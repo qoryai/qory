@@ -51,11 +51,11 @@ homebrew_casks:
     # The tap is a separate repository, qoryai/homebrew-tap, and publishing into it needs a
     # token with write access to it in HOMEBREW_TAP_TOKEN. Without that token the release
     # still publishes its archives and only the cask is skipped.
-    skip_upload: '{{ eq (envOrDefault "HOMEBREW_TAP_TOKEN" "") "" }}'
+    skip_upload: '{{ eq (index .Env "HOMEBREW_TAP_TOKEN") "" }}'
     repository:
       owner: qoryai
       name: homebrew-tap
-      token: '{{ envOrDefault "HOMEBREW_TAP_TOKEN" "" }}'
+      token: '{{ index .Env "HOMEBREW_TAP_TOKEN" }}'
     homepage: https://github.com/qoryai/qory
     description: Compose the harness a runtime loads from modules
     license: apache-2.0
