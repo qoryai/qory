@@ -1,1 +1,1 @@
-layer core: hooks/scripts is a directory; a hook is one file, and a layer's other files are reached as $QORY_HARNESS_HOME/layers/core/scripts
+layer core: hooks/scripts is a directory; a hook is one file. Keep its helpers elsewhere in the layer, reached as $QORY_HARNESS_HOME/layers/core/<path>

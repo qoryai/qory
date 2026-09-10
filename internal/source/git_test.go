@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/qoryai/qory/internal/profile"
 	"github.com/qoryai/qory/internal/source"
@@ -53,7 +54,7 @@ func short(id string) string { return id[:12] }
 func TestResolveGitPinsTheRefToItsCommit(t *testing.T) {
 	url, first, _ := remote(t)
 	src := profile.Source{Git: url, Ref: "v1", Path: "layers/core"}
-	got, err := source.Resolve("/nowhere", src, false)
+	got, err := source.Resolve("/nowhere", src, source.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +81,7 @@ func TestResolveGitReadsTheCacheUntilUpdate(t *testing.T) {
 	url, first, second := remote(t)
 	dir := strings.TrimPrefix(url, "file://")
 	src := profile.Source{Git: url, Ref: "main", Path: "layers/core"}
-	got, err := source.Resolve("/nowhere", src, false)
+	got, err := source.Resolve("/nowhere", src, source.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,12 +90,12 @@ func TestResolveGitReadsTheCacheUntilUpdate(t *testing.T) {
 	}
 	// The branch moves back to the first commit; the cache still holds the second.
 	run(t, dir, "reset", "-q", "--hard", "v1")
-	got, err = source.Resolve("/nowhere", src, false)
+	got, err = source.Resolve("/nowhere", src, source.Options{})
 	if err != nil || got.Pin != short(second) {
 		t.Fatalf("cached pin %q (%v), want %s", got.Pin, err, short(second))
 	}
 	before := got.Dir
-	got, err = source.Resolve("/nowhere", src, true)
+	got, err = source.Resolve("/nowhere", src, source.Options{Update: true})
 	if err != nil || got.Pin != short(first) {
 		t.Fatalf("updated pin %q (%v), want %s", got.Pin, err, short(first))
 	}
@@ -108,13 +109,13 @@ func TestResolveGitReadsTheCacheUntilUpdate(t *testing.T) {
 	if err := os.RemoveAll(dir); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := source.Resolve("/nowhere", src, false); err != nil || got.Pin != short(first) {
+	if got, err := source.Resolve("/nowhere", src, source.Options{}); err != nil || got.Pin != short(first) {
 		t.Fatalf("offline pin %q (%v), want %s", got.Pin, err, short(first))
 	}
-	if _, err := source.Resolve("/nowhere", src, true); err == nil {
+	if _, err := source.Resolve("/nowhere", src, source.Options{Update: true}); err == nil {
 		t.Fatal("an update without the remote succeeded")
 	}
-	if got, err := source.Resolve("/nowhere", src, false); err != nil || got.Pin != short(first) {
+	if got, err := source.Resolve("/nowhere", src, source.Options{}); err != nil || got.Pin != short(first) {
 		t.Fatalf("pin after a failed update %q (%v), want %s", got.Pin, err, short(first))
 	}
 	if entries, _ := os.ReadDir(filepath.Dir(filepath.Dir(filepath.Dir(got.Dir)))); len(entries) != 3 {
@@ -129,7 +130,7 @@ func TestResolveGitReadsTheCacheUntilUpdate(t *testing.T) {
 // TestResolveGitFetchesACommit pins a source by the commit itself.
 func TestResolveGitFetchesACommit(t *testing.T) {
 	url, first, _ := remote(t)
-	got, err := source.Resolve("/nowhere", profile.Source{Git: url, Ref: first}, false)
+	got, err := source.Resolve("/nowhere", profile.Source{Git: url, Ref: first}, source.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +148,7 @@ func TestResolveGitFetchesACommit(t *testing.T) {
 func TestResolveGitRefuses(t *testing.T) {
 	url, _, _ := remote(t)
 	var fetch *source.FetchError
-	_, err := source.Resolve("/nowhere", profile.Source{Git: url, Ref: "v9"}, false)
+	_, err := source.Resolve("/nowhere", profile.Source{Git: url, Ref: "v9"}, source.Options{})
 	if !errors.As(err, &fetch) || !strings.HasPrefix(err.Error(), "fetching "+url+"#v9: ") {
 		t.Errorf("missing ref: %v", err)
 	}
@@ -164,12 +165,121 @@ func TestResolveGitRefuses(t *testing.T) {
 			t.Errorf("a failed fetch left %v in the cache", left)
 		}
 	}
-	_, err = source.Resolve("/nowhere", profile.Source{Git: url, Ref: "v1", Path: "layers/nope"}, false)
+	_, err = source.Resolve("/nowhere", profile.Source{Git: url, Ref: "v1", Path: "layers/nope"}, source.Options{})
 	if err == nil || errors.As(err, &fetch) || !strings.Contains(err.Error(), "has no layers/nope at v1") {
 		t.Errorf("missing path: %v", err)
 	}
-	_, err = source.Resolve("/nowhere", profile.Source{Git: "file:///nowhere/at/all", Ref: "v1"}, false)
+	_, err = source.Resolve("/nowhere", profile.Source{Git: "file:///nowhere/at/all", Ref: "v1"}, source.Options{})
 	if !errors.As(err, &fetch) {
 		t.Errorf("missing remote: %v", err)
+	}
+}
+
+// TestResolveGitTakesTheRefAsARef is a profile a repository carries: a ref written as a git
+// option is a ref git cannot find, never an option git acts on, and -q is not --quiet.
+func TestResolveGitTakesTheRefAsARef(t *testing.T) {
+	url, _, _ := remote(t)
+	marker := filepath.Join(t.TempDir(), "ran")
+	var fetch *source.FetchError
+	for _, ref := range []string{"--upload-pack=touch " + marker + " #", "-q"} {
+		_, err := source.Resolve("/nowhere", profile.Source{Git: url, Ref: ref}, source.Options{})
+		if !errors.As(err, &fetch) {
+			t.Errorf("ref %q: err = %v, want a FetchError", ref, err)
+		}
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("a ref written as --upload-pack ran a command")
+	}
+}
+
+// TestResolveGitKeepsTheCheckoutsPin is two checkouts on one branch: the second's update
+// moves the ref, and the first, composing again with its own pin, stays where it was.
+func TestResolveGitKeepsTheCheckoutsPin(t *testing.T) {
+	url, first, second := remote(t)
+	dir := strings.TrimPrefix(url, "file://")
+	src := profile.Source{Git: url, Ref: "main"}
+	run(t, dir, "reset", "-q", "--hard", "v1")
+	a, err := source.Resolve("/nowhere", src, source.Options{})
+	if err != nil || a.Pin != short(first) {
+		t.Fatalf("a: pin %q (%v), want %s", a.Pin, err, short(first))
+	}
+	run(t, dir, "reset", "-q", "--hard", second)
+	b, err := source.Resolve("/nowhere", src, source.Options{Update: true})
+	if err != nil || b.Pin != short(second) {
+		t.Fatalf("b: pin %q (%v), want %s", b.Pin, err, short(second))
+	}
+	again, err := source.Resolve("/nowhere", src, source.Options{Pin: a.Pin})
+	if err != nil || again.Pin != a.Pin || again.Dir != a.Dir {
+		t.Fatalf("a again: %+v (%v), want its own pin %s", again, err, a.Pin)
+	}
+	// A pin whose clone is gone falls back to the ref's last resolution.
+	if err := os.RemoveAll(a.Dir); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := source.Resolve("/nowhere", src, source.Options{Pin: a.Pin})
+	if err != nil || fresh.Pin != b.Pin {
+		t.Fatalf("a without its clone: %+v (%v), want %s", fresh, err, b.Pin)
+	}
+}
+
+// TestResolveGitFetchesOnceForManyComposes is six composes fetching one source at the same
+// moment: every one gets the commit, and the cache holds one clone.
+func TestResolveGitFetchesOnceForManyComposes(t *testing.T) {
+	url, _, second := remote(t)
+	src := profile.Source{Git: url, Ref: "main", Path: "layers/core"}
+	results := make(chan error, 6)
+	for i := 0; i < 6; i++ {
+		go func() {
+			got, err := source.Resolve("/nowhere", src, source.Options{})
+			if err == nil && got.Pin != short(second) {
+				err = errors.New("pin " + got.Pin)
+			}
+			results <- err
+		}()
+	}
+	for i := 0; i < 6; i++ {
+		if err := <-results; err != nil {
+			t.Errorf("compose %d: %v", i, err)
+		}
+	}
+	cache, _ := source.CacheDir()
+	sources, _ := os.ReadDir(cache)
+	if len(sources) != 1 {
+		t.Fatalf("cache holds %d sources", len(sources))
+	}
+	entries, _ := os.ReadDir(filepath.Join(cache, sources[0].Name()))
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if len(names) != 2 {
+		t.Errorf("the source holds %v, want one clone and refs", names)
+	}
+}
+
+// TestResolveGitRefusesAPathThatLeavesTheClone is a repository whose layers/link is a
+// symlink out of the repository: the layer is refused.
+func TestResolveGitRefusesAPathThatLeavesTheClone(t *testing.T) {
+	url, _, _ := remote(t)
+	dir := strings.TrimPrefix(url, "file://")
+	if err := os.Symlink("/", filepath.Join(dir, "layers", "link")); err != nil {
+		t.Fatal(err)
+	}
+	run(t, dir, "add", "-A")
+	run(t, dir, "commit", "-q", "-m", "link")
+	_, err := source.Resolve("/nowhere", profile.Source{Git: url, Ref: "main", Path: "layers/link"}, source.Options{})
+	if err == nil || !strings.Contains(err.Error(), "links outside the repository") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// TestResolveStopsAGitCommandAtTheTimeout is a fetch with a timeout already over: git is
+// stopped, and the error is a FetchError that names the time given.
+func TestResolveStopsAGitCommandAtTheTimeout(t *testing.T) {
+	url, _, _ := remote(t)
+	_, err := source.Resolve("/nowhere", profile.Source{Git: url, Ref: "v1"}, source.Options{Timeout: time.Nanosecond})
+	var fetch *source.FetchError
+	if !errors.As(err, &fetch) || !strings.Contains(err.Error(), "ran past 1ns and was stopped") {
+		t.Fatalf("err = %v, want a FetchError naming the timeout", err)
 	}
 }

@@ -26,43 +26,47 @@ func init() { render.Register(claude{}) }
 func (claude) Name() string { return Runtime }
 
 // Links are the hard link .claude, a directory link so the checkout's own files in it
-// stay, and a soft .mcp.json at the checkout root, left out when the compose holds no MCP
-// server.
+// stay, and a soft .mcp.json at the checkout root, left out when the runtime writes no
+// mcp.json, see [Render].
 func (claude) Links(res *compose.Result) []render.Link {
 	links := []render.Link{{Checkout: ".claude", Home: Runtime}}
-	if res == nil || len(res.MCP) > 0 {
+	if res == nil || writesMCP(res) {
 		links = append(links, render.Link{Checkout: ".mcp.json", Home: Runtime + "/mcp.json", Soft: true})
 	}
 	return links
 }
 
+// writesMCP reports whether the runtime writes mcp.json for this compose: when the compose
+// holds a server, or a layer ships a settings/claude/mcp.json fragment.
+func writesMCP(res *compose.Result) bool {
+	return len(res.MCP) > 0 || res.Settings[Runtime]["mcp.json"] != nil
+}
+
 // Skips is empty: Claude Code has a place for every kind.
 func (claude) Skips() []string { return nil }
 
-// Render links every atomic kind, writes settings.json with env.QORY_HARNESS_HOME and the
-// model, mcp.json with the MCP servers under mcpServers when there are any, and the
-// instructions as CLAUDE.md. The instructions are written in full rather than imported
-// from AGENTS.md: Claude Code resolves a link to its real path and treats an import found
-// through it as external, which it asks about on every start.
+// Render links every atomic kind, writes settings.json with the exported variables and
+// QORY_HARNESS_HOME under env and the model, mcp.json with the MCP servers under mcpServers on top of any
+// settings/claude/mcp.json fragment, and the instructions as CLAUDE.md. The instructions
+// are written in full rather than imported from AGENTS.md: Claude Code resolves a link to
+// its real path and treats an import found through it as external, which it asks about
+// on every start.
 func (claude) Render(res *compose.Result, dir, home string) error {
 	if err := render.LinkEntries(res, dir, "skills", "agents", "commands", "output-styles", "hooks"); err != nil {
 		return err
 	}
-	if servers := res.MCPFor(home); servers != nil {
-		if err := render.WriteJSON(dir, "mcp.json", map[string]any{"mcpServers": servers}); err != nil {
-			return err
-		}
+	ensure := []string{"settings.json"}
+	if writesMCP(res) {
+		ensure = append(ensure, "mcp.json")
 	}
-	err := render.WriteSettings(res, Runtime, dir, home, []string{"settings.json"}, func(file string, m map[string]any) {
+	err := render.WriteSettings(res, Runtime, dir, home, ensure, func(file string, m map[string]any) {
+		if file == "mcp.json" {
+			render.PutServers(m, "mcpServers", res.MCPFor(home))
+		}
 		if file != "settings.json" {
 			return
 		}
-		env, _ := m["env"].(map[string]any)
-		if env == nil {
-			env = map[string]any{}
-		}
-		env["QORY_HARNESS_HOME"] = home
-		m["env"] = env
+		m["env"] = render.Env(m["env"], res, home)
 		if res.Profile.Target.Model != "" {
 			m["model"] = res.Profile.Target.Model
 		}

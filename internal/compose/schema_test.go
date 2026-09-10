@@ -9,11 +9,14 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"gopkg.in/yaml.v3"
+
+	"github.com/qoryai/qory/internal/layer"
 )
 
 // TestSchemas validates every fixture document against the contract's schemas: a profile
 // that composes passes profile.schema.json, one refused for its apiVersion or kind fails it,
-// and every layer manifest passes layer.schema.json.
+// every layer manifest passes layer.schema.json, and every MCP server file passes
+// mcp.schema.json unless the fixture expects it refused.
 func TestSchemas(t *testing.T) {
 	c := jsonschema.NewCompiler()
 	profileSchema, err := c.Compile("../../contracts/harness/v1/profile.schema.json")
@@ -21,6 +24,10 @@ func TestSchemas(t *testing.T) {
 		t.Fatal(err)
 	}
 	layerSchema, err := c.Compile("../../contracts/harness/v1/layer.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mcpSchema, err := c.Compile("../../contracts/harness/v1/mcp.schema.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,6 +47,63 @@ func TestSchemas(t *testing.T) {
 			if err := layerSchema.Validate(document(t, m)); err != nil {
 				t.Errorf("%s: %v", m, err)
 			}
+		}
+		servers, _ := filepath.Glob(filepath.Join(dir, "layers", "*", "mcp", "*.json"))
+		// A refused server names its file, mcp/<name>.json; a collision or an exclude over an
+		// mcp entry names mcp/<name> without the extension, and its files are valid.
+		wantBadServer := strings.Contains(string(errText), "mcp/") && strings.Contains(string(errText), ".json")
+		for _, f := range servers {
+			err := mcpSchema.Validate(document(t, f))
+			if wantBadServer && err == nil {
+				t.Errorf("%s passed the schema; want a failure", f)
+			}
+			if !wantBadServer && err != nil {
+				t.Errorf("%s: %v", f, err)
+			}
+		}
+	}
+}
+
+// TestMCPSchemaMatchesTheReader keeps the schema and layer.Read in step on the server
+// shapes: each document is accepted or refused by both.
+func TestMCPSchemaMatchesTheReader(t *testing.T) {
+	c := jsonschema.NewCompiler()
+	schema, err := c.Compile("../../contracts/harness/v1/mcp.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		body  string
+		valid bool
+	}{
+		{`{"command": "python3", "args": ["srv.py"], "env": {"A": "1"}}`, true},
+		{`{"type": "http", "url": "https://mcp.example.com", "headers": {"X": "y"}}`, true},
+		{`{"command": "x", "url": "https://mcp.example.com"}`, false},
+		{`{"args": ["x"]}`, false},
+		{`{"comand": "x"}`, false},
+		{`{}`, false},
+		{`{"command": "x", "type": ""}`, false},
+		{`{"url": ""}`, false},
+		{`{"command": "x", "env": {"A": ""}}`, true},
+		{`{"command": "x", "description": "why"}`, true},
+		{`{"command": "x", "description": 3}`, false},
+	} {
+		var doc any
+		if err := json.Unmarshal([]byte(c.body), &doc); err != nil {
+			t.Fatal(err)
+		}
+		if err := schema.Validate(doc); (err == nil) != c.valid {
+			t.Errorf("schema: %s valid=%v err=%v", c.body, c.valid, err)
+		}
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, "mcp"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "mcp", "s.json"), []byte(c.body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := layer.Read("core", dir, nil, ""); (err == nil) != c.valid {
+			t.Errorf("reader: %s valid=%v err=%v", c.body, c.valid, err)
 		}
 	}
 }

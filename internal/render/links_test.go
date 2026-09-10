@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/qoryai/qory/internal/render"
@@ -18,7 +19,6 @@ func gitIn(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	c := exec.Command("git", args...)
 	c.Dir = dir
-	c.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+filepath.Join(t.TempDir(), "gitconfig"), "GIT_CONFIG_NOSYSTEM=1")
 	if out, err := c.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
@@ -292,5 +292,105 @@ func TestUnlinkLeavesWhatAnotherRuntimeShares(t *testing.T) {
 		if !isLink(t, filepath.Join(root, name)) {
 			t.Errorf("%s went with codex", name)
 		}
+	}
+}
+
+// TestForceLeavesADirectoryHoldingIgnoredFiles is a tracked .claude/skills with a
+// gitignored scratch skill in it: git checkout could not bring scratch back, so --force
+// does not remove it.
+func TestForceLeavesADirectoryHoldingIgnoredFiles(t *testing.T) {
+	res, root, home := composeFixture(t, "claude")
+	claude := lookup(t, "claude")
+	write(t, filepath.Join(root, ".claude", "skills", "own", "SKILL.md"), "theirs\n")
+	write(t, filepath.Join(root, ".gitignore"), ".claude/skills/scratch/\n")
+	gitIn(t, root, "add", "-A")
+	gitIn(t, root, "-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-q", "-m", "own")
+	write(t, filepath.Join(root, ".claude", "skills", "scratch", "SKILL.md"), "a day's work\n")
+	if err := render.Build(res, home, claude); err != nil {
+		t.Fatal(err)
+	}
+	_, err := render.LinkInto(claude, res, root, home, true)
+	var foreign *render.ForeignPathError
+	if !errorsAs(err, &foreign) || foreign.Reason != "holds files git does not track" {
+		t.Fatalf("err = %v, want a refusal for the ignored file", err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, ".claude", "skills", "scratch", "SKILL.md")); string(data) != "a day's work\n" {
+		t.Errorf("the ignored file is gone: %q", data)
+	}
+}
+
+// TestUnlinkTakesTheLinksAfterTheQoryDirectoryIsGone is a person who ran rm -rf .qory
+// before qory harness remove: the links dangle, and the remove still knows them as
+// qory's and takes them.
+func TestUnlinkTakesTheLinksAfterTheQoryDirectoryIsGone(t *testing.T) {
+	res, root, home := composeFixture(t, "claude")
+	claude := lookup(t, "claude")
+	if err := render.Build(res, home, claude); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := render.LinkInto(claude, res, root, home, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Dir(home)); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := render.Unlink(claude, root)
+	if err != nil || len(removed) != 2 || removed[0] != ".claude" || removed[1] != ".mcp.json" {
+		t.Fatalf("unlink: removed=%v err=%v", removed, err)
+	}
+	for _, name := range []string{".claude/settings.json", ".claude", ".mcp.json"} {
+		if _, err := os.Lstat(filepath.Join(root, name)); err == nil {
+			t.Errorf("%s is still there", name)
+		}
+	}
+}
+
+// TestUnlinkTakesTheExcludeLinesWithTheLinks is remove --runtime in a checkout composed
+// for two runtimes: the removed runtime's lines leave the exclude file, the lines of the
+// links the other runtime keeps stay, and so does a line the person wrote by hand, byte
+// for byte. The qory directory's own line goes on the command layer's word.
+func TestUnlinkTakesTheExcludeLinesWithTheLinks(t *testing.T) {
+	res, root, home := composeFixture(t, "codex", "opencode")
+	codex, opencode := lookup(t, "codex"), lookup(t, "opencode")
+	file := filepath.Join(root, ".git", "info", "exclude")
+	write(t, file, "# mine\n/notes.local\n\n")
+	if err := render.Build(res, home, codex, opencode); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []render.Runtime{codex, opencode} {
+		if _, err := render.LinkInto(p, res, root, home, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := render.Unlink(codex, root, opencode); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exclude := string(data)
+	if !strings.HasPrefix(exclude, "# mine\n/notes.local\n\n") {
+		t.Errorf("the person's own lines changed:\n%s", exclude)
+	}
+	for _, line := range []string{"/.codex/config.toml", "/AGENTS.override.md"} {
+		if strings.Contains(exclude, line+"\n") {
+			t.Errorf("exclude file still holds %s after codex was removed:\n%s", line, exclude)
+		}
+	}
+	if strings.Contains(exclude, "/.codex/") {
+		t.Errorf("exclude file still holds a codex line:\n%s", exclude)
+	}
+	for _, line := range []string{"/.qory", "/AGENTS.md", "/.agents/skills/review", "/.opencode/opencode.json"} {
+		if !strings.Contains(exclude, line+"\n") {
+			t.Errorf("exclude file lost %s, which opencode still links:\n%s", line, exclude)
+		}
+	}
+	if err := render.RemoveExclude(root, "/.qory"); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(file)
+	if strings.Contains(string(data), "/.qory\n") {
+		t.Errorf("exclude file still holds /.qory:\n%s", data)
 	}
 }

@@ -54,7 +54,11 @@ func TestRuntimes(t *testing.T) {
 		"any":      {{"AGENTS.md", "# Core"}},
 	}
 	for _, name := range render.Names() {
+		if _, ok := expect[name]; !ok {
+			t.Fatalf("runtime %s has no expectations here", name)
+		}
 		t.Run(name, func(t *testing.T) {
+			hermetic(t)
 			p, err := profile.Load(file)
 			if err != nil {
 				t.Fatal(err)
@@ -220,5 +224,44 @@ func TestSoftLink(t *testing.T) {
 	data, _ = os.ReadFile(filepath.Join(root, "AGENTS.md"))
 	if string(data) != "ours\n" {
 		t.Errorf("AGENTS.md was removed: %q", data)
+	}
+}
+
+// TestClaudeMCPFragmentAndEntriesMeet is a layer migrating from a settings/claude/mcp.json
+// fragment: the file is written and linked with the fragment's servers, and a server
+// composed as an entry is written on top of one the fragment names.
+func TestClaudeMCPFragmentAndEntriesMeet(t *testing.T) {
+	res, root, home := composeFixture(t, "claude")
+	claude := lookup(t, "claude")
+	res.Settings["claude"] = map[string]map[string]any{"mcp.json": {"mcpServers": map[string]any{
+		"legacy": map[string]any{"command": "old"},
+		"db":     map[string]any{"command": "fragment"},
+	}}}
+	if err := render.Build(res, home, claude); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(home, "claude", "mcp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"legacy"`, `"old"`, `"python3"`} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("mcp.json lacks %s:\n%s", want, data)
+		}
+	}
+	if strings.Contains(string(data), `"fragment"`) {
+		t.Errorf("the fragment's db server won over the entry:\n%s", data)
+	}
+	// A fragment alone still gets the file and the link.
+	res.MCP = nil
+	res.Entries = nil
+	if err := render.Build(res, home, claude); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := render.LinkInto(claude, res, root, home, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".mcp.json")); err != nil {
+		t.Errorf(".mcp.json is not linked for a fragment-only compose: %v", err)
 	}
 }

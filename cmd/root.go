@@ -34,7 +34,7 @@ Shortcuts:
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.AddCommand(newVersion(), newHarness())
+	root.AddCommand(newVersion(), newHarness(), newConfig())
 	root.AddCommand(shortcuts()...)
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return input(err) })
 	return root

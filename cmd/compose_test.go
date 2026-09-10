@@ -9,6 +9,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/profile"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
@@ -257,7 +258,7 @@ func TestComposeRefuses(t *testing.T) {
 		{
 			name:    "a directory under hooks",
 			fixture: "hooks-directory-fails",
-			wantErr: []string{"hooks/scripts is a directory", "$QORY_HARNESS_HOME/layers/core/scripts"},
+			wantErr: []string{"hooks/scripts is a directory", "$QORY_HARNESS_HOME/layers/core/<path>"},
 		},
 		{
 			name:    "an MCP server that is not an object",
@@ -365,4 +366,76 @@ func readReport(t *testing.T, root string) report.Report {
 		t.Fatal(err)
 	}
 	return rep
+}
+
+// TestComposeRefusesAQoryDirectoryThatIsNotADirectory is a repository that commits .qory
+// as a symlink or a file: nothing is written or removed through it.
+func TestComposeRefusesAQoryDirectoryThatIsNotADirectory(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		setup func(t *testing.T, root string)
+	}{
+		{"a symlink", func(t *testing.T, root string) {
+			outside := tempDir(t)
+			writeFile(t, filepath.Join(outside, "harness", "keep.txt"), "precious\n")
+			if err := os.Symlink(outside, filepath.Join(root, ".qory")); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if _, err := os.Stat(filepath.Join(outside, "harness", "keep.txt")); err != nil {
+					t.Errorf("the file behind the link is gone: %v", err)
+				}
+			})
+		}},
+		{"a file", func(t *testing.T, root string) { writeFile(t, filepath.Join(root, ".qory"), "not a directory\n") }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			root := newCheckout(t)
+			copyFixture(t, "two-layers", root)
+			c.setup(t, root)
+			out, err := run(t, "hc")
+			if err == nil {
+				t.Fatalf("composed through .qory:\n%s", out)
+			}
+			if got := cmd.ExitCode(err); got != cmd.ExitForeign {
+				t.Errorf("exit %d for %v, want %d", got, err, cmd.ExitForeign)
+			}
+			gone(t, root, ".claude")
+		})
+	}
+}
+
+// TestComposeNeedsAGitWorkingTree is a plain directory: nothing to exclude the tree
+// through, so the compose refuses and says so.
+func TestComposeNeedsAGitWorkingTree(t *testing.T) {
+	dir := emptyDir(t)
+	copyFixture(t, "two-layers", dir)
+	out, err := run(t, "hc")
+	if err == nil {
+		t.Fatalf("composed outside git:\n%s", out)
+	}
+	wants(t, err.Error(), "is not inside a git working tree")
+	if got := cmd.ExitCode(err); got != cmd.ExitInput {
+		t.Errorf("exit %d, want %d", got, cmd.ExitInput)
+	}
+	gone(t, dir, ".qory", ".claude")
+}
+
+// TestComposeClassifiesAnUnreadableLayerAsTheMachines is a layer directory the process
+// cannot read: not a mistake in the input, so exit 1.
+func TestComposeClassifiesAnUnreadableLayerAsTheMachines(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root reads a directory whatever its mode")
+	}
+	root := newCheckout(t)
+	copyFixture(t, "two-layers", root)
+	closed := filepath.Join(root, "layers", "nextjs")
+	if err := os.Chmod(closed, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(closed, 0o755) })
+	_, err := run(t, "hc")
+	if got := cmd.ExitCode(err); err == nil || got != 1 {
+		t.Errorf("exit %d for %v, want 1", got, err)
+	}
 }

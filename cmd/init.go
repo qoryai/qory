@@ -21,6 +21,8 @@ var Example fs.FS
 // ExampleRoot is the directory inside Example that holds the example.
 const ExampleRoot = "examples/hello"
 
+// newInit builds the init verb, which writes the hello example into the current directory
+// and refuses to overwrite any file the example would write.
 func newInit(use string, aliases ...string) *cobra.Command {
 	return &cobra.Command{
 		Use:     use,
@@ -35,7 +37,12 @@ func newInit(use string, aliases ...string) *cobra.Command {
 			u := ui.New(cmd.OutOrStdout())
 			u.Title(filepath.Base(dir))
 			if _, err := os.Stat(filepath.Join(dir, profile.FileName)); err == nil {
-				return fmt.Errorf("%s already has a %s; qory does not overwrite it", dir, profile.FileName)
+				return input(fmt.Errorf("%s already has a %s; qory does not overwrite it", dir, profile.FileName))
+			}
+			if existing, err := standing(dir); err != nil {
+				return err
+			} else if existing != "" {
+				return input(fmt.Errorf("%s already has a %s; qory does not overwrite it", dir, existing))
 			}
 			written, err := writeExample(dir)
 			if err != nil {
@@ -56,6 +63,29 @@ func newInit(use string, aliases ...string) *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// standing returns the first file of the example that already exists in dir, relative
+// to dir, or "" when none does.
+func standing(dir string) (string, error) {
+	if Example == nil {
+		return "", errors.New("this build carries no example")
+	}
+	root, err := fs.Sub(Example, ExampleRoot)
+	if err != nil {
+		return "", err
+	}
+	var found string
+	err = fs.WalkDir(root, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || found != "" {
+			return err
+		}
+		if _, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(path))); err == nil {
+			found = filepath.ToSlash(path)
+		}
+		return nil
+	})
+	return found, err
 }
 
 // writeExample copies the example tree into dir and returns the paths it wrote, relative to dir.

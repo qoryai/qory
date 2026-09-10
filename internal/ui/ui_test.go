@@ -17,13 +17,10 @@ func plain(t *testing.T, buf *bytes.Buffer) *ui.UI {
 	return ui.New(buf)
 }
 
-// TestMarkedReportsWhetherATitleWasPrinted runs before every other test in this package,
-// because the flag Marked reads is package state that no call resets: the first Title in the
-// test binary sets it for good.
+// TestMarkedReportsWhetherATitleWasPrinted pins the one direction a test can check in any
+// order: the flag Marked reads is package state that no call resets, so after a Title it
+// is set, whatever ran before.
 func TestMarkedReportsWhetherATitleWasPrinted(t *testing.T) {
-	if ui.Marked() {
-		t.Fatal("a title was printed before this test ran")
-	}
 	var buf bytes.Buffer
 	plain(t, &buf).Title("qory")
 	if !ui.Marked() {

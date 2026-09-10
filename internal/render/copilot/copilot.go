@@ -48,9 +48,10 @@ func (copilot) Links(res *compose.Result) []render.Link {
 func (copilot) Skips() []string { return []string{"commands", "output-styles", "mcp"} }
 
 // Render writes agents/<name>.agent.md per agent with the agent's name, description,
-// tools and model, and the copilot settings files, which are the hook files under hooks/.
-// Both directories are created even when nothing goes in them, so their links resolve.
-// The target model reaches no file, because Copilot keeps the model in a user setting.
+// tools and model, and the settings/copilot/ files into hooks/, where Copilot reads its
+// hook files, so settings/copilot/hooks.json reaches .github/hooks/hooks.json. Both
+// directories are created even when nothing goes in them. The target model reaches no
+// file, because Copilot keeps the model in a user setting.
 func (copilot) Render(res *compose.Result, dir, home string) error {
 	for _, sub := range []string{"agents", "hooks"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
@@ -60,5 +61,5 @@ func (copilot) Render(res *compose.Result, dir, home string) error {
 	if err := render.WriteAgents(res, dir, "agents", ".agent.md", "name", "description", "tools", "model"); err != nil {
 		return err
 	}
-	return render.WriteSettings(res, Runtime, dir, home, nil, nil)
+	return render.WriteSettings(res, Runtime, filepath.Join(dir, "hooks"), home, nil, nil)
 }

@@ -68,7 +68,7 @@ func committedRepo(t *testing.T) string {
 func TestResolveReportsTheDirectoryAndThePin(t *testing.T) {
 	hermetic(t)
 	root := committedRepo(t)
-	got, err := source.Resolve(root, profile.Source{Path: filepath.Join("layers", "core")}, false)
+	got, err := source.Resolve(root, profile.Source{Path: filepath.Join("layers", "core")}, source.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestResolveTakesAnAbsolutePathAsItIs(t *testing.T) {
 	hermetic(t)
 	root := committedRepo(t)
 	dir := filepath.Join(root, "layers", "core")
-	got, err := source.Resolve(t.TempDir(), profile.Source{Path: dir}, false)
+	got, err := source.Resolve(t.TempDir(), profile.Source{Path: dir}, source.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestResolveReportsADirtyWorkingTree(t *testing.T) {
 	root := committedRepo(t)
 	layer := profile.Source{Path: filepath.Join("layers", "core")}
 
-	got, err := source.Resolve(root, layer, false)
+	got, err := source.Resolve(root, layer, source.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestResolveReportsADirtyWorkingTree(t *testing.T) {
 	}
 
 	write(t, filepath.Join(root, "README.md"), "changed\n")
-	got, err = source.Resolve(root, layer, false)
+	got, err = source.Resolve(root, layer, source.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestResolveReportsADirtyWorkingTree(t *testing.T) {
 	}
 
 	write(t, filepath.Join(root, "layers", "core", "skills", "review", "SKILL.md"), "review\n")
-	got, err = source.Resolve(root, layer, false)
+	got, err = source.Resolve(root, layer, source.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestResolveOutsideGitIsClean(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(base, "core"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	got, err := source.Resolve(base, profile.Source{Path: "core"}, false)
+	got, err := source.Resolve(base, profile.Source{Path: "core"}, source.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,10 +156,10 @@ func TestResolveRefusesWhatIsNoDirectory(t *testing.T) {
 	base := t.TempDir()
 	write(t, filepath.Join(base, "core.md"), "not a layer\n")
 
-	if _, err := source.Resolve(base, profile.Source{Path: "missing"}, false); !errors.Is(err, os.ErrNotExist) {
+	if _, err := source.Resolve(base, profile.Source{Path: "missing"}, source.Options{}); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("got %v, want an os.ErrNotExist", err)
 	}
-	_, err := source.Resolve(base, profile.Source{Path: "core.md"}, false)
+	_, err := source.Resolve(base, profile.Source{Path: "core.md"}, source.Options{})
 	if err == nil {
 		t.Fatal("resolved a file as a layer directory")
 	}

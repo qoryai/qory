@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -30,33 +31,37 @@ func ReadDocument(path string) (Document, error) {
 
 // ParseDocument splits data into frontmatter and body. The name appears in the errors.
 //
-// Frontmatter runs from a "---" line at the very start of the file to the next "---" line,
-// which may also be the last line of the file. Data that does not start with "---" is all
-// body, and [Document.Front] stays nil. An opening fence that is never closed is an error,
-// and so is frontmatter YAML that does not decode into a mapping.
+// Frontmatter runs from a "---" line at the very start of the file to the next "---"
+// line, which may be the very next line or the last line of the file; a fence may carry
+// trailing spaces. A byte order mark before the first fence is dropped, and CRLF line
+// endings read as LF throughout, so a file saved on Windows parses the same. Data that
+// does not start with "---" is all body, and [Document.Front] stays nil. An opening fence
+// that is never closed is an error, and so is frontmatter YAML that does not decode into
+// a mapping.
 func ParseDocument(data []byte, name string) (Document, error) {
 	const fence = "---"
-	if !bytes.HasPrefix(data, []byte(fence+"\n")) {
+	data = bytes.TrimPrefix(data, []byte("\ufeff"))
+	data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
+	lines := strings.Split(string(data), "\n")
+	if lines[0] != fence {
 		return Document{Body: string(data)}, nil
 	}
-	rest := data[len(fence)+1:]
-	end := bytes.Index(rest, []byte("\n"+fence+"\n"))
-	tail := len(fence) + 1
-	if end < 0 {
-		if bytes.HasSuffix(rest, []byte("\n"+fence)) {
-			end = len(rest) - len(fence) - 1
-			tail = len(fence)
-		} else {
-			return Document{}, fmt.Errorf("%s: frontmatter is not closed", name)
+	end := -1
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimRight(lines[i], " \t") == fence {
+			end = i
+			break
 		}
 	}
+	if end < 0 {
+		return Document{}, fmt.Errorf("%s: frontmatter is not closed", name)
+	}
 	front := map[string]any{}
-	if err := yaml.Unmarshal(rest[:end], &front); err != nil {
+	if err := yaml.Unmarshal([]byte(strings.Join(lines[1:end], "\n")), &front); err != nil {
 		return Document{}, fmt.Errorf("%s: frontmatter: %w", name, err)
 	}
-	body := rest[end+1+tail:]
-	body = bytes.TrimLeft(body, "\n")
-	return Document{Front: front, Body: string(body)}, nil
+	body := strings.TrimLeft(strings.Join(lines[end+1:], "\n"), "\n")
+	return Document{Front: front, Body: body}, nil
 }
 
 // String returns the frontmatter key as a string. A key that is absent, or holds anything

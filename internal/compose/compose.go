@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 
@@ -33,6 +34,9 @@ type Layer struct {
 	Dirty bool
 	// Variant is the variant chosen for the target runtime, "" for a layer without one.
 	Variant string
+	// Link is the checkout-root name the profile links the layer's directory as, "" for
+	// none.
+	Link string
 }
 
 // Entry is one entry of the composed tree and the layer it came from.
@@ -76,13 +80,27 @@ type Result struct {
 	MCP map[string]map[string]any
 	// Instructions are the layers' AGENTS.md files joined by a blank line, or "".
 	Instructions string
+	// Env are the variables the harness exports, name to value, with every
+	// $QORY_HARNESS_HOME still in place: what the layer manifests export, as
+	// $QORY_HARNESS_HOME/layers/<name>/<path>, and the configuration's variables over
+	// them. [Result.EnvFor] renders it for a home.
+	Env map[string]string
 }
 
 // Options are the choices a caller makes for one compose.
 type Options struct {
-	// Update fetches every git source again instead of reading the cached clone, so a
-	// branch ref moves.
+	// Update resolves every git source's ref again instead of reading the pin or the
+	// cached resolution, so a branch ref moves.
 	Update bool
+	// Pins are the commits the checkout was composed from last time, by layer name as the
+	// last report recorded them, so a git source stays on its commit until Update.
+	Pins map[string]string
+	// Cache is the directory git sources are fetched to, "" for [source.CacheDir].
+	Cache string
+	// Timeout is the longest one git command may run, 0 for no limit.
+	Timeout time.Duration
+	// Env are the configuration's variables, written over what the layers export.
+	Env map[string]string
 }
 
 // Compose is [ComposeWith] and the default options.
@@ -95,13 +113,14 @@ func Compose(p *profile.Profile) (*Result, error) { return ComposeWith(p, Option
 // be fetched a [*source.FetchError]. The package comment has the order of the rules and
 // the merge semantics.
 func ComposeWith(p *profile.Profile, opts Options) (*Result, error) {
-	res := &Result{Profile: p, Settings: map[string]map[string]map[string]any{}, MCP: map[string]map[string]any{}}
+	res := &Result{Profile: p, Settings: map[string]map[string]map[string]any{}, MCP: map[string]map[string]any{}, Env: map[string]string{}}
 	owners := map[string][]string{}
 	paths := map[string]string{}
 	servers := map[string]map[string]any{}
+	exporters := map[string]string{}
 	var instructions []string
 	for _, pl := range p.Layers {
-		src, err := source.Resolve(p.Dir(), pl.Source, opts.Update)
+		src, err := source.Resolve(p.Dir(), pl.Source, source.Options{Pin: opts.Pins[pl.Name], Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout})
 		if err != nil {
 			return nil, fmt.Errorf("layer %s: %w", pl.Name, err)
 		}
@@ -117,9 +136,12 @@ func ComposeWith(p *profile.Profile, opts Options) (*Result, error) {
 		if err != nil {
 			return nil, err
 		}
-		rl := Layer{Name: pl.Name, Dir: l.Dir, Source: pl.Source.String(), Pin: src.Pin, Dirty: src.Dirty, Variant: variant}
+		rl := Layer{Name: pl.Name, Dir: l.Dir, Source: pl.Source.String(), Pin: src.Pin, Dirty: src.Dirty, Variant: variant, Link: pl.Link}
 		if m != nil {
 			rl.ManifestName = m.Name
+			if err := exportEnv(res, exporters, pl.Name, m.Env, opts.Env); err != nil {
+				return nil, err
+			}
 		}
 		res.Layers = append(res.Layers, rl)
 		entries, err := applyExcludes(l, pl.Exclude, res)
@@ -174,7 +196,48 @@ func ComposeWith(p *profile.Profile, opts Options) (*Result, error) {
 	if len(instructions) > 0 {
 		res.Instructions = strings.Join(instructions, "\n\n") + "\n"
 	}
+	for name, value := range opts.Env {
+		res.Env[name] = value
+	}
 	return res, nil
+}
+
+// exportEnv adds a layer's exported variables to the result, each as
+// $QORY_HARNESS_HOME/layers/<layer>/<path>, the path left out for ".". Two layers
+// exporting one name with different values is an error, since neither is the one to
+// keep, unless the configuration's env, decided, names it. The same value twice is fine.
+func exportEnv(res *Result, exporters map[string]string, layer string, env, decided map[string]string) error {
+	names := make([]string, 0, len(env))
+	for name := range env {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		value := "$QORY_HARNESS_HOME/layers/" + layer
+		if env[name] != "." {
+			value += "/" + filepath.ToSlash(env[name])
+		}
+		if _, settled := decided[name]; settled {
+			continue
+		}
+		if other, ok := exporters[name]; ok && res.Env[name] != value {
+			return fmt.Errorf("env %s is exported by layers %s and %s; set it in qory.yaml to decide", name, other, layer)
+		}
+		exporters[name] = layer
+		res.Env[name] = value
+	}
+	return nil
+}
+
+// EnvFor is a copy of the exported variables rendered for a home, with every
+// $QORY_HARNESS_HOME replaced the way [Result.SettingsFor] replaces it. It is empty, not
+// nil, when nothing is exported.
+func (r *Result) EnvFor(home string) map[string]string {
+	out := map[string]string{}
+	for name, value := range r.Env {
+		out[name] = ForHome(value, home).(string)
+	}
+	return out
 }
 
 // selectVariant picks the one variant of a layer that serves every targeted runtime.
@@ -441,15 +504,18 @@ func (r *Result) SettingsFor(runtime, file, home string) map[string]any {
 }
 
 // MCPFor is a copy of the composed MCP servers rendered for a home, name to object, with
-// every $QORY_HARNESS_HOME replaced the way [Result.SettingsFor] replaces it. It is nil
-// when no layer ships a server.
+// every $QORY_HARNESS_HOME replaced the way [Result.SettingsFor] replaces it, and without
+// the description, which is a note to the layer's readers and not a key a runtime
+// starts a server with. It is nil when no layer ships a server.
 func (r *Result) MCPFor(home string) map[string]any {
 	if len(r.MCP) == 0 {
 		return nil
 	}
 	out := map[string]any{}
 	for name, server := range r.MCP {
-		out[name] = ForHome(server, home)
+		rendered := ForHome(server, home).(map[string]any)
+		delete(rendered, "description")
+		out[name] = rendered
 	}
 	return out
 }

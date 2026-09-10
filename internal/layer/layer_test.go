@@ -162,23 +162,69 @@ func TestReadRefusesADirectoryUnderHooks(t *testing.T) {
 	if err == nil {
 		t.Fatal("read a layer with a directory under hooks")
 	}
-	want := "layer core: hooks/scripts is a directory; a hook is one file, and a layer's other files are reached as $QORY_HARNESS_HOME/layers/core/scripts"
+	want := "layer core: hooks/scripts is a directory; a hook is one file. Keep its helpers elsewhere in the layer, reached as $QORY_HARNESS_HOME/layers/core/<path>"
 	if err.Error() != want {
 		t.Fatalf("error %q, want %q", err, want)
 	}
 }
 
-// TestReadRefusesAnMCPServerThatIsNotAnObject names the file.
+// TestReadRefusesAnMCPServerThatIsNotAnObject names the file, and keeps the decoder's
+// message for a file that does not parse, so the reader learns where the file breaks. A
+// null parses and gets no decoder message.
 func TestReadRefusesAnMCPServerThatIsNotAnObject(t *testing.T) {
-	for _, body := range []string{"[]\n", "not json\n", "null\n"} {
-		dir := tree(t, map[string]string{"mcp/db.json": body})
+	for _, c := range []struct{ body, want string }{
+		{"[]\n", "layer core: mcp/db.json does not hold a JSON object: json: cannot unmarshal array into Go value of type map[string]interface {}"},
+		{"not json\n", "layer core: mcp/db.json does not hold a JSON object: invalid character 'o' in literal null (expecting 'u')"},
+		{"{\"command\": \"x\",}\n", "layer core: mcp/db.json does not hold a JSON object: invalid character '}' looking for beginning of object key string"},
+		{"null\n", "layer core: mcp/db.json does not hold a JSON object"},
+	} {
+		dir := tree(t, map[string]string{"mcp/db.json": c.body})
 		_, err := Read("core", dir, nil, "")
 		if err == nil {
-			t.Fatalf("read %q as a server", body)
+			t.Fatalf("read %q as a server", c.body)
 		}
-		if want := "layer core: mcp/db.json does not hold a JSON object"; err.Error() != want {
-			t.Fatalf("error %q, want %q", err, want)
+		if err.Error() != c.want {
+			t.Errorf("%q: error %q, want %q", c.body, err, c.want)
 		}
+	}
+}
+
+// TestReadRefusesAnMCPServerNoRuntimeCouldStart covers the shapes the schema refuses: a
+// key nothing reads, both transports, neither.
+func TestReadRefusesAnMCPServerNoRuntimeCouldStart(t *testing.T) {
+	for _, c := range []struct{ body, want string }{
+		{`{"comand": "x"}`, `layer core: mcp/db.json: key "comand" is not one of an MCP server's; keys: type, command, args, env, url, headers, description`},
+		{`{"command": "x", "url": "https://x"}`, "layer core: mcp/db.json: names both a command and a url; a server is one or the other"},
+		{`{"args": ["x"]}`, "layer core: mcp/db.json: names neither a command nor a url"},
+	} {
+		dir := tree(t, map[string]string{"mcp/db.json": c.body})
+		_, err := Read("core", dir, nil, "")
+		if err == nil || err.Error() != c.want {
+			t.Errorf("%s: error %v, want %q", c.body, err, c.want)
+		}
+	}
+}
+
+// TestReadRefusesALinkToADirectoryUnderHooks is hooks/scripts as a symlink to a directory
+// elsewhere in the layer, and the message under a variant names the directory the variant
+// reads.
+func TestReadRefusesALinkToADirectoryUnderHooks(t *testing.T) {
+	dir := tree(t, map[string]string{
+		"helpers/a.sh":          "#!/bin/sh\n",
+		"claude/hooks/guard.sh": "#!/bin/sh\n",
+		"harness.yaml":          "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: core\nvariants:\n  claude: {hooks: claude/hooks}\n",
+	})
+	if err := os.Symlink(filepath.Join("..", "..", "helpers"), filepath.Join(dir, "claude", "hooks", "scripts")); err != nil {
+		t.Fatal(err)
+	}
+	m, err := ReadManifest(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Read("core", dir, m, "claude")
+	want := "layer core: claude/hooks/scripts is a directory; a hook is one file. Keep its helpers elsewhere in the layer, reached as $QORY_HARNESS_HOME/layers/core/<path>"
+	if err == nil || err.Error() != want {
+		t.Fatalf("error %v, want %q", err, want)
 	}
 }
 
@@ -376,6 +422,78 @@ func TestReadManifestRefuses(t *testing.T) {
 			_, err := ReadManifest(dir)
 			if err == nil {
 				t.Fatalf("read %q without an error", c.yaml)
+			}
+			path := filepath.Join(dir, ManifestName)
+			if !strings.HasPrefix(err.Error(), path+": ") {
+				t.Fatalf("error %q does not start with %q", err, path)
+			}
+			if !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("error %q does not name %q", err, c.want)
+			}
+		})
+	}
+}
+
+// TestReadManifestReadsEnv reads the variables a manifest exports: each value comes back
+// cleaned, and the layer root is ".".
+func TestReadManifestReadsEnv(t *testing.T) {
+	dir := tree(t, map[string]string{ManifestName: "apiVersion: qory.ai/v1alpha1\n" +
+		"kind: HarnessLayer\n" +
+		"name: core\n" +
+		"env:\n" +
+		"  CORE_HOME: .\n" +
+		"  CORE_SCRIPTS: ./scripts/\n" +
+		"  _core_lib: lib/../lib/py\n"})
+	m, err := ReadManifest(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"CORE_HOME": ".", "CORE_SCRIPTS": "scripts", "_core_lib": filepath.Join("lib", "py")}
+	if len(m.Env) != len(want) {
+		t.Fatalf("env %v, want %v", m.Env, want)
+	}
+	for k, v := range want {
+		if m.Env[k] != v {
+			t.Errorf("env %s is %q, want %q", k, m.Env[k], v)
+		}
+	}
+	// A manifest without env leaves the map nil.
+	dir = tree(t, map[string]string{ManifestName: "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: core\n"})
+	m, err = ReadManifest(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Env != nil {
+		t.Fatalf("env %v, want nil", m.Env)
+	}
+}
+
+// TestReadManifestRefusesEnv covers every env the manifest reader turns down: a key that is
+// not an environment variable name, qory's own variable, and a value that is not a path
+// inside the layer. The message starts with the manifest path.
+func TestReadManifestRefusesEnv(t *testing.T) {
+	head := "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: core\nenv:\n"
+	cases := []struct {
+		name string
+		env  string
+		want string
+	}{
+		{"a key with a dash", "  core-home: scripts\n", "env: core-home is not an environment variable name"},
+		{"a key starting with a digit", "  1CORE: scripts\n", "env: 1CORE is not an environment variable name"},
+		{"an empty key", `  "": scripts` + "\n", "env:  is not an environment variable name"},
+		{"qory's own variable", "  QORY_HARNESS_HOME: .\n", "env.QORY_HARNESS_HOME is qory's own; a layer exports another name"},
+		{"an empty value", `  CORE_HOME: ""` + "\n", "env.CORE_HOME:  is not a path inside the layer"},
+		{"an absolute value", "  CORE_HOME: /etc\n", "env.CORE_HOME: /etc is not a path inside the layer"},
+		{"the parent", "  CORE_HOME: ..\n", "env.CORE_HOME: .. is not a path inside the layer"},
+		{"a path leaving the layer", "  CORE_HOME: scripts/../../other\n", "env.CORE_HOME: scripts/../../other is not a path inside the layer"},
+		{"a value that is not a string", "  CORE_HOME: [a]\n", "cannot unmarshal"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := tree(t, map[string]string{ManifestName: head + c.env})
+			_, err := ReadManifest(dir)
+			if err == nil {
+				t.Fatalf("read %q without an error", c.env)
 			}
 			path := filepath.Join(dir, ManifestName)
 			if !strings.HasPrefix(err.Error(), path+": ") {

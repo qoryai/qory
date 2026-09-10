@@ -20,6 +20,7 @@ Shortcuts:
 
 ### SEE ALSO
 
+* [qory config](qory_config.md)	 - Print the effective configuration and where each value comes from
 * [qory harness](qory_harness.md)	 - Write an example, then compose, inspect and remove the harness of a checkout
 * [qory version](qory_version.md)	 - Print the version and the harness format this qory reads
 

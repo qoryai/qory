@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/compose"
+	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/profile"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
@@ -40,6 +42,13 @@ func newHarness() *cobra.Command {
 		Use:     "harness",
 		Aliases: []string{"h"},
 		Short:   "Write an example, then compose, inspect and remove the harness of a checkout",
+		// A verb this noun does not have is an input error, not a help page and exit 0.
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				return input(fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath()))
+			}
+			return cmd.Help()
+		},
 	}
 	harness.AddCommand(newInit("init"), newCompose("compose", "c"), newInspect("inspect", "i"), newRemove("remove", "r"))
 	return harness
@@ -66,8 +75,10 @@ type places struct {
 }
 
 // locate finds the checkout the process is standing in and derives its places. It fails
-// outside a git working tree, which is deliberate: the tool writes into a checkout and
-// links from it, and has nothing to write to without one.
+// outside a git working tree, which is deliberate: qory writes into a checkout, links from
+// it and excludes what it wrote through git, and has none of that without one. It also
+// refuses a .qory that is not a real directory, a symlink a repository committed say,
+// because everything qory writes and removes goes through that path.
 func locate() (places, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -77,24 +88,36 @@ func locate() (places, error) {
 	if err != nil {
 		return places{}, err
 	}
+	if checkout.ExcludeFile(root) == "" {
+		return places{}, input(fmt.Errorf("%s is not inside a git working tree; qory composes into a checkout", root))
+	}
 	dir := checkout.QoryDir(root)
+	if info, err := os.Lstat(dir); err == nil && (info.Mode()&os.ModeSymlink != 0 || !info.IsDir()) {
+		target, _ := os.Readlink(dir)
+		return places{}, &render.ForeignPathError{Path: dir, Target: target}
+	}
 	return places{root: root, dir: dir, home: filepath.Join(dir, "harness"), report: filepath.Join(dir, "harness-report.json")}, nil
 }
 
 // newCompose builds the compose verb under the given name and aliases.
 //
-// The order of the run matters and is this: locate the checkout, discover or load the
-// profile, apply the --runtime and --model overrides on top of it, look the runtime up
-// before doing any work so an unknown name fails early, print the title, compose, and only
-// then touch the disk. Nothing is written before the compose succeeds, so a collision or
-// an unreadable layer leaves the checkout exactly as it was.
+// The order of the run matters and is this: locate the checkout, read the configuration,
+// discover or load the profile, apply the configuration's runtime and model and then the
+// --runtime and --model flags on top of it, look the runtime up before doing any work so
+// an unknown name fails early, print the title, compose, and only then touch the disk.
+// Nothing is written before the compose succeeds, so a collision or an unreadable layer
+// leaves the checkout exactly as it was.
 //
-// Writing is three steps in a fixed order: [render.Build] renders the home tree,
-// [render.LinkInto] links it into the checkout, and [report.Write] records what happened.
-// The report is written last, so a report on disk means the harness beside it is complete.
-// A --dry-run stops after the report is built and prints it instead. --force lets a link
-// replace a tracked, unmodified file of the checkout, and the report records every path it
-// replaced so remove can say how to get it back. --update fetches every git source again.
+// Writing is four steps in a fixed order: [render.Build] renders the home tree,
+// [render.LinkInto] links it into the checkout, [render.LinkLayers] writes the layer
+// links the profile names, and [report.Write] records what happened. The report is
+// written last, so a report on disk means a compose went through; the one exception is a
+// link step that failed after replacing a file, which writes the report so that remove
+// still knows what to restore. A --dry-run stops after the report is built and prints it
+// instead. --force lets a link replace a tracked, unmodified file of the checkout, and the
+// report records every path it replaced so remove can say how to get it back. --update
+// fetches every git source again. Both flags have their standing value in qory.yaml, and
+// a flag given on the command line, --force=false say, wins over the file.
 func newCompose(use string, aliases ...string) *cobra.Command {
 	var file, runtime, model string
 	var dryRun, verbose, force, update bool
@@ -108,6 +131,10 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			conf, err := config.Load(at.root)
+			if err != nil {
+				return input(err)
+			}
 			if file == "" {
 				if file, err = profile.Discover(at.root); err != nil {
 					return input(err)
@@ -117,6 +144,12 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 			if err != nil {
 				return input(err)
 			}
+			if conf.Runtime != nil {
+				p.Target.Runtimes = conf.Runtime
+			}
+			if conf.Model != "" {
+				p.Target.Model = conf.Model
+			}
 			if runtime != "" {
 				p.Target.Runtimes = profile.Runtimes(strings.Split(runtime, ","))
 				for i, r := range p.Target.Runtimes {
@@ -125,6 +158,12 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 			}
 			if model != "" {
 				p.Target.Model = model
+			}
+			if !cmd.Flags().Changed("force") {
+				force = conf.Force
+			}
+			if !cmd.Flags().Changed("update") {
+				update = conf.Update
 			}
 			if err := p.Target.Runtimes.Validate(); err != nil {
 				return input(err)
@@ -146,17 +185,29 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 			out := cmd.OutOrStdout()
 			u := ui.New(out)
 			u.Title(name, strings.TrimSpace(p.Target.Runtimes.String()+" "+p.Target.Model))
-			res, err := compose.ComposeWith(p, compose.Options{Update: update})
+			// The last report pins each git layer to the commit it was composed from,
+			// so a compose without --update stays there, as long as the profile still
+			// names the same source: an edited ref resolves anew.
+			previous, _ := report.Read(at.report)
+			pins := map[string]string{}
+			for _, l := range previous.Layers {
+				if l.Pin == source.WorkingTree {
+					continue
+				}
+				for _, pl := range p.Layers {
+					if pl.Name == l.Name && pl.Source.String() == l.Source {
+						pins[l.Name] = l.Pin
+					}
+				}
+			}
+			res, err := compose.ComposeWith(p, compose.Options{Update: update, Pins: pins, Cache: conf.Git.Cache, Timeout: conf.Git.Timeout, Env: conf.Env})
 			var collision *compose.CollisionError
-			var fetch *source.FetchError
 			switch {
 			case errors.As(err, &collision):
-				printCollision(u, p, collision)
+				printCollision(ui.New(cmd.ErrOrStderr()), p, collision)
 				return reported(err)
-			case errors.As(err, &fetch):
-				return err
 			case err != nil:
-				return input(err)
+				return composeError(err)
 			}
 			rep := report.New(res, name, at.root, at.home)
 			if dryRun {
@@ -182,27 +233,50 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 				}
 			}
 			all := append(append([]render.Runtime{}, targets...), also...)
+			// The report's target is every runtime the home holds after this compose,
+			// the targets first, since the harness was rendered for all of them.
+			rep.Target.Runtimes = nil
+			for _, rt := range all {
+				rep.Target.Runtimes = append(rep.Target.Runtimes, rt.Name())
+			}
 			if err := render.Build(res, at.home, all...); err != nil {
 				return err
 			}
 			// A path replaced by an earlier compose is still replaced: the report keeps
 			// naming it until remove takes its link, so the restore hint is not lost to a
-			// second compose.
-			if previous, err := report.Read(at.report); err == nil {
-				rep.Replaced = previous.Replaced
-			}
+			// second compose. A link step that fails has replaced what it replaced, so the
+			// report is written on that path too when it holds a replaced path, before
+			// the error goes up; a compose that replaced nothing leaves the report as it
+			// was, so a report on disk still means a compose that went through.
+			rep.Replaced = previous.Replaced
 			linked := map[string]render.Linked{}
-			for _, rt := range all {
-				l, err := render.LinkInto(rt, res, at.root, at.home, force)
-				if err != nil {
-					return err
-				}
-				linked[rt.Name()] = l
+			record := func(l render.Linked, err error) error {
 				for _, path := range l.Replaced {
 					if !slices.Contains(rep.Replaced, path) {
 						rep.Replaced = append(rep.Replaced, path)
 					}
 				}
+				if err != nil && len(rep.Replaced) > 0 {
+					_ = report.Write(at.report, rep)
+				}
+				return err
+			}
+			for _, rt := range all {
+				l, err := render.LinkInto(rt, res, at.root, at.home, force)
+				linked[rt.Name()] = l
+				if err := record(l, err); err != nil {
+					return err
+				}
+			}
+			var previousLinks []string
+			for _, l := range previous.Layers {
+				if l.Link != "" {
+					previousLinks = append(previousLinks, l.Link)
+				}
+			}
+			layerLinks, err := render.LinkLayers(res, at.root, at.home, previousLinks, force)
+			if err := record(layerLinks, err); err != nil {
+				return composeError(err)
 			}
 			if err := report.Write(at.report, rep); err != nil {
 				return err
@@ -239,18 +313,43 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 					rows = append(rows, [2]string{"skipped", s + "  (no place in " + rt.Name() + ")"})
 				}
 			}
+			for _, l := range res.Layers {
+				if l.Link == "" {
+					continue
+				}
+				switch {
+				case slices.Contains(layerLinks.Skipped, l.Link):
+					rows = append(rows, [2]string{"kept", l.Link + "  (the checkout's own; not linked to layer " + l.Name + ")"})
+				case slices.Contains(layerLinks.Replaced, l.Link):
+					rows = append(rows, [2]string{"replaced", l.Link + "  (the checkout's own; git checkout -- restores it)"})
+				default:
+					rows = append(rows, [2]string{"link", l.Link + "  (layer " + l.Name + ")"})
+				}
+			}
 			u.Fields(rows)
 			return nil
 		},
 	}
 	c.Flags().StringVarP(&file, "file", "f", "", "the profile to read instead of discovering one")
-	c.Flags().StringVar(&runtime, "runtime", "", "render for these runtimes instead of target.runtime, comma separated ("+strings.Join(render.Names(), ", ")+")")
-	c.Flags().StringVar(&model, "model", "", "write this model instead of target.model")
+	c.Flags().StringVar(&runtime, "runtime", "", "render for these runtimes instead of target.runtime, comma separated ("+strings.Join(render.Names(), ", ")+"; qory.yaml: runtime)")
+	c.Flags().StringVar(&model, "model", "", "write this model instead of target.model (qory.yaml: model)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the report and write nothing")
-	c.Flags().BoolVar(&force, "force", false, "replace a tracked, unmodified file of the checkout where a link goes; git checkout -- restores it")
-	c.Flags().BoolVar(&update, "update", false, "fetch every git source again instead of reading the cached clone")
+	c.Flags().BoolVar(&force, "force", false, "replace a tracked, unmodified file of the checkout where a link goes; git checkout -- restores it (qory.yaml: force)")
+	c.Flags().BoolVar(&update, "update", false, "fetch every git source again instead of reading the cached clone (qory.yaml: update)")
 	c.Flags().BoolVarP(&verbose, "verbose", "v", false, "print one line per entry")
 	return c
+}
+
+// composeError classifies what a compose returned: a git source that could not be fetched
+// and a file the operating system would not read are failures of the machine, left as
+// they are; everything else is a mistake in the profile or a layer, an input error.
+func composeError(err error) error {
+	var fetch *source.FetchError
+	var pathErr *fs.PathError
+	if errors.As(err, &fetch) || errors.As(err, &pathErr) && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return input(err)
 }
 
 // ErrReported marks an error a command has already printed itself, with more detail than
@@ -374,7 +473,7 @@ func printCollision(u *ui.UI, p *profile.Profile, e *compose.CollisionError) {
 
 // newInspect builds the inspect verb, which reads the report of the last compose and
 // prints it. It reads nothing but the report, so it reports the harness as it was composed,
-// not the layers as they are now.
+// not the layers as they are now, and it refuses a report of a version it does not read.
 func newInspect(use string, aliases ...string) *cobra.Command {
 	return &cobra.Command{
 		Use:     use,
@@ -392,6 +491,9 @@ func newInspect(use string, aliases ...string) *cobra.Command {
 			}
 			if err != nil {
 				return err
+			}
+			if rep.Version != report.Version {
+				return input(fmt.Errorf("%s: report version %d is not one this qory reads; versions: %d", at.report, rep.Version, report.Version))
 			}
 			return rep.Print(cmd.OutOrStdout())
 		},
@@ -420,7 +522,12 @@ func newRemove(use string, aliases ...string) *cobra.Command {
 				return err
 			}
 			u := ui.New(cmd.OutOrStdout())
-			u.Title(checkout.RepoKey(at.root))
+			rep, _ := report.Read(at.report)
+			name := rep.Profile
+			if name == "" {
+				name = checkout.RepoKey(at.root)
+			}
+			u.Title(name)
 			if runtime != "" {
 				rt, err := render.Lookup(runtime)
 				if err != nil {
@@ -428,7 +535,6 @@ func newRemove(use string, aliases ...string) *cobra.Command {
 				}
 				return removeRuntime(u, at, rt)
 			}
-			rep, _ := report.Read(at.report)
 			var unlinkErr error
 			var removedAny []string
 			for _, name := range render.Names() {
@@ -442,15 +548,19 @@ func newRemove(use string, aliases ...string) *cobra.Command {
 					unlinkErr = err
 				}
 			}
-			_, err = os.Stat(at.dir)
-			had := err == nil
-			if err := os.RemoveAll(at.dir); err != nil {
+			removed, err := render.UnlinkLayers(at.root, layerLinks(rep))
+			removedAny = append(removedAny, removed...)
+			for _, path := range removed {
+				u.Success("removed %s", path)
+			}
+			if err != nil && unlinkErr == nil {
+				unlinkErr = err
+			}
+			present := had(at)
+			if err := removeDir(u, at); err != nil {
 				return err
 			}
-			switch {
-			case had:
-				u.Success("removed %s", ui.Short(at.dir, at.root))
-			case len(removedAny) == 0:
+			if !present && len(removedAny) == 0 {
 				u.Text("nothing composed here")
 			}
 			restoreHint(u, at.root, rep.Replaced)
@@ -492,10 +602,16 @@ func removeRuntime(u *ui.UI, at places, rt render.Runtime) error {
 		return nil
 	}
 	if len(others) == 0 {
-		if err := os.RemoveAll(at.dir); err != nil {
+		gone, err := render.UnlinkLayers(at.root, layerLinks(rep))
+		for _, path := range gone {
+			u.Success("removed %s", path)
+		}
+		if err != nil {
 			return err
 		}
-		u.Success("removed %s", ui.Short(at.dir, at.root))
+		if err := removeDir(u, at); err != nil {
+			return err
+		}
 		restoreHint(u, at.root, rep.Replaced)
 		return nil
 	}
@@ -510,8 +626,51 @@ func removeRuntime(u *ui.UI, at places, rt render.Runtime) error {
 		return false
 	})
 	restoreHint(u, at.root, gone)
-	rep.Target.Runtimes = slices.DeleteFunc(rep.Target.Runtimes, func(n string) bool { return n == rt.Name() })
+	if rep.Version == 0 {
+		// No report to keep current; the home says what is composed.
+		return nil
+	}
+	rep.Target.Runtimes = nil
+	for _, o := range others {
+		rep.Target.Runtimes = append(rep.Target.Runtimes, o.Name())
+	}
 	return report.Write(at.report, rep)
+}
+
+// layerLinks lists the checkout-root links the last compose wrote for the layers, as the
+// report recorded them.
+func layerLinks(rep report.Report) []string {
+	var links []string
+	for _, l := range rep.Layers {
+		if l.Link != "" {
+			links = append(links, l.Link)
+		}
+	}
+	return links
+}
+
+// had reports whether the qory directory is there before a remove takes it, so the
+// remove can say whether it removed anything. It is read before [removeDir] runs.
+func had(at places) bool {
+	_, err := os.Stat(at.dir)
+	return err == nil
+}
+
+// removeDir removes the qory directory with its exclude line and says so when it was
+// there. The line goes because the directory does: a stale line would hide a .qory the
+// repository later adds.
+func removeDir(u *ui.UI, at places) error {
+	present := had(at)
+	if err := os.RemoveAll(at.dir); err != nil {
+		return err
+	}
+	if err := render.RemoveExclude(at.root, "/"+checkout.Dir); err != nil {
+		return err
+	}
+	if present {
+		u.Success("removed %s", ui.Short(at.dir, at.root))
+	}
+	return nil
 }
 
 // restoreHint tells the person how to get back the checkout's own files a compose replaced
@@ -522,7 +681,11 @@ func restoreHint(u *ui.UI, root string, replaced []string) {
 		return
 	}
 	command := "git checkout -- " + strings.Join(replaced, " ")
-	if cwd, err := os.Getwd(); err == nil && cwd != root {
+	cwd, _ := os.Getwd()
+	if here, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwd = here
+	}
+	if there, err := filepath.EvalSymlinks(root); err == nil && cwd != there {
 		command = "git -C " + ui.Short(root, "") + " checkout -- " + strings.Join(replaced, " ")
 	}
 	u.Blank()

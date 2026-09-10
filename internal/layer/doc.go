@@ -2,13 +2,19 @@
 // it ships per kind, its settings fragments and its instruction file.
 //
 // A layer's tree holds one directory per entry kind, skills, agents, commands,
-// output-styles and hooks, the settings/<runtime>/<file> fragments, and AGENTS.md. An entry
-// is one atomic thing the layer ships, identified by kind and name: a skill is a directory
-// holding SKILL.md, an agent, a command and an output style are Markdown files named after
-// the entry, a hook is a regular file under hooks. The manifest, harness.yaml, declares the
+// output-styles, hooks and mcp, the settings/<runtime>/<file> fragments, and AGENTS.md. An
+// entry is one atomic thing the layer ships, identified by kind and name: a skill is a
+// directory holding SKILL.md, an agent, a command and an output style are Markdown files
+// named after the entry, a hook is a regular file under hooks, an MCP server is one JSON
+// file under mcp. Every path an entry, a fragment or AGENTS.md resolves to, symlinks
+// followed, lies inside the layer; one that leaves it is refused, so the harness reads
+// nothing the report does not show. The manifest, harness.yaml, declares the
 // layer's name and its variants, the per-runtime alternatives, each one reading some kinds
-// from another directory inside the layer. A directory without a manifest is a layer with
-// one variant, read from its root.
+// from another directory inside the layer. The manifest may also export environment
+// variables, env, each naming a path inside the layer; the compose turns them into
+// $QORY_HARNESS_HOME/layers/<name>/<path> and the runtimes with a place for environment
+// write them. A directory without a manifest is a layer with one variant, read from its
+// root.
 //
 // A caller reads the manifest, picks the variant for the target runtime, then scans the
 // tree:

@@ -15,6 +15,7 @@ import (
 // result together with a fresh git checkout and the home path inside it.
 func composeFixture(t *testing.T, runtimes ...string) (*compose.Result, string, string) {
 	t.Helper()
+	hermetic(t)
 	file, err := filepath.Abs("../../contracts/harness/v1/fixtures/two-layers/harness-compose.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -33,6 +34,17 @@ func composeFixture(t *testing.T, runtimes ...string) (*compose.Result, string, 
 		t.Fatalf("git init: %v\n%s", err, out)
 	}
 	return res, root, filepath.Join(root, ".qory", "harness")
+}
+
+// hermetic points git, and everything under test that runs git, at an empty home and
+// configuration, so no test reads the developer's global config or ignore file.
+func hermetic(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(home, ".gitconfig"))
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 }
 
 // lookup is the runtime of that name, which every test here knows exists.

@@ -57,6 +57,7 @@ last-wins.
        source: {path: ../harness/marketing}
      - name: app              # this repository's own, committed with it
        source: {path: ./harness}
+       link: harness          # optional: <checkout>/harness reaches the layer's files
    ```
 
 2. Compose it:
@@ -83,8 +84,8 @@ machine, verifies its checksum, and puts it in `~/.local/bin`:
 curl -fsSL https://raw.githubusercontent.com/qoryai/qory/main/install.sh | sh
 ```
 
-Set `QORY_BIN_DIR` to install somewhere else, and `QORY_VERSION` to install a version other
-than the latest. Any version manager that reads GitHub releases works as well, for example
+Set `QORY_BIN_DIR` to install somewhere else, and `QORY_VERSION` to a tag such as `v0.2.0`
+to install a version other than the latest. Any version manager that reads GitHub releases works as well, for example
 `mise use -g ubi:qoryai/qory`.
 
 From source, with Go 1.27 or later:
@@ -101,7 +102,7 @@ The binary lands in `$(go env GOPATH)/bin`; put that directory on your `PATH`.
 mkdir hello && cd hello && git init
 qory harness init      # writes a profile and two layers
 qory hc                # or: qory hc --runtime codex
-claude                 # type /hello; or codex, gemini, opencode
+claude                 # type /hello; with --runtime codex, gemini or opencode, that program
 qory hr
 ```
 
@@ -116,6 +117,7 @@ qory harness init        # write the hello example into the current directory
 qory harness compose     # compose the profile into the checkout you stand in   (qory hc)
 qory harness inspect     # print the report: every entry and the layer it came from (qory hi)
 qory harness remove      # remove the composed tree and its links               (qory hr)
+qory config              # print every setting, its value and the file it came from
 qory version
 ```
 
@@ -129,6 +131,12 @@ it back. `--update` fetches every git source again. `-v` prints one line per ent
 The exit status tells the failures apart: 2 for a mistake in the input, 3 for a collision,
 4 for a path `qory` would not replace, 1 for anything else.
 
+How `qory` runs on a machine is a `qory.yaml`, in `~/.config/qory`, in a directory above
+the checkouts, or in the checkout root, the nearest winning and every flag over all of
+them. It sets the runtime and model in place of the profile's, `force` and `update` as
+standing choices, the git timeout and cache directory, and variables exported to the
+runtime. Every setting has a default, so the file is optional.
+
 The reference, one page per command, is under [docs/commands](docs/commands/qory.md).
 
 ## What you get
@@ -140,7 +148,8 @@ The reference, one page per command, is under [docs/commands](docs/commands/qory
 - Settings merged from every layer per target file, in the tool's own format: permission
   lists concatenated and deduplicated, hooks concatenated, hook commands rewritten to the
   composed tree's path. A layer's other files, its scripts say, are there too, as
-  `$QORY_HARNESS_HOME/layers/<name>/…`.
+  `$QORY_HARNESS_HOME/layers/<name>/…`, at a checkout-root name the profile chooses, and
+  in a variable the layer exports, `HARNESS_HOME: .` in its manifest.
 - MCP servers, one JSON file each in a layer, written where every tool reads them:
   `.mcp.json` for Claude Code, `config.toml` for Codex, and so on.
 - Layers from a directory beside the repository, or from a git repository at a tag,

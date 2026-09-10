@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/qoryai/qory/internal/compose"
@@ -31,6 +32,9 @@ type Layer struct {
 	Dirty bool `json:"dirty,omitempty"`
 	// Variant is the variant chosen for the target runtime, absent for a layer without one.
 	Variant string `json:"variant,omitempty"`
+	// Link is the checkout-root name that links to the layer's directory, absent when the
+	// profile names none.
+	Link string `json:"link,omitempty"`
 }
 
 // Entry is one composed entry.
@@ -75,9 +79,10 @@ func (r *Runtimes) UnmarshalJSON(data []byte) error {
 
 // Target is the runtimes and the model the harness was rendered for.
 type Target struct {
-	// Runtimes are the programs the harness was rendered for, such as claude or codex,
-	// in the order the profile names them. The field is always an array, of one name
-	// when the profile names one.
+	// Runtimes are the programs the home holds after the compose, such as claude or
+	// codex: the ones the compose targeted first, in the order the profile names them,
+	// then the ones composed earlier and refreshed. The field is always an array, of one
+	// name when the home holds one.
 	Runtimes Runtimes `json:"runtime"`
 	// Model is the model written into the runtime's settings, absent when the profile
 	// names none.
@@ -109,25 +114,36 @@ type Report struct {
 	// under --force to put a link there, absent when it replaced none. git checkout --
 	// restores each of them, and qory harness remove says so.
 	Replaced []string `json:"replaced,omitempty"`
+	// Env are the variables the harness exports, name to value with $QORY_HARNESS_HOME in
+	// place of the home, absent when it exports none.
+	Env map[string]string `json:"env,omitempty"`
+	// Extensions are the profile's extensions, carried as written, absent when it has
+	// none.
+	Extensions map[string]map[string]any `json:"extensions,omitempty"`
 }
 
 // New builds the report of a result rendered into home for a checkout. The name is the
 // profile's name, which the caller resolves, because a profile without one is named after
-// the checkout. Layers, entries and excludes come out as empty arrays rather than null.
+// the checkout. Layers, entries and excludes come out as empty arrays rather than null;
+// env and extensions are left out when empty.
 func New(res *compose.Result, name, checkout, home string) Report {
 	r := Report{
-		Version:  Version,
-		Profile:  name,
-		File:     res.Profile.File,
-		Target:   Target{Runtimes: Runtimes(res.Profile.Target.Runtimes), Model: res.Profile.Target.Model},
-		Checkout: checkout,
-		Home:     home,
-		Layers:   []Layer{},
-		Entries:  []Entry{},
-		Excludes: []Exclude{},
+		Version:    Version,
+		Profile:    name,
+		File:       res.Profile.File,
+		Target:     Target{Runtimes: Runtimes(res.Profile.Target.Runtimes), Model: res.Profile.Target.Model},
+		Checkout:   checkout,
+		Home:       home,
+		Layers:     []Layer{},
+		Entries:    []Entry{},
+		Excludes:   []Exclude{},
+		Extensions: res.Profile.Extensions,
+	}
+	if len(res.Env) > 0 {
+		r.Env = res.Env
 	}
 	for _, l := range res.Layers {
-		r.Layers = append(r.Layers, Layer{Name: l.Name, ManifestName: l.ManifestName, Source: l.Source, Pin: l.Pin, Dirty: l.Dirty, Variant: l.Variant})
+		r.Layers = append(r.Layers, Layer{Name: l.Name, ManifestName: l.ManifestName, Source: l.Source, Pin: l.Pin, Dirty: l.Dirty, Variant: l.Variant, Link: l.Link})
 	}
 	for _, e := range res.Entries {
 		r.Entries = append(r.Entries, Entry{Kind: e.Kind, Name: e.Name, Layer: e.Layer})
@@ -200,6 +216,9 @@ func (r Report) PrintBody(w io.Writer) error {
 		if l.Variant != "" {
 			row = append(row, "variant "+l.Variant)
 		}
+		if l.Link != "" {
+			row = append(row, "linked as "+l.Link)
+		}
 		rows = append(rows, row)
 	}
 	u.Table(rows)
@@ -219,5 +238,36 @@ func (r Report) PrintBody(w io.Writer) error {
 		}
 		u.Table(rows)
 	}
+	if len(r.Env) > 0 {
+		u.Blank()
+		u.Heading("Env")
+		rows = nil
+		for _, name := range sorted(r.Env) {
+			rows = append(rows, []string{name, r.Env[name]})
+		}
+		u.Table(rows)
+	}
+	if len(r.Extensions) > 0 {
+		u.Blank()
+		u.Heading("Extensions")
+		rows = nil
+		for _, ns := range sorted(r.Extensions) {
+			for _, key := range sorted(r.Extensions[ns]) {
+				value, _ := json.Marshal(r.Extensions[ns][key])
+				rows = append(rows, []string{ns + "." + key, string(value)})
+			}
+		}
+		u.Table(rows)
+	}
 	return nil
+}
+
+// sorted lists a map's keys in order, so the printed rows do not follow map order.
+func sorted[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

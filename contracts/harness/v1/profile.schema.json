@@ -25,7 +25,12 @@
         "model": {"type": "string", "minLength": 1}
       }
     },
-    "layers": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/layer"}}
+    "layers": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/layer"}},
+    "extensions": {
+      "description": "Values qory carries into the report and does not read: one object per namespace.",
+      "type": "object",
+      "additionalProperties": {"type": "object"}
+    }
   },
   "$defs": {
     "names": {"type": "array", "items": {"type": "string", "minLength": 1}},
@@ -48,7 +53,12 @@
             "mcp": {"$ref": "#/$defs/names"}
           }
         },
-        "variant": {"type": "string", "minLength": 1}
+        "variant": {"type": "string", "minLength": 1},
+        "link": {
+          "description": "A name at the checkout root that links to the layer's directory.",
+          "type": "string",
+          "pattern": "^[^./\\\\@][^/\\\\@]*$"
+        }
       }
     },
     "source": {

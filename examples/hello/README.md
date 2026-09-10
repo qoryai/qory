@@ -24,5 +24,6 @@ qory hc --runtime codex          # or claude,codex for both at once
 codex                            # then: greet me
 ```
 
-Codex reads `AGENTS.md` and `.agents/skills`, so the greeting is there. It has no place for
-commands, so `/hello` is a Claude Code thing and the compose says which entry it skipped.
+Codex reads `AGENTS.override.md` and `.agents/skills`, so the greeting is there. It has no
+place for commands, so `/hello` is a Claude Code thing and the compose says which entry it
+skipped.

@@ -29,6 +29,6 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Set this secret to publish the Homebrew formula into qoryai/homebrew-tap.
-          # Without it the archives are published and the formula is skipped.
+          # Set this secret to publish the Homebrew cask into qoryai/homebrew-tap.
+          # Without it the archives are published and the cask is skipped.
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

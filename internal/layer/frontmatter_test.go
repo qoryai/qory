@@ -41,11 +41,6 @@ func TestParseDocumentEdgeCases(t *testing.T) {
 	if d.String("missing") != "" {
 		t.Fatalf("missing is %q", d.String("missing"))
 	}
-	// An empty frontmatter block reads as an unclosed one: the parser looks for the closing
-	// fence after a newline, and the two fences share none.
-	if _, err := ParseDocument([]byte("---\n---\nbody\n"), "b.md"); err == nil {
-		t.Fatal("an empty frontmatter block was accepted")
-	}
 	d, err = ParseDocument([]byte("---\n\n---\nbody\n"), "c.md")
 	if err != nil {
 		t.Fatal(err)

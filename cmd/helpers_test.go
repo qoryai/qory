@@ -39,14 +39,15 @@ var twoLayerEntries = map[string]string{
 }
 
 // emptyDir makes an empty directory the working directory, in an environment that reads
-// nothing of the machine's own: HOME, the cache directory, git's global config and gh's
-// config directory all point at temporary paths, git's system config is off, and colour
+// nothing of the machine's own: HOME, the cache and configuration directories, git's
+// global config and gh's config directory all point at temporary paths, git's system config is off, and colour
 // is off. Nothing there names the person, so a command that greets one prints no name.
 func emptyDir(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(home, ".gitconfig"))
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	t.Setenv("GH_CONFIG_DIR", filepath.Join(home, "gh"))

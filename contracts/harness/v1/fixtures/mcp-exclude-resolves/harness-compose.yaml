@@ -1,0 +1,11 @@
+apiVersion: qory.ai/v1alpha1
+kind: HarnessProfile
+target:
+  runtime: claude
+layers:
+  - name: core
+    source: {path: layers/core}
+    exclude:
+      mcp: [db]
+  - name: nextjs
+    source: {path: layers/nextjs}

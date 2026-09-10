@@ -66,6 +66,16 @@ func TestExitCodesTellTheFailuresApart(t *testing.T) {
 			want:  cmd.ExitInput,
 		},
 		{
+			name:  "an unknown harness verb",
+			setup: func(*testing.T, string) []string { return []string{"harness", "compsoe"} },
+			want:  cmd.ExitInput,
+		},
+		{
+			name:  "a stray argument to version",
+			setup: func(*testing.T, string) []string { return []string{"version", "extra"} },
+			want:  cmd.ExitInput,
+		},
+		{
 			name: "a collision",
 			setup: func(t *testing.T, root string) []string {
 				copyFixture(t, "collision-fails", root)

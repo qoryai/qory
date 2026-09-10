@@ -8,10 +8,9 @@ Everywhere. Three kinds are the most useful:
 
 - **Support for another runtime.** A runtime is one package under `internal/render/` that
   implements the `Runtime` interface: which links the checkout needs, what to write into
-  its directory, which kinds it has no place for. Every existing runtime
-  is under fifty lines. Add a row to the runtimes table in `contracts/harness/v1/README.md`
-  and a line in the runtime test. A runtime that changes what it reads is a fix to its
-  package.
+  its directory, which kinds it has no place for. Every existing runtime is under a
+  hundred lines. Add a row to the runtimes table in `contracts/harness/v1/README.md` and a
+  line in the runtime test. A runtime that changes what it reads is a fix to its package.
 - **The contract.** The harness compose format under `contracts/harness/v1/`, its schemas
   and its fixtures. A layer follows the contract and lives in your own repository; nothing
   in this one has to change for it.
@@ -58,8 +57,9 @@ go run github.com/mgechev/revive@v1.16.0 -config revive.toml ./...
 
 A change to the compose format starts with a fixture. Each fixture directory holds a
 `harness-compose.yaml`, its layers under `layers/`, and under `expected/` either
-`entries.txt` (one `kind/name layer` line per composed entry, with `settings.json` and
-`AGENTS.md` beside it when the fixture exercises them) or `error.txt` (the exact error text).
+`entries.txt` (one `kind/name layer` line per composed entry, with `AGENTS.md` beside it
+and a merged settings file at `settings/<runtime>/<file>.json`, a TOML target as
+`<file>.toml.json`, when the fixture exercises them) or `error.txt` (the exact error text).
 The test suite runs every fixture and validates every document against the schemas, so the
 schema, the fixtures and the reader cannot drift apart. Write the fixture, watch it fail,
 then change the code.
@@ -90,10 +90,11 @@ conventions, beyond what `revive` can check:
   lists as two spaces and a dash, and wrap at 90 columns.
 
 One vocabulary, no synonyms: **runtime** is the program that runs the harness, such as
-Claude Code; **profile** is the compose file; **layer**, **source**, **entry**, **kind**,
-**variant**, **exclude**, **collision**, **home**, **checkout**, **link**, **pin** and
-**report** mean what `contracts/harness/v1/README.md` says they mean. A runtime is never a
-provider, a tool or a vendor.
+Claude Code; **profile** is the compose file; **configuration** is `qory.yaml`; **layer**,
+**source**, **entry**, **kind**, **variant**, **exclude**, **collision**, **home**,
+**checkout**, **link**, **pin** and **report** mean what `contracts/harness/v1/README.md`
+says they mean. A runtime is never a provider, a tool or a vendor; a configuration is
+never a setting file or a preference.
 
 The command reference under `docs/commands/` is generated: run
 `go run ./internal/gendocs docs/commands` after changing a command and commit the result.
@@ -110,6 +111,7 @@ goreleaser check
 goreleaser build --snapshot --clean --single-target
 ```
 
-`qory version` reports the tag in a release build, and the commit in a build from source.
+`qory version` reports the version in a release build, `0.2.0` for the tag `v0.2.0`, and
+the commit in a build from source, marked dirty when the tree had uncommitted changes.
 
 Commit messages say what changed and why it was needed, in the imperative.

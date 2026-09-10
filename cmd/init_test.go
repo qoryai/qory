@@ -17,8 +17,7 @@ import (
 // directory, composes it, and refuses to write twice.
 func TestInit(t *testing.T) {
 	cmd.Example = exampleFromDisk(t)
-	dir := t.TempDir()
-	t.Chdir(dir)
+	dir := emptyDir(t)
 	root := cmd.Root()
 	root.SetArgs([]string{"harness", "init"})
 	root.SetOut(&strings.Builder{})
@@ -37,6 +36,25 @@ func TestInit(t *testing.T) {
 	root.SetOut(&strings.Builder{})
 	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "does not overwrite") {
 		t.Fatalf("second init: %v", err)
+	}
+}
+
+// TestInitLeavesEveryExistingFile is a directory with its own README.md: init refuses
+// rather than writing the example's over it.
+func TestInitLeavesEveryExistingFile(t *testing.T) {
+	example := exampleFromDisk(t)
+	dir := emptyDir(t)
+	setExample(t, example)
+	writeFile(t, filepath.Join(dir, "README.md"), "# my project\n")
+	out, err := run(t, "harness", "init")
+	if err == nil || !strings.Contains(err.Error(), "already has a README.md; qory does not overwrite it") {
+		t.Fatalf("init over a README: %v\n%s", err, out)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "README.md")); string(data) != "# my project\n" {
+		t.Errorf("README.md was replaced: %q", data)
+	}
+	if _, err := os.Stat(filepath.Join(dir, profile.FileName)); err == nil {
+		t.Error("the profile was written although init refused")
 	}
 }
 

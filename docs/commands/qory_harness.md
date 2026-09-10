@@ -2,6 +2,10 @@
 
 Write an example, then compose, inspect and remove the harness of a checkout
 
+```
+qory harness [flags]
+```
+
 ### Options
 
 ```

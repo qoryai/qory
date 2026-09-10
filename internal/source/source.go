@@ -13,14 +13,17 @@
 package source
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/qoryai/qory/internal/profile"
 )
@@ -64,20 +67,38 @@ func (e *FetchError) Error() string {
 // Unwrap returns the error from running git.
 func (e *FetchError) Unwrap() error { return e.Err }
 
+// Options are the choices a caller makes for resolving a git source. The zero value reads
+// the cache under [CacheDir] with no pin, no update and no timeout.
+type Options struct {
+	// Pin is the commit this checkout was composed from last time, as the report recorded
+	// it, "" for none.
+	Pin string
+	// Update resolves the ref again instead of reading the pin or the cached resolution.
+	Update bool
+	// Cache is the directory sources are fetched to, "" for [CacheDir].
+	Cache string
+	// Timeout is the longest one git command may run, 0 for no limit.
+	Timeout time.Duration
+}
+
 // Resolve turns a source into a directory and its pin. A relative path resolves against
-// baseDir, which a caller passes absolute, such as [profile.Profile.Dir]. A git source is
-// read from the cache when its ref has been resolved before, and resolved again only when
-// update is set, so a compose needs the network once per ref and a branch ref moves on
-// request, for this compose alone: every clone is kept by commit, and a checkout composed
-// from the earlier commit keeps reading it.
+// baseDir, which a caller passes absolute, such as [profile.Profile.Dir].
+//
+// A git source is read from the cache. The pin, when given, is the commit this checkout
+// was composed from last time, and it is read again when its clone is there, so the
+// checkout stays on its commit whatever another checkout resolved the same ref to.
+// Without a pin, the ref's last resolution serves; a ref never resolved is fetched. An
+// update ignores both and resolves the ref again, so a branch ref moves on request and a
+// compose needs the network only then. A git command that runs past the timeout is
+// killed and reported as a [*FetchError].
 //
 // The error for a path that is not there comes from the operating system unchanged, and a
 // caller can match it with errors.Is and os.ErrNotExist. A path that is there but is not a
 // directory gets an error naming the path. A git source that cannot be fetched returns a
 // [*FetchError].
-func Resolve(baseDir string, s profile.Source, update bool) (Resolved, error) {
+func Resolve(baseDir string, s profile.Source, opts Options) (Resolved, error) {
 	if s.Git != "" {
-		return resolveGit(s, update)
+		return resolveGit(s, opts)
 	}
 	dir := s.Path
 	if !filepath.IsAbs(dir) {
@@ -110,21 +131,30 @@ func CacheDir() (string, error) {
 //
 // Clones are kept per commit, never per ref, so a checkout composed from a branch keeps
 // reading the commit it was composed from until its own compose asks for an update. The
-// ref's commit is remembered in refs/<ref> beside the clones; without update, that file
-// answers and no network is used.
-func resolveGit(s profile.Source, update bool) (Resolved, error) {
-	cache, err := CacheDir()
-	if err != nil {
-		return Resolved{}, err
+// ref's commit is remembered in refs/<ref> beside the clones; without update, the pin the
+// caller passes answers first, then that file, and no network is used.
+func resolveGit(s profile.Source, opts Options) (Resolved, error) {
+	cache := opts.Cache
+	if cache == "" {
+		var err error
+		if cache, err = CacheDir(); err != nil {
+			return Resolved{}, err
+		}
 	}
 	dir := filepath.Join(cache, cacheName(s.Git))
 	refFile := filepath.Join(dir, "refs", cacheName(s.Ref))
 	var commit string
-	if data, err := os.ReadFile(refFile); err == nil && !update {
-		commit = strings.TrimSpace(string(data))
+	if !opts.Update {
+		commit = pinned(dir, opts.Pin)
 	}
+	if commit == "" && !opts.Update {
+		if data, err := os.ReadFile(refFile); err == nil {
+			commit = strings.TrimSpace(string(data))
+		}
+	}
+	var err error
 	if commit == "" || !cloned(filepath.Join(dir, commit)) {
-		if commit, err = fetch(dir, s); err != nil {
+		if commit, err = fetch(dir, s, opts.Timeout); err != nil {
 			return Resolved{}, err
 		}
 		if err := os.MkdirAll(filepath.Dir(refFile), 0o755); err != nil {
@@ -140,13 +170,51 @@ func resolveGit(s profile.Source, update bool) (Resolved, error) {
 		layer = filepath.Join(clone, s.Path)
 	}
 	info, err := os.Stat(layer)
-	if err != nil {
+	if errors.Is(err, os.ErrNotExist) {
 		return Resolved{}, fmt.Errorf("%s has no %s at %s", s.Git, s.Path, s.Ref)
+	}
+	if err != nil {
+		return Resolved{}, err
 	}
 	if !info.IsDir() {
 		return Resolved{}, fmt.Errorf("%s is not a directory in %s at %s", s.Path, s.Git, s.Ref)
 	}
+	// A path inside the clone may be a symlink the repository carries; the layer it names
+	// must still be inside the clone.
+	real, err := filepath.EvalSymlinks(layer)
+	if err != nil {
+		return Resolved{}, err
+	}
+	base, err := filepath.EvalSymlinks(clone)
+	if err != nil {
+		return Resolved{}, err
+	}
+	if real != base && !strings.HasPrefix(real, base+string(filepath.Separator)) {
+		return Resolved{}, fmt.Errorf("%s in %s at %s links outside the repository", s.Path, s.Git, s.Ref)
+	}
 	return Resolved{Dir: layer, Pin: commit[:12]}, nil
+}
+
+// pinned returns the commit of the one complete clone under dir whose id starts with pin,
+// and "" for no pin, no such clone, or more than one.
+func pinned(dir, pin string) string {
+	if pin == "" {
+		return ""
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	var found string
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), pin) && cloned(filepath.Join(dir, e.Name())) {
+			if found != "" {
+				return ""
+			}
+			found = e.Name()
+		}
+	}
+	return found
 }
 
 // cloned reports whether a clone at dir landed whole: the fetch writes a done mark after
@@ -160,9 +228,10 @@ func cloned(dir string) bool {
 // after the commit it resolved to, and returns that commit. It clones into a temporary
 // sibling and renames it into place once the checkout is done, so a fetch that fails or is
 // cut short leaves the clones already there as they were and nothing half-made behind. A
-// commit already cloned is not fetched twice. The ref may be a tag, a branch or a commit
-// by its full id, when the remote allows fetching a commit by id.
-func fetch(dir string, s profile.Source) (string, error) {
+// ref that resolves to a commit already cloned is fetched, since the commit is known only
+// afterwards, and the clone there is kept. The ref may be a tag, a branch or a commit by
+// its full id, when the remote allows fetching a commit by id.
+func fetch(dir string, s profile.Source, timeout time.Duration) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
@@ -171,18 +240,21 @@ func fetch(dir string, s profile.Source) (string, error) {
 		return "", err
 	}
 	defer os.RemoveAll(tmp)
+	// The URL and the ref come from the profile, which a repository carries, so both go
+	// after "--": a ref written as an option, --upload-pack=<command> say, is then a ref
+	// git cannot find and not a command git runs.
 	steps := [][]string{
 		{"init", "--quiet"},
-		{"remote", "add", "origin", s.Git},
-		{"fetch", "--quiet", "--depth", "1", "origin", s.Ref},
+		{"remote", "add", "--", "origin", s.Git},
+		{"fetch", "--quiet", "--depth", "1", "origin", "--", s.Ref},
 		{"checkout", "--quiet", "--detach", "FETCH_HEAD"},
 	}
 	for _, args := range steps {
-		if out, err := git(tmp, args...); err != nil {
+		if out, err := git(tmp, timeout, args...); err != nil {
 			return "", &FetchError{Source: s.Git + "#" + s.Ref, Output: string(out), Err: err}
 		}
 	}
-	out, err := git(tmp, "rev-parse", "HEAD")
+	out, err := git(tmp, timeout, "rev-parse", "HEAD")
 	if err != nil {
 		return "", &FetchError{Source: s.Git + "#" + s.Ref, Output: string(out), Err: err}
 	}
@@ -194,11 +266,21 @@ func fetch(dir string, s profile.Source) (string, error) {
 	if cloned(clone) {
 		return commit, nil
 	}
-	if err := os.RemoveAll(clone); err != nil {
-		return "", err
+	// Two composes may fetch the same source at once. Each renames its own temporary clone
+	// into place; the second rename fails because the first landed, and that is the
+	// clone to use. A clone left there without its done mark is one cut short, and it is
+	// moved aside so this fetch can land.
+	if _, err := os.Stat(clone); err == nil {
+		if err := os.Rename(clone, tmp+"-old"); err != nil {
+			return "", err
+		}
+		defer os.RemoveAll(tmp + "-old")
 	}
 	if err := os.Rename(tmp, clone); err != nil {
-		return "", err
+		if cloned(clone) {
+			return commit, nil
+		}
+		return "", &FetchError{Source: s.Git + "#" + s.Ref, Output: err.Error(), Err: err}
 	}
 	return commit, nil
 }
@@ -207,28 +289,36 @@ func fetch(dir string, s profile.Source) (string, error) {
 var unsafe = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
 // cacheName turns a URL or a ref into one directory name: the unsafe characters replaced
-// by "_", and for a value that had any, a short hash appended so two values that clean
-// to the same text do not share a directory.
+// by "_" and a short hash of the value appended, so two values that clean to the same
+// text, or differ only in case on a file system that does not, keep their own directory.
 func cacheName(v string) string {
 	clean := strings.Trim(unsafe.ReplaceAllString(v, "_"), "_")
-	if clean == v {
-		return clean
-	}
 	sum := sha256.Sum256([]byte(v))
 	return clean + "-" + hex.EncodeToString(sum[:4])
 }
 
-// git runs one git command in dir with prompts off, so a remote that wants a password or
-// an unknown host key fails instead of waiting, and returns its combined output. A
+// git runs one git command in dir with every prompt off, the terminal's, an askpass
+// program's and ssh's, so a remote that wants a password or an unknown host key fails
+// instead of waiting, and returns its combined output. A command still running after the
+// timeout is killed and the error says so; a timeout of zero is no limit. A
 // GIT_SSH_COMMAND the environment already carries is kept.
-func git(dir string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", args...)
+func git(dir string, timeout time.Duration, args ...string) ([]byte, error) {
+	ctx, cancel := context.Background(), func() {}
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+	}
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=", "SSH_ASKPASS=")
 	if os.Getenv("GIT_SSH_COMMAND") == "" {
 		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
 	}
-	return cmd.CombinedOutput()
+	out, err := cmd.CombinedOutput()
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return out, fmt.Errorf("git %s ran past %s and was stopped", args[0], timeout)
+	}
+	return out, err
 }
 
 // dirty reports whether git sees uncommitted changes under dir, untracked files included.

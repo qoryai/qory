@@ -199,6 +199,24 @@ func TestLoadRefuses(t *testing.T) {
 			false,
 		},
 		{
+			"a layer named with a path",
+			"apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\ntarget:\n  runtime: claude\nlayers:\n  - name: ../escaped\n    source: {path: layers/core}\n",
+			`layers[0]: name "../escaped" is not one path segment; a layer name holds no slash, backslash, @ or leading dot`,
+			false,
+		},
+		{
+			"a layer named with an at sign",
+			"apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\ntarget:\n  runtime: claude\nlayers:\n  - name: b@a\n    source: {path: layers/core}\n",
+			`layers[0]: name "b@a" is not one path segment; a layer name holds no slash, backslash, @ or leading dot`,
+			false,
+		},
+		{
+			"two documents in one file",
+			"apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\ntarget:\n  runtime: claude\nlayers:\n  - name: core\n    source: {path: layers/core}\n---\nkind: Other\n",
+			"holds more than one document; a profile is one",
+			false,
+		},
+		{
 			"a git source without a ref",
 			"apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\ntarget:\n  runtime: claude\nlayers:\n  - name: core\n    source: {git: https://git.example.com/acme/harness}\n",
 			"layer core: source.ref is required with source.git",
@@ -310,7 +328,7 @@ func TestOwnedByCurrentUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ownedByCurrentUser(info) {
+	if !OwnedByCurrentUser(info) {
 		t.Fatal("a file this process wrote counts as another user's")
 	}
 }

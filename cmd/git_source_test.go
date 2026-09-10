@@ -64,3 +64,39 @@ func TestComposeReadsALayerFromGit(t *testing.T) {
 		t.Errorf("--update without the remote: %v\n%s", err, out)
 	}
 }
+
+// TestComposeFollowsAnEditedRef is the profile moving from one tag to another: the pin of
+// the last compose was for the old source, so the new ref resolves on its own.
+func TestComposeFollowsAnEditedRef(t *testing.T) {
+	root := newCheckout(t)
+	remote := tempDir(t)
+	runGit(t, remote, "init", "--quiet", "--initial-branch=main")
+	runGit(t, remote, "config", "user.name", "Tester")
+	runGit(t, remote, "config", "user.email", "tester@example.com")
+	writeFile(t, filepath.Join(remote, "AGENTS.md"), "# v1\n")
+	runGit(t, remote, "add", "-A")
+	runGit(t, remote, "commit", "-q", "-m", "first")
+	runGit(t, remote, "tag", "v1")
+	writeFile(t, filepath.Join(remote, "AGENTS.md"), "# v2\n")
+	runGit(t, remote, "commit", "-q", "-am", "second")
+	runGit(t, remote, "tag", "v2")
+	url := "file://" + remote
+	profileFor := func(ref string) string {
+		return "apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\ntarget:\n  runtime: any\nlayers:\n  - name: core\n    source: {git: " + url + ", ref: " + ref + "}\n"
+	}
+	writeFile(t, filepath.Join(root, "harness-compose.yaml"), profileFor("v1"))
+	if out, err := run(t, "hc"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	first := readReport(t, root).Layers[0].Pin
+	writeFile(t, filepath.Join(root, "harness-compose.yaml"), profileFor("v2"))
+	if out, err := run(t, "hc"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if rep := readReport(t, root); rep.Layers[0].Pin == first || rep.Layers[0].Source != url+"#v2" {
+		t.Errorf("after editing the ref: %+v, still pinned to %s", rep.Layers[0], first)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "AGENTS.md")); string(data) != "# v2\n" {
+		t.Errorf("AGENTS.md reads %q after moving to v2", data)
+	}
+}

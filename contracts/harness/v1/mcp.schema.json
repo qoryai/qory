@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qory.ai/contracts/harness/v1/mcp.schema.json",
+  "title": "MCPServer",
+  "description": "mcp/<name>.json in a layer: one MCP server, in the shape Claude Code's .mcp.json holds under the server's name.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {"type": "string", "enum": ["stdio", "http", "sse"]},
+    "command": {"type": "string", "minLength": 1},
+    "args": {"type": "array", "items": {"type": "string"}},
+    "env": {"type": "object", "additionalProperties": {"type": "string"}},
+    "url": {"type": "string", "minLength": 1},
+    "headers": {"type": "object", "additionalProperties": {"type": "string"}},
+    "description": {"type": "string"}
+  },
+  "oneOf": [
+    {"required": ["command"], "not": {"required": ["url"]}},
+    {"required": ["url"], "not": {"required": ["command"]}}
+  ]
+}

@@ -26,7 +26,7 @@ func Discover(root string) (string, error) {
 	}
 	for dir := filepath.Dir(root); ; dir = filepath.Dir(dir) {
 		candidate := filepath.Join(dir, FileName)
-		if info, err := os.Stat(candidate); err == nil && ownedByCurrentUser(info) {
+		if info, err := os.Stat(candidate); err == nil && OwnedByCurrentUser(info) {
 			return candidate, nil
 		}
 		if dir == filepath.Dir(dir) {

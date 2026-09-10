@@ -1,7 +1,8 @@
 // Package codex renders for Codex CLI, which reads a project's .codex directory, skills
 // from .agents/skills, and AGENTS.override.md ahead of AGENTS.md. The checkout gets a
 // link for each of those three, and .codex holds config.toml with the target model as
-// model and the MCP servers as mcp_servers, plus one TOML file per agent. Codex reads
+// model, the MCP servers as mcp_servers and the exported variables as
+// shell_environment_policy.set, plus one TOML file per agent. Codex reads
 // prompt files from the user's home only and has no output styles, so commands and output
 // styles are skipped.
 package codex
@@ -46,9 +47,10 @@ func (codex) Links(res *compose.Result) []render.Link {
 // home only and has no output styles.
 func (codex) Skips() []string { return []string{"commands", "output-styles"} }
 
-// Render writes config.toml, with the target model as model and the MCP servers as
-// mcp_servers, one table per server holding the object as the layer wrote it, and any
-// other codex settings fragment, then one agents/<name>.toml per agent carrying the
+// Render writes config.toml, with the target model as model, the MCP servers as
+// mcp_servers, one table per server holding the object as the layer wrote it, the
+// exported variables and QORY_HARNESS_HOME under shell_environment_policy.set, which
+// Codex passes to every command it runs, and any other codex settings fragment, then one agents/<name>.toml per agent carrying the
 // agent's name, description and its body as developer_instructions. Codex reads a project
 // .codex only in a project the user has marked trusted.
 func (codex) Render(res *compose.Result, dir, home string) error {
@@ -60,6 +62,12 @@ func (codex) Render(res *compose.Result, dir, home string) error {
 			m["model"] = res.Profile.Target.Model
 		}
 		render.PutServers(m, "mcp_servers", res.MCPFor(home))
+		policy, _ := m["shell_environment_policy"].(map[string]any)
+		if policy == nil {
+			policy = map[string]any{}
+		}
+		policy["set"] = render.Env(policy["set"], res, home)
+		m["shell_environment_policy"] = policy
 	})
 	if err != nil {
 		return err

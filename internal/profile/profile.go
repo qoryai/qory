@@ -3,6 +3,7 @@ package profile
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,6 +69,9 @@ type Layer struct {
 	Exclude map[string][]string `yaml:"exclude,omitempty"`
 	// Variant forces one of the layer's variants instead of the one named like the runtime.
 	Variant string `yaml:"variant,omitempty"`
+	// Link is a name at the checkout root that links to the layer's directory, so a
+	// permission rule or a script reaches the layer's files by a checkout-relative path.
+	Link string `yaml:"link,omitempty"`
 }
 
 // Target is the set of runtimes the harness is rendered for.
@@ -155,6 +159,10 @@ type Profile struct {
 	Target Target `yaml:"target"`
 	// Layers are the layers to compose, in the order they merge.
 	Layers []Layer `yaml:"layers"`
+	// Extensions are values qory carries into the report and does not read: one map per
+	// namespace, for the scripts of a team that keep their own settings beside the
+	// profile.
+	Extensions map[string]map[string]any `yaml:"extensions,omitempty"`
 
 	// File is the absolute path the profile was read from, set by [Load], not by the YAML.
 	File string `yaml:"-"`
@@ -166,9 +174,10 @@ func (p *Profile) Dir() string { return filepath.Dir(p.File) }
 
 // Load reads and validates one profile file and records its absolute path in
 // [Profile.File]. An unknown field is an error, so a misspelled key is reported rather than
-// ignored. The error from a missing or unreadable file is returned as it comes from the
-// operating system, and a caller can match it with errors.Is and os.ErrNotExist; a decoding
-// or validation error is prefixed with path.
+// ignored, and so is a second YAML document in the file. The error from a missing or
+// unreadable file is returned as it comes from the operating system, and a caller can
+// match it with errors.Is and os.ErrNotExist; a decoding or validation error is prefixed
+// with path.
 func Load(path string) (*Profile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -179,6 +188,9 @@ func Load(path string) (*Profile, error) {
 	dec.KnownFields(true)
 	if err := dec.Decode(p); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("%s: holds more than one document; a profile is one", path)
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -193,7 +205,8 @@ func Load(path string) (*Profile, error) {
 
 // validate checks the whole document before a caller sees it, so a profile that reaches the
 // compose is known to name a runtime, at least one layer, uniquely named layers with a
-// source each, and excludes over known kinds only.
+// source each, excludes over known kinds only, links that are one path segment and named
+// once, and extensions that are maps.
 func (p *Profile) validate() error {
 	if p.APIVersion != APIVersion {
 		return fmt.Errorf("apiVersion %q is not one this qory reads; versions: %s", p.APIVersion, APIVersion)
@@ -208,9 +221,13 @@ func (p *Profile) validate() error {
 		return errors.New("layers is empty; a profile names at least one layer")
 	}
 	seen := map[string]bool{}
+	links := map[string]string{}
 	for i, l := range p.Layers {
 		if l.Name == "" {
 			return fmt.Errorf("layers[%d]: name is required", i)
+		}
+		if !segment(l.Name) {
+			return fmt.Errorf("layers[%d]: name %q is not one path segment; a layer name holds no slash, backslash, @ or leading dot", i, l.Name)
 		}
 		if seen[l.Name] {
 			return fmt.Errorf("layer %s is named twice", l.Name)
@@ -223,6 +240,20 @@ func (p *Profile) validate() error {
 			if !isKind(kind) {
 				return fmt.Errorf("layer %s: exclude names kind %q; kinds: %s", l.Name, kind, strings.Join(Kinds, ", "))
 			}
+		}
+		if l.Link != "" {
+			if !segment(l.Link) || l.Link == ".qory" {
+				return fmt.Errorf("layer %s: link %q is not one path segment; a link holds no slash, backslash, @ or leading dot", l.Name, l.Link)
+			}
+			if links[l.Link] != "" {
+				return fmt.Errorf("layers %s and %s both link %s", links[l.Link], l.Name, l.Link)
+			}
+			links[l.Link] = l.Name
+		}
+	}
+	for ns, values := range p.Extensions {
+		if values == nil {
+			return fmt.Errorf("extensions.%s is empty; an extension is a map of values", ns)
 		}
 	}
 	return nil
@@ -245,11 +276,19 @@ func (s Source) validate() error {
 	}
 	if s.Path != "" {
 		clean := filepath.Clean(s.Path)
-		if filepath.IsAbs(clean) || clean == "." || strings.HasPrefix(clean, "..") {
+		if filepath.IsAbs(clean) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 			return fmt.Errorf("source.path %q is not a directory inside the repository", s.Path)
 		}
 	}
 	return nil
+}
+
+// segment reports whether name is one plain path segment: no separator of either kind, no
+// leading dot, and no "@", which the compose uses to key an entry by its layer. A layer
+// name becomes the directory name layers/<name> in the composed tree, so anything else
+// would write outside it.
+func segment(name string) bool {
+	return name != "" && !strings.ContainsAny(name, `/\@`) && !strings.HasPrefix(name, ".")
 }
 
 func isKind(k string) bool {

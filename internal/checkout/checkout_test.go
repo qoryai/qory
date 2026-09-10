@@ -13,7 +13,10 @@ import (
 // test reads the machine's git identity or its excludes file.
 func hermetic(t *testing.T) {
 	t.Helper()
-	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(home, ".gitconfig"))
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 }
 
@@ -213,10 +216,58 @@ func TestRestorableIsTrackedAndUnmodified(t *testing.T) {
 		t.Errorf("a modified file: %q", reason)
 	}
 	write(t, filepath.Join(root, ".claude", "settings.local.json"), "{}\n")
-	if reason := checkout.Restorable(root, filepath.Join(root, ".claude")); reason != "has uncommitted changes" {
+	if reason := checkout.Restorable(root, filepath.Join(root, ".claude")); reason != "holds files git does not track" {
 		t.Errorf("a directory with an untracked file in it: %q", reason)
+	}
+	write(t, filepath.Join(root, ".gitignore"), ".claude/settings.local.json\n")
+	git(t, root, "add", ".gitignore")
+	git(t, root, "commit", "-q", "-m", "ignore")
+	if reason := checkout.Restorable(root, filepath.Join(root, ".claude")); reason != "holds files git does not track" {
+		t.Errorf("a directory with an ignored file in it: %q", reason)
 	}
 	if reason := checkout.Restorable(root, filepath.Join(t.TempDir(), "elsewhere")); reason != "is outside the checkout" {
 		t.Errorf("a path outside the checkout: %q", reason)
+	}
+}
+
+// TestRestorableSeesUntrackedFilesTheConfigurationHides is a repository whose config sets
+// status.showUntrackedFiles to no: an untracked file under a tracked directory still
+// makes the directory not restorable, because git checkout would not bring it back.
+func TestRestorableSeesUntrackedFilesTheConfigurationHides(t *testing.T) {
+	hermetic(t)
+	root := initRepo(t, t.TempDir())
+	git(t, root, "config", "status.showUntrackedFiles", "no")
+	write(t, filepath.Join(root, ".claude", "settings.json"), "{}\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-q", "-m", "first")
+	write(t, filepath.Join(root, ".claude", "settings.local.json"), "{}\n")
+	if reason := checkout.Restorable(root, filepath.Join(root, ".claude")); reason != "holds files git does not track" {
+		t.Errorf("a directory with an untracked file the configuration hides: %q", reason)
+	}
+}
+
+// TestRepoKeyNeverTakesTheHostForAnOwner covers remotes with one path segment, a scheme
+// with no owner, and a trailing slash: the directory name is the answer.
+func TestRepoKeyNeverTakesTheHostForAnOwner(t *testing.T) {
+	hermetic(t)
+	for _, c := range []struct{ url, want string }{
+		{"https://git.example.com/acme/app.git", "acme/app"},
+		{"git@git.example.com:acme/app.git", "acme/app"},
+		{"ssh://git@git.example.com:2222/acme/app", "acme/app"},
+		{"https://git.example.com/group/sub/app.git", "sub/app"},
+		{"https://git.example.com/app.git", ""},
+		{"file:///srv/git/app.git", "git/app"},
+		{"https://git.example.com/acme/", ""},
+		{"/srv/app", "srv/app"},
+	} {
+		root := initRepo(t, t.TempDir())
+		git(t, root, "remote", "add", "origin", c.url)
+		want := c.want
+		if want == "" {
+			want = filepath.Base(root)
+		}
+		if got := checkout.RepoKey(root); got != want {
+			t.Errorf("%s: got %q, want %q", c.url, got, want)
+		}
 	}
 }

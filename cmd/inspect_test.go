@@ -72,3 +72,20 @@ func TestInspectPrintsTheLayersAndEntries(t *testing.T) {
 		t.Errorf("printed entries = %v, want %v", got, twoLayerEntries)
 	}
 }
+
+// TestInspectRefusesAReportOfAnotherVersion is a report a later qory wrote: the version
+// is named rather than the report read as this one's.
+func TestInspectRefusesAReportOfAnotherVersion(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-layers", root)
+	if out, err := run(t, "harness", "compose"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	report := filepath.Join(root, ".qory", "harness-report.json")
+	writeFile(t, report, `{"version": 99, "profile": "x"}`+"\n")
+	out, err := run(t, "harness", "inspect")
+	if err == nil {
+		t.Fatalf("inspect read a version 99 report:\n%s", out)
+	}
+	wants(t, err.Error(), "report version 99 is not one this qory reads; versions: 1")
+}

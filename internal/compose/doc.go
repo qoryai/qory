@@ -22,7 +22,11 @@
 //     the layer root.
 //  5. Applies the layer's excludes. An exclude that names nothing the layer ships fails the
 //     compose, so a layer that stops shipping an entry is noticed.
-//  6. Merges the layer's settings fragments into the result and appends its AGENTS.md.
+//  6. Merges the layer's settings fragments into the result, appends its AGENTS.md, and
+//     adds the variables its manifest exports, each as
+//     $QORY_HARNESS_HOME/layers/<name>/<path>. Two layers exporting one name with
+//     different values fail the compose, unless [Options.Env] names it; the
+//     configuration's variables are written over the layers' at the end.
 //
 // After the last layer, Compose refuses a collision: a kind and name that more than one
 // layer still provides fails with a [*CollisionError]. There is no last-wins, no rename and
@@ -56,8 +60,8 @@
 //
 // A settings fragment names a hook script as $QORY_HARNESS_HOME/hooks/<file>, and a layer's
 // other files as $QORY_HARNESS_HOME/layers/<name>/<path>. Merging keeps that text as
-// written, which is what the report shows. [Result.SettingsFor] and [Result.MCPFor]
-// replace every occurrence of the literal $QORY_HARNESS_HOME, braced or not, inside a
+// written, which is what the report shows. [Result.SettingsFor], [Result.MCPFor] and
+// [Result.EnvFor] replace every occurrence of the literal $QORY_HARNESS_HOME, braced or not, inside a
 // string with the home path, at any depth, and return a copy the caller owns.
 // [Result.Settings] and [Result.MCP] are shared: a caller reads them and does not write to
 // them.
