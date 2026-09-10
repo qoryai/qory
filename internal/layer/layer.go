@@ -1,6 +1,7 @@
 package layer
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -50,14 +51,17 @@ type rawManifest struct {
 	Variants   map[string]yaml.Node `yaml:"variants,omitempty"`
 }
 
-// Entry is one atomic entry: a skill, an agent, a command, an output style or a hook script.
+// Entry is one atomic entry: a skill, an agent, a command, an output style, a hook script
+// or an MCP server.
 type Entry struct {
-	// Kind is one of skills, agents, commands, output-styles and hooks.
+	// Kind is one of skills, agents, commands, output-styles, hooks and mcp.
 	Kind string
 	// Name identifies the entry within its kind: the skill directory name, the Markdown file
-	// name without its extension, or the hook file name with its extension.
+	// name without its extension, the hook file name with its extension, or the MCP server's
+	// file name without .json.
 	Name string
-	// Path is absolute: the skill directory, the Markdown file or the hook script.
+	// Path is absolute: the skill directory, the Markdown file, the hook script or the MCP
+	// server's JSON file.
 	Path string
 }
 
@@ -76,6 +80,9 @@ type Layer struct {
 	// Settings are the settings/<runtime>/<file> fragments: per runtime, per target file, the
 	// absolute path of the one fragment this layer contributes to it.
 	Settings map[string]map[string]string
+	// MCP holds the MCP servers by name, each the JSON object its mcp/<name>.json file
+	// holds, as written, with every $QORY_HARNESS_HOME still in place.
+	MCP map[string]map[string]any
 	// Instructions is the absolute AGENTS.md path, or "" when the layer ships none.
 	Instructions string
 }
@@ -183,21 +190,24 @@ func names(v map[string]Variant) string {
 //
 // A kind the variant redirects is read from the directory it names, which must be a
 // relative directory inside the layer: an empty value, ".", an absolute path and a path
-// leaving the layer are all refused. A variant that names a kind outside the five known
+// leaving the layer are all refused. A variant that names a kind outside the six known
 // kinds is refused too.
 //
 // A kind directory that is not there leaves the layer without entries of that kind. A
 // skills subdirectory without SKILL.md is an error. In the Markdown kinds only .md files
-// count, and under hooks only regular files; a name starting with a dot is skipped
-// everywhere. Settings are read from settings/ at the layer root, which no variant
-// redirects, and AGENTS.md from the root as well.
+// count. Under hooks every file is a hook and a directory is an error, because a hook is
+// named by its file name and a script's helpers belong elsewhere in the layer, reached as
+// $QORY_HARNESS_HOME/layers/<name>. Under mcp every .json file is one server and must hold
+// a JSON object. A name starting with a dot is skipped everywhere. Settings are read from
+// settings/ at the layer root, which no variant redirects, and AGENTS.md from the root as
+// well.
 func Read(name, dir string, m *Manifest, variant string) (*Layer, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
 	}
 	l := &Layer{Name: name, Dir: abs, Manifest: m, Variant: variant}
-	dirs := map[string]string{"skills": "skills", "agents": "agents", "commands": "commands", "output-styles": "output-styles", "hooks": "hooks"}
+	dirs := map[string]string{"skills": "skills", "agents": "agents", "commands": "commands", "output-styles": "output-styles", "hooks": "hooks", "mcp": "mcp"}
 	if m != nil && variant != "" {
 		for kind, sub := range m.Variants[variant] {
 			if _, ok := dirs[kind]; !ok {
@@ -222,11 +232,17 @@ func Read(name, dir string, m *Manifest, variant string) (*Layer, error) {
 		}
 		l.Entries = append(l.Entries, es...)
 	}
-	hooks, err := readFiles("hooks", filepath.Join(abs, dirs["hooks"]))
+	hooks, err := readHooks(name, filepath.Join(abs, dirs["hooks"]))
 	if err != nil {
 		return nil, fmt.Errorf("layer %s: %w", name, err)
 	}
 	l.Entries = append(l.Entries, hooks...)
+	servers, mcp, err := readMCP(filepath.Join(abs, dirs["mcp"]))
+	if err != nil {
+		return nil, fmt.Errorf("layer %s: %w", name, err)
+	}
+	l.Entries = append(l.Entries, servers...)
+	l.MCP = mcp
 	sort.Slice(l.Entries, func(i, j int) bool {
 		if l.Entries[i].Kind != l.Entries[j].Kind {
 			return l.Entries[i].Kind < l.Entries[j].Kind
@@ -327,9 +343,12 @@ func readSettings(dir string) (map[string]map[string]string, error) {
 	return out, nil
 }
 
-// readFiles lists the files of a directory as entries of kind, named by their file name
-// with its extension, because a settings fragment names a hook by the file name it has.
-func readFiles(kind, dir string) ([]Entry, error) {
+// readHooks lists the files of the hooks directory as hook entries, named by their file
+// name with its extension, because a settings fragment names a hook by the file name it
+// has. A directory in there is an error rather than a silent skip, so a layer that keeps a
+// script's helpers under hooks/ learns where they go instead; the message names the layer
+// so the path it suggests can be pasted.
+func readHooks(name, dir string) ([]Entry, error) {
 	items, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -339,10 +358,49 @@ func readFiles(kind, dir string) ([]Entry, error) {
 	}
 	var es []Entry
 	for _, it := range items {
-		if it.IsDir() || strings.HasPrefix(it.Name(), ".") {
+		if strings.HasPrefix(it.Name(), ".") {
 			continue
 		}
-		es = append(es, Entry{Kind: kind, Name: it.Name(), Path: filepath.Join(dir, it.Name())})
+		if it.IsDir() {
+			return nil, fmt.Errorf("hooks/%s is a directory; a hook is one file, and a layer's other files are reached as $QORY_HARNESS_HOME/layers/%s/%s", it.Name(), name, it.Name())
+		}
+		es = append(es, Entry{Kind: "hooks", Name: it.Name(), Path: filepath.Join(dir, it.Name())})
 	}
 	return es, nil
+}
+
+// readMCP lists mcp/<name>.json as MCP server entries named without the extension, and
+// returns each file's object by name. A file that is not a JSON object is an error naming
+// it. A directory or a file of another extension is not a server.
+func readMCP(dir string) ([]Entry, map[string]map[string]any, error) {
+	items, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	var es []Entry
+	servers := map[string]map[string]any{}
+	for _, it := range items {
+		if it.IsDir() || strings.HasPrefix(it.Name(), ".") || !strings.HasSuffix(it.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(dir, it.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, nil, err
+		}
+		var server map[string]any
+		if err := json.Unmarshal(data, &server); err != nil || server == nil {
+			return nil, nil, fmt.Errorf("mcp/%s does not hold a JSON object", it.Name())
+		}
+		name := strings.TrimSuffix(it.Name(), ".json")
+		servers[name] = server
+		es = append(es, Entry{Kind: "mcp", Name: name, Path: path})
+	}
+	if len(servers) == 0 {
+		servers = nil
+	}
+	return es, servers, nil
 }

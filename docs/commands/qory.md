@@ -1,11 +1,11 @@
 ## qory
 
-Compose the harness a coding agent runs with from layers
+Compose the harness a runtime loads from layers
 
 ### Synopsis
 
-Compose the harness a coding agent runs with from layers, for Claude Code, Codex,
-Gemini CLI, OpenCode, Cursor, Copilot CLI, Amp, Goose, and any tool that reads AGENTS.md.
+Compose the harness a runtime loads from layers, for Claude Code, Codex, Gemini CLI,
+OpenCode, Cursor, Copilot CLI, Amp, Goose, and any tool that reads AGENTS.md.
 
 Shortcuts:
   hc  harness compose

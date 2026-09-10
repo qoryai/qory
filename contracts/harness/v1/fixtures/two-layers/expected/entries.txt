@@ -1,6 +1,7 @@
 agents/reviewer core
 commands/ship core
 hooks/guard.sh core
+mcp/db core
 output-styles/terse core
 skills/e2e nextjs
 skills/review core

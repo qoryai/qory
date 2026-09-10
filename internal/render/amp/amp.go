@@ -1,8 +1,9 @@
 // Package amp renders for Amp, which reads a project's .amp directory for its settings,
 // AGENTS.md at the checkout root, and skills from .agents/skills. All three are linked
-// into the checkout. Amp picks the model through its own modes, so the target model is
-// not written, and it defines agents, commands and output styles through plugins rather
-// than project files, so those three kinds are skipped.
+// into the checkout, and the MCP servers go into settings.json as amp.mcpServers. Amp
+// picks the model through its own modes, so the target model is not written, and it
+// defines agents, commands and output styles through plugins rather than project files,
+// so those three kinds are skipped.
 package amp
 
 import (
@@ -38,8 +39,17 @@ func (amp) Links(res *compose.Result) []render.Link {
 // than project files.
 func (amp) Skips() []string { return []string{"agents", "commands", "output-styles"} }
 
-// Render writes the amp settings files, such as settings.json, and nothing else. The
-// target model reaches no file, because Amp picks the model through its own modes.
+// Render writes the amp settings files, such as settings.json, which gets the MCP servers
+// under amp.mcpServers when the compose holds any, and nothing else. The target model
+// reaches no file, because Amp picks the model through its own modes.
 func (amp) Render(res *compose.Result, dir, home string) error {
-	return render.WriteSettings(res, Runtime, dir, home, nil, nil)
+	var ensure []string
+	if len(res.MCP) > 0 {
+		ensure = []string{"settings.json"}
+	}
+	return render.WriteSettings(res, Runtime, dir, home, ensure, func(file string, m map[string]any) {
+		if file == "settings.json" {
+			render.PutServers(m, "amp.mcpServers", res.MCPFor(home))
+		}
+	})
 }

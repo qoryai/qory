@@ -3,6 +3,7 @@ package cmd_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -42,12 +43,10 @@ func TestComposeForSeveralRuntimesFromTheProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, ui.Mark+" acme/app · claude, codex", "composed 7 entries from 2 layers")
-	wantsRow(t, out, "claude", claudeLink)
+	wants(t, out, ui.Mark+" acme/app · claude, codex", "composed 8 entries from 2 layers")
+	wantsRow(t, out, "claude", claudeLink+"  .mcp.json")
 	wantsRow(t, out, "codex", strings.Join(codexLinks, "  "))
-	for _, name := range append([]string{claudeLink}, codexLinks...) {
-		linkTarget(t, root, name)
-	}
+	linkedFor(t, root, "claude", "codex")
 	for _, dir := range []string{"claude", "codex"} {
 		if _, err := os.Stat(filepath.Join(root, ".qory", "harness", dir)); err != nil {
 			t.Errorf("the home lacks %s: %v", dir, err)
@@ -64,9 +63,7 @@ func TestComposeForSeveralRuntimesFromTheFlag(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	wants(t, out, ui.Mark+" acme/app · claude, codex")
-	for _, name := range append([]string{claudeLink}, codexLinks...) {
-		linkTarget(t, root, name)
-	}
+	linkedFor(t, root, "claude", "codex")
 }
 
 // TestComposeKeepsARuntimeComposedEarlier is the switch mid-branch: composing for Codex in a
@@ -82,14 +79,73 @@ func TestComposeKeepsARuntimeComposedEarlier(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	wants(t, out, ui.Mark+" acme/app · codex", "(composed here earlier, refreshed)")
-	wantsRow(t, out, "claude", claudeLink+"  (composed here earlier, refreshed)")
-	for _, name := range append([]string{claudeLink}, codexLinks...) {
-		linkTarget(t, root, name)
-	}
+	wantsRow(t, out, "claude", claudeLink+"  .mcp.json  (composed here earlier, refreshed)")
+	linkedFor(t, root, "claude", "codex")
 	if out, err := run(t, "hi"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	} else {
 		wants(t, out, ui.Mark+" acme/app · codex")
+	}
+}
+
+// linkedFor checks the links of the runtimes named: the directory links with one child
+// each runtime always writes, and the file links.
+func linkedFor(t *testing.T, root string, runtimes ...string) {
+	t.Helper()
+	for _, r := range runtimes {
+		switch r {
+		case "claude":
+			dirLinks(t, root, claudeLink, "settings.json", "skills")
+		case "codex":
+			dirLinks(t, root, ".codex", "config.toml")
+			dirLinks(t, root, filepath.Join(".agents", "skills"), "review")
+			linkTarget(t, root, "AGENTS.override.md")
+		default:
+			t.Fatalf("linkedFor knows no runtime %s", r)
+		}
+	}
+}
+
+// TestRemoveOneRuntimeKeepsTheOther is the switch back: a checkout composed for both
+// drops Codex and keeps Claude Code working, and dropping the last runtime takes the
+// harness with it.
+func TestRemoveOneRuntimeKeepsTheOther(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-layers", root)
+	if out, err := run(t, "hc", "--runtime", "claude,codex"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	out, err := run(t, "hr", "--runtime", "codex")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "removed .codex", "removed .agents/skills", "removed AGENTS.override.md", "removed .qory/harness/codex")
+	lacks(t, out, "removed .claude", "removed .qory\n")
+	gone(t, root, append([]string{".agents", ".qory/harness/codex"}, codexLinks...)...)
+	linkedFor(t, root, "claude")
+	if rep := readReport(t, root); !slices.Equal(rep.Target.Runtimes, []string{"claude"}) {
+		t.Errorf("report runtimes = %q after dropping codex", rep.Target.Runtimes)
+	}
+	if out, err := run(t, "hi"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	} else {
+		wants(t, out, ui.Mark+" acme/app · claude opus")
+	}
+
+	out, err = run(t, "hr", "--runtime", "claude")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "removed .claude", "removed .qory")
+	gone(t, root, claudeLink, ".qory")
+
+	out, err = run(t, "hr", "--runtime", "codex")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "nothing composed here for codex")
+	if out, err := run(t, "hr", "--runtime", "nope"); err == nil || !strings.Contains(err.Error(), `runtime "nope" is not one this qory renders`) {
+		t.Errorf("remove --runtime nope: %v\n%s", err, out)
 	}
 }
 
@@ -106,8 +162,8 @@ func TestRemoveTakesEveryRuntimesLinks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "removed "+claudeLink, "removed .codex", "removed .qory")
-	gone(t, root, append([]string{claudeLink, ".qory", ".agents"}, codexLinks...)...)
+	wants(t, out, "removed "+claudeLink, "removed .codex", "removed .mcp.json", "removed .qory")
+	gone(t, root, append([]string{claudeLink, ".mcp.json", ".qory", ".agents"}, codexLinks...)...)
 	if got := snapshot(t, root); len(got) != len(before) {
 		t.Errorf("the checkout holds %d paths, %d before the compose", len(got), len(before))
 	}
@@ -146,4 +202,41 @@ func TestRemoveSaysNothingWasComposed(t *testing.T) {
 	}
 	wants(t, out, "nothing composed here")
 	lacks(t, out, "removed")
+}
+
+// TestRemoveOneRuntimeLeavesWhatTheOtherShares is codex and opencode, which both read
+// .agents/skills and AGENTS.md: dropping one leaves those for the other.
+func TestRemoveOneRuntimeLeavesWhatTheOtherShares(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-layers", root)
+	if out, err := run(t, "hc", "--runtime", "codex,opencode"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	out, err := run(t, "hr", "--runtime", "codex")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "removed .codex", "removed AGENTS.override.md")
+	lacks(t, out, "removed .agents/skills", "removed AGENTS.md")
+	dirLinks(t, root, filepath.Join(".agents", "skills"), "review")
+	linkTarget(t, root, "AGENTS.md")
+	dirLinks(t, root, ".opencode", "opencode.json")
+}
+
+// TestComposeALayerWithoutSkills links every place a runtime reads, a kind directory
+// nothing fills included, so a layer of instructions alone composes for a runtime that
+// reads skills from .agents/skills.
+func TestComposeALayerWithoutSkills(t *testing.T) {
+	root := newCheckout(t)
+	writeFile(t, filepath.Join(root, "harness", "AGENTS.md"), "# Only instructions\n")
+	writeFile(t, filepath.Join(root, "harness-compose.yaml"), "apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\ntarget:\n  runtime: any\nlayers:\n  - name: own\n    source: {path: harness}\n")
+	out, err := run(t, "hc")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "composed 0 entries from 1 layer")
+	linkTarget(t, root, "AGENTS.md")
+	if info, err := os.Stat(filepath.Join(root, ".qory", "harness", "skills")); err != nil || !info.IsDir() {
+		t.Errorf("the home has no skills directory: %v", err)
+	}
 }

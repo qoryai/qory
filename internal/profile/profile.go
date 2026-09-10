@@ -23,23 +23,46 @@ const FileName = "harness-compose.yaml"
 
 // Kinds are the atomic entry kinds an exclude may name. An exclude that names anything else
 // is refused.
-var Kinds = []string{"skills", "agents", "commands", "output-styles", "hooks"}
+var Kinds = []string{"skills", "agents", "commands", "output-styles", "hooks", "mcp"}
 
-// Source is where a layer comes from: a directory today, pinned as working-tree.
+// Source is where a layer comes from: a directory, or a git repository at a ref.
+//
+//	source: {path: ../harness/core}
+//	source: {git: https://github.com/acme/harness, ref: v2.4.0}
+//	source: {git: https://github.com/acme/harness, ref: v2.4.0, path: layers/nextjs}
+//
+// A path source is pinned by nothing and reads the directory as it stands. A git source is
+// pinned by the commit the ref resolves to, and its path, when given, is the layer's
+// directory inside the repository.
 type Source struct {
-	// Path is the layer directory, relative to the profile file unless it is absolute.
-	Path string `yaml:"path"`
+	// Path is the layer directory, relative to the profile file unless it is absolute; with
+	// Git set, the layer's directory inside the repository, relative to its root.
+	Path string `yaml:"path,omitempty"`
+	// Git is the repository URL, in any form git clones from.
+	Git string `yaml:"git,omitempty"`
+	// Ref is the tag, branch or commit to read from a git source, required with Git.
+	Ref string `yaml:"ref,omitempty"`
 }
 
 // String returns the source as the report and the error messages show it: the path as the
-// profile writes it, not the resolved directory.
-func (s Source) String() string { return s.Path }
+// profile writes it for a path source, and <git>#<ref>, with :<path> appended when there
+// is one, for a git source.
+func (s Source) String() string {
+	if s.Git == "" {
+		return s.Path
+	}
+	out := s.Git + "#" + s.Ref
+	if s.Path != "" {
+		out += ":" + s.Path
+	}
+	return out
+}
 
 // Layer is one entry of the profile's ordered list of layers.
 type Layer struct {
 	// Name is unique within the profile and names the layer in the report and in messages.
 	Name string `yaml:"name"`
-	// Source is the directory the layer is read from.
+	// Source is where the layer is read from.
 	Source Source `yaml:"source"`
 	// Exclude lists, per kind from [Kinds], the entry names this layer does not contribute.
 	Exclude map[string][]string `yaml:"exclude,omitempty"`
@@ -169,8 +192,8 @@ func Load(path string) (*Profile, error) {
 }
 
 // validate checks the whole document before a caller sees it, so a profile that reaches the
-// compose is known to name a runtime, at least one layer, uniquely named layers with a path
-// each, and excludes over known kinds only.
+// compose is known to name a runtime, at least one layer, uniquely named layers with a
+// source each, and excludes over known kinds only.
 func (p *Profile) validate() error {
 	if p.APIVersion != APIVersion {
 		return fmt.Errorf("apiVersion %q is not one this qory reads; versions: %s", p.APIVersion, APIVersion)
@@ -205,10 +228,26 @@ func (p *Profile) validate() error {
 	return nil
 }
 
-// validate checks the one field a source has today.
+// validate checks that a source is one directory or one git ref: a path source needs its
+// path, a git source needs its ref, and a path inside a git source stays inside it.
 func (s Source) validate() error {
-	if s.Path == "" {
-		return errors.New("source.path is required")
+	if s.Git == "" {
+		if s.Ref != "" {
+			return errors.New("source.ref needs source.git")
+		}
+		if s.Path == "" {
+			return errors.New("source.path is required")
+		}
+		return nil
+	}
+	if s.Ref == "" {
+		return errors.New("source.ref is required with source.git")
+	}
+	if s.Path != "" {
+		clean := filepath.Clean(s.Path)
+		if filepath.IsAbs(clean) || clean == "." || strings.HasPrefix(clean, "..") {
+			return fmt.Errorf("source.path %q is not a directory inside the repository", s.Path)
+		}
 	}
 	return nil
 }

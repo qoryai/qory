@@ -23,9 +23,11 @@ type Layer struct {
 	ManifestName string
 	// Dir is the absolute directory the layer was read from.
 	Dir string
-	// Source is the profile's source as text, the path of a path source.
+	// Source is the profile's source as text: the path of a path source, <git>#<ref> for a
+	// git source.
 	Source string
-	// Pin is what the source resolved to, "working-tree" for a path.
+	// Pin is what the source resolved to: "working-tree" for a path, the commit for a git
+	// source.
 	Pin string
 	// Dirty is set when git sees uncommitted changes under Dir.
 	Dirty bool
@@ -35,13 +37,14 @@ type Layer struct {
 
 // Entry is one entry of the composed tree and the layer it came from.
 type Entry struct {
-	// Kind is one of skills, agents, commands, output-styles, hooks.
+	// Kind is one of skills, agents, commands, output-styles, hooks, mcp.
 	Kind string
 	// Name is the entry's name within its kind, one per kind across the composed tree.
 	Name string
 	// Layer is the name of the layer that provides the entry.
 	Layer string
-	// Path is absolute: the skill directory, the markdown file or the hook script.
+	// Path is absolute: the skill directory, the markdown file, the hook script or the MCP
+	// server's JSON file.
 	Path string
 }
 
@@ -67,22 +70,38 @@ type Result struct {
 	Excludes []Exclude
 	// Settings are the merged fragments: per runtime, per target file, in layer order.
 	Settings map[string]map[string]map[string]any
+	// MCP holds the composed MCP servers by name, each the object its layer's
+	// mcp/<name>.json holds, with every $QORY_HARNESS_HOME still in place. [Result.MCPFor]
+	// renders it for a home.
+	MCP map[string]map[string]any
 	// Instructions are the layers' AGENTS.md files joined by a blank line, or "".
 	Instructions string
 }
 
-// Compose reads every layer, applies the excludes and refuses a collision. The result holds
-// one entry per kind and name, the settings merged per runtime and target file, and the
-// layers' instructions joined. A collision returns a [*CollisionError], which a caller
-// matches with errors.As. The package comment has the order of the rules and the merge
-// semantics.
-func Compose(p *profile.Profile) (*Result, error) {
-	res := &Result{Profile: p, Settings: map[string]map[string]map[string]any{}}
+// Options are the choices a caller makes for one compose.
+type Options struct {
+	// Update fetches every git source again instead of reading the cached clone, so a
+	// branch ref moves.
+	Update bool
+}
+
+// Compose is [ComposeWith] and the default options.
+func Compose(p *profile.Profile) (*Result, error) { return ComposeWith(p, Options{}) }
+
+// ComposeWith reads every layer, applies the excludes and refuses a collision. The result
+// holds one entry per kind and name, the settings merged per runtime and target file, the
+// MCP servers by name, and the layers' instructions joined. A collision returns a
+// [*CollisionError], which a caller matches with errors.As, and a git source that cannot
+// be fetched a [*source.FetchError]. The package comment has the order of the rules and
+// the merge semantics.
+func ComposeWith(p *profile.Profile, opts Options) (*Result, error) {
+	res := &Result{Profile: p, Settings: map[string]map[string]map[string]any{}, MCP: map[string]map[string]any{}}
 	owners := map[string][]string{}
 	paths := map[string]string{}
+	servers := map[string]map[string]any{}
 	var instructions []string
 	for _, pl := range p.Layers {
-		src, err := source.Resolve(p.Dir(), pl.Source)
+		src, err := source.Resolve(p.Dir(), pl.Source, opts.Update)
 		if err != nil {
 			return nil, fmt.Errorf("layer %s: %w", pl.Name, err)
 		}
@@ -111,6 +130,9 @@ func Compose(p *profile.Profile) (*Result, error) {
 			key := e.Kind + "/" + e.Name
 			owners[key] = append(owners[key], pl.Name)
 			paths[key+"@"+pl.Name] = e.Path
+			if e.Kind == "mcp" {
+				servers[key+"@"+pl.Name] = l.MCP[e.Name]
+			}
 		}
 		for runtime, files := range l.Settings {
 			if res.Settings[runtime] == nil {
@@ -139,6 +161,9 @@ func Compose(p *profile.Profile) (*Result, error) {
 	for key, ls := range owners {
 		kind, name, _ := strings.Cut(key, "/")
 		res.Entries = append(res.Entries, Entry{Kind: kind, Name: name, Layer: ls[0], Path: paths[key+"@"+ls[0]]})
+		if kind == "mcp" {
+			res.MCP[name] = servers[key+"@"+ls[0]]
+		}
 	}
 	sort.Slice(res.Entries, func(i, j int) bool {
 		if res.Entries[i].Kind != res.Entries[j].Kind {
@@ -404,16 +429,37 @@ func contains(list []any, v any) bool {
 }
 
 // SettingsFor is a copy of one merged settings file rendered for a home: every
-// "$QORY_HARNESS_HOME" in a string becomes the home path, at any depth. The copy shares
-// nothing with [Result.Settings], so the caller may write to it. A file no layer contributed
-// to is an empty map.
+// "$QORY_HARNESS_HOME" and "${QORY_HARNESS_HOME}" in a string becomes the home path, at
+// any depth. The copy shares nothing with [Result.Settings], so the caller may write to it.
+// A file no layer contributed to is an empty map.
 func (r *Result) SettingsFor(runtime, file, home string) map[string]any {
 	src := r.Settings[runtime][file]
 	if src == nil {
 		src = map[string]any{}
 	}
-	out := merge(map[string]any{}, src, replace).(map[string]any)
-	return substitute(out, "$QORY_HARNESS_HOME", home).(map[string]any)
+	return ForHome(src, home).(map[string]any)
+}
+
+// MCPFor is a copy of the composed MCP servers rendered for a home, name to object, with
+// every $QORY_HARNESS_HOME replaced the way [Result.SettingsFor] replaces it. It is nil
+// when no layer ships a server.
+func (r *Result) MCPFor(home string) map[string]any {
+	if len(r.MCP) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for name, server := range r.MCP {
+		out[name] = ForHome(server, home)
+	}
+	return out
+}
+
+// ForHome is a copy of a decoded settings value with every "$QORY_HARNESS_HOME" and
+// "${QORY_HARNESS_HOME}" inside a string replaced by home, at any depth. The copy shares
+// nothing mutable with v.
+func ForHome(v any, home string) any {
+	out := substitute(v, "${QORY_HARNESS_HOME}", home)
+	return substitute(out, "$QORY_HARNESS_HOME", home)
 }
 
 // SettingsFiles lists the target files layers contributed to for a runtime, sorted by name.

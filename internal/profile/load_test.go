@@ -70,6 +70,23 @@ func TestLoadReadsTargetAndLayers(t *testing.T) {
 	}
 }
 
+// TestSourceStringNamesAGitSourceTheWayDockerDoes is the text the report and the collision
+// message show: the URL, the ref after #, and the path after : when there is one.
+func TestSourceStringNamesAGitSourceTheWayDockerDoes(t *testing.T) {
+	for _, c := range []struct {
+		src  Source
+		want string
+	}{
+		{Source{Path: "layers/core"}, "layers/core"},
+		{Source{Git: "https://git.example.com/acme/harness", Ref: "v2.4.0"}, "https://git.example.com/acme/harness#v2.4.0"},
+		{Source{Git: "git@git.example.com:acme/harness.git", Ref: "main", Path: "layers/nextjs"}, "git@git.example.com:acme/harness.git#main:layers/nextjs"},
+	} {
+		if got := c.src.String(); got != c.want {
+			t.Errorf("%+v prints %q, want %q", c.src, got, c.want)
+		}
+	}
+}
+
 // TestLoadResolvesTheFileToAnAbsolutePath keeps [Profile.File] absolute for a profile named
 // by a relative path, so a layer's relative source resolves against the right directory.
 func TestLoadResolvesTheFileToAnAbsolutePath(t *testing.T) {
@@ -178,7 +195,25 @@ func TestLoadRefuses(t *testing.T) {
 		{
 			"an exclude over an unknown kind",
 			"apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\ntarget:\n  runtime: claude\nlayers:\n  - name: core\n    source:\n      path: layers/core\n    exclude:\n      prompts: [greet]\n",
-			`layer core: exclude names kind "prompts"; kinds: skills, agents, commands, output-styles, hooks`,
+			`layer core: exclude names kind "prompts"; kinds: skills, agents, commands, output-styles, hooks, mcp`,
+			false,
+		},
+		{
+			"a git source without a ref",
+			"apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\ntarget:\n  runtime: claude\nlayers:\n  - name: core\n    source: {git: https://git.example.com/acme/harness}\n",
+			"layer core: source.ref is required with source.git",
+			false,
+		},
+		{
+			"a ref without a git source",
+			"apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\ntarget:\n  runtime: claude\nlayers:\n  - name: core\n    source: {path: layers/core, ref: v1}\n",
+			"layer core: source.ref needs source.git",
+			false,
+		},
+		{
+			"a git source whose path leaves the repository",
+			"apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\ntarget:\n  runtime: claude\nlayers:\n  - name: core\n    source: {git: https://git.example.com/acme/harness, ref: v1, path: ../other}\n",
+			`layer core: source.path "../other" is not a directory inside the repository`,
 			false,
 		},
 		{

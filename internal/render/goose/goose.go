@@ -2,7 +2,8 @@
 // from .agents/skills and agents from .agents/agents. All three are linked into the
 // checkout, and the agents directory is the only thing Goose gets of its own. Goose has
 // no project settings file, so the target model is not written, and it has recipes
-// instead of commands and no output styles, so both kinds are skipped.
+// instead of commands and no output styles, and configures MCP servers in the user's
+// home, so those three kinds are skipped.
 package goose
 
 import (
@@ -39,9 +40,9 @@ func (goose) Links(res *compose.Result) []render.Link {
 	return links
 }
 
-// Skips are commands and output styles, since Goose has recipes instead of commands and
-// no output styles.
-func (goose) Skips() []string { return []string{"commands", "output-styles"} }
+// Skips are commands, output styles and MCP servers: Goose has recipes instead of
+// commands, no output styles, and configures its extensions in the user's home.
+func (goose) Skips() []string { return []string{"commands", "output-styles", "mcp"} }
 
 // Render writes agents/<name>.md per agent with the agent's name, description and model,
 // and creates that directory even when there are no agents, so its link resolves. The

@@ -1,0 +1,1 @@
+layer core: hooks/scripts is a directory; a hook is one file, and a layer's other files are reached as $QORY_HARNESS_HOME/layers/core/scripts

@@ -45,17 +45,20 @@ func lookup(t *testing.T, name string) render.Runtime {
 	return p
 }
 
-// linkTargets checks that every link of a runtime resolves to something in the home.
-func linkTargets(t *testing.T, p render.Runtime, res *compose.Result, root string) {
+// linkTargets checks that every link of a runtime resolves to something in the home: the
+// link itself for a file, every link inside it for a directory.
+func linkTargets(t *testing.T, p render.Runtime, res *compose.Result, root, home string) {
 	t.Helper()
 	for _, l := range p.Links(res) {
-		path := filepath.Join(root, l.Checkout)
-		if _, err := os.Readlink(path); err != nil {
-			t.Errorf("%s: %v", l.Checkout, err)
-			continue
-		}
-		if _, err := os.Stat(path); err != nil {
-			t.Errorf("%s is a dangling link: %v", l.Checkout, err)
+		for _, path := range linkPaths(t, home, l) {
+			full := filepath.Join(root, path[0])
+			if _, err := os.Readlink(full); err != nil {
+				t.Errorf("%s: %v", path[0], err)
+				continue
+			}
+			if _, err := os.Stat(full); err != nil {
+				t.Errorf("%s is a dangling link: %v", path[0], err)
+			}
 		}
 	}
 }
@@ -74,10 +77,10 @@ func TestBuildHoldsEveryRuntimeItIsGiven(t *testing.T) {
 		}
 	}
 	for _, p := range []render.Runtime{claude, codex} {
-		if _, err := render.LinkInto(p, res, root, home); err != nil {
+		if _, err := render.LinkInto(p, res, root, home, false); err != nil {
 			t.Fatal(err)
 		}
-		linkTargets(t, p, res, root)
+		linkTargets(t, p, res, root, home)
 	}
 }
 
@@ -89,7 +92,7 @@ func TestBuildForOneRuntimeDropsTheOthers(t *testing.T) {
 	if err := render.Build(res, home, claude, codex); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := render.LinkInto(claude, res, root, home); err != nil {
+	if _, err := render.LinkInto(claude, res, root, home, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := render.Build(res, home, codex); err != nil {
@@ -98,8 +101,8 @@ func TestBuildForOneRuntimeDropsTheOthers(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, "claude")); err == nil {
 		t.Error("the claude directory survived a build that did not name it")
 	}
-	if _, err := os.Stat(filepath.Join(root, ".claude")); err == nil {
-		t.Error("the .claude link still resolves; the test no longer proves anything")
+	if _, err := os.Stat(filepath.Join(root, ".claude", "settings.json")); err == nil {
+		t.Error("the .claude/settings.json link still resolves; the test no longer proves anything")
 	}
 }
 

@@ -44,19 +44,26 @@
             "agents": {"$ref": "#/$defs/names"},
             "commands": {"$ref": "#/$defs/names"},
             "output-styles": {"$ref": "#/$defs/names"},
-            "hooks": {"$ref": "#/$defs/names"}
+            "hooks": {"$ref": "#/$defs/names"},
+            "mcp": {"$ref": "#/$defs/names"}
           }
         },
         "variant": {"type": "string", "minLength": 1}
       }
     },
     "source": {
+      "description": "A directory, or a git repository at a ref with the layer's directory inside it.",
       "type": "object",
-      "required": ["path"],
       "additionalProperties": false,
       "properties": {
-        "path": {"type": "string", "minLength": 1}
-      }
+        "path": {"type": "string", "minLength": 1},
+        "git": {"type": "string", "minLength": 1},
+        "ref": {"type": "string", "minLength": 1}
+      },
+      "oneOf": [
+        {"required": ["path"], "not": {"anyOf": [{"required": ["git"]}, {"required": ["ref"]}]}},
+        {"required": ["git", "ref"]}
+      ]
     }
   }
 }

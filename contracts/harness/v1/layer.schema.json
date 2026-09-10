@@ -21,7 +21,8 @@
           "agents": {"type": "string", "minLength": 1},
           "commands": {"type": "string", "minLength": 1},
           "output-styles": {"type": "string", "minLength": 1},
-          "hooks": {"type": "string", "minLength": 1}
+          "hooks": {"type": "string", "minLength": 1},
+          "mcp": {"type": "string", "minLength": 1}
         }
       }
     }

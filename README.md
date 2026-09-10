@@ -49,8 +49,8 @@ last-wins.
      runtime: claude          # or both at once: [claude, codex]
      model: opus
    layers:
-     - name: core             # what every repository of yours gets
-       source: {path: ../harness/core}
+     - name: core             # what every repository of yours gets, pinned to a tag
+       source: {git: https://github.com/acme/harness, ref: v2.4.0, path: core}
      - name: nextjs           # the framework
        source: {path: ../harness/nextjs}
      - name: marketing        # a specialised layer, on the repositories that want it
@@ -115,14 +115,19 @@ to delete to watch `qory` refuse the collision. The same files are in
 qory harness init        # write the hello example into the current directory
 qory harness compose     # compose the profile into the checkout you stand in   (qory hc)
 qory harness inspect     # print the report: every entry and the layer it came from (qory hi)
-qory harness remove      # remove the composed tree and the link                 (qory hr)
+qory harness remove      # remove the composed tree and its links               (qory hr)
 qory version
 ```
 
 `qory harness compose --dry-run` prints the report and writes nothing. `-f <file>` reads a
 profile instead of discovering one. `--runtime` and `--model` override the profile's target
-for one compose, and `--runtime` takes a list: `--runtime claude,codex`. `-v` prints one
-line per entry.
+for one compose, and `--runtime` takes a list: `--runtime claude,codex`. `--force` replaces
+a file the repository tracks, unmodified, where a link goes, and `git checkout --` brings
+it back. `--update` fetches every git source again. `-v` prints one line per entry.
+`qory harness remove --runtime codex` drops one runtime and keeps the rest composed.
+
+The exit status tells the failures apart: 2 for a mistake in the input, 3 for a collision,
+4 for a path `qory` would not replace, 1 for anything else.
 
 The reference, one page per command, is under [docs/commands](docs/commands/qory.md).
 
@@ -130,10 +135,16 @@ The reference, one page per command, is under [docs/commands](docs/commands/qory
 
 - The files your tool reads, linked to a composed tree under `.qory` in the checkout, all of
   it excluded from git through the clone-local exclude file. The tree is built once; each
-  tool gets its own directory in it.
+  tool gets its own directory in it. `.claude` is a real directory with one link per entry,
+  so the `settings.local.json` Claude Code writes stays yours.
 - Settings merged from every layer per target file, in the tool's own format: permission
   lists concatenated and deduplicated, hooks concatenated, hook commands rewritten to the
-  composed tree's path.
+  composed tree's path. A layer's other files, its scripts say, are there too, as
+  `$QORY_HARNESS_HOME/layers/<name>/…`.
+- MCP servers, one JSON file each in a layer, written where every tool reads them:
+  `.mcp.json` for Claude Code, `config.toml` for Codex, and so on.
+- Layers from a directory beside the repository, or from a git repository at a tag,
+  fetched once and pinned by commit in the report.
 - One instruction file, concatenated from the layers in order, presented as `CLAUDE.md`,
   `AGENTS.override.md` or `GEMINI.md` where a tool wants another name.
 - Agents and commands written in each tool's format from one source file, and a line in

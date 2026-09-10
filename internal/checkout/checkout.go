@@ -64,6 +64,26 @@ func ExcludeFile(root string) string {
 	return out
 }
 
+// Restorable reports whether git checkout -- could bring path back after qory removes it,
+// which is when path is tracked and unmodified. It returns "" then, and otherwise the
+// reason, phrased to follow the path in a message: "is not tracked in git" or "has
+// uncommitted changes". A directory counts as tracked when it holds a tracked file, and
+// as modified when git status reports anything under it, an untracked file included. A
+// path outside a working tree, or a host without git, is not restorable.
+func Restorable(root, path string) string {
+	rel, err := filepath.Rel(root, path)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "is outside the checkout"
+	}
+	if _, err := git(root, "ls-files", "--error-unmatch", "--", rel); err != nil {
+		return "is not tracked in git"
+	}
+	if out, err := git(root, "status", "--porcelain", "--", rel); err != nil || out != "" {
+		return "has uncommitted changes"
+	}
+	return ""
+}
+
 // git runs one git command in dir and returns its standard output with surrounding space
 // trimmed. The error carries git's own message in the Stderr field of [exec.ExitError],
 // and every caller in this package discards it and falls back instead, because a

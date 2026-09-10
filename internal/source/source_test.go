@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/qoryai/qory/internal/profile"
@@ -27,6 +28,14 @@ func run(t *testing.T, dir string, args ...string) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
+}
+
+// gitOut runs git in dir and returns its trimmed output.
+func gitOut(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	return strings.TrimSpace(string(out)), err
 }
 
 // write creates a file and the directories above it.
@@ -59,7 +68,7 @@ func committedRepo(t *testing.T) string {
 func TestResolveReportsTheDirectoryAndThePin(t *testing.T) {
 	hermetic(t)
 	root := committedRepo(t)
-	got, err := source.Resolve(root, profile.Source{Path: filepath.Join("layers", "core")})
+	got, err := source.Resolve(root, profile.Source{Path: filepath.Join("layers", "core")}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +86,7 @@ func TestResolveTakesAnAbsolutePathAsItIs(t *testing.T) {
 	hermetic(t)
 	root := committedRepo(t)
 	dir := filepath.Join(root, "layers", "core")
-	got, err := source.Resolve(t.TempDir(), profile.Source{Path: dir})
+	got, err := source.Resolve(t.TempDir(), profile.Source{Path: dir}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +102,7 @@ func TestResolveReportsADirtyWorkingTree(t *testing.T) {
 	root := committedRepo(t)
 	layer := profile.Source{Path: filepath.Join("layers", "core")}
 
-	got, err := source.Resolve(root, layer)
+	got, err := source.Resolve(root, layer, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +111,7 @@ func TestResolveReportsADirtyWorkingTree(t *testing.T) {
 	}
 
 	write(t, filepath.Join(root, "README.md"), "changed\n")
-	got, err = source.Resolve(root, layer)
+	got, err = source.Resolve(root, layer, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +120,7 @@ func TestResolveReportsADirtyWorkingTree(t *testing.T) {
 	}
 
 	write(t, filepath.Join(root, "layers", "core", "skills", "review", "SKILL.md"), "review\n")
-	got, err = source.Resolve(root, layer)
+	got, err = source.Resolve(root, layer, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +137,7 @@ func TestResolveOutsideGitIsClean(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(base, "core"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	got, err := source.Resolve(base, profile.Source{Path: "core"})
+	got, err := source.Resolve(base, profile.Source{Path: "core"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,10 +156,10 @@ func TestResolveRefusesWhatIsNoDirectory(t *testing.T) {
 	base := t.TempDir()
 	write(t, filepath.Join(base, "core.md"), "not a layer\n")
 
-	if _, err := source.Resolve(base, profile.Source{Path: "missing"}); !errors.Is(err, os.ErrNotExist) {
+	if _, err := source.Resolve(base, profile.Source{Path: "missing"}, false); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("got %v, want an os.ErrNotExist", err)
 	}
-	_, err := source.Resolve(base, profile.Source{Path: "core.md"})
+	_, err := source.Resolve(base, profile.Source{Path: "core.md"}, false)
 	if err == nil {
 		t.Fatal("resolved a file as a layer directory")
 	}

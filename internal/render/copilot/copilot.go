@@ -3,7 +3,8 @@
 // .agents/skills. All four are linked into the checkout, the two under .github softly, so
 // a repository's own agents and hooks keep their place. The model is a user setting in
 // Copilot and is not written, and Copilot CLI reads no project prompt files and has no
-// output styles, so commands and output styles are skipped.
+// output styles, and reads MCP servers from the user's home, so commands, output styles
+// and MCP servers are skipped.
 package copilot
 
 import (
@@ -42,9 +43,9 @@ func (copilot) Links(res *compose.Result) []render.Link {
 	return links
 }
 
-// Skips are commands and output styles, since Copilot CLI reads no project prompt files
-// and has no output styles.
-func (copilot) Skips() []string { return []string{"commands", "output-styles"} }
+// Skips are commands, output styles and MCP servers: Copilot CLI reads no project prompt
+// files, has no output styles, and reads its MCP configuration from the user's home.
+func (copilot) Skips() []string { return []string{"commands", "output-styles", "mcp"} }
 
 // Render writes agents/<name>.agent.md per agent with the agent's name, description,
 // tools and model, and the copilot settings files, which are the hook files under hooks/.

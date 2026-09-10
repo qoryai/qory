@@ -28,22 +28,27 @@ func TestComposeWritesTheHomeAndLinksIt(t *testing.T) {
 	}
 	wants(t, out,
 		ui.Mark+" acme/app · claude opus",
-		"composed 7 entries from 2 layers",
+		"composed 8 entries from 2 layers",
 	)
 	// The links are printed under the runtime that needs them.
 	wantsRow(t, out, "home", ".qory/harness")
-	wantsRow(t, out, "claude", ".claude")
+	wantsRow(t, out, "claude", ".claude  .mcp.json")
 	// Without --verbose the entries stay out of the output.
 	lacks(t, out, "skills/e2e", "output-styles/terse")
 
 	home := filepath.Join(root, ".qory", "harness")
-	for _, name := range []string{"AGENTS.md", "claude/CLAUDE.md", "claude/settings.json", "claude/skills/test", "skills/test"} {
+	for _, name := range []string{"AGENTS.md", "claude/CLAUDE.md", "claude/settings.json", "claude/skills/test", "skills/test", "layers/core/scripts/db.py"} {
 		if _, err := os.Stat(filepath.Join(home, name)); err != nil {
 			t.Errorf("home lacks %s: %v", name, err)
 		}
 	}
-	if target := linkTarget(t, root, ".claude"); target != filepath.Join(".qory", "harness", "claude") {
-		t.Errorf(".claude links to %q", target)
+	// .claude is a real directory, one link per file the home's claude directory holds.
+	targets := dirLinks(t, root, ".claude", "skills", "agents", "commands", "output-styles", "hooks", "settings.json", "CLAUDE.md")
+	if targets["settings.json"] != filepath.Join("..", ".qory", "harness", "claude", "settings.json") {
+		t.Errorf(".claude/settings.json links to %q", targets["settings.json"])
+	}
+	if target := linkTarget(t, root, ".mcp.json"); target != filepath.Join(".qory", "harness", "claude", "mcp.json") {
+		t.Errorf(".mcp.json links to %q", target)
 	}
 
 	rep, err := report.Read(filepath.Join(root, ".qory", "harness-report.json"))
@@ -119,6 +124,7 @@ func TestComposeFlags(t *testing.T) {
 			want: []string{ui.Mark + " acme/app · claude", "composed 2 entries from 1 layer"},
 			check: func(t *testing.T, root, out string) {
 				wantsRow(t, out, "claude", ".claude")
+				lacks(t, out, ".mcp.json")
 				rep := readReport(t, root)
 				if len(rep.Layers) != 1 || rep.Layers[0].Name != "solo" {
 					t.Errorf("report layers = %+v", rep.Layers)
@@ -129,7 +135,7 @@ func TestComposeFlags(t *testing.T) {
 				if filepath.Dir(rep.File) == root {
 					t.Errorf("report file %q is inside the checkout", rep.File)
 				}
-				linkTarget(t, root, ".claude")
+				dirLinks(t, root, ".claude", "skills", "commands")
 			},
 		},
 		{
@@ -140,7 +146,7 @@ func TestComposeFlags(t *testing.T) {
 			},
 			want: []string{
 				ui.Mark + " acme/app · codex opus",
-				"composed 7 entries from 2 layers",
+				"composed 8 entries from 2 layers",
 			},
 			check: func(t *testing.T, root, out string) {
 				wantsRow(t, out, "codex", ".codex  .agents/skills  AGENTS.override.md")
@@ -150,11 +156,11 @@ func TestComposeFlags(t *testing.T) {
 				if rep := readReport(t, root); !slices.Equal(rep.Target.Runtimes, []string{"codex"}) {
 					t.Errorf("report runtimes = %q", rep.Target.Runtimes)
 				}
-				if target := linkTarget(t, root, ".codex"); target != filepath.Join(".qory", "harness", "codex") {
-					t.Errorf(".codex links to %q", target)
+				if targets := dirLinks(t, root, ".codex", "config.toml", "agents"); targets["config.toml"] != filepath.Join("..", ".qory", "harness", "codex", "config.toml") {
+					t.Errorf(".codex/config.toml links to %q", targets["config.toml"])
 				}
-				if target := linkTarget(t, root, filepath.Join(".agents", "skills")); target != filepath.Join("..", ".qory", "harness", "skills") {
-					t.Errorf(".agents/skills links to %q", target)
+				if targets := dirLinks(t, root, filepath.Join(".agents", "skills"), "review", "test", "e2e"); targets["review"] != filepath.Join("..", "..", ".qory", "harness", "skills", "review") {
+					t.Errorf(".agents/skills/review links to %q", targets["review"])
 				}
 				if target := linkTarget(t, root, "AGENTS.override.md"); target != filepath.Join(".qory", "harness", "AGENTS.md") {
 					t.Errorf("AGENTS.override.md links to %q", target)
@@ -203,7 +209,7 @@ func TestComposeFlags(t *testing.T) {
 				copyFixture(t, "two-layers", root)
 				return []string{"harness", "compose", "-v"}
 			},
-			want: []string{"composed 7 entries from 2 layers"},
+			want: []string{"composed 8 entries from 2 layers"},
 			check: func(t *testing.T, _, out string) {
 				if got := entryTable(out); !maps.Equal(got, twoLayerEntries) {
 					t.Errorf("printed entries = %v, want %v", got, twoLayerEntries)
@@ -247,6 +253,16 @@ func TestComposeRefuses(t *testing.T) {
 			name:    "an exclude that names nothing the layer ships",
 			fixture: "exclude-names-nothing",
 			wantErr: []string{"layer core: exclude skills/nope names nothing the layer ships"},
+		},
+		{
+			name:    "a directory under hooks",
+			fixture: "hooks-directory-fails",
+			wantErr: []string{"hooks/scripts is a directory", "$QORY_HARNESS_HOME/layers/core/scripts"},
+		},
+		{
+			name:    "an MCP server that is not an object",
+			fixture: "mcp-server-fails",
+			wantErr: []string{"mcp/db.json does not hold a JSON object"},
 		},
 	}
 	for _, tc := range tests {

@@ -21,9 +21,11 @@ type Layer struct {
 	Name string `json:"name"`
 	// ManifestName is the layer's own name from harness.yaml, absent when it has none.
 	ManifestName string `json:"manifest_name,omitempty"`
-	// Source is the profile's source as text, the path of a path source.
+	// Source is the profile's source as text: the path of a path source, <git>#<ref> for a
+	// git source.
 	Source string `json:"source"`
-	// Pin is what the source resolved to, "working-tree" for a path.
+	// Pin is what the source resolved to: "working-tree" for a path, the commit for a git
+	// source.
 	Pin string `json:"pin"`
 	// Dirty is set when git saw uncommitted changes under the layer's directory.
 	Dirty bool `json:"dirty,omitempty"`
@@ -33,7 +35,7 @@ type Layer struct {
 
 // Entry is one composed entry.
 type Entry struct {
-	// Kind is one of skills, agents, commands, output-styles, hooks.
+	// Kind is one of skills, agents, commands, output-styles, hooks, mcp.
 	Kind string `json:"kind"`
 	// Name is the entry's name within its kind.
 	Name string `json:"name"`
@@ -103,6 +105,10 @@ type Report struct {
 	Entries []Entry `json:"entries"`
 	// Excludes are the entries the layers left out, in layer order.
 	Excludes []Exclude `json:"excludes"`
+	// Replaced are the checkout paths whose tracked file or directory the compose removed
+	// under --force to put a link there, absent when it replaced none. git checkout --
+	// restores each of them, and qory harness remove says so.
+	Replaced []string `json:"replaced,omitempty"`
 }
 
 // New builds the report of a result rendered into home for a checkout. The name is the

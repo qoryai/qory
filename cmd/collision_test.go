@@ -1,6 +1,7 @@
 package cmd_test
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,8 +31,11 @@ func TestCollisionOutput(t *testing.T) {
 	root.SetArgs([]string{"harness", "compose"})
 	root.SetOut(&out)
 	err = root.Execute()
-	if err != cmd.ErrReported {
-		t.Fatalf("err = %v, want ErrReported", err)
+	if !errors.Is(err, cmd.ErrReported) {
+		t.Fatalf("err = %v, want one marked reported", err)
+	}
+	if cmd.ExitCode(err) != cmd.ExitCollision {
+		t.Errorf("exit code %d, want %d", cmd.ExitCode(err), cmd.ExitCollision)
 	}
 	for _, want := range []string{"skills/test is provided by 3 layers", "Fix", "- name: core", "- name: nextjs", "skills: [test]"} {
 		if !strings.Contains(out.String(), want) {

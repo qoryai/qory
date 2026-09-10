@@ -167,3 +167,56 @@ func TestRepoKeyFallsBackToTheDirectoryName(t *testing.T) {
 		})
 	}
 }
+
+// git runs one git command in dir and fails the test with its output.
+func git(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// write creates a file and the directories above it.
+func write(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRestorableIsTrackedAndUnmodified is the rule --force replaces under: git checkout --
+// must be able to bring the path back.
+func TestRestorableIsTrackedAndUnmodified(t *testing.T) {
+	hermetic(t)
+	root := initRepo(t, t.TempDir())
+	write(t, filepath.Join(root, "AGENTS.md"), "ours\n")
+	write(t, filepath.Join(root, ".claude", "settings.json"), "{}\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-q", "-m", "first")
+	write(t, filepath.Join(root, "NOTES.md"), "untracked\n")
+	if reason := checkout.Restorable(root, filepath.Join(root, "AGENTS.md")); reason != "" {
+		t.Errorf("a tracked, unmodified file: %q", reason)
+	}
+	if reason := checkout.Restorable(root, filepath.Join(root, ".claude")); reason != "" {
+		t.Errorf("a directory of tracked files: %q", reason)
+	}
+	if reason := checkout.Restorable(root, filepath.Join(root, "NOTES.md")); reason != "is not tracked in git" {
+		t.Errorf("an untracked file: %q", reason)
+	}
+	write(t, filepath.Join(root, "AGENTS.md"), "edited\n")
+	if reason := checkout.Restorable(root, filepath.Join(root, "AGENTS.md")); reason != "has uncommitted changes" {
+		t.Errorf("a modified file: %q", reason)
+	}
+	write(t, filepath.Join(root, ".claude", "settings.local.json"), "{}\n")
+	if reason := checkout.Restorable(root, filepath.Join(root, ".claude")); reason != "has uncommitted changes" {
+		t.Errorf("a directory with an untracked file in it: %q", reason)
+	}
+	if reason := checkout.Restorable(root, filepath.Join(t.TempDir(), "elsewhere")); reason != "is outside the checkout" {
+		t.Errorf("a path outside the checkout: %q", reason)
+	}
+}

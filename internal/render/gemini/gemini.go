@@ -1,8 +1,8 @@
 // Package gemini renders for Gemini CLI, which reads a project's .gemini directory,
 // holding its settings.json and the skills, agents, commands and hooks under it, and
-// GEMINI.md at the checkout root. Both are linked into the checkout, and the target model
-// is written into settings.json as model.name. Gemini CLI has no output styles, so that
-// kind is skipped.
+// GEMINI.md at the checkout root. Both are linked into the checkout, and settings.json
+// gets the target model as model.name and the MCP servers as mcpServers. Gemini CLI has
+// no output styles, so that kind is skipped.
 package gemini
 
 import (
@@ -41,15 +41,20 @@ func (gemini) Links(res *compose.Result) []render.Link {
 func (gemini) Skips() []string { return []string{"output-styles"} }
 
 // Render links skills and hooks, writes settings.json with the target model as
-// model.name, one agents/<name>.md with the agent's name and description, and one
-// commands/<name>.toml per command whose prompt has $ARGUMENTS rewritten to {{args}}.
-// Gemini reads a project .gemini only in a folder the user has marked trusted.
+// model.name and the MCP servers as mcpServers, one agents/<name>.md with the agent's
+// name and description, and one commands/<name>.toml per command whose prompt has
+// $ARGUMENTS rewritten to {{args}}. Gemini reads a project .gemini only in a folder the
+// user has marked trusted.
 func (gemini) Render(res *compose.Result, dir, home string) error {
 	if err := render.LinkEntries(res, dir, "skills", "hooks"); err != nil {
 		return err
 	}
 	err := render.WriteSettings(res, Runtime, dir, home, []string{"settings.json"}, func(file string, m map[string]any) {
-		if file != "settings.json" || res.Profile.Target.Model == "" {
+		if file != "settings.json" {
+			return
+		}
+		render.PutServers(m, "mcpServers", res.MCPFor(home))
+		if res.Profile.Target.Model == "" {
 			return
 		}
 		model, _ := m["model"].(map[string]any)

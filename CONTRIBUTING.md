@@ -90,10 +90,10 @@ conventions, beyond what `revive` can check:
   lists as two spaces and a dash, and wrap at 90 columns.
 
 One vocabulary, no synonyms: **runtime** is the program that runs the harness, such as
-Claude Code; **profile** is the compose file; **layer**, **entry**, **kind**, **variant**,
-**exclude**, **collision**, **home**, **checkout**, **link**, **pin** and **report** mean
-what `contracts/harness/v1/README.md` says they mean. A runtime is never a provider, a tool
-or a vendor.
+Claude Code; **profile** is the compose file; **layer**, **source**, **entry**, **kind**,
+**variant**, **exclude**, **collision**, **home**, **checkout**, **link**, **pin** and
+**report** mean what `contracts/harness/v1/README.md` says they mean. A runtime is never a
+provider, a tool or a vendor.
 
 The command reference under `docs/commands/` is generated: run
 `go run ./internal/gendocs docs/commands` after changing a command and commit the result.

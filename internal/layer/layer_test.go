@@ -44,7 +44,7 @@ func entryLines(l *Layer) string {
 	return b.String()
 }
 
-// TestReadListsEveryKindWithItsPaths reads a layer holding all five kinds, the settings
+// TestReadListsEveryKindWithItsPaths reads a layer holding all six kinds, the settings
 // fragments and the instruction file.
 func TestReadListsEveryKindWithItsPaths(t *testing.T) {
 	dir := tree(t, map[string]string{
@@ -55,6 +55,7 @@ func TestReadListsEveryKindWithItsPaths(t *testing.T) {
 		"output-styles/terse.md":        "terse\n",
 		"hooks/pre-commit.sh":           "#!/bin/sh\n",
 		"hooks/notify.py":               "print()\n",
+		"mcp/db.json":                   "{\"command\": \"db\"}\n",
 		"settings/claude/settings.json": "{}\n",
 		"settings/claude/mcp.json":      "{}\n",
 		"settings/codex/config.toml":    "\n",
@@ -71,6 +72,7 @@ func TestReadListsEveryKindWithItsPaths(t *testing.T) {
 		"commands/ship commands/ship.md\n" +
 		"hooks/notify.py hooks/notify.py\n" +
 		"hooks/pre-commit.sh hooks/pre-commit.sh\n" +
+		"mcp/db mcp/db.json\n" +
 		"output-styles/terse output-styles/terse.md\n" +
 		"skills/review skills/review\n" +
 		"skills/ship skills/ship\n"
@@ -81,6 +83,9 @@ func TestReadListsEveryKindWithItsPaths(t *testing.T) {
 		if !filepath.IsAbs(e.Path) {
 			t.Fatalf("%s/%s has a relative path %s", e.Kind, e.Name, e.Path)
 		}
+	}
+	if len(l.MCP) != 1 || l.MCP["db"]["command"] != "db" {
+		t.Fatalf("mcp servers %v", l.MCP)
 	}
 	settings := map[string]map[string]string{
 		"claude": {
@@ -122,7 +127,9 @@ func TestReadSkipsWhatIsNotAnEntry(t *testing.T) {
 		"output-styles/.keep":            "",
 		"hooks/pre-commit.sh":            "#!/bin/sh\n",
 		"hooks/.gitignore":               "*\n",
-		"hooks/scripts/deep.sh":          "#!/bin/sh\n",
+		"mcp/README.md":                  "not a server\n",
+		"mcp/.draft.json":                "{}\n",
+		"mcp/nested/db.json":             "{}\n",
 		"settings/.hidden/settings.json": "{}\n",
 		"settings/claude/.settings.json": "{}\n",
 		"settings/README.md":             "not a runtime\n",
@@ -142,6 +149,36 @@ func TestReadSkipsWhatIsNotAnEntry(t *testing.T) {
 	}
 	if l.Instructions != "" {
 		t.Fatalf("instructions %q, want none", l.Instructions)
+	}
+}
+
+// TestReadRefusesADirectoryUnderHooks names the directory and where its files belong.
+func TestReadRefusesADirectoryUnderHooks(t *testing.T) {
+	dir := tree(t, map[string]string{
+		"hooks/guard.sh":          "#!/bin/sh\n",
+		"hooks/scripts/helper.sh": "#!/bin/sh\n",
+	})
+	_, err := Read("core", dir, nil, "")
+	if err == nil {
+		t.Fatal("read a layer with a directory under hooks")
+	}
+	want := "layer core: hooks/scripts is a directory; a hook is one file, and a layer's other files are reached as $QORY_HARNESS_HOME/layers/core/scripts"
+	if err.Error() != want {
+		t.Fatalf("error %q, want %q", err, want)
+	}
+}
+
+// TestReadRefusesAnMCPServerThatIsNotAnObject names the file.
+func TestReadRefusesAnMCPServerThatIsNotAnObject(t *testing.T) {
+	for _, body := range []string{"[]\n", "not json\n", "null\n"} {
+		dir := tree(t, map[string]string{"mcp/db.json": body})
+		_, err := Read("core", dir, nil, "")
+		if err == nil {
+			t.Fatalf("read %q as a server", body)
+		}
+		if want := "layer core: mcp/db.json does not hold a JSON object"; err.Error() != want {
+			t.Fatalf("error %q, want %q", err, want)
+		}
 	}
 }
 
@@ -426,7 +463,7 @@ func TestReadPropagatesADirectoryError(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("root reads a directory whatever its mode")
 	}
-	for _, kind := range []string{"skills", "agents", "commands", "output-styles", "hooks", "settings"} {
+	for _, kind := range []string{"skills", "agents", "commands", "output-styles", "hooks", "mcp", "settings"} {
 		t.Run(kind, func(t *testing.T) {
 			dir := tree(t, map[string]string{kind + "/": ""})
 			closed := filepath.Join(dir, kind)

@@ -26,7 +26,7 @@ func newInit(use string, aliases ...string) *cobra.Command {
 		Use:     use,
 		Aliases: aliases,
 		Short:   "Write the hello example into the current directory: a profile and two layers",
-		Args:    cobra.NoArgs,
+		Args:    noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := os.Getwd()
 			if err != nil {

@@ -1,8 +1,9 @@
 // Package codex renders for Codex CLI, which reads a project's .codex directory, skills
 // from .agents/skills, and AGENTS.override.md ahead of AGENTS.md. The checkout gets a
 // link for each of those three, and .codex holds config.toml with the target model as
-// model plus one TOML file per agent. Codex reads prompt files from the user's home only
-// and has no output styles, so commands and output styles are skipped.
+// model and the MCP servers as mcp_servers, plus one TOML file per agent. Codex reads
+// prompt files from the user's home only and has no output styles, so commands and output
+// styles are skipped.
 package codex
 
 import (
@@ -45,15 +46,20 @@ func (codex) Links(res *compose.Result) []render.Link {
 // home only and has no output styles.
 func (codex) Skips() []string { return []string{"commands", "output-styles"} }
 
-// Render writes config.toml, with the target model as model, and any other codex settings
-// fragment, then one agents/<name>.toml per agent carrying the agent's name, description
-// and its body as developer_instructions. Codex reads a project .codex only in a project
-// the user has marked trusted.
+// Render writes config.toml, with the target model as model and the MCP servers as
+// mcp_servers, one table per server holding the object as the layer wrote it, and any
+// other codex settings fragment, then one agents/<name>.toml per agent carrying the
+// agent's name, description and its body as developer_instructions. Codex reads a project
+// .codex only in a project the user has marked trusted.
 func (codex) Render(res *compose.Result, dir, home string) error {
 	err := render.WriteSettings(res, Runtime, dir, home, []string{"config.toml"}, func(file string, m map[string]any) {
-		if file == "config.toml" && res.Profile.Target.Model != "" {
+		if file != "config.toml" {
+			return
+		}
+		if res.Profile.Target.Model != "" {
 			m["model"] = res.Profile.Target.Model
 		}
+		render.PutServers(m, "mcp_servers", res.MCPFor(home))
 	})
 	if err != nil {
 		return err

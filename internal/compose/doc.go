@@ -2,22 +2,24 @@
 //
 // A profile, [profile.Profile], names an ordered list of layers and a target runtime. A
 // layer is one directory of harness material. An entry is one atomic thing a layer ships,
-// identified by kind and name; the kinds are skills, agents, commands, output-styles and
-// hooks. A layer may also ship an AGENTS.md instruction file and settings fragments, and
+// identified by kind and name; the kinds are skills, agents, commands, output-styles, hooks
+// and mcp. A layer may also ship an AGENTS.md instruction file and settings fragments, and
 // those merge across layers instead of colliding. [Compose] returns a [Result]: the layers
 // with their pins and variants, one [Entry] per kind and name, every [Exclude] applied, the
-// merged settings and the joined instructions.
+// merged settings, the MCP servers and the joined instructions.
 //
 // # Composition order
 //
 // Compose walks the profile's layers in order and, for each one:
 //
-//  1. Resolves the source to a directory and a pin with [source.Resolve].
+//  1. Resolves the source to a directory and a pin with [source.Resolve]: a path as it
+//     stands, or a git ref fetched once into the cache and pinned by its commit.
 //  2. Reads the layer's optional harness.yaml with [layer.ReadManifest].
 //  3. Picks the variant with [layer.SelectVariant]: the profile's forced variant, else the
 //     one named like the target runtime, else the manifest's default, else the layer root.
-//  4. Reads the entries, the settings fragments and AGENTS.md with [layer.Read]. A variant
-//     redirects entry kinds only; settings and AGENTS.md come from the layer root.
+//  4. Reads the entries, the settings fragments, the MCP servers and AGENTS.md with
+//     [layer.Read]. A variant redirects entry kinds only; settings and AGENTS.md come from
+//     the layer root.
 //  5. Applies the layer's excludes. An exclude that names nothing the layer ships fails the
 //     compose, so a layer that stops shipping an entry is noticed.
 //  6. Merges the layer's settings fragments into the result and appends its AGENTS.md.
@@ -52,11 +54,13 @@
 //
 // # $QORY_HARNESS_HOME
 //
-// A settings fragment names a hook script as $QORY_HARNESS_HOME/hooks/<file>. Merging keeps
-// that text as written, which is what the report shows. [Result.SettingsFor] replaces every
-// occurrence of the literal $QORY_HARNESS_HOME inside a string with the home path, at any
-// depth, and returns a copy the caller owns. [Result.Settings] is shared: a caller reads it
-// and does not write to it.
+// A settings fragment names a hook script as $QORY_HARNESS_HOME/hooks/<file>, and a layer's
+// other files as $QORY_HARNESS_HOME/layers/<name>/<path>. Merging keeps that text as
+// written, which is what the report shows. [Result.SettingsFor] and [Result.MCPFor]
+// replace every occurrence of the literal $QORY_HARNESS_HOME, braced or not, inside a
+// string with the home path, at any depth, and return a copy the caller owns.
+// [Result.Settings] and [Result.MCP] are shared: a caller reads them and does not write to
+// them.
 //
 // # Using it
 //

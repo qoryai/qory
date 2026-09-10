@@ -14,5 +14,5 @@ qory version [flags]
 
 ### SEE ALSO
 
-* [qory](qory.md)	 - Compose the harness a coding agent runs with from layers
+* [qory](qory.md)	 - Compose the harness a runtime loads from layers
 

@@ -18,13 +18,14 @@ var Version = "dev"
 //
 // Usage and errors are silenced on the root, because this tool prints both itself: a
 // command reports its own failure through the ui package, and the main package prints
-// whatever reaches it.
+// whatever reaches it. A flag cobra cannot parse and an argument a command does not take
+// come back as input errors, so [ExitCode] gives them [ExitInput].
 func Root() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "qory",
-		Short: "Compose the harness a coding agent runs with from layers",
-		Long: `Compose the harness a coding agent runs with from layers, for Claude Code, Codex,
-Gemini CLI, OpenCode, Cursor, Copilot CLI, Amp, Goose, and any tool that reads AGENTS.md.
+		Short: "Compose the harness a runtime loads from layers",
+		Long: `Compose the harness a runtime loads from layers, for Claude Code, Codex, Gemini CLI,
+OpenCode, Cursor, Copilot CLI, Amp, Goose, and any tool that reads AGENTS.md.
 
 Shortcuts:
   hc  harness compose
@@ -35,12 +36,19 @@ Shortcuts:
 	}
 	root.AddCommand(newVersion(), newHarness())
 	root.AddCommand(shortcuts()...)
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return input(err) })
 	return root
 }
 
+// noArgs is [cobra.NoArgs] returning an input error, so a stray argument exits with
+// [ExitInput].
+func noArgs(cmd *cobra.Command, args []string) error {
+	return input(cobra.NoArgs(cmd, args))
+}
+
 // Execute builds the command tree, runs the command the arguments name, and returns its
-// error. The caller decides what to print and which status to exit with; see [ErrReported]
-// for the error a command has already reported itself.
+// error. The caller decides what to print and which status to exit with: [ErrReported]
+// says whether the command printed the failure itself, [ExitCode] which status it gets.
 func Execute() error {
 	return Root().Execute()
 }

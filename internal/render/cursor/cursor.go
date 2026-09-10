@@ -1,9 +1,9 @@
 // Package cursor renders for Cursor and the Cursor CLI, which read a project's .cursor
 // directory for agents, hooks and settings files such as hooks.json, cli.json and
 // mcp.json, AGENTS.md at the checkout root, and skills from .agents/skills. All three are
-// linked into the checkout. The model is a global CLI setting in Cursor and is not
-// written, and Cursor folded commands into skills and has no output styles, so both kinds
-// are skipped.
+// linked into the checkout, and the MCP servers go into mcp.json as mcpServers. The model
+// is a global CLI setting in Cursor and is not written, and Cursor folded commands into
+// skills and has no output styles, so both kinds are skipped.
 package cursor
 
 import (
@@ -43,8 +43,9 @@ func (cursor) Skips() []string { return []string{"commands", "output-styles"} }
 
 // Render links the hook scripts, writes agents/<name>.md with the agent's name,
 // description and model, and writes the cursor settings files such as hooks.json,
-// cli.json and mcp.json. The target model reaches no file, because Cursor keeps the model
-// in a global CLI setting.
+// cli.json and mcp.json, the last with the MCP servers under mcpServers when the compose
+// holds any. The target model reaches no file, because Cursor keeps the model in a global
+// CLI setting.
 func (cursor) Render(res *compose.Result, dir, home string) error {
 	if err := render.LinkEntries(res, dir, "hooks"); err != nil {
 		return err
@@ -52,5 +53,13 @@ func (cursor) Render(res *compose.Result, dir, home string) error {
 	if err := render.WriteAgents(res, dir, "agents", ".md", "name", "description", "model"); err != nil {
 		return err
 	}
-	return render.WriteSettings(res, Runtime, dir, home, nil, nil)
+	var ensure []string
+	if len(res.MCP) > 0 {
+		ensure = []string{"mcp.json"}
+	}
+	return render.WriteSettings(res, Runtime, dir, home, ensure, func(file string, m map[string]any) {
+		if file == "mcp.json" {
+			render.PutServers(m, "mcpServers", res.MCPFor(home))
+		}
+	})
 }

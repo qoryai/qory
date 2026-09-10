@@ -44,6 +44,35 @@ func TestSchemas(t *testing.T) {
 	}
 }
 
+// TestProfileSchemaKnowsBothSourceForms validates the source forms no fixture composes: a
+// git source needs its ref, and a path source takes no ref.
+func TestProfileSchemaKnowsBothSourceForms(t *testing.T) {
+	c := jsonschema.NewCompiler()
+	schema, err := c.Compile("../../contracts/harness/v1/profile.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		source string
+		valid  bool
+	}{
+		{`{"path": "layers/core"}`, true},
+		{`{"git": "https://git.example.com/acme/harness", "ref": "v1"}`, true},
+		{`{"git": "https://git.example.com/acme/harness", "ref": "v1", "path": "layers/core"}`, true},
+		{`{"git": "https://git.example.com/acme/harness"}`, false},
+		{`{"path": "layers/core", "ref": "v1"}`, false},
+		{`{}`, false},
+	} {
+		var doc any
+		if err := json.Unmarshal([]byte(`{"apiVersion": "qory.ai/v1alpha1", "kind": "HarnessProfile", "target": {"runtime": "claude"}, "layers": [{"name": "core", "source": `+c.source+`}]}`), &doc); err != nil {
+			t.Fatal(err)
+		}
+		if err := schema.Validate(doc); (err == nil) != c.valid {
+			t.Errorf("source %s: valid=%v, err=%v", c.source, c.valid, err)
+		}
+	}
+}
+
 func document(t *testing.T, path string) any {
 	t.Helper()
 	data, err := os.ReadFile(path)
