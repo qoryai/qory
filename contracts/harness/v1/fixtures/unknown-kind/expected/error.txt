@@ -1,0 +1,1 @@
+harness-compose.yaml: kind "Harness" is not HarnessProfile

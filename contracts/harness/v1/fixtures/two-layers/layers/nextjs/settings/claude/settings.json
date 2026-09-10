@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Bash(npm test)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo write"
+          }
+        ]
+      }
+    ]
+  },
+  "env": {
+    "A": "nextjs",
+    "B": "1"
+  }
+}

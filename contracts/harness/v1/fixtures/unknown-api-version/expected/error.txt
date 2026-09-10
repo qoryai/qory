@@ -1,0 +1,1 @@
+harness-compose.yaml: apiVersion "qory.ai/v2" is not one this qory reads; versions: qory.ai/v1alpha1

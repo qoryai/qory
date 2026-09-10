@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Go tests
+    runs-on: ubuntu-latest
+    container:
+      image: docker.io/golang:1.27
+    steps:
+      - name: Install node for the JavaScript actions
+        # checkout@v7 runs on node 24; the image has none.
+        env:
+          NODE_VERSION: 24.20.0
+        run: |
+          case "$(uname -m)" in aarch64) arch=arm64 ;; x86_64) arch=x64 ;; *) echo "unsupported arch" >&2; exit 1 ;; esac
+          curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${arch}.tar.gz" \
+            | tar -xz -C /usr/local --strip-components=1
+          node --version
+
+      - uses: actions/checkout@v7
+
+      - name: Trust the checkout
+        # The checkout belongs to the runner user, the container runs as root, and git
+        # refuses to read a repository it sees as someone else's. `go build` stamps the
+        # commit into the binary and fails without it.
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Restore the module cache
+        uses: actions/cache@v6
+        with:
+          path: /go/pkg/mod
+          key: go-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-${{ runner.os }}-
+
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Check doc comments
+        run: go run github.com/mgechev/revive@v1.16.0 -config revive.toml -set_exit_status ./...
+
+      - name: Check the command reference is current
+        run: |
+          go run ./internal/gendocs "$RUNNER_TEMP/commands"
+          diff -r docs/commands "$RUNNER_TEMP/commands"

@@ -1,0 +1,4 @@
+# Every package and exported name carries a doc comment.
+[rule.exported]
+  arguments = ["checkPrivateReceivers", "disableStutteringCheck"]
+[rule.package-comments]

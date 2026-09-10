@@ -1,0 +1,15 @@
+🐝 app · claude opus
+  file      harness-compose.yaml
+  checkout  /work/app
+  home      .qory/harness
+
+Layers
+  core    ../layers/core    working-tree
+  review  ../layers/review  working-tree (dirty)  named reviewers  variant claude
+
+Entries
+  agents/reviewer  review
+  skills/ship      core
+
+Excludes
+  core  skills/old

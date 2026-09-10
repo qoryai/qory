@@ -1,0 +1,79 @@
+# Release configuration: goreleaser builds the binaries a person downloads instead of
+# building from source. Run `goreleaser check` after editing, and `goreleaser build
+# --snapshot --clean` to build locally without releasing anything.
+version: 2
+
+project_name: qory
+
+before:
+  hooks:
+    - go mod download
+    - go test ./...
+
+builds:
+  - id: qory
+    main: .
+    binary: qory
+    env: [CGO_ENABLED=0]
+    # The harness is linked into a checkout with relative symlinks, which Windows grants
+    # only to a privileged or developer-mode session. Until that is handled, no windows
+    # build ships.
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X github.com/qoryai/qory/cmd.Version={{ .Version }}
+
+archives:
+  - id: qory
+    formats: [tar.gz]
+    name_template: "qory_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [README.md, LICENSE, NOTICE, TRADEMARKS.md]
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ .Tag }}-next"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude: ["^docs:", "^test:", "^chore:"]
+
+# Homebrew casks are macOS only. Linux installs with install.sh or with a version manager
+# that reads GitHub releases, such as mise.
+homebrew_casks:
+  - name: qory
+    binaries: [qory]
+    ids: [qory]
+    # The tap is a separate repository, qoryai/homebrew-tap, and publishing into it needs a
+    # token with write access to it in HOMEBREW_TAP_TOKEN. Without that token the release
+    # still publishes its archives and only the cask is skipped.
+    skip_upload: '{{ eq (envOrDefault "HOMEBREW_TAP_TOKEN" "") "" }}'
+    repository:
+      owner: qoryai
+      name: homebrew-tap
+      token: '{{ envOrDefault "HOMEBREW_TAP_TOKEN" "" }}'
+    homepage: https://github.com/qoryai/qory
+    description: Compose the harness a coding agent runs with from layers
+    license: apache-2.0
+    hooks:
+      post:
+        # The binaries are not notarized, so macOS quarantines what it downloads.
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/qory"]
+          end
+
+release:
+  prerelease: auto
+  footer: |
+    ## Install
+
+    ```sh
+    brew install qoryai/tap/qory
+    curl -fsSL https://raw.githubusercontent.com/qoryai/qory/main/install.sh | sh
+    go install github.com/qoryai/qory@{{ .Tag }}
+    ```

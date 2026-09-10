@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git status)",
+      "Read",
+      "Bash(npm test)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$QORY_HARNESS_HOME/hooks/guard.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo write"
+          }
+        ]
+      }
+    ]
+  },
+  "env": {
+    "A": "nextjs",
+    "B": "1"
+  }
+}

@@ -1,0 +1,25 @@
+## qory
+
+Compose the harness a coding agent runs with from layers
+
+### Synopsis
+
+Compose the harness a coding agent runs with from layers, for Claude Code, Codex,
+Gemini CLI, OpenCode, Cursor, Copilot CLI, Amp, Goose, and any tool that reads AGENTS.md.
+
+Shortcuts:
+  hc  harness compose
+  hi  harness inspect
+  hr  harness remove
+
+### Options
+
+```
+  -h, --help   help for qory
+```
+
+### SEE ALSO
+
+* [qory harness](qory_harness.md)	 - Write an example, then compose, inspect and remove the harness of a checkout
+* [qory version](qory_version.md)	 - Print the version and the harness format this qory reads
+

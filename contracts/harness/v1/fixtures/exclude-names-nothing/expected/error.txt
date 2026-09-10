@@ -1,0 +1,1 @@
+layer core: exclude skills/nope names nothing the layer ships

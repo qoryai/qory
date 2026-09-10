@@ -1,0 +1,7 @@
+agents/reviewer core
+commands/ship core
+hooks/guard.sh core
+output-styles/terse core
+skills/e2e nextjs
+skills/review core
+skills/test core

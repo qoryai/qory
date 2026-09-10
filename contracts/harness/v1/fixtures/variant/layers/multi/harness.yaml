@@ -1,0 +1,7 @@
+apiVersion: qory.ai/v1alpha1
+kind: HarnessLayer
+name: multi
+variants:
+  default: fail
+  claude: {}
+  codex: {agents: agents/codex}

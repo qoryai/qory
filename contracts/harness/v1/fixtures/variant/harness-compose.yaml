@@ -1,0 +1,7 @@
+apiVersion: qory.ai/v1alpha1
+kind: HarnessProfile
+target:
+  runtime: codex
+layers:
+  - name: multi
+    source: {path: layers/multi}

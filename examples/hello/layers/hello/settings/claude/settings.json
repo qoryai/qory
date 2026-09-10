@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Bash(qory hi)",
+      "Bash(qory harness inspect)"
+    ]
+  }
+}

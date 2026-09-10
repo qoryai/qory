@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Bash(date)",
+      "Bash(gh api user *)",
+      "Bash(git config user.name)"
+    ]
+  }
+}

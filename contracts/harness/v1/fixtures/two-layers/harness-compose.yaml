@@ -1,0 +1,10 @@
+apiVersion: qory.ai/v1alpha1
+kind: HarnessProfile
+target:
+  runtime: claude
+  model: opus
+layers:
+  - name: core
+    source: {path: layers/core}
+  - name: nextjs
+    source: {path: layers/nextjs}
