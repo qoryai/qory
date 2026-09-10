@@ -1,0 +1,12 @@
+apiVersion: qory.ai/v1alpha1
+target:
+  runtime: claude
+  model: opus
+modules:
+  - name: core
+    source: {path: modules/core}
+    exclude:
+      skills: [test]
+      agents: [reviewer]
+  - name: team
+    source: {path: modules/team}

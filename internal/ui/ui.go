@@ -175,7 +175,7 @@ func pad(s string, width int) string {
 // no checkout.
 func Short(path, base string) string {
 	if base != "" {
-		if rel, err := filepath.Rel(base, path); err == nil && !strings.HasPrefix(rel, "..") {
+		if rel, err := filepath.Rel(base, path); err == nil && rel != ".." && !strings.HasPrefix(rel, "../") {
 			return rel
 		}
 	}

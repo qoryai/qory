@@ -25,12 +25,13 @@ func fixtureDir() string {
 	return filepath.Join(dir, "..", "contracts", "harness", "v1", "fixtures")
 }
 
-// twoLayerEntries are the entries the two-layers fixture composes, kind/name to the layer
+// twoModuleEntries are the entries the two-modules fixture composes, kind/name to the module
 // that provides each one.
-var twoLayerEntries = map[string]string{
+var twoModuleEntries = map[string]string{
 	"agents/reviewer":     "core",
 	"commands/ship":       "core",
 	"hooks/guard.sh":      "core",
+	"mcp/db":              "core",
 	"output-styles/terse": "core",
 	"skills/e2e":          "nextjs",
 	"skills/review":       "core",
@@ -38,13 +39,15 @@ var twoLayerEntries = map[string]string{
 }
 
 // emptyDir makes an empty directory the working directory, in an environment that reads
-// nothing of the machine's own: HOME, git's global config and gh's config directory all
-// point at temporary paths, git's system config is off, and colour is off. Nothing there
-// names the person, so a command that greets one prints no name.
+// nothing of the machine's own: HOME, the cache and configuration directories, git's
+// global config and gh's config directory all point at temporary paths, git's system config is off, and colour
+// is off. Nothing there names the person, so a command that greets one prints no name.
 func emptyDir(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(home, ".gitconfig"))
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	t.Setenv("GH_CONFIG_DIR", filepath.Join(home, "gh"))
@@ -134,7 +137,7 @@ func lacks(t *testing.T, out string, unwanted ...string) {
 	}
 }
 
-// entryTable reads the entry rows of a printed table, kind/name to layer. The rows of two
+// entryTable reads the entry rows of a printed table, kind/name to module. The rows of two
 // columns whose first column names a kind and a name are the entries; a field row such as
 // "home  .qory/harness" is not one.
 func entryTable(out string) map[string]string {
@@ -244,6 +247,24 @@ func linkTarget(t *testing.T, root, name string) string {
 		t.Errorf("%s links to %s, which does not resolve: %v", name, target, err)
 	}
 	return target
+}
+
+// dirLinks checks that name is a real directory in the checkout holding a relative link
+// per child named, each resolving into the home, and returns the link targets by child.
+func dirLinks(t *testing.T, root, name string, children ...string) map[string]string {
+	t.Helper()
+	info, err := os.Lstat(filepath.Join(root, name))
+	if err != nil {
+		t.Fatalf("%s: %v", name, err)
+	}
+	if !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
+		t.Fatalf("%s is %s, want a real directory", name, info.Mode())
+	}
+	targets := map[string]string{}
+	for _, c := range children {
+		targets[c] = linkTarget(t, root, filepath.Join(name, c))
+	}
+	return targets
 }
 
 // gone fails the test when any of the paths still exists in the checkout.

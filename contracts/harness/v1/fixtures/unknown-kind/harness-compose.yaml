@@ -1,8 +1,0 @@
-apiVersion: qory.ai/v1alpha1
-kind: Harness
-target:
-  runtime: claude
-  model: opus
-layers:
-  - name: core
-    source: {path: layers/core}

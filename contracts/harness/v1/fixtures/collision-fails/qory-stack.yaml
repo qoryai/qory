@@ -1,0 +1,11 @@
+apiVersion: qory.ai/v1alpha1
+target:
+  runtime: claude
+  model: opus
+modules:
+  - name: core
+    source: {path: modules/core}
+  - name: nextjs
+    source: {path: modules/nextjs}
+  - name: team
+    source: {path: modules/team}

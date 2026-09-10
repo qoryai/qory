@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qory.ai/contracts/harness/v1/module.schema.json",
+  "title": "qory-module.yaml",
+  "description": "qory-module.yaml at the root of a module: its name, its variants and the variables it exports.",
+  "type": "object",
+  "required": ["apiVersion", "name"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {"const": "qory.ai/v1alpha1"},
+    "name": {"type": "string", "minLength": 1},
+    "description": {"type": "string"},
+    "env": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+      "additionalProperties": {"type": "string", "minLength": 1}
+    },
+    "variants": {
+      "type": "object",
+      "properties": {"default": {"type": "string", "minLength": 1}},
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "skills": {"type": "string", "minLength": 1},
+          "agents": {"type": "string", "minLength": 1},
+          "commands": {"type": "string", "minLength": 1},
+          "output-styles": {"type": "string", "minLength": 1},
+          "hooks": {"type": "string", "minLength": 1},
+          "mcp": {"type": "string", "minLength": 1},
+          "files": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

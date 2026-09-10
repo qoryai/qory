@@ -13,13 +13,13 @@
 //
 //	u := ui.New(cmd.OutOrStdout())
 //	u.Title("acme/app", "claude sonnet")
-//	u.Success("composed %d entries from %d layers %s", 12, 3, ui.Pot)
+//	u.Success("composed %d entries from %d modules %s", 12, 3, ui.Pot)
 //	u.Fields([][2]string{{"home", ui.Short(home, root)}, {"link", ".claude"}})
 //
 // prints the shape every command's output has, a title line, a result, then fields:
 //
 //	🐝 acme/app · claude sonnet
-//	✓ composed 12 entries from 3 layers 🍯
+//	✓ composed 12 entries from 3 modules 🍯
 //	  home  .qory/harness
 //	  link  .claude
 //

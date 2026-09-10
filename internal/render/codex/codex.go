@@ -1,8 +1,15 @@
 // Package codex renders for Codex CLI, which reads a project's .codex directory, skills
 // from .agents/skills, and AGENTS.override.md ahead of AGENTS.md. The checkout gets a
 // link for each of those three, and .codex holds config.toml with the target model as
-// model plus one TOML file per agent. Codex reads prompt files from the user's home only
-// and has no output styles, so commands and output styles are skipped.
+// model, the MCP servers as mcp_servers and the exported variables as
+// shell_environment_policy.set, plus one TOML file per agent. Codex reads
+// prompt files from the user's home only and has no output styles, so commands and output
+// styles are skipped. A files entry named codex/<path> lands at .codex/<path>.
+//
+// The paths under .codex a files entry may not take, see [render.Reserved]:
+//
+//	config.toml  qory writes it
+//	agents       agents are linked there; ship it as agents/<name>
 package codex
 
 import (
@@ -10,7 +17,7 @@ import (
 	"strings"
 
 	"github.com/qoryai/qory/internal/compose"
-	"github.com/qoryai/qory/internal/layer"
+	"github.com/qoryai/qory/internal/module"
 	"github.com/qoryai/qory/internal/render"
 )
 
@@ -45,15 +52,35 @@ func (codex) Links(res *compose.Result) []render.Link {
 // home only and has no output styles.
 func (codex) Skips() []string { return []string{"commands", "output-styles"} }
 
-// Render writes config.toml, with the target model as model, and any other codex settings
-// fragment, then one agents/<name>.toml per agent carrying the agent's name, description
-// and its body as developer_instructions. Codex reads a project .codex only in a project
-// the user has marked trusted.
+// Reserved are config.toml and the agents directory, which Render writes.
+func (codex) Reserved() []render.Reserved {
+	return []render.Reserved{
+		{Path: "config.toml", Why: "qory writes it"},
+		{Path: "agents", Why: "agents are linked there; ship it as agents/<name>"},
+	}
+}
+
+// Render writes config.toml, with the target model as model, the MCP servers as
+// mcp_servers, one table per server holding the object as the module wrote it, the
+// exported variables and QORY_HARNESS_HOME under shell_environment_policy.set, which
+// Codex passes to every command it runs, and any other codex settings fragment, then one agents/<name>.toml per agent carrying the
+// agent's name, description and its body as developer_instructions. Codex reads a project
+// .codex only in a project the user has marked trusted.
 func (codex) Render(res *compose.Result, dir, home string) error {
 	err := render.WriteSettings(res, Runtime, dir, home, []string{"config.toml"}, func(file string, m map[string]any) {
-		if file == "config.toml" && res.Profile.Target.Model != "" {
-			m["model"] = res.Profile.Target.Model
+		if file != "config.toml" {
+			return
 		}
+		if res.Stack.Target.Model != "" {
+			m["model"] = res.Stack.Target.Model
+		}
+		render.PutServers(m, "mcp_servers", res.MCPFor(home))
+		policy, _ := m["shell_environment_policy"].(map[string]any)
+		if policy == nil {
+			policy = map[string]any{}
+		}
+		policy["set"] = render.Env(policy["set"], res, home)
+		m["shell_environment_policy"] = policy
 	})
 	if err != nil {
 		return err
@@ -62,7 +89,7 @@ func (codex) Render(res *compose.Result, dir, home string) error {
 		if e.Kind != "agents" {
 			continue
 		}
-		doc, err := layer.ReadDocument(e.Path)
+		doc, err := module.ReadDocument(e.Path)
 		if err != nil {
 			return err
 		}

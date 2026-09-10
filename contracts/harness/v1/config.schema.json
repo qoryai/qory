@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qory.ai/contracts/harness/v1/config.schema.json",
+  "title": "qory.yaml",
+  "description": "qory.yaml: the repository's own document at the checkout root, and the machine's in the user's directory and the checkout's ancestors. Every key is optional.",
+  "type": "object",
+  "required": ["apiVersion"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {"const": "qory.ai/v1alpha1"},
+    "harness": {
+      "description": "The machine's choices for a compose, and in a checkout's file its document: the checkout's own stack, a target and modules, or the stack it extends and the modules it appends.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "runtime": {
+          "oneOf": [
+            {"type": "string", "minLength": 1},
+            {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+          ]
+        },
+        "model": {"type": "string", "minLength": 1},
+        "force": {"type": "boolean"},
+        "update": {"type": "string", "enum": ["always", "never"]},
+        "name": {"type": "string", "minLength": 1},
+        "description": {"type": "string"},
+        "extends": {
+          "description": "The stack this checkout extends: a directory holding a qory-stack.yaml.",
+          "$ref": "#/$defs/source"
+        },
+        "target": {
+          "description": "The runtime and model of this checkout's own stack; a section that extends a stack leaves it out and takes the base's.",
+          "type": "object",
+          "required": ["runtime"],
+          "additionalProperties": false,
+          "properties": {
+            "runtime": {
+              "oneOf": [
+                {"type": "string", "minLength": 1},
+                {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+              ]
+            },
+            "model": {"type": "string", "minLength": 1}
+          }
+        },
+        "modules": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/module"}},
+        "extensions": {
+          "description": "Values qory carries into the report and does not read: one object per namespace.",
+          "type": "object",
+          "additionalProperties": {"type": "object"}
+        }
+      },
+      "dependentRequired": {"extends": ["modules"], "target": ["modules"]},
+      "if": {"required": ["modules"]},
+      "then": {"oneOf": [{"required": ["extends"]}, {"required": ["target"]}]}
+    },
+    "worktree": {
+      "description": "What a worktree of the repository needs, and where the machine puts it.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dir": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "pattern": "\\{branch\\}"},
+        "base": {"type": "string", "minLength": 1},
+        "link": {"$ref": "#/$defs/names"},
+        "copy": {"$ref": "#/$defs/names"},
+        "run": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "add": {"$ref": "#/$defs/names"},
+            "remove": {"$ref": "#/$defs/names"}
+          }
+        }
+      }
+    },
+    "git": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "timeout": {"type": "string", "minLength": 1},
+        "cache": {"type": "string", "minLength": 1}
+      }
+    },
+    "env": {"type": "object", "additionalProperties": {"type": "string"}}
+  },
+  "$defs": {
+    "names": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "module": {
+      "type": "object",
+      "anyOf": [{"required": ["name"]}, {"required": ["source"]}],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "source": {"$ref": "#/$defs/source"},
+        "exclude": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "skills": {"$ref": "#/$defs/names"},
+            "agents": {"$ref": "#/$defs/names"},
+            "commands": {"$ref": "#/$defs/names"},
+            "output-styles": {"$ref": "#/$defs/names"},
+            "hooks": {"$ref": "#/$defs/names"},
+            "mcp": {"$ref": "#/$defs/names"},
+            "files": {"$ref": "#/$defs/names"}
+          }
+        },
+        "variant": {"type": "string", "minLength": 1},
+        "link": {
+          "description": "A name at the checkout root that links to the module's directory.",
+          "type": "string",
+          "pattern": "^[^./\\\\@][^/\\\\@]*$"
+        }
+      }
+    },
+    "source": {
+      "description": "A directory, or a git repository at a ref with the module's directory inside it.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "git": {"type": "string", "minLength": 1},
+        "ref": {"type": "string", "minLength": 1}
+      },
+      "oneOf": [
+        {"required": ["path"], "not": {"anyOf": [{"required": ["git"]}, {"required": ["ref"]}]}},
+        {"required": ["git", "ref"]}
+      ]
+    }
+  }
+}

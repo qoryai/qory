@@ -1,8 +1,17 @@
 // Package gemini renders for Gemini CLI, which reads a project's .gemini directory,
 // holding its settings.json and the skills, agents, commands and hooks under it, and
-// GEMINI.md at the checkout root. Both are linked into the checkout, and the target model
-// is written into settings.json as model.name. Gemini CLI has no output styles, so that
-// kind is skipped.
+// GEMINI.md at the checkout root. Both are linked into the checkout, and settings.json
+// gets the target model as model.name and the MCP servers as mcpServers. Gemini CLI has
+// no output styles, so that kind is skipped. A files entry named gemini/<path> lands at
+// .gemini/<path>.
+//
+// The paths under .gemini a files entry may not take, see [render.Reserved]:
+//
+//	settings.json  qory writes it
+//	skills         skills are linked there; ship it as skills/<name>
+//	hooks          hooks are linked there; ship it as hooks/<name>
+//	agents         agents are linked there; ship it as agents/<name>
+//	commands       commands are linked there; ship it as commands/<name>
 package gemini
 
 import (
@@ -10,7 +19,7 @@ import (
 	"strings"
 
 	"github.com/qoryai/qory/internal/compose"
-	"github.com/qoryai/qory/internal/layer"
+	"github.com/qoryai/qory/internal/module"
 	"github.com/qoryai/qory/internal/render"
 )
 
@@ -40,23 +49,40 @@ func (gemini) Links(res *compose.Result) []render.Link {
 // Skips are output styles, the one kind Gemini CLI has no place for.
 func (gemini) Skips() []string { return []string{"output-styles"} }
 
+// Reserved are settings.json, which Render writes on every compose, and the four kind
+// directories it links or writes.
+func (gemini) Reserved() []render.Reserved {
+	return []render.Reserved{
+		{Path: "settings.json", Why: "qory writes it"},
+		{Path: "skills", Why: "skills are linked there; ship it as skills/<name>"},
+		{Path: "hooks", Why: "hooks are linked there; ship it as hooks/<name>"},
+		{Path: "agents", Why: "agents are linked there; ship it as agents/<name>"},
+		{Path: "commands", Why: "commands are linked there; ship it as commands/<name>"},
+	}
+}
+
 // Render links skills and hooks, writes settings.json with the target model as
-// model.name, one agents/<name>.md with the agent's name and description, and one
-// commands/<name>.toml per command whose prompt has $ARGUMENTS rewritten to {{args}}.
-// Gemini reads a project .gemini only in a folder the user has marked trusted.
+// model.name and the MCP servers as mcpServers, one agents/<name>.md with the agent's
+// name and description, and one commands/<name>.toml per command whose prompt has
+// $ARGUMENTS rewritten to {{args}}. Gemini reads a project .gemini only in a folder the
+// user has marked trusted.
 func (gemini) Render(res *compose.Result, dir, home string) error {
 	if err := render.LinkEntries(res, dir, "skills", "hooks"); err != nil {
 		return err
 	}
 	err := render.WriteSettings(res, Runtime, dir, home, []string{"settings.json"}, func(file string, m map[string]any) {
-		if file != "settings.json" || res.Profile.Target.Model == "" {
+		if file != "settings.json" {
+			return
+		}
+		render.PutServers(m, "mcpServers", res.MCPFor(home))
+		if res.Stack.Target.Model == "" {
 			return
 		}
 		model, _ := m["model"].(map[string]any)
 		if model == nil {
 			model = map[string]any{}
 		}
-		model["name"] = res.Profile.Target.Model
+		model["name"] = res.Stack.Target.Model
 		m["model"] = model
 	})
 	if err != nil {
@@ -69,7 +95,7 @@ func (gemini) Render(res *compose.Result, dir, home string) error {
 		if e.Kind != "commands" {
 			continue
 		}
-		doc, err := layer.ReadDocument(e.Path)
+		doc, err := module.ReadDocument(e.Path)
 		if err != nil {
 			return err
 		}

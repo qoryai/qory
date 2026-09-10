@@ -7,19 +7,20 @@ import (
 	"testing"
 
 	"github.com/qoryai/qory/internal/compose"
-	"github.com/qoryai/qory/internal/profile"
 	"github.com/qoryai/qory/internal/render"
+	"github.com/qoryai/qory/internal/stack"
 )
 
-// composeFixture composes the two-layers fixture for the given runtimes and returns the
+// composeFixture composes the two-modules fixture for the given runtimes and returns the
 // result together with a fresh git checkout and the home path inside it.
 func composeFixture(t *testing.T, runtimes ...string) (*compose.Result, string, string) {
 	t.Helper()
-	file, err := filepath.Abs("../../contracts/harness/v1/fixtures/two-layers/harness-compose.yaml")
+	hermetic(t)
+	file, err := filepath.Abs("../../contracts/harness/v1/fixtures/two-modules/qory-stack.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := profile.Load(file)
+	p, err := stack.Load(file)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,6 +36,17 @@ func composeFixture(t *testing.T, runtimes ...string) (*compose.Result, string, 
 	return res, root, filepath.Join(root, ".qory", "harness")
 }
 
+// hermetic points git, and everything under test that runs git, at an empty home and
+// configuration, so no test reads the developer's global config or ignore file.
+func hermetic(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(home, ".gitconfig"))
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+}
+
 // lookup is the runtime of that name, which every test here knows exists.
 func lookup(t *testing.T, name string) render.Runtime {
 	t.Helper()
@@ -45,17 +57,20 @@ func lookup(t *testing.T, name string) render.Runtime {
 	return p
 }
 
-// linkTargets checks that every link of a runtime resolves to something in the home.
-func linkTargets(t *testing.T, p render.Runtime, res *compose.Result, root string) {
+// linkTargets checks that every link of a runtime resolves to something in the home: the
+// link itself for a file, every link inside it for a directory.
+func linkTargets(t *testing.T, p render.Runtime, res *compose.Result, root, home string) {
 	t.Helper()
 	for _, l := range p.Links(res) {
-		path := filepath.Join(root, l.Checkout)
-		if _, err := os.Readlink(path); err != nil {
-			t.Errorf("%s: %v", l.Checkout, err)
-			continue
-		}
-		if _, err := os.Stat(path); err != nil {
-			t.Errorf("%s is a dangling link: %v", l.Checkout, err)
+		for _, path := range linkPaths(t, home, l) {
+			full := filepath.Join(root, path[0])
+			if _, err := os.Readlink(full); err != nil {
+				t.Errorf("%s: %v", path[0], err)
+				continue
+			}
+			if _, err := os.Stat(full); err != nil {
+				t.Errorf("%s is a dangling link: %v", path[0], err)
+			}
 		}
 	}
 }
@@ -74,10 +89,10 @@ func TestBuildHoldsEveryRuntimeItIsGiven(t *testing.T) {
 		}
 	}
 	for _, p := range []render.Runtime{claude, codex} {
-		if _, err := render.LinkInto(p, res, root, home); err != nil {
+		if _, err := render.LinkInto(p, res, root, home, false); err != nil {
 			t.Fatal(err)
 		}
-		linkTargets(t, p, res, root)
+		linkTargets(t, p, res, root, home)
 	}
 }
 
@@ -89,7 +104,7 @@ func TestBuildForOneRuntimeDropsTheOthers(t *testing.T) {
 	if err := render.Build(res, home, claude, codex); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := render.LinkInto(claude, res, root, home); err != nil {
+	if _, err := render.LinkInto(claude, res, root, home, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := render.Build(res, home, codex); err != nil {
@@ -98,8 +113,8 @@ func TestBuildForOneRuntimeDropsTheOthers(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, "claude")); err == nil {
 		t.Error("the claude directory survived a build that did not name it")
 	}
-	if _, err := os.Stat(filepath.Join(root, ".claude")); err == nil {
-		t.Error("the .claude link still resolves; the test no longer proves anything")
+	if _, err := os.Stat(filepath.Join(root, ".claude", "settings.json")); err == nil {
+		t.Error("the .claude/settings.json link still resolves; the test no longer proves anything")
 	}
 }
 

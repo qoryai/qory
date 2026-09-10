@@ -1,4 +1,4 @@
-// Command qory composes the harness a coding agent runs with from layers.
+// Command qory composes the harness a runtime loads from modules.
 package main
 
 import (
@@ -25,6 +25,6 @@ func main() {
 			}
 			u.Fail(err)
 		}
-		os.Exit(1)
+		os.Exit(cmd.ExitCode(err))
 	}
 }

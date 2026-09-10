@@ -15,10 +15,16 @@ import (
 
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/compose"
-	"github.com/qoryai/qory/internal/layer"
+	"github.com/qoryai/qory/internal/module"
 )
 
 // Link is one path in a checkout that points into the composed home.
+//
+// A link whose home path is a file is one symlink. A link whose home path is a directory,
+// such as .claude, is written as a real directory in the checkout holding one symlink per
+// entry of it, a file or a directory such as .claude/skills, so the checkout keeps its own
+// files beside them: Claude Code writes .claude/settings.local.json when a person answers
+// a permission prompt, and a repository may own .github/agents. [LinkInto] has the rules.
 type Link struct {
 	// Checkout is the path relative to the checkout root, such as ".claude".
 	Checkout string
@@ -28,6 +34,58 @@ type Link struct {
 	Soft bool
 }
 
+// Linked is what [LinkInto] did besides writing links, for the caller to report.
+type Linked struct {
+	// Skipped are the checkout paths of soft links passed over because something qory did
+	// not write stands there, such as "AGENTS.md" or ".github/agents/triage.agent.md".
+	Skipped []string
+	// Replaced are the checkout paths whose tracked, unmodified file or directory was
+	// removed for a link under force. git checkout -- restores each of them.
+	Replaced []string
+}
+
+// ForeignPathError is the refusal to remove or replace a path qory did not write. The
+// command module matches it with errors.As and exits with its own status for it.
+type ForeignPathError struct {
+	// Path is the absolute checkout path that stands in the way.
+	Path string
+	// Target is the link target when Path is a symlink, "" when it is a file or directory.
+	Target string
+	// Reason is set when force was asked for and refused, and says why.
+	Reason string
+}
+
+// Error names the path and what qory found there.
+func (e *ForeignPathError) Error() string {
+	switch {
+	case e.Reason != "":
+		return fmt.Sprintf("%s %s; qory does not replace it", e.Path, e.Reason)
+	case e.Target != "":
+		return fmt.Sprintf("%s links to %s, which qory did not write; qory does not replace it", e.Path, e.Target)
+	default:
+		return fmt.Sprintf("%s is not a link qory wrote; qory does not replace it", e.Path)
+	}
+}
+
+// Reserved is one path under a runtime's directory that a files entry may not take,
+// because the runtime writes or links something there or the program reads it as its
+// own configuration. [CheckFiles] refuses a files entry at the path or, when the path is
+// a directory, anywhere under it.
+type Reserved struct {
+	// Path is the path under the runtime's directory with forward slashes, a file such as
+	// "settings.json" or a directory such as "skills". A directory reserves its whole
+	// subtree, matched by path segment: "skills" covers "skills/x" and not
+	// "skills-private/x".
+	Path string
+	// Why is the clause the refusal ends with, after "and": what stands at the path and
+	// where the module ships the file instead, such as "qory writes it".
+	Why string
+}
+
+// FilesKind is the entry kind of a file a module ships as it is, at
+// files/<runtime>/<path> in the module, for the runtime's directory in the checkout.
+const FilesKind = "files"
+
 // Runtime renders for one program that runs the harness. A package under internal/render
 // implements it for one program and registers the implementation from its init.
 type Runtime interface {
@@ -36,12 +94,15 @@ type Runtime interface {
 	// Render writes the runtime's own files into dir, the runtime's directory inside a
 	// staging copy of the home. Paths written into files name home, where the tree ends up.
 	// The shared parts, AGENTS.md, skills/ and hooks/, are already at the home's root.
+	// [Build] links the runtime's files entries into dir after Render returns.
 	Render(res *compose.Result, dir, home string) error
 	// Links are the paths a checkout needs so the program reads the home. A nil res asks for
 	// the full set, which is what [Unlink] removes.
 	Links(res *compose.Result) []Link
 	// Skips are the entry kinds the runtime has no place for.
 	Skips() []string
+	// Reserved are the paths under the runtime's directory a files entry may not take.
+	Reserved() []Reserved
 }
 
 // runtimes holds every registered runtime by its target.runtime value.
@@ -94,33 +155,53 @@ func Composed(home string) []Runtime {
 }
 
 // Build writes the composed home for one or more runtimes. It stages the tree in home with
-// ".tmp" appended, discarding whatever that path held, links the shared skills and hooks and
-// writes AGENTS.md at the staging root, calls each runtime's Render for the subdirectory
-// named after it, then removes the old home and renames the staging directory over it. A
-// failure before the rename leaves the previous home as it was.
+// ".tmp" appended, discarding whatever that path held, links the shared skills and hooks,
+// links every module's directory as modules/<name> and writes AGENTS.md at the staging root,
+// calls each runtime's Render for the subdirectory named after it and links the runtime's
+// files entries into that subdirectory, then removes the old home and renames the staging
+// directory over it. A failure before the rename leaves the previous home as it was.
+//
+// The files come after Render, so a files entry at a path Render wrote fails the build.
+// [CheckFiles] refuses such an entry before a build, and the failure here is the check
+// that a runtime's reserved table missed a path.
 //
 // Every runtime the home is to hold must be passed in one call, because the rename replaces
 // the whole tree. A caller composing for one runtime passes the runtimes already in the home
 // alongside it, which [Composed] reports, so that the links of a checkout composed for
 // several runtimes keep resolving and stay current. Build with no runtime is an error.
-func Build(res *compose.Result, home string, runtimes ...Runtime) error {
+func Build(res *compose.Result, home string, runtimes ...Runtime) (err error) {
+	if len(runtimes) == 0 {
+		return errors.New("build needs at least one runtime")
+	}
+	// The qory directory and the home are qory's own, and a symlink at either, which a
+	// repository can commit, would carry the tree and the remove wherever it points.
+	for _, path := range []string{filepath.Dir(home), home} {
+		if err := realDir(path); err != nil {
+			return err
+		}
+	}
 	tmp := home + ".tmp"
 	if err := os.RemoveAll(tmp); err != nil {
 		return err
 	}
+	defer func() {
+		if err != nil {
+			_ = os.RemoveAll(tmp)
+		}
+	}()
 	if err := os.MkdirAll(tmp, 0o755); err != nil {
 		return err
 	}
 	if err := LinkEntries(res, tmp, "skills", "hooks"); err != nil {
 		return err
 	}
+	if err := linkModules(res, tmp); err != nil {
+		return err
+	}
 	if res.Instructions != "" {
 		if err := WriteFile(tmp, "AGENTS.md", []byte(res.Instructions)); err != nil {
 			return err
 		}
-	}
-	if len(runtimes) == 0 {
-		return errors.New("build needs at least one runtime")
 	}
 	for _, p := range runtimes {
 		dir := filepath.Join(tmp, p.Name())
@@ -130,6 +211,9 @@ func Build(res *compose.Result, home string, runtimes ...Runtime) error {
 		if err := p.Render(res, dir, home); err != nil {
 			return err
 		}
+		if err := linkFiles(res, p, dir); err != nil {
+			return err
+		}
 	}
 	if err := os.RemoveAll(home); err != nil {
 		return err
@@ -137,80 +221,775 @@ func Build(res *compose.Result, home string, runtimes ...Runtime) error {
 	return os.Rename(tmp, home)
 }
 
-// LinkInto writes the runtime's links into the checkout at root, each one relative so a
-// checkout that moves keeps them valid, and adds every link and the qory directory to the
-// clone-local exclude file. home is the composed tree under that qory directory.
-//
-// A path holding something qory did not write fails a hard link and is passed over for a
-// soft one. LinkInto returns the checkout paths it passed over, for the caller to report.
-// It stops at the first error, so the links before it are already written.
-func LinkInto(p Runtime, res *compose.Result, root, home string) ([]string, error) {
-	var skipped []string
-	if err := exclude(root, "/"+checkout.Dir); err != nil {
-		return nil, err
+// realDir refuses a path that exists and is not a real directory: a symlink or a file
+// where qory keeps its own tree is a [*ForeignPathError], because qory writes through
+// nothing it did not make. A path that does not exist yet is fine.
+func realDir(path string) error {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
 	}
-	for _, l := range p.Links(res) {
-		path := filepath.Join(root, l.Checkout)
-		if err := removeOwnLink(path); err != nil {
-			if l.Soft {
-				skipped = append(skipped, l.Checkout)
-				continue
-			}
-			return skipped, err
-		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return skipped, err
-		}
-		target, err := filepath.Rel(filepath.Dir(path), filepath.Join(home, l.Home))
-		if err != nil {
-			return skipped, err
-		}
-		if err := os.Symlink(target, path); err != nil {
-			return skipped, err
-		}
-		if err := exclude(root, "/"+l.Checkout); err != nil {
-			return skipped, err
-		}
+	if err != nil {
+		return err
 	}
-	return skipped, nil
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, _ := os.Readlink(path)
+		return &ForeignPathError{Path: path, Target: target}
+	}
+	if !info.IsDir() {
+		return &ForeignPathError{Path: path}
+	}
+	return nil
 }
 
-// Unlink removes the runtime's links that qory wrote, the relative symlinks into the qory
-// directory, and returns their checkout paths. A parent directory the links left empty,
-// such as .agents, is removed too.
-//
-// Anything else at a link's path is not qory's to remove: a hard link's path fails, and a
-// soft link's path is left alone, which is how a checkout's own AGENTS.md survives.
-// Unlink leaves the home for the caller to remove, and it leaves the exclude lines,
-// because worktrees of one repository share one exclude file and a line without its link
-// is harmless.
-func Unlink(p Runtime, root string) ([]string, error) {
-	var removed []string
-	for _, l := range p.Links(nil) {
-		path := filepath.Join(root, l.Checkout)
-		if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+// linkFiles writes one symlink per files entry of the runtime at dir/<path>, pointing at
+// the file in its module, and creates the directories between. A runtime whose Skips
+// names the files kind gets none. A path Render already wrote is an error naming the
+// entry, because [CheckFiles] is meant to have refused the entry before the build.
+func linkFiles(res *compose.Result, p Runtime, dir string) error {
+	if contains(p.Skips(), FilesKind) {
+		return nil
+	}
+	for _, e := range res.Entries {
+		path, ok := FileFor(e, p.Name())
+		if !ok {
 			continue
 		}
-		if err := removeOwnLink(path); err != nil {
+		link := filepath.Join(dir, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+			return fmt.Errorf("files/%s from module %s: %w", e.Name, e.Module, err)
+		}
+		if err := os.Symlink(e.Path, link); err != nil {
+			return fmt.Errorf("files/%s from module %s: %w", e.Name, e.Module, err)
+		}
+	}
+	return nil
+}
+
+// FileFor returns the path under the runtime's directory a files entry lands at, such as
+// "rules/nextjs-15.md" for the entry named "claude/rules/nextjs-15.md", and whether e is
+// a files entry for the runtime. An entry of another kind or for another runtime is not.
+func FileFor(e compose.Entry, runtime string) (string, bool) {
+	if e.Kind != FilesKind {
+		return "", false
+	}
+	rt, path, ok := strings.Cut(e.Name, "/")
+	if !ok || rt != runtime {
+		return "", false
+	}
+	return path, true
+}
+
+// CheckFiles refuses a files entry that names no registered runtime or a path the runtime
+// reserves, and returns the first refusal in the result's order. Every entry is checked,
+// for the target runtime or not, so a module shipping a wrong file is refused wherever it
+// composes. The command module calls it right after the compose, before [Build].
+//
+// The refusal names the module and the entry as it sits in the module, files/<runtime>/<path>,
+// and ends with the runtime's [Reserved] clause, or with the runtimes qory renders when the
+// first segment is none of them.
+func CheckFiles(res *compose.Result) error {
+	for _, e := range res.Entries {
+		if e.Kind != FilesKind {
+			continue
+		}
+		rt, path, _ := strings.Cut(e.Name, "/")
+		p, ok := runtimes[rt]
+		if !ok {
+			return fmt.Errorf("module %s ships files/%s, and %s is not a runtime qory renders; runtimes: %s", e.Module, e.Name, rt, strings.Join(Names(), ", "))
+		}
+		for _, r := range p.Reserved() {
+			if path == r.Path || strings.HasPrefix(path, r.Path+"/") {
+				return fmt.Errorf("module %s ships files/%s, and %s", e.Module, e.Name, r.Why)
+			}
+		}
+	}
+	return nil
+}
+
+// LinkInto makes the checkout at root read the home through the runtime's links, and
+// returns what it passed over and what it replaced. Every link is relative, so a checkout
+// that moves keeps them valid, and every link and the qory directory go into the
+// clone-local exclude file, each link's line leaving the file with the link. home is the
+// composed tree under that qory directory.
+//
+// A link to a file is one symlink. A link to a directory is a real directory in the checkout
+// holding one symlink per entry of the home's directory, a file or a directory such as
+// .claude/skills, so the checkout's own files there stay: .claude/settings.local.json
+// beside qory's .claude/settings.json. A symlink qory wrote at the directory's path, the
+// way a release before this one linked .claude whole, is removed and the directory made;
+// a directory the home leaves empty gets no directory and no link.
+//
+// A path holding something qory did not write is a [*ForeignPathError] for a hard link and
+// is passed over for a soft one, and so is a path behind a directory the checkout links
+// elsewhere, such as a committed .github symlink, since nothing there is qory's. With
+// force, a tracked and unmodified file or directory of the checkout is removed first and
+// its path recorded, for either kind of link; anything untracked or modified is still
+// refused, because git checkout -- could not bring it back.
+//
+// LinkInto also takes back what an earlier compose linked and this one does not: a link the
+// runtime no longer asks for, such as AGENTS.override.md once the compose produces no
+// instructions, a file inside a linked directory the home no longer has, and a link the
+// runtime wrote for a files entry the compose no longer holds, such as
+// .github/instructions/web.instructions.md, which Links with a nil result cannot name.
+// For the last, LinkInto walks the checkout directories the runtime's links stand in,
+// .github say, and removes every symlink into the runtime's directory in the home that
+// the current links do not ask for, then each directory that is left empty. It removes
+// only links that point into the qory directory. It stops at the first error, so the links
+// before it are already written.
+func LinkInto(p Runtime, res *compose.Result, root, home string, force bool) (Linked, error) {
+	var out Linked
+	if err := exclude(root, "/"+checkout.Dir); err != nil {
+		return out, err
+	}
+	current := p.Links(res)
+	for _, l := range current {
+		src := filepath.Join(home, l.Home)
+		info, err := os.Stat(src)
+		if err != nil {
+			return out, err
+		}
+		path := filepath.Join(root, l.Checkout)
+		if err := inside(root, path); err != nil {
 			if l.Soft {
+				out.Skipped = append(out.Skipped, l.Checkout)
 				continue
 			}
-			return removed, err
+			return out, err
 		}
-		removed = append(removed, l.Checkout)
-		if parent := filepath.Dir(path); parent != root {
-			_ = os.Remove(parent)
+		if !info.IsDir() {
+			if err := link(root, path, src, l, force, &out); err != nil {
+				return out, err
+			}
+			continue
+		}
+		skip, err := clearForDir(root, path, l, force, &out)
+		if err != nil {
+			return out, err
+		}
+		if skip {
+			continue
+		}
+		children, err := os.ReadDir(src)
+		if err != nil {
+			return out, err
+		}
+		keep := map[string]bool{}
+		for _, c := range children {
+			keep[c.Name()] = true
+			child := Link{Checkout: l.Checkout + "/" + c.Name(), Soft: l.Soft}
+			if err := link(root, filepath.Join(path, c.Name()), filepath.Join(src, c.Name()), child, force, &out); err != nil {
+				return out, err
+			}
+		}
+		if err := prune(root, path, keep); err != nil {
+			return out, err
+		}
+	}
+	for _, l := range p.Links(nil) {
+		if asksFor(current, l.Checkout) {
+			continue
+		}
+		path := filepath.Join(root, l.Checkout)
+		if err := inside(root, path); err != nil {
+			continue
+		}
+		if err := prune(root, path, nil); err != nil {
+			return out, err
+		}
+	}
+	if _, err := takeBack(p, root, current); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+// takeBack removes the runtime's links that current does not ask for from the checkout
+// directories the runtime's declared links stand in, such as .github for copilot, and
+// returns their checkout paths. A link is the runtime's when it is a relative symlink
+// resolving into the runtime's directory in the home, which is where the links of files
+// entries point and no other runtime's link does. A link at a current link's path, or
+// inside a current directory link, stays. A directory a removal left empty is removed,
+// up to and including the one walked. A symlink is never followed, so nothing behind a
+// directory the checkout links elsewhere is touched. With no current links, every such
+// link goes, which is what [Unlink] asks for.
+func takeBack(p Runtime, root string, current []Link) ([]string, error) {
+	qoryDir, err := realQoryDir(root)
+	if err != nil {
+		return nil, nil
+	}
+	prefix := filepath.Join(qoryDir, "harness", p.Name()) + string(filepath.Separator)
+	var removed []string
+	for _, dir := range nestedDirs(p.Links(nil)) {
+		path := filepath.Join(root, dir)
+		info, err := os.Lstat(path)
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		if err := takeBackIn(root, path, prefix, current, &removed); err != nil {
+			return removed, err
 		}
 	}
 	return removed, nil
 }
 
-// removeOwnLink removes path when it is a link qory wrote, a relative symlink whose
-// target runs through the qory directory. A path that does not exist is nothing to remove
-// and no error. A regular file, a directory, or a link pointing elsewhere is an error
-// naming what stands in the way, and it is the check that keeps a render from eating a
-// repository's own files.
-func removeOwnLink(path string) error {
+// takeBackIn is [takeBack] for one real directory, appending each removed link's checkout
+// path to removed.
+func takeBackIn(root, dir, prefix string, current []Link, removed *[]string) error {
+	items, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	before := len(*removed)
+	for _, it := range items {
+		path := filepath.Join(dir, it.Name())
+		if it.IsDir() {
+			if err := takeBackIn(root, path, prefix, current, removed); err != nil {
+				return err
+			}
+			continue
+		}
+		if it.Type()&os.ModeSymlink == 0 {
+			continue
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if asksForOrHolds(current, rel) {
+			continue
+		}
+		target, err := linkTarget(path)
+		if err != nil {
+			return err
+		}
+		if !strings.HasPrefix(target, prefix) {
+			continue
+		}
+		own, err := unlinkOwn(root, path)
+		if err != nil {
+			return err
+		}
+		if own {
+			*removed = append(*removed, rel)
+		}
+	}
+	if len(*removed) > before {
+		_ = os.Remove(dir)
+	}
+	return nil
+}
+
+// asksForOrHolds reports whether the links hold one at the checkout path or one whose
+// directory the path is inside, such as .github/agents for .github/agents/reviewer.agent.md.
+func asksForOrHolds(links []Link, path string) bool {
+	for _, l := range links {
+		if l.Checkout == path || strings.HasPrefix(path, l.Checkout+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// nestedDirs lists, sorted and once each, the first path segment of every link that stands
+// inside a directory of the checkout, such as .github for .github/agents; a link at the
+// checkout root, such as AGENTS.md or .claude, names none.
+func nestedDirs(links []Link) []string {
+	seen := map[string]bool{}
+	var dirs []string
+	for _, l := range links {
+		first, _, ok := strings.Cut(l.Checkout, "/")
+		if !ok || seen[first] {
+			continue
+		}
+		seen[first] = true
+		dirs = append(dirs, first)
+	}
+	sort.Strings(dirs)
+	return dirs
+}
+
+// link writes one symlink at path pointing at src, relative, and excludes it. What stands
+// at path decides: a link qory wrote is replaced; a foreign path is replaced under force
+// when git can restore it, else passed over for a soft link and an error for a hard one.
+func link(root, path, src string, l Link, force bool, out *Linked) error {
+	err := removeOwnLink(root, path)
+	var foreign *ForeignPathError
+	if errors.As(err, &foreign) {
+		switch {
+		case force:
+			if reason := checkout.Restorable(root, path); reason != "" {
+				return &ForeignPathError{Path: path, Reason: reason}
+			}
+			if err := os.RemoveAll(path); err != nil {
+				return err
+			}
+			out.Replaced = append(out.Replaced, l.Checkout)
+		case l.Soft:
+			out.Skipped = append(out.Skipped, l.Checkout)
+			return nil
+		default:
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	target, err := filepath.Rel(filepath.Dir(path), src)
+	if err != nil {
+		return err
+	}
+	if err := os.Symlink(target, path); err != nil {
+		return err
+	}
+	return exclude(root, "/"+l.Checkout)
+}
+
+// clearForDir makes room for a real directory at path. A directory already there, the
+// checkout's own, is left for the links to go into. A symlink qory wrote there is removed.
+// A symlink qory did not write, or a file, is foreign and follows the rules of [link]:
+// replaced under force when git can restore it, passed over for a soft link, which
+// clearForDir reports as skip, and a [*ForeignPathError] for a hard one.
+func clearForDir(root, path string, l Link, force bool, out *Linked) (skip bool, err error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if info.IsDir() {
+		return false, nil
+	}
+	err = removeOwnLink(root, path)
+	if info.Mode()&os.ModeSymlink == 0 {
+		err = &ForeignPathError{Path: path}
+	}
+	var foreign *ForeignPathError
+	if !errors.As(err, &foreign) {
+		return false, err
+	}
+	switch {
+	case force:
+		if reason := checkout.Restorable(root, path); reason != "" {
+			return false, &ForeignPathError{Path: path, Reason: reason}
+		}
+		if err := os.RemoveAll(path); err != nil {
+			return false, err
+		}
+		out.Replaced = append(out.Replaced, l.Checkout)
+		return false, nil
+	case l.Soft:
+		out.Skipped = append(out.Skipped, l.Checkout)
+		return true, nil
+	default:
+		return false, err
+	}
+}
+
+// inside checks that no directory between root and path is a symlink, so a link is
+// written, pruned or removed where the checkout is and not wherever a repository's own
+// .github symlink points. The first symlink found is a [*ForeignPathError].
+func inside(root, path string) error {
+	rel, err := filepath.Rel(root, filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	dir := root
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if part == "." || part == "" {
+			continue
+		}
+		dir = filepath.Join(dir, part)
+		info, err := os.Lstat(dir)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, _ := os.Readlink(dir)
+			return &ForeignPathError{Path: dir, Target: target}
+		}
+	}
+	return nil
+}
+
+// asksFor reports whether the links hold one at the checkout path.
+func asksFor(links []Link, path string) bool {
+	for _, l := range links {
+		if l.Checkout == path {
+			return true
+		}
+	}
+	return false
+}
+
+// prune removes what qory wrote at path that the compose no longer asks for: a symlink
+// into the qory directory, or, in a real directory, every such symlink whose name keep does
+// not hold, and then the directory itself when nothing is left in it. Anything else at path
+// or inside it is left alone, and a path that does not exist is nothing to prune.
+func prune(root, path string, keep map[string]bool) error {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		_, err := unlinkOwn(root, path)
+		return err
+	}
+	items, err := os.ReadDir(path)
+	if err != nil {
+		return err
+	}
+	removed := 0
+	for _, it := range items {
+		if keep[it.Name()] {
+			continue
+		}
+		own, err := unlinkOwn(root, filepath.Join(path, it.Name()))
+		if err != nil {
+			return err
+		}
+		if own {
+			removed++
+		}
+	}
+	if removed > 0 {
+		_ = os.Remove(path)
+	}
+	return nil
+}
+
+// Unlink removes the runtime's links that qory wrote and returns their checkout paths as
+// the runtime declares them: ".claude" once for the links inside it. A link that one of
+// the others also declares, such as .agents/skills or AGENTS.md, is left for it, which is
+// how one runtime leaves a checkout composed for several. A directory the links left
+// empty, .claude itself or a parent such as .agents, is removed too, and a directory
+// nothing was removed from is left as it was.
+//
+// Anything else at a link's path is not qory's to remove: a hard link's path fails, and a
+// soft link's path is left alone, which is how a checkout's own AGENTS.md survives. Inside a
+// linked directory only the symlinks into the qory directory go, so
+// .claude/settings.local.json stays and so does the directory holding it. A link the
+// runtime wrote for a files entry, which Links with a nil result cannot name, goes the way
+// [LinkInto] takes one back and is returned by its own path, such as
+// .github/instructions/web.instructions.md. Each removed link's line leaves the
+// clone-local exclude file with it. Unlink leaves the home for the caller to remove, and
+// the qory directory's own line with it, through [RemoveExclude].
+func Unlink(p Runtime, root string, others ...Runtime) ([]string, error) {
+	shared := map[string]bool{}
+	for _, o := range others {
+		for _, l := range o.Links(nil) {
+			shared[l.Checkout] = true
+		}
+	}
+	var removed []string
+	for _, l := range p.Links(nil) {
+		if shared[l.Checkout] {
+			continue
+		}
+		path := filepath.Join(root, l.Checkout)
+		if err := inside(root, path); err != nil {
+			// A symlinked parent is the checkout's own; what lies behind it is not
+			// qory's to remove.
+			continue
+		}
+		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return removed, err
+		}
+		if info.IsDir() {
+			n, err := removeOwnLinks(root, path)
+			if err != nil {
+				return removed, err
+			}
+			if n == 0 {
+				continue
+			}
+			removed = append(removed, l.Checkout)
+			_ = os.Remove(path)
+		} else {
+			if err := removeOwnLink(root, path); err != nil {
+				if l.Soft {
+					continue
+				}
+				return removed, err
+			}
+			if err := unexclude(root, "/"+l.Checkout); err != nil {
+				return removed, err
+			}
+			removed = append(removed, l.Checkout)
+		}
+		if parent := filepath.Dir(path); parent != root {
+			_ = os.Remove(parent)
+		}
+	}
+	files, err := takeBack(p, root, nil)
+	removed = append(removed, files...)
+	return removed, err
+}
+
+// LinkModules writes the links a stack asks for to its modules: for every module with a
+// Link, a hard link at root/<Link> pointing, relative, at home/modules/<name>, under the
+// rules of a hard file link of [LinkInto]: a path qory did not write is a
+// [*ForeignPathError], and so is a symlinked parent, or replaced under force when git can
+// restore it, with its path recorded; anything untracked or modified is refused with the
+// reason git gives. The link is hard because permission rules and scripts name the path.
+// Every link written is listed in the clone-local exclude file. LinkModules then takes back
+// the links of previous, the names an earlier compose linked, that no module links now,
+// when qory wrote them; a name that now holds something else is left alone.
+//
+// Before it writes anything, a Link at a path a registered runtime links, or at the qory
+// directory, is refused with an error naming the runtime, because a module link there
+// would stand where the runtime's link goes.
+func LinkModules(res *compose.Result, root, home string, previous []string, force bool) (Linked, error) {
+	var out Linked
+	for _, l := range res.Modules {
+		if l.Link == "" {
+			continue
+		}
+		if err := moduleLinkFree(l.Link); err != nil {
+			return out, err
+		}
+	}
+	current := map[string]bool{}
+	for _, l := range res.Modules {
+		if l.Link == "" {
+			continue
+		}
+		current[l.Link] = true
+		src := filepath.Join(home, "modules", l.Name)
+		if _, err := os.Stat(src); err != nil {
+			return out, err
+		}
+		path := filepath.Join(root, l.Link)
+		hard := Link{Checkout: l.Link, Home: "modules/" + l.Name}
+		if err := inside(root, path); err != nil {
+			return out, err
+		}
+		if err := link(root, path, src, hard, force, &out); err != nil {
+			return out, err
+		}
+	}
+	for _, name := range previous {
+		if current[name] {
+			continue
+		}
+		path := filepath.Join(root, name)
+		if err := inside(root, path); err != nil {
+			continue
+		}
+		if _, err := unlinkOwn(root, path); err != nil {
+			return out, err
+		}
+	}
+	return out, nil
+}
+
+// moduleLinkFree refuses a module link name that a registered runtime links or that is the
+// qory directory.
+func moduleLinkFree(name string) error {
+	if name == checkout.Dir {
+		return fmt.Errorf("link %s is qory's own directory", name)
+	}
+	for _, rt := range Names() {
+		for _, l := range runtimes[rt].Links(nil) {
+			if l.Checkout == name {
+				return fmt.Errorf("link %s is where the %s runtime links %s", name, rt, l.Checkout)
+			}
+		}
+	}
+	return nil
+}
+
+// UnlinkModules removes the module links of the names in links that qory wrote, each with
+// its exclude line, and returns the names it removed. A name holding anything else, or
+// nothing, is passed over and no error.
+func UnlinkModules(root string, links []string) ([]string, error) {
+	var removed []string
+	for _, name := range links {
+		path := filepath.Join(root, name)
+		if err := inside(root, path); err != nil {
+			continue
+		}
+		own, err := unlinkOwn(root, path)
+		if err != nil {
+			return removed, err
+		}
+		if own {
+			removed = append(removed, name)
+		}
+	}
+	return removed, nil
+}
+
+// modulesPrefix is what the target of a module link starts with, from the checkout root:
+// the qory directory, the home and its modules directory.
+var modulesPrefix = filepath.Join(checkout.Dir, "harness", "modules") + string(filepath.Separator)
+
+// UnlinkModuleLinks removes every module link in the checkout root without the report that
+// names them, which is how a remove works after rm -rf .qory. It reads the root's own
+// entries and takes each symlink whose relative target, cleaned, is under
+// .qory/harness/modules, under the rules of [UnlinkModules], each with its exclude line, and
+// returns the names removed in sorted order. A symlink to anywhere else, an absolute one,
+// and a link inside a directory stay.
+func UnlinkModuleLinks(root string) ([]string, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, err
+	}
+	var removed []string
+	for _, e := range entries {
+		if e.Type()&os.ModeSymlink == 0 {
+			continue
+		}
+		path := filepath.Join(root, e.Name())
+		target, err := os.Readlink(path)
+		if err != nil {
+			return removed, err
+		}
+		if filepath.IsAbs(target) || !strings.HasPrefix(filepath.Clean(target), modulesPrefix) {
+			continue
+		}
+		own, err := unlinkOwn(root, path)
+		if err != nil {
+			return removed, err
+		}
+		if own {
+			removed = append(removed, e.Name())
+		}
+	}
+	sort.Strings(removed)
+	return removed, nil
+}
+
+// removeOwnLinks removes every symlink into the checkout's qory directory inside dir, with
+// its exclude line, and returns how many it removed. Files, directories and other links
+// stay.
+func removeOwnLinks(root, dir string) (int, error) {
+	items, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, it := range items {
+		own, err := unlinkOwn(root, filepath.Join(dir, it.Name()))
+		if err != nil {
+			return n, err
+		}
+		if own {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// unlinkOwn removes path when it is a link qory wrote into this checkout, takes its line
+// out of the exclude file, and reports whether it did. Anything else at path, or nothing,
+// is left alone and reads as false.
+func unlinkOwn(root, path string) (bool, error) {
+	own, err := ownLink(root, path)
+	if err != nil || !own {
+		return false, err
+	}
+	if err := os.Remove(path); err != nil {
+		return false, err
+	}
+	line, err := excludeLine(root, path)
+	if err != nil {
+		return false, err
+	}
+	return true, unexclude(root, line)
+}
+
+// excludeLine is the exclude file's line for path: a slash and the path relative to
+// root, with forward slashes, the way [exclude] writes a link's line.
+func excludeLine(root, path string) (string, error) {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return "", err
+	}
+	return "/" + filepath.ToSlash(rel), nil
+}
+
+// ownLink reports whether path is a link qory wrote into this checkout: a relative symlink
+// that resolves, from the directory it really stands in, into the checkout's own qory
+// directory. A link into another checkout's qory directory, reached through a symlinked
+// parent say, is not qory's here. A path that does not exist reads as not qory's. A qory
+// directory that is gone, after rm -rf .qory say, still has its place under the resolved
+// root, so the links left dangling are still qory's and a remove takes them.
+func ownLink(root, path string) (bool, error) {
+	resolved, err := linkTarget(path)
+	if err != nil || resolved == "" {
+		return false, err
+	}
+	qoryDir, err := realQoryDir(root)
+	if err != nil {
+		return false, nil
+	}
+	return resolved == qoryDir || strings.HasPrefix(resolved, qoryDir+string(filepath.Separator)), nil
+}
+
+// linkTarget is where the relative symlink at path points: its target joined to the
+// directory it really stands in, every symlink above resolved, and cleaned. It is "" for
+// a path that does not exist, is not a symlink, holds an absolute target, or stands in a
+// directory that cannot be resolved.
+func linkTarget(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return "", nil
+	}
+	target, err := os.Readlink(path)
+	if err != nil {
+		return "", err
+	}
+	if filepath.IsAbs(target) {
+		return "", nil
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if err != nil {
+		return "", nil
+	}
+	return filepath.Clean(filepath.Join(parent, target)), nil
+}
+
+// realQoryDir is the checkout's qory directory with every symlink above it resolved, the
+// form a link's resolved target takes. When the directory does not exist, it is the
+// resolved root joined with [checkout.Dir]. Any other failure to resolve it is an error.
+func realQoryDir(root string) (string, error) {
+	dir := checkout.QoryDir(root)
+	if _, err := os.Lstat(dir); errors.Is(err, os.ErrNotExist) {
+		resolved, err := filepath.EvalSymlinks(root)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Clean(filepath.Join(resolved, checkout.Dir)), nil
+	}
+	return filepath.EvalSymlinks(dir)
+}
+
+// removeOwnLink removes path when it is a link qory wrote into this checkout. A path that
+// does not exist is nothing to remove and no error. A regular file, a directory, or a
+// link pointing elsewhere is a [*ForeignPathError] naming what stands in the way, and it
+// is the check that keeps a render from eating a repository's own files.
+func removeOwnLink(root, path string) error {
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -219,14 +998,15 @@ func removeOwnLink(path string) error {
 		return err
 	}
 	if info.Mode()&os.ModeSymlink == 0 {
-		return fmt.Errorf("%s is not a link qory wrote; qory does not replace it", path)
+		return &ForeignPathError{Path: path}
 	}
-	target, err := os.Readlink(path)
+	own, err := ownLink(root, path)
 	if err != nil {
 		return err
 	}
-	if filepath.IsAbs(target) || !strings.Contains(filepath.ToSlash(target), "/"+checkout.Dir+"/") && !strings.HasPrefix(filepath.ToSlash(target), checkout.Dir+"/") {
-		return fmt.Errorf("%s links to %s, which qory did not write; qory does not replace it", path, target)
+	if !own {
+		target, _ := os.Readlink(path)
+		return &ForeignPathError{Path: path, Target: target}
 	}
 	return os.Remove(path)
 }
@@ -257,24 +1037,60 @@ func exclude(root, line string) error {
 	return os.WriteFile(file, []byte(text+line+"\n"), 0o644)
 }
 
+// RemoveExclude takes one line out of the checkout's clone-local exclude file, the way
+// the links take theirs when they go. The command module calls it for the qory directory's
+// own line once it has removed the directory.
+func RemoveExclude(root, line string) error { return unexclude(root, line) }
+
+// unexclude removes every line of the checkout's clone-local exclude file that reads as
+// line, and leaves the file's other bytes as they are. A file without the line, no file,
+// or a checkout outside git is nothing to change and no error.
+func unexclude(root, line string) error {
+	file := checkout.ExcludeFile(root)
+	if file == "" {
+		return nil
+	}
+	data, err := os.ReadFile(file)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var kept []string
+	found := false
+	for _, l := range strings.SplitAfter(string(data), "\n") {
+		if strings.TrimSpace(l) == line {
+			found = true
+			continue
+		}
+		kept = append(kept, l)
+	}
+	if !found {
+		return nil
+	}
+	return os.WriteFile(file, []byte(strings.Join(kept, "")), 0o644)
+}
+
 // LinkEntries writes one symlink per composed entry of the kinds in keep, at
-// dir/<kind>/<name>, pointing at the entry in its layer. Skills and hooks keep their
-// name, the Markdown kinds get ".md" appended. Entries of any other kind are left out,
-// and it is the caller's job to pass every kind the runtime reads from a link.
+// dir/<kind>/<name>, pointing at the entry in its module. Skills and hooks keep their
+// name, the Markdown kinds get ".md" appended. Every kind directory named is created,
+// with no entry of that kind as well, so a checkout link to it resolves. Entries of any
+// other kind are left out, and it is the caller's job to pass every kind the runtime
+// reads from a link.
 func LinkEntries(res *compose.Result, dir string, keep ...string) error {
 	wanted := map[string]bool{}
 	for _, k := range keep {
 		wanted[k] = true
+		if err := os.MkdirAll(filepath.Join(dir, k), 0o755); err != nil {
+			return err
+		}
 	}
 	for _, e := range res.Entries {
 		if !wanted[e.Kind] {
 			continue
 		}
-		kindDir := filepath.Join(dir, e.Kind)
-		if err := os.MkdirAll(kindDir, 0o755); err != nil {
-			return err
-		}
-		link := filepath.Join(kindDir, e.Name)
+		link := filepath.Join(dir, e.Kind, e.Name)
 		switch e.Kind {
 		case "skills", "hooks":
 		default:
@@ -287,9 +1103,27 @@ func LinkEntries(res *compose.Result, dir string, keep ...string) error {
 	return nil
 }
 
+// linkModules writes one symlink per module at dir/modules/<name>, pointing at the module's
+// directory, so a settings fragment or a hook reaches a module's other files as
+// $QORY_HARNESS_HOME/modules/<name>/<path>.
+func linkModules(res *compose.Result, dir string) error {
+	modules := filepath.Join(dir, "modules")
+	if err := os.MkdirAll(modules, 0o755); err != nil {
+		return err
+	}
+	for _, l := range res.Modules {
+		if err := os.Symlink(l.Dir, filepath.Join(modules, l.Name)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Skipped lists the composed entries of the kinds a runtime has no place for, as
 // "<kind>/<name>", in the order the compose produced them. The compose prints the list so
-// an entry that went nowhere is announced rather than silently dropped.
+// an entry that went nowhere is announced rather than silently dropped. A files entry is
+// listed only when it is for the runtime, as "files/goose/<path>": one for another runtime
+// is neither rendered nor skipped, like a settings fragment for another runtime.
 func Skipped(p Runtime, res *compose.Result) []string {
 	skip := map[string]bool{}
 	for _, k := range p.Skips() {
@@ -297,20 +1131,26 @@ func Skipped(p Runtime, res *compose.Result) []string {
 	}
 	var out []string
 	for _, e := range res.Entries {
-		if skip[e.Kind] {
-			out = append(out, e.Kind+"/"+e.Name)
+		if !skip[e.Kind] {
+			continue
 		}
+		if e.Kind == FilesKind {
+			if _, ok := FileFor(e, p.Name()); !ok {
+				continue
+			}
+		}
+		out = append(out, e.Kind+"/"+e.Name)
 	}
 	return out
 }
 
 // WriteSettings writes the runtime's merged settings files into dir, one per target file
-// a layer contributed a fragment to, with every $QORY_HARNESS_HOME already replaced by
+// a module contributed a fragment to, with every $QORY_HARNESS_HOME already replaced by
 // home. A ".toml" name is encoded as TOML, every other name as indented JSON.
 //
 // patch, when it is not nil, is called with each file's name and its merged map before
 // the encoding, and changing the map there is how a runtime writes the target model.
-// Names in ensure are written even when no layer contributed to them, so a model reaches
+// Names in ensure are written even when no module contributed to them, so a model reaches
 // a file that would otherwise not exist.
 func WriteSettings(res *compose.Result, runtime, dir, home string, ensure []string, patch func(file string, m map[string]any)) error {
 	files := res.SettingsFiles(runtime)
@@ -330,19 +1170,17 @@ func WriteSettings(res *compose.Result, runtime, dir, home string, ensure []stri
 		if patch != nil {
 			patch(file, m)
 		}
-		var data []byte
-		var err error
-		switch filepath.Ext(file) {
-		case ".toml":
-			data, err = EncodeTOML(m)
-		default:
-			data, err = json.MarshalIndent(m, "", "  ")
-			data = append(data, '\n')
+		if filepath.Ext(file) == ".toml" {
+			data, err := EncodeTOML(m)
+			if err != nil {
+				return err
+			}
+			if err := WriteFile(dir, file, data); err != nil {
+				return err
+			}
+			continue
 		}
-		if err != nil {
-			return err
-		}
-		if err := WriteFile(dir, file, data); err != nil {
+		if err := WriteJSON(dir, file, m); err != nil {
 			return err
 		}
 	}
@@ -402,7 +1240,7 @@ func WriteAgents(res *compose.Result, dir, sub, suffix string, keep ...string) e
 		if e.Kind != "agents" {
 			continue
 		}
-		doc, err := layer.ReadDocument(e.Path)
+		doc, err := module.ReadDocument(e.Path)
 		if err != nil {
 			return err
 		}
@@ -441,6 +1279,33 @@ func contains(list []string, s string) bool {
 	return false
 }
 
+// PutServers merges the MCP servers into m under key, on top of whatever a settings
+// fragment put there, so a server declared as an entry wins over one written into a
+// fragment by hand. It leaves m alone when servers is nil.
+func PutServers(m map[string]any, key string, servers map[string]any) {
+	if servers == nil {
+		return
+	}
+	existing, _ := m[key].(map[string]any)
+	if existing == nil {
+		existing = map[string]any{}
+	}
+	for name, v := range servers {
+		existing[name] = v
+	}
+	m[key] = existing
+}
+
+// WriteJSON writes v as indented JSON with a trailing newline to dir/name, through
+// [WriteFile].
+func WriteJSON(dir, name string, v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	return WriteFile(dir, name, append(data, '\n'))
+}
+
 // WriteFile writes data to dir/name with mode 0644, creating the parent directories and
 // overwriting a file already there. name may hold separators, such as
 // "agents/reviewer.md".
@@ -450,4 +1315,22 @@ func WriteFile(dir, name string, data []byte) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o644)
+}
+
+// Env is the variables a runtime writes where it keeps environment: the fragment's own,
+// which existing is the map already there, then what the harness exports rendered for
+// home, then QORY_HARNESS_HOME as the home, which nothing overrides. The result is a new
+// map with string values, the shape a settings file encodes.
+func Env(existing any, res *compose.Result, home string) map[string]any {
+	env := map[string]any{}
+	if m, ok := existing.(map[string]any); ok {
+		for k, v := range m {
+			env[k] = v
+		}
+	}
+	for name, value := range res.EnvFor(home) {
+		env[name] = value
+	}
+	env["QORY_HARNESS_HOME"] = home
+	return env
 }

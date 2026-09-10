@@ -1,0 +1,1 @@
+module core: hooks/scripts is a directory; a hook is one file. Keep its helpers elsewhere in the module, reached as $QORY_HARNESS_HOME/modules/core/<path>

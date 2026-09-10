@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/qoryai/qory/internal/compose"
-	"github.com/qoryai/qory/internal/profile"
+	"github.com/qoryai/qory/internal/stack"
 )
 
 // writeTree writes a checkout under a fresh temporary directory and returns it. A key ending
@@ -18,6 +18,17 @@ import (
 func writeTree(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
+	// A module directory named in files gets a manifest named after it, unless the test
+	// writes one itself.
+	for name := range files {
+		if rest, ok := strings.CutPrefix(name, "modules/"); ok {
+			module, _, _ := strings.Cut(rest, "/")
+			manifest := "modules/" + module + "/qory-module.yaml"
+			if _, ok := files[manifest]; !ok && module != "" {
+				files[manifest] = "apiVersion: qory.ai/v1alpha1\nname: " + module + "\n"
+			}
+		}
+	}
 	for name, body := range files {
 		path := filepath.Join(dir, name)
 		if strings.HasSuffix(name, "/") {
@@ -36,30 +47,29 @@ func writeTree(t *testing.T, files map[string]string) string {
 	return dir
 }
 
-// composeTree loads the profile of a written checkout and composes it. The profile is named
+// composeTree loads the stack of a written checkout and composes it. The stack is named
 // by its absolute path, so the test needs no working directory of its own.
 func composeTree(t *testing.T, files map[string]string) (*compose.Result, error) {
 	t.Helper()
 	dir := writeTree(t, files)
-	p, err := profile.Load(filepath.Join(dir, profile.FileName))
+	p, err := stack.Load(filepath.Join(dir, stack.FileName))
 	if err != nil {
 		return nil, err
 	}
 	return compose.Compose(p)
 }
 
-// twoLayers is a profile over layers a and b, in that order.
-const twoLayers = `apiVersion: qory.ai/v1alpha1
-kind: HarnessProfile
+// twoModules is a stack over modules a and b, in that order.
+const twoModules = `apiVersion: qory.ai/v1alpha1
 target:
   runtime: claude
-layers:
+modules:
   - name: a
     source:
-      path: layers/a
+      path: modules/a
   - name: b
     source:
-      path: layers/b
+      path: modules/b
 `
 
 // jsonValue decodes a JSON document into the types the merge works on.
@@ -72,13 +82,13 @@ func jsonValue(t *testing.T, doc string) map[string]any {
 	return v
 }
 
-// TestSettingsMergeTwoLayersIntoOneTargetFile concatenates permissions without a duplicate,
-// concatenates hooks, lets the later layer win an env key, merges a nested map deeply and
-// replaces any other list.
-func TestSettingsMergeTwoLayersIntoOneTargetFile(t *testing.T) {
+// TestSettingsMergeTwoModulesIntoOneTargetFile concatenates permissions without a duplicate,
+// concatenates hooks, merges env and a nested map key by key, and keeps a list the
+// second module repeats unchanged.
+func TestSettingsMergeTwoModulesIntoOneTargetFile(t *testing.T) {
 	res, err := composeTree(t, map[string]string{
-		profile.FileName: twoLayers,
-		"layers/a/settings/claude/settings.json": `{
+		stack.FileName: twoModules,
+		"modules/a/settings/claude/settings.json": `{
 			"permissions": {"allow": ["Bash(git status:*)", "Read"], "deny": ["Bash(rm:*)"]},
 			"hooks": {"PreToolUse": [{"matcher": "Bash"}]},
 			"env": {"QORY_A": "a", "SHARED": "a"},
@@ -86,12 +96,12 @@ func TestSettingsMergeTwoLayersIntoOneTargetFile(t *testing.T) {
 			"nested": {"deep": {"one": 1}},
 			"other": ["a"]
 		}`,
-		"layers/b/settings/claude/settings.json": `{
+		"modules/b/settings/claude/settings.json": `{
 			"permissions": {"allow": ["Read", "Bash(git diff:*)"]},
 			"hooks": {"PreToolUse": [{"matcher": "Write"}]},
-			"env": {"SHARED": "b"},
+			"env": {"QORY_B": "b", "SHARED": "a"},
 			"nested": {"deep": {"two": 2}},
-			"other": ["b"]
+			"other": ["a"]
 		}`,
 	})
 	if err != nil {
@@ -100,10 +110,10 @@ func TestSettingsMergeTwoLayersIntoOneTargetFile(t *testing.T) {
 	want := jsonValue(t, `{
 		"permissions": {"allow": ["Bash(git status:*)", "Read", "Bash(git diff:*)"], "deny": ["Bash(rm:*)"]},
 		"hooks": {"PreToolUse": [{"matcher": "Bash"}, {"matcher": "Write"}]},
-		"env": {"QORY_A": "a", "SHARED": "b"},
+		"env": {"QORY_A": "a", "QORY_B": "b", "SHARED": "a"},
 		"model": "opus",
 		"nested": {"deep": {"one": 1, "two": 2}},
-		"other": ["b"]
+		"other": ["a"]
 	}`)
 	got := res.Settings["claude"]["settings.json"]
 	if !reflect.DeepEqual(got, want) {
@@ -111,16 +121,16 @@ func TestSettingsMergeTwoLayersIntoOneTargetFile(t *testing.T) {
 	}
 }
 
-// TestSettingsFilesAreSorted lists the target files a runtime's layers contributed to, and
-// nothing for a runtime no layer wrote for.
+// TestSettingsFilesAreSorted lists the target files a runtime's modules contributed to, and
+// nothing for a runtime no module wrote for.
 func TestSettingsFilesAreSorted(t *testing.T) {
 	res, err := composeTree(t, map[string]string{
-		profile.FileName:                         twoLayers,
-		"layers/a/settings/claude/settings.json": "{}",
-		"layers/a/settings/claude/mcp.json":      "{}",
-		"layers/b/settings/claude/agents.json":   "{}",
-		"layers/b/settings/claude/settings.json": "{}",
-		"layers/b/settings/codex/config.toml":    "\n",
+		stack.FileName: twoModules,
+		"modules/a/settings/claude/settings.json": "{}",
+		"modules/a/settings/claude/mcp.json":      "{}",
+		"modules/b/settings/claude/agents.json":   "{}",
+		"modules/b/settings/claude/settings.json": "{}",
+		"modules/b/settings/codex/config.toml":    "\n",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -141,14 +151,14 @@ func TestSettingsFilesAreSorted(t *testing.T) {
 // inside a map and inside a list, and leaves the merged settings themselves alone.
 func TestSettingsForSubstitutesTheHarnessHome(t *testing.T) {
 	res, err := composeTree(t, map[string]string{
-		profile.FileName: twoLayers,
-		"layers/a/settings/claude/settings.json": `{
+		stack.FileName: twoModules,
+		"modules/a/settings/claude/settings.json": `{
 			"hooks": {"PreToolUse": [{"command": "$QORY_HARNESS_HOME/hooks/pre.sh"}]},
 			"env": {"QORY_HARNESS_HOME": "$QORY_HARNESS_HOME"},
 			"paths": ["$QORY_HARNESS_HOME/skills", "plain"],
 			"count": 1
 		}`,
-		"layers/b/": "",
+		"modules/b/": "",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -170,7 +180,7 @@ func TestSettingsForSubstitutesTheHarnessHome(t *testing.T) {
 	}
 	empty := res.SettingsFor("claude", "mcp.json", home)
 	if empty == nil || len(empty) != 0 {
-		t.Fatalf("a file no layer contributed to is %v, want an empty map", empty)
+		t.Fatalf("a file no module contributed to is %v, want an empty map", empty)
 	}
 }
 
@@ -178,20 +188,19 @@ func TestSettingsForSubstitutesTheHarnessHome(t *testing.T) {
 // its array of tables turned into the list the merge works on.
 func TestSettingsMergeATomlFragment(t *testing.T) {
 	res, err := composeTree(t, map[string]string{
-		profile.FileName: `apiVersion: qory.ai/v1alpha1
-kind: HarnessProfile
+		stack.FileName: `apiVersion: qory.ai/v1alpha1
 target:
   runtime: codex
-layers:
+modules:
   - name: a
     source:
-      path: layers/a
+      path: modules/a
   - name: b
     source:
-      path: layers/b
+      path: modules/b
 `,
-		"layers/a/settings/codex/config.toml": "model = \"gpt-5\"\n\n[permissions]\nallow = [\"read\", \"write\"]\n\n[[hooks]]\nmatcher = \"Bash\"\n\n[profiles.review]\nmodel = \"o3\"\n",
-		"layers/b/settings/codex/config.toml": "[permissions]\nallow = [\"write\", \"exec\"]\n\n[[hooks]]\nmatcher = \"Write\"\n\n[profiles.ship]\nmodel = \"gpt-5\"\n",
+		"modules/a/settings/codex/config.toml": "model = \"gpt-5\"\n\n[permissions]\nallow = [\"read\", \"write\"]\n\n[[hooks]]\nmatcher = \"Bash\"\n\n[stacks.review]\nmodel = \"o3\"\n",
+		"modules/b/settings/codex/config.toml": "[permissions]\nallow = [\"write\", \"exec\"]\n\n[[hooks]]\nmatcher = \"Write\"\n\n[stacks.ship]\nmodel = \"gpt-5\"\n",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -203,7 +212,7 @@ layers:
 			map[string]any{"matcher": "Bash"},
 			map[string]any{"matcher": "Write"},
 		},
-		"profiles": map[string]any{
+		"stacks": map[string]any{
 			"review": map[string]any{"model": "o3"},
 			"ship":   map[string]any{"model": "gpt-5"},
 		},
@@ -215,7 +224,7 @@ layers:
 }
 
 // TestSettingsRefuseAFragmentQoryCannotRead covers an extension that is neither .json nor
-// .toml, and a fragment that does not parse. Every message names the layer and the file.
+// .toml, and a fragment that does not parse. Every message names the module and the file.
 func TestSettingsRefuseAFragmentQoryCannotRead(t *testing.T) {
 	cases := []struct {
 		name string
@@ -231,15 +240,15 @@ func TestSettingsRefuseAFragmentQoryCannotRead(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := composeTree(t, map[string]string{
-				profile.FileName:                     twoLayers,
-				"layers/a/settings/claude/" + c.file: c.body,
-				"layers/b/":                          "",
+				stack.FileName:                        twoModules,
+				"modules/a/settings/claude/" + c.file: c.body,
+				"modules/b/":                          "",
 			})
 			if err == nil {
 				t.Fatalf("read %s without an error", c.file)
 			}
-			if !strings.HasPrefix(err.Error(), "layer a: ") {
-				t.Fatalf("error %q does not name the layer", err)
+			if !strings.HasPrefix(err.Error(), "module a: ") {
+				t.Fatalf("error %q does not name the module", err)
 			}
 			if !strings.Contains(err.Error(), c.file) || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("error %q does not name %q", err, c.want)
@@ -248,71 +257,69 @@ func TestSettingsRefuseAFragmentQoryCannotRead(t *testing.T) {
 	}
 }
 
-// TestExcludeNamesNothingTheLayerShips refuses an exclude that drops nothing, so a renamed
+// TestExcludeNamesNothingTheModuleShips refuses an exclude that drops nothing, so a renamed
 // entry does not leave a stale exclude behind.
-func TestExcludeNamesNothingTheLayerShips(t *testing.T) {
+func TestExcludeNamesNothingTheModuleShips(t *testing.T) {
 	_, err := composeTree(t, map[string]string{
-		profile.FileName: `apiVersion: qory.ai/v1alpha1
-kind: HarnessProfile
+		stack.FileName: `apiVersion: qory.ai/v1alpha1
 target:
   runtime: claude
-layers:
+modules:
   - name: core
     source:
-      path: layers/core
+      path: modules/core
     exclude:
       skills: [gone]
 `,
-		"layers/core/skills/greet/SKILL.md": "# greet\n",
+		"modules/core/skills/greet/SKILL.md": "# greet\n",
 	})
 	if err == nil {
 		t.Fatal("composed with an exclude that names nothing")
 	}
-	if want := "layer core: exclude skills/gone names nothing the layer ships"; err.Error() != want {
+	if want := "module core: exclude skills/gone names nothing the module ships"; err.Error() != want {
 		t.Fatalf("error %q, want %q", err, want)
 	}
 }
 
-// TestCollisionSuggestKeepsTheLastLayer resolves every collision by excluding it from every
-// layer but the last, and returns the layers to change in the order the caller gives.
-func TestCollisionSuggestKeepsTheLastLayer(t *testing.T) {
+// TestCollisionSuggestKeepsTheLastModule resolves every collision by excluding it from every
+// module but the last, and returns the modules to change in the order the caller gives.
+func TestCollisionSuggestKeepsTheLastModule(t *testing.T) {
 	_, err := composeTree(t, map[string]string{
-		profile.FileName: `apiVersion: qory.ai/v1alpha1
-kind: HarnessProfile
+		stack.FileName: `apiVersion: qory.ai/v1alpha1
 target:
   runtime: claude
-layers:
+modules:
   - name: a
     source:
-      path: layers/a
+      path: modules/a
   - name: b
     source:
-      path: layers/b
+      path: modules/b
   - name: c
     source:
-      path: layers/c
+      path: modules/c
 `,
-		"layers/a/skills/greet/SKILL.md": "# greet\n",
-		"layers/b/skills/greet/SKILL.md": "# greet\n",
-		"layers/c/skills/greet/SKILL.md": "# greet\n",
-		"layers/a/agents/reviewer.md":    "reviewer\n",
-		"layers/c/agents/reviewer.md":    "reviewer\n",
-		"layers/b/commands/ship.md":      "ship\n",
+		"modules/a/skills/greet/SKILL.md": "# greet\n",
+		"modules/b/skills/greet/SKILL.md": "# greet\n",
+		"modules/c/skills/greet/SKILL.md": "# greet\n",
+		"modules/a/agents/reviewer.md":    "reviewer\n",
+		"modules/c/agents/reviewer.md":    "reviewer\n",
+		"modules/b/commands/ship.md":      "ship\n",
 	})
 	var ce *compose.CollisionError
 	if !errors.As(err, &ce) {
 		t.Fatalf("error %v, want a *compose.CollisionError", err)
 	}
 	wantCollisions := []compose.Collision{
-		{Kind: "agents", Name: "reviewer", Layers: []string{"a", "c"}},
-		{Kind: "skills", Name: "greet", Layers: []string{"a", "b", "c"}},
+		{Kind: "agents", Name: "reviewer", Modules: []string{"a", "c"}},
+		{Kind: "skills", Name: "greet", Modules: []string{"a", "b", "c"}},
 	}
 	if !reflect.DeepEqual(ce.Collisions, wantCollisions) {
 		t.Fatalf("collisions %+v, want %+v", ce.Collisions, wantCollisions)
 	}
-	layers, excludes := ce.Suggest([]string{"a", "b", "c"})
-	if !reflect.DeepEqual(layers, []string{"a", "b"}) {
-		t.Fatalf("layers %v, want [a b]", layers)
+	modules, excludes := ce.Suggest([]string{"a", "b", "c"})
+	if !reflect.DeepEqual(modules, []string{"a", "b"}) {
+		t.Fatalf("modules %v, want [a b]", modules)
 	}
 	wantExcludes := map[string]map[string][]string{
 		"a": {"agents": {"reviewer"}, "skills": {"greet"}},
@@ -321,14 +328,14 @@ layers:
 	if !reflect.DeepEqual(excludes, wantExcludes) {
 		t.Fatalf("excludes %v, want %v", excludes, wantExcludes)
 	}
-	if layers, _ := ce.Suggest([]string{"c", "b", "a"}); !reflect.DeepEqual(layers, []string{"b", "a"}) {
-		t.Fatalf("layers %v, want [b a] for the order the caller gave", layers)
+	if modules, _ := ce.Suggest([]string{"c", "b", "a"}); !reflect.DeepEqual(modules, []string{"b", "a"}) {
+		t.Fatalf("modules %v, want [b a] for the order the caller gave", modules)
 	}
-	want := "agents/reviewer is provided by 2 layers: a@working-tree, c@working-tree\n" +
+	want := "agents/reviewer is provided by 2 modules: a@working-tree, c@working-tree\n" +
 		"  keep one and exclude the others, for example\n" +
 		"    a: exclude: {agents: [reviewer]}\n" +
 		"\n" +
-		"skills/greet is provided by 3 layers: a@working-tree, b@working-tree, c@working-tree\n" +
+		"skills/greet is provided by 3 modules: a@working-tree, b@working-tree, c@working-tree\n" +
 		"  keep one and exclude the others, for example\n" +
 		"    a: exclude: {skills: [greet]}\n" +
 		"    b: exclude: {skills: [greet]}"
@@ -337,28 +344,27 @@ layers:
 	}
 }
 
-// TestInstructionsAreConcatenatedInLayerOrder joins every AGENTS.md a layer ships, in the
-// order the profile lists the layers, with one blank line between them.
-func TestInstructionsAreConcatenatedInLayerOrder(t *testing.T) {
+// TestInstructionsAreConcatenatedInModuleOrder joins every AGENTS.md a module ships, in the
+// order the stack lists the modules, with one blank line between them.
+func TestInstructionsAreConcatenatedInModuleOrder(t *testing.T) {
 	res, err := composeTree(t, map[string]string{
-		profile.FileName: `apiVersion: qory.ai/v1alpha1
-kind: HarnessProfile
+		stack.FileName: `apiVersion: qory.ai/v1alpha1
 target:
   runtime: claude
-layers:
+modules:
   - name: b
     source:
-      path: layers/b
+      path: modules/b
   - name: a
     source:
-      path: layers/a
+      path: modules/a
   - name: c
     source:
-      path: layers/c
+      path: modules/c
 `,
-		"layers/a/AGENTS.md": "From a.\n\n\n",
-		"layers/b/AGENTS.md": "From b.",
-		"layers/c/":          "",
+		"modules/a/AGENTS.md": "From a.\n\n\n",
+		"modules/b/AGENTS.md": "From b.",
+		"modules/c/":          "",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -368,12 +374,12 @@ layers:
 	}
 }
 
-// TestComposeWithoutInstructions leaves the instructions empty when no layer ships one.
+// TestComposeWithoutInstructions leaves the instructions empty when no module ships one.
 func TestComposeWithoutInstructions(t *testing.T) {
 	res, err := composeTree(t, map[string]string{
-		profile.FileName:               twoLayers,
-		"layers/a/commands/ship.md":    "ship\n",
-		"layers/b/hooks/pre-commit.sh": "#!/bin/sh\n",
+		stack.FileName:                  twoModules,
+		"modules/a/commands/ship.md":    "ship\n",
+		"modules/b/hooks/pre-commit.sh": "#!/bin/sh\n",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -381,40 +387,73 @@ func TestComposeWithoutInstructions(t *testing.T) {
 	if res.Instructions != "" {
 		t.Fatalf("instructions %q, want none", res.Instructions)
 	}
-	// The entries are sorted by kind and name, whatever order the layers come in.
+	// The entries are sorted by kind and name, whatever order the modules come in.
 	if len(res.Entries) != 2 ||
-		res.Entries[0].Kind != "commands" || res.Entries[0].Layer != "a" ||
-		res.Entries[1].Kind != "hooks" || res.Entries[1].Layer != "b" {
+		res.Entries[0].Kind != "commands" || res.Entries[0].Module != "a" ||
+		res.Entries[1].Kind != "hooks" || res.Entries[1].Module != "b" {
 		t.Fatalf("entries %+v", res.Entries)
 	}
 }
 
-// TestComposeRecordsEveryLayer keeps the profile's name for a layer, the layer's own name
-// from its manifest, the source as the profile writes it and the pin.
-func TestComposeRecordsEveryLayer(t *testing.T) {
+// TestComposeRecordsEveryModule is a stack naming module a whose manifest says acme-core:
+// the compose refuses the mismatch; with the entry given by source alone, the manifest's
+// name is the module's, and the source and the pin are recorded as written.
+func TestComposeRecordsEveryModule(t *testing.T) {
+	_, err := composeTree(t, map[string]string{
+		stack.FileName:               twoModules,
+		"modules/a/qory-module.yaml": "apiVersion: qory.ai/v1alpha1\nname: acme-core\n",
+		"modules/a/commands/ship.md": "ship\n",
+	})
+	if err == nil || err.Error() != "module a: the module at modules/a is named acme-core in its qory-module.yaml" {
+		t.Fatalf("err = %v", err)
+	}
 	res, err := composeTree(t, map[string]string{
-		profile.FileName:               twoLayers,
-		"layers/a/harness.yaml":        "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: acme-core\n",
-		"layers/a/commands/ship.md":    "ship\n",
-		"layers/b/hooks/pre-commit.sh": "#!/bin/sh\n",
+		stack.FileName:                  strings.Replace(twoModules, "  - name: a\n    source:\n      path: modules/a\n", "  - source:\n      path: modules/a\n", 1),
+		"modules/a/qory-module.yaml":    "apiVersion: qory.ai/v1alpha1\nname: acme-core\n",
+		"modules/a/commands/ship.md":    "ship\n",
+		"modules/b/hooks/pre-commit.sh": "#!/bin/sh\n",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Layers) != 2 {
-		t.Fatalf("%d layers", len(res.Layers))
+	if len(res.Modules) != 2 {
+		t.Fatalf("modules %+v", res.Modules)
 	}
-	a, b := res.Layers[0], res.Layers[1]
-	if a.Name != "a" || a.ManifestName != "acme-core" || a.Source != "layers/a" || a.Pin != "working-tree" || a.Variant != "" {
-		t.Fatalf("layers[0] %+v", a)
+	a, b := res.Modules[0], res.Modules[1]
+	if a.Name != "acme-core" || a.Source != "modules/a" || a.Pin != "working-tree" || a.Variant != "" {
+		t.Errorf("module a: %+v", a)
 	}
-	if b.Name != "b" || b.ManifestName != "" || b.Source != "layers/b" {
-		t.Fatalf("layers[1] %+v", b)
+	if b.Name != "b" || b.Source != "modules/b" {
+		t.Errorf("module b: %+v", b)
+	}
+	if res.Entries[0].Module != "acme-core" {
+		t.Errorf("entries: %+v", res.Entries)
 	}
 }
 
-// TestComposeRefuses covers the errors a layer raises before its entries are read: a source
-// that is not there, a manifest qory turns down, and a runtime no variant serves.
+// TestComposeReadsAModuleByNameAlone is an entry that gives a name and no source: the
+// module is read from modules/<name> under the stack's root.
+func TestComposeReadsAModuleByNameAlone(t *testing.T) {
+	res, err := composeTree(t, map[string]string{
+		stack.FileName:               strings.Replace(twoModules, "  - name: a\n    source:\n      path: modules/a\n", "  - name: a\n", 1),
+		"modules/a/commands/ship.md": "ship\n",
+		"modules/b/":                 "",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := res.Modules[0]
+	if a.Name != "a" || a.Source != "modules/a" || !strings.HasSuffix(a.Dir, filepath.Join("modules", "a")) {
+		t.Errorf("module a: %+v", a)
+	}
+	if len(res.Entries) != 1 || res.Entries[0].Module != "a" {
+		t.Errorf("entries: %+v", res.Entries)
+	}
+}
+
+// TestComposeRefuses covers the errors a module raises before its entries are read: a source
+// that is not there, a directory without a manifest, a manifest qory turns down, one name
+// composed from two sources, and a runtime no variant serves.
 func TestComposeRefuses(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -423,44 +462,63 @@ func TestComposeRefuses(t *testing.T) {
 	}{
 		{
 			name:  "a source that is not there",
-			files: map[string]string{profile.FileName: twoLayers, "layers/b/": ""},
-			want:  "layer a: ",
+			files: map[string]string{stack.FileName: twoModules, "modules/b/": ""},
+			want:  "module a: ",
+		},
+		{
+			// The module sits outside modules/, where writeTree adds no manifest of its own.
+			name: "a directory without a manifest",
+			files: map[string]string{
+				stack.FileName: strings.Replace(twoModules, "      path: modules/a\n", "      path: bare/a\n", 1),
+				"bare/a/":      "",
+				"modules/b/":   "",
+			},
+			want: filepath.Join("bare", "a") + " has no qory-module.yaml; a module carries one naming it",
+		},
+		{
+			name: "one name composed from two sources",
+			files: map[string]string{
+				stack.FileName:                 strings.Replace(twoModules, "  - name: b\n    source:\n      path: modules/b\n", "  - source:\n      path: modules/dup\n", 1),
+				"modules/a/":                   "",
+				"modules/dup/qory-module.yaml": "apiVersion: qory.ai/v1alpha1\nname: a\n",
+			},
+			want: "module a is composed twice, from modules/a and from modules/dup",
 		},
 		{
 			name: "a manifest qory turns down",
 			files: map[string]string{
-				profile.FileName:        twoLayers,
-				"layers/a/harness.yaml": "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\n",
-				"layers/b/":             "",
+				stack.FileName:               twoModules,
+				"modules/a/qory-module.yaml": "apiVersion: qory.ai/v1alpha1\n",
+				"modules/b/":                 "",
 			},
 			want: "name is required",
 		},
 		{
 			name: "a runtime no variant serves",
 			files: map[string]string{
-				profile.FileName:        twoLayers,
-				"layers/a/harness.yaml": "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: multi\nvariants:\n  codex:\n    agents: agents/codex\n  default: fail\n",
-				"layers/b/":             "",
+				stack.FileName:               twoModules,
+				"modules/a/qory-module.yaml": "apiVersion: qory.ai/v1alpha1\nname: a\nvariants:\n  codex:\n    agents: agents/codex\n  default: fail\n",
+				"modules/b/":                 "",
 			},
-			want: "layer a: the layer has no variant for runtime claude and its default is fail; variants: codex",
+			want: "module a: the module has no variant for runtime claude and its default is fail; variants: codex",
 		},
 		{
-			name: "a forced variant the layer has not",
+			name: "a forced variant the module has not",
 			files: map[string]string{
-				profile.FileName:        strings.Replace(twoLayers, "      path: layers/a\n", "      path: layers/a\n    variant: amp\n", 1),
-				"layers/a/harness.yaml": "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: multi\nvariants:\n  codex:\n    agents: agents/codex\n",
-				"layers/b/":             "",
+				stack.FileName:               strings.Replace(twoModules, "      path: modules/a\n", "      path: modules/a\n    variant: amp\n", 1),
+				"modules/a/qory-module.yaml": "apiVersion: qory.ai/v1alpha1\nname: a\nvariants:\n  codex:\n    agents: agents/codex\n",
+				"modules/b/":                 "",
 			},
-			want: `layer a: variant "amp" is forced, and the layer has no such variant; variants: codex`,
+			want: `module a: variant "amp" is forced, and the module has no such variant; variants: codex`,
 		},
 		{
 			name: "a skill without a SKILL.md",
 			files: map[string]string{
-				profile.FileName:             twoLayers,
-				"layers/a/skills/greet/x.md": "x\n",
-				"layers/b/":                  "",
+				stack.FileName:                twoModules,
+				"modules/a/skills/greet/x.md": "x\n",
+				"modules/b/":                  "",
 			},
-			want: "layer a: skills/greet has no SKILL.md",
+			want: "module a: skills/greet has no SKILL.md",
 		},
 	}
 	for _, c := range cases {

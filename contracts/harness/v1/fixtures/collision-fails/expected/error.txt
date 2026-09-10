@@ -1,4 +1,4 @@
-skills/test is provided by 3 layers: core@working-tree, nextjs@working-tree, team@working-tree
+skills/test is provided by 3 modules: core@working-tree, nextjs@working-tree, team@working-tree
   keep one and exclude the others, for example
     core:   exclude: {skills: [test]}
     nextjs: exclude: {skills: [test]}

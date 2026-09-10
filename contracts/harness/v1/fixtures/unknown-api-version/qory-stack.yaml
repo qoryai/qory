@@ -1,0 +1,7 @@
+apiVersion: qory.ai/v2
+target:
+  runtime: claude
+  model: opus
+modules:
+  - name: core
+    source: {path: modules/core}

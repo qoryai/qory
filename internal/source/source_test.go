@@ -5,10 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
-	"github.com/qoryai/qory/internal/profile"
 	"github.com/qoryai/qory/internal/source"
+	"github.com/qoryai/qory/internal/stack"
 )
 
 // hermetic points git at an empty global configuration and away from the system one, so no
@@ -29,6 +30,14 @@ func run(t *testing.T, dir string, args ...string) {
 	}
 }
 
+// gitOut runs git in dir and returns its trimmed output.
+func gitOut(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	return strings.TrimSpace(string(out)), err
+}
+
 // write creates a file and the directories above it.
 func write(t *testing.T, path, body string) {
 	t.Helper()
@@ -40,14 +49,14 @@ func write(t *testing.T, path, body string) {
 	}
 }
 
-// committedRepo returns a checkout with a layer directory in it and nothing uncommitted.
+// committedRepo returns a checkout with a module directory in it and nothing uncommitted.
 func committedRepo(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	run(t, root, "init", "-q")
 	run(t, root, "config", "user.name", "Test User")
 	run(t, root, "config", "user.email", "test@example.com")
-	write(t, filepath.Join(root, "layers", "core", "AGENTS.md"), "# Core\n")
+	write(t, filepath.Join(root, "modules", "core", "AGENTS.md"), "# Core\n")
 	write(t, filepath.Join(root, "README.md"), "app\n")
 	run(t, root, "add", "-A")
 	run(t, root, "commit", "-q", "-m", "first")
@@ -59,11 +68,11 @@ func committedRepo(t *testing.T) string {
 func TestResolveReportsTheDirectoryAndThePin(t *testing.T) {
 	hermetic(t)
 	root := committedRepo(t)
-	got, err := source.Resolve(root, profile.Source{Path: filepath.Join("layers", "core")})
+	got, err := source.Resolve(root, stack.Source{Path: filepath.Join("modules", "core")}, source.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := source.Resolved{Dir: filepath.Join(root, "layers", "core"), Pin: source.WorkingTree}
+	want := source.Resolved{Dir: filepath.Join(root, "modules", "core"), Pin: source.WorkingTree}
 	if got != want {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
@@ -76,8 +85,8 @@ func TestResolveReportsTheDirectoryAndThePin(t *testing.T) {
 func TestResolveTakesAnAbsolutePathAsItIs(t *testing.T) {
 	hermetic(t)
 	root := committedRepo(t)
-	dir := filepath.Join(root, "layers", "core")
-	got, err := source.Resolve(t.TempDir(), profile.Source{Path: dir})
+	dir := filepath.Join(root, "modules", "core")
+	got, err := source.Resolve(t.TempDir(), stack.Source{Path: dir}, source.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,48 +96,48 @@ func TestResolveTakesAnAbsolutePathAsItIs(t *testing.T) {
 }
 
 // TestResolveReportsADirtyWorkingTree covers the dirty flag: it is set by a change under the
-// layer directory and by nothing else.
+// module directory and by nothing else.
 func TestResolveReportsADirtyWorkingTree(t *testing.T) {
 	hermetic(t)
 	root := committedRepo(t)
-	layer := profile.Source{Path: filepath.Join("layers", "core")}
+	module := stack.Source{Path: filepath.Join("modules", "core")}
 
-	got, err := source.Resolve(root, layer)
+	got, err := source.Resolve(root, module, source.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Dirty {
-		t.Error("a committed layer is reported dirty")
+		t.Error("a committed module is reported dirty")
 	}
 
 	write(t, filepath.Join(root, "README.md"), "changed\n")
-	got, err = source.Resolve(root, layer)
+	got, err = source.Resolve(root, module, source.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Dirty {
-		t.Error("a change outside the layer directory is reported dirty")
+		t.Error("a change outside the module directory is reported dirty")
 	}
 
-	write(t, filepath.Join(root, "layers", "core", "skills", "review", "SKILL.md"), "review\n")
-	got, err = source.Resolve(root, layer)
+	write(t, filepath.Join(root, "modules", "core", "skills", "review", "SKILL.md"), "review\n")
+	got, err = source.Resolve(root, module, source.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !got.Dirty {
-		t.Error("an untracked file under the layer directory is not reported dirty")
+		t.Error("an untracked file under the module directory is not reported dirty")
 	}
 }
 
-// TestResolveOutsideGitIsClean covers a layer directory that no checkout covers: git cannot
-// answer, so the layer is reported clean.
+// TestResolveOutsideGitIsClean covers a module directory that no checkout covers: git cannot
+// answer, so the module is reported clean.
 func TestResolveOutsideGitIsClean(t *testing.T) {
 	hermetic(t)
 	base := t.TempDir()
 	if err := os.Mkdir(filepath.Join(base, "core"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	got, err := source.Resolve(base, profile.Source{Path: "core"})
+	got, err := source.Resolve(base, stack.Source{Path: "core"}, source.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,14 +154,14 @@ func TestResolveOutsideGitIsClean(t *testing.T) {
 func TestResolveRefusesWhatIsNoDirectory(t *testing.T) {
 	hermetic(t)
 	base := t.TempDir()
-	write(t, filepath.Join(base, "core.md"), "not a layer\n")
+	write(t, filepath.Join(base, "core.md"), "not a module\n")
 
-	if _, err := source.Resolve(base, profile.Source{Path: "missing"}); !errors.Is(err, os.ErrNotExist) {
+	if _, err := source.Resolve(base, stack.Source{Path: "missing"}, source.Options{}); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("got %v, want an os.ErrNotExist", err)
 	}
-	_, err := source.Resolve(base, profile.Source{Path: "core.md"})
+	_, err := source.Resolve(base, stack.Source{Path: "core.md"}, source.Options{})
 	if err == nil {
-		t.Fatal("resolved a file as a layer directory")
+		t.Fatal("resolved a file as a module directory")
 	}
 	if want := filepath.Join(base, "core.md") + " is not a directory"; err.Error() != want {
 		t.Errorf("got %q, want %q", err, want)

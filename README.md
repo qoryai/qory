@@ -1,63 +1,56 @@
 # 🐝 qory
 
-`qory` composes the harness a runtime like Claude Code or Codex loads, from the layers a
-repository names: a core your team shares, one for the framework, a specialised one for
-marketing or automation, and whatever this repository alone needs. The repository commits
-that list, not copies of the skills, agents, commands and settings the layers hold.
+A harness is what your coding agent reads before it works: instructions, skills, agents,
+commands and settings. `qory` builds the harness of a repository from modules. Each module
+is one piece of harness: the piece every repository of your team shares, the piece for
+apps built on your framework, the piece this repository alone needs. The repository
+commits the list of modules, not a copy of their files.
 
 ## The problem
 
-You have instructions, skills, agents, commands and settings that your coding agent reads
-from the repository, and you have more than one repository and more than one agent. Claude
-Code reads `.claude`, Codex reads `.codex` and `AGENTS.override.md`, Gemini CLI reads
-`.gemini` and `GEMINI.md`, OpenCode reads `.opencode` and `opencode.json`. So every
-repository holds a copy per tool, and when the shared set improves, the copies drift. A
-skill fixed in one place is stale in the next, and nothing tells you which version a
-checkout runs with.
+Your coding agent reads its harness from the repository. You have many repositories, and
+more than one agent. Claude Code reads `.claude`, Codex reads `.codex`, Gemini CLI reads
+`.gemini`. So every repository holds one copy per tool. When the shared part improves, the
+copies drift, and nothing tells you which version a checkout runs with.
 
 ## What qory does
 
-`qory` reads a compose file, the profile, that names the layers in order: the shared core,
-the framework, the specialised one, the repository's own. It composes them into one tree and
-renders that tree the way the target tool reads it. The tree is linked into the checkout and
-left out of git, so what the repository carries is the profile and its own layer, and a
-report names the layer every entry came from.
+A stack lists modules in order: the harness your team shares, the harness for apps built
+on the framework, the harness this repository alone needs. `qory` composes them into one
+tree and writes that tree the way each tool reads it. The tree is linked into the checkout
+and kept out of git. A report says which module every entry came from.
 
-One layer, written once, serves Claude Code, Codex CLI, Gemini CLI, OpenCode, Cursor,
+A module is written once and serves Claude Code, Codex CLI, Gemini CLI, OpenCode, Cursor,
 GitHub Copilot CLI, Amp, Goose, and every tool that reads `AGENTS.md` and `.agents/skills`.
-`qory harness compose --runtime codex` renders the same profile for another one.
+A checkout can serve two tools at once, and both read the same harness.
 
-A checkout can hold two of them at once: `runtime: [claude, codex]`, or
-`qory hc --runtime claude,codex`, and both agents read the same harness in the same
-directory. Stop working in one, continue in the other, and nothing has to be composed
-again.
-
-The model is Docker's: a layer is an image, the compose file is the Compose file, and the
-composed tree is what runs. One rule differs on purpose. When two layers provide the same
-entry, `qory` refuses to compose until the profile says which one to keep. There is no
-last-wins.
+The model is Docker's: a module is an image, the stack is the Compose file, and the
+composed tree is what runs. One rule differs on purpose. When two modules provide the same
+entry, `qory` refuses to compose until the stack says which one to keep. Nothing wins by
+coming last.
 
 ## Three steps
 
-1. Write `harness-compose.yaml` in the repository, or in a directory above several
-   repositories:
+1. Write `qory.yaml` in the repository, or let `qory setup repo` write it:
 
    ```yaml
    apiVersion: qory.ai/v1alpha1
-   kind: HarnessProfile
-   target:
-     runtime: claude          # or both at once: [claude, codex]
-     model: opus
-   layers:
-     - name: core             # what every repository of yours gets
-       source: {path: ../harness/core}
-     - name: nextjs           # the framework
-       source: {path: ../harness/nextjs}
-     - name: marketing        # a specialised layer, on the repositories that want it
-       source: {path: ../harness/marketing}
-     - name: app              # this repository's own, committed with it
-       source: {path: ./harness}
+   harness:
+     target:
+       runtime: claude          # or both at once: [claude, codex]
+       model: opus
+     modules:
+       - name: core             # what every repository of yours gets, pinned to a tag
+         source: {git: https://github.com/acme/harness, ref: v2.4.0, path: core}
+       - name: nextjs           # the harness for Next.js apps
+         source: {path: ../harness/nextjs}
+       - name: app              # this repository's own, committed with it
+         source: {path: ./harness}
    ```
+
+   Every module has a `qory-module.yaml` that names it. A repository can also take a
+   stack someone else delivers, a `qory-stack.yaml`: it names that stack under `extends`
+   instead of `target`, and adds its own modules. The delivered modules cannot be changed.
 
 2. Compose it:
 
@@ -70,22 +63,17 @@ last-wins.
 
 ## Install
 
-With Homebrew, on macOS:
+With Homebrew:
 
 ```sh
 brew install qoryai/tap/qory
 ```
 
-With the install script, on macOS and Linux. It downloads the release binary for the
-machine, verifies its checksum, and puts it in `~/.local/bin`:
+With the install script, which puts the release binary in `~/.local/bin`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/qoryai/qory/main/install.sh | sh
 ```
-
-Set `QORY_BIN_DIR` to install somewhere else, and `QORY_VERSION` to install a version other
-than the latest. Any version manager that reads GitHub releases works as well, for example
-`mise use -g ubi:qoryai/qory`.
 
 From source, with Go 1.27 or later:
 
@@ -93,60 +81,97 @@ From source, with Go 1.27 or later:
 go install github.com/qoryai/qory@latest
 ```
 
-The binary lands in `$(go env GOPATH)/bin`; put that directory on your `PATH`.
-
 ## Try it
 
 ```sh
-mkdir hello && cd hello && git init
-qory harness init      # writes a profile and two layers
+mkdir hello && cd hello
+qory setup example     # writes a stack and two modules
 qory hc                # or: qory hc --runtime codex
-claude                 # type /hello; or codex, gemini, opencode
+claude                 # type /hello
 qory hr
 ```
 
-Two layers, both convinced they invented greeting. The README that `init` writes says what
-to delete to watch `qory` refuse the collision. The same files are in
-[examples/hello](examples/hello/README.md).
+Both modules ship a greet skill. The README that `qory setup example` writes says which
+line to delete to watch `qory` refuse the collision. For a real repository, run
+`qory setup repo` instead.
+
+## Worktrees
+
+One branch per worktree, beside the main checkout. `qory` prepares the worktree the way
+the repository's `qory.yaml` says and composes the harness into it:
+
+```yaml
+# qory.yaml, committed, beside the harness section
+apiVersion: qory.ai/v1alpha1
+worktree:
+  base: main                     # a new branch starts here; default: the remote's HEAD
+  link: [.env, .env.local]       # linked from the main checkout into the worktree
+  run:
+    add: [pnpm install]          # run in the new worktree
+```
+
+```sh
+qory worktree add feature        # ../wt-feature on branch feature, pushing to origin/feature
+qory worktree remove             # the worktree you stand in; the branch stays
+qory setup shell                 # make your shell cd into a new worktree, and back on remove
+```
+
+Where a worktree goes and what it is called is your choice, not the repository's:
+`worktree.dir` and `worktree.name` in your own `qory.yaml`, which `qory setup machine`
+writes.
 
 ## Commands
 
 ```sh
-qory harness init        # write the hello example into the current directory
-qory harness compose     # compose the profile into the checkout you stand in   (qory hc)
-qory harness inspect     # print the report: every entry and the layer it came from (qory hi)
-qory harness remove      # remove the composed tree and the link                 (qory hr)
-qory version
+qory setup repo          # write the repository's qory.yaml: its stack, module and worktree settings
+qory setup example       # write the hello example into the current directory
+qory setup machine       # write your qory.yaml in ~/.config/qory: how qory runs here
+qory setup shell         # completions, and a shell that follows worktree add and remove
+qory harness compose     # compose the stack into the checkout you stand in   (qory hc)
+qory harness inspect     # the report: every entry and the module it came from (qory hi)
+qory harness remove      # remove the composed tree and its links               (qory hr)
+qory worktree add        # add a worktree for a branch and prepare it            (qory wa)
+qory worktree remove     # remove a worktree and keep its branch                 (qory wr)
+qory worktree list       # every worktree with its branch                        (qory wl)
+qory config              # every setting, its value and the file it came from
 ```
 
-`qory harness compose --dry-run` prints the report and writes nothing. `-f <file>` reads a
-profile instead of discovering one. `--runtime` and `--model` override the profile's target
-for one compose, and `--runtime` takes a list: `--runtime claude,codex`. `-v` prints one
-line per entry.
+Flags worth knowing on `compose`:
 
-The reference, one page per command, is under [docs/commands](docs/commands/qory.md).
+```
+--dry-run              print the report and write nothing
+--runtime claude,codex render for these runtimes instead of the stack's
+--model opus           write this model instead of the stack's
+--force                replace a tracked, unmodified file where a link goes
+--update               fetch every git source again
+```
+
+Two `qory.yaml` files are read. Every setting has a default, so both are optional. The
+repository's file is committed and holds what the repository decides: its stack, and what
+a worktree needs. Your file, in `~/.config/qory`, holds how `qory` runs on this machine
+for every repository: the runtime to compose for, where worktrees go, the git timeout.
+The repository's file is read on top of yours. `qory config` shows every setting and the
+file it came from. The reference, one page per command, is under
+[docs/commands](docs/commands/qory.md).
 
 ## What you get
 
-- The files your tool reads, linked to a composed tree under `.qory` in the checkout, all of
-  it excluded from git through the clone-local exclude file. The tree is built once; each
-  tool gets its own directory in it.
-- Settings merged from every layer per target file, in the tool's own format: permission
-  lists concatenated and deduplicated, hooks concatenated, hook commands rewritten to the
-  composed tree's path.
-- One instruction file, concatenated from the layers in order, presented as `CLAUDE.md`,
-  `AGENTS.override.md` or `GEMINI.md` where a tool wants another name.
-- Agents and commands written in each tool's format from one source file, and a line in
-  the compose output for every kind a tool has no place for.
-- A report, printed by `qory harness inspect`, that names the layer of every entry and every
-  exclude the profile made.
-- A refusal, with the lines that resolve it, when two layers provide the same entry.
+- The files your tool reads, linked to a composed tree under `.qory` and kept out of git.
+  Your own `settings.local.json` stays yours.
+- Settings merged from every module, in the tool's own format. Permission lists and hooks
+  join. A value set twice to different things is a collision, never a silent override.
+- MCP servers, one file each in a module, written where every tool reads them.
+- Modules from a directory beside the repository, or from a git repository at a tag,
+  pinned by commit in the report.
+- One instruction file, joined from the modules in order, under the name each tool wants.
+- A report that names the module of every entry. When two modules provide the same entry,
+  a refusal with the lines that resolve it.
 
 ## The format
 
-The compose file, the optional layer manifest `harness.yaml`, the composition rules and
-the runtimes are specified in [contracts/harness/v1](contracts/harness/v1/README.md), with
-JSON schemas and the fixtures the test suite runs.
+The stack, the module manifest, `qory.yaml`, the composition rules and the runtimes are
+specified in [contracts/harness/v1](contracts/harness/v1/README.md), with JSON schemas and
+the fixtures the test suite runs.
 
 ## Contributing
 

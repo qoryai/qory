@@ -1,0 +1,1 @@
+module core: mcp/db.json does not hold a JSON object: json: cannot unmarshal array into Go value of type map[string]interface {}

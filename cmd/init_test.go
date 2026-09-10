@@ -10,33 +10,60 @@ import (
 
 	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/compose"
-	"github.com/qoryai/qory/internal/profile"
+	"github.com/qoryai/qory/internal/stack"
 )
 
 // TestInit writes the example from the repository's own examples directory into an empty
-// directory, composes it, and refuses to write twice.
+// directory, makes it a git repository since the compose writes into a checkout only and
+// says so, composes it with the command, and refuses to write twice.
 func TestInit(t *testing.T) {
 	cmd.Example = exampleFromDisk(t)
-	dir := t.TempDir()
-	t.Chdir(dir)
+	dir := emptyDir(t)
 	root := cmd.Root()
-	root.SetArgs([]string{"harness", "init"})
-	root.SetOut(&strings.Builder{})
+	root.SetArgs([]string{"setup", "example"})
+	var out strings.Builder
+	root.SetOut(&out)
 	if err := root.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	p, err := profile.Load(filepath.Join(dir, profile.FileName))
+	wantsRow(t, out.String(), "git", "initialised a repository here; qory composes into a checkout")
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		t.Fatalf("no repository: %v", err)
+	}
+	p, err := stack.Load(filepath.Join(dir, stack.FileName))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := compose.Compose(p); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := run(t, "harness", "compose"); err != nil {
+		t.Fatal(err)
+	}
 	root = cmd.Root()
-	root.SetArgs([]string{"harness", "init"})
+	root.SetArgs([]string{"setup", "example"})
 	root.SetOut(&strings.Builder{})
 	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "does not overwrite") {
 		t.Fatalf("second init: %v", err)
+	}
+}
+
+// TestInitLeavesEveryExistingFile is a directory with its own README.md: init refuses
+// rather than writing the example's over it.
+func TestInitLeavesEveryExistingFile(t *testing.T) {
+	example := exampleFromDisk(t)
+	dir := emptyDir(t)
+	setExample(t, example)
+	writeFile(t, filepath.Join(dir, "README.md"), "# my project\n")
+	out, err := run(t, "setup", "example")
+	if err == nil || !strings.Contains(err.Error(), "already has a README.md; qory does not overwrite it") {
+		t.Fatalf("init over a README: %v\n%s", err, out)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "README.md")); string(data) != "# my project\n" {
+		t.Errorf("README.md was replaced: %q", data)
+	}
+	if _, err := os.Stat(filepath.Join(dir, stack.FileName)); err == nil {
+		t.Error("the stack was written although init refused")
 	}
 }
 
@@ -47,15 +74,15 @@ func TestInitWithoutAName(t *testing.T) {
 	dir := emptyDir(t)
 	setExample(t, example)
 
-	out, err := run(t, "harness", "init")
+	out, err := run(t, "setup", "example")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "wrote 9 files", profile.FileName, "layers/hello/skills/greet/SKILL.md", "next", "qory harness compose")
+	wants(t, out, "wrote 11 files", stack.FileName, "modules/hello/skills/greet/SKILL.md", "next", "qory harness compose")
 	if strings.Contains(out, "Hello,") {
 		t.Errorf("nothing names the person and the output greets one:\n%s", out)
 	}
-	if _, err := profile.Load(filepath.Join(dir, profile.FileName)); err != nil {
+	if _, err := stack.Load(filepath.Join(dir, stack.FileName)); err != nil {
 		t.Error(err)
 	}
 }
@@ -65,7 +92,7 @@ func TestInitWithoutAnExample(t *testing.T) {
 	emptyDir(t)
 	setExample(t, nil)
 
-	out, err := run(t, "harness", "init")
+	out, err := run(t, "setup", "example")
 	if err == nil {
 		t.Fatalf("init without an example: no error\n%s", out)
 	}

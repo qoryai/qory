@@ -1,0 +1,1 @@
+module nextjs: settings/claude/settings.json: env.A is set by modules core and nextjs with different values

@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/qoryai/qory/cmd"
-	"github.com/qoryai/qory/internal/profile"
+	"github.com/qoryai/qory/internal/stack"
 	"github.com/qoryai/qory/internal/ui"
 )
 
@@ -43,7 +43,7 @@ func TestVersionPrintsTheMarkAndTheHarnessFormat(t *testing.T) {
 			} else if !strings.Contains(rest, tc.want) {
 				t.Errorf("the title names %q, want %q in it", rest, tc.want)
 			}
-			wants(t, out, "harness format  "+profile.APIVersion)
+			wants(t, out, "harness format  "+stack.APIVersion)
 		})
 	}
 }

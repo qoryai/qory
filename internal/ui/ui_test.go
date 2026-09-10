@@ -17,13 +17,10 @@ func plain(t *testing.T, buf *bytes.Buffer) *ui.UI {
 	return ui.New(buf)
 }
 
-// TestMarkedReportsWhetherATitleWasPrinted runs before every other test in this package,
-// because the flag Marked reads is package state that no call resets: the first Title in the
-// test binary sets it for good.
+// TestMarkedReportsWhetherATitleWasPrinted pins the one direction a test can check in any
+// order: the flag Marked reads is package state that no call resets, so after a Title it
+// is set, whatever ran before.
 func TestMarkedReportsWhetherATitleWasPrinted(t *testing.T) {
-	if ui.Marked() {
-		t.Fatal("a title was printed before this test ran")
-	}
 	var buf bytes.Buffer
 	plain(t, &buf).Title("qory")
 	if !ui.Marked() {
@@ -71,8 +68,8 @@ func TestHelpersRenderTheirLineShape(t *testing.T) {
 		},
 		{
 			"Fail starts with a cross",
-			func(u *ui.UI) { u.Fail(errors.New("no profile")) },
-			"✗ no profile\n",
+			func(u *ui.UI) { u.Fail(errors.New("no stack")) },
+			"✗ no stack\n",
 		},
 		{
 			"Fail aligns the later lines of an error under the first",
@@ -81,13 +78,13 @@ func TestHelpersRenderTheirLineShape(t *testing.T) {
 		},
 		{
 			"Heading prints the text on its own line",
-			func(u *ui.UI) { u.Heading("Layers") },
-			"Layers\n",
+			func(u *ui.UI) { u.Heading("Modules") },
+			"Modules\n",
 		},
 		{
 			"Fields aligns the keys",
-			func(u *ui.UI) { u.Fields([][2]string{{"file", "harness-compose.yaml"}, {"checkout", "app"}}) },
-			"  file      harness-compose.yaml\n  checkout  app\n",
+			func(u *ui.UI) { u.Fields([][2]string{{"file", "qory-stack.yaml"}, {"checkout", "app"}}) },
+			"  file      qory-stack.yaml\n  checkout  app\n",
 		},
 		{
 			"Table aligns every column and drops the trailing padding",
@@ -139,7 +136,7 @@ func TestShortShortensAPathAgainstARoot(t *testing.T) {
 	}{
 		{"a path under the base is relative to it", "/work/app/.qory/harness", "/work/app", ".qory/harness"},
 		{"the base itself is a dot", "/work/app", "/work/app", "."},
-		{"an unrelated path is left alone", "/elsewhere/layers/core", "/work/app", "/elsewhere/layers/core"},
+		{"an unrelated path is left alone", "/elsewhere/modules/core", "/work/app", "/elsewhere/modules/core"},
 		{"an empty base skips the base", "/work/app", "", "/work/app"},
 		{"a path under the home directory shows a tilde", filepath.Join(home, "code", "app"), "", "~" + string(filepath.Separator) + filepath.Join("code", "app")},
 		{"the home directory itself is left alone", home, "", home},

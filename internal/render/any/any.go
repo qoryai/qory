@@ -3,7 +3,9 @@
 // skills from .agents/skills. Both are linked into the checkout, and the package writes
 // nothing of its own, because the home's root already holds them. The convention names no
 // place for a model, so the target model is not written, and none for agents, commands,
-// output styles or hooks, so those four kinds are skipped.
+// output styles, hooks or MCP servers, so those five kinds are skipped. The convention
+// names no directory in the checkout either, so a files entry named any/<path> is skipped
+// too, and no path is reserved.
 package any
 
 import (
@@ -32,9 +34,14 @@ func (runtime) Links(res *compose.Result) []render.Link {
 	return links
 }
 
-// Skips are the four kinds the convention names no place for: agents, commands, output
-// styles and hooks.
-func (runtime) Skips() []string { return []string{"agents", "commands", "output-styles", "hooks"} }
+// Skips are the six kinds the convention names no place for: agents, commands, output
+// styles, hooks, MCP servers and files.
+func (runtime) Skips() []string {
+	return []string{"agents", "commands", "output-styles", "hooks", "mcp", "files"}
+}
+
+// Reserved is empty: the runtime writes nothing under its directory.
+func (runtime) Reserved() []render.Reserved { return nil }
 
 // Render writes nothing of its own, because the home's root already holds AGENTS.md and
 // the skills the links point at.

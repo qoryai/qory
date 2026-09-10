@@ -6,7 +6,7 @@ may do with it without asking.
 
 ## You may
 
-- Say that your layer, your tool or your team uses Qory, is composed with
+- Say that your module, your tool or your team uses Qory, is composed with
   Qory or is built for Qory, when that is true.
 - Redistribute an unmodified release under the name Qory.
 - Use the word Qory to refer to this project, its code and its documentation.
