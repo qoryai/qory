@@ -210,6 +210,11 @@ func TestExtendsGovernsFilesByPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantsRow(t, out, "skipped", "qory.yaml  (the base stack decides; not read under extends)")
+	out, err = run(t, "harness", "compose", "--dry-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantsRow(t, out, "skipped", "qory.yaml  (the base stack decides; not read under extends)")
 	if data, err := os.ReadFile(filepath.Join(root, ".claude", "rules", "web.md")); err != nil || string(data) != "# web\n" {
 		t.Fatalf("the rule through the link: %q, %v", data, err)
 	}

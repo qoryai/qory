@@ -206,12 +206,20 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 				return input(err)
 			}
 			rep := report.New(res, name, at.root, at.home)
+			// A qory.yaml at the checkout root is not read under extends, and a row says
+			// so, on a dry run as well, so the person who wrote it learns that the base
+			// stack decides.
+			var skippedConfig [][2]string
+			if _, err := os.Stat(filepath.Join(at.root, config.FileName)); extends && err == nil {
+				skippedConfig = [][2]string{{"skipped", config.FileName + "  (the base stack decides; not read under extends)"}}
+			}
 			if dryRun {
 				if err := rep.PrintBody(out); err != nil {
 					return err
 				}
 				u.Blank()
 				u.Success("dry run: nothing written")
+				u.Fields(skippedConfig)
 				return nil
 			}
 			// A checkout can be composed for several runtimes at once, and can have been
@@ -309,11 +317,7 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 					rows = append(rows, [2]string{"skipped", s + "  (no place in " + rt.Name() + ")"})
 				}
 			}
-			// A qory.yaml at the checkout root is not read under extends, and a row says
-			// so, so the person who wrote it learns that the base stack decides.
-			if _, err := os.Stat(filepath.Join(at.root, config.FileName)); extends && err == nil {
-				rows = append(rows, [2]string{"skipped", config.FileName + "  (the base stack decides; not read under extends)"})
-			}
+			rows = append(rows, skippedConfig...)
 			for _, l := range res.Modules {
 				if l.Link == "" {
 					continue
