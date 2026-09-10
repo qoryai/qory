@@ -243,7 +243,7 @@ func TestComposeRefuses(t *testing.T) {
 	}{
 		{
 			name:    "no stack in the checkout or above it",
-			wantErr: []string{"no " + stack.FileName + " or " + stack.ComposeFileName + " in ", "ancestor directory you own"},
+			wantErr: []string{"no " + stack.FileName + ", and no qory.yaml with a harness section naming modules, in ", "ancestor directory you own"},
 		},
 		{
 			name:    "a stack of another format",

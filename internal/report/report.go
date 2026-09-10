@@ -36,11 +36,11 @@ type Module struct {
 	// Link is the checkout-root name that links to the module's directory, absent when the
 	// stack names none.
 	Link string `json:"link,omitempty"`
-	// Base marks a module of the base stack, when a compose file extends one.
+	// Base marks a module of the base stack, when a checkout's qory.yaml extends one.
 	Base bool `json:"base,omitempty"`
 }
 
-// Base is the stack a compose file extends.
+// Base is the stack a checkout's qory.yaml extends.
 type Base struct {
 	// Name is the base stack's name.
 	Name string `json:"name"`
@@ -136,7 +136,7 @@ type Report struct {
 	// Extensions are the stack's extensions, carried as written, absent when it has
 	// none.
 	Extensions map[string]map[string]any `json:"extensions,omitempty"`
-	// Base is the stack the compose file extends, absent for a stack.
+	// Base is the stack the checkout's qory.yaml extends, absent for a stack.
 	Base *Base `json:"base,omitempty"`
 }
 

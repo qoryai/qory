@@ -1,26 +1,41 @@
-// Package config reads qory.yaml: how qory runs on this machine, for this person and this
-// checkout, as opposed to what the harness is, which the stack says.
+// Package config reads qory.yaml: the repository's own document and the machine's.
 //
-// Every setting has a default, so qory runs the same with no file at all. A file sets the
-// keys it names and leaves the rest as they were. Files are read in this order, each
-// overriding the one before it: the user's own file, $XDG_CONFIG_HOME/qory/qory.yaml or
-// ~/.config/qory/qory.yaml; qory.yaml in the ancestor directories of the checkout that
-// the current user owns, the farthest first; qory.yaml in the checkout root. A command
-// line flag overrides every file.
+// One file name, one schema, read at three levels. The user's own file,
+// $XDG_CONFIG_HOME/qory/qory.yaml or ~/.config/qory/qory.yaml, and the files of the
+// checkout's ancestor directories carry the machine's choices; the file in the checkout
+// root is committed with the repository and carries what the repository needs. Every key
+// may appear at any level and the nearest file wins, so qory runs the same with no file
+// at all: every setting has a default. Files are read in this order, each overriding the
+// one before it: the user's, the ancestors' that the current user owns, the farthest
+// first, the checkout root's. A command line flag overrides every file.
 //
 //	apiVersion: qory.ai/v1alpha1
-//	runtime: [claude, codex]   # instead of the stack's target.runtime
-//	model: opus                # instead of the stack's target.model
-//	force: true                # replace a tracked, unmodified file where a link goes
-//	update: always             # fetch every git source again on each compose
+//	harness:
+//	  runtime: [claude, codex]   # instead of the stack's target.runtime
+//	  model: opus                # instead of the stack's target.model
+//	  force: true                # replace a tracked, unmodified file where a link goes
+//	  update: always             # fetch every git source again on each compose
+//	  extends: {git: git@git.example.com:acme/harness, ref: main, path: nextjs-15}
+//	  modules:                   # with extends: the stack this checkout extends and its own modules
+//	    - name: app
+//	worktree:
+//	  dir: ..                    # where worktrees go, relative to the main checkout
+//	  name: wt-{branch}          # what a worktree's directory is called
+//	  base: main                 # the branch a new worktree branch starts from
+//	  link: [.env]               # linked from the main checkout into a new worktree
+//	  copy: [config/local.json]  # copied once into a new worktree
+//	  run:
+//	    add: [pnpm install]      # run in a new worktree, after links and copies
+//	    remove: []               # run in a worktree before it is removed
 //	git:
-//	  timeout: 10m             # the longest one git command may run
-//	  cache: /var/cache/qory   # where git sources are fetched to
+//	  timeout: 10m               # the longest one git command may run
+//	  cache: /var/cache/qory     # where git sources are fetched to
 //	env:
 //	  HARNESS_PROFILE: nextjs    # exported to every runtime with a place for it
 //
 // [Load] discovers and reads the files, [Config] is the result, and [Config.Rows] says
-// where each value came from.
+// where each value came from. [DiscoverStack] finds what a checkout composes, its
+// qory-stack.yaml or the harness section of its qory.yaml, and [LoadStack] reads it.
 package config
 
 import (
@@ -47,6 +62,13 @@ const FileName = "qory.yaml"
 // DefaultTimeout is how long one git command may run before the compose gives up on it.
 const DefaultTimeout = 10 * time.Minute
 
+// DefaultWorktreeDir is where worktrees go when no file says: the main checkout's parent.
+const DefaultWorktreeDir = ".."
+
+// DefaultWorktreeName is what a worktree's directory is called when no file says. {branch}
+// is the branch with every slash made a dash, {repo} the main checkout's directory name.
+const DefaultWorktreeName = "wt-{branch}"
+
 // Default is the origin of a value no file set.
 const Default = "default"
 
@@ -56,6 +78,24 @@ type Git struct {
 	Timeout time.Duration
 	// Cache is the directory git sources are fetched to, "" for [source.CacheDir].
 	Cache string
+}
+
+// Worktree holds what a worktree of the repository needs and where the machine puts it.
+type Worktree struct {
+	// Dir is where worktrees go, relative to the main checkout unless absolute.
+	Dir string
+	// Name is the template of a worktree's directory name, see [DefaultWorktreeName].
+	Name string
+	// Base is the branch a new worktree branch starts from, "" for the remote's HEAD.
+	Base string
+	// Link are paths linked from the main checkout into a new worktree.
+	Link []string
+	// Copy are paths copied once from the main checkout into a new worktree.
+	Copy []string
+	// Add are the commands run in a new worktree after links and copies, in order.
+	Add []string
+	// Remove are the commands run in a worktree before it is removed, in order.
+	Remove []string
 }
 
 // Config is the effective configuration: the defaults, overridden by every file read.
@@ -68,6 +108,8 @@ type Config struct {
 	Force bool
 	// Update fetches every git source again on each compose.
 	Update bool
+	// Worktree holds the worktree settings.
+	Worktree Worktree
 	// Git holds the git settings.
 	Git Git
 	// Env are the variables exported to every runtime with a place for them, on top of
@@ -82,11 +124,9 @@ type Config struct {
 // file is qory.yaml as written. Every key is optional, and a pointer that stays nil is a
 // key the file did not name, which leaves the value as it was.
 type file struct {
-	APIVersion string          `yaml:"apiVersion"`
-	Runtime    *stack.Runtimes `yaml:"runtime,omitempty"`
-	Model      *string         `yaml:"model,omitempty"`
-	Force      *bool           `yaml:"force,omitempty"`
-	Update     *string         `yaml:"update,omitempty"`
+	APIVersion string           `yaml:"apiVersion"`
+	Harness    *harnessSection  `yaml:"harness,omitempty"`
+	Worktree   *worktreeSection `yaml:"worktree,omitempty"`
 	Git        *struct {
 		Timeout *string `yaml:"timeout,omitempty"`
 		Cache   *string `yaml:"cache,omitempty"`
@@ -94,15 +134,53 @@ type file struct {
 	Env map[string]string `yaml:"env,omitempty"`
 }
 
+// harnessSection is the harness key: the machine's choices for a compose, and in a
+// checkout's file its document, the checkout's own stack as a target and modules, or the
+// stack it extends and the modules it appends.
+type harnessSection struct {
+	Runtime     *stack.Runtimes           `yaml:"runtime,omitempty"`
+	Model       *string                   `yaml:"model,omitempty"`
+	Force       *bool                     `yaml:"force,omitempty"`
+	Update      *string                   `yaml:"update,omitempty"`
+	Name        string                    `yaml:"name,omitempty"`
+	Description string                    `yaml:"description,omitempty"`
+	Extends     stack.Source              `yaml:"extends,omitempty"`
+	Target      stack.Target              `yaml:"target,omitempty"`
+	Modules     []stack.Module            `yaml:"modules,omitempty"`
+	Extensions  map[string]map[string]any `yaml:"extensions,omitempty"`
+}
+
+// composes reports whether the section carries a compose document: modules or extends.
+func (h *harnessSection) composes() bool {
+	return h != nil && (len(h.Modules) > 0 || h.Extends.Path != "" || h.Extends.Git != "" || h.Extends.Ref != "")
+}
+
+// worktreeSection is the worktree key.
+type worktreeSection struct {
+	Dir  *string  `yaml:"dir,omitempty"`
+	Name *string  `yaml:"name,omitempty"`
+	Base *string  `yaml:"base,omitempty"`
+	Link []string `yaml:"link,omitempty"`
+	Copy []string `yaml:"copy,omitempty"`
+	Run  *struct {
+		Add    []string `yaml:"add,omitempty"`
+		Remove []string `yaml:"remove,omitempty"`
+	} `yaml:"run,omitempty"`
+}
+
 // envName is the shape of an environment variable name.
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// fixedKeys are the row keys every configuration has, in the order [Config.Rows] prints them.
+var fixedKeys = []string{"harness.runtime", "harness.model", "harness.force", "harness.update", "worktree.dir", "worktree.name", "worktree.base", "git.timeout", "git.cache"}
+
 // Defaults is the configuration with no file read: the stack's runtime and model, no
-// force, no update, [DefaultTimeout], the cache under [source.CacheDir], and no
-// variables.
+// force, no update, worktrees beside the main checkout as wt-<branch> off the remote's
+// HEAD with nothing linked, copied or run, [DefaultTimeout], the cache under
+// [source.CacheDir], and no variables.
 func Defaults() Config {
-	c := Config{Git: Git{Timeout: DefaultTimeout}, Env: map[string]string{}, origins: map[string]string{}}
-	for _, key := range []string{"runtime", "model", "force", "update", "git.timeout", "git.cache"} {
+	c := Config{Worktree: Worktree{Dir: DefaultWorktreeDir, Name: DefaultWorktreeName}, Git: Git{Timeout: DefaultTimeout}, Env: map[string]string{}, origins: map[string]string{}}
+	for _, key := range fixedKeys {
 		c.origins[key] = Default
 	}
 	return c
@@ -110,15 +188,17 @@ func Defaults() Config {
 
 // Load returns the effective configuration for the checkout at root: the defaults, then
 // every file [Discover] finds, applied in order. An error names the file it comes from.
-// With own false the checkout's own file is left out, which is how a compose of a stack
-// that extends a closed base keeps the checkout's authors from configuring the runner.
+// With own false, the checkout's own file contributes its worktree section only: its
+// harness, git and env keys are left out, which is how a compose of a stack that extends
+// a closed base keeps the checkout's authors from configuring the runner.
 func Load(root string, own bool) (Config, error) {
 	c := Defaults()
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return c, err
+	}
 	for _, path := range Discover(root) {
-		if !own && filepath.Dir(path) == root {
-			continue
-		}
-		if err := c.apply(path); err != nil {
+		if err := c.apply(path, own || filepath.Dir(path) != root); err != nil {
 			return c, err
 		}
 	}
@@ -160,6 +240,87 @@ func Discover(root string) []string {
 	return files
 }
 
+// DiscoverStack finds what the checkout at root composes and returns its path: the
+// qory-stack.yaml in root, or root's qory.yaml when its harness section names modules or
+// a stack to extend; else the nearest ancestor directory's, when the current user owns the
+// file. A directory holding both is an error naming them. The error for none names root
+// and does not wrap an error a caller can match.
+func DiscoverStack(root string) (string, error) {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	if found, err := composeIn(root, false); found != "" || err != nil {
+		return found, err
+	}
+	for dir := filepath.Dir(root); ; dir = filepath.Dir(dir) {
+		if found, err := composeIn(dir, true); found != "" || err != nil {
+			return found, err
+		}
+		if dir == filepath.Dir(dir) {
+			break
+		}
+	}
+	return "", fmt.Errorf("no %s, and no %s with a harness section naming modules, in %s or in an ancestor directory you own", stack.FileName, FileName, root)
+}
+
+// composeIn returns the one document dir holds for a compose, "" for none, and an error
+// for both. With owned, a file the current user does not own does not count. A qory.yaml
+// that cannot be read is that error, so a mistake in it is reported where it is.
+func composeIn(dir string, owned bool) (string, error) {
+	var found []string
+	if path := filepath.Join(dir, stack.FileName); exists(path) && (!owned || ownedFile(path)) {
+		found = append(found, path)
+	}
+	if path := filepath.Join(dir, FileName); exists(path) && (!owned || ownedFile(path)) {
+		f, err := read(path)
+		if err != nil {
+			return "", err
+		}
+		if f.Harness.composes() {
+			found = append(found, path)
+		}
+	}
+	switch len(found) {
+	case 0:
+		return "", nil
+	case 1:
+		return found[0], nil
+	}
+	return "", fmt.Errorf("%s holds both %s and a %s whose harness section names modules; a directory holds one of the two", dir, stack.FileName, FileName)
+}
+
+// LoadStack reads the document at path as [DiscoverStack] or -f named it: a
+// qory-stack.yaml with [stack.Load], a qory.yaml through its harness section with
+// [Compose].
+func LoadStack(path string) (*stack.Stack, error) {
+	if filepath.Base(path) == FileName {
+		return Compose(path)
+	}
+	return stack.Load(path)
+}
+
+// Compose reads the harness section of the qory.yaml at path as the checkout's document:
+// its own stack, a target and modules, or the stack it extends and the modules it appends,
+// with the name, description and extensions beside them. A file whose harness section
+// names no modules and no stack is an error, and so is one naming modules with neither a
+// target nor a stack to extend.
+func Compose(path string) (*stack.Stack, error) {
+	f, err := read(path)
+	if err != nil {
+		return nil, err
+	}
+	if !f.Harness.composes() {
+		return nil, fmt.Errorf("%s: the harness section names no modules and no stack to extend", path)
+	}
+	h := f.Harness
+	p := &stack.Stack{APIVersion: f.APIVersion, Name: h.Name, Description: h.Description, Extends: h.Extends, Target: h.Target, Modules: h.Modules, Extensions: h.Extensions}
+	if p.Extends.Path == "" && p.Extends.Git == "" && p.Extends.Ref == "" && len(p.Target.Runtimes) == 0 {
+		return nil, fmt.Errorf("%s: harness names modules and no target.runtime; the section holds this repository's own stack, a target and its modules, or extends one", path)
+	}
+	return stack.NewCompose(path, p)
+}
+
 // UserDir is the user's configuration directory: $XDG_CONFIG_HOME/qory, else
 // ~/.config/qory, and "" when neither can be found.
 func UserDir() string {
@@ -179,41 +340,56 @@ func exists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
-// apply reads one file and sets the keys it names.
-func (c *Config) apply(path string) error {
+// ownedFile reports whether the current user owns the file at path.
+func ownedFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && stack.OwnedByCurrentUser(info)
+}
+
+// apply reads one file and sets the keys it names. With machine false, only the worktree
+// section is taken: the harness, git and env keys are the machine's and left out.
+func (c *Config) apply(path string, machine bool) error {
 	f, err := read(path)
 	if err != nil {
 		return err
 	}
 	c.Files = append(c.Files, path)
-	if f.Runtime != nil {
-		if len(*f.Runtime) == 0 {
-			return fmt.Errorf("%s: runtime is empty; it names one runtime or a list of them", path)
-		}
-		if err := f.Runtime.Validate(); err != nil {
-			return fmt.Errorf("%s: %w", path, err)
-		}
-		c.Runtime = *f.Runtime
-		c.origins["runtime"] = path
+	if err := c.applyWorktree(path, f.Worktree); err != nil {
+		return err
 	}
-	if f.Model != nil {
-		c.Model = *f.Model
-		c.origins["model"] = path
+	if !machine {
+		return nil
 	}
-	if f.Force != nil {
-		c.Force = *f.Force
-		c.origins["force"] = path
-	}
-	if f.Update != nil {
-		switch *f.Update {
-		case "always":
-			c.Update = true
-		case "never":
-			c.Update = false
-		default:
-			return fmt.Errorf("%s: update %q is not always or never", path, *f.Update)
+	if h := f.Harness; h != nil {
+		if h.Runtime != nil {
+			if len(*h.Runtime) == 0 {
+				return fmt.Errorf("%s: harness.runtime is empty; it names one runtime or a list of them", path)
+			}
+			if err := h.Runtime.Validate(); err != nil {
+				return fmt.Errorf("%s: harness.%w", path, err)
+			}
+			c.Runtime = *h.Runtime
+			c.origins["harness.runtime"] = path
 		}
-		c.origins["update"] = path
+		if h.Model != nil {
+			c.Model = *h.Model
+			c.origins["harness.model"] = path
+		}
+		if h.Force != nil {
+			c.Force = *h.Force
+			c.origins["harness.force"] = path
+		}
+		if h.Update != nil {
+			switch *h.Update {
+			case "always":
+				c.Update = true
+			case "never":
+				c.Update = false
+			default:
+				return fmt.Errorf("%s: harness.update %q is not always or never", path, *h.Update)
+			}
+			c.origins["harness.update"] = path
+		}
 	}
 	if f.Git != nil {
 		if f.Git.Timeout != nil {
@@ -249,7 +425,64 @@ func (c *Config) apply(path string) error {
 	return nil
 }
 
-// read decodes one file. An unknown key is an error, and so is a second document, an
+// applyWorktree sets the worktree keys the section names. A list replaces the one before
+// it; the nearest file's list is the one in force.
+func (c *Config) applyWorktree(path string, w *worktreeSection) error {
+	if w == nil {
+		return nil
+	}
+	if w.Dir != nil {
+		if *w.Dir == "" {
+			return fmt.Errorf("%s: worktree.dir is empty; it is a directory, relative to the main checkout unless absolute", path)
+		}
+		c.Worktree.Dir = *w.Dir
+		c.origins["worktree.dir"] = path
+	}
+	if w.Name != nil {
+		if !strings.Contains(*w.Name, "{branch}") {
+			return fmt.Errorf("%s: worktree.name %q holds no {branch}; two worktrees would get one directory", path, *w.Name)
+		}
+		if strings.ContainsAny(*w.Name, `/\`) {
+			return fmt.Errorf("%s: worktree.name %q holds a slash; it is one directory name under worktree.dir", path, *w.Name)
+		}
+		c.Worktree.Name = *w.Name
+		c.origins["worktree.name"] = path
+	}
+	if w.Base != nil {
+		c.Worktree.Base = *w.Base
+		c.origins["worktree.base"] = path
+	}
+	for _, list := range []struct {
+		key   string
+		paths []string
+		into  *[]string
+	}{{"worktree.link", w.Link, &c.Worktree.Link}, {"worktree.copy", w.Copy, &c.Worktree.Copy}} {
+		if list.paths == nil {
+			continue
+		}
+		for _, rel := range list.paths {
+			clean := filepath.Clean(rel)
+			if rel == "" || filepath.IsAbs(rel) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+				return fmt.Errorf("%s: %s names %q, which is not a path inside the checkout", path, list.key, rel)
+			}
+		}
+		*list.into = append([]string(nil), list.paths...)
+		c.origins[list.key] = path
+	}
+	if w.Run != nil {
+		if w.Run.Add != nil {
+			c.Worktree.Add = append([]string(nil), w.Run.Add...)
+			c.origins["worktree.run.add"] = path
+		}
+		if w.Run.Remove != nil {
+			c.Worktree.Remove = append([]string(nil), w.Run.Remove...)
+			c.origins["worktree.run.remove"] = path
+		}
+	}
+	return nil
+}
+
+// read decodes one file. An unknown key is an error, and so is a second document and an
 // apiVersion other than [stack.APIVersion].
 func read(path string) (file, error) {
 	var f file
@@ -287,17 +520,17 @@ func decodeError(path string, err error) error {
 
 // Row is one effective value and where it came from.
 type Row struct {
-	// Key is the setting as the file names it: runtime, git.timeout, env.NAME.
+	// Key is the setting as the file names it: harness.runtime, git.timeout, env.NAME.
 	Key string
 	// Value is the effective value as text; "(stack)" for a runtime or model the stack
-	// decides.
+	// decides, "(remote HEAD)" for a worktree base no file set.
 	Value string
 	// Origin is the file that set the value, or [Default].
 	Origin string
 }
 
-// Rows lists every effective value with its origin, the fixed keys first and the
-// variables after them in name order.
+// Rows lists every effective value with its origin: the fixed keys first, the worktree
+// lists that are set, and the variables after them in name order.
 func (c Config) Rows() []Row {
 	runtime, model := "(stack)", "(stack)"
 	if c.Runtime != nil {
@@ -310,18 +543,35 @@ func (c Config) Rows() []Row {
 	if c.Update {
 		update = "always"
 	}
+	base := c.Worktree.Base
+	if base == "" {
+		base = "(remote HEAD)"
+	}
 	cache := c.Git.Cache
 	if cache == "" {
 		cache, _ = source.CacheDir()
 	}
 	rows := []Row{
-		{"runtime", runtime, c.origins["runtime"]},
-		{"model", model, c.origins["model"]},
-		{"force", fmt.Sprint(c.Force), c.origins["force"]},
-		{"update", update, c.origins["update"]},
-		{"git.timeout", c.Git.Timeout.String(), c.origins["git.timeout"]},
-		{"git.cache", cache, c.origins["git.cache"]},
+		{"harness.runtime", runtime, c.origins["harness.runtime"]},
+		{"harness.model", model, c.origins["harness.model"]},
+		{"harness.force", fmt.Sprint(c.Force), c.origins["harness.force"]},
+		{"harness.update", update, c.origins["harness.update"]},
+		{"worktree.dir", c.Worktree.Dir, c.origins["worktree.dir"]},
+		{"worktree.name", c.Worktree.Name, c.origins["worktree.name"]},
+		{"worktree.base", base, c.origins["worktree.base"]},
 	}
+	for _, list := range []struct {
+		key   string
+		items []string
+	}{{"worktree.link", c.Worktree.Link}, {"worktree.copy", c.Worktree.Copy}, {"worktree.run.add", c.Worktree.Add}, {"worktree.run.remove", c.Worktree.Remove}} {
+		if len(list.items) > 0 {
+			rows = append(rows, Row{list.key, strings.Join(list.items, ", "), c.origins[list.key]})
+		}
+	}
+	rows = append(rows,
+		Row{"git.timeout", c.Git.Timeout.String(), c.origins["git.timeout"]},
+		Row{"git.cache", cache, c.origins["git.cache"]},
+	)
 	names := make([]string, 0, len(c.Env))
 	for name := range c.Env {
 		names = append(names, name)

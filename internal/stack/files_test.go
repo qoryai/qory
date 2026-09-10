@@ -58,13 +58,13 @@ func TestLoadRefusesExtendingFilesShapes(t *testing.T) {
 }
 
 // TestExtendRefusesAModuleNamedLikeABaseModule is a customer naming core, the base's
-// module, in their own compose file: the message says the module belongs to the base before any
+// module, in their own qory.yaml: the message says the module belongs to the base before any
 // source is resolved.
 func TestExtendRefusesAModuleNamedLikeABaseModule(t *testing.T) {
 	base := &Stack{Target: Target{Runtimes: Runtimes{"claude"}}, Modules: []Module{{Name: "core", Source: Source{Path: "modules/core"}}}, Extending: &Extending{}, Root: "/repo", File: "/repo/qory-stack.yaml"}
 	p := &Stack{Extends: Source{Path: "../base"}, Modules: []Module{{Name: "core", Exclude: map[string][]string{"skills": {"review"}}}}, File: "/app/qory-stack.yaml"}
 	_, err := Extend(base, p)
-	want := "module core belongs to the base stack; a compose file cannot name a base module, exclude from it or replace it"
+	want := "module core belongs to the base stack; a checkout's qory.yaml cannot name a base module, exclude from it or replace it"
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %q", err, want)
 	}

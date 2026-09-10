@@ -15,21 +15,20 @@ import (
 	"github.com/qoryai/qory/internal/user"
 )
 
-// Example is the file tree qory harness init writes, rooted at ExampleRoot. The main
+// Example is the file tree qory setup example writes, rooted at ExampleRoot. The main
 // package sets it from the files embedded in the binary.
 var Example fs.FS
 
 // ExampleRoot is the directory inside Example that holds the example.
 const ExampleRoot = "examples/hello"
 
-// newInit builds the init verb, which writes the hello example into the current directory
-// and refuses to overwrite any file the example would write.
-func newInit(use string, aliases ...string) *cobra.Command {
+// newSetupExample builds the setup example verb, which writes the hello example into the
+// current directory and refuses to overwrite any file the example would write.
+func newSetupExample() *cobra.Command {
 	return &cobra.Command{
-		Use:     use,
-		Aliases: aliases,
-		Short:   "Write the hello example into the current directory: a stack and two modules",
-		Args:    noArgs,
+		Use:   "example",
+		Short: "Write the hello example into the current directory: a stack and two modules",
+		Args:  noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := os.Getwd()
 			if err != nil {

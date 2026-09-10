@@ -56,17 +56,18 @@ func operatorRepoWith(t *testing.T, stack string) string {
 	return "file://" + dir
 }
 
-// customerCompose is the customer's compose file: the base at a branch, plus their own module.
-func customerCompose(url string) string {
-	return "apiVersion: qory.ai/v1alpha1\nextends: {git: " + url + ", ref: main, path: nextjs-15}\nmodules:\n  - name: app\nextensions:\n  customer: {team: web}\n"
+// customerCompose is the customer's qory.yaml: under harness, the base at a branch and
+// their own module, with extra lines of that section first.
+func customerCompose(url string, extra ...string) string {
+	return "apiVersion: qory.ai/v1alpha1\nharness:\n" + strings.Join(extra, "") + "  extends: {git: " + url + ", ref: main, path: nextjs-15}\n  modules:\n    - name: app\n  extensions:\n    customer: {team: web}\n"
 }
 
-// customerCheckout is a product repository with the customer's compose file and an app module
+// customerCheckout is a product repository with the customer's qory.yaml and an app module
 // shipping a skill, an agent, an AGENTS.md and an allow rule.
 func customerCheckout(t *testing.T, url string) string {
 	t.Helper()
 	root := newCheckout(t)
-	writeFile(t, filepath.Join(root, "qory-compose.yaml"), customerCompose(url))
+	writeFile(t, filepath.Join(root, "qory.yaml"), customerCompose(url))
 	writeManifest(t, filepath.Join(root, "modules", "app"), "app")
 	writeFile(t, filepath.Join(root, "modules", "app", "skills", "deploy", "SKILL.md"), "# deploy\n")
 	writeFile(t, filepath.Join(root, "modules", "app", "agents", "planner.md"), "---\nname: planner\n---\nPlan.\n")
@@ -120,12 +121,12 @@ func TestExtendsComposesTheBaseFirstAndClosed(t *testing.T) {
 // TestExtendsRefusesWhatTheBaseCloses is the customer changing what the base decides:
 // a hook in their module, an entry colliding with the base's, a deny rule in their
 // fragment, a runtime the base does not render for, a model from the command line or
-// from the checkout's own qory.yaml, a target in their own file, and a base namespace in
+// from the checkout's own qory.yaml, a target in that file, and a base namespace in
 // their extensions.
 func TestExtendsRefusesWhatTheBaseCloses(t *testing.T) {
 	url := operatorRepo(t)
 	root := customerCheckout(t, url)
-	compose := filepath.Join(root, "qory-compose.yaml")
+	compose := filepath.Join(root, "qory.yaml")
 	refuse := func(name, want string, exit int, args ...string) {
 		t.Helper()
 		_, err := run(t, append([]string{"harness", "compose"}, args...)...)
@@ -144,13 +145,12 @@ func TestExtendsRefusesWhatTheBaseCloses(t *testing.T) {
 	writeFile(t, filepath.Join(root, "modules", "app", "settings", "claude", "settings.json"), `{"permissions": {"allow": ["Bash(npm test)"]}}`)
 	refuse("another runtime", "runtime codex is not one the base stack nextjs-15@", cmd.ExitInput, "--runtime", "codex")
 	refuse("another model", "the model is the base stack nextjs-15@", cmd.ExitInput, "--model", "sonnet")
-	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.ai/v1alpha1\nruntime: codex\n")
+	writeFile(t, compose, customerCompose(url, "  runtime: codex\n"))
 	if _, err := run(t, "harness", "compose"); err != nil {
-		t.Errorf("the checkout's own qory.yaml was read under extends: %v", err)
+		t.Errorf("the checkout's own runtime was read under extends: %v", err)
 	}
-	os.Remove(filepath.Join(root, "qory.yaml"))
-	writeFile(t, compose, strings.Replace(customerCompose(url), "modules:\n", "target: {runtime: claude}\nmodules:\n", 1))
-	refuse("a target of its own", "target is the base stack's", cmd.ExitInput)
+	writeFile(t, compose, customerCompose(url, "  target: {runtime: claude}\n"))
+	refuse("a target of its own", "target is the base stack's; a harness section that extends a stack does not set it", cmd.ExitInput)
 	writeFile(t, compose, strings.Replace(customerCompose(url), "customer:", "acme:", 1))
 	refuse("the base's namespace", "extensions.acme is the base stack's", cmd.ExitInput)
 }
@@ -159,7 +159,7 @@ func TestExtendsRefusesWhatTheBaseCloses(t *testing.T) {
 // the message says the stack is not reachable from here, with exit 1.
 func TestExtendsNamesABaseThatIsNotReachable(t *testing.T) {
 	root := newCheckout(t)
-	writeFile(t, filepath.Join(root, "qory-compose.yaml"), customerCompose("file:///nowhere/at/all"))
+	writeFile(t, filepath.Join(root, "qory.yaml"), customerCompose("file:///nowhere/at/all"))
 	writeManifest(t, filepath.Join(root, "modules", "app"), "app")
 	_, err := run(t, "harness", "compose")
 	if err == nil || !strings.Contains(err.Error(), "the stack file:///nowhere/at/all#main:nextjs-15 is not reachable from here") || cmd.ExitCode(err) != 1 {
@@ -175,7 +175,7 @@ func TestExtendsRefusesAClosedBase(t *testing.T) {
 	writeManifest(t, filepath.Join(base, "modules", "core"), "core")
 	writeManifest(t, filepath.Join(base, "modules", "tools"), "tools")
 	root := newCheckout(t)
-	writeFile(t, filepath.Join(root, "qory-compose.yaml"), "apiVersion: qory.ai/v1alpha1\nextends: {path: "+base+"}\nmodules:\n  - name: app\n")
+	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.ai/v1alpha1\nharness:\n  extends: {path: "+base+"}\n  modules:\n    - name: app\n")
 	writeManifest(t, filepath.Join(root, "modules", "app"), "app")
 	_, err := run(t, "harness", "compose")
 	if err == nil || !strings.Contains(err.Error(), "is closed: it declares no extending block") || cmd.ExitCode(err) != cmd.ExitInput {
@@ -186,12 +186,12 @@ func TestExtendsRefusesAClosedBase(t *testing.T) {
 // TestExtendsGovernsFilesByPrefix is the base opening claude/rules to customers: a rule
 // file lands in .claude/rules through the link, a file under another path is refused
 // naming the prefixes, a customer naming a base module to exclude from it is told the
-// module belongs to the base, and a qory.yaml at the checkout root is announced as not
-// read.
+// module belongs to the base, and the machine keys of the checkout's qory.yaml are
+// announced as not read.
 func TestExtendsGovernsFilesByPrefix(t *testing.T) {
 	url := operatorRepo(t)
 	root := customerCheckout(t, url)
-	compose := filepath.Join(root, "qory-compose.yaml")
+	compose := filepath.Join(root, "qory.yaml")
 	_, err := run(t, "harness", "compose")
 	if err != nil {
 		t.Fatal(err)
@@ -203,18 +203,17 @@ func TestExtendsGovernsFilesByPrefix(t *testing.T) {
 		t.Fatalf("closed files: err = %v, exit %d", err, cmd.ExitCode(err))
 	}
 	openBase := operatorRepoWith(t, strings.Replace(baseStack, "  settings: [permissions.allow]\n", "  settings: [permissions.allow]\n  files: [claude/rules/]\n", 1))
-	writeFile(t, compose, customerCompose(openBase))
-	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.ai/v1alpha1\nruntime: codex\n")
+	writeFile(t, compose, customerCompose(openBase, "  runtime: codex\n"))
 	out, err := run(t, "harness", "compose")
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantsRow(t, out, "skipped", "qory.yaml  (the base stack decides; not read under extends)")
+	wantsRow(t, out, "skipped", "qory.yaml  (its harness, git and env keys; the base stack decides under extends)")
 	out, err = run(t, "harness", "compose", "--dry-run")
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantsRow(t, out, "skipped", "qory.yaml  (the base stack decides; not read under extends)")
+	wantsRow(t, out, "skipped", "qory.yaml  (its harness, git and env keys; the base stack decides under extends)")
 	if data, err := os.ReadFile(filepath.Join(root, ".claude", "rules", "web.md")); err != nil || string(data) != "# web\n" {
 		t.Fatalf("the rule through the link: %q, %v", data, err)
 	}
@@ -229,9 +228,9 @@ func TestExtendsGovernsFilesByPrefix(t *testing.T) {
 		t.Fatalf("a longer segment: err = %v", err)
 	}
 	os.RemoveAll(filepath.Join(root, "modules", "app", "files", "claude", "rules-private"))
-	writeFile(t, compose, strings.Replace(customerCompose(openBase), "  - name: app\n", "  - name: app\n  - name: core\n    exclude: {skills: [review]}\n", 1))
+	writeFile(t, compose, strings.Replace(customerCompose(openBase), "    - name: app\n", "    - name: app\n    - name: core\n      exclude: {skills: [review]}\n", 1))
 	_, err = run(t, "harness", "compose")
-	if err == nil || !strings.Contains(err.Error(), "module core belongs to the base stack; a compose file cannot name a base module, exclude from it or replace it") || cmd.ExitCode(err) != cmd.ExitInput {
+	if err == nil || !strings.Contains(err.Error(), "module core belongs to the base stack; a checkout's qory.yaml cannot name a base module, exclude from it or replace it") || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("a base module named: err = %v, exit %d", err, cmd.ExitCode(err))
 	}
 }

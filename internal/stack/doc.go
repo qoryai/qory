@@ -1,9 +1,9 @@
-// Package stack reads qory-stack.yaml and qory-compose.yaml and finds the one that covers a
-// checkout.
+// Package stack reads qory-stack.yaml.
 //
 // A stack names the target runtime the harness is rendered for, the optional model, and
-// the ordered modules the harness is composed from. A compose file names the stack it
-// extends instead of a target, and the modules it appends. Each module carries a name, a source
+// the ordered modules the harness is composed from. A checkout's qory.yaml names, under
+// harness, the stack it extends instead of a target, and the modules it appends; the
+// configuration package reads that and builds the same Stack with [NewCompose]. Each module carries a name, a source
 // directory, an optional forced variant, an optional link, a name at the checkout root
 // for the module's directory, and an optional exclude: per kind, the entry names the
 // compose leaves out. The stack may carry extensions, maps qory writes into the report
@@ -12,11 +12,10 @@
 //
 // A caller discovers the file, then loads it:
 //
-//	file, err := stack.Discover(checkout)
 //	p, err := stack.Load(file)
 //
 // [Load] refuses an unknown field, a second document in the file, an apiVersion other than
-// [APIVersion], a stack without target.runtime or with extends, a compose file without extends or with a
+// [APIVersion], a stack without target.runtime or with extends, a checkout's qory.yaml without extends or with a
 // target or an extending block, an empty module list, a
 // module without a name or with a name that is not one path segment, two modules with the
 // same name, a path source without its path, a git source without its ref or with a path

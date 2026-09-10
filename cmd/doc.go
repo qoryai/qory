@@ -8,7 +8,7 @@
 // The tree:
 //
 //	qory version           the version, and the harness format this build reads
-//	qory harness init      write the hello example into the current directory
+//	qory setup example     write the hello example into the current directory
 //	qory harness compose   compose the stack's modules into the checkout
 //	qory harness inspect   print the report of the composed harness
 //	qory harness remove    remove the composed harness and its links, or one runtime's

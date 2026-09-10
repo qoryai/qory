@@ -3,7 +3,7 @@
 Two modules. Both ship a `greet` skill, because everyone believes they invented greeting.
 The stack keeps the world module's and excludes the hello module's.
 
-`qory harness init` writes this directory. From it:
+`qory setup example` writes this directory. From it:
 
 ```sh
 qory hc            # composes into ./.claude

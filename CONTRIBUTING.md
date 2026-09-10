@@ -91,9 +91,10 @@ conventions, beyond what `revive` can check:
 
 One vocabulary, no synonyms: **runtime** is the program that runs the harness, such as
 Claude Code; **stack** is `qory-stack.yaml`, the ordered modules and the target for one kind
-of work; **compose file** is `qory-compose.yaml`, the checkout's document that names the
-stack it extends and the modules it appends; **configuration** is `qory.yaml`;
-**manifest** is `qory-module.yaml`; **base** is the stack a compose file extends; **module**, **source**, **entry**, **kind**, **variant**, **exclude**,
+of work; **configuration** is `qory.yaml`, the repository's own document at its root and
+the machine's elsewhere, whose `harness` section names the stack a checkout extends and
+the modules it appends; **manifest** is `qory-module.yaml`; **base** is the stack a
+checkout extends; **module**, **source**, **entry**, **kind**, **variant**, **exclude**,
 **collision**, **home**, **checkout**, **link**, **pin** and **report** mean what
 `contracts/harness/v1/README.md` says they mean. A runtime is never a provider, a tool or a vendor; a configuration is
 never a setting file or a preference.

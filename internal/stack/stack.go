@@ -18,18 +18,12 @@ import (
 // is refused, and the message names this one.
 const APIVersion = "qory.ai/v1alpha1"
 
-// FileName is the stack's file name on disk, and ComposeFileName the compose file's: the
-// document in a checkout that names the stack it extends and appends its own modules.
-// Either sits in the checkout root or in an ancestor directory covering several
-// checkouts; a directory holds one of the two. The file name is what says which document
-// a file holds; the document carries no kind.
-const (
-	FileName        = "qory-stack.yaml"
-	ComposeFileName = "qory-compose.yaml"
-)
-
-// IsComposeFile reports whether the file at path is a compose file, by its name.
-func IsComposeFile(path string) bool { return filepath.Base(path) == ComposeFileName }
+// FileName is the stack's file name on disk, in the checkout root, in an ancestor
+// directory covering several checkouts, or in a directory of a harness repository. The
+// file name is what says which document a file holds; the document carries no kind. A
+// checkout that extends a stack names it in the harness section of its qory.yaml, which
+// [github.com/qoryai/qory/internal/config] reads and turns into a Stack with [NewCompose].
+const FileName = "qory-stack.yaml"
 
 // Kinds are the atomic entry kinds an exclude may name. An exclude that names anything else
 // is refused.
@@ -80,9 +74,9 @@ type Module struct {
 	Source Source `yaml:"source,omitempty"`
 	// Exclude lists, per kind from [Kinds], the entry names this module does not contribute.
 	Exclude map[string][]string `yaml:"exclude,omitempty"`
-	// Base marks a module that came from the base stack a compose file extends. It
+	// Base marks a module that came from the base stack a checkout's qory.yaml extends. It
 	// is set by [Extend], not by the YAML, which also rewrites the module's source so it
-	// resolves from the compose file.
+	// resolves from the checkout's qory.yaml.
 	Base bool `yaml:"-"`
 	// Variant forces one of the module's variants instead of the one named like the runtime.
 	Variant string `yaml:"variant,omitempty"`
@@ -165,7 +159,7 @@ func (r Runtimes) First() string {
 	return r[0]
 }
 
-// Extending is what a stack lets a compose file's modules ship. A stack
+// Extending is what a stack lets a checkout's own modules ship. A stack
 // without the block is closed: no stack may extend it.
 type Extending struct {
 	// Kinds are the entry kinds an appended module may ship, from [Kinds] without files,
@@ -182,9 +176,10 @@ type Extending struct {
 	Files []string `yaml:"files,omitempty"`
 }
 
-// Stack is one qory-stack.yaml or qory-compose.yaml, validated. A compose file is a Stack whose
-// Extends names the base and whose Target is empty; [Extend] merges it onto its base and
-// returns the stack that composes.
+// Stack is one qory-stack.yaml, validated, or the document a checkout's qory.yaml holds
+// under harness: the checkout's own stack, with a Target and Modules, or a Stack whose
+// Extends names the base and whose Target is empty; [Extend] merges that one onto its base
+// and returns the stack that composes.
 type Stack struct {
 	APIVersion string `yaml:"apiVersion"`
 	// Name is the stack's name in the report. A stack that leaves it out is named after
@@ -192,16 +187,16 @@ type Stack struct {
 	Name string `yaml:"name,omitempty"`
 	// Description says what the stack is for, carried into the report.
 	Description string `yaml:"description,omitempty"`
-	// Extends, in a compose file, names the base stack it appends to: a directory holding
+	// Extends, in a checkout's qory.yaml, names the base stack it appends to: a directory holding
 	// a qory-stack.yaml, as a path or inside a git repository at a ref. The base's modules come
-	// first and cannot be changed; its target is the compose file's target.
+	// first and cannot be changed; its target is the checkout's target.
 	Extends Source `yaml:"extends,omitempty"`
-	// Target is the runtime and model the harness is rendered for. A compose file leaves
-	// it out and takes the base's.
+	// Target is the runtime and model the harness is rendered for. A document that extends
+	// a stack leaves it out and takes the base's.
 	Target Target `yaml:"target,omitempty"`
 	// Modules are the modules to compose, in the order they merge.
 	Modules []Module `yaml:"modules"`
-	// Extending, on a stack, is what a compose file's modules may ship. A stack that
+	// Extending, on a stack, is what a checkout's own modules may ship. A stack that
 	// leaves it out cannot be extended.
 	Extending *Extending `yaml:"extending,omitempty"`
 	// Extensions are values qory carries into the report and does not read: one map per
@@ -268,10 +263,33 @@ func Load(path string) (*Stack, error) {
 	if p.Root, err = checkout.Root(filepath.Dir(abs)); err != nil {
 		return nil, err
 	}
-	if err := p.validate(IsComposeFile(path)); err != nil {
+	if err := p.validate(false); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return p, nil
+}
+
+// NewCompose validates p as the document a checkout's qory.yaml holds under harness, read
+// at path: the checkout's own stack when it sets a target, or, when it names a stack under
+// extends, the document that appends to that base.
+func NewCompose(path string, p *Stack) (*Stack, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	p.File = abs
+	if p.Root, err = checkout.Root(filepath.Dir(abs)); err != nil {
+		return nil, err
+	}
+	if err := p.validate(p.extends()); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return p, nil
+}
+
+// extends reports whether the document names a stack to extend.
+func (p *Stack) extends() bool {
+	return p.Extends.Path != "" || p.Extends.Git != "" || p.Extends.Ref != ""
 }
 
 // unknownKey is the decoder's report of a key the document has no field for. It names the
@@ -289,8 +307,8 @@ func decodeError(path string, err error) error {
 }
 
 // validate checks the whole document before a caller sees it, so a document that reaches
-// the compose is known to carry what its file name asks for, a runtime for a stack or a
-// base for a compose file, at least one module, each with a name or a source, no name
+// the compose is known to carry what it is asked for, a runtime for a stack or a base for
+// a document that extends one, at least one module, each with a name or a source, no name
 // twice, excludes over known kinds only, links that are one path segment and named once,
 // extensions that are maps, and an extending block over known kinds without hooks and
 // servers. Whether a source holds a module, and whether its manifest carries the name the
@@ -299,23 +317,19 @@ func (p *Stack) validate(compose bool) error {
 	if p.APIVersion != APIVersion {
 		return fmt.Errorf("apiVersion %q is not one this qory reads; versions: %s", p.APIVersion, APIVersion)
 	}
-	extends := p.Extends.Path != "" || p.Extends.Git != "" || p.Extends.Ref != ""
 	if compose {
-		if !extends {
-			return errors.New("extends is empty; a compose file names the stack it extends")
-		}
 		if err := p.Extends.validate(); err != nil {
 			return fmt.Errorf("extends: %w", err)
 		}
 		if len(p.Target.Runtimes) > 0 || p.Target.Model != "" {
-			return errors.New("target is the base stack's; a compose file does not set it")
+			return errors.New("target is the base stack's; a harness section that extends a stack does not set it")
 		}
 		if p.Extending != nil {
-			return errors.New("extending is the base stack's; a compose file does not set it")
+			return errors.New("extending is the base stack's; a harness section that extends a stack does not set it")
 		}
 	} else {
-		if extends {
-			return errors.New("extends is not a stack's; a compose file, qory-compose.yaml, extends a stack")
+		if p.extends() {
+			return errors.New("extends is not a stack's; the harness section of a checkout's qory.yaml extends a stack")
 		}
 		if err := p.Target.Runtimes.Validate(); err != nil {
 			return err
@@ -461,7 +475,7 @@ func FileAllowed(name string, prefixes []string) bool {
 	return false
 }
 
-// Extend returns the stack the compose file p composes on base: the base's modules first,
+// Extend returns the stack the checkout's qory.yaml p composes on base: the base's modules first,
 // marked [Module.Base], each with its source rewritten to resolve from p, then p's
 // modules; the base's target; both files' extensions. It refuses a base that extends
 // another, a base without an extending block, and an extension namespace both files
@@ -482,7 +496,7 @@ func Extend(base, p *Stack) (*Stack, error) {
 			// A base module read by path: inside the base's repository, which is the
 			// extends source's clone for a git base, so the module becomes a git source
 			// at the same ref and gets the commit as its pin; a path relative to the
-			// compose file for a base on disk, so the report reads on any machine.
+			// checkout's qory.yaml for a base on disk, so the report reads on any machine.
 			abs := base.SourceOf(l).Path
 			if !filepath.IsAbs(abs) {
 				abs = filepath.Join(base.DirOf(l), abs)
@@ -507,7 +521,7 @@ func Extend(base, p *Stack) (*Stack, error) {
 	}
 	for _, l := range p.Modules {
 		if inBase[l.Name] {
-			return nil, fmt.Errorf("module %s belongs to the base stack; a compose file cannot name a base module, exclude from it or replace it", l.Name)
+			return nil, fmt.Errorf("module %s belongs to the base stack; a checkout's qory.yaml cannot name a base module, exclude from it or replace it", l.Name)
 		}
 	}
 	out.Modules = append(out.Modules, p.Modules...)
@@ -517,7 +531,7 @@ func Extend(base, p *Stack) (*Stack, error) {
 	}
 	for ns, v := range p.Extensions {
 		if _, ok := out.Extensions[ns]; ok {
-			return nil, fmt.Errorf("extensions.%s is the base stack's; a compose file declares another namespace", ns)
+			return nil, fmt.Errorf("extensions.%s is the base stack's; a checkout's qory.yaml declares another namespace", ns)
 		}
 		out.Extensions[ns] = v
 	}

@@ -32,7 +32,7 @@
       "additionalProperties": {"type": "object"}
     },
     "extending": {
-      "description": "What a module of a compose file extending this stack may ship.",
+      "description": "What a module of a checkout extending this stack may ship.",
       "type": "object",
       "additionalProperties": false,
       "properties": {

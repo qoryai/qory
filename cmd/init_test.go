@@ -20,7 +20,7 @@ func TestInit(t *testing.T) {
 	cmd.Example = exampleFromDisk(t)
 	dir := emptyDir(t)
 	root := cmd.Root()
-	root.SetArgs([]string{"harness", "init"})
+	root.SetArgs([]string{"setup", "example"})
 	var out strings.Builder
 	root.SetOut(&out)
 	if err := root.Execute(); err != nil {
@@ -41,7 +41,7 @@ func TestInit(t *testing.T) {
 		t.Fatal(err)
 	}
 	root = cmd.Root()
-	root.SetArgs([]string{"harness", "init"})
+	root.SetArgs([]string{"setup", "example"})
 	root.SetOut(&strings.Builder{})
 	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "does not overwrite") {
 		t.Fatalf("second init: %v", err)
@@ -55,7 +55,7 @@ func TestInitLeavesEveryExistingFile(t *testing.T) {
 	dir := emptyDir(t)
 	setExample(t, example)
 	writeFile(t, filepath.Join(dir, "README.md"), "# my project\n")
-	out, err := run(t, "harness", "init")
+	out, err := run(t, "setup", "example")
 	if err == nil || !strings.Contains(err.Error(), "already has a README.md; qory does not overwrite it") {
 		t.Fatalf("init over a README: %v\n%s", err, out)
 	}
@@ -74,7 +74,7 @@ func TestInitWithoutAName(t *testing.T) {
 	dir := emptyDir(t)
 	setExample(t, example)
 
-	out, err := run(t, "harness", "init")
+	out, err := run(t, "setup", "example")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
@@ -92,7 +92,7 @@ func TestInitWithoutAnExample(t *testing.T) {
 	emptyDir(t)
 	setExample(t, nil)
 
-	out, err := run(t, "harness", "init")
+	out, err := run(t, "setup", "example")
 	if err == nil {
 		t.Fatalf("init without an example: no error\n%s", out)
 	}

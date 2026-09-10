@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -41,7 +42,7 @@ func newHarness() *cobra.Command {
 	harness := &cobra.Command{
 		Use:     "harness",
 		Aliases: []string{"h"},
-		Short:   "Write an example, then compose, inspect and remove the harness of a checkout",
+		Short:   "Compose, inspect and remove the harness of a checkout",
 		// A verb this noun does not have is an input error, not a help page and exit 0.
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
@@ -50,7 +51,7 @@ func newHarness() *cobra.Command {
 			return cmd.Help()
 		},
 	}
-	harness.AddCommand(newInit("init"), newCompose("compose", "c"), newInspect("inspect", "i"), newRemove("remove", "r"))
+	harness.AddCommand(newCompose("compose", "c"), newInspect("inspect", "i"), newRemove("remove", "r"))
 	return harness
 }
 
@@ -79,24 +80,30 @@ type places struct {
 // it and excludes what it wrote through git, and has none of that without one. It also
 // refuses a .qory that is not a real directory, a symlink a repository committed say,
 // because everything qory writes and removes goes through that path.
-func locate() (places, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return places{}, err
+func locate() (places, error) { return locateAt("") }
+
+// locateAt is [locate] for the checkout holding dir, "" for the working directory.
+func locateAt(dir string) (places, error) {
+	if dir == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return places{}, err
+		}
+		dir = cwd
 	}
-	root, err := checkout.Root(cwd)
+	root, err := checkout.Root(dir)
 	if err != nil {
 		return places{}, err
 	}
 	if checkout.ExcludeFile(root) == "" {
 		return places{}, input(fmt.Errorf("%s is not inside a git working tree; qory composes into a checkout", root))
 	}
-	dir := checkout.QoryDir(root)
-	if info, err := os.Lstat(dir); err == nil && (info.Mode()&os.ModeSymlink != 0 || !info.IsDir()) {
-		target, _ := os.Readlink(dir)
-		return places{}, &render.ForeignPathError{Path: dir, Target: target}
+	qdir := checkout.QoryDir(root)
+	if info, err := os.Lstat(qdir); err == nil && (info.Mode()&os.ModeSymlink != 0 || !info.IsDir()) {
+		target, _ := os.Readlink(qdir)
+		return places{}, &render.ForeignPathError{Path: qdir, Target: target}
 	}
-	return places{root: root, dir: dir, home: filepath.Join(dir, "harness"), report: filepath.Join(dir, "harness-report.json")}, nil
+	return places{root: root, dir: qdir, home: filepath.Join(qdir, "harness"), report: filepath.Join(qdir, "harness-report.json")}, nil
 }
 
 // newCompose builds the compose verb under the given name and aliases.
@@ -127,212 +134,17 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 		Short:   "Compose the stack's modules into the checkout you stand in",
 		Args:    noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			at, err := locate()
-			if err != nil {
-				return err
+			o := composeOptions{file: file, runtime: runtime, model: model, dryRun: dryRun, verbose: verbose}
+			if cmd.Flags().Changed("force") {
+				o.force = &force
 			}
-			if file == "" {
-				if file, err = stack.Discover(at.root); err != nil {
-					return input(err)
-				}
+			if cmd.Flags().Changed("update") {
+				o.update = &update
 			}
-			p, err := stack.Load(file)
-			if err != nil {
-				return input(err)
-			}
-			// A compose file takes its target from the closed base it extends, and
-			// the checkout's own qory.yaml is not read: the runner's configuration is
-			// the only one, so the checkout's authors cannot pick another runtime.
-			extends := p.Extends.Path != "" || p.Extends.Git != ""
-			conf, err := config.Load(at.root, !extends)
-			if err != nil {
-				return input(err)
-			}
-			if !cmd.Flags().Changed("force") {
-				force = conf.Force
-			}
-			if !cmd.Flags().Changed("update") {
-				update = conf.Update
-			}
-			// The last report pins each git module, and the base, to the commit it was
-			// composed from, so a compose without --update stays there as long as the
-			// stack still names the same source: an edited ref resolves anew.
-			previous, _ := report.Read(at.report)
-			pins := map[string]string{}
-			for _, l := range previous.Modules {
-				if l.Pin != source.WorkingTree {
-					pins[l.Source] = l.Pin
-				}
-			}
-			opts := compose.Options{Update: update, Pins: pins, Cache: conf.Git.Cache, Timeout: conf.Git.Timeout, Env: conf.Env}
-			var basePin string
-			if previous.Base != nil && previous.Base.Source == p.Extends.String() {
-				basePin = previous.Base.Pin
-			}
-			p, opts.Base, err = compose.LoadBase(p, basePin, opts)
-			if err != nil {
-				return composeError(err)
-			}
-			if err := applyTarget(p, opts.Base, conf, runtime, model); err != nil {
-				return input(err)
-			}
-			// Every targeted runtime is looked up before anything is composed, so an
-			// unknown name fails before the disk is touched.
-			var targets []render.Runtime
-			for _, name := range p.Target.Runtimes {
-				rt, err := render.Lookup(name)
-				if err != nil {
-					return input(err)
-				}
-				targets = append(targets, rt)
-			}
-			name := p.Name
-			if name == "" {
-				name = checkout.RepoKey(at.root)
-			}
-			out := cmd.OutOrStdout()
-			u := ui.New(out)
-			u.Title(name, strings.TrimSpace(p.Target.Runtimes.String()+" "+p.Target.Model))
-			res, err := compose.ComposeWith(p, opts)
-			var collision *compose.CollisionError
-			switch {
-			case errors.As(err, &collision):
-				printCollision(ui.New(cmd.ErrOrStderr()), collision)
-				return reported(err)
-			case err != nil:
-				return composeError(err)
-			}
-			if err := render.CheckFiles(res); err != nil {
-				return input(err)
-			}
-			rep := report.New(res, name, at.root, at.home)
-			// A qory.yaml at the checkout root is not read under extends, and a row says
-			// so, on a dry run as well, so the person who wrote it learns that the base
-			// stack decides.
-			var skippedConfig [][2]string
-			if _, err := os.Stat(filepath.Join(at.root, config.FileName)); extends && err == nil {
-				skippedConfig = [][2]string{{"skipped", config.FileName + "  (the base stack decides; not read under extends)"}}
-			}
-			if dryRun {
-				if err := rep.PrintBody(out); err != nil {
-					return err
-				}
-				u.Blank()
-				u.Success("dry run: nothing written")
-				u.Fields(skippedConfig)
-				return nil
-			}
-			// A checkout can be composed for several runtimes at once, and can have been
-			// composed for others before. The home is one tree that a build replaces
-			// whole, so every runtime it is to hold goes into one call: the targets and
-			// the runtimes already there, whose links would otherwise stop resolving.
-			targeted := map[string]bool{}
-			for _, rt := range targets {
-				targeted[rt.Name()] = true
-			}
-			var also []render.Runtime
-			for _, other := range render.Composed(at.home) {
-				if !targeted[other.Name()] {
-					also = append(also, other)
-				}
-			}
-			all := append(append([]render.Runtime{}, targets...), also...)
-			// The report's target is every runtime the home holds after this compose,
-			// the targets first, since the harness was rendered for all of them.
-			rep.Target.Runtimes = nil
-			for _, rt := range all {
-				rep.Target.Runtimes = append(rep.Target.Runtimes, rt.Name())
-			}
-			if err := render.Build(res, at.home, all...); err != nil {
-				return err
-			}
-			// A path replaced by an earlier compose is still replaced: the report keeps
-			// naming it until remove takes its link, so the restore hint is not lost to a
-			// second compose. A link step that fails has replaced what it replaced, so the
-			// report is written on that path too when it holds a replaced path, before
-			// the error goes up; a compose that replaced nothing leaves the report as it
-			// was, so a report on disk still means a compose that went through.
-			rep.Replaced = previous.Replaced
-			linked := map[string]render.Linked{}
-			record := func(l render.Linked, err error) error {
-				for _, path := range l.Replaced {
-					if !slices.Contains(rep.Replaced, path) {
-						rep.Replaced = append(rep.Replaced, path)
-					}
-				}
-				if err != nil && len(rep.Replaced) > 0 {
-					_ = report.Write(at.report, rep)
-				}
-				return err
-			}
-			for _, rt := range all {
-				l, err := render.LinkInto(rt, res, at.root, at.home, force)
-				linked[rt.Name()] = l
-				if err := record(l, err); err != nil {
-					return err
-				}
-			}
-			var previousLinks []string
-			for _, l := range previous.Modules {
-				if l.Link != "" {
-					previousLinks = append(previousLinks, l.Link)
-				}
-			}
-			moduleLinks, err := render.LinkModules(res, at.root, at.home, previousLinks, force)
-			if err := record(moduleLinks, err); err != nil {
-				return composeError(err)
-			}
-			if err := report.Write(at.report, rep); err != nil {
-				return err
-			}
-			if verbose {
-				var rows [][]string
-				for _, e := range rep.Entries {
-					rows = append(rows, []string{e.Kind + "/" + e.Name, e.Module})
-				}
-				u.Table(rows)
-			}
-			u.Success("composed %s from %s %s", count(len(rep.Entries), "entry", "entries"), count(len(rep.Modules), "module", "modules"), ui.Pot)
-			rows := [][2]string{{"home", ui.Short(at.home, at.root)}}
-			for _, rt := range all {
-				var links []string
-				for _, l := range rt.Links(res) {
-					if slices.Contains(linked[rt.Name()].Skipped, l.Checkout) {
-						continue
-					}
-					links = append(links, l.Checkout)
-				}
-				row := strings.Join(links, "  ")
-				if slices.Contains(also, rt) {
-					row += "  (composed here earlier, refreshed)"
-				}
-				rows = append(rows, [2]string{rt.Name(), row})
-				if kept := linked[rt.Name()].Skipped; len(kept) > 0 {
-					rows = append(rows, [2]string{"kept", strings.Join(kept, "  ") + "  (the checkout's own; not linked)"})
-				}
-				if replaced := linked[rt.Name()].Replaced; len(replaced) > 0 {
-					rows = append(rows, [2]string{"replaced", strings.Join(replaced, "  ") + "  (the checkout's own; git checkout -- restores it)"})
-				}
-				for _, s := range render.Skipped(rt, res) {
-					rows = append(rows, [2]string{"skipped", s + "  (no place in " + rt.Name() + ")"})
-				}
-			}
-			rows = append(rows, skippedConfig...)
-			for _, l := range res.Modules {
-				if l.Link == "" {
-					continue
-				}
-				if slices.Contains(moduleLinks.Replaced, l.Link) {
-					rows = append(rows, [2]string{"replaced", l.Link + "  (the checkout's own; git checkout -- restores it)"})
-					continue
-				}
-				rows = append(rows, [2]string{"link", l.Link + "  (module " + l.Name + ")"})
-			}
-			u.Fields(rows)
-			return nil
+			return runCompose(cmd.OutOrStdout(), cmd.ErrOrStderr(), o)
 		},
 	}
-	c.Flags().StringVarP(&file, "file", "f", "", "the qory-stack.yaml or qory-compose.yaml to read instead of discovering one")
+	c.Flags().StringVarP(&file, "file", "f", "", "the qory-stack.yaml, or the qory.yaml whose harness section to compose, instead of discovering one")
 	c.Flags().StringVar(&runtime, "runtime", "", "render for these runtimes instead of target.runtime, comma separated ("+strings.Join(render.Names(), ", ")+"; qory.yaml: runtime)")
 	c.Flags().StringVar(&model, "model", "", "write this model instead of target.model (qory.yaml: model)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the report and write nothing")
@@ -340,6 +152,228 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 	c.Flags().BoolVar(&update, "update", false, "fetch every git source again instead of reading the cached clone (qory.yaml: update)")
 	c.Flags().BoolVarP(&verbose, "verbose", "v", false, "print one line per entry")
 	return c
+}
+
+// composeOptions is what one compose is told: the checkout to compose, "" for the working
+// directory's, and the flags of the compose verb, with force and update nil when the flag
+// was not given so the configuration decides.
+type composeOptions struct {
+	dir            string
+	file           string
+	runtime, model string
+	dryRun         bool
+	verbose        bool
+	force, update  *bool
+}
+
+// runCompose is the compose verb's body, for the verb and for a worktree add, which
+// composes the worktree it made. out gets the rows, errOut the collision text.
+func runCompose(out, errOut io.Writer, o composeOptions) error {
+	at, err := locateAt(o.dir)
+	if err != nil {
+		return err
+	}
+	file := o.file
+	if file == "" {
+		if file, err = config.DiscoverStack(at.root); err != nil {
+			return input(err)
+		}
+	}
+	p, err := config.LoadStack(file)
+	if err != nil {
+		return input(err)
+	}
+	// A checkout that extends a closed base takes its target from the base, and
+	// the harness, git and env keys of its own qory.yaml are not read: the
+	// runner's configuration is the only one, so the checkout's authors cannot
+	// pick another runtime.
+	extends := p.Extends.Path != "" || p.Extends.Git != ""
+	conf, err := config.Load(at.root, !extends)
+	if err != nil {
+		return input(err)
+	}
+	force, update := conf.Force, conf.Update
+	if o.force != nil {
+		force = *o.force
+	}
+	if o.update != nil {
+		update = *o.update
+	}
+	// The last report pins each git module, and the base, to the commit it was
+	// composed from, so a compose without --update stays there as long as the
+	// stack still names the same source: an edited ref resolves anew.
+	previous, _ := report.Read(at.report)
+	pins := map[string]string{}
+	for _, l := range previous.Modules {
+		if l.Pin != source.WorkingTree {
+			pins[l.Source] = l.Pin
+		}
+	}
+	opts := compose.Options{Update: update, Pins: pins, Cache: conf.Git.Cache, Timeout: conf.Git.Timeout, Env: conf.Env}
+	var basePin string
+	if previous.Base != nil && previous.Base.Source == p.Extends.String() {
+		basePin = previous.Base.Pin
+	}
+	p, opts.Base, err = compose.LoadBase(p, basePin, opts)
+	if err != nil {
+		return composeError(err)
+	}
+	if err := applyTarget(p, opts.Base, conf, o.runtime, o.model); err != nil {
+		return input(err)
+	}
+	// Every targeted runtime is looked up before anything is composed, so an
+	// unknown name fails before the disk is touched.
+	var targets []render.Runtime
+	for _, name := range p.Target.Runtimes {
+		rt, err := render.Lookup(name)
+		if err != nil {
+			return input(err)
+		}
+		targets = append(targets, rt)
+	}
+	name := p.Name
+	if name == "" {
+		name = checkout.RepoKey(at.root)
+	}
+	u := ui.New(out)
+	u.Title(name, strings.TrimSpace(p.Target.Runtimes.String()+" "+p.Target.Model))
+	res, err := compose.ComposeWith(p, opts)
+	var collision *compose.CollisionError
+	switch {
+	case errors.As(err, &collision):
+		printCollision(ui.New(errOut), collision)
+		return reported(err)
+	case err != nil:
+		return composeError(err)
+	}
+	if err := render.CheckFiles(res); err != nil {
+		return input(err)
+	}
+	rep := report.New(res, name, at.root, at.home)
+	// The machine keys of a qory.yaml at the checkout root are not read under
+	// extends, and a row says so, on a dry run as well, so the person who wrote
+	// them learns that the base stack decides.
+	var skippedConfig [][2]string
+	if _, err := os.Stat(filepath.Join(at.root, config.FileName)); extends && err == nil {
+		skippedConfig = [][2]string{{"skipped", config.FileName + "  (its harness, git and env keys; the base stack decides under extends)"}}
+	}
+	if o.dryRun {
+		if err := rep.PrintBody(out); err != nil {
+			return err
+		}
+		u.Blank()
+		u.Success("dry run: nothing written")
+		u.Fields(skippedConfig)
+		return nil
+	}
+	// A checkout can be composed for several runtimes at once, and can have been
+	// composed for others before. The home is one tree that a build replaces
+	// whole, so every runtime it is to hold goes into one call: the targets and
+	// the runtimes already there, whose links would otherwise stop resolving.
+	targeted := map[string]bool{}
+	for _, rt := range targets {
+		targeted[rt.Name()] = true
+	}
+	var also []render.Runtime
+	for _, other := range render.Composed(at.home) {
+		if !targeted[other.Name()] {
+			also = append(also, other)
+		}
+	}
+	all := append(append([]render.Runtime{}, targets...), also...)
+	// The report's target is every runtime the home holds after this compose,
+	// the targets first, since the harness was rendered for all of them.
+	rep.Target.Runtimes = nil
+	for _, rt := range all {
+		rep.Target.Runtimes = append(rep.Target.Runtimes, rt.Name())
+	}
+	if err := render.Build(res, at.home, all...); err != nil {
+		return err
+	}
+	// A path replaced by an earlier compose is still replaced: the report keeps
+	// naming it until remove takes its link, so the restore hint is not lost to a
+	// second compose. A link step that fails has replaced what it replaced, so the
+	// report is written on that path too when it holds a replaced path, before
+	// the error goes up; a compose that replaced nothing leaves the report as it
+	// was, so a report on disk still means a compose that went through.
+	rep.Replaced = previous.Replaced
+	linked := map[string]render.Linked{}
+	record := func(l render.Linked, err error) error {
+		for _, path := range l.Replaced {
+			if !slices.Contains(rep.Replaced, path) {
+				rep.Replaced = append(rep.Replaced, path)
+			}
+		}
+		if err != nil && len(rep.Replaced) > 0 {
+			_ = report.Write(at.report, rep)
+		}
+		return err
+	}
+	for _, rt := range all {
+		l, err := render.LinkInto(rt, res, at.root, at.home, force)
+		linked[rt.Name()] = l
+		if err := record(l, err); err != nil {
+			return err
+		}
+	}
+	var previousLinks []string
+	for _, l := range previous.Modules {
+		if l.Link != "" {
+			previousLinks = append(previousLinks, l.Link)
+		}
+	}
+	moduleLinks, err := render.LinkModules(res, at.root, at.home, previousLinks, force)
+	if err := record(moduleLinks, err); err != nil {
+		return composeError(err)
+	}
+	if err := report.Write(at.report, rep); err != nil {
+		return err
+	}
+	if o.verbose {
+		var rows [][]string
+		for _, e := range rep.Entries {
+			rows = append(rows, []string{e.Kind + "/" + e.Name, e.Module})
+		}
+		u.Table(rows)
+	}
+	u.Success("composed %s from %s %s", count(len(rep.Entries), "entry", "entries"), count(len(rep.Modules), "module", "modules"), ui.Pot)
+	rows := [][2]string{{"home", ui.Short(at.home, at.root)}}
+	for _, rt := range all {
+		var links []string
+		for _, l := range rt.Links(res) {
+			if slices.Contains(linked[rt.Name()].Skipped, l.Checkout) {
+				continue
+			}
+			links = append(links, l.Checkout)
+		}
+		row := strings.Join(links, "  ")
+		if slices.Contains(also, rt) {
+			row += "  (composed here earlier, refreshed)"
+		}
+		rows = append(rows, [2]string{rt.Name(), row})
+		if kept := linked[rt.Name()].Skipped; len(kept) > 0 {
+			rows = append(rows, [2]string{"kept", strings.Join(kept, "  ") + "  (the checkout's own; not linked)"})
+		}
+		if replaced := linked[rt.Name()].Replaced; len(replaced) > 0 {
+			rows = append(rows, [2]string{"replaced", strings.Join(replaced, "  ") + "  (the checkout's own; git checkout -- restores it)"})
+		}
+		for _, s := range render.Skipped(rt, res) {
+			rows = append(rows, [2]string{"skipped", s + "  (no place in " + rt.Name() + ")"})
+		}
+	}
+	rows = append(rows, skippedConfig...)
+	for _, l := range res.Modules {
+		if l.Link == "" {
+			continue
+		}
+		if slices.Contains(moduleLinks.Replaced, l.Link) {
+			rows = append(rows, [2]string{"replaced", l.Link + "  (the checkout's own; git checkout -- restores it)"})
+			continue
+		}
+		rows = append(rows, [2]string{"link", l.Link + "  (module " + l.Name + ")"})
+	}
+	u.Fields(rows)
+	return nil
 }
 
 // applyTarget puts the configuration's runtime and model, then the --runtime and --model

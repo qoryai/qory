@@ -30,12 +30,18 @@ OpenCode, Cursor, Copilot CLI, Amp, Goose, and any tool that reads AGENTS.md.
 Shortcuts:
   hc  harness compose
   hi  harness inspect
-  hr  harness remove`,
+  hr  harness remove
+  wa  worktree add
+  wr  worktree remove
+  wl  worktree list`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.AddCommand(newVersion(), newHarness(), newConfig())
+	// The completion script is qory setup completion, and setup shell loads it.
+	root.CompletionOptions.DisableDefaultCmd = true
+	root.AddCommand(newVersion(), newSetup(), newHarness(), newWorktree(), newConfig())
 	root.AddCommand(shortcuts()...)
+	root.AddCommand(worktreeShortcuts()...)
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return input(err) })
 	return root
 }

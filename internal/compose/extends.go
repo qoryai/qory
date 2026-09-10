@@ -16,7 +16,7 @@ import (
 	"github.com/qoryai/qory/internal/stack"
 )
 
-// Base is the stack a compose file appends to, as the report records it.
+// Base is the stack a checkout's qory.yaml appends to, as the report records it.
 type Base struct {
 	// Name is the base stack's name, or the name of the directory holding it.
 	Name string

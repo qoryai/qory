@@ -137,12 +137,14 @@ func TestStackSchemaKnowsBothSourceForms(t *testing.T) {
 	}
 }
 
-// TestComposeSchemaKnowsExtends validates the shapes no fixture composes: a compose file
-// with extends, one with a target or an extending block too, one without extends, a
-// stack with extends, a stack with an extending block, and a module entry by name alone.
+// TestComposeSchemaKnowsExtends validates the shapes no fixture composes: a qory.yaml
+// whose harness section extends a stack, one with a target or an extending block too,
+// one with modules and no extends, one with its own target and modules, a worktree name
+// without {branch}, a stack with
+// extends, a stack with an extending block, and a module entry by name alone.
 func TestComposeSchemaKnowsExtends(t *testing.T) {
 	c := jsonschema.NewCompiler()
-	composeSchema, err := c.Compile("../../contracts/harness/v1/compose.schema.json")
+	composeSchema, err := c.Compile("../../contracts/harness/v1/config.schema.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,11 +157,13 @@ func TestComposeSchemaKnowsExtends(t *testing.T) {
 		body   string
 		valid  bool
 	}{
-		{composeSchema, `{"extends": {"git": "https://git.example.com/acme/harness", "ref": "main", "path": "nextjs-15"}, "modules": [{"name": "app"}]}`, true},
-		{composeSchema, `{"extends": {"path": "../harness/nextjs-15"}, "modules": [{"name": "app"}]}`, true},
-		{composeSchema, `{"extends": {"path": "../harness/nextjs-15"}, "target": {"runtime": "claude"}, "modules": [{"name": "app"}]}`, false},
-		{composeSchema, `{"extends": {"path": "../harness/nextjs-15"}, "extending": {"kinds": ["skills"]}, "modules": [{"name": "app"}]}`, false},
-		{composeSchema, `{"modules": [{"name": "app"}]}`, false},
+		{composeSchema, `{"harness": {"extends": {"git": "https://git.example.com/acme/harness", "ref": "main", "path": "nextjs-15"}, "modules": [{"name": "app"}]}}`, true},
+		{composeSchema, `{"harness": {"runtime": "codex", "extends": {"path": "../harness/nextjs-15"}, "modules": [{"name": "app"}]}, "worktree": {"base": "main", "link": [".env"], "run": {"add": ["pnpm install"]}}}`, true},
+		{composeSchema, `{"harness": {"extends": {"path": "../harness/nextjs-15"}, "target": {"runtime": "claude"}, "modules": [{"name": "app"}]}}`, false},
+		{composeSchema, `{"harness": {"extends": {"path": "../harness/nextjs-15"}, "extending": {"kinds": ["skills"]}, "modules": [{"name": "app"}]}}`, false},
+		{composeSchema, `{"harness": {"modules": [{"name": "app"}]}}`, false},
+		{composeSchema, `{"harness": {"target": {"runtime": ["claude", "codex"], "model": "opus"}, "modules": [{"name": "app"}]}, "worktree": {"link": [".env"]}}`, true},
+		{composeSchema, `{"worktree": {"name": "wt"}}`, false},
 		{stackSchema, `{"extends": {"path": "../harness/nextjs-15"}, "modules": [{"name": "app"}]}`, false},
 		{stackSchema, `{"modules": [{"name": "app"}]}`, false},
 		{stackSchema, `{"target": {"runtime": "claude"}, "modules": [{"name": "core"}], "extending": {"kinds": ["skills"], "instructions": true, "settings": ["permissions.allow"], "files": ["claude/rules/"]}}`, true},

@@ -287,63 +287,6 @@ func TestLoadRefuses(t *testing.T) {
 	}
 }
 
-// TestDiscoverPrefersTheCheckoutRoot returns the checkout's own stack even when an
-// ancestor directory holds one.
-func TestDiscoverPrefersTheCheckoutRoot(t *testing.T) {
-	base := t.TempDir()
-	checkout := filepath.Join(base, "app")
-	if err := os.MkdirAll(checkout, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, dir := range []string{base, checkout} {
-		if err := os.WriteFile(filepath.Join(dir, FileName), []byte(valid), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	got, err := Discover(checkout)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := filepath.Join(checkout, FileName); got != want {
-		t.Fatalf("got %s, want %s", got, want)
-	}
-}
-
-// TestDiscoverTakesTheNearestAncestor walks up one directory at a time.
-func TestDiscoverTakesTheNearestAncestor(t *testing.T) {
-	base := t.TempDir()
-	checkout := filepath.Join(base, "code", "team", "app")
-	if err := os.MkdirAll(checkout, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, dir := range []string{base, filepath.Join(base, "code")} {
-		if err := os.WriteFile(filepath.Join(dir, FileName), []byte(valid), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	got, err := Discover(checkout)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := filepath.Join(base, "code", FileName); got != want {
-		t.Fatalf("got %s, want %s", got, want)
-	}
-}
-
-// TestDiscoverResolvesARelativeCheckout names the checkout in the error when no ancestor
-// holds a stack.
-func TestDiscoverResolvesARelativeCheckout(t *testing.T) {
-	dir := t.TempDir()
-	t.Chdir(dir)
-	_, err := Discover(".")
-	if err == nil {
-		t.Fatal("found a stack where there is none")
-	}
-	if want := "no " + FileName + " or " + ComposeFileName + " in "; err.Error()[:len(want)] != want {
-		t.Fatalf("error %q", err)
-	}
-}
-
 // TestOwnedByCurrentUser accepts a file this process just created.
 func TestOwnedByCurrentUser(t *testing.T) {
 	path := write(t, valid)

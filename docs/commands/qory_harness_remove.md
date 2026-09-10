@@ -15,5 +15,5 @@ qory harness remove [flags]
 
 ### SEE ALSO
 
-* [qory harness](qory_harness.md)	 - Write an example, then compose, inspect and remove the harness of a checkout
+* [qory harness](qory_harness.md)	 - Compose, inspect and remove the harness of a checkout
 

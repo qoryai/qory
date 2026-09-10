@@ -39,7 +39,7 @@ type Module struct {
 	// Link is the checkout-root name the stack links the module's directory as, "" for
 	// none.
 	Link string
-	// Base marks a module of the base stack, when a compose file extends one.
+	// Base marks a module of the base stack, when a checkout's qory.yaml extends one.
 	Base bool
 }
 
@@ -89,7 +89,7 @@ type Result struct {
 	// $QORY_HARNESS_HOME/modules/<name>/<path>, and the configuration's variables over
 	// them. [Result.EnvFor] renders it for a home.
 	Env map[string]string
-	// Base is the stack the compose file extends, nil for a stack.
+	// Base is the stack the checkout's qory.yaml extends, nil for a stack that extends none.
 	Base *Base
 	// setBy is the module that set each settings leaf, keyed
 	// settings/<runtime>/<file>/<dotted.key.path>, so a later fragment setting the same
@@ -112,7 +112,7 @@ type Options struct {
 	// Env are the configuration's variables, written over what the modules export.
 	Env map[string]string
 	// Base is the base stack [LoadBase] resolved, recorded in the result and enforced on
-	// the modules that are not its own; nil for a stack.
+	// the modules that are not its own; nil for a stack that extends none.
 	Base *Base
 }
 

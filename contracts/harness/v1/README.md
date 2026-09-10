@@ -2,29 +2,30 @@
 
 What `qory harness compose` reads and what it writes.
 
-## Four files
+## Three files
 
 | File | Lives in | Defines |
 |---|---|---|
-| `qory-stack.yaml` | the repository root, or an ancestor directory covering several repositories; any directory, when named by `-f` or `extends` | the stack: the ordered modules, the target runtime and model, the excludes, what a compose file may add |
-| `qory-compose.yaml` | the repository root, or an ancestor directory, where `qory-stack.yaml` is not | the compose file: the stack this repository extends and the modules it appends |
+| `qory-stack.yaml` | a directory named by `extends` or `-f`; an ancestor directory covering several repositories; a repository root | a stack delivered to be extended: the ordered modules, the target runtime and model, the excludes, what a checkout extending it may add |
 | `qory-module.yaml` | the root of a module | the module: its name, its variants per runtime, the variables it exports |
-| `qory.yaml` | the user's configuration directory, an ancestor directory, or the repository root | the configuration: how qory runs on this machine, for this person, in this checkout |
+| `qory.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's own stack, its target and modules, or the stack it extends and the modules it appends, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; `git` and `env` (§The configuration) |
 
 Every module carries a `qory-module.yaml`; it is what names the module, and a directory
 without one is not a module. `qory.yaml` is optional: every setting has a default. Each
-file name is fixed, so a repository with several stacks holds one directory per
-stack, each with its `qory-stack.yaml`. A directory holds `qory-stack.yaml` or `qory-compose.yaml`,
-never both; the file name says which document a file holds, and no document carries a kind.
+file name is fixed, so a repository with several stacks holds one directory per stack,
+each with its `qory-stack.yaml`. A directory holds `qory-stack.yaml` or a `qory.yaml` whose
+`harness` section names modules, never both; the file name says which document a file
+holds, and no document carries a kind.
 
 Every document carries `apiVersion`. A reader refuses a version it does not read
 and names the versions it does. `v1alpha1` says the format may still change.
 
 ## Discovery
 
-The stack or the compose file, in order: the `-f <file>` flag; `qory-stack.yaml` or
-`qory-compose.yaml` in the checkout root; the nearest one in an ancestor directory that
-the current user owns. An ancestor's file owned by another user is not read.
+What to compose, in order: the `-f <file>` flag; `qory-stack.yaml` in the checkout root,
+or the checkout's `qory.yaml` when its `harness` section names modules; the nearest of
+either in an ancestor directory that the current user owns. An ancestor's file owned by
+another user is not read.
 
 The configuration is every `qory.yaml` found, applied in this order, each overriding the
 one before it: `$XDG_CONFIG_HOME/qory/qory.yaml`, else `~/.config/qory/qory.yaml`; the
@@ -55,20 +56,34 @@ extensions:                      # optional; carried into the report, not read
     required_check: Harness self-tests
 ```
 
-A compose file names the stack it extends and appends its own modules (§Extending a stack):
+A repository holds its own stack in the `harness` section of its `qory.yaml`, with the
+same keys, or extends a stack delivered as a `qory-stack.yaml` and appends its own modules
+there (§Extending a stack):
 
 ```yaml
-# qory-compose.yaml
+# qory.yaml, its own stack
 apiVersion: qory.ai/v1alpha1
-extends: {git: git@git.example.com:acme/harness, ref: main, path: nextjs-15}
-modules:
-  - name: app
+harness:
+  target: {runtime: claude}
+  modules:
+    - name: app
+      source: {path: ./harness}
 ```
 
-It takes `name`, `description`, `modules` and `extensions` as a stack does, never `target`
-or `extending`, and `extends` names the base: a directory holding a `qory-stack.yaml`, as
+```yaml
+# qory.yaml, extending a stack
+apiVersion: qory.ai/v1alpha1
+harness:
+  extends: {git: git@git.example.com:acme/harness, ref: main, path: nextjs-15}
+  modules:
+    - name: app
+```
+
+The section takes `name`, `description`, `target`, `modules` and `extensions` as a stack
+does, never `extending`; a stack to be extended is a `qory-stack.yaml`. With `extends` in
+place of `target`, it names the base: a directory holding a `qory-stack.yaml`, as
 `{path: <dir>}` or `{git: <url>, ref: <ref>, path: <dir>}`. The schema is
-[compose.schema.json](compose.schema.json).
+[config.schema.json](config.schema.json).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -84,7 +99,7 @@ or `extending`, and `extends` names the base: a directory holding a `qory-stack.
 | `modules[].variant` | no | forces one of the module's variants instead of the one named like the targeted runtime |
 | `modules[].link` | no | a name at the checkout root, one path segment, linked to the module's directory in the composed tree, so a permission rule or a script names the module's files by a checkout-relative path: `harness/scripts/check.sh`. A hard link (§Rendering), named once across the modules |
 | `extensions` | no | one map per namespace, written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it |
-| `extending` | no | what a module of a compose file extending this stack may ship: `kinds`, `instructions`, `settings`, `files` (§Extending a stack). A base without the block cannot be extended |
+| `extending` | no | what a module of a checkout extending this stack may ship: `kinds`, `instructions`, `settings`, `files` (§Extending a stack). A base without the block cannot be extended |
 
 A name is composed once: two entries resolving to modules of one name fail the compose,
 since a name is one directory in the composed tree.
@@ -93,17 +108,20 @@ The schema is [stack.schema.json](stack.schema.json).
 
 ## Extending a stack
 
-An operator delivers a harness as a stack; a product repository extends it in its compose
-file and adds its own modules. The base is closed and the compose file appends:
+An operator delivers a harness as a stack; a product repository extends it in the
+`harness` section of its `qory.yaml` and adds its own modules. The base is closed and the
+checkout appends:
 
 - The base's modules come first, in the base's order, with the base's excludes, variants
   and links; a relative source of the base resolves inside the base's own repository. The
-  compose file cannot name, exclude, reorder or re-source a base module.
-- The target is the base's. A compose file that sets `target` is refused; a
-  `--runtime` or a `qory.yaml` `runtime` may pick among the runtimes the base lists and
+  checkout cannot name, exclude, reorder or re-source a base module.
+- The target is the base's. A `harness` section that sets `target` beside `extends` is refused; a
+  `--runtime` or a `harness.runtime` may pick among the runtimes the base lists and
   nothing else; a model from anywhere but the base is refused when the base names one.
-- The checkout's own `qory.yaml` is not read under `extends`. The runner's configuration,
-  in the user's directory or an ancestor the runner's user owns, is the only one.
+- The `harness`, `git` and `env` keys of the checkout's own `qory.yaml` are not read under
+  `extends`, and the compose says so. The runner's configuration, in the user's directory
+  or an ancestor the runner's user owns, is the only one. The `worktree` section is the
+  repository's and is read.
 - The base's `extending` block says what an appended module may ship: `kinds`, from
   `skills`, `agents`, `commands` and `output-styles`, never `hooks` or `mcp`, since the
   runner executes those without the agent; `instructions: true` for its `AGENTS.md`,
@@ -117,7 +135,7 @@ file and adds its own modules. The base is closed and the compose file appends:
   the message says the entry belongs to the base, `<name>@<pin>`, and to rename it; no
   exclude resolves it. The message names that one entry and nothing else of the base.
 - Both stacks' `extensions` go into the report; a namespace the base declares is the
-  base's, and a compose file declaring it too is refused.
+  base's, and a checkout declaring it too is refused.
 - The report records the base with its source and pin, and marks the base's modules.
 - A base that cannot be fetched, on a machine without access to its repository, fails
   with status 1 and "the stack <source> is not reachable from here".
@@ -412,17 +430,36 @@ target's `runtime` is always an array: the runtimes the home holds after the com
 targeted ones first. A module carries its `name`, its `source` as the stack writes it,
 its `pin`, `dirty` when git saw uncommitted changes under a path source, the `variant`
 chosen, its `link` when the stack names one, and `base` when it is the base stack's.
-A compose file's report records the `base`: its `name`, `source` and `pin`. A path source's pin is `working-tree`; a git source's pin is twelve
+The report of a checkout that extends a stack records the `base`: its `name`, `source` and `pin`. A path source's pin is `working-tree`; a git source's pin is twelve
 characters of its commit. `qory harness inspect` refuses a report of another version.
 
 ## The configuration
 
+One file name, one schema, read at three levels: the user's file,
+`$XDG_CONFIG_HOME/qory/qory.yaml` or `~/.config/qory/qory.yaml`, and the files of the
+checkout's ancestor directories carry the machine's choices; the file in the checkout
+root is committed with the repository and carries what the repository needs. Every key may
+appear at any level and the nearest file wins.
+
 ```yaml
 apiVersion: qory.ai/v1alpha1
-runtime: [claude, codex]         # instead of the stack's target.runtime
-model: opus                      # instead of the stack's target.model
-force: true                      # replace a tracked, unmodified file where a link goes
-update: always                   # fetch every git source again on each compose
+harness:
+  runtime: [claude, codex]       # instead of the stack's target.runtime
+  model: opus                    # instead of the stack's target.model
+  force: true                    # replace a tracked, unmodified file where a link goes
+  update: always                 # fetch every git source again on each compose
+  extends: {git: git@git.example.com:acme/harness, ref: main, path: nextjs-15}
+  modules:                       # with extends or a target: what this checkout composes
+    - name: app
+worktree:
+  dir: ..                        # where worktrees go, relative to the main checkout
+  name: wt-{branch}              # a worktree's directory name; {repo} is the main checkout's
+  base: main                     # the branch a new worktree branch starts from
+  link: [.env, .env.local]       # linked from the main checkout into a new worktree
+  copy: [config/local.json]      # copied once into a new worktree
+  run:
+    add: [pnpm install]          # run in a new worktree, after links and copies
+    remove: [docker compose down] # run in a worktree before it is removed
 git:
   timeout: 10m                   # the longest one git command may run
   cache: /var/cache/qory         # where git sources are fetched to
@@ -432,17 +469,28 @@ env:
 
 | Key | Default | Meaning |
 |---|---|---|
-| `runtime` | the stack's `target.runtime` | one runtime name or a list; `--runtime` wins over it |
-| `model` | the stack's `target.model` | `--model` wins over it |
-| `force` | `false` | what `--force` does on every compose; `--force=false` wins over it |
-| `update` | `never` | `always` fetches every git source again on each compose; `--update` and `--update=false` win over it |
+| `harness.runtime` | the stack's `target.runtime` | one runtime name or a list; `--runtime` wins over it |
+| `harness.model` | the stack's `target.model` | `--model` wins over it |
+| `harness.force` | `false` | what `--force` does on every compose; `--force=false` wins over it |
+| `harness.update` | `never` | `always` fetches every git source again on each compose; `--update` and `--update=false` win over it |
+| `harness.target`, `harness.modules` | none | in a checkout's file, its own stack: the target and the modules, with `name`, `description` and `extensions` beside them, as in a `qory-stack.yaml` |
+| `harness.extends`, `harness.modules` | none | in a checkout's file, the stack it extends and the modules it appends; `extends` takes the place of `target` (§Extending a stack) |
+| `worktree.dir` | `..` | where `qory worktree add` puts a worktree, relative to the main checkout unless absolute |
+| `worktree.name` | `wt-{branch}` | one directory name under `worktree.dir`; `{branch}` is the branch with each slash made a dash, `{repo}` the main checkout's directory name |
+| `worktree.base` | the remote's HEAD branch, else the main checkout's branch | the branch a new worktree branch starts from; it has to hold a commit, so a repository with none yet is refused |
+| `worktree.link` | none | paths inside the checkout, linked from the main checkout into a new worktree; one missing there is reported, not an error |
+| `worktree.copy` | none | paths copied once into a new worktree |
+| `worktree.run.add` | none | commands run in a new worktree after links, copies and the compose, in order; a failure stops with the worktree kept |
+| `worktree.run.remove` | none | commands run in a worktree before it is removed, in order |
 | `git.timeout` | `10m` | a git command running past it is stopped and the compose fails |
 | `git.cache` | the user's cache directory, `qory/sources` under `~/Library/Caches`, `$XDG_CACHE_HOME` or `~/.cache` | absolute, or relative to the file naming it |
 | `env` | none | variables written over what the modules export; a name two modules export with different values needs one here |
 
-Every key is optional; a file naming none is read and changes nothing. `qory config`
-prints every effective value and the file it came from. Under `extends` the checkout's
-own file is not read (§Extending a stack).
+Every key is optional; a file naming none is read and changes nothing. A list, such as
+`worktree.link`, is the nearest file's whole. `qory config` prints every effective value
+and the file it came from. Under `extends` the `harness`, `git` and `env` keys of the
+checkout's own file are not read (§Extending a stack). The schema is
+[config.schema.json](config.schema.json).
 
 ## Exit status
 

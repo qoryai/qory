@@ -156,7 +156,7 @@ func TestForceFromTheConfigurationAndTheFlag(t *testing.T) {
 	writeFile(t, filepath.Join(root, ".claude", "settings.json"), "{}\n")
 	runGit(t, root, "add", "-A")
 	runGit(t, root, "commit", "-q", "-m", "own settings")
-	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.ai/v1alpha1\nforce: true\n")
+	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.ai/v1alpha1\nharness: {force: true}\n")
 	_, err := run(t, "harness", "compose", "--force=false")
 	if cmd.ExitCode(err) != cmd.ExitForeign {
 		t.Fatalf("with --force=false: err = %v, exit %d", err, cmd.ExitCode(err))

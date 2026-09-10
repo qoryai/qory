@@ -10,7 +10,7 @@ qory harness compose [flags]
 
 ```
       --dry-run          print the report and write nothing
-  -f, --file string      the qory-stack.yaml or qory-compose.yaml to read instead of discovering one
+  -f, --file string      the qory-stack.yaml, or the qory.yaml whose harness section to compose, instead of discovering one
       --force            replace a tracked, unmodified file of the checkout where a link goes; git checkout -- restores it (qory.yaml: force)
   -h, --help             help for compose
       --model string     write this model instead of target.model (qory.yaml: model)
@@ -21,5 +21,5 @@ qory harness compose [flags]
 
 ### SEE ALSO
 
-* [qory harness](qory_harness.md)	 - Write an example, then compose, inspect and remove the harness of a checkout
+* [qory harness](qory_harness.md)	 - Compose, inspect and remove the harness of a checkout
 
