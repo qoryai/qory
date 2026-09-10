@@ -121,7 +121,7 @@ func TestReadFollowsALinkedSettingsDirectory(t *testing.T) {
 // that is not an object under a variant: the messages name the directory read.
 func TestReadNamesTheVariantDirectoryInItsMessages(t *testing.T) {
 	manifest := "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: core\nvariants:\n  codex: {skills: codex/skills, mcp: codex/mcp}\n"
-	dir := tree(t, map[string]string{"codex/skills/x/notes.md": "n\n", "harness.yaml": manifest})
+	dir := tree(t, map[string]string{"codex/skills/x/notes.md": "n\n", "harness-layer.yaml": manifest})
 	m, err := ReadManifest(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +130,7 @@ func TestReadNamesTheVariantDirectoryInItsMessages(t *testing.T) {
 	if err == nil || err.Error() != "layer core: codex/skills/x has no SKILL.md" {
 		t.Errorf("skills: %v", err)
 	}
-	dir = tree(t, map[string]string{"codex/mcp/db.json": "[]\n", "harness.yaml": manifest})
+	dir = tree(t, map[string]string{"codex/mcp/db.json": "[]\n", "harness-layer.yaml": manifest})
 	m, _ = ReadManifest(dir)
 	_, err = Read("core", dir, m, "codex")
 	if err == nil || !strings.HasPrefix(err.Error(), "layer core: codex/mcp/db.json does not hold a JSON object") {
@@ -143,7 +143,7 @@ func TestReadNamesTheVariantDirectoryInItsMessages(t *testing.T) {
 func TestReadAcceptsADirectoryNamedWithTwoDots(t *testing.T) {
 	dir := tree(t, map[string]string{
 		"..agents/planner.md": "p\n",
-		"harness.yaml":        "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: core\nvariants:\n  codex: {agents: ..agents}\n",
+		"harness-layer.yaml":  "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: core\nvariants:\n  codex: {agents: ..agents}\n",
 	})
 	m, err := ReadManifest(dir)
 	if err != nil {

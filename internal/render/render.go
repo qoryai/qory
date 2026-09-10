@@ -528,12 +528,14 @@ func Unlink(p Runtime, root string, others ...Runtime) ([]string, error) {
 }
 
 // LinkLayers writes the links a profile asks for to its layers: for every layer with a
-// Link, a soft link at root/<Link> pointing, relative, at home/layers/<name>, under the
-// rules of a soft file link of [LinkInto]: passed over and reported for a path qory did
-// not write, or replaced under force when git can restore it, and listed in the
-// clone-local exclude file. It then takes back the links of previous, the names an
-// earlier compose linked, that no layer links now, when qory wrote them; a name that now
-// holds something else is left alone.
+// Link, a hard link at root/<Link> pointing, relative, at home/layers/<name>, under the
+// rules of a hard file link of [LinkInto]: a path qory did not write is a
+// [*ForeignPathError], and so is a symlinked parent, or replaced under force when git can
+// restore it, with its path recorded; anything untracked or modified is refused with the
+// reason git gives. The link is hard because permission rules and scripts name the path.
+// Every link written is listed in the clone-local exclude file. LinkLayers then takes back
+// the links of previous, the names an earlier compose linked, that no layer links now,
+// when qory wrote them; a name that now holds something else is left alone.
 //
 // Before it writes anything, a Link at a path a registered runtime links, or at the qory
 // directory, is refused with an error naming the runtime, because a layer link there
@@ -559,12 +561,11 @@ func LinkLayers(res *compose.Result, root, home string, previous []string, force
 			return out, err
 		}
 		path := filepath.Join(root, l.Link)
-		soft := Link{Checkout: l.Link, Home: "layers/" + l.Name, Soft: true}
+		hard := Link{Checkout: l.Link, Home: "layers/" + l.Name}
 		if err := inside(root, path); err != nil {
-			out.Skipped = append(out.Skipped, l.Link)
-			continue
+			return out, err
 		}
-		if err := link(root, path, src, soft, force, &out); err != nil {
+		if err := link(root, path, src, hard, force, &out); err != nil {
 			return out, err
 		}
 	}
@@ -617,6 +618,46 @@ func UnlinkLayers(root string, links []string) ([]string, error) {
 			removed = append(removed, name)
 		}
 	}
+	return removed, nil
+}
+
+// layersPrefix is what the target of a layer link starts with, from the checkout root:
+// the qory directory, the home and its layers directory.
+var layersPrefix = filepath.Join(checkout.Dir, "harness", "layers") + string(filepath.Separator)
+
+// UnlinkLayerLinks removes every layer link in the checkout root without the report that
+// names them, which is how a remove works after rm -rf .qory. It reads the root's own
+// entries and takes each symlink whose relative target, cleaned, is under
+// .qory/harness/layers, under the rules of [UnlinkLayers], each with its exclude line, and
+// returns the names removed in sorted order. A symlink to anywhere else, an absolute one,
+// and a link inside a directory stay.
+func UnlinkLayerLinks(root string) ([]string, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, err
+	}
+	var removed []string
+	for _, e := range entries {
+		if e.Type()&os.ModeSymlink == 0 {
+			continue
+		}
+		path := filepath.Join(root, e.Name())
+		target, err := os.Readlink(path)
+		if err != nil {
+			return removed, err
+		}
+		if filepath.IsAbs(target) || !strings.HasPrefix(filepath.Clean(target), layersPrefix) {
+			continue
+		}
+		own, err := unlinkOwn(root, path)
+		if err != nil {
+			return removed, err
+		}
+		if own {
+			removed = append(removed, e.Name())
+		}
+	}
+	sort.Strings(removed)
 	return removed, nil
 }
 

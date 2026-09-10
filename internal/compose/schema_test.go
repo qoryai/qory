@@ -42,7 +42,7 @@ func TestSchemas(t *testing.T) {
 		if !wantInvalid && err != nil {
 			t.Errorf("%s: profile failed the schema: %v", dir, err)
 		}
-		manifests, _ := filepath.Glob(filepath.Join(dir, "layers", "*", "harness.yaml"))
+		manifests, _ := filepath.Glob(filepath.Join(dir, "layers", "*", "harness-layer.yaml"))
 		for _, m := range manifests {
 			if err := layerSchema.Validate(document(t, m)); err != nil {
 				t.Errorf("%s: %v", m, err)
@@ -133,6 +133,36 @@ func TestProfileSchemaKnowsBothSourceForms(t *testing.T) {
 		}
 		if err := schema.Validate(doc); (err == nil) != c.valid {
 			t.Errorf("source %s: valid=%v, err=%v", c.source, c.valid, err)
+		}
+	}
+}
+
+// TestProfileSchemaKnowsExtends validates the shapes no fixture composes: a profile with
+// extends and no target, one with both, one with neither, and a layer entry by name alone.
+func TestProfileSchemaKnowsExtends(t *testing.T) {
+	c := jsonschema.NewCompiler()
+	schema, err := c.Compile("../../contracts/harness/v1/profile.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		body  string
+		valid bool
+	}{
+		{`{"extends": {"git": "https://git.example.com/acme/harness", "ref": "main", "path": "nextjs-15"}, "layers": [{"name": "app"}]}`, true},
+		{`{"extends": {"path": "../harness/nextjs-15"}, "layers": [{"name": "app"}]}`, true},
+		{`{"extends": {"path": "../harness/nextjs-15"}, "target": {"runtime": "claude"}, "layers": [{"name": "app"}]}`, false},
+		{`{"layers": [{"name": "app"}]}`, false},
+		{`{"target": {"runtime": "claude"}, "layers": [{"name": "core"}], "extending": {"kinds": ["skills"], "instructions": true, "settings": ["permissions.allow"]}}`, true},
+		{`{"target": {"runtime": "claude"}, "layers": [{"name": "core"}], "extending": {"kinds": ["hooks"]}}`, false},
+		{`{"target": {"runtime": "claude"}, "layers": [{"exclude": {"skills": ["x"]}}]}`, false},
+	} {
+		var doc any
+		if err := json.Unmarshal([]byte(`{"apiVersion": "qory.ai/v1alpha1", "kind": "HarnessProfile", `+c.body[1:]), &doc); err != nil {
+			t.Fatal(err)
+		}
+		if err := schema.Validate(doc); (err == nil) != c.valid {
+			t.Errorf("%s: valid=%v, err=%v", c.body, c.valid, err)
 		}
 	}
 }

@@ -2,6 +2,8 @@ package compose_test
 
 import (
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -9,11 +11,18 @@ import (
 	"github.com/qoryai/qory/internal/profile"
 )
 
-// TestExample keeps the hello example composable: the profile loads, the excluded greet
-// skill comes from the world layer, and dropping the exclude is the collision the README
-// promises.
+// TestExample keeps the hello example composable: copied into a repository of its own,
+// the way qory harness init writes it, the profile loads, the excluded greet skill comes
+// from the world layer, and dropping the exclude is the collision the README promises.
 func TestExample(t *testing.T) {
-	p, err := profile.Load("../../examples/hello/harness-compose.yaml")
+	dir := t.TempDir()
+	if out, err := exec.Command("cp", "-R", "../../examples/hello/.", dir).CombinedOutput(); err != nil {
+		t.Fatalf("copy: %v\n%s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", dir, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	p, err := profile.Load(filepath.Join(dir, profile.FileName))
 	if err != nil {
 		t.Fatal(err)
 	}

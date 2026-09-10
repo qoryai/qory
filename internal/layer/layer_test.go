@@ -212,7 +212,7 @@ func TestReadRefusesALinkToADirectoryUnderHooks(t *testing.T) {
 	dir := tree(t, map[string]string{
 		"helpers/a.sh":          "#!/bin/sh\n",
 		"claude/hooks/guard.sh": "#!/bin/sh\n",
-		"harness.yaml":          "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: core\nvariants:\n  claude: {hooks: claude/hooks}\n",
+		"harness-layer.yaml":    "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: core\nvariants:\n  claude: {hooks: claude/hooks}\n",
 	})
 	if err := os.Symlink(filepath.Join("..", "..", "helpers"), filepath.Join(dir, "claude", "hooks", "scripts")); err != nil {
 		t.Fatal(err)
@@ -255,7 +255,7 @@ func TestReadEmptyLayer(t *testing.T) {
 // directory and every other kind from the layer root.
 func TestReadFollowsTheVariantDirectories(t *testing.T) {
 	dir := tree(t, map[string]string{
-		"harness.yaml":               "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: multi\nvariants:\n  codex:\n    agents: agents/codex\n    skills: skills/codex\n",
+		"harness-layer.yaml":         "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: multi\nvariants:\n  codex:\n    agents: agents/codex\n    skills: skills/codex\n",
 		"agents/reviewer.md":         "reviewer\n",
 		"agents/codex/planner.md":    "planner\n",
 		"skills/codex/ship/SKILL.md": "# ship\n",
@@ -284,7 +284,7 @@ func TestReadFollowsTheVariantDirectories(t *testing.T) {
 // names but the layer does not hold contributes no entries and no error.
 func TestReadVariantDirectoryMissingFromDisk(t *testing.T) {
 	dir := tree(t, map[string]string{
-		"harness.yaml":       "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: multi\nvariants:\n  codex:\n    agents: agents/codex\n",
+		"harness-layer.yaml": "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: multi\nvariants:\n  codex:\n    agents: agents/codex\n",
 		"agents/reviewer.md": "reviewer\n",
 	})
 	m, err := ReadManifest(dir)
@@ -328,11 +328,17 @@ func TestReadRefusesAVariantThatLeavesTheLayer(t *testing.T) {
 	}
 }
 
-// TestReadManifestWithoutAFile returns nil for a layer that carries no manifest.
-func TestReadManifestWithoutAFile(t *testing.T) {
-	m, err := ReadManifest(t.TempDir())
-	if err != nil || m != nil {
-		t.Fatalf("got %v, %v", m, err)
+// TestReadManifestRefusesADirectoryWithoutOne refuses a directory that carries no manifest,
+// since every layer names itself in one.
+func TestReadManifestRefusesADirectoryWithoutOne(t *testing.T) {
+	dir := t.TempDir()
+	m, err := ReadManifest(dir)
+	if err == nil {
+		t.Fatalf("read %+v from a directory without a manifest", m)
+	}
+	want := dir + " has no harness-layer.yaml; a layer carries one naming it"
+	if err.Error() != want {
+		t.Fatalf("error %q, want %q", err, want)
 	}
 }
 
@@ -393,7 +399,7 @@ func TestReadManifestRefuses(t *testing.T) {
 		{
 			"unknown field",
 			"apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: core\nlayers: []\n",
-			"field layers not found",
+			`line 4: key "layers" is not one harness-layer.yaml reads`,
 		},
 		{
 			"a default that is not a variant",

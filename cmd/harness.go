@@ -131,10 +131,6 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			conf, err := config.Load(at.root)
-			if err != nil {
-				return input(err)
-			}
 			if file == "" {
 				if file, err = profile.Discover(at.root); err != nil {
 					return input(err)
@@ -144,20 +140,13 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 			if err != nil {
 				return input(err)
 			}
-			if conf.Runtime != nil {
-				p.Target.Runtimes = conf.Runtime
-			}
-			if conf.Model != "" {
-				p.Target.Model = conf.Model
-			}
-			if runtime != "" {
-				p.Target.Runtimes = profile.Runtimes(strings.Split(runtime, ","))
-				for i, r := range p.Target.Runtimes {
-					p.Target.Runtimes[i] = strings.TrimSpace(r)
-				}
-			}
-			if model != "" {
-				p.Target.Model = model
+			// A profile that extends a closed base takes its target from the base, and
+			// the checkout's own qory.yaml is not read: the runner's configuration is
+			// the only one, so the checkout's authors cannot pick another runtime.
+			extends := p.Extends.Path != "" || p.Extends.Git != ""
+			conf, err := config.Load(at.root, !extends)
+			if err != nil {
+				return input(err)
 			}
 			if !cmd.Flags().Changed("force") {
 				force = conf.Force
@@ -165,7 +154,26 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 			if !cmd.Flags().Changed("update") {
 				update = conf.Update
 			}
-			if err := p.Target.Runtimes.Validate(); err != nil {
+			// The last report pins each git layer, and the base, to the commit it was
+			// composed from, so a compose without --update stays there as long as the
+			// profile still names the same source: an edited ref resolves anew.
+			previous, _ := report.Read(at.report)
+			pins := map[string]string{}
+			for _, l := range previous.Layers {
+				if l.Pin != source.WorkingTree {
+					pins[l.Source] = l.Pin
+				}
+			}
+			opts := compose.Options{Update: update, Pins: pins, Cache: conf.Git.Cache, Timeout: conf.Git.Timeout, Env: conf.Env}
+			var basePin string
+			if previous.Base != nil && previous.Base.Source == p.Extends.String() {
+				basePin = previous.Base.Pin
+			}
+			p, opts.Base, err = compose.LoadBase(p, basePin, opts)
+			if err != nil {
+				return composeError(err)
+			}
+			if err := applyTarget(p, opts.Base, conf, runtime, model); err != nil {
 				return input(err)
 			}
 			// Every targeted runtime is looked up before anything is composed, so an
@@ -185,26 +193,11 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 			out := cmd.OutOrStdout()
 			u := ui.New(out)
 			u.Title(name, strings.TrimSpace(p.Target.Runtimes.String()+" "+p.Target.Model))
-			// The last report pins each git layer to the commit it was composed from,
-			// so a compose without --update stays there, as long as the profile still
-			// names the same source: an edited ref resolves anew.
-			previous, _ := report.Read(at.report)
-			pins := map[string]string{}
-			for _, l := range previous.Layers {
-				if l.Pin == source.WorkingTree {
-					continue
-				}
-				for _, pl := range p.Layers {
-					if pl.Name == l.Name && pl.Source.String() == l.Source {
-						pins[l.Name] = l.Pin
-					}
-				}
-			}
-			res, err := compose.ComposeWith(p, compose.Options{Update: update, Pins: pins, Cache: conf.Git.Cache, Timeout: conf.Git.Timeout, Env: conf.Env})
+			res, err := compose.ComposeWith(p, opts)
 			var collision *compose.CollisionError
 			switch {
 			case errors.As(err, &collision):
-				printCollision(ui.New(cmd.ErrOrStderr()), p, collision)
+				printCollision(ui.New(cmd.ErrOrStderr()), collision)
 				return reported(err)
 			case err != nil:
 				return composeError(err)
@@ -317,14 +310,11 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 				if l.Link == "" {
 					continue
 				}
-				switch {
-				case slices.Contains(layerLinks.Skipped, l.Link):
-					rows = append(rows, [2]string{"kept", l.Link + "  (the checkout's own; not linked to layer " + l.Name + ")"})
-				case slices.Contains(layerLinks.Replaced, l.Link):
+				if slices.Contains(layerLinks.Replaced, l.Link) {
 					rows = append(rows, [2]string{"replaced", l.Link + "  (the checkout's own; git checkout -- restores it)"})
-				default:
-					rows = append(rows, [2]string{"link", l.Link + "  (layer " + l.Name + ")"})
+					continue
 				}
+				rows = append(rows, [2]string{"link", l.Link + "  (layer " + l.Name + ")"})
 			}
 			u.Fields(rows)
 			return nil
@@ -338,6 +328,45 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 	c.Flags().BoolVar(&update, "update", false, "fetch every git source again instead of reading the cached clone (qory.yaml: update)")
 	c.Flags().BoolVarP(&verbose, "verbose", "v", false, "print one line per entry")
 	return c
+}
+
+// applyTarget puts the configuration's runtime and model, then the --runtime and --model
+// flags, over the profile's target, and checks the result. Under a base profile the
+// target is the base's: a runtime not among the base's is an input error, and a model
+// from anywhere but the base is one too, since the base's fragments and hooks exist for
+// its target and the runner is the base's owner's.
+func applyTarget(p *profile.Profile, base *compose.Base, conf config.Config, runtime, model string) error {
+	want := p.Target
+	if conf.Runtime != nil {
+		want.Runtimes = conf.Runtime
+	}
+	if conf.Model != "" {
+		want.Model = conf.Model
+	}
+	if runtime != "" {
+		want.Runtimes = profile.Runtimes(strings.Split(runtime, ","))
+		for i, r := range want.Runtimes {
+			want.Runtimes[i] = strings.TrimSpace(r)
+		}
+	}
+	if model != "" {
+		want.Model = model
+	}
+	if err := want.Runtimes.Validate(); err != nil {
+		return err
+	}
+	if base != nil {
+		for _, r := range want.Runtimes {
+			if !slices.Contains(p.Target.Runtimes, r) {
+				return fmt.Errorf("runtime %s is not one the base profile %s renders for; runtimes: %s", r, base, p.Target.Runtimes)
+			}
+		}
+		if want.Model != p.Target.Model {
+			return fmt.Errorf("the model is the base profile %s's, %s; nothing else sets it", base, p.Target.Model)
+		}
+	}
+	p.Target = want
+	return nil
 }
 
 // composeError classifies what a compose returned: a git source that could not be fetched
@@ -438,25 +467,25 @@ func ExitCode(err error) int {
 
 // printCollision prints what happened, the layers involved, and the profile lines that
 // resolve it by keeping the last layer that ships each entry.
-func printCollision(u *ui.UI, p *profile.Profile, e *compose.CollisionError) {
-	sources := map[string]string{}
-	var order []string
-	for _, l := range p.Layers {
-		sources[l.Name] = l.Source.String()
-		order = append(order, l.Name)
-	}
+func printCollision(u *ui.UI, e *compose.CollisionError) {
 	for _, c := range e.Collisions {
 		u.Fail(fmt.Errorf("%s/%s is provided by %d layers", c.Kind, c.Name, len(c.Layers)))
 		var rows [][]string
 		for _, l := range c.Layers {
-			rows = append(rows, []string{l, sources[l], e.Pins[l]})
+			rows = append(rows, []string{l, e.Sources[l], e.Pins[l]})
 		}
 		u.Table(rows)
+		if c.Base != "" {
+			u.Text("It belongs to the base profile " + c.Base + "; rename yours.")
+		}
+	}
+	layers, excludes := e.Suggest(e.Order)
+	if len(layers) == 0 {
+		return
 	}
 	u.Blank()
 	u.Heading("Fix")
 	u.Text("Keep one and exclude it from the others. For example, in harness-compose.yaml:")
-	layers, excludes := e.Suggest(order)
 	for _, l := range layers {
 		u.Blank()
 		u.Code("- name: "+l, "  ...", "  exclude:")
@@ -548,7 +577,7 @@ func newRemove(use string, aliases ...string) *cobra.Command {
 					unlinkErr = err
 				}
 			}
-			removed, err := render.UnlinkLayers(at.root, layerLinks(rep))
+			removed, err := render.UnlinkLayerLinks(at.root)
 			removedAny = append(removedAny, removed...)
 			for _, path := range removed {
 				u.Success("removed %s", path)
@@ -602,7 +631,7 @@ func removeRuntime(u *ui.UI, at places, rt render.Runtime) error {
 		return nil
 	}
 	if len(others) == 0 {
-		gone, err := render.UnlinkLayers(at.root, layerLinks(rep))
+		gone, err := render.UnlinkLayerLinks(at.root)
 		for _, path := range gone {
 			u.Success("removed %s", path)
 		}
@@ -635,18 +664,6 @@ func removeRuntime(u *ui.UI, at places, rt render.Runtime) error {
 		rep.Target.Runtimes = append(rep.Target.Runtimes, o.Name())
 	}
 	return report.Write(at.report, rep)
-}
-
-// layerLinks lists the checkout-root links the last compose wrote for the layers, as the
-// report recorded them.
-func layerLinks(rep report.Report) []string {
-	var links []string
-	for _, l := range rep.Layers {
-		if l.Link != "" {
-			links = append(links, l.Link)
-		}
-	}
-	return links
 }
 
 // had reports whether the qory directory is there before a remove takes it, so the

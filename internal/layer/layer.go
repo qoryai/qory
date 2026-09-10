@@ -18,9 +18,9 @@ import (
 // Kind is the kind every layer manifest carries.
 const Kind = "HarnessLayer"
 
-// ManifestName is the manifest's file name at the layer root. A layer without it is still a
-// layer.
-const ManifestName = "harness.yaml"
+// ManifestName is the manifest's file name at the layer root. Every layer carries one; it
+// is what names the layer.
+const ManifestName = "harness-layer.yaml"
 
 // InstructionsName is the layer's instruction file, read by every runtime.
 const InstructionsName = "AGENTS.md"
@@ -30,7 +30,7 @@ const InstructionsName = "AGENTS.md"
 // kind.
 type Variant map[string]string
 
-// Manifest is one harness.yaml, validated.
+// Manifest is one harness-layer.yaml, validated.
 type Manifest struct {
 	APIVersion string `yaml:"apiVersion"`
 	Kind       string `yaml:"kind"`
@@ -48,7 +48,7 @@ type Manifest struct {
 	Env map[string]string
 }
 
-// rawManifest decodes harness.yaml as it is written, where the variants map holds both the
+// rawManifest decodes harness-layer.yaml as it is written, where the variants map holds both the
 // variants and the default, a string among the maps. [ReadManifest] splits the two apart.
 type rawManifest struct {
 	APIVersion string               `yaml:"apiVersion"`
@@ -98,8 +98,23 @@ type Layer struct {
 // manifest's env has.
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// ReadManifest reads and validates harness.yaml at dir. A layer without one returns nil,
-// nil, and a caller passes that nil on to [SelectVariant] and [Read].
+// unknownKey is the decoder's report of a key the document has no field for. It names the
+// Go type, which the message a person reads leaves out.
+var unknownKey = regexp.MustCompile(`(line \d+: )?field (\S+) not found in type \S+`)
+
+// decodeError prefixes a decode error with path. An unknown key is reported as one the
+// manifest does not read, with the decoder's line number when it gives one; any other
+// error is returned as the decoder wrote it.
+func decodeError(path string, err error) error {
+	if m := unknownKey.FindStringSubmatch(err.Error()); m != nil {
+		return fmt.Errorf("%s: %skey %q is not one %s reads", path, m[1], m[2], ManifestName)
+	}
+	return fmt.Errorf("%s: %w", path, err)
+}
+
+// ReadManifest reads and validates harness-layer.yaml at dir. A directory without one is
+// not a layer, and the error says so and names the directory, because a source that
+// points at the wrong directory is the mistake this catches.
 //
 // An unknown field is an error, so is an apiVersion other than [profile.APIVersion], a kind
 // other than [Kind], a missing name, a default that names something other than a declared
@@ -110,7 +125,7 @@ func ReadManifest(dir string) (*Manifest, error) {
 	path := filepath.Join(dir, ManifestName)
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return nil, fmt.Errorf("%s has no %s; a layer carries one naming it", dir, ManifestName)
 	}
 	if err != nil {
 		return nil, err
@@ -119,7 +134,7 @@ func ReadManifest(dir string) (*Manifest, error) {
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
 	dec.KnownFields(true)
 	if err := dec.Decode(&raw); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, decodeError(path, err)
 	}
 	if raw.APIVersion != profile.APIVersion {
 		return nil, fmt.Errorf("%s: apiVersion %q is not one this qory reads; versions: %s", path, raw.APIVersion, profile.APIVersion)

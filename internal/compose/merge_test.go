@@ -1,0 +1,132 @@
+package compose_test
+
+import (
+	"path/filepath"
+	"reflect"
+	"testing"
+
+	"github.com/qoryai/qory/internal/compose"
+	"github.com/qoryai/qory/internal/profile"
+)
+
+// composeTreeWith is composeTree with options.
+func composeTreeWith(t *testing.T, files map[string]string, opts compose.Options) (*compose.Result, error) {
+	t.Helper()
+	dir := writeTree(t, files)
+	p, err := profile.Load(filepath.Join(dir, profile.FileName))
+	if err != nil {
+		return nil, err
+	}
+	return compose.ComposeWith(p, opts)
+}
+
+// TestSettingsSameValueTwiceMerges is two fragments setting model.name, a list and an env
+// key to the same values: the merged file holds each once.
+func TestSettingsSameValueTwiceMerges(t *testing.T) {
+	res, err := composeTree(t, map[string]string{
+		profile.FileName:                         twoLayers,
+		"layers/a/settings/claude/settings.json": `{"model": {"name": "opus"}, "paths": ["x"], "env": {"A": "1"}}`,
+		"layers/b/settings/claude/settings.json": `{"model": {"name": "opus"}, "paths": ["x"], "env": {"A": "1"}}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := jsonValue(t, `{"model": {"name": "opus"}, "paths": ["x"], "env": {"A": "1"}}`)
+	if got := res.Settings["claude"]["settings.json"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("settings %v, want %v", got, want)
+	}
+}
+
+// TestSettingsDifferentValuesCollide is a scalar, a list outside permissions and hooks, and
+// a value whose shape changes, each set differently by two layers: the compose fails and
+// names the target file, the dotted path and both layers in profile order.
+func TestSettingsDifferentValuesCollide(t *testing.T) {
+	cases := []struct {
+		name string
+		a, b string
+		want string
+	}{
+		{"scalar", `{"model": {"name": "opus"}}`, `{"model": {"name": "sonnet"}}`, "model.name"},
+		{"list", `{"paths": ["x"]}`, `{"paths": ["x", "y"]}`, "paths"},
+		{"shape", `{"model": "opus"}`, `{"model": {"name": "opus"}}`, "model"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := composeTree(t, map[string]string{
+				profile.FileName:                         twoLayers,
+				"layers/a/settings/claude/settings.json": c.a,
+				"layers/b/settings/claude/settings.json": c.b,
+			})
+			want := "layer b: settings/claude/settings.json: " + c.want + " is set by layers a and b with different values"
+			if err == nil || err.Error() != want {
+				t.Fatalf("error %v, want %q", err, want)
+			}
+		})
+	}
+}
+
+// TestSettingsPermissionsAndHooksConcatenate is two layers each adding a permission, one
+// of them twice, and a hook: permissions concatenate without the duplicate, hooks
+// concatenate, and neither collides.
+func TestSettingsPermissionsAndHooksConcatenate(t *testing.T) {
+	res, err := composeTree(t, map[string]string{
+		profile.FileName:                         twoLayers,
+		"layers/a/settings/claude/settings.json": `{"permissions": {"allow": ["Read", "Write"]}, "hooks": {"PreToolUse": [{"matcher": "Bash"}]}}`,
+		"layers/b/settings/claude/settings.json": `{"permissions": {"allow": ["Write", "Edit"]}, "hooks": {"PreToolUse": [{"matcher": "Bash"}]}}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := jsonValue(t, `{"permissions": {"allow": ["Read", "Write", "Edit"]}, "hooks": {"PreToolUse": [{"matcher": "Bash"}, {"matcher": "Bash"}]}}`)
+	if got := res.Settings["claude"]["settings.json"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("settings %v, want %v", got, want)
+	}
+}
+
+// TestSettingsEnvDecidedByTheConfigurationDoesNotCollide is two fragments setting env.A
+// differently while the configuration names A: the compose succeeds and the merged env
+// holds the configuration's value.
+func TestSettingsEnvDecidedByTheConfigurationDoesNotCollide(t *testing.T) {
+	res, err := composeTreeWith(t, map[string]string{
+		profile.FileName:                         twoLayers,
+		"layers/a/settings/claude/settings.json": `{"env": {"A": "a"}}`,
+		"layers/b/settings/claude/settings.json": `{"env": {"A": "b"}}`,
+	}, compose.Options{Env: map[string]string{"A": "decided"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := res.Settings["claude"]["settings.json"]["env"].(map[string]any)
+	if env["A"] != "decided" {
+		t.Fatalf("env %v, want A decided", env)
+	}
+}
+
+// TestExportAgainstFragmentEnvCollides is layer a setting env.TOOLS in its fragment and
+// layer b exporting TOOLS from its manifest with another value: the compose fails and names
+// both, unless the configuration names TOOLS, and a fragment that repeats the exported
+// value is fine.
+func TestExportAgainstFragmentEnvCollides(t *testing.T) {
+	files := func(value string) map[string]string {
+		return map[string]string{
+			profile.FileName:                         twoLayers,
+			"layers/a/settings/claude/settings.json": `{"env": {"TOOLS": "` + value + `"}}`,
+			"layers/b/harness-layer.yaml":            manifest("b", "TOOLS", "scripts/tools"),
+		}
+	}
+	_, err := composeTree(t, files("/usr/local/bin"))
+	want := "settings/claude/settings.json: env.TOOLS is set by layer a and exported by layer b with different values"
+	if err == nil || err.Error() != want {
+		t.Fatalf("error %v, want %q", err, want)
+	}
+	if _, err := composeTree(t, files("$QORY_HARNESS_HOME/layers/b/scripts/tools")); err != nil {
+		t.Fatalf("the exported value repeated in a fragment: %v", err)
+	}
+	res, err := composeTreeWith(t, files("/usr/local/bin"), compose.Options{Env: map[string]string{"TOOLS": "/opt/tools"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := res.Settings["claude"]["settings.json"]["env"].(map[string]any)
+	if env["TOOLS"] != "/opt/tools" || res.Env["TOOLS"] != "/opt/tools" {
+		t.Fatalf("settings env %v, exported env %v, want TOOLS /opt/tools in both", env, res.Env)
+	}
+}

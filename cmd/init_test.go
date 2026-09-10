@@ -69,7 +69,7 @@ func TestInitWithoutAName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "wrote 9 files", profile.FileName, "layers/hello/skills/greet/SKILL.md", "next", "qory harness compose")
+	wants(t, out, "wrote 11 files", profile.FileName, "layers/hello/skills/greet/SKILL.md", "next", "qory harness compose")
 	if strings.Contains(out, "Hello,") {
 		t.Errorf("nothing names the person and the output greets one:\n%s", out)
 	}

@@ -232,6 +232,7 @@ func TestRemoveOneRuntimeLeavesWhatTheOtherShares(t *testing.T) {
 // reads skills from .agents/skills.
 func TestComposeALayerWithoutSkills(t *testing.T) {
 	root := newCheckout(t)
+	writeManifest(t, filepath.Join(root, "harness"), "own")
 	writeFile(t, filepath.Join(root, "harness", "AGENTS.md"), "# Only instructions\n")
 	writeFile(t, filepath.Join(root, "harness-compose.yaml"), "apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\ntarget:\n  runtime: any\nlayers:\n  - name: own\n    source: {path: harness}\n")
 	out, err := run(t, "hc")

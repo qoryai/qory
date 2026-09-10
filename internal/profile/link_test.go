@@ -52,7 +52,7 @@ func TestLoadRefusesABadLinkOrExtension(t *testing.T) {
 		{"link: tools/bin", `layer tree: link "tools/bin" is not one path segment`},
 		{"link: .harness", `layer tree: link ".harness" is not one path segment`},
 		{"link: .qory", `layer tree: link ".qory" is not one path segment`},
-		{"link: harness\n  - name: other\n    source: {path: layers/other}\n    link: harness", "layers tree and other both link harness"},
+		{"link: harness\n  - name: other\n    source: {path: layers/other}\n    link: harness", "layer tree and layer other both link harness"},
 	} {
 		_, err := load(t, strings.Replace(linked, "link: harness", c.edit, 1))
 		if err == nil || !strings.Contains(err.Error(), c.want) {

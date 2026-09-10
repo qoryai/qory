@@ -18,6 +18,17 @@ import (
 func writeTree(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
+	// A layer directory named in files gets a manifest named after it, unless the test
+	// writes one itself.
+	for name := range files {
+		if rest, ok := strings.CutPrefix(name, "layers/"); ok {
+			layer, _, _ := strings.Cut(rest, "/")
+			manifest := "layers/" + layer + "/harness-layer.yaml"
+			if _, ok := files[manifest]; !ok && layer != "" {
+				files[manifest] = "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: " + layer + "\n"
+			}
+		}
+	}
 	for name, body := range files {
 		path := filepath.Join(dir, name)
 		if strings.HasSuffix(name, "/") {
@@ -73,8 +84,8 @@ func jsonValue(t *testing.T, doc string) map[string]any {
 }
 
 // TestSettingsMergeTwoLayersIntoOneTargetFile concatenates permissions without a duplicate,
-// concatenates hooks, lets the later layer win an env key, merges a nested map deeply and
-// replaces any other list.
+// concatenates hooks, merges env and a nested map key by key, and keeps a list the
+// second layer repeats unchanged.
 func TestSettingsMergeTwoLayersIntoOneTargetFile(t *testing.T) {
 	res, err := composeTree(t, map[string]string{
 		profile.FileName: twoLayers,
@@ -89,9 +100,9 @@ func TestSettingsMergeTwoLayersIntoOneTargetFile(t *testing.T) {
 		"layers/b/settings/claude/settings.json": `{
 			"permissions": {"allow": ["Read", "Bash(git diff:*)"]},
 			"hooks": {"PreToolUse": [{"matcher": "Write"}]},
-			"env": {"SHARED": "b"},
+			"env": {"QORY_B": "b", "SHARED": "a"},
 			"nested": {"deep": {"two": 2}},
-			"other": ["b"]
+			"other": ["a"]
 		}`,
 	})
 	if err != nil {
@@ -100,10 +111,10 @@ func TestSettingsMergeTwoLayersIntoOneTargetFile(t *testing.T) {
 	want := jsonValue(t, `{
 		"permissions": {"allow": ["Bash(git status:*)", "Read", "Bash(git diff:*)"], "deny": ["Bash(rm:*)"]},
 		"hooks": {"PreToolUse": [{"matcher": "Bash"}, {"matcher": "Write"}]},
-		"env": {"QORY_A": "a", "SHARED": "b"},
+		"env": {"QORY_A": "a", "QORY_B": "b", "SHARED": "a"},
 		"model": "opus",
 		"nested": {"deep": {"one": 1, "two": 2}},
-		"other": ["b"]
+		"other": ["a"]
 	}`)
 	got := res.Settings["claude"]["settings.json"]
 	if !reflect.DeepEqual(got, want) {
@@ -389,12 +400,21 @@ func TestComposeWithoutInstructions(t *testing.T) {
 	}
 }
 
-// TestComposeRecordsEveryLayer keeps the profile's name for a layer, the layer's own name
-// from its manifest, the source as the profile writes it and the pin.
+// TestComposeRecordsEveryLayer is a profile naming layer a whose manifest says acme-core:
+// the compose refuses the mismatch; with the entry given by source alone, the manifest's
+// name is the layer's, and the source and the pin are recorded as written.
 func TestComposeRecordsEveryLayer(t *testing.T) {
+	_, err := composeTree(t, map[string]string{
+		profile.FileName:              twoLayers,
+		"layers/a/harness-layer.yaml": "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: acme-core\n",
+		"layers/a/commands/ship.md":   "ship\n",
+	})
+	if err == nil || err.Error() != "layer a: the layer at layers/a is named acme-core in its harness-layer.yaml" {
+		t.Fatalf("err = %v", err)
+	}
 	res, err := composeTree(t, map[string]string{
-		profile.FileName:               twoLayers,
-		"layers/a/harness.yaml":        "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: acme-core\n",
+		profile.FileName:               strings.Replace(twoLayers, "  - name: a\n    source:\n      path: layers/a\n", "  - source:\n      path: layers/a\n", 1),
+		"layers/a/harness-layer.yaml":  "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: acme-core\n",
 		"layers/a/commands/ship.md":    "ship\n",
 		"layers/b/hooks/pre-commit.sh": "#!/bin/sh\n",
 	})
@@ -402,19 +422,43 @@ func TestComposeRecordsEveryLayer(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(res.Layers) != 2 {
-		t.Fatalf("%d layers", len(res.Layers))
+		t.Fatalf("layers %+v", res.Layers)
 	}
 	a, b := res.Layers[0], res.Layers[1]
-	if a.Name != "a" || a.ManifestName != "acme-core" || a.Source != "layers/a" || a.Pin != "working-tree" || a.Variant != "" {
-		t.Fatalf("layers[0] %+v", a)
+	if a.Name != "acme-core" || a.Source != "layers/a" || a.Pin != "working-tree" || a.Variant != "" {
+		t.Errorf("layer a: %+v", a)
 	}
-	if b.Name != "b" || b.ManifestName != "" || b.Source != "layers/b" {
-		t.Fatalf("layers[1] %+v", b)
+	if b.Name != "b" || b.Source != "layers/b" {
+		t.Errorf("layer b: %+v", b)
+	}
+	if res.Entries[0].Layer != "acme-core" {
+		t.Errorf("entries: %+v", res.Entries)
+	}
+}
+
+// TestComposeReadsALayerByNameAlone is an entry that gives a name and no source: the
+// layer is read from layers/<name> under the profile's root.
+func TestComposeReadsALayerByNameAlone(t *testing.T) {
+	res, err := composeTree(t, map[string]string{
+		profile.FileName:            strings.Replace(twoLayers, "  - name: a\n    source:\n      path: layers/a\n", "  - name: a\n", 1),
+		"layers/a/commands/ship.md": "ship\n",
+		"layers/b/":                 "",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := res.Layers[0]
+	if a.Name != "a" || a.Source != "layers/a" || !strings.HasSuffix(a.Dir, filepath.Join("layers", "a")) {
+		t.Errorf("layer a: %+v", a)
+	}
+	if len(res.Entries) != 1 || res.Entries[0].Layer != "a" {
+		t.Errorf("entries: %+v", res.Entries)
 	}
 }
 
 // TestComposeRefuses covers the errors a layer raises before its entries are read: a source
-// that is not there, a manifest qory turns down, and a runtime no variant serves.
+// that is not there, a directory without a manifest, a manifest qory turns down, one name
+// composed from two sources, and a runtime no variant serves.
 func TestComposeRefuses(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -427,29 +471,48 @@ func TestComposeRefuses(t *testing.T) {
 			want:  "layer a: ",
 		},
 		{
+			// The layer sits outside layers/, where writeTree adds no manifest of its own.
+			name: "a directory without a manifest",
+			files: map[string]string{
+				profile.FileName: strings.Replace(twoLayers, "      path: layers/a\n", "      path: bare/a\n", 1),
+				"bare/a/":        "",
+				"layers/b/":      "",
+			},
+			want: filepath.Join("bare", "a") + " has no harness-layer.yaml; a layer carries one naming it",
+		},
+		{
+			name: "one name composed from two sources",
+			files: map[string]string{
+				profile.FileName:                strings.Replace(twoLayers, "  - name: b\n    source:\n      path: layers/b\n", "  - source:\n      path: layers/dup\n", 1),
+				"layers/a/":                     "",
+				"layers/dup/harness-layer.yaml": "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: a\n",
+			},
+			want: "layer a is composed twice, from layers/a and from layers/dup",
+		},
+		{
 			name: "a manifest qory turns down",
 			files: map[string]string{
-				profile.FileName:        twoLayers,
-				"layers/a/harness.yaml": "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\n",
-				"layers/b/":             "",
+				profile.FileName:              twoLayers,
+				"layers/a/harness-layer.yaml": "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\n",
+				"layers/b/":                   "",
 			},
 			want: "name is required",
 		},
 		{
 			name: "a runtime no variant serves",
 			files: map[string]string{
-				profile.FileName:        twoLayers,
-				"layers/a/harness.yaml": "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: multi\nvariants:\n  codex:\n    agents: agents/codex\n  default: fail\n",
-				"layers/b/":             "",
+				profile.FileName:              twoLayers,
+				"layers/a/harness-layer.yaml": "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: a\nvariants:\n  codex:\n    agents: agents/codex\n  default: fail\n",
+				"layers/b/":                   "",
 			},
 			want: "layer a: the layer has no variant for runtime claude and its default is fail; variants: codex",
 		},
 		{
 			name: "a forced variant the layer has not",
 			files: map[string]string{
-				profile.FileName:        strings.Replace(twoLayers, "      path: layers/a\n", "      path: layers/a\n    variant: amp\n", 1),
-				"layers/a/harness.yaml": "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: multi\nvariants:\n  codex:\n    agents: agents/codex\n",
-				"layers/b/":             "",
+				profile.FileName:              strings.Replace(twoLayers, "      path: layers/a\n", "      path: layers/a\n    variant: amp\n", 1),
+				"layers/a/harness-layer.yaml": "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: a\nvariants:\n  codex:\n    agents: agents/codex\n",
+				"layers/b/":                   "",
 			},
 			want: `layer a: variant "amp" is forced, and the layer has no such variant; variants: codex`,
 		},

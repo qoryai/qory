@@ -8,13 +8,13 @@
 // named after the entry, a hook is a regular file under hooks, an MCP server is one JSON
 // file under mcp. Every path an entry, a fragment or AGENTS.md resolves to, symlinks
 // followed, lies inside the layer; one that leaves it is refused, so the harness reads
-// nothing the report does not show. The manifest, harness.yaml, declares the
+// nothing the report does not show. The manifest, harness-layer.yaml, declares the
 // layer's name and its variants, the per-runtime alternatives, each one reading some kinds
 // from another directory inside the layer. The manifest may also export environment
 // variables, env, each naming a path inside the layer; the compose turns them into
 // $QORY_HARNESS_HOME/layers/<name>/<path> and the runtimes with a place for environment
-// write them. A directory without a manifest is a layer with one variant, read from its
-// root.
+// write them. A directory without a manifest is not a layer; one whose manifest declares
+// no variants is read from its root.
 //
 // A caller reads the manifest, picks the variant for the target runtime, then scans the
 // tree:

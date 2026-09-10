@@ -90,10 +90,11 @@ conventions, beyond what `revive` can check:
   lists as two spaces and a dash, and wrap at 90 columns.
 
 One vocabulary, no synonyms: **runtime** is the program that runs the harness, such as
-Claude Code; **profile** is the compose file; **configuration** is `qory.yaml`; **layer**,
-**source**, **entry**, **kind**, **variant**, **exclude**, **collision**, **home**,
-**checkout**, **link**, **pin** and **report** mean what `contracts/harness/v1/README.md`
-says they mean. A runtime is never a provider, a tool or a vendor; a configuration is
+Claude Code; **profile** is the compose file; **configuration** is `qory.yaml`;
+**manifest** is `harness-layer.yaml`; **base** is the profile an extending profile
+extends; **layer**, **source**, **entry**, **kind**, **variant**, **exclude**,
+**collision**, **home**, **checkout**, **link**, **pin** and **report** mean what
+`contracts/harness/v1/README.md` says they mean. A runtime is never a provider, a tool or a vendor; a configuration is
 never a setting file or a preference.
 
 The command reference under `docs/commands/` is generated: run

@@ -18,10 +18,9 @@ const Version = 1
 
 // Layer is one composed layer.
 type Layer struct {
-	// Name is the profile's name for the layer, the name excludes and entries use.
+	// Name is the layer's name as its manifest declares it, the name excludes and entries
+	// use.
 	Name string `json:"name"`
-	// ManifestName is the layer's own name from harness.yaml, absent when it has none.
-	ManifestName string `json:"manifest_name,omitempty"`
 	// Source is the profile's source as text: the path of a path source, <git>#<ref> for a
 	// git source.
 	Source string `json:"source"`
@@ -35,6 +34,19 @@ type Layer struct {
 	// Link is the checkout-root name that links to the layer's directory, absent when the
 	// profile names none.
 	Link string `json:"link,omitempty"`
+	// Base marks a layer of the base profile, when the profile extends one.
+	Base bool `json:"base,omitempty"`
+}
+
+// Base is the base profile the profile extends.
+type Base struct {
+	// Name is the base profile's name.
+	Name string `json:"name"`
+	// Source is the extends source as the profile writes it.
+	Source string `json:"source"`
+	// Pin is what the source resolved to: the commit for a git source, "working-tree" for
+	// a path.
+	Pin string `json:"pin"`
 }
 
 // Entry is one composed entry.
@@ -120,6 +132,8 @@ type Report struct {
 	// Extensions are the profile's extensions, carried as written, absent when it has
 	// none.
 	Extensions map[string]map[string]any `json:"extensions,omitempty"`
+	// Base is the base profile the profile extends, absent when it extends none.
+	Base *Base `json:"base,omitempty"`
 }
 
 // New builds the report of a result rendered into home for a checkout. The name is the
@@ -142,8 +156,11 @@ func New(res *compose.Result, name, checkout, home string) Report {
 	if len(res.Env) > 0 {
 		r.Env = res.Env
 	}
+	if res.Base != nil {
+		r.Base = &Base{Name: res.Base.Name, Source: res.Base.Source, Pin: res.Base.Pin}
+	}
 	for _, l := range res.Layers {
-		r.Layers = append(r.Layers, Layer{Name: l.Name, ManifestName: l.ManifestName, Source: l.Source, Pin: l.Pin, Dirty: l.Dirty, Variant: l.Variant, Link: l.Link})
+		r.Layers = append(r.Layers, Layer{Name: l.Name, Source: l.Source, Pin: l.Pin, Dirty: l.Dirty, Variant: l.Variant, Link: l.Link, Base: l.Base})
 	}
 	for _, e := range res.Entries {
 		r.Entries = append(r.Entries, Entry{Kind: e.Kind, Name: e.Name, Layer: e.Layer})
@@ -196,11 +213,12 @@ func (r Report) Print(w io.Writer) error {
 // has printed a title of its own.
 func (r Report) PrintBody(w io.Writer) error {
 	u := ui.New(w)
-	u.Fields([][2]string{
-		{"file", ui.Short(r.File, r.Checkout)},
-		{"checkout", ui.Short(r.Checkout, "")},
-		{"home", ui.Short(r.Home, r.Checkout)},
-	})
+	fields := [][2]string{{"file", ui.Short(r.File, r.Checkout)}}
+	if r.Base != nil {
+		fields = append(fields, [2]string{"extends", r.Base.Name + "  " + r.Base.Source + "  " + r.Base.Pin})
+	}
+	fields = append(fields, [2]string{"checkout", ui.Short(r.Checkout, "")}, [2]string{"home", ui.Short(r.Home, r.Checkout)})
+	u.Fields(fields)
 	u.Blank()
 	u.Heading("Layers")
 	var rows [][]string
@@ -210,14 +228,14 @@ func (r Report) PrintBody(w io.Writer) error {
 			pin += " (dirty)"
 		}
 		row := []string{l.Name, l.Source, pin}
-		if l.ManifestName != "" && l.ManifestName != l.Name {
-			row = append(row, "named "+l.ManifestName)
-		}
 		if l.Variant != "" {
 			row = append(row, "variant "+l.Variant)
 		}
 		if l.Link != "" {
 			row = append(row, "linked as "+l.Link)
+		}
+		if l.Base {
+			row = append(row, "base")
 		}
 		rows = append(rows, row)
 	}

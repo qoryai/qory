@@ -17,8 +17,7 @@ import (
 )
 
 // result is the composed profile every test here reports on: two layers, one of them dirty
-// with a manifest name of its own and a variant, two entries from different layers, and one
-// exclude. The paths are fixed so the golden file does not move with the test directory.
+// with a variant, two entries from different layers, and one exclude. The paths are fixed so the golden file does not move with the test directory.
 func result() *compose.Result {
 	return &compose.Result{
 		Profile: &profile.Profile{
@@ -33,13 +32,12 @@ func result() *compose.Result {
 				Pin:    source.WorkingTree,
 			},
 			{
-				Name:         "review",
-				ManifestName: "reviewers",
-				Dir:          "/work/layers/review",
-				Source:       "../layers/review",
-				Pin:          source.WorkingTree,
-				Dirty:        true,
-				Variant:      "claude",
+				Name:    "review",
+				Dir:     "/work/layers/review",
+				Source:  "../layers/review",
+				Pin:     source.WorkingTree,
+				Dirty:   true,
+				Variant: "claude",
 			},
 		},
 		Entries: []compose.Entry{
@@ -63,7 +61,7 @@ func want() report.Report {
 		Home:     "/work/app/.qory/harness",
 		Layers: []report.Layer{
 			{Name: "core", Source: "../layers/core", Pin: "working-tree"},
-			{Name: "review", ManifestName: "reviewers", Source: "../layers/review", Pin: "working-tree", Dirty: true, Variant: "claude"},
+			{Name: "review", Source: "../layers/review", Pin: "working-tree", Dirty: true, Variant: "claude"},
 		},
 		Entries: []report.Entry{
 			{Kind: "agents", Name: "reviewer", Layer: "review"},

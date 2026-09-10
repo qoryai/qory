@@ -1,0 +1,1 @@
+layer nextjs: settings/claude/settings.json: env.A is set by layers core and nextjs with different values

@@ -6,9 +6,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/qoryai/qory/internal/checkout"
 )
 
 // APIVersion is the one format version this qory reads. A profile that carries another one
@@ -59,14 +62,22 @@ func (s Source) String() string {
 	return out
 }
 
-// Layer is one entry of the profile's ordered list of layers.
+// Layer is one entry of the profile's ordered list of layers. An entry gives a name, a
+// source, or both: a name alone reads layers/<name> at the root of the repository the
+// profile is in; a source alone takes the layer's name from its manifest; both means the
+// manifest must carry that name.
 type Layer struct {
-	// Name is unique within the profile and names the layer in the report and in messages.
-	Name string `yaml:"name"`
-	// Source is where the layer is read from.
-	Source Source `yaml:"source"`
+	// Name is the layer's name, the one its manifest declares. Alone, it is the address
+	// too: layers/<name> under [Profile.Root].
+	Name string `yaml:"name,omitempty"`
+	// Source is where the layer is read from, when it is not at layers/<name>.
+	Source Source `yaml:"source,omitempty"`
 	// Exclude lists, per kind from [Kinds], the entry names this layer does not contribute.
 	Exclude map[string][]string `yaml:"exclude,omitempty"`
+	// Base marks a layer that came from the base profile an extending profile extends. It
+	// is set by [Extend], not by the YAML, which also rewrites the layer's source so it
+	// resolves from the extending profile.
+	Base bool `yaml:"-"`
 	// Variant forces one of the layer's variants instead of the one named like the runtime.
 	Variant string `yaml:"variant,omitempty"`
 	// Link is a name at the checkout root that links to the layer's directory, so a
@@ -148,6 +159,19 @@ func (r Runtimes) First() string {
 	return r[0]
 }
 
+// Extending is what a base profile lets an extending profile's layers ship. A base
+// without the block is closed: no profile may extend it.
+type Extending struct {
+	// Kinds are the entry kinds an appended layer may ship, from [Kinds]. Hooks and MCP
+	// servers are never allowed, since the runner executes them without the agent.
+	Kinds []string `yaml:"kinds,omitempty"`
+	// Instructions allows an appended layer's AGENTS.md, appended after the base's.
+	Instructions bool `yaml:"instructions,omitempty"`
+	// Settings are the dotted key paths an appended layer's settings fragment may set,
+	// such as permissions.allow; a fragment setting anything else fails the compose.
+	Settings []string `yaml:"settings,omitempty"`
+}
+
 // Profile is one harness-compose.yaml, validated.
 type Profile struct {
 	APIVersion string `yaml:"apiVersion"`
@@ -155,10 +179,18 @@ type Profile struct {
 	// Name is the profile's name in the report. A profile that leaves it out is named after
 	// the checkout by the caller.
 	Name string `yaml:"name,omitempty"`
-	// Target is the runtime and model the harness is rendered for.
-	Target Target `yaml:"target"`
+	// Extends names the base profile this one appends to: a directory holding a
+	// harness-compose.yaml, as a path or inside a git repository at a ref. The base's
+	// layers come first and cannot be changed; its target is this profile's target.
+	Extends Source `yaml:"extends,omitempty"`
+	// Target is the runtime and model the harness is rendered for. A profile that extends
+	// a base leaves it out and takes the base's.
+	Target Target `yaml:"target,omitempty"`
 	// Layers are the layers to compose, in the order they merge.
 	Layers []Layer `yaml:"layers"`
+	// Extending, on a base profile, is what an extending profile's layers may ship. A base
+	// that leaves it out cannot be extended.
+	Extending *Extending `yaml:"extending,omitempty"`
 	// Extensions are values qory carries into the report and does not read: one map per
 	// namespace, for the scripts of a team that keep their own settings beside the
 	// profile.
@@ -166,11 +198,34 @@ type Profile struct {
 
 	// File is the absolute path the profile was read from, set by [Load], not by the YAML.
 	File string `yaml:"-"`
+	// Root is the root of the repository the profile is in, set by [Load]: git's toplevel
+	// for the profile's directory, else that directory. A layer named without a source is
+	// read from layers/<name> under it.
+	Root string `yaml:"-"`
 }
 
 // Dir returns the directory holding the profile file. A layer's relative path source
 // resolves against it.
 func (p *Profile) Dir() string { return filepath.Dir(p.File) }
+
+// SourceOf is the source a layer entry reads from: its own, or layers/<name> for an entry
+// with a name alone, which resolves against [Profile.Root]; [Profile.DirOf] says which.
+// The relative form is what the report records, so it reads the same on every machine.
+func (p *Profile) SourceOf(l Layer) Source {
+	if l.Source.Path == "" && l.Source.Git == "" {
+		return Source{Path: filepath.Join("layers", l.Name)}
+	}
+	return l.Source
+}
+
+// DirOf is the directory a layer entry's relative path resolves against: the repository
+// root for an entry with a name alone, else the profile's directory.
+func (p *Profile) DirOf(l Layer) string {
+	if l.Source.Path == "" && l.Source.Git == "" {
+		return p.Root
+	}
+	return p.Dir()
+}
 
 // Load reads and validates one profile file and records its absolute path in
 // [Profile.File]. An unknown field is an error, so a misspelled key is reported rather than
@@ -187,7 +242,7 @@ func Load(path string) (*Profile, error) {
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
 	dec.KnownFields(true)
 	if err := dec.Decode(p); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, decodeError(path, err)
 	}
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("%s: holds more than one document; a profile is one", path)
@@ -197,16 +252,35 @@ func Load(path string) (*Profile, error) {
 		return nil, err
 	}
 	p.File = abs
+	if p.Root, err = checkout.Root(filepath.Dir(abs)); err != nil {
+		return nil, err
+	}
 	if err := p.validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return p, nil
 }
 
+// unknownKey is the decoder's report of a key the document has no field for. It names the
+// Go type, which the message a person reads leaves out.
+var unknownKey = regexp.MustCompile(`(line \d+: )?field (\S+) not found in type \S+`)
+
+// decodeError prefixes a decode error with path. An unknown key is reported as one the
+// profile does not read, with the decoder's line number when it gives one; any other
+// error is returned as the decoder wrote it.
+func decodeError(path string, err error) error {
+	if m := unknownKey.FindStringSubmatch(err.Error()); m != nil {
+		return fmt.Errorf("%s: %skey %q is not one %s reads", path, m[1], m[2], FileName)
+	}
+	return fmt.Errorf("%s: %w", path, err)
+}
+
 // validate checks the whole document before a caller sees it, so a profile that reaches the
-// compose is known to name a runtime, at least one layer, uniquely named layers with a
-// source each, excludes over known kinds only, links that are one path segment and named
-// once, and extensions that are maps.
+// compose is known to name a runtime or a base to take it from, at least one layer, each
+// with a name or a source, no name twice, excludes over known kinds only, links that are
+// one path segment and named once, extensions that are maps, and an extending block over
+// known kinds without hooks and servers. Whether a source holds a layer, and whether its
+// manifest carries the name the entry gives, is the compose's check.
 func (p *Profile) validate() error {
 	if p.APIVersion != APIVersion {
 		return fmt.Errorf("apiVersion %q is not one this qory reads; versions: %s", p.APIVersion, APIVersion)
@@ -214,8 +288,33 @@ func (p *Profile) validate() error {
 	if p.Kind != Kind {
 		return fmt.Errorf("kind %q is not %s", p.Kind, Kind)
 	}
-	if err := p.Target.Runtimes.Validate(); err != nil {
+	if p.Extends.Path != "" || p.Extends.Git != "" || p.Extends.Ref != "" {
+		if err := p.Extends.validate(); err != nil {
+			return fmt.Errorf("extends: %w", err)
+		}
+		if len(p.Target.Runtimes) > 0 || p.Target.Model != "" {
+			return errors.New("target is the base profile's; a profile that extends one does not set it")
+		}
+		if p.Extending != nil {
+			return errors.New("extending and extends together are not supported; a base profile does not extend another")
+		}
+	} else if err := p.Target.Runtimes.Validate(); err != nil {
 		return err
+	}
+	if p.Extending != nil {
+		for _, k := range p.Extending.Kinds {
+			if !isKind(k) {
+				return fmt.Errorf("extending.kinds names kind %q; kinds: %s", k, strings.Join(Kinds, ", "))
+			}
+			if k == "hooks" || k == "mcp" {
+				return fmt.Errorf("extending.kinds names %s, which an extending layer may never ship; the runner executes those without the agent", k)
+			}
+		}
+		for _, key := range p.Extending.Settings {
+			if key == "" || strings.HasPrefix(key, ".") || strings.HasSuffix(key, ".") {
+				return fmt.Errorf("extending.settings names %q, which is not a dotted key path", key)
+			}
+		}
 	}
 	if len(p.Layers) == 0 {
 		return errors.New("layers is empty; a profile names at least one layer")
@@ -223,32 +322,37 @@ func (p *Profile) validate() error {
 	seen := map[string]bool{}
 	links := map[string]string{}
 	for i, l := range p.Layers {
-		if l.Name == "" {
-			return fmt.Errorf("layers[%d]: name is required", i)
+		who := fmt.Sprintf("layers[%d]", i)
+		if l.Name != "" {
+			who = "layer " + l.Name
+			if !segment(l.Name) {
+				return fmt.Errorf("layers[%d]: name %q is not one path segment; a layer name holds no slash, backslash, @ or leading dot", i, l.Name)
+			}
+			if seen[l.Name] {
+				return fmt.Errorf("layer %s is named twice", l.Name)
+			}
+			seen[l.Name] = true
 		}
-		if !segment(l.Name) {
-			return fmt.Errorf("layers[%d]: name %q is not one path segment; a layer name holds no slash, backslash, @ or leading dot", i, l.Name)
-		}
-		if seen[l.Name] {
-			return fmt.Errorf("layer %s is named twice", l.Name)
-		}
-		seen[l.Name] = true
-		if err := l.Source.validate(); err != nil {
-			return fmt.Errorf("layer %s: %w", l.Name, err)
+		if l.Source.Path != "" || l.Source.Git != "" || l.Source.Ref != "" {
+			if err := l.Source.validate(); err != nil {
+				return fmt.Errorf("%s: %w", who, err)
+			}
+		} else if l.Name == "" {
+			return fmt.Errorf("%s: a layer gives a name, a source, or both", who)
 		}
 		for kind := range l.Exclude {
 			if !isKind(kind) {
-				return fmt.Errorf("layer %s: exclude names kind %q; kinds: %s", l.Name, kind, strings.Join(Kinds, ", "))
+				return fmt.Errorf("%s: exclude names kind %q; kinds: %s", who, kind, strings.Join(Kinds, ", "))
 			}
 		}
 		if l.Link != "" {
 			if !segment(l.Link) || l.Link == ".qory" {
-				return fmt.Errorf("layer %s: link %q is not one path segment; a link holds no slash, backslash, @ or leading dot", l.Name, l.Link)
+				return fmt.Errorf("%s: link %q is not one path segment; a link holds no slash, backslash, @ or leading dot", who, l.Link)
 			}
 			if links[l.Link] != "" {
-				return fmt.Errorf("layers %s and %s both link %s", links[l.Link], l.Name, l.Link)
+				return fmt.Errorf("%s and %s both link %s", links[l.Link], who, l.Link)
 			}
-			links[l.Link] = l.Name
+			links[l.Link] = who
 		}
 	}
 	for ns, values := range p.Extensions {
@@ -298,4 +402,60 @@ func isKind(k string) bool {
 		}
 	}
 	return false
+}
+
+// Extend returns the profile p composes as an extending profile of base: the base's
+// layers first, marked [Layer.Base], each with its source rewritten to resolve from p,
+// then p's layers; the base's target; both files' extensions. It refuses a base that extends another, a base without an extending block,
+// and an extension namespace both files declare. The result's File and Root are p's.
+func Extend(base, p *Profile) (*Profile, error) {
+	if base.Extends.Path != "" || base.Extends.Git != "" {
+		return nil, fmt.Errorf("%s extends %s, and a base profile does not extend another", base.File, base.Extends.String())
+	}
+	if base.Extending == nil {
+		return nil, fmt.Errorf("the profile at %s is closed: it declares no extending block, so nothing may extend it", base.File)
+	}
+	out := *p
+	out.Target = base.Target
+	out.Layers = nil
+	for _, l := range base.Layers {
+		l.Base = true
+		if l.Source.Git == "" {
+			// A base layer read by path: inside the base's repository, which is the
+			// extends source's clone for a git base, so the layer becomes a git source
+			// at the same ref and gets the commit as its pin; a path relative to the
+			// extending profile for a base on disk, so the report reads on any machine.
+			abs := base.SourceOf(l).Path
+			if !filepath.IsAbs(abs) {
+				abs = filepath.Join(base.DirOf(l), abs)
+			}
+			rel, err := filepath.Rel(base.Root, abs)
+			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return nil, fmt.Errorf("%s: layer %s is outside the base profile's repository", base.File, l.Name)
+			}
+			if p.Extends.Git != "" {
+				l.Source = Source{Git: p.Extends.Git, Ref: p.Extends.Ref, Path: filepath.ToSlash(rel)}
+			} else if here, err := filepath.Rel(p.Dir(), abs); err == nil {
+				l.Source = Source{Path: here}
+			} else {
+				l.Source = Source{Path: abs}
+			}
+		}
+		out.Layers = append(out.Layers, l)
+	}
+	out.Layers = append(out.Layers, p.Layers...)
+	out.Extensions = map[string]map[string]any{}
+	for ns, v := range base.Extensions {
+		out.Extensions[ns] = v
+	}
+	for ns, v := range p.Extensions {
+		if _, ok := out.Extensions[ns]; ok {
+			return nil, fmt.Errorf("extensions.%s is the base profile's; an extending profile declares another namespace", ns)
+		}
+		out.Extensions[ns] = v
+	}
+	if len(out.Extensions) == 0 {
+		out.Extensions = nil
+	}
+	return &out, nil
 }

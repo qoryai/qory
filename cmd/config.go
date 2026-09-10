@@ -35,7 +35,7 @@ every file.`,
 			if err != nil {
 				return err
 			}
-			conf, err := config.Load(root)
+			conf, err := config.Load(root, true)
 			if err != nil {
 				return input(err)
 			}

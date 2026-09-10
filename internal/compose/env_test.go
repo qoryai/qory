@@ -18,9 +18,9 @@ func manifest(name, variable, path string) string {
 // $QORY_HARNESS_HOME in place until EnvFor renders it for a home.
 func TestLayersExportVariablesAsPathsUnderTheHome(t *testing.T) {
 	res, err := composeTree(t, map[string]string{
-		"harness-compose.yaml":  twoLayers,
-		"layers/a/harness.yaml": manifest("a", "HARNESS_HOME", "."),
-		"layers/b/harness.yaml": "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: b\nenv:\n  TOOLS: scripts/tools\n",
+		"harness-compose.yaml":        twoLayers,
+		"layers/a/harness-layer.yaml": manifest("a", "HARNESS_HOME", "."),
+		"layers/b/harness-layer.yaml": "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: b\nenv:\n  TOOLS: scripts/tools\n",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -38,17 +38,17 @@ func TestLayersExportVariablesAsPathsUnderTheHome(t *testing.T) {
 // configuration; the same value twice is fine, and the configuration's value wins.
 func TestTwoLayersExportingOneNameIsRefused(t *testing.T) {
 	_, err := composeTree(t, map[string]string{
-		"harness-compose.yaml":  twoLayers,
-		"layers/a/harness.yaml": manifest("a", "HARNESS_HOME", "."),
-		"layers/b/harness.yaml": manifest("b", "HARNESS_HOME", "."),
+		"harness-compose.yaml":        twoLayers,
+		"layers/a/harness-layer.yaml": manifest("a", "HARNESS_HOME", "."),
+		"layers/b/harness-layer.yaml": manifest("b", "HARNESS_HOME", "."),
 	})
 	if err == nil || err.Error() != "env HARNESS_HOME is exported by layers a and b; set it in qory.yaml to decide" {
 		t.Fatalf("err = %v", err)
 	}
 	dir := writeTree(t, map[string]string{
-		"harness-compose.yaml":  twoLayers,
-		"layers/a/harness.yaml": manifest("a", "HARNESS_HOME", "."),
-		"layers/b/harness.yaml": manifest("b", "HARNESS_HOME", "."),
+		"harness-compose.yaml":        twoLayers,
+		"layers/a/harness-layer.yaml": manifest("a", "HARNESS_HOME", "."),
+		"layers/b/harness-layer.yaml": manifest("b", "HARNESS_HOME", "."),
 	})
 	p, err := profile.Load(dir + "/harness-compose.yaml")
 	if err != nil {

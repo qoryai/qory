@@ -5,7 +5,7 @@
 
 Layers
   core    ../layers/core    working-tree
-  review  ../layers/review  working-tree (dirty)  named reviewers  variant claude
+  review  ../layers/review  working-tree (dirty)  variant claude
 
 Entries
   agents/reviewer  review

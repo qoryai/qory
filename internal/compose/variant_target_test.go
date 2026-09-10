@@ -25,7 +25,7 @@ func layerWithVariants(t *testing.T, manifest, runtimes string) (*profile.Profil
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(layer, "harness.yaml"), []byte(
+	if err := os.WriteFile(filepath.Join(layer, "harness-layer.yaml"), []byte(
 		"apiVersion: "+profile.APIVersion+"\nkind: HarnessLayer\nname: core\nvariants:\n"+manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}

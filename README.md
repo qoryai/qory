@@ -60,6 +60,11 @@ last-wins.
        link: harness          # optional: <checkout>/harness reaches the layer's files
    ```
 
+   Every layer carries a `harness-layer.yaml` naming it, and a layer named alone is read
+   from `layers/<name>` at the repository root. A repository that takes an operator's
+   harness as delivered writes `extends` instead of `target` and adds its own layers; the
+   base's layers come first and cannot be changed.
+
 2. Compose it:
 
    ```sh
@@ -164,7 +169,7 @@ The reference, one page per command, is under [docs/commands](docs/commands/qory
 
 ## The format
 
-The compose file, the optional layer manifest `harness.yaml`, the composition rules and
+The compose file, the layer manifest `harness-layer.yaml`, the composition rules and
 the runtimes are specified in [contracts/harness/v1](contracts/harness/v1/README.md), with
 JSON schemas and the fixtures the test suite runs.
 

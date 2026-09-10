@@ -336,6 +336,7 @@ func TestComposeTwiceLeavesTheTreeAsItWas(t *testing.T) {
 func writeSoloProfile(t *testing.T) string {
 	t.Helper()
 	dir := tempDir(t)
+	writeManifest(t, filepath.Join(dir, "layers", "solo"), "solo")
 	writeFile(t, filepath.Join(dir, "layers", "solo", "skills", "greet", "SKILL.md"), "---\nname: greet\ndescription: Greet.\n---\n\nSay hello.\n")
 	writeFile(t, filepath.Join(dir, "layers", "solo", "commands", "ship.md"), "# ship\n\nFrom the solo layer.\n")
 	writeFile(t, filepath.Join(dir, profile.FileName), `apiVersion: qory.ai/v1alpha1
@@ -357,6 +358,13 @@ func writeFile(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// writeManifest writes the harness-layer.yaml every layer carries into dir, naming the
+// layer name.
+func writeManifest(t *testing.T, dir, name string) {
+	t.Helper()
+	writeFile(t, filepath.Join(dir, "harness-layer.yaml"), "apiVersion: qory.ai/v1alpha1\nkind: HarnessLayer\nname: "+name+"\n")
 }
 
 func readReport(t *testing.T, root string) report.Report {

@@ -88,10 +88,12 @@ func TestLayerLinkReachesTheLayerThroughTheHome(t *testing.T) {
 	}
 }
 
-// TestLayerLinkYieldsToTheCheckoutsOwnDirectory is a repository with its own harness
-// directory: the layer link is passed over and reported, and a later compose that no
-// longer asks for the name leaves the directory alone too.
-func TestLayerLinkYieldsToTheCheckoutsOwnDirectory(t *testing.T) {
+// TestLayerLinkRefusesTheCheckoutsOwnPath is a repository with its own harness
+// directory where a layer links: the link is hard, because permission rules and scripts
+// name the path, so the compose refuses with the error the exit status is read from.
+// With --force an untracked directory, and an untracked symlink, are refused with git's
+// reason; once committed and unmodified, the directory is replaced and named.
+func TestLayerLinkRefusesTheCheckoutsOwnPath(t *testing.T) {
 	res, root, home := composeFixture(t, "claude")
 	linkLayer(t, res, "core", "harness")
 	own := filepath.Join(root, "harness", "README.md")
@@ -99,9 +101,10 @@ func TestLayerLinkYieldsToTheCheckoutsOwnDirectory(t *testing.T) {
 	if err := render.Build(res, home, lookup(t, "claude")); err != nil {
 		t.Fatal(err)
 	}
-	linked, err := render.LinkLayers(res, root, home, nil, false)
-	if err != nil || len(linked.Skipped) != 1 || linked.Skipped[0] != "harness" || len(linked.Replaced) != 0 {
-		t.Fatalf("linked=%+v err=%v", linked, err)
+	_, err := render.LinkLayers(res, root, home, nil, false)
+	var foreign *render.ForeignPathError
+	if !errorsAs(err, &foreign) || foreign.Path != filepath.Join(root, "harness") || foreign.Reason != "" {
+		t.Fatalf("err = %v, want a plain ForeignPathError for harness", err)
 	}
 	if data, _ := os.ReadFile(own); string(data) != "ours\n" {
 		t.Errorf("the repository's own file was replaced: %q", data)
@@ -109,12 +112,46 @@ func TestLayerLinkYieldsToTheCheckoutsOwnDirectory(t *testing.T) {
 	if strings.Contains(readExclude(t, root), "/harness\n") {
 		t.Errorf("exclude file holds /harness for a link that was not written:\n%s", readExclude(t, root))
 	}
-	linkLayer(t, res, "core", "")
-	if _, err := render.LinkLayers(res, root, home, []string{"harness"}, false); err != nil {
+	// Untracked, force does not help, and the error says why.
+	_, err = render.LinkLayers(res, root, home, nil, true)
+	if !errorsAs(err, &foreign) || foreign.Reason != "is not tracked in git" {
+		t.Fatalf("force over an untracked directory: err = %v, want a refusal naming git's reason", err)
+	}
+	// An untracked symlink of the person's own at the path is refused too, force or not.
+	if err := os.RemoveAll(filepath.Join(root, "harness")); err != nil {
 		t.Fatal(err)
 	}
-	if data, _ := os.ReadFile(own); string(data) != "ours\n" {
-		t.Errorf("the repository's own file went with the prune: %q", data)
+	write(t, filepath.Join(root, "docs", "README.md"), "ours\n")
+	if err := os.Symlink("docs", filepath.Join(root, "harness")); err != nil {
+		t.Fatal(err)
+	}
+	_, err = render.LinkLayers(res, root, home, nil, false)
+	if !errorsAs(err, &foreign) || foreign.Target != "docs" || foreign.Reason != "" {
+		t.Fatalf("over a foreign symlink: err = %v, want a ForeignPathError naming its target", err)
+	}
+	_, err = render.LinkLayers(res, root, home, nil, true)
+	if !errorsAs(err, &foreign) || foreign.Reason != "is not tracked in git" {
+		t.Fatalf("force over an untracked symlink: err = %v, want a refusal naming git's reason", err)
+	}
+	if target, _ := os.Readlink(filepath.Join(root, "harness")); target != "docs" {
+		t.Errorf("the person's own symlink changed: %q", target)
+	}
+	// Committed and unmodified, force replaces the directory and names it.
+	if err := os.Remove(filepath.Join(root, "harness")); err != nil {
+		t.Fatal(err)
+	}
+	write(t, own, "ours\n")
+	gitIn(t, root, "add", "-A")
+	gitIn(t, root, "-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-q", "-m", "own")
+	linked, err := render.LinkLayers(res, root, home, nil, true)
+	if err != nil || len(linked.Replaced) != 1 || linked.Replaced[0] != "harness" || len(linked.Skipped) != 0 {
+		t.Fatalf("force over a committed directory: linked=%+v err=%v", linked, err)
+	}
+	if target, err := os.Readlink(filepath.Join(root, "harness")); err != nil || target != filepath.Join(".qory", "harness", "layers", "core") {
+		t.Fatalf("harness links to %q (%v), want the layer through the home", target, err)
+	}
+	if !strings.Contains(readExclude(t, root), "/harness\n") {
+		t.Errorf("exclude file lacks /harness:\n%s", readExclude(t, root))
 	}
 }
 
@@ -183,5 +220,40 @@ func TestUnlinkLayersTakesOnlyQorysLinks(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "docs", "README.md")); err != nil {
 		t.Errorf("the person's own directory changed: %v", err)
+	}
+}
+
+// TestUnlinkLayerLinksFindsTheLinksWithoutTheReport is a person who ran rm -rf .qory
+// before qory harness remove: the report that named the layer links is gone, and the
+// remove still finds the link by its target, takes it with its exclude line, and leaves
+// a symlink of the person's own alone.
+func TestUnlinkLayerLinksFindsTheLinksWithoutTheReport(t *testing.T) {
+	res, root, home := composeFixture(t, "claude")
+	linkLayer(t, res, "core", "harness")
+	if err := render.Build(res, home, lookup(t, "claude")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := render.LinkLayers(res, root, home, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(root, "docs", "README.md"), "ours\n")
+	if err := os.Symlink("docs", filepath.Join(root, "own")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Dir(home)); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := render.UnlinkLayerLinks(root)
+	if err != nil || len(removed) != 1 || removed[0] != "harness" {
+		t.Fatalf("unlink: removed=%v err=%v", removed, err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "harness")); err == nil {
+		t.Error("harness is still there")
+	}
+	if strings.Contains(readExclude(t, root), "/harness\n") {
+		t.Errorf("exclude file still holds /harness:\n%s", readExclude(t, root))
+	}
+	if target, err := os.Readlink(filepath.Join(root, "own")); err != nil || target != "docs" {
+		t.Errorf("the person's own link changed: %q %v", target, err)
 	}
 }

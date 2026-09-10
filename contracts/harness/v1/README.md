@@ -6,13 +6,14 @@ What `qory harness compose` reads and what it writes.
 
 | File | Lives in | Defines |
 |---|---|---|
-| `harness-compose.yaml` | the repository root, or an ancestor directory covering several repositories | the profile: the ordered layers, their sources, the target runtime and model, the excludes |
-| `harness.yaml` | the root of a layer | the layer: its variants per runtime, the variables it exports |
+| `harness-compose.yaml` | the repository root, or an ancestor directory covering several repositories; any directory, when named by `-f` or `extends` | the profile: the ordered layers, the target runtime and model, the excludes, the base it extends |
+| `harness-layer.yaml` | the root of a layer | the layer: its name, its variants per runtime, the variables it exports |
 | `qory.yaml` | the user's configuration directory, an ancestor directory, or the repository root | the configuration: how qory runs on this machine, for this person, in this checkout |
 
-`harness.yaml` is optional. A directory holding `skills/`, `agents/` and the other entry
-kinds, with no manifest, is a valid layer with one variant. `qory.yaml` is optional too:
-every setting has a default.
+Every layer carries a `harness-layer.yaml`; it is what names the layer, and a directory
+without one is not a layer. `qory.yaml` is optional: every setting has a default. Each
+file name is fixed, so a repository with several profiles holds one directory per
+profile, each with its `harness-compose.yaml`.
 
 Every document carries `apiVersion` and `kind`. A reader refuses a version it does not read
 and names the versions it does. `v1alpha1` says the format may still change.
@@ -38,20 +39,28 @@ target:
   runtime: claude                # or a list: [claude, codex]
   model: opus                    # optional
 layers:
-  - name: core
-    source: {git: https://github.com/acme/harness, ref: v2.4.0, path: core}
+  - name: core                   # read from layers/core at this repository's root
     exclude:
       skills: [test]             # the nextjs layer ships this repository's test skill
       agents: [reviewer]
-  - name: nextjs
-    source: {path: ../harness/nextjs}
+  - source: {git: https://github.com/acme/harness, ref: v2.4.0, path: layers/nextjs}
     variant: claude              # optional; forces a variant of the layer
   - name: team
-    source: {path: ./harness}
+    source: {path: ./harness}    # a name and a source: the manifest must say team
     link: harness                # optional; <checkout>/harness -> .qory/harness/layers/team
 extensions:                      # optional; carried into the report, not read
   acme:
     required_check: Harness self-tests
+```
+
+A profile that extends another names it and appends its own layers (§Extending a profile):
+
+```yaml
+apiVersion: qory.ai/v1alpha1
+kind: HarnessProfile
+extends: {git: git@git.example.com:acme/harness, ref: main, path: nextjs-15}
+layers:
+  - name: app
 ```
 
 | Field | Required | Meaning |
@@ -59,17 +68,58 @@ extensions:                      # optional; carried into the report, not read
 | `apiVersion` | yes | `qory.ai/v1alpha1` |
 | `kind` | yes | `HarnessProfile` |
 | `name` | no | the profile's name in the report. Default: `owner/name` from the origin remote, else the directory name |
-| `target.runtime` | yes | the program that runs the harness, one of the runtimes in §Runtimes, or a list of them to compose for at once |
+| `extends` | no | the base profile this one appends to: a directory holding a `harness-compose.yaml`, as `{path: <dir>}` or `{git: <url>, ref: <ref>, path: <dir>}` (§Extending a profile). With it, `target` is left out |
+| `target.runtime` | without `extends` | the program that runs the harness, one of the runtimes in §Runtimes, or a list of them to compose for at once |
 | `target.model` | no | written into the settings of every targeted runtime that has a project-level place for it (§Runtimes) |
-| `layers` | yes | ordered, at least one. Order decides the merge order of settings and instruction sections |
-| `layers[].name` | yes | unique within the profile and one path segment, since it names `layers/<name>` in the composed tree; used in excludes, the report and error messages |
-| `layers[].source` | yes | `{path: <dir>}`, relative to the profile file; or `{git: <url>, ref: <tag, branch or commit>}` with an optional `path` to the layer's directory inside the repository (§Sources) |
+| `layers` | yes | ordered, at least one. Order decides the order of the instruction sections |
+| `layers[].name` | one of name and source | the layer's name, the one its `harness-layer.yaml` declares, one path segment. Alone, it is the address too: `layers/<name>` at the root of the repository the profile is in |
+| `layers[].source` | one of name and source | `{path: <dir>}`, relative to the profile file; or `{git: <url>, ref: <tag, branch or commit>}` with an optional `path` to the layer's directory inside the repository (§Sources). Alone, the layer's name is its manifest's; with a name, the manifest must carry that name |
 | `layers[].exclude` | no | entries of this layer left out, by kind: `skills`, `agents`, `commands`, `output-styles`, `hooks`, `mcp` |
 | `layers[].variant` | no | forces one of the layer's variants instead of the one named like the targeted runtime |
-| `layers[].link` | no | a name at the checkout root, one path segment, linked to the layer's directory in the composed tree, so a permission rule or a script names the layer's files by a checkout-relative path: `harness/scripts/check.sh`. A soft link (§Rendering), named once across the layers |
+| `layers[].link` | no | a name at the checkout root, one path segment, linked to the layer's directory in the composed tree, so a permission rule or a script names the layer's files by a checkout-relative path: `harness/scripts/check.sh`. A hard link (§Rendering), named once across the layers |
 | `extensions` | no | one map per namespace, written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it |
+| `extending` | no | on a base profile, what a layer of a profile extending it may ship: `kinds`, `instructions`, `settings` (§Extending a profile). A base without the block cannot be extended |
+
+A name is composed once: two entries resolving to layers of one name fail the compose,
+since a name is one directory in the composed tree.
 
 The schema is [profile.schema.json](profile.schema.json).
+
+## Extending a profile
+
+An operator delivers a harness as a profile; a product repository extends it and adds its
+own layers. The base is closed and the extending profile appends:
+
+- The base's layers come first, in the base's order, with the base's excludes, variants
+  and links; a relative source of the base resolves inside the base's own repository. The
+  extending profile cannot name, exclude, reorder or re-source a base layer.
+- The target is the base's. An extending profile that sets `target` is refused; a
+  `--runtime` or a `qory.yaml` `runtime` may pick among the runtimes the base lists and
+  nothing else; a model from anywhere but the base is refused when the base names one.
+- The checkout's own `qory.yaml` is not read under `extends`. The runner's configuration,
+  in the user's directory or an ancestor the runner's user owns, is the only one.
+- The base's `extending` block says what an appended layer may ship: `kinds`, from
+  `skills`, `agents`, `commands` and `output-styles`, never `hooks` or `mcp`, since the
+  runner executes those without the agent; `instructions: true` for its `AGENTS.md`,
+  appended after the base's; `settings`, the dotted key paths a fragment may set, such as
+  `permissions.allow`. A layer shipping anything else fails the compose and the message
+  names it. A base without the block is closed to extension.
+- An entry of an appended layer that collides with a base entry fails with status 3, and
+  the message says the entry belongs to the base, `<name>@<pin>`, and to rename it; no
+  exclude resolves it. The message names that one entry and nothing else of the base.
+- Both profiles' `extensions` go into the report; a namespace the base declares is the
+  base's, and an extending profile declaring it too is refused.
+- The report records the base with its source and pin, and marks the base's layers.
+- A base that cannot be fetched, on a machine without access to its repository, fails
+  with status 1 and "the profile <source> is not reachable from here".
+- A base does not extend another.
+
+The base's hooks and deny rules reach every extending checkout unchanged: `hooks` and
+`permissions` concatenate (§Composition rules) and nothing of the base can be excluded.
+What the kinds list removes is the code that runs without the agent's involvement; a
+script inside an appended skill runs when the agent runs it, under the base's hooks and
+rules. Keeping a copy of the harness from leaving the machine is the runner's egress
+control, not the format's.
 
 ## Sources
 
@@ -95,9 +145,10 @@ repository that holds several layers. The report and the messages write a git so
 ## The layer manifest
 
 ```yaml
+# harness-layer.yaml
 apiVersion: qory.ai/v1alpha1
 kind: HarnessLayer
-name: nextjs
+name: nextjs                     # the layer's name: layers/nextjs in the composed tree
 variants:
   default: claude                # the variant a runtime without its own gets, or `fail`
   claude: {}
@@ -107,7 +158,9 @@ env:
   HARNESS_TOOLS: scripts/tools   # a path inside the layer
 ```
 
-`env` names the variables the layer exports, each the path of a file or directory inside
+`name` is the layer's identity: the profile refers to the layer by it, the composed tree
+holds the layer at `layers/<name>`, and the report and every message use it. The
+directory the layer is stored under is not consulted. `env` names the variables the layer exports, each the path of a file or directory inside
 the layer, `.` for its root. The compose writes each as
 `$QORY_HARNESS_HOME/layers/<name>/<path>` and the runtimes with a place for environment
 get it there (§Runtimes), so a script the layer ships reads its own location from the
@@ -168,12 +221,19 @@ The schema is [layer.schema.json](layer.schema.json).
    There is no last-wins and no rename.
 3. **An exclude that names nothing fails**, so a layer that stops shipping an entry is
    noticed rather than silently composed.
-4. **Merged kinds merge in layer order.** A settings target file merges across the layers
-   that ship a fragment for it, JSON or TOML by extension: `permissions` lists concatenate
-   and deduplicate, `hooks` arrays concatenate, `env` merges with later wins, other objects
-   deep-merge, other lists and scalars are replaced. `AGENTS.md` is the concatenation of the
-   layers' files, separated by a blank line. An MCP server is atomic and follows rules 1 to
-   3; where a settings fragment also names servers, the composed servers are written on top.
+4. **Merged kinds join, and a value is set once.** A settings target file merges across
+   the layers that ship a fragment for it, JSON or TOML by extension: objects deep-merge,
+   `permissions` lists concatenate and deduplicate, `hooks` arrays concatenate. Every
+   other list and every scalar is set by one layer; another layer may repeat the value and
+   may not change it. Two fragments setting one key path to different values fail the
+   compose with `settings/<runtime>/<file>: <dotted.key.path> is set by layers <a> and <b>
+   with different values`. A top-level `env` key the configuration sets takes the
+   configuration's value and never collides; an `env` key a fragment sets and a layer
+   manifest exports with a different value fails the same way, unless the configuration
+   sets it. `AGENTS.md` is the concatenation of the layers' files in layer order, separated
+   by a blank line, the one place the order of `layers` decides anything. An MCP server is
+   atomic and follows rules 1 to 3; where a settings fragment also names servers, the
+   composed servers are written on top.
 5. **Variants resolve per layer.** The forced `variant`, else the one named like
    `target.runtime`, else the manifest's `default`, else the layer root when the manifest
    declares no variants. A manifest with variants, none for the runtime and no default, or
@@ -222,9 +282,13 @@ its link, and the `.qory` line with the directory, so a path the repository late
 there is not hidden; worktrees of one repository share one exclude file, so a remove in
 one worktree drops the lines the links of another still use until its next compose.
 
-A layer's `link` is a soft link at the checkout root to `layers/<name>` in the tree,
+A layer's `link` is a hard link at the checkout root to `layers/<name>` in the tree,
 written after the runtimes' links, excluded, pruned when the profile drops it, and
-refused when it names a path a runtime links or `.qory`.
+refused when it names a path a runtime links or `.qory`. Hard, because the permission
+rules and scripts of the harness depend on that path: a file or a foreign link there
+fails the compose with status 4, and `--force` replaces it when git can restore it.
+`qory harness remove` takes every link at the checkout root into `layers/`, with or
+without a report, so a `.qory` deleted by hand leaves no link behind.
 
 The links listed below are the full set; a link to a file the compose did not produce is
 left out, `AGENTS.md`, `AGENTS.override.md` and `GEMINI.md` without instructions,
@@ -300,10 +364,10 @@ checkout, the home, the layers, the entries with their layer, the excludes, the 
 paths a `--force` compose replaced, the `env` the harness exports with
 `$QORY_HARNESS_HOME` in place of the home, and the profile's `extensions` as written. The
 target's `runtime` is always an array: the runtimes the home holds after the compose, the
-targeted ones first. A layer carries its `name`, its `manifest_name` when the manifest
-gives one, its `source` as the profile writes it, its `pin`, `dirty` when git saw
-uncommitted changes under a path source, the `variant` chosen, and its `link` when the
-profile names one. A path source's pin is `working-tree`; a git source's pin is twelve
+targeted ones first. A layer carries its `name`, its `source` as the profile writes it,
+its `pin`, `dirty` when git saw uncommitted changes under a path source, the `variant`
+chosen, its `link` when the profile names one, and `base` when it is the base profile's.
+A profile that extends one records the `base`: its `name`, `source` and `pin`. A path source's pin is `working-tree`; a git source's pin is twelve
 characters of its commit. `qory harness inspect` refuses a report of another version.
 
 ## The configuration
@@ -333,7 +397,8 @@ env:
 | `env` | none | variables written over what the layers export; a name two layers export with different values needs one here |
 
 Every key is optional; a file naming none is read and changes nothing. `qory config`
-prints every effective value and the file it came from.
+prints every effective value and the file it came from. Under `extends` the checkout's
+own file is not read (§Extending a profile).
 
 ## Exit status
 

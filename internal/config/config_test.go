@@ -34,7 +34,7 @@ func write(t *testing.T, path, body string) {
 // is its default and says so.
 func TestLoadWithoutAFileIsTheDefaults(t *testing.T) {
 	hermetic(t)
-	c, err := config.Load(t.TempDir())
+	c, err := config.Load(t.TempDir(), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestNearerFilesWin(t *testing.T) {
 	write(t, ancestor, "runtime: codex\nupdate: always\nenv: {B: ancestor}\n")
 	own := filepath.Join(root, "qory.yaml")
 	write(t, own, "runtime: [claude, codex]\ngit: {timeout: 30s, cache: cache}\n")
-	c, err := config.Load(root)
+	c, err := config.Load(root, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestNearerFilesWin(t *testing.T) {
 func TestLoadRefusesAMistake(t *testing.T) {
 	hermetic(t)
 	for _, c := range []struct{ body, want string }{
-		{"runtim: claude\n", "field runtim not found"},
+		{"runtim: claude\n", `line 3: key "runtim" is not one qory.yaml reads`},
 		{"update: sometimes\n", `update "sometimes" is not always or never`},
 		{"git: {timeout: soon}\n", `git.timeout "soon" is not a duration above zero, such as 10m`},
 		{"git: {timeout: 0s}\n", `git.timeout "0s" is not a duration above zero`},
@@ -107,7 +107,7 @@ func TestLoadRefusesAMistake(t *testing.T) {
 	} {
 		root := t.TempDir()
 		write(t, filepath.Join(root, "qory.yaml"), c.body)
-		_, err := config.Load(root)
+		_, err := config.Load(root, true)
 		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.HasPrefix(err.Error(), root) {
 			t.Errorf("%q: error %v, want one naming the file and %q", c.body, err, c.want)
 		}
@@ -117,7 +117,7 @@ func TestLoadRefusesAMistake(t *testing.T) {
 	if err := os.WriteFile(path, []byte("apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := config.Load(root); err == nil || !strings.Contains(err.Error(), `kind "HarnessProfile" is not QoryConfig`) {
+	if _, err := config.Load(root, true); err == nil || !strings.Contains(err.Error(), `kind "HarnessProfile" is not QoryConfig`) {
 		t.Errorf("kind: %v", err)
 	}
 }
@@ -128,7 +128,7 @@ func TestAnEmptyFileSetsNothing(t *testing.T) {
 	hermetic(t)
 	root := t.TempDir()
 	write(t, filepath.Join(root, "qory.yaml"), "")
-	c, err := config.Load(root)
+	c, err := config.Load(root, true)
 	if err != nil {
 		t.Fatal(err)
 	}

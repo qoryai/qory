@@ -1,6 +1,9 @@
 // Package compose turns a profile into one flat tree: every entry once, from one layer.
 //
-// A profile, [profile.Profile], names an ordered list of layers and a target runtime. A
+// A profile, [profile.Profile], names an ordered list of layers and a target runtime, or a
+// base profile to take both from: [LoadBase] fetches the base and puts its layers first,
+// closed, and [ComposeWith] refuses what an appended layer ships beyond the base's
+// extending block and any entry colliding with the base's. A
 // layer is one directory of harness material. An entry is one atomic thing a layer ships,
 // identified by kind and name; the kinds are skills, agents, commands, output-styles, hooks
 // and mcp. A layer may also ship an AGENTS.md instruction file and settings fragments, and
@@ -14,7 +17,9 @@
 //
 //  1. Resolves the source to a directory and a pin with [source.Resolve]: a path as it
 //     stands, or a git ref fetched once into the cache and pinned by its commit.
-//  2. Reads the layer's optional harness.yaml with [layer.ReadManifest].
+//  2. Reads the layer's harness-layer.yaml with [layer.ReadManifest], which names the
+//     layer; a directory without one is not a layer. An entry naming the layer must
+//     name it as the manifest does, and a name composes once.
 //  3. Picks the variant with [layer.SelectVariant]: the profile's forced variant, else the
 //     one named like the target runtime, else the manifest's default, else the layer root.
 //  4. Reads the entries, the settings fragments, the MCP servers and AGENTS.md with
@@ -48,8 +53,16 @@
 //   - Maps merge by key, at every depth.
 //   - A list under the top-level key permissions concatenates and drops duplicates.
 //   - A list under the top-level key hooks concatenates.
-//   - Every other list is replaced, and so is every scalar, so the later layer wins. That
-//     is what makes env merge key by key with the later layer's value.
+//   - Every other list, and every scalar, is one value: the first layer sets it and a
+//     later layer may repeat it. A later layer setting it to a different value, or to a
+//     value of another shape, fails the compose with
+//     settings/<runtime>/<file>: <dotted.key.path> is set by layers <a> and <b> with
+//     different values. Values are compared with reflect.DeepEqual after decoding.
+//   - A key of the top-level env map that [Options.Env] names takes the configuration's
+//     value, whatever the fragments say, and never collides. An env key a fragment sets
+//     and a layer manifest exports with a different value fails the compose after the
+//     last layer with settings/<runtime>/<file>: env.<NAME> is set by layer <a> and
+//     exported by layer <b> with different values, unless [Options.Env] names it.
 //   - Two list elements count as duplicates when they print the same, so the string "1" and
 //     the number 1 are one permission.
 //

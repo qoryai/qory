@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -18,10 +19,9 @@ import (
 
 // Layer is a profile layer resolved to a directory.
 type Layer struct {
-	// Name is the profile's name for the layer, the name excludes and messages use.
+	// Name is the layer's name as its manifest declares it, the name excludes, the tree and
+	// messages use.
 	Name string
-	// ManifestName is the layer's own name from harness.yaml, when it has one.
-	ManifestName string
 	// Dir is the absolute directory the layer was read from.
 	Dir string
 	// Source is the profile's source as text: the path of a path source, <git>#<ref> for a
@@ -37,6 +37,8 @@ type Layer struct {
 	// Link is the checkout-root name the profile links the layer's directory as, "" for
 	// none.
 	Link string
+	// Base marks a layer of the base profile, when the profile extends one.
+	Base bool
 }
 
 // Entry is one entry of the composed tree and the layer it came from.
@@ -85,6 +87,12 @@ type Result struct {
 	// $QORY_HARNESS_HOME/layers/<name>/<path>, and the configuration's variables over
 	// them. [Result.EnvFor] renders it for a home.
 	Env map[string]string
+	// Base is the base profile the profile extends, nil when it extends none.
+	Base *Base
+	// setBy is the layer that set each settings leaf, keyed
+	// settings/<runtime>/<file>/<dotted.key.path>, so a later fragment setting the same
+	// path to another value names both layers.
+	setBy map[string]string
 }
 
 // Options are the choices a caller makes for one compose.
@@ -92,8 +100,8 @@ type Options struct {
 	// Update resolves every git source's ref again instead of reading the pin or the
 	// cached resolution, so a branch ref moves.
 	Update bool
-	// Pins are the commits the checkout was composed from last time, by layer name as the
-	// last report recorded them, so a git source stays on its commit until Update.
+	// Pins are the commits the checkout was composed from last time, by source as the
+	// last report recorded it, so a git source stays on its commit until Update.
 	Pins map[string]string
 	// Cache is the directory git sources are fetched to, "" for [source.CacheDir].
 	Cache string
@@ -101,6 +109,9 @@ type Options struct {
 	Timeout time.Duration
 	// Env are the configuration's variables, written over what the layers export.
 	Env map[string]string
+	// Base is the base profile [LoadBase] resolved, recorded in the result and enforced on
+	// the layers that are not its own; nil when the profile extends none.
+	Base *Base
 }
 
 // Compose is [ComposeWith] and the default options.
@@ -113,35 +124,57 @@ func Compose(p *profile.Profile) (*Result, error) { return ComposeWith(p, Option
 // be fetched a [*source.FetchError]. The package comment has the order of the rules and
 // the merge semantics.
 func ComposeWith(p *profile.Profile, opts Options) (*Result, error) {
-	res := &Result{Profile: p, Settings: map[string]map[string]map[string]any{}, MCP: map[string]map[string]any{}, Env: map[string]string{}}
+	res := &Result{Profile: p, Base: opts.Base, Settings: map[string]map[string]map[string]any{}, MCP: map[string]map[string]any{}, Env: map[string]string{}, setBy: map[string]string{}}
 	owners := map[string][]string{}
 	paths := map[string]string{}
 	servers := map[string]map[string]any{}
 	exporters := map[string]string{}
 	var instructions []string
+	dirs := map[string]string{}
 	for _, pl := range p.Layers {
-		src, err := source.Resolve(p.Dir(), pl.Source, source.Options{Pin: opts.Pins[pl.Name], Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout})
+		ps := p.SourceOf(pl)
+		who := "layer " + pl.Name
+		if pl.Name == "" {
+			who = "layer at " + ps.String()
+		}
+		so := source.Options{Pin: opts.Pins[ps.String()], Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout}
+		if pl.Base && opts.Base != nil && ps.Git != "" {
+			// A base layer is in the base's clone, fetched this compose: its pin is the
+			// base's, and no update fetches it again.
+			so.Pin, so.Update = opts.Base.Pin, false
+		}
+		src, err := source.Resolve(p.DirOf(pl), ps, so)
 		if err != nil {
-			return nil, fmt.Errorf("layer %s: %w", pl.Name, err)
+			return nil, fmt.Errorf("%s: %w", who, err)
 		}
 		m, err := layer.ReadManifest(src.Dir)
 		if err != nil {
-			return nil, fmt.Errorf("layer %s: %w", pl.Name, err)
+			return nil, fmt.Errorf("%s: %w", who, err)
 		}
-		variant, err := selectVariant(m, pl, p.Target.Runtimes)
+		if pl.Name != "" && m.Name != pl.Name {
+			return nil, fmt.Errorf("layer %s: the layer at %s is named %s in its %s", pl.Name, ps.String(), m.Name, layer.ManifestName)
+		}
+		name := m.Name
+		if other, ok := dirs[name]; ok {
+			return nil, fmt.Errorf("layer %s is composed twice, from %s and from %s", name, other, ps.String())
+		}
+		dirs[name] = ps.String()
+		variant, err := selectVariant(m, pl, p.Target.Runtimes, name)
 		if err != nil {
-			return nil, fmt.Errorf("layer %s: %w", pl.Name, err)
+			return nil, fmt.Errorf("layer %s: %w", name, err)
 		}
-		l, err := layer.Read(pl.Name, src.Dir, m, variant)
+		l, err := layer.Read(name, src.Dir, m, variant)
 		if err != nil {
 			return nil, err
 		}
-		rl := Layer{Name: pl.Name, Dir: l.Dir, Source: pl.Source.String(), Pin: src.Pin, Dirty: src.Dirty, Variant: variant, Link: pl.Link}
-		if m != nil {
-			rl.ManifestName = m.Name
-			if err := exportEnv(res, exporters, pl.Name, m.Env, opts.Env); err != nil {
+		rl := Layer{Name: name, Dir: l.Dir, Source: ps.String(), Pin: src.Pin, Dirty: src.Dirty, Variant: variant, Link: pl.Link, Base: pl.Base}
+		if !pl.Base && opts.Base != nil {
+			if err := checkExtending(l, opts.Base); err != nil {
 				return nil, err
 			}
+		}
+		if err := exportEnv(res, exporters, name, m.Env, opts.Env); err != nil {
+			return nil, err
 		}
 		res.Layers = append(res.Layers, rl)
 		entries, err := applyExcludes(l, pl.Exclude, res)
@@ -150,10 +183,10 @@ func ComposeWith(p *profile.Profile, opts Options) (*Result, error) {
 		}
 		for _, e := range entries {
 			key := e.Kind + "/" + e.Name
-			owners[key] = append(owners[key], pl.Name)
-			paths[key+"@"+pl.Name] = e.Path
+			owners[key] = append(owners[key], name)
+			paths[key+"@"+name] = e.Path
 			if e.Kind == "mcp" {
-				servers[key+"@"+pl.Name] = l.MCP[e.Name]
+				servers[key+"@"+name] = l.MCP[e.Name]
 			}
 		}
 		for runtime, files := range l.Settings {
@@ -164,8 +197,8 @@ func ComposeWith(p *profile.Profile, opts Options) (*Result, error) {
 				if res.Settings[runtime][file] == nil {
 					res.Settings[runtime][file] = map[string]any{}
 				}
-				if err := mergeFile(res.Settings[runtime][file], path); err != nil {
-					return nil, fmt.Errorf("layer %s: %w", pl.Name, err)
+				if err := mergeFile(res, runtime, file, path, name, opts.Env); err != nil {
+					return nil, fmt.Errorf("layer %s: %w", name, err)
 				}
 			}
 		}
@@ -177,7 +210,10 @@ func ComposeWith(p *profile.Profile, opts Options) (*Result, error) {
 			instructions = append(instructions, strings.TrimRight(string(data), "\n"))
 		}
 	}
-	if err := collisions(owners, res.Layers); err != nil {
+	if err := collisions(owners, res.Layers, opts.Base); err != nil {
+		return nil, err
+	}
+	if err := exportsAgainstSettings(res, exporters, opts.Env); err != nil {
 		return nil, err
 	}
 	for key, ls := range owners {
@@ -248,7 +284,7 @@ func (r *Result) EnvFor(home string) map[string]string {
 // case: the compose refuses and names both runtimes, the way it refuses a collision. A
 // layer with no variants, or one whose variants resolve the same way for every targeted
 // runtime, composes for all of them.
-func selectVariant(m *layer.Manifest, pl profile.Layer, runtimes profile.Runtimes) (string, error) {
+func selectVariant(m *layer.Manifest, pl profile.Layer, runtimes profile.Runtimes, name string) (string, error) {
 	first, err := layer.SelectVariant(m, pl.Variant, runtimes.First())
 	if err != nil {
 		return "", err
@@ -260,7 +296,7 @@ func selectVariant(m *layer.Manifest, pl profile.Layer, runtimes profile.Runtime
 		}
 		if v != first {
 			return "", fmt.Errorf("layer %s reads from %s for %s and from %s for %s; compose one runtime at a time, or give the layer one variant for both",
-				pl.Name, variantName(first), runtimes.First(), variantName(v), r)
+				name, variantName(first), runtimes.First(), variantName(v), r)
 		}
 	}
 	return first, nil
@@ -317,6 +353,9 @@ type Collision struct {
 	Name string
 	// Layers provide the entry, in profile order.
 	Layers []string
+	// Base names the base profile, as <name>@<pin>, when one of the layers is the base's:
+	// no exclude resolves that collision, the extending layer renames its entry.
+	Base string
 }
 
 // CollisionError is the compose refusing an undeclared collision. [Compose] returns it for
@@ -327,6 +366,10 @@ type CollisionError struct {
 	Collisions []Collision
 	// Pins maps a layer name to its pin, for the message.
 	Pins map[string]string
+	// Sources maps a layer name to its source as text, for the command's table.
+	Sources map[string]string
+	// Order lists the layer names in profile order, for [CollisionError.Suggest].
+	Order []string
 }
 
 // Suggest returns, per layer, the excludes that resolve every collision by keeping the last
@@ -336,6 +379,9 @@ type CollisionError struct {
 func (e *CollisionError) Suggest(order []string) (layers []string, excludes map[string]map[string][]string) {
 	excludes = map[string]map[string][]string{}
 	for _, c := range e.Collisions {
+		if c.Base != "" {
+			continue
+		}
 		for _, l := range c.Layers[:len(c.Layers)-1] {
 			if excludes[l] == nil {
 				excludes[l] = map[string][]string{}
@@ -369,6 +415,10 @@ func (e *CollisionError) Error() string {
 			}
 		}
 		fmt.Fprintf(&b, "%s/%s is provided by %d layers: %s\n", c.Kind, c.Name, len(c.Layers), strings.Join(named, ", "))
+		if c.Base != "" {
+			fmt.Fprintf(&b, "  it belongs to the base profile %s; rename yours\n", c.Base)
+			continue
+		}
 		b.WriteString("  keep one and exclude the others, for example\n")
 		for _, l := range c.Layers[:len(c.Layers)-1] {
 			fmt.Fprintf(&b, "    %-*s exclude: {%s: [%s]}\n", width, l+":", c.Kind, c.Name)
@@ -379,10 +429,16 @@ func (e *CollisionError) Error() string {
 
 // collisions builds the CollisionError for every entry more than one layer owns, and returns
 // nil when no name is owned twice. Keys are sorted, so the message does not follow map order.
-func collisions(owners map[string][]string, layers []Layer) error {
+func collisions(owners map[string][]string, layers []Layer, base *Base) error {
 	pin := map[string]string{}
+	sources := map[string]string{}
+	inBase := map[string]bool{}
+	var order []string
 	for _, l := range layers {
 		pin[l.Name] = l.Pin
+		sources[l.Name] = l.Source
+		inBase[l.Name] = l.Base
+		order = append(order, l.Name)
 	}
 	var keys []string
 	for key, ls := range owners {
@@ -394,19 +450,27 @@ func collisions(owners map[string][]string, layers []Layer) error {
 		return nil
 	}
 	sort.Strings(keys)
-	e := &CollisionError{Pins: pin}
+	e := &CollisionError{Pins: pin, Sources: sources, Order: order}
 	for _, key := range keys {
 		kind, name, _ := strings.Cut(key, "/")
-		e.Collisions = append(e.Collisions, Collision{Kind: kind, Name: name, Layers: owners[key]})
+		c := Collision{Kind: kind, Name: name, Layers: owners[key]}
+		for _, l := range owners[key] {
+			if inBase[l] && base != nil {
+				c.Base = base.String()
+			}
+		}
+		e.Collisions = append(e.Collisions, c)
 	}
 	return e
 }
 
-// mergeFile decodes one settings fragment and folds it into dst, the target file merged so
-// far. The extension decides the format, and a TOML document is normalized to the types the
-// JSON decoder produces. The top-level key decides how lists combine, and the mode carries
-// down the whole subtree under that key.
-func mergeFile(dst map[string]any, path string) error {
+// mergeFile decodes one settings fragment of the named layer and folds it into the
+// result's target file for the runtime. The extension decides the format, and a TOML
+// document is normalized to the types the JSON decoder produces. The top-level key decides
+// how lists combine, and the mode carries down the whole subtree under that key. A key path
+// another layer set to a different value is an error, unless it is env.<NAME> and decided
+// names NAME: the configuration's value is written then, whatever the fragments say.
+func mergeFile(res *Result, runtime, file, path, layer string, decided map[string]string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -425,59 +489,145 @@ func mergeFile(dst map[string]any, path string) error {
 	default:
 		return fmt.Errorf("%s: settings fragments are .json or .toml", path)
 	}
-	for key, v := range src {
-		mode := replace
+	m := &merger{file: "settings/" + runtime + "/" + file, layer: layer, setBy: res.setBy}
+	dst := res.Settings[runtime][file]
+	for _, key := range sortedKeys(src) {
+		v := src[key]
+		mode := once
 		switch key {
 		case "permissions":
 			mode = concatDedupe
 		case "hooks":
 			mode = concat
+		case "env":
+			v = m.decide(v, decided)
 		}
-		dst[key] = merge(dst[key], v, mode)
+		merged, err := m.merge(dst[key], v, key, mode)
+		if err != nil {
+			return err
+		}
+		dst[key] = merged
 	}
 	return nil
 }
 
-// listMode says how merge combines two lists: replace takes the later list whole, concat
-// appends it, concatDedupe appends the elements the earlier list does not already hold.
+// listMode says how merge combines two lists: once takes a list as one value that a
+// second layer may repeat and not change, concat appends the later list, concatDedupe
+// appends the elements the earlier list does not already hold.
 type listMode int
 
 const (
-	replace listMode = iota
+	once listMode = iota
 	concat
 	concatDedupe
 )
 
-// merge folds src into dst and returns the result. Maps merge by key; lists follow mode;
-// anything else is replaced. A dst of another type than src is dropped, so a later layer
-// that changes a key's shape wins.
-func merge(dst, src any, mode listMode) any {
+// merger folds one layer's fragment into one target file and records which layer set
+// each leaf.
+type merger struct {
+	// file is settings/<runtime>/<file>, the prefix of the setBy keys and the messages.
+	file string
+	// layer is the layer whose fragment is merged.
+	layer string
+	// setBy is [Result.setBy], shared across the layers.
+	setBy map[string]string
+}
+
+// decide writes the configuration's value over every key of a fragment's env map the
+// configuration names, so the fragments' values for it are never compared. Any other
+// value is returned as is.
+func (m *merger) decide(v any, decided map[string]string) any {
+	env, ok := v.(map[string]any)
+	if !ok {
+		return v
+	}
+	for name := range env {
+		if value, ok := decided[name]; ok {
+			env[name] = value
+		}
+	}
+	return env
+}
+
+// merge folds src into dst at path and returns the result. Maps merge by key; lists follow
+// mode; a scalar, a list in mode once and a value whose type differs from dst's are one
+// leaf: the first layer sets it, another may repeat the value and not change it.
+func (m *merger) merge(dst, src any, path string, mode listMode) (any, error) {
+	key := m.file + "/" + path
 	switch s := src.(type) {
 	case map[string]any:
 		d, ok := dst.(map[string]any)
+		if dst != nil && !ok {
+			return nil, m.collision(path)
+		}
 		if !ok {
 			d = map[string]any{}
+			m.setBy[key] = m.layer
 		}
-		for k, v := range s {
-			d[k] = merge(d[k], v, mode)
-		}
-		return d
-	case []any:
-		d, ok := dst.([]any)
-		if !ok || mode == replace {
-			return s
-		}
-		out := append([]any{}, d...)
-		for _, v := range s {
-			if mode == concatDedupe && contains(out, v) {
-				continue
+		for _, k := range sortedKeys(s) {
+			v, err := m.merge(d[k], s[k], path+"."+k, mode)
+			if err != nil {
+				return nil, err
 			}
-			out = append(out, v)
+			d[k] = v
 		}
-		return out
-	default:
-		return src
+		return d, nil
+	case []any:
+		if d, ok := dst.([]any); ok && mode != once {
+			out := append([]any{}, d...)
+			for _, v := range s {
+				if mode == concatDedupe && contains(out, v) {
+					continue
+				}
+				out = append(out, v)
+			}
+			return out, nil
+		}
 	}
+	if dst != nil && !reflect.DeepEqual(dst, src) {
+		return nil, m.collision(path)
+	}
+	if _, set := m.setBy[key]; !set {
+		m.setBy[key] = m.layer
+	}
+	return src, nil
+}
+
+// collision is the error for a key path two layers set to different values.
+func (m *merger) collision(path string) error {
+	return fmt.Errorf("%s: %s is set by layers %s and %s with different values", m.file, path, m.setBy[m.file+"/"+path], m.layer)
+}
+
+// exportsAgainstSettings refuses a variable a layer's manifest exports that a fragment's
+// env map sets to a different value, for every runtime and target file, unless decided
+// names it. Runtimes, files and names are walked in sorted order, so the error does not
+// follow map order.
+func exportsAgainstSettings(res *Result, exporters map[string]string, decided map[string]string) error {
+	for _, runtime := range sortedKeys(res.Settings) {
+		for _, file := range sortedKeys(res.Settings[runtime]) {
+			env, _ := res.Settings[runtime][file]["env"].(map[string]any)
+			for _, name := range sortedKeys(env) {
+				exporter, exported := exporters[name]
+				if _, settled := decided[name]; settled || !exported || reflect.DeepEqual(env[name], res.Env[name]) {
+					continue
+				}
+				prefix := "settings/" + runtime + "/" + file
+				return fmt.Errorf("%s: env.%s is set by layer %s and exported by layer %s with different values",
+					prefix, name, res.setBy[prefix+"/env."+name], exporter)
+			}
+		}
+	}
+	return nil
+}
+
+// sortedKeys is the keys of a map, sorted.
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // contains reports whether list holds v, compared by printed form, so a number and the

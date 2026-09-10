@@ -70,6 +70,30 @@ func TestLoadReadsTargetAndLayers(t *testing.T) {
 	}
 }
 
+// TestLoadReadsALayerByNameAlone loads an entry that gives a name and no source, and one
+// that gives a source and no name: the first reads layers/<name>, resolved under the root,
+// the second keeps its source, resolved under the profile's directory, as SourceOf and
+// DirOf tell.
+func TestLoadReadsALayerByNameAlone(t *testing.T) {
+	path := write(t, "apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\ntarget:\n  runtime: claude\nlayers:\n  - name: core\n  - source: {path: ../shared/team}\n  - name: tools\n    source: {}\n")
+	p, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Root != filepath.Dir(path) {
+		t.Fatalf("root %q, want %q", p.Root, filepath.Dir(path))
+	}
+	if got, want := p.SourceOf(p.Layers[0]), (Source{Path: filepath.Join("layers", "core")}); got != want || p.DirOf(p.Layers[0]) != p.Root {
+		t.Fatalf("layers[0] source %+v under %s, want %+v under the root", got, p.DirOf(p.Layers[0]), want)
+	}
+	if got, want := p.SourceOf(p.Layers[1]), (Source{Path: "../shared/team"}); got != want || p.DirOf(p.Layers[1]) != p.Dir() {
+		t.Fatalf("layers[1] source %+v under %s, want %+v under the profile's directory", got, p.DirOf(p.Layers[1]), want)
+	}
+	if got, want := p.SourceOf(p.Layers[2]), (Source{Path: filepath.Join("layers", "tools")}); got != want {
+		t.Fatalf("layers[2] source %+v, want %+v", got, want)
+	}
+}
+
 // TestSourceStringNamesAGitSourceTheWayDockerDoes is the text the report and the collision
 // message show: the URL, the ref after #, and the path after : when there is one.
 func TestSourceStringNamesAGitSourceTheWayDockerDoes(t *testing.T) {
@@ -147,14 +171,14 @@ func TestLoadRefuses(t *testing.T) {
 		{
 			"an unknown field",
 			"apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\ntarget:\n  runtime: claude\nlayrs: []\nlayers:\n  - name: core\n    source:\n      path: layers/core\n",
-			"field layrs not found in type profile.Profile",
-			true,
+			`line 5: key "layrs" is not one harness-compose.yaml reads`,
+			false,
 		},
 		{
 			"an unknown field inside a layer",
 			"apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\ntarget:\n  runtime: claude\nlayers:\n  - name: core\n    sources:\n      path: layers/core\n",
-			"field sources not found in type profile.Layer",
-			true,
+			`line 7: key "sources" is not one harness-compose.yaml reads`,
+			false,
 		},
 		{
 			"a target without a runtime",
@@ -169,15 +193,21 @@ func TestLoadRefuses(t *testing.T) {
 			false,
 		},
 		{
-			"a layer without a name",
-			"apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\ntarget:\n  runtime: claude\nlayers:\n  - source:\n      path: layers/core\n",
-			"layers[0]: name is required",
+			"a layer with neither a name nor a source",
+			"apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\ntarget:\n  runtime: claude\nlayers:\n  - link: harness\n",
+			"layers[0]: a layer gives a name, a source, or both",
 			false,
 		},
 		{
-			"the second layer without a name",
-			"apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\ntarget:\n  runtime: claude\nlayers:\n  - name: core\n    source:\n      path: layers/core\n  - source:\n      path: layers/team\n",
-			"layers[1]: name is required",
+			"the second layer with neither a name nor a source",
+			"apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\ntarget:\n  runtime: claude\nlayers:\n  - name: core\n    source:\n      path: layers/core\n  - link: harness\n",
+			"layers[1]: a layer gives a name, a source, or both",
+			false,
+		},
+		{
+			"an empty source without a name",
+			"apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\ntarget:\n  runtime: claude\nlayers:\n  - source: {}\n",
+			"layers[0]: a layer gives a name, a source, or both",
 			false,
 		},
 		{
@@ -187,9 +217,9 @@ func TestLoadRefuses(t *testing.T) {
 			false,
 		},
 		{
-			"a layer without a source path",
-			"apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\ntarget:\n  runtime: claude\nlayers:\n  - name: core\n    source: {}\n",
-			"layer core: source.path is required",
+			"a ref without a git source on a layer without a name",
+			"apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\ntarget:\n  runtime: claude\nlayers:\n  - source: {ref: v1}\n",
+			"layers[0]: source.ref needs source.git",
 			false,
 		},
 		{

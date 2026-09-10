@@ -115,9 +115,14 @@ func Defaults() Config {
 
 // Load returns the effective configuration for the checkout at root: the defaults, then
 // every file [Discover] finds, applied in order. An error names the file it comes from.
-func Load(root string) (Config, error) {
+// With own false the checkout's own file is left out, which is how a compose of a profile
+// that extends a closed base keeps the checkout's authors from configuring the runner.
+func Load(root string, own bool) (Config, error) {
 	c := Defaults()
 	for _, path := range Discover(root) {
+		if !own && filepath.Dir(path) == root {
+			continue
+		}
 		if err := c.apply(path); err != nil {
 			return c, err
 		}
@@ -128,7 +133,8 @@ func Load(root string) (Config, error) {
 // Discover lists the configuration files for the checkout at root, in the order they
 // apply: the user's file under [UserDir], the files of the ancestor directories the
 // current user owns, farthest first, and the file in root. A file that is not there is
-// not listed.
+// not listed. root is absolute, so the checkout's own file is the one whose directory is
+// root.
 func Discover(root string) []string {
 	var files []string
 	if dir := UserDir(); dir != "" {
@@ -259,7 +265,7 @@ func read(path string) (file, error) {
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
 	dec.KnownFields(true)
 	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
-		return f, fmt.Errorf("%s: %w", path, err)
+		return f, decodeError(path, err)
 	}
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return f, fmt.Errorf("%s: holds more than one document; a configuration is one", path)
@@ -271,6 +277,20 @@ func read(path string) (file, error) {
 		return f, fmt.Errorf("%s: kind %q is not %s", path, f.Kind, Kind)
 	}
 	return f, nil
+}
+
+// unknownKey is the decoder's report of a key the document has no field for. It names the
+// Go type, which the message a person reads leaves out.
+var unknownKey = regexp.MustCompile(`(line \d+: )?field (\S+) not found in type \S+`)
+
+// decodeError prefixes a decode error with path. An unknown key is reported as one the
+// configuration does not read, with the decoder's line number when it gives one; any
+// other error is returned as the decoder wrote it.
+func decodeError(path string, err error) error {
+	if m := unknownKey.FindStringSubmatch(err.Error()); m != nil {
+		return fmt.Errorf("%s: %skey %q is not one %s reads", path, m[1], m[2], FileName)
+	}
+	return fmt.Errorf("%s: %w", path, err)
 }
 
 // Row is one effective value and where it came from.

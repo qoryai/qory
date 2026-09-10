@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://qory.ai/contracts/harness/v1/layer.schema.json",
   "title": "HarnessLayer",
-  "description": "harness.yaml at the root of a layer: what the layer provides beyond its tree.",
+  "description": "harness-layer.yaml at the root of a layer: its name, its variants and the variables it exports.",
   "type": "object",
   "required": ["apiVersion", "kind", "name"],
   "additionalProperties": false,

@@ -4,12 +4,20 @@
   "title": "HarnessProfile",
   "description": "harness-compose.yaml: the ordered layers a harness is composed from.",
   "type": "object",
-  "required": ["apiVersion", "kind", "target", "layers"],
+  "required": ["apiVersion", "kind", "layers"],
   "additionalProperties": false,
+  "oneOf": [
+    {"required": ["target"], "not": {"required": ["extends"]}},
+    {"required": ["extends"], "not": {"required": ["target"]}}
+  ],
   "properties": {
     "apiVersion": {"const": "qory.ai/v1alpha1"},
     "kind": {"const": "HarnessProfile"},
     "name": {"type": "string", "minLength": 1},
+    "extends": {
+      "description": "The base profile this one appends to: a directory holding a harness-compose.yaml.",
+      "$ref": "#/$defs/source"
+    },
     "target": {
       "type": "object",
       "required": ["runtime"],
@@ -30,13 +38,23 @@
       "description": "Values qory carries into the report and does not read: one object per namespace.",
       "type": "object",
       "additionalProperties": {"type": "object"}
+    },
+    "extending": {
+      "description": "On a base profile, what a layer of an extending profile may ship.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kinds": {"type": "array", "items": {"type": "string", "enum": ["skills", "agents", "commands", "output-styles"]}},
+        "instructions": {"type": "boolean"},
+        "settings": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
     }
   },
   "$defs": {
     "names": {"type": "array", "items": {"type": "string", "minLength": 1}},
     "layer": {
       "type": "object",
-      "required": ["name", "source"],
+      "anyOf": [{"required": ["name"]}, {"required": ["source"]}],
       "additionalProperties": false,
       "properties": {
         "name": {"type": "string", "minLength": 1},
