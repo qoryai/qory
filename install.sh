@@ -18,13 +18,13 @@ fail() {
 }
 
 case "$(uname -s)" in
-Darwin) os=Darwin ;;
-Linux) os=Linux ;;
+Darwin) os=darwin ;;
+Linux) os=linux ;;
 *) fail "qory has no release build for $(uname -s); build from source with: go install github.com/$repo@latest" ;;
 esac
 
 case "$(uname -m)" in
-x86_64 | amd64) arch=x86_64 ;;
+x86_64 | amd64) arch=amd64 ;;
 arm64 | aarch64) arch=arm64 ;;
 *) fail "qory has no release build for $(uname -m); build from source with: go install github.com/$repo@latest" ;;
 esac
