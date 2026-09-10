@@ -51,6 +51,13 @@ const Dir = ".qory"
 // and does not create the directory or check that it exists.
 func QoryDir(root string) string { return filepath.Join(root, Dir) }
 
+// Init makes dir a git repository, for a directory that is inside none: the compose
+// writes into a checkout only, so an example written outside one could not be composed.
+func Init(dir string) error {
+	_, err := git(dir, "init", "--quiet")
+	return err
+}
+
 // ExcludeFile returns the absolute path of the clone-local exclude file of the checkout
 // at root, info/exclude inside the git directory, which a worktree or a separate git
 // directory can put outside root. It returns "" when root is outside a working tree or

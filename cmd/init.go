@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/stack"
 	"github.com/qoryai/qory/internal/ui"
 	"github.com/qoryai/qory/internal/user"
@@ -48,6 +49,17 @@ func newInit(use string, aliases ...string) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// The compose writes into a checkout only, so a directory inside no
+			// repository becomes one here, and a row says so.
+			var initialised bool
+			if root, err := checkout.Root(dir); err != nil {
+				return err
+			} else if checkout.ExcludeFile(root) == "" {
+				if err := checkout.Init(dir); err != nil {
+					return fmt.Errorf("git init in %s: %w", dir, err)
+				}
+				initialised = true
+			}
 			if name := user.Name(); name != "" {
 				u.Success("Hello, %s. Wrote %d files", name, len(written))
 			} else {
@@ -59,7 +71,11 @@ func newInit(use string, aliases ...string) *cobra.Command {
 			}
 			u.Table(rows)
 			u.Blank()
-			u.Fields([][2]string{{"next", "qory harness compose"}})
+			var fields [][2]string
+			if initialised {
+				fields = append(fields, [2]string{"git", "initialised a repository here; qory composes into a checkout"})
+			}
+			u.Fields(append(fields, [2]string{"next", "qory harness compose"}))
 			return nil
 		},
 	}

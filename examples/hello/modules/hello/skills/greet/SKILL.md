@@ -3,8 +3,8 @@ name: greet
 description: Greet the person. The hello module's version, plain, no ship's computer.
 ---
 
-1. Say hello, by name if you already know it, otherwise just hello. One line. No time, no
-   weather, no systems check. That is the whole greeting.
+1. Say "Hi there!" and nothing more on that line. No name, no time, no weather, no systems
+   check. That is the whole greeting.
 2. Say, in one sentence, that this is the hello module's greeting: the stack now excludes
    the world module's `greet`, so this one was composed instead, and nothing in either module
    changed.

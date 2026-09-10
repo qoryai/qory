@@ -14,21 +14,30 @@ import (
 )
 
 // TestInit writes the example from the repository's own examples directory into an empty
-// directory, composes it, and refuses to write twice.
+// directory, makes it a git repository since the compose writes into a checkout only and
+// says so, composes it with the command, and refuses to write twice.
 func TestInit(t *testing.T) {
 	cmd.Example = exampleFromDisk(t)
 	dir := emptyDir(t)
 	root := cmd.Root()
 	root.SetArgs([]string{"harness", "init"})
-	root.SetOut(&strings.Builder{})
+	var out strings.Builder
+	root.SetOut(&out)
 	if err := root.Execute(); err != nil {
 		t.Fatal(err)
+	}
+	wantsRow(t, out.String(), "git", "initialised a repository here; qory composes into a checkout")
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		t.Fatalf("no repository: %v", err)
 	}
 	p, err := stack.Load(filepath.Join(dir, stack.FileName))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := compose.Compose(p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "harness", "compose"); err != nil {
 		t.Fatal(err)
 	}
 	root = cmd.Root()

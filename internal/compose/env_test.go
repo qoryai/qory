@@ -54,11 +54,11 @@ func TestTwoModulesExportingOneNameIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := compose.ComposeWith(p, compose.Options{Env: map[string]string{"HARNESS_HOME": "$QORY_HARNESS_HOME/modules/b", "APP_ENV": "staging"}})
+	res, err := compose.ComposeWith(p, compose.Options{Env: map[string]string{"HARNESS_HOME": "$QORY_HARNESS_HOME/modules/b", "FOO": "bar"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Env["HARNESS_HOME"] != "$QORY_HARNESS_HOME/modules/b" || res.Env["APP_ENV"] != "staging" {
+	if res.Env["HARNESS_HOME"] != "$QORY_HARNESS_HOME/modules/b" || res.Env["FOO"] != "bar" {
 		t.Errorf("env: %v", res.Env)
 	}
 }
