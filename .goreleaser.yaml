@@ -55,7 +55,7 @@ homebrew_casks:
     repository:
       owner: qoryai
       name: homebrew-tap
-      token: '{{ index .Env "HOMEBREW_TAP_TOKEN" }}'
+      token: '{{ .Env.HOMEBREW_TAP_TOKEN }}'
     homepage: https://github.com/qoryai/qory
     description: Compose the harness a runtime loads from modules
     license: apache-2.0
