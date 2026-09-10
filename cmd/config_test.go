@@ -15,8 +15,8 @@ import (
 func TestConfigPrintsEveryValueWithItsOrigin(t *testing.T) {
 	root := newCheckout(t)
 	user := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "qory.yaml")
-	writeFile(t, user, "apiVersion: qory.ai/v1alpha1\nkind: QoryConfig\nforce: true\n")
-	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.ai/v1alpha1\nkind: QoryConfig\nruntime: codex\nenv: {HARNESS_PROFILE: nextjs}\n")
+	writeFile(t, user, "apiVersion: qory.ai/v1alpha1\nforce: true\n")
+	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.ai/v1alpha1\nruntime: codex\nenv: {HARNESS_PROFILE: nextjs}\n")
 	out, err := run(t, "config")
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +55,7 @@ func TestConfigWithoutAFileSaysSo(t *testing.T) {
 // names the file and exits as an input error.
 func TestConfigRefusesAMistake(t *testing.T) {
 	root := newCheckout(t)
-	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.ai/v1alpha1\nkind: QoryConfig\nruntim: codex\n")
+	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.ai/v1alpha1\nruntim: codex\n")
 	_, err := run(t, "config")
 	if err == nil || !strings.Contains(err.Error(), "qory.yaml") || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("err = %v, exit %d", err, cmd.ExitCode(err))
@@ -63,12 +63,12 @@ func TestConfigRefusesAMistake(t *testing.T) {
 }
 
 // TestComposeReadsTheConfiguration is a qory.yaml naming codex as the runtime and
-// exporting a variable, on a profile that targets claude: the compose renders for codex,
+// exporting a variable, on a stack that targets claude: the compose renders for codex,
 // the variable lands in config.toml, and --runtime on the command line still wins.
 func TestComposeReadsTheConfiguration(t *testing.T) {
 	root := newCheckout(t)
-	copyFixture(t, "two-layers", root)
-	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.ai/v1alpha1\nkind: QoryConfig\nruntime: codex\nenv: {HARNESS_PROFILE: nextjs}\n")
+	copyFixture(t, "two-modules", root)
+	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.ai/v1alpha1\nruntime: codex\nenv: {HARNESS_PROFILE: nextjs}\n")
 	out, err := run(t, "harness", "compose")
 	if err != nil {
 		t.Fatal(err)

@@ -1,3 +1,0 @@
-apiVersion: qory.ai/v1alpha1
-kind: HarnessLayer
-name: core

@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/qoryai/qory/internal/profile"
+	"github.com/qoryai/qory/internal/stack"
 	"github.com/qoryai/qory/internal/ui"
 )
 
@@ -20,7 +20,7 @@ func newVersion() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			u := ui.New(cmd.OutOrStdout())
 			u.Title("qory", version())
-			u.Fields([][2]string{{"harness format", profile.APIVersion}})
+			u.Fields([][2]string{{"harness format", stack.APIVersion}})
 			return nil
 		},
 	}

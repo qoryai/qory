@@ -14,7 +14,7 @@ import (
 // Codex under shell_environment_policy.set in config.toml.
 func TestExportedVariablesReachTheRuntimes(t *testing.T) {
 	res, _, home := composeFixture(t, "claude", "codex")
-	res.Env = map[string]string{"HARNESS_HOME": "$QORY_HARNESS_HOME/layers/core"}
+	res.Env = map[string]string{"HARNESS_HOME": "$QORY_HARNESS_HOME/modules/core"}
 	if err := render.Build(res, home, lookup(t, "claude"), lookup(t, "codex")); err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +22,7 @@ func TestExportedVariablesReachTheRuntimes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"HARNESS_HOME": "` + home + `/layers/core"`, `"QORY_HARNESS_HOME": "` + home + `"`} {
+	for _, want := range []string{`"HARNESS_HOME": "` + home + `/modules/core"`, `"QORY_HARNESS_HOME": "` + home + `"`} {
 		if !strings.Contains(string(settings), want) {
 			t.Errorf("claude settings.json lacks %s:\n%s", want, settings)
 		}
@@ -31,7 +31,7 @@ func TestExportedVariablesReachTheRuntimes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"[shell_environment_policy.set]", `HARNESS_HOME = "` + home + `/layers/core"`, `QORY_HARNESS_HOME = "` + home + `"`} {
+	for _, want := range []string{"[shell_environment_policy.set]", `HARNESS_HOME = "` + home + `/modules/core"`, `QORY_HARNESS_HOME = "` + home + `"`} {
 		if !strings.Contains(string(config), want) {
 			t.Errorf("codex config.toml lacks %s:\n%s", want, config)
 		}

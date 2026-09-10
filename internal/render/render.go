@@ -15,7 +15,7 @@ import (
 
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/compose"
-	"github.com/qoryai/qory/internal/layer"
+	"github.com/qoryai/qory/internal/module"
 )
 
 // Link is one path in a checkout that points into the composed home.
@@ -45,7 +45,7 @@ type Linked struct {
 }
 
 // ForeignPathError is the refusal to remove or replace a path qory did not write. The
-// command layer matches it with errors.As and exits with its own status for it.
+// command module matches it with errors.As and exits with its own status for it.
 type ForeignPathError struct {
 	// Path is the absolute checkout path that stands in the way.
 	Path string
@@ -67,6 +67,25 @@ func (e *ForeignPathError) Error() string {
 	}
 }
 
+// Reserved is one path under a runtime's directory that a files entry may not take,
+// because the runtime writes or links something there or the program reads it as its
+// own configuration. [CheckFiles] refuses a files entry at the path or, when the path is
+// a directory, anywhere under it.
+type Reserved struct {
+	// Path is the path under the runtime's directory with forward slashes, a file such as
+	// "settings.json" or a directory such as "skills". A directory reserves its whole
+	// subtree, matched by path segment: "skills" covers "skills/x" and not
+	// "skills-private/x".
+	Path string
+	// Why is the clause the refusal ends with, after "and": what stands at the path and
+	// where the module ships the file instead, such as "qory writes it".
+	Why string
+}
+
+// FilesKind is the entry kind of a file a module ships as it is, at
+// files/<runtime>/<path> in the module, for the runtime's directory in the checkout.
+const FilesKind = "files"
+
 // Runtime renders for one program that runs the harness. A package under internal/render
 // implements it for one program and registers the implementation from its init.
 type Runtime interface {
@@ -75,12 +94,15 @@ type Runtime interface {
 	// Render writes the runtime's own files into dir, the runtime's directory inside a
 	// staging copy of the home. Paths written into files name home, where the tree ends up.
 	// The shared parts, AGENTS.md, skills/ and hooks/, are already at the home's root.
+	// [Build] links the runtime's files entries into dir after Render returns.
 	Render(res *compose.Result, dir, home string) error
 	// Links are the paths a checkout needs so the program reads the home. A nil res asks for
 	// the full set, which is what [Unlink] removes.
 	Links(res *compose.Result) []Link
 	// Skips are the entry kinds the runtime has no place for.
 	Skips() []string
+	// Reserved are the paths under the runtime's directory a files entry may not take.
+	Reserved() []Reserved
 }
 
 // runtimes holds every registered runtime by its target.runtime value.
@@ -134,10 +156,14 @@ func Composed(home string) []Runtime {
 
 // Build writes the composed home for one or more runtimes. It stages the tree in home with
 // ".tmp" appended, discarding whatever that path held, links the shared skills and hooks,
-// links every layer's directory as layers/<name> and writes AGENTS.md at the staging root,
-// calls each runtime's Render for the subdirectory named after it, then removes the old
-// home and renames the staging directory over it. A failure before the rename leaves the
-// previous home as it was.
+// links every module's directory as modules/<name> and writes AGENTS.md at the staging root,
+// calls each runtime's Render for the subdirectory named after it and links the runtime's
+// files entries into that subdirectory, then removes the old home and renames the staging
+// directory over it. A failure before the rename leaves the previous home as it was.
+//
+// The files come after Render, so a files entry at a path Render wrote fails the build.
+// [CheckFiles] refuses such an entry before a build, and the failure here is the check
+// that a runtime's reserved table missed a path.
 //
 // Every runtime the home is to hold must be passed in one call, because the rename replaces
 // the whole tree. A caller composing for one runtime passes the runtimes already in the home
@@ -169,7 +195,7 @@ func Build(res *compose.Result, home string, runtimes ...Runtime) (err error) {
 	if err := LinkEntries(res, tmp, "skills", "hooks"); err != nil {
 		return err
 	}
-	if err := linkLayers(res, tmp); err != nil {
+	if err := linkModules(res, tmp); err != nil {
 		return err
 	}
 	if res.Instructions != "" {
@@ -183,6 +209,9 @@ func Build(res *compose.Result, home string, runtimes ...Runtime) (err error) {
 			return err
 		}
 		if err := p.Render(res, dir, home); err != nil {
+			return err
+		}
+		if err := linkFiles(res, p, dir); err != nil {
 			return err
 		}
 	}
@@ -213,6 +242,71 @@ func realDir(path string) error {
 	return nil
 }
 
+// linkFiles writes one symlink per files entry of the runtime at dir/<path>, pointing at
+// the file in its module, and creates the directories between. A runtime whose Skips
+// names the files kind gets none. A path Render already wrote is an error naming the
+// entry, because [CheckFiles] is meant to have refused the entry before the build.
+func linkFiles(res *compose.Result, p Runtime, dir string) error {
+	if contains(p.Skips(), FilesKind) {
+		return nil
+	}
+	for _, e := range res.Entries {
+		path, ok := FileFor(e, p.Name())
+		if !ok {
+			continue
+		}
+		link := filepath.Join(dir, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+			return fmt.Errorf("files/%s from module %s: %w", e.Name, e.Module, err)
+		}
+		if err := os.Symlink(e.Path, link); err != nil {
+			return fmt.Errorf("files/%s from module %s: %w", e.Name, e.Module, err)
+		}
+	}
+	return nil
+}
+
+// FileFor returns the path under the runtime's directory a files entry lands at, such as
+// "rules/nextjs-15.md" for the entry named "claude/rules/nextjs-15.md", and whether e is
+// a files entry for the runtime. An entry of another kind or for another runtime is not.
+func FileFor(e compose.Entry, runtime string) (string, bool) {
+	if e.Kind != FilesKind {
+		return "", false
+	}
+	rt, path, ok := strings.Cut(e.Name, "/")
+	if !ok || rt != runtime {
+		return "", false
+	}
+	return path, true
+}
+
+// CheckFiles refuses a files entry that names no registered runtime or a path the runtime
+// reserves, and returns the first refusal in the result's order. Every entry is checked,
+// for the target runtime or not, so a module shipping a wrong file is refused wherever it
+// composes. The command module calls it right after the compose, before [Build].
+//
+// The refusal names the module and the entry as it sits in the module, files/<runtime>/<path>,
+// and ends with the runtime's [Reserved] clause, or with the runtimes qory renders when the
+// first segment is none of them.
+func CheckFiles(res *compose.Result) error {
+	for _, e := range res.Entries {
+		if e.Kind != FilesKind {
+			continue
+		}
+		rt, path, _ := strings.Cut(e.Name, "/")
+		p, ok := runtimes[rt]
+		if !ok {
+			return fmt.Errorf("module %s ships files/%s, and %s is not a runtime qory renders; runtimes: %s", e.Module, e.Name, rt, strings.Join(Names(), ", "))
+		}
+		for _, r := range p.Reserved() {
+			if path == r.Path || strings.HasPrefix(path, r.Path+"/") {
+				return fmt.Errorf("module %s ships files/%s, and %s", e.Module, e.Name, r.Why)
+			}
+		}
+	}
+	return nil
+}
+
 // LinkInto makes the checkout at root read the home through the runtime's links, and
 // returns what it passed over and what it replaced. Every link is relative, so a checkout
 // that moves keeps them valid, and every link and the qory directory go into the
@@ -235,7 +329,12 @@ func realDir(path string) error {
 //
 // LinkInto also takes back what an earlier compose linked and this one does not: a link the
 // runtime no longer asks for, such as AGENTS.override.md once the compose produces no
-// instructions, and a file inside a linked directory the home no longer has. It removes
+// instructions, a file inside a linked directory the home no longer has, and a link the
+// runtime wrote for a files entry the compose no longer holds, such as
+// .github/instructions/web.instructions.md, which Links with a nil result cannot name.
+// For the last, LinkInto walks the checkout directories the runtime's links stand in,
+// .github say, and removes every symlink into the runtime's directory in the home that
+// the current links do not ask for, then each directory that is left empty. It removes
 // only links that point into the qory directory. It stops at the first error, so the links
 // before it are already written.
 func LinkInto(p Runtime, res *compose.Result, root, home string, force bool) (Linked, error) {
@@ -299,7 +398,116 @@ func LinkInto(p Runtime, res *compose.Result, root, home string, force bool) (Li
 			return out, err
 		}
 	}
+	if _, err := takeBack(p, root, current); err != nil {
+		return out, err
+	}
 	return out, nil
+}
+
+// takeBack removes the runtime's links that current does not ask for from the checkout
+// directories the runtime's declared links stand in, such as .github for copilot, and
+// returns their checkout paths. A link is the runtime's when it is a relative symlink
+// resolving into the runtime's directory in the home, which is where the links of files
+// entries point and no other runtime's link does. A link at a current link's path, or
+// inside a current directory link, stays. A directory a removal left empty is removed,
+// up to and including the one walked. A symlink is never followed, so nothing behind a
+// directory the checkout links elsewhere is touched. With no current links, every such
+// link goes, which is what [Unlink] asks for.
+func takeBack(p Runtime, root string, current []Link) ([]string, error) {
+	qoryDir, err := realQoryDir(root)
+	if err != nil {
+		return nil, nil
+	}
+	prefix := filepath.Join(qoryDir, "harness", p.Name()) + string(filepath.Separator)
+	var removed []string
+	for _, dir := range nestedDirs(p.Links(nil)) {
+		path := filepath.Join(root, dir)
+		info, err := os.Lstat(path)
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		if err := takeBackIn(root, path, prefix, current, &removed); err != nil {
+			return removed, err
+		}
+	}
+	return removed, nil
+}
+
+// takeBackIn is [takeBack] for one real directory, appending each removed link's checkout
+// path to removed.
+func takeBackIn(root, dir, prefix string, current []Link, removed *[]string) error {
+	items, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	before := len(*removed)
+	for _, it := range items {
+		path := filepath.Join(dir, it.Name())
+		if it.IsDir() {
+			if err := takeBackIn(root, path, prefix, current, removed); err != nil {
+				return err
+			}
+			continue
+		}
+		if it.Type()&os.ModeSymlink == 0 {
+			continue
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if asksForOrHolds(current, rel) {
+			continue
+		}
+		target, err := linkTarget(path)
+		if err != nil {
+			return err
+		}
+		if !strings.HasPrefix(target, prefix) {
+			continue
+		}
+		own, err := unlinkOwn(root, path)
+		if err != nil {
+			return err
+		}
+		if own {
+			*removed = append(*removed, rel)
+		}
+	}
+	if len(*removed) > before {
+		_ = os.Remove(dir)
+	}
+	return nil
+}
+
+// asksForOrHolds reports whether the links hold one at the checkout path or one whose
+// directory the path is inside, such as .github/agents for .github/agents/reviewer.agent.md.
+func asksForOrHolds(links []Link, path string) bool {
+	for _, l := range links {
+		if l.Checkout == path || strings.HasPrefix(path, l.Checkout+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// nestedDirs lists, sorted and once each, the first path segment of every link that stands
+// inside a directory of the checkout, such as .github for .github/agents; a link at the
+// checkout root, such as AGENTS.md or .claude, names none.
+func nestedDirs(links []Link) []string {
+	seen := map[string]bool{}
+	var dirs []string
+	for _, l := range links {
+		first, _, ok := strings.Cut(l.Checkout, "/")
+		if !ok || seen[first] {
+			continue
+		}
+		seen[first] = true
+		dirs = append(dirs, first)
+	}
+	sort.Strings(dirs)
+	return dirs
 }
 
 // link writes one symlink at path pointing at src, relative, and excludes it. What stands
@@ -470,9 +678,12 @@ func prune(root, path string, keep map[string]bool) error {
 // Anything else at a link's path is not qory's to remove: a hard link's path fails, and a
 // soft link's path is left alone, which is how a checkout's own AGENTS.md survives. Inside a
 // linked directory only the symlinks into the qory directory go, so
-// .claude/settings.local.json stays and so does the directory holding it. Each removed
-// link's line leaves the clone-local exclude file with it. Unlink leaves the home for the
-// caller to remove, and the qory directory's own line with it, through [RemoveExclude].
+// .claude/settings.local.json stays and so does the directory holding it. A link the
+// runtime wrote for a files entry, which Links with a nil result cannot name, goes the way
+// [LinkInto] takes one back and is returned by its own path, such as
+// .github/instructions/web.instructions.md. Each removed link's line leaves the
+// clone-local exclude file with it. Unlink leaves the home for the caller to remove, and
+// the qory directory's own line with it, through [RemoveExclude].
 func Unlink(p Runtime, root string, others ...Runtime) ([]string, error) {
 	shared := map[string]bool{}
 	for _, o := range others {
@@ -524,44 +735,46 @@ func Unlink(p Runtime, root string, others ...Runtime) ([]string, error) {
 			_ = os.Remove(parent)
 		}
 	}
-	return removed, nil
+	files, err := takeBack(p, root, nil)
+	removed = append(removed, files...)
+	return removed, err
 }
 
-// LinkLayers writes the links a profile asks for to its layers: for every layer with a
-// Link, a hard link at root/<Link> pointing, relative, at home/layers/<name>, under the
+// LinkModules writes the links a stack asks for to its modules: for every module with a
+// Link, a hard link at root/<Link> pointing, relative, at home/modules/<name>, under the
 // rules of a hard file link of [LinkInto]: a path qory did not write is a
 // [*ForeignPathError], and so is a symlinked parent, or replaced under force when git can
 // restore it, with its path recorded; anything untracked or modified is refused with the
 // reason git gives. The link is hard because permission rules and scripts name the path.
-// Every link written is listed in the clone-local exclude file. LinkLayers then takes back
-// the links of previous, the names an earlier compose linked, that no layer links now,
+// Every link written is listed in the clone-local exclude file. LinkModules then takes back
+// the links of previous, the names an earlier compose linked, that no module links now,
 // when qory wrote them; a name that now holds something else is left alone.
 //
 // Before it writes anything, a Link at a path a registered runtime links, or at the qory
-// directory, is refused with an error naming the runtime, because a layer link there
+// directory, is refused with an error naming the runtime, because a module link there
 // would stand where the runtime's link goes.
-func LinkLayers(res *compose.Result, root, home string, previous []string, force bool) (Linked, error) {
+func LinkModules(res *compose.Result, root, home string, previous []string, force bool) (Linked, error) {
 	var out Linked
-	for _, l := range res.Layers {
+	for _, l := range res.Modules {
 		if l.Link == "" {
 			continue
 		}
-		if err := layerLinkFree(l.Link); err != nil {
+		if err := moduleLinkFree(l.Link); err != nil {
 			return out, err
 		}
 	}
 	current := map[string]bool{}
-	for _, l := range res.Layers {
+	for _, l := range res.Modules {
 		if l.Link == "" {
 			continue
 		}
 		current[l.Link] = true
-		src := filepath.Join(home, "layers", l.Name)
+		src := filepath.Join(home, "modules", l.Name)
 		if _, err := os.Stat(src); err != nil {
 			return out, err
 		}
 		path := filepath.Join(root, l.Link)
-		hard := Link{Checkout: l.Link, Home: "layers/" + l.Name}
+		hard := Link{Checkout: l.Link, Home: "modules/" + l.Name}
 		if err := inside(root, path); err != nil {
 			return out, err
 		}
@@ -584,9 +797,9 @@ func LinkLayers(res *compose.Result, root, home string, previous []string, force
 	return out, nil
 }
 
-// layerLinkFree refuses a layer link name that a registered runtime links or that is the
+// moduleLinkFree refuses a module link name that a registered runtime links or that is the
 // qory directory.
-func layerLinkFree(name string) error {
+func moduleLinkFree(name string) error {
 	if name == checkout.Dir {
 		return fmt.Errorf("link %s is qory's own directory", name)
 	}
@@ -600,10 +813,10 @@ func layerLinkFree(name string) error {
 	return nil
 }
 
-// UnlinkLayers removes the layer links of the names in links that qory wrote, each with
+// UnlinkModules removes the module links of the names in links that qory wrote, each with
 // its exclude line, and returns the names it removed. A name holding anything else, or
 // nothing, is passed over and no error.
-func UnlinkLayers(root string, links []string) ([]string, error) {
+func UnlinkModules(root string, links []string) ([]string, error) {
 	var removed []string
 	for _, name := range links {
 		path := filepath.Join(root, name)
@@ -621,17 +834,17 @@ func UnlinkLayers(root string, links []string) ([]string, error) {
 	return removed, nil
 }
 
-// layersPrefix is what the target of a layer link starts with, from the checkout root:
-// the qory directory, the home and its layers directory.
-var layersPrefix = filepath.Join(checkout.Dir, "harness", "layers") + string(filepath.Separator)
+// modulesPrefix is what the target of a module link starts with, from the checkout root:
+// the qory directory, the home and its modules directory.
+var modulesPrefix = filepath.Join(checkout.Dir, "harness", "modules") + string(filepath.Separator)
 
-// UnlinkLayerLinks removes every layer link in the checkout root without the report that
+// UnlinkModuleLinks removes every module link in the checkout root without the report that
 // names them, which is how a remove works after rm -rf .qory. It reads the root's own
 // entries and takes each symlink whose relative target, cleaned, is under
-// .qory/harness/layers, under the rules of [UnlinkLayers], each with its exclude line, and
+// .qory/harness/modules, under the rules of [UnlinkModules], each with its exclude line, and
 // returns the names removed in sorted order. A symlink to anywhere else, an absolute one,
 // and a link inside a directory stay.
-func UnlinkLayerLinks(root string) ([]string, error) {
+func UnlinkModuleLinks(root string) ([]string, error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return nil, err
@@ -646,7 +859,7 @@ func UnlinkLayerLinks(root string) ([]string, error) {
 		if err != nil {
 			return removed, err
 		}
-		if filepath.IsAbs(target) || !strings.HasPrefix(filepath.Clean(target), layersPrefix) {
+		if filepath.IsAbs(target) || !strings.HasPrefix(filepath.Clean(target), modulesPrefix) {
 			continue
 		}
 		own, err := unlinkOwn(root, path)
@@ -717,33 +930,44 @@ func excludeLine(root, path string) (string, error) {
 // directory that is gone, after rm -rf .qory say, still has its place under the resolved
 // root, so the links left dangling are still qory's and a remove takes them.
 func ownLink(root, path string) (bool, error) {
-	info, err := os.Lstat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
+	resolved, err := linkTarget(path)
+	if err != nil || resolved == "" {
 		return false, err
-	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		return false, nil
-	}
-	target, err := os.Readlink(path)
-	if err != nil {
-		return false, err
-	}
-	if filepath.IsAbs(target) {
-		return false, nil
 	}
 	qoryDir, err := realQoryDir(root)
 	if err != nil {
 		return false, nil
 	}
+	return resolved == qoryDir || strings.HasPrefix(resolved, qoryDir+string(filepath.Separator)), nil
+}
+
+// linkTarget is where the relative symlink at path points: its target joined to the
+// directory it really stands in, every symlink above resolved, and cleaned. It is "" for
+// a path that does not exist, is not a symlink, holds an absolute target, or stands in a
+// directory that cannot be resolved.
+func linkTarget(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return "", nil
+	}
+	target, err := os.Readlink(path)
+	if err != nil {
+		return "", err
+	}
+	if filepath.IsAbs(target) {
+		return "", nil
+	}
 	parent, err := filepath.EvalSymlinks(filepath.Dir(path))
 	if err != nil {
-		return false, nil
+		return "", nil
 	}
-	resolved := filepath.Clean(filepath.Join(parent, target))
-	return resolved == qoryDir || strings.HasPrefix(resolved, qoryDir+string(filepath.Separator)), nil
+	return filepath.Clean(filepath.Join(parent, target)), nil
 }
 
 // realQoryDir is the checkout's qory directory with every symlink above it resolved, the
@@ -814,7 +1038,7 @@ func exclude(root, line string) error {
 }
 
 // RemoveExclude takes one line out of the checkout's clone-local exclude file, the way
-// the links take theirs when they go. The command layer calls it for the qory directory's
+// the links take theirs when they go. The command module calls it for the qory directory's
 // own line once it has removed the directory.
 func RemoveExclude(root, line string) error { return unexclude(root, line) }
 
@@ -849,7 +1073,7 @@ func unexclude(root, line string) error {
 }
 
 // LinkEntries writes one symlink per composed entry of the kinds in keep, at
-// dir/<kind>/<name>, pointing at the entry in its layer. Skills and hooks keep their
+// dir/<kind>/<name>, pointing at the entry in its module. Skills and hooks keep their
 // name, the Markdown kinds get ".md" appended. Every kind directory named is created,
 // with no entry of that kind as well, so a checkout link to it resolves. Entries of any
 // other kind are left out, and it is the caller's job to pass every kind the runtime
@@ -879,16 +1103,16 @@ func LinkEntries(res *compose.Result, dir string, keep ...string) error {
 	return nil
 }
 
-// linkLayers writes one symlink per layer at dir/layers/<name>, pointing at the layer's
-// directory, so a settings fragment or a hook reaches a layer's other files as
-// $QORY_HARNESS_HOME/layers/<name>/<path>.
-func linkLayers(res *compose.Result, dir string) error {
-	layers := filepath.Join(dir, "layers")
-	if err := os.MkdirAll(layers, 0o755); err != nil {
+// linkModules writes one symlink per module at dir/modules/<name>, pointing at the module's
+// directory, so a settings fragment or a hook reaches a module's other files as
+// $QORY_HARNESS_HOME/modules/<name>/<path>.
+func linkModules(res *compose.Result, dir string) error {
+	modules := filepath.Join(dir, "modules")
+	if err := os.MkdirAll(modules, 0o755); err != nil {
 		return err
 	}
-	for _, l := range res.Layers {
-		if err := os.Symlink(l.Dir, filepath.Join(layers, l.Name)); err != nil {
+	for _, l := range res.Modules {
+		if err := os.Symlink(l.Dir, filepath.Join(modules, l.Name)); err != nil {
 			return err
 		}
 	}
@@ -897,7 +1121,9 @@ func linkLayers(res *compose.Result, dir string) error {
 
 // Skipped lists the composed entries of the kinds a runtime has no place for, as
 // "<kind>/<name>", in the order the compose produced them. The compose prints the list so
-// an entry that went nowhere is announced rather than silently dropped.
+// an entry that went nowhere is announced rather than silently dropped. A files entry is
+// listed only when it is for the runtime, as "files/goose/<path>": one for another runtime
+// is neither rendered nor skipped, like a settings fragment for another runtime.
 func Skipped(p Runtime, res *compose.Result) []string {
 	skip := map[string]bool{}
 	for _, k := range p.Skips() {
@@ -905,20 +1131,26 @@ func Skipped(p Runtime, res *compose.Result) []string {
 	}
 	var out []string
 	for _, e := range res.Entries {
-		if skip[e.Kind] {
-			out = append(out, e.Kind+"/"+e.Name)
+		if !skip[e.Kind] {
+			continue
 		}
+		if e.Kind == FilesKind {
+			if _, ok := FileFor(e, p.Name()); !ok {
+				continue
+			}
+		}
+		out = append(out, e.Kind+"/"+e.Name)
 	}
 	return out
 }
 
 // WriteSettings writes the runtime's merged settings files into dir, one per target file
-// a layer contributed a fragment to, with every $QORY_HARNESS_HOME already replaced by
+// a module contributed a fragment to, with every $QORY_HARNESS_HOME already replaced by
 // home. A ".toml" name is encoded as TOML, every other name as indented JSON.
 //
 // patch, when it is not nil, is called with each file's name and its merged map before
 // the encoding, and changing the map there is how a runtime writes the target model.
-// Names in ensure are written even when no layer contributed to them, so a model reaches
+// Names in ensure are written even when no module contributed to them, so a model reaches
 // a file that would otherwise not exist.
 func WriteSettings(res *compose.Result, runtime, dir, home string, ensure []string, patch func(file string, m map[string]any)) error {
 	files := res.SettingsFiles(runtime)
@@ -1008,7 +1240,7 @@ func WriteAgents(res *compose.Result, dir, sub, suffix string, keep ...string) e
 		if e.Kind != "agents" {
 			continue
 		}
-		doc, err := layer.ReadDocument(e.Path)
+		doc, err := module.ReadDocument(e.Path)
 		if err != nil {
 			return err
 		}

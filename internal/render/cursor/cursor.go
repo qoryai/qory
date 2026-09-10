@@ -3,7 +3,18 @@
 // mcp.json, AGENTS.md at the checkout root, and skills from .agents/skills. All three are
 // linked into the checkout, and the MCP servers go into mcp.json as mcpServers. The model
 // is a global CLI setting in Cursor and is not written, and Cursor folded commands into
-// skills and has no output styles, so both kinds are skipped.
+// skills and has no output styles, so both kinds are skipped. A files entry named
+// cursor/<path> lands at .cursor/<path>, which is how a module ships a rule as
+// .cursor/rules/nextjs-15.mdc.
+//
+// The paths under .cursor a files entry may not take, see [render.Reserved]:
+//
+//	mcp.json          Cursor reads it as settings; a module sets those through settings/cursor/mcp.json
+//	hooks.json        Cursor reads it as settings; a module sets those through settings/cursor/hooks.json
+//	cli.json          Cursor reads it as settings; a module sets those through settings/cursor/cli.json
+//	environment.json  Cursor reads it as settings; a module sets those through settings/cursor/environment.json
+//	agents            agents are linked there; ship it as agents/<name>
+//	hooks             hooks are linked there; ship it as hooks/<name>
 package cursor
 
 import (
@@ -40,6 +51,19 @@ func (cursor) Links(res *compose.Result) []render.Link {
 // Skips are commands and output styles, since Cursor folded commands into skills and has
 // no output styles.
 func (cursor) Skips() []string { return []string{"commands", "output-styles"} }
+
+// Reserved are the four settings files Cursor reads from .cursor, which a settings
+// fragment writes, and the agents and hooks directories Render writes.
+func (cursor) Reserved() []render.Reserved {
+	return []render.Reserved{
+		{Path: "mcp.json", Why: "Cursor reads it as settings; a module sets those through settings/cursor/mcp.json"},
+		{Path: "hooks.json", Why: "Cursor reads it as settings; a module sets those through settings/cursor/hooks.json"},
+		{Path: "cli.json", Why: "Cursor reads it as settings; a module sets those through settings/cursor/cli.json"},
+		{Path: "environment.json", Why: "Cursor reads it as settings; a module sets those through settings/cursor/environment.json"},
+		{Path: "agents", Why: "agents are linked there; ship it as agents/<name>"},
+		{Path: "hooks", Why: "hooks are linked there; ship it as hooks/<name>"},
+	}
+}
 
 // Render links the hook scripts, writes agents/<name>.md with the agent's name,
 // description and model, and writes the cursor settings files such as hooks.json,

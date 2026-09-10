@@ -25,9 +25,9 @@ func fixtureDir() string {
 	return filepath.Join(dir, "..", "contracts", "harness", "v1", "fixtures")
 }
 
-// twoLayerEntries are the entries the two-layers fixture composes, kind/name to the layer
+// twoModuleEntries are the entries the two-modules fixture composes, kind/name to the module
 // that provides each one.
-var twoLayerEntries = map[string]string{
+var twoModuleEntries = map[string]string{
 	"agents/reviewer":     "core",
 	"commands/ship":       "core",
 	"hooks/guard.sh":      "core",
@@ -137,7 +137,7 @@ func lacks(t *testing.T, out string, unwanted ...string) {
 	}
 }
 
-// entryTable reads the entry rows of a printed table, kind/name to layer. The rows of two
+// entryTable reads the entry rows of a printed table, kind/name to module. The rows of two
 // columns whose first column names a kind and a name are the entries; a field row such as
 // "home  .qory/harness" is not one.
 func entryTable(out string) map[string]string {

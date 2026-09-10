@@ -1,4 +1,0 @@
-{
-  "command": "python3",
-  "args": ["$QORY_HARNESS_HOME/layers/nextjs/scripts/db.py"]
-}

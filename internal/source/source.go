@@ -1,4 +1,4 @@
-// Package source resolves a layer's source to a directory on disk and a pin.
+// Package source resolves a module's source to a directory on disk and a pin.
 //
 // A path source is a directory as it stands, pinned by nothing: its pin is [WorkingTree],
 // and [Resolved.Dirty] says whether git sees uncommitted changes under it. A git source is
@@ -6,10 +6,10 @@
 // commit, and pinned by the commit the ref resolved to. The report carries pin and dirty
 // mark, so a reader of one compose knows what it ran on.
 //
-// [Resolve] joins a relative path onto the profile's directory and checks that the result
-// is a directory, or fetches the git source and returns the layer's directory inside the
-// clone. Whether that directory holds a layer is a question for
-// [github.com/qoryai/qory/internal/layer].
+// [Resolve] joins a relative path onto the stack's directory and checks that the result
+// is a directory, or fetches the git source and returns the module's directory inside the
+// clone. Whether that directory holds a module is a question for
+// [github.com/qoryai/qory/internal/module].
 package source
 
 import (
@@ -25,15 +25,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/qoryai/qory/internal/profile"
+	"github.com/qoryai/qory/internal/stack"
 )
 
 // WorkingTree is the pin of a path source: the directory as it stands, pinned by nothing.
 const WorkingTree = "working-tree"
 
-// Resolved is a layer's directory and how it is pinned.
+// Resolved is a module's directory and how it is pinned.
 type Resolved struct {
-	// Dir is the layer directory: the source path when it is absolute, else baseDir joined
+	// Dir is the module directory: the source path when it is absolute, else baseDir joined
 	// with it; for a git source, the path inside the clone.
 	Dir string
 	// Pin is what the source resolved to, [WorkingTree] for a path source and the commit,
@@ -45,9 +45,9 @@ type Resolved struct {
 
 // FetchError is a git source that could not be fetched: the remote is unreachable, the
 // ref does not exist, or git is not installed. It carries git's own message. The command
-// layer matches it with errors.As, because it is not a mistake in an input file.
+// module matches it with errors.As, because it is not a mistake in an input file.
 type FetchError struct {
-	// Source is the git URL and ref that failed, as the profile writes them.
+	// Source is the git URL and ref that failed, as the stack writes them.
 	Source string
 	// Output is what git printed.
 	Output string
@@ -82,7 +82,7 @@ type Options struct {
 }
 
 // Resolve turns a source into a directory and its pin. A relative path resolves against
-// baseDir, which a caller passes absolute, such as [profile.Profile.Dir].
+// baseDir, which a caller passes absolute, such as [stack.Stack.Dir].
 //
 // A git source is read from the cache. The pin, when given, is the commit this checkout
 // was composed from last time, and it is read again when its clone is there, so the
@@ -96,7 +96,7 @@ type Options struct {
 // caller can match it with errors.Is and os.ErrNotExist. A path that is there but is not a
 // directory gets an error naming the path. A git source that cannot be fetched returns a
 // [*FetchError].
-func Resolve(baseDir string, s profile.Source, opts Options) (Resolved, error) {
+func Resolve(baseDir string, s stack.Source, opts Options) (Resolved, error) {
 	if s.Git != "" {
 		return resolveGit(s, opts)
 	}
@@ -126,14 +126,14 @@ func CacheDir() (string, error) {
 	return filepath.Join(base, "qory", "sources"), nil
 }
 
-// resolveGit finds the commit the ref resolves to, fetches it once, and returns the layer's
+// resolveGit finds the commit the ref resolves to, fetches it once, and returns the module's
 // directory in the clone and the commit as the pin.
 //
 // Clones are kept per commit, never per ref, so a checkout composed from a branch keeps
 // reading the commit it was composed from until its own compose asks for an update. The
 // ref's commit is remembered in refs/<ref> beside the clones; without update, the pin the
 // caller passes answers first, then that file, and no network is used.
-func resolveGit(s profile.Source, opts Options) (Resolved, error) {
+func resolveGit(s stack.Source, opts Options) (Resolved, error) {
 	cache := opts.Cache
 	if cache == "" {
 		var err error
@@ -165,11 +165,11 @@ func resolveGit(s profile.Source, opts Options) (Resolved, error) {
 		}
 	}
 	clone := filepath.Join(dir, commit)
-	layer := clone
+	module := clone
 	if s.Path != "" {
-		layer = filepath.Join(clone, s.Path)
+		module = filepath.Join(clone, s.Path)
 	}
-	info, err := os.Stat(layer)
+	info, err := os.Stat(module)
 	if errors.Is(err, os.ErrNotExist) {
 		return Resolved{}, fmt.Errorf("%s has no %s at %s", s.Git, s.Path, s.Ref)
 	}
@@ -179,9 +179,9 @@ func resolveGit(s profile.Source, opts Options) (Resolved, error) {
 	if !info.IsDir() {
 		return Resolved{}, fmt.Errorf("%s is not a directory in %s at %s", s.Path, s.Git, s.Ref)
 	}
-	// A path inside the clone may be a symlink the repository carries; the layer it names
+	// A path inside the clone may be a symlink the repository carries; the module it names
 	// must still be inside the clone.
-	real, err := filepath.EvalSymlinks(layer)
+	real, err := filepath.EvalSymlinks(module)
 	if err != nil {
 		return Resolved{}, err
 	}
@@ -192,7 +192,7 @@ func resolveGit(s profile.Source, opts Options) (Resolved, error) {
 	if real != base && !strings.HasPrefix(real, base+string(filepath.Separator)) {
 		return Resolved{}, fmt.Errorf("%s in %s at %s links outside the repository", s.Path, s.Git, s.Ref)
 	}
-	return Resolved{Dir: layer, Pin: commit[:12]}, nil
+	return Resolved{Dir: module, Pin: commit[:12]}, nil
 }
 
 // pinned returns the commit of the one complete clone under dir whose id starts with pin,
@@ -231,7 +231,7 @@ func cloned(dir string) bool {
 // ref that resolves to a commit already cloned is fetched, since the commit is known only
 // afterwards, and the clone there is kept. The ref may be a tag, a branch or a commit by
 // its full id, when the remote allows fetching a commit by id.
-func fetch(dir string, s profile.Source, timeout time.Duration) (string, error) {
+func fetch(dir string, s stack.Source, timeout time.Duration) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
@@ -240,7 +240,7 @@ func fetch(dir string, s profile.Source, timeout time.Duration) (string, error) 
 		return "", err
 	}
 	defer os.RemoveAll(tmp)
-	// The URL and the ref come from the profile, which a repository carries, so both go
+	// The URL and the ref come from the stack, which a repository carries, so both go
 	// after "--": a ref written as an option, --upload-pack=<command> say, is then a ref
 	// git cannot find and not a command git runs.
 	steps := [][]string{

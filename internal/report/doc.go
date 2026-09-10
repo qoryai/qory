@@ -1,5 +1,5 @@
-// Package report is the JSON record of one compose: every layer with its pin, every entry
-// with its layer.
+// Package report is the JSON record of one compose: every module with its pin, every entry
+// with its module.
 //
 // [New] builds a [Report] from a [compose.Result], [Write] stores it as JSON,
 // [Read] loads a stored one and [Report.Print] renders it for a person, which is what
@@ -21,12 +21,12 @@
 // it does not read. [Read] does neither: it decodes any JSON carrying these names, and a
 // caller that cares compares the version itself.
 //
-// A reader may also rely on the shape. Layers are in profile order, entries are sorted by
-// kind then name, and excludes are in layer order. Layers, Entries and Excludes are always
+// A reader may also rely on the shape. Modules are in stack order, entries are sorted by
+// kind then name, and excludes are in module order. Modules, Entries and Excludes are always
 // arrays, empty rather than absent. Every other field marked omitempty is absent when unset,
 // so a reader treats absent as the zero value. The file, checkout and home fields are
-// absolute paths on the machine that composed; a layer's source is the profile's own text,
-// which for a path source is relative to the profile file.
+// absolute paths on the machine that composed; a module's source is the stack's own text,
+// which for a path source is relative to the stack file.
 //
 // The report records what was composed, not what a runtime reads. It names no rendered file
 // and holds no merged settings.

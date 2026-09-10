@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/qoryai/qory/internal/profile"
 	"github.com/qoryai/qory/internal/source"
+	"github.com/qoryai/qory/internal/stack"
 )
 
-// remote makes a repository with a layer under layers/core, a tag v1 on its first commit,
+// remote makes a repository with a module under modules/core, a tag v1 on its first commit,
 // and returns its file:// URL and the two commits' full ids. HOME points at a temporary
 // directory, so the cache lands under the test and nothing reaches the machine's own.
 func remote(t *testing.T) (url, first, second string) {
@@ -24,12 +24,12 @@ func remote(t *testing.T) (url, first, second string) {
 	run(t, dir, "init", "-q", "-b", "main")
 	run(t, dir, "config", "user.name", "Test User")
 	run(t, dir, "config", "user.email", "test@example.com")
-	write(t, filepath.Join(dir, "layers", "core", "AGENTS.md"), "# Core v1\n")
+	write(t, filepath.Join(dir, "modules", "core", "AGENTS.md"), "# Core v1\n")
 	run(t, dir, "add", "-A")
 	run(t, dir, "commit", "-q", "-m", "first")
 	run(t, dir, "tag", "v1")
 	first = head(t, dir)
-	write(t, filepath.Join(dir, "layers", "core", "AGENTS.md"), "# Core v2\n")
+	write(t, filepath.Join(dir, "modules", "core", "AGENTS.md"), "# Core v2\n")
 	run(t, dir, "commit", "-q", "-am", "second")
 	second = head(t, dir)
 	// A shallow fetch of a commit needs the server to allow it; a file remote does.
@@ -50,10 +50,10 @@ func head(t *testing.T, dir string) string {
 func short(id string) string { return id[:12] }
 
 // TestResolveGitPinsTheRefToItsCommit fetches a tag and reports the commit as the pin, with
-// the layer's directory inside the clone.
+// the module's directory inside the clone.
 func TestResolveGitPinsTheRefToItsCommit(t *testing.T) {
 	url, first, _ := remote(t)
-	src := profile.Source{Git: url, Ref: "v1", Path: "layers/core"}
+	src := stack.Source{Git: url, Ref: "v1", Path: "modules/core"}
 	got, err := source.Resolve("/nowhere", src, source.Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -63,14 +63,14 @@ func TestResolveGitPinsTheRefToItsCommit(t *testing.T) {
 	}
 	data, err := os.ReadFile(filepath.Join(got.Dir, "AGENTS.md"))
 	if err != nil || string(data) != "# Core v1\n" {
-		t.Errorf("layer at %s reads %q (%v)", got.Dir, data, err)
+		t.Errorf("module at %s reads %q (%v)", got.Dir, data, err)
 	}
 	cache, _ := source.CacheDir()
 	if !strings.HasPrefix(got.Dir, cache) {
 		t.Errorf("clone %s is not under the cache %s", got.Dir, cache)
 	}
 	rel, _ := filepath.Rel(cache, got.Dir)
-	if parts := strings.Split(rel, string(filepath.Separator)); len(parts) != 4 || parts[1] != first || parts[2] != "layers" || parts[3] != "core" {
+	if parts := strings.Split(rel, string(filepath.Separator)); len(parts) != 4 || parts[1] != first || parts[2] != "modules" || parts[3] != "core" {
 		t.Errorf("clone %s is not <cache>/<url>/<commit>/<path>", got.Dir)
 	}
 }
@@ -80,7 +80,7 @@ func TestResolveGitPinsTheRefToItsCommit(t *testing.T) {
 func TestResolveGitReadsTheCacheUntilUpdate(t *testing.T) {
 	url, first, second := remote(t)
 	dir := strings.TrimPrefix(url, "file://")
-	src := profile.Source{Git: url, Ref: "main", Path: "layers/core"}
+	src := stack.Source{Git: url, Ref: "main", Path: "modules/core"}
 	got, err := source.Resolve("/nowhere", src, source.Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -130,25 +130,25 @@ func TestResolveGitReadsTheCacheUntilUpdate(t *testing.T) {
 // TestResolveGitFetchesACommit pins a source by the commit itself.
 func TestResolveGitFetchesACommit(t *testing.T) {
 	url, first, _ := remote(t)
-	got, err := source.Resolve("/nowhere", profile.Source{Git: url, Ref: first}, source.Options{})
+	got, err := source.Resolve("/nowhere", stack.Source{Git: url, Ref: first}, source.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Pin != short(first) {
 		t.Errorf("pin %q, want %s", got.Pin, short(first))
 	}
-	if _, err := os.Stat(filepath.Join(got.Dir, "layers", "core", "AGENTS.md")); err != nil {
-		t.Errorf("clone root is not the layer: %v", err)
+	if _, err := os.Stat(filepath.Join(got.Dir, "modules", "core", "AGENTS.md")); err != nil {
+		t.Errorf("clone root is not the module: %v", err)
 	}
 }
 
 // TestResolveGitRefuses covers a ref the remote does not have, a path the repository does
 // not hold, and a remote that is not there, and checks that a failed fetch leaves no clone
-// behind to be read as an empty layer next time.
+// behind to be read as an empty module next time.
 func TestResolveGitRefuses(t *testing.T) {
 	url, _, _ := remote(t)
 	var fetch *source.FetchError
-	_, err := source.Resolve("/nowhere", profile.Source{Git: url, Ref: "v9"}, source.Options{})
+	_, err := source.Resolve("/nowhere", stack.Source{Git: url, Ref: "v9"}, source.Options{})
 	if !errors.As(err, &fetch) || !strings.HasPrefix(err.Error(), "fetching "+url+"#v9: ") {
 		t.Errorf("missing ref: %v", err)
 	}
@@ -165,24 +165,24 @@ func TestResolveGitRefuses(t *testing.T) {
 			t.Errorf("a failed fetch left %v in the cache", left)
 		}
 	}
-	_, err = source.Resolve("/nowhere", profile.Source{Git: url, Ref: "v1", Path: "layers/nope"}, source.Options{})
-	if err == nil || errors.As(err, &fetch) || !strings.Contains(err.Error(), "has no layers/nope at v1") {
+	_, err = source.Resolve("/nowhere", stack.Source{Git: url, Ref: "v1", Path: "modules/nope"}, source.Options{})
+	if err == nil || errors.As(err, &fetch) || !strings.Contains(err.Error(), "has no modules/nope at v1") {
 		t.Errorf("missing path: %v", err)
 	}
-	_, err = source.Resolve("/nowhere", profile.Source{Git: "file:///nowhere/at/all", Ref: "v1"}, source.Options{})
+	_, err = source.Resolve("/nowhere", stack.Source{Git: "file:///nowhere/at/all", Ref: "v1"}, source.Options{})
 	if !errors.As(err, &fetch) {
 		t.Errorf("missing remote: %v", err)
 	}
 }
 
-// TestResolveGitTakesTheRefAsARef is a profile a repository carries: a ref written as a git
+// TestResolveGitTakesTheRefAsARef is a stack a repository carries: a ref written as a git
 // option is a ref git cannot find, never an option git acts on, and -q is not --quiet.
 func TestResolveGitTakesTheRefAsARef(t *testing.T) {
 	url, _, _ := remote(t)
 	marker := filepath.Join(t.TempDir(), "ran")
 	var fetch *source.FetchError
 	for _, ref := range []string{"--upload-pack=touch " + marker + " #", "-q"} {
-		_, err := source.Resolve("/nowhere", profile.Source{Git: url, Ref: ref}, source.Options{})
+		_, err := source.Resolve("/nowhere", stack.Source{Git: url, Ref: ref}, source.Options{})
 		if !errors.As(err, &fetch) {
 			t.Errorf("ref %q: err = %v, want a FetchError", ref, err)
 		}
@@ -197,7 +197,7 @@ func TestResolveGitTakesTheRefAsARef(t *testing.T) {
 func TestResolveGitKeepsTheCheckoutsPin(t *testing.T) {
 	url, first, second := remote(t)
 	dir := strings.TrimPrefix(url, "file://")
-	src := profile.Source{Git: url, Ref: "main"}
+	src := stack.Source{Git: url, Ref: "main"}
 	run(t, dir, "reset", "-q", "--hard", "v1")
 	a, err := source.Resolve("/nowhere", src, source.Options{})
 	if err != nil || a.Pin != short(first) {
@@ -226,7 +226,7 @@ func TestResolveGitKeepsTheCheckoutsPin(t *testing.T) {
 // moment: every one gets the commit, and the cache holds one clone.
 func TestResolveGitFetchesOnceForManyComposes(t *testing.T) {
 	url, _, second := remote(t)
-	src := profile.Source{Git: url, Ref: "main", Path: "layers/core"}
+	src := stack.Source{Git: url, Ref: "main", Path: "modules/core"}
 	results := make(chan error, 6)
 	for i := 0; i < 6; i++ {
 		go func() {
@@ -257,17 +257,17 @@ func TestResolveGitFetchesOnceForManyComposes(t *testing.T) {
 	}
 }
 
-// TestResolveGitRefusesAPathThatLeavesTheClone is a repository whose layers/link is a
-// symlink out of the repository: the layer is refused.
+// TestResolveGitRefusesAPathThatLeavesTheClone is a repository whose modules/link is a
+// symlink out of the repository: the module is refused.
 func TestResolveGitRefusesAPathThatLeavesTheClone(t *testing.T) {
 	url, _, _ := remote(t)
 	dir := strings.TrimPrefix(url, "file://")
-	if err := os.Symlink("/", filepath.Join(dir, "layers", "link")); err != nil {
+	if err := os.Symlink("/", filepath.Join(dir, "modules", "link")); err != nil {
 		t.Fatal(err)
 	}
 	run(t, dir, "add", "-A")
 	run(t, dir, "commit", "-q", "-m", "link")
-	_, err := source.Resolve("/nowhere", profile.Source{Git: url, Ref: "main", Path: "layers/link"}, source.Options{})
+	_, err := source.Resolve("/nowhere", stack.Source{Git: url, Ref: "main", Path: "modules/link"}, source.Options{})
 	if err == nil || !strings.Contains(err.Error(), "links outside the repository") {
 		t.Errorf("err = %v", err)
 	}
@@ -277,7 +277,7 @@ func TestResolveGitRefusesAPathThatLeavesTheClone(t *testing.T) {
 // stopped, and the error is a FetchError that names the time given.
 func TestResolveStopsAGitCommandAtTheTimeout(t *testing.T) {
 	url, _, _ := remote(t)
-	_, err := source.Resolve("/nowhere", profile.Source{Git: url, Ref: "v1"}, source.Options{Timeout: time.Nanosecond})
+	_, err := source.Resolve("/nowhere", stack.Source{Git: url, Ref: "v1"}, source.Options{Timeout: time.Nanosecond})
 	var fetch *source.FetchError
 	if !errors.As(err, &fetch) || !strings.Contains(err.Error(), "ran past 1ns and was stopped") {
 		t.Fatalf("err = %v, want a FetchError naming the timeout", err)

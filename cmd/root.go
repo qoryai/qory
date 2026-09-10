@@ -23,8 +23,8 @@ var Version = "dev"
 func Root() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "qory",
-		Short: "Compose the harness a runtime loads from layers",
-		Long: `Compose the harness a runtime loads from layers, for Claude Code, Codex, Gemini CLI,
+		Short: "Compose the harness a runtime loads from modules",
+		Long: `Compose the harness a runtime loads from modules, for Claude Code, Codex, Gemini CLI,
 OpenCode, Cursor, Copilot CLI, Amp, Goose, and any tool that reads AGENTS.md.
 
 Shortcuts:

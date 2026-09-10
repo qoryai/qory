@@ -1,8 +1,8 @@
 // Package render writes a composed harness into a checkout the way one runtime reads it.
 //
 // A [Runtime] renders for one program that runs the harness, such as Claude Code or Codex
-// CLI, and its Name is the profile's target.runtime value. Each runtime is a package
-// under internal/render that calls [Register] from its init, so the command layer decides
+// CLI, and its Name is the stack's target.runtime value. Each runtime is a package
+// under internal/render that calls [Register] from its init, so the command module decides
 // which runtimes a binary knows by importing them for their side effect alone:
 //
 //	import _ "github.com/qoryai/qory/internal/render/claude"
@@ -15,8 +15,8 @@
 // The home is the composed tree at .qory/harness inside the checkout. [Build] writes it
 // in one step that either lands whole or leaves the previous home untouched: it stages
 // the tree in a sibling directory, home with ".tmp" appended, puts the parts every
-// runtime shares at its root, AGENTS.md, skills/, hooks/ and one layers/<name> link per
-// layer to the layer's own directory, calls the runtime's Render for a subdirectory named
+// runtime shares at its root, AGENTS.md, skills/, hooks/ and one modules/<name> link per
+// module to the module's own directory, calls the runtime's Render for a subdirectory named
 // after the runtime, then removes the old home and renames the staging directory over it.
 // Render is handed both paths because the two differ while it runs: it writes files into
 // the staging directory, and a settings file it writes names the home, the path the
@@ -72,4 +72,23 @@
 //
 // A runtime must return its full set of links from a nil [compose.Result], because
 // [Unlink] runs without a compose.
+//
+// # Files
+//
+// A files entry is a file a module ships as it is, named <runtime>/<path> after its place
+// in the module, files/<runtime>/<path>. Build links it at <path> under the runtime's
+// directory in the home once Render has written the runtime's own files, so a runtime
+// whose directory is linked whole reaches it through that link: .claude/rules becomes a
+// directory link like .claude/skills, and .claude/rules/nextjs-15.md resolves through it.
+// Copilot, whose .github is the repository's, adds one soft link per file to its Links.
+// A runtime with no directory in the checkout, goose and any, names the files kind in
+// its Skips, and [Skipped] lists a files entry only for the runtime it names.
+//
+// Every runtime reserves the paths under its directory that a files entry may not take,
+// [Runtime.Reserved]: the files Render writes, the files the program reads as its own
+// settings, which a settings fragment sets, and the kind directories. [CheckFiles]
+// refuses a files entry at a reserved path, or one whose runtime segment names no
+// registered runtime, for every runtime in the result and not only the target, and the
+// command module runs it right after the compose. [FileFor] is the check a runtime makes
+// for an entry of its own.
 package render

@@ -220,22 +220,22 @@ func TestForceReplacesWhatGitCanRestore(t *testing.T) {
 	}
 }
 
-// TestBuildLinksEveryLayer is what a hook or a server reaches through
-// $QORY_HARNESS_HOME/layers/<name>: the layer's own directory, whole.
-func TestBuildLinksEveryLayer(t *testing.T) {
+// TestBuildLinksEveryModule is what a hook or a server reaches through
+// $QORY_HARNESS_HOME/modules/<name>: the module's own directory, whole.
+func TestBuildLinksEveryModule(t *testing.T) {
 	res, _, home := composeFixture(t, "claude")
 	if err := render.Build(res, home, lookup(t, "claude")); err != nil {
 		t.Fatal(err)
 	}
-	for _, l := range res.Layers {
-		path := filepath.Join(home, "layers", l.Name)
+	for _, l := range res.Modules {
+		path := filepath.Join(home, "modules", l.Name)
 		target, err := os.Readlink(path)
 		if err != nil || target != l.Dir {
-			t.Errorf("layers/%s links to %q (%v), want %s", l.Name, target, err, l.Dir)
+			t.Errorf("modules/%s links to %q (%v), want %s", l.Name, target, err, l.Dir)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(home, "layers", "core", "scripts", "db.py")); err != nil {
-		t.Errorf("a layer's own file is not reachable: %v", err)
+	if _, err := os.Stat(filepath.Join(home, "modules", "core", "scripts", "db.py")); err != nil {
+		t.Errorf("a module's own file is not reachable: %v", err)
 	}
 }
 
@@ -348,7 +348,7 @@ func TestUnlinkTakesTheLinksAfterTheQoryDirectoryIsGone(t *testing.T) {
 // TestUnlinkTakesTheExcludeLinesWithTheLinks is remove --runtime in a checkout composed
 // for two runtimes: the removed runtime's lines leave the exclude file, the lines of the
 // links the other runtime keeps stay, and so does a line the person wrote by hand, byte
-// for byte. The qory directory's own line goes on the command layer's word.
+// for byte. The qory directory's own line goes on the command module's word.
 func TestUnlinkTakesTheExcludeLinesWithTheLinks(t *testing.T) {
 	res, root, home := composeFixture(t, "codex", "opencode")
 	codex, opencode := lookup(t, "codex"), lookup(t, "opencode")

@@ -15,10 +15,10 @@ import (
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/config"
-	"github.com/qoryai/qory/internal/profile"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
 	"github.com/qoryai/qory/internal/source"
+	"github.com/qoryai/qory/internal/stack"
 	"github.com/qoryai/qory/internal/ui"
 
 	// Blank imports for their side effect: each runtime package registers itself with the
@@ -102,15 +102,15 @@ func locate() (places, error) {
 // newCompose builds the compose verb under the given name and aliases.
 //
 // The order of the run matters and is this: locate the checkout, read the configuration,
-// discover or load the profile, apply the configuration's runtime and model and then the
+// discover or load the stack, apply the configuration's runtime and model and then the
 // --runtime and --model flags on top of it, look the runtime up before doing any work so
 // an unknown name fails early, print the title, compose, and only then touch the disk.
-// Nothing is written before the compose succeeds, so a collision or an unreadable layer
+// Nothing is written before the compose succeeds, so a collision or an unreadable module
 // leaves the checkout exactly as it was.
 //
 // Writing is four steps in a fixed order: [render.Build] renders the home tree,
-// [render.LinkInto] links it into the checkout, [render.LinkLayers] writes the layer
-// links the profile names, and [report.Write] records what happened. The report is
+// [render.LinkInto] links it into the checkout, [render.LinkModules] writes the module
+// links the stack names, and [report.Write] records what happened. The report is
 // written last, so a report on disk means a compose went through; the one exception is a
 // link step that failed after replacing a file, which writes the report so that remove
 // still knows what to restore. A --dry-run stops after the report is built and prints it
@@ -124,7 +124,7 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 	c := &cobra.Command{
 		Use:     use,
 		Aliases: aliases,
-		Short:   "Compose the profile's layers into the checkout you stand in",
+		Short:   "Compose the stack's modules into the checkout you stand in",
 		Args:    noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			at, err := locate()
@@ -132,15 +132,15 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 				return err
 			}
 			if file == "" {
-				if file, err = profile.Discover(at.root); err != nil {
+				if file, err = stack.Discover(at.root); err != nil {
 					return input(err)
 				}
 			}
-			p, err := profile.Load(file)
+			p, err := stack.Load(file)
 			if err != nil {
 				return input(err)
 			}
-			// A profile that extends a closed base takes its target from the base, and
+			// A compose file takes its target from the closed base it extends, and
 			// the checkout's own qory.yaml is not read: the runner's configuration is
 			// the only one, so the checkout's authors cannot pick another runtime.
 			extends := p.Extends.Path != "" || p.Extends.Git != ""
@@ -154,12 +154,12 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 			if !cmd.Flags().Changed("update") {
 				update = conf.Update
 			}
-			// The last report pins each git layer, and the base, to the commit it was
+			// The last report pins each git module, and the base, to the commit it was
 			// composed from, so a compose without --update stays there as long as the
-			// profile still names the same source: an edited ref resolves anew.
+			// stack still names the same source: an edited ref resolves anew.
 			previous, _ := report.Read(at.report)
 			pins := map[string]string{}
-			for _, l := range previous.Layers {
+			for _, l := range previous.Modules {
 				if l.Pin != source.WorkingTree {
 					pins[l.Source] = l.Pin
 				}
@@ -201,6 +201,9 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 				return reported(err)
 			case err != nil:
 				return composeError(err)
+			}
+			if err := render.CheckFiles(res); err != nil {
+				return input(err)
 			}
 			rep := report.New(res, name, at.root, at.home)
 			if dryRun {
@@ -262,13 +265,13 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 				}
 			}
 			var previousLinks []string
-			for _, l := range previous.Layers {
+			for _, l := range previous.Modules {
 				if l.Link != "" {
 					previousLinks = append(previousLinks, l.Link)
 				}
 			}
-			layerLinks, err := render.LinkLayers(res, at.root, at.home, previousLinks, force)
-			if err := record(layerLinks, err); err != nil {
+			moduleLinks, err := render.LinkModules(res, at.root, at.home, previousLinks, force)
+			if err := record(moduleLinks, err); err != nil {
 				return composeError(err)
 			}
 			if err := report.Write(at.report, rep); err != nil {
@@ -277,11 +280,11 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 			if verbose {
 				var rows [][]string
 				for _, e := range rep.Entries {
-					rows = append(rows, []string{e.Kind + "/" + e.Name, e.Layer})
+					rows = append(rows, []string{e.Kind + "/" + e.Name, e.Module})
 				}
 				u.Table(rows)
 			}
-			u.Success("composed %s from %s %s", count(len(rep.Entries), "entry", "entries"), count(len(rep.Layers), "layer", "layers"), ui.Pot)
+			u.Success("composed %s from %s %s", count(len(rep.Entries), "entry", "entries"), count(len(rep.Modules), "module", "modules"), ui.Pot)
 			rows := [][2]string{{"home", ui.Short(at.home, at.root)}}
 			for _, rt := range all {
 				var links []string
@@ -306,21 +309,26 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 					rows = append(rows, [2]string{"skipped", s + "  (no place in " + rt.Name() + ")"})
 				}
 			}
-			for _, l := range res.Layers {
+			// A qory.yaml at the checkout root is not read under extends, and a row says
+			// so, so the person who wrote it learns that the base stack decides.
+			if _, err := os.Stat(filepath.Join(at.root, config.FileName)); extends && err == nil {
+				rows = append(rows, [2]string{"skipped", config.FileName + "  (the base stack decides; not read under extends)"})
+			}
+			for _, l := range res.Modules {
 				if l.Link == "" {
 					continue
 				}
-				if slices.Contains(layerLinks.Replaced, l.Link) {
+				if slices.Contains(moduleLinks.Replaced, l.Link) {
 					rows = append(rows, [2]string{"replaced", l.Link + "  (the checkout's own; git checkout -- restores it)"})
 					continue
 				}
-				rows = append(rows, [2]string{"link", l.Link + "  (layer " + l.Name + ")"})
+				rows = append(rows, [2]string{"link", l.Link + "  (module " + l.Name + ")"})
 			}
 			u.Fields(rows)
 			return nil
 		},
 	}
-	c.Flags().StringVarP(&file, "file", "f", "", "the profile to read instead of discovering one")
+	c.Flags().StringVarP(&file, "file", "f", "", "the qory-stack.yaml or qory-compose.yaml to read instead of discovering one")
 	c.Flags().StringVar(&runtime, "runtime", "", "render for these runtimes instead of target.runtime, comma separated ("+strings.Join(render.Names(), ", ")+"; qory.yaml: runtime)")
 	c.Flags().StringVar(&model, "model", "", "write this model instead of target.model (qory.yaml: model)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the report and write nothing")
@@ -331,11 +339,11 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 }
 
 // applyTarget puts the configuration's runtime and model, then the --runtime and --model
-// flags, over the profile's target, and checks the result. Under a base profile the
+// flags, over the stack's target, and checks the result. Under a base stack the
 // target is the base's: a runtime not among the base's is an input error, and a model
 // from anywhere but the base is one too, since the base's fragments and hooks exist for
 // its target and the runner is the base's owner's.
-func applyTarget(p *profile.Profile, base *compose.Base, conf config.Config, runtime, model string) error {
+func applyTarget(p *stack.Stack, base *compose.Base, conf config.Config, runtime, model string) error {
 	want := p.Target
 	if conf.Runtime != nil {
 		want.Runtimes = conf.Runtime
@@ -344,7 +352,7 @@ func applyTarget(p *profile.Profile, base *compose.Base, conf config.Config, run
 		want.Model = conf.Model
 	}
 	if runtime != "" {
-		want.Runtimes = profile.Runtimes(strings.Split(runtime, ","))
+		want.Runtimes = stack.Runtimes(strings.Split(runtime, ","))
 		for i, r := range want.Runtimes {
 			want.Runtimes[i] = strings.TrimSpace(r)
 		}
@@ -358,11 +366,11 @@ func applyTarget(p *profile.Profile, base *compose.Base, conf config.Config, run
 	if base != nil {
 		for _, r := range want.Runtimes {
 			if !slices.Contains(p.Target.Runtimes, r) {
-				return fmt.Errorf("runtime %s is not one the base profile %s renders for; runtimes: %s", r, base, p.Target.Runtimes)
+				return fmt.Errorf("runtime %s is not one the base stack %s renders for; runtimes: %s", r, base, p.Target.Runtimes)
 			}
 		}
 		if want.Model != p.Target.Model {
-			return fmt.Errorf("the model is the base profile %s's, %s; nothing else sets it", base, p.Target.Model)
+			return fmt.Errorf("the model is the base stack %s's, %s; nothing else sets it", base, p.Target.Model)
 		}
 	}
 	p.Target = want
@@ -371,7 +379,7 @@ func applyTarget(p *profile.Profile, base *compose.Base, conf config.Config, run
 
 // composeError classifies what a compose returned: a git source that could not be fetched
 // and a file the operating system would not read are failures of the machine, left as
-// they are; everything else is a mistake in the profile or a layer, an input error.
+// they are; everything else is a mistake in the stack or a module, an input error.
 func composeError(err error) error {
 	var fetch *source.FetchError
 	var pathErr *fs.PathError
@@ -383,8 +391,8 @@ func composeError(err error) error {
 
 // ErrReported marks an error a command has already printed itself, with more detail than
 // a single line could carry. The main package matches it with errors.Is and prints nothing
-// further. A collision is the one case today: [printCollision] shows the layers involved
-// and the profile lines that resolve it, and the command returns the collision wrapped so
+// further. A collision is the one case today: [printCollision] shows the modules involved
+// and the stack lines that resolve it, and the command returns the collision wrapped so
 // that [ExitCode] still sees it.
 var ErrReported = errors.New("reported")
 
@@ -410,7 +418,7 @@ func reported(err error) error {
 }
 
 // inputError wraps an error in what the person handed the command: the command line, the
-// profile, a layer, a fragment. [ExitCode] gives it its own status.
+// stack, a module, a fragment. [ExitCode] gives it its own status.
 type inputError struct{ err error }
 
 // Error is the wrapped error's text.
@@ -433,9 +441,9 @@ func input(err error) error {
 // else from all three.
 const (
 	// ExitInput is a mistake in the command line or an input file: a flag or an argument
-	// that does not exist, a profile, a layer or a fragment that does not read.
+	// that does not exist, a stack, a module or a fragment that does not read.
 	ExitInput = 2
-	// ExitCollision is a compose refused because two layers ship the same entry.
+	// ExitCollision is a compose refused because two modules ship the same entry.
 	ExitCollision = 3
 	// ExitForeign is a path qory would not replace or remove, because it did not write it.
 	ExitForeign = 4
@@ -465,28 +473,28 @@ func ExitCode(err error) int {
 	}
 }
 
-// printCollision prints what happened, the layers involved, and the profile lines that
-// resolve it by keeping the last layer that ships each entry.
+// printCollision prints what happened, the modules involved, and the stack lines that
+// resolve it by keeping the last module that ships each entry.
 func printCollision(u *ui.UI, e *compose.CollisionError) {
 	for _, c := range e.Collisions {
-		u.Fail(fmt.Errorf("%s/%s is provided by %d layers", c.Kind, c.Name, len(c.Layers)))
+		u.Fail(fmt.Errorf("%s/%s is provided by %d modules", c.Kind, c.Name, len(c.Modules)))
 		var rows [][]string
-		for _, l := range c.Layers {
+		for _, l := range c.Modules {
 			rows = append(rows, []string{l, e.Sources[l], e.Pins[l]})
 		}
 		u.Table(rows)
 		if c.Base != "" {
-			u.Text("It belongs to the base profile " + c.Base + "; rename yours.")
+			u.Text("It belongs to the base stack " + c.Base + "; rename yours.")
 		}
 	}
-	layers, excludes := e.Suggest(e.Order)
-	if len(layers) == 0 {
+	modules, excludes := e.Suggest(e.Order)
+	if len(modules) == 0 {
 		return
 	}
 	u.Blank()
 	u.Heading("Fix")
-	u.Text("Keep one and exclude it from the others. For example, in harness-compose.yaml:")
-	for _, l := range layers {
+	u.Text("Keep one and exclude it from the others. For example, in qory-stack.yaml:")
+	for _, l := range modules {
 		u.Blank()
 		u.Code("- name: "+l, "  ...", "  exclude:")
 		var kinds []string
@@ -502,7 +510,7 @@ func printCollision(u *ui.UI, e *compose.CollisionError) {
 
 // newInspect builds the inspect verb, which reads the report of the last compose and
 // prints it. It reads nothing but the report, so it reports the harness as it was composed,
-// not the layers as they are now, and it refuses a report of a version it does not read.
+// not the modules as they are now, and it refuses a report of a version it does not read.
 func newInspect(use string, aliases ...string) *cobra.Command {
 	return &cobra.Command{
 		Use:     use,
@@ -530,7 +538,7 @@ func newInspect(use string, aliases ...string) *cobra.Command {
 }
 
 // newRemove builds the remove verb. It unlinks for every registered runtime, not only the
-// one the profile targets, because a checkout may have been composed for several runtimes
+// one the stack targets, because a checkout may have been composed for several runtimes
 // in turn, and then removes the whole .qory directory. With --runtime it unlinks that
 // runtime alone and drops its directory from the home, leaving the rest composed, unless
 // it was the last one. Unlinking touches only links this tool wrote and pointed into
@@ -552,7 +560,7 @@ func newRemove(use string, aliases ...string) *cobra.Command {
 			}
 			u := ui.New(cmd.OutOrStdout())
 			rep, _ := report.Read(at.report)
-			name := rep.Profile
+			name := rep.Stack
 			if name == "" {
 				name = checkout.RepoKey(at.root)
 			}
@@ -577,7 +585,7 @@ func newRemove(use string, aliases ...string) *cobra.Command {
 					unlinkErr = err
 				}
 			}
-			removed, err := render.UnlinkLayerLinks(at.root)
+			removed, err := render.UnlinkModuleLinks(at.root)
 			removedAny = append(removedAny, removed...)
 			for _, path := range removed {
 				u.Success("removed %s", path)
@@ -631,7 +639,7 @@ func removeRuntime(u *ui.UI, at places, rt render.Runtime) error {
 		return nil
 	}
 	if len(others) == 0 {
-		gone, err := render.UnlinkLayerLinks(at.root)
+		gone, err := render.UnlinkModuleLinks(at.root)
 		for _, path := range gone {
 			u.Success("removed %s", path)
 		}
@@ -710,7 +718,7 @@ func restoreHint(u *ui.UI, root string, replaced []string) {
 	u.Code(command)
 }
 
-// count is "1 layer" and "2 layers", because a message that reads wrong makes a person
+// count is "1 module" and "2 modules", because a message that reads wrong makes a person
 // doubt the number too.
 func count(n int, one, many string) string {
 	if n == 1 {

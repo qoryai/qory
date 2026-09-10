@@ -1,6 +1,6 @@
 ## qory harness init
 
-Write the hello example into the current directory: a profile and two layers
+Write the hello example into the current directory: a stack and two modules
 
 ```
 qory harness init [flags]

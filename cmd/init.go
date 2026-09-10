@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/qoryai/qory/internal/profile"
+	"github.com/qoryai/qory/internal/stack"
 	"github.com/qoryai/qory/internal/ui"
 	"github.com/qoryai/qory/internal/user"
 )
@@ -27,7 +27,7 @@ func newInit(use string, aliases ...string) *cobra.Command {
 	return &cobra.Command{
 		Use:     use,
 		Aliases: aliases,
-		Short:   "Write the hello example into the current directory: a profile and two layers",
+		Short:   "Write the hello example into the current directory: a stack and two modules",
 		Args:    noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := os.Getwd()
@@ -36,8 +36,8 @@ func newInit(use string, aliases ...string) *cobra.Command {
 			}
 			u := ui.New(cmd.OutOrStdout())
 			u.Title(filepath.Base(dir))
-			if _, err := os.Stat(filepath.Join(dir, profile.FileName)); err == nil {
-				return input(fmt.Errorf("%s already has a %s; qory does not overwrite it", dir, profile.FileName))
+			if _, err := os.Stat(filepath.Join(dir, stack.FileName)); err == nil {
+				return input(fmt.Errorf("%s already has a %s; qory does not overwrite it", dir, stack.FileName))
 			}
 			if existing, err := standing(dir); err != nil {
 				return err

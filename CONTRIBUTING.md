@@ -12,7 +12,7 @@ Everywhere. Three kinds are the most useful:
   hundred lines. Add a row to the runtimes table in `contracts/harness/v1/README.md` and a
   line in the runtime test. A runtime that changes what it reads is a fix to its package.
 - **The contract.** The harness compose format under `contracts/harness/v1/`, its schemas
-  and its fixtures. A layer follows the contract and lives in your own repository; nothing
+  and its fixtures. A module follows the contract and lives in your own repository; nothing
   in this one has to change for it.
 - **The `qory` command** and the compose rules.
 
@@ -56,8 +56,8 @@ go run github.com/mgechev/revive@v1.16.0 -config revive.toml ./...
 ```
 
 A change to the compose format starts with a fixture. Each fixture directory holds a
-`harness-compose.yaml`, its layers under `layers/`, and under `expected/` either
-`entries.txt` (one `kind/name layer` line per composed entry, with `AGENTS.md` beside it
+`qory-stack.yaml`, its modules under `modules/`, and under `expected/` either
+`entries.txt` (one `kind/name module` line per composed entry, with `AGENTS.md` beside it
 and a merged settings file at `settings/<runtime>/<file>.json`, a TOML target as
 `<file>.toml.json`, when the fixture exercises them) or `error.txt` (the exact error text).
 The test suite runs every fixture and validates every document against the schemas, so the
@@ -75,7 +75,7 @@ Every package and every exported name carries a doc comment, and CI fails withou
 conventions, beyond what `revive` can check:
 
 - The first sentence starts with the name and is a complete sentence: `Compose reads ...`,
-  `Profile is ...`. A package comment starts `Package x `.
+  `Stack is ...`. A package comment starts `Package x `.
 - A package comment says what the package owns, the words it defines, how a caller uses it,
   and the invariants a caller must not break. It goes in `doc.go` when it runs past about
   eight lines.
@@ -86,13 +86,14 @@ conventions, beyond what `revive` can check:
   does.
 - Say what the code does, including what it refuses, what it overwrites, what it leaves
   behind, and which errors a caller matches with `errors.Is` or `errors.As`.
-- Link identifiers as `[Profile]`, `[profile.Load]`. Indent code blocks with a tab, write
+- Link identifiers as `[Stack]`, `[stack.Load]`. Indent code blocks with a tab, write
   lists as two spaces and a dash, and wrap at 90 columns.
 
 One vocabulary, no synonyms: **runtime** is the program that runs the harness, such as
-Claude Code; **profile** is the compose file; **configuration** is `qory.yaml`;
-**manifest** is `harness-layer.yaml`; **base** is the profile an extending profile
-extends; **layer**, **source**, **entry**, **kind**, **variant**, **exclude**,
+Claude Code; **stack** is `qory-stack.yaml`, the ordered modules and the target for one kind
+of work; **compose file** is `qory-compose.yaml`, the checkout's document that names the
+stack it extends and the modules it appends; **configuration** is `qory.yaml`;
+**manifest** is `qory-module.yaml`; **base** is the stack a compose file extends; **module**, **source**, **entry**, **kind**, **variant**, **exclude**,
 **collision**, **home**, **checkout**, **link**, **pin** and **report** mean what
 `contracts/harness/v1/README.md` says they mean. A runtime is never a provider, a tool or a vendor; a configuration is
 never a setting file or a preference.

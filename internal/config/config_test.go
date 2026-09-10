@@ -25,7 +25,7 @@ func write(t *testing.T, path, body string) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte("apiVersion: qory.ai/v1alpha1\nkind: QoryConfig\n"+body), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("apiVersion: qory.ai/v1alpha1\n"+body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -47,7 +47,7 @@ func TestLoadWithoutAFileIsTheDefaults(t *testing.T) {
 		}
 	}
 	rows := c.Rows()
-	if rows[0].Value != "(profile)" || rows[3].Value != "never" || rows[4].Value != "10m0s" {
+	if rows[0].Value != "(stack)" || rows[3].Value != "never" || rows[4].Value != "10m0s" {
 		t.Errorf("rows: %+v", rows)
 	}
 }
@@ -96,7 +96,7 @@ func TestNearerFilesWin(t *testing.T) {
 func TestLoadRefusesAMistake(t *testing.T) {
 	hermetic(t)
 	for _, c := range []struct{ body, want string }{
-		{"runtim: claude\n", `line 3: key "runtim" is not one qory.yaml reads`},
+		{"runtim: claude\n", `line 2: key "runtim" is not one qory.yaml reads`},
 		{"update: sometimes\n", `update "sometimes" is not always or never`},
 		{"git: {timeout: soon}\n", `git.timeout "soon" is not a duration above zero, such as 10m`},
 		{"git: {timeout: 0s}\n", `git.timeout "0s" is not a duration above zero`},
@@ -111,14 +111,6 @@ func TestLoadRefusesAMistake(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.HasPrefix(err.Error(), root) {
 			t.Errorf("%q: error %v, want one naming the file and %q", c.body, err, c.want)
 		}
-	}
-	root := t.TempDir()
-	path := filepath.Join(root, "qory.yaml")
-	if err := os.WriteFile(path, []byte("apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := config.Load(root, true); err == nil || !strings.Contains(err.Error(), `kind "HarnessProfile" is not QoryConfig`) {
-		t.Errorf("kind: %v", err)
 	}
 }
 

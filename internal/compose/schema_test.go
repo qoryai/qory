@@ -10,20 +10,20 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"gopkg.in/yaml.v3"
 
-	"github.com/qoryai/qory/internal/layer"
+	"github.com/qoryai/qory/internal/module"
 )
 
-// TestSchemas validates every fixture document against the contract's schemas: a profile
-// that composes passes profile.schema.json, one refused for its apiVersion or kind fails it,
-// every layer manifest passes layer.schema.json, and every MCP server file passes
+// TestSchemas validates every fixture document against the contract's schemas: a stack
+// that composes passes stack.schema.json, one refused for its apiVersion or kind fails it,
+// every module manifest passes module.schema.json, and every MCP server file passes
 // mcp.schema.json unless the fixture expects it refused.
 func TestSchemas(t *testing.T) {
 	c := jsonschema.NewCompiler()
-	profileSchema, err := c.Compile("../../contracts/harness/v1/profile.schema.json")
+	stackSchema, err := c.Compile("../../contracts/harness/v1/stack.schema.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	layerSchema, err := c.Compile("../../contracts/harness/v1/layer.schema.json")
+	moduleSchema, err := c.Compile("../../contracts/harness/v1/module.schema.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,20 +35,20 @@ func TestSchemas(t *testing.T) {
 	for _, dir := range dirs {
 		errText, _ := os.ReadFile(filepath.Join(dir, "expected", "error.txt"))
 		wantInvalid := strings.Contains(string(errText), "apiVersion") || strings.Contains(string(errText), "kind ")
-		err := profileSchema.Validate(document(t, filepath.Join(dir, "harness-compose.yaml")))
+		err := stackSchema.Validate(document(t, filepath.Join(dir, "qory-stack.yaml")))
 		if wantInvalid && err == nil {
-			t.Errorf("%s: profile passed the schema; want a failure", dir)
+			t.Errorf("%s: stack passed the schema; want a failure", dir)
 		}
 		if !wantInvalid && err != nil {
-			t.Errorf("%s: profile failed the schema: %v", dir, err)
+			t.Errorf("%s: stack failed the schema: %v", dir, err)
 		}
-		manifests, _ := filepath.Glob(filepath.Join(dir, "layers", "*", "harness-layer.yaml"))
+		manifests, _ := filepath.Glob(filepath.Join(dir, "modules", "*", "qory-module.yaml"))
 		for _, m := range manifests {
-			if err := layerSchema.Validate(document(t, m)); err != nil {
+			if err := moduleSchema.Validate(document(t, m)); err != nil {
 				t.Errorf("%s: %v", m, err)
 			}
 		}
-		servers, _ := filepath.Glob(filepath.Join(dir, "layers", "*", "mcp", "*.json"))
+		servers, _ := filepath.Glob(filepath.Join(dir, "modules", "*", "mcp", "*.json"))
 		// A refused server names its file, mcp/<name>.json; a collision or an exclude over an
 		// mcp entry names mcp/<name> without the extension, and its files are valid.
 		wantBadServer := strings.Contains(string(errText), "mcp/") && strings.Contains(string(errText), ".json")
@@ -64,7 +64,7 @@ func TestSchemas(t *testing.T) {
 	}
 }
 
-// TestMCPSchemaMatchesTheReader keeps the schema and layer.Read in step on the server
+// TestMCPSchemaMatchesTheReader keeps the schema and module.Read in step on the server
 // shapes: each document is accepted or refused by both.
 func TestMCPSchemaMatchesTheReader(t *testing.T) {
 	c := jsonschema.NewCompiler()
@@ -102,17 +102,17 @@ func TestMCPSchemaMatchesTheReader(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "mcp", "s.json"), []byte(c.body), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := layer.Read("core", dir, nil, ""); (err == nil) != c.valid {
+		if _, err := module.Read("core", dir, nil, ""); (err == nil) != c.valid {
 			t.Errorf("reader: %s valid=%v err=%v", c.body, c.valid, err)
 		}
 	}
 }
 
-// TestProfileSchemaKnowsBothSourceForms validates the source forms no fixture composes: a
+// TestStackSchemaKnowsBothSourceForms validates the source forms no fixture composes: a
 // git source needs its ref, and a path source takes no ref.
-func TestProfileSchemaKnowsBothSourceForms(t *testing.T) {
+func TestStackSchemaKnowsBothSourceForms(t *testing.T) {
 	c := jsonschema.NewCompiler()
-	schema, err := c.Compile("../../contracts/harness/v1/profile.schema.json")
+	schema, err := c.Compile("../../contracts/harness/v1/stack.schema.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,15 +120,15 @@ func TestProfileSchemaKnowsBothSourceForms(t *testing.T) {
 		source string
 		valid  bool
 	}{
-		{`{"path": "layers/core"}`, true},
+		{`{"path": "modules/core"}`, true},
 		{`{"git": "https://git.example.com/acme/harness", "ref": "v1"}`, true},
-		{`{"git": "https://git.example.com/acme/harness", "ref": "v1", "path": "layers/core"}`, true},
+		{`{"git": "https://git.example.com/acme/harness", "ref": "v1", "path": "modules/core"}`, true},
 		{`{"git": "https://git.example.com/acme/harness"}`, false},
-		{`{"path": "layers/core", "ref": "v1"}`, false},
+		{`{"path": "modules/core", "ref": "v1"}`, false},
 		{`{}`, false},
 	} {
 		var doc any
-		if err := json.Unmarshal([]byte(`{"apiVersion": "qory.ai/v1alpha1", "kind": "HarnessProfile", "target": {"runtime": "claude"}, "layers": [{"name": "core", "source": `+c.source+`}]}`), &doc); err != nil {
+		if err := json.Unmarshal([]byte(`{"apiVersion": "qory.ai/v1alpha1", "target": {"runtime": "claude"}, "modules": [{"name": "core", "source": `+c.source+`}]}`), &doc); err != nil {
 			t.Fatal(err)
 		}
 		if err := schema.Validate(doc); (err == nil) != c.valid {
@@ -137,31 +137,40 @@ func TestProfileSchemaKnowsBothSourceForms(t *testing.T) {
 	}
 }
 
-// TestProfileSchemaKnowsExtends validates the shapes no fixture composes: a profile with
-// extends and no target, one with both, one with neither, and a layer entry by name alone.
-func TestProfileSchemaKnowsExtends(t *testing.T) {
+// TestComposeSchemaKnowsExtends validates the shapes no fixture composes: a compose file
+// with extends, one with a target or an extending block too, one without extends, a
+// stack with extends, a stack with an extending block, and a module entry by name alone.
+func TestComposeSchemaKnowsExtends(t *testing.T) {
 	c := jsonschema.NewCompiler()
-	schema, err := c.Compile("../../contracts/harness/v1/profile.schema.json")
+	composeSchema, err := c.Compile("../../contracts/harness/v1/compose.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stackSchema, err := c.Compile("../../contracts/harness/v1/stack.schema.json")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range []struct {
-		body  string
-		valid bool
+		schema *jsonschema.Schema
+		body   string
+		valid  bool
 	}{
-		{`{"extends": {"git": "https://git.example.com/acme/harness", "ref": "main", "path": "nextjs-15"}, "layers": [{"name": "app"}]}`, true},
-		{`{"extends": {"path": "../harness/nextjs-15"}, "layers": [{"name": "app"}]}`, true},
-		{`{"extends": {"path": "../harness/nextjs-15"}, "target": {"runtime": "claude"}, "layers": [{"name": "app"}]}`, false},
-		{`{"layers": [{"name": "app"}]}`, false},
-		{`{"target": {"runtime": "claude"}, "layers": [{"name": "core"}], "extending": {"kinds": ["skills"], "instructions": true, "settings": ["permissions.allow"]}}`, true},
-		{`{"target": {"runtime": "claude"}, "layers": [{"name": "core"}], "extending": {"kinds": ["hooks"]}}`, false},
-		{`{"target": {"runtime": "claude"}, "layers": [{"exclude": {"skills": ["x"]}}]}`, false},
+		{composeSchema, `{"extends": {"git": "https://git.example.com/acme/harness", "ref": "main", "path": "nextjs-15"}, "modules": [{"name": "app"}]}`, true},
+		{composeSchema, `{"extends": {"path": "../harness/nextjs-15"}, "modules": [{"name": "app"}]}`, true},
+		{composeSchema, `{"extends": {"path": "../harness/nextjs-15"}, "target": {"runtime": "claude"}, "modules": [{"name": "app"}]}`, false},
+		{composeSchema, `{"extends": {"path": "../harness/nextjs-15"}, "extending": {"kinds": ["skills"]}, "modules": [{"name": "app"}]}`, false},
+		{composeSchema, `{"modules": [{"name": "app"}]}`, false},
+		{stackSchema, `{"extends": {"path": "../harness/nextjs-15"}, "modules": [{"name": "app"}]}`, false},
+		{stackSchema, `{"modules": [{"name": "app"}]}`, false},
+		{stackSchema, `{"target": {"runtime": "claude"}, "modules": [{"name": "core"}], "extending": {"kinds": ["skills"], "instructions": true, "settings": ["permissions.allow"], "files": ["claude/rules/"]}}`, true},
+		{stackSchema, `{"target": {"runtime": "claude"}, "modules": [{"name": "core"}], "extending": {"kinds": ["hooks"]}}`, false},
+		{stackSchema, `{"target": {"runtime": "claude"}, "modules": [{"exclude": {"skills": ["x"]}}]}`, false},
 	} {
 		var doc any
-		if err := json.Unmarshal([]byte(`{"apiVersion": "qory.ai/v1alpha1", "kind": "HarnessProfile", `+c.body[1:]), &doc); err != nil {
+		if err := json.Unmarshal([]byte(`{"apiVersion": "qory.ai/v1alpha1", `+c.body[1:]), &doc); err != nil {
 			t.Fatal(err)
 		}
-		if err := schema.Validate(doc); (err == nil) != c.valid {
+		if err := c.schema.Validate(doc); (err == nil) != c.valid {
 			t.Errorf("%s: valid=%v, err=%v", c.body, c.valid, err)
 		}
 	}

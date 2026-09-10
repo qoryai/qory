@@ -1,4 +1,4 @@
-// Command qory composes the harness a runtime loads from layers.
+// Command qory composes the harness a runtime loads from modules.
 package main
 
 import (

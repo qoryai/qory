@@ -79,7 +79,7 @@ func TestExecuteRunsTheArgumentsTheProcessGot(t *testing.T) {
 func inComposedCheckout(t *testing.T, args ...string) string {
 	t.Helper()
 	root := newCheckout(t)
-	copyFixture(t, "two-layers", root)
+	copyFixture(t, "two-modules", root)
 	if out, err := run(t, "harness", "compose"); err != nil {
 		t.Fatalf("compose: %v\n%s", err, out)
 	}

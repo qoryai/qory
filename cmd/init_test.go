@@ -10,7 +10,7 @@ import (
 
 	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/compose"
-	"github.com/qoryai/qory/internal/profile"
+	"github.com/qoryai/qory/internal/stack"
 )
 
 // TestInit writes the example from the repository's own examples directory into an empty
@@ -24,7 +24,7 @@ func TestInit(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	p, err := profile.Load(filepath.Join(dir, profile.FileName))
+	p, err := stack.Load(filepath.Join(dir, stack.FileName))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,8 +53,8 @@ func TestInitLeavesEveryExistingFile(t *testing.T) {
 	if data, _ := os.ReadFile(filepath.Join(dir, "README.md")); string(data) != "# my project\n" {
 		t.Errorf("README.md was replaced: %q", data)
 	}
-	if _, err := os.Stat(filepath.Join(dir, profile.FileName)); err == nil {
-		t.Error("the profile was written although init refused")
+	if _, err := os.Stat(filepath.Join(dir, stack.FileName)); err == nil {
+		t.Error("the stack was written although init refused")
 	}
 }
 
@@ -69,11 +69,11 @@ func TestInitWithoutAName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "wrote 11 files", profile.FileName, "layers/hello/skills/greet/SKILL.md", "next", "qory harness compose")
+	wants(t, out, "wrote 11 files", stack.FileName, "modules/hello/skills/greet/SKILL.md", "next", "qory harness compose")
 	if strings.Contains(out, "Hello,") {
 		t.Errorf("nothing names the person and the output greets one:\n%s", out)
 	}
-	if _, err := profile.Load(filepath.Join(dir, profile.FileName)); err != nil {
+	if _, err := stack.Load(filepath.Join(dir, stack.FileName)); err != nil {
 		t.Error(err)
 	}
 }

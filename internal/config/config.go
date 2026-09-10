@@ -1,5 +1,5 @@
 // Package config reads qory.yaml: how qory runs on this machine, for this person and this
-// checkout, as opposed to what the harness is, which the profile says.
+// checkout, as opposed to what the harness is, which the stack says.
 //
 // Every setting has a default, so qory runs the same with no file at all. A file sets the
 // keys it names and leaves the rest as they were. Files are read in this order, each
@@ -9,9 +9,8 @@
 // line flag overrides every file.
 //
 //	apiVersion: qory.ai/v1alpha1
-//	kind: QoryConfig
-//	runtime: [claude, codex]   # instead of the profile's target.runtime
-//	model: opus                # instead of the profile's target.model
+//	runtime: [claude, codex]   # instead of the stack's target.runtime
+//	model: opus                # instead of the stack's target.model
 //	force: true                # replace a tracked, unmodified file where a link goes
 //	update: always             # fetch every git source again on each compose
 //	git:
@@ -37,12 +36,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/qoryai/qory/internal/profile"
 	"github.com/qoryai/qory/internal/source"
+	"github.com/qoryai/qory/internal/stack"
 )
-
-// Kind is the kind every configuration document carries.
-const Kind = "QoryConfig"
 
 // FileName is the configuration's file name, in the user's configuration directory, in an
 // ancestor of the checkout, or in the checkout root.
@@ -64,9 +60,9 @@ type Git struct {
 
 // Config is the effective configuration: the defaults, overridden by every file read.
 type Config struct {
-	// Runtime replaces the profile's target.runtime, nil to keep the profile's.
-	Runtime profile.Runtimes
-	// Model replaces the profile's target.model, "" to keep the profile's.
+	// Runtime replaces the stack's target.runtime, nil to keep the stack's.
+	Runtime stack.Runtimes
+	// Model replaces the stack's target.model, "" to keep the stack's.
 	Model string
 	// Force replaces a tracked, unmodified file of the checkout where a link goes.
 	Force bool
@@ -75,7 +71,7 @@ type Config struct {
 	// Git holds the git settings.
 	Git Git
 	// Env are the variables exported to every runtime with a place for them, on top of
-	// what the layers export.
+	// what the modules export.
 	Env map[string]string
 	// Files are the files read, in the order they were applied.
 	Files []string
@@ -86,12 +82,11 @@ type Config struct {
 // file is qory.yaml as written. Every key is optional, and a pointer that stays nil is a
 // key the file did not name, which leaves the value as it was.
 type file struct {
-	APIVersion string            `yaml:"apiVersion"`
-	Kind       string            `yaml:"kind"`
-	Runtime    *profile.Runtimes `yaml:"runtime,omitempty"`
-	Model      *string           `yaml:"model,omitempty"`
-	Force      *bool             `yaml:"force,omitempty"`
-	Update     *string           `yaml:"update,omitempty"`
+	APIVersion string          `yaml:"apiVersion"`
+	Runtime    *stack.Runtimes `yaml:"runtime,omitempty"`
+	Model      *string         `yaml:"model,omitempty"`
+	Force      *bool           `yaml:"force,omitempty"`
+	Update     *string         `yaml:"update,omitempty"`
 	Git        *struct {
 		Timeout *string `yaml:"timeout,omitempty"`
 		Cache   *string `yaml:"cache,omitempty"`
@@ -102,7 +97,7 @@ type file struct {
 // envName is the shape of an environment variable name.
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// Defaults is the configuration with no file read: the profile's runtime and model, no
+// Defaults is the configuration with no file read: the stack's runtime and model, no
 // force, no update, [DefaultTimeout], the cache under [source.CacheDir], and no
 // variables.
 func Defaults() Config {
@@ -115,7 +110,7 @@ func Defaults() Config {
 
 // Load returns the effective configuration for the checkout at root: the defaults, then
 // every file [Discover] finds, applied in order. An error names the file it comes from.
-// With own false the checkout's own file is left out, which is how a compose of a profile
+// With own false the checkout's own file is left out, which is how a compose of a stack
 // that extends a closed base keeps the checkout's authors from configuring the runner.
 func Load(root string, own bool) (Config, error) {
 	c := Defaults()
@@ -149,7 +144,7 @@ func Discover(root string) []string {
 	var ancestors []string
 	for dir := filepath.Dir(root); ; dir = filepath.Dir(dir) {
 		path := filepath.Join(dir, FileName)
-		if info, err := os.Stat(path); err == nil && profile.OwnedByCurrentUser(info) {
+		if info, err := os.Stat(path); err == nil && stack.OwnedByCurrentUser(info) {
 			ancestors = append(ancestors, path)
 		}
 		if dir == filepath.Dir(dir) {
@@ -255,7 +250,7 @@ func (c *Config) apply(path string) error {
 }
 
 // read decodes one file. An unknown key is an error, and so is a second document, an
-// apiVersion other than [profile.APIVersion] and a kind other than [Kind].
+// apiVersion other than [stack.APIVersion].
 func read(path string) (file, error) {
 	var f file
 	data, err := os.ReadFile(path)
@@ -270,11 +265,8 @@ func read(path string) (file, error) {
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return f, fmt.Errorf("%s: holds more than one document; a configuration is one", path)
 	}
-	if f.APIVersion != profile.APIVersion {
-		return f, fmt.Errorf("%s: apiVersion %q is not one this qory reads; versions: %s", path, f.APIVersion, profile.APIVersion)
-	}
-	if f.Kind != Kind {
-		return f, fmt.Errorf("%s: kind %q is not %s", path, f.Kind, Kind)
+	if f.APIVersion != stack.APIVersion {
+		return f, fmt.Errorf("%s: apiVersion %q is not one this qory reads; versions: %s", path, f.APIVersion, stack.APIVersion)
 	}
 	return f, nil
 }
@@ -297,7 +289,7 @@ func decodeError(path string, err error) error {
 type Row struct {
 	// Key is the setting as the file names it: runtime, git.timeout, env.NAME.
 	Key string
-	// Value is the effective value as text; "(profile)" for a runtime or model the profile
+	// Value is the effective value as text; "(stack)" for a runtime or model the stack
 	// decides.
 	Value string
 	// Origin is the file that set the value, or [Default].
@@ -307,7 +299,7 @@ type Row struct {
 // Rows lists every effective value with its origin, the fixed keys first and the
 // variables after them in name order.
 func (c Config) Rows() []Row {
-	runtime, model := "(profile)", "(profile)"
+	runtime, model := "(stack)", "(stack)"
 	if c.Runtime != nil {
 		runtime = c.Runtime.String()
 	}

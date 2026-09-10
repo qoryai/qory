@@ -1,0 +1,6 @@
+apiVersion: qory.ai/v1alpha1
+target:
+  runtime: claude
+modules:
+  - name: core
+    source: {path: modules/core}

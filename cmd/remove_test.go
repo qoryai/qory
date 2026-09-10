@@ -16,7 +16,7 @@ import (
 // the way they were.
 func TestRemoveTakesTheLinksAndTheQoryDir(t *testing.T) {
 	root := newCheckout(t)
-	copyFixture(t, "two-layers", root)
+	copyFixture(t, "two-modules", root)
 	writeFile(t, filepath.Join(root, "README.md"), "The checkout's own README.\n")
 	before := snapshot(t, root)
 
@@ -40,7 +40,7 @@ func TestRemoveTakesTheLinksAndTheQoryDir(t *testing.T) {
 // and remove takes its own links only.
 func TestRemoveKeepsTheCheckoutsOwnAgentsFile(t *testing.T) {
 	root := newCheckout(t)
-	copyFixture(t, "two-layers", root)
+	copyFixture(t, "two-modules", root)
 	own := filepath.Join(root, "AGENTS.md")
 	writeFile(t, own, "The checkout's own instructions.\n")
 
@@ -68,7 +68,7 @@ func TestRemoveKeepsTheCheckoutsOwnAgentsFile(t *testing.T) {
 // prompt: .claude/settings.local.json is theirs, and it survives compose and remove.
 func TestComposeKeepsClaudeCodesOwnLocalSettings(t *testing.T) {
 	root := newCheckout(t)
-	copyFixture(t, "two-layers", root)
+	copyFixture(t, "two-modules", root)
 	local := filepath.Join(root, ".claude", "settings.local.json")
 	writeFile(t, local, "{\"permissions\": {\"allow\": [\"Bash(ls)\"]}}\n")
 
@@ -99,7 +99,7 @@ func TestComposeKeepsClaudeCodesOwnLocalSettings(t *testing.T) {
 // and remove says how to get them back.
 func TestComposeForceReplacesTrackedFiles(t *testing.T) {
 	root := newCheckout(t)
-	copyFixture(t, "two-layers", root)
+	copyFixture(t, "two-modules", root)
 	writeFile(t, filepath.Join(root, ".claude", "settings.json"), "{}\n")
 	writeFile(t, filepath.Join(root, "AGENTS.md"), "theirs\n")
 	runGit(t, root, "add", "-A")

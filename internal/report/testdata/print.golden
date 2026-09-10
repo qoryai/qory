@@ -1,11 +1,11 @@
 🐝 app · claude opus
-  file      harness-compose.yaml
+  file      qory-stack.yaml
   checkout  /work/app
   home      .qory/harness
 
-Layers
-  core    ../layers/core    working-tree
-  review  ../layers/review  working-tree (dirty)  variant claude
+Modules
+  core    ../modules/core    working-tree
+  review  ../modules/review  working-tree (dirty)  variant claude
 
 Entries
   agents/reviewer  review

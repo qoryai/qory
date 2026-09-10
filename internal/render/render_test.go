@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/qoryai/qory/internal/compose"
-	"github.com/qoryai/qory/internal/profile"
 	"github.com/qoryai/qory/internal/render"
+	"github.com/qoryai/qory/internal/stack"
 
 	_ "github.com/qoryai/qory/internal/render/amp"
 	_ "github.com/qoryai/qory/internal/render/any"
@@ -22,10 +22,10 @@ import (
 	_ "github.com/qoryai/qory/internal/render/opencode"
 )
 
-// TestRuntimes renders the two-layers fixture for every runtime, links it into a fresh
+// TestRuntimes renders the two-modules fixture for every runtime, links it into a fresh
 // git checkout, checks the files each CLI reads, and unlinks again.
 func TestRuntimes(t *testing.T) {
-	file, err := filepath.Abs("../../contracts/harness/v1/fixtures/two-layers/harness-compose.yaml")
+	file, err := filepath.Abs("../../contracts/harness/v1/fixtures/two-modules/qory-stack.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,8 +43,8 @@ func TestRuntimes(t *testing.T) {
 	// contains is what one file of each runtime carries: the model where the runtime has a
 	// place for it, and the MCP server where it has one, with the home substituted.
 	contains := map[string][][2]string{
-		"claude":   {{"claude/settings.json", `"model": "opus"`}, {"claude/mcp.json", `"mcpServers"`}, {"claude/mcp.json", `/layers/core/scripts/db.py`}},
-		"codex":    {{"codex/config.toml", `model = "opus"`}, {"codex/config.toml", `[mcp_servers.db]`}, {"codex/config.toml", `/layers/core/scripts/db.py`}},
+		"claude":   {{"claude/settings.json", `"model": "opus"`}, {"claude/mcp.json", `"mcpServers"`}, {"claude/mcp.json", `/modules/core/scripts/db.py`}},
+		"codex":    {{"codex/config.toml", `model = "opus"`}, {"codex/config.toml", `[mcp_servers.db]`}, {"codex/config.toml", `/modules/core/scripts/db.py`}},
 		"gemini":   {{"gemini/settings.json", `"name": "opus"`}, {"gemini/settings.json", `"mcpServers"`}},
 		"opencode": {{"opencode/opencode.json", `"model": "opus"`}, {"opencode/opencode.json", `"type": "local"`}, {"opencode/opencode.json", `"environment"`}},
 		"cursor":   {{"cursor/agents/reviewer.md", "name: reviewer"}, {"cursor/mcp.json", `"mcpServers"`}},
@@ -59,11 +59,11 @@ func TestRuntimes(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			hermetic(t)
-			p, err := profile.Load(file)
+			p, err := stack.Load(file)
 			if err != nil {
 				t.Fatal(err)
 			}
-			p.Target.Runtimes = profile.Runtimes{name}
+			p.Target.Runtimes = stack.Runtimes{name}
 			res, err := compose.Compose(p)
 			if err != nil {
 				t.Fatal(err)
@@ -77,7 +77,7 @@ func TestRuntimes(t *testing.T) {
 			if err := render.Build(res, home, rt); err != nil {
 				t.Fatal(err)
 			}
-			for _, path := range append([]string{"AGENTS.md", "skills/review/SKILL.md", "hooks/guard.sh", "layers/core/scripts/db.py"}, expect[name]...) {
+			for _, path := range append([]string{"AGENTS.md", "skills/review/SKILL.md", "hooks/guard.sh", "modules/core/scripts/db.py"}, expect[name]...) {
 				if _, err := os.Stat(filepath.Join(home, path)); err != nil {
 					t.Errorf("%s: %v", path, err)
 				}
@@ -227,7 +227,7 @@ func TestSoftLink(t *testing.T) {
 	}
 }
 
-// TestClaudeMCPFragmentAndEntriesMeet is a layer migrating from a settings/claude/mcp.json
+// TestClaudeMCPFragmentAndEntriesMeet is a module migrating from a settings/claude/mcp.json
 // fragment: the file is written and linked with the fragment's servers, and a server
 // composed as an entry is written on top of one the fragment names.
 func TestClaudeMCPFragmentAndEntriesMeet(t *testing.T) {

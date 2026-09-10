@@ -57,7 +57,7 @@ homebrew_casks:
       name: homebrew-tap
       token: '{{ envOrDefault "HOMEBREW_TAP_TOKEN" "" }}'
     homepage: https://github.com/qoryai/qory
-    description: Compose the harness a runtime loads from layers
+    description: Compose the harness a runtime loads from modules
     license: apache-2.0
     hooks:
       post:

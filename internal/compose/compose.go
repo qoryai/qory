@@ -12,19 +12,21 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/qoryai/qory/internal/layer"
-	"github.com/qoryai/qory/internal/profile"
+	"github.com/qoryai/qory/internal/module"
 	"github.com/qoryai/qory/internal/source"
+	"github.com/qoryai/qory/internal/stack"
 )
 
-// Layer is a profile layer resolved to a directory.
-type Layer struct {
-	// Name is the layer's name as its manifest declares it, the name excludes, the tree and
+// Module is a stack module resolved to a directory.
+type Module struct {
+	// Name is the module's name as its manifest declares it, the name excludes, the tree and
 	// messages use.
 	Name string
-	// Dir is the absolute directory the layer was read from.
+	// Description is the manifest's description, "" for none.
+	Description string
+	// Dir is the absolute directory the module was read from.
 	Dir string
-	// Source is the profile's source as text: the path of a path source, <git>#<ref> for a
+	// Source is the stack's source as text: the path of a path source, <git>#<ref> for a
 	// git source.
 	Source string
 	// Pin is what the source resolved to: "working-tree" for a path, the commit for a git
@@ -32,66 +34,66 @@ type Layer struct {
 	Pin string
 	// Dirty is set when git sees uncommitted changes under Dir.
 	Dirty bool
-	// Variant is the variant chosen for the target runtime, "" for a layer without one.
+	// Variant is the variant chosen for the target runtime, "" for a module without one.
 	Variant string
-	// Link is the checkout-root name the profile links the layer's directory as, "" for
+	// Link is the checkout-root name the stack links the module's directory as, "" for
 	// none.
 	Link string
-	// Base marks a layer of the base profile, when the profile extends one.
+	// Base marks a module of the base stack, when a compose file extends one.
 	Base bool
 }
 
-// Entry is one entry of the composed tree and the layer it came from.
+// Entry is one entry of the composed tree and the module it came from.
 type Entry struct {
-	// Kind is one of skills, agents, commands, output-styles, hooks, mcp.
+	// Kind is one of skills, agents, commands, output-styles, hooks, mcp and files.
 	Kind string
 	// Name is the entry's name within its kind, one per kind across the composed tree.
 	Name string
-	// Layer is the name of the layer that provides the entry.
-	Layer string
+	// Module is the name of the module that provides the entry.
+	Module string
 	// Path is absolute: the skill directory, the markdown file, the hook script or the MCP
 	// server's JSON file.
 	Path string
 }
 
-// Exclude is one entry a layer left out.
+// Exclude is one entry a module left out.
 type Exclude struct {
-	// Layer is the layer the entry was dropped from.
-	Layer string
+	// Module is the module the entry was dropped from.
+	Module string
 	// Kind is the entry kind the exclude named.
 	Kind string
 	// Name is the dropped entry's name.
 	Name string
 }
 
-// Result is a composed profile: what a renderer writes and what the report records.
+// Result is a composed stack: what a renderer writes and what the report records.
 type Result struct {
-	// Profile is the profile that was composed.
-	Profile *profile.Profile
-	// Layers are the profile's layers, resolved, in profile order.
-	Layers []Layer
+	// Stack is the stack that was composed.
+	Stack *stack.Stack
+	// Modules are the stack's modules, resolved, in stack order.
+	Modules []Module
 	// Entries are the composed entries, sorted by kind then name.
 	Entries []Entry
-	// Excludes are the entries the layers left out, in layer order, by kind.
+	// Excludes are the entries the modules left out, in module order, by kind.
 	Excludes []Exclude
-	// Settings are the merged fragments: per runtime, per target file, in layer order.
+	// Settings are the merged fragments: per runtime, per target file, in module order.
 	Settings map[string]map[string]map[string]any
-	// MCP holds the composed MCP servers by name, each the object its layer's
+	// MCP holds the composed MCP servers by name, each the object its module's
 	// mcp/<name>.json holds, with every $QORY_HARNESS_HOME still in place. [Result.MCPFor]
 	// renders it for a home.
 	MCP map[string]map[string]any
-	// Instructions are the layers' AGENTS.md files joined by a blank line, or "".
+	// Instructions are the modules' AGENTS.md files joined by a blank line, or "".
 	Instructions string
 	// Env are the variables the harness exports, name to value, with every
-	// $QORY_HARNESS_HOME still in place: what the layer manifests export, as
-	// $QORY_HARNESS_HOME/layers/<name>/<path>, and the configuration's variables over
+	// $QORY_HARNESS_HOME still in place: what the module manifests export, as
+	// $QORY_HARNESS_HOME/modules/<name>/<path>, and the configuration's variables over
 	// them. [Result.EnvFor] renders it for a home.
 	Env map[string]string
-	// Base is the base profile the profile extends, nil when it extends none.
+	// Base is the stack the compose file extends, nil for a stack.
 	Base *Base
-	// setBy is the layer that set each settings leaf, keyed
+	// setBy is the module that set each settings leaf, keyed
 	// settings/<runtime>/<file>/<dotted.key.path>, so a later fragment setting the same
-	// path to another value names both layers.
+	// path to another value names both modules.
 	setBy map[string]string
 }
 
@@ -107,39 +109,39 @@ type Options struct {
 	Cache string
 	// Timeout is the longest one git command may run, 0 for no limit.
 	Timeout time.Duration
-	// Env are the configuration's variables, written over what the layers export.
+	// Env are the configuration's variables, written over what the modules export.
 	Env map[string]string
-	// Base is the base profile [LoadBase] resolved, recorded in the result and enforced on
-	// the layers that are not its own; nil when the profile extends none.
+	// Base is the base stack [LoadBase] resolved, recorded in the result and enforced on
+	// the modules that are not its own; nil for a stack.
 	Base *Base
 }
 
 // Compose is [ComposeWith] and the default options.
-func Compose(p *profile.Profile) (*Result, error) { return ComposeWith(p, Options{}) }
+func Compose(p *stack.Stack) (*Result, error) { return ComposeWith(p, Options{}) }
 
-// ComposeWith reads every layer, applies the excludes and refuses a collision. The result
+// ComposeWith reads every module, applies the excludes and refuses a collision. The result
 // holds one entry per kind and name, the settings merged per runtime and target file, the
-// MCP servers by name, and the layers' instructions joined. A collision returns a
+// MCP servers by name, and the modules' instructions joined. A collision returns a
 // [*CollisionError], which a caller matches with errors.As, and a git source that cannot
 // be fetched a [*source.FetchError]. The package comment has the order of the rules and
 // the merge semantics.
-func ComposeWith(p *profile.Profile, opts Options) (*Result, error) {
-	res := &Result{Profile: p, Base: opts.Base, Settings: map[string]map[string]map[string]any{}, MCP: map[string]map[string]any{}, Env: map[string]string{}, setBy: map[string]string{}}
+func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
+	res := &Result{Stack: p, Base: opts.Base, Settings: map[string]map[string]map[string]any{}, MCP: map[string]map[string]any{}, Env: map[string]string{}, setBy: map[string]string{}}
 	owners := map[string][]string{}
 	paths := map[string]string{}
 	servers := map[string]map[string]any{}
 	exporters := map[string]string{}
 	var instructions []string
 	dirs := map[string]string{}
-	for _, pl := range p.Layers {
+	for _, pl := range p.Modules {
 		ps := p.SourceOf(pl)
-		who := "layer " + pl.Name
+		who := "module " + pl.Name
 		if pl.Name == "" {
-			who = "layer at " + ps.String()
+			who = "module at " + ps.String()
 		}
 		so := source.Options{Pin: opts.Pins[ps.String()], Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout}
 		if pl.Base && opts.Base != nil && ps.Git != "" {
-			// A base layer is in the base's clone, fetched this compose: its pin is the
+			// A base module is in the base's clone, fetched this compose: its pin is the
 			// base's, and no update fetches it again.
 			so.Pin, so.Update = opts.Base.Pin, false
 		}
@@ -147,27 +149,27 @@ func ComposeWith(p *profile.Profile, opts Options) (*Result, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", who, err)
 		}
-		m, err := layer.ReadManifest(src.Dir)
+		m, err := module.ReadManifest(src.Dir)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", who, err)
 		}
 		if pl.Name != "" && m.Name != pl.Name {
-			return nil, fmt.Errorf("layer %s: the layer at %s is named %s in its %s", pl.Name, ps.String(), m.Name, layer.ManifestName)
+			return nil, fmt.Errorf("module %s: the module at %s is named %s in its %s", pl.Name, ps.String(), m.Name, module.ManifestName)
 		}
 		name := m.Name
 		if other, ok := dirs[name]; ok {
-			return nil, fmt.Errorf("layer %s is composed twice, from %s and from %s", name, other, ps.String())
+			return nil, fmt.Errorf("module %s is composed twice, from %s and from %s", name, other, ps.String())
 		}
 		dirs[name] = ps.String()
 		variant, err := selectVariant(m, pl, p.Target.Runtimes, name)
 		if err != nil {
-			return nil, fmt.Errorf("layer %s: %w", name, err)
+			return nil, fmt.Errorf("module %s: %w", name, err)
 		}
-		l, err := layer.Read(name, src.Dir, m, variant)
+		l, err := module.Read(name, src.Dir, m, variant)
 		if err != nil {
 			return nil, err
 		}
-		rl := Layer{Name: name, Dir: l.Dir, Source: ps.String(), Pin: src.Pin, Dirty: src.Dirty, Variant: variant, Link: pl.Link, Base: pl.Base}
+		rl := Module{Name: name, Description: m.Description, Dir: l.Dir, Source: ps.String(), Pin: src.Pin, Dirty: src.Dirty, Variant: variant, Link: pl.Link, Base: pl.Base}
 		if !pl.Base && opts.Base != nil {
 			if err := checkExtending(l, opts.Base); err != nil {
 				return nil, err
@@ -176,7 +178,7 @@ func ComposeWith(p *profile.Profile, opts Options) (*Result, error) {
 		if err := exportEnv(res, exporters, name, m.Env, opts.Env); err != nil {
 			return nil, err
 		}
-		res.Layers = append(res.Layers, rl)
+		res.Modules = append(res.Modules, rl)
 		entries, err := applyExcludes(l, pl.Exclude, res)
 		if err != nil {
 			return nil, err
@@ -198,7 +200,7 @@ func ComposeWith(p *profile.Profile, opts Options) (*Result, error) {
 					res.Settings[runtime][file] = map[string]any{}
 				}
 				if err := mergeFile(res, runtime, file, path, name, opts.Env); err != nil {
-					return nil, fmt.Errorf("layer %s: %w", name, err)
+					return nil, fmt.Errorf("module %s: %w", name, err)
 				}
 			}
 		}
@@ -210,7 +212,7 @@ func ComposeWith(p *profile.Profile, opts Options) (*Result, error) {
 			instructions = append(instructions, strings.TrimRight(string(data), "\n"))
 		}
 	}
-	if err := collisions(owners, res.Layers, opts.Base); err != nil {
+	if err := collisions(owners, res.Modules, opts.Base); err != nil {
 		return nil, err
 	}
 	if err := exportsAgainstSettings(res, exporters, opts.Env); err != nil {
@@ -218,7 +220,7 @@ func ComposeWith(p *profile.Profile, opts Options) (*Result, error) {
 	}
 	for key, ls := range owners {
 		kind, name, _ := strings.Cut(key, "/")
-		res.Entries = append(res.Entries, Entry{Kind: kind, Name: name, Layer: ls[0], Path: paths[key+"@"+ls[0]]})
+		res.Entries = append(res.Entries, Entry{Kind: kind, Name: name, Module: ls[0], Path: paths[key+"@"+ls[0]]})
 		if kind == "mcp" {
 			res.MCP[name] = servers[key+"@"+ls[0]]
 		}
@@ -238,18 +240,18 @@ func ComposeWith(p *profile.Profile, opts Options) (*Result, error) {
 	return res, nil
 }
 
-// exportEnv adds a layer's exported variables to the result, each as
-// $QORY_HARNESS_HOME/layers/<layer>/<path>, the path left out for ".". Two layers
+// exportEnv adds a module's exported variables to the result, each as
+// $QORY_HARNESS_HOME/modules/<module>/<path>, the path left out for ".". Two modules
 // exporting one name with different values is an error, since neither is the one to
 // keep, unless the configuration's env, decided, names it. The same value twice is fine.
-func exportEnv(res *Result, exporters map[string]string, layer string, env, decided map[string]string) error {
+func exportEnv(res *Result, exporters map[string]string, module string, env, decided map[string]string) error {
 	names := make([]string, 0, len(env))
 	for name := range env {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		value := "$QORY_HARNESS_HOME/layers/" + layer
+		value := "$QORY_HARNESS_HOME/modules/" + module
 		if env[name] != "." {
 			value += "/" + filepath.ToSlash(env[name])
 		}
@@ -257,9 +259,9 @@ func exportEnv(res *Result, exporters map[string]string, layer string, env, deci
 			continue
 		}
 		if other, ok := exporters[name]; ok && res.Env[name] != value {
-			return fmt.Errorf("env %s is exported by layers %s and %s; set it in qory.yaml to decide", name, other, layer)
+			return fmt.Errorf("env %s is exported by modules %s and %s; set it in qory.yaml to decide", name, other, module)
 		}
-		exporters[name] = layer
+		exporters[name] = module
 		res.Env[name] = value
 	}
 	return nil
@@ -276,26 +278,26 @@ func (r *Result) EnvFor(home string) map[string]string {
 	return out
 }
 
-// selectVariant picks the one variant of a layer that serves every targeted runtime.
+// selectVariant picks the one variant of a module that serves every targeted runtime.
 //
-// A variant exists so that a layer can ship different material to different runtimes, and a
-// target naming several runtimes can therefore ask a layer for two different things at once.
+// A variant exists so that a module can ship different material to different runtimes, and a
+// target naming several runtimes can therefore ask a module for two different things at once.
 // The composed tree holds one copy of each entry, so there is nothing to render in that
 // case: the compose refuses and names both runtimes, the way it refuses a collision. A
-// layer with no variants, or one whose variants resolve the same way for every targeted
+// module with no variants, or one whose variants resolve the same way for every targeted
 // runtime, composes for all of them.
-func selectVariant(m *layer.Manifest, pl profile.Layer, runtimes profile.Runtimes, name string) (string, error) {
-	first, err := layer.SelectVariant(m, pl.Variant, runtimes.First())
+func selectVariant(m *module.Manifest, pl stack.Module, runtimes stack.Runtimes, name string) (string, error) {
+	first, err := module.SelectVariant(m, pl.Variant, runtimes.First())
 	if err != nil {
 		return "", err
 	}
 	for _, r := range runtimes[1:] {
-		v, err := layer.SelectVariant(m, pl.Variant, r)
+		v, err := module.SelectVariant(m, pl.Variant, r)
 		if err != nil {
 			return "", err
 		}
 		if v != first {
-			return "", fmt.Errorf("layer %s reads from %s for %s and from %s for %s; compose one runtime at a time, or give the layer one variant for both",
+			return "", fmt.Errorf("module %s reads from %s for %s and from %s for %s; compose one runtime at a time, or give the module one variant for both",
 				name, variantName(first), runtimes.First(), variantName(v), r)
 		}
 	}
@@ -305,16 +307,16 @@ func selectVariant(m *layer.Manifest, pl profile.Layer, runtimes profile.Runtime
 // variantName names a variant in a message, including the empty one.
 func variantName(v string) string {
 	if v == "" {
-		return "the layer root"
+		return "the module root"
 	}
 	return "variant " + v
 }
 
-// applyExcludes returns the layer's entries minus the ones its excludes name, and records
-// each dropped entry in res. An exclude that names nothing the layer ships is an error, so a
-// layer that stops shipping an entry is noticed rather than composed without it. Kinds are
+// applyExcludes returns the module's entries minus the ones its excludes name, and records
+// each dropped entry in res. An exclude that names nothing the module ships is an error, so a
+// module that stops shipping an entry is noticed rather than composed without it. Kinds are
 // walked in sorted order, so the recorded excludes and the error do not follow map order.
-func applyExcludes(l *layer.Layer, exclude map[string][]string, res *Result) ([]layer.Entry, error) {
+func applyExcludes(l *module.Module, exclude map[string][]string, res *Result) ([]module.Entry, error) {
 	drop := map[string]bool{}
 	kinds := make([]string, 0, len(exclude))
 	for kind := range exclude {
@@ -330,13 +332,13 @@ func applyExcludes(l *layer.Layer, exclude map[string][]string, res *Result) ([]
 				}
 			}
 			if !found {
-				return nil, fmt.Errorf("layer %s: exclude %s/%s names nothing the layer ships", l.Name, kind, name)
+				return nil, fmt.Errorf("module %s: exclude %s/%s names nothing the module ships", l.Name, kind, name)
 			}
 			drop[kind+"/"+name] = true
-			res.Excludes = append(res.Excludes, Exclude{Layer: l.Name, Kind: kind, Name: name})
+			res.Excludes = append(res.Excludes, Exclude{Module: l.Name, Kind: kind, Name: name})
 		}
 	}
-	var kept []layer.Entry
+	var kept []module.Entry
 	for _, e := range l.Entries {
 		if !drop[e.Kind+"/"+e.Name] {
 			kept = append(kept, e)
@@ -345,44 +347,44 @@ func applyExcludes(l *layer.Layer, exclude map[string][]string, res *Result) ([]
 	return kept, nil
 }
 
-// Collision is one entry name that more than one layer provides.
+// Collision is one entry name that more than one module provides.
 type Collision struct {
 	// Kind is the entry kind the collision is in.
 	Kind string
-	// Name is the entry name more than one layer provides.
+	// Name is the entry name more than one module provides.
 	Name string
-	// Layers provide the entry, in profile order.
-	Layers []string
-	// Base names the base profile, as <name>@<pin>, when one of the layers is the base's:
-	// no exclude resolves that collision, the extending layer renames its entry.
+	// Modules provide the entry, in stack order.
+	Modules []string
+	// Base names the base stack, as <name>@<pin>, when one of the modules is the base's:
+	// no exclude resolves that collision, the extending module renames its entry.
 	Base string
 }
 
 // CollisionError is the compose refusing an undeclared collision. [Compose] returns it for
-// every colliding entry at once, and the command layer matches it with errors.As to print
-// the layers involved and the excludes that resolve them.
+// every colliding entry at once, and the command module matches it with errors.As to print
+// the modules involved and the excludes that resolve them.
 type CollisionError struct {
 	// Collisions are the colliding entries, sorted by kind then name.
 	Collisions []Collision
-	// Pins maps a layer name to its pin, for the message.
+	// Pins maps a module name to its pin, for the message.
 	Pins map[string]string
-	// Sources maps a layer name to its source as text, for the command's table.
+	// Sources maps a module name to its source as text, for the command's table.
 	Sources map[string]string
-	// Order lists the layer names in profile order, for [CollisionError.Suggest].
+	// Order lists the module names in stack order, for [CollisionError.Suggest].
 	Order []string
 }
 
-// Suggest returns, per layer, the excludes that resolve every collision by keeping the last
-// layer that ships each. The layers result holds the names that need an exclude, in the
-// order of the order argument, which a caller passes in profile order. The excludes result
-// is keyed by layer name, then by kind, and holds the entry names that layer excludes.
-func (e *CollisionError) Suggest(order []string) (layers []string, excludes map[string]map[string][]string) {
+// Suggest returns, per module, the excludes that resolve every collision by keeping the last
+// module that ships each. The modules result holds the names that need an exclude, in the
+// order of the order argument, which a caller passes in stack order. The excludes result
+// is keyed by module name, then by kind, and holds the entry names that module excludes.
+func (e *CollisionError) Suggest(order []string) (modules []string, excludes map[string]map[string][]string) {
 	excludes = map[string]map[string][]string{}
 	for _, c := range e.Collisions {
 		if c.Base != "" {
 			continue
 		}
-		for _, l := range c.Layers[:len(c.Layers)-1] {
+		for _, l := range c.Modules[:len(c.Modules)-1] {
 			if excludes[l] == nil {
 				excludes[l] = map[string][]string{}
 			}
@@ -391,13 +393,13 @@ func (e *CollisionError) Suggest(order []string) (layers []string, excludes map[
 	}
 	for _, l := range order {
 		if excludes[l] != nil {
-			layers = append(layers, l)
+			modules = append(modules, l)
 		}
 	}
-	return layers, excludes
+	return modules, excludes
 }
 
-// Error is the plain-text form: each collision with the layers that ship it and their pins,
+// Error is the plain-text form: each collision with the modules that ship it and their pins,
 // then the excludes that resolve it. Collisions are separated by a blank line and the text
 // carries no trailing newline. The fixtures under contracts/harness/v1 hold it verbatim.
 func (e *CollisionError) Error() string {
@@ -408,33 +410,33 @@ func (e *CollisionError) Error() string {
 		}
 		var named []string
 		width := 0
-		for _, l := range c.Layers {
+		for _, l := range c.Modules {
 			named = append(named, l+"@"+e.Pins[l])
 			if len(l)+1 > width {
 				width = len(l) + 1
 			}
 		}
-		fmt.Fprintf(&b, "%s/%s is provided by %d layers: %s\n", c.Kind, c.Name, len(c.Layers), strings.Join(named, ", "))
+		fmt.Fprintf(&b, "%s/%s is provided by %d modules: %s\n", c.Kind, c.Name, len(c.Modules), strings.Join(named, ", "))
 		if c.Base != "" {
-			fmt.Fprintf(&b, "  it belongs to the base profile %s; rename yours\n", c.Base)
+			fmt.Fprintf(&b, "  it belongs to the base stack %s; rename yours\n", c.Base)
 			continue
 		}
 		b.WriteString("  keep one and exclude the others, for example\n")
-		for _, l := range c.Layers[:len(c.Layers)-1] {
+		for _, l := range c.Modules[:len(c.Modules)-1] {
 			fmt.Fprintf(&b, "    %-*s exclude: {%s: [%s]}\n", width, l+":", c.Kind, c.Name)
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// collisions builds the CollisionError for every entry more than one layer owns, and returns
+// collisions builds the CollisionError for every entry more than one module owns, and returns
 // nil when no name is owned twice. Keys are sorted, so the message does not follow map order.
-func collisions(owners map[string][]string, layers []Layer, base *Base) error {
+func collisions(owners map[string][]string, modules []Module, base *Base) error {
 	pin := map[string]string{}
 	sources := map[string]string{}
 	inBase := map[string]bool{}
 	var order []string
-	for _, l := range layers {
+	for _, l := range modules {
 		pin[l.Name] = l.Pin
 		sources[l.Name] = l.Source
 		inBase[l.Name] = l.Base
@@ -453,7 +455,7 @@ func collisions(owners map[string][]string, layers []Layer, base *Base) error {
 	e := &CollisionError{Pins: pin, Sources: sources, Order: order}
 	for _, key := range keys {
 		kind, name, _ := strings.Cut(key, "/")
-		c := Collision{Kind: kind, Name: name, Layers: owners[key]}
+		c := Collision{Kind: kind, Name: name, Modules: owners[key]}
 		for _, l := range owners[key] {
 			if inBase[l] && base != nil {
 				c.Base = base.String()
@@ -464,13 +466,13 @@ func collisions(owners map[string][]string, layers []Layer, base *Base) error {
 	return e
 }
 
-// mergeFile decodes one settings fragment of the named layer and folds it into the
+// mergeFile decodes one settings fragment of the named module and folds it into the
 // result's target file for the runtime. The extension decides the format, and a TOML
 // document is normalized to the types the JSON decoder produces. The top-level key decides
 // how lists combine, and the mode carries down the whole subtree under that key. A key path
-// another layer set to a different value is an error, unless it is env.<NAME> and decided
+// another module set to a different value is an error, unless it is env.<NAME> and decided
 // names NAME: the configuration's value is written then, whatever the fragments say.
-func mergeFile(res *Result, runtime, file, path, layer string, decided map[string]string) error {
+func mergeFile(res *Result, runtime, file, path, module string, decided map[string]string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -489,7 +491,7 @@ func mergeFile(res *Result, runtime, file, path, layer string, decided map[strin
 	default:
 		return fmt.Errorf("%s: settings fragments are .json or .toml", path)
 	}
-	m := &merger{file: "settings/" + runtime + "/" + file, layer: layer, setBy: res.setBy}
+	m := &merger{file: "settings/" + runtime + "/" + file, module: module, setBy: res.setBy}
 	dst := res.Settings[runtime][file]
 	for _, key := range sortedKeys(src) {
 		v := src[key]
@@ -512,7 +514,7 @@ func mergeFile(res *Result, runtime, file, path, layer string, decided map[strin
 }
 
 // listMode says how merge combines two lists: once takes a list as one value that a
-// second layer may repeat and not change, concat appends the later list, concatDedupe
+// second module may repeat and not change, concat appends the later list, concatDedupe
 // appends the elements the earlier list does not already hold.
 type listMode int
 
@@ -522,14 +524,14 @@ const (
 	concatDedupe
 )
 
-// merger folds one layer's fragment into one target file and records which layer set
+// merger folds one module's fragment into one target file and records which module set
 // each leaf.
 type merger struct {
 	// file is settings/<runtime>/<file>, the prefix of the setBy keys and the messages.
 	file string
-	// layer is the layer whose fragment is merged.
-	layer string
-	// setBy is [Result.setBy], shared across the layers.
+	// module is the module whose fragment is merged.
+	module string
+	// setBy is [Result.setBy], shared across the modules.
 	setBy map[string]string
 }
 
@@ -551,7 +553,7 @@ func (m *merger) decide(v any, decided map[string]string) any {
 
 // merge folds src into dst at path and returns the result. Maps merge by key; lists follow
 // mode; a scalar, a list in mode once and a value whose type differs from dst's are one
-// leaf: the first layer sets it, another may repeat the value and not change it.
+// leaf: the first module sets it, another may repeat the value and not change it.
 func (m *merger) merge(dst, src any, path string, mode listMode) (any, error) {
 	key := m.file + "/" + path
 	switch s := src.(type) {
@@ -562,7 +564,7 @@ func (m *merger) merge(dst, src any, path string, mode listMode) (any, error) {
 		}
 		if !ok {
 			d = map[string]any{}
-			m.setBy[key] = m.layer
+			m.setBy[key] = m.module
 		}
 		for _, k := range sortedKeys(s) {
 			v, err := m.merge(d[k], s[k], path+"."+k, mode)
@@ -588,17 +590,17 @@ func (m *merger) merge(dst, src any, path string, mode listMode) (any, error) {
 		return nil, m.collision(path)
 	}
 	if _, set := m.setBy[key]; !set {
-		m.setBy[key] = m.layer
+		m.setBy[key] = m.module
 	}
 	return src, nil
 }
 
-// collision is the error for a key path two layers set to different values.
+// collision is the error for a key path two modules set to different values.
 func (m *merger) collision(path string) error {
-	return fmt.Errorf("%s: %s is set by layers %s and %s with different values", m.file, path, m.setBy[m.file+"/"+path], m.layer)
+	return fmt.Errorf("%s: %s is set by modules %s and %s with different values", m.file, path, m.setBy[m.file+"/"+path], m.module)
 }
 
-// exportsAgainstSettings refuses a variable a layer's manifest exports that a fragment's
+// exportsAgainstSettings refuses a variable a module's manifest exports that a fragment's
 // env map sets to a different value, for every runtime and target file, unless decided
 // names it. Runtimes, files and names are walked in sorted order, so the error does not
 // follow map order.
@@ -612,7 +614,7 @@ func exportsAgainstSettings(res *Result, exporters map[string]string, decided ma
 					continue
 				}
 				prefix := "settings/" + runtime + "/" + file
-				return fmt.Errorf("%s: env.%s is set by layer %s and exported by layer %s with different values",
+				return fmt.Errorf("%s: env.%s is set by module %s and exported by module %s with different values",
 					prefix, name, res.setBy[prefix+"/env."+name], exporter)
 			}
 		}
@@ -644,7 +646,7 @@ func contains(list []any, v any) bool {
 // SettingsFor is a copy of one merged settings file rendered for a home: every
 // "$QORY_HARNESS_HOME" and "${QORY_HARNESS_HOME}" in a string becomes the home path, at
 // any depth. The copy shares nothing with [Result.Settings], so the caller may write to it.
-// A file no layer contributed to is an empty map.
+// A file no module contributed to is an empty map.
 func (r *Result) SettingsFor(runtime, file, home string) map[string]any {
 	src := r.Settings[runtime][file]
 	if src == nil {
@@ -655,8 +657,8 @@ func (r *Result) SettingsFor(runtime, file, home string) map[string]any {
 
 // MCPFor is a copy of the composed MCP servers rendered for a home, name to object, with
 // every $QORY_HARNESS_HOME replaced the way [Result.SettingsFor] replaces it, and without
-// the description, which is a note to the layer's readers and not a key a runtime
-// starts a server with. It is nil when no layer ships a server.
+// the description, which is a note to the module's readers and not a key a runtime
+// starts a server with. It is nil when no module ships a server.
 func (r *Result) MCPFor(home string) map[string]any {
 	if len(r.MCP) == 0 {
 		return nil
@@ -678,8 +680,8 @@ func ForHome(v any, home string) any {
 	return substitute(out, "$QORY_HARNESS_HOME", home)
 }
 
-// SettingsFiles lists the target files layers contributed to for a runtime, sorted by name.
-// A runtime no layer ships a fragment for lists nothing.
+// SettingsFiles lists the target files modules contributed to for a runtime, sorted by name.
+// A runtime no module ships a fragment for lists nothing.
 func (r *Result) SettingsFiles(runtime string) []string {
 	var files []string
 	for f := range r.Settings[runtime] {

@@ -1,10 +1,10 @@
 ## qory
 
-Compose the harness a runtime loads from layers
+Compose the harness a runtime loads from modules
 
 ### Synopsis
 
-Compose the harness a runtime loads from layers, for Claude Code, Codex, Gemini CLI,
+Compose the harness a runtime loads from modules, for Claude Code, Codex, Gemini CLI,
 OpenCode, Cursor, Copilot CLI, Amp, Goose, and any tool that reads AGENTS.md.
 
 Shortcuts:

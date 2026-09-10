@@ -1,19 +1,19 @@
 # hello
 
-Two layers. Both ship a `greet` skill, because everyone believes they invented greeting.
-The profile keeps the world layer's and excludes the hello layer's.
+Two modules. Both ship a `greet` skill, because everyone believes they invented greeting.
+The stack keeps the world module's and excludes the hello module's.
 
 `qory harness init` writes this directory. From it:
 
 ```sh
 qory hc            # composes into ./.claude
-qory hi            # the report: every entry and its layer
+qory hi            # the report: every entry and its module
 claude             # type /hello
 qory hr            # removes it again
 ```
 
-Then delete the `exclude` lines in `harness-compose.yaml` and compose again. `qory` refuses,
-names both layers, and prints the lines that resolve it. Put them under the world layer
+Then delete the `exclude` lines in `qory-stack.yaml` and compose again. `qory` refuses,
+names both modules, and prints the lines that resolve it. Put them under the world module
 instead, compose, start `claude` again and type `/hello`: the other greet answers, and
 says where to go from there.
 

@@ -5,7 +5,20 @@
 // directory in the home, so Claude Code's own settings.local.json stays beside them, and
 // a soft .mcp.json when the compose holds a server. The target model is written into
 // settings.json as model. Claude Code has a place for every entry kind, so nothing is
-// skipped.
+// skipped, and a files entry named claude/<path> lands at .claude/<path>, which is how a
+// module ships .claude/rules/nextjs-15.md.
+//
+// The paths under .claude a files entry may not take, see [render.Reserved]:
+//
+//	CLAUDE.md            qory writes it
+//	settings.json        qory writes it
+//	mcp.json             qory writes it
+//	settings.local.json  Claude Code reads it as settings; a module sets those through settings/claude/settings.json
+//	skills               skills are linked there; ship it as skills/<name>
+//	agents               agents are linked there; ship it as agents/<name>
+//	commands             commands are linked there; ship it as commands/<name>
+//	hooks                hooks are linked there; ship it as hooks/<name>
+//	output-styles        output-styles are linked there; ship it as output-styles/<name>
 package claude
 
 import (
@@ -37,13 +50,29 @@ func (claude) Links(res *compose.Result) []render.Link {
 }
 
 // writesMCP reports whether the runtime writes mcp.json for this compose: when the compose
-// holds a server, or a layer ships a settings/claude/mcp.json fragment.
+// holds a server, or a module ships a settings/claude/mcp.json fragment.
 func writesMCP(res *compose.Result) bool {
 	return len(res.MCP) > 0 || res.Settings[Runtime]["mcp.json"] != nil
 }
 
 // Skips is empty: Claude Code has a place for every kind.
 func (claude) Skips() []string { return nil }
+
+// Reserved are the three files Render writes, the settings file Claude Code writes and
+// reads beside them, and the five kind directories Render links.
+func (claude) Reserved() []render.Reserved {
+	return []render.Reserved{
+		{Path: "CLAUDE.md", Why: "qory writes it"},
+		{Path: "settings.json", Why: "qory writes it"},
+		{Path: "mcp.json", Why: "qory writes it"},
+		{Path: "settings.local.json", Why: "Claude Code reads it as settings; a module sets those through settings/claude/settings.json"},
+		{Path: "skills", Why: "skills are linked there; ship it as skills/<name>"},
+		{Path: "agents", Why: "agents are linked there; ship it as agents/<name>"},
+		{Path: "commands", Why: "commands are linked there; ship it as commands/<name>"},
+		{Path: "hooks", Why: "hooks are linked there; ship it as hooks/<name>"},
+		{Path: "output-styles", Why: "output-styles are linked there; ship it as output-styles/<name>"},
+	}
+}
 
 // Render links every atomic kind, writes settings.json with the exported variables and
 // QORY_HARNESS_HOME under env and the model, mcp.json with the MCP servers under mcpServers on top of any
@@ -67,8 +96,8 @@ func (claude) Render(res *compose.Result, dir, home string) error {
 			return
 		}
 		m["env"] = render.Env(m["env"], res, home)
-		if res.Profile.Target.Model != "" {
-			m["model"] = res.Profile.Target.Model
+		if res.Stack.Target.Model != "" {
+			m["model"] = res.Stack.Target.Model
 		}
 	})
 	if err != nil {

@@ -16,34 +16,34 @@ var (
 	claudeLink = ".claude"
 )
 
-// retarget rewrites the runtime line of the profile in the checkout.
+// retarget rewrites the runtime line of the stack in the checkout.
 func retarget(t *testing.T, root, runtime string) {
 	t.Helper()
-	file := filepath.Join(root, "harness-compose.yaml")
+	file := filepath.Join(root, "qory-stack.yaml")
 	data, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatal(err)
 	}
 	out := strings.Replace(string(data), "runtime: claude", "runtime: "+runtime, 1)
 	if out == string(data) {
-		t.Fatalf("the fixture profile has no runtime line to rewrite:\n%s", data)
+		t.Fatalf("the fixture stack has no runtime line to rewrite:\n%s", data)
 	}
 	if err := os.WriteFile(file, []byte(out), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// TestComposeForSeveralRuntimesFromTheProfile is a target that names two runtimes: one
+// TestComposeForSeveralRuntimesFromTheStack is a target that names two runtimes: one
 // checkout, two agents, one composed tree.
-func TestComposeForSeveralRuntimesFromTheProfile(t *testing.T) {
+func TestComposeForSeveralRuntimesFromTheStack(t *testing.T) {
 	root := newCheckout(t)
-	copyFixture(t, "two-layers", root)
+	copyFixture(t, "two-modules", root)
 	retarget(t, root, "[claude, codex]")
 	out, err := run(t, "harness", "compose")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, ui.Mark+" acme/app · claude, codex", "composed 8 entries from 2 layers")
+	wants(t, out, ui.Mark+" acme/app · claude, codex", "composed 8 entries from 2 modules")
 	wantsRow(t, out, "claude", claudeLink+"  .mcp.json")
 	wantsRow(t, out, "codex", strings.Join(codexLinks, "  "))
 	linkedFor(t, root, "claude", "codex")
@@ -57,7 +57,7 @@ func TestComposeForSeveralRuntimesFromTheProfile(t *testing.T) {
 // TestComposeForSeveralRuntimesFromTheFlag is the same target given on the command line.
 func TestComposeForSeveralRuntimesFromTheFlag(t *testing.T) {
 	root := newCheckout(t)
-	copyFixture(t, "two-layers", root)
+	copyFixture(t, "two-modules", root)
 	out, err := run(t, "hc", "--runtime", "claude, codex")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -70,7 +70,7 @@ func TestComposeForSeveralRuntimesFromTheFlag(t *testing.T) {
 // checkout that already runs Claude Code leaves both agents working.
 func TestComposeKeepsARuntimeComposedEarlier(t *testing.T) {
 	root := newCheckout(t)
-	copyFixture(t, "two-layers", root)
+	copyFixture(t, "two-modules", root)
 	if out, err := run(t, "hc"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
@@ -115,7 +115,7 @@ func linkedFor(t *testing.T, root string, runtimes ...string) {
 // harness with it.
 func TestRemoveOneRuntimeKeepsTheOther(t *testing.T) {
 	root := newCheckout(t)
-	copyFixture(t, "two-layers", root)
+	copyFixture(t, "two-modules", root)
 	if out, err := run(t, "hc", "--runtime", "claude,codex"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
@@ -154,10 +154,10 @@ func TestRemoveOneRuntimeKeepsTheOther(t *testing.T) {
 }
 
 // TestRemoveTakesEveryRuntimesLinks pins that one remove cleans a checkout composed for
-// several runtimes, whichever one the profile last targeted.
+// several runtimes, whichever one the stack last targeted.
 func TestRemoveTakesEveryRuntimesLinks(t *testing.T) {
 	root := newCheckout(t)
-	copyFixture(t, "two-layers", root)
+	copyFixture(t, "two-modules", root)
 	before := snapshot(t, root)
 	if out, err := run(t, "hc", "--runtime", "claude,codex"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -182,7 +182,7 @@ func TestComposeRefusesATargetItCannotRender(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			root := newCheckout(t)
-			copyFixture(t, "two-layers", root)
+			copyFixture(t, "two-modules", root)
 			out, err := run(t, "hc", "--runtime", c.runtime)
 			if err == nil {
 				t.Fatalf("the compose was accepted:\n%s", out)
@@ -212,7 +212,7 @@ func TestRemoveSaysNothingWasComposed(t *testing.T) {
 // .agents/skills and AGENTS.md: dropping one leaves those for the other.
 func TestRemoveOneRuntimeLeavesWhatTheOtherShares(t *testing.T) {
 	root := newCheckout(t)
-	copyFixture(t, "two-layers", root)
+	copyFixture(t, "two-modules", root)
 	if out, err := run(t, "hc", "--runtime", "codex,opencode"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
@@ -227,19 +227,19 @@ func TestRemoveOneRuntimeLeavesWhatTheOtherShares(t *testing.T) {
 	dirLinks(t, root, ".opencode", "opencode.json")
 }
 
-// TestComposeALayerWithoutSkills links every place a runtime reads, a kind directory
-// nothing fills included, so a layer of instructions alone composes for a runtime that
+// TestComposeAModuleWithoutSkills links every place a runtime reads, a kind directory
+// nothing fills included, so a module of instructions alone composes for a runtime that
 // reads skills from .agents/skills.
-func TestComposeALayerWithoutSkills(t *testing.T) {
+func TestComposeAModuleWithoutSkills(t *testing.T) {
 	root := newCheckout(t)
 	writeManifest(t, filepath.Join(root, "harness"), "own")
 	writeFile(t, filepath.Join(root, "harness", "AGENTS.md"), "# Only instructions\n")
-	writeFile(t, filepath.Join(root, "harness-compose.yaml"), "apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\ntarget:\n  runtime: any\nlayers:\n  - name: own\n    source: {path: harness}\n")
+	writeFile(t, filepath.Join(root, "qory-stack.yaml"), "apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: any\nmodules:\n  - name: own\n    source: {path: harness}\n")
 	out, err := run(t, "hc")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "composed 0 entries from 1 layer")
+	wants(t, out, "composed 0 entries from 1 module")
 	linkTarget(t, root, "AGENTS.md")
 	if info, err := os.Stat(filepath.Join(root, ".qory", "harness", "skills")); err != nil || !info.IsDir() {
 		t.Errorf("the home has no skills directory: %v", err)

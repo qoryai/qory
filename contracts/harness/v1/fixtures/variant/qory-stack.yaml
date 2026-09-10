@@ -1,0 +1,6 @@
+apiVersion: qory.ai/v1alpha1
+target:
+  runtime: codex
+modules:
+  - name: multi
+    source: {path: modules/multi}

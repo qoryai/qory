@@ -9,7 +9,7 @@
 //
 //	qory version           the version, and the harness format this build reads
 //	qory harness init      write the hello example into the current directory
-//	qory harness compose   compose the profile's layers into the checkout
+//	qory harness compose   compose the stack's modules into the checkout
 //	qory harness inspect   print the report of the composed harness
 //	qory harness remove    remove the composed harness and its links, or one runtime's
 //
@@ -19,8 +19,8 @@
 //
 // A command in this package does four things and nothing else. It finds where it stands
 // with locate, it calls the packages that do the work, it prints through the ui package,
-// and it returns an error. It holds no knowledge of layers, entries or runtimes; that
-// lives in the profile, compose and render packages. The set of runtimes a build can
+// and it returns an error. It holds no knowledge of modules, entries or runtimes; that
+// lives in the stack, compose and render packages. The set of runtimes a build can
 // render for is decided here, by the blank imports at the top of harness.go: a runtime
 // package registers itself in its own init, so importing it is what makes its name valid
 // for target.runtime and for the --runtime flag.

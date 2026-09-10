@@ -1,9 +1,17 @@
 // Package opencode renders for OpenCode, which reads a project's .opencode directory for
 // agents, commands and hooks, opencode.json for its config, AGENTS.md at the checkout
 // root, and skills from .agents/skills. All four are linked into the checkout,
-// opencode.json only when a layer ships one, the profile names a model, or the compose
+// opencode.json only when a module ships one, the stack names a model, or the compose
 // holds an MCP server. The model is written into it as model and the servers as mcp, in
-// OpenCode's own shape. OpenCode has no output styles, so that kind is skipped.
+// OpenCode's own shape. OpenCode has no output styles, so that kind is skipped. A files
+// entry named opencode/<path> lands at .opencode/<path>.
+//
+// The paths under .opencode a files entry may not take, see [render.Reserved]:
+//
+//	opencode.json  qory writes it
+//	commands       commands are linked there; ship it as commands/<name>
+//	hooks          hooks are linked there; ship it as hooks/<name>
+//	agents         agents are linked there; ship it as agents/<name>
 package opencode
 
 import (
@@ -44,9 +52,19 @@ func (opencode) Links(res *compose.Result) []render.Link {
 // Skips are output styles, the one kind OpenCode has no place for.
 func (opencode) Skips() []string { return []string{"output-styles"} }
 
+// Reserved are opencode.json and the three kind directories Render links or writes.
+func (opencode) Reserved() []render.Reserved {
+	return []render.Reserved{
+		{Path: "opencode.json", Why: "qory writes it"},
+		{Path: "commands", Why: "commands are linked there; ship it as commands/<name>"},
+		{Path: "hooks", Why: "hooks are linked there; ship it as hooks/<name>"},
+		{Path: "agents", Why: "agents are linked there; ship it as agents/<name>"},
+	}
+}
+
 // Render links the commands and hooks as they are, since OpenCode reads the same Markdown
 // with frontmatter, writes agents/<name>.md with the agent's description, mode and model,
-// and writes opencode.json when a layer ships the file, the profile names a model or the
+// and writes opencode.json when a module ships the file, the stack names a model or the
 // compose holds an MCP server: the model as model, and each server under mcp as OpenCode
 // reads it, {type: remote, url} for a server with a url, else {type: local, command:
 // [command, args...], environment: env}.
@@ -65,8 +83,8 @@ func (opencode) Render(res *compose.Result, dir, home string) error {
 		if file != "opencode.json" {
 			return
 		}
-		if res.Profile.Target.Model != "" {
-			m["model"] = res.Profile.Target.Model
+		if res.Stack.Target.Model != "" {
+			m["model"] = res.Stack.Target.Model
 		}
 		servers := res.MCPFor(home)
 		if servers == nil {
@@ -82,7 +100,7 @@ func (opencode) Render(res *compose.Result, dir, home string) error {
 
 // writesConfig reports whether the runtime writes opencode.json for this compose.
 func writesConfig(res *compose.Result) bool {
-	return res.Settings[Runtime]["opencode.json"] != nil || res.Profile.Target.Model != "" || len(res.MCP) > 0
+	return res.Settings[Runtime]["opencode.json"] != nil || res.Stack.Target.Model != "" || len(res.MCP) > 0
 }
 
 // server rewrites one MCP server object into OpenCode's shape.

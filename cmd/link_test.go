@@ -9,39 +9,38 @@ import (
 	"github.com/qoryai/qory/cmd"
 )
 
-// linkedProfile is the two-layers fixture's profile with the core layer linked as harness.
-const linkedProfile = `apiVersion: qory.ai/v1alpha1
-kind: HarnessProfile
+// linkedStack is the two-modules fixture's stack with the core module linked as harness.
+const linkedStack = `apiVersion: qory.ai/v1alpha1
 target:
   runtime: claude
-layers:
+modules:
   - name: core
-    source: {path: layers/core}
+    source: {path: modules/core}
     link: harness
   - name: nextjs
-    source: {path: layers/nextjs}
+    source: {path: modules/nextjs}
 extensions:
   acme:
     required_check: Harness self-tests
 `
 
-// TestLayerLinkIsWrittenReportedAndRemoved is a profile linking the core layer as harness:
+// TestModuleLinkIsWrittenReportedAndRemoved is a stack linking the core module as harness:
 // the compose writes the link at the checkout root, excludes it, the report and inspect
 // name it, a compose without it prunes it, and remove takes it with every exclude line.
-func TestLayerLinkIsWrittenReportedAndRemoved(t *testing.T) {
+func TestModuleLinkIsWrittenReportedAndRemoved(t *testing.T) {
 	root := newCheckout(t)
-	copyFixture(t, "two-layers", root)
-	writeFile(t, filepath.Join(root, "harness-compose.yaml"), linkedProfile)
+	copyFixture(t, "two-modules", root)
+	writeFile(t, filepath.Join(root, "qory-stack.yaml"), linkedStack)
 	out, err := run(t, "harness", "compose")
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantsRow(t, out, "link", "harness  (layer core)")
-	if target := linkTarget(t, root, "harness"); target != filepath.Join(".qory", "harness", "layers", "core") {
+	wantsRow(t, out, "link", "harness  (module core)")
+	if target := linkTarget(t, root, "harness"); target != filepath.Join(".qory", "harness", "modules", "core") {
 		t.Errorf("harness links to %s", target)
 	}
 	if _, err := os.Stat(filepath.Join(root, "harness", "scripts", "db.py")); err != nil {
-		t.Errorf("the layer's script is not reachable through the link: %v", err)
+		t.Errorf("the module's script is not reachable through the link: %v", err)
 	}
 	exclude, _ := os.ReadFile(filepath.Join(root, ".git", "info", "exclude"))
 	wants(t, string(exclude), "/harness\n", "/.qory\n")
@@ -50,14 +49,14 @@ func TestLayerLinkIsWrittenReportedAndRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 	wants(t, out, "linked as harness", "Extensions", `acme.required_check  "Harness self-tests"`)
-	writeFile(t, filepath.Join(root, "harness-compose.yaml"), strings.Replace(linkedProfile, "    link: harness\n", "", 1))
+	writeFile(t, filepath.Join(root, "qory-stack.yaml"), strings.Replace(linkedStack, "    link: harness\n", "", 1))
 	if _, err := run(t, "harness", "compose"); err != nil {
 		t.Fatal(err)
 	}
 	gone(t, root, "harness")
 	exclude, _ = os.ReadFile(filepath.Join(root, ".git", "info", "exclude"))
 	lacks(t, string(exclude), "/harness\n")
-	writeFile(t, filepath.Join(root, "harness-compose.yaml"), linkedProfile)
+	writeFile(t, filepath.Join(root, "qory-stack.yaml"), linkedStack)
 	if _, err := run(t, "harness", "compose"); err != nil {
 		t.Fatal(err)
 	}
@@ -75,15 +74,15 @@ func TestLayerLinkIsWrittenReportedAndRemoved(t *testing.T) {
 	}
 }
 
-// TestLayerLinkRefusesTheCheckoutsOwnPath is a repository with its own harness directory,
+// TestModuleLinkRefusesTheCheckoutsOwnPath is a repository with its own harness directory,
 // and one with an untracked symlink there: the compose refuses both with exit 4, since the
 // permission rules and scripts of the harness depend on that path, and --force replaces
 // the directory once it is committed. A link named like a runtime's path is refused
 // before anything is written.
-func TestLayerLinkRefusesTheCheckoutsOwnPath(t *testing.T) {
+func TestModuleLinkRefusesTheCheckoutsOwnPath(t *testing.T) {
 	root := newCheckout(t)
-	copyFixture(t, "two-layers", root)
-	writeFile(t, filepath.Join(root, "harness-compose.yaml"), linkedProfile)
+	copyFixture(t, "two-modules", root)
+	writeFile(t, filepath.Join(root, "qory-stack.yaml"), linkedStack)
 	writeFile(t, filepath.Join(root, "harness", "own.txt"), "mine\n")
 	_, err := run(t, "harness", "compose")
 	if cmd.ExitCode(err) != cmd.ExitForeign || !strings.Contains(err.Error(), "harness is not a link qory wrote") {
@@ -104,7 +103,7 @@ func TestLayerLinkRefusesTheCheckoutsOwnPath(t *testing.T) {
 	}
 	wantsRow(t, out, "replaced", "harness  (the checkout's own; git checkout -- restores it)")
 	if _, err := os.Stat(filepath.Join(root, "harness", "scripts", "db.py")); err != nil {
-		t.Errorf("the link does not reach the layer: %v", err)
+		t.Errorf("the link does not reach the module: %v", err)
 	}
 	if _, err := run(t, "harness", "remove"); err != nil {
 		t.Fatal(err)
@@ -119,19 +118,19 @@ func TestLayerLinkRefusesTheCheckoutsOwnPath(t *testing.T) {
 	if err := os.Remove(filepath.Join(root, "harness")); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(root, "harness-compose.yaml"), strings.Replace(linkedProfile, "link: harness", "link: AGENTS.md", 1))
+	writeFile(t, filepath.Join(root, "qory-stack.yaml"), strings.Replace(linkedStack, "link: harness", "link: AGENTS.md", 1))
 	_, err = run(t, "harness", "compose")
 	if err == nil || !strings.Contains(err.Error(), "link AGENTS.md is where the") || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("err = %v, exit %d", err, cmd.ExitCode(err))
 	}
 }
 
-// TestRemoveTakesTheLayerLinkWithoutTheReport is a checkout whose .qory was deleted by
-// hand: remove still takes the layer link at the root and its exclude line.
-func TestRemoveTakesTheLayerLinkWithoutTheReport(t *testing.T) {
+// TestRemoveTakesTheModuleLinkWithoutTheReport is a checkout whose .qory was deleted by
+// hand: remove still takes the module link at the root and its exclude line.
+func TestRemoveTakesTheModuleLinkWithoutTheReport(t *testing.T) {
 	root := newCheckout(t)
-	copyFixture(t, "two-layers", root)
-	writeFile(t, filepath.Join(root, "harness-compose.yaml"), linkedProfile)
+	copyFixture(t, "two-modules", root)
+	writeFile(t, filepath.Join(root, "qory-stack.yaml"), linkedStack)
 	if _, err := run(t, "harness", "compose"); err != nil {
 		t.Fatal(err)
 	}
@@ -153,11 +152,11 @@ func TestRemoveTakesTheLayerLinkWithoutTheReport(t *testing.T) {
 // line refuses it again.
 func TestForceFromTheConfigurationAndTheFlag(t *testing.T) {
 	root := newCheckout(t)
-	copyFixture(t, "two-layers", root)
+	copyFixture(t, "two-modules", root)
 	writeFile(t, filepath.Join(root, ".claude", "settings.json"), "{}\n")
 	runGit(t, root, "add", "-A")
 	runGit(t, root, "commit", "-q", "-m", "own settings")
-	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.ai/v1alpha1\nkind: QoryConfig\nforce: true\n")
+	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.ai/v1alpha1\nforce: true\n")
 	_, err := run(t, "harness", "compose", "--force=false")
 	if cmd.ExitCode(err) != cmd.ExitForeign {
 		t.Fatalf("with --force=false: err = %v, exit %d", err, cmd.ExitCode(err))

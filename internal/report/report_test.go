@@ -11,41 +11,41 @@ import (
 	"testing"
 
 	"github.com/qoryai/qory/internal/compose"
-	"github.com/qoryai/qory/internal/profile"
 	"github.com/qoryai/qory/internal/report"
 	"github.com/qoryai/qory/internal/source"
+	"github.com/qoryai/qory/internal/stack"
 )
 
-// result is the composed profile every test here reports on: two layers, one of them dirty
-// with a variant, two entries from different layers, and one exclude. The paths are fixed so the golden file does not move with the test directory.
+// result is the composed stack every test here reports on: two modules, one of them dirty
+// with a variant, two entries from different modules, and one exclude. The paths are fixed so the golden file does not move with the test directory.
 func result() *compose.Result {
 	return &compose.Result{
-		Profile: &profile.Profile{
-			File:   "/work/app/harness-compose.yaml",
-			Target: profile.Target{Runtimes: []string{"claude"}, Model: "opus"},
+		Stack: &stack.Stack{
+			File:   "/work/app/qory-stack.yaml",
+			Target: stack.Target{Runtimes: []string{"claude"}, Model: "opus"},
 		},
-		Layers: []compose.Layer{
+		Modules: []compose.Module{
 			{
 				Name:   "core",
-				Dir:    "/work/layers/core",
-				Source: "../layers/core",
+				Dir:    "/work/modules/core",
+				Source: "../modules/core",
 				Pin:    source.WorkingTree,
 			},
 			{
 				Name:    "review",
-				Dir:     "/work/layers/review",
-				Source:  "../layers/review",
+				Dir:     "/work/modules/review",
+				Source:  "../modules/review",
 				Pin:     source.WorkingTree,
 				Dirty:   true,
 				Variant: "claude",
 			},
 		},
 		Entries: []compose.Entry{
-			{Kind: "agents", Name: "reviewer", Layer: "review", Path: "/work/layers/review/agents/reviewer.md"},
-			{Kind: "skills", Name: "ship", Layer: "core", Path: "/work/layers/core/skills/ship"},
+			{Kind: "agents", Name: "reviewer", Module: "review", Path: "/work/modules/review/agents/reviewer.md"},
+			{Kind: "skills", Name: "ship", Module: "core", Path: "/work/modules/core/skills/ship"},
 		},
 		Excludes: []compose.Exclude{
-			{Layer: "core", Kind: "skills", Name: "old"},
+			{Module: "core", Kind: "skills", Name: "old"},
 		},
 	}
 }
@@ -54,28 +54,28 @@ func result() *compose.Result {
 func want() report.Report {
 	return report.Report{
 		Version:  report.Version,
-		Profile:  "app",
-		File:     "/work/app/harness-compose.yaml",
+		Stack:    "app",
+		File:     "/work/app/qory-stack.yaml",
 		Target:   report.Target{Runtimes: []string{"claude"}, Model: "opus"},
 		Checkout: "/work/app",
 		Home:     "/work/app/.qory/harness",
-		Layers: []report.Layer{
-			{Name: "core", Source: "../layers/core", Pin: "working-tree"},
-			{Name: "review", Source: "../layers/review", Pin: "working-tree", Dirty: true, Variant: "claude"},
+		Modules: []report.Module{
+			{Name: "core", Source: "../modules/core", Pin: "working-tree"},
+			{Name: "review", Source: "../modules/review", Pin: "working-tree", Dirty: true, Variant: "claude"},
 		},
 		Entries: []report.Entry{
-			{Kind: "agents", Name: "reviewer", Layer: "review"},
-			{Kind: "skills", Name: "ship", Layer: "core"},
+			{Kind: "agents", Name: "reviewer", Module: "review"},
+			{Kind: "skills", Name: "ship", Module: "core"},
 		},
 		Excludes: []report.Exclude{
-			{Layer: "core", Kind: "skills", Name: "old"},
+			{Module: "core", Kind: "skills", Name: "old"},
 		},
 	}
 }
 
-// TestNewNamesEveryLayerEntryAndExclude checks that the report carries the whole result: the
-// target, the paths, and every layer, entry and exclude with all of its fields.
-func TestNewNamesEveryLayerEntryAndExclude(t *testing.T) {
+// TestNewNamesEveryModuleEntryAndExclude checks that the report carries the whole result: the
+// target, the paths, and every module, entry and exclude with all of its fields.
+func TestNewNamesEveryModuleEntryAndExclude(t *testing.T) {
 	got := report.New(result(), "app", "/work/app", "/work/app/.qory/harness")
 	if !reflect.DeepEqual(got, want()) {
 		t.Errorf("got %+v, want %+v", got, want())
@@ -88,16 +88,16 @@ func TestNewNamesEveryLayerEntryAndExclude(t *testing.T) {
 // TestNewOnAnEmptyResultKeepsTheListsEmptyNotNull matters for the stored JSON: a caller
 // reading it finds [] and not null.
 func TestNewOnAnEmptyResultKeepsTheListsEmptyNotNull(t *testing.T) {
-	res := &compose.Result{Profile: &profile.Profile{Target: profile.Target{Runtimes: []string{"codex"}}}}
+	res := &compose.Result{Stack: &stack.Stack{Target: stack.Target{Runtimes: []string{"codex"}}}}
 	r := report.New(res, "app", "/work/app", "/work/app/.qory/harness")
-	if r.Layers == nil || r.Entries == nil || r.Excludes == nil {
+	if r.Modules == nil || r.Entries == nil || r.Excludes == nil {
 		t.Fatalf("a list is nil: %+v", r)
 	}
 	data, err := json.Marshal(r)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{`"layers":[]`, `"entries":[]`, `"excludes":[]`} {
+	for _, key := range []string{`"modules":[]`, `"entries":[]`, `"excludes":[]`} {
 		if !strings.Contains(string(data), key) {
 			t.Errorf("the JSON lacks %s:\n%s", key, data)
 		}
@@ -150,7 +150,7 @@ func TestReadAMissingFileIsNotExist(t *testing.T) {
 // TestReadMalformedJSONNamesTheFile checks the error a person sees for a truncated report.
 func TestReadMalformedJSONNamesTheFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "harness-report.json")
-	if err := os.WriteFile(path, []byte(`{"version": 1, "layers": [`), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(`{"version": 1, "modules": [`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, err := report.Read(path)

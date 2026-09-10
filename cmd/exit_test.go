@@ -18,16 +18,16 @@ func TestExitCodesTellTheFailuresApart(t *testing.T) {
 	}{
 		{
 			name:  "success",
-			setup: func(t *testing.T, root string) []string { copyFixture(t, "two-layers", root); return []string{"hc"} },
+			setup: func(t *testing.T, root string) []string { copyFixture(t, "two-modules", root); return []string{"hc"} },
 			want:  0,
 		},
 		{
-			name:  "no profile",
+			name:  "no stack",
 			setup: func(*testing.T, string) []string { return []string{"hc"} },
 			want:  cmd.ExitInput,
 		},
 		{
-			name: "a profile of another format",
+			name: "a stack of another format",
 			setup: func(t *testing.T, root string) []string {
 				copyFixture(t, "unknown-api-version", root)
 				return []string{"hc"}
@@ -35,7 +35,7 @@ func TestExitCodesTellTheFailuresApart(t *testing.T) {
 			want: cmd.ExitInput,
 		},
 		{
-			name: "a broken layer",
+			name: "a broken module",
 			setup: func(t *testing.T, root string) []string {
 				copyFixture(t, "hooks-directory-fails", root)
 				return []string{"hc"}
@@ -45,7 +45,7 @@ func TestExitCodesTellTheFailuresApart(t *testing.T) {
 		{
 			name: "an unknown runtime",
 			setup: func(t *testing.T, root string) []string {
-				copyFixture(t, "two-layers", root)
+				copyFixture(t, "two-modules", root)
 				return []string{"hc", "--runtime", "nope"}
 			},
 			want: cmd.ExitInput,
@@ -86,7 +86,7 @@ func TestExitCodesTellTheFailuresApart(t *testing.T) {
 		{
 			name: "a path qory will not replace",
 			setup: func(t *testing.T, root string) []string {
-				copyFixture(t, "two-layers", root)
+				copyFixture(t, "two-modules", root)
 				writeFile(t, filepath.Join(root, ".claude", "settings.json"), "{}\n")
 				return []string{"hc"}
 			},
@@ -95,7 +95,7 @@ func TestExitCodesTellTheFailuresApart(t *testing.T) {
 		{
 			name: "a git source that cannot be fetched",
 			setup: func(t *testing.T, root string) []string {
-				writeFile(t, filepath.Join(root, "harness-compose.yaml"), "apiVersion: qory.ai/v1alpha1\nkind: HarnessProfile\ntarget:\n  runtime: claude\nlayers:\n  - name: core\n    source: {git: file:///nowhere/at/all, ref: v1}\n")
+				writeFile(t, filepath.Join(root, "qory-stack.yaml"), "apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source: {git: file:///nowhere/at/all, ref: v1}\n")
 				return []string{"hc"}
 			},
 			want: 1,

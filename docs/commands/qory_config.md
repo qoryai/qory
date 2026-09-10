@@ -24,5 +24,5 @@ qory config [flags]
 
 ### SEE ALSO
 
-* [qory](qory.md)	 - Compose the harness a runtime loads from layers
+* [qory](qory.md)	 - Compose the harness a runtime loads from modules
 

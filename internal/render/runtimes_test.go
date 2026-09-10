@@ -7,20 +7,20 @@ import (
 	"testing"
 
 	"github.com/qoryai/qory/internal/compose"
-	"github.com/qoryai/qory/internal/profile"
 	"github.com/qoryai/qory/internal/render"
+	"github.com/qoryai/qory/internal/stack"
 )
 
-// composeFixture composes the two-layers fixture for the given runtimes and returns the
+// composeFixture composes the two-modules fixture for the given runtimes and returns the
 // result together with a fresh git checkout and the home path inside it.
 func composeFixture(t *testing.T, runtimes ...string) (*compose.Result, string, string) {
 	t.Helper()
 	hermetic(t)
-	file, err := filepath.Abs("../../contracts/harness/v1/fixtures/two-layers/harness-compose.yaml")
+	file, err := filepath.Abs("../../contracts/harness/v1/fixtures/two-modules/qory-stack.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := profile.Load(file)
+	p, err := stack.Load(file)
 	if err != nil {
 		t.Fatal(err)
 	}

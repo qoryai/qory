@@ -11,12 +11,12 @@ import (
 	"testing"
 
 	"github.com/qoryai/qory/internal/compose"
-	"github.com/qoryai/qory/internal/profile"
+	"github.com/qoryai/qory/internal/stack"
 )
 
 const fixtures = "../../contracts/harness/v1/fixtures"
 
-// TestFixtures runs every fixture: a profile composes to the expected entries, settings and
+// TestFixtures runs every fixture: a stack composes to the expected entries, settings and
 // instructions, or fails with the expected error text.
 func TestFixtures(t *testing.T) {
 	dirs, err := filepath.Glob(filepath.Join(fixtures, "*"))
@@ -45,7 +45,7 @@ func TestFixtures(t *testing.T) {
 			}
 			var b strings.Builder
 			for _, e := range res.Entries {
-				fmt.Fprintf(&b, "%s/%s %s\n", e.Kind, e.Name, e.Layer)
+				fmt.Fprintf(&b, "%s/%s %s\n", e.Kind, e.Name, e.Module)
 			}
 			expectText(t, "expected/entries.txt", b.String())
 			// expected/settings/<runtime>/<file>.json holds the merged target file as JSON;
@@ -87,7 +87,7 @@ func TestFixtures(t *testing.T) {
 }
 
 func load() (*compose.Result, error) {
-	p, err := profile.Load(profile.FileName)
+	p, err := stack.Load(stack.FileName)
 	if err != nil {
 		return nil, err
 	}

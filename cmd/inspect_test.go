@@ -12,7 +12,7 @@ import (
 // the checkout and tells the person which command writes one.
 func TestInspectAsksForAComposeFirst(t *testing.T) {
 	root := newCheckout(t)
-	copyFixture(t, "two-layers", root)
+	copyFixture(t, "two-modules", root)
 
 	out, err := run(t, "harness", "inspect")
 	if err == nil {
@@ -28,7 +28,7 @@ func TestInspectAsksForAComposeFirst(t *testing.T) {
 // with the path in the message, rather than being read as an empty harness.
 func TestInspectNamesAReportItCannotRead(t *testing.T) {
 	root := newCheckout(t)
-	copyFixture(t, "two-layers", root)
+	copyFixture(t, "two-modules", root)
 	if out, err := run(t, "harness", "compose"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
@@ -42,11 +42,11 @@ func TestInspectNamesAReportItCannotRead(t *testing.T) {
 	wants(t, err.Error(), report)
 }
 
-// TestInspectPrintsTheLayersAndEntries checks that inspect after a compose prints the
-// report: the paths, every layer with its source and pin, and every entry with its layer.
-func TestInspectPrintsTheLayersAndEntries(t *testing.T) {
+// TestInspectPrintsTheModulesAndEntries checks that inspect after a compose prints the
+// report: the paths, every module with its source and pin, and every entry with its module.
+func TestInspectPrintsTheModulesAndEntries(t *testing.T) {
 	root := newCheckout(t)
-	copyFixture(t, "two-layers", root)
+	copyFixture(t, "two-modules", root)
 	if out, err := run(t, "harness", "compose"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
@@ -57,19 +57,19 @@ func TestInspectPrintsTheLayersAndEntries(t *testing.T) {
 	}
 	wants(t, out,
 		ui.Mark+" acme/app · claude opus",
-		"harness-compose.yaml",
+		"qory-stack.yaml",
 		root,
 		".qory/harness",
-		"Layers",
+		"Modules",
 		"core",
-		"layers/core",
+		"modules/core",
 		"nextjs",
-		"layers/nextjs",
+		"modules/nextjs",
 		"working-tree",
 		"Entries",
 	)
-	if got := entryTable(out); !maps.Equal(got, twoLayerEntries) {
-		t.Errorf("printed entries = %v, want %v", got, twoLayerEntries)
+	if got := entryTable(out); !maps.Equal(got, twoModuleEntries) {
+		t.Errorf("printed entries = %v, want %v", got, twoModuleEntries)
 	}
 }
 
@@ -77,12 +77,12 @@ func TestInspectPrintsTheLayersAndEntries(t *testing.T) {
 // is named rather than the report read as this one's.
 func TestInspectRefusesAReportOfAnotherVersion(t *testing.T) {
 	root := newCheckout(t)
-	copyFixture(t, "two-layers", root)
+	copyFixture(t, "two-modules", root)
 	if out, err := run(t, "harness", "compose"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	report := filepath.Join(root, ".qory", "harness-report.json")
-	writeFile(t, report, `{"version": 99, "profile": "x"}`+"\n")
+	writeFile(t, report, `{"version": 99, "stack": "x"}`+"\n")
 	out, err := run(t, "harness", "inspect")
 	if err == nil {
 		t.Fatalf("inspect read a version 99 report:\n%s", out)
