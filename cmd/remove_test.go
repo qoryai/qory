@@ -184,3 +184,39 @@ func ownedByCheckout(t *testing.T, path, content string) {
 		t.Errorf("%s holds %q, want %q", path, data, content)
 	}
 }
+
+// TestRemoveLeavesTheExcludeLinesASiblingWorktreeNeeds is a repository composed in the
+// main checkout and in a linked worktree, which share one exclude file: remove in the
+// worktree takes its own links and .qory, and leaves every line the main checkout's
+// composed tree still needs, so git shows nothing new there. Remove in the main checkout
+// then takes the lines.
+func TestRemoveLeavesTheExcludeLinesASiblingWorktreeNeeds(t *testing.T) {
+	root := worktreeRepo(t)
+	if out, err := run(t, "harness", "compose"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if out, err := run(t, "wa", "feature"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wt := filepath.Join(filepath.Dir(root), "wt-feature")
+	exclude := filepath.Join(root, ".git", "info", "exclude")
+
+	t.Chdir(wt)
+	out, err := run(t, "harness", "remove")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "removed .claude", "removed .mcp.json", "removed .qory")
+	gone(t, wt, ".claude", ".mcp.json", ".qory")
+	data, _ := os.ReadFile(exclude)
+	wants(t, string(data), "/.qory\n", "/.claude/settings.json\n", "/.mcp.json\n")
+	status := gitOut(t, root, "status", "--porcelain", "--untracked-files=all")
+	lacks(t, status, ".qory", ".claude", ".mcp.json")
+
+	t.Chdir(root)
+	if out, err := run(t, "harness", "remove"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	data, _ = os.ReadFile(exclude)
+	lacks(t, string(data), "/.qory\n", "/.claude/settings.json\n", "/.mcp.json\n")
+}

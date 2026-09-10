@@ -120,6 +120,26 @@ func TestExcludeFileIsTheCloneLocalExcludeFile(t *testing.T) {
 	}
 }
 
+// TestWorktreesListsEveryWorkingTree is a repository with one linked worktree: both
+// paths come back, the main checkout first, and a directory outside git gives nil.
+func TestWorktreesListsEveryWorkingTree(t *testing.T) {
+	hermetic(t)
+	root := initRepo(t, t.TempDir())
+	write(t, filepath.Join(root, "README.md"), "hello\n")
+	git(t, root, "add", "README.md")
+	git(t, root, "commit", "-q", "-m", "first")
+	wt := filepath.Join(t.TempDir(), "feature")
+	git(t, root, "worktree", "add", "-q", "-b", "feature", wt)
+	got := checkout.Worktrees(wt)
+	want := []string{real(t, root), real(t, wt)}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if got := checkout.Worktrees(t.TempDir()); got != nil {
+		t.Errorf("got %v outside git, want nil", got)
+	}
+}
+
 // TestRepoKeyReturnsOwnerAndNameFromTheOriginRemote covers the URL forms a remote takes, and
 // the fallback when the checkout has no remote.
 func TestRepoKeyReturnsOwnerAndNameFromTheOriginRemote(t *testing.T) {

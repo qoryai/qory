@@ -394,3 +394,43 @@ func TestUnlinkTakesTheExcludeLinesWithTheLinks(t *testing.T) {
 		t.Errorf("exclude file still holds /.qory:\n%s", data)
 	}
 }
+
+// TestUnexcludeKeepsALineAnotherWorktreeHolds is a repository with a linked worktree that
+// has a .qory of its own: the exclude file is one for both, so a remove in the main
+// checkout leaves the line for the worktree, and the line goes once the worktree's .qory
+// is gone too. A line the worktree does not need goes at once.
+func TestUnexcludeKeepsALineAnotherWorktreeHolds(t *testing.T) {
+	_, root, _ := composeFixture(t, "claude")
+	gitIn(t, root, "config", "user.name", "Tester")
+	gitIn(t, root, "config", "user.email", "tester@example.com")
+	write(t, filepath.Join(root, "README.md"), "hello\n")
+	gitIn(t, root, "add", "README.md")
+	gitIn(t, root, "commit", "-q", "-m", "first")
+	wt := filepath.Join(t.TempDir(), "feature")
+	gitIn(t, root, "worktree", "add", "-q", "-b", "feature", wt)
+	if err := os.MkdirAll(filepath.Join(wt, ".qory", "harness"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(root, ".git", "info", "exclude")
+	write(t, file, "/.qory\n/.mcp.json\n")
+
+	if err := render.RemoveExclude(root, "/.mcp.json"); err != nil {
+		t.Fatal(err)
+	}
+	if err := render.RemoveExclude(root, "/.qory"); err != nil {
+		t.Fatal(err)
+	}
+	if got := readExclude(t, root); got != "/.qory\n" {
+		t.Errorf("exclude file after the main checkout's remove:\n%s\nwant /.qory alone, which the worktree still holds", got)
+	}
+
+	if err := os.RemoveAll(filepath.Join(wt, ".qory")); err != nil {
+		t.Fatal(err)
+	}
+	if err := render.RemoveExclude(root, "/.qory"); err != nil {
+		t.Fatal(err)
+	}
+	if got := readExclude(t, root); got != "" {
+		t.Errorf("exclude file once no worktree holds .qory:\n%s\nwant it empty", got)
+	}
+}

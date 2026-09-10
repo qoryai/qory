@@ -73,6 +73,24 @@ func ExcludeFile(root string) string {
 	return out
 }
 
+// Worktrees returns the working trees of the repository holding root, as git lists them
+// and root's own among them. They all share the repository's one [ExcludeFile], so a line
+// in it hides the path it names in every one of them at once. It returns nil when root is
+// outside a working tree or git is not installed.
+func Worktrees(root string) []string {
+	out, err := git(root, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil
+	}
+	var paths []string
+	for _, line := range strings.Split(out, "\n") {
+		if path, ok := strings.CutPrefix(line, "worktree "); ok {
+			paths = append(paths, path)
+		}
+	}
+	return paths
+}
+
 // Restorable reports whether git checkout -- could bring path back after qory removes it,
 // which is when path is tracked and unmodified. It returns "" then, and otherwise the
 // reason, phrased to follow the path in a message: "is not tracked in git", "has
