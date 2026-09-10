@@ -721,7 +721,9 @@ func had(at places) bool {
 
 // removeDir removes the qory directory with its exclude line and says so when it was
 // there. The line goes because the directory does: a stale line would hide a .qory the
-// repository later adds.
+// repository later adds. It stays while another worktree of the repository has a .qory of
+// its own, since the exclude file is one for all of them and that worktree still needs
+// the line; its own remove takes it.
 func removeDir(u *ui.UI, at places) error {
 	present := had(at)
 	if err := os.RemoveAll(at.dir); err != nil {

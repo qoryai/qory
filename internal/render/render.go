@@ -1043,8 +1043,11 @@ func exclude(root, line string) error {
 func RemoveExclude(root, line string) error { return unexclude(root, line) }
 
 // unexclude removes every line of the checkout's clone-local exclude file that reads as
-// line, and leaves the file's other bytes as they are. A file without the line, no file,
-// or a checkout outside git is nothing to change and no error.
+// line, and leaves the file's other bytes as they are. The file is the repository's, one
+// for every worktree of it, so the line stays while another worktree still has something
+// at the path it names: that worktree composed it, and its own remove takes the line in
+// turn. A file without the line, no file, or a checkout outside git is nothing to change
+// and no error.
 func unexclude(root, line string) error {
 	file := checkout.ExcludeFile(root)
 	if file == "" {
@@ -1066,10 +1069,30 @@ func unexclude(root, line string) error {
 		}
 		kept = append(kept, l)
 	}
-	if !found {
+	if !found || heldElsewhere(root, line) {
 		return nil
 	}
 	return os.WriteFile(file, []byte(strings.Join(kept, "")), 0o644)
+}
+
+// heldElsewhere reports whether a worktree of the repository other than root has
+// something, a dangling link included, at the path an exclude line names. Git lists
+// worktrees by their real paths, so root is told apart by its own.
+func heldElsewhere(root, line string) bool {
+	self := root
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		self = resolved
+	}
+	rel := filepath.FromSlash(strings.TrimPrefix(line, "/"))
+	for _, wt := range checkout.Worktrees(root) {
+		if wt == self {
+			continue
+		}
+		if _, err := os.Lstat(filepath.Join(wt, rel)); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // LinkEntries writes one symlink per composed entry of the kinds in keep, at
