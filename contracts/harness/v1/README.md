@@ -510,3 +510,4 @@ checkout's own file are not read (§Extending a stack). The schema is
 | 3 | a collision, printed with the excludes that resolve it |
 | 4 | a path qory did not write standing where a link goes, which `--force` may replace |
 | 5 | the running qory is outside the range a document's `qory` key declares |
+| 6 | `--check`: the home no longer matches what the stack and modules say, or nothing is composed |
