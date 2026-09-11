@@ -182,6 +182,9 @@ type Extending struct {
 // and returns the stack that composes.
 type Stack struct {
 	APIVersion string `yaml:"apiVersion"`
+	// Qory is the range of qory versions the stack is written for, from the qory key;
+	// empty when the stack names none. The compose refuses a qory outside it.
+	Qory Constraint `yaml:"qory,omitempty"`
 	// Name is the stack's name in the report. A stack that leaves it out is named after
 	// the checkout by the caller.
 	Name string `yaml:"name,omitempty"`
@@ -477,7 +480,8 @@ func FileAllowed(name string, prefixes []string) bool {
 
 // Extend returns the stack the checkout's qory.yaml p composes on base: the base's modules first,
 // marked [Module.Base], each with its source rewritten to resolve from p, then p's
-// modules; the base's target; both files' extensions. It refuses a base that extends
+// modules; the base's target; both files' extensions. The result's Qory is p's; the
+// base's range is the caller's to carry and check, as [Base.Qory] does. It refuses a base that extends
 // another, a base without an extending block, and an extension namespace both files
 // declare. The result's File and Root are p's.
 func Extend(base, p *Stack) (*Stack, error) {

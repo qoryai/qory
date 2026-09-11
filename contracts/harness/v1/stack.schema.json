@@ -8,6 +8,11 @@
   "additionalProperties": false,
   "properties": {
     "apiVersion": {"const": "qory.ai/v1alpha1"},
+    "qory": {
+      "description": "The qory versions this document is written for: one or more comparators, >=0.3.0 <0.4.0 say; every one has to hold.",
+      "type": "string",
+      "pattern": "^\\s*(>=|<=|>|<|=)v?\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?(\\s+(>=|<=|>|<|=)v?\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?)*\\s*$"
+    },
     "name": {"type": "string", "minLength": 1},
     "description": {"type": "string"},
     "target": {

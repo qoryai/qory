@@ -88,6 +88,7 @@ place of `target`, it names the base: a directory holding a `qory-stack.yaml`, a
 | Field | Required | Meaning |
 |---|---|---|
 | `apiVersion` | yes | `qory.ai/v1alpha1` |
+| `qory` | no | the qory versions the stack is written for: comparators such as `>=0.3.0 <0.4.0`, every one of which has to hold. A compose on a qory outside the range is refused with status 5; a build from source between tags, which has no version, composes and says the range was not checked. A stack delivered to be extended states its minimum here, and every checkout extending it inherits the range |
 | `name` | no | the stack's name in the report. Default: `owner/name` from the origin remote, else the directory name |
 | `description` | no | what the stack is for, carried into the report and printed by `qory harness inspect` |
 | `target.runtime` | yes | the program that runs the harness, one of the runtimes in §Runtimes, or a list of them to compose for at once |
@@ -469,6 +470,7 @@ env:
 
 | Key | Default | Meaning |
 |---|---|---|
+| `qory` | none | the qory versions the file is written for, as in a stack; read under `extends` as well, since it can only narrow the base's range |
 | `harness.runtime` | the stack's `target.runtime` | one runtime name or a list; `--runtime` wins over it |
 | `harness.model` | the stack's `target.model` | `--model` wins over it |
 | `harness.force` | `false` | what `--force` does on every compose; `--force=false` wins over it |
@@ -501,3 +503,4 @@ checkout's own file are not read (§Extending a stack). The schema is
 | 2 | a mistake in the input: the command line, the stack, a module, a fragment |
 | 3 | a collision, printed with the excludes that resolve it |
 | 4 | a path qory did not write standing where a link goes, which `--force` may replace |
+| 5 | the running qory is outside the range a document's `qory` key declares |

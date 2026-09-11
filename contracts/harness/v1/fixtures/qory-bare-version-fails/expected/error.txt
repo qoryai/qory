@@ -1,0 +1,1 @@
+qory-stack.yaml: qory "0.3.0" is not one or more comparators such as >=0.3.0

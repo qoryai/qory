@@ -192,6 +192,18 @@ func runCompose(out, errOut io.Writer, o composeOptions) error {
 	if err != nil {
 		return input(err)
 	}
+	// Every document with a qory key is checked against the running qory as it is
+	// read, before anything is fetched or written: the configuration files, the stack,
+	// and the base once extends has resolved it.
+	checks := newQoryChecks()
+	for _, r := range conf.Qory {
+		if err := checks.check(r.File, "the file", r.Qory); err != nil {
+			return err
+		}
+	}
+	if err := checks.check(p.File, "the stack", p.Qory); err != nil {
+		return err
+	}
 	force, update := conf.Force, conf.Update
 	if o.force != nil {
 		force = *o.force
@@ -217,6 +229,11 @@ func runCompose(out, errOut io.Writer, o composeOptions) error {
 	p, opts.Base, err = compose.LoadBase(p, basePin, opts)
 	if err != nil {
 		return composeError(err)
+	}
+	if opts.Base != nil {
+		if err := checks.check(p.File, "the base stack "+opts.Base.String(), opts.Base.Qory); err != nil {
+			return err
+		}
 	}
 	if err := applyTarget(p, opts.Base, conf, o.runtime, o.model); err != nil {
 		return input(err)
@@ -257,6 +274,7 @@ func runCompose(out, errOut io.Writer, o composeOptions) error {
 	if _, err := os.Stat(filepath.Join(at.root, config.FileName)); extends && err == nil {
 		skippedConfig = [][2]string{{"skipped", config.FileName + "  (its harness, git and env keys; the base stack decides under extends)"}}
 	}
+	skippedConfig = append(skippedConfig, checks.rows...)
 	if o.dryRun {
 		if err := rep.PrintBody(out); err != nil {
 			return err
@@ -485,10 +503,12 @@ const (
 	ExitCollision = 3
 	// ExitForeign is a path qory would not replace or remove, because it did not write it.
 	ExitForeign = 4
+	// ExitVersion is a document whose qory key excludes the running qory.
+	ExitVersion = 5
 )
 
 // ExitCode is the status a process exits with for err: 0 for nil, [ExitInput],
-// [ExitCollision] or [ExitForeign] for the errors those name, and 1 for every other
+// [ExitCollision], [ExitForeign] or [ExitVersion] for the errors those name, and 1 for every other
 // failure, such as a git source that could not be fetched or a file that could not be
 // written. A command unknown to the tree is an input error too; cobra reports it as a
 // plain error whose text starts with "unknown command", which is the one place this
@@ -497,6 +517,7 @@ func ExitCode(err error) int {
 	var in inputError
 	var collision *compose.CollisionError
 	var foreign *render.ForeignPathError
+	var version *versionError
 	switch {
 	case err == nil:
 		return 0
@@ -504,6 +525,8 @@ func ExitCode(err error) int {
 		return ExitCollision
 	case errors.As(err, &foreign):
 		return ExitForeign
+	case errors.As(err, &version):
+		return ExitVersion
 	case errors.As(err, &in), strings.HasPrefix(err.Error(), "unknown command"):
 		return ExitInput
 	default:
