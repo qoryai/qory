@@ -28,7 +28,7 @@ type Module struct {
 	// Dir is the absolute directory the module was read from.
 	Dir string
 	// Source is the stack's source as text: the path of a path source, <git>#<ref> for a
-	// git source.
+	// git source, either followed by " module <name>" for an export.
 	Source string
 	// Pin is what the source resolved to: "working-tree" for a path, the commit for a git
 	// source.

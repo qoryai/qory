@@ -8,7 +8,7 @@ What `qory harness compose` reads and what it writes.
 |---|---|---|
 | `qory-stack.yaml` | a directory named by `extends` or `-f`; an ancestor directory covering several repositories; the root of the harness repository that delivers it | a stack delivered to be extended: the ordered modules, the target runtime and model, the excludes, what a checkout extending it may add |
 | `qory-module.yaml` | the root of a module | the module: its name, its variants per runtime, the variables it exports |
-| `qory.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's own stack, its target and modules, or the stack it extends and the modules it appends, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; `git` and `env` (§The configuration) |
+| `qory.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's own stack, its target and modules, or the stack it extends and the modules it appends, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; under `exports`, the stacks and modules this repository publishes for others, by name (§Exports); `git` and `env` (§The configuration) |
 
 Every module carries a `qory-module.yaml`; it is what names the module, and a directory
 without one is not a module. `qory.yaml` is optional: every setting has a default. Each
@@ -83,16 +83,19 @@ harness:
 # qory.yaml, extending a stack
 apiVersion: qory.ai/v1alpha1
 harness:
-  extends: {git: git@git.example.com:acme/harness, ref: main, path: nextjs-15}
+  extends: {git: git@git.example.com:acme/harness, ref: v2.4.0, stack: nextjs-15}
   modules:
     - name: app
+    - name: marketing
+      source: {git: git@git.example.com:acme/harness, ref: v2.4.0, module: marketing}
 ```
 
 The section takes `name`, `description`, `target`, `modules` and `extensions` as a stack
 does, never `extending`; a stack to be extended is a `qory-stack.yaml`. With `extends` in
-place of `target`, it names the base: a directory holding a `qory-stack.yaml`, as
-`{path: <dir>}` or `{git: <url>, ref: <ref>, path: <dir>}`. The schema is
-[config.schema.json](config.schema.json).
+place of `target`, it names the base: a stack the repository exports, as `{git: <url>,
+ref: <ref>, stack: <name>}` or `{path: <repository>, stack: <name>}` (§Exports), or the
+directory holding its `qory-stack.yaml`, as `{path: <dir>}` or `{git: <url>, ref: <ref>,
+path: <dir>}`. The schema is [config.schema.json](config.schema.json).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -103,8 +106,8 @@ place of `target`, it names the base: a directory holding a `qory-stack.yaml`, a
 | `target.runtime` | yes | the program that runs the harness, one of the runtimes in §Runtimes, or a list of them to compose for at once |
 | `target.model` | no | written into the settings of every targeted runtime that has a project-level place for it (§Runtimes) |
 | `modules` | yes | ordered, at least one. Order decides the order of the instruction sections |
-| `modules[].name` | one of name and source | the module's name, the one its `qory-module.yaml` declares, one path segment. Alone, it is the address too: `modules/<name>` at the root of the repository the stack is in |
-| `modules[].source` | one of name and source | `{path: <dir>}`, relative to the stack file; or `{git: <url>, ref: <tag, branch or commit>}` with an optional `path` to the module's directory inside the repository (§Sources). Alone, the module's name is its manifest's; with a name, the manifest must carry that name |
+| `modules[].name` | one of name and source | the module's name, the one its `qory-module.yaml` declares, one path segment. Alone, it is the address too: `<name>` under the modules directory of the repository the stack is in, `modules/` at its root unless the root's `qory.yaml` says otherwise under `exports.dir` (§Exports) |
+| `modules[].source` | one of name and source | `{path: <dir>}`, relative to the stack file; or `{git: <url>, ref: <tag, branch or commit>}` with an optional `path` to the module's directory inside the repository (§Sources); or a module the repository exports, `{git: <url>, ref: <ref>, module: <name>}` or `{path: <repository>, module: <name>}` (§Exports). Alone, the module's name is its manifest's; with a name, the manifest must carry that name |
 | `modules[].exclude` | no | what of this module is left out; everything else is composed, or, beside `only`, everything the `only` takes. Entries by kind, `skills`, `agents`, `commands`, `output-styles`, `hooks`, `mcp`, `files`, each a list of names; the three merged parts, `instructions: true` for the module's `AGENTS.md`, `settings` and `env` as `true` for all of it or a list, of `<runtime>/<file>` fragments and of variable names. Not with `only` |
 | `modules[].only` | no | the only things of this module that are composed, with the same keys as `exclude`, plus what the named entries require from this module (`requires` in its manifest, followed transitively). Everything else is left out: a kind not named contributes no entry beyond those, a part not named is left out. `only: {skills: [deploy]}` is the deploy skill, what it needs, and nothing else. An `exclude` beside it names entries the `only` brought in, to leave them out after all; a requirement left out that way has to come from another module (rule 4). It names no part, and nothing the `only` names |
 | `modules[].variant` | no | forces one of the module's variants instead of the one named like the targeted runtime |
@@ -181,6 +184,54 @@ earlier commit keeps reading it until its own `--update`. A path inside the repo
 that links outside it is refused. `path` names the module's directory inside the repository, for a
 repository that holds several modules. The report and the messages write a git source as
 `<url>#<ref>` or `<url>#<ref>:<path>`.
+
+An **export** is a stack or a module named by the name the repository publishes it under,
+`module: <name>` in a module's source and `stack: <name>` in `extends`, beside the
+`path` of the repository on disk or its `git` and `ref`; a git source names an export or
+a `path` inside the repository, never both. The repository is resolved as above, and the
+export's directory is read from the `exports` section of the `qory.yaml` at its root
+(§Exports), so the layout is the publisher's alone and a consumer names nothing of it.
+The report and the messages write an export as `<url>#<ref> module <name>`, `<url>#<ref>
+stack <name>`, or `<path> module <name>`. A base's modules named without a source are
+recorded by the directory they resolved to, `<url>#<ref>:<dir>/<name>`, so the report
+says where each module came from at the pinned commit.
+
+## Exports
+
+A repository that delivers stacks or modules to other repositories lists them in the
+`exports` section of its own `qory.yaml`, at its root:
+
+```yaml
+# qory.yaml of the harness repository
+apiVersion: qory.ai/v1alpha1
+qory: ">=0.4.0"                  # a consumer names an export with 0.4.0 or later
+exports:
+  dir: ./harness                 # optional; where stacks/ and modules/ are
+  stacks: [nextjs-15]            # harness/stacks/nextjs-15/qory-stack.yaml
+  modules: [core, nextjs, marketing]   # harness/modules/<name>/qory-module.yaml
+```
+
+The section is the whole public surface: a consumer can name what it lists and nothing
+else, and a stack or a module not listed is the publisher's own, whatever directory it is
+in. Each export is one directory named after it: `stacks/<name>` holding a
+`qory-stack.yaml`, `modules/<name>` holding a `qory-module.yaml`. Where those two
+directories are is `dir`, relative to the repository root: absent, they are at the root;
+as one string, `dir` is the directory holding both, `<dir>/stacks` and `<dir>/modules`;
+as a map, `{stacks: <dir>, modules: <dir>}`, each is named as it is and the exports sit
+directly under it. A publisher moves its directories by changing `dir`, and a consumer
+pinned to a ref sees nothing of it. `exports.dir` also decides where a stack of that
+repository reads a module it names without a source (§The stack), so a stack, its modules
+and the section agree on one layout.
+
+A name is one path segment, listed once. `qory config` prints the section, and every
+command that reads the configuration checks that each export is there: a listed stack
+whose directory holds no `qory-stack.yaml`, or a module without its `qory-module.yaml`,
+is refused naming the directory, so the section cannot go stale unnoticed in the
+repository that owns it. A section elsewhere than the repository root, in the machine's
+file or an ancestor's, is read and left out: an export is a repository's. A consumer that
+names an export the repository does not list is refused with what the repository does
+export; one naming an export of a repository without the section is told to name a
+`path`.
 
 ## The module manifest
 
@@ -467,7 +518,8 @@ paths a `--force` compose replaced, the `env` the harness exports with
 target's `runtime` is always an array: the runtimes the home holds after the compose, the
 targeted ones first. A module carries its `name`, its `source` as the stack writes it,
 its `pin`, `dirty` when git saw uncommitted changes under a path source, the `variant`
-chosen, its `link` when the stack names one, and `base` when it is the base stack's.
+chosen, its `link` when the stack names one, and `base` when it is the base stack's. A
+source naming an export is written as the stack wrote it, `<url>#<ref> module <name>`.
 An entry an `only` brought in carries `for`, the `<kind>/<name>` that required it.
 The report of a checkout that extends a stack records the `base`: its `name`, `source` and `pin`. A path source's pin is `working-tree`; a git source's pin is twelve
 characters of its commit. The report records the `qory` that wrote it, its `version`,
@@ -507,6 +559,10 @@ git:
   cache: /var/cache/qory         # where git sources are fetched to
 env:
   HARNESS_PROFILE: nextjs        # exported to every runtime with a place for it
+exports:                         # in a repository delivering stacks or modules (§Exports)
+  dir: ./harness                 # where stacks/ and modules/ are; default: the root
+  stacks: [nextjs-15]            # harness/stacks/nextjs-15/qory-stack.yaml
+  modules: [core, nextjs]        # harness/modules/<name>/qory-module.yaml
 ```
 
 | Key | Default | Meaning |
@@ -528,6 +584,8 @@ env:
 | `git.timeout` | `10m` | a git command running past it is stopped and the compose fails |
 | `git.cache` | the user's cache directory, `qory/sources` under `~/Library/Caches`, `$XDG_CACHE_HOME` or `~/.cache` | absolute, or relative to the file naming it |
 | `env` | none | variables written over what the modules export; a name two modules export with different values needs one here |
+| `exports.dir` | the repository root | where the exported stacks and modules are: one directory holding `stacks/` and `modules/`, or `{stacks: <dir>, modules: <dir>}` naming each; relative to the root, inside the repository. Read at the repository root alone |
+| `exports.stacks`, `exports.modules` | none | the names the repository publishes, each one directory under the stacks or modules directory holding its document; a consumer names them with `stack` and `module` (§Exports) |
 
 Every key is optional; a file naming none is read and changes nothing. A list, such as
 `worktree.link`, is the nearest file's whole. `qory config` prints every effective value
