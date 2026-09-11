@@ -57,7 +57,7 @@ func worktreeOptions(root string) (worktree.Options, error) {
 	}
 	// A file whose qory key excludes this qory is refused before a worktree is made,
 	// since the compose after it would refuse the same file.
-	checks := newQoryChecks()
+	checks := newQoryChecks(root)
 	for _, r := range conf.Qory {
 		if err := checks.check(r.File, "the file", r.Qory); err != nil {
 			return worktree.Options{}, err

@@ -328,7 +328,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 	// Every document with a qory key is checked against the running qory as it is
 	// read, before anything is fetched or written: the configuration files, the stack,
 	// and the base once extends has resolved it.
-	checks := newQoryChecks()
+	checks := newQoryChecks(at.root)
 	for _, r := range conf.Qory {
 		if err := checks.check(r.File, "the file", r.Qory); err != nil {
 			return nil, err

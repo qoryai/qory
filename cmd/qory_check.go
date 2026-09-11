@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/qoryai/qory/internal/stack"
+	"github.com/qoryai/qory/internal/ui"
 )
 
 // versionError is the refusal of a document whose qory key excludes the running qory. It
@@ -25,13 +26,14 @@ func (e *versionError) Error() string {
 // per document, and collects the row a compose prints for a build the check skips.
 type qoryChecks struct {
 	version string
+	root    string // the checkout root a row shortens the file against
 	rows    [][2]string
 	seen    map[string]bool
 }
 
-// newQoryChecks starts the checks for the running build.
-func newQoryChecks() *qoryChecks {
-	return &qoryChecks{version: checkedVersion(), seen: map[string]bool{}}
+// newQoryChecks starts the checks for the running build, in the checkout at root.
+func newQoryChecks(root string) *qoryChecks {
+	return &qoryChecks{version: checkedVersion(), root: root, seen: map[string]bool{}}
 }
 
 // check refuses a document whose range excludes the running qory. what names the range's
@@ -46,7 +48,7 @@ func (c *qoryChecks) check(file, what string, want stack.Constraint) error {
 	if c.version == "" {
 		if !c.seen[file] {
 			c.seen[file] = true
-			c.rows = append(c.rows, [2]string{"qory", build().title() + "  (a build from source; not checked against " + want.String() + " in " + file + ")"})
+			c.rows = append(c.rows, [2]string{"qory", build().title() + "  (a build from source; not checked against " + want.String() + " in " + ui.Short(file, c.root) + ")"})
 		}
 		return nil
 	}
