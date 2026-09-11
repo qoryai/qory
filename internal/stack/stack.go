@@ -18,10 +18,10 @@ import (
 // is refused, and the message names this one.
 const APIVersion = "qory.ai/v1alpha1"
 
-// FileName is the stack's file name on disk, in the checkout root, in an ancestor
-// directory covering several checkouts, or in a directory of a harness repository. The
-// file name is what says which document a file holds; the document carries no kind. A
-// checkout that extends a stack names it in the harness section of its qory.yaml, which
+// FileName is the stack's file name on disk, in a directory of the harness repository
+// that delivers it, or in an ancestor directory covering several checkouts. The file name
+// is what says which document a file holds; the document carries no kind. A checkout's
+// own stack, and the stack it extends, are in the harness section of its qory.yaml, which
 // [github.com/qoryai/qory/internal/config] reads and turns into a Stack with [NewCompose].
 const FileName = "qory-stack.yaml"
 
