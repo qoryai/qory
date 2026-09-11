@@ -13,6 +13,8 @@ more than one agent. Claude Code reads `.claude`, Codex reads `.codex`, Gemini C
 `.gemini`. So every repository holds one copy per tool. When the shared part improves, the
 copies drift, and nothing tells you which version a checkout runs with.
 
+**Don't worry, use Qory.**
+
 ## What qory does
 
 A stack lists modules in order: the harness your team shares, the harness for apps built
