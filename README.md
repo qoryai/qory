@@ -14,7 +14,7 @@ more than one agent. Claude Code reads `.claude`, Codex reads `.codex`, Gemini C
 copies drift, and nothing tells you which version a checkout runs with.
 
 <p align="center">
-  <img src="docs/assets/slogan.svg" alt="Don't worry, use Qory" width="640">
+  <img src="docs/assets/slogan.png" alt="Don't worry, use Qory" width="720">
 </p>
 
 ## What qory does
@@ -91,10 +91,10 @@ go install github.com/qoryai/qory@latest
 
 ```sh
 mkdir hello && cd hello
-qory setup example     # writes a stack and two modules
-qory hc                # or: qory hc --runtime codex
-claude                 # type /hello
-qory hr
+qory setup example       # writes a stack and two modules
+qory harness compose     # or: qory hc; for Codex: qory hc --runtime codex
+claude                   # type /hello
+qory harness remove      # or: qory hr
 ```
 
 Both modules ship a greet skill. The README that `qory setup example` writes says which

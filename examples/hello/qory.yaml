@@ -1,9 +1,9 @@
 # The smallest harness there is. qory setup example wrote it. From this directory:
 #
-#   qory hc
-#   qory hi
-#   claude                # then type /hello
-#   qory hr
+#   qory harness compose     # or: qory hc
+#   qory harness inspect     # or: qory hi
+#   claude                   # then type /hello
+#   qory harness remove      # or: qory hr
 #
 apiVersion: qory.ai/v1alpha1
 harness:

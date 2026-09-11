@@ -6,10 +6,10 @@ The stack keeps the world module's and excludes the hello module's.
 `qory setup example` writes this directory. From it:
 
 ```sh
-qory hc            # composes into ./.claude
-qory hi            # the report: every entry and its module
-claude             # type /hello
-qory hr            # removes it again
+qory harness compose     # or: qory hc; composes into ./.claude
+qory harness inspect     # or: qory hi; the report: every entry and its module
+claude                   # type /hello
+qory harness remove      # or: qory hr; removes it again
 ```
 
 Then delete the `exclude` lines in `qory.yaml` and compose again. `qory` refuses,
@@ -20,8 +20,8 @@ says where to go from there.
 ## The same harness for another agent
 
 ```sh
-qory hc --runtime codex          # or claude,codex for both at once
-codex                            # then: greet me
+qory harness compose --runtime codex     # or: qory hc --runtime codex; claude,codex for both at once
+codex                                    # then: greet me
 ```
 
 Codex reads `AGENTS.override.md` and `.agents/skills`, so the greeting is there. It has no
