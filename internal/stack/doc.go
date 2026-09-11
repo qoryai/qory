@@ -3,8 +3,9 @@
 // A stack names the target runtime the harness is rendered for, the optional model, and
 // the ordered modules the harness is composed from. A checkout's qory.yaml names, under
 // harness, the stack it extends instead of a target, and the modules it appends; the
-// configuration package reads that and builds the same Stack with [NewCompose]. Each module carries a name, a source
-// directory, an optional forced variant, an optional link, a name at the checkout root
+// configuration package reads that and builds the same Stack with [NewCompose]. Each module carries a name, a source,
+// a directory, a git repository at a ref, or a module the repository exports by name
+// in the exports section of its qory.yaml, an optional forced variant, an optional link, a name at the checkout root
 // for the module's directory, and an optional exclude: per kind, the entry names the
 // compose leaves out. The stack may carry extensions, maps qory writes into the report
 // and does not read. The module order is the merge order of settings fragments and
@@ -19,7 +20,9 @@
 // target or an extending block, an empty module list, a
 // module without a name or with a name that is not one path segment, two modules with the
 // same name, a path source without its path, a git source without its ref or with a path
-// leaving the repository, a ref without a git source, an exclude that names a kind
+// leaving the repository, a ref without a git source, a source naming both a path
+// inside a git repository and an export, or both a module and a stack, a module's source
+// naming a stack and an extends naming a module, an exclude that names a kind
 // outside [Kinds], a link that is not one path segment or is named by two modules, and an
 // extension that is not a map. It reads one file and nothing else: a module's source directory is
 // resolved by

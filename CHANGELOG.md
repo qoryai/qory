@@ -4,6 +4,33 @@ Every release of qory, newest first, in the shape of [Keep a Changelog](https://
 The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0 a minor
 release may change what an existing document does, and says so under Upgrading.
 
+## [0.4.0] - 2026-09-12
+
+A harness repository publishes its stacks and modules by name, and a consumer names them
+instead of their directories.
+
+### Upgrading
+
+- A `qory.yaml` with an `exports` section, and a source with a `stack` or `module` key,
+  are refused by a 0.3.x binary as unknown keys, exit 2. A repository that exports states
+  `qory: ">=0.4.0"` on its stacks, so a 0.3.x consumer is told which qory it needs.
+- A stack in a repository whose `qory.yaml` sets `exports.dir` reads a module named
+  without a source under that modules directory, `<dir>/modules/<name>`, instead of
+  `modules/<name>` at the root. A repository without the key reads as before.
+
+### Added
+
+- An `exports` section in a repository's `qory.yaml`: the `stacks` and `modules` it
+  publishes, each a name that is one directory under `stacks/` or `modules/`, and `dir`,
+  where those two directories are, as one directory holding both or a map naming each.
+  `qory config` prints it, and every command that reads the configuration refuses a
+  listed export whose directory holds no document, naming it.
+- `stack` on `extends` and `module` on a module's source, beside `git` and `ref` or the
+  `path` of the repository on disk: the export's directory is read from the
+  repository's `exports` section, so the publisher's layout is its own. An export the
+  repository does not list is refused with what it does export. The report writes an
+  export as `<url>#<ref> stack <name>` or `<url>#<ref> module <name>`.
+
 ## [0.3.0] - 2026-09-11
 
 The first release shaped by an integration: a harness repository moved four modules and
@@ -122,6 +149,7 @@ The first release: a stack of modules composed into one tree, linked into the ch
 and kept out of git, with a report naming the module of every entry and a refusal when
 two modules provide the same one.
 
+[0.4.0]: https://github.com/qoryai/qory/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/qoryai/qory/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/qoryai/qory/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/qoryai/qory/compare/v0.1.0...v0.2.0

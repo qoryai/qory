@@ -26,7 +26,7 @@ const moduleDir = "harness"
 const checkoutConfig = `apiVersion: qory.ai/v1alpha1
 
 # This repository's stack. To take a stack as delivered instead, name it under extends in
-# place of target: {git: https://github.com/acme/harness, ref: v2.4.0, path: stacks/nextjs}
+# place of target: {git: https://github.com/acme/harness, ref: v2.4.0, stack: nextjs}
 harness:
   name: %[1]s%[2]s# the stack's name in the report
   target:
