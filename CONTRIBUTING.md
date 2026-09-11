@@ -108,8 +108,10 @@ A release is a tag on a branch named after it, `v0.3.0`, opened as one pull requ
 branch adds the release's section to `CHANGELOG.md`, `[X.Y.Z] - YYYY-MM-DD` with the day
 the tag lands and a compare link at the foot of the file; a fix that goes to `main`
 outside a release branch goes under `[Unreleased]` until the next one. Anything a person
-upgrading has to do stands under Upgrading in the section. The release body on GitHub
-carries the same text above the generated commit list. Pushing `vX.Y.Z` to the GitHub mirror runs `.github/workflows/release.yml`,
+upgrading has to do stands under Upgrading in the section. The release workflow takes
+that section as the release body, above the commit list goreleaser writes, and refuses a
+tag whose version has no section; `scripts/changelog-section.sh 0.3.0` prints what it
+would take. Pushing `vX.Y.Z` to the GitHub mirror runs `.github/workflows/release.yml`,
 which builds the archives for macOS and Linux with goreleaser, publishes them with their
 checksums, and updates the Homebrew cask when `HOMEBREW_TAP_TOKEN` is set. Check the
 configuration before tagging:

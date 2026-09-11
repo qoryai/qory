@@ -70,6 +70,8 @@ This release takes every item of that report.
   found the home behind the stack and modules.
 - A README section on the composed tree and the tools that have to follow its links:
   `find -L`, BSD versus GNU `grep -R`, `rg --follow`.
+- This changelog, and a release workflow that takes a release's section from it as the
+  release body and refuses a tag whose version has no section.
 
 ### Changed
 
