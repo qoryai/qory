@@ -202,18 +202,6 @@ root `AGENTS.md` are symlinks. A tool that walks the tree has to follow them:
 `git status` does not show the tree. Every path `qory` writes is listed in
 `.git/info/exclude`, which every worktree of a repository shares.
 
-## Upgrading from 0.2
-
-- A stack or a `qory.yaml` with a `qory` key is refused by a 0.2.x `qory` as an unknown
-  key, exit 2. Upgrade every machine before a delivered stack gains the key.
-- A `qory-stack.yaml` at a repository root without an `extending` block is refused. Move
-  its target and modules under `harness` in `qory.yaml`.
-- `qory version` prints the number without a `v` from every kind of build. A script that
-  read the `v` reads `qory version --json` instead.
-- The instructions land at `.claude/CLAUDE.md` for Claude Code and at `AGENTS.md` in the
-  home. A root `AGENTS.md` exists only for a runtime that reads one; add `any` to
-  `target.runtime` to get the link at the root.
-
 ## The format
 
 The stack, the module manifest, `qory.yaml`, the composition rules and the runtimes are
