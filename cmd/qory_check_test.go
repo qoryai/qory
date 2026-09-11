@@ -105,3 +105,31 @@ func TestQoryKeyRefusesWorktreeAdd(t *testing.T) {
 		t.Error("the worktree was made")
 	}
 }
+
+// TestReportRecordsTheQoryThatWroteIt is a compose on a release build: the report names
+// the version and the source, inspect prints them, and a build with no version, the test
+// binary's own, leaves the field out.
+func TestReportRecordsTheQoryThatWroteIt(t *testing.T) {
+	root := newCheckout(t)
+	writeAppCheckout(t, root, ">=0.1.0")
+	release(t, "0.3.0")
+	if out, err := run(t, "harness", "compose"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	rep := readReport(t, root)
+	if rep.Qory == nil || rep.Qory.Version != "0.3.0" || rep.Qory.Source != "release" {
+		t.Fatalf("report qory = %+v", rep.Qory)
+	}
+	out, err := run(t, "harness", "inspect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants(t, out, "0.3.0", "release")
+	release(t, "dev")
+	if out, err := run(t, "harness", "compose"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if rep := readReport(t, root); rep.Qory != nil {
+		t.Errorf("a build with no version recorded %+v", rep.Qory)
+	}
+}

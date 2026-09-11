@@ -267,6 +267,12 @@ func runCompose(out, errOut io.Writer, o composeOptions) error {
 		return input(err)
 	}
 	rep := report.New(res, name, at.root, at.home)
+	// The report says which qory wrote it, so a runner's report and a laptop's can be
+	// compared; a build with no version, a source build without version control, is
+	// left out rather than recorded as nothing.
+	if b := build(); b.Version != "" {
+		rep.Qory = &report.Build{Version: b.Version, Commit: b.Commit, Source: b.Source}
+	}
 	// The machine keys of a qory.yaml at the checkout root are not read under
 	// extends, and a row says so, on a dry run as well, so the person who wrote
 	// them learns that the base stack decides.

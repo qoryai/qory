@@ -435,7 +435,10 @@ targeted ones first. A module carries its `name`, its `source` as the stack writ
 its `pin`, `dirty` when git saw uncommitted changes under a path source, the `variant`
 chosen, its `link` when the stack names one, and `base` when it is the base stack's.
 The report of a checkout that extends a stack records the `base`: its `name`, `source` and `pin`. A path source's pin is `working-tree`; a git source's pin is twelve
-characters of its commit. `qory harness inspect` refuses a report of another version.
+characters of its commit. The report records the `qory` that wrote it, its `version`,
+`commit` and `source`, `release` or `source`, as `qory version --json` reports them,
+and leaves the field out when the build carries no version. `qory harness inspect`
+refuses a report of another version.
 
 ## The configuration
 

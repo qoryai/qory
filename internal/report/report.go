@@ -51,6 +51,18 @@ type Base struct {
 	Pin string `json:"pin"`
 }
 
+// Build is the qory that wrote the report, so two reports of one checkout, from a
+// runner and a laptop say, show whether the same qory composed them.
+type Build struct {
+	// Version is the version without a leading v: the release, the tag of a source build
+	// at that tag, or the pseudo-version of a source build between tags.
+	Version string `json:"version"`
+	// Commit is the commit the binary was built from, "" when the build carries none.
+	Commit string `json:"commit,omitempty"`
+	// Source is "release" for a release build and "source" for a go install or go build.
+	Source string `json:"source"`
+}
+
 // Entry is one composed entry.
 type Entry struct {
 	// Kind is one of skills, agents, commands, output-styles, hooks, mcp and files.
@@ -138,6 +150,9 @@ type Report struct {
 	Extensions map[string]map[string]any `json:"extensions,omitempty"`
 	// Base is the stack the checkout's qory.yaml extends, absent for a stack.
 	Base *Base `json:"base,omitempty"`
+	// Qory is the build that wrote the report, absent when the build carries no version.
+	// The command sets it after [New], which knows nothing about the binary.
+	Qory *Build `json:"qory,omitempty"`
 }
 
 // New builds the report of a result rendered into home for a checkout. The name is the
@@ -226,6 +241,9 @@ func (r Report) PrintBody(w io.Writer) error {
 		fields = append(fields, [2]string{"extends", r.Base.Name + "  " + r.Base.Source + "  " + r.Base.Pin})
 	}
 	fields = append(fields, [2]string{"checkout", ui.Short(r.Checkout, "")}, [2]string{"home", ui.Short(r.Home, r.Checkout)})
+	if r.Qory != nil {
+		fields = append(fields, [2]string{"qory", strings.TrimSpace(r.Qory.Version + "  " + r.Qory.Commit + "  " + r.Qory.Source)})
+	}
 	u.Fields(fields)
 	u.Blank()
 	u.Heading("Modules")
