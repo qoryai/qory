@@ -44,17 +44,43 @@ type Manifest struct {
 	// $QORY_HARNESS_HOME/modules/<name>/<path> and the runtimes with a place for environment
 	// write them. A key is a POSIX environment variable name other than QORY_HARNESS_HOME.
 	Env map[string]string
+	// Requires is what the module's entries need composed beside them: per entry this
+	// module ships, keyed <kind>/<name>, the entries it needs as <kind>/<name>, sorted. In
+	// the file each is one item naming the entry by its singular kind and what it needs
+	// by the plural kinds an exclude uses, see [ReadManifest]. A required entry may come
+	// from any module; the compose refuses a stack that leaves one out.
+	Requires map[string][]string
 }
 
 // rawManifest decodes qory-module.yaml as it is written, where the variants map holds both the
 // variants and the default, a string among the maps. [ReadManifest] splits the two apart.
 type rawManifest struct {
-	APIVersion  string               `yaml:"apiVersion"`
-	Name        string               `yaml:"name"`
-	Description string               `yaml:"description,omitempty"`
-	Variants    map[string]yaml.Node `yaml:"variants,omitempty"`
-	Env         map[string]string    `yaml:"env,omitempty"`
+	APIVersion  string                 `yaml:"apiVersion"`
+	Name        string                 `yaml:"name"`
+	Description string                 `yaml:"description,omitempty"`
+	Variants    map[string]yaml.Node   `yaml:"variants,omitempty"`
+	Env         map[string]string      `yaml:"env,omitempty"`
+	Requires    []map[string]yaml.Node `yaml:"requires,omitempty"`
 }
+
+// singular maps the key a requires item names its entry by to the entry's kind. mcp is
+// its own singular, so under requires the key holds the entry's name as a string and the
+// needed servers as a list; YAML allows a key once per item, so an item naming a server
+// cannot list servers it needs.
+var singular = map[string]string{"skill": "skills", "agent": "agents", "command": "commands", "output-style": "output-styles", "hook": "hooks", "mcp": "mcp", "file": "files"}
+
+// singularOf is the key a message names an entry's kind by: skill for skills.
+func singularOf(kind string) string {
+	for one, many := range singular {
+		if many == kind {
+			return one
+		}
+	}
+	return kind
+}
+
+// Describe names an entry for a message the way a requires item does, "skill deploy".
+func Describe(kind, name string) string { return singularOf(kind) + " " + name }
 
 // Entry is one atomic entry: a skill, an agent, a command, an output style, a hook script
 // or an MCP server.
@@ -92,6 +118,74 @@ type Module struct {
 	Instructions string
 }
 
+// readRequirement reads one requires item: the entry it names, as <kind>/<name>, and what
+// the entry needs, as sorted <kind>/<name> keys. The mcp key holds the entry's name when
+// it is a string and needed servers when it is a list.
+func readRequirement(item map[string]yaml.Node) (entry string, needs []string, err error) {
+	keys := make([]string, 0, len(item))
+	for k := range item {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		node := item[k]
+		kind, one := singular[k]
+		if one && !(k == "mcp" && node.Kind == yaml.SequenceNode) {
+			var name string
+			if err := node.Decode(&name); err != nil || name == "" {
+				return "", nil, fmt.Errorf("%s names no entry; it is the entry's name, as %s: <name>", k, k)
+			}
+			if entry != "" {
+				return "", nil, fmt.Errorf("names two entries; an item names one, as skill: <name>, and lists what it needs under skills, agents, commands, output-styles, hooks, mcp and files")
+			}
+			entry = kind + "/" + name
+			continue
+		}
+		if !isKind(k) {
+			return "", nil, fmt.Errorf("key %q is not one requires reads; an item names its entry as skill, agent, command, output-style, hook, mcp or file, and what it needs under skills, agents, commands, output-styles, hooks, mcp and files", k)
+		}
+		var names []string
+		if err := node.Decode(&names); err != nil || len(names) == 0 {
+			return "", nil, fmt.Errorf("%s is empty; it lists the %s the entry needs", k, k)
+		}
+		for _, name := range names {
+			if name == "" {
+				return "", nil, fmt.Errorf("%s names an empty entry", k)
+			}
+			needs = append(needs, k+"/"+name)
+		}
+	}
+	if entry == "" {
+		return "", nil, fmt.Errorf("names no entry; an item names one, as skill: <name>, and lists what it needs under skills, agents, commands, output-styles, hooks, mcp and files")
+	}
+	if len(needs) == 0 {
+		return "", nil, fmt.Errorf("lists nothing the entry needs under skills, agents, commands, output-styles, hooks, mcp or files")
+	}
+	sort.Strings(needs)
+	return entry, needs, nil
+}
+
+// isKind reports whether k is one of [stack.Kinds].
+func isKind(k string) bool {
+	for _, kind := range stack.Kinds {
+		if k == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// sortedKeys lists a map's keys in order, so a check over them reports the same first
+// key every time.
+func sortedKeys(m map[string][]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 // envName is the shape of a POSIX environment variable name, which every key of a
 // manifest's env has.
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -117,8 +211,20 @@ func decodeError(path string, err error) error {
 // An unknown field is an error, so is an apiVersion other than [stack.APIVersion], a
 // missing name, a default that names something other than a declared
 // variant or "fail", an env key that is not an environment variable name or is
-// QORY_HARNESS_HOME, and an env value that is not a relative path inside the module. Every
-// error names the manifest path. The env values come back cleaned, "." for the root.
+// QORY_HARNESS_HOME, and an env value that is not a relative path inside the module.
+// Every error names the manifest path. The env values come back cleaned, "." for the root.
+//
+// A requires item names one entry of the module by its singular kind and lists what it
+// needs under the plural kinds:
+//
+//	requires:
+//	  - skill: deploy
+//	    commands: [ship]
+//	    agents: [reviewer]
+//
+// An item with no entry or two, a key that is neither, an empty list, and an entry named
+// twice are errors. Whether the entry is one the module ships is [Read]'s check, since
+// the entries are read then. The result is keyed <kind>/<name> with sorted values.
 func ReadManifest(dir string) (*Manifest, error) {
 	path := filepath.Join(dir, ManifestName)
 	data, err := os.ReadFile(path)
@@ -156,6 +262,20 @@ func ReadManifest(dir string) (*Manifest, error) {
 			m.Env = map[string]string{}
 		}
 		m.Env[key] = clean
+	}
+	for i, item := range raw.Requires {
+		entry, needs, err := readRequirement(item)
+		if err != nil {
+			return nil, fmt.Errorf("%s: requires[%d]: %w", path, i, err)
+		}
+		if _, dup := m.Requires[entry]; dup {
+			kind, name, _ := strings.Cut(entry, "/")
+			return nil, fmt.Errorf("%s: requires names %s twice", path, Describe(kind, name))
+		}
+		if m.Requires == nil {
+			m.Requires = map[string][]string{}
+		}
+		m.Requires[entry] = needs
 	}
 	for name, node := range raw.Variants {
 		if name == "default" {
@@ -304,6 +424,18 @@ func Read(name, dir string, m *Manifest, variant string) (*Module, error) {
 		}
 		return l.Entries[i].Name < l.Entries[j].Name
 	})
+	if m != nil {
+		shipped := map[string]bool{}
+		for _, e := range l.Entries {
+			shipped[e.Kind+"/"+e.Name] = true
+		}
+		for _, key := range sortedKeys(m.Requires) {
+			if !shipped[key] {
+				kind, entry, _ := strings.Cut(key, "/")
+				return nil, fmt.Errorf("module %s: requires names %s, which the module does not ship", name, Describe(kind, entry))
+			}
+		}
+	}
 	l.Settings, err = readSettings(filepath.Join(abs, "settings"))
 	if err != nil {
 		return nil, fmt.Errorf("module %s: %w", name, err)

@@ -1,0 +1,2 @@
+commands/ship core
+skills/deploy core

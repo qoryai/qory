@@ -15,6 +15,35 @@
       "propertyNames": {"pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
       "additionalProperties": {"type": "string", "minLength": 1}
     },
+    "requires": {
+      "description": "One item per entry of this module that needs other entries composed beside it: the entry by its singular kind, what it needs under the plural kinds, from any module.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 2,
+        "properties": {
+          "skill": {"type": "string", "minLength": 1},
+          "agent": {"type": "string", "minLength": 1},
+          "command": {"type": "string", "minLength": 1},
+          "output-style": {"type": "string", "minLength": 1},
+          "hook": {"type": "string", "minLength": 1},
+          "file": {"type": "string", "minLength": 1},
+          "mcp": {
+            "oneOf": [
+              {"type": "string", "minLength": 1},
+              {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+            ]
+          },
+          "skills": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "agents": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "commands": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "output-styles": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "hooks": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "files": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
     "variants": {
       "type": "object",
       "properties": {"default": {"type": "string", "minLength": 1}},

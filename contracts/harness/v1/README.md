@@ -194,6 +194,10 @@ variants:
 env:
   HARNESS_HOME: .                # exported as the module's root in the composed tree
   HARNESS_TOOLS: scripts/tools   # a path inside the module
+requires:
+  - skill: deploy                # this module's deploy skill needs these composed beside it
+    commands: [ship]
+    agents: [reviewer]
 ```
 
 `description`, optional, says what the module is for; the report carries it and `qory harness
@@ -205,6 +209,14 @@ the module, `.` for its root. The compose writes each as
 get it there (§Runtimes), so a script the module ships reads its own location from the
 variable it has always read. Two modules exporting one name with different values fail the
 compose unless the configuration's `env` names it; `QORY_HARNESS_HOME` is qory's own.
+`requires`, optional, is one item per entry of the module that needs other entries
+composed beside it: the entry by its singular kind, `skill`, `agent`, `command`,
+`output-style`, `hook`, `mcp` or `file`, and what it needs under the plural kinds an
+`exclude` uses. A required entry may come from any module. `mcp` is its own singular: a
+string names the server, a list the servers needed, and since a key appears once per item
+an item naming a server lists no servers. An item that names no entry or two, a key that
+is neither, an empty list, an entry named twice, and an entry the module does not ship are
+refused (§Composition rules).
 
 A module's tree holds these entry kinds:
 
@@ -273,7 +285,16 @@ The schema is [module.schema.json](module.schema.json).
 3. **An exclude or only that names nothing fails**, so a module that stops shipping an
    entry, an instruction section, a fragment or a variable is noticed rather than silently
    composed. The message names the module, the block and the name.
-4. **Merged kinds join, and a value is set once.** A settings target file merges across
+4. **A requirement that is not composed fails.** After the excludes and the collision
+   check, every composed entry's `requires` items from its manifest are checked against
+   the composed entries. One that is missing fails the compose with `module core: skill
+   deploy requires command ship, which module core leaves out` when an `exclude` or an
+   `only` dropped it, naming the module whose block did, and with `module core: skill deploy requires
+   command ship, which no module ships` otherwise. An entry that was left out has no
+   requirements to meet. A manifest whose `requires` names an entry the module does not
+   ship fails as the module is read: `module core: requires names skill release, which
+   the module does not ship`.
+5. **Merged kinds join, and a value is set once.** A settings target file merges across
    the modules that ship a fragment for it, JSON or TOML by extension: objects deep-merge,
    `permissions` lists concatenate and deduplicate, `hooks` arrays concatenate. Every
    other list and every scalar is set by one module; another module may repeat the value and
@@ -284,17 +305,17 @@ The schema is [module.schema.json](module.schema.json).
    manifest exports with a different value fails the same way, unless the configuration
    sets it. `AGENTS.md` is the concatenation of the modules' files in module order, separated
    by a blank line, the one place the order of `modules` decides anything. An MCP server is
-   atomic and follows rules 1 to 3; where a settings fragment also names servers, the
+   atomic and follows rules 1 to 4; where a settings fragment also names servers, the
    composed servers are written on top.
-5. **Variants resolve per module.** The forced `variant`, else the one named like
+6. **Variants resolve per module.** The forced `variant`, else the one named like
    `target.runtime`, else the manifest's `default`, else the module root when the manifest
    declares no variants. A manifest with variants, none for the runtime and no default, or
    `default: fail`, fails the compose.
-6. **Everything is reported.** The report names every module with its pin, every entry with
+7. **Everything is reported.** The report names every module with its pin, every entry with
    its module, every entry and part a block left out, as `<kind>/<name>`,
    `instructions/AGENTS.md`, `settings/<runtime>/<file>` or `env/<NAME>`, and every
    variant chosen. `qory harness inspect` prints it.
-7. **Nothing composed is committed.** The link in the checkout is excluded through the
+8. **Nothing composed is committed.** The link in the checkout is excluded through the
    clone-local exclude file, never the repository's own ignore file.
 
 ## Rendering
