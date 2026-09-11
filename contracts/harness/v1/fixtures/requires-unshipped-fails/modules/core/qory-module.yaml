@@ -1,0 +1,5 @@
+apiVersion: qory.ai/v1alpha1
+name: core
+requires:
+  - skill: release
+    commands: [ship]

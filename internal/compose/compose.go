@@ -133,6 +133,7 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 	exporters := map[string]string{}
 	var instructions []string
 	dirs := map[string]string{}
+	requires := map[string]map[string][]string{}
 	for _, pl := range p.Modules {
 		ps := p.SourceOf(pl)
 		who := "module " + pl.Name
@@ -161,6 +162,7 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 			return nil, fmt.Errorf("module %s is composed twice, from %s and from %s", name, other, ps.String())
 		}
 		dirs[name] = ps.String()
+		requires[name] = m.Requires
 		variant, err := selectVariant(m, pl, p.Target.Runtimes, name)
 		if err != nil {
 			return nil, fmt.Errorf("module %s: %w", name, err)
@@ -231,6 +233,9 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 		}
 		return res.Entries[i].Name < res.Entries[j].Name
 	})
+	if err := checkRequires(res, requires); err != nil {
+		return nil, err
+	}
 	if len(instructions) > 0 {
 		res.Instructions = strings.Join(instructions, "\n\n") + "\n"
 	}
@@ -310,6 +315,35 @@ func variantName(v string) string {
 		return "the module root"
 	}
 	return "variant " + v
+}
+
+// checkRequires refuses a compose in which an entry's requirements, from its module's
+// manifest, are not all composed. requires holds each module's manifest requires by module
+// name, keyed <kind>/<name>. A required entry may come from any module, since a name is
+// composed once; an entry that was left out has no requirements to meet. The message
+// says why the entry is missing: a module's exclude left it out, or no module ships it.
+// Entries are walked in their sorted order and requirements in theirs, so the first
+// failure is the same every time.
+func checkRequires(res *Result, requires map[string]map[string][]string) error {
+	composed := map[string]bool{}
+	for _, e := range res.Entries {
+		composed[e.Kind+"/"+e.Name] = true
+	}
+	for _, e := range res.Entries {
+		for _, need := range requires[e.Module][e.Kind+"/"+e.Name] {
+			if composed[need] {
+				continue
+			}
+			kind, name, _ := strings.Cut(need, "/")
+			for _, x := range res.Excludes {
+				if x.Kind == kind && x.Name == name {
+					return fmt.Errorf("module %s: %s requires %s, which module %s leaves out", e.Module, module.Describe(e.Kind, e.Name), module.Describe(kind, name), x.Module)
+				}
+			}
+			return fmt.Errorf("module %s: %s requires %s, which no module ships", e.Module, module.Describe(e.Kind, e.Name), module.Describe(kind, name))
+		}
+	}
+	return nil
 }
 
 // applyExcludes returns the module's entries minus the ones its excludes name, and records
