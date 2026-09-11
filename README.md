@@ -13,7 +13,9 @@ more than one agent. Claude Code reads `.claude`, Codex reads `.codex`, Gemini C
 `.gemini`. So every repository holds one copy per tool. When the shared part improves, the
 copies drift, and nothing tells you which version a checkout runs with.
 
-**Don't worry, use Qory.**
+<p align="center">
+  <img src="docs/assets/slogan.svg" alt="Don't worry, use Qory" width="640">
+</p>
 
 ## What qory does
 

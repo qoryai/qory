@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 150" width="760" height="150" role="img" aria-label="Don't worry, use Qory">
+  <title>Don't worry, use Qory</title>
+  <defs>
+    <clipPath id="body"><ellipse cx="58" cy="60" rx="30" ry="21" transform="rotate(18 58 60)"/></clipPath>
+    <path id="wing" d="M48 44 C50 20 72 6 88 12 C93 23 72 42 52 49 Z"/>
+    <path id="sting" d="M85 71 L97 79 L83 79 Z"/>
+    <g id="legs"><path d="M44 78 L40 90 M58 82 L57 94 M71 79 L76 90"/></g>
+    <g id="ants"><path d="M17 33 C13 23 15 15 21 11"/><path d="M31 32 C32 21 38 15 45 13"/></g>
+  </defs>
+
+  <!-- the card: cream, so the banner reads the same on a light and a dark page -->
+  <rect x="1" y="1" width="758" height="148" rx="24" fill="#FFF6E0" stroke="#FFC93C" stroke-width="2"/>
+
+  <!-- the agent bee, from the brand mark, 100 units square -->
+  <g transform="translate(34 25)">
+    <g stroke="#FFF6E0" fill="#FFF6E0" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+      <use href="#ants" fill="none"/>
+      <use href="#legs" fill="none"/>
+      <use href="#sting"/>
+      <ellipse cx="58" cy="60" rx="30" ry="21" transform="rotate(18 58 60)"/>
+      <use href="#wing"/>
+      <rect x="8" y="32" width="30" height="30" rx="7" transform="rotate(-8 23 47)"/>
+    </g>
+    <g stroke="#4A3626" stroke-width="3.2" stroke-linecap="round" fill="none">
+      <use href="#legs"/><use href="#ants"/>
+    </g>
+    <use href="#sting" fill="#4A3626"/>
+    <ellipse cx="58" cy="60" rx="30" ry="21" transform="rotate(18 58 60)" fill="#FFC93C"/>
+    <g clip-path="url(#body)" fill="#4A3626">
+      <rect x="48" y="30" width="11" height="60" transform="rotate(18 53 60)"/>
+      <rect x="68" y="30" width="11" height="60" transform="rotate(18 73 60)"/>
+      <rect x="86" y="30" width="11" height="60" transform="rotate(18 91 60)"/>
+    </g>
+    <use href="#wing" fill="#CFE9DC" opacity="0.88"/>
+    <use href="#wing" fill="none" stroke="#9FC7B2" stroke-width="2"/>
+    <path d="M55 41 C60 26 74 15 85 14" stroke="#9FC7B2" stroke-width="2" fill="none" stroke-linecap="round"/>
+    <g transform="rotate(-8 23 47)">
+      <rect x="8" y="32" width="30" height="30" rx="7" fill="#4A3626"/>
+      <rect x="11.5" y="35.5" width="23" height="23" rx="4.5" fill="#1B1F22"/>
+      <path d="M16 41.5 L21.5 46.5 L16 51.5" fill="none" stroke="#2FD174" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M24 51.5 H30.5" fill="none" stroke="#2FD174" stroke-width="3.2" stroke-linecap="round"/>
+    </g>
+  </g>
+
+  <!-- the slogan; textLength pins the width, so every platform's font lands the same -->
+  <text x="170" y="92" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="44" font-weight="800" letter-spacing="1" fill="#4A3626" textLength="556" lengthAdjust="spacingAndGlyphs">DON'T WORRY - <tspan fill="#FFC93C" stroke="#4A3626" stroke-width="1.6" paint-order="stroke" stroke-linejoin="round">USE QORY!</tspan></text>
+</svg>
