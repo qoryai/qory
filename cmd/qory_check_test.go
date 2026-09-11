@@ -22,15 +22,6 @@ func writeOwnModule(t *testing.T, root string) {
 	writeFile(t, filepath.Join(root, "modules", "app", "skills", "deploy", "SKILL.md"), "# deploy\n")
 }
 
-// release runs the test as a release build of the given version and restores the source
-// build after it.
-func release(t *testing.T, version string) {
-	t.Helper()
-	was := cmd.Version
-	cmd.Version = version
-	t.Cleanup(func() { cmd.Version = was })
-}
-
 // TestQoryKeyRefusesAQoryOutsideTheRange is the check on a release build: the checkout's
 // qory.yaml wants a newer qory, the compose stops before writing with exit 5 and names the
 // file, the version and the range; a qory in the range composes.

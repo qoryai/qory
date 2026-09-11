@@ -2,10 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"runtime/debug"
-	"strings"
-
-	"golang.org/x/mod/module"
 
 	"github.com/qoryai/qory/internal/stack"
 )
@@ -50,7 +46,7 @@ func (c *qoryChecks) check(file, what string, want stack.Constraint) error {
 	if c.version == "" {
 		if !c.seen[file] {
 			c.seen[file] = true
-			c.rows = append(c.rows, [2]string{"qory", version() + "  (a build from source; not checked against " + want.String() + " in " + file + ")"})
+			c.rows = append(c.rows, [2]string{"qory", build().title() + "  (a build from source; not checked against " + want.String() + " in " + file + ")"})
 		}
 		return nil
 	}
@@ -61,20 +57,13 @@ func (c *qoryChecks) check(file, what string, want stack.Constraint) error {
 }
 
 // checkedVersion is the version a qory key is checked against: the release version, or
-// the tag Go stamped into a source build made at a clean tagged commit, without the
-// leading v. It is "" for a build with no definite version, a source build between tags
-// that Go stamps with a pseudo-version, or one with no version at all.
+// the tag Go stamped into a source build made at a clean tagged commit, as [build]
+// reads them. It is "" for a build with no definite version: a source build between
+// tags, which Go stamps with a pseudo-version, or one with no version at all.
 func checkedVersion() string {
-	if Version != "dev" {
-		return strings.TrimPrefix(Version, "v")
-	}
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
+	b := build()
+	if b.Source == "source" && pseudo(b.Version) {
 		return ""
 	}
-	v, _, _ := strings.Cut(info.Main.Version, "+")
-	if v == "" || v == "(devel)" || module.IsPseudoVersion(v) {
-		return ""
-	}
-	return strings.TrimPrefix(v, "v")
+	return b.Version
 }
