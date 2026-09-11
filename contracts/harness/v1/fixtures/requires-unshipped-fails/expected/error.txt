@@ -1,0 +1,1 @@
+module core: requires names skill release, which the module does not ship

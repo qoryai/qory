@@ -121,21 +121,28 @@ func locateAt(dir string) (places, error) {
 // written last, so a report on disk means a compose went through; the one exception is a
 // link step that failed after replacing a file, which writes the report so that remove
 // still knows what to restore. A --dry-run stops after the report is built and prints it
-// instead. --force lets a link replace a tracked, unmodified file of the checkout, and the
-// report records every path it replaced so remove can say how to get it back. --update
-// fetches every git source again. Both flags have their standing value in qory.yaml, and
-// a flag given on the command line, --force=false say, wins over the file.
+// instead. A --check renders the tree again into a scratch directory, compares it with
+// the home and exits with [ExitStale] when they differ; the merged outputs are generated
+// copies, so an edit to a module's instructions or settings leaves the home behind until
+// the next compose, and a check is how a CI gate sees that. --force lets a link replace a
+// tracked, unmodified file of the checkout, and the report records every path it replaced
+// so remove can say how to get it back. --update fetches every git source again. Both
+// flags have their standing value in qory.yaml, and a flag given on the command line,
+// --force=false say, wins over the file.
 func newCompose(use string, aliases ...string) *cobra.Command {
 	var file, runtime, model string
-	var dryRun, verbose, force, update bool
+	var dryRun, check, verbose, force, update bool
 	c := &cobra.Command{
 		Use:     use,
 		Aliases: aliases,
 		Short:   "Compose the stack's modules into the checkout you stand in",
 		Args:    noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			o := composeOptions{file: file, runtime: runtime, model: model, dryRun: dryRun, verbose: verbose}
+			o := composeOptions{file: file, runtime: runtime, model: model, dryRun: dryRun, check: check, verbose: verbose}
 			if cmd.Flags().Changed("force") {
+				if check {
+					return input(errors.New("--check writes nothing, so --force has nothing to replace"))
+				}
 				o.force = &force
 			}
 			if cmd.Flags().Changed("update") {
@@ -148,6 +155,7 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 	c.Flags().StringVar(&runtime, "runtime", "", "render for these runtimes instead of target.runtime, comma separated ("+strings.Join(render.Names(), ", ")+"; qory.yaml: runtime)")
 	c.Flags().StringVar(&model, "model", "", "write this model instead of target.model (qory.yaml: model)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the report and write nothing")
+	c.Flags().BoolVar(&check, "check", false, "compare the home with what the stack and modules say now and write nothing; exit 6 when a file or link differs. The links from the checkout into the home and the report are not compared")
 	c.Flags().BoolVar(&force, "force", false, "replace a tracked, unmodified file of the checkout where a link goes; git checkout -- restores it (qory.yaml: force)")
 	c.Flags().BoolVar(&update, "update", false, "fetch every git source again instead of reading the cached clone (qory.yaml: update)")
 	c.Flags().BoolVarP(&verbose, "verbose", "v", false, "print one line per entry")
@@ -162,26 +170,151 @@ type composeOptions struct {
 	file           string
 	runtime, model string
 	dryRun         bool
+	check          bool
 	verbose        bool
 	force, update  *bool
 }
 
-// runCompose is the compose verb's body, for the verb and for a worktree add, which
-// composes the worktree it made. out gets the rows, errOut the collision text.
-func runCompose(out, errOut io.Writer, o composeOptions) error {
-	at, err := locateAt(o.dir)
+// staleError is what a --check returns when the home does not match what the stack and
+// modules say now, or when nothing is composed. [ExitCode] gives it [ExitStale].
+type staleError struct {
+	// Differences are the paths that differ, empty when nothing is composed.
+	Differences []render.Difference
+}
+
+// Error says what to do; the paths were printed as rows before the error went up.
+func (e *staleError) Error() string {
+	if len(e.Differences) == 0 {
+		return "nothing composed here; run qory harness compose"
+	}
+	return "stale: run qory harness compose"
+}
+
+// runCheck is --check: it renders the prepared compose into a scratch directory,
+// addressed as the home, and compares the two trees. The runtimes are the ones a compose
+// would build, the targets and the ones composed earlier, so the comparison is against
+// the tree a compose would write. A home that matches prints up to date and the rows a
+// compose prints; one that differs prints one row per path and returns a [*staleError].
+// The links from the checkout into the home and the report are not compared: a missing
+// link is a foreign path or a remove, and the report changes when the home does.
+func runCheck(out io.Writer, pr *prepared) error {
+	u := pr.u
+	if _, err := os.Stat(pr.at.home); err != nil {
+		return &staleError{}
+	}
+	stage, err := os.MkdirTemp("", "qory-check-")
 	if err != nil {
 		return err
+	}
+	defer os.RemoveAll(stage)
+	if err := render.BuildAt(pr.res, stage, pr.at.home, allRuntimes(pr.at.home, pr.targets)...); err != nil {
+		return err
+	}
+	differences, err := render.Diff(stage, pr.at.home)
+	if err != nil {
+		return err
+	}
+	rows := [][2]string{{"home", ui.Short(pr.at.home, pr.at.root)}}
+	if len(differences) == 0 {
+		u.Success("up to date")
+		u.Fields(append(rows, pr.rows...))
+		return nil
+	}
+	for _, d := range differences {
+		rows = append(rows, [2]string{d.Path, d.What})
+	}
+	u.Fields(append(rows, pr.rows...))
+	return &staleError{Differences: differences}
+}
+
+// prepared is a compose that has been read and composed but not written: what
+// [prepare] hands to the compose, the dry run and the check.
+type prepared struct {
+	at       places
+	res      *compose.Result
+	rep      report.Report
+	previous report.Report
+	targets  []render.Runtime
+	force    bool
+	rows     [][2]string // the rows every outcome prints after its own: skipped keys, unchecked ranges
+	u        *ui.UI
+}
+
+// runCompose is the compose verb's body, for the verb and for a worktree add, which
+// composes the worktree it made. out gets the rows, errOut the collision text. With
+// check set it compares instead of writing, see [runCheck].
+func runCompose(out, errOut io.Writer, o composeOptions) error {
+	pr, err := prepare(out, errOut, o)
+	if err != nil {
+		return err
+	}
+	if o.check {
+		return runCheck(out, pr)
+	}
+	at, res, rep, previous, targets, force, u := pr.at, pr.res, pr.rep, pr.previous, pr.targets, pr.force, pr.u
+	skippedConfig := pr.rows
+	if o.dryRun {
+		if err := rep.PrintBody(out); err != nil {
+			return err
+		}
+		u.Blank()
+		u.Success("dry run: nothing written")
+		u.Fields(skippedConfig)
+		return nil
+	}
+	// A checkout can be composed for several runtimes at once, and can have been
+	// composed for others before. The home is one tree that a build replaces
+	// whole, so every runtime it is to hold goes into one call: the targets and
+	// the runtimes already there, whose links would otherwise stop resolving.
+	all := allRuntimes(at.home, targets)
+	// The report's target is every runtime the home holds after this compose,
+	// the targets first, since the harness was rendered for all of them.
+	rep.Target.Runtimes = nil
+	for _, rt := range all {
+		rep.Target.Runtimes = append(rep.Target.Runtimes, rt.Name())
+	}
+	if err := render.Build(res, at.home, all...); err != nil {
+		return err
+	}
+	return write(out, o, at, res, rep, previous, targets, all, force, skippedConfig, u)
+}
+
+// allRuntimes is every runtime the home holds after a compose for targets: the targets
+// first, then the runtimes composed into home earlier, which the build refreshes so their
+// links keep resolving.
+func allRuntimes(home string, targets []render.Runtime) []render.Runtime {
+	targeted := map[string]bool{}
+	for _, rt := range targets {
+		targeted[rt.Name()] = true
+	}
+	all := append([]render.Runtime{}, targets...)
+	for _, other := range render.Composed(home) {
+		if !targeted[other.Name()] {
+			all = append(all, other)
+		}
+	}
+	return all
+}
+
+// prepare does everything a compose does before it touches the disk: it locates the
+// checkout, reads the configuration, discovers or loads the stack, checks every document's
+// qory key, resolves the base, applies the configuration's runtime and model and then the
+// --runtime and --model flags, looks every runtime up, prints the title, composes, and
+// builds the report. A collision is printed on errOut and comes back marked reported.
+func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
+	at, err := locateAt(o.dir)
+	if err != nil {
+		return nil, err
 	}
 	file := o.file
 	if file == "" {
 		if file, err = config.DiscoverStack(at.root); err != nil {
-			return input(err)
+			return nil, input(err)
 		}
 	}
 	p, err := config.LoadStack(file)
 	if err != nil {
-		return input(err)
+		return nil, input(err)
 	}
 	// A checkout that extends a closed base takes its target from the base, and
 	// the harness, git and env keys of its own qory.yaml are not read: the
@@ -190,7 +323,19 @@ func runCompose(out, errOut io.Writer, o composeOptions) error {
 	extends := p.Extends.Path != "" || p.Extends.Git != ""
 	conf, err := config.Load(at.root, !extends)
 	if err != nil {
-		return input(err)
+		return nil, input(err)
+	}
+	// Every document with a qory key is checked against the running qory as it is
+	// read, before anything is fetched or written: the configuration files, the stack,
+	// and the base once extends has resolved it.
+	checks := newQoryChecks(at.root)
+	for _, r := range conf.Qory {
+		if err := checks.check(r.File, "the file", r.Qory); err != nil {
+			return nil, err
+		}
+	}
+	if err := checks.check(p.File, "the stack", p.Qory); err != nil {
+		return nil, err
 	}
 	force, update := conf.Force, conf.Update
 	if o.force != nil {
@@ -216,10 +361,15 @@ func runCompose(out, errOut io.Writer, o composeOptions) error {
 	}
 	p, opts.Base, err = compose.LoadBase(p, basePin, opts)
 	if err != nil {
-		return composeError(err)
+		return nil, composeError(err)
+	}
+	if opts.Base != nil {
+		if err := checks.check(p.File, "the base stack "+opts.Base.String(), opts.Base.Qory); err != nil {
+			return nil, err
+		}
 	}
 	if err := applyTarget(p, opts.Base, conf, o.runtime, o.model); err != nil {
-		return input(err)
+		return nil, input(err)
 	}
 	// Every targeted runtime is looked up before anything is composed, so an
 	// unknown name fails before the disk is touched.
@@ -227,7 +377,7 @@ func runCompose(out, errOut io.Writer, o composeOptions) error {
 	for _, name := range p.Target.Runtimes {
 		rt, err := render.Lookup(name)
 		if err != nil {
-			return input(err)
+			return nil, input(err)
 		}
 		targets = append(targets, rt)
 	}
@@ -242,14 +392,20 @@ func runCompose(out, errOut io.Writer, o composeOptions) error {
 	switch {
 	case errors.As(err, &collision):
 		printCollision(ui.New(errOut), collision)
-		return reported(err)
+		return nil, reported(err)
 	case err != nil:
-		return composeError(err)
+		return nil, composeError(err)
 	}
 	if err := render.CheckFiles(res); err != nil {
-		return input(err)
+		return nil, input(err)
 	}
 	rep := report.New(res, name, at.root, at.home)
+	// The report says which qory wrote it, so a runner's report and a laptop's can be
+	// compared; a build with no version, a source build without version control, is
+	// left out rather than recorded as nothing.
+	if b := build(); b.Version != "" {
+		rep.Qory = &report.Build{Version: b.Version, Commit: b.Commit, Source: b.Source}
+	}
 	// The machine keys of a qory.yaml at the checkout root are not read under
 	// extends, and a row says so, on a dry run as well, so the person who wrote
 	// them learns that the base stack decides.
@@ -257,39 +413,14 @@ func runCompose(out, errOut io.Writer, o composeOptions) error {
 	if _, err := os.Stat(filepath.Join(at.root, config.FileName)); extends && err == nil {
 		skippedConfig = [][2]string{{"skipped", config.FileName + "  (its harness, git and env keys; the base stack decides under extends)"}}
 	}
-	if o.dryRun {
-		if err := rep.PrintBody(out); err != nil {
-			return err
-		}
-		u.Blank()
-		u.Success("dry run: nothing written")
-		u.Fields(skippedConfig)
-		return nil
-	}
-	// A checkout can be composed for several runtimes at once, and can have been
-	// composed for others before. The home is one tree that a build replaces
-	// whole, so every runtime it is to hold goes into one call: the targets and
-	// the runtimes already there, whose links would otherwise stop resolving.
-	targeted := map[string]bool{}
-	for _, rt := range targets {
-		targeted[rt.Name()] = true
-	}
-	var also []render.Runtime
-	for _, other := range render.Composed(at.home) {
-		if !targeted[other.Name()] {
-			also = append(also, other)
-		}
-	}
-	all := append(append([]render.Runtime{}, targets...), also...)
-	// The report's target is every runtime the home holds after this compose,
-	// the targets first, since the harness was rendered for all of them.
-	rep.Target.Runtimes = nil
-	for _, rt := range all {
-		rep.Target.Runtimes = append(rep.Target.Runtimes, rt.Name())
-	}
-	if err := render.Build(res, at.home, all...); err != nil {
-		return err
-	}
+	skippedConfig = append(skippedConfig, checks.rows...)
+	return &prepared{at: at, res: res, rep: rep, previous: previous, targets: targets, force: force, rows: skippedConfig, u: u}, nil
+}
+
+// write is the second half of a compose, after [render.Build] has replaced the home:
+// the links into the checkout, the module links, the report, and the rows. all is every
+// runtime the home now holds, the targets first.
+func write(out io.Writer, o composeOptions, at places, res *compose.Result, rep, previous report.Report, targets, all []render.Runtime, force bool, skippedConfig [][2]string, u *ui.UI) error {
 	// A path replaced by an earlier compose is still replaced: the report keeps
 	// naming it until remove takes its link, so the restore hint is not lost to a
 	// second compose. A link step that fails has replaced what it replaced, so the
@@ -347,7 +478,7 @@ func runCompose(out, errOut io.Writer, o composeOptions) error {
 			links = append(links, l.Checkout)
 		}
 		row := strings.Join(links, "  ")
-		if slices.Contains(also, rt) {
+		if !slices.Contains(targets, rt) {
 			row += "  (composed here earlier, refreshed)"
 		}
 		rows = append(rows, [2]string{rt.Name(), row})
@@ -485,10 +616,15 @@ const (
 	ExitCollision = 3
 	// ExitForeign is a path qory would not replace or remove, because it did not write it.
 	ExitForeign = 4
+	// ExitVersion is a document whose qory key excludes the running qory.
+	ExitVersion = 5
+	// ExitStale is a --check that found the home behind the stack and modules, or
+	// nothing composed.
+	ExitStale = 6
 )
 
 // ExitCode is the status a process exits with for err: 0 for nil, [ExitInput],
-// [ExitCollision] or [ExitForeign] for the errors those name, and 1 for every other
+// [ExitCollision], [ExitForeign], [ExitVersion] or [ExitStale] for the errors those name, and 1 for every other
 // failure, such as a git source that could not be fetched or a file that could not be
 // written. A command unknown to the tree is an input error too; cobra reports it as a
 // plain error whose text starts with "unknown command", which is the one place this
@@ -497,6 +633,8 @@ func ExitCode(err error) int {
 	var in inputError
 	var collision *compose.CollisionError
 	var foreign *render.ForeignPathError
+	var version *versionError
+	var stale *staleError
 	switch {
 	case err == nil:
 		return 0
@@ -504,6 +642,10 @@ func ExitCode(err error) int {
 		return ExitCollision
 	case errors.As(err, &foreign):
 		return ExitForeign
+	case errors.As(err, &version):
+		return ExitVersion
+	case errors.As(err, &stale):
+		return ExitStale
 	case errors.As(err, &in), strings.HasPrefix(err.Error(), "unknown command"):
 		return ExitInput
 	default:

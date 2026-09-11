@@ -27,6 +27,9 @@ type Base struct {
 	Pin string
 	// Extending is what the base lets an extending module ship.
 	Extending *stack.Extending
+	// Qory is the range of qory versions the base is written for, empty for none. The
+	// command checks the running qory against it, as it does the checkout's own.
+	Qory stack.Constraint
 }
 
 // String names the base in a message, <name>@<pin>.
@@ -65,7 +68,7 @@ func LoadBase(p *stack.Stack, pin string, opts Options) (*stack.Stack, *Base, er
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", p.File, err)
 	}
-	b := &Base{Name: base.Name, Source: p.Extends.String(), Pin: src.Pin, Extending: base.Extending}
+	b := &Base{Name: base.Name, Source: p.Extends.String(), Pin: src.Pin, Extending: base.Extending, Qory: base.Qory}
 	if b.Name == "" {
 		b.Name = filepath.Base(src.Dir)
 	}

@@ -24,6 +24,10 @@ func writeRaw(t *testing.T, path, body string) {
 	}
 }
 
+// deliveredDoc is a stack with an extending block: one a harness repository delivers,
+// and composes at its own root to test.
+const deliveredDoc = stackDoc + "extending:\n  kinds: [skills]\n"
+
 // TestDiscoverStackPrefersTheCheckoutRoot returns the checkout's own stack even when an
 // ancestor directory holds one, and a qory.yaml with only machine keys beside it is not
 // in the way.
@@ -31,15 +35,51 @@ func TestDiscoverStackPrefersTheCheckoutRoot(t *testing.T) {
 	hermetic(t)
 	base := t.TempDir()
 	checkout := filepath.Join(base, "app")
-	for _, dir := range []string{base, checkout} {
-		writeRaw(t, filepath.Join(dir, stack.FileName), stackDoc)
-	}
+	writeRaw(t, filepath.Join(base, stack.FileName), stackDoc)
+	writeRaw(t, filepath.Join(checkout, stack.FileName), deliveredDoc)
 	writeRaw(t, filepath.Join(checkout, "qory.yaml"), "apiVersion: qory.ai/v1alpha1\nharness: {force: true}\n")
 	got, err := config.DiscoverStack(checkout)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := filepath.Join(checkout, stack.FileName); got != want {
+		t.Fatalf("got %s, want %s", got, want)
+	}
+}
+
+// TestDiscoverStackRefusesAClosedStackAtTheRoot is a checkout whose root holds a
+// qory-stack.yaml with no extending block: a delivered stack nothing can extend, which is
+// a repository's own stack in the wrong file. The same file in an ancestor directory
+// composes the checkouts under it and is found as it is.
+func TestDiscoverStackRefusesAClosedStackAtTheRoot(t *testing.T) {
+	hermetic(t)
+	checkout := t.TempDir()
+	file := filepath.Join(checkout, stack.FileName)
+	writeRaw(t, file, stackDoc)
+	_, err := config.DiscoverStack(checkout)
+	want := file + ": a stack at a repository root is delivered to be extended, and this one declares no extending block; a repository's own stack goes under harness in qory.yaml, which qory setup repo writes"
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %q", err, want)
+	}
+	// The load error of a stack that does not read comes first, so the message names
+	// the mistake in the file rather than the missing block.
+	writeRaw(t, file, "apiVersion: qory.ai/v1alpha1\nmodules: []\n")
+	_, err = config.DiscoverStack(checkout)
+	if err == nil || !strings.Contains(err.Error(), "target.runtime is required") {
+		t.Fatalf("a stack that does not load: %v", err)
+	}
+
+	base := t.TempDir()
+	writeRaw(t, filepath.Join(base, stack.FileName), stackDoc)
+	below := filepath.Join(base, "app")
+	if err := os.MkdirAll(below, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := config.DiscoverStack(below)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(base, stack.FileName); got != want {
 		t.Fatalf("got %s, want %s", got, want)
 	}
 }

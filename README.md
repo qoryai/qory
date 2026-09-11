@@ -13,6 +13,10 @@ more than one agent. Claude Code reads `.claude`, Codex reads `.codex`, Gemini C
 `.gemini`. So every repository holds one copy per tool. When the shared part improves, the
 copies drift, and nothing tells you which version a checkout runs with.
 
+<p align="center">
+  <img src="docs/assets/slogan.png" alt="Don't worry, use Qory" width="720">
+</p>
+
 ## What qory does
 
 A stack lists modules in order: the harness your team shares, the harness for apps built
@@ -51,6 +55,8 @@ coming last.
    Every module has a `qory-module.yaml` that names it. A repository can also take a
    stack someone else delivers, a `qory-stack.yaml`: it names that stack under `extends`
    instead of `target`, and adds its own modules. The delivered modules cannot be changed.
+   A delivered stack states the qory it needs, `qory: ">=0.3.0"`, and every repository
+   extending it inherits the range.
 
 2. Compose it:
 
@@ -85,10 +91,10 @@ go install github.com/qoryai/qory@latest
 
 ```sh
 mkdir hello && cd hello
-qory setup example     # writes a stack and two modules
-qory hc                # or: qory hc --runtime codex
-claude                 # type /hello
-qory hr
+qory setup example       # writes a stack and two modules
+qory harness compose     # or: qory hc; for Codex: qory hc --runtime codex
+claude                   # type /hello
+qory harness remove      # or: qory hr
 ```
 
 Both modules ship a greet skill. The README that `qory setup example` writes says which
@@ -144,6 +150,7 @@ Flags worth knowing on `compose`:
 --model opus           write this model instead of the stack's
 --force                replace a tracked, unmodified file where a link goes
 --update               fetch every git source again
+--check                exit 6 when the composed tree is behind the stack and modules
 ```
 
 Two `qory.yaml` files are read. Every setting has a default, so both are optional. The
@@ -166,6 +173,38 @@ file it came from. The reference, one page per command, is under
 - One instruction file, joined from the modules in order, under the name each tool wants.
 - A report that names the module of every entry. When two modules provide the same entry,
   a refusal with the lines that resolve it.
+- Part of a module, when that is all you want. `exclude` leaves entries, the instruction
+  section, settings fragments or variables out. `only` takes the named things, plus what
+  they need as the module's manifest declares it, and nothing else: `only: {skills:
+  [deploy]}` is the deploy skill, the command it runs and the agent it calls, from a
+  module full of other things. A required entry you take from another module instead is
+  one `exclude` line beside the `only`.
+
+## The composed tree
+
+The home, `.qory/harness`, holds one directory per runtime. Most of what is in it is a
+symlink to a file in a module: every skill, agent, command and hook. Beside the links
+are the generated copies: `AGENTS.md` at the root of the home, the instruction file each
+runtime wants, its settings and its MCP file, each joined from the modules' fragments.
+
+Editing a module's file is live through the link. Editing a module's instruction section
+or a settings fragment is not: the merged copy is generated, and it stays as it was until
+the next compose. `qory harness compose --check` compares the home with what the stack
+and modules say now and exits 6 when a merged copy is behind, which is the check a CI
+job runs.
+
+What the checkout holds is links too. `.claude` is a real directory with one symlink per
+entry, so Claude Code's own `settings.local.json` stays beside them; `.mcp.json` and a
+root `AGENTS.md` are symlinks. A tool that walks the tree has to follow them:
+
+- `find` needs `-L`.
+- `grep -R` given a symlink as its operand without a trailing slash reads nothing with
+  BSD grep on macOS and follows the link with GNU grep on Linux, and neither reports an
+  error. Give it the directory with the slash, `grep -R pattern .claude/`, or use `-R -L`.
+- `rg` needs `--follow`.
+
+`git status` does not show the tree. Every path `qory` writes is listed in
+`.git/info/exclude`, which every worktree of a repository shares.
 
 ## The format
 

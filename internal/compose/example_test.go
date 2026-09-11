@@ -8,11 +8,12 @@ import (
 	"testing"
 
 	"github.com/qoryai/qory/internal/compose"
+	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/stack"
 )
 
 // TestExample keeps the hello example composable: copied into a repository of its own,
-// the way qory harness init writes it, the stack loads, the excluded greet skill comes
+// the way qory setup example writes it, the stack in its qory.yaml loads, the excluded greet skill comes
 // from the world module, and dropping the exclude is the collision the README promises.
 func TestExample(t *testing.T) {
 	dir := t.TempDir()
@@ -22,7 +23,7 @@ func TestExample(t *testing.T) {
 	if out, err := exec.Command("git", "-C", dir, "init", "-q").CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v\n%s", err, out)
 	}
-	p, err := stack.Load(filepath.Join(dir, stack.FileName))
+	p, err := config.LoadStack(filepath.Join(dir, config.FileName))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +40,7 @@ func TestExample(t *testing.T) {
 	if greet != "world" {
 		t.Fatalf("skills/greet comes from %q, want world", greet)
 	}
-	p.Modules[0].Exclude = nil
+	p.Modules[0].Exclude = stack.Selection{}
 	_, err = compose.Compose(p)
 	if err == nil || !strings.Contains(err.Error(), "skills/greet is provided by 2 modules") {
 		t.Fatalf("without the exclude: %v", err)

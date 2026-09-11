@@ -42,7 +42,7 @@ func worktreeRepo(t *testing.T) string {
 	t.Helper()
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
-	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.ai/v1alpha1\nworktree:\n  link: [.env, .env.local]\n  copy: [config/local.json]\n  run:\n    add: ['printf \"%s %s\" \"$QORY_BRANCH\" \"$(basename \"$QORY_MAIN\")\" > ran.txt']\n    remove: ['touch \"$QORY_MAIN/removed-$QORY_BRANCH\"']\n")
+	configure(t, root, nil, []string{"worktree:", "  link: [.env, .env.local]", "  copy: [config/local.json]", "  run:", `    add: ['printf "%s %s" "$QORY_BRANCH" "$(basename "$QORY_MAIN")" > ran.txt']`, `    remove: ['touch "$QORY_MAIN/removed-$QORY_BRANCH"']`})
 	runGit(t, root, "add", "-A")
 	runGit(t, root, "commit", "-q", "-m", "stack")
 	writeFile(t, filepath.Join(root, ".env"), "SECRET=1\n")
@@ -139,8 +139,15 @@ func TestWorktreeAddReusesAndRefuses(t *testing.T) {
 // TestWorktreeAddStopsAtAFailingCommand keeps the worktree and names the command.
 func TestWorktreeAddStopsAtAFailingCommand(t *testing.T) {
 	root := worktreeRepo(t)
-	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.ai/v1alpha1\nworktree:\n  run:\n    add: ['true', 'exit 3', 'touch never']\n")
-	_, err := run(t, "wa", "feature")
+	// The stack stays; the worktree section is replaced by one whose second command fails.
+	file := filepath.Join(root, "qory.yaml")
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(data)
+	writeFile(t, file, doc[:strings.Index(doc, "worktree:\n")]+"worktree:\n  run:\n    add: ['true', 'exit 3', 'touch never']\n")
+	_, err = run(t, "wa", "feature")
 	if err == nil || !strings.Contains(err.Error(), "exit 3 in ") || !strings.Contains(err.Error(), "the worktree is kept, repair the command and add again") || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("err = %v", err)
 	}

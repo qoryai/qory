@@ -10,6 +10,7 @@
 // first, the checkout root's. A command line flag overrides every file.
 //
 //	apiVersion: qory.ai/v1alpha1
+//	qory: ">=0.3.0"              # the qory versions this file is written for
 //	harness:
 //	  runtime: [claude, codex]   # instead of the stack's target.runtime
 //	  model: opus                # instead of the stack's target.model
@@ -98,8 +99,20 @@ type Worktree struct {
 	Remove []string
 }
 
+// Requirement is one file's qory key: the range of qory versions it is written for.
+type Requirement struct {
+	// File is the qory.yaml that names the range.
+	File string
+	// Qory is the range.
+	Qory stack.Constraint
+}
+
 // Config is the effective configuration: the defaults, overridden by every file read.
 type Config struct {
+	// Qory are the ranges of qory versions the files name, one per file with a qory key,
+	// in the order the files were read. Every range has to hold; a file's own range is
+	// read under extends as well, since it can only narrow what the base allows.
+	Qory []Requirement
 	// Runtime replaces the stack's target.runtime, nil to keep the stack's.
 	Runtime stack.Runtimes
 	// Model replaces the stack's target.model, "" to keep the stack's.
@@ -125,6 +138,7 @@ type Config struct {
 // key the file did not name, which leaves the value as it was.
 type file struct {
 	APIVersion string           `yaml:"apiVersion"`
+	Qory       stack.Constraint `yaml:"qory,omitempty"`
 	Harness    *harnessSection  `yaml:"harness,omitempty"`
 	Worktree   *worktreeSection `yaml:"worktree,omitempty"`
 	Git        *struct {
@@ -245,12 +259,23 @@ func Discover(root string) []string {
 // a stack to extend; else the nearest ancestor directory's, when the current user owns the
 // file. A directory holding both is an error naming them. The error for none names root
 // and does not wrap an error a caller can match.
+//
+// A qory-stack.yaml in root is a stack delivered to be extended, and one with no
+// extending block is refused: nothing can extend it, so it is a repository's own stack
+// in the wrong file, and the error says where that goes. The rule is discovery's alone:
+// the same file named with -f, in an ancestor directory, or through extends is read as
+// it is.
 func DiscoverStack(root string) (string, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return "", err
 	}
 	if found, err := composeIn(root, false); found != "" || err != nil {
+		if err == nil && filepath.Base(found) == stack.FileName {
+			if err := closedAtRoot(found); err != nil {
+				return "", err
+			}
+		}
 		return found, err
 	}
 	for dir := filepath.Dir(root); ; dir = filepath.Dir(dir) {
@@ -262,6 +287,20 @@ func DiscoverStack(root string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no %s, and no %s with a harness section naming modules, in %s or in an ancestor directory you own", stack.FileName, FileName, root)
+}
+
+// closedAtRoot reads the qory-stack.yaml at path, found in a checkout root, and returns
+// the error for one that declares no extending block. A file that does not load returns
+// its load error, the same one [LoadStack] would.
+func closedAtRoot(path string) error {
+	p, err := stack.Load(path)
+	if err != nil {
+		return err
+	}
+	if p.Extending == nil {
+		return fmt.Errorf("%s: a stack at a repository root is delivered to be extended, and this one declares no extending block; a repository's own stack goes under harness in %s, which qory setup repo writes", path, FileName)
+	}
+	return nil
 }
 
 // composeIn returns the one document dir holds for a compose, "" for none, and an error
@@ -314,7 +353,7 @@ func Compose(path string) (*stack.Stack, error) {
 		return nil, fmt.Errorf("%s: the harness section names no modules and no stack to extend", path)
 	}
 	h := f.Harness
-	p := &stack.Stack{APIVersion: f.APIVersion, Name: h.Name, Description: h.Description, Extends: h.Extends, Target: h.Target, Modules: h.Modules, Extensions: h.Extensions}
+	p := &stack.Stack{APIVersion: f.APIVersion, Qory: f.Qory, Name: h.Name, Description: h.Description, Extends: h.Extends, Target: h.Target, Modules: h.Modules, Extensions: h.Extensions}
 	if p.Extends.Path == "" && p.Extends.Git == "" && p.Extends.Ref == "" && len(p.Target.Runtimes) == 0 {
 		return nil, fmt.Errorf("%s: harness names modules and no target.runtime; the section holds this repository's own stack, a target and its modules, or extends one", path)
 	}
@@ -347,13 +386,17 @@ func ownedFile(path string) bool {
 }
 
 // apply reads one file and sets the keys it names. With machine false, only the worktree
-// section is taken: the harness, git and env keys are the machine's and left out.
+// section and the qory key are taken: the harness, git and env keys are the machine's
+// and left out.
 func (c *Config) apply(path string, machine bool) error {
 	f, err := read(path)
 	if err != nil {
 		return err
 	}
 	c.Files = append(c.Files, path)
+	if !f.Qory.Empty() {
+		c.Qory = append(c.Qory, Requirement{File: path, Qory: f.Qory})
+	}
 	if err := c.applyWorktree(path, f.Worktree); err != nil {
 		return err
 	}
@@ -529,8 +572,9 @@ type Row struct {
 	Origin string
 }
 
-// Rows lists every effective value with its origin: the fixed keys first, the worktree
-// lists that are set, and the variables after them in name order.
+// Rows lists every effective value with its origin: the qory ranges when a file names
+// one, the fixed keys, the worktree lists that are set, and the variables after them in
+// name order.
 func (c Config) Rows() []Row {
 	runtime, model := "(stack)", "(stack)"
 	if c.Runtime != nil {
@@ -551,15 +595,19 @@ func (c Config) Rows() []Row {
 	if cache == "" {
 		cache, _ = source.CacheDir()
 	}
-	rows := []Row{
-		{"harness.runtime", runtime, c.origins["harness.runtime"]},
-		{"harness.model", model, c.origins["harness.model"]},
-		{"harness.force", fmt.Sprint(c.Force), c.origins["harness.force"]},
-		{"harness.update", update, c.origins["harness.update"]},
-		{"worktree.dir", c.Worktree.Dir, c.origins["worktree.dir"]},
-		{"worktree.name", c.Worktree.Name, c.origins["worktree.name"]},
-		{"worktree.base", base, c.origins["worktree.base"]},
+	var rows []Row
+	for _, r := range c.Qory {
+		rows = append(rows, Row{"qory", r.Qory.String(), r.File})
 	}
+	rows = append(rows,
+		Row{"harness.runtime", runtime, c.origins["harness.runtime"]},
+		Row{"harness.model", model, c.origins["harness.model"]},
+		Row{"harness.force", fmt.Sprint(c.Force), c.origins["harness.force"]},
+		Row{"harness.update", update, c.origins["harness.update"]},
+		Row{"worktree.dir", c.Worktree.Dir, c.origins["worktree.dir"]},
+		Row{"worktree.name", c.Worktree.Name, c.origins["worktree.name"]},
+		Row{"worktree.base", base, c.origins["worktree.base"]},
+	)
 	for _, list := range []struct {
 		key   string
 		items []string

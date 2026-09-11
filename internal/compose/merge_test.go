@@ -3,6 +3,7 @@ package compose_test
 import (
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/qoryai/qory/internal/compose"
@@ -128,5 +129,59 @@ func TestExportAgainstFragmentEnvCollides(t *testing.T) {
 	env := res.Settings["claude"]["settings.json"]["env"].(map[string]any)
 	if env["TOOLS"] != "/opt/tools" || res.Env["TOOLS"] != "/opt/tools" {
 		t.Fatalf("settings env %v, exported env %v, want TOOLS /opt/tools in both", env, res.Env)
+	}
+}
+
+// TestSelectionRecordsEveryPartLeftOut is the report's view of an exclude and an only
+// block: the instruction section, a settings fragment and every entry a block left out
+// are recorded beside the excluded entries, so inspect says why a module contributed
+// less than it ships.
+func TestSelectionRecordsEveryPartLeftOut(t *testing.T) {
+	for fixture, want := range map[string][]string{
+		"exclude-drops-parts":  {"core instructions/AGENTS.md", "core settings/claude/settings.json"},
+		"only-keeps-one-skill": {"core agents/reviewer", "core commands/ship", "core hooks/guard.sh", "core mcp/db", "core output-styles/terse", "core skills/test", "core instructions/AGENTS.md", "core settings/claude/settings.json"},
+	} {
+		p, err := stack.Load(filepath.Join(fixtures, fixture, stack.FileName))
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := compose.Compose(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, x := range res.Excludes {
+			got = append(got, x.Module+" "+x.Kind+"/"+x.Name)
+		}
+		if strings.Join(got, "\n") != strings.Join(want, "\n") {
+			t.Errorf("%s: excludes\n%s\nwant\n%s", fixture, strings.Join(got, "\n"), strings.Join(want, "\n"))
+		}
+	}
+}
+
+// TestOnlyBringsInWhatANamedEntryRequires is the pull: only names one skill, the module's
+// manifest says what it needs, and the compose brings those in, transitively, each marked
+// with the entry that required it; an exclude beside the only leaves one of them to
+// another module.
+func TestOnlyBringsInWhatANamedEntryRequires(t *testing.T) {
+	for fixture, want := range map[string]map[string]string{
+		"only-pulls-requirements":      {"agents/reviewer": "skills/deploy", "commands/ship": "skills/deploy", "hooks/guard.sh": "commands/ship", "skills/deploy": ""},
+		"only-excludes-a-pulled-entry": {"agents/reviewer": "", "commands/ship": "skills/deploy", "hooks/guard.sh": "commands/ship", "skills/deploy": ""},
+	} {
+		p, err := stack.Load(filepath.Join(fixtures, fixture, stack.FileName))
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := compose.Compose(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]string{}
+		for _, e := range res.Entries {
+			got[e.Kind+"/"+e.Name] = e.For
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: for = %v, want %v", fixture, got, want)
+		}
 	}
 }

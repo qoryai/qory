@@ -6,7 +6,7 @@ What `qory harness compose` reads and what it writes.
 
 | File | Lives in | Defines |
 |---|---|---|
-| `qory-stack.yaml` | a directory named by `extends` or `-f`; an ancestor directory covering several repositories; a repository root | a stack delivered to be extended: the ordered modules, the target runtime and model, the excludes, what a checkout extending it may add |
+| `qory-stack.yaml` | a directory named by `extends` or `-f`; an ancestor directory covering several repositories; the root of the harness repository that delivers it | a stack delivered to be extended: the ordered modules, the target runtime and model, the excludes, what a checkout extending it may add |
 | `qory-module.yaml` | the root of a module | the module: its name, its variants per runtime, the variables it exports |
 | `qory.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's own stack, its target and modules, or the stack it extends and the modules it appends, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; `git` and `env` (§The configuration) |
 
@@ -25,7 +25,10 @@ and names the versions it does. `v1alpha1` says the format may still change.
 What to compose, in order: the `-f <file>` flag; `qory-stack.yaml` in the checkout root,
 or the checkout's `qory.yaml` when its `harness` section names modules; the nearest of
 either in an ancestor directory that the current user owns. An ancestor's file owned by
-another user is not read.
+another user is not read. A `qory-stack.yaml` found in the checkout root must declare an
+`extending` block: it is a stack delivered to be extended, and one nothing can extend is
+a repository's own stack in the wrong file, refused with the place it goes. The same file
+named with `-f`, in an ancestor directory, or reached through `extends` is read as it is.
 
 The configuration is every `qory.yaml` found, applied in this order, each overriding the
 one before it: `$XDG_CONFIG_HOME/qory/qory.yaml`, else `~/.config/qory/qory.yaml`; the
@@ -46,8 +49,14 @@ modules:
     exclude:
       skills: [test]             # the nextjs module ships this repository's test skill
       agents: [reviewer]
+      instructions: true         # the module's AGENTS.md is left out too
   - source: {git: https://github.com/acme/harness, ref: v2.4.0, path: modules/nextjs}
     variant: claude              # optional; forces a variant of the module
+  - name: ops
+    only:
+      skills: [deploy]           # the deploy skill and what its manifest says it requires; no instructions, settings or variables
+    exclude:
+      agents: [reviewer]         # optional; one the only brought in, taken from another module instead
   - name: team
     source: {path: ./harness}    # a name and a source: the manifest must say team
     link: harness                # optional; <checkout>/harness -> .qory/harness/modules/team
@@ -88,6 +97,7 @@ place of `target`, it names the base: a directory holding a `qory-stack.yaml`, a
 | Field | Required | Meaning |
 |---|---|---|
 | `apiVersion` | yes | `qory.ai/v1alpha1` |
+| `qory` | no | the qory versions the stack is written for: comparators such as `>=0.3.0 <0.4.0`, every one of which has to hold. A compose on a qory outside the range is refused with status 5; a build from source between tags, which has no version, composes and says the range was not checked. A stack delivered to be extended states its minimum here, and every checkout extending it inherits the range |
 | `name` | no | the stack's name in the report. Default: `owner/name` from the origin remote, else the directory name |
 | `description` | no | what the stack is for, carried into the report and printed by `qory harness inspect` |
 | `target.runtime` | yes | the program that runs the harness, one of the runtimes in §Runtimes, or a list of them to compose for at once |
@@ -95,7 +105,8 @@ place of `target`, it names the base: a directory holding a `qory-stack.yaml`, a
 | `modules` | yes | ordered, at least one. Order decides the order of the instruction sections |
 | `modules[].name` | one of name and source | the module's name, the one its `qory-module.yaml` declares, one path segment. Alone, it is the address too: `modules/<name>` at the root of the repository the stack is in |
 | `modules[].source` | one of name and source | `{path: <dir>}`, relative to the stack file; or `{git: <url>, ref: <tag, branch or commit>}` with an optional `path` to the module's directory inside the repository (§Sources). Alone, the module's name is its manifest's; with a name, the manifest must carry that name |
-| `modules[].exclude` | no | entries of this module left out, by kind: `skills`, `agents`, `commands`, `output-styles`, `hooks`, `mcp`, `files` |
+| `modules[].exclude` | no | what of this module is left out; everything else is composed, or, beside `only`, everything the `only` takes. Entries by kind, `skills`, `agents`, `commands`, `output-styles`, `hooks`, `mcp`, `files`, each a list of names; the three merged parts, `instructions: true` for the module's `AGENTS.md`, `settings` and `env` as `true` for all of it or a list, of `<runtime>/<file>` fragments and of variable names. Not with `only` |
+| `modules[].only` | no | the only things of this module that are composed, with the same keys as `exclude`, plus what the named entries require from this module (`requires` in its manifest, followed transitively). Everything else is left out: a kind not named contributes no entry beyond those, a part not named is left out. `only: {skills: [deploy]}` is the deploy skill, what it needs, and nothing else. An `exclude` beside it names entries the `only` brought in, to leave them out after all; a requirement left out that way has to come from another module (rule 4). It names no part, and nothing the `only` names |
 | `modules[].variant` | no | forces one of the module's variants instead of the one named like the targeted runtime |
 | `modules[].link` | no | a name at the checkout root, one path segment, linked to the module's directory in the composed tree, so a permission rule or a script names the module's files by a checkout-relative path: `harness/scripts/check.sh`. A hard link (§Rendering), named once across the modules |
 | `extensions` | no | one map per namespace, written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it |
@@ -185,6 +196,10 @@ variants:
 env:
   HARNESS_HOME: .                # exported as the module's root in the composed tree
   HARNESS_TOOLS: scripts/tools   # a path inside the module
+requires:
+  - skill: deploy                # this module's deploy skill needs these composed beside it
+    commands: [ship]
+    agents: [reviewer]
 ```
 
 `description`, optional, says what the module is for; the report carries it and `qory harness
@@ -196,6 +211,14 @@ the module, `.` for its root. The compose writes each as
 get it there (§Runtimes), so a script the module ships reads its own location from the
 variable it has always read. Two modules exporting one name with different values fail the
 compose unless the configuration's `env` names it; `QORY_HARNESS_HOME` is qory's own.
+`requires`, optional, is one item per entry of the module that needs other entries
+composed beside it: the entry by its singular kind, `skill`, `agent`, `command`,
+`output-style`, `hook`, `mcp` or `file`, and what it needs under the plural kinds an
+`exclude` uses. A required entry may come from any module. `mcp` is its own singular: a
+string names the server, a list the servers needed, and since a key appears once per item
+an item naming a server lists no servers. An item that names no entry or two, a key that
+is neither, an empty list, an entry named twice, and an entry the module does not ship are
+refused (§Composition rules).
 
 A module's tree holds these entry kinds:
 
@@ -247,8 +270,8 @@ The schema is [module.schema.json](module.schema.json).
 
 1. **One flat tree, one entry per name.** Every atomic entry links into `<kind>/<name>` from
    the module that provides it, a file into `<runtime>/<path>`.
-2. **Excludes first, then the collision check.** After each module's `exclude` is applied, an
-   atomic name provided by more than one module fails the compose. The error names every
+2. **Excludes first, then the collision check.** After each module's `exclude` or `only`
+   is applied, an atomic name provided by more than one module fails the compose. The error names every
    module and the excludes that resolve it; this is its text, which the fixtures hold, and
    `qory harness compose` prints the same as a table under a `Fix` heading with the
    stack lines to paste:
@@ -261,9 +284,21 @@ The schema is [module.schema.json](module.schema.json).
    ```
 
    There is no last-wins and no rename.
-3. **An exclude that names nothing fails**, so a module that stops shipping an entry is
-   noticed rather than silently composed.
-4. **Merged kinds join, and a value is set once.** A settings target file merges across
+3. **An exclude or only that names nothing fails**, so a module that stops shipping an
+   entry, an instruction section, a fragment or a variable is noticed rather than silently
+   composed. The message names the module, the block and the name. An `only` brings in
+   what its named entries require from the module, transitively, and an `exclude` beside
+   it may name only those; one naming anything else fails the same way.
+4. **A requirement that is not composed fails.** After the excludes and the collision
+   check, every composed entry's `requires` items from its manifest are checked against
+   the composed entries. One that is missing fails the compose with `module core: skill
+   deploy requires command ship, which module core leaves out` when an `exclude` or an
+   `only` dropped it, naming the module whose block did, and with `module core: skill deploy requires
+   command ship, which no module ships` otherwise. An entry that was left out has no
+   requirements to meet. A manifest whose `requires` names an entry the module does not
+   ship fails as the module is read: `module core: requires names skill release, which
+   the module does not ship`.
+5. **Merged kinds join, and a value is set once.** A settings target file merges across
    the modules that ship a fragment for it, JSON or TOML by extension: objects deep-merge,
    `permissions` lists concatenate and deduplicate, `hooks` arrays concatenate. Every
    other list and every scalar is set by one module; another module may repeat the value and
@@ -274,15 +309,18 @@ The schema is [module.schema.json](module.schema.json).
    manifest exports with a different value fails the same way, unless the configuration
    sets it. `AGENTS.md` is the concatenation of the modules' files in module order, separated
    by a blank line, the one place the order of `modules` decides anything. An MCP server is
-   atomic and follows rules 1 to 3; where a settings fragment also names servers, the
+   atomic and follows rules 1 to 4; where a settings fragment also names servers, the
    composed servers are written on top.
-5. **Variants resolve per module.** The forced `variant`, else the one named like
+6. **Variants resolve per module.** The forced `variant`, else the one named like
    `target.runtime`, else the manifest's `default`, else the module root when the manifest
    declares no variants. A manifest with variants, none for the runtime and no default, or
    `default: fail`, fails the compose.
-6. **Everything is reported.** The report names every module with its pin, every entry with
-   its module, every exclude and every variant chosen. `qory harness inspect` prints it.
-7. **Nothing composed is committed.** The link in the checkout is excluded through the
+7. **Everything is reported.** The report names every module with its pin, every entry with
+   its module and, for one an `only` brought in, the entry that required it, every entry
+   and part a block left out, as `<kind>/<name>`, `instructions/AGENTS.md`,
+   `settings/<runtime>/<file>` or `env/<NAME>`, and every variant chosen. `qory harness
+   inspect` prints it.
+8. **Nothing composed is committed.** The link in the checkout is excluded through the
    clone-local exclude file, never the repository's own ignore file.
 
 ## Rendering
@@ -430,8 +468,12 @@ target's `runtime` is always an array: the runtimes the home holds after the com
 targeted ones first. A module carries its `name`, its `source` as the stack writes it,
 its `pin`, `dirty` when git saw uncommitted changes under a path source, the `variant`
 chosen, its `link` when the stack names one, and `base` when it is the base stack's.
+An entry an `only` brought in carries `for`, the `<kind>/<name>` that required it.
 The report of a checkout that extends a stack records the `base`: its `name`, `source` and `pin`. A path source's pin is `working-tree`; a git source's pin is twelve
-characters of its commit. `qory harness inspect` refuses a report of another version.
+characters of its commit. The report records the `qory` that wrote it, its `version`,
+`commit` and `source`, `release` or `source`, as `qory version --json` reports them,
+and leaves the field out when the build carries no version. `qory harness inspect`
+refuses a report of another version.
 
 ## The configuration
 
@@ -469,6 +511,7 @@ env:
 
 | Key | Default | Meaning |
 |---|---|---|
+| `qory` | none | the qory versions the file is written for, as in a stack; read under `extends` as well, since it can only narrow the base's range |
 | `harness.runtime` | the stack's `target.runtime` | one runtime name or a list; `--runtime` wins over it |
 | `harness.model` | the stack's `target.model` | `--model` wins over it |
 | `harness.force` | `false` | what `--force` does on every compose; `--force=false` wins over it |
@@ -501,3 +544,5 @@ checkout's own file are not read (§Extending a stack). The schema is
 | 2 | a mistake in the input: the command line, the stack, a module, a fragment |
 | 3 | a collision, printed with the excludes that resolve it |
 | 4 | a path qory did not write standing where a link goes, which `--force` may replace |
+| 5 | the running qory is outside the range a document's `qory` key declares |
+| 6 | `--check`: the home no longer matches what the stack and modules say, or nothing is composed |

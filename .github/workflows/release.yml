@@ -22,11 +22,16 @@ jobs:
         with:
           go-version: "1.27"
 
+      - name: Take the release body from the changelog
+        # A tag without a section in CHANGELOG.md does not publish: the section is the
+        # release body, above the commit list goreleaser writes.
+        run: scripts/changelog-section.sh "${GITHUB_REF_NAME#v}" release-notes.md
+
       - name: Release
         uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
-          args: release --clean
+          args: release --clean --release-header=release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Set this secret to publish the Homebrew cask into qoryai/homebrew-tap.

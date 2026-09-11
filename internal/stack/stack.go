@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -18,10 +19,10 @@ import (
 // is refused, and the message names this one.
 const APIVersion = "qory.ai/v1alpha1"
 
-// FileName is the stack's file name on disk, in the checkout root, in an ancestor
-// directory covering several checkouts, or in a directory of a harness repository. The
-// file name is what says which document a file holds; the document carries no kind. A
-// checkout that extends a stack names it in the harness section of its qory.yaml, which
+// FileName is the stack's file name on disk, in a directory of the harness repository
+// that delivers it, or in an ancestor directory covering several checkouts. The file name
+// is what says which document a file holds; the document carries no kind. A checkout's
+// own stack, and the stack it extends, are in the harness section of its qory.yaml, which
 // [github.com/qoryai/qory/internal/config] reads and turns into a Stack with [NewCompose].
 const FileName = "qory-stack.yaml"
 
@@ -72,8 +73,14 @@ type Module struct {
 	Name string `yaml:"name,omitempty"`
 	// Source is where the module is read from, when it is not at modules/<name>.
 	Source Source `yaml:"source,omitempty"`
-	// Exclude lists, per kind from [Kinds], the entry names this module does not contribute.
-	Exclude map[string][]string `yaml:"exclude,omitempty"`
+	// Exclude names what of the module the compose leaves out: entries by kind, the
+	// instruction section, settings fragments, exported variables. Everything else is
+	// composed.
+	Exclude Selection `yaml:"exclude,omitempty"`
+	// Only names the only things of the module the compose takes, with the same keys as
+	// Exclude, and brings in what the named entries require from the module; everything
+	// else is left out. Exclude beside it names entries brought in that way to leave out.
+	Only Selection `yaml:"only,omitempty"`
 	// Base marks a module that came from the base stack a checkout's qory.yaml extends. It
 	// is set by [Extend], not by the YAML, which also rewrites the module's source so it
 	// resolves from the checkout's qory.yaml.
@@ -182,6 +189,9 @@ type Extending struct {
 // and returns the stack that composes.
 type Stack struct {
 	APIVersion string `yaml:"apiVersion"`
+	// Qory is the range of qory versions the stack is written for, from the qory key;
+	// empty when the stack names none. The compose refuses a qory outside it.
+	Qory Constraint `yaml:"qory,omitempty"`
 	// Name is the stack's name in the report. A stack that leaves it out is named after
 	// the checkout by the caller.
 	Name string `yaml:"name,omitempty"`
@@ -309,7 +319,9 @@ func decodeError(path string, err error) error {
 // validate checks the whole document before a caller sees it, so a document that reaches
 // the compose is known to carry what it is asked for, a runtime for a stack or a base for
 // a document that extends one, at least one module, each with a name or a source, no name
-// twice, excludes over known kinds only, links that are one path segment and named once,
+// twice, excludes and onlys over known kinds and parts, an exclude beside an only naming
+// entries the only does not, links
+// that are one path segment and named once,
 // extensions that are maps, and an extending block over known kinds without hooks and
 // servers. Whether a source holds a module, and whether its manifest carries the name the
 // entry gives, is the compose's check.
@@ -382,10 +394,15 @@ func (p *Stack) validate(compose bool) error {
 		} else if l.Name == "" {
 			return fmt.Errorf("%s: a module gives a name, a source, or both", who)
 		}
-		for kind := range l.Exclude {
-			if !isKind(kind) {
-				return fmt.Errorf("%s: exclude names kind %q; kinds: %s", who, kind, strings.Join(Kinds, ", "))
-			}
+		// The blocks are parsed on the stack's own entry, not on the loop's copy.
+		if err := p.Modules[i].Exclude.parse(); err != nil {
+			return fmt.Errorf("%s: exclude %w", who, err)
+		}
+		if err := p.Modules[i].Only.parse(); err != nil {
+			return fmt.Errorf("%s: only %w", who, err)
+		}
+		if err := p.Modules[i].besideOnly(); err != nil {
+			return fmt.Errorf("%s: %w", who, err)
 		}
 		if l.Link != "" {
 			if !segment(l.Link) || l.Link == ".qory" {
@@ -400,6 +417,27 @@ func (p *Stack) validate(compose bool) error {
 	for ns, values := range p.Extensions {
 		if values == nil {
 			return fmt.Errorf("extensions.%s is empty; an extension is a map of values", ns)
+		}
+	}
+	return nil
+}
+
+// besideOnly checks an exclude block that stands beside an only block: it names entries
+// only, since only has already left every part it does not name out, and none that only
+// names, since taking and leaving out one entry contradict. What it names has to be an
+// entry only brings in, which the compose checks when it knows what the module ships.
+func (l Module) besideOnly() error {
+	if l.Only.Empty() || l.Exclude.Empty() {
+		return nil
+	}
+	if l.Exclude.Instructions || l.Exclude.Settings.Set() || l.Exclude.Env.Set() {
+		return errors.New("exclude beside only names a part; only leaves every part it does not name out, so exclude names entries only brings in")
+	}
+	for _, kind := range l.Exclude.KindNames() {
+		for _, name := range l.Exclude.Kinds[kind] {
+			if slices.Contains(l.Only.Kinds[kind], name) {
+				return fmt.Errorf("%s/%s is named in only and in exclude; name it in one", kind, name)
+			}
 		}
 	}
 	return nil
@@ -477,7 +515,8 @@ func FileAllowed(name string, prefixes []string) bool {
 
 // Extend returns the stack the checkout's qory.yaml p composes on base: the base's modules first,
 // marked [Module.Base], each with its source rewritten to resolve from p, then p's
-// modules; the base's target; both files' extensions. It refuses a base that extends
+// modules; the base's target; both files' extensions. The result's Qory is p's; the
+// base's range is the caller's to carry and check, as [Base.Qory] does. It refuses a base that extends
 // another, a base without an extending block, and an extension namespace both files
 // declare. The result's File and Root are p's.
 func Extend(base, p *Stack) (*Stack, error) {

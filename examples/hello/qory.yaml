@@ -1,0 +1,27 @@
+# The smallest harness there is. qory setup example wrote it. From this directory:
+#
+#   qory harness compose     # or: qory hc
+#   qory harness inspect     # or: qory hi
+#   claude                   # then type /hello
+#   qory harness remove      # or: qory hr
+#
+apiVersion: qory.ai/v1alpha1
+harness:
+  name: hello
+  target:
+    runtime: claude       # or compose for two at once: [claude, codex]
+  modules:
+    - name: hello         # read from modules/hello; its qory-module.yaml says hello
+      exclude:
+        skills: [greet]   # both modules ship a greet skill; delete this line and compose again
+    - name: world
+
+# What a worktree of this repository needs; qory worktree add reads it. Commit first,
+# then: qory wa feature   (a worktree beside this one, on branch feature)
+#worktree:
+#  base: main               # a new branch starts here; default: the remote's HEAD
+#  link: [.env]             # linked from the main checkout into the worktree
+#  copy: [.env.local]       # copied once into the worktree
+#  run:
+#    add: [npm install]     # run in the new worktree, after the compose
+#    remove: []             # run in a worktree before it is removed

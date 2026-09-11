@@ -8,6 +8,11 @@
   "additionalProperties": false,
   "properties": {
     "apiVersion": {"const": "qory.ai/v1alpha1"},
+    "qory": {
+      "description": "The qory versions this document is written for: one or more comparators, >=0.3.0 <0.4.0 say; every one has to hold.",
+      "type": "string",
+      "pattern": "^\\s*(>=|<=|>|<|=)v?\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?(\\s+(>=|<=|>|<|=)v?\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?)*\\s*$"
+    },
     "harness": {
       "description": "The machine's choices for a compose, and in a checkout's file its document: the checkout's own stack, a target and modules, or the stack it extends and the modules it appends.",
       "type": "object",

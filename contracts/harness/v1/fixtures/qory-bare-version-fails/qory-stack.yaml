@@ -1,0 +1,6 @@
+apiVersion: qory.ai/v1alpha1
+qory: 0.3.0
+target:
+  runtime: claude
+modules:
+  - name: core

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -154,16 +155,10 @@ func Composed(home string) []Runtime {
 	return found
 }
 
-// Build writes the composed home for one or more runtimes. It stages the tree in home with
-// ".tmp" appended, discarding whatever that path held, links the shared skills and hooks,
-// links every module's directory as modules/<name> and writes AGENTS.md at the staging root,
-// calls each runtime's Render for the subdirectory named after it and links the runtime's
-// files entries into that subdirectory, then removes the old home and renames the staging
-// directory over it. A failure before the rename leaves the previous home as it was.
-//
-// The files come after Render, so a files entry at a path Render wrote fails the build.
-// [CheckFiles] refuses such an entry before a build, and the failure here is the check
-// that a runtime's reserved table missed a path.
+// Build writes the composed home for one or more runtimes. It stages the tree with
+// [BuildAt] in home with ".tmp" appended, discarding whatever that path held, then
+// removes the old home and renames the staging directory over it. A failure before the
+// rename leaves the previous home as it was.
 //
 // Every runtime the home is to hold must be passed in one call, because the rename replaces
 // the whole tree. A caller composing for one runtime passes the runtimes already in the home
@@ -189,22 +184,47 @@ func Build(res *compose.Result, home string, runtimes ...Runtime) (err error) {
 			_ = os.RemoveAll(tmp)
 		}
 	}()
-	if err := os.MkdirAll(tmp, 0o755); err != nil {
+	if err := BuildAt(res, tmp, home, runtimes...); err != nil {
 		return err
 	}
-	if err := LinkEntries(res, tmp, "skills", "hooks"); err != nil {
+	if err := os.RemoveAll(home); err != nil {
 		return err
 	}
-	if err := linkModules(res, tmp); err != nil {
+	return os.Rename(tmp, home)
+}
+
+// BuildAt writes the composed tree into stage, addressed as home: the paths written into
+// files, $QORY_HARNESS_HOME and a server's command say, name home, where the tree is read
+// from, while the files themselves go under stage. [Build] stages beside the home and
+// renames; a check stages elsewhere and compares. BuildAt links the shared skills and
+// hooks, links every module's directory as modules/<name> and writes AGENTS.md at the
+// staging root, then calls each runtime's Render for the subdirectory named after it and
+// links the runtime's files entries into that subdirectory. The links point at the
+// modules by absolute path, so a tree staged anywhere holds the same links.
+//
+// The files come after Render, so a files entry at a path Render wrote fails the build.
+// [CheckFiles] refuses such an entry before a build, and the failure here is the check
+// that a runtime's reserved table missed a path.
+func BuildAt(res *compose.Result, stage, home string, runtimes ...Runtime) error {
+	if len(runtimes) == 0 {
+		return errors.New("build needs at least one runtime")
+	}
+	if err := os.MkdirAll(stage, 0o755); err != nil {
+		return err
+	}
+	if err := LinkEntries(res, stage, "skills", "hooks"); err != nil {
+		return err
+	}
+	if err := linkModules(res, stage); err != nil {
 		return err
 	}
 	if res.Instructions != "" {
-		if err := WriteFile(tmp, "AGENTS.md", []byte(res.Instructions)); err != nil {
+		if err := WriteFile(stage, "AGENTS.md", []byte(res.Instructions)); err != nil {
 			return err
 		}
 	}
 	for _, p := range runtimes {
-		dir := filepath.Join(tmp, p.Name())
+		dir := filepath.Join(stage, p.Name())
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
@@ -215,10 +235,109 @@ func Build(res *compose.Result, home string, runtimes ...Runtime) (err error) {
 			return err
 		}
 	}
-	if err := os.RemoveAll(home); err != nil {
-		return err
+	return nil
+}
+
+// Difference is one path at which two trees differ, as [Diff] reports it.
+type Difference struct {
+	// Path is the path relative to the trees' roots, with forward slashes.
+	Path string
+	// What is how the trees differ there: "changed" for a file whose bytes differ,
+	// "missing" for a path the first tree holds and the second does not, "extra" for one
+	// only the second holds, "target" for a link pointing elsewhere, and "kind" for a file
+	// where the other tree holds a directory or a link.
+	What string
+}
+
+// Diff compares the tree at want with the tree at have and lists every path at which they
+// differ, sorted by path. A link is compared by its target and not followed, a file by its
+// bytes, and a directory in both trees is the same whatever it holds, since what it holds
+// is compared on its own. A check renders the home again into a scratch directory and
+// calls Diff with that as want and the home as have, so "missing" is a path a compose
+// would write and "extra" one it would remove. A root that does not exist is an empty
+// tree.
+func Diff(want, have string) ([]Difference, error) {
+	a, err := readTree(want)
+	if err != nil {
+		return nil, err
 	}
-	return os.Rename(tmp, home)
+	b, err := readTree(have)
+	if err != nil {
+		return nil, err
+	}
+	paths := map[string]bool{}
+	for p := range a {
+		paths[p] = true
+	}
+	for p := range b {
+		paths[p] = true
+	}
+	var out []Difference
+	for p := range paths {
+		x, inA := a[p]
+		y, inB := b[p]
+		switch {
+		case !inB:
+			out = append(out, Difference{p, "missing"})
+		case !inA:
+			out = append(out, Difference{p, "extra"})
+		case x.kind != y.kind:
+			out = append(out, Difference{p, "kind"})
+		case x.kind == "link" && x.body != y.body:
+			out = append(out, Difference{p, "target"})
+		case x.kind == "file" && x.body != y.body:
+			out = append(out, Difference{p, "changed"})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out, nil
+}
+
+// node is one path of a tree as [readTree] records it: its kind, "dir", "link" or "file",
+// and the link's target or the file's bytes.
+type node struct {
+	kind string
+	body string
+}
+
+// readTree records every path under root, links not followed, keyed relative to root
+// with forward slashes. A root that does not exist is an empty tree.
+func readTree(root string) (map[string]node, error) {
+	nodes := map[string]node{}
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if path == root && errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		if path == root {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		key := filepath.ToSlash(rel)
+		switch {
+		case d.Type()&fs.ModeSymlink != 0:
+			target, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			nodes[key] = node{"link", target}
+		case d.IsDir():
+			nodes[key] = node{"dir", ""}
+		default:
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			nodes[key] = node{"file", string(data)}
+		}
+		return nil
+	})
+	return nodes, err
 }
 
 // realDir refuses a path that exists and is not a real directory: a symlink or a file
