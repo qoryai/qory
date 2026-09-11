@@ -26,6 +26,6 @@ Shortcuts:
 * [qory config](qory_config.md)	 - Print the effective configuration and where each value comes from
 * [qory harness](qory_harness.md)	 - Compose, inspect and remove the harness of a checkout
 * [qory setup](qory_setup.md)	 - Set up the repository, the machine's configuration, or your shell
-* [qory version](qory_version.md)	 - Print the version and the harness format this qory reads
+* [qory version](qory_version.md)	 - Print the version, the build and the harness format this qory reads
 * [qory worktree](qory_worktree.md)	 - Add, remove and list the worktrees of the repository you stand in
 

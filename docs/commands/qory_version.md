@@ -1,6 +1,6 @@
 ## qory version
 
-Print the version and the harness format this qory reads
+Print the version, the build and the harness format this qory reads
 
 ```
 qory version [flags]
@@ -10,6 +10,7 @@ qory version [flags]
 
 ```
   -h, --help   help for version
+      --json   print the fields as one JSON object
 ```
 
 ### SEE ALSO
