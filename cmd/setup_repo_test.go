@@ -83,8 +83,18 @@ func TestSetupRepoKeepsAStackThatIsThere(t *testing.T) {
 	lacks(t, out, "wrote")
 	gone(t, root, "qory-stack.yaml", "harness")
 
+	// A harness repository delivering the two-modules stack: the stack file is at the
+	// root with an extending block, so it composes there, and no qory.yaml is beside it.
 	root = newCheckout(t)
 	copyFixture(t, "two-modules", root)
+	delivered, err := os.ReadFile(filepath.Join(fixtures, "two-modules", "qory-stack.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, "qory-stack.yaml"), string(delivered)+"extending:\n  kinds: [skills]\n")
+	if err := os.Remove(filepath.Join(root, config.FileName)); err != nil {
+		t.Fatal(err)
+	}
 	out, err = run(t, "setup", "repo")
 	if err != nil {
 		t.Fatal(err, out)

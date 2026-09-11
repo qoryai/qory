@@ -57,7 +57,7 @@ func TestInspectPrintsTheModulesAndEntries(t *testing.T) {
 	}
 	wants(t, out,
 		ui.Mark+" acme/app · claude opus",
-		"qory-stack.yaml",
+		"qory.yaml",
 		root,
 		".qory/harness",
 		"Modules",

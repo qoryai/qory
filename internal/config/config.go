@@ -259,12 +259,23 @@ func Discover(root string) []string {
 // a stack to extend; else the nearest ancestor directory's, when the current user owns the
 // file. A directory holding both is an error naming them. The error for none names root
 // and does not wrap an error a caller can match.
+//
+// A qory-stack.yaml in root is a stack delivered to be extended, and one with no
+// extending block is refused: nothing can extend it, so it is a repository's own stack
+// in the wrong file, and the error says where that goes. The rule is discovery's alone:
+// the same file named with -f, in an ancestor directory, or through extends is read as
+// it is.
 func DiscoverStack(root string) (string, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return "", err
 	}
 	if found, err := composeIn(root, false); found != "" || err != nil {
+		if err == nil && filepath.Base(found) == stack.FileName {
+			if err := closedAtRoot(found); err != nil {
+				return "", err
+			}
+		}
 		return found, err
 	}
 	for dir := filepath.Dir(root); ; dir = filepath.Dir(dir) {
@@ -276,6 +287,20 @@ func DiscoverStack(root string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no %s, and no %s with a harness section naming modules, in %s or in an ancestor directory you own", stack.FileName, FileName, root)
+}
+
+// closedAtRoot reads the qory-stack.yaml at path, found in a checkout root, and returns
+// the error for one that declares no extending block. A file that does not load returns
+// its load error, the same one [LoadStack] would.
+func closedAtRoot(path string) error {
+	p, err := stack.Load(path)
+	if err != nil {
+		return err
+	}
+	if p.Extending == nil {
+		return fmt.Errorf("%s: a stack at a repository root is delivered to be extended, and this one declares no extending block; a repository's own stack goes under harness in %s, which qory setup repo writes", path, FileName)
+	}
+	return nil
 }
 
 // composeIn returns the one document dir holds for a compose, "" for none, and an error

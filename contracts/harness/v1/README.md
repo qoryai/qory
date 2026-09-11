@@ -6,7 +6,7 @@ What `qory harness compose` reads and what it writes.
 
 | File | Lives in | Defines |
 |---|---|---|
-| `qory-stack.yaml` | a directory named by `extends` or `-f`; an ancestor directory covering several repositories; a repository root | a stack delivered to be extended: the ordered modules, the target runtime and model, the excludes, what a checkout extending it may add |
+| `qory-stack.yaml` | a directory named by `extends` or `-f`; an ancestor directory covering several repositories; the root of the harness repository that delivers it | a stack delivered to be extended: the ordered modules, the target runtime and model, the excludes, what a checkout extending it may add |
 | `qory-module.yaml` | the root of a module | the module: its name, its variants per runtime, the variables it exports |
 | `qory.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's own stack, its target and modules, or the stack it extends and the modules it appends, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; `git` and `env` (§The configuration) |
 
@@ -25,7 +25,10 @@ and names the versions it does. `v1alpha1` says the format may still change.
 What to compose, in order: the `-f <file>` flag; `qory-stack.yaml` in the checkout root,
 or the checkout's `qory.yaml` when its `harness` section names modules; the nearest of
 either in an ancestor directory that the current user owns. An ancestor's file owned by
-another user is not read.
+another user is not read. A `qory-stack.yaml` found in the checkout root must declare an
+`extending` block: it is a stack delivered to be extended, and one nothing can extend is
+a repository's own stack in the wrong file, refused with the place it goes. The same file
+named with `-f`, in an ancestor directory, or reached through `extends` is read as it is.
 
 The configuration is every `qory.yaml` found, applied in this order, each overriding the
 one before it: `$XDG_CONFIG_HOME/qory/qory.yaml`, else `~/.config/qory/qory.yaml`; the

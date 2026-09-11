@@ -30,7 +30,7 @@ extensions:
 func TestModuleLinkIsWrittenReportedAndRemoved(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
-	writeFile(t, filepath.Join(root, "qory-stack.yaml"), linkedStack)
+	writeOwnStack(t, root, linkedStack)
 	out, err := run(t, "harness", "compose")
 	if err != nil {
 		t.Fatal(err)
@@ -49,14 +49,14 @@ func TestModuleLinkIsWrittenReportedAndRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 	wants(t, out, "linked as harness", "Extensions", `acme.required_check  "Harness self-tests"`)
-	writeFile(t, filepath.Join(root, "qory-stack.yaml"), strings.Replace(linkedStack, "    link: harness\n", "", 1))
+	writeOwnStack(t, root, strings.Replace(linkedStack, "    link: harness\n", "", 1))
 	if _, err := run(t, "harness", "compose"); err != nil {
 		t.Fatal(err)
 	}
 	gone(t, root, "harness")
 	exclude, _ = os.ReadFile(filepath.Join(root, ".git", "info", "exclude"))
 	lacks(t, string(exclude), "/harness\n")
-	writeFile(t, filepath.Join(root, "qory-stack.yaml"), linkedStack)
+	writeOwnStack(t, root, linkedStack)
 	if _, err := run(t, "harness", "compose"); err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestModuleLinkIsWrittenReportedAndRemoved(t *testing.T) {
 func TestModuleLinkRefusesTheCheckoutsOwnPath(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
-	writeFile(t, filepath.Join(root, "qory-stack.yaml"), linkedStack)
+	writeOwnStack(t, root, linkedStack)
 	writeFile(t, filepath.Join(root, "harness", "own.txt"), "mine\n")
 	_, err := run(t, "harness", "compose")
 	if cmd.ExitCode(err) != cmd.ExitForeign || !strings.Contains(err.Error(), "harness is not a link qory wrote") {
@@ -118,7 +118,7 @@ func TestModuleLinkRefusesTheCheckoutsOwnPath(t *testing.T) {
 	if err := os.Remove(filepath.Join(root, "harness")); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(root, "qory-stack.yaml"), strings.Replace(linkedStack, "link: harness", "link: AGENTS.md", 1))
+	writeOwnStack(t, root, strings.Replace(linkedStack, "link: harness", "link: AGENTS.md", 1))
 	_, err = run(t, "harness", "compose")
 	if err == nil || !strings.Contains(err.Error(), "link AGENTS.md is where the") || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("err = %v, exit %d", err, cmd.ExitCode(err))
@@ -130,7 +130,7 @@ func TestModuleLinkRefusesTheCheckoutsOwnPath(t *testing.T) {
 func TestRemoveTakesTheModuleLinkWithoutTheReport(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
-	writeFile(t, filepath.Join(root, "qory-stack.yaml"), linkedStack)
+	writeOwnStack(t, root, linkedStack)
 	if _, err := run(t, "harness", "compose"); err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestForceFromTheConfigurationAndTheFlag(t *testing.T) {
 	writeFile(t, filepath.Join(root, ".claude", "settings.json"), "{}\n")
 	runGit(t, root, "add", "-A")
 	runGit(t, root, "commit", "-q", "-m", "own settings")
-	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.ai/v1alpha1\nharness: {force: true}\n")
+	configure(t, root, []string{"force: true"}, nil)
 	_, err := run(t, "harness", "compose", "--force=false")
 	if cmd.ExitCode(err) != cmd.ExitForeign {
 		t.Fatalf("with --force=false: err = %v, exit %d", err, cmd.ExitCode(err))
