@@ -50,25 +50,43 @@
   },
   "$defs": {
     "names": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "someNames": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "part": {
+      "description": "A merged part: true for all of it, or the names of some of it.",
+      "oneOf": [{"const": true}, {"$ref": "#/$defs/someNames"}]
+    },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "skills": {"$ref": "#/$defs/someNames"},
+        "agents": {"$ref": "#/$defs/someNames"},
+        "commands": {"$ref": "#/$defs/someNames"},
+        "output-styles": {"$ref": "#/$defs/someNames"},
+        "hooks": {"$ref": "#/$defs/someNames"},
+        "mcp": {"$ref": "#/$defs/someNames"},
+        "files": {"$ref": "#/$defs/someNames"},
+        "instructions": {"const": true},
+        "settings": {"$ref": "#/$defs/part"},
+        "env": {"$ref": "#/$defs/part"}
+      }
+    },
     "module": {
       "type": "object",
       "anyOf": [{"required": ["name"]}, {"required": ["source"]}],
+      "not": {"required": ["exclude", "only"]},
       "additionalProperties": false,
       "properties": {
         "name": {"type": "string", "minLength": 1},
         "source": {"$ref": "#/$defs/source"},
         "exclude": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "skills": {"$ref": "#/$defs/names"},
-            "agents": {"$ref": "#/$defs/names"},
-            "commands": {"$ref": "#/$defs/names"},
-            "output-styles": {"$ref": "#/$defs/names"},
-            "hooks": {"$ref": "#/$defs/names"},
-            "mcp": {"$ref": "#/$defs/names"},
-            "files": {"$ref": "#/$defs/names"}
-          }
+          "description": "What of the module the compose leaves out; everything else is composed. Not with only.",
+          "$ref": "#/$defs/selection"
+        },
+        "only": {
+          "description": "The only things of the module the compose takes; everything not named is left out. Not with exclude.",
+          "$ref": "#/$defs/selection"
         },
         "variant": {"type": "string", "minLength": 1},
         "link": {

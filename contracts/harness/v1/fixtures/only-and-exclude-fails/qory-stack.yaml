@@ -1,0 +1,12 @@
+apiVersion: qory.ai/v1alpha1
+target:
+  runtime: claude
+modules:
+  - name: core
+    source: {path: modules/core}
+    exclude:
+      skills: [test]
+    only:
+      skills: [review]
+  - name: nextjs
+    source: {path: modules/nextjs}

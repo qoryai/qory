@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -119,7 +120,8 @@ type Options struct {
 // Compose is [ComposeWith] and the default options.
 func Compose(p *stack.Stack) (*Result, error) { return ComposeWith(p, Options{}) }
 
-// ComposeWith reads every module, applies the excludes and refuses a collision. The result
+// ComposeWith reads every module, applies each one's exclude or only block and refuses a
+// collision. The result
 // holds one entry per kind and name, the settings merged per runtime and target file, the
 // MCP servers by name, and the modules' instructions joined. A collision returns a
 // [*CollisionError], which a caller matches with errors.As, and a git source that cannot
@@ -170,20 +172,22 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 			return nil, err
 		}
 		rl := Module{Name: name, Description: m.Description, Dir: l.Dir, Source: ps.String(), Pin: src.Pin, Dirty: src.Dirty, Variant: variant, Link: pl.Link, Base: pl.Base}
+		// The selection comes first, so that what the base allows and what the module
+		// exports are checked on what the module contributes, not on what it ships.
+		env, err := applySelection(l, pl, m.Env, res)
+		if err != nil {
+			return nil, err
+		}
 		if !pl.Base && opts.Base != nil {
 			if err := checkExtending(l, opts.Base); err != nil {
 				return nil, err
 			}
 		}
-		if err := exportEnv(res, exporters, name, m.Env, opts.Env); err != nil {
+		if err := exportEnv(res, exporters, name, env, opts.Env); err != nil {
 			return nil, err
 		}
 		res.Modules = append(res.Modules, rl)
-		entries, err := applyExcludes(l, pl.Exclude, res)
-		if err != nil {
-			return nil, err
-		}
-		for _, e := range entries {
+		for _, e := range l.Entries {
 			key := e.Kind + "/" + e.Name
 			owners[key] = append(owners[key], name)
 			paths[key+"@"+name] = e.Path
@@ -312,39 +316,104 @@ func variantName(v string) string {
 	return "variant " + v
 }
 
-// applyExcludes returns the module's entries minus the ones its excludes name, and records
-// each dropped entry in res. An exclude that names nothing the module ships is an error, so a
-// module that stops shipping an entry is noticed rather than composed without it. Kinds are
-// walked in sorted order, so the recorded excludes and the error do not follow map order.
-func applyExcludes(l *module.Module, exclude map[string][]string, res *Result) ([]module.Entry, error) {
-	drop := map[string]bool{}
-	kinds := make([]string, 0, len(exclude))
-	for kind := range exclude {
-		kinds = append(kinds, kind)
+// applySelection applies the module's exclude or only block, reducing the module in
+// place to what it contributes and recording every entry and part left out in res. It
+// returns the exported variables that remain. A name that matches nothing the module
+// ships is an error, so a module that stops shipping something is noticed rather than
+// composed without it. Kinds and names are walked in sorted order, so the recorded
+// excludes and the first error do not follow map order.
+//
+// Under exclude, what is named is left out. Under only, what is named is kept: a kind
+// the block does not name contributes no entry, and a part it does not name is left out.
+func applySelection(l *module.Module, pl stack.Module, env map[string]string, res *Result) (map[string]string, error) {
+	sel, only := pl.Exclude, false
+	if !pl.Only.Empty() {
+		sel, only = pl.Only, true
 	}
-	sort.Strings(kinds)
-	for _, kind := range kinds {
-		for _, name := range exclude[kind] {
-			found := false
-			for _, e := range l.Entries {
-				if e.Kind == kind && e.Name == name {
-					found = true
-				}
+	block := "exclude"
+	if only {
+		block = "only"
+	}
+	if sel.Empty() {
+		return env, nil
+	}
+	// named reports whether the block names kind/name, checking the name is shipped.
+	shipped := map[string]bool{}
+	for _, e := range l.Entries {
+		shipped[e.Kind+"/"+e.Name] = true
+	}
+	named := map[string]bool{}
+	for _, kind := range sel.KindNames() {
+		for _, name := range sel.Kinds[kind] {
+			if !shipped[kind+"/"+name] {
+				return nil, fmt.Errorf("module %s: %s %s/%s names nothing the module ships", l.Name, block, kind, name)
 			}
-			if !found {
-				return nil, fmt.Errorf("module %s: exclude %s/%s names nothing the module ships", l.Name, kind, name)
-			}
-			drop[kind+"/"+name] = true
-			res.Excludes = append(res.Excludes, Exclude{Module: l.Name, Kind: kind, Name: name})
+			named[kind+"/"+name] = true
 		}
 	}
 	var kept []module.Entry
 	for _, e := range l.Entries {
-		if !drop[e.Kind+"/"+e.Name] {
-			kept = append(kept, e)
+		if named[e.Kind+"/"+e.Name] != only {
+			res.Excludes = append(res.Excludes, Exclude{Module: l.Name, Kind: e.Kind, Name: e.Name})
+			continue
+		}
+		kept = append(kept, e)
+	}
+	l.Entries = kept
+	// The instruction section: named means true in the block.
+	if sel.Instructions && l.Instructions == "" {
+		return nil, fmt.Errorf("module %s: %s instructions names nothing the module ships; it has no %s", l.Name, block, module.InstructionsName)
+	}
+	if l.Instructions != "" && sel.Instructions != only {
+		res.Excludes = append(res.Excludes, Exclude{Module: l.Name, Kind: "instructions", Name: module.InstructionsName})
+		l.Instructions = ""
+	}
+	// The settings fragments, named as <runtime>/<file>.
+	fragments := map[string]bool{}
+	for runtime, files := range l.Settings {
+		for file := range files {
+			fragments[runtime+"/"+file] = true
 		}
 	}
-	return kept, nil
+	if sel.Settings.All && len(fragments) == 0 {
+		return nil, fmt.Errorf("module %s: %s settings names nothing the module ships; it has no settings fragment", l.Name, block)
+	}
+	for _, name := range sel.Settings.Names {
+		if !fragments[name] {
+			return nil, fmt.Errorf("module %s: %s settings/%s names nothing the module ships", l.Name, block, name)
+		}
+	}
+	for _, name := range sortedKeys(fragments) {
+		keep := sel.Settings.All || slices.Contains(sel.Settings.Names, name)
+		if keep == only {
+			continue
+		}
+		runtime, file, _ := strings.Cut(name, "/")
+		delete(l.Settings[runtime], file)
+		if len(l.Settings[runtime]) == 0 {
+			delete(l.Settings, runtime)
+		}
+		res.Excludes = append(res.Excludes, Exclude{Module: l.Name, Kind: "settings", Name: name})
+	}
+	// The exported variables.
+	if sel.Env.All && len(env) == 0 {
+		return nil, fmt.Errorf("module %s: %s env names nothing the module ships; it exports no variable", l.Name, block)
+	}
+	for _, name := range sel.Env.Names {
+		if _, ok := env[name]; !ok {
+			return nil, fmt.Errorf("module %s: %s env %s names nothing the module ships", l.Name, block, name)
+		}
+	}
+	remaining := map[string]string{}
+	for _, name := range sortedKeys(env) {
+		keep := sel.Env.All || slices.Contains(sel.Env.Names, name)
+		if keep == only {
+			remaining[name] = env[name]
+			continue
+		}
+		res.Excludes = append(res.Excludes, Exclude{Module: l.Name, Kind: "env", Name: name})
+	}
+	return remaining, nil
 }
 
 // Collision is one entry name that more than one module provides.

@@ -1,0 +1,16 @@
+{
+  "model_reasoning_effort": "high",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$QORY_HARNESS_HOME/hooks/guard.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

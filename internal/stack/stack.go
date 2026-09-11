@@ -72,8 +72,13 @@ type Module struct {
 	Name string `yaml:"name,omitempty"`
 	// Source is where the module is read from, when it is not at modules/<name>.
 	Source Source `yaml:"source,omitempty"`
-	// Exclude lists, per kind from [Kinds], the entry names this module does not contribute.
-	Exclude map[string][]string `yaml:"exclude,omitempty"`
+	// Exclude names what of the module the compose leaves out: entries by kind, the
+	// instruction section, settings fragments, exported variables. Everything else is
+	// composed.
+	Exclude Selection `yaml:"exclude,omitempty"`
+	// Only names the only things of the module the compose takes, with the same keys as
+	// Exclude; everything not named is left out. A module names Exclude or Only, not both.
+	Only Selection `yaml:"only,omitempty"`
 	// Base marks a module that came from the base stack a checkout's qory.yaml extends. It
 	// is set by [Extend], not by the YAML, which also rewrites the module's source so it
 	// resolves from the checkout's qory.yaml.
@@ -312,7 +317,8 @@ func decodeError(path string, err error) error {
 // validate checks the whole document before a caller sees it, so a document that reaches
 // the compose is known to carry what it is asked for, a runtime for a stack or a base for
 // a document that extends one, at least one module, each with a name or a source, no name
-// twice, excludes over known kinds only, links that are one path segment and named once,
+// twice, excludes and onlys over known kinds and parts and not both on one module, links
+// that are one path segment and named once,
 // extensions that are maps, and an extending block over known kinds without hooks and
 // servers. Whether a source holds a module, and whether its manifest carries the name the
 // entry gives, is the compose's check.
@@ -385,10 +391,15 @@ func (p *Stack) validate(compose bool) error {
 		} else if l.Name == "" {
 			return fmt.Errorf("%s: a module gives a name, a source, or both", who)
 		}
-		for kind := range l.Exclude {
-			if !isKind(kind) {
-				return fmt.Errorf("%s: exclude names kind %q; kinds: %s", who, kind, strings.Join(Kinds, ", "))
-			}
+		// The blocks are parsed on the stack's own entry, not on the loop's copy.
+		if err := p.Modules[i].Exclude.parse(); err != nil {
+			return fmt.Errorf("%s: exclude %w", who, err)
+		}
+		if err := p.Modules[i].Only.parse(); err != nil {
+			return fmt.Errorf("%s: only %w", who, err)
+		}
+		if !p.Modules[i].Exclude.Empty() && !p.Modules[i].Only.Empty() {
+			return fmt.Errorf("%s: names both exclude and only; a module names one of the two", who)
 		}
 		if l.Link != "" {
 			if !segment(l.Link) || l.Link == ".qory" {

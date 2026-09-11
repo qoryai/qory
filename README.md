@@ -169,6 +169,11 @@ file it came from. The reference, one page per command, is under
 - One instruction file, joined from the modules in order, under the name each tool wants.
 - A report that names the module of every entry. When two modules provide the same entry,
   a refusal with the lines that resolve it.
+- Part of a module, when that is all you want. `exclude` leaves entries, the instruction
+  section, settings fragments or variables out; `only` takes the named things and nothing
+  else, so `only: {skills: [deploy]}` is one skill from a module full of other things.
+  A module's manifest can say which entries an entry needs, and a stack that leaves one of
+  them out is refused.
 
 ## The composed tree
 

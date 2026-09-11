@@ -52,10 +52,10 @@ func TestLoadReadsTargetAndModules(t *testing.T) {
 		t.Fatalf("%d modules, want 2", len(p.Modules))
 	}
 	core, team := p.Modules[0], p.Modules[1]
-	if core.Name != "core" || core.Source.Path != "modules/core" || core.Variant != "" || core.Exclude != nil {
+	if core.Name != "core" || core.Source.Path != "modules/core" || core.Variant != "" || !core.Exclude.Empty() {
 		t.Fatalf("modules[0] %+v", core)
 	}
-	if team.Variant != "codex" || len(team.Exclude["skills"]) != 1 || team.Exclude["skills"][0] != "greet" {
+	if team.Variant != "codex" || len(team.Exclude.Kinds["skills"]) != 1 || team.Exclude.Kinds["skills"][0] != "greet" {
 		t.Fatalf("modules[1] %+v", team)
 	}
 	if team.Source.String() != "modules/team" {
@@ -218,7 +218,7 @@ func TestLoadRefuses(t *testing.T) {
 		{
 			"an exclude over an unknown kind",
 			"apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source:\n      path: modules/core\n    exclude:\n      prompts: [greet]\n",
-			`module core: exclude names kind "prompts"; kinds: skills, agents, commands, output-styles, hooks, mcp, files`,
+			`module core: exclude names kind "prompts"; kinds: skills, agents, commands, output-styles, hooks, mcp, files; parts: instructions, settings, env`,
 			false,
 		},
 		{

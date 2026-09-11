@@ -9,6 +9,7 @@ import (
 
 	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/stack"
 )
 
 // TestExample keeps the hello example composable: copied into a repository of its own,
@@ -39,7 +40,7 @@ func TestExample(t *testing.T) {
 	if greet != "world" {
 		t.Fatalf("skills/greet comes from %q, want world", greet)
 	}
-	p.Modules[0].Exclude = nil
+	p.Modules[0].Exclude = stack.Selection{}
 	_, err = compose.Compose(p)
 	if err == nil || !strings.Contains(err.Error(), "skills/greet is provided by 2 modules") {
 		t.Fatalf("without the exclude: %v", err)

@@ -49,8 +49,12 @@ modules:
     exclude:
       skills: [test]             # the nextjs module ships this repository's test skill
       agents: [reviewer]
+      instructions: true         # the module's AGENTS.md is left out too
   - source: {git: https://github.com/acme/harness, ref: v2.4.0, path: modules/nextjs}
     variant: claude              # optional; forces a variant of the module
+  - name: ops
+    only:
+      skills: [deploy]           # one skill and nothing else: no instructions, no settings, no variables
   - name: team
     source: {path: ./harness}    # a name and a source: the manifest must say team
     link: harness                # optional; <checkout>/harness -> .qory/harness/modules/team
@@ -99,7 +103,8 @@ place of `target`, it names the base: a directory holding a `qory-stack.yaml`, a
 | `modules` | yes | ordered, at least one. Order decides the order of the instruction sections |
 | `modules[].name` | one of name and source | the module's name, the one its `qory-module.yaml` declares, one path segment. Alone, it is the address too: `modules/<name>` at the root of the repository the stack is in |
 | `modules[].source` | one of name and source | `{path: <dir>}`, relative to the stack file; or `{git: <url>, ref: <tag, branch or commit>}` with an optional `path` to the module's directory inside the repository (§Sources). Alone, the module's name is its manifest's; with a name, the manifest must carry that name |
-| `modules[].exclude` | no | entries of this module left out, by kind: `skills`, `agents`, `commands`, `output-styles`, `hooks`, `mcp`, `files` |
+| `modules[].exclude` | no | what of this module is left out; everything else is composed. Entries by kind, `skills`, `agents`, `commands`, `output-styles`, `hooks`, `mcp`, `files`, each a list of names; the three merged parts, `instructions: true` for the module's `AGENTS.md`, `settings` and `env` as `true` for all of it or a list, of `<runtime>/<file>` fragments and of variable names. Not with `only` |
+| `modules[].only` | no | the only things of this module that are composed, with the same keys as `exclude`; everything not named is left out: a kind not named contributes no entry, a part not named is left out. `only: {skills: [deploy]}` is one skill and nothing else. Not with `exclude` |
 | `modules[].variant` | no | forces one of the module's variants instead of the one named like the targeted runtime |
 | `modules[].link` | no | a name at the checkout root, one path segment, linked to the module's directory in the composed tree, so a permission rule or a script names the module's files by a checkout-relative path: `harness/scripts/check.sh`. A hard link (§Rendering), named once across the modules |
 | `extensions` | no | one map per namespace, written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it |
@@ -251,8 +256,8 @@ The schema is [module.schema.json](module.schema.json).
 
 1. **One flat tree, one entry per name.** Every atomic entry links into `<kind>/<name>` from
    the module that provides it, a file into `<runtime>/<path>`.
-2. **Excludes first, then the collision check.** After each module's `exclude` is applied, an
-   atomic name provided by more than one module fails the compose. The error names every
+2. **Excludes first, then the collision check.** After each module's `exclude` or `only`
+   is applied, an atomic name provided by more than one module fails the compose. The error names every
    module and the excludes that resolve it; this is its text, which the fixtures hold, and
    `qory harness compose` prints the same as a table under a `Fix` heading with the
    stack lines to paste:
@@ -265,8 +270,9 @@ The schema is [module.schema.json](module.schema.json).
    ```
 
    There is no last-wins and no rename.
-3. **An exclude that names nothing fails**, so a module that stops shipping an entry is
-   noticed rather than silently composed.
+3. **An exclude or only that names nothing fails**, so a module that stops shipping an
+   entry, an instruction section, a fragment or a variable is noticed rather than silently
+   composed. The message names the module, the block and the name.
 4. **Merged kinds join, and a value is set once.** A settings target file merges across
    the modules that ship a fragment for it, JSON or TOML by extension: objects deep-merge,
    `permissions` lists concatenate and deduplicate, `hooks` arrays concatenate. Every
@@ -285,7 +291,9 @@ The schema is [module.schema.json](module.schema.json).
    declares no variants. A manifest with variants, none for the runtime and no default, or
    `default: fail`, fails the compose.
 6. **Everything is reported.** The report names every module with its pin, every entry with
-   its module, every exclude and every variant chosen. `qory harness inspect` prints it.
+   its module, every entry and part a block left out, as `<kind>/<name>`,
+   `instructions/AGENTS.md`, `settings/<runtime>/<file>` or `env/<NAME>`, and every
+   variant chosen. `qory harness inspect` prints it.
 7. **Nothing composed is committed.** The link in the checkout is excluded through the
    clone-local exclude file, never the repository's own ignore file.
 

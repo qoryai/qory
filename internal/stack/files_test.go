@@ -62,7 +62,7 @@ func TestLoadRefusesExtendingFilesShapes(t *testing.T) {
 // source is resolved.
 func TestExtendRefusesAModuleNamedLikeABaseModule(t *testing.T) {
 	base := &Stack{Target: Target{Runtimes: Runtimes{"claude"}}, Modules: []Module{{Name: "core", Source: Source{Path: "modules/core"}}}, Extending: &Extending{}, Root: "/repo", File: "/repo/qory-stack.yaml"}
-	p := &Stack{Extends: Source{Path: "../base"}, Modules: []Module{{Name: "core", Exclude: map[string][]string{"skills": {"review"}}}}, File: "/app/qory-stack.yaml"}
+	p := &Stack{Extends: Source{Path: "../base"}, Modules: []Module{{Name: "core", Exclude: Selection{Kinds: map[string][]string{"skills": {"review"}}}}}, File: "/app/qory-stack.yaml"}
 	_, err := Extend(base, p)
 	want := "module core belongs to the base stack; a checkout's qory.yaml cannot name a base module, exclude from it or replace it"
 	if err == nil || err.Error() != want {

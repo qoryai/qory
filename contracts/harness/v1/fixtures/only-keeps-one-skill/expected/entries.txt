@@ -1,0 +1,2 @@
+skills/e2e nextjs
+skills/review core
