@@ -104,11 +104,12 @@ The command reference under `docs/commands/` is generated: run
 
 ## Releases
 
-A release is a tag. Before it, `CHANGELOG.md` gets the release: the `[Unreleased]` section
-becomes `[X.Y.Z] - YYYY-MM-DD`, its link at the foot of the file points at the compare
-view for the tag, and a new empty `[Unreleased]` goes on top. Anything a person upgrading
-has to do stands under Upgrading in that section. The release body on GitHub carries
-the same text above the generated commit list. Pushing `vX.Y.Z` to the GitHub mirror runs `.github/workflows/release.yml`,
+A release is a tag on a branch named after it, `v0.3.0`, opened as one pull request. That
+branch adds the release's section to `CHANGELOG.md`, `[X.Y.Z] - YYYY-MM-DD` with the day
+the tag lands and a compare link at the foot of the file; a fix that goes to `main`
+outside a release branch goes under `[Unreleased]` until the next one. Anything a person
+upgrading has to do stands under Upgrading in the section. The release body on GitHub
+carries the same text above the generated commit list. Pushing `vX.Y.Z` to the GitHub mirror runs `.github/workflows/release.yml`,
 which builds the archives for macOS and Linux with goreleaser, publishes them with their
 checksums, and updates the Homebrew cask when `HOMEBREW_TAP_TOKEN` is set. Check the
 configuration before tagging:
