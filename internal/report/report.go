@@ -71,6 +71,9 @@ type Entry struct {
 	Name string `json:"name"`
 	// Module is the name of the module that provides the entry.
 	Module string `json:"module"`
+	// For is the entry, as <kind>/<name>, that required this one, when the module's only
+	// block brought it in for that entry rather than naming it; absent otherwise.
+	For string `json:"for,omitempty"`
 }
 
 // Exclude is one excluded entry.
@@ -183,7 +186,7 @@ func New(res *compose.Result, name, checkout, home string) Report {
 		r.Modules = append(r.Modules, Module{Name: l.Name, Description: l.Description, Source: l.Source, Pin: l.Pin, Dirty: l.Dirty, Variant: l.Variant, Link: l.Link, Base: l.Base})
 	}
 	for _, e := range res.Entries {
-		r.Entries = append(r.Entries, Entry{Kind: e.Kind, Name: e.Name, Module: e.Module})
+		r.Entries = append(r.Entries, Entry{Kind: e.Kind, Name: e.Name, Module: e.Module, For: e.For})
 	}
 	for _, x := range res.Excludes {
 		r.Excludes = append(r.Excludes, Exclude{Module: x.Module, Kind: x.Kind, Name: x.Name})
@@ -273,7 +276,11 @@ func (r Report) PrintBody(w io.Writer) error {
 	u.Heading("Entries")
 	rows = nil
 	for _, e := range r.Entries {
-		rows = append(rows, []string{e.Kind + "/" + e.Name, e.Module})
+		row := []string{e.Kind + "/" + e.Name, e.Module}
+		if e.For != "" {
+			row = append(row, "required by "+e.For)
+		}
+		rows = append(rows, row)
 	}
 	u.Table(rows)
 	if len(r.Excludes) > 0 {

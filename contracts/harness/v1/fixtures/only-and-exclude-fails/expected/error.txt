@@ -1,1 +1,0 @@
-qory-stack.yaml: module core: names both exclude and only; a module names one of the two

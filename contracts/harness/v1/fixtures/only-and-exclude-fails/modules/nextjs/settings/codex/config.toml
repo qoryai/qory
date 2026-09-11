@@ -1,8 +1,0 @@
-model_reasoning_effort = "high"
-
-[[hooks.PreToolUse]]
-matcher = "^Bash$"
-
-  [[hooks.PreToolUse.hooks]]
-  type = "command"
-  command = "$QORY_HARNESS_HOME/hooks/guard.sh"

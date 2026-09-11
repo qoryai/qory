@@ -1,0 +1,1 @@
+qory-stack.yaml: module ops: skills/deploy is named in only and in exclude; name it in one

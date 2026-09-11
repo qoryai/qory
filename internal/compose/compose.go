@@ -55,6 +55,10 @@ type Entry struct {
 	// Path is absolute: the skill directory, the markdown file, the hook script or the MCP
 	// server's JSON file.
 	Path string
+	// For is the entry, as <kind>/<name>, that required this one, when an only block
+	// brought it in for that entry rather than naming it; "" for an entry composed in its
+	// own right.
+	For string
 }
 
 // Exclude is one entry a module left out.
@@ -131,6 +135,7 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 	res := &Result{Stack: p, Base: opts.Base, Settings: map[string]map[string]map[string]any{}, MCP: map[string]map[string]any{}, Env: map[string]string{}, setBy: map[string]string{}}
 	owners := map[string][]string{}
 	paths := map[string]string{}
+	fors := map[string]string{}
 	servers := map[string]map[string]any{}
 	exporters := map[string]string{}
 	var instructions []string
@@ -176,7 +181,7 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 		rl := Module{Name: name, Description: m.Description, Dir: l.Dir, Source: ps.String(), Pin: src.Pin, Dirty: src.Dirty, Variant: variant, Link: pl.Link, Base: pl.Base}
 		// The selection comes first, so that what the base allows and what the module
 		// exports are checked on what the module contributes, not on what it ships.
-		env, err := applySelection(l, pl, m.Env, res)
+		env, pulled, err := applySelection(l, pl, m.Env, m.Requires, res)
 		if err != nil {
 			return nil, err
 		}
@@ -193,6 +198,9 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 			key := e.Kind + "/" + e.Name
 			owners[key] = append(owners[key], name)
 			paths[key+"@"+name] = e.Path
+			if by, ok := pulled[key]; ok {
+				fors[key+"@"+name] = by
+			}
 			if e.Kind == "mcp" {
 				servers[key+"@"+name] = l.MCP[e.Name]
 			}
@@ -226,7 +234,7 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 	}
 	for key, ls := range owners {
 		kind, name, _ := strings.Cut(key, "/")
-		res.Entries = append(res.Entries, Entry{Kind: kind, Name: name, Module: ls[0], Path: paths[key+"@"+ls[0]]})
+		res.Entries = append(res.Entries, Entry{Kind: kind, Name: name, Module: ls[0], Path: paths[key+"@"+ls[0]], For: fors[key+"@"+ls[0]]})
 		if kind == "mcp" {
 			res.MCP[name] = servers[key+"@"+ls[0]]
 		}
@@ -350,16 +358,21 @@ func checkRequires(res *Result, requires map[string]map[string][]string) error {
 	return nil
 }
 
-// applySelection applies the module's exclude or only block, reducing the module in
+// applySelection applies the module's exclude and only blocks, reducing the module in
 // place to what it contributes and recording every entry and part left out in res. It
-// returns the exported variables that remain. A name that matches nothing the module
-// ships is an error, so a module that stops shipping something is noticed rather than
-// composed without it. Kinds and names are walked in sorted order, so the recorded
+// returns the exported variables that remain and, for each entry an only block brought
+// in without naming it, the entry that required it. A name that matches nothing the
+// module ships is an error, so a module that stops shipping something is noticed rather
+// than composed without it. Kinds and names are walked in sorted order, so the recorded
 // excludes and the first error do not follow map order.
 //
-// Under exclude, what is named is left out. Under only, what is named is kept: a kind
-// the block does not name contributes no entry, and a part it does not name is left out.
-func applySelection(l *module.Module, pl stack.Module, env map[string]string, res *Result) (map[string]string, error) {
+// Under exclude, what is named is left out. Under only, what is named is kept, and so is
+// what the kept entries require from this module, transitively, as the manifest's
+// requires declares it; a kind the block does not name contributes no entry beyond
+// those, and a part it does not name is left out. An exclude beside an only names
+// entries the only brought in, to leave them out after all; a requirement left out that
+// way has to come from another module, which [checkRequires] sees to.
+func applySelection(l *module.Module, pl stack.Module, env map[string]string, requires map[string][]string, res *Result) (map[string]string, map[string]string, error) {
 	sel, only := pl.Exclude, false
 	if !pl.Only.Empty() {
 		sel, only = pl.Only, true
@@ -369,25 +382,61 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 		block = "only"
 	}
 	if sel.Empty() {
-		return env, nil
+		return env, nil, nil
 	}
-	// named reports whether the block names kind/name, checking the name is shipped.
 	shipped := map[string]bool{}
 	for _, e := range l.Entries {
 		shipped[e.Kind+"/"+e.Name] = true
 	}
+	// named is every entry the block names, checked against what the module ships.
 	named := map[string]bool{}
 	for _, kind := range sel.KindNames() {
 		for _, name := range sel.Kinds[kind] {
 			if !shipped[kind+"/"+name] {
-				return nil, fmt.Errorf("module %s: %s %s/%s names nothing the module ships", l.Name, block, kind, name)
+				return nil, nil, fmt.Errorf("module %s: %s %s/%s names nothing the module ships", l.Name, block, kind, name)
 			}
 			named[kind+"/"+name] = true
 		}
 	}
+	// Under only, the named entries bring in what they require from this module, each
+	// pulled entry recording the first entry that needed it, in sorted order.
+	pulled := map[string]string{}
+	if only {
+		queue := sortedKeys(named)
+		for len(queue) > 0 {
+			key := queue[0]
+			queue = queue[1:]
+			for _, need := range requires[key] {
+				if !shipped[need] || named[need] {
+					continue
+				}
+				if _, seen := pulled[need]; seen {
+					continue
+				}
+				pulled[need] = key
+				queue = append(queue, need)
+			}
+		}
+		// An exclude beside the only names entries the only brought in, and nothing else:
+		// one it did not bring in would name nothing the module contributes.
+		for _, kind := range pl.Exclude.KindNames() {
+			for _, name := range pl.Exclude.Kinds[kind] {
+				key := kind + "/" + name
+				if _, ok := pulled[key]; !ok {
+					if !shipped[key] {
+						return nil, nil, fmt.Errorf("module %s: exclude %s names nothing the module ships", l.Name, key)
+					}
+					return nil, nil, fmt.Errorf("module %s: exclude %s names nothing only brings in; only leaves it out already", l.Name, key)
+				}
+				delete(pulled, key)
+			}
+		}
+	}
 	var kept []module.Entry
 	for _, e := range l.Entries {
-		if named[e.Kind+"/"+e.Name] != only {
+		key := e.Kind + "/" + e.Name
+		_, isPulled := pulled[key]
+		if (named[key] || isPulled) != only {
 			res.Excludes = append(res.Excludes, Exclude{Module: l.Name, Kind: e.Kind, Name: e.Name})
 			continue
 		}
@@ -396,7 +445,7 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 	l.Entries = kept
 	// The instruction section: named means true in the block.
 	if sel.Instructions && l.Instructions == "" {
-		return nil, fmt.Errorf("module %s: %s instructions names nothing the module ships; it has no %s", l.Name, block, module.InstructionsName)
+		return nil, nil, fmt.Errorf("module %s: %s instructions names nothing the module ships; it has no %s", l.Name, block, module.InstructionsName)
 	}
 	if l.Instructions != "" && sel.Instructions != only {
 		res.Excludes = append(res.Excludes, Exclude{Module: l.Name, Kind: "instructions", Name: module.InstructionsName})
@@ -410,11 +459,11 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 		}
 	}
 	if sel.Settings.All && len(fragments) == 0 {
-		return nil, fmt.Errorf("module %s: %s settings names nothing the module ships; it has no settings fragment", l.Name, block)
+		return nil, nil, fmt.Errorf("module %s: %s settings names nothing the module ships; it has no settings fragment", l.Name, block)
 	}
 	for _, name := range sel.Settings.Names {
 		if !fragments[name] {
-			return nil, fmt.Errorf("module %s: %s settings/%s names nothing the module ships", l.Name, block, name)
+			return nil, nil, fmt.Errorf("module %s: %s settings/%s names nothing the module ships", l.Name, block, name)
 		}
 	}
 	for _, name := range sortedKeys(fragments) {
@@ -431,11 +480,11 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 	}
 	// The exported variables.
 	if sel.Env.All && len(env) == 0 {
-		return nil, fmt.Errorf("module %s: %s env names nothing the module ships; it exports no variable", l.Name, block)
+		return nil, nil, fmt.Errorf("module %s: %s env names nothing the module ships; it exports no variable", l.Name, block)
 	}
 	for _, name := range sel.Env.Names {
 		if _, ok := env[name]; !ok {
-			return nil, fmt.Errorf("module %s: %s env %s names nothing the module ships", l.Name, block, name)
+			return nil, nil, fmt.Errorf("module %s: %s env %s names nothing the module ships", l.Name, block, name)
 		}
 	}
 	remaining := map[string]string{}
@@ -447,7 +496,7 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 		}
 		res.Excludes = append(res.Excludes, Exclude{Module: l.Name, Kind: "env", Name: name})
 	}
-	return remaining, nil
+	return remaining, pulled, nil
 }
 
 // Collision is one entry name that more than one module provides.

@@ -158,3 +158,30 @@ func TestSelectionRecordsEveryPartLeftOut(t *testing.T) {
 		}
 	}
 }
+
+// TestOnlyBringsInWhatANamedEntryRequires is the pull: only names one skill, the module's
+// manifest says what it needs, and the compose brings those in, transitively, each marked
+// with the entry that required it; an exclude beside the only leaves one of them to
+// another module.
+func TestOnlyBringsInWhatANamedEntryRequires(t *testing.T) {
+	for fixture, want := range map[string]map[string]string{
+		"only-pulls-requirements":      {"agents/reviewer": "skills/deploy", "commands/ship": "skills/deploy", "hooks/guard.sh": "commands/ship", "skills/deploy": ""},
+		"only-excludes-a-pulled-entry": {"agents/reviewer": "", "commands/ship": "skills/deploy", "hooks/guard.sh": "commands/ship", "skills/deploy": ""},
+	} {
+		p, err := stack.Load(filepath.Join(fixtures, fixture, stack.FileName))
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := compose.Compose(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]string{}
+		for _, e := range res.Entries {
+			got[e.Kind+"/"+e.Name] = e.For
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: for = %v, want %v", fixture, got, want)
+		}
+	}
+}

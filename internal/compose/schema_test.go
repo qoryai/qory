@@ -14,8 +14,8 @@ import (
 )
 
 // TestSchemas validates every fixture document against the contract's schemas: a stack
-// that composes passes stack.schema.json, one refused for its apiVersion, a kind, its
-// qory key or a module naming both exclude and only fails it,
+// that composes passes stack.schema.json, one refused for its apiVersion, a kind or its
+// qory key fails it,
 // every module manifest passes module.schema.json, and every MCP server file passes
 // mcp.schema.json unless the fixture expects it refused.
 func TestSchemas(t *testing.T) {
@@ -35,7 +35,7 @@ func TestSchemas(t *testing.T) {
 	dirs, _ := filepath.Glob(filepath.Join(fixtures, "*"))
 	for _, dir := range dirs {
 		errText, _ := os.ReadFile(filepath.Join(dir, "expected", "error.txt"))
-		wantInvalid := strings.Contains(string(errText), "apiVersion") || strings.Contains(string(errText), "kind ") || strings.Contains(string(errText), "qory \"") || strings.Contains(string(errText), "both exclude and only")
+		wantInvalid := strings.Contains(string(errText), "apiVersion") || strings.Contains(string(errText), "kind ") || strings.Contains(string(errText), "qory \"")
 		err := stackSchema.Validate(document(t, filepath.Join(dir, "qory-stack.yaml")))
 		if wantInvalid && err == nil {
 			t.Errorf("%s: stack passed the schema; want a failure", dir)

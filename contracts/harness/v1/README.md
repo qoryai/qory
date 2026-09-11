@@ -54,7 +54,9 @@ modules:
     variant: claude              # optional; forces a variant of the module
   - name: ops
     only:
-      skills: [deploy]           # one skill and nothing else: no instructions, no settings, no variables
+      skills: [deploy]           # the deploy skill and what its manifest says it requires; no instructions, settings or variables
+    exclude:
+      agents: [reviewer]         # optional; one the only brought in, taken from another module instead
   - name: team
     source: {path: ./harness}    # a name and a source: the manifest must say team
     link: harness                # optional; <checkout>/harness -> .qory/harness/modules/team
@@ -103,8 +105,8 @@ place of `target`, it names the base: a directory holding a `qory-stack.yaml`, a
 | `modules` | yes | ordered, at least one. Order decides the order of the instruction sections |
 | `modules[].name` | one of name and source | the module's name, the one its `qory-module.yaml` declares, one path segment. Alone, it is the address too: `modules/<name>` at the root of the repository the stack is in |
 | `modules[].source` | one of name and source | `{path: <dir>}`, relative to the stack file; or `{git: <url>, ref: <tag, branch or commit>}` with an optional `path` to the module's directory inside the repository (§Sources). Alone, the module's name is its manifest's; with a name, the manifest must carry that name |
-| `modules[].exclude` | no | what of this module is left out; everything else is composed. Entries by kind, `skills`, `agents`, `commands`, `output-styles`, `hooks`, `mcp`, `files`, each a list of names; the three merged parts, `instructions: true` for the module's `AGENTS.md`, `settings` and `env` as `true` for all of it or a list, of `<runtime>/<file>` fragments and of variable names. Not with `only` |
-| `modules[].only` | no | the only things of this module that are composed, with the same keys as `exclude`; everything not named is left out: a kind not named contributes no entry, a part not named is left out. `only: {skills: [deploy]}` is one skill and nothing else. Not with `exclude` |
+| `modules[].exclude` | no | what of this module is left out; everything else is composed, or, beside `only`, everything the `only` takes. Entries by kind, `skills`, `agents`, `commands`, `output-styles`, `hooks`, `mcp`, `files`, each a list of names; the three merged parts, `instructions: true` for the module's `AGENTS.md`, `settings` and `env` as `true` for all of it or a list, of `<runtime>/<file>` fragments and of variable names. Not with `only` |
+| `modules[].only` | no | the only things of this module that are composed, with the same keys as `exclude`, plus what the named entries require from this module (`requires` in its manifest, followed transitively). Everything else is left out: a kind not named contributes no entry beyond those, a part not named is left out. `only: {skills: [deploy]}` is the deploy skill, what it needs, and nothing else. An `exclude` beside it names entries the `only` brought in, to leave them out after all; a requirement left out that way has to come from another module (rule 4). It names no part, and nothing the `only` names |
 | `modules[].variant` | no | forces one of the module's variants instead of the one named like the targeted runtime |
 | `modules[].link` | no | a name at the checkout root, one path segment, linked to the module's directory in the composed tree, so a permission rule or a script names the module's files by a checkout-relative path: `harness/scripts/check.sh`. A hard link (§Rendering), named once across the modules |
 | `extensions` | no | one map per namespace, written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it |
@@ -284,7 +286,9 @@ The schema is [module.schema.json](module.schema.json).
    There is no last-wins and no rename.
 3. **An exclude or only that names nothing fails**, so a module that stops shipping an
    entry, an instruction section, a fragment or a variable is noticed rather than silently
-   composed. The message names the module, the block and the name.
+   composed. The message names the module, the block and the name. An `only` brings in
+   what its named entries require from the module, transitively, and an `exclude` beside
+   it may name only those; one naming anything else fails the same way.
 4. **A requirement that is not composed fails.** After the excludes and the collision
    check, every composed entry's `requires` items from its manifest are checked against
    the composed entries. One that is missing fails the compose with `module core: skill
@@ -312,9 +316,10 @@ The schema is [module.schema.json](module.schema.json).
    declares no variants. A manifest with variants, none for the runtime and no default, or
    `default: fail`, fails the compose.
 7. **Everything is reported.** The report names every module with its pin, every entry with
-   its module, every entry and part a block left out, as `<kind>/<name>`,
-   `instructions/AGENTS.md`, `settings/<runtime>/<file>` or `env/<NAME>`, and every
-   variant chosen. `qory harness inspect` prints it.
+   its module and, for one an `only` brought in, the entry that required it, every entry
+   and part a block left out, as `<kind>/<name>`, `instructions/AGENTS.md`,
+   `settings/<runtime>/<file>` or `env/<NAME>`, and every variant chosen. `qory harness
+   inspect` prints it.
 8. **Nothing composed is committed.** The link in the checkout is excluded through the
    clone-local exclude file, never the repository's own ignore file.
 
@@ -463,6 +468,7 @@ target's `runtime` is always an array: the runtimes the home holds after the com
 targeted ones first. A module carries its `name`, its `source` as the stack writes it,
 its `pin`, `dirty` when git saw uncommitted changes under a path source, the `variant`
 chosen, its `link` when the stack names one, and `base` when it is the base stack's.
+An entry an `only` brought in carries `for`, the `<kind>/<name>` that required it.
 The report of a checkout that extends a stack records the `base`: its `name`, `source` and `pin`. A path source's pin is `working-tree`; a git source's pin is twelve
 characters of its commit. The report records the `qory` that wrote it, its `version`,
 `commit` and `source`, `release` or `source`, as `qory version --json` reports them,

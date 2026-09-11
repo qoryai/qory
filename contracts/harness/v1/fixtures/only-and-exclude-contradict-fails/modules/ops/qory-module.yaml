@@ -1,0 +1,8 @@
+apiVersion: qory.ai/v1alpha1
+name: ops
+requires:
+  - skill: deploy
+    commands: [ship]
+    agents: [reviewer]
+  - command: ship
+    hooks: [guard.sh]

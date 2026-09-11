@@ -75,7 +75,6 @@
     "module": {
       "type": "object",
       "anyOf": [{"required": ["name"]}, {"required": ["source"]}],
-      "not": {"required": ["exclude", "only"]},
       "additionalProperties": false,
       "properties": {
         "name": {"type": "string", "minLength": 1},

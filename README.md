@@ -170,10 +170,11 @@ file it came from. The reference, one page per command, is under
 - A report that names the module of every entry. When two modules provide the same entry,
   a refusal with the lines that resolve it.
 - Part of a module, when that is all you want. `exclude` leaves entries, the instruction
-  section, settings fragments or variables out; `only` takes the named things and nothing
-  else, so `only: {skills: [deploy]}` is one skill from a module full of other things.
-  A module's manifest can say which entries an entry needs, and a stack that leaves one of
-  them out is refused.
+  section, settings fragments or variables out. `only` takes the named things, plus what
+  they need as the module's manifest declares it, and nothing else: `only: {skills:
+  [deploy]}` is the deploy skill, the command it runs and the agent it calls, from a
+  module full of other things. A required entry you take from another module instead is
+  one `exclude` line beside the `only`.
 
 ## The composed tree
 

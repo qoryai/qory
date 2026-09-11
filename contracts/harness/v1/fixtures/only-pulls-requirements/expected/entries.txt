@@ -1,0 +1,4 @@
+agents/reviewer ops
+commands/ship ops
+hooks/guard.sh ops
+skills/deploy ops

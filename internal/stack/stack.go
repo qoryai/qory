@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -77,7 +78,8 @@ type Module struct {
 	// composed.
 	Exclude Selection `yaml:"exclude,omitempty"`
 	// Only names the only things of the module the compose takes, with the same keys as
-	// Exclude; everything not named is left out. A module names Exclude or Only, not both.
+	// Exclude, and brings in what the named entries require from the module; everything
+	// else is left out. Exclude beside it names entries brought in that way to leave out.
 	Only Selection `yaml:"only,omitempty"`
 	// Base marks a module that came from the base stack a checkout's qory.yaml extends. It
 	// is set by [Extend], not by the YAML, which also rewrites the module's source so it
@@ -317,7 +319,8 @@ func decodeError(path string, err error) error {
 // validate checks the whole document before a caller sees it, so a document that reaches
 // the compose is known to carry what it is asked for, a runtime for a stack or a base for
 // a document that extends one, at least one module, each with a name or a source, no name
-// twice, excludes and onlys over known kinds and parts and not both on one module, links
+// twice, excludes and onlys over known kinds and parts, an exclude beside an only naming
+// entries the only does not, links
 // that are one path segment and named once,
 // extensions that are maps, and an extending block over known kinds without hooks and
 // servers. Whether a source holds a module, and whether its manifest carries the name the
@@ -398,8 +401,8 @@ func (p *Stack) validate(compose bool) error {
 		if err := p.Modules[i].Only.parse(); err != nil {
 			return fmt.Errorf("%s: only %w", who, err)
 		}
-		if !p.Modules[i].Exclude.Empty() && !p.Modules[i].Only.Empty() {
-			return fmt.Errorf("%s: names both exclude and only; a module names one of the two", who)
+		if err := p.Modules[i].besideOnly(); err != nil {
+			return fmt.Errorf("%s: %w", who, err)
 		}
 		if l.Link != "" {
 			if !segment(l.Link) || l.Link == ".qory" {
@@ -414,6 +417,27 @@ func (p *Stack) validate(compose bool) error {
 	for ns, values := range p.Extensions {
 		if values == nil {
 			return fmt.Errorf("extensions.%s is empty; an extension is a map of values", ns)
+		}
+	}
+	return nil
+}
+
+// besideOnly checks an exclude block that stands beside an only block: it names entries
+// only, since only has already left every part it does not name out, and none that only
+// names, since taking and leaving out one entry contradict. What it names has to be an
+// entry only brings in, which the compose checks when it knows what the module ships.
+func (l Module) besideOnly() error {
+	if l.Only.Empty() || l.Exclude.Empty() {
+		return nil
+	}
+	if l.Exclude.Instructions || l.Exclude.Settings.Set() || l.Exclude.Env.Set() {
+		return errors.New("exclude beside only names a part; only leaves every part it does not name out, so exclude names entries only brings in")
+	}
+	for _, kind := range l.Exclude.KindNames() {
+		for _, name := range l.Exclude.Kinds[kind] {
+			if slices.Contains(l.Only.Kinds[kind], name) {
+				return fmt.Errorf("%s/%s is named in only and in exclude; name it in one", kind, name)
+			}
 		}
 	}
 	return nil

@@ -1,3 +1,0 @@
-# Core
-
-Follow the workflow.

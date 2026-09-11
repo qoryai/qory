@@ -33,7 +33,8 @@ func TestSelectionReadsKindsAndParts(t *testing.T) {
 }
 
 // TestSelectionRefusesAMistake is the errors a block gives, each naming the module and
-// the block, so a person finds the line.
+// the block, so a person finds the line, and the two ways an exclude beside an only
+// contradicts it.
 func TestSelectionRefusesAMistake(t *testing.T) {
 	cases := map[string]string{
 		"exclude:\n  prompts: [greet]":                         `module core: exclude names kind "prompts"; kinds: skills, agents, commands, output-styles, hooks, mcp, files; parts: instructions, settings, env`,
@@ -44,7 +45,8 @@ func TestSelectionRefusesAMistake(t *testing.T) {
 		"exclude:\n  env: []":                                  "module core: exclude env is true or a list of names",
 		"exclude:\n  env: [\"\"]":                              "module core: exclude env names an empty name",
 		"exclude: [skills]":                                    "module core: exclude is a mapping of kinds and parts to what they name",
-		"exclude:\n  skills: [a]\nonly:\n  instructions: true": "module core: names both exclude and only; a module names one of the two",
+		"only:\n  skills: [a]\nexclude:\n  instructions: true": "module core: exclude beside only names a part; only leaves every part it does not name out, so exclude names entries only brings in",
+		"only:\n  skills: [a]\nexclude:\n  skills: [a]":        "module core: skills/a is named in only and in exclude; name it in one",
 	}
 	for block, want := range cases {
 		_, err := Load(write(t, selectionStack(block)))
