@@ -73,7 +73,7 @@ func TestConfigRefusesAMistake(t *testing.T) {
 func TestComposeReadsTheConfiguration(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
-	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.ai/v1alpha1\nharness: {runtime: codex}\nenv: {HARNESS_PROFILE: nextjs}\n")
+	configure(t, root, []string{"runtime: codex"}, []string{"env: {HARNESS_PROFILE: nextjs}"})
 	out, err := run(t, "harness", "compose")
 	if err != nil {
 		t.Fatal(err)

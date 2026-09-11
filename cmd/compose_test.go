@@ -248,7 +248,7 @@ func TestComposeRefuses(t *testing.T) {
 		{
 			name:    "a stack of another format",
 			fixture: "unknown-api-version",
-			wantErr: []string{stack.FileName + ":", `apiVersion "qory.ai/v2" is not one this qory reads`},
+			wantErr: []string{"qory.yaml:", `apiVersion "qory.ai/v2" is not one this qory reads`},
 		},
 		{
 			name:    "an exclude that names nothing the module ships",
@@ -280,6 +280,45 @@ func TestComposeRefuses(t *testing.T) {
 			lacks(t, out, "composed")
 			gone(t, root, ".qory", ".claude")
 		})
+	}
+}
+
+// TestComposeRefusesAClosedStackAtTheRoot is a checkout whose root holds the two-modules
+// stack as a qory-stack.yaml, with no extending block: discovery refuses it as input,
+// names where a repository's own stack goes, and writes nothing. The same file named
+// with -f composes, and so does the file once it declares an extending block.
+func TestComposeRefusesAClosedStackAtTheRoot(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	delivered, err := os.ReadFile(filepath.Join(fixtures, "two-modules", "qory-stack.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(root, stack.FileName)
+	writeFile(t, file, string(delivered))
+	if err := os.Remove(filepath.Join(root, "qory.yaml")); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := run(t, "harness", "compose")
+	if err == nil {
+		t.Fatalf("compose: no error\n%s", out)
+	}
+	wants(t, err.Error(), file+": a stack at a repository root is delivered to be extended, and this one declares no extending block", "goes under harness in qory.yaml, which qory setup repo writes")
+	if cmd.ExitCode(err) != cmd.ExitInput {
+		t.Errorf("exit %d, want %d", cmd.ExitCode(err), cmd.ExitInput)
+	}
+	gone(t, root, ".qory", ".claude")
+
+	if out, err := run(t, "harness", "compose", "-f", file); err != nil {
+		t.Fatalf("compose -f: %v\n%s", err, out)
+	}
+	if out, err := run(t, "harness", "remove"); err != nil {
+		t.Fatalf("remove: %v\n%s", err, out)
+	}
+	writeFile(t, file, string(delivered)+"extending:\n  kinds: [skills]\n")
+	if out, err := run(t, "harness", "compose"); err != nil {
+		t.Fatalf("compose with an extending block: %v\n%s", err, out)
 	}
 }
 

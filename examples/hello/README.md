@@ -12,7 +12,7 @@ claude             # type /hello
 qory hr            # removes it again
 ```
 
-Then delete the `exclude` lines in `qory-stack.yaml` and compose again. `qory` refuses,
+Then delete the `exclude` lines in `qory.yaml` and compose again. `qory` refuses,
 names both modules, and prints the lines that resolve it. Put them under the world module
 instead, compose, start `claude` again and type `/hello`: the other greet answers, and
 says where to go from there.

@@ -19,7 +19,7 @@ var (
 // retarget rewrites the runtime line of the stack in the checkout.
 func retarget(t *testing.T, root, runtime string) {
 	t.Helper()
-	file := filepath.Join(root, "qory-stack.yaml")
+	file := filepath.Join(root, "qory.yaml")
 	data, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatal(err)
@@ -234,7 +234,7 @@ func TestComposeAModuleWithoutSkills(t *testing.T) {
 	root := newCheckout(t)
 	writeManifest(t, filepath.Join(root, "harness"), "own")
 	writeFile(t, filepath.Join(root, "harness", "AGENTS.md"), "# Only instructions\n")
-	writeFile(t, filepath.Join(root, "qory-stack.yaml"), "apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: any\nmodules:\n  - name: own\n    source: {path: harness}\n")
+	writeOwnStack(t, root, "apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: any\nmodules:\n  - name: own\n    source: {path: harness}\n")
 	out, err := run(t, "hc")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)

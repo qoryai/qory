@@ -27,7 +27,7 @@ func TestComposeReadsAModuleFromGit(t *testing.T) {
 	runGit(t, remote, "tag", "v1")
 	url := "file://" + remote
 
-	writeFile(t, filepath.Join(root, "qory-stack.yaml"), "apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source: {git: "+url+", ref: v1, path: modules/core}\n")
+	writeOwnStack(t, root, "apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source: {git: "+url+", ref: v1, path: modules/core}\n")
 	out, err := run(t, "hc")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -86,12 +86,12 @@ func TestComposeFollowsAnEditedRef(t *testing.T) {
 	stackFor := func(ref string) string {
 		return "apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: any\nmodules:\n  - name: core\n    source: {git: " + url + ", ref: " + ref + "}\n"
 	}
-	writeFile(t, filepath.Join(root, "qory-stack.yaml"), stackFor("v1"))
+	writeOwnStack(t, root, stackFor("v1"))
 	if out, err := run(t, "hc"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	first := readReport(t, root).Modules[0].Pin
-	writeFile(t, filepath.Join(root, "qory-stack.yaml"), stackFor("v2"))
+	writeOwnStack(t, root, stackFor("v2"))
 	if out, err := run(t, "hc"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}

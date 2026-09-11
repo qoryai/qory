@@ -102,6 +102,68 @@ func copyFixture(t *testing.T, name, dir string) {
 	if err := os.RemoveAll(filepath.Join(dir, "expected")); err != nil {
 		t.Fatal(err)
 	}
+	// A fixture holds its stack as a qory-stack.yaml, which at a checkout root is a
+	// delivered stack that nothing can extend and is refused. The checkout gets the
+	// document the way a repository holds its own stack, under harness in qory.yaml.
+	file := filepath.Join(dir, "qory-stack.yaml")
+	doc, err := os.ReadFile(file)
+	if err != nil {
+		return
+	}
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	writeOwnStack(t, dir, string(doc))
+}
+
+// ownStack wraps a stack document as the qory.yaml of a repository holding its own stack:
+// the document's apiVersion line stays at the top, and every other line moves under
+// harness. The result has one harness: line, so [configure] can add keys to the section.
+func ownStack(doc string) string {
+	lines := strings.Split(strings.TrimSuffix(doc, "\n"), "\n")
+	apiVersion := "apiVersion: qory.ai/v1alpha1"
+	for _, line := range lines {
+		if strings.HasPrefix(line, "apiVersion:") {
+			apiVersion = line
+		}
+	}
+	var b strings.Builder
+	b.WriteString(apiVersion + "\nharness:\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "apiVersion:") {
+			continue
+		}
+		if line != "" {
+			b.WriteString("  ")
+		}
+		b.WriteString(line + "\n")
+	}
+	return b.String()
+}
+
+// writeOwnStack writes the stack document as root's qory.yaml through [ownStack].
+func writeOwnStack(t *testing.T, root, doc string) {
+	t.Helper()
+	writeFile(t, filepath.Join(root, "qory.yaml"), ownStack(doc))
+}
+
+// configure adds keys to root's qory.yaml as [writeOwnStack] wrote it: harness lines go
+// into the harness section, top lines at the end of the file, each written as given.
+func configure(t *testing.T, root string, harness, top []string) {
+	t.Helper()
+	file := filepath.Join(root, "qory.yaml")
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(data)
+	if len(harness) > 0 {
+		doc = strings.Replace(doc, "harness:\n", "harness:\n  "+strings.Join(harness, "\n  ")+"\n", 1)
+	}
+	for _, line := range top {
+		doc += line + "\n"
+	}
+	writeFile(t, file, doc)
 }
 
 // run executes one qory command line and returns everything it printed. Output and errors
