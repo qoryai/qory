@@ -11,6 +11,15 @@ import "github.com/spf13/cobra"
 // commit of the checkout it was built from.
 var Version = "dev"
 
+// Commit is the commit a release was built from, set at build time beside [Version] with
+//
+//	go build -ldflags "-X github.com/qoryai/qory/cmd.Commit=a1b2c3d"
+//
+// It is read only when Go recorded no vcs.revision for the build; a build from a git
+// checkout carries one, and a release does too, so the flag is the fallback for a build
+// from an exported tree.
+var Commit = ""
+
 // Root builds the command tree and returns its root command. Every caller builds its own
 // tree: [Execute] to run one, and the gendocs generator to write the command reference
 // under docs/commands. The tree carries no state between calls, so a test may build it,

@@ -114,7 +114,10 @@ goreleaser check
 goreleaser build --snapshot --clean --single-target
 ```
 
-`qory version` reports the version in a release build, `0.2.0` for the tag `v0.2.0`, and
-the commit in a build from source, marked dirty when the tree had uncommitted changes.
+`qory version` reports the version without the `v`, `0.2.0` for the tag `v0.2.0`, in a
+release build and in a source build at that tag; a source build between tags reports the
+pseudo-version Go stamped, and one without version control reports the commit alone. The
+`source` row, `release` or `source`, tells the two kinds of build apart, and
+`qory version --json` prints every field as one object for a script.
 
 Commit messages say what changed and why it was needed, in the imperative.
