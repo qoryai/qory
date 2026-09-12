@@ -4,7 +4,8 @@ Remove a worktree, the one you stand in by default, and its branch
 
 ### Synopsis
 
-Remove a worktree, the one you stand in by default, and its branch.
+Remove a worktree, the one you stand in by default, and its branch. A worktree is named
+by its branch, its path, or the name it was added as beside --branch or --pr.
 
 Every worktree.run.remove of qory.yaml runs in the worktree first, with QORY_WORKTREE,
 QORY_MAIN, QORY_BRANCH and, when the branch's base is recorded, QORY_BASE set. A worktree
@@ -21,7 +22,7 @@ runs, and what every worktree.run.remove command prints. Without it a command's 
 is shown only when the command fails.
 
 ```
-qory worktree remove [<branch or path>] [flags]
+qory worktree remove [<branch, name or path>] [flags]
 ```
 
 ### Options

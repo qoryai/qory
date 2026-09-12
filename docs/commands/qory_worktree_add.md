@@ -18,6 +18,19 @@ there is no upstream on the base: the worktree pushes to a remote branch of its 
 created by the first push. A worktree already there on the branch is reused, and the
 rows say so.
 
+--branch attaches the worktree to a branch of the remote, to go on with work pushed from
+elsewhere: the branch is fetched, checked out under its own name and set to track the
+remote's, and one the remote does not have is refused instead of cut new. A local branch
+of that name is fast-forwarded to the remote's when that is possible. --pr attaches it to
+a pull request the same way, by number: the pull request's head is found among the refs
+the remote publishes, refs/pull/<n>/head on GitHub and Forgejo, refs/merge-requests/<n>/head
+on GitLab, refs/pull-requests/<n>/from on Bitbucket Server, or the ref worktree.pr in
+qory.yaml names with {n} for the number; no hosting API is asked. The branch of the
+remote at that head is the one checked out, so a push goes to the pull request; a head
+that no branch of the remote holds, a fork's, is checked out as pr-<n>, pulled from its
+ref and pushed nowhere. With either flag the branch may be left out, and when given it
+names the worktree instead: qory worktree add review --pr 7 makes ../wt-review.
+
 --base on a branch that already exists moves it: a branch with no commits of its own is
 reset onto the base, one with commits has them rebased onto it, either after a question
 or at once with --rebase. The base a branch was cut from is recorded in its git config,
@@ -40,19 +53,21 @@ prints, and the compose lists its entries. Without it a command's output is show
 when the command fails.
 
 ```
-qory worktree add <branch> [flags]
+qory worktree add [<branch>] [flags]
 ```
 
 ### Options
 
 ```
-      --base string   the branch, tag or commit a new branch starts from, or an existing one is moved onto (qory.yaml: worktree.base; default: the remote's HEAD branch)
-  -f, --file string   the qory-stack.yaml to compose into the worktree, or the qory.yaml or harness.yaml whose harness section to compose, instead of discovering one; a stack named here is the base of the worktree's own document, as on harness compose
-  -h, --help          help for add
-      --no-compose    do not compose the harness into the worktree
-      --offline       do not fetch the remote first; use the refs already fetched
-      --path          print the worktree's path alone on stdout, the rows on stderr
-      --rebase        move or rebase a branch that already exists onto --base without asking
+      --base string     the branch, tag or commit a new branch starts from, or an existing one is moved onto (qory.yaml: worktree.base; default: the remote's HEAD branch)
+      --branch string   a branch of the remote to attach to: fetched, checked out and tracked; <branch> then names the worktree
+  -f, --file string     the qory-stack.yaml to compose into the worktree, or the qory.yaml or harness.yaml whose harness section to compose, instead of discovering one; a stack named here is the base of the worktree's own document, as on harness compose
+  -h, --help            help for add
+      --no-compose      do not compose the harness into the worktree
+      --offline         do not fetch the remote first; use the refs already fetched
+      --path            print the worktree's path alone on stdout, the rows on stderr
+      --pr int          a pull request of the remote to attach to, by number: its branch fetched, checked out and tracked; <branch> then names the worktree
+      --rebase          move or rebase a branch that already exists onto --base without asking
 ```
 
 ### Options inherited from parent commands

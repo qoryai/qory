@@ -67,7 +67,7 @@ func worktreeOptions(root string) (worktree.Options, error) {
 		}
 	}
 	w := conf.Worktree
-	return worktree.Options{Dir: w.Dir, Name: w.Name, Base: w.Base, KeepBranch: w.Branch == "keep", Link: paths(w.Link), Copy: paths(w.Copy), Add: w.Add, Remove: w.Remove, Timeout: conf.Git.Timeout}, nil
+	return worktree.Options{Dir: w.Dir, Name: w.Name, Base: w.Base, KeepBranch: w.Branch == "keep", PullRef: w.PR, Link: paths(w.Link), Copy: paths(w.Copy), Add: w.Add, Remove: w.Remove, Timeout: conf.Git.Timeout}, nil
 }
 
 // paths is the configuration's link or copy list as the worktree package takes it.
@@ -143,10 +143,11 @@ func mainCheckout() (string, error) {
 // the rows go to stderr and stdout carries the worktree's path alone, for a shell to cd
 // into; the shell function qory shell init writes does that.
 func newWorktreeAdd(use string) *cobra.Command {
-	var base, file string
+	var base, file, remoteBranch string
+	var pr int
 	var offline, rebase, pathOnly, noCompose bool
 	c := &cobra.Command{
-		Use:   use + " <branch>",
+		Use:   use + " [<branch>]",
 		Short: "Add a worktree for a branch, prepare it, and compose the harness into it",
 		Long: `Add a worktree for a branch, prepare it, and compose the harness into it.
 
@@ -161,6 +162,19 @@ remote's HEAD branch, else the branch the main checkout is on, which has to hold
 there is no upstream on the base: the worktree pushes to a remote branch of its own name,
 created by the first push. A worktree already there on the branch is reused, and the
 rows say so.
+
+--branch attaches the worktree to a branch of the remote, to go on with work pushed from
+elsewhere: the branch is fetched, checked out under its own name and set to track the
+remote's, and one the remote does not have is refused instead of cut new. A local branch
+of that name is fast-forwarded to the remote's when that is possible. --pr attaches it to
+a pull request the same way, by number: the pull request's head is found among the refs
+the remote publishes, refs/pull/<n>/head on GitHub and Forgejo, refs/merge-requests/<n>/head
+on GitLab, refs/pull-requests/<n>/from on Bitbucket Server, or the ref worktree.pr in
+qory.yaml names with {n} for the number; no hosting API is asked. The branch of the
+remote at that head is the one checked out, so a push goes to the pull request; a head
+that no branch of the remote holds, a fork's, is checked out as pr-<n>, pulled from its
+ref and pushed nowhere. With either flag the branch may be left out, and when given it
+names the worktree instead: qory worktree add review --pr 7 makes ../wt-review.
 
 --base on a branch that already exists moves it: a branch with no commits of its own is
 reset onto the base, one with commits has them rebased onto it, either after a question
@@ -182,8 +196,14 @@ tree supplies one.
 --verbose prints each git command as it runs and what every worktree.run.add command
 prints, and the compose lists its entries. Without it a command's output is shown only
 when the command fails.`,
-		Args: exactArgs(1, "a branch name"),
+		Args: maxArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("pr") && pr < 1 {
+				return input(fmt.Errorf("--pr takes a pull request number, got %d", pr))
+			}
+			if len(args) == 0 && remoteBranch == "" && pr == 0 {
+				return input(fmt.Errorf("%s takes a branch name, or --branch or --pr to say which branch of the remote to attach to", cmd.CommandPath()))
+			}
 			main, err := mainCheckout()
 			if err != nil {
 				return err
@@ -196,6 +216,10 @@ when the command fails.`,
 				o.Base, o.Onto = base, true
 			}
 			o.Offline, o.Rebase = offline, rebase
+			var branch string
+			if len(args) == 1 {
+				branch = args[0]
+			}
 			out, errOut := cmd.OutOrStdout(), cmd.ErrOrStderr()
 			rows := out
 			if pathOnly {
@@ -204,8 +228,25 @@ when the command fails.`,
 			o.Ask = asker(cmd.InOrStdin(), rows)
 			u := ui.New(rows)
 			tracing(cmd, &o, u, rows)
-			u.Title(filepath.Base(main), "worktree "+args[0])
-			a, err := worktree.Add(main, args[0], o)
+			title := branch
+			if remoteBranch != "" || pr != 0 {
+				var r worktree.Remote
+				if pr != 0 {
+					r, err = worktree.PullRequest(main, pr, o)
+				} else {
+					r, err = worktree.RemoteBranch(main, remoteBranch, o)
+				}
+				if err != nil {
+					return input(err)
+				}
+				o.Attach, o.As = r, branch
+				branch = r.Name()
+				if title == "" {
+					title = branch
+				}
+			}
+			u.Title(filepath.Base(main), "worktree "+title)
+			a, err := worktree.Add(main, branch, o)
 			var runErr *worktree.RunError
 			if errors.As(err, &runErr) {
 				printAdded(u, main, a)
@@ -232,8 +273,13 @@ when the command fails.`,
 		},
 	}
 	c.Flags().StringVar(&base, "base", "", "the branch, tag or commit a new branch starts from, or an existing one is moved onto (qory.yaml: worktree.base; default: the remote's HEAD branch)")
+	c.Flags().StringVar(&remoteBranch, "branch", "", "a branch of the remote to attach to: fetched, checked out and tracked; <branch> then names the worktree")
+	c.Flags().IntVar(&pr, "pr", 0, "a pull request of the remote to attach to, by number: its branch fetched, checked out and tracked; <branch> then names the worktree")
 	c.Flags().BoolVar(&rebase, "rebase", false, "move or rebase a branch that already exists onto --base without asking")
+	c.MarkFlagsMutuallyExclusive("branch", "pr", "base")
 	c.Flags().BoolVar(&offline, "offline", false, "do not fetch the remote first; use the refs already fetched")
+	c.MarkFlagsMutuallyExclusive("offline", "branch")
+	c.MarkFlagsMutuallyExclusive("offline", "pr")
 	c.Flags().BoolVar(&pathOnly, "path", false, "print the worktree's path alone on stdout, the rows on stderr")
 	c.Flags().BoolVar(&noCompose, "no-compose", false, "do not compose the harness into the worktree")
 	c.Flags().StringVarP(&file, "file", "f", "", "the qory-stack.yaml to compose into the worktree, or the qory.yaml or harness.yaml whose harness section to compose, instead of discovering one; a stack named here is the base of the worktree's own document, as on harness compose")
@@ -264,6 +310,9 @@ func printAdded(u *ui.UI, main string, a worktree.Added) {
 	}
 	if a.Upstream != "" {
 		rows = append(rows, [2]string{"pushes to", a.Upstream})
+	}
+	if a.Head != "" {
+		rows = append(rows, [2]string{"pulls from", a.Head + "  (no branch of the remote holds it, a fork's or a deleted one; a push from here goes nowhere)"})
 	}
 	for _, p := range a.Linked {
 		rows = append(rows, [2]string{"linked", p.To + "  (" + from(p) + ")"})
@@ -313,9 +362,10 @@ func notAt(p worktree.Path) string {
 func newWorktreeRemove(use string) *cobra.Command {
 	var force, keepBranch, deleteBranch, pathOnly bool
 	c := &cobra.Command{
-		Use:   use + " [<branch or path>]",
+		Use:   use + " [<branch, name or path>]",
 		Short: "Remove a worktree, the one you stand in by default, and its branch",
-		Long: `Remove a worktree, the one you stand in by default, and its branch.
+		Long: `Remove a worktree, the one you stand in by default, and its branch. A worktree is named
+by its branch, its path, or the name it was added as beside --branch or --pr.
 
 Every worktree.run.remove of qory.yaml runs in the worktree first, with QORY_WORKTREE,
 QORY_MAIN, QORY_BRANCH and, when the branch's base is recorded, QORY_BASE set. A worktree
@@ -349,8 +399,12 @@ is shown only when the command fails.`,
 			}
 			var target worktree.Entry
 			if len(args) == 1 {
+				// The name is a path, a branch, or what the worktree was added as, which
+				// is its branch unless a name was given beside --branch or --pr.
 				if target, err = worktree.Find(main, args[0]); err != nil {
-					return input(err)
+					if target, err = worktree.Find(main, worktree.PathFor(main, args[0], o)); err != nil {
+						return input(fmt.Errorf("no worktree is at %s, on a branch of that name or added as it; qory worktree list shows them", args[0]))
+					}
 				}
 			} else {
 				cwd, err := os.Getwd()

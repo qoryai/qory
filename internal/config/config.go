@@ -24,6 +24,7 @@
 //	  dir: ..                    # where worktrees go, relative to the main checkout
 //	  name: wt-{branch}          # what a worktree's directory is called
 //	  base: main                 # the branch a new worktree branch starts from
+//	  pr: refs/pull/{n}/head     # the ref the remote publishes pull request {n}'s head under
 //	  branch: delete             # what worktree remove does with the branch: delete or keep
 //	  link: [.env]               # linked from the main checkout into a new worktree
 //	  copy: [config/local.json]  # copied once into a new worktree
@@ -123,6 +124,9 @@ type Worktree struct {
 	Name string
 	// Base is the branch a new worktree branch starts from, "" for the remote's HEAD.
 	Base string
+	// PR is the ref the remote publishes a pull request's head under, {n} for its number,
+	// "" for the ones GitHub, GitLab and Bitbucket Server publish.
+	PR string
 	// Branch is what a remove does with the worktree's branch: "delete" or "keep".
 	Branch string
 	// Link are paths linked into a new worktree.
@@ -271,6 +275,7 @@ type worktreeSection struct {
 	Dir    *string     `yaml:"dir,omitempty"`
 	Name   *string     `yaml:"name,omitempty"`
 	Base   *string     `yaml:"base,omitempty"`
+	PR     *string     `yaml:"pr,omitempty"`
 	Branch *string     `yaml:"branch,omitempty"`
 	Link   []pathEntry `yaml:"link,omitempty"`
 	Copy   []pathEntry `yaml:"copy,omitempty"`
@@ -680,6 +685,13 @@ func (c *Config) applyWorktree(path string, w *worktreeSection) error {
 		c.Worktree.Base = *w.Base
 		c.origins["worktree.base"] = path
 	}
+	if w.PR != nil {
+		if !strings.HasPrefix(*w.PR, "refs/") || !strings.Contains(*w.PR, "{n}") {
+			return fmt.Errorf("%s: worktree.pr %q is not a ref under refs/ with {n} for the pull request number, as refs/pull/{n}/head", path, *w.PR)
+		}
+		c.Worktree.PR = *w.PR
+		c.origins["worktree.pr"] = path
+	}
 	if w.Branch != nil {
 		if *w.Branch != "delete" && *w.Branch != "keep" {
 			return fmt.Errorf("%s: worktree.branch %q is not delete or keep", path, *w.Branch)
@@ -860,6 +872,9 @@ func (c Config) Rows() []Row {
 		Row{"worktree.base", base, c.origins["worktree.base"]},
 		Row{"worktree.branch", c.Worktree.Branch, c.origins["worktree.branch"]},
 	)
+	if c.Worktree.PR != "" {
+		rows = append(rows, Row{"worktree.pr", c.Worktree.PR, c.origins["worktree.pr"]})
+	}
 	for _, list := range []struct {
 		key   string
 		items []string

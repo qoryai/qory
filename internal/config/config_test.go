@@ -117,6 +117,7 @@ func TestLoadRefusesAMistake(t *testing.T) {
 		{"worktree: {link: [{to: .env}]}\n", `worktree.link names an entry with no path`},
 		{"worktree: {link: [\"\"]}\n", `worktree.link names an entry with no path`},
 		{"worktree: {link: [{from: .env, to: ../.env}]}\n", `worktree.link names to "../.env" for .env, which is not a path inside the worktree`},
+		{"worktree: {pr: \"pull/{n}\"}\n", `worktree.pr "pull/{n}" is not a ref under refs/ with {n} for the pull request number`},
 		{"git: {timeout: soon}\n", `git.timeout "soon" is not a duration above zero, such as 10m`},
 		{"git: {timeout: 0s}\n", `git.timeout "0s" is not a duration above zero`},
 		{"git: {cache: \"\"}\n", "git.cache is empty"},

@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -46,6 +47,16 @@ type Options struct {
 	// Timeout is the longest the fetch, or the push a remove offers, may run; 0 for no
 	// limit.
 	Timeout time.Duration
+	// Attach is a branch of the remote the worktree attaches to, from [RemoteBranch] or
+	// [PullRequest]; its zero value attaches to nothing. The branch is fetched, checked
+	// out under the name Attach.Name gives and set to track it.
+	Attach Remote
+	// As names the worktree instead of its branch: it is what {branch} in Name becomes,
+	// "" for the branch.
+	As string
+	// PullRef is the ref the remote publishes a pull request's head under, {n} for its
+	// number, "" to probe [PullRefs].
+	PullRef string
 	// Link are paths linked into the new worktree.
 	Link []Path
 	// Copy are paths copied once into the new worktree.
@@ -89,12 +100,17 @@ type Added struct {
 	Path string
 	// Branch is the branch checked out in it.
 	Branch string
-	// How says where the branch came from: "new off <base>", "local", "remote", or
-	// "already there" for a worktree that was already there on that branch, and what
-	// Options.Onto did with it after a semicolon.
+	// How says where the branch came from: "new off <base>", "local", "remote", "fetched
+	// from <remote>" for Options.Attach, or "already there" for a worktree that was
+	// already there on that branch, and what Options.Onto did with it after a semicolon.
 	How string
-	// Upstream is the remote branch the worktree pushes to, "" without a remote.
+	// Upstream is the remote branch the worktree pushes to, "" without a remote or when
+	// Head is set.
 	Upstream string
+	// Head is the remote's ref the branch pulls from when it is a pull request's head that
+	// no branch of the remote holds, a fork's or a deleted one, as "<remote> <ref>"; a
+	// push from the worktree goes nowhere then. It is "" otherwise.
+	Head string
 	// Linked and Copied are the paths brought in.
 	Linked, Copied []Path
 	// Kept are the paths of Link and Copy already present in the worktree, left as they
@@ -160,6 +176,161 @@ func (e *RunError) Error() string {
 
 func (e *RunError) Unwrap() error { return e.Err }
 
+// Remote is a branch of the remote an add attaches a worktree to, instead of a branch of
+// the worktree's own: found by [RemoteBranch] or [PullRequest], fetched, checked out and
+// tracked by [Add].
+type Remote struct {
+	// Branch is the branch on the remote, "" for a pull request whose head no branch of
+	// the remote holds: one from a fork, or one whose branch is deleted.
+	Branch string
+	// PR is the pull request's number, 0 for a plain branch.
+	PR int
+	// Head is the ref the remote publishes the pull request's head under, "" for a
+	// plain branch.
+	Head string
+}
+
+// PullRefs are the refs a remote publishes a pull request's head under, {n} for its
+// number: GitHub's and Forgejo's, GitLab's, Bitbucket Server's. [PullRequest] probes
+// them in order when Options.PullRef names none.
+var PullRefs = []string{"refs/pull/{n}/head", "refs/merge-requests/{n}/head", "refs/pull-requests/{n}/from"}
+
+// attached reports whether r names anything.
+func (r Remote) attached() bool { return r.Branch != "" || r.PR != 0 }
+
+// Name is the local branch the remote's is checked out as: its own name, or pr-<n> for
+// a pull request whose head no branch of the remote holds.
+func (r Remote) Name() string {
+	if r.Branch != "" {
+		return r.Branch
+	}
+	return fmt.Sprintf("pr-%d", r.PR)
+}
+
+// ref is the ref fetched from the remote, and what the local branch merges from.
+func (r Remote) ref() string {
+	if r.Branch != "" {
+		return "refs/heads/" + r.Branch
+	}
+	return r.Head
+}
+
+// tracking is the remote-tracking ref the fetch lands in: <remote>/<branch> for a branch,
+// the pull request's ref under <remote> otherwise, as refs/remotes/origin/pull/7/head.
+func (r Remote) tracking(remote string) string {
+	if r.Branch != "" {
+		return "refs/remotes/" + remote + "/" + r.Branch
+	}
+	return "refs/remotes/" + remote + "/" + strings.TrimPrefix(r.Head, "refs/")
+}
+
+// how is what the branch row says of an attach: where it was fetched from, and the pull
+// request it is.
+func (r Remote) how(remote string) string {
+	if r.PR != 0 {
+		return fmt.Sprintf("pull request #%d, fetched from %s", r.PR, remote)
+	}
+	return "fetched from " + remote
+}
+
+// RemoteBranch finds branch on the repository's remote, for [Add] to attach a worktree
+// to. It asks the remote, so a branch pushed from elsewhere is found without a fetch, and
+// one the remote does not have is an error saying so. Options.Timeout bounds the
+// question and Options.Trace is told it.
+func RemoteBranch(main, branch string, o Options) (Remote, error) {
+	if err := checkName(branch); err != nil {
+		return Remote{}, err
+	}
+	remote, refs, err := o.runner(main).lsRemote("refs/heads/" + branch)
+	if err != nil {
+		return Remote{}, err
+	}
+	if _, ok := refs["refs/heads/"+branch]; !ok {
+		return Remote{}, fmt.Errorf("%s has no branch %s; qory worktree add %s cuts a new one", remote, branch, branch)
+	}
+	return Remote{Branch: branch}, nil
+}
+
+// PullRequest finds pull request n on the repository's remote, for [Add] to attach a
+// worktree to: the ref the remote publishes its head under, Options.PullRef with {n}
+// for the number or each of [PullRefs] in turn when that is "", and the branch of the remote at the
+// same commit, which is the pull request's branch when the remote holds it. No hosting
+// API is asked, so any host that publishes the head as a ref serves; one that does not
+// is an error naming what was looked for. A head that two branches hold is an error
+// too, since which one to track is a guess. Options.Timeout bounds the question and
+// Options.Trace is told it.
+func PullRequest(main string, n int, o Options) (Remote, error) {
+	if n < 1 {
+		return Remote{}, fmt.Errorf("%d is not a pull request number", n)
+	}
+	patterns := PullRefs
+	if o.PullRef != "" {
+		patterns = []string{o.PullRef}
+	}
+	heads := make([]string, len(patterns))
+	for i, p := range patterns {
+		heads[i] = strings.ReplaceAll(p, "{n}", strconv.Itoa(n))
+	}
+	remote, refs, err := o.runner(main).lsRemote(append(heads, "refs/heads/*")...)
+	if err != nil {
+		return Remote{}, err
+	}
+	r := Remote{PR: n}
+	var sha string
+	for _, head := range heads {
+		if s, ok := refs[head]; ok {
+			r.Head, sha = head, s
+			break
+		}
+	}
+	if r.Head == "" {
+		return r, fmt.Errorf("pull request %d not found on %s; looked for %s. worktree.pr in qory.yaml names the ref your host uses, with {n} for the number; a host that publishes none takes --branch with the pull request's branch", n, remote, strings.Join(heads, ", "))
+	}
+	var branches []string
+	for name, s := range refs {
+		if b, ok := strings.CutPrefix(name, "refs/heads/"); ok && s == sha {
+			branches = append(branches, b)
+		}
+	}
+	sort.Strings(branches)
+	switch len(branches) {
+	case 0:
+	case 1:
+		r.Branch = branches[0]
+	default:
+		return r, fmt.Errorf("pull request %d is at the tip of %d branches of %s, %s; --branch says which to attach to", n, len(branches), remote, strings.Join(branches, ", "))
+	}
+	return r, nil
+}
+
+// lsRemote asks the repository's remote for the refs matching the patterns and returns
+// the remote's name and the refs it has, ref to commit.
+func (r runner) lsRemote(patterns ...string) (string, map[string]string, error) {
+	remote := r.remoteOf()
+	if remote == "" {
+		return "", nil, errors.New("the repository has no remote to attach to")
+	}
+	out, err := r.net(r.main, append([]string{"ls-remote", "--refs", remote}, patterns...)...)
+	if err != nil {
+		return remote, nil, fmt.Errorf("git ls-remote %s: %w", remote, err)
+	}
+	refs := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		if sha, ref, ok := strings.Cut(line, "\t"); ok {
+			refs[ref] = sha
+		}
+	}
+	return remote, refs, nil
+}
+
+// checkName refuses what git would not take as a branch name.
+func checkName(branch string) error {
+	if branch == "" || strings.HasPrefix(branch, "-") || strings.ContainsAny(branch, " ~^:?*[\\") || strings.HasSuffix(branch, "/") || strings.Contains(branch, "..") {
+		return fmt.Errorf("%q is not a branch name", branch)
+	}
+	return nil
+}
+
 // Main returns the main checkout of the repository holding dir: the first worktree git
 // lists, which is the one with the repository's own git directory.
 func Main(dir string) (string, error) {
@@ -202,9 +373,9 @@ func List(main string) ([]Entry, error) {
 	return entries, nil
 }
 
-// PathFor is the directory the worktree of branch gets, from Options.Dir and
-// Options.Name, absolute.
-func PathFor(main, branch string, o Options) string {
+// PathFor is the directory the worktree called name gets, from Options.Dir and
+// Options.Name, absolute. The name is the branch, or Options.As when that is set.
+func PathFor(main, name string, o Options) string {
 	dir := o.Dir
 	if dir == "" {
 		dir = ".."
@@ -212,45 +383,78 @@ func PathFor(main, branch string, o Options) string {
 	if !filepath.IsAbs(dir) {
 		dir = filepath.Join(main, dir)
 	}
-	name := o.Name
-	if name == "" {
-		name = "wt-{branch}"
+	tmpl := o.Name
+	if tmpl == "" {
+		tmpl = "wt-{branch}"
 	}
-	name = strings.ReplaceAll(name, "{branch}", strings.ReplaceAll(branch, "/", "-"))
-	name = strings.ReplaceAll(name, "{repo}", filepath.Base(main))
-	return filepath.Clean(filepath.Join(dir, name))
+	tmpl = strings.ReplaceAll(tmpl, "{branch}", strings.ReplaceAll(name, "/", "-"))
+	tmpl = strings.ReplaceAll(tmpl, "{repo}", filepath.Base(main))
+	return filepath.Clean(filepath.Join(dir, tmpl))
 }
 
 // Add makes the worktree of branch for the repository whose main checkout is main, and
 // prepares it. The remote is fetched first, unless Options.Offline, so the base is the
 // remote's tip and a branch pushed from elsewhere is found; a fetch that fails is an
-// error, never a quiet fall back to the refs already there. A directory already at the
-// path is reused when it is a worktree on that branch and refused otherwise. The branch
-// is checked out when it exists locally, tracked when it exists on the remote, and cut
-// off the base otherwise, with its upstream set to the remote branch of its own name
-// and the base it was cut from recorded in its git config. With Options.Onto, a branch
-// that existed is moved or rebased onto Options.Base, see [runner.onto]. Then every
-// Options.Link is linked and every Options.Copy copied into the worktree, each skipped
-// with a note when its destination is already there or its source is not, and every
-// Options.Add is run in the worktree with QORY_WORKTREE, QORY_MAIN, QORY_BRANCH and,
-// when the branch's base is recorded, QORY_BASE set; the first failing command is a
-// [*RunError].
+// error, never a quiet fall back to the refs already there. A worktree already on the
+// branch is reused, wherever it is, and so is a directory already at the path when it is
+// a worktree on that branch; one on another branch is refused. The branch is checked out
+// when it exists locally, tracked when it exists on the remote, and cut off the base
+// otherwise, with its upstream set to the remote branch of its own name and the base it
+// was cut from recorded in its git config. With Options.Attach, the remote's branch is
+// fetched and the worktree tracks it: a new local branch starts at it, one that exists
+// is fast-forwarded to it when that is possible, and a pull request's head that no
+// branch of the remote holds is pulled from its ref and pushed nowhere. With
+// Options.Onto, a branch that existed is moved or rebased onto Options.Base, see
+// [runner.onto]. Then every Options.Link is linked and every Options.Copy copied into
+// the worktree, each skipped with a note when its destination is already there or its
+// source is not, and every Options.Add is run in the worktree with QORY_WORKTREE,
+// QORY_MAIN, QORY_BRANCH and, when the branch's base is recorded, QORY_BASE set; the
+// first failing command is a [*RunError].
 func Add(main, branch string, o Options) (Added, error) {
-	a := Added{Path: PathFor(main, branch, o), Branch: branch}
-	if branch == "" || strings.HasPrefix(branch, "-") || strings.ContainsAny(branch, " ~^:?*[\\") || strings.HasSuffix(branch, "/") || strings.Contains(branch, "..") {
-		return a, fmt.Errorf("%q is not a branch name", branch)
+	name := branch
+	if o.As != "" {
+		name = o.As
 	}
-	r := runner{main: main, timeout: o.Timeout, trace: o.Trace}
+	a := Added{Path: PathFor(main, name, o), Branch: branch}
+	if err := checkName(branch); err != nil {
+		return a, err
+	}
+	if err := checkName(name); err != nil {
+		return a, fmt.Errorf("%q is not a worktree name", name)
+	}
+	r := o.runner(main)
 	remote := r.remoteOf()
+	attach := o.Attach.attached()
+	if attach && remote == "" {
+		return a, errors.New("the repository has no remote to attach to")
+	}
 	if remote != "" && !o.Offline {
 		if _, err := r.net(main, "fetch", "--quiet", remote); err != nil {
 			return a, fmt.Errorf("git fetch %s: %w; add --offline to go on with the refs already fetched", remote, err)
+		}
+	}
+	if attach {
+		if _, err := r.net(main, "fetch", "--quiet", remote, "+"+o.Attach.ref()+":"+o.Attach.tracking(remote)); err != nil {
+			return a, fmt.Errorf("git fetch %s %s: %w", remote, o.Attach.ref(), err)
 		}
 	}
 	// A base that resolves to nothing is a mistake on every path, not only the one
 	// that cuts a new branch off it.
 	if o.Base != "" && !r.resolves(o.Base) {
 		return a, fmt.Errorf("base %s is not a branch, tag or commit of this repository", o.Base)
+	}
+	// A branch checked out somewhere is that worktree, whatever the name says; git
+	// refuses a second checkout of one branch, and the main checkout is no worktree.
+	if entries, err := List(main); err == nil {
+		for _, e := range entries {
+			if e.Branch != branch {
+				continue
+			}
+			if e.Main {
+				return a, fmt.Errorf("%s is checked out in the main checkout, %s; a worktree is for another branch", branch, main)
+			}
+			a.Path = e.Path
+		}
 	}
 	existed := true
 	if info, err := os.Stat(a.Path); err == nil {
@@ -277,6 +481,11 @@ func Add(main, branch string, o Options) (Added, error) {
 				return a, fmt.Errorf("git worktree add: %w", err)
 			}
 			a.How = "local"
+		case attach:
+			if _, err := r.git(main, "worktree", "add", "--no-track", "-b", branch, a.Path, o.Attach.tracking(remote)); err != nil {
+				return a, fmt.Errorf("git worktree add -b %s at %s: %w", branch, o.Attach.tracking(remote), err)
+			}
+			a.How = o.Attach.how(remote)
 		case onRemote:
 			if _, err := r.git(main, "worktree", "add", "--track", "-b", branch, a.Path, remote+"/"+branch); err != nil {
 				return a, fmt.Errorf("git worktree add: %w", err)
@@ -297,18 +506,29 @@ func Add(main, branch string, o Options) (Added, error) {
 			existed = false
 		}
 	}
-	if remote != "" && a.How != "remote" {
+	if remote != "" {
 		// The upstream is the branch's own name on the remote, set before that branch
-		// exists there, so a push creates it and a pull, once it does, reads it.
+		// exists there, so a push creates it and a pull, once it does, reads it. An
+		// attached pull request that no branch of the remote holds pulls from the
+		// pull request's ref instead, which nothing pushes to.
+		merge := "refs/heads/" + branch
+		if attach {
+			merge = o.Attach.ref()
+		}
 		if _, err := r.git(a.Path, "config", "branch."+branch+".remote", remote); err != nil {
 			return a, err
 		}
-		if _, err := r.git(a.Path, "config", "branch."+branch+".merge", "refs/heads/"+branch); err != nil {
+		if _, err := r.git(a.Path, "config", "branch."+branch+".merge", merge); err != nil {
 			return a, err
 		}
+		if attach && o.Attach.Branch == "" {
+			a.Head = remote + " " + o.Attach.Head
+		} else {
+			a.Upstream = remote + "/" + branch
+		}
 	}
-	if remote != "" {
-		a.Upstream = remote + "/" + branch
+	if attach && a.How == "local" {
+		a.How = o.Attach.how(remote) + "; " + r.fastForward(a.Path, o.Attach.tracking(remote), remote)
 	}
 	if existed && o.Onto && o.Base != "" {
 		if err := r.onto(remote, &a, o); err != nil {
@@ -412,6 +632,33 @@ func (r runner) onto(remote string, a *Added, o Options) error {
 		a.How = fmt.Sprintf("rebased onto %s; %d commit%s, was on %s", o.Base, n, plural(n), old)
 	}
 	return r.recordBase(a.Path, a.Branch, o.Base)
+}
+
+// fastForward brings the local branch checked out at path up to the remote-tracking ref
+// when that is a fast-forward, and says what it did: the branch was moved, was at the
+// ref already, is ahead of it, or has diverged from it and is left as it is. The ref
+// is shown as the remote shows it, origin/feature.
+func (r runner) fastForward(path, tracking, remote string) string {
+	shown := strings.TrimPrefix(tracking, "refs/remotes/")
+	before, _ := r.git(path, "rev-parse", "HEAD")
+	if _, err := r.git(path, "merge", "--ff-only", "--quiet", tracking); err != nil {
+		return "local branch diverged from " + shown + "; git pull merges"
+	}
+	after, _ := r.git(path, "rev-parse", "HEAD")
+	switch {
+	case before != after:
+		return "local branch fast-forwarded to " + shown
+	case before == r.mustRev(path, tracking):
+		return "local branch at " + shown
+	default:
+		return "local branch ahead of " + shown
+	}
+}
+
+// mustRev is the commit ref names, "" when it names none.
+func (r runner) mustRev(dir, ref string) string {
+	sha, _ := r.git(dir, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	return sha
 }
 
 // Remove takes the worktree at path away, after Options.Remove ran in it. It refuses the
@@ -740,6 +987,12 @@ type runner struct {
 	main    string
 	timeout time.Duration
 	trace   func(string)
+}
+
+// runner is the runner for the repository whose main checkout is main, with o's timeout
+// and trace.
+func (o Options) runner(main string) runner {
+	return runner{main: main, timeout: o.Timeout, trace: o.Trace}
 }
 
 // git runs one git command in dir and returns its trimmed output; a failure carries the

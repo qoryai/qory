@@ -38,6 +38,7 @@ harness:
 # What a worktree of this repository needs; qory worktree add reads it.
 worktree:
   #base: main                  # a new branch starts here; default: the remote's HEAD
+  #pr: refs/pull/{n}/head      # where the remote publishes a pull request's head; default: GitHub, GitLab, Bitbucket Server
   link: []                     # linked from the main checkout, e.g. [.env, .env.local]
   copy: []                     # copied once from the main checkout, e.g. [.env.local]
   run:
@@ -53,6 +54,7 @@ const worktreeConfig = `apiVersion: qory.dev/v1alpha1
 # qory-stack.yaml.
 worktree:
   #base: main                  # a new branch starts here; default: the remote's HEAD
+  #pr: refs/pull/{n}/head      # where the remote publishes a pull request's head; default: GitHub, GitLab, Bitbucket Server
   link: []                     # linked from the main checkout, e.g. [.env, .env.local]
   copy: []                     # copied once from the main checkout, e.g. [.env.local]
   run:

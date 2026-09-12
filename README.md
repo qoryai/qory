@@ -143,6 +143,9 @@ worktree:
 qory worktree add feature        # ../wt-feature on branch feature, pushing to origin/feature
 qory worktree add feature --base v1.2.0   # a branch that exists is moved onto the base, after a question
 qory worktree add feature --offline       # without the fetch every add starts with
+qory worktree add --branch feature   # attach to the remote's feature: fetched, tracked, refused when the remote lacks it
+qory worktree add --pr 7             # attach to pull request 7: its branch, found among the remote's refs
+qory worktree add review --pr 7      # the same, in ../wt-review
 qory worktree remove             # the worktree you stand in, and its branch
 qory setup shell                 # make your shell cd into a new worktree, and back on remove
 ```
@@ -155,6 +158,12 @@ checkout or on the base it was cut from, and after a question otherwise, with pu
 keep, delete anyway and stop as the answers. `--keep-branch` keeps it, and
 `worktree.branch: keep` makes that the default. `-v` on either verb prints each git
 command as it runs, and what the configured commands print.
+
+`--pr` asks no hosting API: the pull request's head is one of the refs the remote
+publishes, `refs/pull/<n>/head` on GitHub and Forgejo, `refs/merge-requests/<n>/head` on
+GitLab, `refs/pull-requests/<n>/from` on Bitbucket Server. A host with another layout
+names it as `worktree.pr: refs/.../{n}/...` in the repository's `qory.yaml`; one that
+publishes none, Bitbucket Cloud, takes `--branch` with the pull request's branch.
 
 Where a worktree goes and what it is called is your choice, not the repository's:
 `worktree.dir`, `worktree.name` and `worktree.branch` in your own `qory.yaml`, which

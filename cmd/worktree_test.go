@@ -406,7 +406,7 @@ func TestWorktreeRemoveGuardsAndRuns(t *testing.T) {
 		t.Fatalf("main: %v", err)
 	}
 	_, err = run(t, "wr", "nothing")
-	if err == nil || !strings.Contains(err.Error(), "no worktree is at nothing or on a branch of that name") {
+	if err == nil || !strings.Contains(err.Error(), "no worktree is at nothing, on a branch of that name or added as it") {
 		t.Fatalf("unknown: %v", err)
 	}
 }
@@ -701,5 +701,230 @@ func TestWorktreeLayoutFromTheConfiguration(t *testing.T) {
 	wantsRow(t, out, "path", "worktrees/"+filepath.Base(root)+"-issue-42")
 	if got := gitOut(t, want, "branch", "--show-current"); got != "issue/42" {
 		t.Errorf("branch %q", got)
+	}
+}
+
+// bareOrigin turns the checkout's origin into a bare repository beside it holding main,
+// and returns the bare repository and a second clone of it, with which a test plays the
+// colleague who pushes from elsewhere.
+func bareOrigin(t *testing.T, root string) (bare, dev string) {
+	t.Helper()
+	bare = filepath.Join(t.TempDir(), "origin.git")
+	runGit(t, root, "init", "--quiet", "--bare", bare)
+	runGit(t, root, "remote", "set-url", "origin", bare)
+	runGit(t, root, "push", "--quiet", "origin", "main")
+	dev = filepath.Join(t.TempDir(), "dev")
+	runGit(t, root, "clone", "--quiet", bare, dev)
+	runGit(t, dev, "config", "user.name", "Dev")
+	runGit(t, dev, "config", "user.email", "dev@example.com")
+	return bare, dev
+}
+
+// commitOnBranch switches the clone to branch, cutting it when it is new, commits one change
+// there and returns the commit.
+func commitOnBranch(t *testing.T, dev, branch, change string) string {
+	t.Helper()
+	if out, _ := exec.Command("git", "-C", dev, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch).Output(); len(out) == 0 {
+		runGit(t, dev, "switch", "-q", "-c", branch)
+	} else {
+		runGit(t, dev, "switch", "-q", branch)
+	}
+	writeFile(t, filepath.Join(dev, branch+".txt"), change+"\n")
+	runGit(t, dev, "add", branch+".txt")
+	runGit(t, dev, "commit", "-q", "-m", change+" on "+branch)
+	return gitOut(t, dev, "rev-parse", "HEAD")
+}
+
+// TestWorktreeAddAttachesToRemoteBranch is --branch: a branch pushed from elsewhere is
+// fetched and tracked, one the remote lacks is refused, a name beside the flag names the worktree, a worktree already on the branch
+// is reused wherever it is, and a local branch that was kept is fast-forwarded, or left
+// where it is when it is ahead or has diverged.
+func TestWorktreeAddAttachesToRemoteBranch(t *testing.T) {
+	root := worktreeRepo(t)
+	_, dev := bareOrigin(t, root)
+	tip := commitOnBranch(t, dev, "feature", "first")
+	runGit(t, dev, "push", "--quiet", "origin", "feature")
+	_, err := run(t, "wa", "--branch", "nowhere", "--no-compose")
+	if err == nil || err.Error() != "origin has no branch nowhere; qory worktree add nowhere cuts a new one" || cmd.ExitCode(err) != cmd.ExitInput {
+		t.Fatalf("a branch the remote lacks: %v", err)
+	}
+	out, err := run(t, "wa", "--branch", "feature", "--no-compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wt := filepath.Join(filepath.Dir(root), "wt-feature")
+	wants(t, out, "worktree feature")
+	wantsRow(t, out, "path", "../wt-feature")
+	wantsRow(t, out, "branch", "feature  (fetched from origin)")
+	wantsRow(t, out, "pushes to", "origin/feature")
+	if got := gitOut(t, wt, "rev-parse", "HEAD"); got != tip {
+		t.Errorf("HEAD %s, want the remote's %s", got, tip)
+	}
+	if got := gitOut(t, wt, "config", "branch.feature.merge"); got != "refs/heads/feature" {
+		t.Errorf("upstream branch %q", got)
+	}
+	out, err = run(t, "wa", "review", "--branch", "feature", "--no-compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "worktree review")
+	wantsRow(t, out, "path", "../wt-feature")
+	wantsRow(t, out, "branch", "feature  (already there)")
+	if _, err := run(t, "wr", "feature", "--keep-branch"); err != nil {
+		t.Fatal(err)
+	}
+	tip = commitOnBranch(t, dev, "feature", "second")
+	runGit(t, dev, "push", "--quiet", "origin", "feature")
+	out, err = run(t, "wa", "short", "--branch", "feature", "--no-compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wt = filepath.Join(filepath.Dir(root), "wt-short")
+	wantsRow(t, out, "path", "../wt-short")
+	wantsRow(t, out, "branch", "feature  (fetched from origin; local branch fast-forwarded to origin/feature)")
+	if got := gitOut(t, wt, "rev-parse", "HEAD"); got != tip {
+		t.Errorf("HEAD %s, want the remote's %s", got, tip)
+	}
+	if _, err := run(t, "wr", "short", "--keep-branch"); err != nil {
+		t.Fatal(err)
+	}
+	out, err = run(t, "wa", "--branch", "feature", "--no-compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "branch", "feature  (fetched from origin; local branch at origin/feature)")
+	wt = filepath.Join(filepath.Dir(root), "wt-feature")
+	writeFile(t, filepath.Join(wt, "mine.txt"), "x\n")
+	runGit(t, wt, "add", "mine.txt")
+	runGit(t, wt, "commit", "-q", "-m", "mine")
+	if _, err := run(t, "wr", "feature", "--keep-branch"); err != nil {
+		t.Fatal(err)
+	}
+	out, err = run(t, "wa", "--branch", "feature", "--no-compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "branch", "feature  (fetched from origin; local branch ahead of origin/feature)")
+	if _, err := run(t, "wr", "feature", "--keep-branch"); err != nil {
+		t.Fatal(err)
+	}
+	commitOnBranch(t, dev, "feature", "third")
+	runGit(t, dev, "push", "--quiet", "origin", "feature")
+	out, err = run(t, "wa", "--branch", "feature", "--no-compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "branch", "feature  (fetched from origin; local branch diverged from origin/feature; git pull merges)")
+	_, err = run(t, "wa", "--branch", "main", "--no-compose")
+	if err == nil || !strings.Contains(err.Error(), "main is checked out in the main checkout, "+root+"; a worktree is for another branch") {
+		t.Fatalf("the main checkout's branch: %v", err)
+	}
+	_, err = run(t, "wa")
+	if err == nil || err.Error() != "qory wa takes a branch name, or --branch or --pr to say which branch of the remote to attach to" || cmd.ExitCode(err) != cmd.ExitInput {
+		t.Fatalf("no branch: %v", err)
+	}
+	runGit(t, root, "remote", "remove", "origin")
+	_, err = run(t, "wa", "--branch", "feature", "--no-compose")
+	if err == nil || err.Error() != "the repository has no remote to attach to" {
+		t.Fatalf("no remote: %v", err)
+	}
+}
+
+// TestWorktreeAddAttachesToPullRequest is --pr: a pull request whose head is a branch of
+// the remote checks that branch out and pushes to it; one whose head no branch holds, a
+// fork's, is checked out as pr-<n> and pulls from the pull request's ref, and its remove
+// is quiet since the commits are on the remote; the refs GitLab publishes are found too;
+// a head at the tip of two branches is refused; a number the remote publishes nothing
+// for says what was looked for; worktree.pr names the host's own ref; and the flags that
+// do not go together.
+func TestWorktreeAddAttachesToPullRequest(t *testing.T) {
+	root := worktreeRepo(t)
+	bare, dev := bareOrigin(t, root)
+	topic := commitOnBranch(t, dev, "topic", "first")
+	runGit(t, dev, "push", "--quiet", "origin", "topic")
+	runGit(t, bare, "update-ref", "refs/pull/7/head", topic)
+	out, err := run(t, "wa", "--pr", "7", "--no-compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wt := filepath.Join(filepath.Dir(root), "wt-topic")
+	wants(t, out, "worktree topic")
+	wantsRow(t, out, "path", "../wt-topic")
+	wantsRow(t, out, "branch", "topic  (pull request #7, fetched from origin)")
+	wantsRow(t, out, "pushes to", "origin/topic")
+	if got := gitOut(t, wt, "rev-parse", "HEAD"); got != topic {
+		t.Errorf("HEAD %s, want the pull request's %s", got, topic)
+	}
+	if got := gitOut(t, wt, "config", "branch.topic.merge"); got != "refs/heads/topic" {
+		t.Errorf("upstream branch %q", got)
+	}
+	fork := commitOnBranch(t, dev, "fork-work", "first")
+	runGit(t, dev, "push", "--quiet", "origin", "HEAD:refs/pull/8/head")
+	out, err = run(t, "wa", "review", "--pr", "8", "--no-compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wt = filepath.Join(filepath.Dir(root), "wt-review")
+	wantsRow(t, out, "path", "../wt-review")
+	wantsRow(t, out, "branch", "pr-8  (pull request #8, fetched from origin)")
+	wantsRow(t, out, "pulls from", "origin refs/pull/8/head  (no branch of the remote holds it, a fork's or a deleted one; a push from here goes nowhere)")
+	lacks(t, out, "pushes to")
+	if got := gitOut(t, wt, "rev-parse", "HEAD"); got != fork {
+		t.Errorf("HEAD %s, want the pull request's %s", got, fork)
+	}
+	if got := gitOut(t, wt, "config", "branch.pr-8.merge"); got != "refs/pull/8/head" {
+		t.Errorf("upstream branch %q", got)
+	}
+	out, err = run(t, "wr", "review")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "branch", "pr-8  (deleted; every commit of it is on the remote, in the main checkout or on its base)")
+	runGit(t, bare, "update-ref", "refs/merge-requests/9/head", topic)
+	out, err = run(t, "wa", "--pr", "9", "--no-compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "path", "../wt-topic")
+	wantsRow(t, out, "branch", "topic  (already there)")
+	_, err = run(t, "wa", "--pr", "10", "--no-compose")
+	if err == nil || !strings.HasPrefix(err.Error(), "pull request 10 not found on origin; looked for refs/pull/10/head, refs/merge-requests/10/head, refs/pull-requests/10/from. worktree.pr in qory.yaml names the ref your host uses") || cmd.ExitCode(err) != cmd.ExitInput {
+		t.Fatalf("no such pull request: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(root), "wt-pr-10")); err == nil {
+		t.Errorf("a pull request that is not found made a worktree")
+	}
+	if out := gitOut(t, root, "branch", "--list", "pr-10"); out != "" {
+		t.Errorf("a pull request that is not found made a branch: %s", out)
+	}
+	runGit(t, dev, "push", "--quiet", "origin", "topic:refs/heads/topic-copy")
+	_, err = run(t, "wa", "--pr", "7", "--no-compose")
+	if err == nil || err.Error() != "pull request 7 is at the tip of 2 branches of origin, topic, topic-copy; --branch says which to attach to" {
+		t.Fatalf("two branches: %v", err)
+	}
+	configure(t, root, nil, []string{"  pr: refs/changes/{n}/head"})
+	runGit(t, bare, "update-ref", "refs/changes/11/head", fork)
+	_, err = run(t, "wa", "--pr", "7", "--no-compose")
+	if err == nil || !strings.Contains(err.Error(), "looked for refs/changes/7/head.") {
+		t.Fatalf("worktree.pr alone is looked for: %v", err)
+	}
+	out, err = run(t, "wa", "--pr", "11", "--no-compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "branch", "pr-11  (pull request #11, fetched from origin)")
+	wantsRow(t, out, "pulls from", "origin refs/changes/11/head  (no branch of the remote holds it, a fork's or a deleted one; a push from here goes nowhere)")
+	out, err = run(t, "config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants(t, out, "worktree.pr", "refs/changes/{n}/head")
+	_, err = run(t, "wa", "--branch", "topic", "--pr", "7")
+	if err == nil || !strings.Contains(err.Error(), "none of the others can be") {
+		t.Fatalf("both flags: %v", err)
+	}
+	_, err = run(t, "wa", "--pr", "0")
+	if err == nil || err.Error() != "--pr takes a pull request number, got 0" {
+		t.Fatalf("pr 0: %v", err)
 	}
 }
