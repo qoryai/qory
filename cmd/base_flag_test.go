@@ -158,6 +158,7 @@ func TestWorktreeAddTakesTheBaseFromTheFlag(t *testing.T) {
 	root := fleetCheckout(t, "harness.yaml")
 	runGit(t, root, "add", "-A")
 	runGit(t, root, "commit", "-q", "-m", "fleet")
+	localOrigin(t, root)
 	out, err := run(t, "wa", "feature", "-f", base)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)

@@ -588,8 +588,10 @@ worktree:
   dir: ..                        # where worktrees go, relative to the main checkout
   name: wt-{branch}              # a worktree's directory name; {repo} is the main checkout's
   base: main                     # the branch a new worktree branch starts from
+  branch: delete                 # what worktree remove does with the branch: delete or keep
   link: [.env, .env.local]       # linked from the main checkout into a new worktree
   copy: [config/local.json]      # copied once into a new worktree
+    # {from: ~/secrets/app.env, to: .env} brings a path from outside the checkout
   run:
     add: [pnpm install]          # run in a new worktree, after links and copies
     remove: [docker compose down] # run in a worktree before it is removed
@@ -617,11 +619,12 @@ exports:                         # in a repository delivering stacks or modules 
 | `worktree.dir` | `..` | where `qory worktree add` puts a worktree, relative to the main checkout unless absolute |
 | `worktree.name` | `wt-{branch}` | one directory name under `worktree.dir`; `{branch}` is the branch with each slash made a dash, `{repo}` the main checkout's directory name |
 | `worktree.base` | the remote's HEAD branch, else the main checkout's branch | the branch a new worktree branch starts from; it has to hold a commit, so a repository with none yet is refused |
-| `worktree.link` | none | paths inside the checkout, linked from the main checkout into a new worktree; one missing there is reported, not an error |
-| `worktree.copy` | none | paths copied once into a new worktree |
-| `worktree.run.add` | none | commands run in a new worktree after links, copies and the compose, in order; a failure stops with the worktree kept |
-| `worktree.run.remove` | none | commands run in a worktree before it is removed, in order |
-| `git.timeout` | `10m` | a git command running past it is stopped and the compose fails |
+| `worktree.branch` | `delete` | what `qory worktree remove` does with the worktree's branch: `delete` or `keep`; `--keep-branch` and `--delete-branch` win over it |
+| `worktree.link` | none | paths linked into a new worktree: a path inside the checkout, linked from the main checkout to the same path, or `{from: <path>, to: <path>}`, `from` anywhere on the machine, absolute or under `~`, `to` the path in the worktree, relative and inside it, required when `from` is outside the checkout. A `from` that is not there is reported, not an error; a `to` already in the worktree, a dangling link too, is kept. The `{from, to}` form belongs in the user's file when `from` is one machine's path, so it never lands in the committed file; the committed file may use it for a path every machine has |
+| `worktree.copy` | none | paths copied once into a new worktree, in the same two forms |
+| `worktree.run.add` | none | commands run in a new worktree after links and copies, in order, with `QORY_WORKTREE`, `QORY_MAIN`, `QORY_BRANCH` and, when the branch's base is recorded, `QORY_BASE` set; a failure stops with the worktree kept |
+| `worktree.run.remove` | none | commands run in a worktree before it is removed, in order, with the same variables set |
+| `git.timeout` | `10m` | a git command running past it is stopped and the compose fails; the fetch a worktree add starts with is bounded by it too |
 | `git.cache` | the user's cache directory, `qory/sources` under `~/Library/Caches`, `$XDG_CACHE_HOME` or `~/.cache` | absolute, or relative to the file naming it |
 | `env` | none | variables written over what the modules export; a name two modules export with different values needs one here |
 | `exports.dir` | the repository root | where the exported stacks and modules are: one directory holding `stacks/` and `modules/`, or `{stacks: <dir>, modules: <dir>}` naming each; relative to the root, inside the repository. Read at the repository root alone |

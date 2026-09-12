@@ -6,6 +6,10 @@ Add a worktree for a branch, prepare it, and compose the harness into it
 
 Add a worktree for a branch, prepare it, and compose the harness into it.
 
+The remote is fetched first, whole, so the base is the remote's tip and a branch pushed
+from another machine is found; git.timeout in qory.yaml bounds the fetch. A fetch that
+fails stops the add, and --offline skips it to go on with the refs already fetched.
+
 The worktree goes where worktree.dir and worktree.name in qory.yaml say, beside the main
 checkout as wt-<branch> by default. A branch that exists locally is checked out; one that
 exists on the remote is tracked; a new one is cut off --base, else worktree.base, else the
@@ -20,12 +24,20 @@ or at once with --rebase. The base a branch was cut from is recorded in its git 
 which is how add knows what the branch's own commits are; a branch made without qory
 counts from the remote's HEAD branch. A no keeps the branch where it is.
 
-Then every worktree.link is linked and every worktree.copy copied from the main checkout,
-every worktree.run.add is run in the worktree with QORY_WORKTREE, QORY_MAIN and
-QORY_BRANCH set, and the harness is composed into it when the repository holds a
-qory-stack.yaml or a qory.yaml naming one. -f names the stack to compose instead, as it
-does on harness compose: a stack the worktree's own document extends composes on it as
-its base, which is how a runner holding the stack tree supplies one.
+Then every worktree.link is linked and every worktree.copy copied into the worktree: a
+path named alone comes from the main checkout, {from: <path>, to: <path>} from anywhere
+on the machine, from absolute or under ~, to the path in the worktree. A destination
+already there is kept, a dangling link too, and a source that is not there is reported.
+Every worktree.run.add is run in the worktree with QORY_WORKTREE, QORY_MAIN, QORY_BRANCH
+and, when the branch's base is recorded, QORY_BASE set, and the harness is composed into
+it when the repository holds a qory-stack.yaml or a qory.yaml naming one. -f names the
+stack to compose instead, as it does on harness compose: a stack the worktree's own
+document extends composes on it as its base, which is how a runner holding the stack
+tree supplies one.
+
+--verbose prints each git command as it runs and what every worktree.run.add command
+prints, and the compose lists its entries. Without it a command's output is shown only
+when the command fails.
 
 ```
 qory worktree add <branch> [flags]
@@ -35,12 +47,18 @@ qory worktree add <branch> [flags]
 
 ```
       --base string   the branch, tag or commit a new branch starts from, or an existing one is moved onto (qory.yaml: worktree.base; default: the remote's HEAD branch)
-      --fetch         fetch the remote first, so the base and the branch are the remote's
   -f, --file string   the qory-stack.yaml to compose into the worktree, or the qory.yaml or harness.yaml whose harness section to compose, instead of discovering one; a stack named here is the base of the worktree's own document, as on harness compose
   -h, --help          help for add
       --no-compose    do not compose the harness into the worktree
+      --offline       do not fetch the remote first; use the refs already fetched
       --path          print the worktree's path alone on stdout, the rows on stderr
       --rebase        move or rebase a branch that already exists onto --base without asking
+```
+
+### Options inherited from parent commands
+
+```
+  -v, --verbose   print more of what the command does; each command's help says what
 ```
 
 ### SEE ALSO

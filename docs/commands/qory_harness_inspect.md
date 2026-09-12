@@ -2,6 +2,12 @@
 
 Print the report of the composed harness
 
+### Synopsis
+
+Print the report of the composed harness.
+
+--verbose adds nothing here.
+
 ```
 qory harness inspect [flags]
 ```
@@ -10,6 +16,12 @@ qory harness inspect [flags]
 
 ```
   -h, --help   help for inspect
+```
+
+### Options inherited from parent commands
+
+```
+  -v, --verbose   print more of what the command does; each command's help says what
 ```
 
 ### SEE ALSO

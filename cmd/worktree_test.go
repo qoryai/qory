@@ -35,35 +35,71 @@ func gitOut(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// worktreeRepo is a checkout on main with the two-modules stack committed, a qory.yaml
-// that links .env and .env.local, copies config/local.json and runs one command on add
-// and one on remove, an .env and a config/local.json outside git, and one commit.
+// localOrigin makes a bare repository and points root's origin at it, so an add can
+// fetch and a remove can push.
+func localOrigin(t *testing.T, root string) string {
+	t.Helper()
+	bare := filepath.Join(t.TempDir(), "origin.git")
+	runGit(t, root, "init", "--quiet", "--bare", "--initial-branch=main", bare)
+	runGit(t, root, "remote", "set-url", "origin", bare)
+	return bare
+}
+
+// clone is a second checkout of the bare repository, another machine's, with its own
+// identity.
+func clone(t *testing.T, bare string) string {
+	t.Helper()
+	dir := filepath.Join(tempDir(t), "other")
+	runGit(t, filepath.Dir(dir), "clone", "--quiet", bare, dir)
+	runGit(t, dir, "config", "user.name", "Other")
+	runGit(t, dir, "config", "user.email", "other@example.com")
+	return dir
+}
+
+// commitOn makes one commit in dir touching file and returns its hash.
+func commitOn(t *testing.T, dir, file, message string) string {
+	t.Helper()
+	writeFile(t, filepath.Join(dir, file), message+"\n")
+	runGit(t, dir, "add", file)
+	runGit(t, dir, "commit", "-q", "-m", message)
+	return gitOut(t, dir, "rev-parse", "HEAD")
+}
+
+// worktreeRepo is a checkout on main with the two-modules stack committed and pushed to
+// a local origin whose HEAD branch is main, a qory.yaml that links .env and .env.local,
+// copies config/local.json and runs one command on add and one on remove, and an .env
+// and a config/local.json outside git.
 func worktreeRepo(t *testing.T) string {
 	t.Helper()
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
-	configure(t, root, nil, []string{"worktree:", "  link: [.env, .env.local]", "  copy: [config/local.json]", "  run:", `    add: ['printf "%s %s" "$QORY_BRANCH" "$(basename "$QORY_MAIN")" > ran.txt']`, `    remove: ['touch "$QORY_MAIN/removed-$QORY_BRANCH"']`})
+	configure(t, root, nil, []string{"worktree:", "  link: [.env, .env.local]", "  copy: [config/local.json]", "  run:", `    add: ['printf "%s %s %s" "$QORY_BRANCH" "$(basename "$QORY_MAIN")" "$QORY_BASE" > ran.txt']`, `    remove: ['touch "$QORY_MAIN/removed-$QORY_BRANCH" && echo "bye $QORY_BRANCH off $QORY_BASE"']`})
 	runGit(t, root, "add", "-A")
 	runGit(t, root, "commit", "-q", "-m", "stack")
+	localOrigin(t, root)
+	runGit(t, root, "push", "--quiet", "origin", "main")
+	runGit(t, root, "remote", "set-head", "origin", "main")
 	writeFile(t, filepath.Join(root, ".env"), "SECRET=1\n")
 	writeFile(t, filepath.Join(root, "config", "local.json"), "{}\n")
 	return root
 }
 
 // TestWorktreeAddPreparesAndComposes is a repository with a stack and a worktree section:
-// add cuts the branch off main, sets its upstream to a remote branch of its own name,
-// links and copies what the section names, reports the one missing in the main checkout,
-// runs the add command with the environment set, and composes the harness into the
-// worktree.
+// add fetches, cuts the branch off the remote's HEAD branch, sets its upstream to a
+// remote branch of its own name, links and copies what the section names, reports the
+// one missing in the main checkout, runs the add command with the environment set, the
+// base in it, and composes the harness into the worktree. With --verbose the git
+// commands and the compose's entries are printed.
 func TestWorktreeAddPreparesAndComposes(t *testing.T) {
 	root := worktreeRepo(t)
-	out, err := run(t, "wa", "feature")
+	out, err := run(t, "wa", "feature", "-v")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	wt := filepath.Join(filepath.Dir(root), "wt-feature")
+	wants(t, out, "  git fetch --quiet origin\n", "  git worktree add --no-track -b feature "+wt+" origin/main\n", "  git config branch.feature.remote origin  (in ../wt-feature)\n", "skills/e2e")
 	wantsRow(t, out, "path", "../wt-feature")
-	wantsRow(t, out, "branch", "feature  (new off main)")
+	wantsRow(t, out, "branch", "feature  (new off origin/main)")
 	wantsRow(t, out, "pushes to", "origin/feature")
 	wantsRow(t, out, "linked", ".env  (from the main checkout)")
 	wantsRow(t, out, "copied", "config/local.json  (from the main checkout)")
@@ -84,7 +120,7 @@ func TestWorktreeAddPreparesAndComposes(t *testing.T) {
 	if data, _ := os.ReadFile(filepath.Join(wt, "config", "local.json")); string(data) != "{}\n" {
 		t.Errorf("config/local.json: %q", data)
 	}
-	if data, _ := os.ReadFile(filepath.Join(wt, "ran.txt")); string(data) != "feature "+filepath.Base(root) {
+	if data, _ := os.ReadFile(filepath.Join(wt, "ran.txt")); string(data) != "feature "+filepath.Base(root)+" origin/main" {
 		t.Errorf("ran.txt: %q", data)
 	}
 	if _, err := os.Stat(filepath.Join(wt, ".claude", "settings.json")); err != nil {
@@ -95,7 +131,7 @@ func TestWorktreeAddPreparesAndComposes(t *testing.T) {
 // TestWorktreeAddNeedsACommit is a repository with no commit yet: add says so instead
 // of passing git's message on.
 func TestWorktreeAddNeedsACommit(t *testing.T) {
-	newCheckout(t)
+	localOrigin(t, newCheckout(t))
 	out, _, err := runSplit(t, "", "worktree", "add", "feature")
 	if err == nil {
 		t.Fatalf("add in a repository with no commit succeeded:\n%s", out)
@@ -118,6 +154,7 @@ func TestWorktreeAddReusesAndRefuses(t *testing.T) {
 	wantsRow(t, out, "path", "../wt-feature")
 	wantsRow(t, out, "branch", "feature  (already there)")
 	wants(t, out, ".env  (already in the worktree)", "config/local.json  (already in the worktree)")
+	lacks(t, out, "git fetch")
 	wt := filepath.Join(filepath.Dir(root), "wt-feature")
 	t.Chdir(wt)
 	out, err = run(t, "wa", "feature", "--no-compose")
@@ -189,16 +226,16 @@ func TestWorktreeAddMovesAnExistingBranchOntoABase(t *testing.T) {
 		t.Fatal(err)
 	}
 	wt := filepath.Join(filepath.Dir(root), "wt-feature")
-	if got := gitOut(t, root, "config", "branch.feature.qory-base"); got != "main" {
-		t.Errorf("recorded base %q, want main", got)
+	if got := gitOut(t, root, "config", "branch.feature.qory-base"); got != "origin/main" {
+		t.Errorf("recorded base %q, want origin/main", got)
 	}
 	tagCommit(t, root, "release.txt", "v0.4.0")
 	stdout, _, err := runSplit(t, "\n", "wa", "feature", "--no-compose", "--base", "v0.4.0")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, stdout)
 	}
-	wants(t, stdout, "feature sits on main with no commits of its own. Move it onto v0.4.0? [Y/n]")
-	wantsRow(t, stdout, "branch", "feature  (moved onto v0.4.0; was on main)")
+	wants(t, stdout, "feature sits on origin/main with no commits of its own. Move it onto v0.4.0? [Y/n]")
+	wantsRow(t, stdout, "branch", "feature  (moved onto v0.4.0; was on origin/main)")
 	if gitOut(t, wt, "rev-parse", "HEAD") != gitOut(t, root, "rev-parse", "v0.4.0") {
 		t.Errorf("the branch did not move")
 	}
@@ -269,14 +306,15 @@ func TestWorktreeAddMovesALocalBranchWithoutAWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wantsRow(t, out, "branch", "feature  (moved onto v0.4.0; was on main)")
+	wantsRow(t, out, "branch", "feature  (moved onto v0.4.0; was on origin/main)")
 	wt := filepath.Join(filepath.Dir(root), "wt-feature")
 	if gitOut(t, wt, "rev-parse", "HEAD") != gitOut(t, root, "rev-parse", "v0.4.0") {
 		t.Errorf("the branch did not move")
 	}
 }
 
-// TestWorktreeAddStopsAtAFailingCommand keeps the worktree and names the command.
+// TestWorktreeAddStopsAtAFailingCommand keeps the worktree, names the command and shows
+// what it printed, which without --verbose went nowhere else.
 func TestWorktreeAddStopsAtAFailingCommand(t *testing.T) {
 	root := worktreeRepo(t)
 	// The stack stays; the worktree section is replaced by one whose second command fails.
@@ -286,11 +324,12 @@ func TestWorktreeAddStopsAtAFailingCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := string(data)
-	writeFile(t, file, doc[:strings.Index(doc, "worktree:\n")]+"worktree:\n  run:\n    add: ['true', 'exit 3', 'touch never']\n")
-	_, err = run(t, "wa", "feature")
-	if err == nil || !strings.Contains(err.Error(), "exit 3 in ") || !strings.Contains(err.Error(), "the worktree is kept, repair the command and add again") || cmd.ExitCode(err) != cmd.ExitInput {
+	writeFile(t, file, doc[:strings.Index(doc, "worktree:\n")]+"worktree:\n  run:\n    add: ['true', 'echo oops >&2; exit 3', 'touch never']\n")
+	out, err := run(t, "wa", "feature")
+	if err == nil || !strings.Contains(err.Error(), "echo oops >&2; exit 3 in ") || !strings.Contains(err.Error(), "the worktree is kept, repair the command and add again; it printed:\noops") || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("err = %v", err)
 	}
+	lacks(t, out, "oops")
 	wt := filepath.Join(filepath.Dir(root), "wt-feature")
 	if _, err := os.Stat(wt); err != nil {
 		t.Errorf("the worktree is gone: %v", err)
@@ -327,7 +366,8 @@ func TestWorktreeRemoveGuardsAndRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantsRow(t, out, "ran", `touch "$QORY_MAIN/removed-$QORY_BRANCH"`)
+	wantsRow(t, out, "ran", `touch "$QORY_MAIN/removed-$QORY_BRANCH" && echo "bye $QORY_BRANCH off $QORY_BASE"`)
+	lacks(t, out, "bye feature", "git worktree remove")
 	wantsRow(t, out, "removed", "../wt-feature")
 	wantsRow(t, out, "branch", "feature  (kept with 1 commit nothing else holds; git branch -D feature deletes it)")
 	wantsRow(t, out, "main", root)
@@ -352,10 +392,11 @@ func TestWorktreeRemoveGuardsAndRuns(t *testing.T) {
 	if _, err := run(t, "wa", "feature", "--no-compose"); err != nil {
 		t.Fatal(err)
 	}
-	out, err = runNoTTY(t, "wr", "feature", "--delete-branch")
+	out, err = runNoTTY(t, "wr", "feature", "--delete-branch", "-v")
 	if err != nil {
 		t.Fatal(err)
 	}
+	wants(t, out, "  counting the commits of feature that are not on every remote branch, the main checkout's HEAD "+gitOut(t, root, "rev-parse", "--short=7", "HEAD")+", its recorded base origin/main\n", "  feature holds 1 commit of its own, the newest ", `"new"`, "\nbye feature off origin/main\n", "  git worktree remove --force "+wt+"\n", "  git branch -D feature\n")
 	wantsRow(t, out, "branch", "feature  (deleted with 1 commit nothing else holds; git reflog finds it for 30 days)")
 	if gitOut(t, root, "branch", "--list", "feature") != "" {
 		t.Errorf("the branch stayed")
@@ -375,10 +416,6 @@ func TestWorktreeRemoveGuardsAndRuns(t *testing.T) {
 // anyway, and p pushes it to the remote first, after which add tracks the remote branch.
 func TestWorktreeRemoveAsksAboutOwnCommits(t *testing.T) {
 	root := worktreeRepo(t)
-	bare := filepath.Join(t.TempDir(), "origin.git")
-	runGit(t, root, "init", "--quiet", "--bare", bare)
-	runGit(t, root, "remote", "set-url", "origin", bare)
-	runGit(t, root, "push", "--quiet", "origin", "main")
 	own := func(branch string) string {
 		if _, err := run(t, "wa", branch, "--no-compose"); err != nil {
 			t.Fatal(err)
@@ -498,7 +535,7 @@ func TestWorktreeRemoveDefaultsToTheOneYouStandIn(t *testing.T) {
 }
 
 // TestWorktreeListNamesEveryWorktree lists the main checkout and the worktrees with
-// their branches, and marks the composed ones.
+// their branches, marks the composed ones, and with --verbose names their reports.
 func TestWorktreeListNamesEveryWorktree(t *testing.T) {
 	root := worktreeRepo(t)
 	if _, err := run(t, "wa", "feature"); err != nil {
@@ -512,7 +549,141 @@ func TestWorktreeListNamesEveryWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 	wants(t, out, "main", "../wt-feature", "feature", "composed", "../wt-second", "second")
+	lacks(t, out, "harness-report.json")
+	out, err = run(t, "wl", "--verbose")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants(t, out, "../wt-feature/.qory/harness-report.json")
+	if strings.Count(out, "harness-report.json") != 1 {
+		t.Errorf("a report is named for a worktree without one:\n%s", out)
+	}
 	_ = root
+}
+
+// TestWorktreeAddFetchesTheRemoteFirst is a remote that moved on since the last fetch:
+// a new branch starts at the remote's tip, not at the stale origin/main, a branch
+// pushed from another checkout is tracked rather than cut anew, and an add of a
+// worktree already there fetches too.
+func TestWorktreeAddFetchesTheRemoteFirst(t *testing.T) {
+	root := worktreeRepo(t)
+	other := clone(t, gitOut(t, root, "remote", "get-url", "origin"))
+	tip := commitOn(t, other, "moved.txt", "main moved on")
+	runGit(t, other, "push", "--quiet", "origin", "main")
+	runGit(t, other, "switch", "--quiet", "-c", "elsewhere")
+	pushed := commitOn(t, other, "elsewhere.txt", "work elsewhere")
+	runGit(t, other, "push", "--quiet", "origin", "elsewhere")
+	stale := gitOut(t, root, "rev-parse", "origin/main")
+	if stale == tip {
+		t.Fatal("origin/main is not stale")
+	}
+	out, err := run(t, "wa", "feature", "--no-compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "branch", "feature  (new off origin/main)")
+	wt := filepath.Join(filepath.Dir(root), "wt-feature")
+	if got := gitOut(t, wt, "rev-parse", "HEAD"); got != tip {
+		t.Errorf("feature starts at %s, want the remote's tip %s", got, tip)
+	}
+	if got := gitOut(t, root, "rev-parse", "main"); got == tip {
+		t.Errorf("the local main moved; only the remote's refs should")
+	}
+	out, err = run(t, "wa", "elsewhere", "--no-compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "branch", "elsewhere  (remote)")
+	if got := gitOut(t, filepath.Join(filepath.Dir(root), "wt-elsewhere"), "rev-parse", "HEAD"); got != pushed {
+		t.Errorf("elsewhere is at %s, want the pushed %s", got, pushed)
+	}
+	runGit(t, other, "switch", "--quiet", "main")
+	again := commitOn(t, other, "moved.txt", "main moved again")
+	runGit(t, other, "push", "--quiet", "origin", "main")
+	if out, err := run(t, "wa", "feature", "--no-compose"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if got := gitOut(t, root, "rev-parse", "origin/main"); got != again {
+		t.Errorf("origin/main is %s after an add of a worktree already there, want %s", got, again)
+	}
+}
+
+// TestWorktreeAddOfflineSkipsTheFetch is a remote that cannot be reached: the add stops
+// with an error naming --offline and makes no worktree, and --offline goes on with the
+// refs already fetched.
+func TestWorktreeAddOfflineSkipsTheFetch(t *testing.T) {
+	root := worktreeRepo(t)
+	runGit(t, root, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "gone.git"))
+	out, err := run(t, "wa", "feature", "--no-compose")
+	if err == nil || !strings.HasPrefix(err.Error(), "git fetch origin: ") || !strings.HasSuffix(err.Error(), "; add --offline to go on with the refs already fetched") || cmd.ExitCode(err) != cmd.ExitInput {
+		t.Fatalf("unreachable remote: %v\n%s", err, out)
+	}
+	wt := filepath.Join(filepath.Dir(root), "wt-feature")
+	if _, err := os.Stat(wt); err == nil {
+		t.Errorf("a worktree was made without the fetch")
+	}
+	out, err = run(t, "wa", "feature", "--no-compose", "--offline")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "branch", "feature  (new off origin/main)")
+	if gitOut(t, wt, "rev-parse", "HEAD") != gitOut(t, root, "rev-parse", "origin/main") {
+		t.Errorf("feature does not start at the fetched origin/main")
+	}
+}
+
+// TestWorktreeLinksAndCopiesFromOutsideTheCheckout is worktree.link and worktree.copy
+// in the user's file with {from, to} entries: a path under ~ is linked, absolute, to
+// its to; a path in the main checkout goes to another name; a from that is not there
+// is missing; and on a second add a dangling link is kept, not remade.
+func TestWorktreeLinksAndCopiesFromOutsideTheCheckout(t *testing.T) {
+	root := newCheckout(t)
+	localOrigin(t, root)
+	home := os.Getenv("HOME")
+	writeFile(t, filepath.Join(root, "config", "dev.json"), "{\"dev\": true}\n")
+	commitOn(t, root, "README.md", "start")
+	writeFile(t, filepath.Join(home, "secrets", "app.env"), "SECRET=1\n")
+	writeFile(t, filepath.Join(home, "shared", "seed.sql"), "select 1;\n")
+	user := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "qory.yaml")
+	writeFile(t, user, "apiVersion: qory.dev/v1alpha1\nworktree:\n  link: [{from: ~/secrets/app.env, to: .env}, {from: ~/nowhere.env, to: .env.local}]\n  copy: [{from: "+home+"/shared/seed.sql, to: db/seed.sql}, {from: config/dev.json, to: config/local.json}]\n")
+	out, err := run(t, "wa", "feature", "--no-compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "linked", ".env  (from ~/secrets/app.env)")
+	wantsRow(t, out, "missing", ".env.local  (not at ~/nowhere.env; nothing linked)")
+	if got := fieldRows(out)["copied"]; strings.Join(got, "|") != "db/seed.sql  (from ~/shared/seed.sql)|config/local.json  (from config/dev.json in the main checkout)" {
+		t.Errorf("copied rows %q:\n%s", got, out)
+	}
+	wt := filepath.Join(filepath.Dir(root), "wt-feature")
+	if target, err := os.Readlink(filepath.Join(wt, ".env")); err != nil || target != filepath.Join(home, "secrets", "app.env") {
+		t.Errorf(".env links to %q, %v; want the absolute source", target, err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(wt, "db", "seed.sql")); string(data) != "select 1;\n" {
+		t.Errorf("db/seed.sql: %q", data)
+	}
+	if data, _ := os.ReadFile(filepath.Join(wt, "config", "local.json")); string(data) != "{\"dev\": true}\n" {
+		t.Errorf("config/local.json: %q", data)
+	}
+	if err := os.Remove(filepath.Join(home, "secrets", "app.env")); err != nil {
+		t.Fatal(err)
+	}
+	out, err = run(t, "wa", "feature", "--no-compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if got := fieldRows(out)["kept"]; strings.Join(got, "|") != ".env  (already in the worktree)|db/seed.sql  (already in the worktree)|config/local.json  (already in the worktree)" {
+		t.Errorf("kept rows %q:\n%s", got, out)
+	}
+	lacks(t, out, ".env  (not at")
+	if info, err := os.Lstat(filepath.Join(wt, ".env")); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("the dangling link is gone: %v", err)
+	}
+	out, err = run(t, "config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants(t, out, home+"/secrets/app.env -> .env", "config/dev.json -> config/local.json")
 }
 
 // TestWorktreeLayoutFromTheConfiguration is worktree.dir and worktree.name in the user's

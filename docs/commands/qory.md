@@ -18,7 +18,8 @@ Shortcuts:
 ### Options
 
 ```
-  -h, --help   help for qory
+  -h, --help      help for qory
+  -v, --verbose   print more of what the command does; each command's help says what
 ```
 
 ### SEE ALSO

@@ -32,6 +32,14 @@ of the operator's, and may say nothing of the tool that reads it.
   document on that stack as its base. Before, the flag composed the stack alone and the
   document was dropped without a word. A document holding its own stack, a `target`, is
   refused beside `-f` with exit 2; compose it without the flag.
+- `qory worktree add` fetches the remote before every add, so a new branch starts at the
+  remote's tip and a branch pushed from another machine is tracked instead of cut anew.
+  `--fetch` is gone; `--offline` skips the fetch and goes on with the refs already there.
+  A fetch that fails stops the add and names `--offline`; `git.timeout` bounds it.
+- `-v, --verbose` is a flag of every command, in place of the one `qory harness compose`
+  owned. `qory harness compose -v` reads as before.
+- What a `worktree.run.add` or `worktree.run.remove` command prints is shown with
+  `--verbose`, and otherwise only when the command fails, as part of the error.
 
 ### Added
 
@@ -79,6 +87,16 @@ of the operator's, and may say nothing of the tool that reads it.
   neither `target` nor `extends`, composed with no base from `-f`, is refused with exit 2
   and the message says what the section holds instead. A `harness` section with only
   the machine's keys is still not a document.
+- `{from: <path>, to: <path>}` as an entry of `worktree.link` and `worktree.copy`, beside
+  a path inside the checkout: `from` anywhere on the machine, absolute or under `~`, `to`
+  the path in the worktree. Meant for the user's `qory.yaml` in `~/.config/qory`, so a
+  machine's own path never lands in the committed file. A `from` that is not there is
+  reported as missing; a destination already in the worktree, a dangling link too, is kept.
+- `--verbose` on `qory worktree add` and `remove` prints each git command as it runs,
+  and remove prints how the branch's own commits were counted; `qory worktree list -v`
+  adds the path of each composed worktree's report.
+- `QORY_BASE`, the branch's recorded base, in the environment of `worktree.run.add` and
+  `worktree.run.remove`, beside `QORY_WORKTREE`, `QORY_MAIN` and `QORY_BRANCH`.
 
 ### Changed
 
@@ -93,6 +111,7 @@ of the operator's, and may say nothing of the tool that reads it.
 - `qory worktree add --base <ref>` on a branch that already existed silently ignored the
   base, even one that named nothing. The base is checked before anything else, on every
   path.
+- `worktree.branch` was missing from `config.schema.json` and the configuration reference.
 
 ## [0.3.0] - 2026-09-11
 

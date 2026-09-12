@@ -137,14 +137,17 @@ func locateAt(dir string) (places, error) {
 // --force=false say, wins over the file.
 func newCompose(use string, aliases ...string) *cobra.Command {
 	var file, runtime, model string
-	var dryRun, check, verbose, force, update bool
+	var dryRun, check, force, update bool
 	c := &cobra.Command{
 		Use:     use,
 		Aliases: aliases,
 		Short:   "Compose the stack's modules into the checkout you stand in",
-		Args:    noArgs,
+		Long: `Compose the stack's modules into the checkout you stand in.
+
+--verbose prints one line per entry, the entry and the module it came from.`,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			o := composeOptions{file: file, runtime: runtime, model: model, dryRun: dryRun, check: check, verbose: verbose}
+			o := composeOptions{file: file, runtime: runtime, model: model, dryRun: dryRun, check: check, verbose: verbose(cmd)}
 			if cmd.Flags().Changed("force") {
 				if check {
 					return input(errors.New("--check writes nothing, so --force has nothing to replace"))
@@ -164,7 +167,6 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 	c.Flags().BoolVar(&check, "check", false, "compare the home with what the stack and modules say now and write nothing; exit 6 when a file or link differs. The links from the checkout into the home and the report are not compared")
 	c.Flags().BoolVar(&force, "force", false, "replace a tracked, unmodified file of the checkout where a link goes; git checkout -- restores it (qory.yaml: force)")
 	c.Flags().BoolVar(&update, "update", false, "fetch every git source again instead of reading the cached clone (qory.yaml: update)")
-	c.Flags().BoolVarP(&verbose, "verbose", "v", false, "print one line per entry")
 	return c
 }
 
@@ -733,7 +735,10 @@ func newInspect(use string, aliases ...string) *cobra.Command {
 		Use:     use,
 		Aliases: aliases,
 		Short:   "Print the report of the composed harness",
-		Args:    noArgs,
+		Long: `Print the report of the composed harness.
+
+--verbose adds nothing here.`,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			at, err := locate()
 			if err != nil {
