@@ -25,7 +25,7 @@ func writeTree(t *testing.T, files map[string]string) string {
 			module, _, _ := strings.Cut(rest, "/")
 			manifest := "modules/" + module + "/qory-module.yaml"
 			if _, ok := files[manifest]; !ok && module != "" {
-				files[manifest] = "apiVersion: qory.ai/v1alpha1\nname: " + module + "\n"
+				files[manifest] = "apiVersion: qory.dev/v1alpha1\nname: " + module + "\n"
 			}
 		}
 	}
@@ -60,7 +60,7 @@ func composeTree(t *testing.T, files map[string]string) (*compose.Result, error)
 }
 
 // twoModules is a stack over modules a and b, in that order.
-const twoModules = `apiVersion: qory.ai/v1alpha1
+const twoModules = `apiVersion: qory.dev/v1alpha1
 target:
   runtime: claude
 modules:
@@ -188,7 +188,7 @@ func TestSettingsForSubstitutesTheHarnessHome(t *testing.T) {
 // its array of tables turned into the list the merge works on.
 func TestSettingsMergeATomlFragment(t *testing.T) {
 	res, err := composeTree(t, map[string]string{
-		stack.FileName: `apiVersion: qory.ai/v1alpha1
+		stack.FileName: `apiVersion: qory.dev/v1alpha1
 target:
   runtime: codex
 modules:
@@ -261,7 +261,7 @@ func TestSettingsRefuseAFragmentQoryCannotRead(t *testing.T) {
 // entry does not leave a stale exclude behind.
 func TestExcludeNamesNothingTheModuleShips(t *testing.T) {
 	_, err := composeTree(t, map[string]string{
-		stack.FileName: `apiVersion: qory.ai/v1alpha1
+		stack.FileName: `apiVersion: qory.dev/v1alpha1
 target:
   runtime: claude
 modules:
@@ -285,7 +285,7 @@ modules:
 // module but the last, and returns the modules to change in the order the caller gives.
 func TestCollisionSuggestKeepsTheLastModule(t *testing.T) {
 	_, err := composeTree(t, map[string]string{
-		stack.FileName: `apiVersion: qory.ai/v1alpha1
+		stack.FileName: `apiVersion: qory.dev/v1alpha1
 target:
   runtime: claude
 modules:
@@ -348,7 +348,7 @@ modules:
 // order the stack lists the modules, with one blank line between them.
 func TestInstructionsAreConcatenatedInModuleOrder(t *testing.T) {
 	res, err := composeTree(t, map[string]string{
-		stack.FileName: `apiVersion: qory.ai/v1alpha1
+		stack.FileName: `apiVersion: qory.dev/v1alpha1
 target:
   runtime: claude
 modules:
@@ -401,7 +401,7 @@ func TestComposeWithoutInstructions(t *testing.T) {
 func TestComposeRecordsEveryModule(t *testing.T) {
 	_, err := composeTree(t, map[string]string{
 		stack.FileName:               twoModules,
-		"modules/a/qory-module.yaml": "apiVersion: qory.ai/v1alpha1\nname: acme-core\n",
+		"modules/a/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: acme-core\n",
 		"modules/a/commands/ship.md": "ship\n",
 	})
 	if err == nil || err.Error() != "module a: the module at modules/a is named acme-core in its qory-module.yaml" {
@@ -409,7 +409,7 @@ func TestComposeRecordsEveryModule(t *testing.T) {
 	}
 	res, err := composeTree(t, map[string]string{
 		stack.FileName:                  strings.Replace(twoModules, "  - name: a\n    source:\n      path: modules/a\n", "  - source:\n      path: modules/a\n", 1),
-		"modules/a/qory-module.yaml":    "apiVersion: qory.ai/v1alpha1\nname: acme-core\n",
+		"modules/a/qory-module.yaml":    "apiVersion: qory.dev/v1alpha1\nname: acme-core\n",
 		"modules/a/commands/ship.md":    "ship\n",
 		"modules/b/hooks/pre-commit.sh": "#!/bin/sh\n",
 	})
@@ -480,7 +480,7 @@ func TestComposeRefuses(t *testing.T) {
 			files: map[string]string{
 				stack.FileName:                 strings.Replace(twoModules, "  - name: b\n    source:\n      path: modules/b\n", "  - source:\n      path: modules/dup\n", 1),
 				"modules/a/":                   "",
-				"modules/dup/qory-module.yaml": "apiVersion: qory.ai/v1alpha1\nname: a\n",
+				"modules/dup/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: a\n",
 			},
 			want: "module a is composed twice, from modules/a and from modules/dup",
 		},
@@ -488,7 +488,7 @@ func TestComposeRefuses(t *testing.T) {
 			name: "a manifest qory turns down",
 			files: map[string]string{
 				stack.FileName:               twoModules,
-				"modules/a/qory-module.yaml": "apiVersion: qory.ai/v1alpha1\n",
+				"modules/a/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\n",
 				"modules/b/":                 "",
 			},
 			want: "name is required",
@@ -497,7 +497,7 @@ func TestComposeRefuses(t *testing.T) {
 			name: "a runtime no variant serves",
 			files: map[string]string{
 				stack.FileName:               twoModules,
-				"modules/a/qory-module.yaml": "apiVersion: qory.ai/v1alpha1\nname: a\nvariants:\n  codex:\n    agents: agents/codex\n  default: fail\n",
+				"modules/a/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: a\nvariants:\n  codex:\n    agents: agents/codex\n  default: fail\n",
 				"modules/b/":                 "",
 			},
 			want: "module a: the module has no variant for runtime claude and its default is fail; variants: codex",
@@ -506,7 +506,7 @@ func TestComposeRefuses(t *testing.T) {
 			name: "a forced variant the module has not",
 			files: map[string]string{
 				stack.FileName:               strings.Replace(twoModules, "      path: modules/a\n", "      path: modules/a\n    variant: amp\n", 1),
-				"modules/a/qory-module.yaml": "apiVersion: qory.ai/v1alpha1\nname: a\nvariants:\n  codex:\n    agents: agents/codex\n",
+				"modules/a/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: a\nvariants:\n  codex:\n    agents: agents/codex\n",
 				"modules/b/":                 "",
 			},
 			want: `module a: variant "amp" is forced, and the module has no such variant; variants: codex`,

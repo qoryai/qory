@@ -1,4 +1,4 @@
-apiVersion: qory.ai/v2
+apiVersion: qory.dev/v2
 target:
   runtime: claude
   model: opus

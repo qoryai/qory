@@ -212,7 +212,7 @@ func TestReadRefusesALinkToADirectoryUnderHooks(t *testing.T) {
 	dir := tree(t, map[string]string{
 		"helpers/a.sh":          "#!/bin/sh\n",
 		"claude/hooks/guard.sh": "#!/bin/sh\n",
-		"qory-module.yaml":      "apiVersion: qory.ai/v1alpha1\nname: core\nvariants:\n  claude: {hooks: claude/hooks}\n",
+		"qory-module.yaml":      "apiVersion: qory.dev/v1alpha1\nname: core\nvariants:\n  claude: {hooks: claude/hooks}\n",
 	})
 	if err := os.Symlink(filepath.Join("..", "..", "helpers"), filepath.Join(dir, "claude", "hooks", "scripts")); err != nil {
 		t.Fatal(err)
@@ -255,7 +255,7 @@ func TestReadEmptyModule(t *testing.T) {
 // directory and every other kind from the module root.
 func TestReadFollowsTheVariantDirectories(t *testing.T) {
 	dir := tree(t, map[string]string{
-		"qory-module.yaml":           "apiVersion: qory.ai/v1alpha1\nname: multi\nvariants:\n  codex:\n    agents: agents/codex\n    skills: skills/codex\n",
+		"qory-module.yaml":           "apiVersion: qory.dev/v1alpha1\nname: multi\nvariants:\n  codex:\n    agents: agents/codex\n    skills: skills/codex\n",
 		"agents/reviewer.md":         "reviewer\n",
 		"agents/codex/planner.md":    "planner\n",
 		"skills/codex/ship/SKILL.md": "# ship\n",
@@ -284,7 +284,7 @@ func TestReadFollowsTheVariantDirectories(t *testing.T) {
 // names but the module does not hold contributes no entries and no error.
 func TestReadVariantDirectoryMissingFromDisk(t *testing.T) {
 	dir := tree(t, map[string]string{
-		"qory-module.yaml":   "apiVersion: qory.ai/v1alpha1\nname: multi\nvariants:\n  codex:\n    agents: agents/codex\n",
+		"qory-module.yaml":   "apiVersion: qory.dev/v1alpha1\nname: multi\nvariants:\n  codex:\n    agents: agents/codex\n",
 		"agents/reviewer.md": "reviewer\n",
 	})
 	m, err := ReadManifest(dir)
@@ -316,7 +316,7 @@ func TestReadRefusesAVariantThatLeavesTheModule(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			m := &Manifest{APIVersion: "qory.ai/v1alpha1", Name: "multi", Variants: map[string]Variant{"codex": c.variant}}
+			m := &Manifest{APIVersion: "qory.dev/v1alpha1", Name: "multi", Variants: map[string]Variant{"codex": c.variant}}
 			_, err := Read("multi", t.TempDir(), m, "codex")
 			if err == nil {
 				t.Fatal("read a variant that leaves the module")
@@ -345,7 +345,7 @@ func TestReadManifestRefusesADirectoryWithoutOne(t *testing.T) {
 // TestReadManifestReadsVariantsAndDefault reads a manifest holding a variant per runtime and
 // a default naming one of them.
 func TestReadManifestReadsVariantsAndDefault(t *testing.T) {
-	dir := tree(t, map[string]string{ManifestName: "apiVersion: qory.ai/v1alpha1\n" +
+	dir := tree(t, map[string]string{ManifestName: "apiVersion: qory.dev/v1alpha1\n" +
 		"name: multi\n" +
 		"variants:\n" +
 		"  claude:\n" +
@@ -358,7 +358,7 @@ func TestReadManifestReadsVariantsAndDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.APIVersion != "qory.ai/v1alpha1" || m.Name != "multi" {
+	if m.APIVersion != "qory.dev/v1alpha1" || m.Name != "multi" {
 		t.Fatalf("got %+v", m)
 	}
 	if m.Default != "claude" {
@@ -382,32 +382,32 @@ func TestReadManifestRefuses(t *testing.T) {
 	}{
 		{
 			"unknown apiVersion",
-			"apiVersion: qory.ai/v2\nname: core\n",
-			`apiVersion "qory.ai/v2" is not one this qory reads; versions: qory.ai/v1alpha1`,
+			"apiVersion: qory.dev/v2\nname: core\n",
+			`apiVersion "qory.dev/v2" is not one this qory reads; versions: qory.dev/v1alpha1`,
 		},
 		{
 			"missing name",
-			"apiVersion: qory.ai/v1alpha1\n",
+			"apiVersion: qory.dev/v1alpha1\n",
 			"name is required",
 		},
 		{
 			"unknown field",
-			"apiVersion: qory.ai/v1alpha1\nname: core\nmodules: []\n",
+			"apiVersion: qory.dev/v1alpha1\nname: core\nmodules: []\n",
 			`line 3: key "modules" is not one qory-module.yaml reads`,
 		},
 		{
 			"a default that is not a variant",
-			"apiVersion: qory.ai/v1alpha1\nname: core\nvariants:\n  codex:\n    agents: agents/codex\n  default: claude\n",
+			"apiVersion: qory.dev/v1alpha1\nname: core\nvariants:\n  codex:\n    agents: agents/codex\n  default: claude\n",
 			`variants.default names "claude", which is not a variant`,
 		},
 		{
 			"a default that is not a string",
-			"apiVersion: qory.ai/v1alpha1\nname: core\nvariants:\n  default:\n    agents: agents/claude\n",
+			"apiVersion: qory.dev/v1alpha1\nname: core\nvariants:\n  default:\n    agents: agents/claude\n",
 			"variants.default:",
 		},
 		{
 			"a variant that is not a map of kinds",
-			"apiVersion: qory.ai/v1alpha1\nname: core\nvariants:\n  codex: agents/codex\n",
+			"apiVersion: qory.dev/v1alpha1\nname: core\nvariants:\n  codex: agents/codex\n",
 			"variants.codex:",
 		},
 		{
@@ -437,7 +437,7 @@ func TestReadManifestRefuses(t *testing.T) {
 // TestReadManifestReadsEnv reads the variables a manifest exports: each value comes back
 // cleaned, and the module root is ".".
 func TestReadManifestReadsEnv(t *testing.T) {
-	dir := tree(t, map[string]string{ManifestName: "apiVersion: qory.ai/v1alpha1\n" +
+	dir := tree(t, map[string]string{ManifestName: "apiVersion: qory.dev/v1alpha1\n" +
 		"name: core\n" +
 		"env:\n" +
 		"  CORE_HOME: .\n" +
@@ -457,7 +457,7 @@ func TestReadManifestReadsEnv(t *testing.T) {
 		}
 	}
 	// A manifest without env leaves the map nil.
-	dir = tree(t, map[string]string{ManifestName: "apiVersion: qory.ai/v1alpha1\nname: core\n"})
+	dir = tree(t, map[string]string{ManifestName: "apiVersion: qory.dev/v1alpha1\nname: core\n"})
 	m, err = ReadManifest(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -471,7 +471,7 @@ func TestReadManifestReadsEnv(t *testing.T) {
 // not an environment variable name, qory's own variable, and a value that is not a path
 // inside the module. The message starts with the manifest path.
 func TestReadManifestRefusesEnv(t *testing.T) {
-	head := "apiVersion: qory.ai/v1alpha1\nname: core\nenv:\n"
+	head := "apiVersion: qory.dev/v1alpha1\nname: core\nenv:\n"
 	cases := []struct {
 		name string
 		env  string

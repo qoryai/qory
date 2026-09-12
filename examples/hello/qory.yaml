@@ -5,7 +5,7 @@
 #   claude                   # then type /hello
 #   qory harness remove      # or: qory hr
 #
-apiVersion: qory.ai/v1alpha1
+apiVersion: qory.dev/v1alpha1
 harness:
   name: hello
   target:

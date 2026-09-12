@@ -26,7 +26,7 @@ func write(t *testing.T, path, body string) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte("apiVersion: qory.ai/v1alpha1\n"+body), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("apiVersion: qory.dev/v1alpha1\n"+body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -181,9 +181,9 @@ func TestAFileWithoutAnAPIVersionReadsAsTheNewest(t *testing.T) {
 	if p.APIVersion != stack.APIVersion || p.Extends.Path != "../base" {
 		t.Fatalf("document: %+v", p)
 	}
-	writeRaw(t, path, "apiVersion: qory.ai/v2\nharness: {force: true}\n")
+	writeRaw(t, path, "apiVersion: qory.dev/v2\nharness: {force: true}\n")
 	_, err = config.Load(root, true)
-	want := path + `: apiVersion "qory.ai/v2" is not one this qory reads; versions: qory.ai/v1alpha1`
+	want := path + `: apiVersion "qory.dev/v2" is not one this qory reads; versions: qory.dev/v1alpha1`
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %q", err, want)
 	}

@@ -15,7 +15,7 @@ var columns = regexp.MustCompile(`\s{2,}`)
 
 // publisherConfig is the qory.yaml of a harness repository that exports its stack and
 // its modules by name, all under harness/, with one module more than the stack uses.
-const publisherConfig = `apiVersion: qory.ai/v1alpha1
+const publisherConfig = `apiVersion: qory.dev/v1alpha1
 exports:
   dir: harness
   stacks: [nextjs-15]
@@ -60,7 +60,7 @@ func exportsCompose(repo, stackName string) string {
 	if strings.HasPrefix(repo, "file://") {
 		source = "{git: " + repo + ", ref: main"
 	}
-	return "apiVersion: qory.ai/v1alpha1\nharness:\n  extends: " + source + ", stack: " + stackName + "}\n  modules:\n    - name: app\n    - name: extra\n      source: " + source + ", module: extra}\n"
+	return "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: " + source + ", stack: " + stackName + "}\n  modules:\n    - name: app\n    - name: extra\n      source: " + source + ", module: extra}\n"
 }
 
 // TestExtendsAnExportedStackByName is the customer's checkout naming the stack and a

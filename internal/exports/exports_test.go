@@ -14,7 +14,7 @@ import (
 func write(t *testing.T, body string) string {
 	t.Helper()
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, exports.FileName), []byte("apiVersion: qory.ai/v1alpha1\n"+body), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, exports.FileName), []byte("apiVersion: qory.dev/v1alpha1\n"+body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return root
@@ -115,10 +115,10 @@ func TestReadRefuses(t *testing.T) {
 		}
 	}
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "qory.yaml"), []byte("apiVersion: qory.ai/v2\nexports: {modules: [core]}\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "qory.yaml"), []byte("apiVersion: qory.dev/v2\nexports: {modules: [core]}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := exports.Read(root); err == nil || !strings.Contains(err.Error(), `apiVersion "qory.ai/v2" is not one this qory reads`) {
+	if _, err := exports.Read(root); err == nil || !strings.Contains(err.Error(), `apiVersion "qory.dev/v2" is not one this qory reads`) {
 		t.Errorf("another apiVersion: %v", err)
 	}
 	root = write(t, "exports: {modules: [core]}\nharnes: {runtime: claude}\n")

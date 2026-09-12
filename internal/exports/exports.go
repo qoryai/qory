@@ -57,9 +57,18 @@ func File(dir string) (string, error) {
 	return found, nil
 }
 
-// APIVersion is the one format version this qory reads, the same one every document
-// carries.
-const APIVersion = "qory.ai/v1alpha1"
+// APIVersion is the format version this qory writes and the newest it reads, the same one
+// every document carries.
+const APIVersion = "qory.dev/v1alpha1"
+
+// CheckAPIVersion returns nil for a version this qory reads, [APIVersion], and for any
+// other an error naming the version and the ones read. A reader prefixes the file.
+func CheckAPIVersion(version string) error {
+	if version == APIVersion {
+		return nil
+	}
+	return fmt.Errorf("apiVersion %q is not one this qory reads; versions: %s", version, APIVersion)
+}
 
 // StackFileName and ModuleFileName are what an exported directory holds: a stack its
 // qory-stack.yaml, a module its qory-module.yaml.
@@ -256,8 +265,8 @@ func Read(root string) (*Exports, error) {
 	if doc.APIVersion == "" {
 		doc.APIVersion = APIVersion
 	}
-	if doc.APIVersion != APIVersion {
-		return nil, fmt.Errorf("%s: apiVersion %q is not one this qory reads; versions: %s", file, doc.APIVersion, APIVersion)
+	if err := CheckAPIVersion(doc.APIVersion); err != nil {
+		return nil, fmt.Errorf("%s: %w", file, err)
 	}
 	if doc.Exports == nil {
 		return nil, nil

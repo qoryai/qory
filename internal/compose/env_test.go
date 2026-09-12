@@ -10,7 +10,7 @@ import (
 
 // manifest is a module manifest exporting one variable at the given path.
 func manifest(name, variable, path string) string {
-	return "apiVersion: qory.ai/v1alpha1\nname: " + name + "\nenv:\n  " + variable + ": " + path + "\n"
+	return "apiVersion: qory.dev/v1alpha1\nname: " + name + "\nenv:\n  " + variable + ": " + path + "\n"
 }
 
 // TestModulesExportVariablesAsPathsUnderTheHome is a module exporting HARNESS_HOME as its
@@ -20,7 +20,7 @@ func TestModulesExportVariablesAsPathsUnderTheHome(t *testing.T) {
 	res, err := composeTree(t, map[string]string{
 		"qory-stack.yaml":            twoModules,
 		"modules/a/qory-module.yaml": manifest("a", "HARNESS_HOME", "."),
-		"modules/b/qory-module.yaml": "apiVersion: qory.ai/v1alpha1\nname: b\nenv:\n  TOOLS: scripts/tools\n",
+		"modules/b/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: b\nenv:\n  TOOLS: scripts/tools\n",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -90,8 +90,8 @@ func TestMCPForDropsTheDescription(t *testing.T) {
 // through the compose as written.
 func TestDescriptionsAreRead(t *testing.T) {
 	res, err := composeTree(t, map[string]string{
-		"qory-stack.yaml":            strings.Replace(twoModules, "apiVersion: qory.ai/v1alpha1\n", "apiVersion: qory.ai/v1alpha1\ndescription: Two modules\n", 1),
-		"modules/a/qory-module.yaml": "apiVersion: qory.ai/v1alpha1\nname: a\ndescription: the first\n",
+		"qory-stack.yaml":            strings.Replace(twoModules, "apiVersion: qory.dev/v1alpha1\n", "apiVersion: qory.dev/v1alpha1\ndescription: Two modules\n", 1),
+		"modules/a/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: a\ndescription: the first\n",
 		"modules/b/":                 "",
 	})
 	if err != nil {

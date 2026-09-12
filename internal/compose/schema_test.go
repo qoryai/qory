@@ -135,7 +135,7 @@ func TestStackSchemaKnowsBothSourceForms(t *testing.T) {
 		{`{"git": "https://git.example.com/acme/harness", "ref": "v1", "stack": "nextjs"}`, false},
 	} {
 		var doc any
-		if err := json.Unmarshal([]byte(`{"apiVersion": "qory.ai/v1alpha1", "target": {"runtime": "claude"}, "modules": [{"name": "core", "source": `+c.source+`}]}`), &doc); err != nil {
+		if err := json.Unmarshal([]byte(`{"apiVersion": "qory.dev/v1alpha1", "target": {"runtime": "claude"}, "modules": [{"name": "core", "source": `+c.source+`}]}`), &doc); err != nil {
 			t.Fatal(err)
 		}
 		if err := schema.Validate(doc); (err == nil) != c.valid {
@@ -194,7 +194,7 @@ func TestComposeSchemaKnowsExtends(t *testing.T) {
 		{composeSchema, `{"exports": {"stack": ["nextjs"]}}`, false},
 	} {
 		var doc any
-		if err := json.Unmarshal([]byte(`{"apiVersion": "qory.ai/v1alpha1", `+c.body[1:]), &doc); err != nil {
+		if err := json.Unmarshal([]byte(`{"apiVersion": "qory.dev/v1alpha1", `+c.body[1:]), &doc); err != nil {
 			t.Fatal(err)
 		}
 		if err := c.schema.Validate(doc); (err == nil) != c.valid {

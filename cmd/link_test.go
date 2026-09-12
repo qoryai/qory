@@ -10,7 +10,7 @@ import (
 )
 
 // linkedStack is the two-modules fixture's stack with the core module linked as harness.
-const linkedStack = `apiVersion: qory.ai/v1alpha1
+const linkedStack = `apiVersion: qory.dev/v1alpha1
 target:
   runtime: claude
 modules:

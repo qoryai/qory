@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-const valid = `apiVersion: qory.ai/v1alpha1
+const valid = `apiVersion: qory.dev/v1alpha1
 name: app
 target:
   runtime: claude
@@ -74,7 +74,7 @@ func TestLoadReadsTargetAndModules(t *testing.T) {
 // the second keeps its source, resolved under the stack's directory, as SourceOf and
 // DirOf tell.
 func TestLoadReadsAModuleByNameAlone(t *testing.T) {
-	path := write(t, "apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n  - source: {path: ../shared/team}\n  - name: tools\n    source: {}\n")
+	path := write(t, "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n  - source: {path: ../shared/team}\n  - name: tools\n    source: {}\n")
 	p, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
@@ -151,109 +151,109 @@ func TestLoadRefuses(t *testing.T) {
 	}{
 		{
 			"an unknown apiVersion",
-			"apiVersion: qory.ai/v2\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source:\n      path: modules/core\n",
-			`apiVersion "qory.ai/v2" is not one this qory reads; versions: qory.ai/v1alpha1`,
+			"apiVersion: qory.dev/v2\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source:\n      path: modules/core\n",
+			`apiVersion "qory.dev/v2" is not one this qory reads; versions: qory.dev/v1alpha1`,
 			false,
 		},
 		{
 			"a missing apiVersion",
 			"target:\n  runtime: claude\nmodules:\n  - name: core\n    source:\n      path: modules/core\n",
-			`apiVersion "" is not one this qory reads; versions: qory.ai/v1alpha1`,
+			`apiVersion "" is not one this qory reads; versions: qory.dev/v1alpha1`,
 			false,
 		},
 		{
 			"an unknown field",
-			"apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nlayrs: []\nmodules:\n  - name: core\n    source:\n      path: modules/core\n",
+			"apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nlayrs: []\nmodules:\n  - name: core\n    source:\n      path: modules/core\n",
 			`line 4: key "layrs" is not one qory-stack.yaml reads`,
 			false,
 		},
 		{
 			"an unknown field inside a module",
-			"apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    sources:\n      path: modules/core\n",
+			"apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    sources:\n      path: modules/core\n",
 			`line 6: key "sources" is not one qory-stack.yaml reads`,
 			false,
 		},
 		{
 			"a target without a runtime",
-			"apiVersion: qory.ai/v1alpha1\ntarget:\n  model: opus\nmodules:\n  - name: core\n    source:\n      path: modules/core\n",
+			"apiVersion: qory.dev/v1alpha1\ntarget:\n  model: opus\nmodules:\n  - name: core\n    source:\n      path: modules/core\n",
 			"target.runtime is required",
 			false,
 		},
 		{
 			"no modules",
-			"apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules: []\n",
+			"apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules: []\n",
 			"modules is empty; a stack names at least one module",
 			false,
 		},
 		{
 			"a module with neither a name nor a source",
-			"apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - link: harness\n",
+			"apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - link: harness\n",
 			"modules[0]: a module gives a name, a source, or both",
 			false,
 		},
 		{
 			"the second module with neither a name nor a source",
-			"apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source:\n      path: modules/core\n  - link: harness\n",
+			"apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source:\n      path: modules/core\n  - link: harness\n",
 			"modules[1]: a module gives a name, a source, or both",
 			false,
 		},
 		{
 			"an empty source without a name",
-			"apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - source: {}\n",
+			"apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - source: {}\n",
 			"modules[0]: a module gives a name, a source, or both",
 			false,
 		},
 		{
 			"two modules of one name",
-			"apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source:\n      path: modules/core\n  - name: core\n    source:\n      path: modules/team\n",
+			"apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source:\n      path: modules/core\n  - name: core\n    source:\n      path: modules/team\n",
 			"module core is named twice",
 			false,
 		},
 		{
 			"a ref without a git source on a module without a name",
-			"apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - source: {ref: v1}\n",
+			"apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - source: {ref: v1}\n",
 			"modules[0]: source.ref needs source.git",
 			false,
 		},
 		{
 			"an exclude over an unknown kind",
-			"apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source:\n      path: modules/core\n    exclude:\n      prompts: [greet]\n",
+			"apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source:\n      path: modules/core\n    exclude:\n      prompts: [greet]\n",
 			`module core: exclude names kind "prompts"; kinds: skills, agents, commands, output-styles, hooks, mcp, files; parts: instructions, settings, env`,
 			false,
 		},
 		{
 			"a module named with a path",
-			"apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: ../escaped\n    source: {path: modules/core}\n",
+			"apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: ../escaped\n    source: {path: modules/core}\n",
 			`modules[0]: name "../escaped" is not one path segment; a module name holds no slash, backslash, @ or leading dot`,
 			false,
 		},
 		{
 			"a module named with an at sign",
-			"apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: b@a\n    source: {path: modules/core}\n",
+			"apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: b@a\n    source: {path: modules/core}\n",
 			`modules[0]: name "b@a" is not one path segment; a module name holds no slash, backslash, @ or leading dot`,
 			false,
 		},
 		{
 			"two documents in one file",
-			"apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source: {path: modules/core}\n---\nkind: Other\n",
+			"apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source: {path: modules/core}\n---\nkind: Other\n",
 			"holds more than one document; a stack is one",
 			false,
 		},
 		{
 			"a git source without a ref",
-			"apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source: {git: https://git.example.com/acme/harness}\n",
+			"apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source: {git: https://git.example.com/acme/harness}\n",
 			"module core: source.ref is required with source.git",
 			false,
 		},
 		{
 			"a ref without a git source",
-			"apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source: {path: modules/core, ref: v1}\n",
+			"apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source: {path: modules/core, ref: v1}\n",
 			"module core: source.ref needs source.git",
 			false,
 		},
 		{
 			"a git source whose path leaves the repository",
-			"apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source: {git: https://git.example.com/acme/harness, ref: v1, path: ../other}\n",
+			"apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source: {git: https://git.example.com/acme/harness, ref: v1, path: ../other}\n",
 			`module core: source.path "../other" is not a directory inside the repository`,
 			false,
 		},
@@ -312,7 +312,7 @@ func TestNewComposeAcceptsADocumentWithoutModules(t *testing.T) {
 	if p.Extends.Path != "../base" || len(p.Modules) != 0 || p.File != path {
 		t.Fatalf("got %+v", p)
 	}
-	_, err = Load(write(t, "apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules: []\n"))
+	_, err = Load(write(t, "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules: []\n"))
 	if err == nil || !strings.HasSuffix(err.Error(), "modules is empty; a stack names at least one module") {
 		t.Fatalf("a stack without modules: %v", err)
 	}

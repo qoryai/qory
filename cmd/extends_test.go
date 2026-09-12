@@ -12,7 +12,7 @@ import (
 
 // baseStack is the stack of an operator's harness repository: two modules, closed
 // except for skills, agents and permission allow rules, rendered for claude with a model.
-const baseStack = `apiVersion: qory.ai/v1alpha1
+const baseStack = `apiVersion: qory.dev/v1alpha1
 name: nextjs-15
 target: {runtime: claude, model: opus}
 modules:
@@ -59,7 +59,7 @@ func operatorRepoWith(t *testing.T, stack string) string {
 // customerCompose is the customer's qory.yaml: under harness, the base at a branch and
 // their own module, with extra lines of that section first.
 func customerCompose(url string, extra ...string) string {
-	return "apiVersion: qory.ai/v1alpha1\nharness:\n" + strings.Join(extra, "") + "  extends: {git: " + url + ", ref: main, path: nextjs-15}\n  modules:\n    - name: app\n  extensions:\n    customer: {team: web}\n"
+	return "apiVersion: qory.dev/v1alpha1\nharness:\n" + strings.Join(extra, "") + "  extends: {git: " + url + ", ref: main, path: nextjs-15}\n  modules:\n    - name: app\n  extensions:\n    customer: {team: web}\n"
 }
 
 // customerCheckout is a product repository with the customer's qory.yaml and an app module
@@ -175,7 +175,7 @@ func TestExtendsRefusesAClosedBase(t *testing.T) {
 	writeManifest(t, filepath.Join(base, "modules", "core"), "core")
 	writeManifest(t, filepath.Join(base, "modules", "tools"), "tools")
 	root := newCheckout(t)
-	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.ai/v1alpha1\nharness:\n  extends: {path: "+base+"}\n  modules:\n    - name: app\n")
+	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {path: "+base+"}\n  modules:\n    - name: app\n")
 	writeManifest(t, filepath.Join(root, "modules", "app"), "app")
 	_, err := run(t, "harness", "compose")
 	if err == nil || !strings.Contains(err.Error(), "is closed: it declares no extending block") || cmd.ExitCode(err) != cmd.ExitInput {

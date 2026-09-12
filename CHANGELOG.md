@@ -14,6 +14,9 @@ of the operator's, and may say nothing of the tool that reads it.
 
 ### Upgrading
 
+- The API group is `qory.dev`, the domain of the open format: `apiVersion:
+  qory.dev/v1alpha1`. `qory setup repo` writes it, `qory version` reports it, and the
+  schemas name it.
 - A `qory.yaml` with an `exports` section, and a source with a `stack` or `module` key,
   are refused by a 0.3.x binary as unknown keys, exit 2. A repository that exports states
   `qory: ">=0.4.0"` on its stacks, so a 0.3.x consumer is told which qory it needs.
@@ -68,7 +71,7 @@ of the operator's, and may say nothing of the tool that reads it.
   names, never both, and both is refused. `qory setup repo` writes under the name the
   directory already uses, and an unknown key is reported under the file's own name.
 - `apiVersion` is optional in `qory.yaml` and `harness.yaml`: a file leaving it out is
-  read as `qory.ai/v1alpha1`, the newest format this qory reads, and a wrong value is
+  read as `qory.dev/v1alpha1`, the newest format this qory reads, and a wrong value is
   still refused. A delivered file, `qory-stack.yaml` or `qory-module.yaml`, carries it
   as before.
 - A document may leave `extends` out when `-f` supplies the base, and a document that
