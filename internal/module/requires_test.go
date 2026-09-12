@@ -11,7 +11,7 @@ import (
 // entry as <kind>/<name>, with what it needs as sorted <kind>/<name> keys, and the mcp key
 // is the entry's name as a string in one item and the needed servers as a list in another.
 func TestReadManifestReadsRequires(t *testing.T) {
-	dir := tree(t, map[string]string{ManifestName: "apiVersion: qory.ai/v1alpha1\n" +
+	dir := tree(t, map[string]string{ManifestName: "apiVersion: qory.dev/v1alpha1\n" +
 		"name: core\n" +
 		"requires:\n" +
 		"  - skill: deploy\n" +
@@ -33,7 +33,7 @@ func TestReadManifestReadsRequires(t *testing.T) {
 	if !reflect.DeepEqual(m.Requires, want) {
 		t.Fatalf("requires %v, want %v", m.Requires, want)
 	}
-	dir = tree(t, map[string]string{ManifestName: "apiVersion: qory.ai/v1alpha1\nname: core\n"})
+	dir = tree(t, map[string]string{ManifestName: "apiVersion: qory.dev/v1alpha1\nname: core\n"})
 	if m, err = ReadManifest(dir); err != nil || m.Requires != nil {
 		t.Fatalf("requires %v, err %v; want nil", m.Requires, err)
 	}
@@ -43,7 +43,7 @@ func TestReadManifestReadsRequires(t *testing.T) {
 // entry, two entries, a key that is neither an entry nor a kind, an empty list, nothing
 // needed, and an entry named twice. The message starts with the manifest path.
 func TestReadManifestRefusesRequires(t *testing.T) {
-	head := "apiVersion: qory.ai/v1alpha1\nname: core\nrequires:\n"
+	head := "apiVersion: qory.dev/v1alpha1\nname: core\nrequires:\n"
 	cases := []struct {
 		name string
 		yaml string
@@ -80,7 +80,7 @@ func TestReadManifestRefusesRequires(t *testing.T) {
 // manifest naming a shipped entry reads.
 func TestReadRefusesARequirementOfAnEntryNotShipped(t *testing.T) {
 	dir := tree(t, map[string]string{
-		ManifestName:                "apiVersion: qory.ai/v1alpha1\nname: core\nrequires:\n  - skill: release\n    commands: [ship]\n",
+		ManifestName:                "apiVersion: qory.dev/v1alpha1\nname: core\nrequires:\n  - skill: release\n    commands: [ship]\n",
 		"skills/deploy/SKILL.md":    "# deploy\n",
 		"commands/ship.md":          "# ship\n",
 		"agents/reviewer.md":        "# reviewer\n",

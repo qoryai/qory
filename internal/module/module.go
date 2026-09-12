@@ -12,6 +12,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/stack"
 )
 
@@ -240,8 +241,8 @@ func ReadManifest(dir string) (*Manifest, error) {
 	if err := dec.Decode(&raw); err != nil {
 		return nil, decodeError(path, err)
 	}
-	if raw.APIVersion != stack.APIVersion {
-		return nil, fmt.Errorf("%s: apiVersion %q is not one this qory reads; versions: %s", path, raw.APIVersion, stack.APIVersion)
+	if err := exports.CheckAPIVersion(raw.APIVersion); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	if raw.Name == "" {
 		return nil, fmt.Errorf("%s: name is required", path)

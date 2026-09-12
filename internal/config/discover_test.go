@@ -10,9 +10,9 @@ import (
 	"github.com/qoryai/qory/internal/stack"
 )
 
-const stackDoc = "apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n"
+const stackDoc = "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n"
 
-const composeDoc = "apiVersion: qory.ai/v1alpha1\nharness:\n  extends: {path: ../base}\n  modules:\n    - name: app\n"
+const composeDoc = "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {path: ../base}\n  modules:\n    - name: app\n"
 
 func writeRaw(t *testing.T, path, body string) {
 	t.Helper()
@@ -37,7 +37,7 @@ func TestDiscoverStackPrefersTheCheckoutRoot(t *testing.T) {
 	checkout := filepath.Join(base, "app")
 	writeRaw(t, filepath.Join(base, stack.FileName), stackDoc)
 	writeRaw(t, filepath.Join(checkout, stack.FileName), deliveredDoc)
-	writeRaw(t, filepath.Join(checkout, "qory.yaml"), "apiVersion: qory.ai/v1alpha1\nharness: {force: true}\n")
+	writeRaw(t, filepath.Join(checkout, "qory.yaml"), "apiVersion: qory.dev/v1alpha1\nharness: {force: true}\n")
 	got, err := config.DiscoverStack(checkout)
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +63,7 @@ func TestDiscoverStackRefusesAClosedStackAtTheRoot(t *testing.T) {
 	}
 	// The load error of a stack that does not read comes first, so the message names
 	// the mistake in the file rather than the missing block.
-	writeRaw(t, file, "apiVersion: qory.ai/v1alpha1\nmodules: []\n")
+	writeRaw(t, file, "apiVersion: qory.dev/v1alpha1\nmodules: []\n")
 	_, err = config.DiscoverStack(checkout)
 	if err == nil || !strings.Contains(err.Error(), "target.runtime is required") {
 		t.Fatalf("a stack that does not load: %v", err)
@@ -139,12 +139,12 @@ func TestLoadStackReadsTheHarnessSectionAsTheComposeDocument(t *testing.T) {
 	if p.Extends.Path != "../base" || len(p.Modules) != 1 || p.Modules[0].Name != "app" || p.Name != "app" || p.File != path {
 		t.Fatalf("compose: %+v", p)
 	}
-	writeRaw(t, path, "apiVersion: qory.ai/v1alpha1\nharness:\n  modules:\n    - name: app\n")
+	writeRaw(t, path, "apiVersion: qory.dev/v1alpha1\nharness:\n  modules:\n    - name: app\n")
 	_, err = config.LoadStack(path)
 	if err == nil || !strings.Contains(err.Error(), "harness names no target.runtime and no stack to extend; the section holds this repository's own stack") {
 		t.Fatalf("without extends or a target: %v", err)
 	}
-	writeRaw(t, path, "apiVersion: qory.ai/v1alpha1\nharness:\n  target: {runtime: codex, model: o3}\n  modules:\n    - name: app\n")
+	writeRaw(t, path, "apiVersion: qory.dev/v1alpha1\nharness:\n  target: {runtime: codex, model: o3}\n  modules:\n    - name: app\n")
 	p, err = config.LoadStack(path)
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +152,7 @@ func TestLoadStackReadsTheHarnessSectionAsTheComposeDocument(t *testing.T) {
 	if p.Target.Runtimes.First() != "codex" || p.Target.Model != "o3" || len(p.Modules) != 1 || p.Extends.Path != "" {
 		t.Fatalf("own stack: %+v", p)
 	}
-	writeRaw(t, path, "apiVersion: qory.ai/v1alpha1\nharness: {force: true}\n")
+	writeRaw(t, path, "apiVersion: qory.dev/v1alpha1\nharness: {force: true}\n")
 	_, err = config.LoadStack(path)
 	if err == nil || !strings.Contains(err.Error(), "the harness section names no modules, no stack to extend and no extensions") {
 		t.Fatalf("without a document: %v", err)

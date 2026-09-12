@@ -120,7 +120,7 @@ func TestReadFollowsALinkedSettingsDirectory(t *testing.T) {
 // TestReadNamesTheVariantDirectoryInItsMessages is a skill without SKILL.md and a server
 // that is not an object under a variant: the messages name the directory read.
 func TestReadNamesTheVariantDirectoryInItsMessages(t *testing.T) {
-	manifest := "apiVersion: qory.ai/v1alpha1\nname: core\nvariants:\n  codex: {skills: codex/skills, mcp: codex/mcp}\n"
+	manifest := "apiVersion: qory.dev/v1alpha1\nname: core\nvariants:\n  codex: {skills: codex/skills, mcp: codex/mcp}\n"
 	dir := tree(t, map[string]string{"codex/skills/x/notes.md": "n\n", "qory-module.yaml": manifest})
 	m, err := ReadManifest(dir)
 	if err != nil {
@@ -143,7 +143,7 @@ func TestReadNamesTheVariantDirectoryInItsMessages(t *testing.T) {
 func TestReadAcceptsADirectoryNamedWithTwoDots(t *testing.T) {
 	dir := tree(t, map[string]string{
 		"..agents/planner.md": "p\n",
-		"qory-module.yaml":    "apiVersion: qory.ai/v1alpha1\nname: core\nvariants:\n  codex: {agents: ..agents}\n",
+		"qory-module.yaml":    "apiVersion: qory.dev/v1alpha1\nname: core\nvariants:\n  codex: {agents: ..agents}\n",
 	})
 	m, err := ReadManifest(dir)
 	if err != nil {

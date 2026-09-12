@@ -95,7 +95,7 @@ func TestExitCodesTellTheFailuresApart(t *testing.T) {
 		{
 			name: "a git source that cannot be fetched",
 			setup: func(t *testing.T, root string) []string {
-				writeOwnStack(t, root, "apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source: {git: file:///nowhere/at/all, ref: v1}\n")
+				writeOwnStack(t, root, "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source: {git: file:///nowhere/at/all, ref: v1}\n")
 				return []string{"hc"}
 			},
 			want: 1,

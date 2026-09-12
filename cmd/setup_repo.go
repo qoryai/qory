@@ -23,7 +23,7 @@ const moduleDir = "harness"
 // runtime and the repository's own module, and every key a repository commits shown.
 // %[1]s is the repository's name, %[2]s and %[3]s the spaces that bring the comments
 // after it to the column of the others.
-const checkoutConfig = `apiVersion: qory.ai/v1alpha1
+const checkoutConfig = `apiVersion: qory.dev/v1alpha1
 
 # This repository's stack. To take a stack as delivered instead, name it under extends in
 # place of target: {git: https://github.com/acme/harness, ref: v2.4.0, stack: nextjs}
@@ -47,7 +47,7 @@ worktree:
 
 // worktreeConfig is the qory.yaml setup repo writes beside a qory-stack.yaml that is there: the
 // worktree section alone, since the stack file holds the stack.
-const worktreeConfig = `apiVersion: qory.ai/v1alpha1
+const worktreeConfig = `apiVersion: qory.dev/v1alpha1
 
 # What a worktree of this repository needs; qory worktree add reads it. The stack is in
 # qory-stack.yaml.
@@ -61,7 +61,7 @@ worktree:
 `
 
 // moduleFile is the qory-module.yaml of the repository's own module. %s is its name.
-const moduleFile = `apiVersion: qory.ai/v1alpha1
+const moduleFile = `apiVersion: qory.dev/v1alpha1
 name: %s
 `
 
@@ -73,7 +73,7 @@ Instructions every agent reads in this repository.
 
 // userConfig is the qory.yaml setup machine writes: how qory runs on this machine, every
 // value at its default.
-const userConfig = `apiVersion: qory.ai/v1alpha1
+const userConfig = `apiVersion: qory.dev/v1alpha1
 
 # How qory runs on this machine. A checkout's qory.yaml overrides the keys it names.
 harness:

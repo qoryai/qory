@@ -22,8 +22,10 @@ and no document carries a kind.
 
 A `qory-stack.yaml` and a `qory-module.yaml` carry `apiVersion`; they are delivered
 files. A `qory.yaml` or `harness.yaml` may leave it out, and is then read as the newest
-format this qory reads, `qory.ai/v1alpha1`. A reader refuses a version it does not read
+format this qory reads, `qory.dev/v1alpha1`. A reader refuses a version it does not read
 and names the versions it does. `v1alpha1` says the format may still change.
+
+The group is `qory.dev`, the domain of the open format and its documentation.
 
 ## Discovery
 
@@ -61,7 +63,7 @@ file.
 ## The stack
 
 ```yaml
-apiVersion: qory.ai/v1alpha1
+apiVersion: qory.dev/v1alpha1
 name: nextjs-app                 # optional; default: owner/name from the origin remote
 description: The web app's harness   # optional; carried into the report
 target:
@@ -94,7 +96,7 @@ there (§Extending a stack):
 
 ```yaml
 # qory.yaml, its own stack
-apiVersion: qory.ai/v1alpha1
+apiVersion: qory.dev/v1alpha1
 harness:
   target: {runtime: claude}
   modules:
@@ -128,7 +130,7 @@ in this file (§The configuration). A `harness` section holding only the machine
 
 | Field | Required | Meaning |
 |---|---|---|
-| `apiVersion` | yes | `qory.ai/v1alpha1` |
+| `apiVersion` | yes | `qory.dev/v1alpha1` |
 | `qory` | no | the qory versions the stack is written for: comparators such as `>=0.3.0 <0.4.0`, every one of which has to hold. A compose on a qory outside the range is refused with status 5; a build from source between tags, which has no version, composes and says the range was not checked. A stack delivered to be extended states its minimum here, and every checkout extending it inherits the range |
 | `name` | no | the stack's name in the report. Default: `owner/name` from the origin remote, else the directory name |
 | `description` | no | what the stack is for, carried into the report and printed by `qory harness inspect` |
@@ -237,7 +239,7 @@ A repository that delivers stacks or modules to other repositories lists them in
 
 ```yaml
 # qory.yaml of the harness repository
-apiVersion: qory.ai/v1alpha1
+apiVersion: qory.dev/v1alpha1
 qory: ">=0.4.0"                  # a consumer names an export with 0.4.0 or later
 exports:
   dir: ./harness                 # optional; where stacks/ and modules/ are
@@ -271,7 +273,7 @@ export; one naming an export of a repository without the section is told to name
 
 ```yaml
 # qory-module.yaml
-apiVersion: qory.ai/v1alpha1
+apiVersion: qory.dev/v1alpha1
 name: nextjs                     # the module's name: modules/nextjs in the composed tree
 description: Next.js 15 conventions and the e2e skill
 variants:
@@ -573,7 +575,7 @@ uses. `harness.yaml` is for a repository whose committed file is to say nothing 
 tool that reads it.
 
 ```yaml
-apiVersion: qory.ai/v1alpha1     # optional; the newest format this qory reads when left out
+apiVersion: qory.dev/v1alpha1     # optional; the newest format this qory reads when left out
 harness:
   runtime: [claude, codex]       # instead of the stack's target.runtime
   model: opus                    # instead of the stack's target.model
@@ -604,7 +606,7 @@ exports:                         # in a repository delivering stacks or modules 
 
 | Key | Default | Meaning |
 |---|---|---|
-| `apiVersion` | `qory.ai/v1alpha1` | the format the file is written in, the newest this qory reads when left out, since the file is the repository's or the machine's own and not a delivered one; a version this qory does not read is refused |
+| `apiVersion` | `qory.dev/v1alpha1` | the format the file is written in, the newest this qory reads when left out, since the file is the repository's or the machine's own and not a delivered one; a version this qory does not read is refused |
 | `qory` | none | the qory versions the file is written for, as in a stack; read under `extends` as well, since it can only narrow the base's range |
 | `harness.runtime` | the stack's `target.runtime` | one runtime name or a list; `--runtime` wins over it |
 | `harness.model` | the stack's `target.model` | `--model` wins over it |

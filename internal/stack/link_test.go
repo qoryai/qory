@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-const linked = `apiVersion: qory.ai/v1alpha1
+const linked = `apiVersion: qory.dev/v1alpha1
 target:
   runtime: claude
 modules:

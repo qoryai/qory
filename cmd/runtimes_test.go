@@ -234,7 +234,7 @@ func TestComposeAModuleWithoutSkills(t *testing.T) {
 	root := newCheckout(t)
 	writeManifest(t, filepath.Join(root, "harness"), "own")
 	writeFile(t, filepath.Join(root, "harness", "AGENTS.md"), "# Only instructions\n")
-	writeOwnStack(t, root, "apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: any\nmodules:\n  - name: own\n    source: {path: harness}\n")
+	writeOwnStack(t, root, "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: any\nmodules:\n  - name: own\n    source: {path: harness}\n")
 	out, err := run(t, "hc")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)

@@ -38,7 +38,7 @@ coming last.
 1. Write `qory.yaml` in the repository, or let `qory setup repo` write it:
 
    ```yaml
-   apiVersion: qory.ai/v1alpha1
+   apiVersion: qory.dev/v1alpha1
    harness:
      target:
        runtime: claude          # or both at once: [claude, codex]
@@ -61,7 +61,7 @@ coming last.
    extending it inherits the range.
 
    ```yaml
-   apiVersion: qory.ai/v1alpha1
+   apiVersion: qory.dev/v1alpha1
    harness:
      extends: {git: https://github.com/acme/harness, ref: v2.4.0, stack: nextjs}
      modules:
@@ -131,7 +131,7 @@ the repository's `qory.yaml` says and composes the harness into it:
 
 ```yaml
 # qory.yaml, committed, beside the harness section
-apiVersion: qory.ai/v1alpha1
+apiVersion: qory.dev/v1alpha1
 worktree:
   base: main                     # a new branch starts here; default: the remote's HEAD
   link: [.env, .env.local]       # linked from the main checkout into the worktree

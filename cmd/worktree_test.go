@@ -440,7 +440,7 @@ func TestWorktreeRemoveAsksAboutOwnCommits(t *testing.T) {
 func TestWorktreeBranchSettingKeepsTheBranch(t *testing.T) {
 	root := worktreeRepo(t)
 	user := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "qory.yaml")
-	writeFile(t, user, "apiVersion: qory.ai/v1alpha1\nworktree: {branch: keep}\n")
+	writeFile(t, user, "apiVersion: qory.dev/v1alpha1\nworktree: {branch: keep}\n")
 	if _, err := run(t, "wa", "feature", "--no-compose"); err != nil {
 		t.Fatal(err)
 	}
@@ -463,7 +463,7 @@ func TestWorktreeBranchSettingKeepsTheBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantsRow(t, out, "branch", "feature  (deleted; every commit of it is on the remote, in the main checkout or on its base)")
-	writeFile(t, user, "apiVersion: qory.ai/v1alpha1\nworktree: {branch: drop}\n")
+	writeFile(t, user, "apiVersion: qory.dev/v1alpha1\nworktree: {branch: drop}\n")
 	_, err = run(t, "wa", "feature", "--no-compose")
 	if err == nil || !strings.Contains(err.Error(), `worktree.branch "drop" is not delete or keep`) {
 		t.Fatalf("bad value: %v", err)
@@ -521,7 +521,7 @@ func TestWorktreeListNamesEveryWorktree(t *testing.T) {
 func TestWorktreeLayoutFromTheConfiguration(t *testing.T) {
 	root := worktreeRepo(t)
 	user := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "qory.yaml")
-	writeFile(t, user, "apiVersion: qory.ai/v1alpha1\nworktree: {dir: worktrees, name: \"{repo}-{branch}\"}\n")
+	writeFile(t, user, "apiVersion: qory.dev/v1alpha1\nworktree: {dir: worktrees, name: \"{repo}-{branch}\"}\n")
 	out, err := run(t, "wa", "issue/42", "--no-compose")
 	if err != nil {
 		t.Fatal(err)

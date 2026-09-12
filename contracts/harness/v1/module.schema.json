@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://qory.ai/contracts/harness/v1/module.schema.json",
+  "$id": "https://qory.dev/contracts/harness/v1/module.schema.json",
   "title": "qory-module.yaml",
   "description": "qory-module.yaml at the root of a module: its name, its variants and the variables it exports.",
   "type": "object",
   "required": ["apiVersion", "name"],
   "additionalProperties": false,
   "properties": {
-    "apiVersion": {"const": "qory.ai/v1alpha1"},
+    "apiVersion": {"const": "qory.dev/v1alpha1"},
     "name": {"type": "string", "minLength": 1},
     "description": {"type": "string"},
     "env": {

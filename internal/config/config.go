@@ -10,7 +10,7 @@
 // owns, the farthest first, the checkout root's. A command line flag overrides every
 // file. A directory holds one of the two names, never both.
 //
-//	apiVersion: qory.ai/v1alpha1 # optional; the newest format this qory reads when left out
+//	apiVersion: qory.dev/v1alpha1 # optional; the newest format this qory reads when left out
 //	qory: ">=0.3.0"              # the qory versions this file is written for
 //	harness:
 //	  runtime: [claude, codex]   # instead of the stack's target.runtime
@@ -687,8 +687,8 @@ func read(path string) (file, error) {
 	if f.APIVersion == "" {
 		f.APIVersion = stack.APIVersion
 	}
-	if f.APIVersion != stack.APIVersion {
-		return f, fmt.Errorf("%s: apiVersion %q is not one this qory reads; versions: %s", path, f.APIVersion, stack.APIVersion)
+	if err := exports.CheckAPIVersion(f.APIVersion); err != nil {
+		return f, fmt.Errorf("%s: %w", path, err)
 	}
 	if f.Exports != nil {
 		if err := f.Exports.Validate(); err != nil {

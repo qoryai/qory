@@ -27,7 +27,7 @@ func TestComposeReadsAModuleFromGit(t *testing.T) {
 	runGit(t, remote, "tag", "v1")
 	url := "file://" + remote
 
-	writeOwnStack(t, root, "apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source: {git: "+url+", ref: v1, path: modules/core}\n")
+	writeOwnStack(t, root, "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source: {git: "+url+", ref: v1, path: modules/core}\n")
 	out, err := run(t, "hc")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -84,7 +84,7 @@ func TestComposeFollowsAnEditedRef(t *testing.T) {
 	runGit(t, remote, "tag", "v2")
 	url := "file://" + remote
 	stackFor := func(ref string) string {
-		return "apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: any\nmodules:\n  - name: core\n    source: {git: " + url + ", ref: " + ref + "}\n"
+		return "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: any\nmodules:\n  - name: core\n    source: {git: " + url + ", ref: " + ref + "}\n"
 	}
 	writeOwnStack(t, root, stackFor("v1"))
 	if out, err := run(t, "hc"); err != nil {

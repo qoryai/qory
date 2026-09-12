@@ -7,7 +7,7 @@ import (
 
 // selectionStack wraps a module block into a stack document.
 func selectionStack(block string) string {
-	return "apiVersion: qory.ai/v1alpha1\ntarget: {runtime: claude}\nmodules:\n  - name: core\n    " + strings.ReplaceAll(block, "\n", "\n    ") + "\n"
+	return "apiVersion: qory.dev/v1alpha1\ntarget: {runtime: claude}\nmodules:\n  - name: core\n    " + strings.ReplaceAll(block, "\n", "\n    ") + "\n"
 }
 
 // TestSelectionReadsKindsAndParts is every key a block takes: entries by kind, the

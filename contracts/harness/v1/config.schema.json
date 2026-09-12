@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://qory.ai/contracts/harness/v1/config.schema.json",
+  "$id": "https://qory.dev/contracts/harness/v1/config.schema.json",
   "title": "qory.yaml, or harness.yaml",
-  "description": "qory.yaml, or under its second name harness.yaml: the repository's own document at the checkout root, and the machine's in the user's directory and the checkout's ancestors. Every key is optional, apiVersion too: a file leaving it out is read as qory.ai/v1alpha1.",
+  "description": "qory.yaml, or under its second name harness.yaml: the repository's own document at the checkout root, and the machine's in the user's directory and the checkout's ancestors. Every key is optional, apiVersion too: a file leaving it out is read as qory.dev/v1alpha1.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "apiVersion": {"description": "Optional; the newest format this qory reads when left out.", "const": "qory.ai/v1alpha1"},
+    "apiVersion": {"description": "Optional; the newest format this qory reads when left out.", "const": "qory.dev/v1alpha1"},
     "qory": {
       "description": "The qory versions this document is written for: one or more comparators, >=0.3.0 <0.4.0 say; every one has to hold.",
       "type": "string",

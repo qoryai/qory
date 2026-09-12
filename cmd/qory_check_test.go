@@ -10,7 +10,7 @@ import (
 )
 
 // appStack is a checkout's own stack on the module [writeOwnModule] writes.
-const appStack = "apiVersion: qory.ai/v1alpha1\ntarget: {runtime: claude}\nmodules:\n  - name: app\n    source: {path: modules/app}\n"
+const appStack = "apiVersion: qory.dev/v1alpha1\ntarget: {runtime: claude}\nmodules:\n  - name: app\n    source: {path: modules/app}\n"
 
 // writeOwnModule writes the app module a checkout's own stack names.
 func writeOwnModule(t *testing.T, root string) {
