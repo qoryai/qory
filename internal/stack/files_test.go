@@ -57,7 +57,7 @@ func TestLoadRefusesExtendingFilesShapes(t *testing.T) {
 	}
 }
 
-// TestExtendRefusesAModuleNamedLikeABaseModule is a customer naming core, the base's
+// TestExtendRefusesAModuleNamedLikeABaseModule is a consumer naming core, the base's
 // module, in their own qory.yaml: the message says the module belongs to the base before any
 // source is resolved.
 func TestExtendRefusesAModuleNamedLikeABaseModule(t *testing.T) {

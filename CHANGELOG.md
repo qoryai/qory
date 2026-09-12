@@ -145,7 +145,7 @@ This release takes every item of that report.
   every document they read before anything is fetched or written and exit 5 outside the
   range, naming the file, the version and the range. A delivered stack states its minimum
   once, and every repository extending it inherits the range, so upgrading qory on the
-  runners changes no client file. A build from source between tags has no version to
+  runners changes no consumer's file. A build from source between tags has no version to
   compare; it composes and prints one row saying the range was not checked.
 - `qory version --json`: version, commit, dirty, source (`release` for a release build,
   `source` for a `go install` or `go build`), the harness format and the report version.

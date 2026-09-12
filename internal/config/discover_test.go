@@ -241,7 +241,7 @@ func TestDiscoverStackReadsHarnessYaml(t *testing.T) {
 	for _, c := range []struct{ body, want string }{
 		{"", ancestor},
 		{"harness: {runtime: codex}\n", ancestor},
-		{"harness:\n  extensions:\n    customer: {team: web}\n", own},
+		{"harness:\n  extensions:\n    consumer: {team: web}\n", own},
 		{composeDoc, own},
 	} {
 		if c.body != "" {

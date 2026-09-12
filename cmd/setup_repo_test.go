@@ -72,7 +72,7 @@ func TestSetupRepoSetsTheRepositoryUp(t *testing.T) {
 // worktree section alone.
 func TestSetupRepoKeepsAStackThatIsThere(t *testing.T) {
 	root := newCheckout(t)
-	if err := os.WriteFile(filepath.Join(root, config.FileName), []byte(customerCompose("https://git.example.com/acme/harness.git")), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, config.FileName), []byte(consumerCompose("https://git.example.com/acme/harness.git")), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	out, err := run(t, "setup", "repo")

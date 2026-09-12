@@ -59,8 +59,8 @@ func TestQoryKeyRefusesAQoryOutsideTheRange(t *testing.T) {
 // checkout extends states the qory it needs, and every checkout extending it is refused
 // on an older qory with the base named.
 func TestQoryKeyOfTheBaseStackIsChecked(t *testing.T) {
-	url := operatorRepoWith(t, "qory: \">=0.3.0\"\n"+baseStack)
-	root := customerCheckout(t, url)
+	url := baseRepoWith(t, "qory: \">=0.3.0\"\n"+baseStack)
+	root := consumerCheckout(t, url)
 	release(t, "0.2.1")
 	out, err := run(t, "harness", "compose")
 	if err == nil {

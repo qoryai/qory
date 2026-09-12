@@ -51,7 +51,7 @@ checkout whose root holds no document composes the stack alone. A document holdi
 repository's own stack, a `target`, has no base to take and is refused with status 2.
 This is how a runner that holds the stack tree composes a fleet of checkouts: each
 repository's file carries only what is the repository's own, its modules and its
-extensions, and names no version, ref or URL of the operator's.
+extensions, and names no version, ref or URL of the publisher's.
 
 The configuration is every `qory.yaml` or `harness.yaml` found, applied in this order,
 each overriding the one before it: `$XDG_CONFIG_HOME/qory/qory.yaml`, else
@@ -153,7 +153,7 @@ The schema is [stack.schema.json](stack.schema.json).
 
 ## Extending a stack
 
-An operator delivers a harness as a stack; a product repository extends it in the
+A publisher delivers a harness as a stack; a product repository extends it in the
 `harness` section of its `qory.yaml` and adds its own modules. The base is closed and the
 checkout appends:
 

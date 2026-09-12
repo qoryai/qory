@@ -64,12 +64,12 @@ func TestOnBaseTakesTheBaseFromTheFlag(t *testing.T) {
 	if want := (stack.Source{Git: "https://git.example.com/acme/harness", Ref: "main", Path: "x"}); p.Extends != (stack.Source{Path: rel}) || named != want {
 		t.Fatalf("with extends: %+v, named %+v, want %+v", p.Extends, named, want)
 	}
-	writeRaw(t, path, "harness:\n  extensions:\n    customer: {team: web}\n")
+	writeRaw(t, path, "harness:\n  extensions:\n    consumer: {team: web}\n")
 	p, named, err = config.OnBase(path, base)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Extends.Path != rel || named != (stack.Source{}) || len(p.Modules) != 0 || p.Extensions["customer"]["team"] != "web" {
+	if p.Extends.Path != rel || named != (stack.Source{}) || len(p.Modules) != 0 || p.Extensions["consumer"]["team"] != "web" {
 		t.Fatalf("extensions alone: %+v", p)
 	}
 }
