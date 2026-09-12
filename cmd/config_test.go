@@ -35,6 +35,7 @@ func TestConfigPrintsEveryValueWithItsOrigin(t *testing.T) {
 		"harness.update":      {"never", "default"},
 		"worktree.dir":        {"..", "default"},
 		"worktree.name":       {"wt-{branch}", "default"},
+		"worktree.branch":     {"delete", "default"},
 		"git.timeout":         {"10m0s", "default"},
 		"env.HARNESS_PROFILE": {"nextjs", "qory.yaml"},
 		"worktree.link":       {".env, .env.local", "qory.yaml"},

@@ -84,6 +84,7 @@ harness:
 worktree:
   dir: ..                      # where worktrees go, relative to the main checkout
   name: wt-{branch}            # the directory name; {branch} and {repo} are replaced
+  branch: delete               # what worktree remove does with the branch: delete or keep
 git:
   timeout: 10m                 # the longest one git command may run
   #cache: ~/.cache/qory        # where git sources are fetched to

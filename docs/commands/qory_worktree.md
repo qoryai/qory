@@ -28,5 +28,5 @@ Shortcuts:
 * [qory](qory.md)	 - Compose the harness a runtime loads from modules
 * [qory worktree add](qory_worktree_add.md)	 - Add a worktree for a branch, prepare it, and compose the harness into it
 * [qory worktree list](qory_worktree_list.md)	 - List the repository's worktrees with their branches
-* [qory worktree remove](qory_worktree_remove.md)	 - Remove a worktree, the one you stand in by default, and keep its branch
+* [qory worktree remove](qory_worktree_remove.md)	 - Remove a worktree, the one you stand in by default, and its branch
 

@@ -17,6 +17,10 @@ instead of their directories.
 - A stack in a repository whose `qory.yaml` sets `exports.dir` reads a module named
   without a source under that modules directory, `<dir>/modules/<name>`, instead of
   `modules/<name>` at the root. A repository without the key reads as before.
+- `qory worktree remove` deletes the branch by default. `--keep-branch` keeps it for one
+  remove, and `worktree.branch: keep` in your `qory.yaml` keeps it always. `--force` now
+  covers uncommitted changes alone; a branch with commits nothing else holds is asked
+  about, or answered by `--keep-branch` or `--delete-branch`.
 
 ### Added
 
@@ -30,6 +34,27 @@ instead of their directories.
   repository's `exports` section, so the publisher's layout is its own. An export the
   repository does not list is refused with what it does export. The report writes an
   export as `<url>#<ref> stack <name>` or `<url>#<ref> module <name>`.
+- `--base` on `qory worktree add` moves a branch that already exists: a branch with no
+  commits of its own is reset onto the base, one with commits has them rebased onto it,
+  after a question or at once with `--rebase`. The base a branch was cut from is recorded
+  in its git config as `branch.<name>.qory-base`.
+- `worktree.branch` in `qory.yaml`, `delete` or `keep`: what a remove does with the
+  branch. `qory config` shows it and `qory setup machine` writes it.
+- `qory worktree remove` tells a branch that holds nothing of its own, which goes
+  quietly, from one holding commits no remote branch, the main checkout or its base
+  holds, which is asked about: push it and delete, keep it, delete it anyway, or stop.
+  Without a terminal the question is an error naming the flags.
+
+### Changed
+
+- `qory worktree add` on a worktree already there says `already there` instead of
+  `reused`, and `you are in it` on the path row when you stand in that worktree.
+
+### Fixed
+
+- `qory worktree add --base <ref>` on a branch that already existed silently ignored the
+  base, even one that named nothing. The base is checked before anything else, on every
+  path.
 
 ## [0.3.0] - 2026-09-11
 

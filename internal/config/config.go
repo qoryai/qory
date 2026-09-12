@@ -23,6 +23,7 @@
 //	  dir: ..                    # where worktrees go, relative to the main checkout
 //	  name: wt-{branch}          # what a worktree's directory is called
 //	  base: main                 # the branch a new worktree branch starts from
+//	  branch: delete             # what worktree remove does with the branch: delete or keep
 //	  link: [.env]               # linked from the main checkout into a new worktree
 //	  copy: [config/local.json]  # copied once into a new worktree
 //	  run:
@@ -78,6 +79,9 @@ const DefaultWorktreeDir = ".."
 // is the branch with every slash made a dash, {repo} the main checkout's directory name.
 const DefaultWorktreeName = "wt-{branch}"
 
+// DefaultWorktreeBranch is what a remove does with the branch when no file says: delete it.
+const DefaultWorktreeBranch = "delete"
+
 // Default is the origin of a value no file set.
 const Default = "default"
 
@@ -97,6 +101,8 @@ type Worktree struct {
 	Name string
 	// Base is the branch a new worktree branch starts from, "" for the remote's HEAD.
 	Base string
+	// Branch is what a remove does with the worktree's branch: "delete" or "keep".
+	Branch string
 	// Link are paths linked from the main checkout into a new worktree.
 	Link []string
 	// Copy are paths copied once from the main checkout into a new worktree.
@@ -184,12 +190,13 @@ func (h *harnessSection) composes() bool {
 
 // worktreeSection is the worktree key.
 type worktreeSection struct {
-	Dir  *string  `yaml:"dir,omitempty"`
-	Name *string  `yaml:"name,omitempty"`
-	Base *string  `yaml:"base,omitempty"`
-	Link []string `yaml:"link,omitempty"`
-	Copy []string `yaml:"copy,omitempty"`
-	Run  *struct {
+	Dir    *string  `yaml:"dir,omitempty"`
+	Name   *string  `yaml:"name,omitempty"`
+	Base   *string  `yaml:"base,omitempty"`
+	Branch *string  `yaml:"branch,omitempty"`
+	Link   []string `yaml:"link,omitempty"`
+	Copy   []string `yaml:"copy,omitempty"`
+	Run    *struct {
 		Add    []string `yaml:"add,omitempty"`
 		Remove []string `yaml:"remove,omitempty"`
 	} `yaml:"run,omitempty"`
@@ -199,14 +206,14 @@ type worktreeSection struct {
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // fixedKeys are the row keys every configuration has, in the order [Config.Rows] prints them.
-var fixedKeys = []string{"harness.runtime", "harness.model", "harness.force", "harness.update", "worktree.dir", "worktree.name", "worktree.base", "git.timeout", "git.cache"}
+var fixedKeys = []string{"harness.runtime", "harness.model", "harness.force", "harness.update", "worktree.dir", "worktree.name", "worktree.base", "worktree.branch", "git.timeout", "git.cache"}
 
 // Defaults is the configuration with no file read: the stack's runtime and model, no
 // force, no update, worktrees beside the main checkout as wt-<branch> off the remote's
-// HEAD with nothing linked, copied or run, [DefaultTimeout], the cache under
-// [source.CacheDir], and no variables.
+// HEAD with nothing linked, copied or run and the branch deleted on remove,
+// [DefaultTimeout], the cache under [source.CacheDir], and no variables.
 func Defaults() Config {
-	c := Config{Worktree: Worktree{Dir: DefaultWorktreeDir, Name: DefaultWorktreeName}, Git: Git{Timeout: DefaultTimeout}, Env: map[string]string{}, origins: map[string]string{}}
+	c := Config{Worktree: Worktree{Dir: DefaultWorktreeDir, Name: DefaultWorktreeName, Branch: DefaultWorktreeBranch}, Git: Git{Timeout: DefaultTimeout}, Env: map[string]string{}, origins: map[string]string{}}
 	for _, key := range fixedKeys {
 		c.origins[key] = Default
 	}
@@ -517,6 +524,13 @@ func (c *Config) applyWorktree(path string, w *worktreeSection) error {
 		c.Worktree.Base = *w.Base
 		c.origins["worktree.base"] = path
 	}
+	if w.Branch != nil {
+		if *w.Branch != "delete" && *w.Branch != "keep" {
+			return fmt.Errorf("%s: worktree.branch %q is not delete or keep", path, *w.Branch)
+		}
+		c.Worktree.Branch = *w.Branch
+		c.origins["worktree.branch"] = path
+	}
 	for _, list := range []struct {
 		key   string
 		paths []string
@@ -634,6 +648,7 @@ func (c Config) Rows() []Row {
 		Row{"worktree.dir", c.Worktree.Dir, c.origins["worktree.dir"]},
 		Row{"worktree.name", c.Worktree.Name, c.origins["worktree.name"]},
 		Row{"worktree.base", base, c.origins["worktree.base"]},
+		Row{"worktree.branch", c.Worktree.Branch, c.origins["worktree.branch"]},
 	)
 	for _, list := range []struct {
 		key   string

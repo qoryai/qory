@@ -4,7 +4,10 @@
 // plain: a worktree per branch, beside the main checkout unless the configuration says
 // where else, a new branch cut off a base with no upstream on it, and its upstream set
 // to a remote branch of its own name, whether that branch exists yet or not, so a push
-// from the worktree creates or updates that branch and never touches the base.
+// from the worktree creates or updates that branch and never touches the base. The base
+// is recorded in the branch's git config, so a later add can move the branch onto
+// another one and a remove can tell whether the branch holds anything of its own, which
+// decides whether it goes with the worktree quietly or after a question.
 package worktree
 
 import (
@@ -28,6 +31,11 @@ type Options struct {
 	// Base is the ref a new branch starts from, "" for the remote's HEAD branch, else the
 	// main checkout's current branch.
 	Base string
+	// Onto says Base was asked for on the command line, so a branch that already exists
+	// is moved or rebased onto it after Ask, instead of left where it is.
+	Onto bool
+	// Rebase answers the question Onto asks with yes.
+	Rebase bool
 	// Fetch fetches the remote before the branch is cut, so the base is the remote's.
 	Fetch bool
 	// Link are paths linked from the main checkout into the new worktree.
@@ -38,10 +46,17 @@ type Options struct {
 	Add []string
 	// Remove are commands run in a worktree before it is removed, in order.
 	Remove []string
-	// Force removes a worktree with uncommitted changes or unpushed commits.
+	// Force removes a worktree with uncommitted changes.
 	Force bool
-	// DeleteBranch deletes the branch after the worktree is removed.
+	// KeepBranch keeps the branch after the worktree is removed; the default deletes it.
+	KeepBranch bool
+	// DeleteBranch deletes the branch even when it holds commits nothing else does,
+	// without asking.
 	DeleteBranch bool
+	// Ask puts a question to the user and returns the answer, trimmed and lower-cased,
+	// "" for none. It is nil when nobody is there to answer, and a question is then an
+	// error naming the flag that answers it.
+	Ask func(question string) (string, error)
 	// Output is where the commands' output goes, nil for none.
 	Output io.Writer
 }
@@ -53,7 +68,8 @@ type Added struct {
 	// Branch is the branch checked out in it.
 	Branch string
 	// How says where the branch came from: "new off <base>", "local", "remote", or
-	// "reused" for a worktree that was already there on that branch.
+	// "already there" for a worktree that was already there on that branch, and what
+	// Options.Onto did with it after a semicolon.
 	How string
 	// Upstream is the remote branch the worktree pushes to, "" without a remote.
 	Upstream string
@@ -75,7 +91,14 @@ type Removed struct {
 	Main string
 	// Ran are the commands run before the removal, in order.
 	Ran []string
-	// BranchDeleted says whether the branch went with it.
+	// Own is how many commits the branch held that nothing else did: no remote branch,
+	// not the main checkout, not the base it was cut from.
+	Own int
+	// Pushed says the branch was pushed to Upstream before it was deleted.
+	Pushed bool
+	// Upstream is the remote branch of the branch's name, "" without a remote.
+	Upstream string
+	// BranchDeleted says whether the branch went with the worktree.
 	BranchDeleted bool
 }
 
@@ -167,17 +190,29 @@ func PathFor(main, branch string, o Options) string {
 // prepares it. A directory already at the path is reused when it is a worktree on that
 // branch and refused otherwise. The branch is checked out when it exists locally, tracked
 // when it exists on the remote, and cut off the base otherwise, with its upstream set to
-// the remote branch of its own name. Then every Options.Link is linked and every
-// Options.Copy copied from the main checkout, each skipped with a note when it is
-// already in the worktree or absent in the main checkout, and every Options.Add is run
-// in the worktree with QORY_WORKTREE, QORY_MAIN and QORY_BRANCH set; the first failing
-// command is a [*RunError].
+// the remote branch of its own name and the base it was cut from recorded in its git
+// config. With Options.Onto, a branch that existed is moved or rebased onto Options.Base,
+// see [onto]. Then every Options.Link is linked and every Options.Copy copied from the
+// main checkout, each skipped with a note when it is already in the worktree or absent
+// in the main checkout, and every Options.Add is run in the worktree with QORY_WORKTREE,
+// QORY_MAIN and QORY_BRANCH set; the first failing command is a [*RunError].
 func Add(main, branch string, o Options) (Added, error) {
 	a := Added{Path: PathFor(main, branch, o), Branch: branch}
 	if branch == "" || strings.HasPrefix(branch, "-") || strings.ContainsAny(branch, " ~^:?*[\\") || strings.HasSuffix(branch, "/") || strings.Contains(branch, "..") {
 		return a, fmt.Errorf("%q is not a branch name", branch)
 	}
 	remote := remoteOf(main)
+	if o.Fetch && remote != "" {
+		if _, err := git(main, "fetch", "--quiet", remote); err != nil {
+			return a, fmt.Errorf("git fetch %s: %w", remote, err)
+		}
+	}
+	// A base that resolves to nothing is a mistake on every path, not only the one
+	// that cuts a new branch off it.
+	if o.Base != "" && !resolves(main, o.Base) {
+		return a, fmt.Errorf("base %s is not a branch, tag or commit of this repository", o.Base)
+	}
+	existed := true
 	if info, err := os.Stat(a.Path); err == nil {
 		if !info.IsDir() {
 			return a, fmt.Errorf("%s is a file, where the worktree of %s would go", a.Path, branch)
@@ -189,15 +224,10 @@ func Add(main, branch string, o Options) (Added, error) {
 		if on != branch {
 			return a, fmt.Errorf("%s exists on branch %s, not %s; remove it or pick another branch", a.Path, on, branch)
 		}
-		a.How = "reused"
+		a.How = "already there"
 	} else {
 		if err := os.MkdirAll(filepath.Dir(a.Path), 0o755); err != nil {
 			return a, err
-		}
-		if o.Fetch && remote != "" {
-			if _, err := git(main, "fetch", "--quiet", remote); err != nil {
-				return a, fmt.Errorf("git fetch %s: %w", remote, err)
-			}
 		}
 		local := refExists(main, "refs/heads/"+branch)
 		onRemote := remote != "" && refExists(main, "refs/remotes/"+remote+"/"+branch)
@@ -220,7 +250,11 @@ func Add(main, branch string, o Options) (Added, error) {
 			if _, err := git(main, "worktree", "add", "--no-track", "-b", branch, a.Path, base); err != nil {
 				return a, fmt.Errorf("git worktree add -b %s off %s: %w", branch, base, err)
 			}
+			if err := recordBase(a.Path, branch, base); err != nil {
+				return a, err
+			}
 			a.How = "new off " + base
+			existed = false
 		}
 	}
 	if remote != "" && a.How != "remote" {
@@ -235,6 +269,11 @@ func Add(main, branch string, o Options) (Added, error) {
 	}
 	if remote != "" {
 		a.Upstream = remote + "/" + branch
+	}
+	if existed && o.Onto && o.Base != "" {
+		if err := onto(main, remote, &a, o); err != nil {
+			return a, err
+		}
 	}
 	for _, rel := range o.Link {
 		switch state := bring(main, a.Path, rel, true); state {
@@ -269,11 +308,77 @@ func Add(main, branch string, o Options) (Added, error) {
 	return a, nil
 }
 
+// onto puts the branch of a, which existed before this add, onto o.Base. The branch's
+// own commits are the ones past its recorded base, or past the default base when none
+// was recorded: with none, the branch is reset to o.Base; with some, they are rebased
+// onto it. Either way the user is asked first, unless o.Rebase answers yes, and a no
+// keeps the branch where it is, which a.How says. A worktree with uncommitted changes is
+// refused, a rebase that stops at a conflict is aborted and the branch left as it was,
+// and a branch that already holds o.Base is left alone. The recorded base may be a
+// branch that moved on, so --base with the same name rebases onto where it is now.
+func onto(main, remote string, a *Added, o Options) error {
+	if status, _ := git(a.Path, "status", "--porcelain", "--untracked-files=no"); status != "" {
+		return fmt.Errorf("%s has uncommitted changes, so %s stays where it is; commit or stash them to move it onto %s", a.Path, a.Branch, o.Base)
+	}
+	old := recordedBase(main, a.Branch)
+	if old == "" {
+		var err error
+		if old, err = baseRef(main, remote, ""); err != nil {
+			return err
+		}
+	}
+	// A branch that holds the base already sits on it, or on top of it; there is
+	// nothing to move. The recorded base may be a branch that moved on since, so the
+	// question is asked of the branch's own history, not of the two bases' tips.
+	if _, err := git(a.Path, "merge-base", "--is-ancestor", o.Base, "HEAD"); err == nil {
+		a.How += "; on " + o.Base + " already"
+		return recordBase(a.Path, a.Branch, o.Base)
+	}
+	out, err := git(a.Path, "rev-list", "--count", old+"..HEAD")
+	if err != nil {
+		return err
+	}
+	n, _ := strconv.Atoi(out)
+	yes := o.Rebase
+	if !yes {
+		if o.Ask == nil {
+			return fmt.Errorf("%s exists off %s, so --base %s needs an answer: add --rebase to move it onto %s, or leave --base out to keep it", a.Branch, old, o.Base, o.Base)
+		}
+		question := fmt.Sprintf("%s sits on %s with no commits of its own. Move it onto %s? [Y/n] ", a.Branch, old, o.Base)
+		if n > 0 {
+			question = fmt.Sprintf("%s holds %d commit%s off %s. Rebase %s onto %s? [y/N] ", a.Branch, n, plural(n), old, map[bool]string{true: "them", false: "it"}[n > 1], o.Base)
+		}
+		answer, err := o.Ask(question)
+		if err != nil {
+			return err
+		}
+		yes = answer == "y" || answer == "yes" || (n == 0 && answer == "")
+	}
+	if !yes {
+		a.How += "; kept on " + old + ", not moved onto " + o.Base
+		return nil
+	}
+	if n == 0 {
+		if _, err := git(a.Path, "reset", "--hard", "--quiet", o.Base); err != nil {
+			return fmt.Errorf("git reset --hard %s: %w", o.Base, err)
+		}
+		a.How = "moved onto " + o.Base + "; was on " + old
+	} else {
+		if _, err := git(a.Path, "rebase", "--quiet", "--onto", o.Base, old, a.Branch); err != nil {
+			git(a.Path, "rebase", "--abort")
+			return fmt.Errorf("rebasing %s onto %s stops at a conflict, so it stays on %s; run git rebase --onto %s %s in %s and resolve it there", a.Branch, o.Base, old, o.Base, old, a.Path)
+		}
+		a.How = fmt.Sprintf("rebased onto %s; %d commit%s, was on %s", o.Base, n, plural(n), old)
+	}
+	return recordBase(a.Path, a.Branch, o.Base)
+}
+
 // Remove takes the worktree at path away, after Options.Remove ran in it. It refuses the
-// main checkout, a worktree with uncommitted changes to tracked files, and one whose
-// branch holds commits its upstream does not, or, without an upstream on the remote, that
-// the main checkout's branch does not; Options.Force removes it anyway. The branch stays
-// unless Options.DeleteBranch.
+// main checkout and a worktree with uncommitted changes to tracked files, the latter
+// unless Options.Force. The branch goes with the worktree unless Options.KeepBranch:
+// quietly when every commit of it is on a remote branch, in the main checkout or on the
+// base it was cut from, and after a question otherwise, whose answers are to push the
+// branch first, keep it, delete it anyway, or stop; Options.DeleteBranch answers delete.
 func Remove(main, path string, o Options) (Removed, error) {
 	r := Removed{Path: path, Main: main}
 	if path == main {
@@ -284,12 +389,44 @@ func Remove(main, path string, o Options) (Removed, error) {
 		return r, fmt.Errorf("%s is not a worktree of this repository", path)
 	}
 	r.Branch = branch
+	if remote := remoteOf(main); remote != "" {
+		r.Upstream = remote + "/" + branch
+	}
 	if !o.Force {
 		if status, _ := git(path, "status", "--porcelain", "--untracked-files=no"); status != "" {
 			return r, fmt.Errorf("%s has uncommitted changes; commit or stash them, or remove with --force", path)
 		}
-		if n, where := unpushed(main, path, branch); n > 0 {
-			return r, fmt.Errorf("branch %s has %d commit%s %s; push them, or remove with --force", branch, n, plural(n), where)
+	}
+	var last string
+	if branch != "" {
+		r.Own, last = own(main, path, branch)
+	}
+	deleteBranch := branch != "" && !o.KeepBranch
+	if deleteBranch {
+		if r.Own > 0 && !o.DeleteBranch {
+			held := fmt.Sprintf("branch %s holds %d commit%s no remote branch, the main checkout or its base holds", branch, r.Own, plural(r.Own))
+			if o.Ask == nil {
+				return r, fmt.Errorf("%s; push them, or remove with --keep-branch or --delete-branch", held)
+			}
+			answer, err := o.Ask(fmt.Sprintf("%s (last: %q).\n  [p]ush it and delete, [k]eep it, [d]elete it anyway (git reflog finds the commits for 30 days), or [a]bort? [p/k/d/A] ", held, last))
+			if err != nil {
+				return r, err
+			}
+			switch answer {
+			case "p", "push":
+				if r.Upstream == "" {
+					return r, errors.New("no remote to push to")
+				}
+				if _, err := git(path, "push", "--quiet", "--set-upstream", strings.SplitN(r.Upstream, "/", 2)[0], branch); err != nil {
+					return r, fmt.Errorf("git push: %w", err)
+				}
+				r.Pushed = true
+			case "k", "keep":
+				deleteBranch = false
+			case "d", "delete":
+			default:
+				return r, errors.New("nothing removed")
+			}
 		}
 	}
 	for _, command := range o.Remove {
@@ -304,13 +441,11 @@ func Remove(main, path string, o Options) (Removed, error) {
 	if _, err := git(main, "worktree", "remove", "--force", path); err != nil {
 		return r, fmt.Errorf("git worktree remove: %w", err)
 	}
-	if o.DeleteBranch && branch != "" {
-		flag := "-d"
-		if o.Force {
-			flag = "-D"
-		}
-		if _, err := git(main, "branch", flag, branch); err != nil {
-			return r, fmt.Errorf("the worktree is removed, and git branch %s %s failed: %w", flag, branch, err)
+	if deleteBranch {
+		// -D, since the check above is stricter than git's own, which wants the branch
+		// merged into its upstream or HEAD and knows nothing of the base or other remotes.
+		if _, err := git(main, "branch", "-D", branch); err != nil {
+			return r, fmt.Errorf("the worktree is removed, and git branch -D %s failed: %w", branch, err)
 		}
 		r.BranchDeleted = true
 	}
@@ -341,25 +476,51 @@ func Find(main, name string) (Entry, error) {
 	return Entry{}, fmt.Errorf("no worktree is at %s or on a branch of that name; qory worktree list shows them", name)
 }
 
-// unpushed counts the commits of branch that its upstream lacks, or, when no upstream is
-// reachable, that neither a remote branch nor the main checkout's HEAD holds, and says
-// which in words. The second count is what keeps a worktree that added nothing removable
-// before its first push.
-func unpushed(main, path, branch string) (int, string) {
-	if out, err := git(path, "rev-list", "--count", "@{upstream}..HEAD"); err == nil {
-		n, _ := strconv.Atoi(out)
-		return n, "its upstream does not hold"
-	}
-	args := []string{"rev-list", "--count", "HEAD", "--not", "--remotes"}
+// own counts the commits of the worktree's branch that nothing else holds: no remote
+// ref, not the main checkout's HEAD, not the base the branch was cut from. It returns the
+// count and the subject of the newest one. A branch whose every commit is elsewhere is
+// safe to delete, and this is the count that says so.
+func own(main, path, branch string) (int, string) {
+	args := []string{"rev-list", "HEAD", "--not", "--remotes"}
 	if head, err := git(main, "rev-parse", "HEAD"); err == nil {
 		args = append(args, head)
 	}
+	if base := recordedBase(main, branch); base != "" {
+		args = append(args, base)
+	}
 	out, err := git(path, args...)
-	if err != nil {
+	if err != nil || out == "" {
 		return 0, ""
 	}
-	n, _ := strconv.Atoi(out)
-	return n, "no remote branch and not the main checkout holds"
+	commits := strings.Split(out, "\n")
+	subject, _ := git(path, "log", "-1", "--format=%s", commits[0])
+	return len(commits), subject
+}
+
+// baseKey is the git config key, under branch.<name>, that holds the base a branch was
+// cut from, so a later add knows what to rebase and a remove what the branch added.
+const baseKey = "qory-base"
+
+// recordBase writes base as the branch's recorded base.
+func recordBase(dir, branch, base string) error {
+	_, err := git(dir, "config", "branch."+branch+"."+baseKey, base)
+	return err
+}
+
+// recordedBase is the base recorded for the branch, "" when none was or it no longer
+// resolves.
+func recordedBase(main, branch string) string {
+	base, err := git(main, "config", "--get", "branch."+branch+"."+baseKey)
+	if err != nil || base == "" || !resolves(main, base) {
+		return ""
+	}
+	return base
+}
+
+// resolves reports whether ref names a commit of the repository.
+func resolves(main, ref string) bool {
+	_, err := git(main, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	return err == nil
 }
 
 // baseRef resolves the ref a new branch starts from: the one given, else the remote's
@@ -367,7 +528,7 @@ func unpushed(main, path, branch string) (int, string) {
 // that does not resolve is an error naming it.
 func baseRef(main, remote, base string) (string, error) {
 	if base != "" {
-		if _, err := git(main, "rev-parse", "--verify", "--quiet", base+"^{commit}"); err != nil {
+		if !resolves(main, base) {
 			return "", fmt.Errorf("base %s is not a branch, tag or commit of this repository", base)
 		}
 		return base, nil

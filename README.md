@@ -139,13 +139,19 @@ worktree:
 
 ```sh
 qory worktree add feature        # ../wt-feature on branch feature, pushing to origin/feature
-qory worktree remove             # the worktree you stand in; the branch stays
+qory worktree add feature --base v1.2.0   # a branch that exists is moved onto the base, after a question
+qory worktree remove             # the worktree you stand in, and its branch
 qory setup shell                 # make your shell cd into a new worktree, and back on remove
 ```
 
+The branch goes with the worktree: quietly when every commit of it is on the remote, in
+the main checkout or on the base it was cut from, and after a question otherwise, with
+push, keep, delete anyway and stop as the answers. `--keep-branch` keeps it, and
+`worktree.branch: keep` makes that the default.
+
 Where a worktree goes and what it is called is your choice, not the repository's:
-`worktree.dir` and `worktree.name` in your own `qory.yaml`, which `qory setup machine`
-writes.
+`worktree.dir`, `worktree.name` and `worktree.branch` in your own `qory.yaml`, which
+`qory setup machine` writes.
 
 ## Commands
 
@@ -158,7 +164,7 @@ qory harness compose     # compose the stack into the checkout you stand in   (q
 qory harness inspect     # the report: every entry and the module it came from (qory hi)
 qory harness remove      # remove the composed tree and its links               (qory hr)
 qory worktree add        # add a worktree for a branch and prepare it            (qory wa)
-qory worktree remove     # remove a worktree and keep its branch                 (qory wr)
+qory worktree remove     # remove a worktree and its branch                      (qory wr)
 qory worktree list       # every worktree with its branch                        (qory wl)
 qory config              # every setting, its value and the file it came from
 ```
