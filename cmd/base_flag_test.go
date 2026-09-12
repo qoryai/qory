@@ -148,3 +148,39 @@ func TestHarnessYamlIsTheDocumentsOtherName(t *testing.T) {
 		}
 	}
 }
+
+// TestWorktreeAddTakesTheBaseFromTheFlag is the runner adding a worktree of a fleet
+// checkout: -f names the base the worktree's document composes on, and the worktree
+// comes out composed. Without the flag the document is found and refused for lacking a
+// base, with the worktree kept; -f beside --no-compose is an input error.
+func TestWorktreeAddTakesTheBaseFromTheFlag(t *testing.T) {
+	_, base := runnerTree(t)
+	root := fleetCheckout(t, "harness.yaml")
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "commit", "-q", "-m", "fleet")
+	out, err := run(t, "wa", "feature", "-f", base)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wt := filepath.Join(filepath.Dir(root), "wt-feature")
+	wantsRow(t, out, "base", base+"  (named by -f)")
+	wantsRow(t, out, "skipped", "harness.yaml  (its harness, git and env keys; the base stack decides under extends)")
+	rep := readReport(t, wt)
+	if len(rep.Modules) != 3 || rep.Modules[2].Name != "app" || rep.Base == nil || rep.Extensions["customer"] == nil {
+		t.Fatalf("report: %+v", rep)
+	}
+	if _, err := os.Lstat(filepath.Join(wt, ".claude", "skills", "deploy")); err != nil {
+		t.Errorf("the worktree's own skill is not composed: %v", err)
+	}
+	out, err = run(t, "wa", "other")
+	if err == nil || cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "leaves extends out for the base that qory harness compose -f <stack> names") {
+		t.Fatalf("without the flag: err = %v, exit %d\n%s", err, cmd.ExitCode(err), out)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(root), "wt-other", "harness.yaml")); err != nil {
+		t.Errorf("the worktree is not kept: %v", err)
+	}
+	_, err = run(t, "wa", "third", "-f", base, "--no-compose")
+	if err == nil || !strings.Contains(err.Error(), "[file no-compose]") {
+		t.Fatalf("with --no-compose: %v", err)
+	}
+}

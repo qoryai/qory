@@ -60,7 +60,8 @@ of the operator's, and may say nothing of the tool that reads it.
   place of extends <source>)`, and the report records the base with the stack
   directory's path relative to the document and the pin `working-tree`. A checkout
   without a document composes the stack alone, as before, and `-f` naming a `qory.yaml`
-  or `harness.yaml` still composes that document itself.
+  or `harness.yaml` still composes that document itself. `qory worktree add -f <stack>`
+  composes the new worktree the same way, so a runner adds and composes in one call.
 - `harness.yaml` as a second name for `qory.yaml`, read exactly as `qory.yaml` at every
   level: the user's directory, the ancestor directories, the checkout root; by the
   configuration walk, by stack discovery, and by `-f`. A directory holds one of the two
