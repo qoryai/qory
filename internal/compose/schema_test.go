@@ -148,7 +148,7 @@ func TestStackSchemaKnowsBothSourceForms(t *testing.T) {
 // whose harness section extends a stack, one with a target or an extending block too,
 // one with modules and no extends, whose base compose -f names, one with extensions
 // alone, one with its own target and modules, a worktree name
-// without {branch}, a stack with
+// without {branch}, worktree paths in both forms, a stack with
 // extends, a stack with an extending block, a module entry by name alone, a base and a
 // module named as exports, and the exports section in each of its forms.
 func TestComposeSchemaKnowsExtends(t *testing.T) {
@@ -174,6 +174,13 @@ func TestComposeSchemaKnowsExtends(t *testing.T) {
 		{composeSchema, `{"harness": {"extensions": {"acme": {"team": "web"}}}}`, true},
 		{composeSchema, `{"harness": {"target": {"runtime": ["claude", "codex"], "model": "opus"}, "modules": [{"name": "app"}]}, "worktree": {"link": [".env"]}}`, true},
 		{composeSchema, `{"worktree": {"name": "wt"}}`, false},
+		{composeSchema, `{"worktree": {"link": [".env", {"from": "~/secrets/app.env", "to": ".env.local"}, {"from": "config/dev.json", "to": "config/local.json"}], "copy": [{"from": "config/dev.json"}]}}`, true},
+		{composeSchema, `{"worktree": {"branch": "keep"}}`, true},
+		{composeSchema, `{"worktree": {"branch": "drop"}}`, false},
+		{composeSchema, `{"worktree": {"link": [{"from": "/etc/hosts"}]}}`, false},
+		{composeSchema, `{"worktree": {"link": [{"from": "~/secrets/app.env"}]}}`, false},
+		{composeSchema, `{"worktree": {"copy": [{"to": ".env"}]}}`, false},
+		{composeSchema, `{"worktree": {"copy": [{"from": ".env", "into": "x"}]}}`, false},
 		{stackSchema, `{"extends": {"path": "../harness/nextjs-15"}, "modules": [{"name": "app"}]}`, false},
 		{stackSchema, `{"modules": [{"name": "app"}]}`, false},
 		{stackSchema, `{"target": {"runtime": "claude"}, "modules": [{"name": "core"}], "extending": {"kinds": ["skills"], "instructions": true, "settings": ["permissions.allow"], "files": ["claude/rules/"]}}`, true},

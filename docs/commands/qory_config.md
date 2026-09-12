@@ -12,6 +12,8 @@ order, each overriding the one before it: the user's, in $XDG_CONFIG_HOME/qory o
 owns, the farthest first, then the one in the checkout root. A compose flag overrides
 every file.
 
+--verbose adds nothing here.
+
 ```
 qory config [flags]
 ```
@@ -20,6 +22,12 @@ qory config [flags]
 
 ```
   -h, --help   help for config
+```
+
+### Options inherited from parent commands
+
+```
+  -v, --verbose   print more of what the command does; each command's help says what
 ```
 
 ### SEE ALSO

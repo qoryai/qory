@@ -27,6 +27,7 @@
 //	  branch: delete             # what worktree remove does with the branch: delete or keep
 //	  link: [.env]               # linked from the main checkout into a new worktree
 //	  copy: [config/local.json]  # copied once into a new worktree
+//	    # or {from: ~/secrets/app.env, to: .env}: a path from outside the checkout
 //	  run:
 //	    add: [pnpm install]      # run in a new worktree, after links and copies
 //	    remove: []               # run in a worktree before it is removed
@@ -124,14 +125,64 @@ type Worktree struct {
 	Base string
 	// Branch is what a remove does with the worktree's branch: "delete" or "keep".
 	Branch string
-	// Link are paths linked from the main checkout into a new worktree.
-	Link []string
-	// Copy are paths copied once from the main checkout into a new worktree.
-	Copy []string
+	// Link are paths linked into a new worktree.
+	Link []Path
+	// Copy are paths copied once into a new worktree.
+	Copy []Path
 	// Add are the commands run in a new worktree after links and copies, in order.
 	Add []string
 	// Remove are the commands run in a worktree before it is removed, in order.
 	Remove []string
+}
+
+// Path is one entry of worktree.link or worktree.copy: where it comes from and where it
+// goes in the worktree. A path named alone is inside the checkout and goes to the same
+// path; {from: <path>, to: <path>} brings a path from anywhere, From absolute with a
+// leading ~ expanded, To relative to the worktree.
+type Path struct {
+	// From is the source: relative to the main checkout, or absolute.
+	From string
+	// To is the destination, relative to the worktree.
+	To string
+}
+
+// String is the entry as a row prints it: the path alone when the two are the same,
+// else "from -> to".
+func (p Path) String() string {
+	if p.From == p.To {
+		return p.To
+	}
+	return p.From + " -> " + p.To
+}
+
+// pathEntry is a worktree.link or worktree.copy entry as written: a string, or a
+// mapping with from and to.
+type pathEntry struct {
+	From, To string
+	// mapping says the entry was written as {from, to}, so an absolute from is meant.
+	mapping bool
+}
+
+// UnmarshalYAML reads a string as From, and a mapping's from and to.
+func (e *pathEntry) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		return node.Decode(&e.From)
+	}
+	var m struct {
+		From *string `yaml:"from"`
+		To   *string `yaml:"to"`
+	}
+	if err := node.Decode(&m); err != nil {
+		return err
+	}
+	e.mapping = true
+	if m.From != nil {
+		e.From = *m.From
+	}
+	if m.To != nil {
+		e.To = *m.To
+	}
+	return nil
 }
 
 // Requirement is one file's qory key: the range of qory versions it is written for.
@@ -217,12 +268,12 @@ func (h *harnessSection) extends() bool {
 
 // worktreeSection is the worktree key.
 type worktreeSection struct {
-	Dir    *string  `yaml:"dir,omitempty"`
-	Name   *string  `yaml:"name,omitempty"`
-	Base   *string  `yaml:"base,omitempty"`
-	Branch *string  `yaml:"branch,omitempty"`
-	Link   []string `yaml:"link,omitempty"`
-	Copy   []string `yaml:"copy,omitempty"`
+	Dir    *string     `yaml:"dir,omitempty"`
+	Name   *string     `yaml:"name,omitempty"`
+	Base   *string     `yaml:"base,omitempty"`
+	Branch *string     `yaml:"branch,omitempty"`
+	Link   []pathEntry `yaml:"link,omitempty"`
+	Copy   []pathEntry `yaml:"copy,omitempty"`
 	Run    *struct {
 		Add    []string `yaml:"add,omitempty"`
 		Remove []string `yaml:"remove,omitempty"`
@@ -637,20 +688,22 @@ func (c *Config) applyWorktree(path string, w *worktreeSection) error {
 		c.origins["worktree.branch"] = path
 	}
 	for _, list := range []struct {
-		key   string
-		paths []string
-		into  *[]string
+		key     string
+		entries []pathEntry
+		into    *[]Path
 	}{{"worktree.link", w.Link, &c.Worktree.Link}, {"worktree.copy", w.Copy, &c.Worktree.Copy}} {
-		if list.paths == nil {
+		if list.entries == nil {
 			continue
 		}
-		for _, rel := range list.paths {
-			clean := filepath.Clean(rel)
-			if rel == "" || filepath.IsAbs(rel) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-				return fmt.Errorf("%s: %s names %q, which is not a path inside the checkout", path, list.key, rel)
+		paths := []Path{}
+		for _, e := range list.entries {
+			p, err := worktreePath(path, list.key, e)
+			if err != nil {
+				return err
 			}
+			paths = append(paths, p)
 		}
-		*list.into = append([]string(nil), list.paths...)
+		*list.into = paths
 		c.origins[list.key] = path
 	}
 	if w.Run != nil {
@@ -664,6 +717,53 @@ func (c *Config) applyWorktree(path string, w *worktreeSection) error {
 		}
 	}
 	return nil
+}
+
+// worktreePath checks one worktree.link or worktree.copy entry of the file at path and
+// returns it as a [Path]. A path named alone, or a from written relative, is inside the
+// checkout and goes to the same path unless to says otherwise; a from that is absolute
+// or starts with ~ comes from outside the checkout and needs a to. A to is relative and
+// stays inside the worktree.
+func worktreePath(path, key string, e pathEntry) (Path, error) {
+	from := e.From
+	if from == "" {
+		return Path{}, fmt.Errorf("%s: %s names an entry with no path; one is a path inside the checkout, or {from: <path>, to: <path in the worktree>}", path, key)
+	}
+	if from == "~" || strings.HasPrefix(from, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return Path{}, fmt.Errorf("%s: %s names %s, and the home directory is unknown: %w", path, key, from, err)
+		}
+		from = filepath.Join(home, from[1:])
+	}
+	to := e.To
+	switch {
+	case filepath.IsAbs(from) && !e.mapping:
+		return Path{}, fmt.Errorf("%s: %s names %q, which is not a path inside the checkout; a path from outside goes as {from: %s, to: <path in the worktree>}", path, key, e.From, e.From)
+	case filepath.IsAbs(from):
+		from = filepath.Clean(from)
+		if to == "" {
+			return Path{}, fmt.Errorf("%s: %s names %s with no to; a path from outside the checkout says where it goes, as {from: %s, to: <path in the worktree>}", path, key, e.From, e.From)
+		}
+	default:
+		if !insideRel(from) {
+			return Path{}, fmt.Errorf("%s: %s names %q, which is not a path inside the checkout", path, key, from)
+		}
+		if to == "" {
+			to = from
+		}
+	}
+	if !insideRel(to) {
+		return Path{}, fmt.Errorf("%s: %s names to %q for %s, which is not a path inside the worktree", path, key, to, e.From)
+	}
+	return Path{From: from, To: to}, nil
+}
+
+// insideRel reports whether p is a relative path that stays inside the directory it is
+// relative to.
+func insideRel(p string) bool {
+	clean := filepath.Clean(p)
+	return p != "" && !filepath.IsAbs(p) && clean != "." && clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator))
 }
 
 // read decodes one file. An unknown key is an error, and so is a second document and an
@@ -763,7 +863,7 @@ func (c Config) Rows() []Row {
 	for _, list := range []struct {
 		key   string
 		items []string
-	}{{"worktree.link", c.Worktree.Link}, {"worktree.copy", c.Worktree.Copy}, {"worktree.run.add", c.Worktree.Add}, {"worktree.run.remove", c.Worktree.Remove}} {
+	}{{"worktree.link", pathStrings(c.Worktree.Link)}, {"worktree.copy", pathStrings(c.Worktree.Copy)}, {"worktree.run.add", c.Worktree.Add}, {"worktree.run.remove", c.Worktree.Remove}} {
 		if len(list.items) > 0 {
 			rows = append(rows, Row{list.key, strings.Join(list.items, ", "), c.origins[list.key]})
 		}
@@ -789,6 +889,15 @@ func (c Config) Rows() []Row {
 		)
 	}
 	return rows
+}
+
+// pathStrings is each path as [Path.String] prints it.
+func pathStrings(paths []Path) []string {
+	var out []string
+	for _, p := range paths {
+		out = append(out, p.String())
+	}
+	return out
 }
 
 // listOrNone joins names for a row, "(none)" for an empty list.

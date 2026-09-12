@@ -142,18 +142,29 @@ worktree:
 ```sh
 qory worktree add feature        # ../wt-feature on branch feature, pushing to origin/feature
 qory worktree add feature --base v1.2.0   # a branch that exists is moved onto the base, after a question
+qory worktree add feature --offline       # without the fetch every add starts with
 qory worktree remove             # the worktree you stand in, and its branch
 qory setup shell                 # make your shell cd into a new worktree, and back on remove
 ```
 
-The branch goes with the worktree: quietly when every commit of it is on the remote, in
-the main checkout or on the base it was cut from, and after a question otherwise, with
-push, keep, delete anyway and stop as the answers. `--keep-branch` keeps it, and
-`worktree.branch: keep` makes that the default.
+Every add fetches the remote first, so a new branch starts at the remote's tip and a
+branch pushed from another machine is tracked instead of cut anew; a fetch that fails
+stops the add, and `--offline` goes on with the refs already there. The branch goes with
+the worktree on remove: quietly when every commit of it is on the remote, in the main
+checkout or on the base it was cut from, and after a question otherwise, with push,
+keep, delete anyway and stop as the answers. `--keep-branch` keeps it, and
+`worktree.branch: keep` makes that the default. `-v` on either verb prints each git
+command as it runs, and what the configured commands print.
 
 Where a worktree goes and what it is called is your choice, not the repository's:
 `worktree.dir`, `worktree.name` and `worktree.branch` in your own `qory.yaml`, which
-`qory setup machine` writes.
+`qory setup machine` writes. A file the repository must not name goes there too:
+
+```yaml
+# ~/.config/qory/qory.yaml
+worktree:
+  link: [{from: ~/secrets/app.env, to: .env}]   # this machine's path, linked as .env
+```
 
 ## Commands
 

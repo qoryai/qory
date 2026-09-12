@@ -2,6 +2,12 @@
 
 Compose the stack's modules into the checkout you stand in
 
+### Synopsis
+
+Compose the stack's modules into the checkout you stand in.
+
+--verbose prints one line per entry, the entry and the module it came from.
+
 ```
 qory harness compose [flags]
 ```
@@ -17,7 +23,12 @@ qory harness compose [flags]
       --model string     write this model instead of target.model (qory.yaml: model)
       --runtime string   render for these runtimes instead of target.runtime, comma separated (amp, any, claude, codex, copilot, cursor, gemini, goose, opencode; qory.yaml: runtime)
       --update           fetch every git source again instead of reading the cached clone (qory.yaml: update)
-  -v, --verbose          print one line per entry
+```
+
+### Options inherited from parent commands
+
+```
+  -v, --verbose   print more of what the command does; each command's help says what
 ```
 
 ### SEE ALSO

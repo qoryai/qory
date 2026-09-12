@@ -65,8 +65,9 @@
         "dir": {"type": "string", "minLength": 1},
         "name": {"type": "string", "pattern": "\\{branch\\}"},
         "base": {"type": "string", "minLength": 1},
-        "link": {"$ref": "#/$defs/names"},
-        "copy": {"$ref": "#/$defs/names"},
+        "branch": {"enum": ["delete", "keep"]},
+        "link": {"$ref": "#/$defs/paths"},
+        "copy": {"$ref": "#/$defs/paths"},
         "run": {
           "type": "object",
           "additionalProperties": false,
@@ -114,6 +115,26 @@
   },
   "$defs": {
     "names": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "paths": {
+      "description": "Paths brought into a new worktree: each a path inside the checkout, or {from, to} with from a path anywhere, absolute or under ~, and to the path in the worktree, required when from is outside the checkout.",
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {"type": "string", "minLength": 1},
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["from"],
+            "properties": {
+              "from": {"type": "string", "minLength": 1},
+              "to": {"type": "string", "minLength": 1}
+            },
+            "if": {"properties": {"from": {"pattern": "^[/~]"}}},
+            "then": {"required": ["to"]}
+          }
+        ]
+      }
+    },
     "module": {
       "type": "object",
       "anyOf": [{"required": ["name"]}, {"required": ["source"]}],

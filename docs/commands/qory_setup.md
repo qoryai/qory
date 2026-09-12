@@ -17,6 +17,12 @@ script that function loads.
   -h, --help   help for setup
 ```
 
+### Options inherited from parent commands
+
+```
+  -v, --verbose   print more of what the command does; each command's help says what
+```
+
 ### SEE ALSO
 
 * [qory](qory.md)	 - Compose the harness a runtime loads from modules
