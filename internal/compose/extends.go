@@ -64,13 +64,22 @@ func LoadBase(p *stack.Stack, pin string, opts Options) (*stack.Stack, *Base, er
 	if err != nil {
 		return nil, nil, err
 	}
+	return ExtendOn(p, base, src.Pin)
+}
+
+// ExtendOn returns the stack the checkout's document p composes on base, a stack the
+// caller has read, with the base recorded for the result: [LoadBase] once the base is
+// on disk, and what compose -f does with the stack it names in a checkout whose
+// document extends one. p.Extends names the base as the report records it, and pin is
+// what it resolved to.
+func ExtendOn(p, base *stack.Stack, pin string) (*stack.Stack, *Base, error) {
 	merged, err := stack.Extend(base, p)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", p.File, err)
 	}
-	b := &Base{Name: base.Name, Source: p.Extends.String(), Pin: src.Pin, Extending: base.Extending, Qory: base.Qory}
+	b := &Base{Name: base.Name, Source: p.Extends.String(), Pin: pin, Extending: base.Extending, Qory: base.Qory}
 	if b.Name == "" {
-		b.Name = filepath.Base(src.Dir)
+		b.Name = filepath.Base(base.Dir())
 	}
 	return merged, b, nil
 }

@@ -23,7 +23,9 @@ counts from the remote's HEAD branch. A no keeps the branch where it is.
 Then every worktree.link is linked and every worktree.copy copied from the main checkout,
 every worktree.run.add is run in the worktree with QORY_WORKTREE, QORY_MAIN and
 QORY_BRANCH set, and the harness is composed into it when the repository holds a
-qory-stack.yaml or a qory.yaml naming one.
+qory-stack.yaml or a qory.yaml naming one. -f names the stack to compose instead, as it
+does on harness compose: a stack the worktree's own document extends composes on it as
+its base, which is how a runner holding the stack tree supplies one.
 
 ```
 qory worktree add <branch> [flags]
@@ -34,6 +36,7 @@ qory worktree add <branch> [flags]
 ```
       --base string   the branch, tag or commit a new branch starts from, or an existing one is moved onto (qory.yaml: worktree.base; default: the remote's HEAD branch)
       --fetch         fetch the remote first, so the base and the branch are the remote's
+  -f, --file string   the qory-stack.yaml to compose into the worktree, or the qory.yaml or harness.yaml whose harness section to compose, instead of discovering one; a stack named here is the base of the worktree's own document, as on harness compose
   -h, --help          help for add
       --no-compose    do not compose the harness into the worktree
       --path          print the worktree's path alone on stdout, the rows on stderr

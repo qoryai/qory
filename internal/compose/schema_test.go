@@ -146,7 +146,8 @@ func TestStackSchemaKnowsBothSourceForms(t *testing.T) {
 
 // TestComposeSchemaKnowsExtends validates the shapes no fixture composes: a qory.yaml
 // whose harness section extends a stack, one with a target or an extending block too,
-// one with modules and no extends, one with its own target and modules, a worktree name
+// one with modules and no extends, whose base compose -f names, one with extensions
+// alone, one with its own target and modules, a worktree name
 // without {branch}, a stack with
 // extends, a stack with an extending block, a module entry by name alone, a base and a
 // module named as exports, and the exports section in each of its forms.
@@ -169,7 +170,8 @@ func TestComposeSchemaKnowsExtends(t *testing.T) {
 		{composeSchema, `{"harness": {"runtime": "codex", "extends": {"path": "../harness/nextjs-15"}, "modules": [{"name": "app"}]}, "worktree": {"base": "main", "link": [".env"], "run": {"add": ["pnpm install"]}}}`, true},
 		{composeSchema, `{"harness": {"extends": {"path": "../harness/nextjs-15"}, "target": {"runtime": "claude"}, "modules": [{"name": "app"}]}}`, false},
 		{composeSchema, `{"harness": {"extends": {"path": "../harness/nextjs-15"}, "extending": {"kinds": ["skills"]}, "modules": [{"name": "app"}]}}`, false},
-		{composeSchema, `{"harness": {"modules": [{"name": "app"}]}}`, false},
+		{composeSchema, `{"harness": {"modules": [{"name": "app"}]}}`, true},
+		{composeSchema, `{"harness": {"extensions": {"acme": {"team": "web"}}}}`, true},
 		{composeSchema, `{"harness": {"target": {"runtime": ["claude", "codex"], "model": "opus"}, "modules": [{"name": "app"}]}, "worktree": {"link": [".env"]}}`, true},
 		{composeSchema, `{"worktree": {"name": "wt"}}`, false},
 		{stackSchema, `{"extends": {"path": "../harness/nextjs-15"}, "modules": [{"name": "app"}]}`, false},

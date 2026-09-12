@@ -54,7 +54,7 @@ func TestConfigWithoutAFileSaysSo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, out, "No qory.yaml was found", "default")
+	wants(t, out, "No qory.yaml or harness.yaml was found", "default")
 }
 
 // TestConfigRefusesAMistake is a qory.yaml with a key qory does not read: the command

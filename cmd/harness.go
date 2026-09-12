@@ -115,6 +115,12 @@ func locateAt(dir string) (places, error) {
 // Nothing is written before the compose succeeds, so a collision or an unreadable module
 // leaves the checkout exactly as it was.
 //
+// -f names the document to compose instead of discovering one. A stack it names, in a
+// checkout whose own document extends a stack, is that document's base in place of what
+// extends names, and the document may leave extends out altogether: a runner that holds
+// the stack tree supplies the base, and the checkout's file carries only what is the
+// repository's own.
+//
 // Writing is four steps in a fixed order: [render.Build] renders the home tree,
 // [render.LinkInto] links it into the checkout, [render.LinkModules] writes the module
 // links the stack names, and [report.Write] records what happened. The report is
@@ -151,7 +157,7 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 			return runCompose(cmd.OutOrStdout(), cmd.ErrOrStderr(), o)
 		},
 	}
-	c.Flags().StringVarP(&file, "file", "f", "", "the qory-stack.yaml, or the qory.yaml whose harness section to compose, instead of discovering one")
+	c.Flags().StringVarP(&file, "file", "f", "", "the qory-stack.yaml, or the qory.yaml or harness.yaml whose harness section to compose, instead of discovering one. A stack named here, in a checkout whose own document extends one, is that document's base in place of extends")
 	c.Flags().StringVar(&runtime, "runtime", "", "render for these runtimes instead of target.runtime, comma separated ("+strings.Join(render.Names(), ", ")+"; qory.yaml: runtime)")
 	c.Flags().StringVar(&model, "model", "", "write this model instead of target.model (qory.yaml: model)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the report and write nothing")
@@ -316,6 +322,26 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 	if err != nil {
 		return nil, input(err)
 	}
+	// A stack named with -f, in a checkout whose own document extends one, is that
+	// document's base, in place of what extends names: the document composes on it,
+	// its modules appended and its extensions beside the base's. That is how a runner
+	// holding the stack tree supplies the base, and the checkout's file need name no
+	// version, ref or URL of it. A checkout without a document composes the stack
+	// alone, as it always has.
+	var base *stack.Stack
+	var named stack.Source
+	if o.file != "" && !config.IsDocument(file) {
+		doc, err := config.Document(at.root)
+		if err != nil {
+			return nil, input(err)
+		}
+		if doc != "" {
+			base = p
+			if p, named, err = config.OnBase(doc, base.File); err != nil {
+				return nil, input(err)
+			}
+		}
+	}
 	// A checkout that extends a closed base takes its target from the base, and
 	// the harness, git and env keys of its own qory.yaml are not read: the
 	// runner's configuration is the only one, so the checkout's authors cannot
@@ -359,7 +385,11 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 	if previous.Base != nil && previous.Base.Source == p.Extends.String() {
 		basePin = previous.Base.Pin
 	}
-	p, opts.Base, err = compose.LoadBase(p, basePin, opts)
+	if base != nil {
+		p, opts.Base, err = compose.ExtendOn(p, base, source.WorkingTree)
+	} else {
+		p, opts.Base, err = compose.LoadBase(p, basePin, opts)
+	}
 	if err != nil {
 		return nil, composeError(err)
 	}
@@ -410,8 +440,15 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 	// extends, and a row says so, on a dry run as well, so the person who wrote
 	// them learns that the base stack decides.
 	var skippedConfig [][2]string
-	if _, err := os.Stat(filepath.Join(at.root, config.FileName)); extends && err == nil {
-		skippedConfig = [][2]string{{"skipped", config.FileName + "  (its harness, git and env keys; the base stack decides under extends)"}}
+	if base != nil {
+		what := "(named by -f)"
+		if named.Path != "" || named.Git != "" {
+			what = "(named by -f, in place of extends " + named.String() + ")"
+		}
+		skippedConfig = append(skippedConfig, [2]string{"base", ui.Short(base.File, at.root) + "  " + what})
+	}
+	if own, _ := config.FileIn(at.root); extends && own != "" {
+		skippedConfig = append(skippedConfig, [2]string{"skipped", filepath.Base(own) + "  (its harness, git and env keys; the base stack decides under extends)"})
 	}
 	skippedConfig = append(skippedConfig, checks.rows...)
 	return &prepared{at: at, res: res, rep: rep, previous: previous, targets: targets, force: force, rows: skippedConfig, u: u}, nil

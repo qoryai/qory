@@ -123,7 +123,7 @@ func mainCheckout() (string, error) {
 // the rows go to stderr and stdout carries the worktree's path alone, for a shell to cd
 // into; the shell function qory shell init writes does that.
 func newWorktreeAdd(use string) *cobra.Command {
-	var base string
+	var base, file string
 	var fetch, rebase, pathOnly, noCompose bool
 	c := &cobra.Command{
 		Use:   use + " <branch>",
@@ -147,7 +147,9 @@ counts from the remote's HEAD branch. A no keeps the branch where it is.
 Then every worktree.link is linked and every worktree.copy copied from the main checkout,
 every worktree.run.add is run in the worktree with QORY_WORKTREE, QORY_MAIN and
 QORY_BRANCH set, and the harness is composed into it when the repository holds a
-qory-stack.yaml or a qory.yaml naming one.`,
+qory-stack.yaml or a qory.yaml naming one. -f names the stack to compose instead, as it
+does on harness compose: a stack the worktree's own document extends composes on it as
+its base, which is how a runner holding the stack tree supplies one.`,
 		Args: exactArgs(1, "a branch name"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			main, err := mainCheckout()
@@ -182,9 +184,9 @@ qory-stack.yaml or a qory.yaml naming one.`,
 			}
 			printAdded(u, main, a)
 			if !noCompose {
-				if _, err := config.DiscoverStack(a.Path); err == nil {
+				if _, err := config.DiscoverStack(a.Path); err == nil || file != "" {
 					u.Blank()
-					if err := runCompose(rows, errOut, composeOptions{dir: a.Path}); err != nil {
+					if err := runCompose(rows, errOut, composeOptions{dir: a.Path, file: file}); err != nil {
 						return err
 					}
 				} else {
@@ -202,6 +204,8 @@ qory-stack.yaml or a qory.yaml naming one.`,
 	c.Flags().BoolVar(&fetch, "fetch", false, "fetch the remote first, so the base and the branch are the remote's")
 	c.Flags().BoolVar(&pathOnly, "path", false, "print the worktree's path alone on stdout, the rows on stderr")
 	c.Flags().BoolVar(&noCompose, "no-compose", false, "do not compose the harness into the worktree")
+	c.Flags().StringVarP(&file, "file", "f", "", "the qory-stack.yaml to compose into the worktree, or the qory.yaml or harness.yaml whose harness section to compose, instead of discovering one; a stack named here is the base of the worktree's own document, as on harness compose")
+	c.MarkFlagsMutuallyExclusive("file", "no-compose")
 	return c
 }
 

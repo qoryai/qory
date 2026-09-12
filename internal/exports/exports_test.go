@@ -166,3 +166,28 @@ func TestVerifyWantsEveryExportOnDisk(t *testing.T) {
 		t.Errorf("all there: %v", err)
 	}
 }
+
+// TestReadTakesEitherNameAndNoAPIVersion is the section under the file's second name,
+// harness.yaml, read as the qory.yaml is, without an apiVersion, which the file may leave
+// out; and the refusal of a root holding both names.
+func TestReadTakesEitherNameAndNoAPIVersion(t *testing.T) {
+	root := t.TempDir()
+	other := filepath.Join(root, exports.AltFileName)
+	if err := os.WriteFile(other, []byte("exports:\n  modules: [core]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e, err := exports.Read(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e == nil || e.File != other || len(e.Modules) != 1 {
+		t.Fatalf("exports = %+v", e)
+	}
+	if err := os.WriteFile(filepath.Join(root, exports.FileName), []byte("exports:\n  modules: [core]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = exports.Read(root)
+	if err == nil || !strings.Contains(err.Error(), "holds both qory.yaml and harness.yaml; a directory holds one of the two") {
+		t.Fatalf("both names: %v", err)
+	}
+}

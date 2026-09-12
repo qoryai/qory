@@ -123,15 +123,21 @@ machine, for every repository, is the qory.yaml that setup machine writes.`,
 			u.Title(name)
 			var rows [][2]string
 			var files []struct{ path, content string }
+			// The configuration goes under the name the directory already uses, so
+			// a repository that keeps a harness.yaml does not gain a qory.yaml beside it.
+			configName := config.FileName
+			if own, _ := config.FileIn(dir); own != "" {
+				configName = filepath.Base(own)
+			}
 			switch found, _ := config.DiscoverStack(dir); found {
-			case filepath.Join(dir, config.FileName):
-				rows = append(rows, [2]string{"kept", config.FileName + "  (its harness section names the stack)"})
+			case filepath.Join(dir, config.FileName), filepath.Join(dir, config.AltFileName):
+				rows = append(rows, [2]string{"kept", configName + "  (its harness section names the stack)"})
 			case filepath.Join(dir, stack.FileName):
 				rows = append(rows, [2]string{"kept", stack.FileName + "  (the stack is here)"})
-				files = append(files, struct{ path, content string }{config.FileName, worktreeConfig})
+				files = append(files, struct{ path, content string }{configName, worktreeConfig})
 			default:
 				files = append(files,
-					struct{ path, content string }{config.FileName, fmt.Sprintf(checkoutConfig, name, column(name, 23), column(name, 19))},
+					struct{ path, content string }{configName, fmt.Sprintf(checkoutConfig, name, column(name, 23), column(name, 19))},
 					struct{ path, content string }{filepath.Join(moduleDir, module.ManifestName), fmt.Sprintf(moduleFile, name)},
 					struct{ path, content string }{filepath.Join(moduleDir, "AGENTS.md"), fmt.Sprintf(agentsFile, name)})
 			}

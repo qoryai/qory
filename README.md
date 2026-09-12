@@ -55,6 +55,8 @@ coming last.
    Every module has a `qory-module.yaml` that names it. A repository can also take a
    stack someone else delivers, a `qory-stack.yaml`: it names that stack under `extends`
    instead of `target`, and adds its own modules. The delivered modules cannot be changed.
+   A runner that holds the stack tree names the base with `qory harness compose -f
+   <stack>` instead, and the repository's file then names no version, ref or URL of it.
    A delivered stack states the qory it needs, `qory: ">=0.4.0"`, and every repository
    extending it inherits the range.
 
@@ -172,6 +174,7 @@ qory config              # every setting, its value and the file it came from
 Flags worth knowing on `compose`:
 
 ```
+-f <stack>             compose this stack; as the base of the repository's document when that extends one
 --dry-run              print the report and write nothing
 --runtime claude,codex render for these runtimes instead of the stack's
 --model opus           write this model instead of the stack's
@@ -182,7 +185,8 @@ Flags worth knowing on `compose`:
 
 Two `qory.yaml` files are read. Every setting has a default, so both are optional. The
 repository's file is committed and holds what the repository decides: its stack, and what
-a worktree needs. Your file, in `~/.config/qory`, holds how `qory` runs on this machine
+a worktree needs; it may be named `harness.yaml` instead, for a file that says nothing of
+the tool that reads it. Your file, in `~/.config/qory`, holds how `qory` runs on this machine
 for every repository: the runtime to compose for, where worktrees go, the git timeout.
 The repository's file is read on top of yours. `qory config` shows every setting and the
 file it came from. The reference, one page per command, is under
