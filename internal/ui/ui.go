@@ -5,9 +5,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/term"
 )
 
 // UI writes styled text to one writer, and decides once, in [New], whether that writer
@@ -20,6 +22,9 @@ type UI struct {
 	name    lipgloss.Style // the first column of a table and a line of code: bold
 	ok      lipgloss.Style // the check mark of a success line: bold green
 	bad     lipgloss.Style // the cross of a failure line: bold red
+	yellow  lipgloss.Style // one stripe of a box's frame: the bee's yellow
+	black   lipgloss.Style // the other stripe: the bee's black
+	columns int            // the width of w when it is a terminal, else 0
 }
 
 // Green is the brand colour, used for marks and headings, never for running text. A
@@ -27,18 +32,38 @@ type UI struct {
 // the styles once.
 var Green = lipgloss.Color("#2FD174")
 
+// Yellow and Black are the bee's stripes, which frame a [UI.Box]. The yellow is a fixed
+// shade. The black is the terminal's bright black, the eighth colour of its palette,
+// which every theme keeps visible against its own background, dark grey on a dark
+// ground and near black on a light one. Neither is an adaptive colour, because those
+// make lipgloss ask the terminal for its background and wait for the answer, which a
+// terminal that answers late or not at all turns into stray characters or a pause.
+var (
+	Yellow = lipgloss.Color("#FFD21E")
+	Black  = lipgloss.Color("8")
+)
+
 // New returns a UI that writes to w. It asks lipgloss what w supports, so the UI colours
 // its output when w is a terminal and NO_COLOR is unset, and writes the same text plain
 // otherwise. The decision is made here, once per UI, and not at each call.
 func New(w io.Writer) *UI {
 	r := lipgloss.NewRenderer(w)
+	columns := 0
+	if f, ok := w.(*os.File); ok {
+		if cols, _, err := term.GetSize(f.Fd()); err == nil {
+			columns = cols
+		}
+	}
 	return &UI{
 		w:       w,
+		columns: columns,
 		heading: r.NewStyle().Bold(true).Foreground(Green),
 		key:     r.NewStyle().Faint(true),
 		name:    r.NewStyle().Bold(true),
 		ok:      r.NewStyle().Foreground(Green).Bold(true),
 		bad:     r.NewStyle().Foreground(lipgloss.Color("1")).Bold(true),
+		yellow:  r.NewStyle().Foreground(Yellow),
+		black:   r.NewStyle().Foreground(Black),
 	}
 }
 
@@ -163,6 +188,132 @@ func (u *UI) Code(lines ...string) {
 		fmt.Fprintf(u.w, "    %s\n", u.name.Render(l))
 	}
 }
+
+// Box prints lines inside a double-line frame striped like the bee, yellow and black in
+// turn all the way round, each line centred on the widest, one blank line of padding
+// above and below them and three columns at each side, the whole indented one step and
+// set off by a blank line before and after. It is the shape of a notice that has to be
+// seen among a command's output, such as that a newer release is available. A line may
+// carry styling from [UI.Strong], [UI.Brand] or [UI.Alert]; the frame is measured on the
+// text and not the escape codes.
+//
+// On a terminal too narrow for the frame the lines are printed without it, indented and
+// set off by blank lines, since a frame the terminal wraps is worse than none.
+func (u *UI) Box(lines ...string) {
+	const pad = 3
+	inner := 0
+	for _, l := range lines {
+		inner = max(inner, lipgloss.Width(l))
+	}
+	width := inner + 2*pad // cells between the corners
+	rows := len(lines) + 2 // the lines, and the blank row above and below them
+	if u.columns > 0 && width+4 > u.columns {
+		fmt.Fprintln(u.w)
+		u.Text(lines...)
+		fmt.Fprintln(u.w)
+		return
+	}
+
+	// The stripes run round the frame from the top left corner: along the top, down the
+	// right side, back along the bottom and up the left side. A cell of a horizontal
+	// edge is one step and a row of a vertical edge two, since a row is about twice as
+	// tall as a cell is wide, so the stripes look alike on every edge.
+	var cells []string // every cell of the frame, in that order
+	var steps []int    // where along the frame each cell starts
+	step := 0
+	add := func(cell string, size int) {
+		cells = append(cells, cell)
+		steps = append(steps, step)
+		step += size
+	}
+	add("╔", 1)
+	for range width {
+		add("═", 1)
+	}
+	add("╗", 1)
+	for range rows {
+		add("║", 2)
+	}
+	add("╝", 1)
+	for range width {
+		add("═", 1)
+	}
+	add("╚", 1)
+	for range rows {
+		add("║", 2)
+	}
+	top := u.edge(cells[:width+2], steps[:width+2])
+	right := u.each(cells[width+2:width+2+rows], steps[width+2:width+2+rows])
+	bottomCells := slices.Clone(cells[width+2+rows : 2*width+4+rows])
+	bottomSteps := slices.Clone(steps[width+2+rows : 2*width+4+rows])
+	slices.Reverse(bottomCells)
+	slices.Reverse(bottomSteps)
+	bottom := u.edge(bottomCells, bottomSteps)
+	left := u.each(cells[2*width+4+rows:], steps[2*width+4+rows:])
+	slices.Reverse(left)
+
+	fmt.Fprintln(u.w)
+	fmt.Fprintf(u.w, "  %s\n", top)
+	for r := range rows {
+		text := ""
+		if r > 0 && r <= len(lines) {
+			text = lines[r-1]
+		}
+		w := lipgloss.Width(text)
+		before := (width - w) / 2
+		fmt.Fprintf(u.w, "  %s%s%s%s%s\n", left[r], strings.Repeat(" ", before), text, strings.Repeat(" ", width-w-before), right[r])
+	}
+	fmt.Fprintf(u.w, "  %s\n", bottom)
+	fmt.Fprintln(u.w)
+}
+
+// stripeLength is how many steps along a frame each stripe of a [UI.Box] runs.
+const stripeLength = 4
+
+// stripe is the style of the cell that starts at step along the frame: yellow for the
+// first stripe, black for the second, and so on by turns.
+func (u *UI) stripe(step int) lipgloss.Style {
+	if (step/stripeLength)%2 == 1 {
+		return u.black
+	}
+	return u.yellow
+}
+
+// edge paints the cells of one horizontal edge, given where along the frame each starts,
+// and joins them. Cells of one stripe that follow each other are rendered as one run, so
+// the edge carries as few escape codes as its stripes need.
+func (u *UI) edge(cells []string, steps []int) string {
+	var out strings.Builder
+	for i := 0; i < len(cells); {
+		j := i
+		var run strings.Builder
+		for j < len(cells) && steps[j]/stripeLength == steps[i]/stripeLength {
+			run.WriteString(cells[j])
+			j++
+		}
+		out.WriteString(u.stripe(steps[i]).Render(run.String()))
+		i = j
+	}
+	return out.String()
+}
+
+// each paints the cells of one vertical edge one by one, since each is its own row.
+func (u *UI) each(cells []string, steps []int) []string {
+	painted := make([]string, len(cells))
+	for i, cell := range cells {
+		painted[i] = u.stripe(steps[i]).Render(cell)
+	}
+	return painted
+}
+
+// Strong returns s bold, for the one thing in a line to act on, such as a command to run.
+func (u *UI) Strong(s string) string { return u.name.Render(s) }
+
+// Brand returns s in the brand colour, bold.
+func (u *UI) Brand(s string) string { return u.ok.Render(s) }
+
+// Alert returns s in red, bold, for what is behind or wrong.
+func (u *UI) Alert(s string) string { return u.bad.Render(s) }
 
 func pad(s string, width int) string {
 	return s + strings.Repeat(" ", width-len(s))
