@@ -7,10 +7,10 @@ release may change what an existing document does, and says so under Upgrading.
 ## [0.4.0] - 2026-09-12
 
 A harness repository publishes its stacks and modules by name, and a consumer names them
-instead of their directories. And a fleet operator's request: a customer's committed file
-carries only what is the repository's own, its modules and its extensions, and the runner
-supplies the base from the stack tree it holds, so the file names no version, ref or URL
-of the operator's, and may say nothing of the tool that reads it.
+instead of their directories. A checkout's committed file carries only what is the
+repository's own, its modules and its extensions, and a runner supplies the base from the
+stack tree it holds, so the file names no version, ref or URL of the base, and may say
+nothing of the tool that reads it.
 
 ### Upgrading
 
