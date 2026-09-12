@@ -47,7 +47,7 @@ func TestLoadWithoutAFileIsTheDefaults(t *testing.T) {
 		}
 	}
 	rows := c.Rows()
-	if rows[0].Value != "(stack)" || rows[3].Value != "never" || rows[4].Value != ".." || rows[5].Value != "wt-{branch}" || rows[6].Value != "(remote HEAD)" || rows[7].Value != "10m0s" {
+	if rows[0].Value != "(stack)" || rows[3].Value != "never" || rows[4].Value != ".." || rows[5].Value != "wt-{branch}" || rows[6].Value != "(remote HEAD)" || rows[7].Value != "delete" || rows[8].Value != "10m0s" {
 		t.Errorf("rows: %+v", rows)
 	}
 }
