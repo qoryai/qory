@@ -29,8 +29,8 @@
         "name": {"type": "string", "minLength": 1},
         "description": {"type": "string"},
         "extends": {
-          "description": "The stack this checkout extends: a directory holding a qory-stack.yaml. Left out when qory harness compose -f <stack> names the base.",
-          "$ref": "#/$defs/source"
+          "description": "The stack this checkout extends: a directory holding a qory-stack.yaml, or a stack the repository exports, named by stack. Left out when qory harness compose -f <stack> names the base.",
+          "$ref": "#/$defs/base"
         },
         "target": {
           "description": "The runtime and model of this checkout's own stack; a section that extends a stack leaves it out and takes the base's.",
@@ -85,7 +85,32 @@
         "cache": {"type": "string", "minLength": 1}
       }
     },
-    "env": {"type": "object", "additionalProperties": {"type": "string"}}
+    "env": {"type": "object", "additionalProperties": {"type": "string"}},
+    "exports": {
+      "description": "What this repository publishes for other repositories, by name: each stack at <dir>/stacks/<name>/qory-stack.yaml, each module at <dir>/modules/<name>/qory-module.yaml, dir being the repository root unless set.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "dir": {
+          "description": "Where the exports are, relative to the repository root: one directory holding stacks/ and modules/, or a map naming the stacks and the modules directories as they are.",
+          "oneOf": [
+            {"type": "string", "minLength": 1},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["stacks", "modules"],
+              "properties": {
+                "stacks": {"type": "string", "minLength": 1},
+                "modules": {"type": "string", "minLength": 1}
+              }
+            }
+          ]
+        },
+        "stacks": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/exportName"}},
+        "modules": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/exportName"}}
+      }
+    }
   },
   "$defs": {
     "names": {"type": "array", "items": {"type": "string", "minLength": 1}},
@@ -118,18 +143,39 @@
       }
     },
     "source": {
-      "description": "A directory, or a git repository at a ref with the module's directory inside it.",
+      "description": "A directory; a git repository at a ref with the module's directory inside it; or a module the repository exports, named by module, with path or git and ref naming the repository.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "path": {"type": "string", "minLength": 1},
         "git": {"type": "string", "minLength": 1},
-        "ref": {"type": "string", "minLength": 1}
+        "ref": {"type": "string", "minLength": 1},
+        "module": {"$ref": "#/$defs/exportName"}
       },
       "oneOf": [
         {"required": ["path"], "not": {"anyOf": [{"required": ["git"]}, {"required": ["ref"]}]}},
-        {"required": ["git", "ref"]}
+        {"required": ["git", "ref"], "not": {"required": ["path", "module"]}}
       ]
+    },
+    "base": {
+      "description": "A directory holding a qory-stack.yaml; a git repository at a ref with that directory inside it; or a stack the repository exports, named by stack, with path or git and ref naming the repository.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "git": {"type": "string", "minLength": 1},
+        "ref": {"type": "string", "minLength": 1},
+        "stack": {"$ref": "#/$defs/exportName"}
+      },
+      "oneOf": [
+        {"required": ["path"], "not": {"anyOf": [{"required": ["git"]}, {"required": ["ref"]}]}},
+        {"required": ["git", "ref"], "not": {"required": ["path", "stack"]}}
+      ]
+    },
+    "exportName": {
+      "description": "The name of an export, one path segment.",
+      "type": "string",
+      "pattern": "^[^./\\\\@][^/\\\\@]*$"
     }
   }
 }

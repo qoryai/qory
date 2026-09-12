@@ -13,6 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/qoryai/qory/internal/checkout"
+	"github.com/qoryai/qory/internal/exports"
 )
 
 // APIVersion is the one format version this qory reads. A stack that carries another one
@@ -24,54 +25,76 @@ const APIVersion = "qory.ai/v1alpha1"
 // is what says which document a file holds; the document carries no kind. A checkout's
 // own stack, and the stack it extends, are in the harness section of its qory.yaml, which
 // [github.com/qoryai/qory/internal/config] reads and turns into a Stack with [NewCompose].
-const FileName = "qory-stack.yaml"
+const FileName = exports.StackFileName
 
 // Kinds are the atomic entry kinds an exclude may name. An exclude that names anything else
 // is refused.
 var Kinds = []string{"skills", "agents", "commands", "output-styles", "hooks", "mcp", "files"}
 
-// Source is where a module comes from: a directory, or a git repository at a ref.
+// Source is where a module comes from: a directory, a git repository at a ref, or an
+// export of a repository, one it names in the exports section of its qory.yaml.
 //
 //	source: {path: ../harness/core}
 //	source: {git: https://github.com/acme/harness, ref: v2.4.0}
 //	source: {git: https://github.com/acme/harness, ref: v2.4.0, path: modules/nextjs}
+//	source: {git: https://github.com/acme/harness, ref: v2.4.0, module: nextjs}
+//	source: {path: ../harness, module: nextjs}
 //
 // A path source is pinned by nothing and reads the directory as it stands. A git source is
 // pinned by the commit the ref resolves to, and its path, when given, is the module's
-// directory inside the repository.
+// directory inside the repository. With a module or a stack named, the source is the
+// repository, the clone or the path, and the export's directory is what the repository's
+// qory.yaml says it is, so the publisher may move it. The same shape names the base a
+// checkout extends, with stack in place of module.
 type Source struct {
 	// Path is the module directory, relative to the stack file unless it is absolute; with
-	// Git set, the module's directory inside the repository, relative to its root.
+	// Git set, the module's directory inside the repository, relative to its root. With
+	// Module or Stack set and no Git, the repository whose export is read.
 	Path string `yaml:"path,omitempty"`
 	// Git is the repository URL, in any form git clones from.
 	Git string `yaml:"git,omitempty"`
 	// Ref is the tag, branch or commit to read from a git source, required with Git.
 	Ref string `yaml:"ref,omitempty"`
+	// Module is the name of an exported module of the repository, in a module's source.
+	Module string `yaml:"module,omitempty"`
+	// Stack is the name of an exported stack of the repository, in extends.
+	Stack string `yaml:"stack,omitempty"`
 }
 
 // String returns the source as the report and the error messages show it: the path as the
 // stack writes it for a path source, and <git>#<ref>, with :<path> appended when there
-// is one, for a git source.
+// is one, for a git source; an export follows as " module <name>" or " stack <name>".
 func (s Source) String() string {
-	if s.Git == "" {
-		return s.Path
+	out := s.Path
+	if s.Git != "" {
+		out = s.Git + "#" + s.Ref
+		if s.Path != "" {
+			out += ":" + s.Path
+		}
 	}
-	out := s.Git + "#" + s.Ref
-	if s.Path != "" {
-		out += ":" + s.Path
+	switch {
+	case s.Stack != "":
+		out += " stack " + s.Stack
+	case s.Module != "":
+		out += " module " + s.Module
 	}
 	return out
 }
 
+// exported reports whether the source names an export of a repository.
+func (s Source) exported() bool { return s.Module != "" || s.Stack != "" }
+
 // Module is one entry of the stack's ordered list of modules. An entry gives a name, a
-// source, or both: a name alone reads modules/<name> at the root of the repository the
-// stack is in; a source alone takes the module's name from its manifest; both means the
-// manifest must carry that name.
+// source, or both: a name alone reads <name> under the modules directory of the
+// repository the stack is in, modules/ at its root unless the root's qory.yaml says
+// otherwise under exports.dir; a source alone takes the module's name from its manifest;
+// both means the manifest must carry that name.
 type Module struct {
 	// Name is the module's name, the one its manifest declares. Alone, it is the address
-	// too: modules/<name> under [Stack.Root].
+	// too: <name> under [Stack.ModulesDir] under [Stack.Root].
 	Name string `yaml:"name,omitempty"`
-	// Source is where the module is read from, when it is not at modules/<name>.
+	// Source is where the module is read from, when it is not in the repository's
+	// modules directory.
 	Source Source `yaml:"source,omitempty"`
 	// Exclude names what of the module the compose leaves out: entries by kind, the
 	// instruction section, settings fragments, exported variables. Everything else is
@@ -218,20 +241,29 @@ type Stack struct {
 	File string `yaml:"-"`
 	// Root is the root of the repository the stack is in, set by [Load]: git's toplevel
 	// for the stack's directory, else that directory. A module named without a source is
-	// read from modules/<name> under it.
+	// read from ModulesDir under it.
 	Root string `yaml:"-"`
+	// ModulesDir is the directory a module named without a source is read from, relative
+	// to Root, set by [Load]: what the root's qory.yaml says under exports.dir, else
+	// modules. A stack built without [Load] reads modules.
+	ModulesDir string `yaml:"-"`
 }
 
 // Dir returns the directory holding the stack file. A module's relative path source
 // resolves against it.
 func (p *Stack) Dir() string { return filepath.Dir(p.File) }
 
-// SourceOf is the source a module entry reads from: its own, or modules/<name> for an entry
-// with a name alone, which resolves against [Stack.Root]; [Stack.DirOf] says which.
-// The relative form is what the report records, so it reads the same on every machine.
+// SourceOf is the source a module entry reads from: its own, or <name> under
+// [Stack.ModulesDir] for an entry with a name alone, which resolves against [Stack.Root];
+// [Stack.DirOf] says which. The relative form is what the report records, so it reads
+// the same on every machine.
 func (p *Stack) SourceOf(l Module) Source {
 	if l.Source.Path == "" && l.Source.Git == "" {
-		return Source{Path: filepath.Join("modules", l.Name)}
+		dir := p.ModulesDir
+		if dir == "" {
+			dir = exports.DefaultModulesDir
+		}
+		return Source{Path: filepath.Join(dir, l.Name)}
 	}
 	return l.Source
 }
@@ -270,13 +302,24 @@ func Load(path string) (*Stack, error) {
 		return nil, err
 	}
 	p.File = abs
-	if p.Root, err = checkout.Root(filepath.Dir(abs)); err != nil {
+	if err := p.locate(); err != nil {
 		return nil, err
 	}
 	if err := p.validate(false); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return p, nil
+}
+
+// locate sets [Stack.Root] and [Stack.ModulesDir] for the file the stack was read from:
+// the repository root, and the modules directory its qory.yaml names, else modules.
+func (p *Stack) locate() error {
+	var err error
+	if p.Root, err = checkout.Root(filepath.Dir(p.File)); err != nil {
+		return err
+	}
+	p.ModulesDir, err = exports.ModulesDir(p.Root)
+	return err
 }
 
 // NewCompose validates p as the document a checkout's qory.yaml holds under harness, read
@@ -288,7 +331,7 @@ func NewCompose(path string, p *Stack) (*Stack, error) {
 		return nil, err
 	}
 	p.File = abs
-	if p.Root, err = checkout.Root(filepath.Dir(abs)); err != nil {
+	if err := p.locate(); err != nil {
 		return nil, err
 	}
 	if err := p.validate(p.extends()); err != nil {
@@ -299,7 +342,7 @@ func NewCompose(path string, p *Stack) (*Stack, error) {
 
 // extends reports whether the document names a stack to extend.
 func (p *Stack) extends() bool {
-	return p.Extends.Path != "" || p.Extends.Git != "" || p.Extends.Ref != ""
+	return p.Extends.Path != "" || p.Extends.Git != "" || p.Extends.Ref != "" || p.Extends.exported()
 }
 
 // unknownKey is the decoder's report of a key the document has no field for. It names the
@@ -332,6 +375,9 @@ func (p *Stack) validate(compose bool) error {
 	if compose {
 		if err := p.Extends.validate(); err != nil {
 			return fmt.Errorf("extends: %w", err)
+		}
+		if p.Extends.Module != "" {
+			return fmt.Errorf("extends names module %s; a checkout extends a stack, and a module goes under modules", p.Extends.Module)
 		}
 		if len(p.Target.Runtimes) > 0 || p.Target.Model != "" {
 			return errors.New("target is the base stack's; a harness section that extends a stack does not set it")
@@ -389,9 +435,12 @@ func (p *Stack) validate(compose bool) error {
 			}
 			seen[l.Name] = true
 		}
-		if l.Source.Path != "" || l.Source.Git != "" || l.Source.Ref != "" {
+		if l.Source.Path != "" || l.Source.Git != "" || l.Source.Ref != "" || l.Source.exported() {
 			if err := l.Source.validate(); err != nil {
 				return fmt.Errorf("%s: %w", who, err)
+			}
+			if l.Source.Stack != "" {
+				return fmt.Errorf("%s: source names stack %s; a module's source names a module, and a stack goes under extends", who, l.Source.Stack)
 			}
 		} else if l.Name == "" {
 			return fmt.Errorf("%s: a module gives a name, a source, or both", who)
@@ -445,20 +494,36 @@ func (l Module) besideOnly() error {
 	return nil
 }
 
-// validate checks that a source is one directory or one git ref: a path source needs its
-// path, a git source needs its ref, and a path inside a git source stays inside it.
+// validate checks that a source is one directory, one git ref or one export: a path
+// source needs its path, a git source needs its ref, a path inside a git source stays
+// inside it, an export is one name that is one path segment, and a git source names an
+// export or a path, not both.
 func (s Source) validate() error {
+	if s.Module != "" && s.Stack != "" {
+		return errors.New("source names both a module and a stack; it names one export")
+	}
+	for _, e := range []struct{ key, name string }{{"module", s.Module}, {"stack", s.Stack}} {
+		if e.name != "" && !segment(e.name) {
+			return fmt.Errorf("source.%s %q is not one path segment; an export's name holds no slash, backslash, @ or leading dot", e.key, e.name)
+		}
+	}
 	if s.Git == "" {
 		if s.Ref != "" {
 			return errors.New("source.ref needs source.git")
 		}
 		if s.Path == "" {
+			if s.exported() {
+				return errors.New("source.path is required; with an export named, it is the repository exporting it")
+			}
 			return errors.New("source.path is required")
 		}
 		return nil
 	}
 	if s.Ref == "" {
 		return errors.New("source.ref is required with source.git")
+	}
+	if s.Path != "" && s.exported() {
+		return errors.New("source.path and an export both name the directory; an export's directory is what the repository's qory.yaml says")
 	}
 	if s.Path != "" {
 		clean := filepath.Clean(s.Path)

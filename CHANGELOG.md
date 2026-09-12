@@ -4,15 +4,26 @@ Every release of qory, newest first, in the shape of [Keep a Changelog](https://
 The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0 a minor
 release may change what an existing document does, and says so under Upgrading.
 
-## [0.4.0] - Unreleased
+## [0.4.0] - 2026-09-12
 
-This release takes a fleet operator's request: a customer's committed file carries only
-what is the repository's own, its modules and its extensions, and the runner supplies the
-base from the stack tree it holds. The file names no version, ref or URL of the
-operator's, and may say nothing of the tool that reads it.
+A harness repository publishes its stacks and modules by name, and a consumer names them
+instead of their directories. And a fleet operator's request: a customer's committed file
+carries only what is the repository's own, its modules and its extensions, and the runner
+supplies the base from the stack tree it holds, so the file names no version, ref or URL
+of the operator's, and may say nothing of the tool that reads it.
 
 ### Upgrading
 
+- A `qory.yaml` with an `exports` section, and a source with a `stack` or `module` key,
+  are refused by a 0.3.x binary as unknown keys, exit 2. A repository that exports states
+  `qory: ">=0.4.0"` on its stacks, so a 0.3.x consumer is told which qory it needs.
+- A stack in a repository whose `qory.yaml` sets `exports.dir` reads a module named
+  without a source under that modules directory, `<dir>/modules/<name>`, instead of
+  `modules/<name>` at the root. A repository without the key reads as before.
+- `qory worktree remove` deletes the branch by default. `--keep-branch` keeps it for one
+  remove, and `worktree.branch: keep` in your `qory.yaml` keeps it always. `--force` now
+  covers uncommitted changes alone; a branch with commits nothing else holds is asked
+  about, or answered by `--keep-branch` or `--delete-branch`.
 - `qory harness compose -f <stack>` in a checkout whose `qory.yaml` holds a document, a
   `harness` section naming modules, a stack to extend or extensions, composes the
   document on that stack as its base. Before, the flag composed the stack alone and the
@@ -21,6 +32,26 @@ operator's, and may say nothing of the tool that reads it.
 
 ### Added
 
+- An `exports` section in a repository's `qory.yaml`: the `stacks` and `modules` it
+  publishes, each a name that is one directory under `stacks/` or `modules/`, and `dir`,
+  where those two directories are, as one directory holding both or a map naming each.
+  `qory config` prints it, and every command that reads the configuration refuses a
+  listed export whose directory holds no document, naming it.
+- `stack` on `extends` and `module` on a module's source, beside `git` and `ref` or the
+  `path` of the repository on disk: the export's directory is read from the
+  repository's `exports` section, so the publisher's layout is its own. An export the
+  repository does not list is refused with what it does export. The report writes an
+  export as `<url>#<ref> stack <name>` or `<url>#<ref> module <name>`.
+- `--base` on `qory worktree add` moves a branch that already exists: a branch with no
+  commits of its own is reset onto the base, one with commits has them rebased onto it,
+  after a question or at once with `--rebase`. The base a branch was cut from is recorded
+  in its git config as `branch.<name>.qory-base`.
+- `worktree.branch` in `qory.yaml`, `delete` or `keep`: what a remove does with the
+  branch. `qory config` shows it and `qory setup machine` writes it.
+- `qory worktree remove` tells a branch that holds nothing of its own, which goes
+  quietly, from one holding commits no remote branch, the main checkout or its base
+  holds, which is asked about: push it and delete, keep it, delete it anyway, or stop.
+  Without a terminal the question is an error naming the flags.
 - `-f <stack>` names the base of the checkout's own document, as if the document had
   named the stack's directory under `extends`: the base's modules come first and closed,
   the document's modules append, extensions merge by namespace, and the collision rules
@@ -47,9 +78,17 @@ operator's, and may say nothing of the tool that reads it.
 
 ### Changed
 
+- `qory worktree add` on a worktree already there says `already there` instead of
+  `reused`, and `you are in it` on the path row when you stand in that worktree.
 - The message for a checkout with nothing to compose names both file names: no
   `qory-stack.yaml`, and no `qory.yaml` or `harness.yaml` whose harness section names
   modules or a stack to extend.
+
+### Fixed
+
+- `qory worktree add --base <ref>` on a branch that already existed silently ignored the
+  base, even one that named nothing. The base is checked before anything else, on every
+  path.
 
 ## [0.3.0] - 2026-09-11
 
@@ -169,7 +208,7 @@ The first release: a stack of modules composed into one tree, linked into the ch
 and kept out of git, with a report naming the module of every entry and a refusal when
 two modules provide the same one.
 
-[0.4.0]: https://github.com/qoryai/qory/compare/v0.3.0...HEAD
+[0.4.0]: https://github.com/qoryai/qory/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/qoryai/qory/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/qoryai/qory/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/qoryai/qory/compare/v0.1.0...v0.2.0

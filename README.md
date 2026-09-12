@@ -57,8 +57,29 @@ coming last.
    instead of `target`, and adds its own modules. The delivered modules cannot be changed.
    A runner that holds the stack tree names the base with `qory harness compose -f
    <stack>` instead, and the repository's file then names no version, ref or URL of it.
-   A delivered stack states the qory it needs, `qory: ">=0.3.0"`, and every repository
+   A delivered stack states the qory it needs, `qory: ">=0.4.0"`, and every repository
    extending it inherits the range.
+
+   ```yaml
+   apiVersion: qory.ai/v1alpha1
+   harness:
+     extends: {git: https://github.com/acme/harness, ref: v2.4.0, stack: nextjs}
+     modules:
+       - name: marketing          # the harness repository exports it too
+         source: {git: https://github.com/acme/harness, ref: v2.4.0, module: marketing}
+       - name: app
+         source: {path: ./harness}
+   ```
+
+   `stack` and `module` name what the harness repository publishes in the `exports`
+   section of its own `qory.yaml`, so nobody outside it depends on its directories:
+
+   ```yaml
+   exports:
+     dir: ./harness               # where stacks/ and modules/ are; default: the root
+     stacks: [nextjs]
+     modules: [core, nextjs, marketing]
+   ```
 
 2. Compose it:
 
@@ -120,13 +141,19 @@ worktree:
 
 ```sh
 qory worktree add feature        # ../wt-feature on branch feature, pushing to origin/feature
-qory worktree remove             # the worktree you stand in; the branch stays
+qory worktree add feature --base v1.2.0   # a branch that exists is moved onto the base, after a question
+qory worktree remove             # the worktree you stand in, and its branch
 qory setup shell                 # make your shell cd into a new worktree, and back on remove
 ```
 
+The branch goes with the worktree: quietly when every commit of it is on the remote, in
+the main checkout or on the base it was cut from, and after a question otherwise, with
+push, keep, delete anyway and stop as the answers. `--keep-branch` keeps it, and
+`worktree.branch: keep` makes that the default.
+
 Where a worktree goes and what it is called is your choice, not the repository's:
-`worktree.dir` and `worktree.name` in your own `qory.yaml`, which `qory setup machine`
-writes.
+`worktree.dir`, `worktree.name` and `worktree.branch` in your own `qory.yaml`, which
+`qory setup machine` writes.
 
 ## Commands
 
@@ -139,7 +166,7 @@ qory harness compose     # compose the stack into the checkout you stand in   (q
 qory harness inspect     # the report: every entry and the module it came from (qory hi)
 qory harness remove      # remove the composed tree and its links               (qory hr)
 qory worktree add        # add a worktree for a branch and prepare it            (qory wa)
-qory worktree remove     # remove a worktree and keep its branch                 (qory wr)
+qory worktree remove     # remove a worktree and its branch                      (qory wr)
 qory worktree list       # every worktree with its branch                        (qory wl)
 qory config              # every setting, its value and the file it came from
 ```
@@ -173,7 +200,8 @@ file it came from. The reference, one page per command, is under
   join. A value set twice to different things is a collision, never a silent override.
 - MCP servers, one file each in a module, written where every tool reads them.
 - Modules from a directory beside the repository, or from a git repository at a tag,
-  pinned by commit in the report.
+  pinned by commit in the report. A repository that publishes stacks and modules lists
+  them under `exports`, and a consumer names them, never their directories.
 - One instruction file, joined from the modules in order, under the name each tool wants.
 - A report that names the module of every entry. When two modules provide the same entry,
   a refusal with the lines that resolve it.

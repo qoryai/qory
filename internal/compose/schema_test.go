@@ -127,6 +127,12 @@ func TestStackSchemaKnowsBothSourceForms(t *testing.T) {
 		{`{"git": "https://git.example.com/acme/harness"}`, false},
 		{`{"path": "modules/core", "ref": "v1"}`, false},
 		{`{}`, false},
+		{`{"git": "https://git.example.com/acme/harness", "ref": "v1", "module": "core"}`, true},
+		{`{"path": "../harness", "module": "core"}`, true},
+		{`{"git": "https://git.example.com/acme/harness", "ref": "v1", "path": "modules/core", "module": "core"}`, false},
+		{`{"module": "core"}`, false},
+		{`{"git": "https://git.example.com/acme/harness", "ref": "v1", "module": "a/b"}`, false},
+		{`{"git": "https://git.example.com/acme/harness", "ref": "v1", "stack": "nextjs"}`, false},
 	} {
 		var doc any
 		if err := json.Unmarshal([]byte(`{"apiVersion": "qory.ai/v1alpha1", "target": {"runtime": "claude"}, "modules": [{"name": "core", "source": `+c.source+`}]}`), &doc); err != nil {
@@ -143,7 +149,8 @@ func TestStackSchemaKnowsBothSourceForms(t *testing.T) {
 // one with modules and no extends, whose base compose -f names, one with extensions
 // alone, one with its own target and modules, a worktree name
 // without {branch}, a stack with
-// extends, a stack with an extending block, and a module entry by name alone.
+// extends, a stack with an extending block, a module entry by name alone, a base and a
+// module named as exports, and the exports section in each of its forms.
 func TestComposeSchemaKnowsExtends(t *testing.T) {
 	c := jsonschema.NewCompiler()
 	composeSchema, err := c.Compile("../../contracts/harness/v1/config.schema.json")
@@ -172,6 +179,19 @@ func TestComposeSchemaKnowsExtends(t *testing.T) {
 		{stackSchema, `{"target": {"runtime": "claude"}, "modules": [{"name": "core"}], "extending": {"kinds": ["skills"], "instructions": true, "settings": ["permissions.allow"], "files": ["claude/rules/"]}}`, true},
 		{stackSchema, `{"target": {"runtime": "claude"}, "modules": [{"name": "core"}], "extending": {"kinds": ["hooks"]}}`, false},
 		{stackSchema, `{"target": {"runtime": "claude"}, "modules": [{"exclude": {"skills": ["x"]}}]}`, false},
+		{composeSchema, `{"harness": {"extends": {"git": "https://git.example.com/acme/harness", "ref": "main", "stack": "nextjs"}, "modules": [{"name": "app"}, {"name": "extra", "source": {"git": "https://git.example.com/acme/harness", "ref": "main", "module": "extra"}}]}}`, true},
+		{composeSchema, `{"harness": {"extends": {"path": "../harness", "stack": "nextjs"}, "modules": [{"name": "app"}]}}`, true},
+		{composeSchema, `{"harness": {"extends": {"git": "https://git.example.com/acme/harness", "ref": "main", "path": "nextjs", "stack": "nextjs"}, "modules": [{"name": "app"}]}}`, false},
+		{composeSchema, `{"harness": {"extends": {"git": "https://git.example.com/acme/harness", "ref": "main", "module": "core"}, "modules": [{"name": "app"}]}}`, false},
+		{composeSchema, `{"exports": {"stacks": ["nextjs"], "modules": ["core", "nextjs"]}}`, true},
+		{composeSchema, `{"exports": {"dir": "./harness", "stacks": ["nextjs"]}}`, true},
+		{composeSchema, `{"exports": {"dir": {"stacks": "./stacks", "modules": "./lib/modules"}, "modules": ["core"]}}`, true},
+		{composeSchema, `{"exports": {"dir": "./harness"}}`, true},
+		{composeSchema, `{"exports": {}}`, false},
+		{composeSchema, `{"exports": {"dir": {"stacks": "./stacks"}, "modules": ["core"]}}`, false},
+		{composeSchema, `{"exports": {"modules": ["a/b"]}}`, false},
+		{composeSchema, `{"exports": {"modules": ["core", "core"]}}`, false},
+		{composeSchema, `{"exports": {"stack": ["nextjs"]}}`, false},
 	} {
 		var doc any
 		if err := json.Unmarshal([]byte(`{"apiVersion": "qory.ai/v1alpha1", `+c.body[1:]), &doc); err != nil {

@@ -103,8 +103,9 @@ func TestWorktreeAddNeedsACommit(t *testing.T) {
 	wants(t, err.Error(), "main has no commit yet; a worktree branch starts from a commit, so commit once and add again")
 }
 
-// TestWorktreeAddReusesAndRefuses is add run twice for one branch, a path standing on
-// another branch, a base that does not exist, and a name that is not a branch.
+// TestWorktreeAddReusesAndRefuses is add run twice for one branch, once from inside the
+// worktree, a path standing on another branch, a base that does not exist on a new
+// branch and on one that exists, and a name that is not a branch.
 func TestWorktreeAddReusesAndRefuses(t *testing.T) {
 	root := worktreeRepo(t)
 	if _, err := run(t, "wa", "feature", "--no-compose"); err != nil {
@@ -114,9 +115,21 @@ func TestWorktreeAddReusesAndRefuses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantsRow(t, out, "branch", "feature  (reused)")
+	wantsRow(t, out, "path", "../wt-feature")
+	wantsRow(t, out, "branch", "feature  (already there)")
 	wants(t, out, ".env  (already in the worktree)", "config/local.json  (already in the worktree)")
 	wt := filepath.Join(filepath.Dir(root), "wt-feature")
+	t.Chdir(wt)
+	out, err = run(t, "wa", "feature", "--no-compose")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantsRow(t, out, "path", "../wt-feature  (you are in it)")
+	t.Chdir(root)
+	_, err = run(t, "wa", "feature", "--base", "nowhere")
+	if err == nil || !strings.Contains(err.Error(), "base nowhere is not a branch, tag or commit") {
+		t.Fatalf("bad base on an existing branch: %v", err)
+	}
 	runGit(t, wt, "switch", "-q", "-c", "other")
 	_, err = run(t, "wa", "feature")
 	if err == nil || !strings.Contains(err.Error(), "exists on branch other, not feature") || cmd.ExitCode(err) != cmd.ExitInput {
@@ -133,6 +146,133 @@ func TestWorktreeAddReusesAndRefuses(t *testing.T) {
 	_, err = run(t, "wa")
 	if err == nil || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("no argument: %v", err)
+	}
+}
+
+// runNoTTY runs the command with a regular file for stdin, the way a script runs it: no
+// question can be asked.
+func runNoTTY(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "stdin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	var out strings.Builder
+	root := cmd.Root()
+	root.SetArgs(args)
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetIn(f)
+	err = root.Execute()
+	return out.String(), err
+}
+
+// tagCommit makes one more commit on main in root, touching file, and tags it.
+func tagCommit(t *testing.T, root, file, tag string) {
+	t.Helper()
+	writeFile(t, filepath.Join(root, file), tag+"\n")
+	runGit(t, root, "add", file)
+	runGit(t, root, "commit", "-q", "-m", tag)
+	runGit(t, root, "tag", tag)
+}
+
+// TestWorktreeAddMovesAnExistingBranchOntoABase is --base on a branch that exists: the
+// base a new branch was cut from is recorded; a branch with no commits of its own is
+// moved onto the new base after a question, which Enter answers yes; one with commits is
+// kept on a no, rebased with --rebase, and left alone when already on the base; without
+// a terminal the question is an error naming --rebase; uncommitted changes refuse the
+// move; and a conflict aborts the rebase and keeps the branch as it was.
+func TestWorktreeAddMovesAnExistingBranchOntoABase(t *testing.T) {
+	root := worktreeRepo(t)
+	if _, err := run(t, "wa", "feature", "--no-compose"); err != nil {
+		t.Fatal(err)
+	}
+	wt := filepath.Join(filepath.Dir(root), "wt-feature")
+	if got := gitOut(t, root, "config", "branch.feature.qory-base"); got != "main" {
+		t.Errorf("recorded base %q, want main", got)
+	}
+	tagCommit(t, root, "release.txt", "v0.4.0")
+	stdout, _, err := runSplit(t, "\n", "wa", "feature", "--no-compose", "--base", "v0.4.0")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, stdout)
+	}
+	wants(t, stdout, "feature sits on main with no commits of its own. Move it onto v0.4.0? [Y/n]")
+	wantsRow(t, stdout, "branch", "feature  (moved onto v0.4.0; was on main)")
+	if gitOut(t, wt, "rev-parse", "HEAD") != gitOut(t, root, "rev-parse", "v0.4.0") {
+		t.Errorf("the branch did not move")
+	}
+	if got := gitOut(t, root, "config", "branch.feature.qory-base"); got != "v0.4.0" {
+		t.Errorf("recorded base %q, want v0.4.0", got)
+	}
+	writeFile(t, filepath.Join(wt, "work.txt"), "w\n")
+	runGit(t, wt, "add", "work.txt")
+	runGit(t, wt, "commit", "-q", "-m", "work")
+	tagCommit(t, root, "release.txt", "v0.5.0")
+	stdout, _, err = runSplit(t, "n\n", "wa", "feature", "--no-compose", "--base", "v0.5.0")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, stdout)
+	}
+	wants(t, stdout, "feature holds 1 commit off v0.4.0. Rebase it onto v0.5.0? [y/N]")
+	wantsRow(t, stdout, "branch", "feature  (already there; kept on v0.4.0, not moved onto v0.5.0)")
+	_, err = runNoTTY(t, "wa", "feature", "--no-compose", "--base", "v0.5.0")
+	if err == nil || !strings.Contains(err.Error(), "feature exists off v0.4.0, so --base v0.5.0 needs an answer: add --rebase to move it onto v0.5.0, or leave --base out to keep it") {
+		t.Fatalf("no terminal: %v", err)
+	}
+	writeFile(t, filepath.Join(wt, "work.txt"), "edited\n")
+	_, err = run(t, "wa", "feature", "--no-compose", "--base", "v0.5.0", "--rebase")
+	if err == nil || !strings.Contains(err.Error(), "has uncommitted changes, so feature stays where it is") {
+		t.Fatalf("dirty: %v", err)
+	}
+	runGit(t, wt, "checkout", "--", "work.txt")
+	out, err := run(t, "wa", "feature", "--no-compose", "--base", "v0.5.0", "--rebase")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "branch", "feature  (rebased onto v0.5.0; 1 commit, was on v0.4.0)")
+	if gitOut(t, wt, "rev-parse", "HEAD~1") != gitOut(t, root, "rev-parse", "v0.5.0") {
+		t.Errorf("the commit is not on v0.5.0")
+	}
+	if got := gitOut(t, wt, "log", "-1", "--format=%s"); got != "work" {
+		t.Errorf("HEAD is %q, want the rebased commit", got)
+	}
+	out, err = run(t, "wa", "feature", "--no-compose", "--base", "v0.5.0")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "branch", "feature  (already there; on v0.5.0 already)")
+	// main edits work.txt too, so the rebase onto its tip conflicts.
+	writeFile(t, filepath.Join(root, "work.txt"), "main\n")
+	runGit(t, root, "add", "work.txt")
+	runGit(t, root, "commit", "-q", "-m", "clash")
+	runGit(t, root, "tag", "v0.6.0")
+	before := gitOut(t, wt, "rev-parse", "HEAD")
+	_, err = run(t, "wa", "feature", "--no-compose", "--base", "v0.6.0", "--rebase")
+	if err == nil || !strings.Contains(err.Error(), "rebasing feature onto v0.6.0 stops at a conflict, so it stays on v0.5.0; run git rebase --onto v0.6.0 v0.5.0 in") {
+		t.Fatalf("conflict: %v", err)
+	}
+	if gitOut(t, wt, "rev-parse", "HEAD") != before {
+		t.Errorf("the branch moved despite the conflict")
+	}
+	if _, err := os.Stat(filepath.Join(root, ".git", "worktrees", "wt-feature", "rebase-merge")); err == nil {
+		t.Errorf("a rebase is still in progress")
+	}
+}
+
+// TestWorktreeAddMovesALocalBranchWithoutAWorktree is --base on a branch that exists
+// with no worktree: the worktree is made, then the branch moved.
+func TestWorktreeAddMovesALocalBranchWithoutAWorktree(t *testing.T) {
+	root := worktreeRepo(t)
+	runGit(t, root, "branch", "feature")
+	tagCommit(t, root, "release.txt", "v0.4.0")
+	out, err := run(t, "wa", "feature", "--no-compose", "--base", "v0.4.0", "--rebase")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "branch", "feature  (moved onto v0.4.0; was on main)")
+	wt := filepath.Join(filepath.Dir(root), "wt-feature")
+	if gitOut(t, wt, "rev-parse", "HEAD") != gitOut(t, root, "rev-parse", "v0.4.0") {
+		t.Errorf("the branch did not move")
 	}
 }
 
@@ -160,10 +300,11 @@ func TestWorktreeAddStopsAtAFailingCommand(t *testing.T) {
 	}
 }
 
-// TestWorktreeRemoveGuardsAndRuns is remove on a worktree with an unpushed commit, then
-// with an uncommitted change, both refused; with --force it runs the remove command and
-// goes, keeping the branch; --delete-branch takes the branch too; and the main checkout
-// is never a target.
+// TestWorktreeRemoveGuardsAndRuns is remove on a worktree with a commit of its own
+// without a terminal, refused with the flags named; with an uncommitted change, refused;
+// with --force and --keep-branch it runs the remove command and goes, keeping the branch;
+// a branch with nothing of its own goes quietly; --delete-branch takes one with commits;
+// and the main checkout is never a target.
 func TestWorktreeRemoveGuardsAndRuns(t *testing.T) {
 	root := worktreeRepo(t)
 	if _, err := run(t, "wa", "feature", "--no-compose"); err != nil {
@@ -173,22 +314,22 @@ func TestWorktreeRemoveGuardsAndRuns(t *testing.T) {
 	writeFile(t, filepath.Join(wt, "new.txt"), "x\n")
 	runGit(t, wt, "add", "new.txt")
 	runGit(t, wt, "commit", "-q", "-m", "new")
-	_, err := run(t, "wr", "feature")
-	if err == nil || !strings.Contains(err.Error(), "branch feature has 1 commit no remote branch and not the main checkout holds; push them, or remove with --force") {
-		t.Fatalf("unpushed: %v", err)
+	_, err := runNoTTY(t, "wr", "feature")
+	if err == nil || !strings.Contains(err.Error(), "branch feature holds 1 commit no remote branch, the main checkout or its base holds; push them, or remove with --keep-branch or --delete-branch") {
+		t.Fatalf("own commit: %v", err)
 	}
 	writeFile(t, filepath.Join(wt, "new.txt"), "y\n")
 	_, err = run(t, "wr", "feature")
 	if err == nil || !strings.Contains(err.Error(), "has uncommitted changes; commit or stash them, or remove with --force") {
 		t.Fatalf("dirty: %v", err)
 	}
-	out, err := run(t, "wr", "feature", "--force")
+	out, err := run(t, "wr", "feature", "--force", "--keep-branch")
 	if err != nil {
 		t.Fatal(err)
 	}
 	wantsRow(t, out, "ran", `touch "$QORY_MAIN/removed-$QORY_BRANCH"`)
 	wantsRow(t, out, "removed", "../wt-feature")
-	wantsRow(t, out, "branch", "feature  (kept; git branch -d feature deletes it)")
+	wantsRow(t, out, "branch", "feature  (kept with 1 commit nothing else holds; git branch -D feature deletes it)")
 	wantsRow(t, out, "main", root)
 	if _, err := os.Stat(filepath.Join(root, "removed-feature")); err != nil {
 		t.Errorf("the remove command did not run: %v", err)
@@ -200,12 +341,23 @@ func TestWorktreeRemoveGuardsAndRuns(t *testing.T) {
 	if _, err := run(t, "wa", "second", "--no-compose"); err != nil {
 		t.Fatal(err)
 	}
-	out, err = run(t, "wr", filepath.Join(filepath.Dir(root), "wt-second"), "--delete-branch")
+	out, err = run(t, "wr", filepath.Join(filepath.Dir(root), "wt-second"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantsRow(t, out, "branch", "second  (deleted)")
+	wantsRow(t, out, "branch", "second  (deleted; every commit of it is on the remote, in the main checkout or on its base)")
 	if gitOut(t, root, "branch", "--list", "second") != "" {
+		t.Errorf("the branch stayed")
+	}
+	if _, err := run(t, "wa", "feature", "--no-compose"); err != nil {
+		t.Fatal(err)
+	}
+	out, err = runNoTTY(t, "wr", "feature", "--delete-branch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantsRow(t, out, "branch", "feature  (deleted with 1 commit nothing else holds; git reflog finds it for 30 days)")
+	if gitOut(t, root, "branch", "--list", "feature") != "" {
 		t.Errorf("the branch stayed")
 	}
 	_, err = run(t, "wr", root)
@@ -216,6 +368,107 @@ func TestWorktreeRemoveGuardsAndRuns(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "no worktree is at nothing or on a branch of that name") {
 		t.Fatalf("unknown: %v", err)
 	}
+}
+
+// TestWorktreeRemoveAsksAboutOwnCommits is remove on a branch with a commit of its own
+// at a terminal: Enter stops and leaves the worktree, k keeps the branch, d deletes it
+// anyway, and p pushes it to the remote first, after which add tracks the remote branch.
+func TestWorktreeRemoveAsksAboutOwnCommits(t *testing.T) {
+	root := worktreeRepo(t)
+	bare := filepath.Join(t.TempDir(), "origin.git")
+	runGit(t, root, "init", "--quiet", "--bare", bare)
+	runGit(t, root, "remote", "set-url", "origin", bare)
+	runGit(t, root, "push", "--quiet", "origin", "main")
+	own := func(branch string) string {
+		if _, err := run(t, "wa", branch, "--no-compose"); err != nil {
+			t.Fatal(err)
+		}
+		wt := filepath.Join(filepath.Dir(root), "wt-"+branch)
+		writeFile(t, filepath.Join(wt, branch+".txt"), "x\n")
+		runGit(t, wt, "add", branch+".txt")
+		runGit(t, wt, "commit", "-q", "-m", "work on "+branch)
+		return wt
+	}
+	wt := own("feature")
+	question := `branch feature holds 1 commit no remote branch, the main checkout or its base holds (last: "work on feature").`
+	stdout, _, err := runSplit(t, "\n", "wr", "feature")
+	if err == nil || err.Error() != "nothing removed" {
+		t.Fatalf("Enter: %v", err)
+	}
+	wants(t, stdout, question, "[p]ush it and delete, [k]eep it, [d]elete it anyway (git reflog finds the commits for 30 days), or [a]bort? [p/k/d/A]")
+	if _, err := os.Stat(wt); err != nil {
+		t.Fatalf("the worktree went: %v", err)
+	}
+	stdout, _, err = runSplit(t, "k\n", "wr", "feature")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, stdout)
+	}
+	wantsRow(t, stdout, "branch", "feature  (kept with 1 commit nothing else holds; git branch -D feature deletes it)")
+	runGit(t, root, "branch", "-D", "feature")
+	own("feature")
+	stdout, _, err = runSplit(t, "d\n", "wr", "feature")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, stdout)
+	}
+	wantsRow(t, stdout, "branch", "feature  (deleted with 1 commit nothing else holds; git reflog finds it for 30 days)")
+	if gitOut(t, root, "branch", "--list", "feature") != "" {
+		t.Errorf("the branch stayed")
+	}
+	own("feature")
+	stdout, _, err = runSplit(t, "p\n", "wr", "feature")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, stdout)
+	}
+	wantsRow(t, stdout, "branch", "feature  (pushed to origin/feature, then deleted)")
+	if gitOut(t, root, "ls-remote", "--heads", "origin", "feature") == "" {
+		t.Errorf("origin lacks the branch")
+	}
+	out, err := run(t, "wa", "feature", "--no-compose")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantsRow(t, out, "branch", "feature  (remote)")
+	out, err = run(t, "wr", "feature")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "branch", "feature  (deleted; every commit of it is on the remote, in the main checkout or on its base)")
+}
+
+// TestWorktreeBranchSettingKeepsTheBranch is worktree.branch: keep in the user's file,
+// which --delete-branch overrides, and a value that is neither delete nor keep.
+func TestWorktreeBranchSettingKeepsTheBranch(t *testing.T) {
+	root := worktreeRepo(t)
+	user := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "qory.yaml")
+	writeFile(t, user, "apiVersion: qory.ai/v1alpha1\nworktree: {branch: keep}\n")
+	if _, err := run(t, "wa", "feature", "--no-compose"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, "wr", "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantsRow(t, out, "branch", "feature  (kept; git branch -d feature deletes it)")
+	out, err = run(t, "config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants(t, out, "worktree.branch")
+	wants(t, out, "keep")
+	if _, err := run(t, "wa", "feature", "--no-compose"); err != nil {
+		t.Fatal(err)
+	}
+	out, err = run(t, "wr", "feature", "--delete-branch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantsRow(t, out, "branch", "feature  (deleted; every commit of it is on the remote, in the main checkout or on its base)")
+	writeFile(t, user, "apiVersion: qory.ai/v1alpha1\nworktree: {branch: drop}\n")
+	_, err = run(t, "wa", "feature", "--no-compose")
+	if err == nil || !strings.Contains(err.Error(), `worktree.branch "drop" is not delete or keep`) {
+		t.Fatalf("bad value: %v", err)
+	}
+	_ = root
 }
 
 // TestWorktreeRemoveDefaultsToTheOneYouStandIn is remove without an argument from inside

@@ -1,0 +1,8 @@
+apiVersion: qory.ai/v1alpha1
+target:
+  runtime: claude
+modules:
+  - name: core
+    source: {path: ., module: core}      # an export of this repository, by name
+  - name: extra
+    source: {path: harness/modules/extra}   # not exported; the repository reaches it by path
