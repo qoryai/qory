@@ -12,7 +12,7 @@ import (
 
 // publisherConfig is the qory.yaml of a repository exporting one stack and one module
 // under harness/, with a second module it keeps to itself.
-const publisherConfig = "apiVersion: qory.ai/v1alpha1\nexports:\n  dir: harness\n  stacks: [nextjs]\n  modules: [core, gone]\n"
+const publisherConfig = "apiVersion: qory.dev/v1alpha1\nexports:\n  dir: harness\n  stacks: [nextjs]\n  modules: [core, gone]\n"
 
 // publisher makes a repository with an exports section: the stack under
 // harness/stacks/nextjs, the modules under harness/modules, and a listed module, gone,
@@ -21,9 +21,9 @@ func publisher(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	write(t, filepath.Join(dir, "qory.yaml"), publisherConfig)
-	write(t, filepath.Join(dir, "harness", "stacks", "nextjs", "qory-stack.yaml"), "apiVersion: qory.ai/v1alpha1\n")
-	write(t, filepath.Join(dir, "harness", "modules", "core", "qory-module.yaml"), "apiVersion: qory.ai/v1alpha1\nname: core\n")
-	write(t, filepath.Join(dir, "harness", "modules", "tools", "qory-module.yaml"), "apiVersion: qory.ai/v1alpha1\nname: tools\n")
+	write(t, filepath.Join(dir, "harness", "stacks", "nextjs", "qory-stack.yaml"), "apiVersion: qory.dev/v1alpha1\n")
+	write(t, filepath.Join(dir, "harness", "modules", "core", "qory-module.yaml"), "apiVersion: qory.dev/v1alpha1\nname: core\n")
+	write(t, filepath.Join(dir, "harness", "modules", "tools", "qory-module.yaml"), "apiVersion: qory.dev/v1alpha1\nname: tools\n")
 	return dir
 }
 

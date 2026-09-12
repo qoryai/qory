@@ -1,15 +1,16 @@
 // Package config reads qory.yaml: the repository's own document and the machine's.
 //
-// One file name, one schema, read at three levels. The user's own file,
-// $XDG_CONFIG_HOME/qory/qory.yaml or ~/.config/qory/qory.yaml, and the files of the
-// checkout's ancestor directories carry the machine's choices; the file in the checkout
-// root is committed with the repository and carries what the repository needs. Every key
-// may appear at any level and the nearest file wins, so qory runs the same with no file
-// at all: every setting has a default. Files are read in this order, each overriding the
-// one before it: the user's, the ancestors' that the current user owns, the farthest
-// first, the checkout root's. A command line flag overrides every file.
+// One schema under one of two names, qory.yaml or harness.yaml, read at three levels.
+// The user's own file, $XDG_CONFIG_HOME/qory/qory.yaml or ~/.config/qory/qory.yaml, and
+// the files of the checkout's ancestor directories carry the machine's choices; the file
+// in the checkout root is committed with the repository and carries what the repository
+// needs. Every key may appear at any level and the nearest file wins, so qory runs the
+// same with no file at all: every setting has a default. Files are read in this order,
+// each overriding the one before it: the user's, the ancestors' that the current user
+// owns, the farthest first, the checkout root's. A command line flag overrides every
+// file. A directory holds one of the two names, never both.
 //
-//	apiVersion: qory.ai/v1alpha1
+//	apiVersion: qory.dev/v1alpha1 # optional; the newest format this qory reads when left out
 //	qory: ">=0.3.0"              # the qory versions this file is written for
 //	harness:
 //	  runtime: [claude, codex]   # instead of the stack's target.runtime
@@ -18,7 +19,7 @@
 //	  update: always             # fetch every git source again on each compose
 //	  extends: {git: git@git.example.com:acme/harness, ref: main, path: nextjs-15}
 //	  modules:                   # with extends: the stack this checkout extends and its own modules
-//	    - name: app
+//	    - name: app              # extends may be left out when compose -f names the base
 //	worktree:
 //	  dir: ..                    # where worktrees go, relative to the main checkout
 //	  name: wt-{branch}          # what a worktree's directory is called
@@ -27,6 +28,7 @@
 //	  branch: delete             # what worktree remove does with the branch: delete or keep
 //	  link: [.env]               # linked from the main checkout into a new worktree
 //	  copy: [config/local.json]  # copied once into a new worktree
+//	    # or {from: ~/secrets/app.env, to: .env}: a path from outside the checkout
 //	  run:
 //	    add: [pnpm install]      # run in a new worktree, after links and copies
 //	    remove: []               # run in a worktree before it is removed
@@ -70,6 +72,26 @@ import (
 // ancestor of the checkout, or in the checkout root.
 const FileName = exports.FileName
 
+// AltFileName is the file's second name, for a repository whose committed file is to say
+// nothing of the tool that reads it. It is read exactly as [FileName] is, at every level,
+// and a directory holds one of the two names, never both.
+const AltFileName = exports.AltFileName
+
+// Names are the file's two names, in the order a directory is searched.
+var Names = []string{FileName, AltFileName}
+
+// IsDocument reports whether path carries one of the file's two names, and so is read
+// through its harness section rather than as a stack.
+func IsDocument(path string) bool {
+	base := filepath.Base(path)
+	return base == FileName || base == AltFileName
+}
+
+// FileIn returns the configuration file dir holds, "" for none, and an error for a
+// directory holding both names, since one file at each level is the rule and neither
+// name comes first.
+func FileIn(dir string) (string, error) { return exports.File(dir) }
+
 // DefaultTimeout is how long one git command may run before the compose gives up on it.
 const DefaultTimeout = 10 * time.Minute
 
@@ -107,14 +129,64 @@ type Worktree struct {
 	PR string
 	// Branch is what a remove does with the worktree's branch: "delete" or "keep".
 	Branch string
-	// Link are paths linked from the main checkout into a new worktree.
-	Link []string
-	// Copy are paths copied once from the main checkout into a new worktree.
-	Copy []string
+	// Link are paths linked into a new worktree.
+	Link []Path
+	// Copy are paths copied once into a new worktree.
+	Copy []Path
 	// Add are the commands run in a new worktree after links and copies, in order.
 	Add []string
 	// Remove are the commands run in a worktree before it is removed, in order.
 	Remove []string
+}
+
+// Path is one entry of worktree.link or worktree.copy: where it comes from and where it
+// goes in the worktree. A path named alone is inside the checkout and goes to the same
+// path; {from: <path>, to: <path>} brings a path from anywhere, From absolute with a
+// leading ~ expanded, To relative to the worktree.
+type Path struct {
+	// From is the source: relative to the main checkout, or absolute.
+	From string
+	// To is the destination, relative to the worktree.
+	To string
+}
+
+// String is the entry as a row prints it: the path alone when the two are the same,
+// else "from -> to".
+func (p Path) String() string {
+	if p.From == p.To {
+		return p.To
+	}
+	return p.From + " -> " + p.To
+}
+
+// pathEntry is a worktree.link or worktree.copy entry as written: a string, or a
+// mapping with from and to.
+type pathEntry struct {
+	From, To string
+	// mapping says the entry was written as {from, to}, so an absolute from is meant.
+	mapping bool
+}
+
+// UnmarshalYAML reads a string as From, and a mapping's from and to.
+func (e *pathEntry) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		return node.Decode(&e.From)
+	}
+	var m struct {
+		From *string `yaml:"from"`
+		To   *string `yaml:"to"`
+	}
+	if err := node.Decode(&m); err != nil {
+		return err
+	}
+	e.mapping = true
+	if m.From != nil {
+		e.From = *m.From
+	}
+	if m.To != nil {
+		e.To = *m.To
+	}
+	return nil
 }
 
 // Requirement is one file's qory key: the range of qory versions it is written for.
@@ -187,20 +259,26 @@ type harnessSection struct {
 	Extensions  map[string]map[string]any `yaml:"extensions,omitempty"`
 }
 
-// composes reports whether the section carries a compose document: modules or extends.
+// composes reports whether the section carries a compose document: modules, extends or
+// extensions. A section of machine keys alone is not a document.
 func (h *harnessSection) composes() bool {
-	return h != nil && (len(h.Modules) > 0 || h.Extends.Path != "" || h.Extends.Git != "" || h.Extends.Ref != "" || h.Extends.Stack != "" || h.Extends.Module != "")
+	return h != nil && (len(h.Modules) > 0 || h.extends() || len(h.Extensions) > 0)
+}
+
+// extends reports whether the section names a stack to extend, by directory or by export.
+func (h *harnessSection) extends() bool {
+	return h.Extends.Path != "" || h.Extends.Git != "" || h.Extends.Ref != "" || h.Extends.Stack != "" || h.Extends.Module != ""
 }
 
 // worktreeSection is the worktree key.
 type worktreeSection struct {
-	Dir    *string  `yaml:"dir,omitempty"`
-	Name   *string  `yaml:"name,omitempty"`
-	Base   *string  `yaml:"base,omitempty"`
-	PR     *string  `yaml:"pr,omitempty"`
-	Branch *string  `yaml:"branch,omitempty"`
-	Link   []string `yaml:"link,omitempty"`
-	Copy   []string `yaml:"copy,omitempty"`
+	Dir    *string     `yaml:"dir,omitempty"`
+	Name   *string     `yaml:"name,omitempty"`
+	Base   *string     `yaml:"base,omitempty"`
+	PR     *string     `yaml:"pr,omitempty"`
+	Branch *string     `yaml:"branch,omitempty"`
+	Link   []pathEntry `yaml:"link,omitempty"`
+	Copy   []pathEntry `yaml:"copy,omitempty"`
 	Run    *struct {
 		Add    []string `yaml:"add,omitempty"`
 		Remove []string `yaml:"remove,omitempty"`
@@ -238,7 +316,11 @@ func Load(root string, own bool) (Config, error) {
 	if err != nil {
 		return c, err
 	}
-	for _, path := range Discover(root) {
+	files, err := Discover(root)
+	if err != nil {
+		return c, err
+	}
+	for _, path := range files {
 		f, err := c.apply(path, own || filepath.Dir(path) != root)
 		if err != nil {
 			return c, err
@@ -255,24 +337,31 @@ func Load(root string, own bool) (Config, error) {
 
 // Discover lists the configuration files for the checkout at root, in the order they
 // apply: the user's file under [UserDir], the files of the ancestor directories the
-// current user owns, farthest first, and the file in root. A file that is not there is
-// not listed. root is absolute, so the checkout's own file is the one whose directory is
-// root.
-func Discover(root string) []string {
+// current user owns, farthest first, and the file in root, each under either of [Names].
+// A file that is not there is not listed; a directory holding both names is an error.
+// root is absolute, so the checkout's own file is the one whose directory is root.
+func Discover(root string) ([]string, error) {
 	var files []string
 	if dir := UserDir(); dir != "" {
-		if path := filepath.Join(dir, FileName); exists(path) {
+		path, err := FileIn(dir)
+		if err != nil {
+			return nil, err
+		}
+		if path != "" {
 			files = append(files, path)
 		}
 	}
 	root, err := filepath.Abs(root)
 	if err != nil {
-		return files
+		return files, nil
 	}
 	var ancestors []string
 	for dir := filepath.Dir(root); ; dir = filepath.Dir(dir) {
-		path := filepath.Join(dir, FileName)
-		if info, err := os.Stat(path); err == nil && stack.OwnedByCurrentUser(info) {
+		path, err := FileIn(dir)
+		if err != nil {
+			return nil, err
+		}
+		if path != "" && ownedFile(path) {
 			ancestors = append(ancestors, path)
 		}
 		if dir == filepath.Dir(dir) {
@@ -282,10 +371,14 @@ func Discover(root string) []string {
 	for i := len(ancestors) - 1; i >= 0; i-- {
 		files = append(files, ancestors[i])
 	}
-	if path := filepath.Join(root, FileName); exists(path) {
+	path, err := FileIn(root)
+	if err != nil {
+		return nil, err
+	}
+	if path != "" {
 		files = append(files, path)
 	}
-	return files
+	return files, nil
 }
 
 // DiscoverStack finds what the checkout at root composes and returns its path: the
@@ -320,7 +413,25 @@ func DiscoverStack(root string) (string, error) {
 			break
 		}
 	}
-	return "", fmt.Errorf("no %s, and no %s with a harness section naming modules, in %s or in an ancestor directory you own", stack.FileName, FileName, root)
+	return "", fmt.Errorf("no %s, and no %s or %s whose harness section names modules or a stack to extend, in %s or in an ancestor directory you own", stack.FileName, FileName, AltFileName, root)
+}
+
+// Document returns the checkout root's own document: its [FileName] or [AltFileName]
+// when the harness section composes, "" for none. It is what compose -f names a base
+// for. A file that cannot be read is that error.
+func Document(root string) (string, error) {
+	path, err := FileIn(root)
+	if err != nil || path == "" {
+		return "", err
+	}
+	f, err := read(path)
+	if err != nil {
+		return "", err
+	}
+	if !f.Harness.composes() {
+		return "", nil
+	}
+	return path, nil
 }
 
 // closedAtRoot reads the qory-stack.yaml at path, found in a checkout root, and returns
@@ -345,7 +456,11 @@ func composeIn(dir string, owned bool) (string, error) {
 	if path := filepath.Join(dir, stack.FileName); exists(path) && (!owned || ownedFile(path)) {
 		found = append(found, path)
 	}
-	if path := filepath.Join(dir, FileName); exists(path) && (!owned || ownedFile(path)) {
+	path, err := FileIn(dir)
+	if err != nil {
+		return "", err
+	}
+	if path != "" && (!owned || ownedFile(path)) {
 		f, err := read(path)
 		if err != nil {
 			return "", err
@@ -360,14 +475,14 @@ func composeIn(dir string, owned bool) (string, error) {
 	case 1:
 		return found[0], nil
 	}
-	return "", fmt.Errorf("%s holds both %s and a %s whose harness section names modules; a directory holds one of the two", dir, stack.FileName, FileName)
+	return "", fmt.Errorf("%s holds both %s and a %s whose harness section names modules; a directory holds one of the two", dir, stack.FileName, filepath.Base(path))
 }
 
 // LoadStack reads the document at path as [DiscoverStack] or -f named it: a
-// qory-stack.yaml with [stack.Load], a qory.yaml through its harness section with
-// [Compose].
+// qory-stack.yaml with [stack.Load], a qory.yaml or harness.yaml through its harness
+// section with [Compose].
 func LoadStack(path string) (*stack.Stack, error) {
-	if filepath.Base(path) == FileName {
+	if IsDocument(path) {
 		return Compose(path)
 	}
 	return stack.Load(path)
@@ -376,22 +491,63 @@ func LoadStack(path string) (*stack.Stack, error) {
 // Compose reads the harness section of the qory.yaml at path as the checkout's document:
 // its own stack, a target and modules, or the stack it extends and the modules it appends,
 // with the name, description and extensions beside them. A file whose harness section
-// names no modules and no stack is an error, and so is one naming modules with neither a
-// target nor a stack to extend.
+// holds no document is an error, and so is one with neither a target nor a stack to
+// extend: that document composes on the base compose -f names, see [OnBase].
 func Compose(path string) (*stack.Stack, error) {
 	f, err := read(path)
 	if err != nil {
 		return nil, err
 	}
 	if !f.Harness.composes() {
-		return nil, fmt.Errorf("%s: the harness section names no modules and no stack to extend", path)
+		return nil, fmt.Errorf("%s: the harness section names no modules, no stack to extend and no extensions", path)
 	}
+	if !f.Harness.extends() && len(f.Harness.Target.Runtimes) == 0 {
+		return nil, fmt.Errorf("%s: harness names no target.runtime and no stack to extend; the section holds this repository's own stack, a target and its modules, or extends one, or leaves extends out for the base that qory harness compose -f <stack> names", path)
+	}
+	return stack.NewCompose(path, f.document())
+}
+
+// OnBase reads the harness section of the qory.yaml at path as the checkout's document
+// composed on the stack file base, which compose -f named: base's directory takes the
+// place of whatever extends names, as if the document had named it there, so a document
+// may leave extends out and carry only what is the repository's own, its modules and its
+// extensions. The source the document named under extends is returned beside the stack,
+// empty for none, so the compose can say what -f replaced. A document holding this
+// repository's own stack, a target, is refused: it has no base to replace.
+func OnBase(path, base string) (*stack.Stack, stack.Source, error) {
+	f, err := read(path)
+	if err != nil {
+		return nil, stack.Source{}, err
+	}
+	if !f.Harness.composes() {
+		return nil, stack.Source{}, fmt.Errorf("%s: the harness section names no modules, no stack to extend and no extensions", path)
+	}
+	if len(f.Harness.Target.Runtimes) > 0 || f.Harness.Target.Model != "" {
+		return nil, stack.Source{}, fmt.Errorf("%s: harness sets a target, this repository's own stack, and -f names a base for a document that extends one; a document takes its base under extends or from -f, in place of a target", path)
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, stack.Source{}, err
+	}
+	baseDir, err := filepath.Abs(filepath.Dir(base))
+	if err != nil {
+		return nil, stack.Source{}, err
+	}
+	dir := baseDir
+	if rel, err := filepath.Rel(filepath.Dir(abs), baseDir); err == nil {
+		dir = rel
+	}
+	p := f.document()
+	named := p.Extends
+	p.Extends = stack.Source{Path: dir}
+	p, err = stack.NewCompose(path, p)
+	return p, named, err
+}
+
+// document is the file's harness section as the stack it holds, before validation.
+func (f file) document() *stack.Stack {
 	h := f.Harness
-	p := &stack.Stack{APIVersion: f.APIVersion, Qory: f.Qory, Name: h.Name, Description: h.Description, Extends: h.Extends, Target: h.Target, Modules: h.Modules, Extensions: h.Extensions}
-	if p.Extends.Path == "" && p.Extends.Git == "" && p.Extends.Ref == "" && p.Extends.Stack == "" && p.Extends.Module == "" && len(p.Target.Runtimes) == 0 {
-		return nil, fmt.Errorf("%s: harness names modules and no target.runtime; the section holds this repository's own stack, a target and its modules, or extends one", path)
-	}
-	return stack.NewCompose(path, p)
+	return &stack.Stack{APIVersion: f.APIVersion, Qory: f.Qory, Name: h.Name, Description: h.Description, Extends: h.Extends, Target: h.Target, Modules: h.Modules, Extensions: h.Extensions}
 }
 
 // UserDir is the user's configuration directory: $XDG_CONFIG_HOME/qory, else
@@ -544,20 +700,22 @@ func (c *Config) applyWorktree(path string, w *worktreeSection) error {
 		c.origins["worktree.branch"] = path
 	}
 	for _, list := range []struct {
-		key   string
-		paths []string
-		into  *[]string
+		key     string
+		entries []pathEntry
+		into    *[]Path
 	}{{"worktree.link", w.Link, &c.Worktree.Link}, {"worktree.copy", w.Copy, &c.Worktree.Copy}} {
-		if list.paths == nil {
+		if list.entries == nil {
 			continue
 		}
-		for _, rel := range list.paths {
-			clean := filepath.Clean(rel)
-			if rel == "" || filepath.IsAbs(rel) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-				return fmt.Errorf("%s: %s names %q, which is not a path inside the checkout", path, list.key, rel)
+		paths := []Path{}
+		for _, e := range list.entries {
+			p, err := worktreePath(path, list.key, e)
+			if err != nil {
+				return err
 			}
+			paths = append(paths, p)
 		}
-		*list.into = append([]string(nil), list.paths...)
+		*list.into = paths
 		c.origins[list.key] = path
 	}
 	if w.Run != nil {
@@ -573,8 +731,57 @@ func (c *Config) applyWorktree(path string, w *worktreeSection) error {
 	return nil
 }
 
+// worktreePath checks one worktree.link or worktree.copy entry of the file at path and
+// returns it as a [Path]. A path named alone, or a from written relative, is inside the
+// checkout and goes to the same path unless to says otherwise; a from that is absolute
+// or starts with ~ comes from outside the checkout and needs a to. A to is relative and
+// stays inside the worktree.
+func worktreePath(path, key string, e pathEntry) (Path, error) {
+	from := e.From
+	if from == "" {
+		return Path{}, fmt.Errorf("%s: %s names an entry with no path; one is a path inside the checkout, or {from: <path>, to: <path in the worktree>}", path, key)
+	}
+	if from == "~" || strings.HasPrefix(from, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return Path{}, fmt.Errorf("%s: %s names %s, and the home directory is unknown: %w", path, key, from, err)
+		}
+		from = filepath.Join(home, from[1:])
+	}
+	to := e.To
+	switch {
+	case filepath.IsAbs(from) && !e.mapping:
+		return Path{}, fmt.Errorf("%s: %s names %q, which is not a path inside the checkout; a path from outside goes as {from: %s, to: <path in the worktree>}", path, key, e.From, e.From)
+	case filepath.IsAbs(from):
+		from = filepath.Clean(from)
+		if to == "" {
+			return Path{}, fmt.Errorf("%s: %s names %s with no to; a path from outside the checkout says where it goes, as {from: %s, to: <path in the worktree>}", path, key, e.From, e.From)
+		}
+	default:
+		if !insideRel(from) {
+			return Path{}, fmt.Errorf("%s: %s names %q, which is not a path inside the checkout", path, key, from)
+		}
+		if to == "" {
+			to = from
+		}
+	}
+	if !insideRel(to) {
+		return Path{}, fmt.Errorf("%s: %s names to %q for %s, which is not a path inside the worktree", path, key, to, e.From)
+	}
+	return Path{From: from, To: to}, nil
+}
+
+// insideRel reports whether p is a relative path that stays inside the directory it is
+// relative to.
+func insideRel(p string) bool {
+	clean := filepath.Clean(p)
+	return p != "" && !filepath.IsAbs(p) && clean != "." && clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator))
+}
+
 // read decodes one file. An unknown key is an error, and so is a second document and an
-// apiVersion other than [stack.APIVersion].
+// apiVersion other than [stack.APIVersion]. A file naming no apiVersion is read as the
+// newest format this qory reads, which is that one: the file is a repository's or a
+// machine's own, not a delivered document, so it need carry no version to bump.
 func read(path string) (file, error) {
 	var f file
 	data, err := os.ReadFile(path)
@@ -589,8 +796,11 @@ func read(path string) (file, error) {
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return f, fmt.Errorf("%s: holds more than one document; a configuration is one", path)
 	}
-	if f.APIVersion != stack.APIVersion {
-		return f, fmt.Errorf("%s: apiVersion %q is not one this qory reads; versions: %s", path, f.APIVersion, stack.APIVersion)
+	if f.APIVersion == "" {
+		f.APIVersion = stack.APIVersion
+	}
+	if err := exports.CheckAPIVersion(f.APIVersion); err != nil {
+		return f, fmt.Errorf("%s: %w", path, err)
 	}
 	if f.Exports != nil {
 		if err := f.Exports.Validate(); err != nil {
@@ -609,7 +819,7 @@ var unknownKey = regexp.MustCompile(`(line \d+: )?field (\S+) not found in type 
 // other error is returned as the decoder wrote it.
 func decodeError(path string, err error) error {
 	if m := unknownKey.FindStringSubmatch(err.Error()); m != nil {
-		return fmt.Errorf("%s: %skey %q is not one %s reads", path, m[1], m[2], FileName)
+		return fmt.Errorf("%s: %skey %q is not one %s reads", path, m[1], m[2], filepath.Base(path))
 	}
 	return fmt.Errorf("%s: %w", path, err)
 }
@@ -668,7 +878,7 @@ func (c Config) Rows() []Row {
 	for _, list := range []struct {
 		key   string
 		items []string
-	}{{"worktree.link", c.Worktree.Link}, {"worktree.copy", c.Worktree.Copy}, {"worktree.run.add", c.Worktree.Add}, {"worktree.run.remove", c.Worktree.Remove}} {
+	}{{"worktree.link", pathStrings(c.Worktree.Link)}, {"worktree.copy", pathStrings(c.Worktree.Copy)}, {"worktree.run.add", c.Worktree.Add}, {"worktree.run.remove", c.Worktree.Remove}} {
 		if len(list.items) > 0 {
 			rows = append(rows, Row{list.key, strings.Join(list.items, ", "), c.origins[list.key]})
 		}
@@ -694,6 +904,15 @@ func (c Config) Rows() []Row {
 		)
 	}
 	return rows
+}
+
+// pathStrings is each path as [Path.String] prints it.
+func pathStrings(paths []Path) []string {
+	var out []string
+	for _, p := range paths {
+		out = append(out, p.String())
+	}
+	return out
 }
 
 // listOrNone joins names for a row, "(none)" for an empty list.

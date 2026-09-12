@@ -23,6 +23,12 @@ qory setup shell [flags]
       --print   print the lines and write nothing, for an rc file a tool of yours owns
 ```
 
+### Options inherited from parent commands
+
+```
+  -v, --verbose   print more of what the command does; each command's help says what
+```
+
 ### SEE ALSO
 
 * [qory setup](qory_setup.md)	 - Set up the repository, the machine's configuration, or your shell

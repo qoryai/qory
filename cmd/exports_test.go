@@ -15,7 +15,7 @@ var columns = regexp.MustCompile(`\s{2,}`)
 
 // publisherConfig is the qory.yaml of a harness repository that exports its stack and
 // its modules by name, all under harness/, with one module more than the stack uses.
-const publisherConfig = `apiVersion: qory.ai/v1alpha1
+const publisherConfig = `apiVersion: qory.dev/v1alpha1
 exports:
   dir: harness
   stacks: [nextjs-15]
@@ -43,7 +43,7 @@ func publisherRepo(t *testing.T) string {
 	t.Helper()
 	dir := tempDir(t)
 	runGit(t, dir, "init", "-q", "-b", "main")
-	runGit(t, dir, "config", "user.name", "Operator")
+	runGit(t, dir, "config", "user.name", "Publisher")
 	runGit(t, dir, "config", "user.email", "op@example.com")
 	publisherTree(t, dir)
 	runGit(t, dir, "add", "-A")
@@ -52,18 +52,18 @@ func publisherRepo(t *testing.T) string {
 	return "file://" + dir
 }
 
-// exportsCompose is the customer's qory.yaml: the base named as an export of the
-// publisher's repository, at repo as a git URL or a path, the customer's own module and
+// exportsCompose is the consumer's qory.yaml: the base named as an export of the
+// publisher's repository, at repo as a git URL or a path, the consumer's own module and
 // one more of the publisher's, named as an export too.
 func exportsCompose(repo, stackName string) string {
 	source := "{path: " + repo
 	if strings.HasPrefix(repo, "file://") {
 		source = "{git: " + repo + ", ref: main"
 	}
-	return "apiVersion: qory.ai/v1alpha1\nharness:\n  extends: " + source + ", stack: " + stackName + "}\n  modules:\n    - name: app\n    - name: extra\n      source: " + source + ", module: extra}\n"
+	return "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: " + source + ", stack: " + stackName + "}\n  modules:\n    - name: app\n    - name: extra\n      source: " + source + ", module: extra}\n"
 }
 
-// TestExtendsAnExportedStackByName is the customer's checkout naming the stack and a
+// TestExtendsAnExportedStackByName is the consumer's checkout naming the stack and a
 // module by their export names: the base's modules resolve where the publisher's
 // qory.yaml says, the report records the exports as written and the base's modules by
 // the directory they resolved to, and the extra module's skill is composed.
@@ -111,7 +111,7 @@ func TestExtendsAnExportedStackByName(t *testing.T) {
 	}
 }
 
-// TestExtendsAnExportedStackByPath is the same customer with the publisher's checkout
+// TestExtendsAnExportedStackByPath is the same consumer with the publisher's checkout
 // on disk beside its own: the base and the extra module resolve through the exports of
 // that repository, and the base's modules are recorded by a relative path.
 func TestExtendsAnExportedStackByPath(t *testing.T) {

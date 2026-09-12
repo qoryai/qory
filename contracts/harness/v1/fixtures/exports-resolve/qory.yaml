@@ -1,4 +1,4 @@
-apiVersion: qory.ai/v1alpha1
+apiVersion: qory.dev/v1alpha1
 exports:
   dir: harness
   modules: [core]

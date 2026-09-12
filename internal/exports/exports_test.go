@@ -14,7 +14,7 @@ import (
 func write(t *testing.T, body string) string {
 	t.Helper()
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, exports.FileName), []byte("apiVersion: qory.ai/v1alpha1\n"+body), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, exports.FileName), []byte("apiVersion: qory.dev/v1alpha1\n"+body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return root
@@ -115,10 +115,10 @@ func TestReadRefuses(t *testing.T) {
 		}
 	}
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "qory.yaml"), []byte("apiVersion: qory.ai/v2\nexports: {modules: [core]}\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "qory.yaml"), []byte("apiVersion: qory.dev/v2\nexports: {modules: [core]}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := exports.Read(root); err == nil || !strings.Contains(err.Error(), `apiVersion "qory.ai/v2" is not one this qory reads`) {
+	if _, err := exports.Read(root); err == nil || !strings.Contains(err.Error(), `apiVersion "qory.dev/v2" is not one this qory reads`) {
 		t.Errorf("another apiVersion: %v", err)
 	}
 	root = write(t, "exports: {modules: [core]}\nharnes: {runtime: claude}\n")
@@ -164,5 +164,30 @@ func TestVerifyWantsEveryExportOnDisk(t *testing.T) {
 	touch(t, filepath.Join(root, "harness", "modules", "core", "qory-module.yaml"))
 	if err := e.Verify(); err != nil {
 		t.Errorf("all there: %v", err)
+	}
+}
+
+// TestReadTakesEitherNameAndNoAPIVersion is the section under the file's second name,
+// harness.yaml, read as the qory.yaml is, without an apiVersion, which the file may leave
+// out; and the refusal of a root holding both names.
+func TestReadTakesEitherNameAndNoAPIVersion(t *testing.T) {
+	root := t.TempDir()
+	other := filepath.Join(root, exports.AltFileName)
+	if err := os.WriteFile(other, []byte("exports:\n  modules: [core]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e, err := exports.Read(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e == nil || e.File != other || len(e.Modules) != 1 {
+		t.Fatalf("exports = %+v", e)
+	}
+	if err := os.WriteFile(filepath.Join(root, exports.FileName), []byte("exports:\n  modules: [core]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = exports.Read(root)
+	if err == nil || !strings.Contains(err.Error(), "holds both qory.yaml and harness.yaml; a directory holds one of the two") {
+		t.Fatalf("both names: %v", err)
 	}
 }

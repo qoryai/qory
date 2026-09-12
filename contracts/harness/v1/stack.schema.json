@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://qory.ai/contracts/harness/v1/stack.schema.json",
+  "$id": "https://qory.dev/contracts/harness/v1/stack.schema.json",
   "title": "qory-stack.yaml",
   "description": "qory-stack.yaml: the ordered modules a harness is composed from, and the runtime it is rendered for.",
   "type": "object",
   "required": ["apiVersion", "target", "modules"],
   "additionalProperties": false,
   "properties": {
-    "apiVersion": {"const": "qory.ai/v1alpha1"},
+    "apiVersion": {"const": "qory.dev/v1alpha1"},
     "qory": {
       "description": "The qory versions this document is written for: one or more comparators, >=0.3.0 <0.4.0 say; every one has to hold.",
       "type": "string",

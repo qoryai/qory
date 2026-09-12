@@ -1,4 +1,4 @@
-apiVersion: qory.ai/v1alpha1
+apiVersion: qory.dev/v1alpha1
 qory: 0.3.0
 target:
   runtime: claude

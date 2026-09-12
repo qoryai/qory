@@ -16,7 +16,7 @@ func TestFilesCollideByPathAndAnExcludeResolvesIt(t *testing.T) {
 		"qory-stack.yaml":                      twoModules,
 		"modules/a/qory-module.yaml":           manifest("a", "HARNESS_HOME", "."),
 		"modules/a/files/claude/rules/web.md":  "a\n",
-		"modules/b/qory-module.yaml":           "apiVersion: qory.ai/v1alpha1\nname: b\n",
+		"modules/b/qory-module.yaml":           "apiVersion: qory.dev/v1alpha1\nname: b\n",
 		"modules/b/files/claude/rules/web.md":  "b\n",
 		"modules/b/files/cursor/rules/web.mdc": "b\n",
 	}

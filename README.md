@@ -38,7 +38,7 @@ coming last.
 1. Write `qory.yaml` in the repository, or let `qory setup repo` write it:
 
    ```yaml
-   apiVersion: qory.ai/v1alpha1
+   apiVersion: qory.dev/v1alpha1
    harness:
      target:
        runtime: claude          # or both at once: [claude, codex]
@@ -55,11 +55,13 @@ coming last.
    Every module has a `qory-module.yaml` that names it. A repository can also take a
    stack someone else delivers, a `qory-stack.yaml`: it names that stack under `extends`
    instead of `target`, and adds its own modules. The delivered modules cannot be changed.
+   A runner that holds the stack tree names the base with `qory harness compose -f
+   <stack>` instead, and the repository's file then names no version, ref or URL of it.
    A delivered stack states the qory it needs, `qory: ">=0.4.0"`, and every repository
    extending it inherits the range.
 
    ```yaml
-   apiVersion: qory.ai/v1alpha1
+   apiVersion: qory.dev/v1alpha1
    harness:
      extends: {git: https://github.com/acme/harness, ref: v2.4.0, stack: nextjs}
      modules:
@@ -129,7 +131,7 @@ the repository's `qory.yaml` says and composes the harness into it:
 
 ```yaml
 # qory.yaml, committed, beside the harness section
-apiVersion: qory.ai/v1alpha1
+apiVersion: qory.dev/v1alpha1
 worktree:
   base: main                     # a new branch starts here; default: the remote's HEAD
   link: [.env, .env.local]       # linked from the main checkout into the worktree
@@ -140,6 +142,7 @@ worktree:
 ```sh
 qory worktree add feature        # ../wt-feature on branch feature, pushing to origin/feature
 qory worktree add feature --base v1.2.0   # a branch that exists is moved onto the base, after a question
+qory worktree add feature --offline       # without the fetch every add starts with
 qory worktree add --branch feature   # attach to the remote's feature: fetched, tracked, refused when the remote lacks it
 qory worktree add --pr 7             # attach to pull request 7: its branch, found among the remote's refs
 qory worktree add review --pr 7      # the same, in ../wt-review
@@ -147,10 +150,14 @@ qory worktree remove             # the worktree you stand in, and its branch
 qory setup shell                 # make your shell cd into a new worktree, and back on remove
 ```
 
-The branch goes with the worktree: quietly when every commit of it is on the remote, in
-the main checkout or on the base it was cut from, and after a question otherwise, with
-push, keep, delete anyway and stop as the answers. `--keep-branch` keeps it, and
-`worktree.branch: keep` makes that the default.
+Every add fetches the remote first, so a new branch starts at the remote's tip and a
+branch pushed from another machine is tracked instead of cut anew; a fetch that fails
+stops the add, and `--offline` goes on with the refs already there. The branch goes with
+the worktree on remove: quietly when every commit of it is on the remote, in the main
+checkout or on the base it was cut from, and after a question otherwise, with push,
+keep, delete anyway and stop as the answers. `--keep-branch` keeps it, and
+`worktree.branch: keep` makes that the default. `-v` on either verb prints each git
+command as it runs, and what the configured commands print.
 
 `--pr` asks no hosting API: the pull request's head is one of the refs the remote
 publishes, `refs/pull/<n>/head` on GitHub and Forgejo, `refs/merge-requests/<n>/head` on
@@ -160,7 +167,13 @@ publishes none, Bitbucket Cloud, takes `--branch` with the pull request's branch
 
 Where a worktree goes and what it is called is your choice, not the repository's:
 `worktree.dir`, `worktree.name` and `worktree.branch` in your own `qory.yaml`, which
-`qory setup machine` writes.
+`qory setup machine` writes. A file the repository must not name goes there too:
+
+```yaml
+# ~/.config/qory/qory.yaml
+worktree:
+  link: [{from: ~/secrets/app.env, to: .env}]   # this machine's path, linked as .env
+```
 
 ## Commands
 
@@ -181,6 +194,7 @@ qory config              # every setting, its value and the file it came from
 Flags worth knowing on `compose`:
 
 ```
+-f <stack>             compose this stack; as the base of the repository's document when that extends one
 --dry-run              print the report and write nothing
 --runtime claude,codex render for these runtimes instead of the stack's
 --model opus           write this model instead of the stack's
@@ -191,7 +205,8 @@ Flags worth knowing on `compose`:
 
 Two `qory.yaml` files are read. Every setting has a default, so both are optional. The
 repository's file is committed and holds what the repository decides: its stack, and what
-a worktree needs. Your file, in `~/.config/qory`, holds how `qory` runs on this machine
+a worktree needs; it may be named `harness.yaml` instead, for a file that says nothing of
+the tool that reads it. Your file, in `~/.config/qory`, holds how `qory` runs on this machine
 for every repository: the runtime to compose for, where worktrees go, the git timeout.
 The repository's file is read on top of yours. `qory config` shows every setting and the
 file it came from. The reference, one page per command, is under

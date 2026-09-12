@@ -16,9 +16,9 @@ import (
 	"github.com/qoryai/qory/internal/exports"
 )
 
-// APIVersion is the one format version this qory reads. A stack that carries another one
-// is refused, and the message names this one.
-const APIVersion = "qory.ai/v1alpha1"
+// APIVersion is the one format version this qory reads, [exports.APIVersion]. A stack
+// that carries another one is refused, and the message names this one.
+const APIVersion = exports.APIVersion
 
 // FileName is the stack's file name on disk, in a directory of the harness repository
 // that delivers it, or in an ancestor directory covering several checkouts. The file name
@@ -369,8 +369,8 @@ func decodeError(path string, err error) error {
 // servers. Whether a source holds a module, and whether its manifest carries the name the
 // entry gives, is the compose's check.
 func (p *Stack) validate(compose bool) error {
-	if p.APIVersion != APIVersion {
-		return fmt.Errorf("apiVersion %q is not one this qory reads; versions: %s", p.APIVersion, APIVersion)
+	if err := exports.CheckAPIVersion(p.APIVersion); err != nil {
+		return err
 	}
 	if compose {
 		if err := p.Extends.validate(); err != nil {
@@ -416,7 +416,9 @@ func (p *Stack) validate(compose bool) error {
 			}
 		}
 	}
-	if len(p.Modules) == 0 {
+	// A document that extends a stack may append nothing and carry only what is the
+	// repository's own beside the base, its extensions say; a stack names a module.
+	if len(p.Modules) == 0 && !compose {
 		return errors.New("modules is empty; a stack names at least one module")
 	}
 	seen := map[string]bool{}

@@ -1,1 +1,1 @@
-qory-stack.yaml: apiVersion "qory.ai/v2" is not one this qory reads; versions: qory.ai/v1alpha1
+qory-stack.yaml: apiVersion "qory.dev/v2" is not one this qory reads; versions: qory.dev/v1alpha1

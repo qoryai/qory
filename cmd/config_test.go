@@ -15,8 +15,8 @@ import (
 func TestConfigPrintsEveryValueWithItsOrigin(t *testing.T) {
 	root := newCheckout(t)
 	user := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "qory.yaml")
-	writeFile(t, user, "apiVersion: qory.ai/v1alpha1\nharness: {force: true}\n")
-	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.ai/v1alpha1\nharness: {runtime: codex}\nworktree: {link: [.env, .env.local]}\nenv: {HARNESS_PROFILE: nextjs}\n")
+	writeFile(t, user, "apiVersion: qory.dev/v1alpha1\nharness: {force: true}\n")
+	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.dev/v1alpha1\nharness: {runtime: codex}\nworktree: {link: [.env, .env.local]}\nenv: {HARNESS_PROFILE: nextjs}\n")
 	out, err := run(t, "config")
 	if err != nil {
 		t.Fatal(err)
@@ -54,14 +54,14 @@ func TestConfigWithoutAFileSaysSo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, out, "No qory.yaml was found", "default")
+	wants(t, out, "No qory.yaml or harness.yaml was found", "default")
 }
 
 // TestConfigRefusesAMistake is a qory.yaml with a key qory does not read: the command
 // names the file and exits as an input error.
 func TestConfigRefusesAMistake(t *testing.T) {
 	root := newCheckout(t)
-	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.ai/v1alpha1\nharness: {runtim: codex}\n")
+	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.dev/v1alpha1\nharness: {runtim: codex}\n")
 	_, err := run(t, "config")
 	if err == nil || !strings.Contains(err.Error(), "qory.yaml") || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("err = %v, exit %d", err, cmd.ExitCode(err))

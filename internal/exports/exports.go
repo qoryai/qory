@@ -36,9 +36,39 @@ import (
 // FileName is the configuration's file name, the qory.yaml the section is read from.
 const FileName = "qory.yaml"
 
-// APIVersion is the one format version this qory reads, the same one every document
-// carries.
-const APIVersion = "qory.ai/v1alpha1"
+// AltFileName is the configuration's second name, read exactly as [FileName]; a
+// directory holds one of the two.
+const AltFileName = "harness.yaml"
+
+// File returns the configuration file dir holds under either name, "" for none, and an
+// error for a directory holding both.
+func File(dir string) (string, error) {
+	var found string
+	for _, name := range []string{FileName, AltFileName} {
+		path := filepath.Join(dir, name)
+		if !isFile(path) {
+			continue
+		}
+		if found != "" {
+			return "", fmt.Errorf("%s holds both %s and %s; a directory holds one of the two", dir, FileName, AltFileName)
+		}
+		found = path
+	}
+	return found, nil
+}
+
+// APIVersion is the format version this qory writes and the newest it reads, the same one
+// every document carries.
+const APIVersion = "qory.dev/v1alpha1"
+
+// CheckAPIVersion returns nil for a version this qory reads, [APIVersion], and for any
+// other an error naming the version and the ones read. A reader prefixes the file.
+func CheckAPIVersion(version string) error {
+	if version == APIVersion {
+		return nil
+	}
+	return fmt.Errorf("apiVersion %q is not one this qory reads; versions: %s", version, APIVersion)
+}
 
 // StackFileName and ModuleFileName are what an exported directory holds: a stack its
 // qory-stack.yaml, a module its qory-module.yaml.
@@ -212,16 +242,17 @@ type document struct {
 	Rest       map[string]any `yaml:",inline"`
 }
 
-// Read reads the exports section of the qory.yaml in root and returns it resolved, or
-// nil when root holds no qory.yaml or the file has no exports section. A file that
-// cannot be decoded, one with another apiVersion, and a section that does not validate
-// are errors naming the file.
+// Read reads the exports section of the qory.yaml in root, under either of its names,
+// and returns it resolved, or nil when root holds no such file or the file has no
+// exports section. A file that cannot be decoded, one with another apiVersion, and a
+// section that does not validate are errors naming the file; a file naming no
+// apiVersion is read as [APIVersion], the newest format, as the configuration reads it.
 func Read(root string) (*Exports, error) {
-	file := filepath.Join(root, FileName)
-	data, err := os.ReadFile(file)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+	file, err := File(root)
+	if err != nil || file == "" {
+		return nil, err
 	}
+	data, err := os.ReadFile(file)
 	if err != nil {
 		return nil, err
 	}
@@ -231,8 +262,11 @@ func Read(root string) (*Exports, error) {
 	if err := dec.Decode(&doc); err != nil && !errors.Is(err, io.EOF) {
 		return nil, decodeError(file, err)
 	}
-	if doc.APIVersion != APIVersion {
-		return nil, fmt.Errorf("%s: apiVersion %q is not one this qory reads; versions: %s", file, doc.APIVersion, APIVersion)
+	if doc.APIVersion == "" {
+		doc.APIVersion = APIVersion
+	}
+	if err := CheckAPIVersion(doc.APIVersion); err != nil {
+		return nil, fmt.Errorf("%s: %w", file, err)
 	}
 	if doc.Exports == nil {
 		return nil, nil
@@ -265,7 +299,7 @@ var unknownKey = regexp.MustCompile(`(line \d+: )?field (\S+) not found in type 
 // configuration does not read, with the decoder's line number when it gives one.
 func decodeError(path string, err error) error {
 	if m := unknownKey.FindStringSubmatch(err.Error()); m != nil {
-		return fmt.Errorf("%s: %skey %q is not one %s reads", path, m[1], m[2], FileName)
+		return fmt.Errorf("%s: %skey %q is not one %s reads", path, m[1], m[2], filepath.Base(path))
 	}
 	return fmt.Errorf("%s: %w", path, err)
 }

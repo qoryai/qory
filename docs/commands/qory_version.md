@@ -13,6 +13,12 @@ qory version [flags]
       --json   print the fields as one JSON object
 ```
 
+### Options inherited from parent commands
+
+```
+  -v, --verbose   print more of what the command does; each command's help says what
+```
+
 ### SEE ALSO
 
 * [qory](qory.md)	 - Compose the harness a runtime loads from modules

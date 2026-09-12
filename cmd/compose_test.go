@@ -243,12 +243,12 @@ func TestComposeRefuses(t *testing.T) {
 	}{
 		{
 			name:    "no stack in the checkout or above it",
-			wantErr: []string{"no " + stack.FileName + ", and no qory.yaml with a harness section naming modules, in ", "ancestor directory you own"},
+			wantErr: []string{"no " + stack.FileName + ", and no qory.yaml or harness.yaml whose harness section names modules or a stack to extend, in ", "ancestor directory you own"},
 		},
 		{
 			name:    "a stack of another format",
 			fixture: "unknown-api-version",
-			wantErr: []string{"qory.yaml:", `apiVersion "qory.ai/v2" is not one this qory reads`},
+			wantErr: []string{"qory.yaml:", `apiVersion "qory.dev/v2" is not one this qory reads`},
 		},
 		{
 			name:    "an exclude that names nothing the module ships",
@@ -378,7 +378,7 @@ func writeSoloStack(t *testing.T) string {
 	writeManifest(t, filepath.Join(dir, "modules", "solo"), "solo")
 	writeFile(t, filepath.Join(dir, "modules", "solo", "skills", "greet", "SKILL.md"), "---\nname: greet\ndescription: Greet.\n---\n\nSay hello.\n")
 	writeFile(t, filepath.Join(dir, "modules", "solo", "commands", "ship.md"), "# ship\n\nFrom the solo module.\n")
-	writeFile(t, filepath.Join(dir, stack.FileName), `apiVersion: qory.ai/v1alpha1
+	writeFile(t, filepath.Join(dir, stack.FileName), `apiVersion: qory.dev/v1alpha1
 target:
   runtime: claude
 modules:
@@ -402,7 +402,7 @@ func writeFile(t *testing.T, path, content string) {
 // module name.
 func writeManifest(t *testing.T, dir, name string) {
 	t.Helper()
-	writeFile(t, filepath.Join(dir, "qory-module.yaml"), "apiVersion: qory.ai/v1alpha1\nname: "+name+"\n")
+	writeFile(t, filepath.Join(dir, "qory-module.yaml"), "apiVersion: qory.dev/v1alpha1\nname: "+name+"\n")
 }
 
 func readReport(t *testing.T, root string) report.Report {

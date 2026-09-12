@@ -51,8 +51,15 @@ Shortcuts:
 	root.AddCommand(newVersion(), newSetup(), newHarness(), newWorktree(), newConfig())
 	root.AddCommand(shortcuts()...)
 	root.AddCommand(worktreeShortcuts()...)
+	root.PersistentFlags().BoolP("verbose", "v", false, "print more of what the command does; each command's help says what")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return input(err) })
 	return root
+}
+
+// verbose reports whether the root's --verbose was given, for any command of the tree.
+func verbose(cmd *cobra.Command) bool {
+	v, _ := cmd.Root().PersistentFlags().GetBool("verbose")
+	return v
 }
 
 // noArgs is [cobra.NoArgs] returning an input error, so a stray argument exits with

@@ -121,7 +121,7 @@ func copyFixture(t *testing.T, name, dir string) {
 // harness. The result has one harness: line, so [configure] can add keys to the section.
 func ownStack(doc string) string {
 	lines := strings.Split(strings.TrimSuffix(doc, "\n"), "\n")
-	apiVersion := "apiVersion: qory.ai/v1alpha1"
+	apiVersion := "apiVersion: qory.dev/v1alpha1"
 	for _, line := range lines {
 		if strings.HasPrefix(line, "apiVersion:") {
 			apiVersion = line

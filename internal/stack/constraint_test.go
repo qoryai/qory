@@ -76,7 +76,7 @@ func TestConstraintAllows(t *testing.T) {
 // TestStackReadsTheQoryKey is the key in a stack file: read into [Stack.Qory], and a
 // bad value refused with the file named and no line number in the way.
 func TestStackReadsTheQoryKey(t *testing.T) {
-	path := write(t, "apiVersion: qory.ai/v1alpha1\nqory: \">=0.3.0\"\ntarget: {runtime: claude}\nmodules: [{name: core}]\n")
+	path := write(t, "apiVersion: qory.dev/v1alpha1\nqory: \">=0.3.0\"\ntarget: {runtime: claude}\nmodules: [{name: core}]\n")
 	p, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +84,7 @@ func TestStackReadsTheQoryKey(t *testing.T) {
 	if p.Qory.String() != ">=0.3.0" {
 		t.Errorf("qory = %q", p.Qory.String())
 	}
-	path = write(t, "apiVersion: qory.ai/v1alpha1\nqory: [0.3.0]\ntarget: {runtime: claude}\nmodules: [{name: core}]\n")
+	path = write(t, "apiVersion: qory.dev/v1alpha1\nqory: [0.3.0]\ntarget: {runtime: claude}\nmodules: [{name: core}]\n")
 	_, err = Load(path)
 	if err == nil || !strings.HasPrefix(err.Error(), path+": qory is one or more comparators such as >=0.3.0, as a string") {
 		t.Errorf("err = %v", err)

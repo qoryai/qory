@@ -23,7 +23,7 @@ const moduleDir = "harness"
 // runtime and the repository's own module, and every key a repository commits shown.
 // %[1]s is the repository's name, %[2]s and %[3]s the spaces that bring the comments
 // after it to the column of the others.
-const checkoutConfig = `apiVersion: qory.ai/v1alpha1
+const checkoutConfig = `apiVersion: qory.dev/v1alpha1
 
 # This repository's stack. To take a stack as delivered instead, name it under extends in
 # place of target: {git: https://github.com/acme/harness, ref: v2.4.0, stack: nextjs}
@@ -48,7 +48,7 @@ worktree:
 
 // worktreeConfig is the qory.yaml setup repo writes beside a qory-stack.yaml that is there: the
 // worktree section alone, since the stack file holds the stack.
-const worktreeConfig = `apiVersion: qory.ai/v1alpha1
+const worktreeConfig = `apiVersion: qory.dev/v1alpha1
 
 # What a worktree of this repository needs; qory worktree add reads it. The stack is in
 # qory-stack.yaml.
@@ -63,7 +63,7 @@ worktree:
 `
 
 // moduleFile is the qory-module.yaml of the repository's own module. %s is its name.
-const moduleFile = `apiVersion: qory.ai/v1alpha1
+const moduleFile = `apiVersion: qory.dev/v1alpha1
 name: %s
 `
 
@@ -75,7 +75,7 @@ Instructions every agent reads in this repository.
 
 // userConfig is the qory.yaml setup machine writes: how qory runs on this machine, every
 // value at its default.
-const userConfig = `apiVersion: qory.ai/v1alpha1
+const userConfig = `apiVersion: qory.dev/v1alpha1
 
 # How qory runs on this machine. A checkout's qory.yaml overrides the keys it names.
 harness:
@@ -125,15 +125,21 @@ machine, for every repository, is the qory.yaml that setup machine writes.`,
 			u.Title(name)
 			var rows [][2]string
 			var files []struct{ path, content string }
+			// The configuration goes under the name the directory already uses, so
+			// a repository that keeps a harness.yaml does not gain a qory.yaml beside it.
+			configName := config.FileName
+			if own, _ := config.FileIn(dir); own != "" {
+				configName = filepath.Base(own)
+			}
 			switch found, _ := config.DiscoverStack(dir); found {
-			case filepath.Join(dir, config.FileName):
-				rows = append(rows, [2]string{"kept", config.FileName + "  (its harness section names the stack)"})
+			case filepath.Join(dir, config.FileName), filepath.Join(dir, config.AltFileName):
+				rows = append(rows, [2]string{"kept", configName + "  (its harness section names the stack)"})
 			case filepath.Join(dir, stack.FileName):
 				rows = append(rows, [2]string{"kept", stack.FileName + "  (the stack is here)"})
-				files = append(files, struct{ path, content string }{config.FileName, worktreeConfig})
+				files = append(files, struct{ path, content string }{configName, worktreeConfig})
 			default:
 				files = append(files,
-					struct{ path, content string }{config.FileName, fmt.Sprintf(checkoutConfig, name, column(name, 23), column(name, 19))},
+					struct{ path, content string }{configName, fmt.Sprintf(checkoutConfig, name, column(name, 23), column(name, 19))},
 					struct{ path, content string }{filepath.Join(moduleDir, module.ManifestName), fmt.Sprintf(moduleFile, name)},
 					struct{ path, content string }{filepath.Join(moduleDir, "AGENTS.md"), fmt.Sprintf(agentsFile, name)})
 			}

@@ -35,7 +35,7 @@ func TestFileAllowedMatchesByPathSegment(t *testing.T) {
 // TestLoadRefusesExtendingFilesShapes is a base naming files under extending.kinds, and
 // a prefix that is not a relative <runtime>/<path>.
 func TestLoadRefusesExtendingFilesShapes(t *testing.T) {
-	head := "apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n"
+	head := "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n"
 	cases := []struct{ yaml, want string }{
 		{head + "extending:\n  kinds: [files]\n", "extending.kinds names files; the paths an extending module's files may sit under go in extending.files"},
 		{head + "extending:\n  files: [/claude/rules]\n", `extending.files names "/claude/rules", which is not a <runtime>/<path> prefix`},
@@ -57,7 +57,7 @@ func TestLoadRefusesExtendingFilesShapes(t *testing.T) {
 	}
 }
 
-// TestExtendRefusesAModuleNamedLikeABaseModule is a customer naming core, the base's
+// TestExtendRefusesAModuleNamedLikeABaseModule is a consumer naming core, the base's
 // module, in their own qory.yaml: the message says the module belongs to the base before any
 // source is resolved.
 func TestExtendRefusesAModuleNamedLikeABaseModule(t *testing.T) {
