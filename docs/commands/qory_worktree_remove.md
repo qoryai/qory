@@ -4,7 +4,8 @@ Remove a worktree, the one you stand in by default, and its branch
 
 ### Synopsis
 
-Remove a worktree, the one you stand in by default, and its branch.
+Remove a worktree, the one you stand in by default, and its branch. A worktree is named
+by its branch, its path, or the name it was added as beside --branch or --pr.
 
 Every worktree.run.remove of qory.yaml runs in the worktree first. A worktree with
 uncommitted changes to tracked files is refused unless --force.
@@ -16,7 +17,7 @@ asked about: push it and delete, keep it, delete it anyway, or stop; --delete-br
 answers delete, and the deleted commits stay in git's reflog for 30 days.
 
 ```
-qory worktree remove [<branch or path>] [flags]
+qory worktree remove [<branch, name or path>] [flags]
 ```
 
 ### Options

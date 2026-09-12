@@ -107,6 +107,7 @@ func TestLoadRefusesAMistake(t *testing.T) {
 		{"worktree: {dir: \"\"}\n", "worktree.dir is empty"},
 		{"worktree: {link: [../secrets]}\n", `worktree.link names "../secrets", which is not a path inside the checkout`},
 		{"worktree: {copy: [/etc/hosts]}\n", `worktree.copy names "/etc/hosts"`},
+		{"worktree: {pr: \"pull/{n}\"}\n", `worktree.pr "pull/{n}" is not a ref under refs/ with {n} for the pull request number`},
 		{"git: {timeout: soon}\n", `git.timeout "soon" is not a duration above zero, such as 10m`},
 		{"git: {timeout: 0s}\n", `git.timeout "0s" is not a duration above zero`},
 		{"git: {cache: \"\"}\n", "git.cache is empty"},

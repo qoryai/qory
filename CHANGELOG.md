@@ -38,6 +38,13 @@ instead of their directories.
   commits of its own is reset onto the base, one with commits has them rebased onto it,
   after a question or at once with `--rebase`. The base a branch was cut from is recorded
   in its git config as `branch.<name>.qory-base`.
+- `--branch` and `--pr` on `qory worktree add` attach the worktree to a branch of the
+  remote or to a pull request: the branch is fetched, checked out under its own name and
+  set to track the remote's, and a name given beside the flag names the worktree. A
+  pull request's head is found among the refs the remote publishes, with no hosting API:
+  GitHub, Forgejo, GitLab and Bitbucket Server out of the box, any other host through
+  `worktree.pr` in `qory.yaml`. A head that no branch of the remote holds, a fork's, is
+  checked out as `pr-<n>` and pulled from its ref.
 - `worktree.branch` in `qory.yaml`, `delete` or `keep`: what a remove does with the
   branch. `qory config` shows it and `qory setup machine` writes it.
 - `qory worktree remove` tells a branch that holds nothing of its own, which goes
