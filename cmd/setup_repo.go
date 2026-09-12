@@ -26,7 +26,7 @@ const moduleDir = "harness"
 const checkoutConfig = `apiVersion: qory.ai/v1alpha1
 
 # This repository's stack. To take a stack as delivered instead, name it under extends in
-# place of target: {git: https://github.com/acme/harness, ref: v2.4.0, path: stacks/nextjs}
+# place of target: {git: https://github.com/acme/harness, ref: v2.4.0, stack: nextjs}
 harness:
   name: %[1]s%[2]s# the stack's name in the report
   target:
@@ -38,6 +38,7 @@ harness:
 # What a worktree of this repository needs; qory worktree add reads it.
 worktree:
   #base: main                  # a new branch starts here; default: the remote's HEAD
+  #pr: refs/pull/{n}/head      # where the remote publishes a pull request's head; default: GitHub, GitLab, Bitbucket Server
   link: []                     # linked from the main checkout, e.g. [.env, .env.local]
   copy: []                     # copied once from the main checkout, e.g. [.env.local]
   run:
@@ -53,6 +54,7 @@ const worktreeConfig = `apiVersion: qory.ai/v1alpha1
 # qory-stack.yaml.
 worktree:
   #base: main                  # a new branch starts here; default: the remote's HEAD
+  #pr: refs/pull/{n}/head      # where the remote publishes a pull request's head; default: GitHub, GitLab, Bitbucket Server
   link: []                     # linked from the main checkout, e.g. [.env, .env.local]
   copy: []                     # copied once from the main checkout, e.g. [.env.local]
   run:
@@ -84,6 +86,7 @@ harness:
 worktree:
   dir: ..                      # where worktrees go, relative to the main checkout
   name: wt-{branch}            # the directory name; {branch} and {repo} are replaced
+  branch: delete               # what worktree remove does with the branch: delete or keep
 git:
   timeout: 10m                 # the longest one git command may run
   #cache: ~/.cache/qory        # where git sources are fetched to

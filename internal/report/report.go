@@ -24,7 +24,7 @@ type Module struct {
 	// Description is the module's description from its manifest, absent when it has none.
 	Description string `json:"description,omitempty"`
 	// Source is the stack's source as text: the path of a path source, <git>#<ref> for a
-	// git source.
+	// git source, either followed by " module <name>" for an export.
 	Source string `json:"source"`
 	// Pin is what the source resolved to: "working-tree" for a path, the commit for a git
 	// source.

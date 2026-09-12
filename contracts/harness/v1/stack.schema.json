@@ -96,18 +96,24 @@
       }
     },
     "source": {
-      "description": "A directory, or a git repository at a ref with the module's directory inside it.",
+      "description": "A directory; a git repository at a ref with the module's directory inside it; or a module the repository exports, named by module, with path or git and ref naming the repository.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "path": {"type": "string", "minLength": 1},
         "git": {"type": "string", "minLength": 1},
-        "ref": {"type": "string", "minLength": 1}
+        "ref": {"type": "string", "minLength": 1},
+        "module": {"$ref": "#/$defs/exportName"}
       },
       "oneOf": [
         {"required": ["path"], "not": {"anyOf": [{"required": ["git"]}, {"required": ["ref"]}]}},
-        {"required": ["git", "ref"]}
+        {"required": ["git", "ref"], "not": {"required": ["path", "module"]}}
       ]
+    },
+    "exportName": {
+      "description": "The name of an export, one path segment.",
+      "type": "string",
+      "pattern": "^[^./\\\\@][^/\\\\@]*$"
     }
   }
 }

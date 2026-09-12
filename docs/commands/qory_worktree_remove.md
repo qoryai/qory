@@ -1,25 +1,32 @@
 ## qory worktree remove
 
-Remove a worktree, the one you stand in by default, and keep its branch
+Remove a worktree, the one you stand in by default, and its branch
 
 ### Synopsis
 
-Remove a worktree, the one you stand in by default, and keep its branch.
+Remove a worktree, the one you stand in by default, and its branch. A worktree is named
+by its branch, its path, or the name it was added as beside --branch or --pr.
 
 Every worktree.run.remove of qory.yaml runs in the worktree first. A worktree with
-uncommitted changes to tracked files, or whose branch holds commits no remote branch
-holds, is refused unless --force. The branch stays unless --delete-branch.
+uncommitted changes to tracked files is refused unless --force.
+
+The branch goes with the worktree, unless --keep-branch or worktree.branch: keep in
+qory.yaml. It goes quietly when every commit of it is on a remote branch, in the main
+checkout or on the base it was cut from. A branch holding commits nothing else does is
+asked about: push it and delete, keep it, delete it anyway, or stop; --delete-branch
+answers delete, and the deleted commits stay in git's reflog for 30 days.
 
 ```
-qory worktree remove [<branch or path>] [flags]
+qory worktree remove [<branch, name or path>] [flags]
 ```
 
 ### Options
 
 ```
-      --delete-branch   delete the branch after the worktree
-      --force           remove a worktree with uncommitted changes or unpushed commits
+      --delete-branch   delete the branch even when it holds commits nothing else does, without asking
+      --force           remove a worktree with uncommitted changes
   -h, --help            help for remove
+      --keep-branch     keep the branch after the worktree (qory.yaml: worktree.branch)
       --path            print the main checkout's path alone on stdout, the rows on stderr
 ```
 

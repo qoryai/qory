@@ -47,7 +47,7 @@ func TestLoadWithoutAFileIsTheDefaults(t *testing.T) {
 		}
 	}
 	rows := c.Rows()
-	if rows[0].Value != "(stack)" || rows[3].Value != "never" || rows[4].Value != ".." || rows[5].Value != "wt-{branch}" || rows[6].Value != "(remote HEAD)" || rows[7].Value != "10m0s" {
+	if rows[0].Value != "(stack)" || rows[3].Value != "never" || rows[4].Value != ".." || rows[5].Value != "wt-{branch}" || rows[6].Value != "(remote HEAD)" || rows[7].Value != "delete" || rows[8].Value != "10m0s" {
 		t.Errorf("rows: %+v", rows)
 	}
 }
@@ -107,6 +107,7 @@ func TestLoadRefusesAMistake(t *testing.T) {
 		{"worktree: {dir: \"\"}\n", "worktree.dir is empty"},
 		{"worktree: {link: [../secrets]}\n", `worktree.link names "../secrets", which is not a path inside the checkout`},
 		{"worktree: {copy: [/etc/hosts]}\n", `worktree.copy names "/etc/hosts"`},
+		{"worktree: {pr: \"pull/{n}\"}\n", `worktree.pr "pull/{n}" is not a ref under refs/ with {n} for the pull request number`},
 		{"git: {timeout: soon}\n", `git.timeout "soon" is not a duration above zero, such as 10m`},
 		{"git: {timeout: 0s}\n", `git.timeout "0s" is not a duration above zero`},
 		{"git: {cache: \"\"}\n", "git.cache is empty"},

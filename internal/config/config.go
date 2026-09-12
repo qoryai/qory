@@ -23,6 +23,8 @@
 //	  dir: ..                    # where worktrees go, relative to the main checkout
 //	  name: wt-{branch}          # what a worktree's directory is called
 //	  base: main                 # the branch a new worktree branch starts from
+//	  pr: refs/pull/{n}/head     # the ref the remote publishes pull request {n}'s head under
+//	  branch: delete             # what worktree remove does with the branch: delete or keep
 //	  link: [.env]               # linked from the main checkout into a new worktree
 //	  copy: [config/local.json]  # copied once into a new worktree
 //	  run:
@@ -33,10 +35,17 @@
 //	  cache: /var/cache/qory     # where git sources are fetched to
 //	env:
 //	  HARNESS_PROFILE: nextjs    # exported to every runtime with a place for it
+//	exports:                     # what this repository publishes for others, by name
+//	  dir: ./harness             # where stacks/ and modules/ are; default: the root
+//	  stacks: [nextjs]           # harness/stacks/nextjs/qory-stack.yaml
+//	  modules: [core, nextjs]    # harness/modules/<name>/qory-module.yaml
 //
 // [Load] discovers and reads the files, [Config] is the result, and [Config.Rows] says
 // where each value came from. [DiscoverStack] finds what a checkout composes, its
 // qory-stack.yaml or the harness section of its qory.yaml, and [LoadStack] reads it.
+// The exports section is the checkout root's alone: [Load] checks that every export it
+// lists is there, and [github.com/qoryai/qory/internal/exports] reads it for a source
+// naming one.
 package config
 
 import (
@@ -52,13 +61,14 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/source"
 	"github.com/qoryai/qory/internal/stack"
 )
 
 // FileName is the configuration's file name, in the user's configuration directory, in an
 // ancestor of the checkout, or in the checkout root.
-const FileName = "qory.yaml"
+const FileName = exports.FileName
 
 // DefaultTimeout is how long one git command may run before the compose gives up on it.
 const DefaultTimeout = 10 * time.Minute
@@ -69,6 +79,9 @@ const DefaultWorktreeDir = ".."
 // DefaultWorktreeName is what a worktree's directory is called when no file says. {branch}
 // is the branch with every slash made a dash, {repo} the main checkout's directory name.
 const DefaultWorktreeName = "wt-{branch}"
+
+// DefaultWorktreeBranch is what a remove does with the branch when no file says: delete it.
+const DefaultWorktreeBranch = "delete"
 
 // Default is the origin of a value no file set.
 const Default = "default"
@@ -89,6 +102,11 @@ type Worktree struct {
 	Name string
 	// Base is the branch a new worktree branch starts from, "" for the remote's HEAD.
 	Base string
+	// PR is the ref the remote publishes a pull request's head under, {n} for its number,
+	// "" for the ones GitHub, GitLab and Bitbucket Server publish.
+	PR string
+	// Branch is what a remove does with the worktree's branch: "delete" or "keep".
+	Branch string
 	// Link are paths linked from the main checkout into a new worktree.
 	Link []string
 	// Copy are paths copied once from the main checkout into a new worktree.
@@ -128,6 +146,10 @@ type Config struct {
 	// Env are the variables exported to every runtime with a place for them, on top of
 	// what the modules export.
 	Env map[string]string
+	// Exports is what the repository publishes, from the exports section of the checkout
+	// root's file; nil when it names none. A section in any other file is read and left
+	// out, since an export is a repository's.
+	Exports *exports.Exports
 	// Files are the files read, in the order they were applied.
 	Files []string
 	// origins maps a row key to the file that set it, or [Default].
@@ -145,7 +167,8 @@ type file struct {
 		Timeout *string `yaml:"timeout,omitempty"`
 		Cache   *string `yaml:"cache,omitempty"`
 	} `yaml:"git,omitempty"`
-	Env map[string]string `yaml:"env,omitempty"`
+	Env     map[string]string `yaml:"env,omitempty"`
+	Exports *exports.Section  `yaml:"exports,omitempty"`
 }
 
 // harnessSection is the harness key: the machine's choices for a compose, and in a
@@ -166,17 +189,19 @@ type harnessSection struct {
 
 // composes reports whether the section carries a compose document: modules or extends.
 func (h *harnessSection) composes() bool {
-	return h != nil && (len(h.Modules) > 0 || h.Extends.Path != "" || h.Extends.Git != "" || h.Extends.Ref != "")
+	return h != nil && (len(h.Modules) > 0 || h.Extends.Path != "" || h.Extends.Git != "" || h.Extends.Ref != "" || h.Extends.Stack != "" || h.Extends.Module != "")
 }
 
 // worktreeSection is the worktree key.
 type worktreeSection struct {
-	Dir  *string  `yaml:"dir,omitempty"`
-	Name *string  `yaml:"name,omitempty"`
-	Base *string  `yaml:"base,omitempty"`
-	Link []string `yaml:"link,omitempty"`
-	Copy []string `yaml:"copy,omitempty"`
-	Run  *struct {
+	Dir    *string  `yaml:"dir,omitempty"`
+	Name   *string  `yaml:"name,omitempty"`
+	Base   *string  `yaml:"base,omitempty"`
+	PR     *string  `yaml:"pr,omitempty"`
+	Branch *string  `yaml:"branch,omitempty"`
+	Link   []string `yaml:"link,omitempty"`
+	Copy   []string `yaml:"copy,omitempty"`
+	Run    *struct {
 		Add    []string `yaml:"add,omitempty"`
 		Remove []string `yaml:"remove,omitempty"`
 	} `yaml:"run,omitempty"`
@@ -186,14 +211,14 @@ type worktreeSection struct {
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // fixedKeys are the row keys every configuration has, in the order [Config.Rows] prints them.
-var fixedKeys = []string{"harness.runtime", "harness.model", "harness.force", "harness.update", "worktree.dir", "worktree.name", "worktree.base", "git.timeout", "git.cache"}
+var fixedKeys = []string{"harness.runtime", "harness.model", "harness.force", "harness.update", "worktree.dir", "worktree.name", "worktree.base", "worktree.branch", "git.timeout", "git.cache"}
 
 // Defaults is the configuration with no file read: the stack's runtime and model, no
 // force, no update, worktrees beside the main checkout as wt-<branch> off the remote's
-// HEAD with nothing linked, copied or run, [DefaultTimeout], the cache under
-// [source.CacheDir], and no variables.
+// HEAD with nothing linked, copied or run and the branch deleted on remove,
+// [DefaultTimeout], the cache under [source.CacheDir], and no variables.
 func Defaults() Config {
-	c := Config{Worktree: Worktree{Dir: DefaultWorktreeDir, Name: DefaultWorktreeName}, Git: Git{Timeout: DefaultTimeout}, Env: map[string]string{}, origins: map[string]string{}}
+	c := Config{Worktree: Worktree{Dir: DefaultWorktreeDir, Name: DefaultWorktreeName, Branch: DefaultWorktreeBranch}, Git: Git{Timeout: DefaultTimeout}, Env: map[string]string{}, origins: map[string]string{}}
 	for _, key := range fixedKeys {
 		c.origins[key] = Default
 	}
@@ -202,9 +227,11 @@ func Defaults() Config {
 
 // Load returns the effective configuration for the checkout at root: the defaults, then
 // every file [Discover] finds, applied in order. An error names the file it comes from.
-// With own false, the checkout's own file contributes its worktree section only: its
-// harness, git and env keys are left out, which is how a compose of a stack that extends
-// a closed base keeps the checkout's authors from configuring the runner.
+// With own false, the checkout's own file contributes its worktree section and its
+// exports only: its harness, git and env keys are left out, which is how a compose of a
+// stack that extends a closed base keeps the checkout's authors from configuring the
+// runner. The root file's exports are checked: an export whose directory holds no
+// document is an error naming it, so the section stays true to the tree.
 func Load(root string, own bool) (Config, error) {
 	c := Defaults()
 	root, err := filepath.Abs(root)
@@ -212,8 +239,15 @@ func Load(root string, own bool) (Config, error) {
 		return c, err
 	}
 	for _, path := range Discover(root) {
-		if err := c.apply(path, own || filepath.Dir(path) != root); err != nil {
+		f, err := c.apply(path, own || filepath.Dir(path) != root)
+		if err != nil {
 			return c, err
+		}
+		if f.Exports != nil && filepath.Dir(path) == root {
+			c.Exports = f.Exports.At(root, path)
+			if err := c.Exports.Verify(); err != nil {
+				return c, err
+			}
 		}
 	}
 	return c, nil
@@ -354,7 +388,7 @@ func Compose(path string) (*stack.Stack, error) {
 	}
 	h := f.Harness
 	p := &stack.Stack{APIVersion: f.APIVersion, Qory: f.Qory, Name: h.Name, Description: h.Description, Extends: h.Extends, Target: h.Target, Modules: h.Modules, Extensions: h.Extensions}
-	if p.Extends.Path == "" && p.Extends.Git == "" && p.Extends.Ref == "" && len(p.Target.Runtimes) == 0 {
+	if p.Extends.Path == "" && p.Extends.Git == "" && p.Extends.Ref == "" && p.Extends.Stack == "" && p.Extends.Module == "" && len(p.Target.Runtimes) == 0 {
 		return nil, fmt.Errorf("%s: harness names modules and no target.runtime; the section holds this repository's own stack, a target and its modules, or extends one", path)
 	}
 	return stack.NewCompose(path, p)
@@ -385,31 +419,31 @@ func ownedFile(path string) bool {
 	return err == nil && stack.OwnedByCurrentUser(info)
 }
 
-// apply reads one file and sets the keys it names. With machine false, only the worktree
-// section and the qory key are taken: the harness, git and env keys are the machine's
-// and left out.
-func (c *Config) apply(path string, machine bool) error {
+// apply reads one file, sets the keys it names and returns the file as read. With
+// machine false, only the worktree section and the qory key are taken: the harness, git
+// and env keys are the machine's and left out.
+func (c *Config) apply(path string, machine bool) (file, error) {
 	f, err := read(path)
 	if err != nil {
-		return err
+		return f, err
 	}
 	c.Files = append(c.Files, path)
 	if !f.Qory.Empty() {
 		c.Qory = append(c.Qory, Requirement{File: path, Qory: f.Qory})
 	}
 	if err := c.applyWorktree(path, f.Worktree); err != nil {
-		return err
+		return f, err
 	}
 	if !machine {
-		return nil
+		return f, nil
 	}
 	if h := f.Harness; h != nil {
 		if h.Runtime != nil {
 			if len(*h.Runtime) == 0 {
-				return fmt.Errorf("%s: harness.runtime is empty; it names one runtime or a list of them", path)
+				return f, fmt.Errorf("%s: harness.runtime is empty; it names one runtime or a list of them", path)
 			}
 			if err := h.Runtime.Validate(); err != nil {
-				return fmt.Errorf("%s: harness.%w", path, err)
+				return f, fmt.Errorf("%s: harness.%w", path, err)
 			}
 			c.Runtime = *h.Runtime
 			c.origins["harness.runtime"] = path
@@ -429,7 +463,7 @@ func (c *Config) apply(path string, machine bool) error {
 			case "never":
 				c.Update = false
 			default:
-				return fmt.Errorf("%s: harness.update %q is not always or never", path, *h.Update)
+				return f, fmt.Errorf("%s: harness.update %q is not always or never", path, *h.Update)
 			}
 			c.origins["harness.update"] = path
 		}
@@ -438,7 +472,7 @@ func (c *Config) apply(path string, machine bool) error {
 		if f.Git.Timeout != nil {
 			d, err := time.ParseDuration(*f.Git.Timeout)
 			if err != nil || d <= 0 {
-				return fmt.Errorf("%s: git.timeout %q is not a duration above zero, such as 10m", path, *f.Git.Timeout)
+				return f, fmt.Errorf("%s: git.timeout %q is not a duration above zero, such as 10m", path, *f.Git.Timeout)
 			}
 			c.Git.Timeout = d
 			c.origins["git.timeout"] = path
@@ -446,7 +480,7 @@ func (c *Config) apply(path string, machine bool) error {
 		if f.Git.Cache != nil {
 			dir := *f.Git.Cache
 			if dir == "" {
-				return fmt.Errorf("%s: git.cache is empty", path)
+				return f, fmt.Errorf("%s: git.cache is empty", path)
 			}
 			if !filepath.IsAbs(dir) {
 				dir = filepath.Join(filepath.Dir(path), dir)
@@ -457,15 +491,15 @@ func (c *Config) apply(path string, machine bool) error {
 	}
 	for name, value := range f.Env {
 		if !envName.MatchString(name) {
-			return fmt.Errorf("%s: env: %s is not an environment variable name", path, name)
+			return f, fmt.Errorf("%s: env: %s is not an environment variable name", path, name)
 		}
 		if name == "QORY_HARNESS_HOME" {
-			return fmt.Errorf("%s: env.QORY_HARNESS_HOME is qory's own; the configuration exports another name", path)
+			return f, fmt.Errorf("%s: env.QORY_HARNESS_HOME is qory's own; the configuration exports another name", path)
 		}
 		c.Env[name] = value
 		c.origins["env."+name] = path
 	}
-	return nil
+	return f, nil
 }
 
 // applyWorktree sets the worktree keys the section names. A list replaces the one before
@@ -494,6 +528,20 @@ func (c *Config) applyWorktree(path string, w *worktreeSection) error {
 	if w.Base != nil {
 		c.Worktree.Base = *w.Base
 		c.origins["worktree.base"] = path
+	}
+	if w.PR != nil {
+		if !strings.HasPrefix(*w.PR, "refs/") || !strings.Contains(*w.PR, "{n}") {
+			return fmt.Errorf("%s: worktree.pr %q is not a ref under refs/ with {n} for the pull request number, as refs/pull/{n}/head", path, *w.PR)
+		}
+		c.Worktree.PR = *w.PR
+		c.origins["worktree.pr"] = path
+	}
+	if w.Branch != nil {
+		if *w.Branch != "delete" && *w.Branch != "keep" {
+			return fmt.Errorf("%s: worktree.branch %q is not delete or keep", path, *w.Branch)
+		}
+		c.Worktree.Branch = *w.Branch
+		c.origins["worktree.branch"] = path
 	}
 	for _, list := range []struct {
 		key   string
@@ -544,6 +592,11 @@ func read(path string) (file, error) {
 	if f.APIVersion != stack.APIVersion {
 		return f, fmt.Errorf("%s: apiVersion %q is not one this qory reads; versions: %s", path, f.APIVersion, stack.APIVersion)
 	}
+	if f.Exports != nil {
+		if err := f.Exports.Validate(); err != nil {
+			return f, fmt.Errorf("%s: %w", path, err)
+		}
+	}
 	return f, nil
 }
 
@@ -573,8 +626,8 @@ type Row struct {
 }
 
 // Rows lists every effective value with its origin: the qory ranges when a file names
-// one, the fixed keys, the worktree lists that are set, and the variables after them in
-// name order.
+// one, the fixed keys, the worktree lists that are set, the variables after them in
+// name order, and the exports when the root's file names any.
 func (c Config) Rows() []Row {
 	runtime, model := "(stack)", "(stack)"
 	if c.Runtime != nil {
@@ -607,7 +660,11 @@ func (c Config) Rows() []Row {
 		Row{"worktree.dir", c.Worktree.Dir, c.origins["worktree.dir"]},
 		Row{"worktree.name", c.Worktree.Name, c.origins["worktree.name"]},
 		Row{"worktree.base", base, c.origins["worktree.base"]},
+		Row{"worktree.branch", c.Worktree.Branch, c.origins["worktree.branch"]},
 	)
+	if c.Worktree.PR != "" {
+		rows = append(rows, Row{"worktree.pr", c.Worktree.PR, c.origins["worktree.pr"]})
+	}
 	for _, list := range []struct {
 		key   string
 		items []string
@@ -628,5 +685,21 @@ func (c Config) Rows() []Row {
 	for _, name := range names {
 		rows = append(rows, Row{"env." + name, c.Env[name], c.origins["env."+name]})
 	}
+	if e := c.Exports; e != nil {
+		rows = append(rows,
+			Row{"exports.dir.stacks", e.Dir.Stacks, e.File},
+			Row{"exports.dir.modules", e.Dir.Modules, e.File},
+			Row{"exports.stacks", listOrNone(e.Stacks), e.File},
+			Row{"exports.modules", listOrNone(e.Modules), e.File},
+		)
+	}
 	return rows
+}
+
+// listOrNone joins names for a row, "(none)" for an empty list.
+func listOrNone(names []string) string {
+	if len(names) == 0 {
+		return "(none)"
+	}
+	return strings.Join(names, ", ")
 }

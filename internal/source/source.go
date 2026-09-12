@@ -8,7 +8,10 @@
 //
 // [Resolve] joins a relative path onto the stack's directory and checks that the result
 // is a directory, or fetches the git source and returns the module's directory inside the
-// clone. Whether that directory holds a module is a question for
+// clone. A source naming an export, a module or a stack the repository lists in the
+// exports section of its qory.yaml, resolves the repository the same way and then reads
+// the export's directory from that section, so the publisher's layout is the publisher's
+// alone. Whether that directory holds a module is a question for
 // [github.com/qoryai/qory/internal/module].
 package source
 
@@ -25,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/stack"
 )
 
@@ -95,7 +99,9 @@ type Options struct {
 // The error for a path that is not there comes from the operating system unchanged, and a
 // caller can match it with errors.Is and os.ErrNotExist. A path that is there but is not a
 // directory gets an error naming the path. A git source that cannot be fetched returns a
-// [*FetchError].
+// [*FetchError]. A source naming an export the repository does not list, or whose
+// repository has no qory.yaml with an exports section, gets an error naming the
+// repository and what it exports.
 func Resolve(baseDir string, s stack.Source, opts Options) (Resolved, error) {
 	if s.Git != "" {
 		return resolveGit(s, opts)
@@ -111,7 +117,49 @@ func Resolve(baseDir string, s stack.Source, opts Options) (Resolved, error) {
 	if !info.IsDir() {
 		return Resolved{}, fmt.Errorf("%s is not a directory", dir)
 	}
+	if s.Module != "" || s.Stack != "" {
+		rel, err := exported(dir, dir, s)
+		if err != nil {
+			return Resolved{}, err
+		}
+		repo := dir
+		dir = filepath.Join(repo, rel)
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			return Resolved{}, fmt.Errorf("%s exports %s at %s, which is not a directory there", repo, exportName(s), rel)
+		}
+	}
 	return Resolved{Dir: dir, Pin: WorkingTree, Dirty: dirty(dir)}, nil
+}
+
+// exported returns the directory of the export s names, relative to the repository at
+// repo, as the repository's qory.yaml lists it. where names the repository in a message:
+// the directory for a path source, <url> at <ref> for a git one.
+func exported(repo, where string, s stack.Source) (string, error) {
+	e, err := exports.Read(repo)
+	if err != nil {
+		return "", err
+	}
+	if e == nil {
+		return "", fmt.Errorf("%s exports nothing: it has no %s with an exports section, so name its directories with path", where, exports.FileName)
+	}
+	var rel string
+	if s.Stack != "" {
+		rel, err = e.Stack(s.Stack)
+	} else {
+		rel, err = e.Module(s.Module)
+	}
+	if err != nil {
+		return "", fmt.Errorf("%s %w", where, err)
+	}
+	return rel, nil
+}
+
+// exportName is the export a source names, for a message: "module core" or "stack nextjs".
+func exportName(s stack.Source) string {
+	if s.Stack != "" {
+		return "stack " + s.Stack
+	}
+	return "module " + s.Module
 }
 
 // CacheDir is where git sources are fetched to: qory/sources under the user's cache
@@ -165,19 +213,27 @@ func resolveGit(s stack.Source, opts Options) (Resolved, error) {
 		}
 	}
 	clone := filepath.Join(dir, commit)
-	module := clone
-	if s.Path != "" {
-		module = filepath.Join(clone, s.Path)
+	module, sub := clone, s.Path
+	if s.Module != "" || s.Stack != "" {
+		if sub, err = exported(clone, s.Git+" at "+s.Ref, s); err != nil {
+			return Resolved{}, err
+		}
+	}
+	if sub != "" {
+		module = filepath.Join(clone, sub)
 	}
 	info, err := os.Stat(module)
+	if errors.Is(err, os.ErrNotExist) && s.Path == "" && sub != "" {
+		return Resolved{}, fmt.Errorf("%s at %s exports %s at %s, which is not there", s.Git, s.Ref, exportName(s), sub)
+	}
 	if errors.Is(err, os.ErrNotExist) {
-		return Resolved{}, fmt.Errorf("%s has no %s at %s", s.Git, s.Path, s.Ref)
+		return Resolved{}, fmt.Errorf("%s has no %s at %s", s.Git, sub, s.Ref)
 	}
 	if err != nil {
 		return Resolved{}, err
 	}
 	if !info.IsDir() {
-		return Resolved{}, fmt.Errorf("%s is not a directory in %s at %s", s.Path, s.Git, s.Ref)
+		return Resolved{}, fmt.Errorf("%s is not a directory in %s at %s", sub, s.Git, s.Ref)
 	}
 	// A path inside the clone may be a symlink the repository carries; the module it names
 	// must still be inside the clone.
@@ -190,7 +246,7 @@ func resolveGit(s stack.Source, opts Options) (Resolved, error) {
 		return Resolved{}, err
 	}
 	if real != base && !strings.HasPrefix(real, base+string(filepath.Separator)) {
-		return Resolved{}, fmt.Errorf("%s in %s at %s links outside the repository", s.Path, s.Git, s.Ref)
+		return Resolved{}, fmt.Errorf("%s in %s at %s links outside the repository", sub, s.Git, s.Ref)
 	}
 	return Resolved{Dir: module, Pin: commit[:12]}, nil
 }
