@@ -17,14 +17,17 @@ var example embed.FS
 
 func main() {
 	cmd.Example = example
-	if err := cmd.Execute(); err != nil {
-		if !errors.Is(err, cmd.ErrReported) {
-			u := ui.New(os.Stderr)
-			if !ui.Marked() {
-				u.Title("qory")
-			}
-			u.Fail(err)
+	notify := cmd.StartUpdateCheck(os.Stderr)
+	err := cmd.Execute()
+	if err != nil && !errors.Is(err, cmd.ErrReported) {
+		u := ui.New(os.Stderr)
+		if !ui.Marked() {
+			u.Title("qory")
 		}
+		u.Fail(err)
+	}
+	notify()
+	if err != nil {
 		os.Exit(cmd.ExitCode(err))
 	}
 }

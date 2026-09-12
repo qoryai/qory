@@ -7,8 +7,9 @@
 //
 // Every command opens its output with [UI.Title] and ends it with [UI.Success] or with
 // [UI.Fail]. In between it prints [UI.Fields] for named values, [UI.Table] for rows,
-// [UI.Heading] for a section, [UI.Text] for prose, [UI.Code] for a block to paste, and
-// [UI.Blank] for an empty line. [Short] shortens a path against the checkout so a field
+// [UI.Heading] for a section, [UI.Text] for prose, [UI.Code] for a block to paste,
+// [UI.Blank] for an empty line, and [UI.Box] for a framed notice that has to be seen,
+// its lines styled with [UI.Strong], [UI.Brand] and [UI.Alert]. [Short] shortens a path against the checkout so a field
 // reads as a path inside it.
 //
 //	u := ui.New(cmd.OutOrStdout())

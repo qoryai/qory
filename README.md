@@ -110,6 +110,14 @@ From source, with Go 1.27 or later:
 go install github.com/qoryai/qory@latest
 ```
 
+To update, run `qory update`: it installs the newest release the way this qory was
+installed, with `brew`, with `go install`, or by replacing the release binary in place
+after checking it against the release's checksums. Every command looks for a newer release
+when it runs on a terminal, asking GitHub at most once an hour, and says so after its
+output when the newest release is ahead of its version. A build from `main` between
+releases is told only when it is behind a release. Set `QORY_NO_UPDATE_CHECK=1` to turn
+that off; it is off when `CI` is set.
+
 ## Try it
 
 ```sh
@@ -189,6 +197,7 @@ qory worktree add        # add a worktree for a branch and prepare it           
 qory worktree remove     # remove a worktree and its branch                      (qory wr)
 qory worktree list       # every worktree with its branch                        (qory wl)
 qory config              # every setting, its value and the file it came from
+qory update              # install the newest release; --check only says whether one exists
 ```
 
 Flags worth knowing on `compose`:
