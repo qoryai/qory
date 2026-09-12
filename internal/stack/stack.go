@@ -370,7 +370,9 @@ func (p *Stack) validate(compose bool) error {
 			}
 		}
 	}
-	if len(p.Modules) == 0 {
+	// A document that extends a stack may append nothing and carry only what is the
+	// repository's own beside the base, its extensions say; a stack names a module.
+	if len(p.Modules) == 0 && !compose {
 		return errors.New("modules is empty; a stack names at least one module")
 	}
 	seen := map[string]bool{}

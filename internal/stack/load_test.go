@@ -298,3 +298,22 @@ func TestOwnedByCurrentUser(t *testing.T) {
 		t.Fatal("a file this process wrote counts as another user's")
 	}
 }
+
+// TestNewComposeAcceptsADocumentWithoutModules is a checkout's document that extends a
+// stack and appends nothing: the compose takes it, with the base kept and no module of
+// its own, while a stack with an empty modules list is refused as before, since a stack
+// names a module.
+func TestNewComposeAcceptsADocumentWithoutModules(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "qory.yaml")
+	p, err := NewCompose(path, &Stack{APIVersion: APIVersion, Extends: Source{Path: "../base"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Extends.Path != "../base" || len(p.Modules) != 0 || p.File != path {
+		t.Fatalf("got %+v", p)
+	}
+	_, err = Load(write(t, "apiVersion: qory.ai/v1alpha1\ntarget:\n  runtime: claude\nmodules: []\n"))
+	if err == nil || !strings.HasSuffix(err.Error(), "modules is empty; a stack names at least one module") {
+		t.Fatalf("a stack without modules: %v", err)
+	}
+}

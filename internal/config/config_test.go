@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/stack"
 )
 
 // hermetic points HOME and the configuration directory at temporary paths, so no test
@@ -154,5 +155,36 @@ func TestOwnFileKeepsItsWorktreeSectionUnderExtends(t *testing.T) {
 	}
 	if c.Worktree.Base != "develop" || strings.Join(c.Worktree.Link, ",") != ".env" {
 		t.Errorf("worktree keys were not read: %+v", c.Worktree)
+	}
+}
+
+// TestAFileWithoutAnAPIVersionReadsAsTheNewest is a qory.yaml naming no apiVersion: it
+// is read as the format this qory reads, through Load and as a document through
+// LoadStack, while one naming another version is refused as before.
+func TestAFileWithoutAnAPIVersionReadsAsTheNewest(t *testing.T) {
+	hermetic(t)
+	root := t.TempDir()
+	path := filepath.Join(root, "qory.yaml")
+	writeRaw(t, path, "harness: {force: true}\n")
+	c, err := config.Load(root, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Force || len(c.Files) != 1 {
+		t.Fatalf("got %+v", c)
+	}
+	writeRaw(t, path, "harness:\n  extends: {path: ../base}\n  modules:\n    - name: app\n")
+	p, err := config.LoadStack(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.APIVersion != stack.APIVersion || p.Extends.Path != "../base" {
+		t.Fatalf("document: %+v", p)
+	}
+	writeRaw(t, path, "apiVersion: qory.ai/v2\nharness: {force: true}\n")
+	_, err = config.Load(root, true)
+	want := path + `: apiVersion "qory.ai/v2" is not one this qory reads; versions: qory.ai/v1alpha1`
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %q", err, want)
 	}
 }

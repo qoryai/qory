@@ -4,6 +4,53 @@ Every release of qory, newest first, in the shape of [Keep a Changelog](https://
 The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0 a minor
 release may change what an existing document does, and says so under Upgrading.
 
+## [0.4.0] - Unreleased
+
+This release takes a fleet operator's request: a customer's committed file carries only
+what is the repository's own, its modules and its extensions, and the runner supplies the
+base from the stack tree it holds. The file names no version, ref or URL of the
+operator's, and may say nothing of the tool that reads it.
+
+### Upgrading
+
+- `qory harness compose -f <stack>` in a checkout whose `qory.yaml` holds a document, a
+  `harness` section naming modules, a stack to extend or extensions, composes the
+  document on that stack as its base. Before, the flag composed the stack alone and the
+  document was dropped without a word. A document holding its own stack, a `target`, is
+  refused beside `-f` with exit 2; compose it without the flag.
+
+### Added
+
+- `-f <stack>` names the base of the checkout's own document, as if the document had
+  named the stack's directory under `extends`: the base's modules come first and closed,
+  the document's modules append, extensions merge by namespace, and the collision rules
+  are those of `extends`. What the document itself names under `extends` is not read and
+  not fetched. The compose prints `base <file>  (named by -f)`, or `(named by -f, in
+  place of extends <source>)`, and the report records the base with the stack
+  directory's path relative to the document and the pin `working-tree`. A checkout
+  without a document composes the stack alone, as before, and `-f` naming a `qory.yaml`
+  or `harness.yaml` still composes that document itself.
+- `harness.yaml` as a second name for `qory.yaml`, read exactly as `qory.yaml` at every
+  level: the user's directory, the ancestor directories, the checkout root; by the
+  configuration walk, by stack discovery, and by `-f`. A directory holds one of the two
+  names, never both, and both is refused. `qory setup repo` writes under the name the
+  directory already uses, and an unknown key is reported under the file's own name.
+- `apiVersion` is optional in `qory.yaml` and `harness.yaml`: a file leaving it out is
+  read as `qory.ai/v1alpha1`, the newest format this qory reads, and a wrong value is
+  still refused. A delivered file, `qory-stack.yaml` or `qory-module.yaml`, carries it
+  as before.
+- A document may leave `extends` out when `-f` supplies the base, and a document that
+  extends a stack may name no modules, carrying its extensions alone. A document with
+  neither `target` nor `extends`, composed with no base from `-f`, is refused with exit 2
+  and the message says what the section holds instead. A `harness` section with only
+  the machine's keys is still not a document.
+
+### Changed
+
+- The message for a checkout with nothing to compose names both file names: no
+  `qory-stack.yaml`, and no `qory.yaml` or `harness.yaml` whose harness section names
+  modules or a stack to extend.
+
 ## [0.3.0] - 2026-09-11
 
 The first release shaped by an integration: a harness repository moved four modules and
@@ -122,6 +169,7 @@ The first release: a stack of modules composed into one tree, linked into the ch
 and kept out of git, with a report naming the module of every entry and a refusal when
 two modules provide the same one.
 
+[0.4.0]: https://github.com/qoryai/qory/compare/v0.3.0...HEAD
 [0.3.0]: https://github.com/qoryai/qory/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/qoryai/qory/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/qoryai/qory/compare/v0.1.0...v0.2.0

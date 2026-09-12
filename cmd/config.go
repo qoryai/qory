@@ -52,7 +52,7 @@ every file.`,
 			u.Table(rows)
 			if len(conf.Files) == 0 {
 				u.Blank()
-				u.Text("No " + config.FileName + " was found; every value is its default.")
+				u.Text("No " + config.FileName + " or " + config.AltFileName + " was found; every value is its default.")
 			}
 			return nil
 		},
