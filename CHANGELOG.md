@@ -122,9 +122,9 @@ nothing of the tool that reads it.
 
 ## [0.3.0] - 2026-09-11
 
-The first release shaped by an integration: a harness repository moved four modules and
-two stacks off its own composer onto 0.2.x and wrote down what it had to work around.
-This release takes every item of that report.
+A document states the qory it is written for, a compose can be checked against the home
+it wrote, and a stack may take part of a module, with what every entry requires declared
+by the module that ships it.
 
 ### Upgrading
 
