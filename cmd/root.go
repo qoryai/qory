@@ -48,7 +48,7 @@ Shortcuts:
 	}
 	// The completion script is qory setup completion, and setup shell loads it.
 	root.CompletionOptions.DisableDefaultCmd = true
-	root.AddCommand(newVersion(), newSetup(), newHarness(), newWorktree(), newConfig())
+	root.AddCommand(newVersion(), newUpdate(), newSetup(), newHarness(), newWorktree(), newConfig())
 	root.AddCommand(shortcuts()...)
 	root.AddCommand(worktreeShortcuts()...)
 	root.PersistentFlags().BoolP("verbose", "v", false, "print more of what the command does; each command's help says what")

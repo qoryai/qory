@@ -8,6 +8,7 @@
 // The tree:
 //
 //	qory version           the version, and the harness format this build reads
+//	qory update            install the newest release the way this build was installed
 //	qory setup example     write the hello example into the current directory
 //	qory harness compose   compose the stack's modules into the checkout
 //	qory harness inspect   print the report of the composed harness
@@ -24,6 +25,11 @@
 // render for is decided here, by the blank imports at the top of harness.go: a runtime
 // package registers itself in its own init, so importing it is what makes its name valid
 // for target.runtime and for the --runtime flag.
+//
+// Every command ends with a look for a newer release: [StartUpdateCheck] begins it before
+// the command runs and prints a notice after, when the output is a terminal and the
+// newest release is ahead of the build. The look asks GitHub at most once an hour and reads
+// its cache otherwise; qory update installs what it found and clears the cache.
 //
 // Errors reach the person in one of two ways. A plain error travels up to the main
 // package, which prints it under the mark. An error a command has already printed itself,
