@@ -25,7 +25,10 @@ files. A `qory.yaml` or `harness.yaml` may leave it out, and is then read as the
 format this qory reads, `qory.dev/v1alpha1`. A reader refuses a version it does not read
 and names the versions it does. `v1alpha1` says the format may still change.
 
-The group is `qory.dev`, the domain of the open format and its documentation.
+The group is `qory.dev`, the domain of the open format and its documentation. A
+retired version, one an earlier qory wrote for the same format, is read as the current
+one, and a compose prints a `retired` row naming the file and the line to write. A
+later major release stops reading it.
 
 ## Discovery
 
@@ -130,7 +133,7 @@ in this file (§The configuration). A `harness` section holding only the machine
 
 | Field | Required | Meaning |
 |---|---|---|
-| `apiVersion` | yes | `qory.dev/v1alpha1` |
+| `apiVersion` | yes | `qory.dev/v1alpha1`; a retired version is read as it, with a `retired` row |
 | `qory` | no | the qory versions the stack is written for: comparators such as `>=0.3.0 <0.4.0`, every one of which has to hold. A compose on a qory outside the range is refused with status 5; a build from source between tags, which has no version, composes and says the range was not checked. A stack delivered to be extended states its minimum here, and every checkout extending it inherits the range |
 | `name` | no | the stack's name in the report. Default: `owner/name` from the origin remote, else the directory name |
 | `description` | no | what the stack is for, carried into the report and printed by `qory harness inspect` |
@@ -608,7 +611,7 @@ exports:                         # in a repository delivering stacks or modules 
 
 | Key | Default | Meaning |
 |---|---|---|
-| `apiVersion` | `qory.dev/v1alpha1` | the format the file is written in, the newest this qory reads when left out, since the file is the repository's or the machine's own and not a delivered one; a version this qory does not read is refused |
+| `apiVersion` | `qory.dev/v1alpha1` | the format the file is written in, the newest this qory reads when left out, since the file is the repository's or the machine's own and not a delivered one; a retired version is read as it, with a `retired` row, and a version this qory does not read is refused |
 | `qory` | none | the qory versions the file is written for, as in a stack; read under `extends` as well, since it can only narrow the base's range |
 | `harness.runtime` | the stack's `target.runtime` | one runtime name or a list; `--runtime` wins over it |
 | `harness.model` | the stack's `target.model` | `--model` wins over it |

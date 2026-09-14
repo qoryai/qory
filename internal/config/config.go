@@ -10,7 +10,7 @@
 // owns, the farthest first, the checkout root's. A command line flag overrides every
 // file. A directory holds one of the two names, never both.
 //
-//	apiVersion: qory.dev/v1alpha1 # optional; the newest format this qory reads when left out
+//	apiVersion: qory.dev/v1alpha1 # optional; the newest format this qory reads when left out, and a retired spelling reads as it
 //	qory: ">=0.3.0"              # the qory versions this file is written for
 //	harness:
 //	  runtime: [claude, codex]   # instead of the stack's target.runtime
@@ -197,12 +197,25 @@ type Requirement struct {
 	Qory stack.Constraint
 }
 
+// Retired is one file's apiVersion when it is a retired spelling of the current one, one
+// of [exports.RetiredAPIVersions]: the file was read as [stack.APIVersion] and wants the
+// line rewritten.
+type Retired struct {
+	// File is the qory.yaml that declares the version.
+	File string
+	// APIVersion is the retired spelling the file declares.
+	APIVersion string
+}
+
 // Config is the effective configuration: the defaults, overridden by every file read.
 type Config struct {
 	// Qory are the ranges of qory versions the files name, one per file with a qory key,
 	// in the order the files were read. Every range has to hold; a file's own range is
 	// read under extends as well, since it can only narrow what the base allows.
 	Qory []Requirement
+	// Retired are the files declaring a retired apiVersion, in the order they were read,
+	// so a compose can say which want the line rewritten.
+	Retired []Retired
 	// Runtime replaces the stack's target.runtime, nil to keep the stack's.
 	Runtime stack.Runtimes
 	// Model replaces the stack's target.model, "" to keep the stack's.
@@ -241,6 +254,10 @@ type file struct {
 	} `yaml:"git,omitempty"`
 	Env     map[string]string `yaml:"env,omitempty"`
 	Exports *exports.Section  `yaml:"exports,omitempty"`
+
+	// retired is the apiVersion the file declared when it is a retired spelling of
+	// [stack.APIVersion], which APIVersion then holds; "" otherwise. Set by [read].
+	retired string
 }
 
 // harnessSection is the harness key: the machine's choices for a compose, and in a
@@ -547,7 +564,7 @@ func OnBase(path, base string) (*stack.Stack, stack.Source, error) {
 // document is the file's harness section as the stack it holds, before validation.
 func (f file) document() *stack.Stack {
 	h := f.Harness
-	return &stack.Stack{APIVersion: f.APIVersion, Qory: f.Qory, Name: h.Name, Description: h.Description, Extends: h.Extends, Target: h.Target, Modules: h.Modules, Extensions: h.Extensions}
+	return &stack.Stack{APIVersion: f.APIVersion, RetiredAPIVersion: f.retired, Qory: f.Qory, Name: h.Name, Description: h.Description, Extends: h.Extends, Target: h.Target, Modules: h.Modules, Extensions: h.Extensions}
 }
 
 // UserDir is the user's configuration directory: $XDG_CONFIG_HOME/qory, else
@@ -586,6 +603,9 @@ func (c *Config) apply(path string, machine bool) (file, error) {
 	c.Files = append(c.Files, path)
 	if !f.Qory.Empty() {
 		c.Qory = append(c.Qory, Requirement{File: path, Qory: f.Qory})
+	}
+	if f.retired != "" {
+		c.Retired = append(c.Retired, Retired{File: path, APIVersion: f.retired})
 	}
 	if err := c.applyWorktree(path, f.Worktree); err != nil {
 		return f, err
@@ -779,9 +799,11 @@ func insideRel(p string) bool {
 }
 
 // read decodes one file. An unknown key is an error, and so is a second document and an
-// apiVersion other than [stack.APIVersion]. A file naming no apiVersion is read as the
-// newest format this qory reads, which is that one: the file is a repository's or a
-// machine's own, not a delivered document, so it need carry no version to bump.
+// apiVersion other than [stack.APIVersion] or a retired spelling of it. A file naming no
+// apiVersion is read as the newest format this qory reads, which is that one: the file
+// is a repository's or a machine's own, not a delivered document, so it need carry no
+// version to bump. A file naming a retired spelling is read as that format too, and the
+// spelling is kept so the compose can say the line wants rewriting.
 func read(path string) (file, error) {
 	var f file
 	data, err := os.ReadFile(path)
@@ -799,8 +821,12 @@ func read(path string) (file, error) {
 	if f.APIVersion == "" {
 		f.APIVersion = stack.APIVersion
 	}
-	if err := exports.CheckAPIVersion(f.APIVersion); err != nil {
+	current, err := exports.ResolveAPIVersion(f.APIVersion)
+	if err != nil {
 		return f, fmt.Errorf("%s: %w", path, err)
+	}
+	if current != f.APIVersion {
+		f.retired, f.APIVersion = f.APIVersion, current
 	}
 	if f.Exports != nil {
 		if err := f.Exports.Validate(); err != nil {

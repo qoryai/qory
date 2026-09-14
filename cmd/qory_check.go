@@ -69,3 +69,31 @@ func checkedVersion() string {
 	}
 	return b.Version
 }
+
+// retiredRows collects the documents a compose read under a retired apiVersion, one of
+// [exports.RetiredAPIVersions], one row per document in the order they were read: the
+// stack or the checkout's document, the configuration files, the base, the modules. The
+// compose reads each as the current format all the same, and the row says so and names
+// the line to write, so the person who owns the document learns it before a release
+// stops reading the spelling. A checkout's qory.yaml is read as the configuration and as
+// the document, and gets one row.
+type retiredRows struct {
+	root string
+	seen map[string]bool
+	rows [][2]string
+}
+
+func newRetiredRows(root string) *retiredRows {
+	return &retiredRows{root: root, seen: map[string]bool{}}
+}
+
+// add records what, a file path or the name of a base or a module, as read under the
+// retired spelling declared; "" is a document naming the current version and adds
+// nothing.
+func (r *retiredRows) add(what, declared string) {
+	if declared == "" || r.seen[what] {
+		return
+	}
+	r.seen[what] = true
+	r.rows = append(r.rows, [2]string{"retired", ui.Short(what, r.root) + "  (apiVersion " + declared + "; read as " + stack.APIVersion + ", the line to write)"})
+}

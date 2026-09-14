@@ -185,3 +185,57 @@ func TestWorktreeAddTakesTheBaseFromTheFlag(t *testing.T) {
 		t.Fatalf("with --no-compose: %v", err)
 	}
 }
+
+// TestARetiredAPIVersionComposesWithARow is a checkout committed under a retired
+// apiVersion, composed on the base -f names: the document reads as the current format, its
+// extensions are carried, and a row names the file, the spelling it declares and the
+// line to write; on a dry run as well. A base stack and a module manifest under the
+// retired spelling get their rows, one each, and a version qory never wrote is still
+// refused.
+func TestARetiredAPIVersionComposesWithARow(t *testing.T) {
+	_, base := runnerTree(t)
+	root := fleetCheckout(t, "qory.yaml", "  extends: {git: https://git.example.com/acme/harness, ref: v9, path: nextjs-15}\n")
+	file := filepath.Join(root, "qory.yaml")
+	stale, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, file, "apiVersion: qory.ai/v1alpha1\n"+string(stale))
+	row := "qory.yaml  (apiVersion qory.ai/v1alpha1; read as qory.dev/v1alpha1, the line to write)"
+	out, err := run(t, "harness", "compose", "-f", base, "--dry-run")
+	if err != nil {
+		t.Fatalf("dry run: %v\n%s", err, out)
+	}
+	wantsRow(t, out, "retired", row)
+	gone(t, root, ".qory", ".claude")
+	out, err = run(t, "harness", "compose", "-f", base)
+	if err != nil {
+		t.Fatalf("compose -f: %v\n%s", err, out)
+	}
+	wants(t, out, "claude opus", "composed")
+	wantsRow(t, out, "retired", row)
+	wantsRow(t, out, "skipped", "qory.yaml  (its harness, git and env keys; the base stack decides under extends)")
+	rep := readReport(t, root)
+	if len(rep.Modules) != 3 || rep.Modules[2].Name != "app" || rep.Extensions["consumer"] == nil || rep.Extensions["acme"] == nil {
+		t.Fatalf("report: modules %+v, extensions %v", rep.Modules, rep.Extensions)
+	}
+	// The base and a module under the retired spelling: a row each, the document's
+	// own gone once it names the current version.
+	writeFile(t, file, string(stale))
+	tree := strings.TrimPrefix(baseRepoWith(t, strings.Replace(baseStack, "qory.dev/v1alpha1", "qory.ai/v1alpha1", 1)), "file://")
+	staleBase := filepath.Join(tree, "nextjs-15", "qory-stack.yaml")
+	writeFile(t, filepath.Join(root, "modules", "app", "qory-module.yaml"), "apiVersion: qory.ai/v1alpha1\nname: app\n")
+	out, err = run(t, "harness", "compose", "-f", staleBase)
+	if err != nil {
+		t.Fatalf("compose -f: %v\n%s", err, out)
+	}
+	if got := fieldRows(out)["retired"]; len(got) != 2 || got[0] != staleBase+"  (apiVersion qory.ai/v1alpha1; read as qory.dev/v1alpha1, the line to write)" || got[1] != "module app  (apiVersion qory.ai/v1alpha1; read as qory.dev/v1alpha1, the line to write)" {
+		t.Fatalf("retired rows: %q\n%s", got, out)
+	}
+	writeFile(t, file, "apiVersion: qory.ai/v2\n"+string(stale))
+	out, err = run(t, "harness", "compose", "-f", base)
+	if err == nil || cmd.ExitCode(err) != cmd.ExitInput {
+		t.Fatalf("a version never written: err = %v, exit %d\n%s", err, cmd.ExitCode(err), out)
+	}
+	wants(t, err.Error(), `qory.yaml: apiVersion "qory.ai/v2" is not one this qory reads; versions: qory.dev/v1alpha1`)
+}

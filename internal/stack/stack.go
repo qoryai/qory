@@ -16,7 +16,8 @@ import (
 	"github.com/qoryai/qory/internal/exports"
 )
 
-// APIVersion is the one format version this qory reads, [exports.APIVersion]. A stack
+// APIVersion is the format version this qory reads, [exports.APIVersion], and the one a
+// retired spelling of it, [exports.RetiredAPIVersions], is read as. A stack
 // that carries another one is refused, and the message names this one.
 const APIVersion = exports.APIVersion
 
@@ -237,6 +238,12 @@ type Stack struct {
 	// stack.
 	Extensions map[string]map[string]any `yaml:"extensions,omitempty"`
 
+	// RetiredAPIVersion is the apiVersion the file declared when it is a retired
+	// spelling of [APIVersion], one of [exports.RetiredAPIVersions], "" when the file
+	// names the current one. It is set as the stack is validated, and APIVersion holds
+	// what the file is read as; a compose says which files want the line rewritten.
+	RetiredAPIVersion string `yaml:"-"`
+
 	// File is the absolute path the stack was read from, set by [Load], not by the YAML.
 	File string `yaml:"-"`
 	// Root is the root of the repository the stack is in, set by [Load]: git's toplevel
@@ -369,8 +376,12 @@ func decodeError(path string, err error) error {
 // servers. Whether a source holds a module, and whether its manifest carries the name the
 // entry gives, is the compose's check.
 func (p *Stack) validate(compose bool) error {
-	if err := exports.CheckAPIVersion(p.APIVersion); err != nil {
+	current, err := exports.ResolveAPIVersion(p.APIVersion)
+	if err != nil {
 		return err
+	}
+	if current != p.APIVersion {
+		p.RetiredAPIVersion, p.APIVersion = p.APIVersion, current
 	}
 	if compose {
 		if err := p.Extends.validate(); err != nil {

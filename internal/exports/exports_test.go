@@ -191,3 +191,33 @@ func TestReadTakesEitherNameAndNoAPIVersion(t *testing.T) {
 		t.Fatalf("both names: %v", err)
 	}
 }
+
+// TestResolveAPIVersionReadsARetiredSpelling is the version a document is read as: the
+// current one for itself and for a retired version, which the section reader takes the
+// same way, and an error for any other.
+func TestResolveAPIVersionReadsARetiredSpelling(t *testing.T) {
+	for _, c := range []struct{ version, want string }{
+		{exports.APIVersion, exports.APIVersion},
+		{"qory.ai/v1alpha1", exports.APIVersion},
+	} {
+		got, err := exports.ResolveAPIVersion(c.version)
+		if err != nil || got != c.want {
+			t.Errorf("%q: got %q, %v, want %q", c.version, got, err, c.want)
+		}
+	}
+	for _, version := range []string{"", "qory.dev/v2", "qory.ai/v1alpha2", "QORY.DEV/V1ALPHA1"} {
+		got, err := exports.ResolveAPIVersion(version)
+		want := `apiVersion "` + version + `" is not one this qory reads; versions: qory.dev/v1alpha1`
+		if err == nil || err.Error() != want || got != "" {
+			t.Errorf("%q: got %q, %v, want %q", version, got, err, want)
+		}
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, exports.FileName), []byte("apiVersion: qory.ai/v1alpha1\nexports: {modules: [core]}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e, err := exports.Read(root)
+	if err != nil || e == nil || len(e.Modules) != 1 {
+		t.Fatalf("the retired spelling: %+v, %v", e, err)
+	}
+}

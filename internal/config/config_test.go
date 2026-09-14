@@ -234,3 +234,37 @@ func TestWorktreePathsFromOutsideTheCheckout(t *testing.T) {
 		t.Errorf("worktree.copy row %q, want %q", rows["worktree.copy"], want)
 	}
 }
+
+// TestAFileNamingARetiredAPIVersionReads is a qory.yaml naming a retired apiVersion:
+// Load reads it and records the file and the spelling under Retired, and as a
+// document through LoadStack it carries the spelling beside the version it is read as,
+// so a compose can say the line wants rewriting. Nothing is recorded for a file naming
+// the current version or none.
+func TestAFileNamingARetiredAPIVersionReads(t *testing.T) {
+	hermetic(t)
+	root := t.TempDir()
+	path := filepath.Join(root, "qory.yaml")
+	writeRaw(t, path, "apiVersion: qory.ai/v1alpha1\nharness: {force: true}\n")
+	c, err := config.Load(root, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Force || len(c.Retired) != 1 || c.Retired[0].File != path || c.Retired[0].APIVersion != "qory.ai/v1alpha1" {
+		t.Fatalf("got force %v, retired %+v", c.Force, c.Retired)
+	}
+	writeRaw(t, path, "apiVersion: qory.ai/v1alpha1\nharness:\n  extends: {path: ../base}\n  modules:\n    - name: app\n  extensions:\n    consumer: {team: web}\n")
+	p, err := config.LoadStack(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.APIVersion != stack.APIVersion || p.RetiredAPIVersion != "qory.ai/v1alpha1" || p.Extensions["consumer"] == nil {
+		t.Fatalf("document: apiVersion %q, retired %q, extensions %v", p.APIVersion, p.RetiredAPIVersion, p.Extensions)
+	}
+	if got, err := config.Document(root); err != nil || got != path {
+		t.Fatalf("Document: %q, %v", got, err)
+	}
+	writeRaw(t, path, "harness: {force: true}\n")
+	if c, err = config.Load(root, true); err != nil || len(c.Retired) != 0 {
+		t.Fatalf("no apiVersion: retired %+v, %v", c.Retired, err)
+	}
+}

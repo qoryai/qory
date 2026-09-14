@@ -42,6 +42,10 @@ type Module struct {
 	Link string
 	// Base marks a module of the base stack, when a checkout's qory.yaml extends one.
 	Base bool
+	// RetiredAPIVersion is the apiVersion the module's manifest declared when it is a
+	// retired spelling of the current one, "" otherwise, so the command can say the
+	// manifest wants the line rewritten.
+	RetiredAPIVersion string
 }
 
 // Entry is one entry of the composed tree and the module it came from.
@@ -178,7 +182,7 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 		if err != nil {
 			return nil, err
 		}
-		rl := Module{Name: name, Description: m.Description, Dir: l.Dir, Source: ps.String(), Pin: src.Pin, Dirty: src.Dirty, Variant: variant, Link: pl.Link, Base: pl.Base}
+		rl := Module{Name: name, Description: m.Description, Dir: l.Dir, Source: ps.String(), Pin: src.Pin, Dirty: src.Dirty, Variant: variant, Link: pl.Link, Base: pl.Base, RetiredAPIVersion: m.RetiredAPIVersion}
 		// The selection comes first, so that what the base allows and what the module
 		// exports are checked on what the module contributes, not on what it ships.
 		env, pulled, err := applySelection(l, pl, m.Env, m.Requires, res)
