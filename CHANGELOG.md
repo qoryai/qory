@@ -4,7 +4,21 @@ Every release of qory, newest first, in the shape of [Keep a Changelog](https://
 The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0 a minor
 release may change what an existing document does, and says so under Upgrading.
 
-## [Unreleased]
+## [0.4.1] - 2026-09-14
+
+### Added
+
+- `qory update` installs the newest release the way this qory was installed: `brew
+  upgrade` for the cask, `go install` for a GOBIN build, and for a release binary the
+  release's archive for this platform, checked against the release's checksums and
+  renamed over the running binary. `--check` reports and installs nothing. A build ahead
+  of the newest release is offered the release and asked; `--release` answers yes in a
+  script.
+- Every command looks for a newer release when its error output is a terminal and says
+  so after its own output when the newest release is ahead of its version. GitHub is
+  asked at most once an hour; between asks the answer is read from a file under the
+  user's cache directory. `QORY_NO_UPDATE_CHECK=1` and `CI` turn the look off. A build
+  from `main` between releases is told only when it is behind a release.
 
 ### Fixed
 
@@ -247,7 +261,7 @@ The first release: a stack of modules composed into one tree, linked into the ch
 and kept out of git, with a report naming the module of every entry and a refusal when
 two modules provide the same one.
 
-[Unreleased]: https://github.com/qoryai/qory/compare/v0.4.0...HEAD
+[0.4.1]: https://github.com/qoryai/qory/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/qoryai/qory/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/qoryai/qory/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/qoryai/qory/compare/v0.2.0...v0.2.1
