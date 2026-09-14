@@ -4,6 +4,15 @@ Every release of qory, newest first, in the shape of [Keep a Changelog](https://
 The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0 a minor
 release may change what an existing document does, and says so under Upgrading.
 
+## [Unreleased]
+
+### Fixed
+
+- A document declaring a retired `apiVersion`, one an earlier qory wrote for the same
+  format, was refused with exit 2. It is now read as the current version, in every
+  document, and the compose prints a `retired` row per document naming the version it
+  declares and the line to write. A later major release stops reading it.
+
 ## [0.4.0] - 2026-09-12
 
 A harness repository publishes its stacks and modules by name, and a consumer names them
@@ -238,6 +247,7 @@ The first release: a stack of modules composed into one tree, linked into the ch
 and kept out of git, with a report naming the module of every entry and a refusal when
 two modules provide the same one.
 
+[Unreleased]: https://github.com/qoryai/qory/compare/v0.4.0...HEAD
 [0.4.0]: https://github.com/qoryai/qory/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/qoryai/qory/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/qoryai/qory/compare/v0.2.0...v0.2.1

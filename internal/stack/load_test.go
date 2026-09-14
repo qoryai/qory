@@ -317,3 +317,25 @@ func TestNewComposeAcceptsADocumentWithoutModules(t *testing.T) {
 		t.Fatalf("a stack without modules: %v", err)
 	}
 }
+
+// TestLoadReadsARetiredAPIVersion is a stack naming a retired apiVersion: it
+// loads as the current format, and the spelling it declared is kept beside it so the
+// compose can say the line wants rewriting. A stack naming the current version keeps
+// nothing there.
+func TestLoadReadsARetiredAPIVersion(t *testing.T) {
+	p, err := Load(write(t, strings.Replace(valid, "qory.dev/v1alpha1", "qory.ai/v1alpha1", 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.APIVersion != APIVersion || p.RetiredAPIVersion != "qory.ai/v1alpha1" || p.Name != "app" {
+		t.Fatalf("got apiVersion %q, retired %q, name %q", p.APIVersion, p.RetiredAPIVersion, p.Name)
+	}
+	if p, err = Load(write(t, valid)); err != nil || p.RetiredAPIVersion != "" {
+		t.Fatalf("the current version: retired %q, %v", p.RetiredAPIVersion, err)
+	}
+	path := write(t, "apiVersion: qory.ai/v1alpha1\nextends: {path: ../base}\nmodules:\n  - name: app\n")
+	p, err = NewCompose(path, &Stack{APIVersion: "qory.ai/v1alpha1", Extends: Source{Path: "../base"}})
+	if err != nil || p.APIVersion != APIVersion || p.RetiredAPIVersion != "qory.ai/v1alpha1" {
+		t.Fatalf("a document: apiVersion %q, retired %q, %v", p.APIVersion, p.RetiredAPIVersion, err)
+	}
+}

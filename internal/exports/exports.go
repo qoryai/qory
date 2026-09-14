@@ -61,13 +61,26 @@ func File(dir string) (string, error) {
 // every document carries.
 const APIVersion = "qory.dev/v1alpha1"
 
-// CheckAPIVersion returns nil for a version this qory reads, [APIVersion], and for any
-// other an error naming the version and the ones read. A reader prefixes the file.
-func CheckAPIVersion(version string) error {
+// RetiredAPIVersions maps each version an earlier qory wrote for the format it still
+// reads to the one a document declaring it is read as. Every reader keeps the declared
+// version beside the result, so a compose can say the document wants its line
+// rewritten. A later major release drops an entry.
+var RetiredAPIVersions = map[string]string{"qory.ai/v1alpha1": APIVersion}
+
+// ResolveAPIVersion returns the version a document declaring version is read as:
+// [APIVersion] for itself and for a retired spelling of it, and for any other version an
+// error naming it and the ones read. A reader stores the result in the document's place
+// and, when it differs from what the document declared, keeps the declared spelling
+// beside it, so the compose can say which files want rewriting. A reader prefixes the
+// error with the file.
+func ResolveAPIVersion(version string) (string, error) {
 	if version == APIVersion {
-		return nil
+		return version, nil
 	}
-	return fmt.Errorf("apiVersion %q is not one this qory reads; versions: %s", version, APIVersion)
+	if current, ok := RetiredAPIVersions[version]; ok {
+		return current, nil
+	}
+	return "", fmt.Errorf("apiVersion %q is not one this qory reads; versions: %s", version, APIVersion)
 }
 
 // StackFileName and ModuleFileName are what an exported directory holds: a stack its
@@ -265,7 +278,7 @@ func Read(root string) (*Exports, error) {
 	if doc.APIVersion == "" {
 		doc.APIVersion = APIVersion
 	}
-	if err := CheckAPIVersion(doc.APIVersion); err != nil {
+	if doc.APIVersion, err = ResolveAPIVersion(doc.APIVersion); err != nil {
 		return nil, fmt.Errorf("%s: %w", file, err)
 	}
 	if doc.Exports == nil {

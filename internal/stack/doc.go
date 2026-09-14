@@ -16,7 +16,7 @@
 //	p, err := stack.Load(file)
 //
 // [Load] refuses an unknown field, a second document in the file, an apiVersion other than
-// [APIVersion], a stack without target.runtime or with extends, a checkout's qory.yaml without extends or with a
+// [APIVersion] or a retired spelling of it, a stack without target.runtime or with extends, a checkout's qory.yaml without extends or with a
 // target or an extending block, an empty module list, a
 // module without a name or with a name that is not one path segment, two modules with the
 // same name, a path source without its path, a git source without its ref or with a path

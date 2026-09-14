@@ -324,6 +324,8 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 	if err != nil {
 		return nil, input(err)
 	}
+	retired := newRetiredRows(at.root)
+	retired.add(p.File, p.RetiredAPIVersion)
 	// A stack named with -f, in a checkout whose own document extends one, is that
 	// document's base, in place of what extends names: the document composes on it,
 	// its modules appended and its extensions beside the base's. That is how a runner
@@ -342,6 +344,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 			if p, named, err = config.OnBase(doc, base.File); err != nil {
 				return nil, input(err)
 			}
+			retired.add(p.File, p.RetiredAPIVersion)
 		}
 	}
 	// A checkout that extends a closed base takes its target from the base, and
@@ -361,6 +364,9 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 		if err := checks.check(r.File, "the file", r.Qory); err != nil {
 			return nil, err
 		}
+	}
+	for _, r := range conf.Retired {
+		retired.add(r.File, r.APIVersion)
 	}
 	if err := checks.check(p.File, "the stack", p.Qory); err != nil {
 		return nil, err
@@ -399,6 +405,9 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 		if err := checks.check(p.File, "the base stack "+opts.Base.String(), opts.Base.Qory); err != nil {
 			return nil, err
 		}
+		if base == nil {
+			retired.add("the base stack "+opts.Base.String(), opts.Base.RetiredAPIVersion)
+		}
 	}
 	if err := applyTarget(p, opts.Base, conf, o.runtime, o.model); err != nil {
 		return nil, input(err)
@@ -431,6 +440,9 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 	if err := render.CheckFiles(res); err != nil {
 		return nil, input(err)
 	}
+	for _, m := range res.Modules {
+		retired.add("module "+m.Name, m.RetiredAPIVersion)
+	}
 	rep := report.New(res, name, at.root, at.home)
 	// The report says which qory wrote it, so a runner's report and a laptop's can be
 	// compared; a build with no version, a source build without version control, is
@@ -453,6 +465,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 		skippedConfig = append(skippedConfig, [2]string{"skipped", filepath.Base(own) + "  (its harness, git and env keys; the base stack decides under extends)"})
 	}
 	skippedConfig = append(skippedConfig, checks.rows...)
+	skippedConfig = append(skippedConfig, retired.rows...)
 	return &prepared{at: at, res: res, rep: rep, previous: previous, targets: targets, force: force, rows: skippedConfig, u: u}, nil
 }
 

@@ -30,7 +30,12 @@ type Variant map[string]string
 
 // Manifest is one qory-module.yaml, validated.
 type Manifest struct {
+	// APIVersion is the format the manifest is read as, [stack.APIVersion].
 	APIVersion string `yaml:"apiVersion"`
+	// RetiredAPIVersion is the apiVersion the file declared when it is a retired
+	// spelling of the current one, one of [exports.RetiredAPIVersions], "" when the file
+	// names the current one; a compose says which files want the line rewritten.
+	RetiredAPIVersion string
 	// Name is the module's name, the one the stack refers to it by.
 	Name string `yaml:"name"`
 	// Description says what the module is for, carried into the report.
@@ -209,7 +214,8 @@ func decodeError(path string, err error) error {
 // not a module, and the error says so and names the directory, because a source that
 // points at the wrong directory is the mistake this catches.
 //
-// An unknown field is an error, so is an apiVersion other than [stack.APIVersion], a
+// An unknown field is an error, so is an apiVersion other than [stack.APIVersion] or a
+// retired spelling of it, a
 // missing name, a default that names something other than a declared
 // variant or "fail", an env key that is not an environment variable name or is
 // QORY_HARNESS_HOME, and an env value that is not a relative path inside the module.
@@ -241,13 +247,17 @@ func ReadManifest(dir string) (*Manifest, error) {
 	if err := dec.Decode(&raw); err != nil {
 		return nil, decodeError(path, err)
 	}
-	if err := exports.CheckAPIVersion(raw.APIVersion); err != nil {
+	current, err := exports.ResolveAPIVersion(raw.APIVersion)
+	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	if raw.Name == "" {
 		return nil, fmt.Errorf("%s: name is required", path)
 	}
-	m := &Manifest{APIVersion: raw.APIVersion, Name: raw.Name, Description: raw.Description}
+	m := &Manifest{APIVersion: current, Name: raw.Name, Description: raw.Description}
+	if current != raw.APIVersion {
+		m.RetiredAPIVersion = raw.APIVersion
+	}
 	for key, value := range raw.Env {
 		if key == "QORY_HARNESS_HOME" {
 			return nil, fmt.Errorf("%s: env.QORY_HARNESS_HOME is qory's own; a module exports another name", path)

@@ -30,6 +30,10 @@ type Base struct {
 	// Qory is the range of qory versions the base is written for, empty for none. The
 	// command checks the running qory against it, as it does the checkout's own.
 	Qory stack.Constraint
+	// RetiredAPIVersion is the apiVersion the base's file declared when it is a retired
+	// spelling of the current one, "" otherwise, so the command can say the base wants
+	// the line rewritten.
+	RetiredAPIVersion string
 }
 
 // String names the base in a message, <name>@<pin>.
@@ -77,7 +81,7 @@ func ExtendOn(p, base *stack.Stack, pin string) (*stack.Stack, *Base, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", p.File, err)
 	}
-	b := &Base{Name: base.Name, Source: p.Extends.String(), Pin: pin, Extending: base.Extending, Qory: base.Qory}
+	b := &Base{Name: base.Name, Source: p.Extends.String(), Pin: pin, Extending: base.Extending, Qory: base.Qory, RetiredAPIVersion: base.RetiredAPIVersion}
 	if b.Name == "" {
 		b.Name = filepath.Base(base.Dir())
 	}

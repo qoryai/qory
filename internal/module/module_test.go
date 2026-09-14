@@ -626,3 +626,20 @@ func TestReadRefusesADanglingSkillLink(t *testing.T) {
 		t.Fatal("read a skill link that leads nowhere")
 	}
 }
+
+// TestReadManifestReadsARetiredAPIVersion is a manifest naming a retired apiVersion:
+// it reads as the current format, with the spelling it declared kept beside it.
+func TestReadManifestReadsARetiredAPIVersion(t *testing.T) {
+	dir := tree(t, map[string]string{ManifestName: "apiVersion: qory.ai/v1alpha1\nname: core\n"})
+	m, err := ReadManifest(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.APIVersion != "qory.dev/v1alpha1" || m.RetiredAPIVersion != "qory.ai/v1alpha1" || m.Name != "core" {
+		t.Fatalf("got %+v", m)
+	}
+	dir = tree(t, map[string]string{ManifestName: "apiVersion: qory.dev/v1alpha1\nname: core\n"})
+	if m, err = ReadManifest(dir); err != nil || m.RetiredAPIVersion != "" {
+		t.Fatalf("the current version: retired %q, %v", m.RetiredAPIVersion, err)
+	}
+}
