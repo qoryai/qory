@@ -428,6 +428,12 @@ is shown only when the command fails.`,
 			u := ui.New(rows)
 			tracing(cmd, &o, u, rows)
 			u.Title(filepath.Base(main), "worktree remove "+shortPath(main, target.Path))
+			// A home outside the worktree goes with it, and is found before the worktree
+			// is gone, since its configuration is read from there.
+			var outside *places
+			if at, err := placesAt(target.Path); err == nil && at.dir == "" {
+				outside = &at
+			}
 			r, err := worktree.Remove(main, target.Path, o)
 			if err != nil {
 				return input(err)
@@ -436,7 +442,19 @@ is shown only when the command fails.`,
 			for _, c := range r.Ran {
 				fields = append(fields, [2]string{"ran", c})
 			}
-			fields = append(fields, [2]string{"removed", shortPath(main, r.Path)}, [2]string{"branch", branchRow(r)}, [2]string{"main", r.Main})
+			fields = append(fields, [2]string{"removed", shortPath(main, r.Path)})
+			if outside != nil {
+				for _, path := range []string{outside.home, outside.report, outside.home + ".tmp"} {
+					if _, err := os.Lstat(path); err != nil {
+						continue
+					}
+					if err := os.RemoveAll(path); err != nil {
+						return err
+					}
+					fields = append(fields, [2]string{"removed", ui.Short(path, "") + "  (its home)"})
+				}
+			}
+			fields = append(fields, [2]string{"branch", branchRow(r)}, [2]string{"main", r.Main})
 			u.Fields(fields)
 			if pathOnly {
 				fmt.Fprintln(out, r.Main)
@@ -485,7 +503,13 @@ which of them hold a composed harness.
 			if err != nil {
 				return err
 			}
-			entries, err := worktree.List(main)
+			entries, err := worktree.ListWith(main, func(path string) string {
+				at, err := placesAt(path)
+				if err != nil {
+					return ""
+				}
+				return at.report
+			})
 			if err != nil {
 				return input(err)
 			}

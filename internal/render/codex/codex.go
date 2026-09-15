@@ -10,6 +10,15 @@
 //
 //	config.toml  qory writes it
 //	agents       agents are linked there; ship it as agents/<name>
+//	skills       qory links them there for a launch; ship it as skills/<name>
+//	AGENTS.md    qory writes it for a launch
+//
+// Codex also takes its whole home from CODEX_HOME, and the runtime's directory is one:
+// config.toml, the agents, the skills linked under skills/ and the instructions as
+// AGENTS.md, the global instructions file Codex reads there. [Template] sets the
+// variable. Codex keeps its login in the same home, auth.json, so a launcher on such a
+// home authenticates through OPENAI_API_KEY or puts auth.json there. The checkout's
+// .codex never links the skills or the instructions.
 package codex
 
 import (
@@ -39,7 +48,7 @@ func (codex) Name() string { return Runtime }
 // instructions link is left out when the compose produced none.
 func (codex) Links(res *compose.Result) []render.Link {
 	links := []render.Link{
-		{Checkout: ".codex", Home: Runtime},
+		{Checkout: ".codex", Home: Runtime, Except: []string{"skills", "AGENTS.md"}},
 		{Checkout: ".agents/skills", Home: "skills"},
 	}
 	if res == nil || res.Instructions != "" {
@@ -57,6 +66,8 @@ func (codex) Reserved() []render.Reserved {
 	return []render.Reserved{
 		{Path: "config.toml", Why: "qory writes it"},
 		{Path: "agents", Why: "agents are linked there; ship it as agents/<name>"},
+		{Path: "skills", Why: "qory links them there for a launch; ship it as skills/<name>"},
+		{Path: "AGENTS.md", Why: "qory writes it for a launch"},
 	}
 }
 
@@ -109,5 +120,18 @@ func (codex) Render(res *compose.Result, dir, home string) error {
 			return err
 		}
 	}
+	if err := render.LinkEntries(res, dir, "skills"); err != nil {
+		return err
+	}
+	if res.Instructions != "" {
+		if err := render.WriteFile(dir, "AGENTS.md", []byte(res.Instructions)); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// Template starts Codex with the runtime's directory as its home.
+func (codex) Template() render.Template {
+	return render.Template{Command: "codex", Env: map[string]string{"CODEX_HOME": "${dir}"}}
 }

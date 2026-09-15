@@ -12,7 +12,8 @@
 //
 // # The home
 //
-// The home is the composed tree at .qory/harness inside the checkout. [Build] writes it
+// The home is the composed tree, at .qory/harness inside the checkout or in a directory
+// outside it that the command module derives from the configuration. [Build] writes it
 // in one step that either lands whole or leaves the previous home untouched: it stages
 // the tree in a sibling directory, home with ".tmp" appended, puts the parts every
 // runtime shares at its root, AGENTS.md, skills/, hooks/ and one modules/<name> link per
@@ -21,6 +22,10 @@
 // Render is handed both paths because the two differ while it runs: it writes files into
 // the staging directory, and a settings file it writes names the home, the path the
 // runtime will read the tree from.
+//
+// A runtime that is a [Launcher] also renders a launch spec into its directory, what
+// its program takes from outside the checkout, and [Launch] lists the arguments that
+// start the program on it; that is how a home the checkout does not link to is read.
 //
 // # The links
 //

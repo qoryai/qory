@@ -8,6 +8,10 @@
 // The paths under .amp a files entry may not take, see [render.Reserved]:
 //
 //	settings.json  Amp reads it as settings; a module sets those through settings/amp/settings.json
+//
+// Amp also takes its settings file from --settings-file, so the servers and the
+// permissions reach a session from outside the checkout; the skills and the instructions
+// are read from the checkout alone. [Template] names the file.
 package amp
 
 import (
@@ -64,4 +68,9 @@ func (amp) Render(res *compose.Result, dir, home string) error {
 			render.PutServers(m, "amp.mcpServers", res.MCPFor(home))
 		}
 	})
+}
+
+// Template starts Amp with the runtime's settings file, when the compose wrote one.
+func (amp) Template() render.Template {
+	return render.Template{Command: "amp", Args: [][]string{{"--settings-file", "${dir}/settings.json"}}}
 }

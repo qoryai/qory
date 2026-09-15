@@ -4,6 +4,41 @@ Every release of qory, newest first, in the shape of [Keep a Changelog](https://
 The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0 a minor
 release may change what an existing document does, and says so under Upgrading.
 
+## [0.4.2] - 2026-09-15
+
+### Added
+
+- The harness can be composed outside the checkout, into a directory the process that
+  composes it owns: `qory harness compose --home <dir>`, or `harness.home` in the
+  machine's `qory.yaml`, puts the tree and its report under the directory, one home per
+  checkout and per worktree, and writes nothing into the checkout: no link, no `.qory`,
+  no exclude line. A tracked path at a link's name is then no collision, `git clean -x`
+  deletes nothing of qory's, and a pull is an ordinary pull. `inspect`, `remove` and
+  `--check` take `--home` too and find the checkout through the report, so they run from
+  either side. `harness.links: none`, or `--no-links`, keeps the checkout untouched with
+  the home under `.qory` as well.
+- `qory harness launch --runtime <name>` prints the command that starts a runtime's
+  program on the composed home, wherever it is, from a launch template each runtime
+  ships: for claude `--plugin-dir` for a plugin in Claude Code's own layout that the
+  compose renders at `claude/plugin`, `--settings` for the permissions, hooks,
+  environment and model, `--mcp-config` for the servers, `--append-system-prompt-file`
+  for the instructions, and `--setting-sources user` so no `.claude` of the checkout or
+  of a directory above it is read; for cursor the same plugin with the hooks and servers
+  copied in; for copilot `--add-dir` on a rendered workspace and
+  `--additional-mcp-config`; for codex `CODEX_HOME`, with the skills and instructions
+  rendered into the directory; for opencode `OPENCODE_CONFIG_DIR`; for amp
+  `--settings-file`; for gemini `GEMINI_CLI_SYSTEM_SETTINGS_PATH`. A launcher evals the
+  line and knows nothing of the layout; `--json` prints the command, arguments and
+  variables as one object. `harness.launch.<runtime>` in `qory.yaml` puts a command,
+  arguments or variables in place of the runtime's own, field by field, so a program
+  whose flags move is followed without a new qory. goose and any read their harness
+  through the links alone, and `launch` says so.
+- copilot has a place for MCP servers now, `copilot/mcp.json` for a launch, so the kind
+  is no longer skipped for it.
+- `qory worktree add` composes a worktree into its own home under `harness.home`, and
+  `qory worktree remove` removes that home with the worktree; `qory worktree list` finds
+  the report there.
+
 ## [0.4.1] - 2026-09-14
 
 ### Added
@@ -261,6 +296,7 @@ The first release: a stack of modules composed into one tree, linked into the ch
 and kept out of git, with a report naming the module of every entry and a refusal when
 two modules provide the same one.
 
+[0.4.2]: https://github.com/qoryai/qory/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/qoryai/qory/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/qoryai/qory/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/qoryai/qory/compare/v0.2.1...v0.3.0

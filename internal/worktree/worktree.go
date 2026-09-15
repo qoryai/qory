@@ -147,8 +147,8 @@ type Entry struct {
 	Path, Branch string
 	// Main marks the main checkout.
 	Main bool
-	// Composed says whether a qory compose report is in it, and Report is that report's
-	// path, "" when there is none.
+	// Composed says whether a qory compose report is there for it, and Report is that
+	// report's path, "" when there is none.
 	Composed bool
 	Report   string
 }
@@ -346,8 +346,13 @@ func Main(dir string) (string, error) {
 	return "", fmt.Errorf("git lists no worktree for %s", dir)
 }
 
-// List returns the repository's worktrees, the main checkout first.
-func List(main string) ([]Entry, error) {
+// List returns the repository's worktrees, the main checkout first, each composed when
+// its report is at the default place, .qory/harness-report.json in it.
+func List(main string) ([]Entry, error) { return ListWith(main, nil) }
+
+// ListWith is [List] with reportFor saying where each worktree's report is, for a home
+// composed outside the worktree; nil, or "" for a worktree, means the default place.
+func ListWith(main string, reportFor func(path string) string) ([]Entry, error) {
 	out, err := runner{}.git(main, "worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, err
@@ -365,7 +370,13 @@ func List(main string) ([]Entry, error) {
 	}
 	for i := range entries {
 		entries[i].Main = i == 0
-		report := filepath.Join(entries[i].Path, ".qory", "harness-report.json")
+		report := ""
+		if reportFor != nil {
+			report = reportFor(entries[i].Path)
+		}
+		if report == "" {
+			report = filepath.Join(entries[i].Path, ".qory", "harness-report.json")
+		}
 		if _, err := os.Stat(report); err == nil {
 			entries[i].Composed, entries[i].Report = true, report
 		}

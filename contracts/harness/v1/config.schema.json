@@ -26,6 +26,43 @@
         "model": {"type": "string", "minLength": 1},
         "force": {"type": "boolean"},
         "update": {"type": "string", "enum": ["always", "never"]},
+        "home": {
+          "description": "Where the harness is composed: .qory/harness in the checkout, or a directory outside it, absolute or under ~, holding one home per checkout.",
+          "type": "string",
+          "minLength": 1
+        },
+        "links": {
+          "description": "What the checkout gets: checkout, links into the home, the default with the home inside the checkout; or none, nothing, the default and the only value with the home outside it.",
+          "type": "string",
+          "enum": ["checkout", "none"]
+        },
+        "launch": {
+          "description": "How a runtime's program is started on the home, by runtime name, for qory harness launch: each key given stands in for the runtime's own. ${home} is the home, ${dir} the runtime's directory in it.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "command": {"description": "The program.", "type": "string", "minLength": 1},
+              "args": {
+                "description": "The arguments in groups, a flag and its value say; a group naming a file under ${home} or ${dir} that the compose did not write is left out.",
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {"type": "string", "minLength": 1},
+                    {"type": "array", "minItems": 1, "items": {"type": "string"}}
+                  ]
+                }
+              },
+              "env": {
+                "description": "The variables set for the program.",
+                "type": "object",
+                "propertyNames": {"pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+                "additionalProperties": {"type": "string"}
+              }
+            }
+          }
+        },
         "name": {"type": "string", "minLength": 1},
         "description": {"type": "string"},
         "extends": {

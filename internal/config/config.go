@@ -17,6 +17,11 @@
 //	  model: opus                # instead of the stack's target.model
 //	  force: true                # replace a tracked, unmodified file where a link goes
 //	  update: always             # fetch every git source again on each compose
+//	  home: ~/.cache/qory/homes  # where the harness is composed: .qory/harness in the checkout, or a root outside it
+//	  links: none                # what the checkout gets: links into the home, or nothing
+//	  launch:                    # how a runtime's program is started on the home, over the runtime's own
+//	    claude: {command: /opt/claude/bin/claude}
+//	    codex: {env: {CODEX_HOME: "${dir}"}}
 //	  extends: {git: git@git.example.com:acme/harness, ref: main, path: nextjs-15}
 //	  modules:                   # with extends: the stack this checkout extends and its own modules
 //	    - name: app              # extends may be left out when compose -f names the base
@@ -105,6 +110,20 @@ const DefaultWorktreeName = "wt-{branch}"
 // DefaultWorktreeBranch is what a remove does with the branch when no file says: delete it.
 const DefaultWorktreeBranch = "delete"
 
+// DefaultHome is where the harness is composed when no file says: .qory/harness in the
+// checkout, with the report beside it.
+const DefaultHome = ".qory/harness"
+
+// The values of harness.links: what the checkout gets from a compose.
+const (
+	// LinksCheckout writes the runtime's links and the module links into the checkout,
+	// each excluded from git. It needs a home inside the checkout.
+	LinksCheckout = "checkout"
+	// LinksNone writes nothing into the checkout: a runtime reads the home through the
+	// launch spec qory harness launch prints.
+	LinksNone = "none"
+)
+
 // Default is the origin of a value no file set.
 const Default = "default"
 
@@ -137,6 +156,51 @@ type Worktree struct {
 	Add []string
 	// Remove are the commands run in a worktree before it is removed, in order.
 	Remove []string
+}
+
+// Launch is harness.launch.<runtime>: what a file sets of how the runtime's program is
+// started on a home. A field left nil is the runtime's own. ${home} in a value is the
+// home, ${dir} the runtime's directory in it, and an argument group naming a file under
+// either that the compose did not write is left out of the launch.
+type Launch struct {
+	// Command is the program, "" for the runtime's own.
+	Command string
+	// Args are the arguments in groups, a flag and its value say; nil for the runtime's
+	// own, an empty list for none.
+	Args [][]string
+	// Env are the variables set for the program; nil for the runtime's own, an empty
+	// map for none.
+	Env map[string]string
+}
+
+// launchSection is harness.launch.<runtime> as written: a command, args as a list whose
+// items are a group, a list of words, or one word, and env as a mapping.
+type launchSection struct {
+	Command *string           `yaml:"command,omitempty"`
+	Args    *[]argGroup       `yaml:"args,omitempty"`
+	Env     map[string]string `yaml:"env,omitempty"`
+}
+
+// argGroup is one item of harness.launch.<runtime>.args: a list of words, or a word on
+// its own, which is a group of one.
+type argGroup []string
+
+// UnmarshalYAML reads a scalar as a group of one word and a sequence as the words.
+func (g *argGroup) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		var word string
+		if err := node.Decode(&word); err != nil {
+			return err
+		}
+		*g = argGroup{word}
+		return nil
+	}
+	var words []string
+	if err := node.Decode(&words); err != nil {
+		return err
+	}
+	*g = words
+	return nil
 }
 
 // Path is one entry of worktree.link or worktree.copy: where it comes from and where it
@@ -224,6 +288,17 @@ type Config struct {
 	Force bool
 	// Update fetches every git source again on each compose.
 	Update bool
+	// Home is where the harness is composed, as the file wrote it with a leading ~
+	// expanded: "" for [DefaultHome], a relative path under the checkout root, or an
+	// absolute path outside the checkout, a root that holds one home per checkout.
+	Home string
+	// Links is what the checkout gets: [LinksCheckout] for links into the home,
+	// [LinksNone] for nothing, "" to follow the home: links when it is inside the
+	// checkout, nothing when it is outside.
+	Links string
+	// Launch is how a runtime's program is started on the home, by runtime name, for
+	// the runtimes a file names; each field set stands in for the runtime's own.
+	Launch map[string]Launch
 	// Worktree holds the worktree settings.
 	Worktree Worktree
 	// Git holds the git settings.
@@ -268,6 +343,9 @@ type harnessSection struct {
 	Model       *string                   `yaml:"model,omitempty"`
 	Force       *bool                     `yaml:"force,omitempty"`
 	Update      *string                   `yaml:"update,omitempty"`
+	Home        *string                   `yaml:"home,omitempty"`
+	Links       *string                   `yaml:"links,omitempty"`
+	Launch      map[string]launchSection  `yaml:"launch,omitempty"`
 	Name        string                    `yaml:"name,omitempty"`
 	Description string                    `yaml:"description,omitempty"`
 	Extends     stack.Source              `yaml:"extends,omitempty"`
@@ -306,7 +384,7 @@ type worktreeSection struct {
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // fixedKeys are the row keys every configuration has, in the order [Config.Rows] prints them.
-var fixedKeys = []string{"harness.runtime", "harness.model", "harness.force", "harness.update", "worktree.dir", "worktree.name", "worktree.base", "worktree.branch", "git.timeout", "git.cache"}
+var fixedKeys = []string{"harness.runtime", "harness.model", "harness.force", "harness.update", "harness.home", "harness.links", "worktree.dir", "worktree.name", "worktree.base", "worktree.branch", "git.timeout", "git.cache"}
 
 // Defaults is the configuration with no file read: the stack's runtime and model, no
 // force, no update, worktrees beside the main checkout as wt-<branch> off the remote's
@@ -643,6 +721,41 @@ func (c *Config) apply(path string, machine bool) (file, error) {
 			}
 			c.origins["harness.update"] = path
 		}
+		if h.Home != nil {
+			dir := *h.Home
+			if dir == "" {
+				return f, fmt.Errorf("%s: harness.home is empty; it is a path under the checkout, or a directory outside it", path)
+			}
+			if dir == "~" || strings.HasPrefix(dir, "~/") {
+				home, err := os.UserHomeDir()
+				if err != nil {
+					return f, fmt.Errorf("%s: harness.home names %s, and the home directory is unknown: %w", path, dir, err)
+				}
+				dir = filepath.Join(home, dir[1:])
+			}
+			c.Home = filepath.Clean(dir)
+			c.origins["harness.home"] = path
+		}
+		if h.Links != nil {
+			switch *h.Links {
+			case LinksCheckout, LinksNone:
+				c.Links = *h.Links
+			default:
+				return f, fmt.Errorf("%s: harness.links %q is not %s or %s", path, *h.Links, LinksCheckout, LinksNone)
+			}
+			c.origins["harness.links"] = path
+		}
+		for _, name := range sortedNames(h.Launch) {
+			l, err := launchOf(path, name, h.Launch[name])
+			if err != nil {
+				return f, err
+			}
+			if c.Launch == nil {
+				c.Launch = map[string]Launch{}
+			}
+			c.Launch[name] = l
+			c.origins["harness.launch."+name] = path
+		}
 	}
 	if f.Git != nil {
 		if f.Git.Timeout != nil {
@@ -837,6 +950,69 @@ func read(path string) (file, error) {
 }
 
 // unknownKey is the decoder's report of a key the document has no field for. It names the
+// launchOf reads one harness.launch entry: the command has to be a word when set, every
+// argument group a word or more, and every variable an environment variable name other
+// than qory's own.
+func launchOf(path, name string, l launchSection) (Launch, error) {
+	key := "harness.launch." + name
+	var out Launch
+	if l.Command != nil {
+		if strings.TrimSpace(*l.Command) == "" {
+			return out, fmt.Errorf("%s: %s.command is empty; it names the program, or is left out for the runtime's own", path, key)
+		}
+		out.Command = *l.Command
+	}
+	if l.Args != nil {
+		out.Args = [][]string{}
+		for i, g := range *l.Args {
+			if len(g) == 0 {
+				return out, fmt.Errorf("%s: %s.args[%d] is empty; a group is a word or a list of words", path, key, i)
+			}
+			out.Args = append(out.Args, []string(g))
+		}
+	}
+	if l.Env != nil {
+		out.Env = map[string]string{}
+		for k, v := range l.Env {
+			if !envName.MatchString(k) {
+				return out, fmt.Errorf("%s: %s.env: %s is not an environment variable name", path, key, k)
+			}
+			if k == "QORY_HARNESS_HOME" {
+				return out, fmt.Errorf("%s: %s.env.QORY_HARNESS_HOME is qory's own; the settings carry it", path, key)
+			}
+			out.Env[k] = v
+		}
+	}
+	return out, nil
+}
+
+// sortedNames lists a map's keys in order, so the rows and the origins do not follow
+// map order.
+func sortedNames[V any](m map[string]V) []string {
+	names := make([]string, 0, len(m))
+	for k := range m {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// String is the entry as a row prints it: the variables, the command and the groups on
+// one line, with a field the runtime's own left out.
+func (l Launch) String() string {
+	var parts []string
+	for _, k := range sortedNames(l.Env) {
+		parts = append(parts, k+"="+l.Env[k])
+	}
+	if l.Command != "" {
+		parts = append(parts, l.Command)
+	}
+	for _, g := range l.Args {
+		parts = append(parts, strings.Join(g, " "))
+	}
+	return strings.Join(parts, " ")
+}
+
 // Go type, which the message a person reads leaves out.
 var unknownKey = regexp.MustCompile(`(line \d+: )?field (\S+) not found in type \S+`)
 
@@ -880,6 +1056,13 @@ func (c Config) Rows() []Row {
 	if base == "" {
 		base = "(remote HEAD)"
 	}
+	home, links := c.Home, c.Links
+	if home == "" {
+		home = DefaultHome
+	}
+	if links == "" {
+		links = "(by home)"
+	}
 	cache := c.Git.Cache
 	if cache == "" {
 		cache, _ = source.CacheDir()
@@ -893,6 +1076,8 @@ func (c Config) Rows() []Row {
 		Row{"harness.model", model, c.origins["harness.model"]},
 		Row{"harness.force", fmt.Sprint(c.Force), c.origins["harness.force"]},
 		Row{"harness.update", update, c.origins["harness.update"]},
+		Row{"harness.home", home, c.origins["harness.home"]},
+		Row{"harness.links", links, c.origins["harness.links"]},
 		Row{"worktree.dir", c.Worktree.Dir, c.origins["worktree.dir"]},
 		Row{"worktree.name", c.Worktree.Name, c.origins["worktree.name"]},
 		Row{"worktree.base", base, c.origins["worktree.base"]},
@@ -908,6 +1093,9 @@ func (c Config) Rows() []Row {
 		if len(list.items) > 0 {
 			rows = append(rows, Row{list.key, strings.Join(list.items, ", "), c.origins[list.key]})
 		}
+	}
+	for _, name := range sortedNames(c.Launch) {
+		rows = append(rows, Row{"harness.launch." + name, c.Launch[name].String(), c.origins["harness.launch."+name]})
 	}
 	rows = append(rows,
 		Row{"git.timeout", c.Git.Timeout.String(), c.origins["git.timeout"]},

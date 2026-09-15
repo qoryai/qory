@@ -39,3 +39,26 @@ func TestNewCarriesLinksEnvAndExtensions(t *testing.T) {
 		t.Errorf("a report without them prints the sections:\n%s", buf.String())
 	}
 }
+
+// TestPrintNamesALinklessCompose is a report of a compose that wrote nothing into the
+// checkout: the links row says so, and a report of a linked compose has no such row.
+func TestPrintNamesALinklessCompose(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	t.Setenv("HOME", t.TempDir())
+	r := want()
+	var buf bytes.Buffer
+	if err := r.Print(&buf); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "links") {
+		t.Errorf("a linked compose prints a links row:\n%s", buf.String())
+	}
+	r.Links = report.NoLinks
+	buf.Reset()
+	if err := r.Print(&buf); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "  links     none\n") {
+		t.Errorf("the links row is missing:\n%s", buf.String())
+	}
+}
