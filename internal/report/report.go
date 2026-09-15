@@ -16,6 +16,9 @@ import (
 // Version is the report format version a [New] report carries.
 const Version = 1
 
+// NoLinks is the Links value of a compose that wrote nothing into the checkout.
+const NoLinks = "none"
+
 // Module is one composed module.
 type Module struct {
 	// Name is the module's name as its manifest declares it, the name excludes and entries
@@ -133,8 +136,13 @@ type Report struct {
 	Target Target `json:"target"`
 	// Checkout is the absolute path of the git working tree composed into.
 	Checkout string `json:"checkout"`
-	// Home is the absolute path of the composed tree inside the checkout.
+	// Home is the absolute path of the composed tree: .qory/harness in the checkout, or a
+	// directory outside it, one per checkout under the root harness.home names.
 	Home string `json:"home"`
+	// Links is "none" when the compose wrote nothing into the checkout, no link and no
+	// exclude line, so a runtime reads the home through its launch spec; absent when the
+	// checkout links into the home.
+	Links string `json:"links,omitempty"`
 	// Modules are the stack's modules in order.
 	Modules []Module `json:"modules"`
 	// Entries are the composed entries, sorted by kind then name.
@@ -244,6 +252,9 @@ func (r Report) PrintBody(w io.Writer) error {
 		fields = append(fields, [2]string{"extends", r.Base.Name + "  " + r.Base.Source + "  " + r.Base.Pin})
 	}
 	fields = append(fields, [2]string{"checkout", ui.Short(r.Checkout, "")}, [2]string{"home", ui.Short(r.Home, r.Checkout)})
+	if r.Links != "" {
+		fields = append(fields, [2]string{"links", r.Links})
+	}
 	if r.Qory != nil {
 		fields = append(fields, [2]string{"qory", strings.TrimSpace(r.Qory.Version + "  " + r.Qory.Commit + "  " + r.Qory.Source)})
 	}

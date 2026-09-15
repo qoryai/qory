@@ -33,6 +33,9 @@ type Link struct {
 	Home string
 	// Soft marks a link that yields to whatever qory did not write at its path.
 	Soft bool
+	// Except names the entries of a directory link's home directory that get no link in
+	// the checkout, such as the plugin a runtime renders for a launch from outside it.
+	Except []string
 }
 
 // Linked is what [LinkInto] did besides writing links, for the caller to report.
@@ -104,6 +107,30 @@ type Runtime interface {
 	Skips() []string
 	// Reserved are the paths under the runtime's directory a files entry may not take.
 	Reserved() []Reserved
+}
+
+// Launcher is a runtime whose program takes the harness from outside the checkout, so a
+// home composed without links into the checkout still reaches it: the runtime renders
+// a launch spec into its directory in the home, and Launch says how to start the
+// program on it. A runtime that does not implement it reads its harness through the
+// links alone.
+type Launcher interface {
+	// Launch is the argument list that starts the program in a checkout with the
+	// harness composed into home active: the plugin, the settings, the servers and the
+	// instructions, each named by its absolute path in home. A file the compose did not
+	// produce, the servers say, is left out.
+	Launch(home string) []string
+}
+
+// Launch is the argument list that starts a runtime's program on the harness in home,
+// see [Launcher], and an error for a runtime that has no launch spec: its program reads
+// the harness from the checkout alone, through the links a compose writes there.
+func Launch(p Runtime, home string) ([]string, error) {
+	l, ok := p.(Launcher)
+	if !ok {
+		return nil, fmt.Errorf("%s reads its harness from the checkout alone, through the links a compose with harness.links: checkout writes; qory renders no launch spec for it", p.Name())
+	}
+	return l.Launch(home), nil
 }
 
 // runtimes holds every registered runtime by its target.runtime value.
@@ -495,6 +522,9 @@ func LinkInto(p Runtime, res *compose.Result, root, home string, force bool) (Li
 		}
 		keep := map[string]bool{}
 		for _, c := range children {
+			if contains(l.Except, c.Name()) {
+				continue
+			}
 			keep[c.Name()] = true
 			child := Link{Checkout: l.Checkout + "/" + c.Name(), Soft: l.Soft}
 			if err := link(root, filepath.Join(path, c.Name()), filepath.Join(src, c.Name()), child, force, &out); err != nil {
@@ -1160,6 +1190,11 @@ func exclude(root, line string) error {
 // the links take theirs when they go. The command module calls it for the qory directory's
 // own line once it has removed the directory.
 func RemoveExclude(root, line string) error { return unexclude(root, line) }
+
+// Exclude puts one line into the checkout's clone-local exclude file, once. The command
+// module calls it for the qory directory when a compose writes the home into it and no
+// links, since [LinkInto] is what excludes the directory otherwise.
+func Exclude(root, line string) error { return exclude(root, line) }
 
 // unexclude removes every line of the checkout's clone-local exclude file that reads as
 // line, and leaves the file's other bytes as they are. The file is the repository's, one

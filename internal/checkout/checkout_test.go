@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/qoryai/qory/internal/checkout"
@@ -289,5 +290,33 @@ func TestRepoKeyNeverTakesTheHostForAnOwner(t *testing.T) {
 		if got := checkout.RepoKey(root); got != want {
 			t.Errorf("%s: got %q, want %q", c.url, got, want)
 		}
+	}
+}
+
+// TestKeyNamesACheckoutOnceHoweverItIsReached is the name a checkout's home takes under
+// a directory outside it: the checkout's base name with a digest of its real path, the
+// same through a symlink to the checkout, and different for two checkouts of one name.
+func TestKeyNamesACheckoutOnceHoweverItIsReached(t *testing.T) {
+	parent := t.TempDir()
+	app := filepath.Join(parent, "app")
+	other := filepath.Join(parent, "elsewhere", "app")
+	for _, dir := range []string{app, other} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := filepath.Join(parent, "link")
+	if err := os.Symlink(app, link); err != nil {
+		t.Fatal(err)
+	}
+	key := checkout.Key(app)
+	if !strings.HasPrefix(key, "app-") || len(key) != len("app-")+8 {
+		t.Errorf("key %q, want app-<8 hex digits>", key)
+	}
+	if got := checkout.Key(link); got != key {
+		t.Errorf("through a symlink the key is %q, want %q", got, key)
+	}
+	if got := checkout.Key(other); got == key {
+		t.Errorf("two checkouts named app share the key %q", got)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -143,6 +144,9 @@ func linkPaths(t *testing.T, home string, l render.Link) [][2]string {
 	}
 	var out [][2]string
 	for _, c := range children {
+		if slices.Contains(l.Except, c.Name()) {
+			continue
+		}
 		out = append(out, [2]string{l.Checkout + "/" + c.Name(), l.Home + "/" + c.Name()})
 	}
 	return out

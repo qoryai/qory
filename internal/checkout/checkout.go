@@ -1,6 +1,8 @@
 package checkout
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -46,6 +48,20 @@ func RepoKey(root string) string {
 // Dir is the directory qory keeps in a checkout, excluded from git: the composed harness
 // and its report.
 const Dir = ".qory"
+
+// Key names the checkout at root among every checkout on the machine, for its home under
+// a directory outside it: the root's base name, so a person reads which checkout a home
+// is for, and eight hex digits of the SHA-256 of the root's real path, so two checkouts
+// of one name, a main checkout and a worktree of it say, get two homes. The root's
+// symlinks are resolved first, so a checkout reached through two paths has one key.
+func Key(root string) string {
+	real := root
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		real = resolved
+	}
+	sum := sha256.Sum256([]byte(real))
+	return filepath.Base(real) + "-" + hex.EncodeToString(sum[:4])
+}
 
 // QoryDir returns the checkout's qory directory, [Dir] inside root. It joins the paths
 // and does not create the directory or check that it exists.

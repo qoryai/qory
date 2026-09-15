@@ -8,11 +8,19 @@
 // skipped, and a files entry named claude/<path> lands at .claude/<path>, which is how a
 // module ships .claude/rules/nextjs-15.md.
 //
+// Claude Code also takes a harness from outside the checkout, and the runtime's directory
+// holds the launch spec for that: plugin/ is a plugin in Claude Code's own layout, the
+// skills, agents, commands and output styles under a .claude-plugin/plugin.json, which
+// --plugin-dir loads for one session; settings.json goes to --settings, mcp.json to
+// --mcp-config and CLAUDE.md to --append-system-prompt-file. [Launch] lists those
+// arguments, and the plugin is never linked into the checkout.
+//
 // The paths under .claude a files entry may not take, see [render.Reserved]:
 //
 //	CLAUDE.md            qory writes it
 //	settings.json        qory writes it
 //	mcp.json             qory writes it
+//	plugin               qory writes the plugin there
 //	settings.local.json  Claude Code reads it as settings; a module sets those through settings/claude/settings.json
 //	skills               skills are linked there; ship it as skills/<name>
 //	agents               agents are linked there; ship it as agents/<name>
@@ -22,6 +30,9 @@
 package claude
 
 import (
+	"os"
+	"path/filepath"
+
 	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/render"
 )
@@ -29,6 +40,15 @@ import (
 // Runtime is the target.runtime value for Claude Code, and the name of its directory in
 // the home.
 const Runtime = "claude"
+
+// Plugin is the plugin's directory under the runtime's directory in the home, what
+// --plugin-dir names.
+const Plugin = "plugin"
+
+// PluginName is the name the plugin's manifest declares, the prefix Claude Code puts
+// before the plugin's skills and commands, /harness:review say. It is the same for
+// every stack, so a launcher and its prompts can name a skill without knowing the stack.
+const PluginName = "harness"
 
 // claude implements [render.Runtime] for Claude Code.
 type claude struct{}
@@ -39,10 +59,10 @@ func init() { render.Register(claude{}) }
 func (claude) Name() string { return Runtime }
 
 // Links are the hard link .claude, a directory link so the checkout's own files in it
-// stay, and a soft .mcp.json at the checkout root, left out when the runtime writes no
-// mcp.json, see [Render].
+// stay, without the plugin, which a checkout has no use for, and a soft .mcp.json at the
+// checkout root, left out when the runtime writes no mcp.json, see [Render].
 func (claude) Links(res *compose.Result) []render.Link {
-	links := []render.Link{{Checkout: ".claude", Home: Runtime}}
+	links := []render.Link{{Checkout: ".claude", Home: Runtime, Except: []string{Plugin}}}
 	if res == nil || writesMCP(res) {
 		links = append(links, render.Link{Checkout: ".mcp.json", Home: Runtime + "/mcp.json", Soft: true})
 	}
@@ -58,13 +78,14 @@ func writesMCP(res *compose.Result) bool {
 // Skips is empty: Claude Code has a place for every kind.
 func (claude) Skips() []string { return nil }
 
-// Reserved are the three files Render writes, the settings file Claude Code writes and
-// reads beside them, and the five kind directories Render links.
+// Reserved are the three files Render writes, the plugin directory, the settings file
+// Claude Code writes and reads beside them, and the five kind directories Render links.
 func (claude) Reserved() []render.Reserved {
 	return []render.Reserved{
 		{Path: "CLAUDE.md", Why: "qory writes it"},
 		{Path: "settings.json", Why: "qory writes it"},
 		{Path: "mcp.json", Why: "qory writes it"},
+		{Path: Plugin, Why: "qory writes the plugin there"},
 		{Path: "settings.local.json", Why: "Claude Code reads it as settings; a module sets those through settings/claude/settings.json"},
 		{Path: "skills", Why: "skills are linked there; ship it as skills/<name>"},
 		{Path: "agents", Why: "agents are linked there; ship it as agents/<name>"},
@@ -79,7 +100,7 @@ func (claude) Reserved() []render.Reserved {
 // settings/claude/mcp.json fragment, and the instructions as CLAUDE.md. The instructions
 // are written in full rather than imported from AGENTS.md: Claude Code resolves a link to
 // its real path and treats an import found through it as external, which it asks about
-// on every start.
+// on every start. Then it writes the plugin, see [Plugin].
 func (claude) Render(res *compose.Result, dir, home string) error {
 	if err := render.LinkEntries(res, dir, "skills", "agents", "commands", "output-styles", "hooks"); err != nil {
 		return err
@@ -108,5 +129,57 @@ func (claude) Render(res *compose.Result, dir, home string) error {
 			return err
 		}
 	}
-	return nil
+	return renderPlugin(res, filepath.Join(dir, Plugin))
+}
+
+// renderPlugin writes the plugin into dir: .claude-plugin/plugin.json naming it, and the
+// skills, agents and commands linked under the directories Claude Code reads in a plugin,
+// with the output styles under output-styles and the manifest pointing there when the
+// compose holds one. The hooks, the servers, the settings and the instructions are not
+// in the plugin: they reach the session through the settings and files [Launch] names,
+// the same ones the checkout's links point at, so nothing is rendered twice.
+func renderPlugin(res *compose.Result, dir string) error {
+	if err := render.LinkEntries(res, dir, "skills", "agents", "commands"); err != nil {
+		return err
+	}
+	manifest := map[string]any{"name": PluginName, "description": description(res)}
+	styles := false
+	for _, e := range res.Entries {
+		if e.Kind == "output-styles" {
+			styles = true
+		}
+	}
+	if styles {
+		if err := render.LinkEntries(res, dir, "output-styles"); err != nil {
+			return err
+		}
+		manifest["outputStyles"] = "./output-styles"
+	}
+	return render.WriteJSON(dir, filepath.Join(".claude-plugin", "plugin.json"), manifest)
+}
+
+// description is the plugin's, the stack's description when it has one.
+func description(res *compose.Result) string {
+	if res.Stack != nil && res.Stack.Description != "" {
+		return res.Stack.Description
+	}
+	return "The harness qory composed for this checkout."
+}
+
+// Launch is the argument list that starts Claude Code with the harness in home: the
+// plugin for the skills, agents, commands and output styles, settings.json for the
+// permissions, the hooks, the environment and the model, mcp.json for the servers when
+// the compose wrote one, CLAUDE.md appended to the system prompt when the compose
+// produced instructions, and the setting sources cut to the user's, so no .claude of the
+// checkout or a directory above it is read. Every path is absolute.
+func (claude) Launch(home string) []string {
+	dir := filepath.Join(home, Runtime)
+	args := []string{"--plugin-dir", filepath.Join(dir, Plugin), "--settings", filepath.Join(dir, "settings.json")}
+	if _, err := os.Stat(filepath.Join(dir, "mcp.json")); err == nil {
+		args = append(args, "--mcp-config", filepath.Join(dir, "mcp.json"))
+	}
+	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); err == nil {
+		args = append(args, "--append-system-prompt-file", filepath.Join(dir, "CLAUDE.md"))
+	}
+	return append(args, "--setting-sources", "user")
 }

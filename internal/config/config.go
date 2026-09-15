@@ -17,6 +17,8 @@
 //	  model: opus                # instead of the stack's target.model
 //	  force: true                # replace a tracked, unmodified file where a link goes
 //	  update: always             # fetch every git source again on each compose
+//	  home: ~/.cache/qory/homes  # where the harness is composed: .qory/harness in the checkout, or a root outside it
+//	  links: none                # what the checkout gets: links into the home, or nothing
 //	  extends: {git: git@git.example.com:acme/harness, ref: main, path: nextjs-15}
 //	  modules:                   # with extends: the stack this checkout extends and its own modules
 //	    - name: app              # extends may be left out when compose -f names the base
@@ -104,6 +106,20 @@ const DefaultWorktreeName = "wt-{branch}"
 
 // DefaultWorktreeBranch is what a remove does with the branch when no file says: delete it.
 const DefaultWorktreeBranch = "delete"
+
+// DefaultHome is where the harness is composed when no file says: .qory/harness in the
+// checkout, with the report beside it.
+const DefaultHome = ".qory/harness"
+
+// The values of harness.links: what the checkout gets from a compose.
+const (
+	// LinksCheckout writes the runtime's links and the module links into the checkout,
+	// each excluded from git. It needs a home inside the checkout.
+	LinksCheckout = "checkout"
+	// LinksNone writes nothing into the checkout: a runtime reads the home through the
+	// launch spec qory harness launch prints.
+	LinksNone = "none"
+)
 
 // Default is the origin of a value no file set.
 const Default = "default"
@@ -224,6 +240,14 @@ type Config struct {
 	Force bool
 	// Update fetches every git source again on each compose.
 	Update bool
+	// Home is where the harness is composed, as the file wrote it with a leading ~
+	// expanded: "" for [DefaultHome], a relative path under the checkout root, or an
+	// absolute path outside the checkout, a root that holds one home per checkout.
+	Home string
+	// Links is what the checkout gets: [LinksCheckout] for links into the home,
+	// [LinksNone] for nothing, "" to follow the home: links when it is inside the
+	// checkout, nothing when it is outside.
+	Links string
 	// Worktree holds the worktree settings.
 	Worktree Worktree
 	// Git holds the git settings.
@@ -268,6 +292,8 @@ type harnessSection struct {
 	Model       *string                   `yaml:"model,omitempty"`
 	Force       *bool                     `yaml:"force,omitempty"`
 	Update      *string                   `yaml:"update,omitempty"`
+	Home        *string                   `yaml:"home,omitempty"`
+	Links       *string                   `yaml:"links,omitempty"`
 	Name        string                    `yaml:"name,omitempty"`
 	Description string                    `yaml:"description,omitempty"`
 	Extends     stack.Source              `yaml:"extends,omitempty"`
@@ -306,7 +332,7 @@ type worktreeSection struct {
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // fixedKeys are the row keys every configuration has, in the order [Config.Rows] prints them.
-var fixedKeys = []string{"harness.runtime", "harness.model", "harness.force", "harness.update", "worktree.dir", "worktree.name", "worktree.base", "worktree.branch", "git.timeout", "git.cache"}
+var fixedKeys = []string{"harness.runtime", "harness.model", "harness.force", "harness.update", "harness.home", "harness.links", "worktree.dir", "worktree.name", "worktree.base", "worktree.branch", "git.timeout", "git.cache"}
 
 // Defaults is the configuration with no file read: the stack's runtime and model, no
 // force, no update, worktrees beside the main checkout as wt-<branch> off the remote's
@@ -643,6 +669,30 @@ func (c *Config) apply(path string, machine bool) (file, error) {
 			}
 			c.origins["harness.update"] = path
 		}
+		if h.Home != nil {
+			dir := *h.Home
+			if dir == "" {
+				return f, fmt.Errorf("%s: harness.home is empty; it is a path under the checkout, or a directory outside it", path)
+			}
+			if dir == "~" || strings.HasPrefix(dir, "~/") {
+				home, err := os.UserHomeDir()
+				if err != nil {
+					return f, fmt.Errorf("%s: harness.home names %s, and the home directory is unknown: %w", path, dir, err)
+				}
+				dir = filepath.Join(home, dir[1:])
+			}
+			c.Home = filepath.Clean(dir)
+			c.origins["harness.home"] = path
+		}
+		if h.Links != nil {
+			switch *h.Links {
+			case LinksCheckout, LinksNone:
+				c.Links = *h.Links
+			default:
+				return f, fmt.Errorf("%s: harness.links %q is not %s or %s", path, *h.Links, LinksCheckout, LinksNone)
+			}
+			c.origins["harness.links"] = path
+		}
 	}
 	if f.Git != nil {
 		if f.Git.Timeout != nil {
@@ -880,6 +930,13 @@ func (c Config) Rows() []Row {
 	if base == "" {
 		base = "(remote HEAD)"
 	}
+	home, links := c.Home, c.Links
+	if home == "" {
+		home = DefaultHome
+	}
+	if links == "" {
+		links = "(by home)"
+	}
 	cache := c.Git.Cache
 	if cache == "" {
 		cache, _ = source.CacheDir()
@@ -893,6 +950,8 @@ func (c Config) Rows() []Row {
 		Row{"harness.model", model, c.origins["harness.model"]},
 		Row{"harness.force", fmt.Sprint(c.Force), c.origins["harness.force"]},
 		Row{"harness.update", update, c.origins["harness.update"]},
+		Row{"harness.home", home, c.origins["harness.home"]},
+		Row{"harness.links", links, c.origins["harness.links"]},
 		Row{"worktree.dir", c.Worktree.Dir, c.origins["worktree.dir"]},
 		Row{"worktree.name", c.Worktree.Name, c.origins["worktree.name"]},
 		Row{"worktree.base", base, c.origins["worktree.base"]},

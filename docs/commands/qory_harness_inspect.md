@@ -15,7 +15,8 @@ qory harness inspect [flags]
 ### Options
 
 ```
-  -h, --help   help for inspect
+  -h, --help          help for inspect
+      --home string   where the harness is composed: a directory outside the checkout, one home per checkout under it, or .qory/harness (qory.yaml: harness.home)
 ```
 
 ### Options inherited from parent commands
@@ -26,5 +27,5 @@ qory harness inspect [flags]
 
 ### SEE ALSO
 
-* [qory harness](qory_harness.md)	 - Compose, inspect and remove the harness of a checkout
+* [qory harness](qory_harness.md)	 - Compose, inspect, remove and launch the harness of a checkout
 

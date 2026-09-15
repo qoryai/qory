@@ -3,8 +3,9 @@
 //
 // [New] builds a [Report] from a [compose.Result], [Write] stores it as JSON,
 // [Read] loads a stored one and [Report.Print] renders it for a person, which is what
-// qory harness inspect prints. The compose writes it to .qory/harness-report.json, beside
-// the composed home:
+// qory harness inspect prints. The compose writes it beside the home as
+// <home>-report.json, which is .qory/harness-report.json for the home inside the
+// checkout:
 //
 //	path := filepath.Join(checkout, ".qory", "harness-report.json")
 //	rep := report.New(res, name, checkout, home)

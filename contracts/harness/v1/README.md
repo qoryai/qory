@@ -415,14 +415,33 @@ The schema is [module.schema.json](module.schema.json).
 
 ## Rendering
 
-The composed tree is written into the checkout at `.qory/harness`, beside its report
-`.qory/harness-report.json`, and `.qory` is excluded through the clone-local exclude file.
-`.qory` must be a real directory or absent: a symlink or a file there, which a repository
-could commit, is refused, because everything qory writes and removes goes through it. The
-compose runs inside a git working tree only. The tree holds the runtime-agnostic parts
-once, `AGENTS.md`, `skills/` and `hooks/`, one link
-per module at `modules/<name>` to the module's own directory, and one directory per runtime
-with that runtime's files. Every atomic entry is a symlink into its module. Every
+The composed tree, the home, is written into the checkout at `.qory/harness`, beside its
+report `.qory/harness-report.json`, and `.qory` is excluded through the clone-local
+exclude file. `.qory` must be a real directory or absent: a symlink or a file there,
+which a repository could commit, is refused, because everything qory writes and removes
+goes through it. The compose runs for a git working tree only.
+
+The home can stand outside the checkout instead: `harness.home` in the configuration, or
+`--home <dir>` on `compose`, `inspect`, `remove` and `launch`, names a directory outside
+the checkout, and the tree goes under it at `<dir>/<name>-<digest>`, the checkout's base
+name and eight hex digits of the SHA-256 of its real path, one home per checkout and per
+worktree, with the report beside the tree as `<home>-report.json`. Such a compose writes
+nothing into the checkout: no link, no `.qory`, no exclude line, and a tracked path at a
+link's name is no collision, since no link is written. A runtime reads such a home
+through its launch spec (§Launching). A relative value is under the checkout root, and
+the one value allowed inside the checkout is `.qory/harness`. `harness.links: none`, or
+`--no-links`, keeps the checkout untouched with the home inside it too: `.qory` is
+written and excluded, and nothing else; a compose with links off takes back the links an
+earlier compose wrote. `harness.links: checkout`, the default inside, is refused with a
+home outside the checkout. The report records the checkout the home was composed for, so
+`inspect`, `remove` and `--check` find the pair from either side: standing in the
+checkout, or anywhere with `--home` naming the tree. `qory worktree add` composes each
+worktree into its own home under the directory, and `qory worktree remove` removes it
+with the worktree.
+
+The tree holds the runtime-agnostic parts once, `AGENTS.md`, `skills/` and `hooks/`, one
+link per module at `modules/<name>` to the module's own directory, and one directory per
+runtime with that runtime's files. Every atomic entry is a symlink into its module. Every
 `$QORY_HARNESS_HOME`, braced or not, in a settings fragment or an MCP server becomes the
 tree's absolute path, so `$QORY_HARNESS_HOME/modules/core/scripts/check.sh` runs the script
 the core module ships. The links survive a moved checkout; the absolute paths written into
@@ -457,7 +476,10 @@ one worktree drops the lines the links of another still use until its next compo
 
 A module's `link` is a hard link at the checkout root to `modules/<name>` in the tree,
 written after the runtimes' links, excluded, pruned when the stack drops it, and
-refused when it names a path a runtime links or `.qory`. Hard, because the permission
+refused when it names a path a runtime links or `.qory`. With links off it is not
+written, and the compose says so; a script that reaches the module through the
+environment the module exports, `HARNESS_HOME` say, finds it wherever the home is, since
+the variable is written as the module's absolute path in the home. Hard, because the permission
 rules and scripts of the harness depend on that path: a file or a foreign link there
 fails the compose with status 4, and `--force` replaces it when git can restore it.
 `qory harness remove` takes every link at the checkout root into `modules/`, with or
@@ -503,7 +525,7 @@ segment. The refusal names the module, the entry and the reason, with status 2:
 
 | `target.runtime` | qory writes | The program reads as settings | A kind is linked at | Runs without the agent |
 |---|---|---|---|---|
-| `claude` | `CLAUDE.md`, `settings.json`, `mcp.json` | `settings.local.json` | `skills`, `agents`, `commands`, `hooks`, `output-styles` | |
+| `claude` | `CLAUDE.md`, `settings.json`, `mcp.json`, `plugin` | `settings.local.json` | `skills`, `agents`, `commands`, `hooks`, `output-styles` | |
 | `codex` | `config.toml` | | `agents` | |
 | `gemini` | `settings.json` | | `skills`, `hooks`, `agents`, `commands` | |
 | `opencode` | `opencode.json` | | `commands`, `hooks`, `agents` | |
@@ -519,7 +541,8 @@ Per runtime, the files written into its directory:
   the model, `mcp.json` with the servers, linked as `.mcp.json` at the checkout root, and the
   instructions written in full as `CLAUDE.md`. They are not imported from `AGENTS.md`,
   because Claude Code resolves a link to its real path and asks about an import found
-  through one on every start.
+  through one on every start. `plugin/` is the launch spec, a plugin in Claude Code's
+  layout (§Launching), never linked into the checkout.
 - **codex**: `config.toml` with the model, the servers as `[mcp_servers.<name>]` tables,
   the environment under `[shell_environment_policy.set]`, which Codex passes to every
   command it runs, and any other `settings/codex/` file, one `agents/<name>.toml` per agent with the body as
@@ -548,10 +571,44 @@ DeepSeek Harness, Kilo Code, Kimi CLI, Factory Droid, Mistral Vibe, JetBrains Ju
 CLI, Warp, Windsurf, Zed and Crush; compose for them with `target.runtime: any`. A
 package for one of them under `internal/render/` implements one interface.
 
+## Launching
+
+A runtime whose program takes a harness from outside the checkout reads a home the
+checkout does not link to. `qory harness launch --runtime <name>` prints the arguments
+that start the program on the composed home, on one line quoted for a POSIX shell, so a
+launcher runs the program with them and knows nothing of the home's layout:
+
+```sh
+cd <checkout> && eval claude "$(qory harness launch --runtime claude)"
+```
+
+The home is found the way `compose` finds it, from `--home`, `harness.home` or the
+checkout; the runtime is `--runtime`, or the one runtime the harness is composed for, and
+one the harness is not composed for is refused with status 2. The paths printed are
+absolute.
+
+For `claude` the home's `claude/` directory holds, beside the files the checkout links:
+
+| Path | Carries | Argument |
+|---|---|---|
+| `claude/plugin/` | the skills, agents, commands and output styles, linked into their module, under `.claude-plugin/plugin.json` naming the plugin `harness`, so a skill is `/harness:<name>`; `outputStyles` points at `output-styles/` when the compose holds one | `--plugin-dir` |
+| `claude/settings.json` | the permissions, the hooks, the environment with `QORY_HARNESS_HOME` and the model, every `$QORY_HARNESS_HOME` already the home's absolute path | `--settings` |
+| `claude/mcp.json` | the servers, when the compose holds one | `--mcp-config` |
+| `claude/CLAUDE.md` | the instructions, when the compose produces them | `--append-system-prompt-file` |
+| | the user's settings alone, so no `.claude` of the checkout or of a directory above it is read | `--setting-sources user` |
+
+The hooks and the servers reach the session through the settings and the MCP file, the
+same files the checkout's links point at, and not through the plugin, so nothing runs
+twice. The plugin is rendered on every compose, with links or without, so `launch` works
+on a home inside the checkout too. Every other runtime reads its harness from the
+checkout alone, through the links a compose with `harness.links: checkout` writes, and
+`launch` says so with status 2.
+
 ## The report
 
-`.qory/harness-report.json`, `version` 1: the stack name and file, the target, the
-checkout, the home, the modules, the entries with their module, the excludes, the checkout
+`.qory/harness-report.json`, or `<home>-report.json` beside a home outside the
+checkout, `version` 1: the stack name and file, the target, the checkout, the home,
+`links: none` when the compose wrote nothing into the checkout, the modules, the entries with their module, the excludes, the checkout
 paths a `--force` compose replaced, the `env` the harness exports with
 `$QORY_HARNESS_HOME` in place of the home, and the stack's `extensions` as written. The
 target's `runtime` is always an array: the runtimes the home holds after the compose, the
@@ -584,6 +641,8 @@ harness:
   model: opus                    # instead of the stack's target.model
   force: true                    # replace a tracked, unmodified file where a link goes
   update: always                 # fetch every git source again on each compose
+  home: ~/.cache/qory/homes      # where the harness is composed: a directory outside the checkout, or .qory/harness
+  links: none                    # what the checkout gets: checkout, links into the home, or none
   extends: {git: git@git.example.com:acme/harness, ref: main, path: nextjs-15}
   modules:                       # with extends or a target: what this checkout composes
     - name: app                  # extends may be left out when compose -f names the base
@@ -617,6 +676,8 @@ exports:                         # in a repository delivering stacks or modules 
 | `harness.model` | the stack's `target.model` | `--model` wins over it |
 | `harness.force` | `false` | what `--force` does on every compose; `--force=false` wins over it |
 | `harness.update` | `never` | `always` fetches every git source again on each compose; `--update` and `--update=false` win over it |
+| `harness.home` | `.qory/harness` | where the harness is composed: `.qory/harness` in the checkout, or a directory outside it, absolute or under `~`, holding one home per checkout as `<name>-<digest>` (§Rendering); `--home` wins over it |
+| `harness.links` | `checkout` inside the checkout, `none` outside | `checkout` links the checkout into the home and excludes the links; `none` writes nothing into the checkout, and a runtime reads the home through `qory harness launch` (§Launching); `checkout` is refused with a home outside the checkout; `--no-links` wins over it |
 | `harness.target`, `harness.modules` | none | in a checkout's file, its own stack: the target and the modules, with `name`, `description` and `extensions` beside them, as in a `qory-stack.yaml` |
 | `harness.extends`, `harness.modules` | none | in a checkout's file, the stack it extends and the modules it appends; `extends` takes the place of `target`, and may be left out when `qory harness compose -f <stack>` names the base; `modules` may be left out under `extends` or `-f`, for a document carrying its extensions alone (§Extending a stack) |
 | `worktree.dir` | `..` | where `qory worktree add` puts a worktree, relative to the main checkout unless absolute |
