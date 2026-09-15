@@ -14,6 +14,14 @@
 //	agents     agents are linked there; ship it as agents/<name>
 //	hooks      hooks are linked there; ship it as hooks/<name>
 //	workflows  GitHub runs it on every push
+//
+// Copilot CLI also takes a harness from outside the checkout: --add-dir loads a
+// directory's .github/skills and .github/agents as trusted configuration, and
+// --additional-mcp-config takes a file of servers for one session. The runtime's
+// directory holds workspace/.github with the skills linked and the agents written, and
+// mcp.json with the servers when the compose holds one, so the MCP kind has a place
+// there and is not skipped. The hooks and the instructions are read from the checkout
+// alone. [Template] names both.
 package copilot
 
 import (
@@ -64,7 +72,7 @@ func (copilot) Links(res *compose.Result) []render.Link {
 
 // Skips are commands, output styles and MCP servers: Copilot CLI reads no project prompt
 // files, has no output styles, and reads its MCP configuration from the user's home.
-func (copilot) Skips() []string { return []string{"commands", "output-styles", "mcp"} }
+func (copilot) Skips() []string { return []string{"commands", "output-styles"} }
 
 // Reserved are the agents and hooks directories Render writes, and workflows, where a
 // file would be a GitHub Actions workflow the repository did not commit.
@@ -90,5 +98,23 @@ func (copilot) Render(res *compose.Result, dir, home string) error {
 	if err := render.WriteAgents(res, dir, "agents", ".agent.md", "name", "description", "tools", "model"); err != nil {
 		return err
 	}
-	return render.WriteSettings(res, Runtime, filepath.Join(dir, "hooks"), home, nil, nil)
+	if err := render.WriteSettings(res, Runtime, filepath.Join(dir, "hooks"), home, nil, nil); err != nil {
+		return err
+	}
+	if servers := res.MCPFor(home); servers != nil {
+		if err := render.WriteJSON(dir, "mcp.json", map[string]any{"mcpServers": servers}); err != nil {
+			return err
+		}
+	}
+	github := filepath.Join(dir, "workspace", ".github")
+	if err := render.LinkEntries(res, github, "skills"); err != nil {
+		return err
+	}
+	return render.WriteAgents(res, github, "agents", ".agent.md", "name", "description", "tools", "model")
+}
+
+// Template starts Copilot CLI with the workspace directory for the skills and agents,
+// and the servers when the compose wrote them.
+func (copilot) Template() render.Template {
+	return render.Template{Command: "copilot", Args: [][]string{{"--add-dir", "${dir}/workspace"}, {"--additional-mcp-config", "@${dir}/mcp.json"}}}
 }

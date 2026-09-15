@@ -12,6 +12,13 @@
 //	commands       commands are linked there; ship it as commands/<name>
 //	hooks          hooks are linked there; ship it as hooks/<name>
 //	agents         agents are linked there; ship it as agents/<name>
+//	skills         qory links them there for a launch; ship it as skills/<name>
+//
+// OpenCode also reads a directory named by OPENCODE_CONFIG_DIR the way it reads a
+// project's .opencode, and the runtime's directory is one: opencode.json, the agents,
+// the commands, the hooks and the skills linked under skills/. [Template] sets the
+// variable. The instructions are read from the checkout alone. The checkout's .opencode
+// never links the skills, which it reads from .agents/skills.
 package opencode
 
 import (
@@ -37,7 +44,7 @@ func (opencode) Name() string { return Runtime }
 // only when the compose produced instructions.
 func (opencode) Links(res *compose.Result) []render.Link {
 	links := []render.Link{
-		{Checkout: ".opencode", Home: Runtime},
+		{Checkout: ".opencode", Home: Runtime, Except: []string{"skills"}},
 		{Checkout: ".agents/skills", Home: "skills"},
 	}
 	if res == nil || writesConfig(res) {
@@ -59,6 +66,7 @@ func (opencode) Reserved() []render.Reserved {
 		{Path: "commands", Why: "commands are linked there; ship it as commands/<name>"},
 		{Path: "hooks", Why: "hooks are linked there; ship it as hooks/<name>"},
 		{Path: "agents", Why: "agents are linked there; ship it as agents/<name>"},
+		{Path: "skills", Why: "qory links them there for a launch; ship it as skills/<name>"},
 	}
 }
 
@@ -69,7 +77,7 @@ func (opencode) Reserved() []render.Reserved {
 // reads it, {type: remote, url} for a server with a url, else {type: local, command:
 // [command, args...], environment: env}.
 func (opencode) Render(res *compose.Result, dir, home string) error {
-	if err := render.LinkEntries(res, dir, "commands", "hooks"); err != nil {
+	if err := render.LinkEntries(res, dir, "commands", "hooks", "skills"); err != nil {
 		return err
 	}
 	if err := render.WriteAgents(res, dir, "agents", ".md", "description", "mode", "model"); err != nil {
@@ -124,4 +132,9 @@ func server(in map[string]any) map[string]any {
 		out["environment"] = env
 	}
 	return out
+}
+
+// Template starts OpenCode with the runtime's directory as its configuration directory.
+func (opencode) Template() render.Template {
+	return render.Template{Command: "opencode", Env: map[string]string{"OPENCODE_CONFIG_DIR": "${dir}"}}
 }

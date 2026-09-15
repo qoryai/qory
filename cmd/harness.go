@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -87,22 +88,29 @@ type homeOptions struct {
 // reportFor is the report's path for a home, beside it.
 func reportFor(home string) string { return home + "-report.json" }
 
-// locate finds the places a verb works with: from the --home flag, when it names a
-// composed home whose report says which checkout it is for, so a verb runs from either
-// side of the pair; else from the checkout the process stands in and its configuration.
-func locate(o homeOptions) (places, error) {
-	if at, ok, err := placesFromReport(o); ok || err != nil {
-		return at, err
-	}
-	root, err := locateRoot("")
+// locate finds the places a verb works with, and the configuration of their checkout:
+// from the --home flag, when it names a composed home whose report says which checkout
+// it is for, so a verb runs from either side of the pair; else from the checkout the
+// process stands in and its configuration.
+func locate(o homeOptions) (places, config.Config, error) {
+	at, ok, err := placesFromReport(o)
 	if err != nil {
-		return places{}, err
+		return at, config.Config{}, err
+	}
+	root := at.root
+	if !ok {
+		if root, err = locateRoot(""); err != nil {
+			return places{}, config.Config{}, err
+		}
 	}
 	conf, err := configFor(root)
 	if err != nil {
-		return places{}, err
+		return places{}, conf, err
 	}
-	return placesFor(root, conf, o)
+	if !ok {
+		at, err = placesFor(root, conf, o)
+	}
+	return at, conf, err
 }
 
 // placesFromReport reads the --home flag as a composed home: when a report stands beside
@@ -953,7 +961,7 @@ func newInspect(use string, aliases ...string) *cobra.Command {
 --verbose adds nothing here.`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			at, err := locate(h)
+			at, _, err := locate(h)
 			if err != nil {
 				return err
 			}
@@ -985,38 +993,41 @@ func readReport(at places) (report.Report, error) {
 	return rep, nil
 }
 
-// newLaunch builds the launch verb, which prints the arguments that start a runtime's
-// program on the composed home: for claude, the plugin, the settings, the servers and
-// the instructions, each by its absolute path in the home, and the setting sources cut
-// to the user's. A launcher evals the line and knows nothing of the home's layout. The
-// runtime is --runtime, or the one runtime the harness is composed for; a runtime whose
-// program reads its harness from the checkout alone has no launch spec, and the verb
-// says so.
+// newLaunch builds the launch verb, which prints what starts a runtime's program on the
+// composed home: the program, its arguments and its environment, from the runtime's own
+// launch template with the configuration's harness.launch over it, resolved against the
+// home. A launcher evals the line and knows nothing of the home's layout. The runtime is
+// --runtime, or the one runtime the harness is composed for; a runtime whose program
+// reads its harness from the checkout alone has no launch template, and the verb says so.
 func newLaunch(use string, aliases ...string) *cobra.Command {
 	var runtime string
+	var asJSON bool
 	var h homeOptions
 	c := &cobra.Command{
 		Use:     use,
 		Aliases: aliases,
-		Short:   "Print the arguments that start a runtime on the composed harness",
-		Long: `Print the arguments that start a runtime on the composed harness, on one line, quoted for a
-shell, so a launcher runs the program with them:
+		Short:   "Print the command that starts a runtime on the composed harness",
+		Long: `Print the command that starts a runtime on the composed harness, on one line quoted for a
+POSIX shell, so a launcher runs it as it is, with arguments of its own after it:
 
-  cd <checkout> && eval claude "$(qory harness launch --runtime claude)"
+  cd <checkout> && eval "$(qory harness launch --runtime claude)"
 
-For claude they are --plugin-dir for the skills, agents, commands and output styles,
---settings for the permissions, hooks, environment and model, --mcp-config for the
-servers when the compose holds one, --append-system-prompt-file for the instructions,
-and --setting-sources user, so no .claude of the checkout or of a directory above it is
-read. The home is found the way compose finds it, from --home, harness.home or the
-checkout you stand in; the paths printed are absolute, so the line works wherever the
-home is. The other runtimes read their harness from the checkout alone, through the
-links a compose writes there, and have no launch spec.
+The line is the runtime's own launch template, with harness.launch.<runtime> in
+qory.yaml over it: the program, the arguments that hand it the home's files, and the
+variables it takes them from, ${dir} being the runtime's directory in the home. For
+claude it is --plugin-dir, --settings, --mcp-config, --append-system-prompt-file and
+--setting-sources user; for codex it is CODEX_HOME. A group of arguments naming a file
+the compose did not write, mcp.json without a server say, is left out. The home is found
+the way compose finds it, from --home, harness.home or the checkout you stand in; the
+paths printed are absolute, so the line works wherever the home is. --json prints the
+command, the arguments and the variables as one JSON object, for a launcher that spawns
+the program without a shell. A runtime that reads its harness from the checkout alone
+has no launch template, and the verb says so.
 
 --verbose adds nothing here.`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			at, err := locate(h)
+			at, conf, err := locate(h)
 			if err != nil {
 				return err
 			}
@@ -1038,31 +1049,70 @@ links a compose writes there, and have no launch spec.
 			if err != nil {
 				return input(err)
 			}
-			line, err := render.Launch(rt, rep.Home)
+			var override *render.Template
+			if l, ok := conf.Launch[name]; ok {
+				override = &render.Template{Command: l.Command, Args: l.Args, Env: l.Env}
+			}
+			launch, err := render.LaunchFor(rt, rep.Home, override)
 			if err != nil {
 				return input(err)
 			}
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), shellLine(line))
+			if asJSON {
+				data, err := json.MarshalIndent(launchJSON{Command: launch.Command, Args: append([]string{}, launch.Args...), Env: launch.Env}, "", "  ")
+				if err != nil {
+					return err
+				}
+				_, err = fmt.Fprintln(cmd.OutOrStdout(), string(data))
+				return err
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), shellLine(launch))
 			return err
 		},
 	}
 	c.Flags().StringVar(&runtime, "runtime", "", "the runtime to start, one the harness is composed for; the only one when left out")
+	c.Flags().BoolVar(&asJSON, "json", false, "print the command, the arguments and the variables as one JSON object")
 	homeFlags(c, &h)
 	return c
 }
 
-// shellLine joins arguments into one line a POSIX shell reads back as the same
-// arguments: a word of plain characters as it is, anything else in single quotes with
-// its own single quotes escaped.
-func shellLine(args []string) string {
-	words := make([]string, len(args))
-	for i, a := range args {
-		words[i] = shellQuote(a)
+// launchJSON is what --json prints: the arguments always an array, the variables left
+// out when there are none.
+type launchJSON struct {
+	Command string            `json:"command"`
+	Args    []string          `json:"args"`
+	Env     map[string]string `json:"env,omitempty"`
+}
+
+// shellLine is a launch as one line a POSIX shell reads back as the same command: the
+// variables through env when there are any, then the program and its arguments, a word
+// of plain characters as it is and anything else in single quotes with its own single
+// quotes escaped.
+func shellLine(l render.Launch) string {
+	var words []string
+	if len(l.Env) > 0 {
+		words = append(words, "env")
+		for _, k := range sortedKeys(l.Env) {
+			words = append(words, shellQuote(k+"="+l.Env[k]))
+		}
+	}
+	words = append(words, shellQuote(l.Command))
+	for _, a := range l.Args {
+		words = append(words, shellQuote(a))
 	}
 	return strings.Join(words, " ")
 }
 
-// shellQuote is one argument for [shellLine].
+// sortedKeys lists a map's keys in order.
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// shellQuote is one word for [shellLine].
 func shellQuote(s string) string {
 	if s != "" && strings.IndexFunc(s, func(r rune) bool {
 		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("-_./=:@%+,", r))
@@ -1094,7 +1144,7 @@ A home outside the checkout, under the directory --home or harness.home names, i
 removed with its report, and the checkout is not touched: nothing was written there.`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			at, err := locate(h)
+			at, _, err := locate(h)
 			if err != nil {
 				return err
 			}

@@ -12,7 +12,7 @@
 // holds the launch spec for that: plugin/ is a plugin in Claude Code's own layout, the
 // skills, agents, commands and output styles under a .claude-plugin/plugin.json, which
 // --plugin-dir loads for one session; settings.json goes to --settings, mcp.json to
-// --mcp-config and CLAUDE.md to --append-system-prompt-file. [Launch] lists those
+// --mcp-config and CLAUDE.md to --append-system-prompt-file. [Template] holds those
 // arguments, and the plugin is never linked into the checkout.
 //
 // The paths under .claude a files entry may not take, see [render.Reserved]:
@@ -30,7 +30,6 @@
 package claude
 
 import (
-	"os"
 	"path/filepath"
 
 	"github.com/qoryai/qory/internal/compose"
@@ -44,11 +43,6 @@ const Runtime = "claude"
 // Plugin is the plugin's directory under the runtime's directory in the home, what
 // --plugin-dir names.
 const Plugin = "plugin"
-
-// PluginName is the name the plugin's manifest declares, the prefix Claude Code puts
-// before the plugin's skills and commands, /harness:review say. It is the same for
-// every stack, so a launcher and its prompts can name a skill without knowing the stack.
-const PluginName = "harness"
 
 // claude implements [render.Runtime] for Claude Code.
 type claude struct{}
@@ -136,50 +130,38 @@ func (claude) Render(res *compose.Result, dir, home string) error {
 // skills, agents and commands linked under the directories Claude Code reads in a plugin,
 // with the output styles under output-styles and the manifest pointing there when the
 // compose holds one. The hooks, the servers, the settings and the instructions are not
-// in the plugin: they reach the session through the settings and files [Launch] names,
+// in the plugin: they reach the session through the settings and files [Template] names,
 // the same ones the checkout's links point at, so nothing is rendered twice.
 func renderPlugin(res *compose.Result, dir string) error {
-	if err := render.LinkEntries(res, dir, "skills", "agents", "commands"); err != nil {
-		return err
-	}
-	manifest := map[string]any{"name": PluginName, "description": description(res)}
-	styles := false
+	extra := map[string]any{}
 	for _, e := range res.Entries {
 		if e.Kind == "output-styles" {
-			styles = true
+			extra["outputStyles"] = "./output-styles"
 		}
 	}
-	if styles {
+	if extra["outputStyles"] != nil {
 		if err := render.LinkEntries(res, dir, "output-styles"); err != nil {
 			return err
 		}
-		manifest["outputStyles"] = "./output-styles"
 	}
-	return render.WriteJSON(dir, filepath.Join(".claude-plugin", "plugin.json"), manifest)
+	return render.WritePlugin(res, dir, ".claude-plugin", extra)
 }
 
-// description is the plugin's, the stack's description when it has one.
-func description(res *compose.Result) string {
-	if res.Stack != nil && res.Stack.Description != "" {
-		return res.Stack.Description
+// Template starts Claude Code with the harness in a home: the plugin for the skills,
+// agents, commands and output styles, settings.json for the permissions, the hooks, the
+// environment and the model, mcp.json for the servers when the compose wrote one,
+// CLAUDE.md appended to the system prompt when the compose produced instructions, and
+// the setting sources cut to the user's, so no .claude of the checkout or a directory
+// above it is read.
+func (claude) Template() render.Template {
+	return render.Template{
+		Command: "claude",
+		Args: [][]string{
+			{"--plugin-dir", "${dir}/" + Plugin},
+			{"--settings", "${dir}/settings.json"},
+			{"--mcp-config", "${dir}/mcp.json"},
+			{"--append-system-prompt-file", "${dir}/CLAUDE.md"},
+			{"--setting-sources", "user"},
+		},
 	}
-	return "The harness qory composed for this checkout."
-}
-
-// Launch is the argument list that starts Claude Code with the harness in home: the
-// plugin for the skills, agents, commands and output styles, settings.json for the
-// permissions, the hooks, the environment and the model, mcp.json for the servers when
-// the compose wrote one, CLAUDE.md appended to the system prompt when the compose
-// produced instructions, and the setting sources cut to the user's, so no .claude of the
-// checkout or a directory above it is read. Every path is absolute.
-func (claude) Launch(home string) []string {
-	dir := filepath.Join(home, Runtime)
-	args := []string{"--plugin-dir", filepath.Join(dir, Plugin), "--settings", filepath.Join(dir, "settings.json")}
-	if _, err := os.Stat(filepath.Join(dir, "mcp.json")); err == nil {
-		args = append(args, "--mcp-config", filepath.Join(dir, "mcp.json"))
-	}
-	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); err == nil {
-		args = append(args, "--append-system-prompt-file", filepath.Join(dir, "CLAUDE.md"))
-	}
-	return append(args, "--setting-sources", "user")
 }

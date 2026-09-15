@@ -104,7 +104,7 @@ func TestComposeOutsideTheCheckoutLeavesItUntouched(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	claude := filepath.Join(home, "claude")
-	want := strings.Join([]string{"--plugin-dir", filepath.Join(claude, "plugin"), "--settings", filepath.Join(claude, "settings.json"), "--mcp-config", filepath.Join(claude, "mcp.json"), "--append-system-prompt-file", filepath.Join(claude, "CLAUDE.md"), "--setting-sources", "user"}, " ")
+	want := strings.Join([]string{"claude", "--plugin-dir", filepath.Join(claude, "plugin"), "--settings", filepath.Join(claude, "settings.json"), "--mcp-config", filepath.Join(claude, "mcp.json"), "--append-system-prompt-file", filepath.Join(claude, "CLAUDE.md"), "--setting-sources", "user"}, " ")
 	if strings.TrimSpace(out) != want {
 		t.Errorf("launch printed\n%s\nwant\n%s", out, want)
 	}
@@ -215,7 +215,7 @@ func TestHomeFromTheConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "--plugin-dir "+filepath.Join(home, "claude", "plugin")+" ")
+	wants(t, out, "claude --plugin-dir "+filepath.Join(home, "claude", "plugin")+" ")
 	out, err = run(t, "harness", "remove")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -306,20 +306,20 @@ func TestNoLinksKeepsTheHomeInTheCheckout(t *testing.T) {
 
 // TestLaunchNeedsARuntimeWithASpec is launch on a home composed for two runtimes: the
 // runtime has to be named, one the harness is not composed for is refused, and one whose
-// program reads the harness from the checkout alone has no launch spec.
+// program reads the harness from the checkout alone has no launch template.
 func TestLaunchNeedsARuntimeWithASpec(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
-	if out, err := run(t, "harness", "compose", "--runtime", "claude,codex", "--no-links"); err != nil {
+	if out, err := run(t, "harness", "compose", "--runtime", "claude,goose", "--no-links"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	for _, c := range []struct {
 		args []string
 		want string
 	}{
-		{nil, "the harness is composed for claude, codex; --runtime says which to start"},
-		{[]string{"--runtime", "gemini"}, "the harness is not composed for gemini; composed: claude, codex"},
-		{[]string{"--runtime", "codex"}, "codex reads its harness from the checkout alone"},
+		{nil, "the harness is composed for claude, goose; --runtime says which to start"},
+		{[]string{"--runtime", "gemini"}, "the harness is not composed for gemini; composed: claude, goose"},
+		{[]string{"--runtime", "goose"}, "goose reads its harness from the checkout alone"},
 	} {
 		_, err := run(t, append([]string{"harness", "launch"}, c.args...)...)
 		if err == nil || cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), c.want) {
@@ -372,4 +372,144 @@ func TestWorktreeHomeOutsideTheCheckout(t *testing.T) {
 	}
 	wants(t, out, "removed  "+home+"  (its home)")
 	gone(t, homes, filepath.Base(home), filepath.Base(home)+"-report.json")
+}
+
+// TestLaunchPerRuntime composes one home for every runtime with a launch template and
+// checks each line: the program, the flags or the variables that hand it the home, and
+// the files under the runtime's directory those name. The line is the runtime's own
+// template; --json prints the same as one object.
+func TestLaunchPerRuntime(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	out, err := run(t, "harness", "compose", "--runtime", "claude,codex,opencode,amp,gemini,cursor,copilot", "--no-links")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	home := filepath.Join(root, ".qory", "harness")
+	dir := func(rt string) string { return filepath.Join(home, rt) }
+	lines := map[string]string{
+		"claude":   "claude --plugin-dir " + dir("claude") + "/plugin --settings " + dir("claude") + "/settings.json --mcp-config " + dir("claude") + "/mcp.json --append-system-prompt-file " + dir("claude") + "/CLAUDE.md --setting-sources user",
+		"codex":    "env CODEX_HOME=" + dir("codex") + " codex",
+		"opencode": "env OPENCODE_CONFIG_DIR=" + dir("opencode") + " opencode",
+		"amp":      "amp --settings-file " + dir("amp") + "/settings.json",
+		"gemini":   "env GEMINI_CLI_SYSTEM_SETTINGS_PATH=" + dir("gemini") + "/settings.json gemini",
+		"cursor":   "cursor-agent --plugin-dir " + dir("cursor") + "/plugin",
+		"copilot":  "copilot --add-dir " + dir("copilot") + "/workspace --additional-mcp-config @" + dir("copilot") + "/mcp.json",
+	}
+	for rt, want := range lines {
+		out, err := run(t, "harness", "launch", "--runtime", rt)
+		if err != nil {
+			t.Errorf("launch %s: %v\n%s", rt, err, out)
+			continue
+		}
+		if got := strings.TrimSpace(out); got != want {
+			t.Errorf("launch %s printed\n%s\nwant\n%s", rt, got, want)
+		}
+	}
+	// What each template names is there: the directories a program reads as its own,
+	// with the skills linked and the instructions written where it looks for them.
+	for _, name := range []string{
+		"codex/skills/review/SKILL.md", "codex/AGENTS.md", "codex/config.toml",
+		"opencode/skills/review/SKILL.md", "opencode/agents/reviewer.md",
+		"cursor/plugin/.cursor-plugin/plugin.json", "cursor/plugin/skills/review/SKILL.md", "cursor/plugin/agents/reviewer.md", "cursor/plugin/.mcp.json",
+		"copilot/workspace/.github/skills/review/SKILL.md", "copilot/workspace/.github/agents/reviewer.agent.md", "copilot/mcp.json",
+		"gemini/settings.json", "amp/settings.json",
+	} {
+		if _, err := os.Stat(filepath.Join(home, name)); err != nil {
+			t.Errorf("home lacks %s: %v", name, err)
+		}
+	}
+	// No module ships a cursor hooks fragment, so the plugin carries no hooks file.
+	gone(t, home, "cursor/plugin/hooks")
+	data, _ := os.ReadFile(filepath.Join(home, "copilot", "mcp.json"))
+	wants(t, string(data), `"mcpServers"`, `"db"`)
+	lacks(t, out, "mcp/db  (no place in copilot)")
+
+	out, err = run(t, "harness", "launch", "--runtime", "codex", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Command string            `json:"command"`
+		Args    []string          `json:"args"`
+		Env     map[string]string `json:"env"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("%v:\n%s", err, out)
+	}
+	if got.Command != "codex" || got.Args == nil || len(got.Args) != 0 || got.Env["CODEX_HOME"] != dir("codex") {
+		t.Errorf("--json printed %+v", got)
+	}
+}
+
+// TestLaunchFromTheConfiguration is harness.launch in the user's file: a field set there
+// stands in for the runtime's own, a group naming a file the compose did not write is
+// left out, ${home} and ${dir} are the home and the runtime's directory, qory config
+// shows the entry, and a malformed entry is refused by name.
+func TestLaunchFromTheConfiguration(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	user := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "qory.yaml")
+	writeFile(t, user, `apiVersion: qory.dev/v1alpha1
+harness:
+  launch:
+    claude:
+      command: /opt/claude/bin/claude
+      args:
+        - [--plugin-dir, "${dir}/plugin"]
+        - [--append-system-prompt-file, "${dir}/nothing.md"]
+        - --verbose
+    codex:
+      env: {CODEX_HOME: "${home}", OPENAI_API_KEY: "it's secret"}
+`)
+	if out, err := run(t, "harness", "compose", "--runtime", "claude,codex", "--no-links"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	home := filepath.Join(root, ".qory", "harness")
+	out, err := run(t, "harness", "launch", "--runtime", "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.TrimSpace(out), "/opt/claude/bin/claude --plugin-dir "+home+"/claude/plugin --verbose"; got != want {
+		t.Errorf("launch printed\n%s\nwant\n%s", got, want)
+	}
+	out, err = run(t, "harness", "launch", "--runtime", "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.TrimSpace(out), "env CODEX_HOME="+home+" 'OPENAI_API_KEY=it'\\''s secret' codex"; got != want {
+		t.Errorf("launch printed\n%s\nwant\n%s", got, want)
+	}
+	out, err = run(t, "config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants(t, out, "harness.launch.claude", "/opt/claude/bin/claude --plugin-dir ${dir}/plugin --append-system-prompt-file ${dir}/nothing.md --verbose", "harness.launch.codex", "CODEX_HOME=${home} OPENAI_API_KEY=it's secret")
+	for _, c := range []struct{ file, want string }{
+		{"harness: {launch: {claude: {command: \"\"}}}\n", "harness.launch.claude.command is empty"},
+		{"harness: {launch: {claude: {args: [[]]}}}\n", "harness.launch.claude.args[0] is empty"},
+		{"harness: {launch: {codex: {env: {1BAD: x}}}}\n", "harness.launch.codex.env: 1BAD is not an environment variable name"},
+		{"harness: {launch: {codex: {env: {QORY_HARNESS_HOME: x}}}}\n", "harness.launch.codex.env.QORY_HARNESS_HOME is qory's own"},
+	} {
+		writeFile(t, user, "apiVersion: qory.dev/v1alpha1\n"+c.file)
+		if _, err := run(t, "config"); err == nil || !strings.Contains(err.Error(), c.want) || cmd.ExitCode(err) != cmd.ExitInput {
+			t.Errorf("%s: %v, want %q", c.file, err, c.want)
+		}
+	}
+}
+
+// TestLaunchDirectoriesAreNotLinked is a compose with links for the runtimes that render
+// a launch directory beside what the checkout links: the plugin, the skills and the
+// instructions a program takes from outside stay in the home, and the checkout's
+// directories hold what they held before.
+func TestLaunchDirectoriesAreNotLinked(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	if out, err := run(t, "harness", "compose", "--runtime", "claude,codex,opencode,cursor"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	gone(t, root, ".claude/plugin", ".cursor/plugin", ".codex/skills", ".codex/AGENTS.md", ".opencode/skills")
+	dirLinks(t, root, ".codex", "config.toml", "agents")
+	dirLinks(t, root, ".opencode", "agents", "commands")
+	dirLinks(t, root, ".cursor", "agents", "mcp.json")
 }

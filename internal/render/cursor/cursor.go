@@ -15,12 +15,27 @@
 //	environment.json  Cursor reads it as settings; a module sets those through settings/cursor/environment.json
 //	agents            agents are linked there; ship it as agents/<name>
 //	hooks             hooks are linked there; ship it as hooks/<name>
+//	plugin            qory writes the plugin there
+//
+// The Cursor CLI also takes a plugin from outside the checkout, --plugin-dir, in the
+// layout Claude Code's plugins have, and the runtime's directory holds one at plugin/:
+// the skills and the agents linked, and copies of hooks.json as hooks/hooks.json and of
+// mcp.json as .mcp.json, since the CLI has no flag for settings. The instructions are
+// read from the checkout alone. [Template] names the plugin, and the checkout's .cursor
+// never links it.
 package cursor
 
 import (
+	"os"
+	"path/filepath"
+
 	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/render"
 )
+
+// Plugin is the plugin's directory under the runtime's directory in the home, what
+// --plugin-dir names.
+const Plugin = "plugin"
 
 // Runtime is the target.runtime value for Cursor, and the name of its directory in the
 // home.
@@ -39,7 +54,7 @@ func (cursor) Name() string { return Runtime }
 // produced no instructions.
 func (cursor) Links(res *compose.Result) []render.Link {
 	links := []render.Link{
-		{Checkout: ".cursor", Home: Runtime},
+		{Checkout: ".cursor", Home: Runtime, Except: []string{Plugin}},
 		{Checkout: ".agents/skills", Home: "skills"},
 	}
 	if res == nil || res.Instructions != "" {
@@ -62,6 +77,7 @@ func (cursor) Reserved() []render.Reserved {
 		{Path: "environment.json", Why: "Cursor reads it as settings; a module sets those through settings/cursor/environment.json"},
 		{Path: "agents", Why: "agents are linked there; ship it as agents/<name>"},
 		{Path: "hooks", Why: "hooks are linked there; ship it as hooks/<name>"},
+		{Path: Plugin, Why: "qory writes the plugin there"},
 	}
 }
 
@@ -81,9 +97,42 @@ func (cursor) Render(res *compose.Result, dir, home string) error {
 	if len(res.MCP) > 0 {
 		ensure = []string{"mcp.json"}
 	}
-	return render.WriteSettings(res, Runtime, dir, home, ensure, func(file string, m map[string]any) {
+	err := render.WriteSettings(res, Runtime, dir, home, ensure, func(file string, m map[string]any) {
 		if file == "mcp.json" {
 			render.PutServers(m, "mcpServers", res.MCPFor(home))
 		}
 	})
+	if err != nil {
+		return err
+	}
+	return renderPlugin(res, dir)
+}
+
+// renderPlugin writes the plugin into dir/plugin: the manifest, the skills and agents
+// linked, and copies of the hooks and MCP files the runtime wrote beside it, each when
+// it was written. The agents are the ones Render wrote, linked again under the plugin.
+func renderPlugin(res *compose.Result, dir string) error {
+	plugin := filepath.Join(dir, Plugin)
+	if err := render.LinkEntries(res, plugin, "skills"); err != nil {
+		return err
+	}
+	if err := render.WriteAgents(res, plugin, "agents", ".md", "name", "description", "model"); err != nil {
+		return err
+	}
+	for _, c := range [][2]string{{"hooks.json", filepath.Join("hooks", "hooks.json")}, {"mcp.json", ".mcp.json"}} {
+		src := filepath.Join(dir, c[0])
+		if _, err := os.Stat(src); err != nil {
+			continue
+		}
+		if err := render.CopyFile(src, plugin, c[1]); err != nil {
+			return err
+		}
+	}
+	return render.WriteJSON(plugin, filepath.Join(".cursor-plugin", "plugin.json"), map[string]any{"name": render.PluginName, "description": render.PluginDescription(res)})
+}
+
+// Template starts the Cursor CLI with the plugin, which carries the skills, the agents,
+// the hooks and the servers.
+func (cursor) Template() render.Template {
+	return render.Template{Command: "cursor-agent", Args: [][]string{{"--plugin-dir", "${dir}/" + Plugin}}}
 }

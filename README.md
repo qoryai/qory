@@ -193,7 +193,7 @@ qory setup shell         # completions, and a shell that follows worktree add an
 qory harness compose     # compose the stack into the checkout you stand in   (qory hc)
 qory harness inspect     # the report: every entry and the module it came from (qory hi)
 qory harness remove      # remove the composed tree and its links               (qory hr)
-qory harness launch      # the arguments that start a runtime on the tree        (qory hl)
+qory harness launch      # the command that starts a runtime on the tree          (qory hl)
 qory worktree add        # add a worktree for a branch and prepare it            (qory wa)
 qory worktree remove     # remove a worktree and its branch                      (qory wr)
 qory worktree list       # every worktree with its branch                        (qory wl)
@@ -277,19 +277,24 @@ The tree can live outside the checkout, owned by whatever composes it, a workflo
 launcher, and the checkout then carries nothing of it: no link, no `.qory`, no exclude
 line, so a tracked `harness/` directory is no collision and a pull is an ordinary pull.
 `--home <dir>`, or `harness.home` in your own `qory.yaml`, names the directory, and
-every checkout and worktree gets its own home under it. Claude Code takes such a home
-from its own command line, and `qory harness launch` prints the arguments:
+every checkout and worktree gets its own home under it. Each tool takes such a home
+from its own command line or environment, and `qory harness launch` prints the command:
 
 ```sh
 qory harness compose --home ~/.cache/qory/homes
-eval claude "$(qory harness launch --runtime claude --home ~/.cache/qory/homes)"
+eval "$(qory harness launch --runtime claude --home ~/.cache/qory/homes)"
 ```
 
-That is `--plugin-dir` for the skills, agents, commands and output styles, `--settings`
+For Claude Code that is `--plugin-dir` for a plugin the compose renders, `--settings`
 for the permissions, hooks, environment and model, `--mcp-config` for the servers,
 `--append-system-prompt-file` for the instructions, and `--setting-sources user` so no
-`.claude` of the checkout or of a directory above it is read. The other runtimes read
-their harness from the checkout alone, through the links.
+`.claude` of the checkout or of a directory above it is read. Cursor takes the same
+plugin, Codex takes the tree as its `CODEX_HOME`, OpenCode as its `OPENCODE_CONFIG_DIR`,
+Copilot the skills and agents through `--add-dir`, Amp and Gemini their settings file.
+Every line is the tool's own template, and `harness.launch.<runtime>` in your
+`qory.yaml` changes the command, the arguments or the variables when a tool's flags
+move. `--json` prints the same as one object. The contract says what each tool takes
+from outside and what it still reads from the checkout.
 
 ## The format
 

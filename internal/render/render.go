@@ -111,26 +111,149 @@ type Runtime interface {
 
 // Launcher is a runtime whose program takes the harness from outside the checkout, so a
 // home composed without links into the checkout still reaches it: the runtime renders
-// a launch spec into its directory in the home, and Launch says how to start the
-// program on it. A runtime that does not implement it reads its harness through the
-// links alone.
+// what the program takes from outside into its directory in the home, a plugin or a
+// configuration directory say, and Template says how to start the program on it. A
+// runtime that does not implement it reads its harness through the links alone.
 type Launcher interface {
-	// Launch is the argument list that starts the program in a checkout with the
-	// harness composed into home active: the plugin, the settings, the servers and the
-	// instructions, each named by its absolute path in home. A file the compose did not
-	// produce, the servers say, is left out.
-	Launch(home string) []string
+	// Template is how the program is started on a home, see [Template].
+	Template() Template
 }
 
-// Launch is the argument list that starts a runtime's program on the harness in home,
-// see [Launcher], and an error for a runtime that has no launch spec: its program reads
-// the harness from the checkout alone, through the links a compose writes there.
-func Launch(p Runtime, home string) ([]string, error) {
+// Template is how a runtime's program is started on the harness in a home: the program,
+// groups of arguments, and environment variables, each naming the home's files through
+// two placeholders, ${home} for the home and ${dir} for the runtime's directory in it. A
+// runtime ships its own as the default, and the configuration's harness.launch key
+// overrides any field of it. [LaunchFor] resolves one against a home.
+type Template struct {
+	// Command is the program, as found on the PATH or by its path.
+	Command string
+	// Args are the arguments in groups, a flag and its value say. A group naming a path
+	// under ${home} or ${dir} that the compose did not write, mcp.json without a server
+	// say, is left out whole, so a flag never names a file that is not there.
+	Args [][]string
+	// Env are the variables set for the program, under the same rule as a group.
+	Env map[string]string
+}
+
+// Launch is a [Template] resolved against a home: what starts the program.
+type Launch struct {
+	// Command is the program.
+	Command string
+	// Args are the arguments, every placeholder replaced and every group naming a
+	// missing path left out.
+	Args []string
+	// Env are the variables to set, nil when there are none.
+	Env map[string]string
+}
+
+// LaunchFor resolves the runtime's launch template against home: the runtime's own, with
+// every field the override sets in its place. A runtime without a template is an error
+// saying that its program reads the harness from the checkout alone, through the links
+// a compose writes there.
+func LaunchFor(p Runtime, home string, override *Template) (Launch, error) {
 	l, ok := p.(Launcher)
 	if !ok {
-		return nil, fmt.Errorf("%s reads its harness from the checkout alone, through the links a compose with harness.links: checkout writes; qory renders no launch spec for it", p.Name())
+		return Launch{}, fmt.Errorf("%s reads its harness from the checkout alone, through the links a compose with harness.links: checkout writes; qory renders no launch spec for it", p.Name())
 	}
-	return l.Launch(home), nil
+	t := l.Template()
+	if override != nil {
+		if override.Command != "" {
+			t.Command = override.Command
+		}
+		if override.Args != nil {
+			t.Args = override.Args
+		}
+		if override.Env != nil {
+			t.Env = override.Env
+		}
+	}
+	dir := filepath.Join(home, p.Name())
+	out := Launch{Command: t.Command}
+	for _, group := range t.Args {
+		words, ok := resolveWords(group, home, dir)
+		if ok {
+			out.Args = append(out.Args, words...)
+		}
+	}
+	for _, name := range sortedKeys(t.Env) {
+		words, ok := resolveWords([]string{t.Env[name]}, home, dir)
+		if !ok {
+			continue
+		}
+		if out.Env == nil {
+			out.Env = map[string]string{}
+		}
+		out.Env[name] = words[0]
+	}
+	return out, nil
+}
+
+// resolveWords replaces the placeholders in a group of words and reports whether every
+// path a word names under the home is there. The path is what follows a placeholder to
+// the end of the word, so "@${dir}/mcp.json" names mcp.json.
+func resolveWords(group []string, home, dir string) ([]string, bool) {
+	out := make([]string, len(group))
+	for i, w := range group {
+		for _, ph := range [][2]string{{"${dir}", dir}, {"${home}", home}} {
+			if at := strings.Index(w, ph[0]+"/"); at >= 0 {
+				path := ph[1] + w[at+len(ph[0]):]
+				if _, err := os.Stat(path); err != nil {
+					return nil, false
+				}
+			}
+		}
+		out[i] = strings.NewReplacer("${dir}", dir, "${home}", home).Replace(w)
+	}
+	return out, true
+}
+
+// sortedKeys lists a map's keys in order, so a launch's variables come out the same
+// every time.
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// CopyFile copies the file at src to dir/name through [WriteFile], for a runtime that
+// hands a file it wrote to its program twice over, once in place and once in a plugin.
+func CopyFile(src, dir, name string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return WriteFile(dir, name, data)
+}
+
+// WritePlugin writes the manifest a plugin in Claude Code's layout starts with, at
+// dir/<manifestDir>/plugin.json, naming the plugin [PluginName] with the stack's
+// description, and links the composed skills, agents and commands under dir. Cursor and
+// Claude Code read the layout, each under its own manifest directory.
+func WritePlugin(res *compose.Result, dir, manifestDir string, extra map[string]any) error {
+	if err := LinkEntries(res, dir, "skills", "agents", "commands"); err != nil {
+		return err
+	}
+	manifest := map[string]any{"name": PluginName, "description": PluginDescription(res)}
+	for k, v := range extra {
+		manifest[k] = v
+	}
+	return WriteJSON(dir, filepath.Join(manifestDir, "plugin.json"), manifest)
+}
+
+// PluginName is the name a rendered plugin's manifest declares, the prefix a program
+// puts before the plugin's skills and commands, /harness:review say. It is the same for
+// every stack, so a launcher and its prompts can name a skill without knowing the stack.
+const PluginName = "harness"
+
+// PluginDescription is a rendered plugin's description: the stack's, when it has one.
+func PluginDescription(res *compose.Result) string {
+	if res.Stack != nil && res.Stack.Description != "" {
+		return res.Stack.Description
+	}
+	return "The harness qory composed for this checkout."
 }
 
 // runtimes holds every registered runtime by its target.runtime value.

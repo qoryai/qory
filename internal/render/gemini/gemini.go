@@ -12,6 +12,11 @@
 //	hooks          hooks are linked there; ship it as hooks/<name>
 //	agents         agents are linked there; ship it as agents/<name>
 //	commands       commands are linked there; ship it as commands/<name>
+//
+// Gemini CLI also reads its system settings from the file GEMINI_CLI_SYSTEM_SETTINGS_PATH
+// names, over the user's and the workspace's, so the model, the servers and the hooks in
+// settings.json reach a session from outside the checkout; the skills, agents, commands
+// and instructions are read from the checkout alone. [Template] sets the variable.
 package gemini
 
 import (
@@ -112,4 +117,9 @@ func (gemini) Render(res *compose.Result, dir, home string) error {
 		}
 	}
 	return nil
+}
+
+// Template starts Gemini CLI with the runtime's settings file as the system settings.
+func (gemini) Template() render.Template {
+	return render.Template{Command: "gemini", Env: map[string]string{"GEMINI_CLI_SYSTEM_SETTINGS_PATH": "${dir}/settings.json"}}
 }
