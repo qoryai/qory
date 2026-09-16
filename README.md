@@ -195,7 +195,6 @@ qory harness inspect     # the report: every entry and the module it came from (
 qory harness remove      # remove the composed tree and its links               (qory hr)
 qory harness launch      # the command that starts a runtime on the tree          (qory hl)
 qory run                 # start a runtime on the tree, observed and recorded
-qory receive             # receive the runner's webhook deliveries into a file
 qory worktree add        # add a worktree for a branch and prepare it            (qory wa)
 qory worktree remove     # remove a worktree and its branch                      (qory wr)
 qory worktree list       # every worktree with its branch                        (qory wl)
@@ -335,8 +334,7 @@ hosts the policy covers and nothing else; the policy is the ceiling. When no mod
 declares, the policy's list stands as it is.
 
 With a webhook configured the runner does not start unless the receiver answers;
-`--local` runs with the files alone. `qory receive` is a receiver for that URL on this
-machine, which appends what it verifies to a file. A denied connection is recorded and
+`--local` runs with the files alone. A denied connection is recorded and
 the session goes on; nothing here ends a session. The formats are in the runner's
 [contract](https://github.com/qoryai/runner/tree/main/contracts/runner/v1).
 

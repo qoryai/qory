@@ -20,9 +20,6 @@ release may change what an existing document does, and says so under Upgrading.
   `--headless` or no terminal runs it on pipes. The exit status is the runtime's. The
   hidden `qory run forward` is the hook command the runner installs into a copy of the
   runtime's settings, so a session needs nothing on the machine beyond `qory`.
-- `qory receive` is the reference receiver of that webhook: it listens where the
-  configuration's URL says, verifies each delivery's signature, deduplicates on the event
-  id and appends the events to a file.
 - A module declares the hosts its skills, hooks and servers reach under `egress` in
   `qory-module.yaml`, a lower-case name or a `*.` suffix, in the grammar the runner
   contract gives a policy's allow list. The compose unions the declarations into the

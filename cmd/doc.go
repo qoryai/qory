@@ -15,7 +15,6 @@
 //	qory harness remove    remove the composed harness and its links, or one runtime's
 //	qory harness launch    print the command that starts a runtime on the composed harness
 //	qory run               start a runtime on the composed harness through the session runner
-//	qory receive           receive the runner's webhook deliveries into a file
 //
 // Each harness verb has a one-letter alias under the noun, and a hidden two-letter
 // shortcut at the top level for typing at a prompt many times a day: hc, hi and hr. Both
@@ -27,7 +26,7 @@
 // lives in the stack, compose and render packages. Nor of how a session is observed:
 // qory run hands a launch spec to the session package of the runner module,
 // github.com/qoryai/runner, and exits with what comes back, and qory run forward, hidden,
-// is the hook command the runner installs; qory receive serves that module's receiver. The set of runtimes a build can
+// is the hook command the runner installs. The set of runtimes a build can
 // render for is decided here, by the blank imports at the top of harness.go: a runtime
 // package registers itself in its own init, so importing it is what makes its name valid
 // for target.runtime and for the --runtime flag.
