@@ -351,13 +351,14 @@ type harnessSection struct {
 	Extends     stack.Source              `yaml:"extends,omitempty"`
 	Target      stack.Target              `yaml:"target,omitempty"`
 	Modules     []stack.Module            `yaml:"modules,omitempty"`
+	Bind        map[string]string         `yaml:"bind,omitempty"`
 	Extensions  map[string]map[string]any `yaml:"extensions,omitempty"`
 }
 
-// composes reports whether the section carries a compose document: modules, extends or
-// extensions. A section of machine keys alone is not a document.
+// composes reports whether the section carries a compose document: modules, extends,
+// bindings or extensions. A section of machine keys alone is not a document.
 func (h *harnessSection) composes() bool {
-	return h != nil && (len(h.Modules) > 0 || h.extends() || len(h.Extensions) > 0)
+	return h != nil && (len(h.Modules) > 0 || h.extends() || len(h.Bind) > 0 || len(h.Extensions) > 0)
 }
 
 // extends reports whether the section names a stack to extend, by directory or by export.
@@ -642,7 +643,7 @@ func OnBase(path, base string) (*stack.Stack, stack.Source, error) {
 // document is the file's harness section as the stack it holds, before validation.
 func (f file) document() *stack.Stack {
 	h := f.Harness
-	return &stack.Stack{APIVersion: f.APIVersion, RetiredAPIVersion: f.retired, Qory: f.Qory, Name: h.Name, Description: h.Description, Extends: h.Extends, Target: h.Target, Modules: h.Modules, Extensions: h.Extensions}
+	return &stack.Stack{APIVersion: f.APIVersion, RetiredAPIVersion: f.retired, Qory: f.Qory, Name: h.Name, Description: h.Description, Extends: h.Extends, Target: h.Target, Modules: h.Modules, Bind: h.Bind, Extensions: h.Extensions}
 }
 
 // UserDir is the user's configuration directory: $XDG_CONFIG_HOME/qory, else

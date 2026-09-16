@@ -77,10 +77,10 @@ func (opencode) Reserved() []render.Reserved {
 // reads it, {type: remote, url} for a server with a url, else {type: local, command:
 // [command, args...], environment: env}.
 func (opencode) Render(res *compose.Result, dir, home string) error {
-	if err := render.LinkEntries(res, dir, "commands", "hooks", "skills"); err != nil {
+	if err := render.PlaceEntries(res, dir, render.Bare, "commands", "hooks", "skills"); err != nil {
 		return err
 	}
-	if err := render.WriteAgents(res, dir, "agents", ".md", "description", "mode", "model"); err != nil {
+	if err := render.WriteAgents(res, render.Bare, dir, "agents", ".md", "description", "mode", "model"); err != nil {
 		return err
 	}
 	var ensure []string

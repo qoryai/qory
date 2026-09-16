@@ -1,0 +1,3 @@
+agents/core-coder core
+agents/reviewer core
+skills/deploy core

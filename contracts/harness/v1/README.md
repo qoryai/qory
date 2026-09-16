@@ -146,6 +146,7 @@ in this file (§The configuration). A `harness` section holding only the machine
 | `modules[].only` | no | the only things of this module that are composed, with the same keys as `exclude`, plus what the named entries require from this module (`requires` in its manifest, followed transitively). Everything else is left out: a kind not named contributes no entry beyond those, a part not named is left out. `only: {skills: [deploy]}` is the deploy skill, what it needs, and nothing else. An `exclude` beside it names entries the `only` brought in, to leave them out after all; a requirement left out that way has to come from another module (rule 4). It names no part, and nothing the `only` names |
 | `modules[].variant` | no | forces one of the module's variants instead of the one named like the targeted runtime |
 | `modules[].link` | no | a name at the checkout root, one path segment, linked to the module's directory in the composed tree, so a permission rule or a script names the module's files by a checkout-relative path: `harness/scripts/check.sh`. A hard link (§Rendering), named once across the modules |
+| `bind` | no | the entry that fills each role a document references (§References): `<kind>/<role>` to the name of an entry of that kind, `agents/coder: rails-coder`. The kind is `agents`, `skills` or `commands`. A checkout extending a stack adds to the base's bindings and may rebind a role of the base's |
 | `extensions` | no | one map per namespace, written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it |
 | `extending` | no | what a module of a checkout extending this stack may ship: `kinds`, `instructions`, `settings`, `files` (§Extending a stack). A base without the block cannot be extended |
 
@@ -184,6 +185,8 @@ checkout appends:
   exclude resolves it. The message names that one entry and nothing else of the base.
 - Both stacks' `extensions` go into the report; a namespace the base declares is the
   base's, and a checkout declaring it too is refused.
+- The base's `bind` carries, and the checkout's `bind` adds to it and may rebind a role of
+  the base's: which entry fills a role is a target's choice, like the model.
 - The report records the base with its source and pin, and marks the base's modules.
 - The base may come from `-f` in place of `extends` (§Discovery): `qory harness compose
   -f <stack>` in a checkout whose document extends a stack composes the document on that
@@ -356,6 +359,45 @@ the composed tree.
 
 The schema is [module.schema.json](module.schema.json).
 
+## References
+
+A document that dispatches another composed entry names it by a reference, and the
+compose resolves the reference to the name the session registers the entry under, which
+the module cannot know: a program that loads the harness as a plugin puts its own name
+before every agent, skill and command, `harness:reviewer`, where the checkout's links and
+most launch paths register the name as written. A reference is `${qory:<kind>/<name>}`,
+the kind `agents`, `skills` or `commands`, the name one path segment:
+
+```markdown
+1. Dispatch ${qory:agents/coder} for the code.
+2. Run ${qory:skills/test}, then dispatch ${qory:agents/reviewer}.
+```
+
+The compose reads a reference in an agent, a command, an output style, `AGENTS.md`, and
+every `.md` file under a skill's directory at any depth. Anything else between `${qory:`
+and `}` fails the compose naming the file and the reference. Prose that mentions an entry
+in passing stays prose; the marker names the strings that are dispatched. The reference
+becomes the registered name and nothing around it, so a document that wants the slash a
+program puts before a skill writes `/${qory:skills/review}`.
+
+A reference names an entry of that name, or a role. A role is a name no entry has, bound
+per stack under `bind` to the entry that fills it: core writes `${qory:agents/coder}`,
+one stack binds `agents/coder: rails-coder` and another binds a different agent, and the
+same core module serves both. A reference resolves within the stack's composed entries
+and its bindings, and nowhere else: it never brings in a module the stack did not list,
+and never an entry a module's `only` or `exclude` left out. A reference is a requirement
+(rule 4), so an entry needs no `requires` line for what its documents reference, and an
+`only` follows references the way it follows `requires`.
+
+Each place a renderer puts a document in front of a program has an address, the name
+the program registers an entry under when it reads it there, and the document is
+placed with its references resolved at that address (§Rendering). A launch path whose
+program renames the entries also gets the names written into the instructions it reads,
+under a heading of its own after the modules' text, so a session that meets an unmarked
+name in prose knows the registered one; `qory harness launch --json` prints the same
+names under `addresses` (§Launching). A module's own text is never rewritten for one
+runtime: the resolution happens in the composed tree, per path.
+
 ## Composition rules
 
 1. **One flat tree, one entry per name.** Every atomic entry links into `<kind>/<name>` from
@@ -380,14 +422,23 @@ The schema is [module.schema.json](module.schema.json).
    what its named entries require from the module, transitively, and an `exclude` beside
    it may name only those; one naming anything else fails the same way.
 4. **A requirement that is not composed fails.** After the excludes and the collision
-   check, every composed entry's `requires` items from its manifest are checked against
-   the composed entries. One that is missing fails the compose with `module core: skill
-   deploy requires command ship, which module core leaves out` when an `exclude` or an
-   `only` dropped it, naming the module whose block did, and with `module core: skill deploy requires
-   command ship, which no module ships` otherwise. An entry that was left out has no
-   requirements to meet. A manifest whose `requires` names an entry the module does not
-   ship fails as the module is read: `module core: requires names skill release, which
-   the module does not ship`.
+   check, every composed entry's `requires` items from its manifest and the references in
+   its documents (§References) are checked against the composed entries, a reference to
+   a bound role against the entry it is bound to. One that is missing fails the compose
+   with `module core: skill deploy requires command ship, which module core leaves out`
+   when an `exclude` or an `only` dropped it, naming the module whose block did, and with
+   `module core: skill deploy requires command ship, which no module ships` otherwise; a
+   reference says `references` for `requires`, and `which no module ships and the stack
+   does not bind` when neither an entry nor a binding answers to the name. A binding is
+   checked first: one naming an entry that is not composed fails with `bind agents/coder
+   names agent rails-coder, which no module ships`, or `which module rails leaves out`,
+   and a role whose name an entry has fails with `bind agents/reviewer names a role, and
+   module core ships agent reviewer; a role's name is no entry's`, since such a role
+   could never be rebound. Every failure of this rule comes at once, one per line, the
+   bindings first and then the entries in their sorted order, so one compose names every
+   site there is to fix. An entry that was left out has no requirements to meet. A
+   manifest whose `requires` names an entry the module does not ship fails as the module
+   is read: `module core: requires names skill release, which the module does not ship`.
 5. **Merged kinds join, and a value is set once.** A settings target file merges across
    the modules that ship a fragment for it, JSON or TOML by extension: objects deep-merge,
    `permissions` lists concatenate and deduplicate, `hooks` arrays concatenate. Every
@@ -406,7 +457,8 @@ The schema is [module.schema.json](module.schema.json).
    declares no variants. A manifest with variants, none for the runtime and no default, or
    `default: fail`, fails the compose.
 7. **Everything is reported.** The report names every module with its pin, every entry with
-   its module and, for one an `only` brought in, the entry that required it, every entry
+   its module and, for one an `only` brought in, the entry that required it, the
+   references each entry's documents hold, the bindings, every entry
    and part a block left out, as `<kind>/<name>`, `instructions/AGENTS.md`,
    `settings/<runtime>/<file>` or `env/<NAME>`, and every variant chosen. `qory harness
    inspect` prints it.
@@ -441,7 +493,17 @@ with the worktree.
 
 The tree holds the runtime-agnostic parts once, `AGENTS.md`, `skills/` and `hooks/`, one
 link per module at `modules/<name>` to the module's own directory, and one directory per
-runtime with that runtime's files. Every atomic entry is a symlink into its module. Every
+runtime with that runtime's files. Every atomic entry is a symlink into its module, with
+one exception: an entry whose documents hold a reference (§References) is placed with the
+references resolved for the path it stands on, a single file written, a skill a real
+directory holding a link per file and directory without a reference and a written copy
+of each `.md` file with one, so the module's files stay live wherever nothing had to
+change, and an edit to a file with a reference reaches the tree on the next compose,
+which `--check` reports. The shared root, every checkout link and every launch path but
+one resolve to the bare name, the name as the module wrote it; the `claude` plugin
+resolves to `harness:<name>`, the name Claude Code registers a plugin's entries under,
+and the plugin's copies of the same documents differ from the checkout's in that alone.
+Every
 `$QORY_HARNESS_HOME`, braced or not, in a settings fragment or an MCP server becomes the
 tree's absolute path, so `$QORY_HARNESS_HOME/modules/core/scripts/check.sh` runs the script
 the core module ships. The links survive a moved checkout; the absolute paths written into
@@ -525,7 +587,7 @@ segment. The refusal names the module, the entry and the reason, with status 2:
 
 | `target.runtime` | qory writes | The program reads as settings | A kind is linked at | Runs without the agent |
 |---|---|---|---|---|
-| `claude` | `CLAUDE.md`, `settings.json`, `mcp.json`, `plugin` | `settings.local.json` | `skills`, `agents`, `commands`, `hooks`, `output-styles` | |
+| `claude` | `CLAUDE.md`, `settings.json`, `mcp.json`, `plugin`, `launch` | `settings.local.json` | `skills`, `agents`, `commands`, `hooks`, `output-styles` | |
 | `codex` | `config.toml`, `AGENTS.md` | | `agents`, `skills` | |
 | `gemini` | `settings.json` | | `skills`, `hooks`, `agents`, `commands` | |
 | `opencode` | `opencode.json` | | `commands`, `hooks`, `agents`, `skills` | |
@@ -542,7 +604,10 @@ Per runtime, the files written into its directory:
   instructions written in full as `CLAUDE.md`. They are not imported from `AGENTS.md`,
   because Claude Code resolves a link to its real path and asks about an import found
   through one on every start. `plugin/` is the launch spec, a plugin in Claude Code's
-  layout (§Launching), never linked into the checkout.
+  layout, and `launch/CLAUDE.md` the instructions a launch reads, with the plugin's names
+  and the names the session registers after the modules' text (§Launching); neither is
+  linked into the checkout, whose `.claude/CLAUDE.md` and `.claude/agents` register the
+  bare names.
 - **codex**: `config.toml` with the model, the servers as `[mcp_servers.<name>]` tables,
   the environment under `[shell_environment_policy.set]`, which Codex passes to every
   command it runs, and any other `settings/codex/` file, one `agents/<name>.toml` per agent with the body as
@@ -582,11 +647,23 @@ A runtime whose program takes a harness from outside the checkout reads a home t
 checkout does not link to. `qory harness launch --runtime <name>` prints the command
 that starts the program on the composed home, on one line quoted for a POSIX shell, so
 a launcher runs it as it is and knows nothing of the home's layout; `--json` prints the
-same as one object, `{command, args, env}`, for a launcher that spawns without a shell:
+same as one object, `{command, args, env, addresses}`, for a launcher that spawns without
+a shell:
 
 ```sh
 cd <checkout> && eval "$(qory harness launch --runtime claude)"
 ```
+
+`addresses` is, per kind, the name the session started by that line registers each
+composed agent, skill and command under, and each bound role as the entry it is bound to
+(§References): `{"agents": {"coder": "harness:rails-coder", "reviewer":
+"harness:reviewer"}, "skills": {"implement": "harness:implement"}}` for claude, whose
+plugin prefixes every kind, the names as the modules wrote them for every other runtime,
+and a kind the runtime skips left out. `--address <kind>/<name>` prints that one
+registered name and nothing else, so a launcher builds its first prompt from an entry
+point, `/$(qory harness launch --runtime claude --address skills/implement)`, and the
+prompt names what the session has whichever runtime it is. The names come from the same
+resolver that writes them into the documents and the instructions, so the three agree.
 
 The home is found the way `compose` finds it, from `--home`, `harness.home` or the
 checkout; the runtime is `--runtime`, or the one runtime the harness is composed for, and
@@ -609,10 +686,10 @@ says so with status 2: `goose` and `any`.
 
 | `target.runtime` | Template | Rendered for it under the runtime's directory | Reaches the session from outside | Read from the checkout alone |
 |---|---|---|---|---|
-| `claude` | `claude --plugin-dir ${dir}/plugin --settings ${dir}/settings.json --mcp-config ${dir}/mcp.json --append-system-prompt-file ${dir}/CLAUDE.md --setting-sources user` | `plugin/`, a plugin in Claude Code's layout: the skills and commands linked, the agents copied, since Claude Code passes over a link in a plugin's `agents/` where it follows one everywhere else, the output styles under `output-styles/` with the manifest's `outputStyles` pointing there, `.claude-plugin/plugin.json` naming it `harness`, so a skill is `/harness:<name>` and an agent `harness:<name>` | everything: the plugin, the permissions, hooks, environment and model in `settings.json`, the servers, the instructions appended to the system prompt; `--setting-sources user` keeps every `.claude` of the checkout and of the directories above it out | nothing |
+| `claude` | `claude --plugin-dir ${dir}/plugin --settings ${dir}/settings.json --mcp-config ${dir}/mcp.json --append-system-prompt-file ${dir}/launch/CLAUDE.md --setting-sources user` | `plugin/`, a plugin in Claude Code's layout: the skills and commands linked, or written where a document holds a reference, the agents copied, since Claude Code passes over a link in a plugin's `agents/` where it follows one everywhere else, the output styles under `output-styles/` with the manifest's `outputStyles` pointing there, `.claude-plugin/plugin.json` naming it `harness`, so a skill is `/harness:<name>` and an agent `harness:<name>`, and every reference in the plugin resolves to that name; `launch/CLAUDE.md`, the instructions with their references resolved the same way and, after them, the names the session registers, per kind, with each bound role | everything: the plugin, the permissions, hooks, environment and model in `settings.json`, the servers, the instructions appended to the system prompt; `--setting-sources user` keeps every `.claude` of the checkout and of the directories above it out | nothing |
 | `cursor` | `cursor-agent --plugin-dir ${dir}/plugin` | `plugin/`, the same layout under `.cursor-plugin/plugin.json`, with the agents in Cursor's shape, a copy of `hooks.json` as `hooks/hooks.json` and of `mcp.json` as `.mcp.json`, since the CLI takes no settings file | the skills, agents, hooks and servers | the instructions, `AGENTS.md` |
 | `copilot` | `copilot --add-dir ${dir}/workspace --additional-mcp-config @${dir}/mcp.json` | `workspace/.github/skills` linked and `workspace/.github/agents` written, which `--add-dir` loads as trusted configuration, and `mcp.json` with the servers under `mcpServers`, so the MCP kind has a place in copilot | the skills, agents and servers | the hooks and the instructions |
-| `codex` | `env CODEX_HOME=${dir} codex` | `skills/` linked and the instructions as `AGENTS.md`, beside `config.toml` and the agents, so the directory is a Codex home | everything | nothing; Codex keeps its login in the same home, `auth.json`, so a launcher authenticates through `OPENAI_API_KEY` or puts `auth.json` there |
+| `codex` | `env CODEX_HOME=${dir} codex` | `skills/` linked and the instructions as `AGENTS.md`, ending with the names the session registers, which a Codex home registers as the modules wrote them, beside `config.toml` and the agents, so the directory is a Codex home | everything | nothing; Codex keeps its login in the same home, `auth.json`, so a launcher authenticates through `OPENAI_API_KEY` or puts `auth.json` there |
 | `opencode` | `env OPENCODE_CONFIG_DIR=${dir} opencode` | `skills/` linked, beside `opencode.json`, the agents, commands and hooks, since OpenCode reads the directory the way it reads `.opencode` | the model, servers, agents, commands, hooks and skills | the instructions, `AGENTS.md` |
 | `amp` | `amp --settings-file ${dir}/settings.json` | nothing more | the servers and the permissions | the skills and the instructions |
 | `gemini` | `env GEMINI_CLI_SYSTEM_SETTINGS_PATH=${dir}/settings.json gemini` | nothing more; the file is read as the system settings, over the user's and the workspace's | the model, servers and hooks | the skills, agents, commands and instructions |
@@ -636,7 +713,10 @@ targeted ones first. A module carries its `name`, its `source` as the stack writ
 its `pin`, `dirty` when git saw uncommitted changes under a path source, the `variant`
 chosen, its `link` when the stack names one, and `base` when it is the base stack's. A
 source naming an export is written as the stack wrote it, `<url>#<ref> module <name>`.
-An entry an `only` brought in carries `for`, the `<kind>/<name>` that required it.
+An entry an `only` brought in carries `for`, the `<kind>/<name>` that required it, and
+an entry whose documents reference others carries `references`, the `<kind>/<name>` keys
+as written, a role's included; the stack's bindings are `bind`, `<kind>/<role>` to the
+entry's name, absent when there are none.
 The report of a checkout that extends a stack records the `base`: its `name`, `source` and `pin`. A path source's pin is `working-tree`; a git source's pin is twelve
 characters of its commit. The report records the `qory` that wrote it, its `version`,
 `commit` and `source`, `release` or `source`, as `qory version --json` reports them,

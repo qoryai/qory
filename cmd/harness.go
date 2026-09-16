@@ -1000,7 +1000,7 @@ func readReport(at places) (report.Report, error) {
 // --runtime, or the one runtime the harness is composed for; a runtime whose program
 // reads its harness from the checkout alone has no launch template, and the verb says so.
 func newLaunch(use string, aliases ...string) *cobra.Command {
-	var runtime string
+	var runtime, address string
 	var asJSON bool
 	var h homeOptions
 	c := &cobra.Command{
@@ -1021,8 +1021,13 @@ the compose did not write, mcp.json without a server say, is left out. The home 
 the way compose finds it, from --home, harness.home or the checkout you stand in; the
 paths printed are absolute, so the line works wherever the home is. --json prints the
 command, the arguments and the variables as one JSON object, for a launcher that spawns
-the program without a shell. A runtime that reads its harness from the checkout alone
-has no launch template, and the verb says so.
+the program without a shell, with the names the session registers the composed agents,
+skills and commands under on that launch under addresses, per kind, a bound role beside
+them as the entry it is bound to: harness:<name> for claude, whose plugin prefixes
+every kind, the name as the module wrote it elsewhere. --address <kind>/<name> prints
+that one registered name alone, for a launcher that builds its first prompt from an
+entry point, /harness:implement say. A runtime that reads its harness from the
+checkout alone has no launch template, and the verb says so.
 
 --verbose adds nothing here.`,
 		Args: noArgs,
@@ -1057,8 +1062,22 @@ has no launch template, and the verb says so.
 			if err != nil {
 				return input(err)
 			}
+			keys := make([]string, 0, len(rep.Entries))
+			for _, e := range rep.Entries {
+				keys = append(keys, e.Kind+"/"+e.Name)
+			}
+			addresses := render.Addresses(keys, rep.Bind, render.AddressOf(rt), rt.Skips())
+			if address != "" {
+				kind, entry, _ := strings.Cut(address, "/")
+				registered, ok := addresses[kind][entry]
+				if !ok {
+					return input(fmt.Errorf("%s is not an agent, skill, command or bound role the harness is composed with for %s; --json lists them under addresses", address, name))
+				}
+				_, err = fmt.Fprintln(cmd.OutOrStdout(), registered)
+				return err
+			}
 			if asJSON {
-				data, err := json.MarshalIndent(launchJSON{Command: launch.Command, Args: append([]string{}, launch.Args...), Env: launch.Env}, "", "  ")
+				data, err := json.MarshalIndent(launchJSON{Command: launch.Command, Args: append([]string{}, launch.Args...), Env: launch.Env, Addresses: addresses}, "", "  ")
 				if err != nil {
 					return err
 				}
@@ -1070,17 +1089,20 @@ has no launch template, and the verb says so.
 		},
 	}
 	c.Flags().StringVar(&runtime, "runtime", "", "the runtime to start, one the harness is composed for; the only one when left out")
-	c.Flags().BoolVar(&asJSON, "json", false, "print the command, the arguments and the variables as one JSON object")
+	c.Flags().BoolVar(&asJSON, "json", false, "print the command, the arguments, the variables and the registered names as one JSON object")
+	c.Flags().StringVar(&address, "address", "", "print the name the session registers this <kind>/<name>, or bound role, under on this launch, and nothing else")
 	homeFlags(c, &h)
 	return c
 }
 
 // launchJSON is what --json prints: the arguments always an array, the variables left
-// out when there are none.
+// out when there are none, and the registered names per kind, left out when the harness
+// holds no agent, skill or command the runtime places.
 type launchJSON struct {
-	Command string            `json:"command"`
-	Args    []string          `json:"args"`
-	Env     map[string]string `json:"env,omitempty"`
+	Command   string                       `json:"command"`
+	Args      []string                     `json:"args"`
+	Env       map[string]string            `json:"env,omitempty"`
+	Addresses map[string]map[string]string `json:"addresses,omitempty"`
 }
 
 // shellLine is a launch as one line a POSIX shell reads back as the same command: the

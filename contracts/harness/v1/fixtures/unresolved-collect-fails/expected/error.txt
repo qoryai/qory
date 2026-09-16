@@ -1,0 +1,5 @@
+bind agents/coder names agent rails-coder, which no module ships
+module core: skill audit references agent auditor, which no module ships and the stack does not bind
+module core: skill audit references agent linter, which no module ships and the stack does not bind
+module core: skill deploy references agent reviewer, which module core leaves out
+module core: skill deploy references skill e2e, which no module ships and the stack does not bind

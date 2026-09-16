@@ -16,8 +16,14 @@ import (
 // result together with a fresh git checkout and the home path inside it.
 func composeFixture(t *testing.T, runtimes ...string) (*compose.Result, string, string) {
 	t.Helper()
+	return composeFixtureNamed(t, "two-modules", runtimes...)
+}
+
+// composeFixtureNamed is [composeFixture] for the contract fixture of that name.
+func composeFixtureNamed(t *testing.T, name string, runtimes ...string) (*compose.Result, string, string) {
+	t.Helper()
 	hermetic(t)
-	file, err := filepath.Abs("../../contracts/harness/v1/fixtures/two-modules/qory-stack.yaml")
+	file, err := filepath.Abs("../../contracts/harness/v1/fixtures/" + name + "/qory-stack.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}

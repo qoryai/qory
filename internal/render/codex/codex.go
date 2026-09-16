@@ -26,7 +26,6 @@ import (
 	"strings"
 
 	"github.com/qoryai/qory/internal/compose"
-	"github.com/qoryai/qory/internal/module"
 	"github.com/qoryai/qory/internal/render"
 )
 
@@ -75,8 +74,11 @@ func (codex) Reserved() []render.Reserved {
 // mcp_servers, one table per server holding the object as the module wrote it, the
 // exported variables and QORY_HARNESS_HOME under shell_environment_policy.set, which
 // Codex passes to every command it runs, and any other codex settings fragment, then one agents/<name>.toml per agent carrying the
-// agent's name, description and its body as developer_instructions. Codex reads a project
-// .codex only in a project the user has marked trusted.
+// agent's name, description and its body as developer_instructions. The instructions
+// written as AGENTS.md end with the names the session registers, see
+// [render.Addressing]: a Codex home registers them as the modules wrote them, and the
+// file says so. Codex reads a project .codex only in a project the user has marked
+// trusted.
 func (codex) Render(res *compose.Result, dir, home string) error {
 	err := render.WriteSettings(res, Runtime, dir, home, []string{"config.toml"}, func(file string, m map[string]any) {
 		if file != "config.toml" {
@@ -100,7 +102,7 @@ func (codex) Render(res *compose.Result, dir, home string) error {
 		if e.Kind != "agents" {
 			continue
 		}
-		doc, err := module.ReadDocument(e.Path)
+		doc, err := render.ReadDocument(res, render.Bare, e.Path)
 		if err != nil {
 			return err
 		}
@@ -120,11 +122,11 @@ func (codex) Render(res *compose.Result, dir, home string) error {
 			return err
 		}
 	}
-	if err := render.LinkEntries(res, dir, "skills"); err != nil {
+	if err := render.PlaceEntries(res, dir, render.Bare, "skills"); err != nil {
 		return err
 	}
-	if res.Instructions != "" {
-		if err := render.WriteFile(dir, "AGENTS.md", []byte(res.Instructions)); err != nil {
+	if text := render.WithAddressing(res, render.Bare, codex{}.Skips()); text != "" {
+		if err := render.WriteFile(dir, "AGENTS.md", []byte(text)); err != nil {
 			return err
 		}
 	}

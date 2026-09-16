@@ -63,6 +63,9 @@ type Entry struct {
 	// brought it in for that entry rather than naming it; "" for an entry composed in its
 	// own right.
 	For string
+	// References are the entries the entry's documents reference, as sorted <kind>/<name>
+	// keys as written, a role's name included; nil for an entry that references none.
+	References []string
 }
 
 // Exclude is one entry a module left out.
@@ -93,6 +96,9 @@ type Result struct {
 	MCP map[string]map[string]any
 	// Instructions are the modules' AGENTS.md files joined by a blank line, or "".
 	Instructions string
+	// Bind is the stack's bindings, <kind>/<role> to the name of the entry that fills the
+	// role, every one checked against the composed entries; nil when the stack binds none.
+	Bind map[string]string
 	// Env are the variables the harness exports, name to value, with every
 	// $QORY_HARNESS_HOME still in place: what the module manifests export, as
 	// $QORY_HARNESS_HOME/modules/<name>/<path>, and the configuration's variables over
@@ -137,14 +143,21 @@ func Compose(p *stack.Stack) (*Result, error) { return ComposeWith(p, Options{})
 // the merge semantics.
 func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 	res := &Result{Stack: p, Base: opts.Base, Settings: map[string]map[string]map[string]any{}, MCP: map[string]map[string]any{}, Env: map[string]string{}, setBy: map[string]string{}}
+	if len(p.Bind) > 0 {
+		res.Bind = map[string]string{}
+		for role, to := range p.Bind {
+			res.Bind[role] = to
+		}
+	}
 	owners := map[string][]string{}
 	paths := map[string]string{}
 	fors := map[string]string{}
+	refs := map[string][]string{}
 	servers := map[string]map[string]any{}
 	exporters := map[string]string{}
 	var instructions []string
 	dirs := map[string]string{}
-	requires := map[string]map[string][]string{}
+	requires := map[string]map[string][]Need{}
 	for _, pl := range p.Modules {
 		ps := p.SourceOf(pl)
 		who := "module " + pl.Name
@@ -173,7 +186,6 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 			return nil, fmt.Errorf("module %s is composed twice, from %s and from %s", name, other, ps.String())
 		}
 		dirs[name] = ps.String()
-		requires[name] = m.Requires
 		variant, err := selectVariant(m, pl, p.Target.Runtimes, name)
 		if err != nil {
 			return nil, fmt.Errorf("module %s: %w", name, err)
@@ -183,9 +195,10 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 			return nil, err
 		}
 		rl := Module{Name: name, Description: m.Description, Dir: l.Dir, Source: ps.String(), Pin: src.Pin, Dirty: src.Dirty, Variant: variant, Link: pl.Link, Base: pl.Base, RetiredAPIVersion: m.RetiredAPIVersion}
+		requires[name] = needs(l, m.Requires, res.Bind)
 		// The selection comes first, so that what the base allows and what the module
 		// exports are checked on what the module contributes, not on what it ships.
-		env, pulled, err := applySelection(l, pl, m.Env, m.Requires, res)
+		env, pulled, err := applySelection(l, pl, m.Env, requires[name], res)
 		if err != nil {
 			return nil, err
 		}
@@ -205,6 +218,7 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 			if by, ok := pulled[key]; ok {
 				fors[key+"@"+name] = by
 			}
+			refs[key+"@"+name] = e.References
 			if e.Kind == "mcp" {
 				servers[key+"@"+name] = l.MCP[e.Name]
 			}
@@ -238,7 +252,7 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 	}
 	for key, ls := range owners {
 		kind, name, _ := strings.Cut(key, "/")
-		res.Entries = append(res.Entries, Entry{Kind: kind, Name: name, Module: ls[0], Path: paths[key+"@"+ls[0]], For: fors[key+"@"+ls[0]]})
+		res.Entries = append(res.Entries, Entry{Kind: kind, Name: name, Module: ls[0], Path: paths[key+"@"+ls[0]], For: fors[key+"@"+ls[0]], References: refs[key+"@"+ls[0]]})
 		if kind == "mcp" {
 			res.MCP[name] = servers[key+"@"+ls[0]]
 		}
@@ -249,7 +263,7 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 		}
 		return res.Entries[i].Name < res.Entries[j].Name
 	})
-	if err := checkRequires(res, requires); err != nil {
+	if err := checkResolved(res, requires); err != nil {
 		return nil, err
 	}
 	if len(instructions) > 0 {
@@ -333,33 +347,148 @@ func variantName(v string) string {
 	return "variant " + v
 }
 
-// checkRequires refuses a compose in which an entry's requirements, from its module's
-// manifest, are not all composed. requires holds each module's manifest requires by module
-// name, keyed <kind>/<name>. A required entry may come from any module, since a name is
-// composed once; an entry that was left out has no requirements to meet. The message
-// says why the entry is missing: a module's exclude left it out, or no module ships it.
-// Entries are walked in their sorted order and requirements in theirs, so the first
-// failure is the same every time.
-func checkRequires(res *Result, requires map[string]map[string][]string) error {
+// Need is one thing a composed entry needs beside it: an entry its manifest's requires
+// names, or one its documents reference.
+type Need struct {
+	// Key is the entry needed, as <kind>/<name>, a role resolved to the entry the stack
+	// binds it to.
+	Key string
+	// Role is the reference as written when it named a bound role, "" otherwise.
+	Role string
+	// Reference marks a need a document's reference made, as against the manifest's
+	// requires.
+	Reference bool
+}
+
+// needs joins, per entry of the module, what the manifest's requires names and what the
+// entry's documents reference, a reference to a bound role resolved to the entry it is
+// bound to. Each key comes once per entry, the manifest's first, then the references in
+// their sorted order.
+func needs(l *module.Module, requires map[string][]string, bind map[string]string) map[string][]Need {
+	out := map[string][]Need{}
+	for key, list := range requires {
+		for _, need := range list {
+			out[key] = append(out[key], Need{Key: need})
+		}
+	}
+	for _, e := range l.Entries {
+		key := e.Kind + "/" + e.Name
+		for _, ref := range e.References {
+			need := Need{Key: ref, Reference: true}
+			if to, ok := bind[ref]; ok {
+				kind, _, _ := strings.Cut(ref, "/")
+				need.Key, need.Role = kind+"/"+to, ref
+			}
+			dup := false
+			for _, have := range out[key] {
+				if have.Key == need.Key {
+					dup = true
+					break
+				}
+			}
+			if !dup {
+				out[key] = append(out[key], need)
+			}
+		}
+	}
+	return out
+}
+
+// UnresolvedError is the compose refusing what does not resolve against the composed
+// entries: a binding to an entry that is not composed, a role bound while an entry of
+// its name is composed, a requirement or a reference that nothing composed meets. Every
+// failure comes at once, one line each, the bindings first, then the entries in their
+// sorted order, so one compose names every site there is to fix.
+type UnresolvedError struct {
+	// Lines are the failures, one per line, in the order they print.
+	Lines []string
+}
+
+func (e *UnresolvedError) Error() string { return strings.Join(e.Lines, "\n") }
+
+// checkResolved refuses a compose in which a binding, a requirement or a reference does
+// not resolve. requires holds each module's needs by module name, keyed <kind>/<name>. A
+// needed entry may come from any module, since a name is composed once; an entry that
+// was left out has no needs to meet. A bound role is checked once, under bind, and a
+// reference through it says nothing more: the binding is what there is to fix. The
+// message says why an entry is missing: a module's exclude left it out, or no module
+// ships it, and for a reference that the stack binds no role of that name either.
+func checkResolved(res *Result, requires map[string]map[string][]Need) error {
 	composed := map[string]bool{}
 	for _, e := range res.Entries {
 		composed[e.Kind+"/"+e.Name] = true
 	}
-	for _, e := range res.Entries {
-		for _, need := range requires[e.Module][e.Kind+"/"+e.Name] {
-			if composed[need] {
-				continue
+	leftOut := func(kind, name string) string {
+		for _, x := range res.Excludes {
+			if x.Kind == kind && x.Name == name {
+				return x.Module
 			}
-			kind, name, _ := strings.Cut(need, "/")
-			for _, x := range res.Excludes {
-				if x.Kind == kind && x.Name == name {
-					return fmt.Errorf("module %s: %s requires %s, which module %s leaves out", e.Module, module.Describe(e.Kind, e.Name), module.Describe(kind, name), x.Module)
+		}
+		return ""
+	}
+	var lines []string
+	for _, role := range sortedKeys(res.Bind) {
+		kind, name, _ := strings.Cut(role, "/")
+		to := res.Bind[role]
+		if composed[role] {
+			for _, e := range res.Entries {
+				if e.Kind == kind && e.Name == name {
+					lines = append(lines, fmt.Sprintf("bind %s names a role, and module %s ships %s; a role's name is no entry's", role, e.Module, module.Describe(kind, name)))
 				}
 			}
-			return fmt.Errorf("module %s: %s requires %s, which no module ships", e.Module, module.Describe(e.Kind, e.Name), module.Describe(kind, name))
+		}
+		if composed[kind+"/"+to] {
+			continue
+		}
+		if by := leftOut(kind, to); by != "" {
+			lines = append(lines, fmt.Sprintf("bind %s names %s, which module %s leaves out", role, module.Describe(kind, to), by))
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("bind %s names %s, which no module ships", role, module.Describe(kind, to)))
+	}
+	for _, e := range res.Entries {
+		for _, need := range requires[e.Module][e.Kind+"/"+e.Name] {
+			if composed[need.Key] || need.Role != "" {
+				continue
+			}
+			kind, name, _ := strings.Cut(need.Key, "/")
+			verb := "requires"
+			if need.Reference {
+				verb = "references"
+			}
+			if by := leftOut(kind, name); by != "" {
+				lines = append(lines, fmt.Sprintf("module %s: %s %s %s, which module %s leaves out", e.Module, module.Describe(e.Kind, e.Name), verb, module.Describe(kind, name), by))
+				continue
+			}
+			why := "which no module ships"
+			if need.Reference {
+				why += " and the stack does not bind"
+			}
+			lines = append(lines, fmt.Sprintf("module %s: %s %s %s, %s", e.Module, module.Describe(e.Kind, e.Name), verb, module.Describe(kind, name), why))
 		}
 	}
-	return nil
+	if len(lines) == 0 {
+		return nil
+	}
+	return &UnresolvedError{Lines: lines}
+}
+
+// Resolve is the entry a reference to kind and name means: the entry the stack binds the
+// role to, when the name is a bound role of that kind, else the name itself.
+func (r *Result) Resolve(kind, name string) (string, string) {
+	if to, ok := r.Bind[kind+"/"+name]; ok {
+		return kind, to
+	}
+	return kind, name
+}
+
+// Substitute replaces every reference in text with the name address gives the entry it
+// resolves to, a role resolved through the bindings first. A renderer passes the address
+// of the path it writes for: the name the program registers the entry under there.
+func (r *Result) Substitute(text string, address func(kind, name string) string) string {
+	return module.Substitute(text, func(kind, name string) string {
+		return address(r.Resolve(kind, name))
+	})
 }
 
 // applySelection applies the module's exclude and only blocks, reducing the module in
@@ -371,12 +500,13 @@ func checkRequires(res *Result, requires map[string]map[string][]string) error {
 // excludes and the first error do not follow map order.
 //
 // Under exclude, what is named is left out. Under only, what is named is kept, and so is
-// what the kept entries require from this module, transitively, as the manifest's
-// requires declares it; a kind the block does not name contributes no entry beyond
-// those, and a part it does not name is left out. An exclude beside an only names
-// entries the only brought in, to leave them out after all; a requirement left out that
-// way has to come from another module, which [checkRequires] sees to.
-func applySelection(l *module.Module, pl stack.Module, env map[string]string, requires map[string][]string, res *Result) (map[string]string, map[string]string, error) {
+// what the kept entries need from this module, transitively, as the manifest's requires
+// declares it and the entries' documents reference it, see [needs]; a kind the block
+// does not name contributes no entry beyond those, and a part it does not name is left
+// out. An exclude beside an only names entries the only brought in, to leave them out
+// after all; a requirement left out that way has to come from another module, which
+// [checkResolved] sees to.
+func applySelection(l *module.Module, pl stack.Module, env map[string]string, requires map[string][]Need, res *Result) (map[string]string, map[string]string, error) {
 	sel, only := pl.Exclude, false
 	if !pl.Only.Empty() {
 		sel, only = pl.Only, true
@@ -410,7 +540,8 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 		for len(queue) > 0 {
 			key := queue[0]
 			queue = queue[1:]
-			for _, need := range requires[key] {
+			for _, n := range requires[key] {
+				need := n.Key
 				if !shipped[need] || named[need] {
 					continue
 				}

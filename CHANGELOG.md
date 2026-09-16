@@ -4,6 +4,61 @@ Every release of qory, newest first, in the shape of [Keep a Changelog](https://
 The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0 a minor
 release may change what an existing document does, and says so under Upgrading.
 
+## [0.4.4] - 2026-09-16
+
+### Added
+
+- A document names an entry it dispatches by a reference, `${qory:agents/<name>}`,
+  `${qory:skills/<name>}` or `${qory:commands/<name>}`, and the compose resolves it to
+  the name the session registers the entry under, which the module cannot know: a
+  program that loads the harness as a plugin puts its own name before every agent,
+  skill and command, `harness:reviewer`, where the checkout's links and most launch
+  paths register the name as written. A reference is read in an agent, a command, an
+  output style, `AGENTS.md` and every `.md` file under a skill. It is a requirement: an
+  entry needs no `requires` line for what its documents reference, an `only` follows it
+  within the module, and a reference nothing composed answers to fails the compose,
+  `module core: skill deploy references agent coder, which no module ships and the stack
+  does not bind`. A reference resolves within the stack's composed entries and its
+  bindings alone; it never brings in a module the stack did not list.
+- A reference may name a role, a name no entry has, and the stack binds it under `bind`
+  to the entry that fills it: `agents/coder: rails-coder`. One core module then serves
+  every product stack, each binding the role to its own agent. A binding to an entry
+  that is not composed, and a role whose name an entry has, fail the compose; every
+  failure of a binding, a requirement or a reference comes at once, one per line, so
+  one compose names every site there is to fix. A checkout extending a stack adds to
+  the base's bindings and may rebind a role of the base's. The report carries the
+  bindings and each entry's references, and `qory harness inspect` prints them.
+- The composed tree resolves each reference for the path it stands on. An entry with
+  none is a link as before; one with a reference is a written copy, a skill a real
+  directory holding a link per file without a reference, so the module's files stay live
+  wherever nothing had to change. The shared root, every checkout link and every launch
+  path but one resolve to the bare name; the `claude` plugin resolves to
+  `harness:<name>`.
+- The instructions a launch path reads end with the names the session registers, per
+  kind, and each bound role as the entry it is bound to, derived from the same resolver
+  as the documents, so a session that meets an unmarked name in prose knows the
+  registered one. For claude they are written to `claude/launch/CLAUDE.md`, which the
+  launch line appends to the system prompt, while the checkout's `.claude/CLAUDE.md`
+  keeps the bare names its `.claude/agents` register; for codex they end the home's
+  `AGENTS.md`, which says the names are the modules'. A compose with no agent, skill or
+  command says nothing.
+- `qory harness launch --json` carries `addresses`, the registered names per kind for
+  that launch, roles included, and `--address <kind>/<name>` prints one of them alone,
+  so a launcher builds its first prompt from an entry point whichever runtime it
+  starts.
+
+### Upgrading
+
+- `${qory:` followed by anything but `agents/<name>`, `skills/<name>` or
+  `commands/<name>` and `}` now fails the compose in a document; a module that carried
+  the text for another reason renames it.
+- The claude launch line appends `${dir}/launch/CLAUDE.md` in place of
+  `${dir}/CLAUDE.md`. A `harness.launch.claude` override naming the old file keeps
+  working and gets the bare names without the roster; drop the override, or name the
+  new file, for the plugin's.
+- `bind` is a new stack key, refused by a 0.4.3 binary as unknown. A stack that binds a
+  role states `qory: ">=0.4.4"`.
+
 ## [0.4.3] - 2026-09-16
 
 ### Fixed
@@ -309,6 +364,7 @@ The first release: a stack of modules composed into one tree, linked into the ch
 and kept out of git, with a report naming the module of every entry and a refusal when
 two modules provide the same one.
 
+[0.4.4]: https://github.com/qoryai/qory/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/qoryai/qory/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/qoryai/qory/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/qoryai/qory/compare/v0.4.0...v0.4.1

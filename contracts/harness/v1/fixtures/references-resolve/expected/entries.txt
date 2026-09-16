@@ -1,0 +1,5 @@
+agents/rails-coder rails
+agents/reviewer core
+commands/ship core
+skills/deploy core
+skills/test core

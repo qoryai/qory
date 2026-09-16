@@ -87,10 +87,10 @@ func (cursor) Reserved() []render.Reserved {
 // holds any. The target model reaches no file, because Cursor keeps the model in a global
 // CLI setting.
 func (cursor) Render(res *compose.Result, dir, home string) error {
-	if err := render.LinkEntries(res, dir, "hooks"); err != nil {
+	if err := render.PlaceEntries(res, dir, render.Bare, "hooks"); err != nil {
 		return err
 	}
-	if err := render.WriteAgents(res, dir, "agents", ".md", "name", "description", "model"); err != nil {
+	if err := render.WriteAgents(res, render.Bare, dir, "agents", ".md", "name", "description", "model"); err != nil {
 		return err
 	}
 	var ensure []string
@@ -111,12 +111,16 @@ func (cursor) Render(res *compose.Result, dir, home string) error {
 // renderPlugin writes the plugin into dir/plugin: the manifest, the skills and agents
 // linked, and copies of the hooks and MCP files the runtime wrote beside it, each when
 // it was written. The agents are the ones Render wrote, linked again under the plugin.
+// The plugin's entries are placed for the bare address: how the Cursor CLI names a
+// plugin's agents and skills has not been measured, and a name the runtime does not
+// vouch for is not written. A measurement that shows a prefix makes the runtime an
+// [render.Addresser] and moves these two calls to it.
 func renderPlugin(res *compose.Result, dir string) error {
 	plugin := filepath.Join(dir, Plugin)
-	if err := render.LinkEntries(res, plugin, "skills"); err != nil {
+	if err := render.PlaceEntries(res, plugin, render.Bare, "skills"); err != nil {
 		return err
 	}
-	if err := render.WriteAgents(res, plugin, "agents", ".md", "name", "description", "model"); err != nil {
+	if err := render.WriteAgents(res, render.Bare, plugin, "agents", ".md", "name", "description", "model"); err != nil {
 		return err
 	}
 	for _, c := range [][2]string{{"hooks.json", filepath.Join("hooks", "hooks.json")}, {"mcp.json", ".mcp.json"}} {

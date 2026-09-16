@@ -1,0 +1,1 @@
+module core: skills/deploy/SKILL.md: ${qory:agent/coder} is not a reference; after ${qory: comes one of agents, commands, skills, then /<name>

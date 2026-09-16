@@ -1,0 +1,1 @@
+bind agents/coder names agent rails-coder, which no module ships

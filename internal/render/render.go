@@ -16,7 +16,6 @@ import (
 
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/compose"
-	"github.com/qoryai/qory/internal/module"
 )
 
 // Link is one path in a checkout that points into the composed home.
@@ -230,19 +229,24 @@ func CopyFile(src, dir, name string) error {
 
 // WritePlugin writes the manifest a plugin in Claude Code's layout starts with, at
 // dir/<manifestDir>/plugin.json, naming the plugin [PluginName] with the stack's
-// description, links the composed skills and commands under dir, and copies the agents:
-// Claude Code reads a plugin's agents directory by entry type and passes over a link
-// there, where it follows one in a checkout's .claude/agents and a plugin's skills, so a
-// linked agent registers nowhere and a copied one as <plugin>:<name>.
+// description, places the composed skills and commands under dir for the plugin's
+// address, see [PluginAddress], and copies the agents with their references resolved
+// the same way: Claude Code reads a plugin's agents directory by entry type and passes
+// over a link there, where it follows one in a checkout's .claude/agents and a plugin's
+// skills, so a linked agent registers nowhere and a copied one as <plugin>:<name>.
 func WritePlugin(res *compose.Result, dir, manifestDir string, extra map[string]any) error {
-	if err := LinkEntries(res, dir, "skills", "commands"); err != nil {
+	if err := PlaceEntries(res, dir, PluginAddress, "skills", "commands"); err != nil {
 		return err
 	}
 	for _, e := range res.Entries {
 		if e.Kind != "agents" {
 			continue
 		}
-		if err := CopyFile(e.Path, dir, filepath.Join("agents", e.Name+".md")); err != nil {
+		data, err := os.ReadFile(e.Path)
+		if err != nil {
+			return err
+		}
+		if err := WriteFile(dir, filepath.Join("agents", e.Name+".md"), []byte(res.Substitute(string(data), PluginAddress))); err != nil {
 			return err
 		}
 	}
@@ -254,9 +258,16 @@ func WritePlugin(res *compose.Result, dir, manifestDir string, extra map[string]
 }
 
 // PluginName is the name a rendered plugin's manifest declares, the prefix a program
-// puts before the plugin's skills and commands, /harness:review say. It is the same for
-// every stack, so a launcher and its prompts can name a skill without knowing the stack.
+// puts before the plugin's agents, skills and commands: harness:reviewer for the agent,
+// /harness:review for the skill. It is the same for every stack, so a launcher and its
+// prompts can name a skill without knowing the stack. [PluginAddress] is the same fact
+// as an [Address], and the one source of both the manifest and every name written for
+// the plugin's path.
 const PluginName = "harness"
+
+// PluginAddress is the address of a plugin named [PluginName]: every kind registers as
+// harness:<name>.
+var PluginAddress = Prefixed(PluginName)
 
 // PluginDescription is a rendered plugin's description: the stack's, when it has one.
 func PluginDescription(res *compose.Result) string {
@@ -357,8 +368,9 @@ func Build(res *compose.Result, home string, runtimes ...Runtime) (err error) {
 // files, $QORY_HARNESS_HOME and a server's command say, name home, where the tree is read
 // from, while the files themselves go under stage. [Build] stages beside the home and
 // renames; a check stages elsewhere and compares. BuildAt links the shared skills and
-// hooks, links every module's directory as modules/<name> and writes AGENTS.md at the
-// staging root, then calls each runtime's Render for the subdirectory named after it and
+// hooks for the bare address, links every module's directory as modules/<name> and
+// writes AGENTS.md at the staging root with its references resolved the same way, since
+// every checkout link reads them, then calls each runtime's Render for the subdirectory named after it and
 // links the runtime's files entries into that subdirectory. The links point at the
 // modules by absolute path, so a tree staged anywhere holds the same links.
 //
@@ -372,14 +384,14 @@ func BuildAt(res *compose.Result, stage, home string, runtimes ...Runtime) error
 	if err := os.MkdirAll(stage, 0o755); err != nil {
 		return err
 	}
-	if err := LinkEntries(res, stage, "skills", "hooks"); err != nil {
+	if err := PlaceEntries(res, stage, Bare, "skills", "hooks"); err != nil {
 		return err
 	}
 	if err := linkModules(res, stage); err != nil {
 		return err
 	}
 	if res.Instructions != "" {
-		if err := WriteFile(stage, "AGENTS.md", []byte(res.Instructions)); err != nil {
+		if err := WriteFile(stage, "AGENTS.md", []byte(res.Substitute(res.Instructions, Bare))); err != nil {
 			return err
 		}
 	}
@@ -1382,37 +1394,6 @@ func heldElsewhere(root, line string) bool {
 	return false
 }
 
-// LinkEntries writes one symlink per composed entry of the kinds in keep, at
-// dir/<kind>/<name>, pointing at the entry in its module. Skills and hooks keep their
-// name, the Markdown kinds get ".md" appended. Every kind directory named is created,
-// with no entry of that kind as well, so a checkout link to it resolves. Entries of any
-// other kind are left out, and it is the caller's job to pass every kind the runtime
-// reads from a link.
-func LinkEntries(res *compose.Result, dir string, keep ...string) error {
-	wanted := map[string]bool{}
-	for _, k := range keep {
-		wanted[k] = true
-		if err := os.MkdirAll(filepath.Join(dir, k), 0o755); err != nil {
-			return err
-		}
-	}
-	for _, e := range res.Entries {
-		if !wanted[e.Kind] {
-			continue
-		}
-		link := filepath.Join(dir, e.Kind, e.Name)
-		switch e.Kind {
-		case "skills", "hooks":
-		default:
-			link += ".md"
-		}
-		if err := os.Symlink(e.Path, link); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // linkModules writes one symlink per module at dir/modules/<name>, pointing at the module's
 // directory, so a settings fragment or a hook reaches a module's other files as
 // $QORY_HARNESS_HOME/modules/<name>/<path>.
@@ -1540,17 +1521,18 @@ func tables(v any) any {
 }
 
 // WriteAgents writes one Markdown file per composed agent at dir/sub/<name><suffix>,
-// where suffix carries the runtime's extension, such as ".agent.md". Each file is the
-// agent's body under frontmatter holding only the keys in keep that the source agent has,
-// so a key one runtime reads does not reach another. When keep names "name" and the
-// source has none, the entry's name fills it. The keys come out in alphabetical order,
-// not the order of keep.
-func WriteAgents(res *compose.Result, dir, sub, suffix string, keep ...string) error {
+// where suffix carries the runtime's extension, such as ".agent.md", with every
+// reference resolved for the path addr names. Each file is the agent's body under
+// frontmatter holding only the keys in keep that the source agent has, so a key one
+// runtime reads does not reach another. When keep names "name" and the source has none,
+// the entry's name fills it. The keys come out in alphabetical order, not the order of
+// keep.
+func WriteAgents(res *compose.Result, addr Address, dir, sub, suffix string, keep ...string) error {
 	for _, e := range res.Entries {
 		if e.Kind != "agents" {
 			continue
 		}
-		doc, err := module.ReadDocument(e.Path)
+		doc, err := ReadDocument(res, addr, e.Path)
 		if err != nil {
 			return err
 		}
