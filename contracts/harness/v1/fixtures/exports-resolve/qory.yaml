@@ -2,3 +2,11 @@ apiVersion: qory.dev/v1alpha1
 exports:
   dir: harness
   modules: [core]
+harness:
+  target:
+    runtime: claude
+  modules:
+    - name: core
+      source: {path: ., module: core}      # an export of this repository, by name
+    - name: extra
+      source: {path: harness/modules/extra}   # not exported; the repository reaches it by path

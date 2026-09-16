@@ -29,7 +29,7 @@ func TestSourceStringNamesAnExport(t *testing.T) {
 // module's source naming a stack, a source naming both, a git source naming a path and
 // an export, an export without the repository, and a name that is not one path segment.
 func TestLoadRefusesAnExportWrittenWrong(t *testing.T) {
-	head := "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n"
+	head := "apiVersion: qory.dev/v1alpha1\nmodules:\n"
 	for _, c := range []struct{ module, want string }{
 		{"  - name: core\n    source: {git: https://h, ref: v1, stack: nextjs}\n", "module core: source names stack nextjs; a module's source names a module, and a stack goes under extends"},
 		{"  - name: core\n    source: {git: https://h, ref: v1, module: core, stack: nextjs}\n", "module core: source names both a module and a stack; it names one export"},
@@ -61,7 +61,7 @@ func TestLoadRefusesAnExportWrittenWrong(t *testing.T) {
 // qory.yaml sets exports.dir: a module named without a source is read under that
 // directory, and the same stack in a repository without the key reads modules/.
 func TestAModuleByNameReadsTheRepositoryModulesDir(t *testing.T) {
-	doc := "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n"
+	doc := "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n"
 	path := write(t, doc)
 	p, err := Load(path)
 	if err != nil {

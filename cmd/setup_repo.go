@@ -25,8 +25,8 @@ const moduleDir = "harness"
 // after it to the column of the others.
 const checkoutConfig = `apiVersion: qory.dev/v1alpha1
 
-# This repository's stack. To take a stack as delivered instead, name it under extends in
-# place of target: {git: https://github.com/acme/harness, ref: v2.4.0, stack: nextjs}
+# This repository's stack. To take a stack as delivered instead, name it under extends
+# beside target: {git: https://github.com/acme/harness, ref: v2.4.0, stack: nextjs}
 harness:
   name: %[1]s%[2]s# the stack's name in the report
   target:
@@ -79,8 +79,8 @@ const userConfig = `apiVersion: qory.dev/v1alpha1
 
 # How qory runs on this machine. A checkout's qory.yaml overrides the keys it names.
 harness:
-  #runtime: claude             # render for this runtime, or a list, instead of the stack's
-  #model: opus                 # write this model instead of the stack's
+  #runtime: claude             # render for this runtime, or a list, instead of the document's
+  #model: opus                 # write this model instead of the document's
   force: false                 # replace a tracked, unmodified file where a link goes
   update: never                # always: fetch every git source again on each compose
 worktree:
@@ -175,7 +175,7 @@ func newSetupMachine() *cobra.Command {
 on this machine, every key shown at its default. A file that is already there is kept.
 
 This qory.yaml is yours, never committed, and applies to every repository you work in:
-the runtime and model to compose for instead of the stack's, force and update, where a
+the runtime and model to compose for instead of the document's, force and update, where a
 worktree goes and what it is called, the git timeout and cache, and environment
 variables. The repository's own qory.yaml, which setup repo writes, is read on top of it,
 and qory config shows every key with the file it came from.`,

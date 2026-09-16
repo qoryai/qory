@@ -221,3 +221,34 @@ func TestResolveAPIVersionReadsARetiredSpelling(t *testing.T) {
 		t.Fatalf("the retired spelling: %+v, %v", e, err)
 	}
 }
+
+// TestRangeIsTheQoryKeyAsWritten is the repository's qory key, which every stack it
+// delivers is held to: returned as the file writes it, with the file, under either
+// name; "" for a root without a file and for a file naming no range; and the error of a
+// file that does not read, since the key is not parsed here.
+func TestRangeIsTheQoryKeyAsWritten(t *testing.T) {
+	root := write(t, "qory: \" >=0.5.0 \"\nexports: {modules: [core]}\n")
+	value, file, err := exports.Range(root)
+	if err != nil || value != " >=0.5.0 " || file != filepath.Join(root, exports.FileName) {
+		t.Errorf("a range: %q from %q, %v", value, file, err)
+	}
+	root = write(t, "harness: {runtime: claude}\n")
+	if value, file, err = exports.Range(root); err != nil || value != "" || file != filepath.Join(root, exports.FileName) {
+		t.Errorf("no key: %q from %q, %v", value, file, err)
+	}
+	if value, file, err = exports.Range(t.TempDir()); err != nil || value != "" || file != "" {
+		t.Errorf("no file: %q from %q, %v", value, file, err)
+	}
+	root = t.TempDir()
+	other := filepath.Join(root, exports.AltFileName)
+	if err := os.WriteFile(other, []byte("qory: \">=0.4.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if value, file, err = exports.Range(root); err != nil || value != ">=0.4.0" || file != other {
+		t.Errorf("harness.yaml: %q from %q, %v", value, file, err)
+	}
+	root = write(t, "qory: [0.5.0]\n")
+	if _, _, err = exports.Range(root); err == nil || !strings.HasPrefix(err.Error(), filepath.Join(root, exports.FileName)+": ") {
+		t.Errorf("a key that is not a string: %v", err)
+	}
+}

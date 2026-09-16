@@ -47,12 +47,29 @@ func writeTree(t *testing.T, files map[string]string) string {
 	return dir
 }
 
-// composeTree loads the stack of a written checkout and composes it. The stack is named
-// by its absolute path, so the test needs no working directory of its own.
+// loadFor reads the stack at path and sets the target a checkout's document would give
+// it, since a stack file carries none: the runtimes named, and no model.
+func loadFor(path string, runtimes ...string) (*stack.Stack, error) {
+	p, err := stack.Load(path)
+	if err != nil {
+		return nil, err
+	}
+	p.Target = stack.Target{Runtimes: runtimes}
+	return p, nil
+}
+
+// composeTree loads the stack of a written checkout and composes it for claude. The stack
+// is named by its absolute path, so the test needs no working directory of its own.
 func composeTree(t *testing.T, files map[string]string) (*compose.Result, error) {
 	t.Helper()
+	return composeTreeFor(t, files, "claude")
+}
+
+// composeTreeFor is composeTree for the given runtimes.
+func composeTreeFor(t *testing.T, files map[string]string, runtimes ...string) (*compose.Result, error) {
+	t.Helper()
 	dir := writeTree(t, files)
-	p, err := stack.Load(filepath.Join(dir, stack.FileName))
+	p, err := loadFor(filepath.Join(dir, stack.FileName), runtimes...)
 	if err != nil {
 		return nil, err
 	}
@@ -61,8 +78,6 @@ func composeTree(t *testing.T, files map[string]string) (*compose.Result, error)
 
 // twoModules is a stack over modules a and b, in that order.
 const twoModules = `apiVersion: qory.dev/v1alpha1
-target:
-  runtime: claude
 modules:
   - name: a
     source:
@@ -187,10 +202,8 @@ func TestSettingsForSubstitutesTheHarnessHome(t *testing.T) {
 // TestSettingsMergeATomlFragment reads a TOML fragment for the runtime that takes one, with
 // its array of tables turned into the list the merge works on.
 func TestSettingsMergeATomlFragment(t *testing.T) {
-	res, err := composeTree(t, map[string]string{
+	res, err := composeTreeFor(t, map[string]string{
 		stack.FileName: `apiVersion: qory.dev/v1alpha1
-target:
-  runtime: codex
 modules:
   - name: a
     source:
@@ -201,7 +214,7 @@ modules:
 `,
 		"modules/a/settings/codex/config.toml": "model = \"gpt-5\"\n\n[permissions]\nallow = [\"read\", \"write\"]\n\n[[hooks]]\nmatcher = \"Bash\"\n\n[stacks.review]\nmodel = \"o3\"\n",
 		"modules/b/settings/codex/config.toml": "[permissions]\nallow = [\"write\", \"exec\"]\n\n[[hooks]]\nmatcher = \"Write\"\n\n[stacks.ship]\nmodel = \"gpt-5\"\n",
-	})
+	}, "codex")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,8 +275,6 @@ func TestSettingsRefuseAFragmentQoryCannotRead(t *testing.T) {
 func TestExcludeNamesNothingTheModuleShips(t *testing.T) {
 	_, err := composeTree(t, map[string]string{
 		stack.FileName: `apiVersion: qory.dev/v1alpha1
-target:
-  runtime: claude
 modules:
   - name: core
     source:
@@ -286,8 +297,6 @@ modules:
 func TestCollisionSuggestKeepsTheLastModule(t *testing.T) {
 	_, err := composeTree(t, map[string]string{
 		stack.FileName: `apiVersion: qory.dev/v1alpha1
-target:
-  runtime: claude
 modules:
   - name: a
     source:
@@ -349,8 +358,6 @@ modules:
 func TestInstructionsAreConcatenatedInModuleOrder(t *testing.T) {
 	res, err := composeTree(t, map[string]string{
 		stack.FileName: `apiVersion: qory.dev/v1alpha1
-target:
-  runtime: claude
 modules:
   - name: b
     source:

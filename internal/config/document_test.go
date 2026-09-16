@@ -41,7 +41,9 @@ func TestDocumentIsTheRootsOwnComposeFile(t *testing.T) {
 // named: the base's directory, relative to the document, stands where extends would,
 // whether the document left extends out or named a source of its own, and what it named
 // comes back beside the stack so the compose can say what -f replaced. A document of
-// extensions alone composes with no module of its own.
+// extensions alone composes with no module of its own, and a document's target is kept,
+// as it is under extends: a delivered stack carries none, so the target is the
+// checkout's to set.
 func TestOnBaseTakesTheBaseFromTheFlag(t *testing.T) {
 	tmp := t.TempDir()
 	base := filepath.Join(tmp, "tree", "nextjs-15", stack.FileName)
@@ -72,18 +74,24 @@ func TestOnBaseTakesTheBaseFromTheFlag(t *testing.T) {
 	if p.Extends.Path != rel || named != (stack.Source{}) || len(p.Modules) != 0 || p.Extensions["consumer"]["team"] != "web" {
 		t.Fatalf("extensions alone: %+v", p)
 	}
+	writeRaw(t, path, "harness:\n  target: {runtime: claude, model: opus}\n  modules:\n    - name: app\n")
+	p, named, err = config.OnBase(path, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Extends.Path != rel || named != (stack.Source{}) || p.Target.Runtimes.String() != "claude" || p.Target.Model != "opus" || len(p.Modules) != 1 {
+		t.Fatalf("with a target: %+v", p)
+	}
 }
 
-// TestOnBaseRefusesWhatHasNoBase is a document holding this repository's own stack, a
-// target, in which -f has nothing to replace; a section of machine keys alone, which is
-// no document; and a harness.yaml with a key it does not read, whose message names the
+// TestOnBaseRefusesWhatIsNoDocument is a section of machine keys alone, which is no
+// document, and a harness.yaml with a key it does not read, whose message names the
 // file by that name.
-func TestOnBaseRefusesWhatHasNoBase(t *testing.T) {
+func TestOnBaseRefusesWhatIsNoDocument(t *testing.T) {
 	tmp := t.TempDir()
 	base := filepath.Join(tmp, "tree", stack.FileName)
 	path := filepath.Join(tmp, "app", "harness.yaml")
 	for _, c := range []struct{ body, want string }{
-		{"harness:\n  target: {runtime: claude}\n  modules:\n    - name: app\n", path + ": harness sets a target, this repository's own stack, and -f names a base for a document that extends one; a document takes its base under extends or from -f, in place of a target"},
 		{"harness: {runtime: codex}\n", path + ": the harness section names no modules, no stack to extend and no extensions"},
 		{"harness:\n  nope: 1\n", path + `: line 2: key "nope" is not one harness.yaml reads`},
 	} {

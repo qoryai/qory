@@ -33,6 +33,58 @@ release may change what an existing document does, and says so under Upgrading.
   is a new manifest key, refused by a 0.4.4 binary as unknown; a stack shipping a module
   that declares states `qory: ">=0.5.0"`.
 
+- `extending.target` in a stack: the runtimes and the models the stack is written for,
+  `runtime` and `model`, each one name or a list, one of the two at least. The target a
+  checkout resolves, whichever of the document, the configuration and the flags set it,
+  is held to it under `extends` and `-f` alike, and before `--dry-run` stops: a runtime
+  outside the list is refused, `runtime <r> is not one the base stack <name>@<pin> is
+  written for; runtimes: <list>`, and where models are listed the target names one of
+  them, or is refused with `the target names no model, and the base stack <name>@<pin>
+  is written for one of these; models: <list>`. A stack without the block accepts every
+  target.
+
+### Changed
+
+- A `qory-stack.yaml` carries no `target`, and one that does is refused: `target is not
+  a stack's; a stack is delivered to be extended, and the checkout extending it sets
+  target under harness, beside extends`. The `harness` section of a checkout's
+  `qory.yaml` sets `target` beside `extends`, the runtime and model it composes the
+  base for, where before the base's target was the checkout's and a `target` beside
+  `extends` was refused.
+- The target of a compose on a base is the document's, then the machine's
+  `harness.runtime` and `harness.model` over it, then `--runtime` and `--model` over
+  those. The two base checks are gone, the one refusing a runtime the base did not
+  render for and the one refusing a model beside the base's; what bounds the target now
+  is the base's `extending.target`, when it states one. A compose on a base with no
+  runtime from the document, the configuration or `--runtime` is refused with
+  `target.runtime is required; the base stack <name>@<pin> carries no target, so the
+  document sets one beside extends, or the configuration or --runtime does`.
+- `qory harness compose -f <stack>` in a checkout whose root holds a document keeps the
+  document's `target`, as `extends` does. Before, a document that set one was taken for
+  the repository's own stack and refused beside `-f`.
+- A stack's `qory` range is joined with the `qory` key of the `qory.yaml`, or
+  `harness.yaml`, at the root of the repository the stack sits in, read whenever the
+  stack file is read: under `extends`, under `-f` and alone. A repository delivering
+  stacks states its floor once, and a stack naming no key is held to the repository's.
+
+### Upgrading
+
+- A 0.4.x qory refuses `target` beside `extends`, and 0.5.0 refuses `target` on a
+  stack, so the three land together: the stack edit that drops its `target`, one
+  `target` line in every repository extending it, and the runner's upgrade. A stack
+  delivered for 0.5.0 states `qory: ">=0.5.0"`, so an earlier qory is told which it
+  needs instead of refusing the file.
+- A stack that states `extending.target.model` makes the model required: a checkout
+  naming none is refused, since it would run whatever the runtime defaults to. A stack
+  that means to keep a fleet on one model lists it; one that leaves the model to the
+  checkout names `runtime` alone, or no block.
+- A repository delivering stacks may state `qory: ">=0.5.0"` once, at its root, and
+  drop the key from each stack; every stack it delivers is held to the root's range
+  beside its own.
+- A self-test that composed a stack with `-f` into a checkout holding no document, and
+  took the runtime from the stack's target, now passes `--runtime` and `--model`, or
+  composes once per runtime the stack allows.
+
 ## [0.4.4] - 2026-09-16
 
 ### Added

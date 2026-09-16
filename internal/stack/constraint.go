@@ -3,6 +3,7 @@ package stack
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"golang.org/x/mod/semver"
@@ -114,9 +115,16 @@ func (c Constraint) String() string {
 	return strings.Join(parts, " ")
 }
 
-// Join returns a constraint that holds when both do.
+// Join returns a constraint that holds when both do. A comparator both name is kept
+// once, so a stack repeating its repository's range prints it once.
 func (c Constraint) Join(other Constraint) Constraint {
-	return Constraint{comparators: append(append([]comparator{}, c.comparators...), other.comparators...)}
+	out := Constraint{comparators: append([]comparator{}, c.comparators...)}
+	for _, cmp := range other.comparators {
+		if !slices.Contains(out.comparators, cmp) {
+			out.comparators = append(out.comparators, cmp)
+		}
+	}
+	return out
 }
 
 // UnmarshalYAML reads the qory key. A value that is not a string, or that

@@ -10,7 +10,7 @@ import (
 	"github.com/qoryai/qory/internal/stack"
 )
 
-const stackDoc = "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n"
+const stackDoc = "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n"
 
 const composeDoc = "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {path: ../base}\n  modules:\n    - name: app\n"
 
@@ -65,7 +65,7 @@ func TestDiscoverStackRefusesAClosedStackAtTheRoot(t *testing.T) {
 	// the mistake in the file rather than the missing block.
 	writeRaw(t, file, "apiVersion: qory.dev/v1alpha1\nmodules: []\n")
 	_, err = config.DiscoverStack(checkout)
-	if err == nil || !strings.Contains(err.Error(), "target.runtime is required") {
+	if err == nil || !strings.Contains(err.Error(), "modules is empty; a stack names at least one module") {
 		t.Fatalf("a stack that does not load: %v", err)
 	}
 
@@ -126,7 +126,9 @@ func TestDiscoverStackRefusesBothAndNamesNone(t *testing.T) {
 
 // TestLoadStackReadsTheHarnessSectionAsTheComposeDocument reads a qory.yaml through its
 // harness section: the stack it extends and its modules come out as a compose document,
-// a machine key beside them is no error, and a section without extends is refused.
+// a machine key beside them is no error, a target beside extends is the target the
+// checkout composes the base for, a section without extends is the checkout's own stack
+// and needs a target, and a section of machine keys alone is no document.
 func TestLoadStackReadsTheHarnessSectionAsTheComposeDocument(t *testing.T) {
 	hermetic(t)
 	dir := t.TempDir()
@@ -138,6 +140,13 @@ func TestLoadStackReadsTheHarnessSectionAsTheComposeDocument(t *testing.T) {
 	}
 	if p.Extends.Path != "../base" || len(p.Modules) != 1 || p.Modules[0].Name != "app" || p.Name != "app" || p.File != path {
 		t.Fatalf("compose: %+v", p)
+	}
+	writeRaw(t, path, strings.Replace(composeDoc, "harness:\n", "harness:\n  target: {runtime: [claude, codex], model: opus}\n", 1))
+	if p, err = config.LoadStack(path); err != nil {
+		t.Fatal(err)
+	}
+	if p.Extends.Path != "../base" || p.Target.Runtimes.String() != "claude, codex" || p.Target.Model != "opus" || len(p.Modules) != 1 {
+		t.Fatalf("a target beside extends: %+v", p)
 	}
 	writeRaw(t, path, "apiVersion: qory.dev/v1alpha1\nharness:\n  modules:\n    - name: app\n")
 	_, err = config.LoadStack(path)

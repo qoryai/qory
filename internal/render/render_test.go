@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/qoryai/qory/internal/compose"
+	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/stack"
 
@@ -26,7 +27,7 @@ import (
 // TestRuntimes renders the two-modules fixture for every runtime, links it into a fresh
 // git checkout, checks the files each CLI reads, and unlinks again.
 func TestRuntimes(t *testing.T) {
-	file, err := filepath.Abs("../../contracts/harness/v1/fixtures/two-modules/qory-stack.yaml")
+	file, err := filepath.Abs("../../contracts/harness/v1/fixtures/two-modules/qory.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +61,7 @@ func TestRuntimes(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			hermetic(t)
-			p, err := stack.Load(file)
+			p, err := config.Compose(file)
 			if err != nil {
 				t.Fatal(err)
 			}

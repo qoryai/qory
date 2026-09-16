@@ -12,13 +12,13 @@ import (
 	"testing"
 
 	"github.com/qoryai/qory/internal/compose"
-	"github.com/qoryai/qory/internal/stack"
+	"github.com/qoryai/qory/internal/config"
 )
 
 const fixtures = "../../contracts/harness/v1/fixtures"
 
-// TestFixtures runs every fixture: a stack composes to the expected entries, settings and
-// instructions, or fails with the expected error text.
+// TestFixtures runs every fixture: the document in its qory.yaml composes to the expected
+// entries, settings and instructions, or fails with the expected error text.
 func TestFixtures(t *testing.T) {
 	dirs, err := filepath.Glob(filepath.Join(fixtures, "*"))
 	if err != nil || len(dirs) == 0 {
@@ -129,7 +129,7 @@ func TestFixtures(t *testing.T) {
 }
 
 func load() (*compose.Result, error) {
-	p, err := stack.Load(stack.FileName)
+	p, err := config.Compose(config.FileName)
 	if err != nil {
 		return nil, err
 	}

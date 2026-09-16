@@ -118,9 +118,9 @@ func TestComposeFlags(t *testing.T) {
 		check func(t *testing.T, root, out string)
 	}{
 		{
-			name: "-f reads a stack outside the discovery path",
+			name: "-f reads a stack outside the discovery path, for the runtime the flag names",
 			setup: func(t *testing.T, _ string) []string {
-				return []string{"harness", "compose", "-f", writeSoloStack(t)}
+				return []string{"harness", "compose", "-f", writeSoloStack(t), "--runtime", "claude"}
 			},
 			want: []string{ui.Mark + " acme/app · claude", "composed 2 entries from 1 module"},
 			check: func(t *testing.T, root, out string) {
@@ -286,16 +286,13 @@ func TestComposeRefuses(t *testing.T) {
 // TestComposeRefusesAClosedStackAtTheRoot is a checkout whose root holds the two-modules
 // stack as a qory-stack.yaml, with no extending block: discovery refuses it as input,
 // names where a repository's own stack goes, and writes nothing. The same file named
-// with -f composes, and so does the file once it declares an extending block.
+// with -f composes, for the runtime the flag names since a stack file carries no target,
+// and so does the file once it declares an extending block.
 func TestComposeRefusesAClosedStackAtTheRoot(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
-	delivered, err := os.ReadFile(filepath.Join(fixtures, "two-modules", "qory-stack.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	file := filepath.Join(root, stack.FileName)
-	writeFile(t, file, string(delivered))
+	writeFile(t, file, twoModulesStack)
 	if err := os.Remove(filepath.Join(root, "qory.yaml")); err != nil {
 		t.Fatal(err)
 	}
@@ -310,14 +307,14 @@ func TestComposeRefusesAClosedStackAtTheRoot(t *testing.T) {
 	}
 	gone(t, root, ".qory", ".claude")
 
-	if out, err := run(t, "harness", "compose", "-f", file); err != nil {
+	if out, err := run(t, "harness", "compose", "-f", file, "--runtime", "claude"); err != nil {
 		t.Fatalf("compose -f: %v\n%s", err, out)
 	}
 	if out, err := run(t, "harness", "remove"); err != nil {
 		t.Fatalf("remove: %v\n%s", err, out)
 	}
-	writeFile(t, file, string(delivered)+"extending:\n  kinds: [skills]\n")
-	if out, err := run(t, "harness", "compose"); err != nil {
+	writeFile(t, file, twoModulesStack+"extending:\n  kinds: [skills]\n")
+	if out, err := run(t, "harness", "compose", "--runtime", "claude"); err != nil {
 		t.Fatalf("compose with an extending block: %v\n%s", err, out)
 	}
 }
@@ -371,7 +368,8 @@ func TestComposeTwiceLeavesTheTreeAsItWas(t *testing.T) {
 
 // writeSoloStack writes a stack and its one small module into a directory of their own,
 // outside any checkout, and returns the stack's path. Discovery never reaches it: a
-// checkout in another temporary directory is not below it.
+// checkout in another temporary directory is not below it. The stack names no target,
+// as no stack file does; the compose is told one.
 func writeSoloStack(t *testing.T) string {
 	t.Helper()
 	dir := tempDir(t)
@@ -379,8 +377,6 @@ func writeSoloStack(t *testing.T) string {
 	writeFile(t, filepath.Join(dir, "modules", "solo", "skills", "greet", "SKILL.md"), "---\nname: greet\ndescription: Greet.\n---\n\nSay hello.\n")
 	writeFile(t, filepath.Join(dir, "modules", "solo", "commands", "ship.md"), "# ship\n\nFrom the solo module.\n")
 	writeFile(t, filepath.Join(dir, stack.FileName), `apiVersion: qory.dev/v1alpha1
-target:
-  runtime: claude
 modules:
   - name: solo
     source: {path: modules/solo}

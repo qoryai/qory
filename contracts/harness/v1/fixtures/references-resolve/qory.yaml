@@ -1,0 +1,11 @@
+apiVersion: qory.dev/v1alpha1
+harness:
+  target:
+    runtime: claude
+  modules:
+    - name: core
+      source: {path: modules/core}
+    - name: rails
+      source: {path: modules/rails}
+  bind:
+    agents/coder: rails-coder

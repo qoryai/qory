@@ -1,0 +1,13 @@
+apiVersion: qory.dev/v1alpha1
+harness:
+  target:
+    runtime: claude
+    model: opus
+  modules:
+    - name: core
+      source: {path: modules/core}
+      exclude:
+        skills: [test]
+        agents: [reviewer]
+    - name: team
+      source: {path: modules/team}

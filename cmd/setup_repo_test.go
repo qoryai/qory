@@ -87,11 +87,7 @@ func TestSetupRepoKeepsAStackThatIsThere(t *testing.T) {
 	// root with an extending block, so it composes there, and no qory.yaml is beside it.
 	root = newCheckout(t)
 	copyFixture(t, "two-modules", root)
-	delivered, err := os.ReadFile(filepath.Join(fixtures, "two-modules", "qory-stack.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(root, "qory-stack.yaml"), string(delivered)+"extending:\n  kinds: [skills]\n")
+	writeFile(t, filepath.Join(root, "qory-stack.yaml"), twoModulesStack+"extending:\n  kinds: [skills]\n")
 	if err := os.Remove(filepath.Join(root, config.FileName)); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +99,8 @@ func TestSetupRepoKeepsAStackThatIsThere(t *testing.T) {
 	wantsRow(t, out, "wrote", "qory.yaml")
 	gone(t, root, "harness")
 	validConfig(t, filepath.Join(root, config.FileName))
-	if _, err := run(t, "harness", "compose", "--dry-run"); err != nil {
+	// The stack file carries no target, so the compose is told the runtime.
+	if _, err := run(t, "harness", "compose", "--dry-run", "--runtime", "claude"); err != nil {
 		t.Errorf("the stack file and the written qory.yaml do not compose together: %v", err)
 	}
 }

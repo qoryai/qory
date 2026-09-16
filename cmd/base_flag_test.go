@@ -3,10 +3,12 @@ package cmd_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/qoryai/qory/cmd"
+	"github.com/qoryai/qory/internal/ui"
 )
 
 // runnerTree is the publisher's stack tree on the runner's disk: [baseRepo] as a
@@ -19,8 +21,9 @@ func runnerTree(t *testing.T) (dir, file string) {
 
 // fleetCheckout is a consumer's repository as it is committed for a runner: a document
 // under harness holding only what is the repository's own, its module and its
-// extensions, with the lines given before them, and no apiVersion, since the file names
-// nothing of the tool that reads it.
+// extensions, with the lines given before them, its target among them when the runner's
+// configuration does not name one, and no apiVersion, since the file names nothing of
+// the tool that reads it.
 func fleetCheckout(t *testing.T, name string, lines ...string) string {
 	t.Helper()
 	root := newCheckout(t)
@@ -37,7 +40,7 @@ func fleetCheckout(t *testing.T, name string, lines ...string) string {
 // say where the base came from and that the document's own extends was not read.
 func TestFileFlagNamesTheBaseOfTheCheckoutsDocument(t *testing.T) {
 	_, base := runnerTree(t)
-	root := fleetCheckout(t, "qory.yaml", "  extends: {git: https://git.example.com/acme/harness, ref: v9, path: nextjs-15}\n")
+	root := fleetCheckout(t, "qory.yaml", "  extends: {git: https://git.example.com/acme/harness, ref: v9, path: nextjs-15}\n", consumerTarget)
 	out, err := run(t, "harness", "compose", "-f", base)
 	if err != nil {
 		t.Fatalf("compose -f: %v\n%s", err, out)
@@ -66,8 +69,8 @@ func TestFileFlagNamesTheBaseOfTheCheckoutsDocument(t *testing.T) {
 }
 
 // TestDocumentLeavesExtendsOutForTheFlag is the committed file at its barest: no
-// apiVersion, no extends. It composes on the base -f names and is refused, saying what
-// to do, when nothing supplies a base.
+// apiVersion, no extends, no target. It composes on the base -f names, for the runtime
+// the flag names, and is refused, saying what to do, when nothing supplies a base.
 func TestDocumentLeavesExtendsOutForTheFlag(t *testing.T) {
 	_, base := runnerTree(t)
 	root := fleetCheckout(t, "qory.yaml")
@@ -77,7 +80,7 @@ func TestDocumentLeavesExtendsOutForTheFlag(t *testing.T) {
 	}
 	wants(t, err.Error(), "qory.yaml: harness names no target.runtime and no stack to extend", "leaves extends out for the base that qory harness compose -f <stack> names")
 	gone(t, root, ".qory", ".claude")
-	out, err = run(t, "harness", "compose", "-f", base)
+	out, err = run(t, "harness", "compose", "-f", base, "--runtime", "claude")
 	if err != nil {
 		t.Fatalf("compose -f: %v\n%s", err, out)
 	}
@@ -88,7 +91,7 @@ func TestDocumentLeavesExtendsOutForTheFlag(t *testing.T) {
 	}
 	// A document that appends no module at all, its extensions alone, composes too.
 	writeFile(t, filepath.Join(root, "qory.yaml"), "harness:\n  extensions:\n    consumer: {team: web}\n")
-	if out, err := run(t, "harness", "compose", "-f", base); err != nil {
+	if out, err := run(t, "harness", "compose", "-f", base, "--runtime", "claude"); err != nil {
 		t.Fatalf("extensions alone: %v\n%s", err, out)
 	}
 	rep = readReport(t, root)
@@ -97,18 +100,27 @@ func TestDocumentLeavesExtendsOutForTheFlag(t *testing.T) {
 	}
 }
 
-// TestFileFlagRefusesADocumentWithItsOwnTarget is -f naming a stack in a checkout whose
-// document holds its own stack: nothing is a base for that, and the message says so
-// rather than composing either one and dropping the other.
-func TestFileFlagRefusesADocumentWithItsOwnTarget(t *testing.T) {
+// TestFileFlagKeepsTheDocumentsTarget is -f naming the base of a document that sets a
+// target and leaves extends out: the document composes on the base for its own target,
+// as it would under extends, and --runtime stands over that target.
+func TestFileFlagKeepsTheDocumentsTarget(t *testing.T) {
 	_, base := runnerTree(t)
-	root := fleetCheckout(t, "qory.yaml", "  target: {runtime: claude}\n")
+	root := fleetCheckout(t, "qory.yaml", "  target: {runtime: codex, model: sonnet}\n")
 	out, err := run(t, "harness", "compose", "-f", base)
-	if err == nil || cmd.ExitCode(err) != cmd.ExitInput {
-		t.Fatalf("err = %v, exit %d\n%s", err, cmd.ExitCode(err), out)
+	if err != nil {
+		t.Fatalf("compose -f: %v\n%s", err, out)
 	}
-	wants(t, err.Error(), "qory.yaml: harness sets a target, this repository's own stack, and -f names a base for a document that extends one")
-	gone(t, root, ".qory", ".claude")
+	wants(t, out, ui.Mark+" acme/app · codex sonnet")
+	wantsRow(t, out, "base", base+"  (named by -f)")
+	rep := readReport(t, root)
+	if rep.Base == nil || !slices.Equal(rep.Target.Runtimes, []string{"codex"}) || rep.Target.Model != "sonnet" || len(rep.Modules) != 3 {
+		t.Fatalf("report: base %+v, target %+v, modules %+v", rep.Base, rep.Target, rep.Modules)
+	}
+	out, err = run(t, "harness", "compose", "-f", base, "--runtime", "claude")
+	if err != nil {
+		t.Fatalf("compose -f --runtime: %v\n%s", err, out)
+	}
+	wants(t, out, ui.Mark+" acme/app · claude sonnet")
 }
 
 // TestHarnessYamlIsTheDocumentsOtherName is the committed file under its other name:
@@ -116,7 +128,7 @@ func TestFileFlagRefusesADocumentWithItsOwnTarget(t *testing.T) {
 // names is refused.
 func TestHarnessYamlIsTheDocumentsOtherName(t *testing.T) {
 	tree, base := runnerTree(t)
-	root := fleetCheckout(t, "harness.yaml")
+	root := fleetCheckout(t, "harness.yaml", "  target: {runtime: claude}\n")
 	out, err := run(t, "harness", "compose", "-f", base)
 	if err != nil {
 		t.Fatalf("compose -f: %v\n%s", err, out)
@@ -126,7 +138,7 @@ func TestHarnessYamlIsTheDocumentsOtherName(t *testing.T) {
 		t.Fatalf("remove: %v\n%s", err, out)
 	}
 	rel, _ := filepath.Rel(root, filepath.Join(tree, "nextjs-15"))
-	writeFile(t, filepath.Join(root, "harness.yaml"), "harness:\n  extends: {path: "+rel+"}\n  modules:\n    - name: app\n      source: {path: ./modules/app}\n")
+	writeFile(t, filepath.Join(root, "harness.yaml"), "harness:\n  extends: {path: "+rel+"}\n  target: {runtime: claude}\n  modules:\n    - name: app\n      source: {path: ./modules/app}\n")
 	out, err = run(t, "harness", "compose")
 	if err != nil {
 		t.Fatalf("discovered: %v\n%s", err, out)
@@ -150,12 +162,14 @@ func TestHarnessYamlIsTheDocumentsOtherName(t *testing.T) {
 }
 
 // TestWorktreeAddTakesTheBaseFromTheFlag is the runner adding a worktree of a fleet
-// checkout: -f names the base the worktree's document composes on, and the worktree
-// comes out composed. Without the flag the document is found and refused for lacking a
-// base, with the worktree kept; -f beside --no-compose is an input error.
+// checkout: -f names the base the worktree's document composes on, the runner's own
+// qory.yaml names the runtime, and the worktree comes out composed. Without the flag
+// the document is found and refused for lacking a base, with the worktree kept; -f
+// beside --no-compose is an input error.
 func TestWorktreeAddTakesTheBaseFromTheFlag(t *testing.T) {
 	_, base := runnerTree(t)
 	root := fleetCheckout(t, "harness.yaml")
+	machineConfig(t, "harness:\n  runtime: claude\n")
 	runGit(t, root, "add", "-A")
 	runGit(t, root, "commit", "-q", "-m", "fleet")
 	localOrigin(t, root)
@@ -194,7 +208,7 @@ func TestWorktreeAddTakesTheBaseFromTheFlag(t *testing.T) {
 // refused.
 func TestARetiredAPIVersionComposesWithARow(t *testing.T) {
 	_, base := runnerTree(t)
-	root := fleetCheckout(t, "qory.yaml", "  extends: {git: https://git.example.com/acme/harness, ref: v9, path: nextjs-15}\n")
+	root := fleetCheckout(t, "qory.yaml", "  extends: {git: https://git.example.com/acme/harness, ref: v9, path: nextjs-15}\n", consumerTarget)
 	file := filepath.Join(root, "qory.yaml")
 	stale, err := os.ReadFile(file)
 	if err != nil {

@@ -53,17 +53,18 @@ coming last.
    ```
 
    Every module has a `qory-module.yaml` that names it. A repository can also take a
-   stack someone else delivers, a `qory-stack.yaml`: it names that stack under `extends`
-   instead of `target`, and adds its own modules. The delivered modules cannot be changed.
-   A runner that holds the stack tree names the base with `qory harness compose -f
-   <stack>` instead, and the repository's file then names no version, ref or URL of it.
-   A delivered stack states the qory it needs, `qory: ">=0.4.0"`, and every repository
-   extending it inherits the range.
+   stack someone else delivers, a `qory-stack.yaml`: it names that stack under `extends`,
+   says what it composes it for under `target`, and adds its own modules. The delivered
+   modules cannot be changed. A runner that holds the stack tree names the base with
+   `qory harness compose -f <stack>` instead, and the repository's file then names no
+   version, ref or URL of it. The harness repository states the qory it needs once, in
+   its own `qory.yaml`, `qory: ">=0.5.0"`, and every stack it delivers is held to it.
 
    ```yaml
    apiVersion: qory.dev/v1alpha1
    harness:
      extends: {git: https://github.com/acme/harness, ref: v2.4.0, stack: nextjs}
+     target: {runtime: claude, model: opus}
      modules:
        - name: marketing          # the harness repository exports it too
          source: {git: https://github.com/acme/harness, ref: v2.4.0, module: marketing}
@@ -207,8 +208,8 @@ Flags worth knowing on `compose`:
 ```
 -f <stack>             compose this stack; as the base of the repository's document when that extends one
 --dry-run              print the report and write nothing
---runtime claude,codex render for these runtimes instead of the stack's
---model opus           write this model instead of the stack's
+--runtime claude,codex render for these runtimes instead of the document's
+--model opus           write this model instead of the document's
 --force                replace a tracked, unmodified file where a link goes
 --update               fetch every git source again
 --check                exit 6 when the composed tree is behind the stack and modules
