@@ -194,6 +194,7 @@ qory harness compose     # compose the stack into the checkout you stand in   (q
 qory harness inspect     # the report: every entry and the module it came from (qory hi)
 qory harness remove      # remove the composed tree and its links               (qory hr)
 qory harness launch      # the command that starts a runtime on the tree          (qory hl)
+qory run                 # start a runtime on the tree, observed and recorded
 qory worktree add        # add a worktree for a branch and prepare it            (qory wa)
 qory worktree remove     # remove a worktree and its branch                      (qory wr)
 qory worktree list       # every worktree with its branch                        (qory wl)
@@ -295,6 +296,44 @@ Every line is the tool's own template, and `harness.launch.<runtime>` in your
 `qory.yaml` changes the command, the arguments or the variables when a tool's flags
 move. `--json` prints the same as one object. The contract says what each tool takes
 from outside and what it still reads from the checkout.
+
+## Running a session
+
+`qory run` starts the runtime on the composed tree inside the session runner of
+[qoryai/runner](https://github.com/qoryai/runner): the same launch as `qory harness launch`,
+with every connection the runtime makes going through a proxy on your machine and
+recorded, and the session written as events beside its output.
+
+```sh
+qory run                              # the composed runtime, at your terminal
+qory run claude -- -p "Reply pong"    # one headless turn; arguments after -- go to the runtime
+```
+
+The record is `.qory/runs/<id>/`: `events.jsonl`, one event per line, and `output.log`,
+the session's bytes. One optional file, `~/.config/qory/runner.yaml`, says what the
+runner does on this machine. It lives beside your `qory.yaml` and nowhere else, so a
+repository cannot set it:
+
+```yaml
+# ~/.config/qory/runner.yaml
+apiVersion: qory.dev/v1alpha1
+egress:                  # what the runtime may reach; enforce denies the rest
+  mode: enforce          # or observe: record everything, deny nothing
+  allow: [api.anthropic.com, "*.github.com"]
+webhook:                 # where to post the events as well; optional
+  url: https://example.com/qory/events
+  secret: sixteen-characters-at-least   # or QORY_WEBHOOK_SECRET in the environment
+```
+
+A module declares the hosts it reaches under `egress` in its manifest, and the compose
+unions them into the report. When the harness declares, the runtime reaches the declared
+hosts the policy covers and nothing else; the policy is the ceiling. When no module
+declares, the policy's list stands as it is.
+
+With a webhook configured the runner does not start unless the receiver answers;
+`--local` runs with the files alone. A denied connection is recorded and
+the session goes on; nothing here ends a session. The formats are in the runner's
+[contract](https://github.com/qoryai/runner/tree/main/contracts/runner/v1).
 
 ## The format
 

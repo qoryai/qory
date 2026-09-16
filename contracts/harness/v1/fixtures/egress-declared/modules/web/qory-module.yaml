@@ -1,0 +1,5 @@
+apiVersion: qory.dev/v1alpha1
+name: web
+egress:
+  - registry.npmjs.org
+  - api.example.com

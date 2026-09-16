@@ -4,3 +4,5 @@
 
 /release-notes.md
 /docs/plans/
+/go.work
+/go.work.sum

@@ -46,6 +46,10 @@ type Module struct {
 	// retired spelling of the current one, "" otherwise, so the command can say the
 	// manifest wants the line rewritten.
 	RetiredAPIVersion string
+	// Egress are the hosts the manifest declares the module reaches, sorted; nil when
+	// it declares none, empty when it declares that it reaches nothing. An exclude or
+	// an only leaves it as it is: a module composed at all declares.
+	Egress []string
 }
 
 // Entry is one entry of the composed tree and the module it came from.
@@ -194,7 +198,7 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 		if err != nil {
 			return nil, err
 		}
-		rl := Module{Name: name, Description: m.Description, Dir: l.Dir, Source: ps.String(), Pin: src.Pin, Dirty: src.Dirty, Variant: variant, Link: pl.Link, Base: pl.Base, RetiredAPIVersion: m.RetiredAPIVersion}
+		rl := Module{Name: name, Description: m.Description, Dir: l.Dir, Source: ps.String(), Pin: src.Pin, Dirty: src.Dirty, Variant: variant, Link: pl.Link, Base: pl.Base, RetiredAPIVersion: m.RetiredAPIVersion, Egress: m.Egress}
 		requires[name] = needs(l, m.Requires, res.Bind)
 		// The selection comes first, so that what the base allows and what the module
 		// exports are checked on what the module contributes, not on what it ships.

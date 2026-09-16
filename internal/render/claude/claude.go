@@ -182,6 +182,11 @@ func renderPlugin(res *compose.Result, dir string) error {
 	return render.WritePlugin(res, dir, ".claude-plugin", extra)
 }
 
+// Egress is the host Claude Code's program reaches for the model: the API. The
+// telemetry and the MCP proxy hosts it also tries are not declared; a policy that does
+// not cover them denies them, and a session is unaffected.
+func (claude) Egress() []string { return []string{"api.anthropic.com"} }
+
 // Template starts Claude Code with the harness in a home: the plugin for the skills,
 // agents, commands and output styles, settings.json for the permissions, the hooks, the
 // environment and the model, mcp.json for the servers when the compose wrote one,

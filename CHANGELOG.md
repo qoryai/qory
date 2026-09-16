@@ -4,6 +4,35 @@ Every release of qory, newest first, in the shape of [Keep a Changelog](https://
 The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0 a minor
 release may change what an existing document does, and says so under Upgrading.
 
+## [0.5.0] - 2026-09-16
+
+### Added
+
+- `qory run` starts a runtime on the composed harness through the session runner of
+  [`github.com/qoryai/runner`](https://github.com/qoryai/runner): the launch spec is the
+  one `qory harness launch` prints, with the arguments after `--` appended; every
+  connection the runtime makes goes through a loopback proxy and is recorded. What the
+  runner does on a machine is `runner.yaml` beside the user's `qory.yaml`, and nowhere
+  else: its `egress` section is the policy, which in enforce mode decides what is denied,
+  and its `webhook` section is where every event is posted as well, the secret there or
+  in `QORY_WEBHOOK_SECRET`. The session's bytes, the runner's observations and the
+  runtime's own reports are written as CloudEvents to `.qory/runs/<id>/events.jsonl`
+  beside `output.log`; `--local` keeps to the files when a webhook is configured. `qory
+  config` lists the file's values under `runner.`. At a terminal the session runs on a pseudo-terminal;
+  `--headless` or no terminal runs it on pipes. The exit status is the runtime's. The
+  hidden `qory run forward` is the hook command the runner installs into a copy of the
+  runtime's settings, so a session needs nothing on the machine beyond `qory`.
+- A module declares the hosts its skills, hooks and servers reach under `egress` in
+  `qory-module.yaml`, a lower-case name or a `*.` suffix, in the grammar the runner
+  contract gives a policy's allow list. The compose unions the declarations into the
+  report's `egress`, each host with the modules that declared it, and adds the runtime's
+  own endpoint under the runtime's name when any module declares; `qory harness inspect`
+  shows the union. `qory run` hands it to the runner, which keeps the declared hosts the
+  policy covers, so the policy is the ceiling and a declaration only lowers it. A harness
+  in which no module declares hands over nothing and the policy's list stands. `egress`
+  is a new manifest key, refused by a 0.4.4 binary as unknown; a stack shipping a module
+  that declares states `qory: ">=0.5.0"`.
+
 ## [0.4.4] - 2026-09-16
 
 ### Added
@@ -364,6 +393,7 @@ The first release: a stack of modules composed into one tree, linked into the ch
 and kept out of git, with a report naming the module of every entry and a refusal when
 two modules provide the same one.
 
+[0.5.0]: https://github.com/qoryai/qory/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/qoryai/qory/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/qoryai/qory/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/qoryai/qory/compare/v0.4.1...v0.4.2

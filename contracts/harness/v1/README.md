@@ -293,6 +293,9 @@ requires:
   - skill: deploy                # this module's deploy skill needs these composed beside it
     commands: [ship]
     agents: [reviewer]
+egress:                          # the hosts the module's skills, hooks and servers reach
+  - api.example.com
+  - "*.github.com"               # every host below github.com, not github.com itself
 ```
 
 `description`, optional, says what the module is for; the report carries it and `qory harness
@@ -312,6 +315,22 @@ string names the server, a list the servers needed, and since a key appears once
 an item naming a server lists no servers. An item that names no entry or two, a key that
 is neither, an empty list, an entry named twice, and an entry the module does not ship are
 refused (§Composition rules).
+`egress`, optional, declares the hosts the module's skills, hooks and servers reach: a
+lower-case host name, or `*.` followed by a name for every host below it and not the name
+itself. No ports, no paths, no schemes. The grammar is the runner contract's, the
+`egress.allow` entry of a run policy at
+`https://qory.dev/contracts/runner/v1/policy.schema.json`, copied into the module schema and
+kept identical by a test; a host that is not in it is refused by name. The declarations of
+every composed module are unioned into the report's `egress` (§The report), and `qory run`
+hands the union to the runner, which keeps the declared hosts the run's policy covers: the
+policy is the ceiling, a declaration can only lower it. An `exclude` or an `only` does not
+touch the declaration; a module composed at all declares. A module with no `egress` key
+declares nothing, and a harness in which no module declares hands the runner no list, so
+the policy's own list stands. `egress: []` is a declaration that the module reaches
+nothing, and a harness whose modules declare, and between them name no host, reaches
+nothing under an enforce policy beyond what the runtime's own program needs. A module that
+declares states `qory: ">=0.5.0"` on the stack that ships it; an earlier qory refuses the
+key as unknown.
 
 A module's tree holds these entry kinds:
 
@@ -716,7 +735,13 @@ source naming an export is written as the stack wrote it, `<url>#<ref> module <n
 An entry an `only` brought in carries `for`, the `<kind>/<name>` that required it, and
 an entry whose documents reference others carries `references`, the `<kind>/<name>` keys
 as written, a role's included; the stack's bindings are `bind`, `<kind>/<role>` to the
-entry's name, absent when there are none.
+entry's name, absent when there are none. `egress` is the union of the hosts the modules
+declared (§The module manifest), sorted by host, each with the `modules` that declared it
+in stack order, and absent when no module declares; when one does, the target runtime's
+own hosts, the model endpoint for `claude`, join under the runtime's name, so a stack
+declares what its modules reach and not what the program needs. A harness whose modules
+declare and name no host writes `egress: []`. `qory run` hands the hosts to the runner
+(§Launching).
 The report of a checkout that extends a stack records the `base`: its `name`, `source` and `pin`. A path source's pin is `working-tree`; a git source's pin is twelve
 characters of its commit. The report records the `qory` that wrote it, its `version`,
 `commit` and `source`, `release` or `source`, as `qory version --json` reports them,
@@ -802,7 +827,38 @@ Every key is optional; a file naming none is read and changes nothing. A key the
 does not read is refused, and the message names the file by its own name. A list, such
 as `worktree.link`, is the nearest file's whole. `qory config` prints every effective
 value and the file it came from. Under `extends` the `harness`, `git` and `env` keys of the
-checkout's own file are not read (§Extending a stack). The schema is
+checkout's own file are not read (§Extending a stack).
+
+**The runner file.** What `qory run` does on this machine is a second file,
+`runner.yaml`, beside the user's `qory.yaml` under the configuration directory and
+nowhere else: it has no counterpart in a repository or an ancestor directory, so a
+checkout cannot set the policy the agent runs under or where the run's events go. Its
+two sections are the runner contract's objects, `https://qory.dev/contracts/runner/v1/`,
+in the runner contract's grammar; `qory run` hands them to the runner as they are.
+
+```yaml
+# ~/.config/qory/runner.yaml
+apiVersion: qory.dev/v1alpha1
+egress:                          # the run policy; absent: observe everything, deny nothing
+  mode: enforce                  # or observe: record every connection, deny none
+  allow: [api.anthropic.com, "*.github.com"]
+webhook:                         # where every event is posted as well; absent: files only
+  url: https://example.com/qory/events
+  secret: ...                    # at least 16 characters; or QORY_WEBHOOK_SECRET in the environment
+  events: ["*"]                  # the types to post; absent: every type
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `egress.mode` | `observe` | `observe` records every connection and denies none; `enforce` denies a connection to a host outside `allow` and records the denial |
+| `egress.allow` | none | the hosts the runtime may reach: a lower-case name, or `*.` and a name for every host below it, the grammar of a module's `egress` (§The module manifest). When the harness declares egress, the runtime reaches the declared hosts this list covers; when it declares nothing, this list as it is |
+| `webhook.url` | none | `https`, or `http` to this machine; with it set, `qory run` does not start unless the receiver accepts a ping, and `--local` runs with the files alone |
+| `webhook.secret` | `QORY_WEBHOOK_SECRET` | signs every delivery; at least 16 characters, never in a repository |
+| `webhook.events` | every type | the event types to post, by full name or `*` |
+
+`qory config` lists the file's values under `runner.`; a file that does not read stops
+every command, the way a `qory.yaml` that does not read does. The schema is
+`runner.schema.json`. The schema of `qory.yaml` is
 [config.schema.json](config.schema.json).
 
 ## Exit status

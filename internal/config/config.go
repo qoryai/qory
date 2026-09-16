@@ -47,6 +47,18 @@
 //	  stacks: [nextjs]           # harness/stacks/nextjs/qory-stack.yaml
 //	  modules: [core, nextjs]    # harness/modules/<name>/qory-module.yaml
 //
+// The machine's runner file, runner.yaml beside the user's qory.yaml and nowhere else,
+// says what qory run does on this machine; [LoadRunner] reads it and [Load] carries it:
+//
+//	apiVersion: qory.dev/v1alpha1
+//	egress:                      # the run policy: absent is observe everything
+//	  mode: enforce              # or observe: record every connection, deny none
+//	  allow: [api.anthropic.com, "*.github.com"]
+//	webhook:                     # where every event is posted as well; absent is files only
+//	  url: https://example.com/qory/events
+//	  secret: ...                # or QORY_WEBHOOK_SECRET in the environment
+//	  events: ["*"]              # the types to post; absent is every type
+//
 // [Load] discovers and reads the files, [Config] is the result, and [Config.Rows] says
 // where each value came from. [DiscoverStack] finds what a checkout composes, its
 // qory-stack.yaml or the harness section of its qory.yaml, and [LoadStack] reads it.
@@ -310,6 +322,9 @@ type Config struct {
 	// root's file; nil when it names none. A section in any other file is read and left
 	// out, since an export is a repository's.
 	Exports *exports.Exports
+	// Runner is the machine's runner file, [RunnerFileName] under [UserDir]; nil when
+	// there is none.
+	Runner *Runner
 	// Files are the files read, in the order they were applied.
 	Files []string
 	// origins maps a row key to the file that set it, or [Default].
@@ -414,6 +429,9 @@ func Load(root string, own bool) (Config, error) {
 	}
 	files, err := Discover(root)
 	if err != nil {
+		return c, err
+	}
+	if c.Runner, err = LoadRunner(); err != nil {
 		return c, err
 	}
 	for _, path := range files {
@@ -1110,6 +1128,7 @@ func (c Config) Rows() []Row {
 	for _, name := range names {
 		rows = append(rows, Row{"env." + name, c.Env[name], c.origins["env."+name]})
 	}
+	rows = append(rows, c.Runner.Rows()...)
 	if e := c.Exports; e != nil {
 		rows = append(rows,
 			Row{"exports.dir.stacks", e.Dir.Stacks, e.File},

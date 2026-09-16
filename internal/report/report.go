@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -162,6 +163,12 @@ type Report struct {
 	// Bind is the stack's bindings, <kind>/<role> to the name of the entry that fills the
 	// role, absent when the stack binds none.
 	Bind map[string]string `json:"bind,omitempty"`
+	// Egress is the union of the hosts the modules declared, sorted by host, each with
+	// the modules that declared it, the target runtime among them for the hosts its
+	// program reaches. Absent when no module declares egress, which leaves a run's
+	// policy as it is; an empty list when the modules declare and name no host between
+	// them, which under an enforce policy reaches nothing.
+	Egress []Egress `json:"egress,omitzero"`
 	// Extensions are the stack's extensions, carried as written, absent when it has
 	// none.
 	Extensions map[string]map[string]any `json:"extensions,omitempty"`
@@ -170,6 +177,45 @@ type Report struct {
 	// Qory is the build that wrote the report, absent when the build carries no version.
 	// The command sets it after [New], which knows nothing about the binary.
 	Qory *Build `json:"qory,omitempty"`
+}
+
+// Egress is one declared host and who declared it.
+type Egress struct {
+	// Host is the declaration as written: a lower-case name or a *. suffix.
+	Host string `json:"host"`
+	// Modules are the modules that declared it, in stack order, a runtime by its name.
+	Modules []string `json:"modules"`
+}
+
+// AddEgress adds hosts declared by name, a module's or a runtime's, to the union,
+// keeping the hosts sorted and each declarer once per host.
+func (r *Report) AddEgress(name string, hosts []string) {
+	if r.Egress == nil {
+		r.Egress = []Egress{}
+	}
+	for _, host := range hosts {
+		i := sort.Search(len(r.Egress), func(i int) bool { return r.Egress[i].Host >= host })
+		if i < len(r.Egress) && r.Egress[i].Host == host {
+			if !slices.Contains(r.Egress[i].Modules, name) {
+				r.Egress[i].Modules = append(r.Egress[i].Modules, name)
+			}
+			continue
+		}
+		r.Egress = slices.Insert(r.Egress, i, Egress{Host: host, Modules: []string{name}})
+	}
+}
+
+// Hosts are the declared hosts alone, sorted, for a runner: nil when the report has
+// no declaration, empty when it declares nothing.
+func (r Report) Hosts() []string {
+	if r.Egress == nil {
+		return nil
+	}
+	hosts := make([]string, 0, len(r.Egress))
+	for _, e := range r.Egress {
+		hosts = append(hosts, e.Host)
+	}
+	return hosts
 }
 
 // New builds the report of a result rendered into home for a checkout. The name is the
@@ -201,6 +247,9 @@ func New(res *compose.Result, name, checkout, home string) Report {
 	}
 	for _, l := range res.Modules {
 		r.Modules = append(r.Modules, Module{Name: l.Name, Description: l.Description, Source: l.Source, Pin: l.Pin, Dirty: l.Dirty, Variant: l.Variant, Link: l.Link, Base: l.Base})
+		if l.Egress != nil {
+			r.AddEgress(l.Name, l.Egress)
+		}
 	}
 	for _, e := range res.Entries {
 		r.Entries = append(r.Entries, Entry{Kind: e.Kind, Name: e.Name, Module: e.Module, For: e.For, References: e.References})
@@ -312,6 +361,18 @@ func (r Report) PrintBody(w io.Writer) error {
 		rows = nil
 		for _, role := range sorted(r.Bind) {
 			rows = append(rows, []string{role, r.Bind[role]})
+		}
+		u.Table(rows)
+	}
+	if r.Egress != nil {
+		u.Blank()
+		u.Heading("Egress")
+		rows = nil
+		for _, e := range r.Egress {
+			rows = append(rows, []string{e.Host, strings.Join(e.Modules, ", ")})
+		}
+		if len(rows) == 0 {
+			u.Text("declared: nothing")
 		}
 		u.Table(rows)
 	}

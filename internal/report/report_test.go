@@ -30,6 +30,7 @@ func result() *compose.Result {
 				Dir:    "/work/modules/core",
 				Source: "../modules/core",
 				Pin:    source.WorkingTree,
+				Egress: []string{"*.github.com", "api.example.com"},
 			},
 			{
 				Name:    "review",
@@ -38,6 +39,7 @@ func result() *compose.Result {
 				Pin:     source.WorkingTree,
 				Dirty:   true,
 				Variant: "claude",
+				Egress:  []string{"api.example.com"},
 			},
 		},
 		Entries: []compose.Entry{
@@ -70,7 +72,54 @@ func want() report.Report {
 		Excludes: []report.Exclude{
 			{Module: "core", Kind: "skills", Name: "old"},
 		},
+		Egress: []report.Egress{
+			{Host: "*.github.com", Modules: []string{"core"}},
+			{Host: "api.example.com", Modules: []string{"core", "review"}},
+		},
 	}
+}
+
+// TestEgressTellsNoDeclarationFromAnEmptyOne is the difference a runner reads: a
+// result whose modules declare nothing has no egress key and nil hosts, one whose
+// module declares an empty list has an empty egress array and empty hosts, and a
+// runtime added to a declaration joins the union under its name, in host order.
+func TestEgressTellsNoDeclarationFromAnEmptyOne(t *testing.T) {
+	none := report.New(&compose.Result{Stack: &stack.Stack{}, Modules: []compose.Module{{Name: "core"}}}, "app", "/work/app", "/work/app/.qory/harness")
+	if none.Egress != nil || none.Hosts() != nil {
+		t.Errorf("no declaration gave %v", none.Egress)
+	}
+	if data, _ := json.Marshal(none); strings.Contains(string(data), `"egress"`) {
+		t.Errorf("no declaration is written:\n%s", data)
+	}
+	empty := report.New(&compose.Result{Stack: &stack.Stack{}, Modules: []compose.Module{{Name: "core", Egress: []string{}}}}, "app", "/work/app", "/work/app/.qory/harness")
+	if empty.Egress == nil || len(empty.Egress) != 0 || empty.Hosts() == nil || len(empty.Hosts()) != 0 {
+		t.Errorf("an empty declaration gave %v", empty.Egress)
+	}
+	if data, _ := json.Marshal(empty); !strings.Contains(string(data), `"egress":[]`) {
+		t.Errorf("an empty declaration is not written as []:\n%s", data)
+	}
+	r := report.New(result(), "app", "/work/app", "/work/app/.qory/harness")
+	r.AddEgress("claude", []string{"api.anthropic.com", "api.example.com"})
+	if got, want := strings.Join(r.Hosts(), " "), "*.github.com api.anthropic.com api.example.com"; got != want {
+		t.Errorf("hosts %q, want %q", got, want)
+	}
+	if got := strings.Join(r.Egress[2].Modules, " "); got != "core review claude" {
+		t.Errorf("api.example.com is declared by %q", got)
+	}
+	back, err := readBack(r)
+	if err != nil || !reflect.DeepEqual(back.Egress, r.Egress) {
+		t.Errorf("read back %v, %v", back.Egress, err)
+	}
+}
+
+// readBack writes a report and reads it again.
+func readBack(r report.Report) (report.Report, error) {
+	path := filepath.Join(os.TempDir(), "qory-report-egress-test.json")
+	defer os.Remove(path)
+	if err := report.Write(path, r); err != nil {
+		return report.Report{}, err
+	}
+	return report.Read(path)
 }
 
 // TestNewNamesEveryModuleEntryAndExclude checks that the report carries the whole result: the
