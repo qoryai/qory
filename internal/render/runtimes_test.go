@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/qoryai/qory/internal/compose"
@@ -145,5 +146,36 @@ func TestBuildNeedsARuntime(t *testing.T) {
 	res, _, home := composeFixture(t, "claude")
 	if err := render.Build(res, home); err == nil {
 		t.Fatal("Build with no runtime returned no error")
+	}
+}
+
+// TestClaudeLaunchesOnItsConfigurationDirectory is the launch spec for Claude Code: the
+// runtime's directory delivered whole as CLAUDE_CONFIG_DIR, the shape of ~/.claude, since
+// a plugin given with --plugin-dir registers its skills and commands but not its agents.
+// The agents are in the directory, no plugin is rendered beside them, and the line names
+// nothing the directory already carries: no --settings, no --append-system-prompt-file.
+func TestClaudeLaunchesOnItsConfigurationDirectory(t *testing.T) {
+	res, _, home := composeFixture(t, "claude")
+	if err := render.Build(res, home, lookup(t, "claude")); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(home, "claude")
+	for _, name := range []string{"agents/reviewer.md", "skills/review/SKILL.md", "commands/ship.md", "output-styles/terse.md", "hooks/guard.sh", "settings.json", "CLAUDE.md", "mcp.json"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("claude lacks %s: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "plugin")); err == nil {
+		t.Error("claude renders a plugin")
+	}
+	l, err := render.LaunchFor(lookup(t, "claude"), home, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := l.Env["CLAUDE_CONFIG_DIR"]; got != dir {
+		t.Errorf("CLAUDE_CONFIG_DIR is %q, want %q", got, dir)
+	}
+	if want := []string{"--mcp-config", filepath.Join(dir, "mcp.json"), "--setting-sources", "user"}; !slices.Equal(l.Args, want) {
+		t.Errorf("args %q, want %q", l.Args, want)
 	}
 }

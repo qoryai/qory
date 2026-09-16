@@ -4,6 +4,28 @@ Every release of qory, newest first, in the shape of [Keep a Changelog](https://
 The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0 a minor
 release may change what an existing document does, and says so under Upgrading.
 
+## [0.4.3] - 2026-09-16
+
+### Fixed
+
+- The launch line for claude delivered the harness as a plugin, `--plugin-dir`, and
+  Claude Code registers a plugin's skills and commands but not its agents, so a session
+  started from the line had every skill and no agent. The composed `claude` directory
+  has the shape of `~/.claude`, and the line now hands it over as that:
+  `CLAUDE_CONFIG_DIR=${dir}`, under which the skills, agents, commands, output styles
+  and hooks register the way the user's own do, `settings.json` is read as the user's
+  settings, so its permission rules and hooks hold whether or not the checkout is a
+  trusted workspace, and `CLAUDE.md` as the user's memory. `--mcp-config` stays for the
+  servers, the one file the directory does not carry, and `--setting-sources user`
+  still keeps every `.claude` of the checkout and of the directories above it out. The
+  `plugin/` directory is no longer rendered for claude, and `--settings` and
+  `--append-system-prompt-file` are gone from the line, so nothing reaches the session
+  twice: a skill is `/<name>`, not `/harness:<name>`. Claude Code keeps its own state
+  in the directory it is given, the login in `.claude.json` and the transcripts under
+  `projects/`, so a launcher sets a home up once the way it would a fresh `~/.claude`.
+  A stack delivered for launching claude states `qory: ">=0.4.3"`, so an earlier qory
+  refuses it instead of composing agents the line cannot reach.
+
 ## [0.4.2] - 2026-09-15
 
 ### Added
@@ -296,6 +318,7 @@ The first release: a stack of modules composed into one tree, linked into the ch
 and kept out of git, with a report naming the module of every entry and a refusal when
 two modules provide the same one.
 
+[0.4.3]: https://github.com/qoryai/qory/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/qoryai/qory/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/qoryai/qory/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/qoryai/qory/compare/v0.3.0...v0.4.0

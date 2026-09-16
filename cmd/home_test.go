@@ -47,9 +47,10 @@ func clean(t *testing.T, root string) {
 // tracked harness directory, a stack that links the core module as harness, and a compose
 // with --home naming a directory outside the checkout. The compose exits 0 and writes
 // nothing under the checkout, byte for byte; the home under the directory holds the tree
-// and the report beside it; launch prints the arguments that give Claude Code the
-// plugin, the settings, the servers and the instructions; the hook the settings name
-// runs from the home; check, inspect and remove find the pair from either side.
+// and the report beside it; launch prints the variable that makes the runtime's
+// directory Claude Code's configuration directory and the argument that gives it the
+// servers; the hook the settings name runs from the home; check, inspect and remove
+// find the pair from either side.
 func TestComposeOutsideTheCheckoutLeavesItUntouched(t *testing.T) {
 	root := trackedHarnessCheckout(t)
 	before := snapshot(t, root)
@@ -83,28 +84,23 @@ func TestComposeOutsideTheCheckoutLeavesItUntouched(t *testing.T) {
 	if rep.Modules[0].Link != "harness" {
 		t.Errorf("the report lost the stack's link: %+v", rep.Modules[0])
 	}
-	for _, name := range []string{"AGENTS.md", "hooks/guard.sh", "modules/core/scripts/db.py", "claude/settings.json", "claude/mcp.json", "claude/CLAUDE.md", "claude/skills/review/SKILL.md", "claude/plugin/.claude-plugin/plugin.json", "claude/plugin/skills/review/SKILL.md", "claude/plugin/skills/e2e/SKILL.md", "claude/plugin/agents/reviewer.md", "claude/plugin/commands/ship.md", "claude/plugin/output-styles/terse.md"} {
+	for _, name := range []string{"AGENTS.md", "hooks/guard.sh", "modules/core/scripts/db.py", "claude/settings.json", "claude/mcp.json", "claude/CLAUDE.md", "claude/skills/review/SKILL.md", "claude/skills/e2e/SKILL.md", "claude/agents/reviewer.md", "claude/commands/ship.md", "claude/output-styles/terse.md", "claude/hooks/guard.sh"} {
 		if _, err := os.Stat(filepath.Join(home, name)); err != nil {
 			t.Errorf("home lacks %s: %v", name, err)
 		}
 	}
-	// The hooks and the servers reach the session through the settings and mcp.json,
-	// so the plugin carries neither, and nothing runs twice.
-	gone(t, home, "claude/plugin/hooks", "claude/plugin/.mcp.json", "claude/plugin/settings.json")
-	manifest, err := os.ReadFile(filepath.Join(home, "claude", "plugin", ".claude-plugin", "plugin.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	wants(t, string(manifest), `"name": "harness"`, `"outputStyles": "./output-styles"`)
+	// The runtime's directory is delivered whole as CLAUDE_CONFIG_DIR, so nothing is
+	// rendered a second time in a plugin's layout.
+	gone(t, home, "claude/plugin")
 
-	// The launch line names the home's files by absolute path and cuts the setting
-	// sources to the user's.
+	// The launch line names the runtime's directory and the home's files by absolute
+	// path and cuts the setting sources to the user's.
 	out, err = run(t, "harness", "launch", "--runtime", "claude", "--home", homes)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	claude := filepath.Join(home, "claude")
-	want := strings.Join([]string{"claude", "--plugin-dir", filepath.Join(claude, "plugin"), "--settings", filepath.Join(claude, "settings.json"), "--mcp-config", filepath.Join(claude, "mcp.json"), "--append-system-prompt-file", filepath.Join(claude, "CLAUDE.md"), "--setting-sources", "user"}, " ")
+	want := strings.Join([]string{"env", "CLAUDE_CONFIG_DIR=" + claude, "claude", "--mcp-config", filepath.Join(claude, "mcp.json"), "--setting-sources", "user"}, " ")
 	if strings.TrimSpace(out) != want {
 		t.Errorf("launch printed\n%s\nwant\n%s", out, want)
 	}
@@ -208,14 +204,14 @@ func TestHomeFromTheConfiguration(t *testing.T) {
 	if !maps.Equal(snapshot(t, root), before) {
 		t.Error("the compose changed the checkout")
 	}
-	if _, err := os.Stat(filepath.Join(home, "claude", "plugin", ".claude-plugin", "plugin.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(home, "claude", "agents", "reviewer.md")); err != nil {
 		t.Error(err)
 	}
 	out, err = run(t, "harness", "launch")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "claude --plugin-dir "+filepath.Join(home, "claude", "plugin")+" ")
+	wants(t, out, "env CLAUDE_CONFIG_DIR="+filepath.Join(home, "claude")+" claude ")
 	out, err = run(t, "harness", "remove")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -258,7 +254,7 @@ func TestNoLinksKeepsTheHomeInTheCheckout(t *testing.T) {
 	wantsRow(t, out, "home", ".qory/harness")
 	wantsRow(t, out, "claude", "no links  (qory harness launch --runtime claude prints how to start it)")
 	gone(t, root, ".claude", ".mcp.json", "harness")
-	if _, err := os.Stat(filepath.Join(root, ".qory", "harness", "claude", "plugin")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, ".qory", "harness", "claude", "agents", "reviewer.md")); err != nil {
 		t.Error(err)
 	}
 	exclude, _ := os.ReadFile(filepath.Join(root, ".git", "info", "exclude"))
@@ -271,7 +267,7 @@ func TestNoLinksKeepsTheHomeInTheCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "--plugin-dir "+filepath.Join(root, ".qory", "harness", "claude", "plugin")+" ", "--setting-sources user")
+	wants(t, out, "env CLAUDE_CONFIG_DIR="+filepath.Join(root, ".qory", "harness", "claude")+" claude ", "--setting-sources user")
 
 	// A compose with links after one without writes them, and one without after one
 	// with takes them back, the way any compose takes back what it no longer asks for.
@@ -326,7 +322,7 @@ func TestLaunchNeedsARuntimeWithASpec(t *testing.T) {
 			t.Errorf("launch %v: %v, exit %d, want %q", c.args, err, cmd.ExitCode(err), c.want)
 		}
 	}
-	if out, err := run(t, "harness", "launch", "--runtime", "claude"); err != nil || !strings.Contains(out, "--plugin-dir") {
+	if out, err := run(t, "harness", "launch", "--runtime", "claude"); err != nil || !strings.Contains(out, "CLAUDE_CONFIG_DIR=") {
 		t.Errorf("launch claude: %v\n%s", err, out)
 	}
 	if out, err := run(t, "harness", "remove"); err != nil {
@@ -388,7 +384,7 @@ func TestLaunchPerRuntime(t *testing.T) {
 	home := filepath.Join(root, ".qory", "harness")
 	dir := func(rt string) string { return filepath.Join(home, rt) }
 	lines := map[string]string{
-		"claude":   "claude --plugin-dir " + dir("claude") + "/plugin --settings " + dir("claude") + "/settings.json --mcp-config " + dir("claude") + "/mcp.json --append-system-prompt-file " + dir("claude") + "/CLAUDE.md --setting-sources user",
+		"claude":   "env CLAUDE_CONFIG_DIR=" + dir("claude") + " claude --mcp-config " + dir("claude") + "/mcp.json --setting-sources user",
 		"codex":    "env CODEX_HOME=" + dir("codex") + " codex",
 		"opencode": "env OPENCODE_CONFIG_DIR=" + dir("opencode") + " opencode",
 		"amp":      "amp --settings-file " + dir("amp") + "/settings.json",
@@ -456,7 +452,7 @@ harness:
     claude:
       command: /opt/claude/bin/claude
       args:
-        - [--plugin-dir, "${dir}/plugin"]
+        - [--settings, "${dir}/settings.json"]
         - [--append-system-prompt-file, "${dir}/nothing.md"]
         - --verbose
     codex:
@@ -470,7 +466,7 @@ harness:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := strings.TrimSpace(out), "/opt/claude/bin/claude --plugin-dir "+home+"/claude/plugin --verbose"; got != want {
+	if got, want := strings.TrimSpace(out), "env CLAUDE_CONFIG_DIR="+home+"/claude /opt/claude/bin/claude --settings "+home+"/claude/settings.json --verbose"; got != want {
 		t.Errorf("launch printed\n%s\nwant\n%s", got, want)
 	}
 	out, err = run(t, "harness", "launch", "--runtime", "codex")
@@ -484,7 +480,7 @@ harness:
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, out, "harness.launch.claude", "/opt/claude/bin/claude --plugin-dir ${dir}/plugin --append-system-prompt-file ${dir}/nothing.md --verbose", "harness.launch.codex", "CODEX_HOME=${home} OPENAI_API_KEY=it's secret")
+	wants(t, out, "harness.launch.claude", "/opt/claude/bin/claude --settings ${dir}/settings.json --append-system-prompt-file ${dir}/nothing.md --verbose", "harness.launch.codex", "CODEX_HOME=${home} OPENAI_API_KEY=it's secret")
 	for _, c := range []struct{ file, want string }{
 		{"harness: {launch: {claude: {command: \"\"}}}\n", "harness.launch.claude.command is empty"},
 		{"harness: {launch: {claude: {args: [[]]}}}\n", "harness.launch.claude.args[0] is empty"},
@@ -501,14 +497,15 @@ harness:
 // TestLaunchDirectoriesAreNotLinked is a compose with links for the runtimes that render
 // a launch directory beside what the checkout links: the plugin, the skills and the
 // instructions a program takes from outside stay in the home, and the checkout's
-// directories hold what they held before.
+// directories hold what they held before. claude renders no such directory: the
+// runtime's directory is the launch directory, and the checkout links all of it.
 func TestLaunchDirectoriesAreNotLinked(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	if out, err := run(t, "harness", "compose", "--runtime", "claude,codex,opencode,cursor"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	gone(t, root, ".claude/plugin", ".cursor/plugin", ".codex/skills", ".codex/AGENTS.md", ".opencode/skills")
+	gone(t, root, ".cursor/plugin", ".codex/skills", ".codex/AGENTS.md", ".opencode/skills")
 	dirLinks(t, root, ".codex", "config.toml", "agents")
 	dirLinks(t, root, ".opencode", "agents", "commands")
 	dirLinks(t, root, ".cursor", "agents", "mcp.json")

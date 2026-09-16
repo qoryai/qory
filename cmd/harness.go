@@ -1015,14 +1015,14 @@ POSIX shell, so a launcher runs it as it is, with arguments of its own after it:
 The line is the runtime's own launch template, with harness.launch.<runtime> in
 qory.yaml over it: the program, the arguments that hand it the home's files, and the
 variables it takes them from, ${dir} being the runtime's directory in the home. For
-claude it is --plugin-dir, --settings, --mcp-config, --append-system-prompt-file and
---setting-sources user; for codex it is CODEX_HOME. A group of arguments naming a file
-the compose did not write, mcp.json without a server say, is left out. The home is found
-the way compose finds it, from --home, harness.home or the checkout you stand in; the
-paths printed are absolute, so the line works wherever the home is. --json prints the
-command, the arguments and the variables as one JSON object, for a launcher that spawns
-the program without a shell. A runtime that reads its harness from the checkout alone
-has no launch template, and the verb says so.
+claude it is CLAUDE_CONFIG_DIR, --mcp-config and --setting-sources user; for codex it is
+CODEX_HOME. A group of arguments naming a file the compose did not write, mcp.json
+without a server say, is left out. The home is found the way compose finds it, from
+--home, harness.home or the checkout you stand in; the paths printed are absolute, so
+the line works wherever the home is. --json prints the command, the arguments and the
+variables as one JSON object, for a launcher that spawns the program without a shell. A
+runtime that reads its harness from the checkout alone has no launch template, and the
+verb says so.
 
 --verbose adds nothing here.`,
 		Args: noArgs,

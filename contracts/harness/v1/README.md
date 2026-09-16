@@ -525,7 +525,7 @@ segment. The refusal names the module, the entry and the reason, with status 2:
 
 | `target.runtime` | qory writes | The program reads as settings | A kind is linked at | Runs without the agent |
 |---|---|---|---|---|
-| `claude` | `CLAUDE.md`, `settings.json`, `mcp.json`, `plugin` | `settings.local.json` | `skills`, `agents`, `commands`, `hooks`, `output-styles` | |
+| `claude` | `CLAUDE.md`, `settings.json`, `mcp.json` | `settings.local.json` | `skills`, `agents`, `commands`, `hooks`, `output-styles` | |
 | `codex` | `config.toml`, `AGENTS.md` | | `agents`, `skills` | |
 | `gemini` | `settings.json` | | `skills`, `hooks`, `agents`, `commands` | |
 | `opencode` | `opencode.json` | | `commands`, `hooks`, `agents`, `skills` | |
@@ -541,8 +541,8 @@ Per runtime, the files written into its directory:
   the model, `mcp.json` with the servers, linked as `.mcp.json` at the checkout root, and the
   instructions written in full as `CLAUDE.md`. They are not imported from `AGENTS.md`,
   because Claude Code resolves a link to its real path and asks about an import found
-  through one on every start. `plugin/` is the launch spec, a plugin in Claude Code's
-  layout (§Launching), never linked into the checkout.
+  through one on every start. The directory as a whole is the launch spec, delivered as
+  Claude Code's configuration directory (§Launching).
 - **codex**: `config.toml` with the model, the servers as `[mcp_servers.<name>]` tables,
   the environment under `[shell_environment_policy.set]`, which Codex passes to every
   command it runs, and any other `settings/codex/` file, one `agents/<name>.toml` per agent with the body as
@@ -601,15 +601,14 @@ environment variables, each naming the home's files through `${home}`, the home,
 naming a file under either placeholder that the compose did not write, `mcp.json`
 without a server say, is left out whole, and so is a variable; the placeholder and what
 follows it to the end of the word is the file, so `@${dir}/mcp.json` names `mcp.json`.
-The plugin and the directories below are rendered on every compose, with links or
-without, so `launch` works on a home inside the checkout too, and none of them is linked
-into the checkout. A runtime without a template reads its harness from the checkout
+The directories below are rendered on every compose, with links or without, so `launch`
+works on a home inside the checkout too, and none of them is linked into the checkout. A runtime without a template reads its harness from the checkout
 alone, through the links a compose with `harness.links: checkout` writes, and `launch`
 says so with status 2: `goose` and `any`.
 
 | `target.runtime` | Template | Rendered for it under the runtime's directory | Reaches the session from outside | Read from the checkout alone |
 |---|---|---|---|---|
-| `claude` | `claude --plugin-dir ${dir}/plugin --settings ${dir}/settings.json --mcp-config ${dir}/mcp.json --append-system-prompt-file ${dir}/CLAUDE.md --setting-sources user` | `plugin/`, a plugin in Claude Code's layout: the skills, agents and commands linked, the output styles under `output-styles/` with the manifest's `outputStyles` pointing there, `.claude-plugin/plugin.json` naming it `harness`, so a skill is `/harness:<name>` | everything: the plugin, the permissions, hooks, environment and model in `settings.json`, the servers, the instructions appended to the system prompt; `--setting-sources user` keeps every `.claude` of the checkout and of the directories above it out | nothing |
+| `claude` | `env CLAUDE_CONFIG_DIR=${dir} claude --mcp-config ${dir}/mcp.json --setting-sources user` | nothing more: the directory has the shape of `~/.claude`, and Claude Code reads it as that, the skills, agents, commands, output styles and hooks registering the way the user's own do, `settings.json` as the user's settings and `CLAUDE.md` as the user's memory; Claude Code keeps its own state there too, the login in `.claude.json` and the transcripts under `projects/`, so a launcher sets a home up once the way it would a fresh `~/.claude` | everything: the kinds, the permissions, hooks, environment and model, the instructions, and the servers through `--mcp-config`, the one file the directory does not carry; `--setting-sources user` keeps every `.claude` of the checkout and of the directories above it out | nothing |
 | `cursor` | `cursor-agent --plugin-dir ${dir}/plugin` | `plugin/`, the same layout under `.cursor-plugin/plugin.json`, with the agents in Cursor's shape, a copy of `hooks.json` as `hooks/hooks.json` and of `mcp.json` as `.mcp.json`, since the CLI takes no settings file | the skills, agents, hooks and servers | the instructions, `AGENTS.md` |
 | `copilot` | `copilot --add-dir ${dir}/workspace --additional-mcp-config @${dir}/mcp.json` | `workspace/.github/skills` linked and `workspace/.github/agents` written, which `--add-dir` loads as trusted configuration, and `mcp.json` with the servers under `mcpServers`, so the MCP kind has a place in copilot | the skills, agents and servers | the hooks and the instructions |
 | `codex` | `env CODEX_HOME=${dir} codex` | `skills/` linked and the instructions as `AGENTS.md`, beside `config.toml` and the agents, so the directory is a Codex home | everything | nothing; Codex keeps its login in the same home, `auth.json`, so a launcher authenticates through `OPENAI_API_KEY` or puts `auth.json` there |
@@ -617,10 +616,10 @@ says so with status 2: `goose` and `any`.
 | `amp` | `amp --settings-file ${dir}/settings.json` | nothing more | the servers and the permissions | the skills and the instructions |
 | `gemini` | `env GEMINI_CLI_SYSTEM_SETTINGS_PATH=${dir}/settings.json gemini` | nothing more; the file is read as the system settings, over the user's and the workspace's | the model, servers and hooks | the skills, agents, commands and instructions |
 
-The hooks and the servers of `claude` reach the session through the settings and the
-MCP file, the same files the checkout's links point at, and not through the plugin, so
-nothing runs twice; `cursor` gets copies in the plugin because its CLI has no other way
-in. Each template was checked against the program's own command line at the time of
+`claude` is not delivered as a plugin: `--plugin-dir` registers a plugin's skills and
+commands but not its agents, and a directory delivered whole registers every kind once,
+under its bare name. `cursor` gets copies of the hooks and servers in its plugin because
+its CLI has no other way in. Each template was checked against the program's own command line at the time of
 writing; a program that changes a flag is followed with `harness.launch` until the next
 qory.
 
