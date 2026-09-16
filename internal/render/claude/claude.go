@@ -132,9 +132,10 @@ func (claude) Render(res *compose.Result, dir, home string) error {
 }
 
 // renderPlugin writes the plugin into dir: .claude-plugin/plugin.json naming it, and the
-// skills, agents and commands linked under the directories Claude Code reads in a plugin,
-// with the output styles under output-styles and the manifest pointing there when the
-// compose holds one. The hooks, the servers, the settings and the instructions are not
+// skills, agents and commands under the directories Claude Code reads in a plugin, with
+// the output styles under output-styles and the manifest pointing there when the compose
+// holds one. The manifest names no agents key: Claude Code discovers agents/ on its own,
+// and a manifest that names the directory turns the discovery off. The hooks, the servers, the settings and the instructions are not
 // in the plugin: they reach the session through the settings and files [Template] names,
 // the same ones the checkout's links point at, so nothing is rendered twice.
 func renderPlugin(res *compose.Result, dir string) error {

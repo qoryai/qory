@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/qoryai/qory/internal/compose"
@@ -183,6 +184,15 @@ func TestClaudePluginCopiesItsAgents(t *testing.T) {
 		if fi, err := os.Lstat(name); err != nil || fi.Mode()&os.ModeSymlink == 0 {
 			t.Errorf("%s: %v, want a link", name, err)
 		}
+	}
+	// The manifest leaves agents to discovery: a manifest naming the directory, even
+	// as ./agents, keeps Claude Code from reading it.
+	manifest, err := os.ReadFile(filepath.Join(plugin, ".claude-plugin", "plugin.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(manifest), `"agents"`) {
+		t.Errorf("the manifest names agents:\n%s", manifest)
 	}
 	l, err := render.LaunchFor(lookup(t, "claude"), home, nil)
 	if err != nil {
