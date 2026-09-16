@@ -11,8 +11,8 @@ import (
 )
 
 // moduleWithVariants writes a module whose skills come from a different directory per variant,
-// with the given manifest tail, and a stack targeting the given runtimes.
-func moduleWithVariants(t *testing.T, manifest, runtimes string) (*stack.Stack, error) {
+// with the given manifest tail, and a stack over it, loaded for the given runtimes.
+func moduleWithVariants(t *testing.T, manifest string, runtimes ...string) (*stack.Stack, error) {
 	t.Helper()
 	dir := t.TempDir()
 	module := filepath.Join(dir, "modules", "core")
@@ -30,19 +30,18 @@ func moduleWithVariants(t *testing.T, manifest, runtimes string) (*stack.Stack, 
 		t.Fatal(err)
 	}
 	file := filepath.Join(dir, stack.FileName)
-	doc := "apiVersion: " + stack.APIVersion +
-		"\ntarget:\n  runtime: " + runtimes + "\nmodules:\n  - name: core\n    source: {path: modules/core}\n"
+	doc := "apiVersion: " + stack.APIVersion + "\nmodules:\n  - name: core\n    source: {path: modules/core}\n"
 	if err := os.WriteFile(file, []byte(doc), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return stack.Load(file)
+	return loadFor(file, runtimes...)
 }
 
 // TestComposeRefusesAModuleThatReadsDifferentlyPerRuntime is the one case a target of several
 // runtimes cannot render: the composed tree holds one copy of each entry.
 func TestComposeRefusesAModuleThatReadsDifferentlyPerRuntime(t *testing.T) {
 	p, err := moduleWithVariants(t,
-		"  claude: {skills: skills-claude}\n  codex: {skills: skills-codex}\n", "[claude, codex]")
+		"  claude: {skills: skills-claude}\n  codex: {skills: skills-codex}\n", "claude", "codex")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +60,7 @@ func TestComposeRefusesAModuleThatReadsDifferentlyPerRuntime(t *testing.T) {
 // one runtime and a default the others share.
 func TestComposeAcceptsAModuleThatReadsTheSameForEveryRuntime(t *testing.T) {
 	p, err := moduleWithVariants(t,
-		"  claude: {skills: skills-claude}\n  default: claude\n", "[claude, codex]")
+		"  claude: {skills: skills-claude}\n  default: claude\n", "claude", "codex")
 	if err != nil {
 		t.Fatal(err)
 	}

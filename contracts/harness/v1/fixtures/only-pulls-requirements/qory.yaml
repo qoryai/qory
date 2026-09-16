@@ -1,0 +1,9 @@
+apiVersion: qory.dev/v1alpha1
+harness:
+  target:
+    runtime: claude
+  modules:
+    - name: ops
+      source: {path: modules/ops}
+      only:
+        skills: [deploy]

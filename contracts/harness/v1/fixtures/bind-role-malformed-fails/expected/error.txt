@@ -1,1 +1,1 @@
-qory-stack.yaml: bind coder: a role is <kind>/<name>, the kind one of agents, commands, skills
+qory.yaml: bind coder: a role is <kind>/<name>, the kind one of agents, commands, skills

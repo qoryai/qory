@@ -35,7 +35,7 @@ func TestFileAllowedMatchesByPathSegment(t *testing.T) {
 // TestLoadRefusesExtendingFilesShapes is a base naming files under extending.kinds, and
 // a prefix that is not a relative <runtime>/<path>.
 func TestLoadRefusesExtendingFilesShapes(t *testing.T) {
-	head := "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n"
+	head := "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n"
 	cases := []struct{ yaml, want string }{
 		{head + "extending:\n  kinds: [files]\n", "extending.kinds names files; the paths an extending module's files may sit under go in extending.files"},
 		{head + "extending:\n  files: [/claude/rules]\n", `extending.files names "/claude/rules", which is not a <runtime>/<path> prefix`},
@@ -61,7 +61,7 @@ func TestLoadRefusesExtendingFilesShapes(t *testing.T) {
 // module, in their own qory.yaml: the message says the module belongs to the base before any
 // source is resolved.
 func TestExtendRefusesAModuleNamedLikeABaseModule(t *testing.T) {
-	base := &Stack{Target: Target{Runtimes: Runtimes{"claude"}}, Modules: []Module{{Name: "core", Source: Source{Path: "modules/core"}}}, Extending: &Extending{}, Root: "/repo", File: "/repo/qory-stack.yaml"}
+	base := &Stack{Modules: []Module{{Name: "core", Source: Source{Path: "modules/core"}}}, Extending: &Extending{}, Root: "/repo", File: "/repo/qory-stack.yaml"}
 	p := &Stack{Extends: Source{Path: "../base"}, Modules: []Module{{Name: "core", Exclude: Selection{Kinds: map[string][]string{"skills": {"review"}}}}}, File: "/app/qory-stack.yaml"}
 	_, err := Extend(base, p)
 	want := "module core belongs to the base stack; a checkout's qory.yaml cannot name a base module, exclude from it or replace it"
@@ -73,7 +73,7 @@ func TestExtendRefusesAModuleNamedLikeABaseModule(t *testing.T) {
 // TestExtendMergesTheBindings is a checkout's qory.yaml binding a role over its base: the
 // base's bindings carry, the checkout's add to them and rebind a role of the base's.
 func TestExtendMergesTheBindings(t *testing.T) {
-	base := &Stack{Target: Target{Runtimes: Runtimes{"claude"}}, Modules: []Module{{Name: "core", Source: Source{Path: "modules/core"}}}, Bind: map[string]string{"agents/coder": "base-coder", "agents/reviewer-role": "reviewer"}, Extending: &Extending{}, Root: "/repo", File: "/repo/qory-stack.yaml"}
+	base := &Stack{Modules: []Module{{Name: "core", Source: Source{Path: "modules/core"}}}, Bind: map[string]string{"agents/coder": "base-coder", "agents/reviewer-role": "reviewer"}, Extending: &Extending{}, Root: "/repo", File: "/repo/qory-stack.yaml"}
 	p := &Stack{Extends: Source{Path: "../base"}, Bind: map[string]string{"agents/coder": "rails-coder", "skills/entry": "implement"}, File: "/app/qory-stack.yaml"}
 	out, err := Extend(base, p)
 	if err != nil {
@@ -90,5 +90,27 @@ func TestExtendMergesTheBindings(t *testing.T) {
 	}
 	if base.Bind["agents/coder"] != "base-coder" {
 		t.Error("Extend wrote into the base's bindings")
+	}
+}
+
+// TestExtendKeepsTheDocumentsTarget is a checkout's qory.yaml naming a target beside
+// extends: the composed stack carries that target, since a delivered stack has none,
+// and a document without one composes with an empty target for the machine to fill.
+func TestExtendKeepsTheDocumentsTarget(t *testing.T) {
+	base := &Stack{Modules: []Module{{Name: "core", Source: Source{Path: "modules/core"}}}, Extending: &Extending{}, Root: "/repo", File: "/repo/qory-stack.yaml"}
+	p := &Stack{Extends: Source{Path: "../base"}, Target: Target{Runtimes: Runtimes{"claude", "codex"}, Model: "opus"}, File: "/app/qory.yaml"}
+	out, err := Extend(base, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Target.Runtimes.String() != "claude, codex" || out.Target.Model != "opus" {
+		t.Errorf("target %+v, want the document's", out.Target)
+	}
+	if len(out.Modules) != 1 || !out.Modules[0].Base {
+		t.Errorf("modules %+v", out.Modules)
+	}
+	p = &Stack{Extends: Source{Path: "../base"}, File: "/app/qory.yaml"}
+	if out, err = Extend(base, p); err != nil || len(out.Target.Runtimes) != 0 || out.Target.Model != "" {
+		t.Errorf("no target: %+v, %v", out.Target, err)
 	}
 }

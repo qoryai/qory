@@ -206,16 +206,113 @@ type Extending struct {
 	// Files are the <runtime>/<path> prefixes an appended module's files may sit under,
 	// such as claude/rules, matched by path segment; a file elsewhere fails the compose.
 	Files []string `yaml:"files,omitempty"`
+	// Target is the targets the stack is written for, and so the ones a checkout
+	// extending it may compose for; nil accepts every target.
+	Target *TargetPolicy `yaml:"target,omitempty"`
+}
+
+// TargetPolicy is what a stack says under extending.target: the runtimes and the
+// models it is written for. A resolved target outside either list fails the compose,
+// and a stack that lists models makes the model required, since a target without one
+// runs whatever the runtime defaults to, which is a model the stack did not list.
+//
+//	extending:
+//	  target:
+//	    runtime: [claude]
+//	    model: [opus, sonnet]
+//
+// Either key may be left out, and the other alone is the policy; a block naming
+// neither is refused.
+type TargetPolicy struct {
+	// Runtime lists the runtimes a checkout may compose for, one name or a list.
+	Runtime Names `yaml:"runtime,omitempty"`
+	// Model lists the models a checkout may compose with, one name or a list. Given,
+	// a target names one of them.
+	Model Names `yaml:"model,omitempty"`
+}
+
+// Names is a list of names that reads from one name or a sequence of them, the way
+// [Runtimes] does.
+type Names []string
+
+// UnmarshalYAML accepts a single name or a sequence of names.
+func (n *Names) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		var one string
+		if err := node.Decode(&one); err != nil {
+			return err
+		}
+		*n = Names{one}
+		return nil
+	}
+	var many []string
+	if err := node.Decode(&many); err != nil {
+		return fmt.Errorf("one name or a list of them: %w", err)
+	}
+	*n = many
+	return nil
+}
+
+// validate refuses a policy naming nothing, an empty name and a name given twice.
+func (t *TargetPolicy) validate() error {
+	if len(t.Runtime) == 0 && len(t.Model) == 0 {
+		return errors.New("extending.target names no runtime and no model; it lists the runtimes, the models, or both, a checkout may compose for")
+	}
+	for _, l := range []struct {
+		key   string
+		names Names
+	}{{"runtime", t.Runtime}, {"model", t.Model}} {
+		seen := map[string]bool{}
+		for _, name := range l.names {
+			if name == "" {
+				return fmt.Errorf("extending.target.%s names an empty name", l.key)
+			}
+			if seen[name] {
+				return fmt.Errorf("extending.target.%s names %s twice", l.key, name)
+			}
+			seen[name] = true
+		}
+	}
+	return nil
+}
+
+// Check refuses a resolved target outside the policy: a runtime not listed, a model not
+// listed, and, when models are listed, no model at all. base names the stack in the
+// message, as the report shows it.
+func (t *TargetPolicy) Check(target Target, base string) error {
+	if t == nil {
+		return nil
+	}
+	if len(t.Runtime) > 0 {
+		for _, r := range target.Runtimes {
+			if !slices.Contains(t.Runtime, r) {
+				return fmt.Errorf("runtime %s is not one the base stack %s is written for; runtimes: %s", r, base, strings.Join(t.Runtime, ", "))
+			}
+		}
+	}
+	if len(t.Model) > 0 {
+		if target.Model == "" {
+			return fmt.Errorf("the target names no model, and the base stack %s is written for one of these; models: %s", base, strings.Join(t.Model, ", "))
+		}
+		if !slices.Contains(t.Model, target.Model) {
+			return fmt.Errorf("model %s is not one the base stack %s is written for; models: %s", target.Model, base, strings.Join(t.Model, ", "))
+		}
+	}
+	return nil
 }
 
 // Stack is one qory-stack.yaml, validated, or the document a checkout's qory.yaml holds
 // under harness: the checkout's own stack, with a Target and Modules, or a Stack whose
-// Extends names the base and whose Target is empty; [Extend] merges that one onto its base
-// and returns the stack that composes.
+// Extends names the base, with the Target the checkout composes for; [Extend] merges
+// that one onto its base and returns the stack that composes. A qory-stack.yaml
+// carries no Target: it is delivered to be extended, and the checkout extending it
+// says what it composes for.
 type Stack struct {
 	APIVersion string `yaml:"apiVersion"`
-	// Qory is the range of qory versions the stack is written for, from the qory key;
-	// empty when the stack names none. The compose refuses a qory outside it.
+	// Qory is the range of qory versions the stack is written for, from the qory key,
+	// joined by [Load] with the qory key of the qory.yaml at the root of the
+	// repository the stack is in; empty when neither names one. The compose refuses a
+	// qory outside it.
 	Qory Constraint `yaml:"qory,omitempty"`
 	// Name is the stack's name in the report. A stack that leaves it out is named after
 	// the checkout by the caller.
@@ -224,10 +321,12 @@ type Stack struct {
 	Description string `yaml:"description,omitempty"`
 	// Extends, in a checkout's qory.yaml, names the base stack it appends to: a directory holding
 	// a qory-stack.yaml, as a path or inside a git repository at a ref. The base's modules come
-	// first and cannot be changed; its target is the checkout's target.
+	// first and cannot be changed.
 	Extends Source `yaml:"extends,omitempty"`
-	// Target is the runtime and model the harness is rendered for. A document that extends
-	// a stack leaves it out and takes the base's.
+	// Target is the runtime and model the harness is rendered for, in a checkout's
+	// qory.yaml: required for its own stack, and beside Extends the target the checkout
+	// composes the base for, which the machine's configuration and the flags may
+	// replace. A qory-stack.yaml carries none, and one that does is refused.
 	Target Target `yaml:"target,omitempty"`
 	// Modules are the modules to compose, in the order they merge.
 	Modules []Module `yaml:"modules"`
@@ -321,6 +420,19 @@ func Load(path string) (*Stack, error) {
 	if err := p.validate(false); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	// The repository delivering the stack states the qory it needs once, in its
+	// qory.yaml; every stack it holds is held to that range beside its own.
+	value, file, err := exports.Range(p.Root)
+	if err != nil {
+		return nil, err
+	}
+	if value != "" {
+		c, err := ParseConstraint(value)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", file, err)
+		}
+		p.Qory = p.Qory.Join(c)
+	}
 	return p, nil
 }
 
@@ -347,7 +459,7 @@ func NewCompose(path string, p *Stack) (*Stack, error) {
 	if err := p.locate(); err != nil {
 		return nil, err
 	}
-	if err := p.validate(p.extends()); err != nil {
+	if err := p.validate(true); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return p, nil
@@ -373,8 +485,9 @@ func decodeError(path string, err error) error {
 }
 
 // validate checks the whole document before a caller sees it, so a document that reaches
-// the compose is known to carry what it is asked for, a runtime for a stack or a base for
-// a document that extends one, at least one module, each with a name or a source, no name
+// the compose is known to carry what it is asked for, a runtime for a checkout's own
+// stack, a base for a document that extends one and no target for a stack file, at
+// least one module unless the document extends a stack, each with a name or a source, no name
 // twice, excludes and onlys over known kinds and parts, an exclude beside an only naming
 // entries the only does not, links
 // that are one path segment and named once,
@@ -390,24 +503,30 @@ func (p *Stack) validate(compose bool) error {
 		p.RetiredAPIVersion, p.APIVersion = p.APIVersion, current
 	}
 	if compose {
-		if err := p.Extends.validate(); err != nil {
-			return fmt.Errorf("extends: %w", err)
-		}
-		if p.Extends.Module != "" {
-			return fmt.Errorf("extends names module %s; a checkout extends a stack, and a module goes under modules", p.Extends.Module)
-		}
-		if len(p.Target.Runtimes) > 0 || p.Target.Model != "" {
-			return errors.New("target is the base stack's; a harness section that extends a stack does not set it")
+		if p.extends() {
+			if err := p.Extends.validate(); err != nil {
+				return fmt.Errorf("extends: %w", err)
+			}
+			if p.Extends.Module != "" {
+				return fmt.Errorf("extends names module %s; a checkout extends a stack, and a module goes under modules", p.Extends.Module)
+			}
 		}
 		if p.Extending != nil {
 			return errors.New("extending is the base stack's; a harness section that extends a stack does not set it")
+		}
+		// A document extending a stack may leave the runtime to the machine's
+		// configuration or the flag; its own stack names one.
+		if len(p.Target.Runtimes) > 0 || !p.extends() {
+			if err := p.Target.Runtimes.Validate(); err != nil {
+				return err
+			}
 		}
 	} else {
 		if p.extends() {
 			return errors.New("extends is not a stack's; the harness section of a checkout's qory.yaml extends a stack")
 		}
-		if err := p.Target.Runtimes.Validate(); err != nil {
-			return err
+		if len(p.Target.Runtimes) > 0 || p.Target.Model != "" {
+			return errors.New("target is not a stack's; a stack is delivered to be extended, and the checkout extending it sets target under harness, beside extends")
 		}
 	}
 	if p.Extending != nil {
@@ -432,6 +551,11 @@ func (p *Stack) validate(compose bool) error {
 				return fmt.Errorf("extending.files names %q, which is not a <runtime>/<path> prefix; a prefix is relative, holds no dot segment and starts with the runtime", prefix)
 			}
 		}
+		if p.Extending.Target != nil {
+			if err := p.Extending.Target.validate(); err != nil {
+				return err
+			}
+		}
 	}
 	for _, role := range sortedKeys(p.Bind) {
 		kind, name, ok := strings.Cut(role, "/")
@@ -446,8 +570,9 @@ func (p *Stack) validate(compose bool) error {
 		}
 	}
 	// A document that extends a stack may append nothing and carry only what is the
-	// repository's own beside the base, its extensions say; a stack names a module.
-	if len(p.Modules) == 0 && !compose {
+	// repository's own beside the base, its extensions say; a stack, and a document
+	// holding a checkout's own stack, names a module.
+	if len(p.Modules) == 0 && (!compose || !p.extends()) {
 		return errors.New("modules is empty; a stack names at least one module")
 	}
 	seen := map[string]bool{}
@@ -634,7 +759,7 @@ func FileAllowed(name string, prefixes []string) bool {
 
 // Extend returns the stack the checkout's qory.yaml p composes on base: the base's modules first,
 // marked [Module.Base], each with its source rewritten to resolve from p, then p's
-// modules; the base's target; both files' extensions. The result's Qory is p's; the
+// modules; p's target, since a base carries none; both files' extensions. The result's Qory is p's; the
 // base's range is the caller's to carry and check, as [Base.Qory] does. It refuses a base that extends
 // another, a base without an extending block, and an extension namespace both files
 // declare. The result's File and Root are p's.
@@ -646,7 +771,6 @@ func Extend(base, p *Stack) (*Stack, error) {
 		return nil, fmt.Errorf("the stack at %s is closed: it declares no extending block, so nothing may extend it", base.File)
 	}
 	out := *p
-	out.Target = base.Target
 	out.Modules = nil
 	for _, l := range base.Modules {
 		l.Base = true

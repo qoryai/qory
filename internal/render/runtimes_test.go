@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/qoryai/qory/internal/compose"
+	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/render"
-	"github.com/qoryai/qory/internal/stack"
 )
 
 // composeFixture composes the two-modules fixture for the given runtimes and returns the
@@ -23,11 +23,11 @@ func composeFixture(t *testing.T, runtimes ...string) (*compose.Result, string, 
 func composeFixtureNamed(t *testing.T, name string, runtimes ...string) (*compose.Result, string, string) {
 	t.Helper()
 	hermetic(t)
-	file, err := filepath.Abs("../../contracts/harness/v1/fixtures/" + name + "/qory-stack.yaml")
+	file, err := filepath.Abs("../../contracts/harness/v1/fixtures/" + name + "/qory.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := stack.Load(file)
+	p, err := config.Compose(file)
 	if err != nil {
 		t.Fatal(err)
 	}

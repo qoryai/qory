@@ -1,84 +1,100 @@
 package stack
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// writeStack writes a stack whose target block is the given YAML and loads it.
-func writeStack(t *testing.T, target string) (*Stack, error) {
+// compose validates a document built in Go as the harness section of a checkout's
+// qory.yaml, the way the configuration package hands it to [NewCompose].
+func compose(t *testing.T, p *Stack) (*Stack, error) {
 	t.Helper()
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "modules", "core"), 0o755); err != nil {
-		t.Fatal(err)
+	if p.APIVersion == "" {
+		p.APIVersion = APIVersion
 	}
-	file := filepath.Join(dir, FileName)
-	doc := "apiVersion: " + APIVersion + "\ntarget:\n" + target +
-		"modules:\n  - name: core\n    source: {path: modules/core}\n"
-	if err := os.WriteFile(file, []byte(doc), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return Load(file)
+	return NewCompose(filepath.Join(t.TempDir(), "qory.yaml"), p)
 }
 
-// TestTargetTakesOneRuntimeOrAList is the two spellings of target.runtime.
-func TestTargetTakesOneRuntimeOrAList(t *testing.T) {
+// TestNewComposeReadsTheCheckoutsOwnStack is a document with a target and modules and
+// no extends, this repository's own stack: it composes with the target it names, and
+// the same document without target.runtime is refused as before, since only a document
+// that extends a stack may leave the runtime to the machine.
+func TestNewComposeReadsTheCheckoutsOwnStack(t *testing.T) {
+	p, err := compose(t, &Stack{Target: Target{Runtimes: Runtimes{"codex"}, Model: "o3"}, Modules: []Module{{Name: "app"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Target.Runtimes.String() != "codex" || p.Target.Model != "o3" || len(p.Modules) != 1 {
+		t.Fatalf("own stack: %+v", p)
+	}
 	for _, c := range []struct {
 		name   string
-		target string
+		target Target
 		want   string
 	}{
-		{"one name", "  runtime: claude\n", "claude"},
-		{"one name quoted", "  runtime: \"claude\"\n", "claude"},
-		{"a flow list", "  runtime: [claude, codex]\n", "claude, codex"},
-		{"a block list", "  runtime:\n    - claude\n    - codex\n", "claude, codex"},
-		{"a list of one", "  runtime: [codex]\n", "codex"},
-		{"the file's order", "  runtime: [codex, claude]\n", "codex, claude"},
+		{"no runtime", Target{Model: "opus"}, "target.runtime is required"},
+		{"an empty list", Target{Runtimes: Runtimes{}}, "target.runtime is required"},
+		{"an empty name", Target{Runtimes: Runtimes{"claude", ""}}, "target.runtime names an empty runtime"},
+		{"the same runtime twice", Target{Runtimes: Runtimes{"claude", "codex", "claude"}}, "target.runtime names claude twice"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			p, err := writeStack(t, c.target)
-			if err != nil {
-				t.Fatal(err)
+			_, err := compose(t, &Stack{Target: c.target, Modules: []Module{{Name: "app"}}})
+			if err == nil {
+				t.Fatal("the document was accepted")
 			}
-			if got := p.Target.Runtimes.String(); got != c.want {
-				t.Errorf("runtimes = %q, want %q", got, c.want)
-			}
-			if p.Target.Runtimes.First() != strings.Split(c.want, ", ")[0] {
-				t.Errorf("First = %q", p.Target.Runtimes.First())
+			if !strings.HasSuffix(err.Error(), ": "+c.want) {
+				t.Errorf("error = %q, want it to end with %q", err, c.want)
 			}
 		})
 	}
+	_, err = compose(t, &Stack{Target: Target{Runtimes: Runtimes{"claude"}}})
+	if want := "modules is empty; a stack names at least one module"; err == nil || !strings.HasSuffix(err.Error(), want) {
+		t.Errorf("an own stack without modules: err = %v, want %q", err, want)
+	}
 }
 
-// TestTargetRefuses covers every target a stack may not carry.
-func TestTargetRefuses(t *testing.T) {
+// TestNewComposeReadsATargetBesideExtends is a document that extends a stack and says
+// what it composes it for: the target is kept beside extends, a document with extends
+// and a target alone composes, a runtime named twice is refused with the runtime
+// message, and a target of a model alone is kept for the machine's runtime.
+func TestNewComposeReadsATargetBesideExtends(t *testing.T) {
+	base := Source{Path: "../base"}
+	p, err := compose(t, &Stack{Extends: base, Target: Target{Runtimes: Runtimes{"claude", "codex"}, Model: "opus"}, Modules: []Module{{Name: "app"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Extends != base || p.Target.Runtimes.String() != "claude, codex" || p.Target.Model != "opus" {
+		t.Fatalf("with modules: %+v", p)
+	}
+	if p, err = compose(t, &Stack{Extends: base, Target: Target{Runtimes: Runtimes{"claude"}}}); err != nil || p.Target.Runtimes.String() != "claude" || len(p.Modules) != 0 {
+		t.Fatalf("a target alone: %+v, %v", p, err)
+	}
+	if p, err = compose(t, &Stack{Extends: base, Target: Target{Model: "opus"}}); err != nil || p.Target.Model != "opus" || len(p.Target.Runtimes) != 0 {
+		t.Fatalf("a model alone: %+v, %v", p, err)
+	}
 	for _, c := range []struct {
 		name   string
-		target string
+		target Target
 		want   string
 	}{
-		{"no runtime", "  model: opus\n", "target.runtime is required"},
-		{"an empty list", "  runtime: []\n", "target.runtime is required"},
-		{"an empty name", "  runtime: [claude, \"\"]\n", "target.runtime names an empty runtime"},
-		{"the same runtime twice", "  runtime: [claude, codex, claude]\n", "target.runtime names claude twice"},
-		{"a mapping", "  runtime: {claude: opus}\n", "one runtime name or a list of them"},
+		{"an empty name", Target{Runtimes: Runtimes{"claude", ""}}, "target.runtime names an empty runtime"},
+		{"the same runtime twice", Target{Runtimes: Runtimes{"claude", "claude"}}, "target.runtime names claude twice"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := writeStack(t, c.target)
+			_, err := compose(t, &Stack{Extends: base, Target: c.target})
 			if err == nil {
-				t.Fatal("the stack was accepted")
+				t.Fatal("the document was accepted")
 			}
-			if !strings.Contains(err.Error(), c.want) {
-				t.Errorf("error = %q, want it to name %q", err, c.want)
+			if !strings.HasSuffix(err.Error(), ": "+c.want) {
+				t.Errorf("error = %q, want it to end with %q", err, c.want)
 			}
 		})
 	}
 }
 
 // TestRuntimesValidateIsCalledOnTheFlagToo pins that the command module can validate what
-// --runtime put in place of the stack's target.
+// --runtime put in place of the document's target.
 func TestRuntimesValidateIsCalledOnTheFlagToo(t *testing.T) {
 	if err := (Runtimes{"claude", "codex"}).Validate(); err != nil {
 		t.Errorf("two runtimes: %v", err)

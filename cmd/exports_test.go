@@ -53,14 +53,14 @@ func publisherRepo(t *testing.T) string {
 }
 
 // exportsCompose is the consumer's qory.yaml: the base named as an export of the
-// publisher's repository, at repo as a git URL or a path, the consumer's own module and
-// one more of the publisher's, named as an export too.
+// publisher's repository, at repo as a git URL or a path, the target it is composed for,
+// the consumer's own module and one more of the publisher's, named as an export too.
 func exportsCompose(repo, stackName string) string {
 	source := "{path: " + repo
 	if strings.HasPrefix(repo, "file://") {
 		source = "{git: " + repo + ", ref: main"
 	}
-	return "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: " + source + ", stack: " + stackName + "}\n  modules:\n    - name: app\n    - name: extra\n      source: " + source + ", module: extra}\n"
+	return "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: " + source + ", stack: " + stackName + "}\n" + consumerTarget + "  modules:\n    - name: app\n    - name: extra\n      source: " + source + ", module: extra}\n"
 }
 
 // TestExtendsAnExportedStackByName is the consumer's checkout naming the stack and a

@@ -8,8 +8,6 @@ import (
 )
 
 const linked = `apiVersion: qory.dev/v1alpha1
-target:
-  runtime: claude
 modules:
   - name: tree
     source: {path: modules/tree}

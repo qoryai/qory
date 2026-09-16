@@ -2,9 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://qory.dev/contracts/harness/v1/stack.schema.json",
   "title": "qory-stack.yaml",
-  "description": "qory-stack.yaml: the ordered modules a harness is composed from, and the runtime it is rendered for.",
+  "description": "qory-stack.yaml: the ordered modules a harness is composed from, delivered to be extended; the checkout extending it says what it is rendered for.",
   "type": "object",
-  "required": ["apiVersion", "target", "modules"],
+  "required": ["apiVersion", "modules"],
   "additionalProperties": false,
   "properties": {
     "apiVersion": {"const": "qory.dev/v1alpha1"},
@@ -15,21 +15,6 @@
     },
     "name": {"type": "string", "minLength": 1},
     "description": {"type": "string"},
-    "target": {
-      "type": "object",
-      "required": ["runtime"],
-      "additionalProperties": false,
-      "properties": {
-        "runtime": {
-          "description": "One runtime name, or the list of runtimes to compose for at once.",
-          "oneOf": [
-            {"type": "string", "minLength": 1},
-            {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
-          ]
-        },
-        "model": {"type": "string", "minLength": 1}
-      }
-    },
     "modules": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/module"}},
     "bind": {
       "description": "The entry that fills each role a document references: <kind>/<role> to the name of an entry of that kind, so a module writes ${qory:agents/coder} and the stack says which agent that is.",
@@ -50,12 +35,29 @@
         "kinds": {"type": "array", "items": {"type": "string", "enum": ["skills", "agents", "commands", "output-styles"]}},
         "instructions": {"type": "boolean"},
         "settings": {"type": "array", "items": {"type": "string", "minLength": 1}},
-        "files": {"type": "array", "items": {"type": "string", "minLength": 1}}
+        "files": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "target": {
+          "description": "The targets the stack is written for: the runtimes and the models a checkout extending it may compose for. A resolved target outside either list fails the compose, and a stack that lists models makes the model required. Left out, every target is accepted.",
+          "type": "object",
+          "additionalProperties": false,
+          "anyOf": [{"required": ["runtime"]}, {"required": ["model"]}],
+          "properties": {
+            "runtime": {"$ref": "#/$defs/oneOrMore"},
+            "model": {"$ref": "#/$defs/oneOrMore"}
+          }
+        }
       }
     }
   },
   "$defs": {
     "names": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "oneOrMore": {
+      "description": "One name, or a list of them.",
+      "oneOf": [
+        {"type": "string", "minLength": 1},
+        {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      ]
+    },
     "someNames": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
     "part": {
       "description": "A merged part: true for all of it, or the names of some of it.",

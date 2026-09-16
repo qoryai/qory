@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/qoryai/qory/internal/compose"
-	"github.com/qoryai/qory/internal/stack"
 )
 
 // manifest is a module manifest exporting one variable at the given path.
@@ -50,7 +49,7 @@ func TestTwoModulesExportingOneNameIsRefused(t *testing.T) {
 		"modules/a/qory-module.yaml": manifest("a", "HARNESS_HOME", "."),
 		"modules/b/qory-module.yaml": manifest("b", "HARNESS_HOME", "."),
 	})
-	p, err := stack.Load(dir + "/qory-stack.yaml")
+	p, err := loadFor(dir+"/qory-stack.yaml", "claude")
 	if err != nil {
 		t.Fatal(err)
 	}

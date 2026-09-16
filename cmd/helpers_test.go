@@ -25,6 +25,16 @@ func fixtureDir() string {
 	return filepath.Join(dir, "..", "contracts", "harness", "v1", "fixtures")
 }
 
+// twoModulesStack is the two-modules fixture's document as a delivered stack, a
+// qory-stack.yaml: the same modules, and no target, since a stack file carries none.
+const twoModulesStack = `apiVersion: qory.dev/v1alpha1
+modules:
+  - name: core
+    source: {path: modules/core}
+  - name: nextjs
+    source: {path: modules/nextjs}
+`
+
 // twoModuleEntries are the entries the two-modules fixture composes, kind/name to the module
 // that provides each one.
 var twoModuleEntries = map[string]string{
@@ -145,6 +155,13 @@ func ownStack(doc string) string {
 func writeOwnStack(t *testing.T, root, doc string) {
 	t.Helper()
 	writeFile(t, filepath.Join(root, "qory.yaml"), ownStack(doc))
+}
+
+// machineConfig writes the machine's qory.yaml, the one setup machine writes, under the
+// configuration directory [emptyDir] set, with the lines given.
+func machineConfig(t *testing.T, doc string) {
+	t.Helper()
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "qory.yaml"), "apiVersion: qory.dev/v1alpha1\n"+doc)
 }
 
 // configure adds keys to root's qory.yaml as [writeOwnStack] wrote it: harness lines go

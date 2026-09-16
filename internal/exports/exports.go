@@ -251,6 +251,7 @@ func (e *Exports) Verify() error {
 // and the rest of the file is the configuration reader's to check.
 type document struct {
 	APIVersion string         `yaml:"apiVersion"`
+	Qory       string         `yaml:"qory,omitempty"`
 	Exports    *Section       `yaml:"exports,omitempty"`
 	Rest       map[string]any `yaml:",inline"`
 }
@@ -261,33 +262,54 @@ type document struct {
 // section that does not validate are errors naming the file; a file naming no
 // apiVersion is read as [APIVersion], the newest format, as the configuration reads it.
 func Read(root string) (*Exports, error) {
-	file, err := File(root)
-	if err != nil || file == "" {
+	doc, file, err := read(root)
+	if err != nil || doc == nil || doc.Exports == nil {
 		return nil, err
-	}
-	data, err := os.ReadFile(file)
-	if err != nil {
-		return nil, err
-	}
-	var doc document
-	dec := yaml.NewDecoder(strings.NewReader(string(data)))
-	dec.KnownFields(true)
-	if err := dec.Decode(&doc); err != nil && !errors.Is(err, io.EOF) {
-		return nil, decodeError(file, err)
-	}
-	if doc.APIVersion == "" {
-		doc.APIVersion = APIVersion
-	}
-	if doc.APIVersion, err = ResolveAPIVersion(doc.APIVersion); err != nil {
-		return nil, fmt.Errorf("%s: %w", file, err)
-	}
-	if doc.Exports == nil {
-		return nil, nil
 	}
 	if err := doc.Exports.Validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", file, err)
 	}
 	return doc.Exports.At(root, file), nil
+}
+
+// Range returns the qory key of the qory.yaml in root as the file writes it, "" when
+// root holds no such file or the file names no range. It is the range every stack the
+// repository delivers is held to, joined with the stack's own by the stack reader, so
+// the repository states its floor once. The value is not parsed here; the stack reader
+// does that and names the file.
+func Range(root string) (value, file string, err error) {
+	doc, file, err := read(root)
+	if err != nil || doc == nil {
+		return "", "", err
+	}
+	return doc.Qory, file, nil
+}
+
+// read decodes the qory.yaml in root, under either of its names, and returns it with
+// its path, or nil for a root without one. The apiVersion is resolved as the
+// configuration resolves it.
+func read(root string) (*document, string, error) {
+	file, err := File(root)
+	if err != nil || file == "" {
+		return nil, "", err
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return nil, "", err
+	}
+	var doc document
+	dec := yaml.NewDecoder(strings.NewReader(string(data)))
+	dec.KnownFields(true)
+	if err := dec.Decode(&doc); err != nil && !errors.Is(err, io.EOF) {
+		return nil, "", decodeError(file, err)
+	}
+	if doc.APIVersion == "" {
+		doc.APIVersion = APIVersion
+	}
+	if doc.APIVersion, err = ResolveAPIVersion(doc.APIVersion); err != nil {
+		return nil, "", fmt.Errorf("%s: %w", file, err)
+	}
+	return &doc, file, nil
 }
 
 // ModulesDir is the directory a module named without a source is read from, relative

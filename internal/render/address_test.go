@@ -166,13 +166,14 @@ func TestAddressingSaysNothingWithoutARoster(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("qory-stack.yaml", "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: [claude, codex]\nmodules:\n  - name: core\n    source: {path: modules/core}\n")
+	write("qory-stack.yaml", "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n    source: {path: modules/core}\n")
 	write("modules/core/qory-module.yaml", "apiVersion: qory.dev/v1alpha1\nname: core\n")
 	write("modules/core/AGENTS.md", "Rules.\n")
 	p, err := stack.Load(filepath.Join(dir, "qory-stack.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	p.Target = stack.Target{Runtimes: stack.Runtimes{"claude", "codex"}}
 	res, err := compose.Compose(p)
 	if err != nil {
 		t.Fatal(err)

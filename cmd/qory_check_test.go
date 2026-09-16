@@ -73,6 +73,31 @@ func TestQoryKeyOfTheBaseStackIsChecked(t *testing.T) {
 	gone(t, root, ".qory", ".claude")
 }
 
+// TestQoryKeyOfTheBaseStacksRepositoryIsChecked is the floor a harness repository states
+// once, in the qory.yaml at its root: a base stack naming no qory key of its own is held
+// to it, so a checkout extending the stack, or composing on it through -f, is refused on
+// a qory outside the range with the base named and exit 5.
+func TestQoryKeyOfTheBaseStacksRepositoryIsChecked(t *testing.T) {
+	url := baseRepo(t)
+	dir := strings.TrimPrefix(url, "file://")
+	writeFile(t, filepath.Join(dir, "qory.yaml"), "apiVersion: qory.dev/v1alpha1\nqory: \">=9.0.0\"\n")
+	runGit(t, dir, "add", "-A")
+	runGit(t, dir, "commit", "-q", "-m", "floor")
+	root := consumerCheckout(t, url)
+	release(t, "0.3.4")
+	for _, args := range [][]string{{"harness", "compose"}, {"harness", "compose", "-f", filepath.Join(dir, "nextjs-15", "qory-stack.yaml")}} {
+		out, err := run(t, args...)
+		if err == nil {
+			t.Fatalf("%s composed:\n%s", strings.Join(args, " "), out)
+		}
+		if got := cmd.ExitCode(err); got != cmd.ExitVersion {
+			t.Errorf("%s: exit %d, want %d", strings.Join(args, " "), got, cmd.ExitVersion)
+		}
+		wants(t, err.Error(), "qory.yaml: this qory is 0.3.4, and the base stack nextjs-15@", " wants >=9.0.0")
+		gone(t, root, ".qory", ".claude")
+	}
+}
+
 // TestQoryKeyIsNotCheckedOnASourceBuild is a build between tags, which has no version
 // to compare: the compose goes through and one row says the range was not checked, once
 // for a qory.yaml read as the configuration and as the stack.

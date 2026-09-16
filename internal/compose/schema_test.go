@@ -13,14 +13,14 @@ import (
 	"github.com/qoryai/qory/internal/module"
 )
 
-// TestSchemas validates every fixture document against the contract's schemas: a stack
-// that composes passes stack.schema.json, one refused for its apiVersion, a kind or its
-// qory key fails it,
+// TestSchemas validates every fixture document against the contract's schemas: a
+// qory.yaml that composes passes config.schema.json, one refused for its apiVersion, a
+// kind or its qory key fails it,
 // every module manifest passes module.schema.json, and every MCP server file passes
 // mcp.schema.json unless the fixture expects it refused.
 func TestSchemas(t *testing.T) {
 	c := jsonschema.NewCompiler()
-	stackSchema, err := c.Compile("../../contracts/harness/v1/stack.schema.json")
+	composeSchema, err := c.Compile("../../contracts/harness/v1/config.schema.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,12 +36,12 @@ func TestSchemas(t *testing.T) {
 	for _, dir := range dirs {
 		errText, _ := os.ReadFile(filepath.Join(dir, "expected", "error.txt"))
 		wantInvalid := strings.Contains(string(errText), "apiVersion") || strings.Contains(string(errText), "kind ") || strings.Contains(string(errText), "qory \"")
-		err := stackSchema.Validate(document(t, filepath.Join(dir, "qory-stack.yaml")))
+		err := composeSchema.Validate(document(t, filepath.Join(dir, "qory.yaml")))
 		if wantInvalid && err == nil {
-			t.Errorf("%s: stack passed the schema; want a failure", dir)
+			t.Errorf("%s: the document passed the schema; want a failure", dir)
 		}
 		if !wantInvalid && err != nil {
-			t.Errorf("%s: stack failed the schema: %v", dir, err)
+			t.Errorf("%s: the document failed the schema: %v", dir, err)
 		}
 		manifests, _ := filepath.Glob(filepath.Join(dir, "modules", "*", "qory-module.yaml"))
 		for _, m := range manifests {
@@ -135,7 +135,7 @@ func TestStackSchemaKnowsBothSourceForms(t *testing.T) {
 		{`{"git": "https://git.example.com/acme/harness", "ref": "v1", "stack": "nextjs"}`, false},
 	} {
 		var doc any
-		if err := json.Unmarshal([]byte(`{"apiVersion": "qory.dev/v1alpha1", "target": {"runtime": "claude"}, "modules": [{"name": "core", "source": `+c.source+`}]}`), &doc); err != nil {
+		if err := json.Unmarshal([]byte(`{"apiVersion": "qory.dev/v1alpha1", "modules": [{"name": "core", "source": `+c.source+`}]}`), &doc); err != nil {
 			t.Fatal(err)
 		}
 		if err := schema.Validate(doc); (err == nil) != c.valid {
@@ -145,12 +145,13 @@ func TestStackSchemaKnowsBothSourceForms(t *testing.T) {
 }
 
 // TestComposeSchemaKnowsExtends validates the shapes no fixture composes: a qory.yaml
-// whose harness section extends a stack, one with a target or an extending block too,
-// one with modules and no extends, whose base compose -f names, one with extensions
-// alone, one with its own target and modules, a worktree name
+// whose harness section extends a stack, one with a target beside extends, one with an
+// extending block, one with modules and no extends, whose base compose -f names, one
+// with extensions alone, one with its own target and modules, a worktree name
 // without {branch}, worktree paths in both forms, a stack with
-// extends, a stack with an extending block, a module entry by name alone, a base and a
-// module named as exports, and the exports section in each of its forms.
+// extends, a stack with a target, a stack with an extending block, a module entry by
+// name alone, a base and a module named as exports, and the exports section in each of
+// its forms.
 func TestComposeSchemaKnowsExtends(t *testing.T) {
 	c := jsonschema.NewCompiler()
 	composeSchema, err := c.Compile("../../contracts/harness/v1/config.schema.json")
@@ -168,7 +169,8 @@ func TestComposeSchemaKnowsExtends(t *testing.T) {
 	}{
 		{composeSchema, `{"harness": {"extends": {"git": "https://git.example.com/acme/harness", "ref": "main", "path": "nextjs-15"}, "modules": [{"name": "app"}]}}`, true},
 		{composeSchema, `{"harness": {"runtime": "codex", "extends": {"path": "../harness/nextjs-15"}, "modules": [{"name": "app"}]}, "worktree": {"base": "main", "link": [".env"], "run": {"add": ["pnpm install"]}}}`, true},
-		{composeSchema, `{"harness": {"extends": {"path": "../harness/nextjs-15"}, "target": {"runtime": "claude"}, "modules": [{"name": "app"}]}}`, false},
+		{composeSchema, `{"harness": {"extends": {"path": "../harness/nextjs-15"}, "target": {"runtime": "claude"}, "modules": [{"name": "app"}]}}`, true},
+		{composeSchema, `{"harness": {"extends": {"path": "../harness/nextjs-15"}, "target": {"runtime": "claude", "model": "opus"}}}`, true},
 		{composeSchema, `{"harness": {"extends": {"path": "../harness/nextjs-15"}, "extending": {"kinds": ["skills"]}, "modules": [{"name": "app"}]}}`, false},
 		{composeSchema, `{"harness": {"modules": [{"name": "app"}]}}`, true},
 		{composeSchema, `{"harness": {"extensions": {"acme": {"team": "web"}}}}`, true},
@@ -182,10 +184,11 @@ func TestComposeSchemaKnowsExtends(t *testing.T) {
 		{composeSchema, `{"worktree": {"copy": [{"to": ".env"}]}}`, false},
 		{composeSchema, `{"worktree": {"copy": [{"from": ".env", "into": "x"}]}}`, false},
 		{stackSchema, `{"extends": {"path": "../harness/nextjs-15"}, "modules": [{"name": "app"}]}`, false},
-		{stackSchema, `{"modules": [{"name": "app"}]}`, false},
-		{stackSchema, `{"target": {"runtime": "claude"}, "modules": [{"name": "core"}], "extending": {"kinds": ["skills"], "instructions": true, "settings": ["permissions.allow"], "files": ["claude/rules/"]}}`, true},
-		{stackSchema, `{"target": {"runtime": "claude"}, "modules": [{"name": "core"}], "extending": {"kinds": ["hooks"]}}`, false},
-		{stackSchema, `{"target": {"runtime": "claude"}, "modules": [{"exclude": {"skills": ["x"]}}]}`, false},
+		{stackSchema, `{"modules": [{"name": "app"}]}`, true},
+		{stackSchema, `{"target": {"runtime": "claude"}, "modules": [{"name": "app"}]}`, false},
+		{stackSchema, `{"modules": [{"name": "core"}], "extending": {"kinds": ["skills"], "instructions": true, "settings": ["permissions.allow"], "files": ["claude/rules/"]}}`, true},
+		{stackSchema, `{"modules": [{"name": "core"}], "extending": {"kinds": ["hooks"]}}`, false},
+		{stackSchema, `{"modules": [{"exclude": {"skills": ["x"]}}]}`, false},
 		{composeSchema, `{"harness": {"extends": {"git": "https://git.example.com/acme/harness", "ref": "main", "stack": "nextjs"}, "modules": [{"name": "app"}, {"name": "extra", "source": {"git": "https://git.example.com/acme/harness", "ref": "main", "module": "extra"}}]}}`, true},
 		{composeSchema, `{"harness": {"extends": {"path": "../harness", "stack": "nextjs"}, "modules": [{"name": "app"}]}}`, true},
 		{composeSchema, `{"harness": {"extends": {"git": "https://git.example.com/acme/harness", "ref": "main", "path": "nextjs", "stack": "nextjs"}, "modules": [{"name": "app"}]}}`, false},

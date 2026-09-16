@@ -1,0 +1,7 @@
+apiVersion: qory.dev/v1alpha1
+qory: 0.3.0
+harness:
+  target:
+    runtime: claude
+  modules:
+    - name: core

@@ -3,18 +3,20 @@ package cmd_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/report"
+	"github.com/qoryai/qory/internal/ui"
 )
 
 // baseStack is the stack of a publisher's harness repository: two modules, closed
-// except for skills, agents and permission allow rules, rendered for claude with a model.
+// except for skills, agents and permission allow rules, and no target, since the
+// checkout extending it says what it composes the stack for.
 const baseStack = `apiVersion: qory.dev/v1alpha1
 name: nextjs-15
-target: {runtime: claude, model: opus}
 modules:
   - name: core
   - name: tools
@@ -56,10 +58,13 @@ func baseRepoWith(t *testing.T, stack string) string {
 	return "file://" + dir
 }
 
-// consumerCompose is the consumer's qory.yaml: under harness, the base at a branch and
-// their own module, with extra lines of that section first.
+// consumerTarget is the target the consumer's qory.yaml composes the base for.
+const consumerTarget = "  target: {runtime: claude, model: opus}\n"
+
+// consumerCompose is the consumer's qory.yaml: under harness, the base at a branch, the
+// target it is composed for and their own module, with extra lines of that section first.
 func consumerCompose(url string, extra ...string) string {
-	return "apiVersion: qory.dev/v1alpha1\nharness:\n" + strings.Join(extra, "") + "  extends: {git: " + url + ", ref: main, path: nextjs-15}\n  modules:\n    - name: app\n  extensions:\n    consumer: {team: web}\n"
+	return "apiVersion: qory.dev/v1alpha1\nharness:\n" + strings.Join(extra, "") + "  extends: {git: " + url + ", ref: main, path: nextjs-15}\n" + consumerTarget + "  modules:\n    - name: app\n  extensions:\n    consumer: {team: web}\n"
 }
 
 // consumerCheckout is a product repository with the consumer's qory.yaml and an app module
@@ -120,9 +125,7 @@ func TestExtendsComposesTheBaseFirstAndClosed(t *testing.T) {
 
 // TestExtendsRefusesWhatTheBaseCloses is the consumer changing what the base decides:
 // a hook in their module, an entry colliding with the base's, a deny rule in their
-// fragment, a runtime the base does not render for, a model from the command line or
-// from the checkout's own qory.yaml, a target in that file, and a base namespace in
-// their extensions.
+// fragment, and a base namespace in their extensions.
 func TestExtendsRefusesWhatTheBaseCloses(t *testing.T) {
 	url := baseRepo(t)
 	root := consumerCheckout(t, url)
@@ -143,16 +146,61 @@ func TestExtendsRefusesWhatTheBaseCloses(t *testing.T) {
 	writeFile(t, filepath.Join(root, "modules", "app", "settings", "claude", "settings.json"), `{"permissions": {"deny": ["Read"]}}`)
 	refuse("a deny rule", "module app sets permissions.deny in settings/claude/settings.json, and the base stack nextjs-15@", cmd.ExitInput)
 	writeFile(t, filepath.Join(root, "modules", "app", "settings", "claude", "settings.json"), `{"permissions": {"allow": ["Bash(npm test)"]}}`)
-	refuse("another runtime", "runtime codex is not one the base stack nextjs-15@", cmd.ExitInput, "--runtime", "codex")
-	refuse("another model", "the model is the base stack nextjs-15@", cmd.ExitInput, "--model", "sonnet")
-	writeFile(t, compose, consumerCompose(url, "  runtime: codex\n"))
-	if _, err := run(t, "harness", "compose"); err != nil {
-		t.Errorf("the checkout's own runtime was read under extends: %v", err)
-	}
-	writeFile(t, compose, consumerCompose(url, "  target: {runtime: claude}\n"))
-	refuse("a target of its own", "target is the base stack's; a harness section that extends a stack does not set it", cmd.ExitInput)
 	writeFile(t, compose, strings.Replace(consumerCompose(url), "consumer:", "acme:", 1))
 	refuse("the base's namespace", "extensions.acme is the base stack's", cmd.ExitInput)
+}
+
+// TestExtendsTakesTheTargetFromTheDocument is where the target lives under a base: the
+// document sets it beside extends, since the base carries none; the machine's qory.yaml
+// stands over the document's target and the flags over both; and the runtime and model
+// keys of the checkout's own qory.yaml are still not read under extends.
+func TestExtendsTakesTheTargetFromTheDocument(t *testing.T) {
+	url := baseRepo(t)
+	root := consumerCheckout(t, url)
+	compose := filepath.Join(root, "qory.yaml")
+	composed := func(name, want string, args ...string) {
+		t.Helper()
+		out, err := run(t, append([]string{"harness", "compose"}, args...)...)
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", name, err, out)
+		}
+		wants(t, out, ui.Mark+" acme/app · "+want)
+	}
+	composed("the document's target", "claude opus")
+	if rep := readReport(t, root); !slices.Equal(rep.Target.Runtimes, []string{"claude"}) || rep.Target.Model != "opus" {
+		t.Errorf("report target = %+v", rep.Target)
+	}
+	composed("--runtime over the document", "codex opus", "--runtime", "codex")
+	composed("--model over the document", "claude sonnet", "--model", "sonnet")
+	writeFile(t, compose, consumerCompose(url, "  runtime: codex\n  model: sonnet\n"))
+	composed("the checkout's own keys, not read", "claude opus")
+	machineConfig(t, "harness:\n  runtime: codex\n  model: sonnet\n")
+	composed("the machine's file over the document", "codex sonnet")
+	composed("the flags over the machine's file", "claude opus", "--runtime", "claude", "--model", "opus")
+}
+
+// TestExtendsNeedsARuntimeFromSomewhere is a document that extends a base and names no
+// target, on a machine whose configuration names no runtime: the base carries none
+// either, so the compose is an input error saying where a runtime comes from, and
+// --runtime supplies one.
+func TestExtendsNeedsARuntimeFromSomewhere(t *testing.T) {
+	url := baseRepo(t)
+	root := consumerCheckout(t, url)
+	writeFile(t, filepath.Join(root, "qory.yaml"), strings.Replace(consumerCompose(url), consumerTarget, "", 1))
+	out, err := run(t, "harness", "compose")
+	if err == nil || cmd.ExitCode(err) != cmd.ExitInput {
+		t.Fatalf("err = %v, exit %d\n%s", err, cmd.ExitCode(err), out)
+	}
+	wants(t, err.Error(), "target.runtime is required; the base stack nextjs-15@", " carries no target, so the document sets one beside extends, or the configuration or --runtime does")
+	gone(t, root, ".qory", ".claude")
+	out, err = run(t, "harness", "compose", "--runtime", "claude")
+	if err != nil {
+		t.Fatalf("with --runtime: %v\n%s", err, out)
+	}
+	wants(t, out, ui.Mark+" acme/app · claude")
+	if rep := readReport(t, root); !slices.Equal(rep.Target.Runtimes, []string{"claude"}) || rep.Target.Model != "" {
+		t.Errorf("report target = %+v", rep.Target)
+	}
 }
 
 // TestExtendsNamesABaseThatIsNotReachable is a base at a remote that cannot be fetched:

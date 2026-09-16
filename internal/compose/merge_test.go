@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/qoryai/qory/internal/compose"
+	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/stack"
 )
 
@@ -14,7 +15,7 @@ import (
 func composeTreeWith(t *testing.T, files map[string]string, opts compose.Options) (*compose.Result, error) {
 	t.Helper()
 	dir := writeTree(t, files)
-	p, err := stack.Load(filepath.Join(dir, stack.FileName))
+	p, err := loadFor(filepath.Join(dir, stack.FileName), "claude")
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +142,7 @@ func TestSelectionRecordsEveryPartLeftOut(t *testing.T) {
 		"exclude-drops-parts":  {"core instructions/AGENTS.md", "core settings/claude/settings.json"},
 		"only-keeps-one-skill": {"core agents/reviewer", "core commands/ship", "core hooks/guard.sh", "core mcp/db", "core output-styles/terse", "core skills/test", "core instructions/AGENTS.md", "core settings/claude/settings.json"},
 	} {
-		p, err := stack.Load(filepath.Join(fixtures, fixture, stack.FileName))
+		p, err := config.Compose(filepath.Join(fixtures, fixture, config.FileName))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -168,7 +169,7 @@ func TestOnlyBringsInWhatANamedEntryRequires(t *testing.T) {
 		"only-pulls-requirements":      {"agents/reviewer": "skills/deploy", "commands/ship": "skills/deploy", "hooks/guard.sh": "commands/ship", "skills/deploy": ""},
 		"only-excludes-a-pulled-entry": {"agents/reviewer": "", "commands/ship": "skills/deploy", "hooks/guard.sh": "commands/ship", "skills/deploy": ""},
 	} {
-		p, err := stack.Load(filepath.Join(fixtures, fixture, stack.FileName))
+		p, err := config.Compose(filepath.Join(fixtures, fixture, config.FileName))
 		if err != nil {
 			t.Fatal(err)
 		}

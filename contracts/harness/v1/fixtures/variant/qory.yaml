@@ -1,0 +1,7 @@
+apiVersion: qory.dev/v1alpha1
+harness:
+  target:
+    runtime: codex
+  modules:
+    - name: multi
+      source: {path: modules/multi}

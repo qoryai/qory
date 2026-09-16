@@ -510,10 +510,10 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 			retired.add(p.File, p.RetiredAPIVersion)
 		}
 	}
-	// A checkout that extends a closed base takes its target from the base, and
-	// the harness, git and env keys of its own qory.yaml are not read: the
-	// runner's configuration is the only one, so the checkout's authors cannot
-	// pick another runtime.
+	// A checkout that extends a closed base says what it composes the base for in
+	// its document's target, and the harness, git and env keys of its own
+	// qory.yaml are not read: the runner's configuration is the only one that
+	// stands over the document.
 	extends := p.Extends.Path != "" || p.Extends.Git != ""
 	conf, err := config.Load(root, !extends)
 	if err != nil {
@@ -776,10 +776,9 @@ func launchHint(rt render.Runtime) string {
 }
 
 // applyTarget puts the configuration's runtime and model, then the --runtime and --model
-// flags, over the stack's target, and checks the result. Under a base stack the
-// target is the base's: a runtime not among the base's is an input error, and a model
-// from anywhere but the base is one too, since the base's fragments and hooks exist for
-// its target and the runner is the base's owner's.
+// flags, over the document's target, and checks the result: a runtime from one of the
+// three, and, under a base stack that says what it is written for in extending.target,
+// a target inside that, whichever of the three set it.
 func applyTarget(p *stack.Stack, base *compose.Base, conf config.Config, runtime, model string) error {
 	want := p.Target
 	if conf.Runtime != nil {
@@ -798,16 +797,14 @@ func applyTarget(p *stack.Stack, base *compose.Base, conf config.Config, runtime
 		want.Model = model
 	}
 	if err := want.Runtimes.Validate(); err != nil {
+		if len(want.Runtimes) == 0 && base != nil {
+			return fmt.Errorf("target.runtime is required; the base stack %s carries no target, so the document sets one beside extends, or the configuration or --runtime does", base)
+		}
 		return err
 	}
-	if base != nil {
-		for _, r := range want.Runtimes {
-			if !slices.Contains(p.Target.Runtimes, r) {
-				return fmt.Errorf("runtime %s is not one the base stack %s renders for; runtimes: %s", r, base, p.Target.Runtimes)
-			}
-		}
-		if want.Model != p.Target.Model {
-			return fmt.Errorf("the model is the base stack %s's, %s; nothing else sets it", base, p.Target.Model)
+	if base != nil && base.Extending != nil {
+		if err := base.Extending.Target.Check(want, base.String()); err != nil {
+			return err
 		}
 	}
 	p.Target = want

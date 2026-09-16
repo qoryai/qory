@@ -13,8 +13,8 @@
 //	apiVersion: qory.dev/v1alpha1 # optional; the newest format this qory reads when left out, and a retired spelling reads as it
 //	qory: ">=0.3.0"              # the qory versions this file is written for
 //	harness:
-//	  runtime: [claude, codex]   # instead of the stack's target.runtime
-//	  model: opus                # instead of the stack's target.model
+//	  runtime: [claude, codex]   # instead of the document's target.runtime
+//	  model: opus                # instead of the document's target.model
 //	  force: true                # replace a tracked, unmodified file where a link goes
 //	  update: always             # fetch every git source again on each compose
 //	  home: ~/.cache/qory/homes  # where the harness is composed: .qory/harness in the checkout, or a root outside it
@@ -22,7 +22,8 @@
 //	  launch:                    # how a runtime's program is started on the home, over the runtime's own
 //	    claude: {command: /opt/claude/bin/claude}
 //	    codex: {env: {CODEX_HOME: "${dir}"}}
-//	  extends: {git: git@git.example.com:acme/harness, ref: main, path: nextjs-15}
+//	  extends: {git: git@git.example.com:acme/harness, ref: main, stack: nextjs-15}
+//	  target: {runtime: claude, model: opus}  # what this checkout composes the base for
 //	  modules:                   # with extends: the stack this checkout extends and its own modules
 //	    - name: app              # extends may be left out when compose -f names the base
 //	worktree:
@@ -292,9 +293,9 @@ type Config struct {
 	// Retired are the files declaring a retired apiVersion, in the order they were read,
 	// so a compose can say which want the line rewritten.
 	Retired []Retired
-	// Runtime replaces the stack's target.runtime, nil to keep the stack's.
+	// Runtime replaces the document's target.runtime, nil to keep the document's.
 	Runtime stack.Runtimes
-	// Model replaces the stack's target.model, "" to keep the stack's.
+	// Model replaces the document's target.model, "" to keep the document's.
 	Model string
 	// Force replaces a tracked, unmodified file of the checkout where a link goes.
 	Force bool
@@ -352,7 +353,7 @@ type file struct {
 
 // harnessSection is the harness key: the machine's choices for a compose, and in a
 // checkout's file its document, the checkout's own stack as a target and modules, or the
-// stack it extends and the modules it appends.
+// stack it extends, the target it composes it for and the modules it appends.
 type harnessSection struct {
 	Runtime     *stack.Runtimes           `yaml:"runtime,omitempty"`
 	Model       *string                   `yaml:"model,omitempty"`
@@ -603,10 +604,11 @@ func LoadStack(path string) (*stack.Stack, error) {
 }
 
 // Compose reads the harness section of the qory.yaml at path as the checkout's document:
-// its own stack, a target and modules, or the stack it extends and the modules it appends,
-// with the name, description and extensions beside them. A file whose harness section
-// holds no document is an error, and so is one with neither a target nor a stack to
-// extend: that document composes on the base compose -f names, see [OnBase].
+// its own stack, a target and modules, or the stack it extends, with the target it
+// composes it for and the modules it appends, and the name, description and extensions
+// beside them. A file whose harness section holds no document is an error, and so is
+// one with neither a target nor a stack to extend: that document composes on the base
+// compose -f names, see [OnBase].
 func Compose(path string) (*stack.Stack, error) {
 	f, err := read(path)
 	if err != nil {
@@ -624,10 +626,11 @@ func Compose(path string) (*stack.Stack, error) {
 // OnBase reads the harness section of the qory.yaml at path as the checkout's document
 // composed on the stack file base, which compose -f named: base's directory takes the
 // place of whatever extends names, as if the document had named it there, so a document
-// may leave extends out and carry only what is the repository's own, its modules and its
-// extensions. The source the document named under extends is returned beside the stack,
-// empty for none, so the compose can say what -f replaced. A document holding this
-// repository's own stack, a target, is refused: it has no base to replace.
+// may leave extends out and carry only what is the repository's own, its target, its
+// modules and its extensions. The source the document named under extends is returned
+// beside the stack, empty for none, so the compose can say what -f replaced. The
+// document's target is kept, as it is under extends: a target no longer marks a
+// repository's own stack, since a delivered stack carries none.
 func OnBase(path, base string) (*stack.Stack, stack.Source, error) {
 	f, err := read(path)
 	if err != nil {
@@ -635,9 +638,6 @@ func OnBase(path, base string) (*stack.Stack, stack.Source, error) {
 	}
 	if !f.Harness.composes() {
 		return nil, stack.Source{}, fmt.Errorf("%s: the harness section names no modules, no stack to extend and no extensions", path)
-	}
-	if len(f.Harness.Target.Runtimes) > 0 || f.Harness.Target.Model != "" {
-		return nil, stack.Source{}, fmt.Errorf("%s: harness sets a target, this repository's own stack, and -f names a base for a document that extends one; a document takes its base under extends or from -f, in place of a target", path)
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {

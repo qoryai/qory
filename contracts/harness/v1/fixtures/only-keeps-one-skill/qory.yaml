@@ -1,0 +1,12 @@
+apiVersion: qory.dev/v1alpha1
+harness:
+  target:
+    runtime: claude
+    model: opus
+  modules:
+    - name: core
+      source: {path: modules/core}
+      only:
+        skills: [review]
+    - name: nextjs
+      source: {path: modules/nextjs}
