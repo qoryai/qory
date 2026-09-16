@@ -90,7 +90,7 @@ func TestRunRecordsTheSession(t *testing.T) {
 	copyFixture(t, "two-modules", root)
 	script := fakeRuntime(t)
 	composedForFake(t, root, script)
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "policy.yaml"), "version: 1\negress:\n  mode: enforce\n  allow: [example.com]\n")
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "apiVersion: qory.dev/v1alpha1\negress:\n  mode: enforce\n  allow: [example.com]\n")
 	out, err := run(t, "run", "claude", "--", "--extra", "one")
 	if err == nil || cmd.ExitCode(err) != 3 || !errors.Is(err, cmd.ErrReported) {
 		t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
@@ -102,7 +102,7 @@ func TestRunRecordsTheSession(t *testing.T) {
 		t.Errorf("run.started %v", started)
 	}
 	applied := evs["ai.qory.run.policy_applied"]
-	if len(applied) != 1 || applied[0]["mode"] != "enforce" || applied[0]["source"] != "file" {
+	if len(applied) != 1 || applied[0]["mode"] != "enforce" || applied[0]["source"] != "config" {
 		t.Errorf("run.policy_applied %v", applied)
 	}
 	exited := evs["ai.qory.run.exited"]
@@ -146,7 +146,7 @@ func TestRunExitsZeroQuietly(t *testing.T) {
 }
 
 // TestRunRefusesWhatItCannotStart is the runs that never start: a runtime the harness
-// is not composed for, two runtimes named, a policy that does not read, and no
+// is not composed for, two runtimes named, a runner file that does not read, and no
 // composed harness at all; none of them leaves a record.
 func TestRunRefusesWhatItCannotStart(t *testing.T) {
 	root := newCheckout(t)
@@ -161,8 +161,9 @@ func TestRunRefusesWhatItCannotStart(t *testing.T) {
 	if _, err := run(t, "run", "claude", "codex"); cmd.ExitCode(err) != cmd.ExitInput {
 		t.Errorf("two runtimes: %v", err)
 	}
-	if _, err := run(t, "run", "--policy", filepath.Join(root, "missing.yaml")); err == nil || !strings.Contains(err.Error(), "missing.yaml") {
-		t.Errorf("unreadable policy: %v", err)
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "apiVersion: qory.dev/v1alpha1\negress:\n  mode: log\n")
+	if _, err := run(t, "run"); err == nil || !strings.Contains(err.Error(), `runner.yaml: egress.mode "log" is not observe or enforce`) {
+		t.Errorf("unreadable runner file: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".qory", "runs")); !errors.Is(err, os.ErrNotExist) {
 		t.Error("a run that did not start left a record")

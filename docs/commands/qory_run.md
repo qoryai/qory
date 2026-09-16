@@ -12,17 +12,18 @@ composed for, or named as the first argument when it is composed for several;
 arguments after -- go to the runtime after the launch template's own, so
 qory run claude -- -p 'say hello' runs one headless turn.
 
-The policy is policy.yaml in the configuration directory, ~/.config/qory, or the
-file --policy names; it can only narrow what the runtime reaches. No policy file means
-every connection is allowed and recorded; a policy that does not read means no run.
+What the runner does on this machine is runner.yaml in the configuration
+directory, ~/.config/qory, and nowhere else: a repository cannot set it. Its egress
+section is the policy, which can only narrow what the runtime reaches; no section means
+every connection is allowed and recorded, and a file that does not read means no run.
 When the harness declares egress, the hosts its modules and the runtime declare in the
 report, the runtime reaches the declared hosts the policy covers and nothing else; a
-harness that declares nothing leaves the policy's list as it is.
-The webhook is webhook.yaml beside it, or the file --webhook names; when one is
-configured the runner pings it first and does not start unless it answers, and posts
-every event to it. --local runs with the files alone, webhook or not. A descriptor
-override, <runtime>.yaml under runtimes in the same directory, replaces
-the built-in description of how the runtime's output and hooks map to events.
+harness that declares nothing leaves the policy's list as it is. Its webhook section
+posts every event somewhere as well; when one is configured the runner pings it first
+and does not start unless it answers. --local runs with the files alone, webhook or
+not. A descriptor override, <runtime>.yaml under runtimes in the same
+directory, replaces the built-in description of how the runtime's output and hooks map
+to events.
 
 At a terminal the session runs on a pseudo-terminal, so the runtime's own interface
 works and its bytes are still captured; --headless, or no terminal, runs it on pipes and
@@ -39,12 +40,10 @@ qory run [runtime] [-- argument...] [flags]
 ### Options
 
 ```
-      --headless         run on pipes even at a terminal, and read the runtime's structured output
-  -h, --help             help for run
-      --home string      where the harness is composed: a directory outside the checkout, one home per checkout under it, or .qory/harness (qory.yaml: harness.home)
-      --local            record to files only, even when a webhook is configured
-      --policy string    the policy file; policy.yaml in the configuration directory when left out
-      --webhook string   the webhook configuration; webhook.yaml in the configuration directory when left out
+      --headless      run on pipes even at a terminal, and read the runtime's structured output
+  -h, --help          help for run
+      --home string   where the harness is composed: a directory outside the checkout, one home per checkout under it, or .qory/harness (qory.yaml: harness.home)
+      --local         record to files only, even when a webhook is configured
 ```
 
 ### Options inherited from parent commands

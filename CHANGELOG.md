@@ -11,12 +11,14 @@ release may change what an existing document does, and says so under Upgrading.
 - `qory run` starts a runtime on the composed harness through the session runner of
   [`github.com/qoryai/runner`](https://github.com/qoryai/runner): the launch spec is the
   one `qory harness launch` prints, with the arguments after `--` appended; every
-  connection the runtime makes goes through a loopback proxy and is recorded, and the
-  policy, `policy.yaml` in the configuration directory or `--policy`, decides in enforce
-  mode what is denied. The session's bytes, the runner's observations and the runtime's
-  own reports are written as CloudEvents to `.qory/runs/<id>/events.jsonl` beside
-  `output.log`, and posted to a webhook when `webhook.yaml` or `--webhook` configures one;
-  `--local` keeps to the files. At a terminal the session runs on a pseudo-terminal;
+  connection the runtime makes goes through a loopback proxy and is recorded. What the
+  runner does on a machine is `runner.yaml` beside the user's `qory.yaml`, and nowhere
+  else: its `egress` section is the policy, which in enforce mode decides what is denied,
+  and its `webhook` section is where every event is posted as well, the secret there or
+  in `QORY_WEBHOOK_SECRET`. The session's bytes, the runner's observations and the
+  runtime's own reports are written as CloudEvents to `.qory/runs/<id>/events.jsonl`
+  beside `output.log`; `--local` keeps to the files when a webhook is configured. `qory
+  config` lists the file's values under `runner.`. At a terminal the session runs on a pseudo-terminal;
   `--headless` or no terminal runs it on pipes. The exit status is the runtime's. The
   hidden `qory run forward` is the hook command the runner installs into a copy of the
   runtime's settings, so a session needs nothing on the machine beyond `qory`.

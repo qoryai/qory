@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qory.dev/contracts/harness/v1/runner.schema.json",
+  "title": "runner.yaml",
+  "description": "The machine's runner file, under the user's configuration directory alone: what qory run does on this machine. egress is the run policy's egress section and webhook the webhook configuration, both in the runner contract's grammar, https://qory.dev/contracts/runner/v1/.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "qory.dev/v1alpha1"
+    },
+    "egress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "observe",
+            "enforce"
+          ]
+        },
+        "allow": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+          }
+        }
+      }
+    },
+    "webhook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "secret": {
+          "description": "At least 16 characters; may be left out when QORY_WEBHOOK_SECRET is set in the environment.",
+          "type": "string",
+          "minLength": 16
+        },
+        "events": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

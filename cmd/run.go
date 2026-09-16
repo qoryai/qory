@@ -20,13 +20,9 @@ import (
 	"github.com/qoryai/qory/internal/ui"
 )
 
-// The files qory run reads from the user's configuration directory when no flag names
-// them, and the directory of runtime descriptor overrides beside them.
-const (
-	PolicyFile     = "policy.yaml"
-	WebhookFile    = "webhook.yaml"
-	DescriptorsDir = "runtimes"
-)
+// DescriptorsDir is the directory of runtime descriptor overrides, <runtime>.yaml,
+// under the user's configuration directory.
+const DescriptorsDir = "runtimes"
 
 // newRun builds the run verb, which starts a runtime on the composed harness through
 // the session runner: the launch spec is what qory harness launch prints, the policy
@@ -35,7 +31,6 @@ const (
 // it resolves the spec, hands it to the runner and exits with the runtime's status.
 func newRun() *cobra.Command {
 	var h homeOptions
-	var policyPath, webhookPath string
 	var local, headless bool
 	c := &cobra.Command{
 		Use:   "run [runtime] [-- argument...]",
@@ -48,17 +43,18 @@ composed for, or named as the first argument when it is composed for several;
 arguments after -- go to the runtime after the launch template's own, so
 qory run claude -- -p 'say hello' runs one headless turn.
 
-The policy is ` + PolicyFile + ` in the configuration directory, ~/.config/qory, or the
-file --policy names; it can only narrow what the runtime reaches. No policy file means
-every connection is allowed and recorded; a policy that does not read means no run.
+What the runner does on this machine is ` + config.RunnerFileName + ` in the configuration
+directory, ~/.config/qory, and nowhere else: a repository cannot set it. Its egress
+section is the policy, which can only narrow what the runtime reaches; no section means
+every connection is allowed and recorded, and a file that does not read means no run.
 When the harness declares egress, the hosts its modules and the runtime declare in the
 report, the runtime reaches the declared hosts the policy covers and nothing else; a
-harness that declares nothing leaves the policy's list as it is.
-The webhook is ` + WebhookFile + ` beside it, or the file --webhook names; when one is
-configured the runner pings it first and does not start unless it answers, and posts
-every event to it. --local runs with the files alone, webhook or not. A descriptor
-override, <runtime>.yaml under ` + DescriptorsDir + ` in the same directory, replaces
-the built-in description of how the runtime's output and hooks map to events.
+harness that declares nothing leaves the policy's list as it is. Its webhook section
+posts every event somewhere as well; when one is configured the runner pings it first
+and does not start unless it answers. --local runs with the files alone, webhook or
+not. A descriptor override, <runtime>.yaml under ` + DescriptorsDir + ` in the same
+directory, replaces the built-in description of how the runtime's output and hooks map
+to events.
 
 At a terminal the session runs on a pseudo-terminal, so the runtime's own interface
 works and its bytes are still captured; --headless, or no terminal, runs it on pipes and
@@ -100,11 +96,15 @@ is the runtime's.
 				return err
 			}
 			user := config.UserDir()
-			if policyPath == "" {
-				policyPath = present(filepath.Join(user, PolicyFile))
-			}
-			if webhookPath == "" {
-				webhookPath = present(filepath.Join(user, WebhookFile))
+			var pol *session.Policy
+			var hook *session.Webhook
+			if r := conf.Runner; r != nil {
+				if r.Egress != nil {
+					pol = &session.Policy{Version: 1, Egress: session.PolicyEgress{Mode: r.Egress.Mode, Allow: r.Egress.Allow}}
+				}
+				if r.Webhook != nil {
+					hook = &session.Webhook{Version: 1, URL: r.Webhook.URL, Secret: r.Webhook.Secret, Events: r.Webhook.Events}
+				}
 			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
@@ -119,8 +119,8 @@ is the runtime's.
 				Stdin:         cmd.InOrStdin(),
 				Stdout:        cmd.OutOrStdout(),
 				Stderr:        stderr,
-				PolicyPath:    policyPath,
-				WebhookPath:   webhookPath,
+				Policy:        pol,
+				Webhook:       hook,
 				Local:         local,
 				Declared:      rep.Hosts(),
 				RunsDir:       filepath.Join(at.root, ".qory", "runs"),
@@ -149,8 +149,6 @@ is the runtime's.
 			return nil
 		},
 	}
-	c.Flags().StringVar(&policyPath, "policy", "", "the policy file; "+PolicyFile+" in the configuration directory when left out")
-	c.Flags().StringVar(&webhookPath, "webhook", "", "the webhook configuration; "+WebhookFile+" in the configuration directory when left out")
 	c.Flags().BoolVar(&local, "local", false, "record to files only, even when a webhook is configured")
 	c.Flags().BoolVar(&headless, "headless", false, "run on pipes even at a terminal, and read the runtime's structured output")
 	homeFlags(c, &h)
@@ -218,14 +216,6 @@ func splitAtDash(cmd *cobra.Command, args []string) (string, []string) {
 		runtime = args[0]
 	}
 	return runtime, args[dash:]
-}
-
-// present is path when a file is there, else "".
-func present(path string) string {
-	if _, err := os.Stat(path); err != nil {
-		return ""
-	}
-	return path
 }
 
 // withEnv is base with the variables of m set, replacing any of the same names.

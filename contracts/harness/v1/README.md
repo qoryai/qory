@@ -827,7 +827,38 @@ Every key is optional; a file naming none is read and changes nothing. A key the
 does not read is refused, and the message names the file by its own name. A list, such
 as `worktree.link`, is the nearest file's whole. `qory config` prints every effective
 value and the file it came from. Under `extends` the `harness`, `git` and `env` keys of the
-checkout's own file are not read (§Extending a stack). The schema is
+checkout's own file are not read (§Extending a stack).
+
+**The runner file.** What `qory run` does on this machine is a second file,
+`runner.yaml`, beside the user's `qory.yaml` under the configuration directory and
+nowhere else: it has no counterpart in a repository or an ancestor directory, so a
+checkout cannot set the policy the agent runs under or where the run's events go. Its
+two sections are the runner contract's objects, `https://qory.dev/contracts/runner/v1/`,
+in the runner contract's grammar; `qory run` hands them to the runner as they are.
+
+```yaml
+# ~/.config/qory/runner.yaml
+apiVersion: qory.dev/v1alpha1
+egress:                          # the run policy; absent: observe everything, deny nothing
+  mode: enforce                  # or observe: record every connection, deny none
+  allow: [api.anthropic.com, "*.github.com"]
+webhook:                         # where every event is posted as well; absent: files only
+  url: https://example.com/qory/events
+  secret: ...                    # at least 16 characters; or QORY_WEBHOOK_SECRET in the environment
+  events: ["*"]                  # the types to post; absent: every type
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `egress.mode` | `observe` | `observe` records every connection and denies none; `enforce` denies a connection to a host outside `allow` and records the denial |
+| `egress.allow` | none | the hosts the runtime may reach: a lower-case name, or `*.` and a name for every host below it, the grammar of a module's `egress` (§The module manifest). When the harness declares egress, the runtime reaches the declared hosts this list covers; when it declares nothing, this list as it is |
+| `webhook.url` | none | `https`, or `http` to this machine; with it set, `qory run` does not start unless the receiver accepts a ping, and `--local` runs with the files alone |
+| `webhook.secret` | `QORY_WEBHOOK_SECRET` | signs every delivery; at least 16 characters, never in a repository |
+| `webhook.events` | every type | the event types to post, by full name or `*` |
+
+`qory config` lists the file's values under `runner.`; a file that does not read stops
+every command, the way a `qory.yaml` that does not read does. The schema is
+`runner.schema.json`. The schema of `qory.yaml` is
 [config.schema.json](config.schema.json).
 
 ## Exit status

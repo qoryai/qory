@@ -65,9 +65,9 @@ type Manifest struct {
 	Egress []string
 }
 
-// egressHost is the grammar of a declared host, copied from the runner contract's
+// EgressHost is the grammar of a declared host, copied from the runner contract's
 // policy.schema.json, egress.allow items, which defines it once for both contracts.
-var egressHost = regexp.MustCompile(`^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+var EgressHost = regexp.MustCompile(`^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 // rawManifest decodes qory-module.yaml as it is written, where the variants map holds both the
 // variants and the default, a string among the maps. [ReadManifest] splits the two apart.
@@ -306,7 +306,7 @@ func ReadManifest(dir string) (*Manifest, error) {
 	if raw.Egress != nil {
 		m.Egress = []string{}
 		for _, host := range *raw.Egress {
-			if !egressHost.MatchString(host) {
+			if !EgressHost.MatchString(host) {
 				return nil, fmt.Errorf("%s: egress: %q is not a lower-case host name or a *. suffix; no port, path or scheme", path, host)
 			}
 			if !slices.Contains(m.Egress, host) {

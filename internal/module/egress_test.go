@@ -73,7 +73,7 @@ func TestEgressGrammarIsTheRunnersOnce(t *testing.T) {
 	if got != want {
 		t.Errorf("module.schema.json egress pattern\n%s\nrunner policy allow pattern\n%s", got, want)
 	}
-	if egressHost.String() != want {
-		t.Errorf("egressHost\n%s\nrunner policy allow pattern\n%s", egressHost.String(), want)
+	if EgressHost.String() != want {
+		t.Errorf("EgressHost\n%s\nrunner policy allow pattern\n%s", EgressHost.String(), want)
 	}
 }

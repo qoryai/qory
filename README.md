@@ -310,22 +310,19 @@ qory run claude -- -p "Reply pong"    # one headless turn; arguments after -- go
 ```
 
 The record is `.qory/runs/<id>/`: `events.jsonl`, one event per line, and `output.log`,
-the session's bytes. Two files in `~/.config/qory` change what the runner does, and both
-are optional:
+the session's bytes. One optional file, `~/.config/qory/runner.yaml`, says what the
+runner does on this machine. It lives beside your `qory.yaml` and nowhere else, so a
+repository cannot set it:
 
 ```yaml
-# ~/.config/qory/policy.yaml — what the runtime may reach; enforce denies the rest
-version: 1
-egress:
+# ~/.config/qory/runner.yaml
+apiVersion: qory.dev/v1alpha1
+egress:                  # what the runtime may reach; enforce denies the rest
   mode: enforce          # or observe: record everything, deny nothing
   allow: [api.anthropic.com, "*.github.com"]
-```
-
-```yaml
-# ~/.config/qory/webhook.yaml — where to post the events as well
-version: 1
-url: http://127.0.0.1:8787/events
-secret: sixteen-characters-at-least
+webhook:                 # where to post the events as well; optional
+  url: https://example.com/qory/events
+  secret: sixteen-characters-at-least   # or QORY_WEBHOOK_SECRET in the environment
 ```
 
 A module declares the hosts it reaches under `egress` in its manifest, and the compose
