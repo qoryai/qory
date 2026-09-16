@@ -95,7 +95,7 @@ func (copilot) Render(res *compose.Result, dir, home string) error {
 			return err
 		}
 	}
-	if err := render.WriteAgents(res, dir, "agents", ".agent.md", "name", "description", "tools", "model"); err != nil {
+	if err := render.WriteAgents(res, render.Bare, dir, "agents", ".agent.md", "name", "description", "tools", "model"); err != nil {
 		return err
 	}
 	if err := render.WriteSettings(res, Runtime, filepath.Join(dir, "hooks"), home, nil, nil); err != nil {
@@ -107,10 +107,10 @@ func (copilot) Render(res *compose.Result, dir, home string) error {
 		}
 	}
 	github := filepath.Join(dir, "workspace", ".github")
-	if err := render.LinkEntries(res, github, "skills"); err != nil {
+	if err := render.PlaceEntries(res, github, render.Bare, "skills"); err != nil {
 		return err
 	}
-	return render.WriteAgents(res, github, "agents", ".agent.md", "name", "description", "tools", "model")
+	return render.WriteAgents(res, render.Bare, github, "agents", ".agent.md", "name", "description", "tools", "model")
 }
 
 // Template starts Copilot CLI with the workspace directory for the skills and agents,

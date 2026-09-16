@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -83,7 +84,7 @@ func TestComposeOutsideTheCheckoutLeavesItUntouched(t *testing.T) {
 	if rep.Modules[0].Link != "harness" {
 		t.Errorf("the report lost the stack's link: %+v", rep.Modules[0])
 	}
-	for _, name := range []string{"AGENTS.md", "hooks/guard.sh", "modules/core/scripts/db.py", "claude/settings.json", "claude/mcp.json", "claude/CLAUDE.md", "claude/skills/review/SKILL.md", "claude/plugin/.claude-plugin/plugin.json", "claude/plugin/skills/review/SKILL.md", "claude/plugin/skills/e2e/SKILL.md", "claude/plugin/agents/reviewer.md", "claude/plugin/commands/ship.md", "claude/plugin/output-styles/terse.md"} {
+	for _, name := range []string{"AGENTS.md", "hooks/guard.sh", "modules/core/scripts/db.py", "claude/settings.json", "claude/mcp.json", "claude/CLAUDE.md", "claude/launch/CLAUDE.md", "claude/skills/review/SKILL.md", "claude/plugin/.claude-plugin/plugin.json", "claude/plugin/skills/review/SKILL.md", "claude/plugin/skills/e2e/SKILL.md", "claude/plugin/agents/reviewer.md", "claude/plugin/commands/ship.md", "claude/plugin/output-styles/terse.md"} {
 		if _, err := os.Stat(filepath.Join(home, name)); err != nil {
 			t.Errorf("home lacks %s: %v", name, err)
 		}
@@ -104,7 +105,7 @@ func TestComposeOutsideTheCheckoutLeavesItUntouched(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	claude := filepath.Join(home, "claude")
-	want := strings.Join([]string{"claude", "--plugin-dir", filepath.Join(claude, "plugin"), "--settings", filepath.Join(claude, "settings.json"), "--mcp-config", filepath.Join(claude, "mcp.json"), "--append-system-prompt-file", filepath.Join(claude, "CLAUDE.md"), "--setting-sources", "user"}, " ")
+	want := strings.Join([]string{"claude", "--plugin-dir", filepath.Join(claude, "plugin"), "--settings", filepath.Join(claude, "settings.json"), "--mcp-config", filepath.Join(claude, "mcp.json"), "--append-system-prompt-file", filepath.Join(claude, "launch", "CLAUDE.md"), "--setting-sources", "user"}, " ")
 	if strings.TrimSpace(out) != want {
 		t.Errorf("launch printed\n%s\nwant\n%s", out, want)
 	}
@@ -388,7 +389,7 @@ func TestLaunchPerRuntime(t *testing.T) {
 	home := filepath.Join(root, ".qory", "harness")
 	dir := func(rt string) string { return filepath.Join(home, rt) }
 	lines := map[string]string{
-		"claude":   "claude --plugin-dir " + dir("claude") + "/plugin --settings " + dir("claude") + "/settings.json --mcp-config " + dir("claude") + "/mcp.json --append-system-prompt-file " + dir("claude") + "/CLAUDE.md --setting-sources user",
+		"claude":   "claude --plugin-dir " + dir("claude") + "/plugin --settings " + dir("claude") + "/settings.json --mcp-config " + dir("claude") + "/mcp.json --append-system-prompt-file " + dir("claude") + "/launch/CLAUDE.md --setting-sources user",
 		"codex":    "env CODEX_HOME=" + dir("codex") + " codex",
 		"opencode": "env OPENCODE_CONFIG_DIR=" + dir("opencode") + " opencode",
 		"amp":      "amp --settings-file " + dir("amp") + "/settings.json",
@@ -508,8 +509,70 @@ func TestLaunchDirectoriesAreNotLinked(t *testing.T) {
 	if out, err := run(t, "harness", "compose", "--runtime", "claude,codex,opencode,cursor"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	gone(t, root, ".claude/plugin", ".cursor/plugin", ".codex/skills", ".codex/AGENTS.md", ".opencode/skills")
+	gone(t, root, ".claude/plugin", ".claude/launch", ".cursor/plugin", ".codex/skills", ".codex/AGENTS.md", ".opencode/skills")
 	dirLinks(t, root, ".codex", "config.toml", "agents")
 	dirLinks(t, root, ".opencode", "agents", "commands")
 	dirLinks(t, root, ".cursor", "agents", "mcp.json")
+}
+
+// TestLaunchPrintsTheRegisteredNames is the names a launcher builds its prompt from:
+// --json carries addresses, per kind, the name the session registers each agent, skill
+// and command under on that launch, a bound role beside them as the entry it is bound to,
+// harness:<name> for claude, whose plugin prefixes every kind, and the bare name for
+// codex; --address prints one of them alone, and a name the harness is not composed with
+// is refused.
+func TestLaunchPrintsTheRegisteredNames(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "references-resolve", root)
+	if out, err := run(t, "harness", "compose", "--runtime", "claude,codex", "--no-links"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	type launch struct {
+		Addresses map[string]map[string]string `json:"addresses"`
+	}
+	read := func(rt string) launch {
+		t.Helper()
+		out, err := run(t, "harness", "launch", "--runtime", rt, "--json")
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		var got launch
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatalf("%v:\n%s", err, out)
+		}
+		return got
+	}
+	claude := read("claude")
+	want := map[string]map[string]string{
+		"agents":   {"coder": "harness:rails-coder", "rails-coder": "harness:rails-coder", "reviewer": "harness:reviewer"},
+		"commands": {"ship": "harness:ship"},
+		"skills":   {"deploy": "harness:deploy", "test": "harness:test"},
+	}
+	if !reflect.DeepEqual(claude.Addresses, want) {
+		t.Errorf("claude addresses %v, want %v", claude.Addresses, want)
+	}
+	// Codex skips commands, and registers what it has under the modules' names.
+	codex := read("codex")
+	want = map[string]map[string]string{
+		"agents": {"coder": "rails-coder", "rails-coder": "rails-coder", "reviewer": "reviewer"},
+		"skills": {"deploy": "deploy", "test": "test"},
+	}
+	if !reflect.DeepEqual(codex.Addresses, want) {
+		t.Errorf("codex addresses %v, want %v", codex.Addresses, want)
+	}
+	for _, c := range [][3]string{{"claude", "skills/deploy", "harness:deploy"}, {"claude", "agents/coder", "harness:rails-coder"}, {"codex", "agents/coder", "rails-coder"}} {
+		out, err := run(t, "harness", "launch", "--runtime", c[0], "--address", c[1])
+		if err != nil {
+			t.Errorf("--address %s for %s: %v\n%s", c[1], c[0], err, out)
+			continue
+		}
+		if got := strings.TrimSpace(out); got != c[2] {
+			t.Errorf("--address %s for %s printed %q, want %q", c[1], c[0], got, c[2])
+		}
+	}
+	out, err := run(t, "harness", "launch", "--runtime", "codex", "--address", "commands/ship")
+	if err == nil {
+		t.Fatalf("--address commands/ship for codex printed %q; want a refusal, codex has no commands", out)
+	}
+	wants(t, err.Error(), "commands/ship is not an agent, skill, command or bound role the harness is composed with for codex")
 }

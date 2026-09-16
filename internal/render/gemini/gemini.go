@@ -24,7 +24,6 @@ import (
 	"strings"
 
 	"github.com/qoryai/qory/internal/compose"
-	"github.com/qoryai/qory/internal/module"
 	"github.com/qoryai/qory/internal/render"
 )
 
@@ -72,7 +71,7 @@ func (gemini) Reserved() []render.Reserved {
 // $ARGUMENTS rewritten to {{args}}. Gemini reads a project .gemini only in a folder the
 // user has marked trusted.
 func (gemini) Render(res *compose.Result, dir, home string) error {
-	if err := render.LinkEntries(res, dir, "skills", "hooks"); err != nil {
+	if err := render.PlaceEntries(res, dir, render.Bare, "skills", "hooks"); err != nil {
 		return err
 	}
 	err := render.WriteSettings(res, Runtime, dir, home, []string{"settings.json"}, func(file string, m map[string]any) {
@@ -93,14 +92,14 @@ func (gemini) Render(res *compose.Result, dir, home string) error {
 	if err != nil {
 		return err
 	}
-	if err := render.WriteAgents(res, dir, "agents", ".md", "name", "description"); err != nil {
+	if err := render.WriteAgents(res, render.Bare, dir, "agents", ".md", "name", "description"); err != nil {
 		return err
 	}
 	for _, e := range res.Entries {
 		if e.Kind != "commands" {
 			continue
 		}
-		doc, err := module.ReadDocument(e.Path)
+		doc, err := render.ReadDocument(res, render.Bare, e.Path)
 		if err != nil {
 			return err
 		}

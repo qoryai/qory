@@ -61,8 +61,9 @@
 //
 // A Render implementation is assembled from these:
 //
-//   - [LinkEntries] symlinks the atomic entries of the kinds it names into the runtime's
-//     directory, one link per entry.
+//   - [PlaceEntries] puts the atomic entries of the kinds it names into the runtime's
+//     directory for the path's [Address], one link per entry, or a written copy where a
+//     document holds a reference.
 //   - [WriteSettings] writes the runtime's merged settings files, JSON or TOML by
 //     extension, handing each to a patch function, which is where the target model goes.
 //   - [WriteAgents] writes one Markdown file per composed agent, keeping the frontmatter

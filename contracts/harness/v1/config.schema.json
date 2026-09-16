@@ -85,6 +85,12 @@
           }
         },
         "modules": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/module"}},
+        "bind": {
+          "description": "The entry that fills each role a document references: <kind>/<role> to the name of an entry of that kind, so a module writes ${qory:agents/coder} and the stack says which agent that is.",
+          "type": "object",
+          "propertyNames": {"pattern": "^(agents|commands|skills)/[^/\\\\@ .][^/\\\\@ ]*$"},
+          "additionalProperties": {"type": "string", "pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"}
+        },
         "extensions": {
           "description": "Values qory carries into the report and does not read: one object per namespace.",
           "type": "object",

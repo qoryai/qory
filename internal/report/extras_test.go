@@ -62,3 +62,34 @@ func TestPrintNamesALinklessCompose(t *testing.T) {
 		t.Errorf("the links row is missing:\n%s", buf.String())
 	}
 }
+
+// TestNewCarriesBindingsAndReferences is a result whose stack binds a role and whose
+// skill references it: the report carries both, Print shows them, and a report without
+// them prints no Bind section.
+func TestNewCarriesBindingsAndReferences(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	t.Setenv("HOME", t.TempDir())
+	res := result()
+	res.Bind = map[string]string{"agents/coder": "rails-coder"}
+	res.Entries[0].References = []string{"agents/coder", "skills/test"}
+	r := report.New(res, "app", "/work/app", "/work/app/.qory/harness")
+	if r.Bind["agents/coder"] != "rails-coder" || len(r.Entries[0].References) != 2 {
+		t.Errorf("report: %+v", r)
+	}
+	var buf bytes.Buffer
+	if err := r.Print(&buf); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"references agents/coder, skills/test", "Bind", "agents/coder  rails-coder"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("print lacks %q:\n%s", want, buf.String())
+		}
+	}
+	buf.Reset()
+	if err := want().Print(&buf); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "Bind") {
+		t.Errorf("a report without bindings prints the section:\n%s", buf.String())
+	}
+}

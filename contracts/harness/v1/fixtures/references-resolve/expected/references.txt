@@ -1,0 +1,1 @@
+skills/deploy: agents/coder agents/reviewer commands/ship skills/test

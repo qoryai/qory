@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -82,6 +83,24 @@ func TestFixtures(t *testing.T) {
 			if _, err := os.Stat("expected/AGENTS.md"); err == nil {
 				expectText(t, "expected/AGENTS.md", res.Instructions)
 			}
+			// expected/references.txt lists the entries that reference others, and
+			// expected/bind.txt the bindings; each when the fixture has any.
+			b.Reset()
+			for _, e := range res.Entries {
+				if len(e.References) > 0 {
+					fmt.Fprintf(&b, "%s/%s: %s\n", e.Kind, e.Name, strings.Join(e.References, " "))
+				}
+			}
+			if _, err := os.Stat("expected/references.txt"); err == nil || b.Len() > 0 {
+				expectText(t, "expected/references.txt", b.String())
+			}
+			b.Reset()
+			for _, role := range sortedKeys(res.Bind) {
+				fmt.Fprintf(&b, "%s %s\n", role, res.Bind[role])
+			}
+			if _, err := os.Stat("expected/bind.txt"); err == nil || b.Len() > 0 {
+				expectText(t, "expected/bind.txt", b.String())
+			}
 		})
 	}
 }
@@ -106,4 +125,13 @@ func expectText(t *testing.T, path, got string) {
 	if got != string(want) {
 		t.Fatalf("%s:\n%s\nwant:\n%s", path, got, want)
 	}
+}
+
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

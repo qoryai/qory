@@ -64,5 +64,5 @@ func (goose) Render(res *compose.Result, dir, home string) error {
 	if err := os.MkdirAll(filepath.Join(dir, "agents"), 0o755); err != nil {
 		return err
 	}
-	return render.WriteAgents(res, dir, "agents", ".md", "name", "description", "model")
+	return render.WriteAgents(res, render.Bare, dir, "agents", ".md", "name", "description", "model")
 }

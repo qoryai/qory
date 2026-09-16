@@ -100,6 +100,9 @@ type Entry struct {
 	// Path is absolute: the skill directory, the Markdown file, the hook script, the MCP
 	// server's JSON file or the file itself.
 	Path string
+	// References are the entries the entry's documents reference, as sorted <kind>/<name>
+	// keys, each once, see [References]; nil for an entry that references none.
+	References []string
 }
 
 // Module is a module read from disk.
@@ -419,7 +422,7 @@ func Read(name, dir string, m *Manifest, variant string) (*Module, error) {
 		return nil, fmt.Errorf("module %s: %w", name, err)
 	}
 	l.Entries = append(l.Entries, files...)
-	for _, e := range l.Entries {
+	for i, e := range l.Entries {
 		if err := inside(abs, e.Path); err != nil {
 			return nil, fmt.Errorf("module %s: %s/%s %w", name, e.Kind, e.Name, err)
 		}
@@ -428,6 +431,11 @@ func Read(name, dir string, m *Manifest, variant string) (*Module, error) {
 				return nil, fmt.Errorf("module %s: skills/%s/%w", name, e.Name, err)
 			}
 		}
+		refs, err := references(abs, e)
+		if err != nil {
+			return nil, fmt.Errorf("module %s: %w", name, err)
+		}
+		l.Entries[i].References = refs
 	}
 	sort.Slice(l.Entries, func(i, j int) bool {
 		if l.Entries[i].Kind != l.Entries[j].Kind {

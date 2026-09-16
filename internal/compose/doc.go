@@ -36,8 +36,23 @@
 // module still provides fails with a [*CollisionError]. There is no last-wins, no rename and
 // no precedence by module order. Excludes are applied per module before the check, so an
 // exclude is the only way to resolve a collision. Compose then sorts the entries by kind
-// and name, and joins the instruction files with a blank line between them and a trailing
-// newline.
+// and name, checks that every binding, requirement and reference resolves against them,
+// failing with an [*UnresolvedError] that lists every one that does not, and joins the
+// instruction files with a blank line between them and a trailing newline.
+//
+// # References and roles
+//
+// A document names another entry it dispatches by a reference, ${qory:<kind>/<name>},
+// which [module.Read] collects per entry into [Entry.References]. A reference is a
+// requirement: it joins the manifest's requires as a [Need], an only follows it within
+// the module, and the check after the last module wants it composed. The name may be a
+// role, one no entry has, that the stack binds under bind to the entry filling it,
+// [Result.Bind]; a reference to a bound role is checked against the bound entry, and a
+// binding is checked to name a composed entry and no entry's name. A reference resolves
+// within the composed entries and the bindings alone: it never brings in a module the
+// stack did not list. The text is left as written in the result; a renderer resolves it
+// per delivery path with [Result.Substitute], handing in the name the program registers
+// an entry under on that path.
 //
 // The first module that fails ends the compose. Compose returns that error and no result.
 //

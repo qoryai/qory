@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -230,6 +231,11 @@ type Stack struct {
 	Target Target `yaml:"target,omitempty"`
 	// Modules are the modules to compose, in the order they merge.
 	Modules []Module `yaml:"modules"`
+	// Bind names the entry that fills each role a document references, <kind>/<role> to
+	// the entry's name in that kind, so a module writes ${qory:agents/coder} and the stack
+	// says which agent that is. A document that extends a stack adds to the base's
+	// bindings and may rebind a role of the base's.
+	Bind map[string]string `yaml:"bind,omitempty"`
 	// Extending, on a stack, is what a checkout's own modules may ship. A stack that
 	// leaves it out cannot be extended.
 	Extending *Extending `yaml:"extending,omitempty"`
@@ -427,6 +433,18 @@ func (p *Stack) validate(compose bool) error {
 			}
 		}
 	}
+	for _, role := range sortedKeys(p.Bind) {
+		kind, name, ok := strings.Cut(role, "/")
+		if !ok || !isReferable(kind) {
+			return fmt.Errorf("bind %s: a role is <kind>/<name>, the kind one of %s", role, strings.Join(Referable, ", "))
+		}
+		if !segment(name) || strings.Contains(name, " ") {
+			return fmt.Errorf("bind %s: %q is not an entry name; a name is one path segment", role, name)
+		}
+		if to := p.Bind[role]; !segment(to) || strings.Contains(to, " ") || strings.Contains(to, "/") {
+			return fmt.Errorf("bind %s: %q is not an entry name; a role is bound to the name of an entry of its kind", role, to)
+		}
+	}
 	// A document that extends a stack may append nothing and carry only what is the
 	// repository's own beside the base, its extensions say; a stack names a module.
 	if len(p.Modules) == 0 && !compose {
@@ -553,6 +571,29 @@ func segment(name string) bool {
 	return name != "" && !strings.ContainsAny(name, `/\@`) && !strings.HasPrefix(name, ".")
 }
 
+// Referable are the kinds a reference and a binding may name, see the module package.
+var Referable = []string{"agents", "commands", "skills"}
+
+// isReferable reports whether k is a kind a role may be of.
+func isReferable(k string) bool {
+	for _, kind := range Referable {
+		if k == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// sortedKeys lists a map's keys in order.
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 func isKind(k string) bool {
 	for _, kind := range Kinds {
 		if k == kind {
@@ -642,6 +683,15 @@ func Extend(base, p *Stack) (*Stack, error) {
 		}
 	}
 	out.Modules = append(out.Modules, p.Modules...)
+	if len(base.Bind) > 0 || len(p.Bind) > 0 {
+		out.Bind = map[string]string{}
+		for role, to := range base.Bind {
+			out.Bind[role] = to
+		}
+		for role, to := range p.Bind {
+			out.Bind[role] = to
+		}
+	}
 	out.Extensions = map[string]map[string]any{}
 	for ns, v := range base.Extensions {
 		out.Extensions[ns] = v

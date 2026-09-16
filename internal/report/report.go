@@ -77,6 +77,9 @@ type Entry struct {
 	// For is the entry, as <kind>/<name>, that required this one, when the module's only
 	// block brought it in for that entry rather than naming it; absent otherwise.
 	For string `json:"for,omitempty"`
+	// References are the entries the entry's documents reference, as <kind>/<name> keys
+	// as written, a role's name included; absent when it references none.
+	References []string `json:"references,omitempty"`
 }
 
 // Exclude is one excluded entry.
@@ -156,6 +159,9 @@ type Report struct {
 	// Env are the variables the harness exports, name to value with $QORY_HARNESS_HOME in
 	// place of the home, absent when it exports none.
 	Env map[string]string `json:"env,omitempty"`
+	// Bind is the stack's bindings, <kind>/<role> to the name of the entry that fills the
+	// role, absent when the stack binds none.
+	Bind map[string]string `json:"bind,omitempty"`
 	// Extensions are the stack's extensions, carried as written, absent when it has
 	// none.
 	Extensions map[string]map[string]any `json:"extensions,omitempty"`
@@ -187,6 +193,9 @@ func New(res *compose.Result, name, checkout, home string) Report {
 	if len(res.Env) > 0 {
 		r.Env = res.Env
 	}
+	if len(res.Bind) > 0 {
+		r.Bind = res.Bind
+	}
 	if res.Base != nil {
 		r.Base = &Base{Name: res.Base.Name, Source: res.Base.Source, Pin: res.Base.Pin}
 	}
@@ -194,7 +203,7 @@ func New(res *compose.Result, name, checkout, home string) Report {
 		r.Modules = append(r.Modules, Module{Name: l.Name, Description: l.Description, Source: l.Source, Pin: l.Pin, Dirty: l.Dirty, Variant: l.Variant, Link: l.Link, Base: l.Base})
 	}
 	for _, e := range res.Entries {
-		r.Entries = append(r.Entries, Entry{Kind: e.Kind, Name: e.Name, Module: e.Module, For: e.For})
+		r.Entries = append(r.Entries, Entry{Kind: e.Kind, Name: e.Name, Module: e.Module, For: e.For, References: e.References})
 	}
 	for _, x := range res.Excludes {
 		r.Excludes = append(r.Excludes, Exclude{Module: x.Module, Kind: x.Kind, Name: x.Name})
@@ -291,9 +300,21 @@ func (r Report) PrintBody(w io.Writer) error {
 		if e.For != "" {
 			row = append(row, "required by "+e.For)
 		}
+		if len(e.References) > 0 {
+			row = append(row, "references "+strings.Join(e.References, ", "))
+		}
 		rows = append(rows, row)
 	}
 	u.Table(rows)
+	if len(r.Bind) > 0 {
+		u.Blank()
+		u.Heading("Bind")
+		rows = nil
+		for _, role := range sorted(r.Bind) {
+			rows = append(rows, []string{role, r.Bind[role]})
+		}
+		u.Table(rows)
+	}
 	if len(r.Excludes) > 0 {
 		u.Blank()
 		u.Heading("Excludes")

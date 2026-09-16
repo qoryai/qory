@@ -69,3 +69,26 @@ func TestExtendRefusesAModuleNamedLikeABaseModule(t *testing.T) {
 		t.Fatalf("err = %v, want %q", err, want)
 	}
 }
+
+// TestExtendMergesTheBindings is a checkout's qory.yaml binding a role over its base: the
+// base's bindings carry, the checkout's add to them and rebind a role of the base's.
+func TestExtendMergesTheBindings(t *testing.T) {
+	base := &Stack{Target: Target{Runtimes: Runtimes{"claude"}}, Modules: []Module{{Name: "core", Source: Source{Path: "modules/core"}}}, Bind: map[string]string{"agents/coder": "base-coder", "agents/reviewer-role": "reviewer"}, Extending: &Extending{}, Root: "/repo", File: "/repo/qory-stack.yaml"}
+	p := &Stack{Extends: Source{Path: "../base"}, Bind: map[string]string{"agents/coder": "rails-coder", "skills/entry": "implement"}, File: "/app/qory-stack.yaml"}
+	out, err := Extend(base, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"agents/coder": "rails-coder", "agents/reviewer-role": "reviewer", "skills/entry": "implement"}
+	if len(out.Bind) != len(want) {
+		t.Fatalf("bind %v, want %v", out.Bind, want)
+	}
+	for role, to := range want {
+		if out.Bind[role] != to {
+			t.Errorf("bind %s = %q, want %q", role, out.Bind[role], to)
+		}
+	}
+	if base.Bind["agents/coder"] != "base-coder" {
+		t.Error("Extend wrote into the base's bindings")
+	}
+}
