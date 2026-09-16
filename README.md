@@ -285,14 +285,12 @@ qory harness compose --home ~/.cache/qory/homes
 eval "$(qory harness launch --runtime claude --home ~/.cache/qory/homes)"
 ```
 
-For Claude Code that is `CLAUDE_CONFIG_DIR` on the composed directory, which has the
-shape of `~/.claude`, so the skills, agents, commands, output styles and hooks register,
-the settings carry the permissions, environment and model and `CLAUDE.md` the
-instructions, then `--mcp-config` for the servers and `--setting-sources user` so no
-`.claude` of the checkout or of a directory above it is read. Cursor takes a plugin the
-compose renders, Codex takes the tree as its `CODEX_HOME`, OpenCode as its
-`OPENCODE_CONFIG_DIR`, Copilot the skills and agents through `--add-dir`, Amp and Gemini
-their settings file.
+For Claude Code that is `--plugin-dir` for a plugin the compose renders, `--settings`
+for the permissions, hooks, environment and model, `--mcp-config` for the servers,
+`--append-system-prompt-file` for the instructions, and `--setting-sources user` so no
+`.claude` of the checkout or of a directory above it is read. Cursor takes the same
+plugin, Codex takes the tree as its `CODEX_HOME`, OpenCode as its `OPENCODE_CONFIG_DIR`,
+Copilot the skills and agents through `--add-dir`, Amp and Gemini their settings file.
 Every line is the tool's own template, and `harness.launch.<runtime>` in your
 `qory.yaml` changes the command, the arguments or the variables when a tool's flags
 move. `--json` prints the same as one object. The contract says what each tool takes
