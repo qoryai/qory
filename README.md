@@ -194,6 +194,8 @@ qory harness compose     # compose the stack into the checkout you stand in   (q
 qory harness inspect     # the report: every entry and the module it came from (qory hi)
 qory harness remove      # remove the composed tree and its links               (qory hr)
 qory harness launch      # the command that starts a runtime on the tree          (qory hl)
+qory run                 # start a runtime on the tree, observed and recorded
+qory receive             # receive the runner's webhook deliveries into a file
 qory worktree add        # add a worktree for a branch and prepare it            (qory wa)
 qory worktree remove     # remove a worktree and its branch                      (qory wr)
 qory worktree list       # every worktree with its branch                        (qory wl)
@@ -295,6 +297,43 @@ Every line is the tool's own template, and `harness.launch.<runtime>` in your
 `qory.yaml` changes the command, the arguments or the variables when a tool's flags
 move. `--json` prints the same as one object. The contract says what each tool takes
 from outside and what it still reads from the checkout.
+
+## Running a session
+
+`qory run` starts the runtime on the composed tree inside the session runner of
+[qoryai/runner](https://github.com/qoryai/runner): the same launch as `qory harness launch`,
+with every connection the runtime makes going through a proxy on your machine and
+recorded, and the session written as events beside its output.
+
+```sh
+qory run                              # the composed runtime, at your terminal
+qory run claude -- -p "Reply pong"    # one headless turn; arguments after -- go to the runtime
+```
+
+The record is `.qory/runs/<id>/`: `events.jsonl`, one event per line, and `output.log`,
+the session's bytes. Two files in `~/.config/qory` change what the runner does, and both
+are optional:
+
+```yaml
+# ~/.config/qory/policy.yaml — what the runtime may reach; enforce denies the rest
+version: 1
+egress:
+  mode: enforce          # or observe: record everything, deny nothing
+  allow: [api.anthropic.com, "*.github.com"]
+```
+
+```yaml
+# ~/.config/qory/webhook.yaml — where to post the events as well
+version: 1
+url: http://127.0.0.1:8787/events
+secret: sixteen-characters-at-least
+```
+
+With a webhook configured the runner does not start unless the receiver answers;
+`--local` runs with the files alone. `qory receive` is a receiver for that URL on this
+machine, which appends what it verifies to a file. A denied connection is recorded and
+the session goes on; nothing here ends a session. The formats are in the runner's
+[contract](https://github.com/qoryai/runner/tree/main/contracts/runner/v1).
 
 ## The format
 

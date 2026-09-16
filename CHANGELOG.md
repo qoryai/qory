@@ -4,6 +4,26 @@ Every release of qory, newest first, in the shape of [Keep a Changelog](https://
 The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0 a minor
 release may change what an existing document does, and says so under Upgrading.
 
+## [0.5.0] - 2026-09-16
+
+### Added
+
+- `qory run` starts a runtime on the composed harness through the session runner of
+  [`github.com/qoryai/runner`](https://github.com/qoryai/runner): the launch spec is the
+  one `qory harness launch` prints, with the arguments after `--` appended; every
+  connection the runtime makes goes through a loopback proxy and is recorded, and the
+  policy, `policy.yaml` in the configuration directory or `--policy`, decides in enforce
+  mode what is denied. The session's bytes, the runner's observations and the runtime's
+  own reports are written as CloudEvents to `.qory/runs/<id>/events.jsonl` beside
+  `output.log`, and posted to a webhook when `webhook.yaml` or `--webhook` configures one;
+  `--local` keeps to the files. At a terminal the session runs on a pseudo-terminal;
+  `--headless` or no terminal runs it on pipes. The exit status is the runtime's. The
+  hidden `qory run forward` is the hook command the runner installs into a copy of the
+  runtime's settings, so a session needs nothing on the machine beyond `qory`.
+- `qory receive` is the reference receiver of that webhook: it listens where the
+  configuration's URL says, verifies each delivery's signature, deduplicates on the event
+  id and appends the events to a file.
+
 ## [0.4.4] - 2026-09-16
 
 ### Added

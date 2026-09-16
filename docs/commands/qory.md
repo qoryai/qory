@@ -26,6 +26,8 @@ Shortcuts:
 
 * [qory config](qory_config.md)	 - Print the effective configuration and where each value comes from
 * [qory harness](qory_harness.md)	 - Compose, inspect, remove and launch the harness of a checkout
+* [qory receive](qory_receive.md)	 - Receive the runner's webhook deliveries and append the events to a file
+* [qory run](qory_run.md)	 - Start a runtime on the composed harness, observed and recorded
 * [qory setup](qory_setup.md)	 - Set up the repository, the machine's configuration, or your shell
 * [qory update](qory_update.md)	 - Update qory to the newest release
 * [qory version](qory_version.md)	 - Print the version, the build and the harness format this qory reads

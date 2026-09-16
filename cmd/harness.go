@@ -882,8 +882,9 @@ const (
 	ExitStale = 6
 )
 
-// ExitCode is the status a process exits with for err: 0 for nil, [ExitInput],
-// [ExitCollision], [ExitForeign], [ExitVersion] or [ExitStale] for the errors those name, and 1 for every other
+// ExitCode is the status a process exits with for err: 0 for nil, the runtime's own
+// status for a qory run whose runtime exited with one, [ExitInput], [ExitCollision],
+// [ExitForeign], [ExitVersion] or [ExitStale] for the errors those name, and 1 for every other
 // failure, such as a git source that could not be fetched or a file that could not be
 // written. A command unknown to the tree is an input error too; cobra reports it as a
 // plain error whose text starts with "unknown command", which is the one place this
@@ -897,6 +898,9 @@ func ExitCode(err error) int {
 	switch {
 	case err == nil:
 		return 0
+	case exitStatusOf(err):
+		code, _ := exitStatus(err)
+		return code
 	case errors.As(err, &collision):
 		return ExitCollision
 	case errors.As(err, &foreign):
@@ -1040,25 +1044,11 @@ checkout alone has no launch template, and the verb says so.
 			if err != nil {
 				return err
 			}
-			name := runtime
-			if name == "" {
-				if len(rep.Target.Runtimes) != 1 {
-					return input(fmt.Errorf("the harness is composed for %s; --runtime says which to start", strings.Join(rep.Target.Runtimes, ", ")))
-				}
-				name = rep.Target.Runtimes[0]
-			}
-			if !slices.Contains(rep.Target.Runtimes, name) {
-				return input(fmt.Errorf("the harness is not composed for %s; composed: %s", name, strings.Join(rep.Target.Runtimes, ", ")))
+			name, launch, err := resolveLaunch(rep, conf, runtime)
+			if err != nil {
+				return err
 			}
 			rt, err := render.Lookup(name)
-			if err != nil {
-				return input(err)
-			}
-			var override *render.Template
-			if l, ok := conf.Launch[name]; ok {
-				override = &render.Template{Command: l.Command, Args: l.Args, Env: l.Env}
-			}
-			launch, err := render.LaunchFor(rt, rep.Home, override)
 			if err != nil {
 				return input(err)
 			}
