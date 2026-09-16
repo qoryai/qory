@@ -23,6 +23,16 @@ release may change what an existing document does, and says so under Upgrading.
 - `qory receive` is the reference receiver of that webhook: it listens where the
   configuration's URL says, verifies each delivery's signature, deduplicates on the event
   id and appends the events to a file.
+- A module declares the hosts its skills, hooks and servers reach under `egress` in
+  `qory-module.yaml`, a lower-case name or a `*.` suffix, in the grammar the runner
+  contract gives a policy's allow list. The compose unions the declarations into the
+  report's `egress`, each host with the modules that declared it, and adds the runtime's
+  own endpoint under the runtime's name when any module declares; `qory harness inspect`
+  shows the union. `qory run` hands it to the runner, which keeps the declared hosts the
+  policy covers, so the policy is the ceiling and a declaration only lowers it. A harness
+  in which no module declares hands over nothing and the policy's list stands. `egress`
+  is a new manifest key, refused by a 0.4.4 binary as unknown; a stack shipping a module
+  that declares states `qory: ">=0.5.0"`.
 
 ## [0.4.4] - 2026-09-16
 
@@ -384,6 +394,7 @@ The first release: a stack of modules composed into one tree, linked into the ch
 and kept out of git, with a report naming the module of every entry and a refusal when
 two modules provide the same one.
 
+[0.5.0]: https://github.com/qoryai/qory/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/qoryai/qory/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/qoryai/qory/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/qoryai/qory/compare/v0.4.1...v0.4.2

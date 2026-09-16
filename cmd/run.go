@@ -51,6 +51,9 @@ qory run claude -- -p 'say hello' runs one headless turn.
 The policy is ` + PolicyFile + ` in the configuration directory, ~/.config/qory, or the
 file --policy names; it can only narrow what the runtime reaches. No policy file means
 every connection is allowed and recorded; a policy that does not read means no run.
+When the harness declares egress, the hosts its modules and the runtime declare in the
+report, the runtime reaches the declared hosts the policy covers and nothing else; a
+harness that declares nothing leaves the policy's list as it is.
 The webhook is ` + WebhookFile + ` beside it, or the file --webhook names; when one is
 configured the runner pings it first and does not start unless it answers, and posts
 every event to it. --local runs with the files alone, webhook or not. A descriptor
@@ -119,6 +122,7 @@ is the runtime's.
 				PolicyPath:    policyPath,
 				WebhookPath:   webhookPath,
 				Local:         local,
+				Declared:      rep.Hosts(),
 				RunsDir:       filepath.Join(at.root, ".qory", "runs"),
 				Descriptors:   filepath.Join(user, DescriptorsDir),
 				Forwarder:     []string{exe, "run", "forward"},

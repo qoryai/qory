@@ -118,6 +118,16 @@ type Launcher interface {
 	Template() Template
 }
 
+// Declarer is a runtime whose program reaches hosts of its own, its model endpoint say,
+// which no module declares. When the modules of a harness declare egress, the compose
+// adds these to the report's union under the runtime's name, so a stack does not have
+// to know the endpoint; when none declares, they are not needed, since the run's policy
+// stands as it is.
+type Declarer interface {
+	// Egress are the hosts the program reaches, in the grammar of a module's egress key.
+	Egress() []string
+}
+
 // Template is how a runtime's program is started on the harness in a home: the program,
 // groups of arguments, and environment variables, each naming the home's files through
 // two placeholders, ${home} for the home and ${dir} for the runtime's directory in it. A

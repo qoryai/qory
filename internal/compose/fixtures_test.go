@@ -101,6 +101,29 @@ func TestFixtures(t *testing.T) {
 			if _, err := os.Stat("expected/bind.txt"); err == nil || b.Len() > 0 {
 				expectText(t, "expected/bind.txt", b.String())
 			}
+			// expected/egress.txt is the union of the declared hosts, each with the
+			// modules that declared it, when any module has the key; an empty file
+			// is a harness that declares and names nothing.
+			b.Reset()
+			declared := false
+			byHost := map[string][]string{}
+			for _, m := range res.Modules {
+				declared = declared || m.Egress != nil
+				for _, host := range m.Egress {
+					byHost[host] = append(byHost[host], m.Name)
+				}
+			}
+			hosts := make([]string, 0, len(byHost))
+			for host := range byHost {
+				hosts = append(hosts, host)
+			}
+			sort.Strings(hosts)
+			for _, host := range hosts {
+				fmt.Fprintf(&b, "%s %s\n", host, strings.Join(byHost[host], " "))
+			}
+			if _, err := os.Stat("expected/egress.txt"); err == nil || declared {
+				expectText(t, "expected/egress.txt", b.String())
+			}
 		})
 	}
 }

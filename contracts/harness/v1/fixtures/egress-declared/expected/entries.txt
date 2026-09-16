@@ -1,0 +1,3 @@
+skills/a core
+skills/b web
+skills/c quiet

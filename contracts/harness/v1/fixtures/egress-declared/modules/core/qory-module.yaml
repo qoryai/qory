@@ -1,0 +1,5 @@
+apiVersion: qory.dev/v1alpha1
+name: core
+egress:
+  - api.example.com
+  - "*.github.com"

@@ -615,6 +615,15 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 	if !at.links {
 		rep.Links = report.NoLinks
 	}
+	// A runtime's own hosts join the declaration when there is one, under the
+	// runtime's name, so a stack that declares needs to know no endpoint.
+	if rep.Egress != nil {
+		for _, rt := range targets {
+			if d, ok := rt.(render.Declarer); ok {
+				rep.AddEgress(rt.Name(), d.Egress())
+			}
+		}
+	}
 	// The report says which qory wrote it, so a runner's report and a laptop's can be
 	// compared; a build with no version, a source build without version control, is
 	// left out rather than recorded as nothing.

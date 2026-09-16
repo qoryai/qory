@@ -329,6 +329,11 @@ url: http://127.0.0.1:8787/events
 secret: sixteen-characters-at-least
 ```
 
+A module declares the hosts it reaches under `egress` in its manifest, and the compose
+unions them into the report. When the harness declares, the runtime reaches the declared
+hosts the policy covers and nothing else; the policy is the ceiling. When no module
+declares, the policy's list stands as it is.
+
 With a webhook configured the runner does not start unless the receiver answers;
 `--local` runs with the files alone. `qory receive` is a receiver for that URL on this
 machine, which appends what it verifies to a file. A denied connection is recorded and

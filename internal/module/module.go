@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -56,7 +57,17 @@ type Manifest struct {
 	// by the plural kinds an exclude uses, see [ReadManifest]. A required entry may come
 	// from any module; the compose refuses a stack that leaves one out.
 	Requires map[string][]string
+	// Egress are the hosts the module's skills, hooks and servers reach, sorted, each
+	// once: a lower-case host name, or "*." followed by a name for every host below it,
+	// in the grammar the runner contract gives a policy's allow list. Nil when the
+	// manifest has no egress key; empty, and not nil, when it declares an empty list,
+	// which says the module reaches nothing. The runner tells the two apart.
+	Egress []string
 }
+
+// egressHost is the grammar of a declared host, copied from the runner contract's
+// policy.schema.json, egress.allow items, which defines it once for both contracts.
+var egressHost = regexp.MustCompile(`^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 // rawManifest decodes qory-module.yaml as it is written, where the variants map holds both the
 // variants and the default, a string among the maps. [ReadManifest] splits the two apart.
@@ -67,6 +78,7 @@ type rawManifest struct {
 	Variants    map[string]yaml.Node   `yaml:"variants,omitempty"`
 	Env         map[string]string      `yaml:"env,omitempty"`
 	Requires    []map[string]yaml.Node `yaml:"requires,omitempty"`
+	Egress      *[]string              `yaml:"egress,omitempty"`
 }
 
 // singular maps the key a requires item names its entry by to the entry's kind. mcp is
@@ -290,6 +302,18 @@ func ReadManifest(dir string) (*Manifest, error) {
 			m.Requires = map[string][]string{}
 		}
 		m.Requires[entry] = needs
+	}
+	if raw.Egress != nil {
+		m.Egress = []string{}
+		for _, host := range *raw.Egress {
+			if !egressHost.MatchString(host) {
+				return nil, fmt.Errorf("%s: egress: %q is not a lower-case host name or a *. suffix; no port, path or scheme", path, host)
+			}
+			if !slices.Contains(m.Egress, host) {
+				m.Egress = append(m.Egress, host)
+			}
+		}
+		sort.Strings(m.Egress)
 	}
 	for name, node := range raw.Variants {
 		if name == "default" {

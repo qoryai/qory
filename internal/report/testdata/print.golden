@@ -11,5 +11,9 @@ Entries
   agents/reviewer  review
   skills/ship      core
 
+Egress
+  *.github.com     core
+  api.example.com  core, review
+
 Excludes
   core  skills/old
