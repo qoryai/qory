@@ -4,6 +4,19 @@ Every release of qory, newest first, in the shape of [Keep a Changelog](https://
 The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0 a minor
 release may change what an existing document does, and says so under Upgrading.
 
+## [0.4.3] - 2026-09-16
+
+### Fixed
+
+- A session started from the claude launch line had every skill and no agent. The
+  plugin the compose renders at `claude/plugin` linked its agents the way it links
+  everything else, and Claude Code passes over a link in a plugin's `agents/` where it
+  follows one in a plugin's `skills/` and in a checkout's `.claude/agents`. The agents
+  are now copied into the plugin and register as `harness:<name>`; the launch line, the
+  layout and the checkout's links are as they were. A stack delivered for launching
+  claude states `qory: ">=0.4.3"`, so an earlier qory refuses it instead of composing
+  a roster the session never sees.
+
 ## [0.4.2] - 2026-09-15
 
 ### Added
@@ -296,6 +309,7 @@ The first release: a stack of modules composed into one tree, linked into the ch
 and kept out of git, with a report naming the module of every entry and a refusal when
 two modules provide the same one.
 
+[0.4.3]: https://github.com/qoryai/qory/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/qoryai/qory/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/qoryai/qory/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/qoryai/qory/compare/v0.3.0...v0.4.0

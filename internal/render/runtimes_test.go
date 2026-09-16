@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/qoryai/qory/internal/compose"
@@ -145,5 +146,59 @@ func TestBuildNeedsARuntime(t *testing.T) {
 	res, _, home := composeFixture(t, "claude")
 	if err := render.Build(res, home); err == nil {
 		t.Fatal("Build with no runtime returned no error")
+	}
+}
+
+// TestClaudePluginCopiesItsAgents is the roster a launch from outside the checkout
+// delivers: Claude Code passes over a link in a plugin's agents directory, so the plugin
+// holds the agents as files, byte for byte the module's, while its skills and the
+// checkout's own agents stay links, and the launch line still names the plugin.
+func TestClaudePluginCopiesItsAgents(t *testing.T) {
+	res, _, home := composeFixture(t, "claude")
+	if err := render.Build(res, home, lookup(t, "claude")); err != nil {
+		t.Fatal(err)
+	}
+	plugin := filepath.Join(home, "claude", "plugin")
+	agent := filepath.Join(plugin, "agents", "reviewer.md")
+	fi, err := os.Lstat(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fi.Mode().IsRegular() {
+		t.Errorf("%s is %v, want a regular file", agent, fi.Mode())
+	}
+	var src string
+	for _, e := range res.Entries {
+		if e.Kind == "agents" && e.Name == "reviewer" {
+			src = e.Path
+		}
+	}
+	want, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(agent); string(got) != string(want) {
+		t.Errorf("the plugin's reviewer.md differs from %s", src)
+	}
+	for _, name := range []string{filepath.Join(plugin, "skills", "review"), filepath.Join(home, "claude", "agents", "reviewer.md")} {
+		if fi, err := os.Lstat(name); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+			t.Errorf("%s: %v, want a link", name, err)
+		}
+	}
+	// The manifest leaves agents to discovery: a manifest naming the directory, even
+	// as ./agents, keeps Claude Code from reading it.
+	manifest, err := os.ReadFile(filepath.Join(plugin, ".claude-plugin", "plugin.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(manifest), `"agents"`) {
+		t.Errorf("the manifest names agents:\n%s", manifest)
+	}
+	l, err := render.LaunchFor(lookup(t, "claude"), home, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(l.Env) != 0 || len(l.Args) < 2 || l.Args[0] != "--plugin-dir" || l.Args[1] != plugin {
+		t.Errorf("launch %q env %q, want --plugin-dir %s and no variable", l.Args, l.Env, plugin)
 	}
 }

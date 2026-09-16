@@ -13,7 +13,12 @@
 // skills, agents, commands and output styles under a .claude-plugin/plugin.json, which
 // --plugin-dir loads for one session; settings.json goes to --settings, mcp.json to
 // --mcp-config and CLAUDE.md to --append-system-prompt-file. [Template] holds those
-// arguments, and the plugin is never linked into the checkout.
+// arguments, and the plugin is never linked into the checkout. The plugin's agents are
+// copies where everything else in the home is a link, see [render.WritePlugin]: Claude
+// Code passes over a link in a plugin's agents directory, and registers a file there as
+// harness:<name>. The launch line adds to the session the program was started in and
+// takes nothing over: whatever configuration directory, login and memory the launcher
+// has stay its own.
 //
 // The paths under .claude a files entry may not take, see [render.Reserved]:
 //
@@ -127,9 +132,10 @@ func (claude) Render(res *compose.Result, dir, home string) error {
 }
 
 // renderPlugin writes the plugin into dir: .claude-plugin/plugin.json naming it, and the
-// skills, agents and commands linked under the directories Claude Code reads in a plugin,
-// with the output styles under output-styles and the manifest pointing there when the
-// compose holds one. The hooks, the servers, the settings and the instructions are not
+// skills, agents and commands under the directories Claude Code reads in a plugin, with
+// the output styles under output-styles and the manifest pointing there when the compose
+// holds one. The manifest names no agents key: Claude Code discovers agents/ on its own,
+// and a manifest that names the directory turns the discovery off. The hooks, the servers, the settings and the instructions are not
 // in the plugin: they reach the session through the settings and files [Template] names,
 // the same ones the checkout's links point at, so nothing is rendered twice.
 func renderPlugin(res *compose.Result, dir string) error {

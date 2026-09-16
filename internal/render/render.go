@@ -230,11 +230,21 @@ func CopyFile(src, dir, name string) error {
 
 // WritePlugin writes the manifest a plugin in Claude Code's layout starts with, at
 // dir/<manifestDir>/plugin.json, naming the plugin [PluginName] with the stack's
-// description, and links the composed skills, agents and commands under dir. Cursor and
-// Claude Code read the layout, each under its own manifest directory.
+// description, links the composed skills and commands under dir, and copies the agents:
+// Claude Code reads a plugin's agents directory by entry type and passes over a link
+// there, where it follows one in a checkout's .claude/agents and a plugin's skills, so a
+// linked agent registers nowhere and a copied one as <plugin>:<name>.
 func WritePlugin(res *compose.Result, dir, manifestDir string, extra map[string]any) error {
-	if err := LinkEntries(res, dir, "skills", "agents", "commands"); err != nil {
+	if err := LinkEntries(res, dir, "skills", "commands"); err != nil {
 		return err
+	}
+	for _, e := range res.Entries {
+		if e.Kind != "agents" {
+			continue
+		}
+		if err := CopyFile(e.Path, dir, filepath.Join("agents", e.Name+".md")); err != nil {
+			return err
+		}
 	}
 	manifest := map[string]any{"name": PluginName, "description": PluginDescription(res)}
 	for k, v := range extra {
