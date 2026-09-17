@@ -4,7 +4,7 @@ Every release of qory, newest first, in the shape of [Keep a Changelog](https://
 The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0 a minor
 release may change what an existing document does, and says so under Upgrading.
 
-## [Unreleased]
+## [0.8.0] - 2026-09-17
 
 ### Upgrading
 
@@ -526,6 +526,7 @@ The first release: a stack of modules composed into one tree, linked into the ch
 and kept out of git, with a report naming the module of every entry and a refusal when
 two modules provide the same one.
 
+[0.8.0]: https://github.com/qoryai/qory/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/qoryai/qory/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/qoryai/qory/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/qoryai/qory/compare/v0.4.4...v0.5.0
