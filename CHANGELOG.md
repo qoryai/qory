@@ -4,6 +4,14 @@ Every release of qory, newest first, in the shape of [Keep a Changelog](https://
 The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0 a minor
 release may change what an existing document does, and says so under Upgrading.
 
+## [Unreleased]
+
+### Changed
+
+- `qory update` of a `go install` build fetches the release's module first, and the
+  finished step stays on the screen as `downloaded qory <version>`, above `built qory
+  <version>`. It was one step, which landed as built alone.
+
 ## [0.7.0] - 2026-09-17
 
 ### Added

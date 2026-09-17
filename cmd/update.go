@@ -132,7 +132,13 @@ look off, and so does CI being set.
 			case update.Homebrew:
 				err = runTool(cmd, u, "", "", tool[0], tool[1:]...)
 			case update.GoInstall:
-				err = runTool(cmd, u, "building qory "+latest+" with go install", "built qory "+latest, tool[0], tool[1:]...)
+				// go install fetches and builds in one silent run, so the module is fetched
+				// first, as a step of its own that stays on the screen when it is done. The
+				// modules a release newly needs still arrive with the build.
+				err = runTool(cmd, u, "downloading qory "+latest, "downloaded qory "+latest, "go", "mod", "download", "github.com/"+update.Repo+"@v"+latest)
+				if err == nil {
+					err = runTool(cmd, u, "building qory "+latest+" with go install", "built qory "+latest, tool[0], tool[1:]...)
+				}
 			default:
 				flight := u.Fly("downloading qory " + latest)
 				site := update.GitHub
@@ -148,6 +154,9 @@ look off, and so does CI being set.
 			if err != nil {
 				return err
 			}
+			if tool != nil {
+				u.Success("updated with %s %s", tool[0], ui.Pot)
+			}
 			// The look was made by the binary that has just been replaced; the next
 			// command looks for itself.
 			return cache.Clear()
@@ -158,13 +167,13 @@ look off, and so does CI being set.
 	return c
 }
 
-// runTool runs the installer that put this qory on the machine, brew or go, and reports
-// when it is done. With no waiting label the tool's output is passed through, which is
-// for brew, since it reports its own progress and may ask. With one, a flight carrying
-// the label is shown while the tool runs and lands as landed when it is done, and the
-// tool's output is kept back, to follow the error when it fails, which is for go
-// install, since it builds for a while and says nothing unless it has modules to
-// download.
+// runTool runs one command of the installer that put this qory on the machine, brew or
+// go. With no waiting label the tool's output is passed through, which is for brew,
+// since it reports its own progress and may ask. With one, a flight carrying the label
+// is shown while the tool runs and lands as landed when it is done, and the tool's
+// output is kept back, to follow the error when it fails, which is for go, since it
+// works for a while and says next to nothing. The caller reports the update itself,
+// once every command of it is done.
 func runTool(cmd *cobra.Command, u *ui.UI, waiting, landed, name string, args ...string) error {
 	tool := exec.CommandContext(cmd.Context(), name, args...)
 	var kept bytes.Buffer
@@ -190,7 +199,6 @@ func runTool(cmd *cobra.Command, u *ui.UI, waiting, landed, name string, args ..
 		}
 		return fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
 	}
-	u.Success("updated with %s %s", name, ui.Pot)
 	return nil
 }
 
