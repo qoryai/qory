@@ -6,6 +6,14 @@ release may change what an existing document does, and says so under Upgrading.
 
 ## [0.6.0] - 2026-09-17
 
+### Added
+
+- `qory update` shows a progress indicator while it downloads or builds the release.
+
+### Fixed
+
+- `qory update` no longer cuts a release download off after three seconds.
+
 ### Changed
 
 - `extensions`, in a `qory-stack.yaml` and in a checkout's `harness` section, takes a

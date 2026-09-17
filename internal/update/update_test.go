@@ -210,8 +210,14 @@ func TestInstallReplacesTheBinaryAfterCheckingTheSum(t *testing.T) {
 	}
 
 	s := server(t, "v0.5.0", map[string][]byte{name: data, "checksums.txt": sums})
+	// Progress is told of the archive alone, and last that all of it has arrived.
+	var done, total int64
+	s.Progress = func(d, n int64) { done, total = d, n }
 	if err := s.Install(context.Background(), "0.5.0", exe, runtime.GOOS, runtime.GOARCH); err != nil {
 		t.Fatal(err)
+	}
+	if done != int64(len(data)) || total != int64(len(data)) {
+		t.Errorf("progress ended at %d of %d, want %d of %d", done, total, len(data), len(data))
 	}
 	got, err := os.ReadFile(exe)
 	if err != nil {
