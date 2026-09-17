@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://qory.dev/contracts/harness/v1/runner.schema.json",
   "title": "runner.yaml",
-  "description": "The machine's runner file, under the user's configuration directory alone: what qory run does on this machine. egress is the run policy's egress section and webhook the webhook configuration, both in the runner contract's grammar, https://qory.dev/contracts/runner/v1/.",
+  "description": "The machine's runner file, under the user's configuration directory alone: what qory run does on this machine. egress is the run policy's egress section and webhook the webhook configuration, both in the runner contract's grammar, https://qory.dev/contracts/runner/v1/. wall is the container the runtime is started in, that contract's wall.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -56,6 +56,53 @@
             "type": "string",
             "minLength": 1
           }
+        }
+      }
+    },
+    "wall": {
+      "description": "The wall every run on this machine starts the runtime behind: a container with no route out except to the runner's proxy. Absent, the runtime is a process of this machine.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "adapter"
+      ],
+      "properties": {
+        "adapter": {
+          "description": "What builds the wall.",
+          "type": "string",
+          "enum": [
+            "docker"
+          ]
+        },
+        "image": {
+          "description": "The agent's image: the runtime and the project's toolchain. qory builds none. May be left out when --image names one.",
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/:@-]*$"
+        },
+        "command": {
+          "description": "The program the adapter runs, podman say. Default docker.",
+          "type": "string",
+          "minLength": 1
+        },
+        "helper": {
+          "description": "The absolute path of a static Linux build of qory, mounted read-only into the container as the relay and the hook forwarder. Default this binary, which only a Linux machine can use.",
+          "type": "string",
+          "pattern": "^/"
+        },
+        "env": {
+          "description": "Names of variables of qory run's environment that go into the container, the model credential say. Values are never written here. Nothing else of the environment goes in.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          }
+        },
+        "user": {
+          "description": "The uid:gid the container runs as. Default qory run's own, so the checkout's files keep their owner. Root is refused; a machine where qory runs as root names another.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*(:[A-Za-z0-9_][A-Za-z0-9_.-]*)?$"
         }
       }
     }

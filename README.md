@@ -324,6 +324,10 @@ egress:                  # what the runtime may reach; enforce denies the rest
 webhook:                 # where to post the events as well; optional
   url: https://example.com/qory/events
   secret: sixteen-characters-at-least   # or QORY_WEBHOOK_SECRET in the environment
+wall:                    # start the runtime in a container; optional
+  adapter: docker
+  image: example.com/agent:1            # yours: the runtime and your toolchain
+  env: [ANTHROPIC_API_KEY]              # names; nothing else of your environment goes in
 ```
 
 A module declares the hosts it reaches under `egress` in its manifest, and the compose
@@ -335,6 +339,31 @@ With a webhook configured the runner does not start unless the receiver answers;
 `--local` runs with the files alone. A denied connection is recorded and
 the session goes on; nothing here ends a session. The formats are in the runner's
 [contract](https://github.com/qoryai/runner/tree/main/contracts/runner/v1).
+
+The proxy sees only programs that honour it. A **wall** makes the rest fail: with a
+`wall` section, or `--wall docker --image <image>` for one run, the runtime starts in a
+container on a network with no route out, and reaches the proxy, and nothing else,
+through a relay. The container sees the checkout and the composed home and nothing else
+of your machine; the runner, the policy, the record and the webhook's secret stay
+outside. It needs the `docker` command and an engine behind it, and an image of yours
+that holds the runtime; qory builds none. What to know:
+
+- The model credential goes in by name, `wall.env` or `--env`, and is then the
+  agent's. A subscription login kept in a Mac's Keychain does not reach a container;
+  use an API key, or a token from `claude setup-token`.
+- Inside the container the relay and the hook forwarder are qory's own Linux build. On
+  Linux that is the binary you run. On a Mac, download the Linux archive of the same
+  release for your engine's architecture and name the binary as `wall.helper`.
+- The container sees the checkout it was started in and no other directory. In a git
+  worktree the repository's data lives in the main checkout, outside it, so git inside
+  the container does not work there yet; a clone works.
+- Behind a wall the proxy reaches your own machine only for a host `egress.allow`
+  names itself, in either mode, and never the cloud metadata address. For a local model
+  endpoint or MCP server, list your machine's host name, and point the harness at that
+  name: `localhost` inside the container is the container.
+- With the engine in a virtual machine, as on a Mac, the runtime's hooks do not reach
+  the runner, so a walled run there has no hook events; the log, the egress record and
+  the structured output are there. On a Linux host they cross.
 
 ## The format
 
