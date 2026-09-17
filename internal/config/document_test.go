@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/qoryai/qory/internal/config"
@@ -71,7 +72,7 @@ func TestOnBaseTakesTheBaseFromTheFlag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Extends.Path != rel || named != (stack.Source{}) || len(p.Modules) != 0 || p.Extensions["consumer"]["team"] != "web" {
+	if p.Extends.Path != rel || named != (stack.Source{}) || len(p.Modules) != 0 || !reflect.DeepEqual(p.Extensions["consumer"], map[string]any{"team": "web"}) {
 		t.Fatalf("extensions alone: %+v", p)
 	}
 	writeRaw(t, path, "harness:\n  target: {runtime: claude, model: opus}\n  modules:\n    - name: app\n")

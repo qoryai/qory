@@ -9,7 +9,9 @@
 // [UI.Fail]. In between it prints [UI.Fields] for named values, [UI.Table] for rows,
 // [UI.Heading] for a section, [UI.Text] for prose, [UI.Code] for a block to paste,
 // [UI.Blank] for an empty line, and [UI.Box] for a framed notice that has to be seen,
-// its lines styled with [UI.Strong], [UI.Brand] and [UI.Alert]. [Short] shortens a path against the checkout so a field
+// its lines styled with [UI.Strong], [UI.Brand] and [UI.Alert]. A wait is a [Flight], from
+// [UI.Fly]: the bee flying to the jar, drawn on a terminal only, since it redraws its line
+// in place, and left as a finished line everywhere by [Flight.Land]. [Short] shortens a path against the checkout so a field
 // reads as a path inside it.
 //
 //	u := ui.New(cmd.OutOrStdout())

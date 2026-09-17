@@ -4,6 +4,36 @@ Every release of qory, newest first, in the shape of [Keep a Changelog](https://
 The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0 a minor
 release may change what an existing document does, and says so under Upgrading.
 
+## [0.6.0] - 2026-09-17
+
+### Added
+
+- `qory update` shows a progress indicator while it downloads or builds the release.
+
+### Fixed
+
+- `qory update` no longer cuts a release download off after three seconds.
+
+### Changed
+
+- `extensions`, in a `qory-stack.yaml` and in a checkout's `harness` section, takes a
+  value of any shape under each key: a scalar, a list, or a map of any depth. It was one
+  map per namespace, so `sweep_floor: 40` directly under `extensions` failed to decode.
+  The report carries the block as written, and `qory harness inspect` prints one row per
+  key, a map's keys one level down as `key.sub`, which is what a namespaced block printed
+  before. A key with no value is carried as null and no longer refused. Both schemas
+  drop the object constraint on the values.
+- A checkout that extends a stack may set an extension key the base sets: its value
+  replaces the base's whole, and the keys it leaves alone stay the base's. It was
+  refused with `extensions.<namespace> is the base stack's`. Nothing under a key is
+  merged.
+
+### Upgrading
+
+- Nothing to change: a block written one map per namespace reads, reports and prints as
+  it did. A reader of the report's `extensions` that assumed every value is an object
+  now meets whatever the stack wrote there.
+
 ## [0.5.0] - 2026-09-16
 
 ### Added
@@ -445,6 +475,7 @@ The first release: a stack of modules composed into one tree, linked into the ch
 and kept out of git, with a report naming the module of every entry and a refusal when
 two modules provide the same one.
 
+[0.6.0]: https://github.com/qoryai/qory/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/qoryai/qory/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/qoryai/qory/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/qoryai/qory/compare/v0.4.2...v0.4.3

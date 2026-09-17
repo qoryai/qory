@@ -3,6 +3,7 @@ package stack
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -37,7 +38,7 @@ func TestLoadReadsALinkAndExtensions(t *testing.T) {
 	if p.Modules[0].Link != "harness" {
 		t.Errorf("link = %q", p.Modules[0].Link)
 	}
-	if p.Extensions["acme"]["sweep_floor"] != 160 || len(p.Extensions["acme"]["corpus_roots"].([]any)) != 1 {
+	if !reflect.DeepEqual(p.Extensions["acme"], map[string]any{"sweep_floor": 160, "corpus_roots": []any{"scripts"}}) {
 		t.Errorf("extensions = %v", p.Extensions)
 	}
 }
@@ -56,12 +57,21 @@ func TestLoadRefusesABadLinkOrExtension(t *testing.T) {
 			t.Errorf("%q: err = %v, want %q", c.edit, err, c.want)
 		}
 	}
-	_, err := load(t, strings.Replace(linked, "  acme:\n    sweep_floor: 160\n    corpus_roots: [scripts]\n", "  acme: 160\n", 1))
-	if err == nil || !strings.Contains(err.Error(), "cannot unmarshal !!int `160` into map") {
-		t.Errorf("a scalar extension: err = %v", err)
+	_, err := load(t, strings.Replace(linked, "extensions:\n  acme:\n", "extensions: [scripts]\n  acme:\n", 1))
+	if err == nil {
+		t.Errorf("a list for extensions: loaded, want a refusal")
 	}
-	_, err = load(t, strings.Replace(linked, "  acme:\n    sweep_floor: 160\n    corpus_roots: [scripts]\n", "  acme:\n", 1))
-	if err == nil || !strings.Contains(err.Error(), "extensions.acme is empty") {
-		t.Errorf("an empty extension: err = %v", err)
+}
+
+// TestLoadReadsExtensionsOfAnyShape is an extension block of a scalar, a list, a map
+// two levels deep and a key with no value: every one loads as written.
+func TestLoadReadsExtensionsOfAnyShape(t *testing.T) {
+	p, err := load(t, strings.Replace(linked, "  acme:\n    sweep_floor: 160\n    corpus_roots: [scripts]\n", "  sweep_floor: 40\n  corpus_roots: [scripts, infra]\n  resolve_ci:\n    watched: {workflows: [Lint]}\n  later:\n", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"sweep_floor": 40, "corpus_roots": []any{"scripts", "infra"}, "resolve_ci": map[string]any{"watched": map[string]any{"workflows": []any{"Lint"}}}, "later": nil}
+	if !reflect.DeepEqual(p.Extensions, want) {
+		t.Errorf("extensions = %#v, want %#v", p.Extensions, want)
 	}
 }

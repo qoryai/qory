@@ -71,7 +71,7 @@ const (
 	// Mark is Qory's mark, the bee that does the work. Every title starts with it, so it is
 	// the first character of a command's output.
 	Mark = "🐝"
-	// Jar is the jar that waits for the bee. Nothing in this tool prints it yet.
+	// Jar is the jar that waits for the bee. A [Flight] draws it where the bee is headed.
 	Jar = "🫙"
 	// Pot is the work done. A command ends a success line with it, after the numbers.
 	Pot = "🍯"

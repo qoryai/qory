@@ -491,7 +491,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 	retired.add(p.File, p.RetiredAPIVersion)
 	// A stack named with -f, in a checkout whose own document extends one, is that
 	// document's base, in place of what extends names: the document composes on it,
-	// its modules appended and its extensions beside the base's. That is how a runner
+	// its modules appended and its extensions over the base's. That is how a runner
 	// holding the stack tree supplies the base, and the checkout's file need name no
 	// version, ref or URL of it. A checkout without a document composes the stack
 	// alone, as it always has.

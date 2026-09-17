@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -56,7 +57,9 @@ look off, and so does CI being set.
 			u.Title("qory update", b.title())
 			ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
 			defer cancel()
+			flight := u.Fly("looking for the newest release")
 			latest, err := update.GitHub.Latest(ctx)
+			flight.Stop()
 			if err != nil {
 				return err
 			}
@@ -125,10 +128,22 @@ look off, and so does CI being set.
 			if rows != nil {
 				u.Fields(rows)
 			}
-			if tool != nil {
-				err = runTool(cmd, u, tool[0], tool[1:]...)
-			} else if err = update.GitHub.Install(ctx, latest, exe, runtime.GOOS, runtime.GOARCH); err == nil {
-				u.Success("updated %s to %s %s", b.title(), latest, ui.Pot)
+			switch channel {
+			case update.Homebrew:
+				err = runTool(cmd, u, "", "", tool[0], tool[1:]...)
+			case update.GoInstall:
+				err = runTool(cmd, u, "building qory "+latest+" with go install", "built qory "+latest, tool[0], tool[1:]...)
+			default:
+				flight := u.Fly("downloading qory " + latest)
+				site := update.GitHub
+				site.Progress = flight.Progress
+				err = site.Install(ctx, latest, exe, runtime.GOOS, runtime.GOARCH)
+				if err != nil {
+					flight.Stop()
+				} else {
+					flight.Land("downloaded qory " + latest)
+					u.Success("updated %s to %s %s", b.title(), latest, ui.Pot)
+				}
 			}
 			if err != nil {
 				return err
@@ -143,14 +158,36 @@ look off, and so does CI being set.
 	return c
 }
 
-// runTool runs the installer that put this qory on the machine, brew or go, with its
-// output passed through, and reports when it is done.
-func runTool(cmd *cobra.Command, u *ui.UI, name string, args ...string) error {
+// runTool runs the installer that put this qory on the machine, brew or go, and reports
+// when it is done. With no waiting label the tool's output is passed through, which is
+// for brew, since it reports its own progress and may ask. With one, a flight carrying
+// the label is shown while the tool runs and lands as landed when it is done, and the
+// tool's output is kept back, to follow the error when it fails, which is for go
+// install, since it builds for a while and says nothing unless it has modules to
+// download.
+func runTool(cmd *cobra.Command, u *ui.UI, waiting, landed, name string, args ...string) error {
 	tool := exec.CommandContext(cmd.Context(), name, args...)
-	tool.Stdout = cmd.OutOrStdout()
-	tool.Stderr = cmd.ErrOrStderr()
-	tool.Stdin = cmd.InOrStdin()
-	if err := tool.Run(); err != nil {
+	var kept bytes.Buffer
+	var err error
+	if waiting == "" {
+		tool.Stdout = cmd.OutOrStdout()
+		tool.Stderr = cmd.ErrOrStderr()
+		tool.Stdin = cmd.InOrStdin()
+		err = tool.Run()
+	} else {
+		tool.Stdout = &kept
+		tool.Stderr = &kept
+		flight := u.Fly(waiting)
+		if err = tool.Run(); err != nil {
+			flight.Stop()
+		} else {
+			flight.Land(landed)
+		}
+	}
+	if err != nil {
+		if out := strings.TrimSpace(kept.String()); out != "" {
+			return fmt.Errorf("%s %s: %w\n%s", name, strings.Join(args, " "), err, out)
+		}
 		return fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
 	}
 	u.Success("updated with %s %s", name, ui.Pot)

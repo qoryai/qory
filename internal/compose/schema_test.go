@@ -174,6 +174,8 @@ func TestComposeSchemaKnowsExtends(t *testing.T) {
 		{composeSchema, `{"harness": {"extends": {"path": "../harness/nextjs-15"}, "extending": {"kinds": ["skills"]}, "modules": [{"name": "app"}]}}`, false},
 		{composeSchema, `{"harness": {"modules": [{"name": "app"}]}}`, true},
 		{composeSchema, `{"harness": {"extensions": {"acme": {"team": "web"}}}}`, true},
+		{composeSchema, `{"harness": {"extensions": {"sweep_floor": 40, "corpus_roots": ["scripts"], "resolve_ci": {"watched": {"workflows": ["Lint"]}}}}}`, true},
+		{composeSchema, `{"harness": {"extensions": ["scripts"]}}`, false},
 		{composeSchema, `{"harness": {"target": {"runtime": ["claude", "codex"], "model": "opus"}, "modules": [{"name": "app"}]}, "worktree": {"link": [".env"]}}`, true},
 		{composeSchema, `{"worktree": {"name": "wt"}}`, false},
 		{composeSchema, `{"worktree": {"link": [".env", {"from": "~/secrets/app.env", "to": ".env.local"}, {"from": "config/dev.json", "to": "config/local.json"}], "copy": [{"from": "config/dev.json"}]}}`, true},

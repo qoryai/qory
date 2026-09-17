@@ -171,7 +171,7 @@ type Report struct {
 	Egress []Egress `json:"egress,omitzero"`
 	// Extensions are the stack's extensions, carried as written, absent when it has
 	// none.
-	Extensions map[string]map[string]any `json:"extensions,omitempty"`
+	Extensions map[string]any `json:"extensions,omitempty"`
 	// Base is the stack the checkout's qory.yaml extends, absent for a stack.
 	Base *Base `json:"base,omitempty"`
 	// Qory is the build that wrote the report, absent when the build carries no version.
@@ -398,11 +398,17 @@ func (r Report) PrintBody(w io.Writer) error {
 		u.Blank()
 		u.Heading("Extensions")
 		rows = nil
-		for _, ns := range sorted(r.Extensions) {
-			for _, key := range sorted(r.Extensions[ns]) {
-				value, _ := json.Marshal(r.Extensions[ns][key])
-				rows = append(rows, []string{ns + "." + key, string(value)})
+		for _, key := range sorted(r.Extensions) {
+			// A map's keys take a row each, one level down; any other value is one row.
+			if values, ok := r.Extensions[key].(map[string]any); ok && len(values) > 0 {
+				for _, sub := range sorted(values) {
+					value, _ := json.Marshal(values[sub])
+					rows = append(rows, []string{key + "." + sub, string(value)})
+				}
+				continue
 			}
+			value, _ := json.Marshal(r.Extensions[key])
+			rows = append(rows, []string{key, string(value)})
 		}
 		u.Table(rows)
 	}

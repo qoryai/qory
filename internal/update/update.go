@@ -50,6 +50,10 @@ type Site struct {
 	// Client makes the requests. It carries the timeout, so a check that hangs gives up
 	// rather than holding a command.
 	Client *http.Client
+	// Progress, when set, is told how much of a release archive [Site.Install] has
+	// downloaded, in bytes, as it arrives: done of total, total zero when the server
+	// does not say. It is called from the goroutine that downloads.
+	Progress func(done, total int64)
 }
 
 // GitHub is the site the releases live on. The client gives up after a few seconds,
@@ -307,13 +311,19 @@ func Archive(version, goos, goarch string) string {
 // release has no build for, a checksum that does not match, or a directory the process
 // may not write to.
 func (s Site) Install(ctx context.Context, version, exe, goos, goarch string) error {
+	// The client's timeout is for the look every command makes, a few seconds for a few
+	// hundred bytes. It covers the body too, so it would cut an archive off on a slow
+	// line; a download is as long as ctx allows instead.
+	client := *s.Client
+	client.Timeout = 0
+	s.Client = &client
 	archive := Archive(version, goos, goarch)
 	base := s.Downloads + "/" + Repo + "/releases/download/v" + version + "/"
-	data, err := s.fetch(ctx, base+archive)
+	data, err := s.fetch(ctx, base+archive, s.Progress)
 	if err != nil {
 		return fmt.Errorf("release %s has no archive %s: %w", version, archive, err)
 	}
-	sums, err := s.fetch(ctx, base+"checksums.txt")
+	sums, err := s.fetch(ctx, base+"checksums.txt", nil)
 	if err != nil {
 		return fmt.Errorf("release %s has no checksums.txt: %w", version, err)
 	}
@@ -327,8 +337,9 @@ func (s Site) Install(ctx context.Context, version, exe, goos, goarch string) er
 	return replace(exe, binary)
 }
 
-// fetch downloads one URL whole. A release archive is a few megabytes.
-func (s Site) fetch(ctx context.Context, url string) ([]byte, error) {
+// fetch downloads one URL whole, telling progress, when there is one, how much has
+// arrived. A release archive is a few megabytes.
+func (s Site) fetch(ctx context.Context, url string, progress func(done, total int64)) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -342,7 +353,24 @@ func (s Site) fetch(ctx context.Context, url string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, errors.New(resp.Status)
 	}
-	return io.ReadAll(resp.Body)
+	if progress == nil {
+		return io.ReadAll(resp.Body)
+	}
+	return io.ReadAll(&counted{r: resp.Body, total: max(0, resp.ContentLength), progress: progress})
+}
+
+// counted reports every read of r to progress, as the bytes read so far of total.
+type counted struct {
+	r           io.Reader
+	done, total int64
+	progress    func(done, total int64)
+}
+
+func (c *counted) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.done += int64(n)
+	c.progress(c.done, c.total)
+	return n, err
 }
 
 // verify checks that sums, the release's checksums.txt, lists the SHA-256 of data under

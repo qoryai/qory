@@ -338,10 +338,10 @@ type Stack struct {
 	// Extending, on a stack, is what a checkout's own modules may ship. A stack that
 	// leaves it out cannot be extended.
 	Extending *Extending `yaml:"extending,omitempty"`
-	// Extensions are values qory carries into the report and does not read: one map per
-	// namespace, for the scripts of a team that keep their own settings beside the
-	// stack.
-	Extensions map[string]map[string]any `yaml:"extensions,omitempty"`
+	// Extensions are values qory carries into the report and does not read: a map of
+	// keys to values of any shape, for the scripts of a team that keep their own
+	// settings beside the stack.
+	Extensions map[string]any `yaml:"extensions,omitempty"`
 
 	// RetiredAPIVersion is the apiVersion the file declared when it is a retired
 	// spelling of [APIVersion], one of [exports.RetiredAPIVersions], "" when the file
@@ -619,11 +619,6 @@ func (p *Stack) validate(compose bool) error {
 			links[l.Link] = who
 		}
 	}
-	for ns, values := range p.Extensions {
-		if values == nil {
-			return fmt.Errorf("extensions.%s is empty; an extension is a map of values", ns)
-		}
-	}
 	return nil
 }
 
@@ -761,8 +756,8 @@ func FileAllowed(name string, prefixes []string) bool {
 // marked [Module.Base], each with its source rewritten to resolve from p, then p's
 // modules; p's target, since a base carries none; both files' extensions. The result's Qory is p's; the
 // base's range is the caller's to carry and check, as [Base.Qory] does. It refuses a base that extends
-// another, a base without an extending block, and an extension namespace both files
-// declare. The result's File and Root are p's.
+// another and a base without an extending block. An extension key both files set is
+// p's. The result's File and Root are p's.
 func Extend(base, p *Stack) (*Stack, error) {
 	if base.Extends.Path != "" || base.Extends.Git != "" {
 		return nil, fmt.Errorf("%s extends %s, and a stack does not extend another", base.File, base.Extends.String())
@@ -816,15 +811,12 @@ func Extend(base, p *Stack) (*Stack, error) {
 			out.Bind[role] = to
 		}
 	}
-	out.Extensions = map[string]map[string]any{}
-	for ns, v := range base.Extensions {
-		out.Extensions[ns] = v
+	out.Extensions = map[string]any{}
+	for key, v := range base.Extensions {
+		out.Extensions[key] = v
 	}
-	for ns, v := range p.Extensions {
-		if _, ok := out.Extensions[ns]; ok {
-			return nil, fmt.Errorf("extensions.%s is the base stack's; a checkout's qory.yaml declares another namespace", ns)
-		}
-		out.Extensions[ns] = v
+	for key, v := range p.Extensions {
+		out.Extensions[key] = v
 	}
 	if len(out.Extensions) == 0 {
 		out.Extensions = nil
