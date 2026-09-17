@@ -92,9 +92,8 @@
           "additionalProperties": {"type": "string", "pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"}
         },
         "extensions": {
-          "description": "Values qory carries into the report and does not read: one object per namespace.",
-          "type": "object",
-          "additionalProperties": {"type": "object"}
+          "description": "Values qory carries into the report and does not read: keys of the author's choosing, each a value of any shape.",
+          "type": "object"
         }
       }
     },

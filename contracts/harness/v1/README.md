@@ -46,7 +46,7 @@ found, the message names the root and every file it looked for.
 file's document. Naming a stack, any other file, in a checkout whose root holds a
 document, makes the stack that document's base: the compose reads as if the document had
 named the stack's directory under `extends`, the base's modules first and closed, the
-document's modules appended, the extensions merged by namespace, under the rules of
+document's modules appended, the extensions merged by key, under the rules of
 §Extending a stack. What the document itself names under `extends`, if anything, is not
 read and not fetched. The compose prints a row, `base <file>  (named by -f)`, or `base
 <file>  (named by -f, in place of extends <source>)` when the document names one. A
@@ -94,8 +94,8 @@ extending:                       # optional; without it the stack cannot be exte
     runtime: [claude]
     model: [opus, sonnet]        # listed, the checkout's target names one of them
 extensions:                      # optional; carried into the report, not read
-  acme:
-    required_check: Harness self-tests
+  required_check: Harness self-tests
+  corpus_roots: [scripts]        # a value is any shape: a scalar, a list, a map of any depth
 ```
 
 A stack carries no `target`: it is delivered to be extended, and the checkout extending
@@ -166,7 +166,7 @@ schema is [config.schema.json](config.schema.json).
 | `modules[].variant` | no | forces one of the module's variants instead of the one named like the targeted runtime |
 | `modules[].link` | no | a name at the checkout root, one path segment, linked to the module's directory in the composed tree, so a permission rule or a script names the module's files by a checkout-relative path: `harness/scripts/check.sh`. A hard link (§Rendering), named once across the modules |
 | `bind` | no | the entry that fills each role a document references (§References): `<kind>/<role>` to the name of an entry of that kind, `agents/coder: rails-coder`. The kind is `agents`, `skills` or `commands`. A checkout extending a stack adds to the base's bindings and may rebind a role of the base's |
-| `extensions` | no | one map per namespace, written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it |
+| `extensions` | no | a map of keys the author chooses, each a value of any shape, a scalar, a list or a map of any depth; written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it |
 | `extending` | no | what a module of a checkout extending this stack may ship: `kinds`, `instructions`, `settings`, `files` (§Extending a stack). A base without the block cannot be extended |
 | `extending.target` | no | the runtimes and the models the stack is written for, `runtime` and `model`, each one name or a list, one of the two at least. A checkout's resolved target outside either list fails the compose; listed models make the model required, since a target without one runs whatever the runtime defaults to, which is a model the stack did not list. Left out, every target is accepted, a model left out included (§Extending a stack) |
 
@@ -217,8 +217,9 @@ checkout appends:
 - An entry of an appended module that collides with a base entry fails with status 3, and
   the message says the entry belongs to the base, `<name>@<pin>`, and to rename it; no
   exclude resolves it. The message names that one entry and nothing else of the base.
-- Both stacks' `extensions` go into the report; a namespace the base declares is the
-  base's, and a checkout declaring it too is refused.
+- Both stacks' `extensions` go into the report, merged by top-level key: a key the
+  checkout sets replaces the base's value whole, and a key it leaves alone stays the
+  base's. Nothing under a key is merged.
 - The base's `bind` carries, and the checkout's `bind` adds to it and may rebind a role of
   the base's: which entry fills a role is a target's choice, like the model.
 - The report records the base with its source and pin, and marks the base's modules.

@@ -3,6 +3,7 @@ package cmd_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -124,12 +125,11 @@ func TestExtendsComposesTheBaseFirstAndClosed(t *testing.T) {
 }
 
 // TestExtendsRefusesWhatTheBaseCloses is the consumer changing what the base decides:
-// a hook in their module, an entry colliding with the base's, a deny rule in their
-// fragment, and a base namespace in their extensions.
+// a hook in their module, an entry colliding with the base's and a deny rule in their
+// fragment.
 func TestExtendsRefusesWhatTheBaseCloses(t *testing.T) {
 	url := baseRepo(t)
 	root := consumerCheckout(t, url)
-	compose := filepath.Join(root, "qory.yaml")
 	refuse := func(name, want string, exit int, args ...string) {
 		t.Helper()
 		_, err := run(t, append([]string{"harness", "compose"}, args...)...)
@@ -146,8 +146,23 @@ func TestExtendsRefusesWhatTheBaseCloses(t *testing.T) {
 	writeFile(t, filepath.Join(root, "modules", "app", "settings", "claude", "settings.json"), `{"permissions": {"deny": ["Read"]}}`)
 	refuse("a deny rule", "module app sets permissions.deny in settings/claude/settings.json, and the base stack nextjs-15@", cmd.ExitInput)
 	writeFile(t, filepath.Join(root, "modules", "app", "settings", "claude", "settings.json"), `{"permissions": {"allow": ["Bash(npm test)"]}}`)
-	writeFile(t, compose, strings.Replace(consumerCompose(url), "consumer:", "acme:", 1))
-	refuse("the base's namespace", "extensions.acme is the base stack's", cmd.ExitInput)
+}
+
+// TestExtendsMergesExtensionsByKey is a checkout setting a key the base sets, beside a
+// scalar and a list of its own: its value replaces the base's whole, and the rest of
+// both files is carried.
+func TestExtendsMergesExtensionsByKey(t *testing.T) {
+	url := baseRepo(t)
+	root := consumerCheckout(t, url)
+	writeFile(t, filepath.Join(root, "qory.yaml"), strings.Replace(consumerCompose(url), "    consumer: {team: web}\n", "    acme: {team: web}\n    sweep_floor: 40\n    corpus_roots: [scripts]\n", 1))
+	if out, err := run(t, "harness", "compose"); err != nil {
+		t.Fatalf("compose: %v\n%s", err, out)
+	}
+	rep := readReport(t, root)
+	want := map[string]any{"acme": map[string]any{"team": "web"}, "sweep_floor": float64(40), "corpus_roots": []any{"scripts"}}
+	if !reflect.DeepEqual(rep.Extensions, want) {
+		t.Errorf("extensions = %v, want %v", rep.Extensions, want)
+	}
 }
 
 // TestExtendsTakesTheTargetFromTheDocument is where the target lives under a base: the

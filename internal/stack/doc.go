@@ -10,8 +10,8 @@
 // a directory, a git repository at a ref, or a module the repository exports by name
 // in the exports section of its qory.yaml, an optional forced variant, an optional link, a name at the checkout root
 // for the module's directory, and an optional exclude: per kind, the entry names the
-// compose leaves out. The stack may carry extensions, maps qory writes into the report
-// and does not read. The module order is the merge order of settings fragments and
+// compose leaves out. The stack may carry extensions, values of any shape qory writes into the
+// report and does not read. The module order is the merge order of settings fragments and
 // instruction sections, so it is kept as written.
 //
 // A caller discovers the file, then loads it:

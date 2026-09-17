@@ -16,16 +16,16 @@ func TestNewCarriesLinksEnvAndExtensions(t *testing.T) {
 	res := result()
 	res.Modules[0].Link = "harness"
 	res.Env = map[string]string{"HARNESS_HOME": "$QORY_HARNESS_HOME/modules/core"}
-	res.Stack.Extensions = map[string]map[string]any{"acme": {"sweep_floor": 160, "roots": []any{"scripts"}}}
+	res.Stack.Extensions = map[string]any{"acme": map[string]any{"sweep_floor": 160, "roots": []any{"scripts"}}, "required_check": "Self-tests", "branches": []any{"main"}, "empty": map[string]any{}}
 	r := report.New(res, "app", "/work/app", "/work/app/.qory/harness")
-	if r.Modules[0].Link != "harness" || r.Env["HARNESS_HOME"] != "$QORY_HARNESS_HOME/modules/core" || r.Extensions["acme"]["sweep_floor"] != 160 {
+	if r.Modules[0].Link != "harness" || r.Env["HARNESS_HOME"] != "$QORY_HARNESS_HOME/modules/core" || r.Extensions["required_check"] != "Self-tests" {
 		t.Errorf("report: %+v", r)
 	}
 	var buf bytes.Buffer
 	if err := r.Print(&buf); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"linked as harness", "Env", "HARNESS_HOME  $QORY_HARNESS_HOME/modules/core", "Extensions", "acme.roots        [\"scripts\"]", "acme.sweep_floor  160"} {
+	for _, want := range []string{"linked as harness", "Env", "HARNESS_HOME  $QORY_HARNESS_HOME/modules/core", "Extensions", "acme.roots        [\"scripts\"]", "acme.sweep_floor  160", "branches          [\"main\"]", "empty             {}", "required_check    \"Self-tests\""} {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("print lacks %q:\n%s", want, buf.String())
 		}
