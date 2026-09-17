@@ -34,8 +34,8 @@ type Options struct {
 	// Name is the directory name template: {branch} with each slash made a dash, {repo}
 	// the main checkout's directory name.
 	Name string
-	// Base is the ref a new branch starts from, "" for the remote's HEAD branch, else the
-	// main checkout's current branch.
+	// Base is the base a new branch starts from, read as [ResolveBase] reads it: "" for
+	// the remote's HEAD branch, else the main checkout's current branch.
 	Base string
 	// Onto says Base was asked for on the command line, so a branch that already exists
 	// is moved or rebased onto it after Ask, instead of left where it is.
@@ -450,9 +450,14 @@ func Add(main, branch string, o Options) (Added, error) {
 		}
 	}
 	// A base that resolves to nothing is a mistake on every path, not only the one
-	// that cuts a new branch off it.
-	if o.Base != "" && !r.resolves(o.Base) {
-		return a, fmt.Errorf("base %s is not a branch, tag or commit of this repository", o.Base)
+	// that cuts a new branch off it. From here on the base is the ref it resolved to,
+	// the remote's branch when the remote holds one of that name.
+	if o.Base != "" {
+		b, err := r.resolveBase(remote, o.Base)
+		if err != nil {
+			return a, err
+		}
+		o.Base = b.Ref
 	}
 	// A branch checked out somewhere is that worktree, whatever the name says; git
 	// refuses a second checkout of one branch, and the main checkout is no worktree.
@@ -841,29 +846,80 @@ func (r runner) resolves(ref string) bool {
 	return err == nil
 }
 
-// baseRef resolves the ref a new branch starts from: the one given, else the remote's
-// HEAD branch as <remote>/<branch>, else the main checkout's current branch. A given ref
-// that does not resolve is an error naming it.
-func (r runner) baseRef(remote, base string) (string, error) {
+// Base is a base resolved against the repository: the ref git reads and, when that ref is
+// a branch, the branch's name.
+type Base struct {
+	// Branch is the branch's name without a remote before it, what a pull request
+	// targets; "" when the base is a tag or a commit.
+	Branch string
+	// Ref is what git reads: <remote>/<branch> when the remote holds the branch, else the
+	// base as it was given.
+	Ref string
+	// From says what named the base: [FromGiven], [FromRemoteHead] or [FromCheckout].
+	From string
+}
+
+// What named a [Base].
+const (
+	// FromGiven is a base the caller gave: --base, or worktree.base of a qory.yaml.
+	FromGiven = "given"
+	// FromRemoteHead is the remote's HEAD branch, the default.
+	FromRemoteHead = "remote HEAD"
+	// FromCheckout is the main checkout's current branch, the default of a repository
+	// whose remote names no HEAD branch, or that has no remote.
+	FromCheckout = "checkout"
+)
+
+// ResolveBase resolves the base of the repository whose main checkout is main: the one
+// given, else the remote's HEAD branch, else the main checkout's current branch. It reads
+// the refs already fetched and reaches no remote.
+//
+// A given base that names a branch of the remote is read there, as <remote>/<base>, the
+// same way the default is, so a clone that never checked the branch out has it and a
+// local copy that fell behind is not what new work starts from; heads/<base> names the
+// local branch. Any other base is read as given: a tag, a commit, a branch no remote
+// holds, or <remote>/<branch> written out. One that resolves to nothing is an error
+// naming it.
+func ResolveBase(main, base string) (Base, error) {
+	r := runner{main: main}
+	return r.resolveBase(r.remoteOf(), base)
+}
+
+func (r runner) resolveBase(remote, base string) (Base, error) {
 	if base != "" {
-		if !r.resolves(base) {
-			return "", fmt.Errorf("base %s is not a branch, tag or commit of this repository", base)
+		if remote != "" && r.refExists("refs/remotes/"+remote+"/"+base) {
+			return Base{Branch: base, Ref: remote + "/" + base, From: FromGiven}, nil
 		}
-		return base, nil
+		if !r.resolves(base) {
+			return Base{}, fmt.Errorf("base %s is not a branch, tag or commit of this repository", base)
+		}
+		b := Base{Ref: base, From: FromGiven}
+		if name, ok := strings.CutPrefix(base, remote+"/"); ok && remote != "" && r.refExists("refs/remotes/"+base) {
+			b.Branch = name
+		} else if name := strings.TrimPrefix(strings.TrimPrefix(base, "refs/"), "heads/"); r.refExists("refs/heads/" + name) {
+			b.Branch = name
+		}
+		return b, nil
 	}
 	if remote != "" {
 		if head, err := r.git(r.main, "symbolic-ref", "--quiet", "--short", "refs/remotes/"+remote+"/HEAD"); err == nil && head != "" {
-			return head, nil
+			return Base{Branch: strings.TrimPrefix(head, remote+"/"), Ref: head, From: FromRemoteHead}, nil
 		}
 	}
 	current, err := r.git(r.main, "branch", "--show-current")
 	if err != nil || current == "" {
-		return "", errors.New("no base: the remote has no HEAD branch and the main checkout is on no branch; give --base")
+		return Base{}, errors.New("no base: the remote has no HEAD branch and the main checkout is on no branch; give --base")
 	}
 	if !r.resolves(current) {
-		return "", fmt.Errorf("%s has no commit yet; a worktree branch starts from a commit, so commit once and add again", current)
+		return Base{}, fmt.Errorf("%s has no commit yet; a worktree branch starts from a commit, so commit once and add again", current)
 	}
-	return current, nil
+	return Base{Branch: current, Ref: current, From: FromCheckout}, nil
+}
+
+// baseRef is the ref of [runner.resolveBase].
+func (r runner) baseRef(remote, base string) (string, error) {
+	b, err := r.resolveBase(remote, base)
+	return b.Ref, err
 }
 
 // remoteOf is the repository's remote, origin when it has one, else the first, "" for none.

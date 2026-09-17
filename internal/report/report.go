@@ -125,6 +125,30 @@ type Target struct {
 	Model string `json:"model,omitempty"`
 }
 
+// Worktree is what the report carries of the configuration's worktree section.
+type Worktree struct {
+	// Base is the repository's base branch, worktree.base resolved.
+	Base *WorktreeBase `json:"base,omitempty"`
+}
+
+// WorktreeBase is the repository's base branch, resolved against the refs already fetched
+// when the report was written: where new work starts, what a pull request targets, what a
+// diff is taken against. A reader gets the answer, not worktree.base as written, so it
+// derives nothing itself.
+type WorktreeBase struct {
+	// Branch is the branch's name with no remote before it, what a pull request targets;
+	// absent when worktree.base names a tag or a commit.
+	Branch string `json:"branch,omitempty"`
+	// Ref is what git reads, for a diff or a merge: <remote>/<branch> when the remote
+	// holds the branch, else the base as the configuration wrote it.
+	Ref string `json:"ref"`
+	// Source says what named the base: the absolute path of the file that set
+	// worktree.base, "remote HEAD" for the remote's HEAD branch, or "checkout" for the
+	// main checkout's current branch, the default of a repository whose remote names no
+	// HEAD branch.
+	Source string `json:"source"`
+}
+
 // Report is one report: the stack and its target, the checkout and home written into, the
 // modules with their pins, the entries with their modules, and the excludes.
 type Report struct {
@@ -174,6 +198,9 @@ type Report struct {
 	Extensions map[string]any `json:"extensions,omitempty"`
 	// Base is the stack the checkout's qory.yaml extends, absent for a stack.
 	Base *Base `json:"base,omitempty"`
+	// Worktree is the worktree section of the configuration as the compose resolved it,
+	// absent when the repository has no base to resolve.
+	Worktree *Worktree `json:"worktree,omitempty"`
 	// Qory is the build that wrote the report, absent when the build carries no version.
 	// The command sets it after [New], which knows nothing about the binary.
 	Qory *Build `json:"qory,omitempty"`
@@ -312,6 +339,10 @@ func (r Report) PrintBody(w io.Writer) error {
 	fields = append(fields, [2]string{"checkout", ui.Short(r.Checkout, "")}, [2]string{"home", ui.Short(r.Home, r.Checkout)})
 	if r.Links != "" {
 		fields = append(fields, [2]string{"links", r.Links})
+	}
+	if r.Worktree != nil && r.Worktree.Base != nil {
+		b := r.Worktree.Base
+		fields = append(fields, [2]string{"base branch", b.Ref + "  (" + ui.Short(b.Source, r.Checkout) + ")"})
 	}
 	if r.Qory != nil {
 		fields = append(fields, [2]string{"qory", strings.TrimSpace(r.Qory.Version + "  " + r.Qory.Commit + "  " + r.Qory.Source)})

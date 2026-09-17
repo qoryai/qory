@@ -13,8 +13,10 @@ fails stops the add, and --offline skips it to go on with the refs already fetch
 The worktree goes where worktree.dir and worktree.name in qory.yaml say, beside the main
 checkout as wt-<branch> by default. A branch that exists locally is checked out; one that
 exists on the remote is tracked; a new one is cut off --base, else worktree.base, else the
-remote's HEAD branch, else the branch the main checkout is on, which has to hold a commit;
-there is no upstream on the base: the worktree pushes to a remote branch of its own name,
+remote's HEAD branch, else the branch the main checkout is on, which has to hold a commit.
+A base that names a branch of the remote is read there, as <remote>/<base>, so a branch
+never checked out serves and a local copy that fell behind is not used; heads/<base>
+names the local branch. There is no upstream on the base: the worktree pushes to a remote branch of its own name,
 created by the first push. A worktree already there on the branch is reused, and the
 rows say so.
 
@@ -59,7 +61,7 @@ qory worktree add [<branch>] [flags]
 ### Options
 
 ```
-      --base string     the branch, tag or commit a new branch starts from, or an existing one is moved onto (qory.yaml: worktree.base; default: the remote's HEAD branch)
+      --base string     the branch, tag or commit a new branch starts from, or an existing one is moved onto; a branch the remote holds is read there (qory.yaml: worktree.base; default: the remote's HEAD branch)
       --branch string   a branch of the remote to attach to: fetched, checked out and tracked; <branch> then names the worktree
   -f, --file string     the qory-stack.yaml to compose into the worktree, or the qory.yaml or harness.yaml whose harness section to compose, instead of discovering one; a stack named here is the base of the worktree's own document, as on harness compose
   -h, --help            help for add
