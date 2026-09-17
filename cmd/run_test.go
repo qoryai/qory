@@ -289,7 +289,8 @@ esac
 // standing in for docker: the wall section and the flags choose the wall and the image,
 // the container is shown the checkout and nothing of this machine's environment but
 // the variables named, the relay and the forwarder are qory's Linux build inside, the
-// record names the wall, and the exit status is the container's.
+// record names the wall, and the exit status is the container's. The section names the
+// container's user, because a machine that runs the tests as root has none to default to.
 func TestRunBehindAWall(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -297,7 +298,7 @@ func TestRunBehindAWall(t *testing.T) {
 	docker, log := fakeDocker(t)
 	helper := staticELF(t)
 	runnerFile := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml")
-	writeFile(t, runnerFile, "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+helper+"\n  env: [MODEL_KEY, NOT_SET_HERE]\n")
+	writeFile(t, runnerFile, "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+helper+"\n  env: [MODEL_KEY, NOT_SET_HERE]\n  user: \"1000:1000\"\n")
 	t.Setenv("MODEL_KEY", "not-a-real-key")
 	t.Setenv("HOST_ONLY", "stays outside")
 	t.Setenv("FLAG_NAMED", "goes in")
@@ -314,6 +315,7 @@ func TestRunBehindAWall(t *testing.T) {
 	lines := string(data)
 	wants(t, lines,
 		"network create --internal",
+		"--user 1000:1000 --cap-drop ALL",
 		"--entrypoint /qory/qory example.com/agent:2 run relay 3128=",
 		"src="+helper+",dst=/qory/qory,readonly",
 		"--mount type=bind,src="+root+",dst="+root+" ",
