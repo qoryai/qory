@@ -29,7 +29,7 @@
 //	worktree:
 //	  dir: ..                    # where worktrees go, relative to the main checkout
 //	  name: wt-{branch}          # what a worktree's directory is called
-//	  base: main                 # the branch a new worktree branch starts from
+//	  base: main                 # the repository's base branch; a new worktree branch starts from it
 //	  pr: refs/pull/{n}/head     # the ref the remote publishes pull request {n}'s head under
 //	  branch: delete             # what worktree remove does with the branch: delete or keep
 //	  link: [.env]               # linked from the main checkout into a new worktree
@@ -154,7 +154,8 @@ type Worktree struct {
 	Dir string
 	// Name is the template of a worktree's directory name, see [DefaultWorktreeName].
 	Name string
-	// Base is the branch a new worktree branch starts from, "" for the remote's HEAD.
+	// Base is the repository's base branch, which a new worktree branch starts from and
+	// the report carries resolved; "" for the remote's HEAD.
 	Base string
 	// PR is the ref the remote publishes a pull request's head under, {n} for its number,
 	// "" for the ones GitHub, GitLab and Bitbucket Server publish.
@@ -1054,6 +1055,14 @@ type Row struct {
 	Value string
 	// Origin is the file that set the value, or [Default].
 	Origin string
+}
+
+// Origin is the file that set the key, named as a row names it, or [Default].
+func (c Config) Origin(key string) string {
+	if o, ok := c.origins[key]; ok {
+		return o
+	}
+	return Default
 }
 
 // Rows lists every effective value with its origin: the qory ranges when a file names

@@ -142,7 +142,7 @@ the repository's `qory.yaml` says and composes the harness into it:
 # qory.yaml, committed, beside the harness section
 apiVersion: qory.dev/v1alpha1
 worktree:
-  base: main                     # a new branch starts here; default: the remote's HEAD
+  base: main                     # the base branch, read on the remote; default: the remote's HEAD
   link: [.env, .env.local]       # linked from the main checkout into the worktree
   run:
     add: [pnpm install]          # run in the new worktree

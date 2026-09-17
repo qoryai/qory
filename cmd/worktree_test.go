@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/qoryai/qory/cmd"
+	"github.com/qoryai/qory/internal/report"
 )
 
 // runSplit runs the command with stdin and returns stdout and stderr apart.
@@ -927,4 +928,98 @@ func TestWorktreeAddAttachesToPullRequest(t *testing.T) {
 	if err == nil || err.Error() != "--pr takes a pull request number, got 0" {
 		t.Fatalf("pr 0: %v", err)
 	}
+}
+
+// reportedBase composes the checkout the test stands in and returns the base its report
+// names, nil when it names none, with what the compose printed.
+func reportedBase(t *testing.T, root string) (*report.WorktreeBase, string) {
+	t.Helper()
+	out, err := run(t, "harness", "compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	rep, err := report.Read(filepath.Join(root, ".qory", "harness-report.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Worktree == nil {
+		return nil, out
+	}
+	return rep.Worktree.Base, out
+}
+
+// TestWorktreeBaseIsTheRemotesBranch is a repository whose base branch is not the
+// remote's HEAD branch and was never checked out, as in a fresh clone: worktree.base
+// names it bare, unquoted though it reads as a number, a new branch is cut off the
+// remote's copy of it, and the report names the branch, the ref and the file that set it.
+// A local copy that fell behind is not what new work starts from, and heads/<branch>
+// names it all the same.
+func TestWorktreeBaseIsTheRemotesBranch(t *testing.T) {
+	root := worktreeRepo(t)
+	runGit(t, root, "push", "--quiet", "origin", "main:refs/heads/dev")
+	runGit(t, root, "remote", "set-head", "origin", "dev")
+	tagCommit(t, root, "release.txt", "released")
+	runGit(t, root, "push", "--quiet", "origin", "main:refs/heads/2.0")
+	runGit(t, root, "reset", "-q", "--hard", "HEAD~1")
+	configure(t, root, nil, []string{"  base: 2.0"})
+	runGit(t, root, "commit", "-q", "-am", "base")
+
+	out, err := run(t, "wa", "feature", "--no-compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "branch", "feature  (new off origin/2.0)")
+	wt := filepath.Join(filepath.Dir(root), "wt-feature")
+	if got, want := gitOut(t, wt, "rev-parse", "HEAD"), gitOut(t, root, "rev-parse", "released"); got != want {
+		t.Errorf("feature is at %s, not at origin/2.0 %s", got, want)
+	}
+	if got := gitOut(t, root, "config", "branch.feature.qory-base"); got != "origin/2.0" {
+		t.Errorf("recorded base %q", got)
+	}
+
+	base, _ := reportedBase(t, root)
+	if base == nil || base.Branch != "2.0" || base.Ref != "origin/2.0" || base.Source != filepath.Join(root, "qory.yaml") {
+		t.Errorf("reported base %+v", base)
+	}
+	out, err = run(t, "harness", "inspect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantsRow(t, out, "base branch", "origin/2.0  (qory.yaml)")
+
+	// A local 2.0 behind the remote's: the bare name still reads the remote's.
+	runGit(t, root, "branch", "2.0", "main")
+	out, err = run(t, "wa", "second", "--no-compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "branch", "second  (new off origin/2.0)")
+	out, err = run(t, "wa", "third", "--no-compose", "--base", "heads/2.0")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "branch", "third  (new off heads/2.0)")
+}
+
+// TestReportNamesTheDefaultBase is a repository that sets no worktree.base: the report
+// names the remote's HEAD branch, and the main checkout's branch when the remote names
+// none. A worktree.base naming nothing is a row of the compose, which goes through, and
+// the report names no base.
+func TestReportNamesTheDefaultBase(t *testing.T) {
+	root := worktreeRepo(t)
+	base, _ := reportedBase(t, root)
+	if base == nil || base.Branch != "main" || base.Ref != "origin/main" || base.Source != "remote HEAD" {
+		t.Errorf("with a remote HEAD: %+v", base)
+	}
+	runGit(t, root, "remote", "set-head", "origin", "--delete")
+	base, _ = reportedBase(t, root)
+	if base == nil || base.Branch != "main" || base.Ref != "main" || base.Source != "checkout" {
+		t.Errorf("with no remote HEAD: %+v", base)
+	}
+	configure(t, root, nil, []string{"  base: nowhere"})
+	base, out := reportedBase(t, root)
+	if base != nil {
+		t.Errorf("a base naming nothing is reported: %+v", base)
+	}
+	wants(t, out, "worktree.base", "base nowhere is not a branch, tag or commit of this repository")
 }

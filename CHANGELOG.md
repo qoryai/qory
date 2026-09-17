@@ -6,11 +6,33 @@ release may change what an existing document does, and says so under Upgrading.
 
 ## [Unreleased]
 
+### Upgrading
+
+- `worktree.base` and `--base` naming a branch the remote holds now start new work from
+  the remote's copy, `<remote>/<branch>`, where they read the local branch before. A
+  branch recorded from here on has `branch.<name>.qory-base` set to that ref. Write
+  `heads/<branch>` to keep starting from the local branch.
+
+### Added
+
+- The report carries the repository's base branch as `worktree.base`: the `branch` a
+  pull request targets, the `ref` a diff or a merge reads, and the `source` that named
+  it, the file that set `worktree.base`, `remote HEAD` or `checkout`. It is resolved
+  from the refs already fetched, so a compose reaches no remote for it, and
+  `qory harness inspect` prints it as `base branch`. `worktree.base` is documented as
+  the repository's base branch, with `qory worktree add` as one reader of it.
+
 ### Changed
 
 - `qory update` of a `go install` build fetches the release's module first, and the
   finished step stays on the screen as `downloaded qory <version>`, above `built qory
   <version>`. It was one step, which landed as built alone.
+
+### Fixed
+
+- `worktree.base` naming a branch that was never checked out, a base branch other than
+  the remote's HEAD branch in a fresh clone, was refused as `not a branch, tag or commit
+  of this repository`. It is read on the remote now, the way the default base is.
 
 ## [0.7.0] - 2026-09-17
 

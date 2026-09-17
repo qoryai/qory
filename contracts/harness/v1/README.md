@@ -777,6 +777,16 @@ own hosts, the model endpoint for `claude`, join under the runtime's name, so a 
 declares what its modules reach and not what the program needs. A harness whose modules
 declare and name no host writes `egress: []`. `qory run` hands the hosts to the runner
 (§Launching).
+`worktree.base` is the repository's base branch, the configuration's `worktree.base`
+resolved against the refs already fetched when the compose ran, so a program beside
+qory reads the answer and derives nothing: `branch`, the branch's name with no remote
+before it, what a pull request targets, absent when the base is a tag or a commit; `ref`,
+what git reads for a diff or a merge, `<remote>/<branch>` when the remote holds the
+branch; and `source`, the absolute path of the file that set the key, `remote HEAD`, or
+`checkout` for the main checkout's current branch, the default when the remote names no
+HEAD branch. The compose reaches no remote for it. A repository with no commit, or a
+main checkout on no branch and no key, has no `worktree` in its report; a `worktree.base`
+that names nothing is a row of the compose, which goes on, and the report leaves it out.
 The report of a checkout that extends a stack records the `base`: its `name`, `source` and `pin`. A path source's pin is `working-tree`; a git source's pin is twelve
 characters of its commit. The report records the `qory` that wrote it, its `version`,
 `commit` and `source`, `release` or `source`, as `qory version --json` reports them,
@@ -813,7 +823,7 @@ harness:
 worktree:
   dir: ..                        # where worktrees go, relative to the main checkout
   name: wt-{branch}              # a worktree's directory name; {repo} is the main checkout's
-  base: main                     # the branch a new worktree branch starts from
+  base: main                     # the repository's base branch; a new worktree branch starts from it
   branch: delete                 # what worktree remove does with the branch: delete or keep
   link: [.env, .env.local]       # linked from the main checkout into a new worktree
   copy: [config/local.json]      # copied once into a new worktree
@@ -847,7 +857,7 @@ exports:                         # in a repository delivering stacks or modules 
 | `harness.extends`, `harness.target`, `harness.modules` | none | in a checkout's file, the stack it extends, the target it composes it for and the modules it appends; `extends` may be left out when `qory harness compose -f <stack>` names the base; `target` may be left out when `harness.runtime` or `--runtime` supplies the runtime, and is held to the base's `extending.target`; `modules` may be left out under `extends` or `-f`, for a document carrying its target or its extensions alone (§Extending a stack) |
 | `worktree.dir` | `..` | where `qory worktree add` puts a worktree, relative to the main checkout unless absolute |
 | `worktree.name` | `wt-{branch}` | one directory name under `worktree.dir`; `{branch}` is the branch with each slash made a dash, `{repo}` the main checkout's directory name |
-| `worktree.base` | the remote's HEAD branch, else the main checkout's branch | the branch a new worktree branch starts from; it has to hold a commit, so a repository with none yet is refused |
+| `worktree.base` | the remote's HEAD branch, else the main checkout's branch | the repository's base branch: where new work starts, what a pull request targets, what a diff is taken against. `qory worktree add` cuts a new branch off it, and the report carries it resolved (§The report). A branch the remote holds is named bare, `release`, and read as `<remote>/release`, so a clone that never checked it out has it and a local copy that fell behind is not used; `heads/release` names the local branch. A tag or a commit is read as written. It has to hold a commit, so a repository with none yet is refused |
 | `worktree.branch` | `delete` | what `qory worktree remove` does with the worktree's branch: `delete` or `keep`; `--keep-branch` and `--delete-branch` win over it |
 | `worktree.link` | none | paths linked into a new worktree: a path inside the checkout, linked from the main checkout to the same path, or `{from: <path>, to: <path>}`, `from` anywhere on the machine, absolute or under `~`, `to` the path in the worktree, relative and inside it, required when `from` is outside the checkout. A `from` that is not there is reported, not an error; a `to` already in the worktree, a dangling link too, is kept. The `{from, to}` form belongs in the user's file when `from` is one machine's path, so it never lands in the committed file; the committed file may use it for a path every machine has |
 | `worktree.copy` | none | paths copied once into a new worktree, in the same two forms |

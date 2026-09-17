@@ -22,6 +22,7 @@ import (
 	"github.com/qoryai/qory/internal/source"
 	"github.com/qoryai/qory/internal/stack"
 	"github.com/qoryai/qory/internal/ui"
+	"github.com/qoryai/qory/internal/worktree"
 
 	// Blank imports for their side effect: each runtime package registers itself with the
 	// render package in its own init, and this list is therefore the set of runtimes this
@@ -630,6 +631,8 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 	if b := build(); b.Version != "" {
 		rep.Qory = &report.Build{Version: b.Version, Commit: b.Commit, Source: b.Source}
 	}
+	var baseErr error
+	rep.Worktree, baseErr = reportBase(at.root, conf)
 	// The machine keys of a qory.yaml at the checkout root are not read under
 	// extends, and a row says so, on a dry run as well, so the person who wrote
 	// them learns that the base stack decides.
@@ -644,9 +647,36 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 	if own, _ := config.FileIn(at.root); extends && own != "" {
 		skippedConfig = append(skippedConfig, [2]string{"skipped", filepath.Base(own) + "  (its harness, git and env keys; the base stack decides under extends)"})
 	}
+	if baseErr != nil {
+		skippedConfig = append(skippedConfig, [2]string{"skipped", "worktree.base  (" + baseErr.Error() + "; the report names no base)"})
+	}
 	skippedConfig = append(skippedConfig, checks.rows...)
 	skippedConfig = append(skippedConfig, retired.rows...)
 	return &prepared{at: at, res: res, rep: rep, previous: previous, targets: targets, force: force, rows: skippedConfig, u: u}, nil
+}
+
+// reportBase resolves the configuration's worktree.base for the report of the checkout at
+// root, so a program beside qory reads the repository's base branch instead of deriving
+// it. It reads local refs alone. A repository with no base to default to, one with no
+// commit or a main checkout on no branch, gets no base and no error; a worktree.base that
+// names nothing gets the error, which the compose prints as a row and goes on.
+func reportBase(root string, conf config.Config) (*report.Worktree, error) {
+	main, err := worktree.Main(root)
+	if err != nil {
+		return nil, nil
+	}
+	b, err := worktree.ResolveBase(main, conf.Worktree.Base)
+	if err != nil {
+		if conf.Worktree.Base == "" {
+			err = nil
+		}
+		return nil, err
+	}
+	source := b.From
+	if b.From == worktree.FromGiven {
+		source = conf.Origin("worktree.base")
+	}
+	return &report.Worktree{Base: &report.WorktreeBase{Branch: b.Branch, Ref: b.Ref, Source: source}}, nil
 }
 
 // write is the second half of a compose, after [render.Build] has replaced the home:
