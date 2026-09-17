@@ -6,12 +6,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"syscall"
 
 	"github.com/charmbracelet/x/term"
 	"github.com/qoryai/runner/session"
+	"github.com/qoryai/runner/wall"
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/config"
@@ -32,6 +34,8 @@ const DescriptorsDir = "runtimes"
 func newRun() *cobra.Command {
 	var h homeOptions
 	var local, headless bool
+	var wallName, image string
+	var passEnv []string
 	c := &cobra.Command{
 		Use:   "run [runtime] [-- argument...]",
 		Short: "Start a runtime on the composed harness, observed and recorded",
@@ -55,6 +59,17 @@ and does not start unless it answers. --local runs with the files alone, webhook
 not. A descriptor override, <runtime>.yaml under ` + DescriptorsDir + ` in the same
 directory, replaces the built-in description of how the runtime's output and hooks map
 to events.
+
+A wall starts the runtime in a container with no route out except to that proxy, so a
+program that ignores the proxy reaches nothing instead of going unseen: --wall docker,
+or a wall section in ` + config.RunnerFileName + `, and --wall none for one run without the
+section's. --image, or wall.image, names the container's image, which holds the runtime
+and the project's toolchain; qory builds none. The container sees the checkout and the
+composed home, at their own paths, and nothing else of this machine; of the environment
+it gets the launch template's variables and the ones --env or wall.env names, the model
+credential say, and nothing else. Inside, the relay and the hook forwarder are qory's
+own Linux build, mounted read-only: this binary on Linux, wall.helper elsewhere. With
+the engine in a virtual machine, on a Mac, the runtime's hooks do not reach the runner.
 
 At a terminal the session runs on a pseudo-terminal, so the runtime's own interface
 works and its bytes are still captured; --headless, or no terminal, runs it on pipes and
@@ -128,6 +143,9 @@ is the runtime's.
 				Forwarder:     []string{exe, "run", "forward"},
 				RunnerVersion: build().title(),
 			}
+			if err := enclose(&spec, conf.Runner, wallOptions{name: wallName, image: image, env: passEnv}, exe, at.root, rep.Home, launch.Env); err != nil {
+				return err
+			}
 			res, err := session.Run(ctx, spec)
 			if err != nil {
 				return err
@@ -151,9 +169,107 @@ is the runtime's.
 	}
 	c.Flags().BoolVar(&local, "local", false, "record to files only, even when a webhook is configured")
 	c.Flags().BoolVar(&headless, "headless", false, "run on pipes even at a terminal, and read the runtime's structured output")
+	c.Flags().StringVar(&wallName, "wall", "", "start the runtime in a container with no route out except to the proxy: "+config.WallDocker+", or none ("+config.RunnerFileName+": wall.adapter)")
+	c.Flags().StringVar(&image, "image", "", "the container's image under a wall ("+config.RunnerFileName+": wall.image)")
+	c.Flags().StringArrayVar(&passEnv, "env", nil, "a variable of this environment that goes into the container under a wall, by name; repeatable ("+config.RunnerFileName+": wall.env)")
 	homeFlags(c, &h)
-	c.AddCommand(newForward())
+	c.AddCommand(newForward(), newRelay())
 	return c
+}
+
+// wallOptions are the run verb's wall flags.
+type wallOptions struct {
+	name  string
+	image string
+	env   []string
+}
+
+// wallOff is the --wall value that runs without the wall the runner file names.
+const wallOff = "none"
+
+// enclose puts the spec behind a wall when a flag or the runner file asks for one. The
+// runtime then runs in a container, so everything that named this machine is renamed:
+// the environment is the launch template's and the named variables, never the
+// process's; the forwarder is the helper's path inside; and the container is shown the
+// checkout and the composed home, which is all a launch template's paths point into.
+func enclose(spec *session.Spec, r *config.Runner, o wallOptions, exe, root, home string, launchEnv map[string]string) error {
+	var section config.RunnerWall
+	if r != nil && r.Wall != nil {
+		section = *r.Wall
+	}
+	name := o.name
+	if name == "" {
+		name = section.Adapter
+	}
+	if name == "" || name == wallOff {
+		if o.image != "" || len(o.env) > 0 {
+			return input(fmt.Errorf("--image and --env are for a run behind a wall; --wall %s starts one", config.WallDocker))
+		}
+		return nil
+	}
+	if name != config.WallDocker {
+		return input(fmt.Errorf("--wall %s: the walls are %s, and %s for a run without one", name, config.WallDocker, wallOff))
+	}
+	spec.Image = o.image
+	if spec.Image == "" {
+		spec.Image = section.Image
+	}
+	if spec.Image == "" {
+		return input(fmt.Errorf("a wall needs the container's image: --image, or wall.image in %s; qory builds none", config.RunnerFileName))
+	}
+	helper := section.Helper
+	if helper == "" {
+		if runtime.GOOS != "linux" {
+			return input(fmt.Errorf("the container runs qory's Linux build as its relay and hook forwarder, and this is the %s build; name the Linux one as wall.helper in %s", runtime.GOOS, config.RunnerFileName))
+		}
+		helper = exe
+	}
+	env := withEnv(nil, launchEnv)
+	for _, n := range append(append([]string{}, section.Env...), o.env...) {
+		if v, ok := os.LookupEnv(n); ok {
+			env = withEnv(env, map[string]string{n: v})
+		}
+	}
+	if env == nil {
+		env = []string{}
+	}
+	spec.Env = env
+	spec.Wall = &wall.Docker{Command: section.Command, Helper: helper, RelayArgs: []string{"run", "relay"}, User: section.User}
+	spec.Forwarder = []string{wall.HelperPath, "run", "forward"}
+	spec.Mounts = []wall.Mount{{Path: root}}
+	if !reallyWithin(root, home) {
+		spec.Mounts = append(spec.Mounts, wall.Mount{Path: home, ReadOnly: true})
+	}
+	return nil
+}
+
+// reallyWithin is [within] by where both paths really are: a temporary directory and a
+// home are often reached through a link.
+func reallyWithin(root, path string) bool {
+	if r, err := filepath.EvalSymlinks(root); err == nil {
+		root = r
+	}
+	if p, err := filepath.EvalSymlinks(path); err == nil {
+		path = p
+	}
+	return within(root, path)
+}
+
+// newRelay builds the hidden relay verb, what the wall starts in the relay's container
+// from qory's own binary: it listens on a port for each forward, port=host:port, and
+// copies every connection to that address, the runner's proxy. It is the one peer the
+// runtime's container reaches.
+func newRelay() *cobra.Command {
+	return &cobra.Command{
+		Use:    "relay port=host:port...",
+		Short:  "Forward the wall's fixed ports to the run's proxy",
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			return wall.Relay(ctx, args, cmd.OutOrStdout())
+		},
+	}
 }
 
 // newForward builds the hidden forward verb, the command qory run installs as the

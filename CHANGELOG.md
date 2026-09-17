@@ -4,6 +4,27 @@ Every release of qory, newest first, in the shape of [Keep a Changelog](https://
 The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0 a minor
 release may change what an existing document does, and says so under Upgrading.
 
+## [Unreleased]
+
+### Added
+
+- `qory run --wall docker --image <image>` starts the runtime in a container with no
+  route out except to the runner's proxy, so a program that ignores the proxy reaches
+  nothing instead of going unseen. The container sees the checkout and the composed
+  home, at their own paths, and of the environment only the launch template's variables
+  and the ones `--env` names. `--wall none` runs once without a configured wall.
+- The `wall` section of `runner.yaml`: `adapter`, `image`, `env`, `user`, `command` and
+  `helper`, with the same meaning as the flags, for every run on the machine;
+  `qory config` lists it under `runner.wall.`, and `runner.schema.json` describes it.
+- Inside the container the relay and the hook forwarder are qory's own static Linux
+  build, mounted read-only: the running binary on Linux, `wall.helper` elsewhere. The
+  hidden `qory run relay` is the mode the relay's container runs.
+
+### Upgrading
+
+- Needs `github.com/qoryai/runner` 0.2.0, which adds the wall. A run without a wall does
+  what it did.
+
 ## [0.6.0] - 2026-09-17
 
 ### Added

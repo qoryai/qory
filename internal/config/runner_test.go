@@ -49,6 +49,40 @@ func TestRunnerFileReadsBothSections(t *testing.T) {
 	}
 }
 
+// TestRunnerFileReadsTheWall reads the wall section, lists it, and lists no wall as the
+// default when the file names none.
+func TestRunnerFileReadsTheWall(t *testing.T) {
+	hermetic(t)
+	path := runnerFile(t, "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: podman\n  helper: /opt/qory/qory-linux\n  env: [ANTHROPIC_API_KEY, GH_TOKEN]\n  user: \"1000:1000\"\n")
+	c, err := config.Load(t.TempDir(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := c.Runner.Wall
+	if w == nil || w.Adapter != config.WallDocker || w.Image != "example.com/agent:1" || w.Command != "podman" || w.Helper != "/opt/qory/qory-linux" || w.User != "1000:1000" || strings.Join(w.Env, " ") != "ANTHROPIC_API_KEY GH_TOKEN" {
+		t.Fatalf("wall read as %+v", w)
+	}
+	rows := map[string]config.Row{}
+	for _, row := range c.Rows() {
+		rows[row.Key] = row
+	}
+	for key, want := range map[string]string{"runner.wall.adapter": "docker", "runner.wall.image": "example.com/agent:1", "runner.wall.env": "ANTHROPIC_API_KEY, GH_TOKEN", "runner.wall.command": "podman", "runner.wall.helper": "/opt/qory/qory-linux"} {
+		if rows[key].Value != want || rows[key].Origin != path {
+			t.Errorf("%s: %+v, want %q from %s", key, rows[key], want, path)
+		}
+	}
+	runnerFile(t, "egress: {mode: observe}\n")
+	c, err = config.Load(t.TempDir(), true)
+	if err != nil || c.Runner.Wall != nil {
+		t.Fatalf("no wall section: %+v, %v", c.Runner, err)
+	}
+	for _, row := range c.Rows() {
+		if row.Key == "runner.wall.adapter" && (row.Value != "(none)" || row.Origin != config.Default) {
+			t.Errorf("no wall listed as %+v", row)
+		}
+	}
+}
+
 // TestRunnerFileDefaults is no file, an empty file and a file with one section: what is
 // absent is observe everything and files only, listed as defaults, and the secret may
 // come from the environment.
@@ -96,6 +130,11 @@ func TestRunnerFileRefusesAMistake(t *testing.T) {
 		{"webhook: {url: \"https://example.com/e\"}\n", "webhook.secret is missing; set it there or in QORY_WEBHOOK_SECRET"},
 		{"webhook: {url: \"https://example.com/e\", secret: short}\n", "webhook.secret is shorter than 16 characters"},
 		{"webhook: {url: \"https://example.com/e\", secret: sixteen-characters-at-least, events: [\"\"]}\n", "webhook.events names an empty type"},
+		{"wall: {image: i}\n", "wall.adapter is required, and docker is the one there is"},
+		{"wall: {adapter: bubblewrap}\n", "wall.adapter is required, and docker is the one there is"},
+		{"wall: {adapter: docker, helper: qory-linux}\n", `wall.helper "qory-linux" is not an absolute path`},
+		{"wall: {adapter: docker, env: [\"KEY=value\"]}\n", `wall.env: "KEY=value" is not a variable's name`},
+		{"wall: {adapter: docker, network: host}\n", `key "network" is not one`},
 		{"apiVersion: qory.dev/v9\n", "qory.dev/v9"},
 	} {
 		path := runnerFile(t, c.body)

@@ -35,6 +35,35 @@ type Runner struct {
 	Egress *RunnerEgress
 	// Webhook is where every event is posted as well, nil when the file names none.
 	Webhook *RunnerWebhook
+	// Wall is what the runtime is enclosed in, nil when the file names none: the runtime
+	// is a process of this machine.
+	Wall *RunnerWall
+}
+
+// WallDocker is the one wall adapter there is.
+const WallDocker = "docker"
+
+// RunnerWall is the wall section: the container every run on this machine starts the
+// runtime in, with no route out except to the runner's proxy.
+type RunnerWall struct {
+	// Adapter names what builds the wall: docker.
+	Adapter string
+	// Image is the agent's image, the runtime and the project's toolchain; the --image
+	// flag names another. It may be empty here and given by the flag.
+	Image string
+	// Command is the program the adapter runs, podman say; empty means docker.
+	Command string
+	// Helper is the path of a static Linux build of qory, mounted into the container as
+	// the relay and the hook forwarder; empty means this binary, which only a Linux
+	// machine can use.
+	Helper string
+	// Env names the variables of this environment that go into the container, the model
+	// credential say. Nothing else of the environment does.
+	Env []string
+	// User is the uid:gid the container runs as; empty means qory run's own, so the
+	// checkout's files keep their owner. Root is refused, so a machine where qory runs
+	// as root names one.
+	User string
 }
 
 // RunnerEgress is the egress section: the policy the runner pins for every run on this
@@ -70,6 +99,14 @@ type runnerFile struct {
 		Secret *string   `yaml:"secret"`
 		Events *[]string `yaml:"events"`
 	} `yaml:"webhook,omitempty"`
+	Wall *struct {
+		Adapter *string   `yaml:"adapter"`
+		Image   *string   `yaml:"image"`
+		Command *string   `yaml:"command"`
+		Helper  *string   `yaml:"helper"`
+		Env     *[]string `yaml:"env"`
+		User    *string   `yaml:"user"`
+	} `yaml:"wall,omitempty"`
 }
 
 // LoadRunner reads the machine's runner file under [UserDir]. No file is no runner
@@ -149,6 +186,35 @@ func LoadRunner() (*Runner, error) {
 			r.Webhook.Events = append([]string{}, (*w.Events)...)
 		}
 	}
+	if w := f.Wall; w != nil {
+		if w.Adapter == nil || *w.Adapter != WallDocker {
+			return nil, fmt.Errorf("%s: wall.adapter is required, and %s is the one there is", path, WallDocker)
+		}
+		r.Wall = &RunnerWall{Adapter: *w.Adapter}
+		if w.Image != nil {
+			r.Wall.Image = *w.Image
+		}
+		if w.Command != nil {
+			r.Wall.Command = *w.Command
+		}
+		if w.Helper != nil {
+			if !filepath.IsAbs(*w.Helper) {
+				return nil, fmt.Errorf("%s: wall.helper %q is not an absolute path", path, *w.Helper)
+			}
+			r.Wall.Helper = *w.Helper
+		}
+		if w.User != nil {
+			r.Wall.User = *w.User
+		}
+		if w.Env != nil {
+			for _, name := range *w.Env {
+				if !envName.MatchString(name) {
+					return nil, fmt.Errorf("%s: wall.env: %q is not a variable's name; the value comes from the environment, never from this file", path, name)
+				}
+				r.Wall.Env = append(r.Wall.Env, name)
+			}
+		}
+	}
 	return r, nil
 }
 
@@ -189,6 +255,24 @@ func (r *Runner) Rows() []Row {
 		)
 	} else {
 		rows = append(rows, Row{"runner.webhook.url", "(none)", Default})
+	}
+	if r != nil && r.Wall != nil {
+		rows = append(rows,
+			Row{"runner.wall.adapter", r.Wall.Adapter, origin},
+			Row{"runner.wall.image", listOrNone(strings.Fields(r.Wall.Image)), origin},
+			Row{"runner.wall.env", listOrNone(r.Wall.Env), origin},
+		)
+		if r.Wall.Command != "" {
+			rows = append(rows, Row{"runner.wall.command", r.Wall.Command, origin})
+		}
+		if r.Wall.Helper != "" {
+			rows = append(rows, Row{"runner.wall.helper", r.Wall.Helper, origin})
+		}
+		if r.Wall.User != "" {
+			rows = append(rows, Row{"runner.wall.user", r.Wall.User, origin})
+		}
+	} else {
+		rows = append(rows, Row{"runner.wall.adapter", "(none)", Default})
 	}
 	return rows
 }

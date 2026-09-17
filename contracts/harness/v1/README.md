@@ -869,9 +869,11 @@ the document under `harness` is (§Extending a stack).
 **The runner file.** What `qory run` does on this machine is a second file,
 `runner.yaml`, beside the user's `qory.yaml` under the configuration directory and
 nowhere else: it has no counterpart in a repository or an ancestor directory, so a
-checkout cannot set the policy the agent runs under or where the run's events go. Its
-two sections are the runner contract's objects, `https://qory.dev/contracts/runner/v1/`,
-in the runner contract's grammar; `qory run` hands them to the runner as they are.
+checkout cannot set the policy the agent runs under, where the run's events go or what
+the agent is enclosed in. `egress` and `webhook` are the runner contract's objects,
+`https://qory.dev/contracts/runner/v1/`, in the runner contract's grammar; `qory run`
+hands them to the runner as they are. `wall` chooses that contract's wall and says what
+`qory run` hands it.
 
 ```yaml
 # ~/.config/qory/runner.yaml
@@ -883,6 +885,11 @@ webhook:                         # where every event is posted as well; absent: 
   url: https://example.com/qory/events
   secret: ...                    # at least 16 characters; or QORY_WEBHOOK_SECRET in the environment
   events: ["*"]                  # the types to post; absent: every type
+wall:                            # the container the runtime starts in; absent: a process of this machine
+  adapter: docker
+  image: example.com/agent:1     # yours: the runtime and the toolchain; or --image
+  env: [ANTHROPIC_API_KEY]       # names; the values come from qory run's environment
+  helper: /opt/qory/qory-linux   # a static Linux build of qory; absent on Linux: this binary
 ```
 
 | Key | Default | Meaning |
@@ -892,6 +899,12 @@ webhook:                         # where every event is posted as well; absent: 
 | `webhook.url` | none | `https`, or `http` to this machine; with it set, `qory run` does not start unless the receiver accepts a ping, and `--local` runs with the files alone |
 | `webhook.secret` | `QORY_WEBHOOK_SECRET` | signs every delivery; at least 16 characters, never in a repository |
 | `webhook.events` | every type | the event types to post, by full name or `*` |
+| `wall.adapter` | none | `docker`, the one there is. With it set, every `qory run` starts the runtime in a container with no route out except to the runner's proxy; `--wall none` runs once without it, `--wall docker` once with it |
+| `wall.image` | none | the container's image, which holds the runtime and the project's toolchain; `--image` names another. qory builds none, and a wall without an image is refused |
+| `wall.env` | none | names of variables of `qory run`'s environment that go into the container, the model credential say, with `--env` adding to them. The launch template's variables go in; nothing else of the environment does. A name with no value here is left out |
+| `wall.command` | `docker` | the program the adapter runs, `podman` say, supported where the runner's conformance suite passes |
+| `wall.user` | `qory run`'s own | the `uid:gid` the container runs as. Root is refused, so a machine where qory runs as root names another, one that can write the checkout |
+| `wall.helper` | this binary, on Linux | the absolute path of a static Linux build of qory for the engine's architecture, mounted read-only into the container as the relay and the hook forwarder. Required where qory itself is not a Linux build |
 
 `qory config` lists the file's values under `runner.`; a file that does not read stops
 every command, the way a `qory.yaml` that does not read does. The schema is
