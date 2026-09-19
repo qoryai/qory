@@ -298,12 +298,13 @@ func TestRunBehindAWall(t *testing.T) {
 	docker, log := fakeDocker(t)
 	helper := staticELF(t)
 	runnerFile := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml")
-	writeFile(t, runnerFile, "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+helper+"\n  env: [MODEL_KEY, NOT_SET_HERE]\n  user: \"1000:1000\"\n")
+	writeFile(t, runnerFile, "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+helper+"\n  env: [MODEL_KEY, NOT_SET_HERE]\n  user: \"1000:1000\"\n  cpus: \"2\"\n  memory: 4g\n  pids_limit: 4096\n")
 	t.Setenv("MODEL_KEY", "not-a-real-key")
 	t.Setenv("HOST_ONLY", "stays outside")
 	t.Setenv("FLAG_NAMED", "goes in")
 
-	out, err := run(t, "run", "claude", "--image", "example.com/agent:2", "--env", "FLAG_NAMED", "--", "-p", "hi")
+	sibling := t.TempDir()
+	out, err := run(t, "run", "claude", "--image", "example.com/agent:2", "--env", "FLAG_NAMED", "--mount", sibling+":ro", "--memory", "8g", "--shm-size", "2g", "--", "-p", "hi")
 	if err == nil || cmd.ExitCode(err) != 4 {
 		t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
@@ -316,6 +317,8 @@ func TestRunBehindAWall(t *testing.T) {
 	wants(t, lines,
 		"network create --internal",
 		"--user 1000:1000 --cap-drop ALL",
+		"--mount type=bind,src="+sibling+",dst="+sibling+",readonly",
+		"--cpus 2 --memory 8g --shm-size 2g --pids-limit 4096",
 		"--entrypoint /qory/qory example.com/agent:2 run relay 3128=",
 		"src="+helper+",dst=/qory/qory,readonly",
 		"--mount type=bind,src="+root+",dst="+root+" ",
@@ -367,6 +370,14 @@ func TestRunRefusesAWallItCannotBuild(t *testing.T) {
 		{[]string{"run", "--wall", "bubblewrap"}, "the walls are docker"},
 		{[]string{"run", "--wall", "docker"}, "needs the container's image"},
 		{[]string{"run", "--image", "i"}, "behind a wall"},
+		{[]string{"run", "--mount", "/srv"}, "behind a wall"},
+		{[]string{"run", "--shm-size", "2g"}, "behind a wall"},
+		{[]string{"run", "--wall", "docker", "--image", "i", "--mount", "srv"}, "not an absolute path"},
+		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_WEBHOOK_SECRET"}, "the runner's own"},
+		{[]string{"run", "--label", "issue"}, "not key=value"},
+		{[]string{"run", "--label", "Issue=1"}, "label key"},
+		{[]string{"run", "--run-id", "../x"}, "not a UUID"},
+		{[]string{"run", "--policy", filepath.Join(root, "policy.yaml")}, "inside the checkout"},
 	} {
 		out, err := run(t, c.args...)
 		if cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), c.want) {
@@ -406,6 +417,8 @@ func TestRunBehindARealWall(t *testing.T) {
 	}
 	origin := "http://" + strings.TrimSpace(string(ip)) + ":8080/"
 	root := newCheckout(t)
+	sibling := t.TempDir()
+	writeFile(t, filepath.Join(sibling, "note"), "from beside the checkout\n")
 	copyFixture(t, "two-modules", root)
 	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "qory.yaml"), `apiVersion: qory.dev/v1alpha1
 harness:
@@ -420,23 +433,66 @@ harness:
             nc -w 3 1.1.1.1 80 </dev/null && echo "direct: connected" || echo "direct: nowhere"
             echo '{"hook_event_name":"SessionEnd"}' | /qory/qory run forward; echo "forwarder: $?"
             test -r "$1" && echo "settings: readable"
+            echo "sibling: $(cat `+sibling+`/note)"
+            touch `+sibling+`/mine 2>/dev/null && echo "sibling: written" || echo "sibling: read-only"
+            echo "shm: $(df -k /dev/shm | tail -1 | awk '{print $2}') pids: $(cat /sys/fs/cgroup/pids.max)"
             id -u
 `)
 	if out, err := run(t, "harness", "compose", "--runtime", "claude", "--no-links"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "wall:\n  adapter: docker\n  image: busybox:stable\n  helper: "+helper+"\n")
-	out, err := run(t, "run", "claude")
+	out, err := run(t, "run", "claude", "--mount", sibling+":ro", "--shm-size", "256m", "--pids-limit", "512", "--memory", "512m")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "proxied: from the origin", "403", "direct: nowhere", "forwarder: 0", "settings: readable")
-	lacks(t, out, "direct: connected", "this machine: this machine")
+	wants(t, out, "proxied: from the origin", "403", "direct: nowhere", "forwarder: 0", "settings: readable",
+		"sibling: from beside the checkout", "sibling: read-only", "shm: 262144 pids: 512")
+	lacks(t, out, "direct: connected", "this machine: this machine", "sibling: written")
 	_, evs := events(t, root)
 	if egress := evs["ai.qory.run.egress"]; len(egress) != 2 || egress[0]["decision"] != "allowed" || egress[1]["decision"] != "denied" || egress[1]["rule"] != "wall:own-address" {
 		t.Errorf("run.egress %v", egress)
 	}
 	if runtime.GOOS == "linux" && len(evs["ai.qory.session.ended"]) != 1 {
 		t.Errorf("the hook did not reach the runner: %v", evs)
+	}
+}
+
+// TestRunIsNamedLimitedAndUnderItsOwnPolicy is a run started by a system of its own: the
+// id and the labels are the caller's, the run's policy file narrows the machine's and
+// never widens it, the runtime is stopped at the limit with timeout(1)'s status, and
+// the webhook's secret in qory's environment is not in the session's.
+func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	script := filepath.Join(t.TempDir(), "slow-runtime")
+	writeFile(t, script, "#!/bin/sh\ntest -z \"$QORY_WEBHOOK_SECRET\" || exit 7\nexec sleep 30\n")
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	composedForFake(t, root, script)
+	t.Setenv("QORY_WEBHOOK_SECRET", "sixteen-characters-at-least")
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "apiVersion: qory.dev/v1alpha1\negress:\n  mode: enforce\n  allow: [\"*.github.com\", api.anthropic.com]\nwebhook:\n  url: https://example.com/events\n")
+	policy := filepath.Join(t.TempDir(), "run-policy.yaml")
+	writeFile(t, policy, "version: 1\negress:\n  mode: enforce\n  allow: [api.github.com, pypi.org]\n")
+	const id = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f"
+	out, err := run(t, "run", "--local", "--policy", policy, "--run-id", id, "--label", "run_key=erpy/1234", "--label", "issue=77", "--timeout", "300ms", "--stop-grace", "2s")
+	if cmd.ExitCode(err) != 124 {
+		t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	wants(t, out, "stopped at the limit of 300ms")
+	dir, evs := events(t, root)
+	if filepath.Base(dir) != id {
+		t.Errorf("the run is recorded in %s", dir)
+	}
+	if labels, _ := evs["ai.qory.run.started"][0]["labels"].(map[string]any); labels["run_key"] != "erpy/1234" || labels["issue"] != "77" {
+		t.Errorf("run.started %v", evs["ai.qory.run.started"])
+	}
+	applied := evs["ai.qory.run.policy_applied"][0]
+	if allow, _ := applied["allow"].([]any); applied["mode"] != "enforce" || len(allow) != 1 || allow[0] != "api.github.com" {
+		t.Errorf("run.policy_applied %v", applied)
+	}
+	if exited := evs["ai.qory.run.exited"][0]; exited["reason"] != "timeout" || exited["state"] != "failed" {
+		t.Errorf("run.exited %v", exited)
 	}
 }

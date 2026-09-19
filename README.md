@@ -328,6 +328,11 @@ wall:                    # start the runtime in a container; optional
   adapter: docker
   image: example.com/agent:1            # yours: the runtime and your toolchain
   env: [ANTHROPIC_API_KEY]              # names; nothing else of your environment goes in
+  mounts: [/srv/odoo:ro]                # what else of your machine it sees; optional
+  memory: 14g                           # and cpus, pids_limit, shm_size; optional
+run:                     # optional
+  timeout: 5h30m         # stop a runtime that still runs then
+  stop_grace: 30s        # between SIGTERM and SIGKILL when the runner stops it; 10s
 ```
 
 A module declares the hosts it reaches under `egress` in its manifest, and the compose
@@ -337,7 +342,24 @@ declares, the policy's list stands as it is.
 
 With a webhook configured the runner does not start unless the receiver answers;
 `--local` runs with the files alone. A denied connection is recorded and
-the session goes on; nothing here ends a session. The formats are in the runner's
+the session goes on; only a time limit you set ends a session: `--timeout 5h30m`, or
+`run.timeout`, stops the runtime then, `ai.qory.run.exited` says the limit was the
+reason, and `qory run` exits 124.
+
+A system that starts runs of its own names them and brings each its policy:
+
+```sh
+qory run --headless --run-id "$uuid" --label run_key=1234 --label issue=77 \
+  --policy /etc/factory/shop-policy.yaml --timeout 5h30m --stop-grace 30s -- -p "$prompt"
+```
+
+`--run-id` is the id the caller already holds, a UUID in lower case, and the labels go
+into `ai.qory.run.started`, where a receiver ties the run to what it knows. `--policy`
+is one run's own policy, in the runner contract's format, kept outside the checkout. It
+narrows only: under an `egress` section in mode `enforce` the run reaches the file's
+hosts the section covers; with no section, or one in mode `observe`, the file stands as
+it is. The webhook's secret stays the runner's: `QORY_WEBHOOK_SECRET` is taken out of
+the session's environment. The formats are in the runner's
 [contract](https://github.com/qoryai/runner/tree/main/contracts/runner/v1).
 
 The proxy sees only programs that honour it. A **wall** makes the rest fail: with a
@@ -354,9 +376,14 @@ that holds the runtime; qory builds none. What to know:
 - Inside the container the relay and the hook forwarder are qory's own Linux build. On
   Linux that is the binary you run. On a Mac, download the Linux archive of the same
   release for your engine's architecture and name the binary as `wall.helper`.
-- The container sees the checkout it was started in and no other directory. In a git
-  worktree the repository's data lives in the main checkout, outside it, so git inside
-  the container does not work there yet; a clone works.
+- The container sees the checkout it was started in and no other directory, unless
+  `--mount <path>[:ro]` or `wall.mounts` shows it one, at its own path: a sibling
+  checkout the session reads, say. A socket is never mounted. In a git worktree the
+  repository's data lives in the main checkout, outside it, so git inside the container
+  works there only with that directory mounted; a clone works as it is.
+- `--cpus`, `--memory`, `--pids-limit` and `--shm-size`, or the keys of those names
+  under `wall`, limit what the container uses. A headless browser wants `--shm-size 2g`:
+  an engine's default `/dev/shm` is 64 MB.
 - Behind a wall the proxy reaches your own machine only for a host `egress.allow`
   names itself, in either mode, and never the cloud metadata address. For a local model
   endpoint or MCP server, list your machine's host name, and point the harness at that

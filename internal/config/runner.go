@@ -8,7 +8,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -38,6 +40,11 @@ type Runner struct {
 	// Wall is what the runtime is enclosed in, nil when the file names none: the runtime
 	// is a process of this machine.
 	Wall *RunnerWall
+	// Timeout is how long a runtime may run on this machine, zero for no limit, and
+	// StopGrace how long it gets between SIGTERM and SIGKILL when the runner stops it,
+	// zero for the runner's default. --timeout and --stop-grace name others for one run.
+	Timeout   time.Duration
+	StopGrace time.Duration
 }
 
 // WallDocker is the one wall adapter there is.
@@ -64,6 +71,39 @@ type RunnerWall struct {
 	// checkout's files keep their owner. Root is refused, so a machine where qory runs
 	// as root names one.
 	User string
+	// Mounts are what the container sees of this machine beside the checkout and the
+	// composed home, each at its own path; --mount adds to them.
+	Mounts []RunnerMount
+	// CPUs, Memory, PIDs and ShmSize limit what the container uses, as docker run's
+	// --cpus, --memory, --pids-limit and --shm-size do; empty or zero is the engine's
+	// default, and a flag of the same name sets another for one run.
+	CPUs    string
+	Memory  string
+	PIDs    int
+	ShmSize string
+}
+
+// RunnerMount is one file or directory of this machine a walled run sees, at the same
+// path.
+type RunnerMount struct {
+	Path     string
+	ReadOnly bool
+}
+
+// ParseMount reads a mount as wall.mounts and --mount write it: an absolute path, and
+// :ro after it for one the container cannot change. :rw says the default aloud.
+func ParseMount(v string) (RunnerMount, error) {
+	m := RunnerMount{Path: v}
+	if p, ok := strings.CutSuffix(v, ":ro"); ok {
+		m = RunnerMount{Path: p, ReadOnly: true}
+	} else if p, ok := strings.CutSuffix(v, ":rw"); ok {
+		m.Path = p
+	}
+	if !filepath.IsAbs(m.Path) {
+		return m, fmt.Errorf("the mount %q is not an absolute path, with :ro after it for a read-only one", v)
+	}
+	m.Path = filepath.Clean(m.Path)
+	return m, nil
 }
 
 // RunnerEgress is the egress section: the policy the runner pins for every run on this
@@ -99,6 +139,10 @@ type runnerFile struct {
 		Secret *string   `yaml:"secret"`
 		Events *[]string `yaml:"events"`
 	} `yaml:"webhook,omitempty"`
+	Run *struct {
+		Timeout   *string `yaml:"timeout"`
+		StopGrace *string `yaml:"stop_grace"`
+	} `yaml:"run,omitempty"`
 	Wall *struct {
 		Adapter *string   `yaml:"adapter"`
 		Image   *string   `yaml:"image"`
@@ -106,6 +150,11 @@ type runnerFile struct {
 		Helper  *string   `yaml:"helper"`
 		Env     *[]string `yaml:"env"`
 		User    *string   `yaml:"user"`
+		Mounts  *[]string `yaml:"mounts"`
+		CPUs    *string   `yaml:"cpus"`
+		Memory  *string   `yaml:"memory"`
+		PIDs    *int      `yaml:"pids_limit"`
+		ShmSize *string   `yaml:"shm_size"`
 	} `yaml:"wall,omitempty"`
 }
 
@@ -186,6 +235,22 @@ func LoadRunner() (*Runner, error) {
 			r.Webhook.Events = append([]string{}, (*w.Events)...)
 		}
 	}
+	if run := f.Run; run != nil {
+		for _, d := range []struct {
+			key string
+			in  *string
+			out *time.Duration
+		}{{"run.timeout", run.Timeout, &r.Timeout}, {"run.stop_grace", run.StopGrace, &r.StopGrace}} {
+			if d.in == nil {
+				continue
+			}
+			v, err := time.ParseDuration(*d.in)
+			if err != nil || v <= 0 {
+				return nil, fmt.Errorf("%s: %s %q is not a duration above zero, 5h30m or 30s say", path, d.key, *d.in)
+			}
+			*d.out = v
+		}
+	}
 	if w := f.Wall; w != nil {
 		if w.Adapter == nil || *w.Adapter != WallDocker {
 			return nil, fmt.Errorf("%s: wall.adapter is required, and %s is the one there is", path, WallDocker)
@@ -206,8 +271,35 @@ func LoadRunner() (*Runner, error) {
 		if w.User != nil {
 			r.Wall.User = *w.User
 		}
+		if w.Mounts != nil {
+			for _, v := range *w.Mounts {
+				m, err := ParseMount(v)
+				if err != nil {
+					return nil, fmt.Errorf("%s: wall.mounts: %w", path, err)
+				}
+				r.Wall.Mounts = append(r.Wall.Mounts, m)
+			}
+		}
+		if w.CPUs != nil {
+			r.Wall.CPUs = *w.CPUs
+		}
+		if w.Memory != nil {
+			r.Wall.Memory = *w.Memory
+		}
+		if w.PIDs != nil {
+			if *w.PIDs < 1 {
+				return nil, fmt.Errorf("%s: wall.pids_limit is %d; a limit is at least 1", path, *w.PIDs)
+			}
+			r.Wall.PIDs = *w.PIDs
+		}
+		if w.ShmSize != nil {
+			r.Wall.ShmSize = *w.ShmSize
+		}
 		if w.Env != nil {
 			for _, name := range *w.Env {
+				if name == EnvWebhookSecret {
+					return nil, fmt.Errorf("%s: wall.env: %s is the runner's own and never the session's", path, name)
+				}
 				if !envName.MatchString(name) {
 					return nil, fmt.Errorf("%s: wall.env: %q is not a variable's name; the value comes from the environment, never from this file", path, name)
 				}
@@ -256,6 +348,16 @@ func (r *Runner) Rows() []Row {
 	} else {
 		rows = append(rows, Row{"runner.webhook.url", "(none)", Default})
 	}
+	if r != nil && r.Timeout > 0 {
+		rows = append(rows, Row{"runner.run.timeout", r.Timeout.String(), origin})
+	} else {
+		rows = append(rows, Row{"runner.run.timeout", "(none)", Default})
+	}
+	if r != nil && r.StopGrace > 0 {
+		rows = append(rows, Row{"runner.run.stop_grace", r.StopGrace.String(), origin})
+	} else {
+		rows = append(rows, Row{"runner.run.stop_grace", "10s", Default})
+	}
 	if r != nil && r.Wall != nil {
 		rows = append(rows,
 			Row{"runner.wall.adapter", r.Wall.Adapter, origin},
@@ -270,6 +372,25 @@ func (r *Runner) Rows() []Row {
 		}
 		if r.Wall.User != "" {
 			rows = append(rows, Row{"runner.wall.user", r.Wall.User, origin})
+		}
+		if len(r.Wall.Mounts) > 0 {
+			var mounts []string
+			for _, m := range r.Wall.Mounts {
+				if m.ReadOnly {
+					mounts = append(mounts, m.Path+":ro")
+				} else {
+					mounts = append(mounts, m.Path)
+				}
+			}
+			rows = append(rows, Row{"runner.wall.mounts", strings.Join(mounts, ", "), origin})
+		}
+		for _, l := range [][2]string{{"cpus", r.Wall.CPUs}, {"memory", r.Wall.Memory}, {"shm_size", r.Wall.ShmSize}} {
+			if l[1] != "" {
+				rows = append(rows, Row{"runner.wall." + l[0], l[1], origin})
+			}
+		}
+		if r.Wall.PIDs > 0 {
+			rows = append(rows, Row{"runner.wall.pids_limit", strconv.Itoa(r.Wall.PIDs), origin})
 		}
 	} else {
 		rows = append(rows, Row{"runner.wall.adapter", "(none)", Default})

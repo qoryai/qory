@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/charmbracelet/x/term"
 	"github.com/qoryai/runner/session"
@@ -34,8 +35,10 @@ const DescriptorsDir = "runtimes"
 func newRun() *cobra.Command {
 	var h homeOptions
 	var local, headless bool
-	var wallName, image string
-	var passEnv []string
+	var o wallOptions
+	var policyFile, runID string
+	var labels []string
+	var timeout, grace time.Duration
 	c := &cobra.Command{
 		Use:   "run [runtime] [-- argument...]",
 		Short: "Start a runtime on the composed harness, observed and recorded",
@@ -53,7 +56,11 @@ section is the policy, which can only narrow what the runtime reaches; no sectio
 every connection is allowed and recorded, and a file that does not read means no run.
 When the harness declares egress, the hosts its modules and the runtime declare in the
 report, the runtime reaches the declared hosts the policy covers and nothing else; a
-harness that declares nothing leaves the policy's list as it is. Its webhook section
+harness that declares nothing leaves the policy's list as it is. --policy names one
+run's own policy, a file in the runner contract's policy format kept outside the
+checkout, for a machine that serves runs of different kinds. It narrows only: under a
+section in mode enforce the run reaches the file's hosts the section covers, and with
+no section, or one in mode observe, the file stands as it is. Its webhook section
 posts every event somewhere as well; when one is configured the runner pings it first
 and does not start unless it answers. --local runs with the files alone, webhook or
 not. A descriptor override, <runtime>.yaml under ` + DescriptorsDir + ` in the same
@@ -67,7 +74,11 @@ section's. --image, or wall.image, names the container's image, which holds the 
 and the project's toolchain; qory builds none. The container sees the checkout and the
 composed home, at their own paths, and nothing else of this machine; of the environment
 it gets the launch template's variables and the ones --env or wall.env names, the model
-credential say, and nothing else. Inside, the relay and the hook forwarder are qory's
+credential say, and nothing else. --mount, or wall.mounts, shows it more of this machine
+at its own path, a sibling checkout say, with :ro after the path for what it must not
+change; never a socket. --cpus, --memory, --pids-limit and --shm-size, or the keys of
+the same names under wall, limit what it uses; a browser wants more /dev/shm than an
+engine gives by default. Inside, the relay and the hook forwarder are qory's
 own Linux build, mounted read-only: this binary on Linux, wall.helper elsewhere. With
 the engine in a virtual machine, on a Mac, the runtime's hooks do not reach the runner.
 
@@ -76,6 +87,16 @@ works and its bytes are still captured; --headless, or no terminal, runs it on p
 reads its structured output. Either way the record is .qory/runs/<id>/ in the checkout:
 events.jsonl, one event per line, and output.log, the session's bytes. The exit status
 is the runtime's.
+
+A caller that starts runs for a system of its own names them: --run-id gives the run
+the id the caller already holds, a UUID in lower case, and --label key=value, repeatable,
+puts the caller's own names, a key in a queue, a repository, an issue, into
+ai.qory.run.started, where a receiver finds them. --timeout stops a runtime that still
+runs after that long, 5h30m say: ai.qory.run.exited says the limit was the reason, and
+the exit status is ` + fmt.Sprint(exitTimeout) + `, as timeout(1) has it. Stopped at the limit or by a signal to
+qory run, the runtime gets SIGTERM and, --stop-grace later, 10s unless named, SIGKILL:
+the time a session needs to close what it has open. run.timeout and run.stop_grace in
+` + config.RunnerFileName + ` set both for every run on the machine; --timeout 0 lifts the file's.
 
 --verbose adds nothing here.`,
 		Args: func(cmd *cobra.Command, args []string) error {
@@ -117,6 +138,36 @@ is the runtime's.
 				if r.Egress != nil {
 					pol = &session.Policy{Version: 1, Egress: session.PolicyEgress{Mode: r.Egress.Mode, Allow: r.Egress.Allow}}
 				}
+			}
+			if policyFile != "" {
+				if pol, err = runPolicy(policyFile, at.root, pol); err != nil {
+					return err
+				}
+			}
+			named, err := parseLabels(labels)
+			if err != nil {
+				return err
+			}
+			if err := session.CheckLabels(named); err != nil {
+				return input(err)
+			}
+			if runID != "" {
+				if err := session.CheckRunID(runID); err != nil {
+					return input(fmt.Errorf("--run-id: %w", err))
+				}
+			}
+			if timeout < 0 || grace < 0 {
+				return input(fmt.Errorf("--timeout and --stop-grace are not negative"))
+			}
+			if r := conf.Runner; r != nil {
+				if !cmd.Flags().Changed("timeout") {
+					timeout = r.Timeout
+				}
+				if !cmd.Flags().Changed("stop-grace") {
+					grace = r.StopGrace
+				}
+			}
+			if r := conf.Runner; r != nil {
 				if r.Webhook != nil {
 					hook = &session.Webhook{Version: 1, URL: r.Webhook.URL, Secret: r.Webhook.Secret, Events: r.Webhook.Events}
 				}
@@ -128,7 +179,7 @@ is the runtime's.
 				Runtime:       name,
 				Command:       launch.Command,
 				Args:          append(append([]string{}, launch.Args...), extra...),
-				Env:           withEnv(os.Environ(), launch.Env),
+				Env:           withEnv(withoutRunners(os.Environ()), launch.Env),
 				Dir:           cwd,
 				Interactive:   !headless && isTerminal(cmd.InOrStdin()) && isTerminal(cmd.OutOrStdout()),
 				Stdin:         cmd.InOrStdin(),
@@ -142,9 +193,20 @@ is the runtime's.
 				Descriptors:   filepath.Join(user, DescriptorsDir),
 				Forwarder:     []string{exe, "run", "forward"},
 				RunnerVersion: build().title(),
+				RunID:         runID,
+				Labels:        named,
+				Timeout:       timeout,
+				StopGrace:     grace,
 			}
-			if err := enclose(&spec, conf.Runner, wallOptions{name: wallName, image: image, env: passEnv}, exe, at.root, rep.Home, launch.Env); err != nil {
+			if err := enclose(&spec, conf.Runner, o, exe, at.root, rep.Home, launch.Env); err != nil {
 				return err
+			}
+			if policyFile != "" {
+				for _, m := range spec.Mounts {
+					if abs, _ := filepath.Abs(policyFile); !m.ReadOnly && reallyWithin(m.Path, abs) {
+						return input(fmt.Errorf("--policy %s is inside %s, which the container may write; keep it outside or mount that read-only", policyFile, m.Path))
+					}
+				}
 			}
 			res, err := session.Run(ctx, spec)
 			if err != nil {
@@ -156,6 +218,9 @@ is the runtime's.
 				u.Fail(fmt.Errorf("%d events did not reach the webhook; %s/undelivered holds them", res.Undelivered, record))
 			}
 			switch {
+			case res.TimedOut:
+				u.Fail(fmt.Errorf("%s was stopped at the limit of %s; recorded in %s", name, timeout, record))
+				return reported(&exitError{code: exitTimeout})
 			case res.Signal != "":
 				u.Fail(fmt.Errorf("%s was ended by %s; recorded in %s", name, res.Signal, record))
 				return reported(&exitError{code: 1})
@@ -169,9 +234,19 @@ is the runtime's.
 	}
 	c.Flags().BoolVar(&local, "local", false, "record to files only, even when a webhook is configured")
 	c.Flags().BoolVar(&headless, "headless", false, "run on pipes even at a terminal, and read the runtime's structured output")
-	c.Flags().StringVar(&wallName, "wall", "", "start the runtime in a container with no route out except to the proxy: "+config.WallDocker+", or none ("+config.RunnerFileName+": wall.adapter)")
-	c.Flags().StringVar(&image, "image", "", "the container's image under a wall ("+config.RunnerFileName+": wall.image)")
-	c.Flags().StringArrayVar(&passEnv, "env", nil, "a variable of this environment that goes into the container under a wall, by name; repeatable ("+config.RunnerFileName+": wall.env)")
+	c.Flags().StringVar(&policyFile, "policy", "", "this run's own policy, a file outside the checkout in the runner contract's policy format; it narrows the egress section of "+config.RunnerFileName+" and never widens it")
+	c.Flags().StringVar(&runID, "run-id", "", "the run's id when the caller already holds one: a UUID in lower case (default a new one)")
+	c.Flags().StringArrayVar(&labels, "label", nil, "the caller's own name for the run, key=value, reported in ai.qory.run.started; repeatable")
+	c.Flags().DurationVar(&timeout, "timeout", 0, "stop a runtime that still runs after this long, 5h30m say, and exit "+fmt.Sprint(exitTimeout)+" (default no limit; "+config.RunnerFileName+": run.timeout)")
+	c.Flags().DurationVar(&grace, "stop-grace", 0, "how long the runtime gets between SIGTERM and SIGKILL when the runner stops it (default 10s; "+config.RunnerFileName+": run.stop_grace)")
+	c.Flags().StringVar(&o.name, "wall", "", "start the runtime in a container with no route out except to the proxy: "+config.WallDocker+", or none ("+config.RunnerFileName+": wall.adapter)")
+	c.Flags().StringVar(&o.image, "image", "", "the container's image under a wall ("+config.RunnerFileName+": wall.image)")
+	c.Flags().StringArrayVar(&o.env, "env", nil, "a variable of this environment that goes into the container under a wall, by name; repeatable ("+config.RunnerFileName+": wall.env)")
+	c.Flags().StringArrayVar(&o.mounts, "mount", nil, "a file or directory of this machine the container sees as well, at its own path, with :ro after it for one it cannot change; repeatable ("+config.RunnerFileName+": wall.mounts)")
+	c.Flags().StringVar(&o.limits.CPUs, "cpus", "", "how many processors' worth of time the container gets ("+config.RunnerFileName+": wall.cpus)")
+	c.Flags().StringVar(&o.limits.Memory, "memory", "", "the most memory the container gets, 8g say ("+config.RunnerFileName+": wall.memory)")
+	c.Flags().IntVar(&o.limits.PIDs, "pids-limit", 0, "the most processes and threads in the container ("+config.RunnerFileName+": wall.pids_limit)")
+	c.Flags().StringVar(&o.limits.ShmSize, "shm-size", "", "the size of /dev/shm in the container, 2g say ("+config.RunnerFileName+": wall.shm_size)")
 	homeFlags(c, &h)
 	c.AddCommand(newForward(), newRelay())
 	return c
@@ -179,9 +254,72 @@ is the runtime's.
 
 // wallOptions are the run verb's wall flags.
 type wallOptions struct {
-	name  string
-	image string
-	env   []string
+	name   string
+	image  string
+	env    []string
+	mounts []string
+	limits wall.Limits
+}
+
+// walled reports whether a flag that means something only behind a wall was given.
+func (o wallOptions) walled() bool {
+	return o.image != "" || len(o.env) > 0 || len(o.mounts) > 0 || o.limits != (wall.Limits{})
+}
+
+// exitTimeout is the exit status of a run stopped at its --timeout, timeout(1)'s.
+const exitTimeout = 124
+
+// runPolicy reads one run's own policy and puts it under the machine's. The file is
+// kept outside the checkout, as the runner file is: inside, the agent it constrains
+// could write it.
+func runPolicy(file, root string, machine *session.Policy) (*session.Policy, error) {
+	abs, err := filepath.Abs(file)
+	if err != nil {
+		return nil, input(err)
+	}
+	if reallyWithin(root, abs) {
+		return nil, input(fmt.Errorf("--policy %s is inside the checkout, where the agent it constrains could write it; keep it outside", file))
+	}
+	b, err := os.ReadFile(abs)
+	if err != nil {
+		return nil, input(err)
+	}
+	p, err := session.ReadPolicy(filepath.Base(abs), b)
+	if err != nil {
+		return nil, input(err)
+	}
+	return p.Under(machine), nil
+}
+
+// parseLabels reads --label key=value; the runner checks what a key and a value may be.
+func parseLabels(labels []string) (map[string]string, error) {
+	if len(labels) == 0 {
+		return nil, nil
+	}
+	out := map[string]string{}
+	for _, l := range labels {
+		k, v, ok := strings.Cut(l, "=")
+		if !ok {
+			return nil, input(fmt.Errorf("--label %s is not key=value", l))
+		}
+		if _, dup := out[k]; dup {
+			return nil, input(fmt.Errorf("--label %s is given twice", k))
+		}
+		out[k] = v
+	}
+	return out, nil
+}
+
+// withoutRunners is the environment without the runner's own variables, which are never
+// the session's: with the webhook's secret a session could sign events of its own.
+func withoutRunners(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if name, _, _ := strings.Cut(kv, "="); name != config.EnvWebhookSecret {
+			out = append(out, kv)
+		}
+	}
+	return out
 }
 
 // wallOff is the --wall value that runs without the wall the runner file names.
@@ -202,8 +340,8 @@ func enclose(spec *session.Spec, r *config.Runner, o wallOptions, exe, root, hom
 		name = section.Adapter
 	}
 	if name == "" || name == wallOff {
-		if o.image != "" || len(o.env) > 0 {
-			return input(fmt.Errorf("--image and --env are for a run behind a wall; --wall %s starts one", config.WallDocker))
+		if o.walled() {
+			return input(fmt.Errorf("--image, --env, --mount and the limits are for a run behind a wall; --wall %s starts one", config.WallDocker))
 		}
 		return nil
 	}
@@ -217,15 +355,11 @@ func enclose(spec *session.Spec, r *config.Runner, o wallOptions, exe, root, hom
 	if spec.Image == "" {
 		return input(fmt.Errorf("a wall needs the container's image: --image, or wall.image in %s; qory builds none", config.RunnerFileName))
 	}
-	helper := section.Helper
-	if helper == "" {
-		if runtime.GOOS != "linux" {
-			return input(fmt.Errorf("the container runs qory's Linux build as its relay and hook forwarder, and this is the %s build; name the Linux one as wall.helper in %s", runtime.GOOS, config.RunnerFileName))
-		}
-		helper = exe
-	}
 	env := withEnv(nil, launchEnv)
 	for _, n := range append(append([]string{}, section.Env...), o.env...) {
+		if n == config.EnvWebhookSecret {
+			return input(fmt.Errorf("--env %s: the variable is the runner's own and never the session's", n))
+		}
 		if v, ok := os.LookupEnv(n); ok {
 			env = withEnv(env, map[string]string{n: v})
 		}
@@ -233,12 +367,47 @@ func enclose(spec *session.Spec, r *config.Runner, o wallOptions, exe, root, hom
 	if env == nil {
 		env = []string{}
 	}
+	var more []wall.Mount
+	for _, m := range section.Mounts {
+		more = append(more, wall.Mount{Path: m.Path, ReadOnly: m.ReadOnly})
+	}
+	for _, v := range o.mounts {
+		m, err := config.ParseMount(v)
+		if err != nil {
+			return input(fmt.Errorf("--mount: %w", err))
+		}
+		if _, err := os.Stat(m.Path); err != nil {
+			return input(fmt.Errorf("--mount: %w", err))
+		}
+		more = append(more, wall.Mount{Path: m.Path, ReadOnly: m.ReadOnly})
+	}
+	helper := section.Helper
+	if helper == "" {
+		if runtime.GOOS != "linux" {
+			return input(fmt.Errorf("the container runs qory's Linux build as its relay and hook forwarder, and this is the %s build; name the Linux one as wall.helper in %s", runtime.GOOS, config.RunnerFileName))
+		}
+		helper = exe
+	}
 	spec.Env = env
 	spec.Wall = &wall.Docker{Command: section.Command, Helper: helper, RelayArgs: []string{"run", "relay"}, User: section.User}
 	spec.Forwarder = []string{wall.HelperPath, "run", "forward"}
 	spec.Mounts = []wall.Mount{{Path: root}}
 	if !reallyWithin(root, home) {
 		spec.Mounts = append(spec.Mounts, wall.Mount{Path: home, ReadOnly: true})
+	}
+	spec.Mounts = append(spec.Mounts, more...)
+	spec.Limits = wall.Limits{CPUs: section.CPUs, Memory: section.Memory, PIDs: section.PIDs, ShmSize: section.ShmSize}
+	if o.limits.CPUs != "" {
+		spec.Limits.CPUs = o.limits.CPUs
+	}
+	if o.limits.Memory != "" {
+		spec.Limits.Memory = o.limits.Memory
+	}
+	if o.limits.PIDs != 0 {
+		spec.Limits.PIDs = o.limits.PIDs
+	}
+	if o.limits.ShmSize != "" {
+		spec.Limits.ShmSize = o.limits.ShmSize
 	}
 	return nil
 }

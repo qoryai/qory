@@ -59,6 +59,23 @@
         }
       }
     },
+    "run": {
+      "description": "What holds for every run on this machine unless a flag of qory run says otherwise.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "timeout": {
+          "description": "How long a runtime may run, as a duration: 5h30m. At the limit the runner stops it and ai.qory.run.exited says so. Default no limit. --timeout names another for one run.",
+          "type": "string",
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"
+        },
+        "stop_grace": {
+          "description": "How long a runtime gets between SIGTERM and SIGKILL when the runner stops it, at the limit or on a signal to qory run: the time a session needs to close what it has open. Default 10s. --stop-grace names another for one run.",
+          "type": "string",
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"
+        }
+      }
+    },
     "wall": {
       "description": "The wall every run on this machine starts the runtime behind: a container with no route out except to the runner's proxy. Absent, the runtime is a process of this machine.",
       "type": "object",
@@ -103,6 +120,35 @@
           "description": "The uid:gid the container runs as. Default qory run's own, so the checkout's files keep their owner. Root is refused; a machine where qory runs as root names another.",
           "type": "string",
           "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*(:[A-Za-z0-9_][A-Za-z0-9_.-]*)?$"
+        },
+        "mounts": {
+          "description": "What the container sees of this machine beside the checkout and the composed home, each at its own path: an absolute path, with :ro after it for one the container cannot change. --mount adds to them. A socket, or a directory holding a container runtime's, is refused.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^/"
+          }
+        },
+        "cpus": {
+          "description": "How many processors' worth of time the container gets, a decimal number. Default the engine's.",
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?$"
+        },
+        "memory": {
+          "description": "The most memory the container gets: a number of bytes with an optional unit of b, k, m or g. Default the engine's.",
+          "type": "string",
+          "pattern": "^[0-9]+[bkmgBKMG]?$"
+        },
+        "pids_limit": {
+          "description": "The most processes and threads in the container. Default the engine's.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "shm_size": {
+          "description": "The size of /dev/shm in the container, written as memory is. A browser needs more than an engine's default.",
+          "type": "string",
+          "pattern": "^[0-9]+[bkmgBKMG]?$"
         }
       }
     }

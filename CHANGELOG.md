@@ -4,6 +4,35 @@ Every release of qory, newest first, in the shape of [Keep a Changelog](https://
 The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0 a minor
 release may change what an existing document does, and says so under Upgrading.
 
+## [Unreleased]
+
+### Security
+
+- `qory run` no longer passes `QORY_WEBHOOK_SECRET` into the session. Without a wall the
+  session's environment was qory's own, the secret included when it was given that way,
+  and a session holding it could sign batches of its own to the receiver. The variable
+  is taken out, and `wall.env` and `--env` refuse its name. Behind a wall it never went
+  in. GHSA-ff27-pg8g-j94q.
+
+### Added
+
+- `qory run --policy <file>`: one run's own policy, in the runner contract's policy
+  format, for a machine that serves runs of different kinds. It narrows the `egress`
+  section of `runner.yaml` and never widens it, and is refused inside the checkout or
+  anything the container may write.
+- `qory run --mount <path>[:ro]` and `wall.mounts`: more of the machine for a walled
+  run, at its own path. A socket is refused.
+- `qory run --cpus`, `--memory`, `--pids-limit`, `--shm-size`, and `wall.cpus`,
+  `wall.memory`, `wall.pids_limit`, `wall.shm_size`: what the container may use.
+- `qory run --run-id` and `--label key=value`: the caller's id for the run, a UUID, and
+  its own names for it, reported in `ai.qory.run.started`.
+- `qory run --timeout` and `--stop-grace`, and `run.timeout` and `run.stop_grace` in
+  `runner.yaml`: a runtime still running at the limit is stopped, `ai.qory.run.exited`
+  carries `reason: timeout`, and the exit status is 124. The grace is the time between
+  SIGTERM and SIGKILL whenever the runner stops the runtime, 10s unless named.
+- Needs `github.com/qoryai/runner` after 0.2.0, which adds the limit, the labels, the
+  container's limits and the policy's narrowing.
+
 ## [0.8.0] - 2026-09-17
 
 ### Upgrading
@@ -526,6 +555,7 @@ The first release: a stack of modules composed into one tree, linked into the ch
 and kept out of git, with a report naming the module of every entry and a refusal when
 two modules provide the same one.
 
+[Unreleased]: https://github.com/qoryai/qory/compare/v0.8.0...HEAD
 [0.8.0]: https://github.com/qoryai/qory/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/qoryai/qory/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/qoryai/qory/compare/v0.5.0...v0.6.0
