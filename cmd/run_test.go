@@ -476,7 +476,7 @@ func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
 	policy := filepath.Join(t.TempDir(), "run-policy.yaml")
 	writeFile(t, policy, "version: 1\negress:\n  mode: enforce\n  allow: [api.github.com, pypi.org]\n")
 	const id = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f"
-	out, err := run(t, "run", "--local", "--policy", policy, "--run-id", id, "--label", "run_key=erpy/1234", "--label", "issue=77", "--timeout", "300ms", "--stop-grace", "2s")
+	out, err := run(t, "run", "--local", "--policy", policy, "--run-id", id, "--label", "run_key=queue/1234", "--label", "issue=77", "--timeout", "300ms", "--stop-grace", "2s")
 	if cmd.ExitCode(err) != 124 {
 		t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
@@ -485,7 +485,7 @@ func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
 	if filepath.Base(dir) != id {
 		t.Errorf("the run is recorded in %s", dir)
 	}
-	if labels, _ := evs["ai.qory.run.started"][0]["labels"].(map[string]any); labels["run_key"] != "erpy/1234" || labels["issue"] != "77" {
+	if labels, _ := evs["ai.qory.run.started"][0]["labels"].(map[string]any); labels["run_key"] != "queue/1234" || labels["issue"] != "77" {
 		t.Errorf("run.started %v", evs["ai.qory.run.started"])
 	}
 	applied := evs["ai.qory.run.policy_applied"][0]
