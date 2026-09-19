@@ -26,10 +26,13 @@ release may change what an existing document does, and says so under Upgrading.
   `wall.memory`, `wall.pids_limit`, `wall.shm_size`: what the container may use.
 - `qory run --run-id` and `--label key=value`: the caller's id for the run, a UUID, and
   its own names for it, reported in `ai.qory.run.started`.
-- `qory run --timeout` and `--stop-grace`, and `run.timeout` and `run.stop_grace` in
-  `runner.yaml`: a runtime still running at the limit is stopped, `ai.qory.run.exited`
-  carries `reason: timeout`, and the exit status is 124. The grace is the time between
-  SIGTERM and SIGKILL whenever the runner stops the runtime, 10s unless named.
+- `qory run --timeout`, `--stop-signal` and `--stop-grace`, and `run.timeout`,
+  `run.stop_signal` and `run.stop_grace` in `runner.yaml`: a runtime still running at the
+  limit is stopped, `ai.qory.run.exited` carries `reason: timeout`, and the exit status
+  is 124. Whenever the runner stops the runtime it sends the stop signal, SIGTERM unless
+  named, and SIGKILL after the grace, 10s unless named. A runtime may close its session
+  on one signal and drop it on another, so the signal is one of SIGTERM, SIGINT, SIGHUP,
+  SIGQUIT, SIGUSR1 and SIGUSR2.
 - Credentials the agent never holds. The `credentials` section of `runner.yaml` defines
   what the machine has: a token from `env`, from a `file`, or from an `adapter`, a
   program of yours that knows one kind of host and prints the token with the hosts, the

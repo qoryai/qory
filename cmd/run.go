@@ -40,6 +40,7 @@ func newRun() *cobra.Command {
 	var policyFile, runID string
 	var labels []string
 	var timeout, grace time.Duration
+	var stopSignal string
 	c := &cobra.Command{
 		Use:   "run [runtime] [-- argument...]",
 		Short: "Start a runtime on the composed harness, observed and recorded",
@@ -109,9 +110,12 @@ puts the caller's own names, a key in a queue, a repository, an issue, into
 ai.qory.run.started, where a receiver finds them. --timeout stops a runtime that still
 runs after that long, 5h30m say: ai.qory.run.exited says the limit was the reason, and
 the exit status is ` + fmt.Sprint(exitTimeout) + `, as timeout(1) has it. Stopped at the limit or by a signal to
-qory run, the runtime gets SIGTERM and, --stop-grace later, 10s unless named, SIGKILL:
-the time a session needs to close what it has open. run.timeout and run.stop_grace in
-` + config.RunnerFileName + ` set both for every run on the machine; --timeout 0 lifts the file's.
+qory run, the runtime gets --stop-signal, SIGTERM unless named, and, --stop-grace later,
+10s unless named, SIGKILL: the time a session needs to close what it has open. Runtimes
+differ in what a signal means, one closes its session on SIGINT and drops it on SIGTERM,
+so the signal is yours to name: SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2.
+run.timeout, run.stop_signal and run.stop_grace in ` + config.RunnerFileName + ` set them for
+every run on the machine; --timeout 0 lifts the file's.
 
 --verbose adds nothing here.`,
 		Args: func(cmd *cobra.Command, args []string) error {
@@ -181,6 +185,12 @@ the time a session needs to close what it has open. run.timeout and run.stop_gra
 				if !cmd.Flags().Changed("stop-grace") {
 					grace = r.StopGrace
 				}
+				if !cmd.Flags().Changed("stop-signal") {
+					stopSignal = r.StopSignal
+				}
+			}
+			if err := session.CheckStopSignal(stopSignal); err != nil {
+				return input(fmt.Errorf("--stop-signal: %w", err))
 			}
 			if r := conf.Runner; r != nil {
 				if r.Webhook != nil {
@@ -211,6 +221,7 @@ the time a session needs to close what it has open. run.timeout and run.stop_gra
 				RunID:         runID,
 				Labels:        named,
 				Timeout:       timeout,
+				StopSignal:    stopSignal,
 				StopGrace:     grace,
 			}
 			if r := conf.Runner; r != nil {
@@ -262,7 +273,8 @@ the time a session needs to close what it has open. run.timeout and run.stop_gra
 	c.Flags().StringVar(&runID, "run-id", "", "the run's id when the caller already holds one: a UUID in lower case (default a new one)")
 	c.Flags().StringArrayVar(&labels, "label", nil, "the caller's own name for the run, key=value, reported in ai.qory.run.started; repeatable")
 	c.Flags().DurationVar(&timeout, "timeout", 0, "stop a runtime that still runs after this long, 5h30m say, and exit "+fmt.Sprint(exitTimeout)+" (default no limit; "+config.RunnerFileName+": run.timeout)")
-	c.Flags().DurationVar(&grace, "stop-grace", 0, "how long the runtime gets between SIGTERM and SIGKILL when the runner stops it (default 10s; "+config.RunnerFileName+": run.stop_grace)")
+	c.Flags().StringVar(&stopSignal, "stop-signal", "", "the signal that asks the runtime to leave when the runner stops it: SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2 (default SIGTERM; "+config.RunnerFileName+": run.stop_signal)")
+	c.Flags().DurationVar(&grace, "stop-grace", 0, "how long the runtime gets between the stop signal and SIGKILL when the runner stops it (default 10s; "+config.RunnerFileName+": run.stop_grace)")
 	c.Flags().StringVar(&o.name, "wall", "", "start the runtime in a container with no route out except to the proxy: "+config.WallDocker+", or none ("+config.RunnerFileName+": wall.adapter)")
 	c.Flags().StringVar(&o.image, "image", "", "the container's image under a wall ("+config.RunnerFileName+": wall.image)")
 	c.Flags().StringArrayVar(&o.env, "env", nil, "a variable of this environment that goes into the container under a wall, by name; repeatable ("+config.RunnerFileName+": wall.env)")

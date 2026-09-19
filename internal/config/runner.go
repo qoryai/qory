@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/qoryai/runner/session"
 	"gopkg.in/yaml.v3"
 
 	"github.com/qoryai/qory/internal/exports"
@@ -41,10 +42,12 @@ type Runner struct {
 	// is a process of this machine.
 	Wall *RunnerWall
 	// Timeout is how long a runtime may run on this machine, zero for no limit, and
-	// StopGrace how long it gets between SIGTERM and SIGKILL when the runner stops it,
-	// zero for the runner's default. --timeout and --stop-grace name others for one run.
-	Timeout   time.Duration
-	StopGrace time.Duration
+	// StopSignal the signal that asks it to leave when the runner stops it and StopGrace
+	// how long it gets between that and SIGKILL, empty and zero for the runner's
+	// defaults. --timeout, --stop-signal and --stop-grace name others for one run.
+	Timeout    time.Duration
+	StopSignal string
+	StopGrace  time.Duration
 	// Credentials are the credentials this machine defines, in the file's order. A
 	// run's policy selects among them by name; the runner holds each outside the
 	// container and its proxy sets it on the requests to the hosts it is for.
@@ -161,8 +164,9 @@ type runnerFile struct {
 		Events *[]string `yaml:"events"`
 	} `yaml:"webhook,omitempty"`
 	Run *struct {
-		Timeout   *string `yaml:"timeout"`
-		StopGrace *string `yaml:"stop_grace"`
+		Timeout    *string `yaml:"timeout"`
+		StopSignal *string `yaml:"stop_signal"`
+		StopGrace  *string `yaml:"stop_grace"`
 	} `yaml:"run,omitempty"`
 	Credentials yaml.Node `yaml:"credentials,omitempty"`
 	Wall        *struct {
@@ -272,6 +276,15 @@ func LoadRunner() (*Runner, error) {
 				return nil, fmt.Errorf("%s: %s %q is not a duration above zero, 5h30m or 30s say", path, d.key, *d.in)
 			}
 			*d.out = v
+		}
+		if run.StopSignal != nil {
+			if *run.StopSignal == "" {
+				return nil, fmt.Errorf("%s: run.stop_signal is empty", path)
+			}
+			if err := session.CheckStopSignal(*run.StopSignal); err != nil {
+				return nil, fmt.Errorf("%s: run.stop_signal: %w", path, err)
+			}
+			r.StopSignal = *run.StopSignal
 		}
 	}
 	if f.Credentials.Kind != 0 {
@@ -472,6 +485,11 @@ func (r *Runner) Rows() []Row {
 		rows = append(rows, Row{"runner.run.timeout", r.Timeout.String(), origin})
 	} else {
 		rows = append(rows, Row{"runner.run.timeout", "(none)", Default})
+	}
+	if r != nil && r.StopSignal != "" {
+		rows = append(rows, Row{"runner.run.stop_signal", r.StopSignal, origin})
+	} else {
+		rows = append(rows, Row{"runner.run.stop_signal", session.DefaultStopSignal, Default})
 	}
 	if r != nil && r.StopGrace > 0 {
 		rows = append(rows, Row{"runner.run.stop_grace", r.StopGrace.String(), origin})

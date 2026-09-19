@@ -70,9 +70,12 @@ puts the caller's own names, a key in a queue, a repository, an issue, into
 ai.qory.run.started, where a receiver finds them. --timeout stops a runtime that still
 runs after that long, 5h30m say: ai.qory.run.exited says the limit was the reason, and
 the exit status is 124, as timeout(1) has it. Stopped at the limit or by a signal to
-qory run, the runtime gets SIGTERM and, --stop-grace later, 10s unless named, SIGKILL:
-the time a session needs to close what it has open. run.timeout and run.stop_grace in
-runner.yaml set both for every run on the machine; --timeout 0 lifts the file's.
+qory run, the runtime gets --stop-signal, SIGTERM unless named, and, --stop-grace later,
+10s unless named, SIGKILL: the time a session needs to close what it has open. Runtimes
+differ in what a signal means, one closes its session on SIGINT and drops it on SIGTERM,
+so the signal is yours to name: SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2.
+run.timeout, run.stop_signal and run.stop_grace in runner.yaml set them for
+every run on the machine; --timeout 0 lifts the file's.
 
 --verbose adds nothing here.
 
@@ -97,7 +100,8 @@ qory run [runtime] [-- argument...] [flags]
       --policy string         this run's own policy, a file outside the checkout in the runner contract's policy format; it narrows the egress section of runner.yaml and never widens it
       --run-id string         the run's id when the caller already holds one: a UUID in lower case (default a new one)
       --shm-size string       the size of /dev/shm in the container, 2g say (runner.yaml: wall.shm_size)
-      --stop-grace duration   how long the runtime gets between SIGTERM and SIGKILL when the runner stops it (default 10s; runner.yaml: run.stop_grace)
+      --stop-grace duration   how long the runtime gets between the stop signal and SIGKILL when the runner stops it (default 10s; runner.yaml: run.stop_grace)
+      --stop-signal string    the signal that asks the runtime to leave when the runner stops it: SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2 (default SIGTERM; runner.yaml: run.stop_signal)
       --timeout duration      stop a runtime that still runs after this long, 5h30m say, and exit 124 (default no limit; runner.yaml: run.timeout)
       --wall string           start the runtime in a container with no route out except to the proxy: docker, or none (runner.yaml: wall.adapter)
 ```

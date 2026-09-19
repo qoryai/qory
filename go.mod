@@ -6,7 +6,7 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/term v0.2.1
-	github.com/qoryai/runner v0.2.1-0.20260919133808-290d91dee454
+	github.com/qoryai/runner v0.2.1-0.20260919162238-3fcb7e774e0c
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/mod v0.41.0

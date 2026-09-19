@@ -53,7 +53,7 @@ func TestRunnerFileReadsBothSections(t *testing.T) {
 // default when the file names none.
 func TestRunnerFileReadsTheWall(t *testing.T) {
 	hermetic(t)
-	path := runnerFile(t, "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: podman\n  helper: /opt/qory/qory-linux\n  env: [ANTHROPIC_API_KEY, GH_TOKEN]\n  user: \"1000:1000\"\n  mounts: [/srv/odoo:ro, /srv/cache]\n  cpus: \"3.5\"\n  memory: 14g\n  pids_limit: 4096\n  shm_size: 2g\n  ca_env: [SSL_CERT_FILE, MY_TOOLS_CA]\nrun:\n  timeout: 5h30m\n  stop_grace: 30s\ncredentials:\n  product:\n    adapter: [/opt/adapters/git-host, --repo, \"${argument}\"]\n    argument: \"[a-z0-9-]+/[a-z0-9-]+\"\n    hosts: [\"*.example.com\"]\n    placeholders: [GIT_HOST_TOKEN]\n  model:\n    env: MODEL_TOKEN\n    hosts: [api.model.example]\n    auth: {scheme: header, header: X-Api-Key}\n")
+	path := runnerFile(t, "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: podman\n  helper: /opt/qory/qory-linux\n  env: [ANTHROPIC_API_KEY, GH_TOKEN]\n  user: \"1000:1000\"\n  mounts: [/srv/odoo:ro, /srv/cache]\n  cpus: \"3.5\"\n  memory: 14g\n  pids_limit: 4096\n  shm_size: 2g\n  ca_env: [SSL_CERT_FILE, MY_TOOLS_CA]\nrun:\n  timeout: 5h30m\n  stop_signal: SIGINT\n  stop_grace: 30s\ncredentials:\n  product:\n    adapter: [/opt/adapters/git-host, --repo, \"${argument}\"]\n    argument: \"[a-z0-9-]+/[a-z0-9-]+\"\n    hosts: [\"*.example.com\"]\n    placeholders: [GIT_HOST_TOKEN]\n  model:\n    env: MODEL_TOKEN\n    hosts: [api.model.example]\n    auth: {scheme: header, header: X-Api-Key}\n")
 	c, err := config.Load(t.TempDir(), true)
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +68,7 @@ func TestRunnerFileReadsTheWall(t *testing.T) {
 	}
 	for key, want := range map[string]string{"runner.wall.adapter": "docker", "runner.wall.image": "example.com/agent:1", "runner.wall.env": "ANTHROPIC_API_KEY, GH_TOKEN", "runner.wall.command": "podman", "runner.wall.helper": "/opt/qory/qory-linux",
 		"runner.wall.mounts": "/srv/odoo:ro, /srv/cache", "runner.wall.cpus": "3.5", "runner.wall.memory": "14g", "runner.wall.pids_limit": "4096", "runner.wall.shm_size": "2g",
-		"runner.run.timeout": "5h30m0s", "runner.run.stop_grace": "30s", "runner.wall.ca_env": "SSL_CERT_FILE, MY_TOOLS_CA",
+		"runner.run.timeout": "5h30m0s", "runner.run.stop_grace": "30s", "runner.run.stop_signal": "SIGINT", "runner.wall.ca_env": "SSL_CERT_FILE, MY_TOOLS_CA",
 		"runner.credentials.product": "adapter /opt/adapters/git-host", "runner.credentials.model": "env MODEL_TOKEN"} {
 		if rows[key].Value != want || rows[key].Origin != path {
 			t.Errorf("%s: %+v, want %q from %s", key, rows[key], want, path)
@@ -146,6 +146,7 @@ func TestRunnerFileRefusesAMistake(t *testing.T) {
 		{"credentials: [product]\n", `credentials is a mapping`},
 		{"run: {timeout: soon}\n", `run.timeout "soon" is not a duration above zero`},
 		{"run: {stop_grace: 0s}\n", `run.stop_grace "0s" is not a duration above zero`},
+		{"run: {stop_signal: SIGKILL}\n", `run.stop_signal: the stop signal "SIGKILL" is not one of`},
 		{"apiVersion: qory.dev/v9\n", "qory.dev/v9"},
 	} {
 		path := runnerFile(t, c.body)

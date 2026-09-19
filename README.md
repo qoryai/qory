@@ -402,7 +402,8 @@ wall:                    # start the runtime in a container; optional
   memory: 14g                           # and cpus, pids_limit, shm_size; optional
 run:                     # optional
   timeout: 5h30m         # stop a runtime that still runs then
-  stop_grace: 30s        # between SIGTERM and SIGKILL when the runner stops it; 10s
+  stop_signal: SIGINT    # what asks it to leave when the runner stops it; SIGTERM
+  stop_grace: 30s        # between that signal and SIGKILL; 10s
 ```
 
 A module declares the hosts it reaches under `egress` in its manifest, and the compose
