@@ -25,9 +25,15 @@ section in mode enforce the run reaches the file's hosts the section covers, and
 no section, or one in mode observe, the file stands as it is. Its webhook section
 posts every event somewhere as well; when one is configured the runner pings it first
 and does not start unless it answers. --local runs with the files alone, webhook or
-not. A descriptor override, <runtime>.yaml under runtimes in the same
-directory, replaces the built-in description of how the runtime's output and hooks map
-to events.
+not.
+
+Any runtime the harness is composed for runs this way. What qory run knows of one, how
+its hooks are installed, what its output means and which signal asks it to leave, is a
+descriptor in the runner contract's format: the runner's own, Claude Code's today, or
+<runtime>.yaml under runtimes in the same directory, which describes a
+runtime the runner ships nothing for or replaces what it ships. A runtime with neither
+runs all the same: the run, its log and its egress are recorded, the events of the
+session inside it are not.
 
 A wall starts the runtime in a container with no route out except to that proxy, so a
 program that ignores the proxy reaches nothing instead of going unseen: --wall docker,
@@ -70,7 +76,7 @@ puts the caller's own names, a key in a queue, a repository, an issue, into
 ai.qory.run.started, where a receiver finds them. --timeout stops a runtime that still
 runs after that long, 5h30m say: ai.qory.run.exited says the limit was the reason, and
 the exit status is 124, as timeout(1) has it. Stopped at the limit or by a signal to
-qory run, the runtime gets --stop-signal, SIGTERM unless named, and, --stop-grace later,
+qory run, the runtime gets --stop-signal, SIGTERM unless named or the runtime's descriptor names one, and, --stop-grace later,
 10s unless named, SIGKILL: the time a session needs to close what it has open. Runtimes
 differ in what a signal means, one closes its session on SIGINT and drops it on SIGTERM,
 so the signal is yours to name: SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2.

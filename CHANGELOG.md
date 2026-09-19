@@ -26,6 +26,13 @@ release may change what an existing document does, and says so under Upgrading.
   `wall.memory`, `wall.pids_limit`, `wall.shm_size`: what the container may use.
 - `qory run --run-id` and `--label key=value`: the caller's id for the run, a UUID, and
   its own names for it, reported in `ai.qory.run.started`.
+- `qory run` runs any runtime the harness is composed for, not Claude Code alone. What
+  it knows of one is a descriptor in the runner contract's format: the runner's own,
+  Claude Code's today, or `<runtime>.yaml` under `runtimes` in the user's configuration
+  directory, which describes a runtime the runner ships nothing for: what its output
+  means, and in a `stop` section which signal asks it to leave. A runtime with neither
+  runs bare: the run, its log and its egress are recorded, the session's events are not.
+  Before, a runtime without a descriptor did not start.
 - `qory run --timeout`, `--stop-signal` and `--stop-grace`, and `run.timeout`,
   `run.stop_signal` and `run.stop_grace` in `runner.yaml`: a runtime still running at the
   limit is stopped, `ai.qory.run.exited` carries `reason: timeout`, and the exit status

@@ -489,12 +489,12 @@ func (r *Runner) Rows() []Row {
 	if r != nil && r.StopSignal != "" {
 		rows = append(rows, Row{"runner.run.stop_signal", r.StopSignal, origin})
 	} else {
-		rows = append(rows, Row{"runner.run.stop_signal", session.DefaultStopSignal, Default})
+		rows = append(rows, Row{"runner.run.stop_signal", "(the runtime's, else " + session.DefaultStopSignal + ")", Default})
 	}
 	if r != nil && r.StopGrace > 0 {
 		rows = append(rows, Row{"runner.run.stop_grace", r.StopGrace.String(), origin})
 	} else {
-		rows = append(rows, Row{"runner.run.stop_grace", "10s", Default})
+		rows = append(rows, Row{"runner.run.stop_grace", "(the runtime's, else 10s)", Default})
 	}
 	if r != nil {
 		for _, c := range r.Credentials {

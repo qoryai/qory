@@ -70,11 +70,11 @@
           "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"
         },
         "stop_signal": {
-          "description": "The signal that asks a runtime to leave when the runner stops it, at the limit or on a signal to qory run. Runtimes differ in what a signal means, so it is the machine's to name. Default SIGTERM. --stop-signal names another for one run.",
+          "description": "The signal that asks a runtime to leave when the runner stops it, at the limit or on a signal to qory run. Runtimes differ in what a signal means, so the runtime's descriptor says which, and this key names another for every run on the machine. Default the descriptor's, and SIGTERM when it names none. --stop-signal names another for one run.",
           "enum": ["SIGTERM", "SIGINT", "SIGHUP", "SIGQUIT", "SIGUSR1", "SIGUSR2"]
         },
         "stop_grace": {
-          "description": "How long a runtime gets between the stop signal and SIGKILL when the runner stops it, at the limit or on a signal to qory run: the time a session needs to close what it has open. Default 10s. --stop-grace names another for one run.",
+          "description": "How long a runtime gets between the stop signal and SIGKILL when the runner stops it, at the limit or on a signal to qory run: the time a session needs to close what it has open. Default the runtime's descriptor's, and 10s when it names none. --stop-grace names another for one run.",
           "type": "string",
           "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"
         }

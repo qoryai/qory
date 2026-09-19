@@ -402,9 +402,17 @@ wall:                    # start the runtime in a container; optional
   memory: 14g                           # and cpus, pids_limit, shm_size; optional
 run:                     # optional
   timeout: 5h30m         # stop a runtime that still runs then
-  stop_signal: SIGINT    # what asks it to leave when the runner stops it; SIGTERM
+  stop_signal: SIGINT    # what asks it to leave; the runtime's descriptor's, else SIGTERM
   stop_grace: 30s        # between that signal and SIGKILL; 10s
 ```
+
+`qory run` runs whichever runtime the harness is composed for, and none of the above is
+particular to one. What the runner knows of a runtime is a descriptor, a file of data in
+the [runner contract](https://github.com/qoryai/runner/blob/main/contracts/runner/v1/README.md#the-runtime)'s
+format: how its hooks are installed, what its output means as events, which signal asks
+it to leave. The runner ships Claude Code's. `~/.config/qory/runtimes/<runtime>.yaml`
+describes another, or replaces the one shipped; and a runtime nothing describes runs all
+the same, the run, its log and its egress recorded and the session's own events not.
 
 A module declares the hosts it reaches under `egress` in its manifest, and the compose
 unions them into the report. When the harness declares, the runtime reaches the declared

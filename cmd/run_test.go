@@ -542,3 +542,80 @@ func TestResendClosesAndDeliversARunItsRunnerLeft(t *testing.T) {
 		t.Errorf("a run that is not recorded: %v", err)
 	}
 }
+
+// TestRunRunsARuntimeTheRunnerShipsNothingFor pins that qory run is not Claude Code's:
+// a runtime with no descriptor runs bare, the run recorded and the session not, with no
+// settings written for it; and a descriptor of the machine's makes its output events
+// and says which signal asks it to leave.
+func TestRunRunsARuntimeTheRunnerShipsNothingFor(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	script := filepath.Join(t.TempDir(), "fake-codex")
+	writeFile(t, script, `#!/bin/sh
+echo '{"kind":"done","text":"all good","session":"s-1","ok":true}'
+test -n "$QORY_TEST_WAIT" || exit 0
+trap 'exit 7' HUP
+trap '' TERM
+sleep 30 & wait
+`)
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "qory.yaml"), `apiVersion: qory.dev/v1alpha1
+harness:
+  launch:
+    codex:
+      command: `+script+`
+      args: []
+`)
+	if out, err := run(t, "harness", "compose", "--runtime", "codex", "--no-links"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	out, err := run(t, "run", "--headless")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "codex exited 0")
+	dir, evs := events(t, root)
+	started := evs["ai.qory.run.started"]
+	if len(started) != 1 || started[0]["runtime"] != "codex" || started[0]["runtime_version"] != nil {
+		t.Errorf("run.started %v", started)
+	}
+	if len(evs["ai.qory.session.result"]) != 0 || len(evs["ai.qory.run.exited"]) != 1 {
+		t.Errorf("a bare runtime's events: %v", evs)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "settings.json")); !os.IsNotExist(err) {
+		t.Error("Claude Code's settings were written for another runtime")
+	}
+	if err := os.RemoveAll(filepath.Join(root, ".qory", "runs")); err != nil {
+		t.Fatal(err)
+	}
+
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", cmd.DescriptorsDir, "codex.yaml"), `version: 1
+runtime: codex
+runtime_version: "0.9"
+sources:
+  output: {format: jsonl}
+stop: {signal: SIGHUP}
+rules:
+  - source: output
+    match: {kind: done}
+    type: ai.qory.session.result
+    data: {session_id: session, outcome: text, is_error: ok}
+`)
+	t.Setenv("QORY_TEST_WAIT", "1")
+	out, err = run(t, "run", "--headless", "--timeout", "500ms")
+	if cmd.ExitCode(err) != 124 {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	_, evs = events(t, root)
+	if started := evs["ai.qory.run.started"]; len(started) != 1 || started[0]["runtime_version"] != "0.9" {
+		t.Errorf("run.started %v", started)
+	}
+	if result := evs["ai.qory.session.result"]; len(result) != 1 || result[0]["outcome"] != "all good" {
+		t.Errorf("session.result %v", result)
+	}
+	if exited := evs["ai.qory.run.exited"]; len(exited) != 1 || exited[0]["exit_code"] != float64(7) {
+		t.Errorf("the descriptor's signal did not ask it to leave: %v", exited)
+	}
+}
