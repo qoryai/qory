@@ -133,6 +133,76 @@ Both modules ship a greet skill. The README that `qory setup example` writes say
 line to delete to watch `qory` refuse the collision. For a real repository, run
 `qory setup repo` instead.
 
+### The same example, observed, then behind a wall
+
+`qory run` starts the agent on the composed harness inside the session runner: every
+connection it makes goes through a proxy on your machine, and the session is recorded.
+
+```sh
+qory run -- -p "/hello"         # one headless turn, observed
+cat .qory/runs/*/events.jsonl   # what it reached, what it said, how it ended
+```
+
+Without a wall the proxy sees only programs that honour it. A **wall** starts the agent
+in a container whose one route out is that proxy. It needs the `docker` command and an
+image of yours that holds the agent; `qory` builds none. A minimal one for Claude Code:
+
+```dockerfile
+FROM node:22-slim
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
+ && rm -rf /var/lib/apt/lists/* && npm install -g @anthropic-ai/claude-code
+# The container runs as your user, who has no home in the image.
+ENV HOME=/tmp
+```
+
+```sh
+docker build -t hello-agent:1 .
+export CLAUDE_CODE_OAUTH_TOKEN=...       # from `claude setup-token`; or ANTHROPIC_API_KEY
+qory run --wall docker --image hello-agent:1 --env CLAUDE_CODE_OAUTH_TOKEN -- -p "/hello"
+```
+
+On a Mac, name the Linux build of the same `qory` release as `wall.helper` first; see
+[Running a session](#running-a-session). That run hands the token to the container. The
+last step keeps it outside: say in `~/.config/qory/runner.yaml` what this machine has
+and what the agent may reach,
+
+```yaml
+apiVersion: qory.dev/v1alpha1
+egress:
+  mode: enforce
+  allow: [api.anthropic.com]
+credentials:
+  model:
+    env: CLAUDE_CODE_OAUTH_TOKEN
+    hosts: [api.anthropic.com]
+    auth: {scheme: bearer}
+    placeholders: [CLAUDE_CODE_OAUTH_TOKEN]
+wall:
+  adapter: docker
+  image: hello-agent:1
+```
+
+and give the run a policy that selects the credential, kept outside the checkout:
+
+```yaml
+# ~/hello-policy.yaml
+version: 1
+egress:
+  mode: enforce
+  allow: [api.anthropic.com]
+credentials:
+  - name: model
+```
+
+```sh
+qory run --policy ~/hello-policy.yaml -- -p "/hello"
+```
+
+The agent greets you as before. Inside the container `CLAUDE_CODE_OAUTH_TOKEN` is a
+placeholder; the proxy sets the real token on each request to `api.anthropic.com`, which
+the record lists with the credential's name and never its value, and everything else the
+agent tries to reach is denied and recorded.
+
 ## Worktrees
 
 One branch per worktree, beside the main checkout. `qory` prepares the worktree the way
@@ -328,7 +398,21 @@ wall:                    # start the runtime in a container; optional
   adapter: docker
   image: example.com/agent:1            # yours: the runtime and your toolchain
   env: [ANTHROPIC_API_KEY]              # names; nothing else of your environment goes in
+  mounts: [/srv/odoo:ro]                # what else of your machine it sees; optional
+  memory: 14g                           # and cpus, pids_limit, shm_size; optional
+run:                     # optional
+  timeout: 5h30m         # stop a runtime that still runs then
+  stop_signal: SIGINT    # what asks it to leave; the runtime's descriptor's, else SIGTERM
+  stop_grace: 30s        # between that signal and SIGKILL; 10s
 ```
+
+`qory run` runs whichever runtime the harness is composed for, and none of the above is
+particular to one. What the runner knows of a runtime is a descriptor, a file of data in
+the [runner contract](https://github.com/qoryai/runner/blob/main/contracts/runner/v1/README.md#the-runtime)'s
+format: how its hooks are installed, what its output means as events, which signal asks
+it to leave. The runner ships Claude Code's. `~/.config/qory/runtimes/<runtime>.yaml`
+describes another, or replaces the one shipped; and a runtime nothing describes runs all
+the same, the run, its log and its egress recorded and the session's own events not.
 
 A module declares the hosts it reaches under `egress` in its manifest, and the compose
 unions them into the report. When the harness declares, the runtime reaches the declared
@@ -337,7 +421,79 @@ declares, the policy's list stands as it is.
 
 With a webhook configured the runner does not start unless the receiver answers;
 `--local` runs with the files alone. A denied connection is recorded and
-the session goes on; nothing here ends a session. The formats are in the runner's
+the session goes on; only a time limit you set ends a session: `--timeout 5h30m`, or
+`run.timeout`, stops the runtime then, `ai.qory.run.exited` says the limit was the
+reason, and `qory run` exits 124.
+
+A system that starts runs of its own names them and brings each its policy:
+
+```sh
+qory run --headless --run-id "$uuid" --label run_key=1234 --label issue=77 \
+  --policy /etc/factory/shop-policy.yaml --timeout 5h30m --stop-grace 30s -- -p "$prompt"
+```
+
+`--run-id` is the id the caller already holds, a UUID in lower case, and the labels go
+into `ai.qory.run.started`, where a receiver ties the run to what it knows. `--policy`
+is one run's own policy, in the runner contract's format, kept outside the checkout. It
+narrows only: under an `egress` section in mode `enforce` the run reaches the file's
+hosts the section covers; with no section, or one in mode `observe`, the file stands as
+it is. The webhook's secret stays the runner's: `QORY_WEBHOOK_SECRET` is taken out of
+the session's environment.
+
+### Credentials the agent never holds
+
+Behind a wall a run needs no credential inside the container. `runner.yaml` defines what
+the machine has, and a run's policy selects among it by name:
+
+```yaml
+# ~/.config/qory/runner.yaml
+credentials:
+  model:                                  # a token from qory run's environment
+    env: CLAUDE_CODE_OAUTH_TOKEN
+    hosts: [api.anthropic.com]
+    auth: {scheme: bearer}                # or basic with a username, or header with a name
+    placeholders: [CLAUDE_CODE_OAUTH_TOKEN]
+  product:                                # a token from an adapter of yours
+    adapter: [/opt/adapters/code-host, --repo, "${argument}"]
+    argument: '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+'
+```
+
+```yaml
+# the run's policy, given with --policy
+version: 1
+egress:
+  mode: enforce
+  allow: [api.anthropic.com, git.example.com, api.git.example.com]
+credentials:
+  - name: model
+  - {name: product, argument: acme/shop}
+```
+
+The runner keeps each token outside the container, and its proxy sets it on the requests
+to the hosts it is for. The container gets a placeholder where a program wants a
+credential set, and never the token. An **adapter** is a program of yours that knows one
+kind of host, a source code host say: it runs outside the container and prints the
+token, its expiry, and the hosts, the scheme and the paths the token is for, so `qory`
+names no host of its own. Its paths are the run's whole reach on those hosts: a
+credential for `acme/shop` opens no other organization's repository, and a path the
+adapter leaves out, the host's GraphQL endpoint say, is not reached. `egress.paths` in a
+policy holds a host to paths the same way with no credential. The
+[runner's contract](https://github.com/qoryai/runner/tree/main/contracts/runner/v1#credentials)
+has the adapter's document and the rules.
+
+For those hosts, and no other, the proxy ends the container's TLS itself, with an
+authority made for the run whose key never leaves the runner. The container is given
+one bundle to trust, its image's own authorities and the run's certificate, through
+`SSL_CERT_FILE`, `GIT_SSL_CAINFO`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE` and
+`CURL_CA_BUNDLE`, or the variables `wall.ca_env` names. The record lists the terminated
+hosts and, for each request to one, the method, the path and the credential's name.
+
+A job ends with `qory run resend <run-id>`, whatever happened before it. It sends the
+receiver what it has not accepted of the run's record, and nothing twice. After a runner
+that died it first closes the record, `ai.qory.run.exited` with `reason: runner_lost`,
+and removes the containers and networks the run's wall left. It refuses a run that is
+still going, and exits 1 when the receiver still has not taken everything after
+`--wait`, two minutes unless named. The formats are in the runner's
 [contract](https://github.com/qoryai/runner/tree/main/contracts/runner/v1).
 
 The proxy sees only programs that honour it. A **wall** makes the rest fail: with a
@@ -354,9 +510,14 @@ that holds the runtime; qory builds none. What to know:
 - Inside the container the relay and the hook forwarder are qory's own Linux build. On
   Linux that is the binary you run. On a Mac, download the Linux archive of the same
   release for your engine's architecture and name the binary as `wall.helper`.
-- The container sees the checkout it was started in and no other directory. In a git
-  worktree the repository's data lives in the main checkout, outside it, so git inside
-  the container does not work there yet; a clone works.
+- The container sees the checkout it was started in and no other directory, unless
+  `--mount <path>[:ro]` or `wall.mounts` shows it one, at its own path: a sibling
+  checkout the session reads, say. A socket is never mounted. In a git worktree the
+  repository's data lives in the main checkout, outside it, so git inside the container
+  works there only with that directory mounted; a clone works as it is.
+- `--cpus`, `--memory`, `--pids-limit` and `--shm-size`, or the keys of those names
+  under `wall`, limit what the container uses. A headless browser wants `--shm-size 2g`:
+  an engine's default `/dev/shm` is 64 MB.
 - Behind a wall the proxy reaches your own machine only for a host `egress.allow`
   names itself, in either mode, and never the cloud metadata address. For a local model
   endpoint or MCP server, list your machine's host name, and point the harness at that

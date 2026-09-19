@@ -914,7 +914,29 @@ wall:                            # the container the runtime starts in; absent: 
 | `wall.env` | none | names of variables of `qory run`'s environment that go into the container, the model credential say, with `--env` adding to them. The launch template's variables go in; nothing else of the environment does. A name with no value here is left out |
 | `wall.command` | `docker` | the program the adapter runs, `podman` say, supported where the runner's conformance suite passes |
 | `wall.user` | `qory run`'s own | the `uid:gid` the container runs as. Root is refused, so a machine where qory runs as root names another, one that can write the checkout |
+| `wall.mounts` | none | what the container sees of the machine beside the checkout and the composed home, each at its own path: an absolute path, with `:ro` after it for one the container cannot change; `--mount` adds to them. A socket, or a directory holding a container runtime's, is refused |
+| `wall.cpus`, `wall.memory`, `wall.pids_limit`, `wall.shm_size` | the engine's | what the container may use, as `docker run`'s flags of those names read them: `3.5`, `14g`, `4096`, `2g`. A flag of the same name sets another for one run |
+| `run.timeout` | none | how long a runtime may run, a duration such as `5h30m`. At the limit the runner stops it, `ai.qory.run.exited` carries `reason: timeout`, and `qory run` exits 124. `--timeout` names another for one run, and `--timeout 0` none |
+| `run.stop_signal` | the runtime's descriptor's, else `SIGTERM` | the signal that asks a runtime to leave when the runner stops it, at the limit or on a signal to `qory run`: `SIGTERM`, `SIGINT`, `SIGHUP`, `SIGQUIT`, `SIGUSR1` or `SIGUSR2`. Runtimes differ in what a signal means, one closes its session on SIGINT and drops it on SIGTERM, so the runtime's descriptor says which and the machine may name another; `--stop-signal` names another for one run |
+| `run.stop_grace` | the runtime's descriptor's, else `10s` | how long a runtime gets between the stop signal and SIGKILL; `--stop-grace` names another |
+| `wall.ca_env` | `SSL_CERT_FILE`, `GIT_SSL_CAINFO`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE` | the variables that point a program in the container at the authorities it trusts, the image's own and the run's, when a run holds a credential or has path rules |
+| `credentials.<name>` | none | a credential this machine has for its runs. Exactly one of `env`, a variable of `qory run`'s environment, `file`, an absolute path read whenever the token is used, and `adapter`, a program by its absolute path with its arguments, says where the token comes from. An adapter prints the token with the hosts, the scheme and the paths it is for, the runner contract's `credential.schema.json`, and takes the policy's argument as `${argument}` when `argument`, a regular expression, matches it whole; its `hosts` and `paths` here are the most it may claim. With `env` and `file`, `hosts`, `auth` (`scheme: bearer`, `basic` with `username`, or `header` with `header`) and `paths` say how the token is used. `placeholders` names variables the container gets with a value that is no credential |
 | `wall.helper` | this binary, on Linux | the absolute path of a static Linux build of qory for the engine's architecture, mounted read-only into the container as the relay and the hook forwarder. Required where qory itself is not a Linux build |
+
+The egress section is the machine's policy. One run may bring its own, `qory run
+--policy <file>`, a document of the runner contract's policy format kept outside the
+checkout and outside everything the container may write. It narrows only: under a
+section in mode `enforce` the run reaches the file's hosts the section covers, and with
+no section, or one in mode `observe`, the file stands as it is. `QORY_WEBHOOK_SECRET`
+is the runner's own: it never enters a session's environment, and `wall.env` and
+`--env` refuse its name.
+
+A run's policy also selects credentials, `credentials: [{name: product, argument:
+acme/shop}]`, and may hold a host to paths, `egress.paths`. Both need the wall. The
+runner keeps a selected credential outside the container, and its proxy sets it on the
+requests to the hosts it is for, ending the container's TLS for those hosts alone with
+an authority made for the run. Of a host with paths the run reaches those and no other.
+A policy defines no credential: it chooses among the ones this file has.
 
 `qory config` lists the file's values under `runner.`; a file that does not read stops
 every command, the way a `qory.yaml` that does not read does. The schema is

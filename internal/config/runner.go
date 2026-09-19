@@ -8,8 +8,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
+	"github.com/qoryai/runner/session"
 	"gopkg.in/yaml.v3"
 
 	"github.com/qoryai/qory/internal/exports"
@@ -38,6 +41,31 @@ type Runner struct {
 	// Wall is what the runtime is enclosed in, nil when the file names none: the runtime
 	// is a process of this machine.
 	Wall *RunnerWall
+	// Timeout is how long a runtime may run on this machine, zero for no limit, and
+	// StopSignal the signal that asks it to leave when the runner stops it and StopGrace
+	// how long it gets between that and SIGKILL, empty and zero for the runner's
+	// defaults. --timeout, --stop-signal and --stop-grace name others for one run.
+	Timeout    time.Duration
+	StopSignal string
+	StopGrace  time.Duration
+	// Credentials are the credentials this machine defines, in the file's order. A
+	// run's policy selects among them by name; the runner holds each outside the
+	// container and its proxy sets it on the requests to the hosts it is for.
+	Credentials []RunnerCredential
+}
+
+// RunnerCredential is one entry of the credentials section. Exactly one of Env, File
+// and Adapter says where the token comes from; an adapter says how its token is used,
+// and for the other two Hosts, Scheme, Username, Header and Paths do.
+type RunnerCredential struct {
+	Name                     string
+	Env, File                string
+	Adapter                  []string
+	Argument                 string
+	Hosts                    []string
+	Scheme, Username, Header string
+	Paths                    []string
+	Placeholders             []string
 }
 
 // WallDocker is the one wall adapter there is.
@@ -64,6 +92,42 @@ type RunnerWall struct {
 	// checkout's files keep their owner. Root is refused, so a machine where qory runs
 	// as root names one.
 	User string
+	// Mounts are what the container sees of this machine beside the checkout and the
+	// composed home, each at its own path; --mount adds to them.
+	Mounts []RunnerMount
+	// CPUs, Memory, PIDs and ShmSize limit what the container uses, as docker run's
+	// --cpus, --memory, --pids-limit and --shm-size do; empty or zero is the engine's
+	// default, and a flag of the same name sets another for one run.
+	CPUs    string
+	Memory  string
+	PIDs    int
+	ShmSize string
+	// CAEnv names the variables that point a program in the container at the bundle of
+	// authorities, when a run has one of its own; nil means the runner's defaults.
+	CAEnv []string
+}
+
+// RunnerMount is one file or directory of this machine a walled run sees, at the same
+// path.
+type RunnerMount struct {
+	Path     string
+	ReadOnly bool
+}
+
+// ParseMount reads a mount as wall.mounts and --mount write it: an absolute path, and
+// :ro after it for one the container cannot change. :rw says the default aloud.
+func ParseMount(v string) (RunnerMount, error) {
+	m := RunnerMount{Path: v}
+	if p, ok := strings.CutSuffix(v, ":ro"); ok {
+		m = RunnerMount{Path: p, ReadOnly: true}
+	} else if p, ok := strings.CutSuffix(v, ":rw"); ok {
+		m.Path = p
+	}
+	if !filepath.IsAbs(m.Path) {
+		return m, fmt.Errorf("the mount %q is not an absolute path, with :ro after it for a read-only one", v)
+	}
+	m.Path = filepath.Clean(m.Path)
+	return m, nil
 }
 
 // RunnerEgress is the egress section: the policy the runner pins for every run on this
@@ -99,13 +163,25 @@ type runnerFile struct {
 		Secret *string   `yaml:"secret"`
 		Events *[]string `yaml:"events"`
 	} `yaml:"webhook,omitempty"`
-	Wall *struct {
+	Run *struct {
+		Timeout    *string `yaml:"timeout"`
+		StopSignal *string `yaml:"stop_signal"`
+		StopGrace  *string `yaml:"stop_grace"`
+	} `yaml:"run,omitempty"`
+	Credentials yaml.Node `yaml:"credentials,omitempty"`
+	Wall        *struct {
 		Adapter *string   `yaml:"adapter"`
 		Image   *string   `yaml:"image"`
 		Command *string   `yaml:"command"`
 		Helper  *string   `yaml:"helper"`
 		Env     *[]string `yaml:"env"`
 		User    *string   `yaml:"user"`
+		Mounts  *[]string `yaml:"mounts"`
+		CPUs    *string   `yaml:"cpus"`
+		Memory  *string   `yaml:"memory"`
+		PIDs    *int      `yaml:"pids_limit"`
+		ShmSize *string   `yaml:"shm_size"`
+		CAEnv   *[]string `yaml:"ca_env"`
 	} `yaml:"wall,omitempty"`
 }
 
@@ -186,6 +262,36 @@ func LoadRunner() (*Runner, error) {
 			r.Webhook.Events = append([]string{}, (*w.Events)...)
 		}
 	}
+	if run := f.Run; run != nil {
+		for _, d := range []struct {
+			key string
+			in  *string
+			out *time.Duration
+		}{{"run.timeout", run.Timeout, &r.Timeout}, {"run.stop_grace", run.StopGrace, &r.StopGrace}} {
+			if d.in == nil {
+				continue
+			}
+			v, err := time.ParseDuration(*d.in)
+			if err != nil || v <= 0 {
+				return nil, fmt.Errorf("%s: %s %q is not a duration above zero, 5h30m or 30s say", path, d.key, *d.in)
+			}
+			*d.out = v
+		}
+		if run.StopSignal != nil {
+			if *run.StopSignal == "" {
+				return nil, fmt.Errorf("%s: run.stop_signal is empty", path)
+			}
+			if err := session.CheckStopSignal(*run.StopSignal); err != nil {
+				return nil, fmt.Errorf("%s: run.stop_signal: %w", path, err)
+			}
+			r.StopSignal = *run.StopSignal
+		}
+	}
+	if f.Credentials.Kind != 0 {
+		if r.Credentials, err = readCredentials(path, &f.Credentials); err != nil {
+			return nil, err
+		}
+	}
 	if w := f.Wall; w != nil {
 		if w.Adapter == nil || *w.Adapter != WallDocker {
 			return nil, fmt.Errorf("%s: wall.adapter is required, and %s is the one there is", path, WallDocker)
@@ -206,8 +312,43 @@ func LoadRunner() (*Runner, error) {
 		if w.User != nil {
 			r.Wall.User = *w.User
 		}
+		if w.Mounts != nil {
+			for _, v := range *w.Mounts {
+				m, err := ParseMount(v)
+				if err != nil {
+					return nil, fmt.Errorf("%s: wall.mounts: %w", path, err)
+				}
+				r.Wall.Mounts = append(r.Wall.Mounts, m)
+			}
+		}
+		if w.CPUs != nil {
+			r.Wall.CPUs = *w.CPUs
+		}
+		if w.Memory != nil {
+			r.Wall.Memory = *w.Memory
+		}
+		if w.PIDs != nil {
+			if *w.PIDs < 1 {
+				return nil, fmt.Errorf("%s: wall.pids_limit is %d; a limit is at least 1", path, *w.PIDs)
+			}
+			r.Wall.PIDs = *w.PIDs
+		}
+		if w.ShmSize != nil {
+			r.Wall.ShmSize = *w.ShmSize
+		}
+		if w.CAEnv != nil {
+			for _, name := range *w.CAEnv {
+				if !envName.MatchString(name) {
+					return nil, fmt.Errorf("%s: wall.ca_env: %q is not a variable's name", path, name)
+				}
+				r.Wall.CAEnv = append(r.Wall.CAEnv, name)
+			}
+		}
 		if w.Env != nil {
 			for _, name := range *w.Env {
+				if name == EnvWebhookSecret {
+					return nil, fmt.Errorf("%s: wall.env: %s is the runner's own and never the session's", path, name)
+				}
 				if !envName.MatchString(name) {
 					return nil, fmt.Errorf("%s: wall.env: %q is not a variable's name; the value comes from the environment, never from this file", path, name)
 				}
@@ -216,6 +357,90 @@ func LoadRunner() (*Runner, error) {
 		}
 	}
 	return r, nil
+}
+
+// credentialFile is one entry of the credentials section as written.
+type credentialFile struct {
+	Env      *string   `yaml:"env"`
+	File     *string   `yaml:"file"`
+	Adapter  *[]string `yaml:"adapter"`
+	Argument *string   `yaml:"argument"`
+	Hosts    *[]string `yaml:"hosts"`
+	Paths    *[]string `yaml:"paths"`
+	Auth     *struct {
+		Scheme   *string `yaml:"scheme"`
+		Username *string `yaml:"username"`
+		Header   *string `yaml:"header"`
+	} `yaml:"auth"`
+	Placeholders *[]string `yaml:"placeholders"`
+}
+
+// readCredentials reads the credentials section, a mapping from name to entry, in the
+// file's order. What an entry may hold together is the runner's to say, and qory run
+// asks it before a run.
+func readCredentials(path string, node *yaml.Node) ([]RunnerCredential, error) {
+	if node.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("%s: credentials is a mapping from a name to a credential", path)
+	}
+	var out []RunnerCredential
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		c := RunnerCredential{Name: node.Content[i].Value}
+		var f credentialFile
+		// A node decodes loosely, so a key that is not one is refused here as the rest
+		// of the file refuses it.
+		if entry := node.Content[i+1]; entry.Kind == yaml.MappingNode {
+			for k := 0; k+1 < len(entry.Content); k += 2 {
+				switch key := entry.Content[k].Value; key {
+				case "env", "file", "adapter", "argument", "hosts", "paths", "auth", "placeholders":
+				default:
+					return nil, fmt.Errorf("%s: credentials.%s: key %q is not one", path, c.Name, key)
+				}
+			}
+		}
+		if err := node.Content[i+1].Decode(&f); err != nil {
+			return nil, fmt.Errorf("%s: credentials.%s: %w", path, c.Name, err)
+		}
+		if f.Env != nil {
+			c.Env = *f.Env
+		}
+		if f.File != nil {
+			if !filepath.IsAbs(*f.File) {
+				return nil, fmt.Errorf("%s: credentials.%s.file %q is not an absolute path", path, c.Name, *f.File)
+			}
+			c.File = *f.File
+		}
+		if f.Adapter != nil {
+			if len(*f.Adapter) == 0 || !filepath.IsAbs((*f.Adapter)[0]) {
+				return nil, fmt.Errorf("%s: credentials.%s.adapter is a program by its absolute path, and its arguments", path, c.Name)
+			}
+			c.Adapter = *f.Adapter
+		}
+		if f.Argument != nil {
+			c.Argument = *f.Argument
+		}
+		if f.Hosts != nil {
+			c.Hosts = *f.Hosts
+		}
+		if f.Paths != nil {
+			c.Paths = *f.Paths
+		}
+		if f.Auth != nil {
+			if f.Auth.Scheme != nil {
+				c.Scheme = *f.Auth.Scheme
+			}
+			if f.Auth.Username != nil {
+				c.Username = *f.Auth.Username
+			}
+			if f.Auth.Header != nil {
+				c.Header = *f.Auth.Header
+			}
+		}
+		if f.Placeholders != nil {
+			c.Placeholders = *f.Placeholders
+		}
+		out = append(out, c)
+	}
+	return out, nil
 }
 
 // loopback reports whether host is this machine: localhost or a loopback address.
@@ -256,6 +481,33 @@ func (r *Runner) Rows() []Row {
 	} else {
 		rows = append(rows, Row{"runner.webhook.url", "(none)", Default})
 	}
+	if r != nil && r.Timeout > 0 {
+		rows = append(rows, Row{"runner.run.timeout", r.Timeout.String(), origin})
+	} else {
+		rows = append(rows, Row{"runner.run.timeout", "(none)", Default})
+	}
+	if r != nil && r.StopSignal != "" {
+		rows = append(rows, Row{"runner.run.stop_signal", r.StopSignal, origin})
+	} else {
+		rows = append(rows, Row{"runner.run.stop_signal", "(the runtime's, else " + session.DefaultStopSignal + ")", Default})
+	}
+	if r != nil && r.StopGrace > 0 {
+		rows = append(rows, Row{"runner.run.stop_grace", r.StopGrace.String(), origin})
+	} else {
+		rows = append(rows, Row{"runner.run.stop_grace", "(the runtime's, else 10s)", Default})
+	}
+	if r != nil {
+		for _, c := range r.Credentials {
+			from := "env " + c.Env
+			switch {
+			case c.File != "":
+				from = "file " + c.File
+			case len(c.Adapter) > 0:
+				from = "adapter " + c.Adapter[0]
+			}
+			rows = append(rows, Row{"runner.credentials." + c.Name, from, origin})
+		}
+	}
 	if r != nil && r.Wall != nil {
 		rows = append(rows,
 			Row{"runner.wall.adapter", r.Wall.Adapter, origin},
@@ -270,6 +522,28 @@ func (r *Runner) Rows() []Row {
 		}
 		if r.Wall.User != "" {
 			rows = append(rows, Row{"runner.wall.user", r.Wall.User, origin})
+		}
+		if len(r.Wall.Mounts) > 0 {
+			var mounts []string
+			for _, m := range r.Wall.Mounts {
+				if m.ReadOnly {
+					mounts = append(mounts, m.Path+":ro")
+				} else {
+					mounts = append(mounts, m.Path)
+				}
+			}
+			rows = append(rows, Row{"runner.wall.mounts", strings.Join(mounts, ", "), origin})
+		}
+		for _, l := range [][2]string{{"cpus", r.Wall.CPUs}, {"memory", r.Wall.Memory}, {"shm_size", r.Wall.ShmSize}} {
+			if l[1] != "" {
+				rows = append(rows, Row{"runner.wall." + l[0], l[1], origin})
+			}
+		}
+		if len(r.Wall.CAEnv) > 0 {
+			rows = append(rows, Row{"runner.wall.ca_env", strings.Join(r.Wall.CAEnv, ", "), origin})
+		}
+		if r.Wall.PIDs > 0 {
+			rows = append(rows, Row{"runner.wall.pids_limit", strconv.Itoa(r.Wall.PIDs), origin})
 		}
 	} else {
 		rows = append(rows, Row{"runner.wall.adapter", "(none)", Default})

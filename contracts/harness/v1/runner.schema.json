@@ -59,6 +59,27 @@
         }
       }
     },
+    "run": {
+      "description": "What holds for every run on this machine unless a flag of qory run says otherwise.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "timeout": {
+          "description": "How long a runtime may run, as a duration: 5h30m. At the limit the runner stops it and ai.qory.run.exited says so. Default no limit. --timeout names another for one run.",
+          "type": "string",
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"
+        },
+        "stop_signal": {
+          "description": "The signal that asks a runtime to leave when the runner stops it, at the limit or on a signal to qory run. Runtimes differ in what a signal means, so the runtime's descriptor says which, and this key names another for every run on the machine. Default the descriptor's, and SIGTERM when it names none. --stop-signal names another for one run.",
+          "enum": ["SIGTERM", "SIGINT", "SIGHUP", "SIGQUIT", "SIGUSR1", "SIGUSR2"]
+        },
+        "stop_grace": {
+          "description": "How long a runtime gets between the stop signal and SIGKILL when the runner stops it, at the limit or on a signal to qory run: the time a session needs to close what it has open. Default the runtime's descriptor's, and 10s when it names none. --stop-grace names another for one run.",
+          "type": "string",
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"
+        }
+      }
+    },
     "wall": {
       "description": "The wall every run on this machine starts the runtime behind: a container with no route out except to the runner's proxy. Absent, the runtime is a process of this machine.",
       "type": "object",
@@ -103,6 +124,132 @@
           "description": "The uid:gid the container runs as. Default qory run's own, so the checkout's files keep their owner. Root is refused; a machine where qory runs as root names another.",
           "type": "string",
           "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*(:[A-Za-z0-9_][A-Za-z0-9_.-]*)?$"
+        },
+        "mounts": {
+          "description": "What the container sees of this machine beside the checkout and the composed home, each at its own path: an absolute path, with :ro after it for one the container cannot change. --mount adds to them. A socket, or a directory holding a container runtime's, is refused.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^/"
+          }
+        },
+        "cpus": {
+          "description": "How many processors' worth of time the container gets, a decimal number. Default the engine's.",
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?$"
+        },
+        "memory": {
+          "description": "The most memory the container gets: a number of bytes with an optional unit of b, k, m or g. Default the engine's.",
+          "type": "string",
+          "pattern": "^[0-9]+[bkmgBKMG]?$"
+        },
+        "pids_limit": {
+          "description": "The most processes and threads in the container. Default the engine's.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "shm_size": {
+          "description": "The size of /dev/shm in the container, written as memory is. A browser needs more than an engine's default.",
+          "type": "string",
+          "pattern": "^[0-9]+[bkmgBKMG]?$"
+        },
+        "ca_env": {
+          "description": "The variables that point a program in the container at the bundle of authorities it trusts, the image's own and the run's, when a run has an authority of its own. Default SSL_CERT_FILE, GIT_SSL_CAINFO, NODE_EXTRA_CA_CERTS, REQUESTS_CA_BUNDLE, CURL_CA_BUNDLE.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          }
+        }
+      }
+    },
+    "credentials": {
+      "description": "The credentials this machine has for its runs, by name. A run's policy selects among them and defines none. Behind a wall the runner keeps each outside the container and its proxy sets it on the requests to the hosts it is for, ending the container's TLS for those hosts alone. Exactly one of env, file and adapter says where the token comes from.",
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "env": {
+            "description": "A variable of qory run's environment that holds the token.",
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "file": {
+            "description": "The absolute path of a file that holds the token, read again whenever it is used.",
+            "type": "string",
+            "pattern": "^/"
+          },
+          "adapter": {
+            "description": "A program of yours, by its absolute path, and its arguments: it knows one kind of host, a source code host say, runs outside the container, and prints one JSON document, the runner contract's credential.schema.json: the token, when it expires, and the hosts, the scheme and the paths it is for. ${argument} in an argument is replaced by the argument the run's policy gives. The runner asks again before the token expires and when a host refuses it.",
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "argument": {
+            "description": "A regular expression the policy's argument must match whole, with an adapter. Absent, a policy passes none.",
+            "type": "string"
+          },
+          "hosts": {
+            "description": "With env or file, the hosts the token is for. With an adapter, the most it may claim.",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+            }
+          },
+          "paths": {
+            "description": "With env or file, the paths of the hosts the run may ask for, a path matched whole or up to a final * as a prefix; absent is every path. With an adapter, the most it may claim.",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^/[^*?#\\s]*\\*?$"
+            }
+          },
+          "auth": {
+            "description": "With env or file, how the token is set: bearer, basic with a username, or header with a header's name.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "scheme"
+            ],
+            "properties": {
+              "scheme": {
+                "type": "string",
+                "enum": [
+                  "bearer",
+                  "basic",
+                  "header"
+                ]
+              },
+              "username": {
+                "type": "string",
+                "minLength": 1
+              },
+              "header": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9-]+$"
+              }
+            }
+          },
+          "placeholders": {
+            "description": "Variables the container gets with a value that is no credential, for a program that does not start without one set; the proxy replaces what the program sends.",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            }
+          }
         }
       }
     }
