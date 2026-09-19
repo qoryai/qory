@@ -51,6 +51,19 @@ events.jsonl, one event per line, and output.log, the session's bytes. The exit 
 is the runtime's. qory run resend sends a finished run's record to the webhook again,
 after a runner that died or a receiver that was away.
 
+A run holds no credential it can be spared. The credentials section of runner.yaml
+defines what this machine has: a token from a variable of qory's environment, from a
+file, or from an adapter, a program of yours that knows one kind of host, a source code
+host say, and prints the token with the hosts, the scheme and the paths it is for. A
+run's policy selects credentials by name, with an argument for an adapter, a repository
+say, and defines none. Behind a wall the runner keeps each outside the container and
+its proxy sets it on the requests to the hosts it is for, ending the container's TLS
+for those hosts alone with an authority made for the run, which the container is given
+to trust beside its image's own. Of those hosts the run reaches the paths the
+credential names and no other, another organization's repositories say, and every
+other host stays a tunnel nobody reads. The policy's egress.paths holds a host to
+paths the same way with no credential.
+
 A caller that starts runs for a system of its own names them: --run-id gives the run
 the id the caller already holds, a UUID in lower case, and --label key=value, repeatable,
 puts the caller's own names, a key in a queue, a repository, an issue, into

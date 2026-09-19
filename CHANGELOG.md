@@ -30,6 +30,15 @@ release may change what an existing document does, and says so under Upgrading.
   `runner.yaml`: a runtime still running at the limit is stopped, `ai.qory.run.exited`
   carries `reason: timeout`, and the exit status is 124. The grace is the time between
   SIGTERM and SIGKILL whenever the runner stops the runtime, 10s unless named.
+- Credentials the agent never holds. The `credentials` section of `runner.yaml` defines
+  what the machine has: a token from `env`, from a `file`, or from an `adapter`, a
+  program of yours that knows one kind of host and prints the token with the hosts, the
+  scheme and the paths it is for. A run's policy selects among them by name, with an
+  argument for an adapter. Behind a wall the runner keeps each outside the container,
+  its proxy sets it on the requests to its hosts, and the container gets placeholders.
+  Of a host with paths the run reaches those and no other; `egress.paths` in a policy
+  does the same with no credential. `wall.ca_env` names the variables that point the
+  container at the authorities it trusts.
 - `qory run resend <run-id>`: a job's last step. It sends the webhook what it has not
   accepted of a finished run's record, closes a record a runner that died left without
   `ai.qory.run.exited`, with `reason: runner_lost`, and removes the containers and

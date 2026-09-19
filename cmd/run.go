@@ -90,6 +90,19 @@ events.jsonl, one event per line, and output.log, the session's bytes. The exit 
 is the runtime's. qory run resend sends a finished run's record to the webhook again,
 after a runner that died or a receiver that was away.
 
+A run holds no credential it can be spared. The credentials section of ` + config.RunnerFileName + `
+defines what this machine has: a token from a variable of qory's environment, from a
+file, or from an adapter, a program of yours that knows one kind of host, a source code
+host say, and prints the token with the hosts, the scheme and the paths it is for. A
+run's policy selects credentials by name, with an argument for an adapter, a repository
+say, and defines none. Behind a wall the runner keeps each outside the container and
+its proxy sets it on the requests to the hosts it is for, ending the container's TLS
+for those hosts alone with an authority made for the run, which the container is given
+to trust beside its image's own. Of those hosts the run reaches the paths the
+credential names and no other, another organization's repositories say, and every
+other host stays a tunnel nobody reads. The policy's egress.paths holds a host to
+paths the same way with no credential.
+
 A caller that starts runs for a system of its own names them: --run-id gives the run
 the id the caller already holds, a UUID in lower case, and --label key=value, repeatable,
 puts the caller's own names, a key in a queue, a repository, an issue, into
@@ -199,6 +212,15 @@ the time a session needs to close what it has open. run.timeout and run.stop_gra
 				Labels:        named,
 				Timeout:       timeout,
 				StopGrace:     grace,
+			}
+			if r := conf.Runner; r != nil {
+				for _, c := range r.Credentials {
+					def := session.Credential{Name: c.Name, Env: c.Env, File: c.File, Adapter: c.Adapter, Argument: c.Argument, Hosts: c.Hosts, Scheme: c.Scheme, Username: c.Username, Header: c.Header, Paths: c.Paths, Placeholders: c.Placeholders}
+					if err := def.Check(); err != nil {
+						return input(fmt.Errorf("%s: %w", config.RunnerFileName, err))
+					}
+					spec.Credentials = append(spec.Credentials, def)
+				}
 			}
 			if err := enclose(&spec, conf.Runner, o, exe, at.root, rep.Home, launch.Env); err != nil {
 				return err
@@ -391,7 +413,7 @@ func enclose(spec *session.Spec, r *config.Runner, o wallOptions, exe, root, hom
 		helper = exe
 	}
 	spec.Env = env
-	spec.Wall = &wall.Docker{Command: section.Command, Helper: helper, RelayArgs: []string{"run", "relay"}, User: section.User}
+	spec.Wall = &wall.Docker{Command: section.Command, Helper: helper, RelayArgs: []string{"run", "relay"}, User: section.User, CAEnv: section.CAEnv}
 	spec.Forwarder = []string{wall.HelperPath, "run", "forward"}
 	spec.Mounts = []wall.Mount{{Path: root}}
 	if !reallyWithin(root, home) {
