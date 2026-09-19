@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -86,7 +87,8 @@ At a terminal the session runs on a pseudo-terminal, so the runtime's own interf
 works and its bytes are still captured; --headless, or no terminal, runs it on pipes and
 reads its structured output. Either way the record is .qory/runs/<id>/ in the checkout:
 events.jsonl, one event per line, and output.log, the session's bytes. The exit status
-is the runtime's.
+is the runtime's. qory run resend sends a finished run's record to the webhook again,
+after a runner that died or a receiver that was away.
 
 A caller that starts runs for a system of its own names them: --run-id gives the run
 the id the caller already holds, a UUID in lower case, and --label key=value, repeatable,
@@ -248,7 +250,7 @@ the time a session needs to close what it has open. run.timeout and run.stop_gra
 	c.Flags().IntVar(&o.limits.PIDs, "pids-limit", 0, "the most processes and threads in the container ("+config.RunnerFileName+": wall.pids_limit)")
 	c.Flags().StringVar(&o.limits.ShmSize, "shm-size", "", "the size of /dev/shm in the container, 2g say ("+config.RunnerFileName+": wall.shm_size)")
 	homeFlags(c, &h)
-	c.AddCommand(newForward(), newRelay())
+	c.AddCommand(newResend(), newForward(), newRelay())
 	return c
 }
 
@@ -410,6 +412,80 @@ func enclose(spec *session.Spec, r *config.Runner, o wallOptions, exe, root, hom
 		spec.Limits.ShmSize = o.limits.ShmSize
 	}
 	return nil
+}
+
+// newResend builds the resend verb: the last step of a job that started a run, whatever
+// happened before it.
+func newResend() *cobra.Command {
+	var wait time.Duration
+	c := &cobra.Command{
+		Use:   "resend <run-id>",
+		Short: "Send a finished run's record to the webhook again, completing it first",
+		Long: `Send the record of a run that is over to the webhook of ` + config.RunnerFileName + `, for a run
+whose runner died or whose receiver was away: the step a job runs last, whatever
+happened before it. The run is named by its id, the directory under .qory/runs in this
+checkout.
+
+The run directory says what the receiver accepted, so only the rest is sent, in order,
+until it is accepted or --wait is over. A record with no ai.qory.run.exited, which a
+runner that died leaves, gets one first, with the reason runner_lost, and the
+containers and networks the run's wall left are removed. A run whose runner still
+lives is refused. A receiver may see an event twice and discards it by its id.
+
+The exit status is 0 when the receiver has everything, 1 when events remain, which
+are under the run directory's undelivered then.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			at, conf, err := locate(homeOptions{})
+			if err != nil {
+				return err
+			}
+			if err := session.CheckRunID(args[0]); err != nil {
+				return input(err)
+			}
+			r := conf.Runner
+			if r == nil || r.Webhook == nil {
+				return input(fmt.Errorf("%s names no webhook to send the record to", config.RunnerFileName))
+			}
+			spec := session.ResendSpec{
+				Dir:           filepath.Join(at.root, ".qory", "runs", args[0]),
+				Webhook:       &session.Webhook{Version: 1, URL: r.Webhook.URL, Secret: r.Webhook.Secret, Events: r.Webhook.Events},
+				RunnerVersion: build().title(),
+				Report:        func(line string) { fmt.Fprintln(cmd.ErrOrStderr(), "qory run resend:", line) },
+			}
+			if r.Wall != nil {
+				spec.Wall = &wall.Docker{Command: r.Wall.Command}
+			}
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			ctx, cancel := context.WithTimeout(ctx, wait)
+			defer cancel()
+			res, err := session.Resend(ctx, spec)
+			switch {
+			case errors.Is(err, session.ErrRunning):
+				return input(fmt.Errorf("the run %s is still going", args[0]))
+			case errors.Is(err, os.ErrNotExist):
+				return input(fmt.Errorf("no run %s is recorded in this checkout", args[0]))
+			case err != nil:
+				return err
+			}
+			u := ui.New(cmd.ErrOrStderr())
+			if res.Closed {
+				u.Success("the record had no exit and was closed with the reason runner_lost")
+			}
+			if res.Reaped > 0 {
+				u.Success("removed %d containers and networks the run left", res.Reaped)
+			}
+			if res.Undelivered > 0 {
+				u.Fail(fmt.Errorf("%d events were accepted and %d still are not; %s/undelivered holds them", res.Sent, res.Undelivered, ui.Short(spec.Dir, at.root)))
+				return reported(&exitError{code: 1})
+			}
+			u.Success("%d events were accepted; the receiver has the whole record", res.Sent)
+			return nil
+		},
+	}
+	c.Flags().DurationVar(&wait, "wait", 2*time.Minute, "how long to keep trying a receiver that does not accept")
+	return c
 }
 
 // reallyWithin is [within] by where both paths really are: a temporary directory and a

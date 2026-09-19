@@ -359,7 +359,14 @@ is one run's own policy, in the runner contract's format, kept outside the check
 narrows only: under an `egress` section in mode `enforce` the run reaches the file's
 hosts the section covers; with no section, or one in mode `observe`, the file stands as
 it is. The webhook's secret stays the runner's: `QORY_WEBHOOK_SECRET` is taken out of
-the session's environment. The formats are in the runner's
+the session's environment.
+
+A job ends with `qory run resend <run-id>`, whatever happened before it. It sends the
+receiver what it has not accepted of the run's record, and nothing twice. After a runner
+that died it first closes the record, `ai.qory.run.exited` with `reason: runner_lost`,
+and removes the containers and networks the run's wall left. It refuses a run that is
+still going, and exits 1 when the receiver still has not taken everything after
+`--wait`, two minutes unless named. The formats are in the runner's
 [contract](https://github.com/qoryai/runner/tree/main/contracts/runner/v1).
 
 The proxy sees only programs that honour it. A **wall** makes the rest fail: with a

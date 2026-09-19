@@ -30,6 +30,10 @@ release may change what an existing document does, and says so under Upgrading.
   `runner.yaml`: a runtime still running at the limit is stopped, `ai.qory.run.exited`
   carries `reason: timeout`, and the exit status is 124. The grace is the time between
   SIGTERM and SIGKILL whenever the runner stops the runtime, 10s unless named.
+- `qory run resend <run-id>`: a job's last step. It sends the webhook what it has not
+  accepted of a finished run's record, closes a record a runner that died left without
+  `ai.qory.run.exited`, with `reason: runner_lost`, and removes the containers and
+  networks that run's wall left. A run still going is refused.
 - Needs `github.com/qoryai/runner` after 0.2.0, which adds the limit, the labels, the
   container's limits and the policy's narrowing.
 

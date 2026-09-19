@@ -48,7 +48,8 @@ At a terminal the session runs on a pseudo-terminal, so the runtime's own interf
 works and its bytes are still captured; --headless, or no terminal, runs it on pipes and
 reads its structured output. Either way the record is .qory/runs/<id>/ in the checkout:
 events.jsonl, one event per line, and output.log, the session's bytes. The exit status
-is the runtime's.
+is the runtime's. qory run resend sends a finished run's record to the webhook again,
+after a runner that died or a receiver that was away.
 
 A caller that starts runs for a system of its own names them: --run-id gives the run
 the id the caller already holds, a UUID in lower case, and --label key=value, repeatable,
@@ -97,4 +98,5 @@ qory run [runtime] [-- argument...] [flags]
 ### SEE ALSO
 
 * [qory](qory.md)	 - Compose the harness a runtime loads from modules
+* [qory run resend](qory_run_resend.md)	 - Send a finished run's record to the webhook again, completing it first
 

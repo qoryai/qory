@@ -496,3 +496,49 @@ func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
 		t.Errorf("run.exited %v", exited)
 	}
 }
+
+// TestResendClosesAndDeliversARunItsRunnerLeft is a job's last step: the record of a
+// run nobody received, cut short the way a runner that died leaves it, is closed with
+// the reason and sent whole, once; a run that is not there is the user's mistake.
+func TestResendClosesAndDeliversARunItsRunnerLeft(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, fakeRuntime(t))
+	var got []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var batch []map[string]any
+		if r.Header.Get("X-Qory-Signature-256") == "" || json.NewDecoder(r.Body).Decode(&batch) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		got = append(got, batch...)
+	}))
+	defer srv.Close()
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "apiVersion: qory.dev/v1alpha1\nwebhook:\n  url: "+srv.URL+"\n  secret: sixteen-characters-at-least\n")
+	const id = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f"
+	if out, err := run(t, "run", "--local", "--run-id", id); cmd.ExitCode(err) != 3 {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	file := filepath.Join(root, ".qory", "runs", id, "events.jsonl")
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.SplitAfter(strings.TrimSuffix(string(data), "\n"), "\n")
+	writeFile(t, file, strings.Join(lines[:len(lines)-1], ""))
+
+	out, err := run(t, "run", "resend", id)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "runner_lost", fmt.Sprintf("%d events were accepted", len(lines)))
+	if last := got[len(got)-1]; len(got) != len(lines) || last["type"] != "ai.qory.run.exited" || last["data"].(map[string]any)["reason"] != "runner_lost" {
+		t.Errorf("the receiver got %d events, the last %v", len(got), last)
+	}
+	if out, err := run(t, "run", "resend", id); err != nil || !strings.Contains(out, "0 events were accepted") || len(got) != len(lines) {
+		t.Errorf("a second resend: %v\n%s", err, out)
+	}
+	if _, err := run(t, "run", "resend", "0191f2a4-3c5e-7b8d-9e0f-000000000000"); cmd.ExitCode(err) != cmd.ExitInput {
+		t.Errorf("a run that is not recorded: %v", err)
+	}
+}
