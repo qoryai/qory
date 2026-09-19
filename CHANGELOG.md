@@ -53,8 +53,9 @@ release may change what an existing document does, and says so under Upgrading.
   accepted of a finished run's record, closes a record a runner that died left without
   `ai.qory.run.exited`, with `reason: runner_lost`, and removes the containers and
   networks that run's wall left. A run still going is refused.
-- Needs `github.com/qoryai/runner` after 0.2.0, which adds the limit, the labels, the
-  container's limits and the policy's narrowing.
+- Needs `github.com/qoryai/runner` 0.3.0, which adds the limit, the labels, the
+  container's limits, the policy's narrowing, credentials held outside the container,
+  path rules, the resend and the runtime interface.
 
 ## [0.8.0] - 2026-09-17
 
