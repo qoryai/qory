@@ -55,10 +55,10 @@
 //	egress:                      # the run policy: absent is observe everything
 //	  mode: enforce              # or observe: record every connection, deny none
 //	  allow: [api.anthropic.com, "*.github.com"]
-//	webhook:                     # where every event is posted as well; absent is files only
-//	  url: https://example.com/qory/events
-//	  secret: ...                # or QORY_WEBHOOK_SECRET in the environment
-//	  events: ["*"]              # the types to post; absent is every type
+//	server:                      # the server every run reports to; absent is files only
+//	  url: https://qory.example  # a scheme and a host
+//	  access_key: ak_f1xt0re000000000
+//	  secret: ...                # or QORY_SERVER_SECRET in the environment
 //
 // [Load] discovers and reads the files, [Config] is the result, and [Config.Rows] says
 // where each value came from. [DiscoverStack] finds what a checkout composes, its

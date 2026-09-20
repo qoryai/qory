@@ -172,6 +172,44 @@ func TestRepoKeyReturnsOwnerAndNameFromTheOriginRemote(t *testing.T) {
 	}
 }
 
+// TestOriginNamesTheForgeAndTheRepository covers the forms an origin remote takes: the
+// host is the forge, a user and a port left out, and the path is the repository without
+// the leading slash and a .git suffix; a remote that is a path of this machine, a file
+// URL, a remote with no path, or no remote at all is no forge and no repository.
+func TestOriginNamesTheForgeAndTheRepository(t *testing.T) {
+	hermetic(t)
+	for _, c := range []struct{ url, forge, repository string }{
+		{"https://github.com/acme/shop.git", "github.com", "acme/shop"},
+		{"https://git.example.com/acme/app", "git.example.com", "acme/app"},
+		{"https://git.example.com/acme/app/", "git.example.com", "acme/app"},
+		{"https://git.example.com:8443/group/sub/app.git", "git.example.com", "group/sub/app"},
+		{"http://localhost:3000/acme/app.git", "localhost", "acme/app"},
+		{"git@github.com:acme/shop.git", "github.com", "acme/shop"},
+		{"Git.Example.COM:acme/app", "git.example.com", "acme/app"},
+		{"ssh://git@git.example.com:2222/acme/app.git", "git.example.com", "acme/app"},
+		{"ssh://git.example.com/acme/app", "git.example.com", "acme/app"},
+		{"file:///srv/git/app.git", "", ""},
+		{"/srv/git/acme/app.git", "", ""},
+		{"../app", "", ""},
+		{"https://git.example.com", "", ""},
+		{"https://git.example.com/", "", ""},
+		{"git@git.example.com:", "", ""},
+		{"", "", ""},
+	} {
+		root := initRepo(t, t.TempDir())
+		if c.url != "" {
+			git(t, root, "remote", "add", "origin", c.url)
+		}
+		forge, repository, ok := checkout.Origin(root)
+		if forge != c.forge || repository != c.repository || ok != (c.forge != "") {
+			t.Errorf("%q: got %q, %q, %v, want %q, %q", c.url, forge, repository, ok, c.forge, c.repository)
+		}
+	}
+	if forge, repository, ok := checkout.Origin(t.TempDir()); ok || forge != "" || repository != "" {
+		t.Errorf("no checkout: got %q, %q, %v", forge, repository, ok)
+	}
+}
+
 // TestRepoKeyFallsBackToTheDirectoryName covers a checkout with no origin remote and a
 // directory that is no checkout at all.
 func TestRepoKeyFallsBackToTheDirectoryName(t *testing.T) {

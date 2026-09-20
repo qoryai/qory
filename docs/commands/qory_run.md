@@ -16,16 +16,20 @@ What the runner does on this machine is runner.yaml in the configuration
 directory, ~/.config/qory, and nowhere else: a repository cannot set it. Its egress
 section is the policy, which can only narrow what the runtime reaches; no section means
 every connection is allowed and recorded, and a file that does not read means no run.
-When the harness declares egress, the hosts its modules and the runtime declare in the
-report, the runtime reaches the declared hosts the policy covers and nothing else; a
-harness that declares nothing leaves the policy's list as it is. --policy names one
-run's own policy, a file in the runner contract's policy format kept outside the
-checkout, for a machine that serves runs of different kinds. It narrows only: under a
-section in mode enforce the run reaches the file's hosts the section covers, and with
-no section, or one in mode observe, the file stands as it is. Its webhook section
-posts every event somewhere as well; when one is configured the runner pings it first
-and does not start unless it answers. --local runs with the files alone, webhook or
-not.
+The hosts the harness declares, its modules' and the runtime's in the report, are
+reported beside the policy as harness_hosts and narrow nothing; the policy alone says
+what the runtime reaches. --policy names one run's own policy, a file in the runner
+contract's policy format kept outside the checkout, for a machine without a server
+that serves runs of different kinds. It narrows only: under a section in mode enforce
+the run reaches the file's hosts the section covers, and with no section, or one in
+mode observe, the file stands as it is. The file's server section names the server
+every run reports to, with the access key and the secret the server issued this
+machine: the runner fetches the server's configuration first, signed, and does not
+start unless the server answers; the events go where the configuration says, and when
+it names a run configuration that is the run's policy, fetched for the checkout's forge
+and repository and reloaded when the server says it changed, so --policy is refused.
+--local runs with the files alone and the machine's policy; the server is not
+contacted.
 
 Any runtime the harness is composed for runs this way. What qory run knows of one, how
 its hooks are installed, what its output means and which signal asks it to leave, is a
@@ -54,8 +58,8 @@ At a terminal the session runs on a pseudo-terminal, so the runtime's own interf
 works and its bytes are still captured; --headless, or no terminal, runs it on pipes and
 reads its structured output. Either way the record is .qory/runs/<id>/ in the checkout:
 events.jsonl, one event per line, and output.log, the session's bytes. The exit status
-is the runtime's. qory run resend sends a finished run's record to the webhook again,
-after a runner that died or a receiver that was away.
+is the runtime's. qory run resend sends a finished run's record to the server again,
+after a runner that died or a server that was away.
 
 A run holds no credential it can be spared. The credentials section of runner.yaml
 defines what this machine has: a token from a variable of qory's environment, from a
@@ -73,7 +77,10 @@ paths the same way with no credential.
 A caller that starts runs for a system of its own names them: --run-id gives the run
 the id the caller already holds, a UUID in lower case, and --label key=value, repeatable,
 puts the caller's own names, a key in a queue, a repository, an issue, into
-ai.qory.run.started, where a receiver finds them. --timeout stops a runtime that still
+ai.qory.run.started, where a receiver finds them. Two come from the checkout's origin
+remote unless --label names them: forge, the remote's host, and repository, its path
+without the leading slash and .git, github.com and acme/shop say; a checkout with no
+remote, or one on this machine, carries neither. --timeout stops a runtime that still
 runs after that long, 5h30m say: ai.qory.run.exited says the limit was the reason, and
 the exit status is 124, as timeout(1) has it. Stopped at the limit or by a signal to
 qory run, the runtime gets --stop-signal, SIGTERM unless named or the runtime's descriptor names one, and, --stop-grace later,
@@ -98,12 +105,12 @@ qory run [runtime] [-- argument...] [flags]
   -h, --help                  help for run
       --home string           where the harness is composed: a directory outside the checkout, one home per checkout under it, or .qory/harness (qory.yaml: harness.home)
       --image string          the container's image under a wall (runner.yaml: wall.image)
-      --label stringArray     the caller's own name for the run, key=value, reported in ai.qory.run.started; repeatable
-      --local                 record to files only, even when a webhook is configured
+      --label stringArray     the caller's own name for the run, key=value, reported in ai.qory.run.started; repeatable. forge and repository come from the origin remote unless named
+      --local                 record to files only and run under the machine's policy, even when a server is configured; the server is not contacted
       --memory string         the most memory the container gets, 8g say (runner.yaml: wall.memory)
       --mount stringArray     a file or directory of this machine the container sees as well, at its own path, with :ro after it for one it cannot change; repeatable (runner.yaml: wall.mounts)
       --pids-limit int        the most processes and threads in the container (runner.yaml: wall.pids_limit)
-      --policy string         this run's own policy, a file outside the checkout in the runner contract's policy format; it narrows the egress section of runner.yaml and never widens it
+      --policy string         this run's own policy, a file outside the checkout in the runner contract's policy format; it narrows the egress section of runner.yaml and never widens it, and is refused with a server configured unless --local
       --run-id string         the run's id when the caller already holds one: a UUID in lower case (default a new one)
       --shm-size string       the size of /dev/shm in the container, 2g say (runner.yaml: wall.shm_size)
       --stop-grace duration   how long the runtime gets between the stop signal and SIGKILL when the runner stops it (default 10s; runner.yaml: run.stop_grace)
@@ -121,5 +128,5 @@ qory run [runtime] [-- argument...] [flags]
 ### SEE ALSO
 
 * [qory](qory.md)	 - Compose the harness a runtime loads from modules
-* [qory run resend](qory_run_resend.md)	 - Send a finished run's record to the webhook again, completing it first
+* [qory run resend](qory_run_resend.md)	 - Send a finished run's record to the server again, completing it first
 

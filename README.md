@@ -391,9 +391,10 @@ apiVersion: qory.dev/v1alpha1
 egress:                  # what the runtime may reach; enforce denies the rest
   mode: enforce          # or observe: record everything, deny nothing
   allow: [api.anthropic.com, "*.github.com"]
-webhook:                 # where to post the events as well; optional
-  url: https://example.com/qory/events
-  secret: sixteen-characters-at-least   # or QORY_WEBHOOK_SECRET in the environment
+server:                  # the server every run reports to; optional
+  url: https://qory.example             # a scheme and a host, nothing after
+  access_key: ak_f1xt0re000000000       # the key the server issued this machine
+  secret: fixture-secret-not-a-real-one # or QORY_SERVER_SECRET in the environment
 wall:                    # start the runtime in a container; optional
   adapter: docker
   image: example.com/agent:1            # yours: the runtime and your toolchain
@@ -415,12 +416,16 @@ describes another, or replaces the one shipped; and a runtime nothing describes 
 the same, the run, its log and its egress recorded and the session's own events not.
 
 A module declares the hosts it reaches under `egress` in its manifest, and the compose
-unions them into the report. When the harness declares, the runtime reaches the declared
-hosts the policy covers and nothing else; the policy is the ceiling. When no module
-declares, the policy's list stands as it is.
+unions them into the report. The runner reports them as `harness_hosts` in
+`ai.qory.run.policy_applied`, for a receiver to compare with the policy; they decide
+nothing. The policy alone says what the runtime reaches.
 
-With a webhook configured the runner does not start unless the receiver answers;
-`--local` runs with the files alone. A denied connection is recorded and
+With a server configured the runner starts by fetching the server's configuration,
+signed with the access key and the secret, and does not start unless the server
+answers: the events go where the configuration says, and when it names a run
+configuration, that is the run's policy, fetched for the checkout's forge and repository
+and reloaded when the server says it changed. `--local` runs with the files alone and
+the machine's policy; the server is not contacted. A denied connection is recorded and
 the session goes on; only a time limit you set ends a session: `--timeout 5h30m`, or
 `run.timeout`, stops the runtime then, `ai.qory.run.exited` says the limit was the
 reason, and `qory run` exits 124.
@@ -433,12 +438,17 @@ qory run --headless --run-id "$uuid" --label run_key=1234 --label issue=77 \
 ```
 
 `--run-id` is the id the caller already holds, a UUID in lower case, and the labels go
-into `ai.qory.run.started`, where a receiver ties the run to what it knows. `--policy`
-is one run's own policy, in the runner contract's format, kept outside the checkout. It
-narrows only: under an `egress` section in mode `enforce` the run reaches the file's
+into `ai.qory.run.started`, where a receiver ties the run to what it knows. Two labels
+come from the checkout's origin remote unless `--label` names them: `forge`, the
+remote's host, and `repository`, its path without the leading slash and `.git`, so
+`git@github.com:acme/shop.git` is `github.com` and `acme/shop`; a checkout with no
+remote, or one on this machine, carries neither. `--policy` is one run's own policy, in
+the runner contract's format, kept outside the checkout, for a machine without a server.
+It narrows only: under an `egress` section in mode `enforce` the run reaches the file's
 hosts the section covers; with no section, or one in mode `observe`, the file stands as
-it is. The webhook's secret stays the runner's: `QORY_WEBHOOK_SECRET` is taken out of
-the session's environment.
+it is. With a server configured the server's run configuration is the policy and
+`--policy` is refused; `--local` keeps it. The server's secret stays the runner's:
+`QORY_SERVER_SECRET` is taken out of the session's environment.
 
 ### Credentials the agent never holds
 
@@ -489,10 +499,10 @@ one bundle to trust, its image's own authorities and the run's certificate, thro
 hosts and, for each request to one, the method, the path and the credential's name.
 
 A job ends with `qory run resend <run-id>`, whatever happened before it. It sends the
-receiver what it has not accepted of the run's record, and nothing twice. After a runner
+server what it has not accepted of the run's record, and nothing twice. After a runner
 that died it first closes the record, `ai.qory.run.exited` with `reason: runner_lost`,
 and removes the containers and networks the run's wall left. It refuses a run that is
-still going, and exits 1 when the receiver still has not taken everything after
+still going, and exits 1 when the server still has not taken everything after
 `--wait`, two minutes unless named. The formats are in the runner's
 [contract](https://github.com/qoryai/runner/tree/main/contracts/runner/v1).
 
@@ -500,7 +510,7 @@ The proxy sees only programs that honour it. A **wall** makes the rest fail: wit
 `wall` section, or `--wall docker --image <image>` for one run, the runtime starts in a
 container on a network with no route out, and reaches the proxy, and nothing else,
 through a relay. The container sees the checkout and the composed home and nothing else
-of your machine; the runner, the policy, the record and the webhook's secret stay
+of your machine; the runner, the policy, the record and the server's secret stay
 outside. It needs the `docker` command and an engine behind it, and an image of yours
 that holds the runtime; qory builds none. What to know:
 

@@ -22,11 +22,11 @@ func runnerFile(t *testing.T, body string) string {
 	return path
 }
 
-// TestRunnerFileReadsBothSections reads egress and webhook, lists them with the file as
-// origin, and carries them on the configuration a checkout loads.
+// TestRunnerFileReadsBothSections reads egress and server, lists them with the file as
+// origin and the secret never, and carries them on the configuration a checkout loads.
 func TestRunnerFileReadsBothSections(t *testing.T) {
 	hermetic(t)
-	path := runnerFile(t, "apiVersion: qory.dev/v1alpha1\negress:\n  mode: enforce\n  allow: [api.anthropic.com, \"*.github.com\"]\nwebhook:\n  url: https://example.com/qory/events\n  secret: sixteen-characters-at-least\n  events: [ai.qory.run.exited]\n")
+	path := runnerFile(t, "apiVersion: qory.dev/v1alpha1\negress:\n  mode: enforce\n  allow: [api.anthropic.com, \"*.github.com\"]\nserver:\n  url: https://qory.example\n  access_key: ak_f1xt0re000000000\n  secret: fixture-secret-not-a-real-one\n")
 	c, err := config.Load(t.TempDir(), true)
 	if err != nil {
 		t.Fatal(err)
@@ -35,14 +35,17 @@ func TestRunnerFileReadsBothSections(t *testing.T) {
 	if r == nil || r.File != path || r.Egress == nil || r.Egress.Mode != "enforce" || strings.Join(r.Egress.Allow, " ") != "api.anthropic.com *.github.com" {
 		t.Fatalf("egress read as %+v", r)
 	}
-	if r.Webhook == nil || r.Webhook.URL != "https://example.com/qory/events" || r.Webhook.Secret != "sixteen-characters-at-least" || r.Webhook.FromEnv || strings.Join(r.Webhook.Events, " ") != "ai.qory.run.exited" {
-		t.Fatalf("webhook read as %+v", r.Webhook)
+	if r.Server == nil || r.Server.URL != "https://qory.example" || r.Server.AccessKey != "ak_f1xt0re000000000" || r.Server.Secret != "fixture-secret-not-a-real-one" || r.Server.FromEnv {
+		t.Fatalf("server read as %+v", r.Server)
 	}
 	rows := map[string]config.Row{}
 	for _, row := range c.Rows() {
 		rows[row.Key] = row
+		if strings.Contains(row.Value, "fixture-secret") || strings.Contains(row.Key, "secret") {
+			t.Errorf("the secret is listed: %+v", row)
+		}
 	}
-	for key, want := range map[string]string{"runner.egress.mode": "enforce", "runner.egress.allow": "api.anthropic.com, *.github.com", "runner.webhook.url": "https://example.com/qory/events", "runner.webhook.secret": "(set)", "runner.webhook.events": "ai.qory.run.exited"} {
+	for key, want := range map[string]string{"runner.egress.mode": "enforce", "runner.egress.allow": "api.anthropic.com, *.github.com", "runner.server.url": "https://qory.example", "runner.server.access_key": "ak_f1xt0re000000000"} {
 		if rows[key].Value != want || rows[key].Origin != path {
 			t.Errorf("%s: %+v, want %q from %s", key, rows[key], want, path)
 		}
@@ -99,22 +102,22 @@ func TestRunnerFileDefaults(t *testing.T) {
 	for _, row := range c.Rows() {
 		rows[row.Key] = row
 	}
-	if rows["runner.egress.mode"].Value != "observe" || rows["runner.egress.mode"].Origin != config.Default || rows["runner.webhook.url"].Value != "(none)" {
+	if rows["runner.egress.mode"].Value != "observe" || rows["runner.egress.mode"].Origin != config.Default || rows["runner.server.url"].Value != "(none)" {
 		t.Errorf("default rows %+v", rows)
 	}
 	runnerFile(t, "apiVersion: qory.dev/v1alpha1\n")
-	if c, err = config.Load(t.TempDir(), true); err != nil || c.Runner == nil || c.Runner.Egress != nil || c.Runner.Webhook != nil {
+	if c, err = config.Load(t.TempDir(), true); err != nil || c.Runner == nil || c.Runner.Egress != nil || c.Runner.Server != nil {
 		t.Errorf("empty file: %+v, %v", c.Runner, err)
 	}
-	t.Setenv(config.EnvWebhookSecret, "from-the-environment")
-	runnerFile(t, "webhook:\n  url: http://127.0.0.1:8787/events\n")
+	t.Setenv(config.EnvServerSecret, "from-the-environment")
+	runnerFile(t, "server:\n  url: http://127.0.0.1:8787\n  access_key: ak_f1xt0re000000000\n")
 	c, err = config.Load(t.TempDir(), true)
-	if err != nil || c.Runner.Webhook == nil || c.Runner.Webhook.Secret != "from-the-environment" || !c.Runner.Webhook.FromEnv || c.Runner.Egress != nil {
+	if err != nil || c.Runner.Server == nil || c.Runner.Server.Secret != "from-the-environment" || !c.Runner.Server.FromEnv || c.Runner.Egress != nil {
 		t.Fatalf("secret from the environment: %+v, %v", c.Runner, err)
 	}
 	for _, row := range c.Rows() {
-		if row.Key == "runner.webhook.secret" && row.Value != "(from "+config.EnvWebhookSecret+")" {
-			t.Errorf("secret row %+v", row)
+		if strings.Contains(row.Value, "from-the-environment") {
+			t.Errorf("the secret is listed: %+v", row)
 		}
 	}
 }
@@ -127,12 +130,18 @@ func TestRunnerFileRefusesAMistake(t *testing.T) {
 		{"egress: {allow: [a.example]}\n", "egress.mode is required"},
 		{"egress: {mode: log}\n", `egress.mode "log" is not observe or enforce`},
 		{"egress: {mode: enforce, allow: [\"api.example.com:443\"]}\n", `egress.allow: "api.example.com:443" is not a lower-case host name or a *. suffix`},
-		{"webhook: {secret: sixteen-characters-at-least}\n", "webhook.url is required"},
-		{"webhook: {url: \"ftp://x\", secret: sixteen-characters-at-least}\n", `webhook.url "ftp://x" is not an https URL`},
-		{"webhook: {url: \"http://example.com/e\", secret: sixteen-characters-at-least}\n", "is http to a host that is not this machine"},
-		{"webhook: {url: \"https://example.com/e\"}\n", "webhook.secret is missing; set it there or in QORY_WEBHOOK_SECRET"},
-		{"webhook: {url: \"https://example.com/e\", secret: short}\n", "webhook.secret is shorter than 16 characters"},
-		{"webhook: {url: \"https://example.com/e\", secret: sixteen-characters-at-least, events: [\"\"]}\n", "webhook.events names an empty type"},
+		{"server: {access_key: ak_f1xt0re000000000, secret: fixture-secret-not-a-real-one}\n", "server.url is required"},
+		{"server: {url: \"ftp://x\", access_key: ak_f1xt0re000000000, secret: fixture-secret-not-a-real-one}\n", `server.url "ftp://x" is not an https URL, or an http URL to this machine`},
+		{"server: {url: \"http://qory.example\", access_key: ak_f1xt0re000000000, secret: fixture-secret-not-a-real-one}\n", `server.url "http://qory.example" is http to a host that is not this machine`},
+		{"server: {url: \"https://qory.example/v1/events\", access_key: ak_f1xt0re000000000, secret: fixture-secret-not-a-real-one}\n", `server.url "https://qory.example/v1/events" is more than a scheme and a host`},
+		{"server: {url: \"https://qory.example/\", access_key: ak_f1xt0re000000000, secret: fixture-secret-not-a-real-one}\n", `is more than a scheme and a host`},
+		{"server: {url: \"https://qory.example\", secret: fixture-secret-not-a-real-one}\n", "server.access_key is required"},
+		{"server: {url: \"https://qory.example\", access_key: AK_F1XT0RE000000000, secret: fixture-secret-not-a-real-one}\n", `server.access_key "AK_F1XT0RE000000000" is not an access key: ak_ and 16 characters`},
+		{"server: {url: \"https://qory.example\", access_key: ak_f1xt0re0000000, secret: fixture-secret-not-a-real-one}\n", `server.access_key "ak_f1xt0re0000000" is not an access key: ak_ and 16 characters`},
+		{"server: {url: \"https://qory.example\", access_key: ak_f1xt0re000000000}\n", "server.secret is missing; set it there or in QORY_SERVER_SECRET"},
+		{"server: {url: \"https://qory.example\", access_key: ak_f1xt0re000000000, secret: short}\n", "server.secret is shorter than 16 characters"},
+		{"server: {url: \"https://qory.example\", access_key: ak_f1xt0re000000000, secret: fixture-secret-not-a-real-one, events: [\"*\"]}\n", `key "events" is not one`},
+		{"webhook: {url: \"https://example.com/e\", secret: sixteen-characters-at-least}\n", "webhook: qory 0.10.0 replaced this section with server; see the runner file docs"},
 		{"wall: {image: i}\n", "wall.adapter is required, and docker is the one there is"},
 		{"wall: {adapter: bubblewrap}\n", "wall.adapter is required, and docker is the one there is"},
 		{"wall: {adapter: docker, helper: qory-linux}\n", `wall.helper "qory-linux" is not an absolute path`},
@@ -140,7 +149,7 @@ func TestRunnerFileRefusesAMistake(t *testing.T) {
 		{"wall: {adapter: docker, network: host}\n", `key "network" is not one`},
 		{"wall: {adapter: docker, mounts: [srv]}\n", `wall.mounts: the mount "srv" is not an absolute path`},
 		{"wall: {adapter: docker, pids_limit: 0}\n", `wall.pids_limit is 0`},
-		{"wall: {adapter: docker, env: [QORY_WEBHOOK_SECRET]}\n", `the runner's own`},
+		{"wall: {adapter: docker, env: [QORY_SERVER_SECRET]}\n", `the runner's own`},
 		{"credentials: {product: {adapter: [git-host]}}\n", `credentials.product.adapter is a program by its absolute path`},
 		{"credentials: {product: {command: [/x]}}\n", `credentials.product: key "command" is not one`},
 		{"credentials: [product]\n", `credentials is a mapping`},
