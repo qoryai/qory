@@ -4,6 +4,54 @@ Every release of qory, newest first, in the shape of [Keep a Changelog](https://
 The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0 a minor
 release may change what an existing document does, and says so under Upgrading.
 
+## [0.10.0] - 2026-09-20
+
+### Upgrading
+
+- The `webhook` section of `runner.yaml` is gone, and a file that still has it is
+  refused with a message that says so. Put a `server` section in its place: `url`, the
+  server's scheme and host with nothing after, `access_key`, the key the control plane
+  issued this machine, and `secret`, in the file or in `QORY_SERVER_SECRET`;
+  `QORY_WEBHOOK_SECRET` is not read any more, and `wall.env` and `--env` refuse the new
+  name as they refused the old. At start the runner fetches the server's configuration,
+  signed with the key and the secret, posts the events where it says, and takes the
+  server's run configuration as the run's policy when it names one. A receiver of your
+  own implements the same contract, the runner's `contracts/runner/v1` at revision 1:
+  the discovery document and the events endpoint.
+- `qory run --policy` is refused when a server is configured, unless `--local` keeps
+  the run to the files: with a server the server's run configuration is the policy.
+- `qory config` lists `runner.server.url` and `runner.server.access_key` where it listed
+  `runner.webhook.*`; the secret is never listed.
+- The hosts a harness declares no longer narrow the policy. The runner reports them as
+  `harness_hosts` in `ai.qory.run.policy_applied`, renamed from `declared`, and `allow`
+  is the policy's own list. A machine that relied on the narrowing puts the hosts in
+  `egress.allow`.
+- Needs `github.com/qoryai/runner` 0.4.0, which replaces the webhook with the server.
+
+### Added
+
+- The `server` section of `runner.yaml`: `url`, `access_key` and `secret`, the runner
+  contract's server document, read and refused in the file's voice, and described by
+  `runner.schema.json`.
+- Two labels from the checkout's origin remote, unless `--label` names them: `forge`,
+  the remote's host, and `repository`, its path without the leading slash and `.git`,
+  so `git@github.com:acme/shop.git` is `github.com` and `acme/shop`. They go into
+  `ai.qory.run.started` as every label does, and the runner asks the server for the run
+  configuration by them. A checkout with no remote, or one on this machine, carries
+  neither, and nothing else is read from the remote.
+- What the runner reports at contract revision 1: `outcome` on every
+  `ai.qory.run.egress`, `connected`, `dial_failed` or `refused`; `harness_hosts`,
+  `source: fetched` with the `url` and the server's `run_configuration` digest on
+  `ai.qory.run.policy_applied`, and a second `policy_applied` when the server's run
+  configuration changes during a run; `contract_version` in the ping.
+
+### Changed
+
+- `qory run resend` sends the record to the server: it fetches the server's
+  configuration first and posts where it says.
+- The help of `qory run` and `qory run resend`, the README, the contract's runner file
+  section and the security policy say server where they said webhook.
+
 ## [0.9.0] - 2026-09-19
 
 ### Upgrading
@@ -591,7 +639,8 @@ The first release: a stack of modules composed into one tree, linked into the ch
 and kept out of git, with a report naming the module of every entry and a refusal when
 two modules provide the same one.
 
-[Unreleased]: https://github.com/qoryai/qory/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/qoryai/qory/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/qoryai/qory/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/qoryai/qory/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/qoryai/qory/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/qoryai/qory/compare/v0.6.0...v0.7.0
