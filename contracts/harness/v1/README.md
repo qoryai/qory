@@ -887,9 +887,10 @@ hands them to the runner as they are. `wall` chooses that contract's wall and sa
 ```yaml
 # ~/.config/qory/runner.yaml
 apiVersion: qory.dev/v1alpha1
-egress:                          # the run policy; absent: observe everything, deny nothing
-  mode: enforce                  # or observe: record every connection, deny none
+egress:                          # the run policy; absent: observe everything, nothing to deny by
+  mode: enforce                  # or observe: record every connection, deny only what deny names
   allow: [api.anthropic.com, "*.github.com"]
+  deny: [gist.github.com]        # denied in either mode, whatever allow says
 server:                          # the server every run reports to; absent: files only
   url: https://qory.example      # a scheme and a host; https, or http to this machine
   access_key: ak_f1xt0re000000000 # the key the server issued this machine
@@ -903,8 +904,9 @@ wall:                            # the container the runtime starts in; absent: 
 
 | Key | Default | Meaning |
 |---|---|---|
-| `egress.mode` | `observe` | `observe` records every connection and denies none; `enforce` denies a connection to a host outside `allow` and records the denial |
+| `egress.mode` | `observe` | `observe` records every connection and denies only what `deny` names; `enforce` denies a connection to a host outside `allow` as well, and records the denial |
 | `egress.allow` | none | the hosts the runtime may reach: a lower-case name, or `*.` and a name for every host below it, the grammar of a module's `egress` (§The module manifest). The hosts the harness declares are reported beside it as `harness_hosts` and narrow nothing |
+| `egress.deny` | none | the hosts the runtime may not reach, in `allow`'s grammar, in either mode: the runner decides them before the mode and the allow list, so a host an entry covers is denied under `observe` as under `enforce`, whatever `allow` says, with the entry as the rule recorded |
 | `server.url` | none | the server the run reports to: `https`, or `http` to this machine, a scheme and a host with nothing after. With it set, `qory run` fetches the server's configuration, signed, and does not start unless the server answers; the events go where it says, and its run configuration, when it names one, is the run's policy. `--local` runs with the files alone and the server is not contacted |
 | `server.access_key` | none | the key the server issued this machine, `ak_` and 16 characters; sent with every request |
 | `server.secret` | `QORY_SERVER_SECRET` | signs every request; at least 16 characters, never in a repository, never sent |
@@ -926,7 +928,8 @@ The egress section is the machine's policy. One run may bring its own, `qory run
 --policy <file>`, a document of the runner contract's policy format kept outside the
 checkout and outside everything the container may write. It narrows only: under a
 section in mode `enforce` the run reaches the file's hosts the section covers, and with
-no section, or one in mode `observe`, the file stands as it is. With a server configured
+no section, or one in mode `observe`, the file stands as it is; the `deny` lists of
+both hold either way. With a server configured
 the server's run configuration is the policy and `--policy` is refused, unless `--local`
 keeps the run to the files. `QORY_SERVER_SECRET` is the runner's own: it never enters a
 session's environment, and `wall.env` and `--env` refuse its name.

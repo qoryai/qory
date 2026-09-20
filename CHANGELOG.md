@@ -30,6 +30,12 @@ release may change what an existing document does, and says so under Upgrading.
 
 ### Added
 
+- `egress.deny` in `runner.yaml`: hosts the runtime may not reach, in `allow`'s
+  grammar, denied in either mode, under `observe` as under `enforce`, whatever
+  `allow` says of them. The list goes to the runner as written, `qory config` lists
+  it as `runner.egress.deny`, and a run's own `--policy` keeps the file's deny list
+  beside its own whatever the modes. Observe records every connection and denies
+  only what `deny` names.
 - The `server` section of `runner.yaml`: `url`, `access_key` and `secret`, the runner
   contract's server document, read and refused in the file's voice, and described by
   `runner.schema.json`.

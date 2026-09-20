@@ -26,13 +26,13 @@ func runnerFile(t *testing.T, body string) string {
 // origin and the secret never, and carries them on the configuration a checkout loads.
 func TestRunnerFileReadsBothSections(t *testing.T) {
 	hermetic(t)
-	path := runnerFile(t, "apiVersion: qory.dev/v1alpha1\negress:\n  mode: enforce\n  allow: [api.anthropic.com, \"*.github.com\"]\nserver:\n  url: https://qory.example\n  access_key: ak_f1xt0re000000000\n  secret: fixture-secret-not-a-real-one\n")
+	path := runnerFile(t, "apiVersion: qory.dev/v1alpha1\negress:\n  mode: enforce\n  allow: [api.anthropic.com, \"*.github.com\"]\n  deny: [gist.github.com, \"*.ads.example\"]\nserver:\n  url: https://qory.example\n  access_key: ak_f1xt0re000000000\n  secret: fixture-secret-not-a-real-one\n")
 	c, err := config.Load(t.TempDir(), true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := c.Runner
-	if r == nil || r.File != path || r.Egress == nil || r.Egress.Mode != "enforce" || strings.Join(r.Egress.Allow, " ") != "api.anthropic.com *.github.com" {
+	if r == nil || r.File != path || r.Egress == nil || r.Egress.Mode != "enforce" || strings.Join(r.Egress.Allow, " ") != "api.anthropic.com *.github.com" || strings.Join(r.Egress.Deny, " ") != "gist.github.com *.ads.example" {
 		t.Fatalf("egress read as %+v", r)
 	}
 	if r.Server == nil || r.Server.URL != "https://qory.example" || r.Server.AccessKey != "ak_f1xt0re000000000" || r.Server.Secret != "fixture-secret-not-a-real-one" || r.Server.FromEnv {
@@ -45,7 +45,7 @@ func TestRunnerFileReadsBothSections(t *testing.T) {
 			t.Errorf("the secret is listed: %+v", row)
 		}
 	}
-	for key, want := range map[string]string{"runner.egress.mode": "enforce", "runner.egress.allow": "api.anthropic.com, *.github.com", "runner.server.url": "https://qory.example", "runner.server.access_key": "ak_f1xt0re000000000"} {
+	for key, want := range map[string]string{"runner.egress.mode": "enforce", "runner.egress.allow": "api.anthropic.com, *.github.com", "runner.egress.deny": "gist.github.com, *.ads.example", "runner.server.url": "https://qory.example", "runner.server.access_key": "ak_f1xt0re000000000"} {
 		if rows[key].Value != want || rows[key].Origin != path {
 			t.Errorf("%s: %+v, want %q from %s", key, rows[key], want, path)
 		}
@@ -102,7 +102,7 @@ func TestRunnerFileDefaults(t *testing.T) {
 	for _, row := range c.Rows() {
 		rows[row.Key] = row
 	}
-	if rows["runner.egress.mode"].Value != "observe" || rows["runner.egress.mode"].Origin != config.Default || rows["runner.server.url"].Value != "(none)" {
+	if rows["runner.egress.mode"].Value != "observe" || rows["runner.egress.mode"].Origin != config.Default || rows["runner.egress.deny"].Value != "(none)" || rows["runner.server.url"].Value != "(none)" {
 		t.Errorf("default rows %+v", rows)
 	}
 	runnerFile(t, "apiVersion: qory.dev/v1alpha1\n")
@@ -130,6 +130,7 @@ func TestRunnerFileRefusesAMistake(t *testing.T) {
 		{"egress: {allow: [a.example]}\n", "egress.mode is required"},
 		{"egress: {mode: log}\n", `egress.mode "log" is not observe or enforce`},
 		{"egress: {mode: enforce, allow: [\"api.example.com:443\"]}\n", `egress.allow: "api.example.com:443" is not a lower-case host name or a *. suffix`},
+		{"egress: {mode: observe, deny: [\"tracker.example:443\"]}\n", `egress.deny: "tracker.example:443" is not a lower-case host name or a *. suffix`},
 		{"server: {access_key: ak_f1xt0re000000000, secret: fixture-secret-not-a-real-one}\n", "server.url is required"},
 		{"server: {url: \"ftp://x\", access_key: ak_f1xt0re000000000, secret: fixture-secret-not-a-real-one}\n", `server.url "ftp://x" is not an https URL, or an http URL to this machine`},
 		{"server: {url: \"http://qory.example\", access_key: ak_f1xt0re000000000, secret: fixture-secret-not-a-real-one}\n", `server.url "http://qory.example" is http to a host that is not this machine`},

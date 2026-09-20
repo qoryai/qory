@@ -14,15 +14,18 @@ qory run claude -- -p 'say hello' runs one headless turn.
 
 What the runner does on this machine is runner.yaml in the configuration
 directory, ~/.config/qory, and nowhere else: a repository cannot set it. Its egress
-section is the policy, which can only narrow what the runtime reaches; no section means
-every connection is allowed and recorded, and a file that does not read means no run.
+section is the policy, which can only narrow what the runtime reaches: its allow list,
+and its deny list, whose hosts are denied in either mode, under observe as under
+enforce, whatever allow says. No section means every connection is allowed and
+recorded, and a file that does not read means no run.
 The hosts the harness declares, its modules' and the runtime's in the report, are
 reported beside the policy as harness_hosts and narrow nothing; the policy alone says
 what the runtime reaches. --policy names one run's own policy, a file in the runner
 contract's policy format kept outside the checkout, for a machine without a server
 that serves runs of different kinds. It narrows only: under a section in mode enforce
 the run reaches the file's hosts the section covers, and with no section, or one in
-mode observe, the file stands as it is. The file's server section names the server
+mode observe, the file stands as it is; the deny lists of both hold either way. The
+file's server section names the server
 every run reports to, with the access key and the secret the server issued this
 machine: the runner fetches the server's configuration first, signed, and does not
 start unless the server answers; the events go where the configuration says, and when

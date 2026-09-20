@@ -39,7 +39,7 @@ type Runner struct {
 	// File is the path read.
 	File string
 	// Egress is the run policy's egress section, nil when the file names none: observe
-	// everything, deny nothing.
+	// everything, with no list to deny by.
 	Egress *RunnerEgress
 	// Server is the server every run reports to, nil when the file names none: the
 	// events go to files alone.
@@ -143,6 +143,10 @@ type RunnerEgress struct {
 	Mode string
 	// Allow are the hosts the runtime may reach, each a lower-case name or a *. suffix.
 	Allow []string
+	// Deny are the hosts the runtime may not reach, in the same grammar, in either
+	// mode: the runner decides them before the mode and the allow list. Passed to the
+	// runner as written.
+	Deny []string
 }
 
 // RunnerServer is the server section: the runner contract's server document, where a
@@ -166,6 +170,7 @@ type runnerFile struct {
 	Egress     *struct {
 		Mode  *string   `yaml:"mode"`
 		Allow *[]string `yaml:"allow"`
+		Deny  *[]string `yaml:"deny"`
 	} `yaml:"egress,omitempty"`
 	Server *struct {
 		URL       *string `yaml:"url"`
@@ -239,6 +244,14 @@ func LoadRunner() (*Runner, error) {
 					return nil, fmt.Errorf("%s: egress.allow: %q is not a lower-case host name or a *. suffix; no port, path or scheme", path, host)
 				}
 				r.Egress.Allow = append(r.Egress.Allow, host)
+			}
+		}
+		if e.Deny != nil {
+			for _, host := range *e.Deny {
+				if !module.EgressHost.MatchString(host) {
+					return nil, fmt.Errorf("%s: egress.deny: %q is not a lower-case host name or a *. suffix; no port, path or scheme", path, host)
+				}
+				r.Egress.Deny = append(r.Egress.Deny, host)
 			}
 		}
 	}
@@ -475,10 +488,11 @@ func (r *Runner) Rows() []Row {
 	if r != nil {
 		origin = r.File
 	}
-	rows := []Row{{"runner.egress.mode", "observe", Default}, {"runner.egress.allow", "(none)", Default}}
+	rows := []Row{{"runner.egress.mode", "observe", Default}, {"runner.egress.allow", "(none)", Default}, {"runner.egress.deny", "(none)", Default}}
 	if r != nil && r.Egress != nil {
 		rows[0] = Row{"runner.egress.mode", r.Egress.Mode, origin}
 		rows[1] = Row{"runner.egress.allow", listOrNone(r.Egress.Allow), origin}
+		rows[2] = Row{"runner.egress.deny", listOrNone(r.Egress.Deny), origin}
 	}
 	if r != nil && r.Server != nil {
 		rows = append(rows,

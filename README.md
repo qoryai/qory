@@ -389,8 +389,9 @@ repository cannot set it:
 # ~/.config/qory/runner.yaml
 apiVersion: qory.dev/v1alpha1
 egress:                  # what the runtime may reach; enforce denies the rest
-  mode: enforce          # or observe: record everything, deny nothing
+  mode: enforce          # or observe: record everything, deny only what deny names
   allow: [api.anthropic.com, "*.github.com"]
+  deny: [gist.github.com]                # denied in either mode, whatever allow says
 server:                  # the server every run reports to; optional
   url: https://qory.example             # a scheme and a host, nothing after
   access_key: ak_f1xt0re000000000       # the key the server issued this machine
@@ -446,8 +447,9 @@ remote, or one on this machine, carries neither. `--policy` is one run's own pol
 the runner contract's format, kept outside the checkout, for a machine without a server.
 It narrows only: under an `egress` section in mode `enforce` the run reaches the file's
 hosts the section covers; with no section, or one in mode `observe`, the file stands as
-it is. With a server configured the server's run configuration is the policy and
-`--policy` is refused; `--local` keeps it. The server's secret stays the runner's:
+it is; the `deny` lists of both hold either way. With a server configured the server's
+run configuration is the policy and `--policy` is refused; `--local` keeps it. The
+server's secret stays the runner's:
 `QORY_SERVER_SECRET` is taken out of the session's environment.
 
 ### Credentials the agent never holds
