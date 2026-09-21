@@ -11,8 +11,8 @@ import (
 
 // TestDeclaredEgressReachesTheRun is decision 0053 end to end: the modules' declarations
 // are unioned in the report with the runtime's own host under the runtime's name, the
-// inspect shows them, and qory run hands the hosts to the runner, which keeps the ones
-// the policy covers and records both lists.
+// inspect shows them, and qory run hands the hosts to the runner, which records them
+// as harness_hosts beside the policy's own list and narrows nothing by them.
 func TestDeclaredEgressReachesTheRun(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "egress-declared", root)
@@ -45,19 +45,21 @@ func TestDeclaredEgressReachesTheRun(t *testing.T) {
 	if len(applied) != 1 {
 		t.Fatalf("policy_applied %v", applied)
 	}
-	if got := list(applied[0]["declared"]); got != "*.github.com api.anthropic.com api.example.com registry.npmjs.org" {
-		t.Errorf("declared %q", got)
+	if got := list(applied[0]["harness_hosts"]); got != "*.github.com api.anthropic.com api.example.com registry.npmjs.org" {
+		t.Errorf("harness_hosts %q", got)
 	}
-	if got := list(applied[0]["allow"]); got != "api.anthropic.com api.example.com" {
-		t.Errorf("effective allow %q", got)
+	if got := list(applied[0]["allow"]); got != "api.anthropic.com *.example.com other.example.org" {
+		t.Errorf("allow %q, want the policy's own list", got)
+	}
+	if _, old := applied[0]["declared"]; old {
+		t.Error("policy_applied still carries declared")
 	}
 }
 
 // TestAnEmptyDeclarationStillHasTheRuntime is a harness whose one module declares an
 // empty list: the harness declares, so the runtime's own host joins under the runtime's
-// name and is all the run reaches, unlike a harness that declares nothing, whose run
-// keeps the policy's list, and unlike a runtime with no host of its own, which then
-// reaches nothing.
+// name and is reported as the harness's hosts, while the run reaches what the policy
+// allows, as it does for a harness that declares nothing.
 func TestAnEmptyDeclarationStillHasTheRuntime(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "egress-nothing", root)
@@ -76,7 +78,7 @@ func TestAnEmptyDeclarationStillHasTheRuntime(t *testing.T) {
 	}
 	_, evs := events(t, root)
 	applied := evs["ai.qory.run.policy_applied"]
-	if len(applied) != 1 || list(applied[0]["allow"]) != "api.anthropic.com" || list(applied[0]["declared"]) != "api.anthropic.com" {
+	if len(applied) != 1 || list(applied[0]["allow"]) != "api.anthropic.com *.example.com" || list(applied[0]["harness_hosts"]) != "api.anthropic.com" {
 		t.Errorf("policy_applied %v", applied)
 	}
 }

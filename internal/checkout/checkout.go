@@ -3,6 +3,7 @@ package checkout
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"net/url"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -44,6 +45,51 @@ func RepoKey(root string) string {
 	}
 	return filepath.Base(root)
 }
+
+// Origin returns the forge and the repository the origin remote of the checkout at root
+// names, the labels a run carries to a receiver: the forge is the remote's host, and
+// the repository its path without the leading slash and a trailing .git, so
+// git@git.example.com:acme/app.git, ssh://git@git.example.com:2222/acme/app and
+// https://git.example.com/acme/app all give git.example.com and acme/app. A user and a
+// port are not part of the host. It returns ok false, and nothing else, when root has no
+// origin remote, when git cannot be run, when the remote is a path of this machine, a
+// file:// URL or a bare path, or when the host or the path is empty: a run of a
+// repository that is nowhere else has no forge and no repository, and nothing invents
+// one.
+func Origin(root string) (forge, repository string, ok bool) {
+	remote, err := git(root, "remote", "get-url", "origin")
+	if err != nil {
+		return "", "", false
+	}
+	var host, path string
+	switch {
+	case strings.Contains(remote, "://"):
+		u, err := url.Parse(remote)
+		if err != nil {
+			return "", "", false
+		}
+		switch u.Scheme {
+		case "ssh", "https", "http":
+		default:
+			return "", "", false
+		}
+		host, path = u.Hostname(), u.Path
+	case scpRemote.MatchString(remote):
+		m := scpRemote.FindStringSubmatch(remote)
+		host, path = m[1], m[2]
+	default:
+		return "", "", false
+	}
+	path = strings.TrimSuffix(strings.TrimSuffix(strings.TrimPrefix(path, "/"), "/"), ".git")
+	if host == "" || path == "" {
+		return "", "", false
+	}
+	return strings.ToLower(host), path, true
+}
+
+// scpRemote is the scp-like remote, [user@]host:path, which has no scheme: the host is
+// everything before the first colon, and a slash before the colon makes it a local path.
+var scpRemote = regexp.MustCompile(`^(?:[^@/:]+@)?([^@/:]+):(.*)$`)
 
 // Dir is the directory qory keeps in a checkout, excluded from git: the composed harness
 // and its report.

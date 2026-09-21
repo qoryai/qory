@@ -1,6 +1,9 @@
 package cmd_test
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,11 +16,123 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/qoryai/qory/cmd"
 )
+
+// The server's credentials in every test: the runner contract's published fixture key
+// and secret.
+const (
+	testAccessKey = "ak_f1xt0re000000000"
+	testSecret    = "fixture-secret-not-a-real-one"
+)
+
+// fakeServer stands in for the server the runner reports to, the way the runner
+// contract has it: it verifies the key and the signature of every request, answers the
+// configuration document, the run configuration with the policy it was given, and
+// accepts every batch, keeping the events and the queries it saw.
+type fakeServer struct {
+	*httptest.Server
+	mu      sync.Mutex
+	policy  string
+	queries []string
+	events  []map[string]any
+	refused int
+}
+
+// newFakeServer starts a server whose run configuration carries policy, the JSON of a
+// security_policy, or names no run section when policy is empty.
+func newFakeServer(t *testing.T, policy string) *fakeServer {
+	t.Helper()
+	f := &fakeServer{policy: policy}
+	f.Server = httptest.NewServer(http.HandlerFunc(f.serve))
+	t.Cleanup(f.Close)
+	return f
+}
+
+// serve answers one request of the contract, or 401 with the contract's body.
+func (f *fakeServer) serve(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	unauthorized := func() {
+		f.refused++
+		w.WriteHeader(http.StatusUnauthorized)
+		io.WriteString(w, `{"error":"unauthorized"}`)
+	}
+	if r.Header.Get("X-Qory-Access-Key") != testAccessKey || r.Header.Get("X-Qory-Contract-Version") != "1" || !strings.HasPrefix(r.Header.Get("User-Agent"), "qory-runner/") {
+		unauthorized()
+		return
+	}
+	mac := hmac.New(sha256.New, []byte(testSecret))
+	switch r.Method {
+	case http.MethodGet:
+		mac.Write([]byte("GET\n" + r.URL.RequestURI() + "\n" + r.Header.Get("X-Qory-Timestamp")))
+	case http.MethodPost:
+		body, _ := io.ReadAll(r.Body)
+		mac.Write(body)
+		r.Body = io.NopCloser(strings.NewReader(string(body)))
+	}
+	if r.Header.Get("X-Qory-Signature-256") != "sha256="+hex.EncodeToString(mac.Sum(nil)) {
+		unauthorized()
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	switch r.Method + " " + r.URL.Path {
+	case "GET /.well-known/qory-configuration":
+		doc := `{"version":1,"events":{"url":"` + f.URL + `/v1/events","types":["*"]}`
+		if f.policy != "" {
+			doc += `,"run":{"url":"` + f.URL + `/v1/run-configuration"}`
+		}
+		doc += "}"
+		w.Header().Set("X-Qory-Configuration", digest(doc))
+		io.WriteString(w, doc)
+	case "GET /v1/run-configuration":
+		f.queries = append(f.queries, r.URL.RawQuery)
+		doc := `{"version":1,"security_policy":` + f.policy + `}`
+		w.Header().Set("X-Qory-Run-Configuration", digest(doc))
+		w.Header().Set("ETag", `"`+digest(doc)+`"`)
+		io.WriteString(w, doc)
+	case "POST /v1/events":
+		var batch []map[string]any
+		if r.Header.Get("X-Qory-Delivery") == "" || json.NewDecoder(r.Body).Decode(&batch) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		f.events = append(f.events, batch...)
+		w.WriteHeader(http.StatusAccepted)
+	default:
+		w.WriteHeader(http.StatusNotFound)
+	}
+}
+
+// digest is the server's digest of a document, as the contract's headers carry it.
+func digest(doc string) string {
+	sum := sha256.Sum256([]byte(doc))
+	return "sha256=" + hex.EncodeToString(sum[:])
+}
+
+// byType is the events the server accepted, by type.
+func (f *fakeServer) byType() map[string][]map[string]any {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[string][]map[string]any{}
+	for _, ev := range f.events {
+		typ, _ := ev["type"].(string)
+		data, _ := ev["data"].(map[string]any)
+		out[typ] = append(out[typ], data)
+	}
+	return out
+}
+
+// serverFile writes a runner file with the fake server as its server section, and what
+// more the test wants after it.
+func serverFile(t *testing.T, srv *fakeServer, more string) {
+	t.Helper()
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "apiVersion: qory.dev/v1alpha1\nserver:\n  url: "+srv.URL+"\n  access_key: "+testAccessKey+"\n  secret: "+testSecret+"\n"+more)
+}
 
 // fakeRuntime writes a program that stands in for a runtime: it prints its run id and
 // its arguments, checks that the runner's proxy and socket are in its environment, and
@@ -107,6 +222,9 @@ func TestRunRecordsTheSession(t *testing.T) {
 	if len(started) != 1 || started[0]["command"] != script || started[0]["interactive"] != false {
 		t.Errorf("run.started %v", started)
 	}
+	if labels, _ := started[0]["labels"].(map[string]any); len(labels) != 2 || labels["forge"] != "git.example.com" || labels["repository"] != "acme/app" {
+		t.Errorf("the labels from the origin remote: %v", started[0]["labels"])
+	}
 	applied := evs["ai.qory.run.policy_applied"]
 	if len(applied) != 1 || applied[0]["mode"] != "enforce" || applied[0]["source"] != "config" {
 		t.Errorf("run.policy_applied %v", applied)
@@ -116,7 +234,7 @@ func TestRunRecordsTheSession(t *testing.T) {
 		t.Errorf("run.exited %v", exited)
 	}
 	if len(evs["ai.qory.ping"]) != 0 {
-		t.Error("a ping was sent with no webhook configured")
+		t.Error("a ping was sent with no server configured")
 	}
 	log, err := os.ReadFile(filepath.Join(dir, "output.log"))
 	if err != nil || !strings.Contains(string(log), "hello from ") {
@@ -373,7 +491,7 @@ func TestRunRefusesAWallItCannotBuild(t *testing.T) {
 		{[]string{"run", "--mount", "/srv"}, "behind a wall"},
 		{[]string{"run", "--shm-size", "2g"}, "behind a wall"},
 		{[]string{"run", "--wall", "docker", "--image", "i", "--mount", "srv"}, "not an absolute path"},
-		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_WEBHOOK_SECRET"}, "the runner's own"},
+		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_SERVER_SECRET"}, "the runner's own"},
 		{[]string{"run", "--label", "issue"}, "not key=value"},
 		{[]string{"run", "--label", "Issue=1"}, "label key"},
 		{[]string{"run", "--run-id", "../x"}, "not a UUID"},
@@ -459,24 +577,32 @@ harness:
 }
 
 // TestRunIsNamedLimitedAndUnderItsOwnPolicy is a run started by a system of its own: the
-// id and the labels are the caller's, the run's policy file narrows the machine's and
-// never widens it, the runtime is stopped at the limit with timeout(1)'s status, and
-// the webhook's secret in qory's environment is not in the session's.
+// id and the labels are the caller's, and win over the origin remote's, the run's
+// policy file narrows the machine's and never widens it, the runtime is stopped at the
+// limit with timeout(1)'s status, and the server's secret in qory's environment is not
+// in the session's. With a server configured the run's own policy is refused, unless
+// --local keeps the run to the files.
 func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	script := filepath.Join(t.TempDir(), "slow-runtime")
-	writeFile(t, script, "#!/bin/sh\ntest -z \"$QORY_WEBHOOK_SECRET\" || exit 7\nexec sleep 30\n")
+	writeFile(t, script, "#!/bin/sh\ntest -z \"$QORY_SERVER_SECRET\" || exit 7\nexec sleep 30\n")
 	if err := os.Chmod(script, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	composedForFake(t, root, script)
-	t.Setenv("QORY_WEBHOOK_SECRET", "sixteen-characters-at-least")
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "apiVersion: qory.dev/v1alpha1\negress:\n  mode: enforce\n  allow: [\"*.github.com\", api.anthropic.com]\nwebhook:\n  url: https://example.com/events\n")
+	t.Setenv("QORY_SERVER_SECRET", testSecret)
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "apiVersion: qory.dev/v1alpha1\negress:\n  mode: enforce\n  allow: [\"*.github.com\", api.anthropic.com]\nserver:\n  url: https://qory.example\n  access_key: "+testAccessKey+"\n")
 	policy := filepath.Join(t.TempDir(), "run-policy.yaml")
 	writeFile(t, policy, "version: 1\negress:\n  mode: enforce\n  allow: [api.github.com, pypi.org]\n")
+	if _, err := run(t, "run", "--policy", policy); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "--policy is the run's own policy without a server; with server configured the server's run configuration is the policy") {
+		t.Errorf("--policy with a server: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".qory", "runs")); err == nil {
+		t.Error("a refused run left a record")
+	}
 	const id = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f"
-	out, err := run(t, "run", "--local", "--policy", policy, "--run-id", id, "--label", "run_key=queue/1234", "--label", "issue=77", "--timeout", "300ms", "--stop-grace", "2s")
+	out, err := run(t, "run", "--local", "--policy", policy, "--run-id", id, "--label", "run_key=queue/1234", "--label", "issue=77", "--label", "repository=acme/shop", "--timeout", "300ms", "--stop-grace", "2s")
 	if cmd.ExitCode(err) != 124 {
 		t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
@@ -485,7 +611,7 @@ func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
 	if filepath.Base(dir) != id {
 		t.Errorf("the run is recorded in %s", dir)
 	}
-	if labels, _ := evs["ai.qory.run.started"][0]["labels"].(map[string]any); labels["run_key"] != "queue/1234" || labels["issue"] != "77" {
+	if labels, _ := evs["ai.qory.run.started"][0]["labels"].(map[string]any); labels["run_key"] != "queue/1234" || labels["issue"] != "77" || labels["repository"] != "acme/shop" || labels["forge"] != "git.example.com" {
 		t.Errorf("run.started %v", evs["ai.qory.run.started"])
 	}
 	applied := evs["ai.qory.run.policy_applied"][0]
@@ -497,24 +623,79 @@ func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
 	}
 }
 
+// TestRunReportsToTheServer is a run with a server configured: the runner fetches the
+// server's configuration, signed with the key and the secret, pings, takes the server's
+// run configuration as the policy, asked for by the checkout's forge and repository,
+// and posts every event where the configuration says; the record says the policy was
+// fetched and from where.
+func TestRunReportsToTheServer(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, fakeRuntime(t))
+	srv := newFakeServer(t, `{"version":1,"egress":{"mode":"enforce","allow":["api.example"]}}`)
+	serverFile(t, srv, "egress:\n  mode: observe\n")
+	t.Setenv("QORY_TEST_EXIT", "0")
+	out, err := run(t, "run", "--label", "issue=77")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "claude exited 0")
+	_, evs := events(t, root)
+	applied := evs["ai.qory.run.policy_applied"]
+	if allow, _ := applied[0]["allow"].([]any); len(applied) != 1 || applied[0]["source"] != "fetched" || applied[0]["mode"] != "enforce" || len(allow) != 1 || allow[0] != "api.example" || applied[0]["url"] != srv.URL+"/v1/run-configuration" || applied[0]["run_configuration"] != digest(`{"version":1,"security_policy":`+srv.policy+`}`) {
+		t.Errorf("run.policy_applied %v", applied)
+	}
+	if srv.refused != 0 || strings.Join(srv.queries, " ") != "forge=git.example.com&repository=acme%2Fapp" {
+		t.Errorf("the server refused %d requests and was asked %q", srv.refused, srv.queries)
+	}
+	got := srv.byType()
+	if ping := got["ai.qory.ping"]; len(ping) != 1 || ping[0]["contract_version"] != float64(1) {
+		t.Errorf("the ping: %v", ping)
+	}
+	if started := got["ai.qory.run.started"]; len(started) != 1 || started[0]["labels"].(map[string]any)["issue"] != "77" || started[0]["labels"].(map[string]any)["repository"] != "acme/app" {
+		t.Errorf("the server's run.started: %v", started)
+	}
+	if len(got["ai.qory.run.exited"]) != 1 || len(got["ai.qory.run.policy_applied"]) != 1 {
+		t.Errorf("the server's events: %v", got)
+	}
+
+	// A server that names no run configuration leaves the machine's policy; a server
+	// that does not answer is no run.
+	if err := os.RemoveAll(filepath.Join(root, ".qory", "runs")); err != nil {
+		t.Fatal(err)
+	}
+	srv = newFakeServer(t, "")
+	serverFile(t, srv, "egress:\n  mode: enforce\n  allow: [api.example]\n")
+	if out, err := run(t, "run"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if _, evs := events(t, root); evs["ai.qory.run.policy_applied"][0]["source"] != "config" || len(srv.byType()["ai.qory.run.exited"]) != 1 {
+		t.Errorf("without a run section: %v", evs["ai.qory.run.policy_applied"])
+	}
+	if err := os.RemoveAll(filepath.Join(root, ".qory", "runs")); err != nil {
+		t.Fatal(err)
+	}
+	gone := newFakeServer(t, "")
+	gone.Close()
+	serverFile(t, gone, "")
+	if _, err := run(t, "run"); err == nil || !strings.Contains(err.Error(), gone.URL) {
+		t.Errorf("a server that does not answer: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".qory", "runs")); err == nil {
+		t.Error("a run the server did not answer left a record")
+	}
+}
+
 // TestResendClosesAndDeliversARunItsRunnerLeft is a job's last step: the record of a
 // run nobody received, cut short the way a runner that died leaves it, is closed with
-// the reason and sent whole, once; a run that is not there is the user's mistake.
+// the reason and sent whole, once, to the server's events endpoint after its
+// configuration was fetched; a run that is not there is the user's mistake.
 func TestResendClosesAndDeliversARunItsRunnerLeft(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, fakeRuntime(t))
-	var got []map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var batch []map[string]any
-		if r.Header.Get("X-Qory-Signature-256") == "" || json.NewDecoder(r.Body).Decode(&batch) != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		got = append(got, batch...)
-	}))
-	defer srv.Close()
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "apiVersion: qory.dev/v1alpha1\nwebhook:\n  url: "+srv.URL+"\n  secret: sixteen-characters-at-least\n")
+	srv := newFakeServer(t, "")
+	serverFile(t, srv, "")
 	const id = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f"
 	if out, err := run(t, "run", "--local", "--run-id", id); cmd.ExitCode(err) != 3 {
 		t.Fatalf("%v\n%s", err, out)
@@ -532,10 +713,11 @@ func TestResendClosesAndDeliversARunItsRunnerLeft(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	wants(t, out, "runner_lost", fmt.Sprintf("%d events were accepted", len(lines)))
+	got := srv.events
 	if last := got[len(got)-1]; len(got) != len(lines) || last["type"] != "ai.qory.run.exited" || last["data"].(map[string]any)["reason"] != "runner_lost" {
-		t.Errorf("the receiver got %d events, the last %v", len(got), last)
+		t.Errorf("the server got %d events, the last %v", len(got), last)
 	}
-	if out, err := run(t, "run", "resend", id); err != nil || !strings.Contains(out, "0 events were accepted") || len(got) != len(lines) {
+	if out, err := run(t, "run", "resend", id); err != nil || !strings.Contains(out, "0 events were accepted") || len(srv.events) != len(lines) {
 		t.Errorf("a second resend: %v\n%s", err, out)
 	}
 	if _, err := run(t, "run", "resend", "0191f2a4-3c5e-7b8d-9e0f-000000000000"); cmd.ExitCode(err) != cmd.ExitInput {

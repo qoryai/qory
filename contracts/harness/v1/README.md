@@ -357,15 +357,14 @@ itself. No ports, no paths, no schemes. The grammar is the runner contract's, th
 `https://qory.dev/contracts/runner/v1/policy.schema.json`, copied into the module schema and
 kept identical by a test; a host that is not in it is refused by name. The declarations of
 every composed module are unioned into the report's `egress` (§The report), and `qory run`
-hands the union to the runner, which keeps the declared hosts the run's policy covers: the
-policy is the ceiling, a declaration can only lower it. An `exclude` or an `only` does not
-touch the declaration; a module composed at all declares. A module with no `egress` key
-declares nothing, and a harness in which no module declares hands the runner no list, so
-the policy's own list stands. `egress: []` is a declaration that the module reaches
-nothing, and a harness whose modules declare, and between them name no host, reaches
-nothing under an enforce policy beyond what the runtime's own program needs. A module that
-declares states `qory: ">=0.5.0"` on the stack that ships it; an earlier qory refuses the
-key as unknown.
+hands the union to the runner, which reports it as `harness_hosts` in
+`ai.qory.run.policy_applied` beside the policy's own list, for a receiver to compare the
+two: the declaration decides nothing, the policy alone says what the run reaches. An
+`exclude` or an `only` does not touch the declaration; a module composed at all declares.
+A module with no `egress` key declares nothing, and a harness in which no module declares
+hands the runner no list. `egress: []` is a declaration that the module reaches nothing
+of its own. A module that declares states `qory: ">=0.5.0"` on the stack that ships it;
+an earlier qory refuses the key as unknown.
 
 A module's tree holds these entry kinds:
 
@@ -879,8 +878,8 @@ the document under `harness` is (§Extending a stack).
 **The runner file.** What `qory run` does on this machine is a second file,
 `runner.yaml`, beside the user's `qory.yaml` under the configuration directory and
 nowhere else: it has no counterpart in a repository or an ancestor directory, so a
-checkout cannot set the policy the agent runs under, where the run's events go or what
-the agent is enclosed in. `egress` and `webhook` are the runner contract's objects,
+checkout cannot set the policy the agent runs under, which server the run reports to or
+what the agent is enclosed in. `egress` and `server` are the runner contract's objects,
 `https://qory.dev/contracts/runner/v1/`, in the runner contract's grammar; `qory run`
 hands them to the runner as they are. `wall` chooses that contract's wall and says what
 `qory run` hands it.
@@ -888,13 +887,14 @@ hands them to the runner as they are. `wall` chooses that contract's wall and sa
 ```yaml
 # ~/.config/qory/runner.yaml
 apiVersion: qory.dev/v1alpha1
-egress:                          # the run policy; absent: observe everything, deny nothing
-  mode: enforce                  # or observe: record every connection, deny none
+egress:                          # the run policy; absent: observe everything, nothing to deny by
+  mode: enforce                  # or observe: record every connection, deny only what deny names
   allow: [api.anthropic.com, "*.github.com"]
-webhook:                         # where every event is posted as well; absent: files only
-  url: https://example.com/qory/events
-  secret: ...                    # at least 16 characters; or QORY_WEBHOOK_SECRET in the environment
-  events: ["*"]                  # the types to post; absent: every type
+  deny: [gist.github.com]        # denied in either mode, whatever allow says
+server:                          # the server every run reports to; absent: files only
+  url: https://qory.example      # a scheme and a host; https, or http to this machine
+  access_key: ak_f1xt0re000000000 # the key the server issued this machine
+  secret: ...                    # at least 16 characters; or QORY_SERVER_SECRET in the environment
 wall:                            # the container the runtime starts in; absent: a process of this machine
   adapter: docker
   image: example.com/agent:1     # yours: the runtime and the toolchain; or --image
@@ -904,11 +904,12 @@ wall:                            # the container the runtime starts in; absent: 
 
 | Key | Default | Meaning |
 |---|---|---|
-| `egress.mode` | `observe` | `observe` records every connection and denies none; `enforce` denies a connection to a host outside `allow` and records the denial |
-| `egress.allow` | none | the hosts the runtime may reach: a lower-case name, or `*.` and a name for every host below it, the grammar of a module's `egress` (§The module manifest). When the harness declares egress, the runtime reaches the declared hosts this list covers; when it declares nothing, this list as it is |
-| `webhook.url` | none | `https`, or `http` to this machine; with it set, `qory run` does not start unless the receiver accepts a ping, and `--local` runs with the files alone |
-| `webhook.secret` | `QORY_WEBHOOK_SECRET` | signs every delivery; at least 16 characters, never in a repository |
-| `webhook.events` | every type | the event types to post, by full name or `*` |
+| `egress.mode` | `observe` | `observe` records every connection and denies only what `deny` names; `enforce` denies a connection to a host outside `allow` as well, and records the denial |
+| `egress.allow` | none | the hosts the runtime may reach: a lower-case name, or `*.` and a name for every host below it, the grammar of a module's `egress` (§The module manifest). The hosts the harness declares are reported beside it as `harness_hosts` and narrow nothing |
+| `egress.deny` | none | the hosts the runtime may not reach, in `allow`'s grammar, in either mode: the runner decides them before the mode and the allow list, so a host an entry covers is denied under `observe` as under `enforce`, whatever `allow` says, with the entry as the rule recorded |
+| `server.url` | none | the server the run reports to: `https`, or `http` to this machine, a scheme and a host with nothing after. With it set, `qory run` fetches the server's configuration, signed, and does not start unless the server answers; the events go where it says, and its run configuration, when it names one, is the run's policy. `--local` runs with the files alone and the server is not contacted |
+| `server.access_key` | none | the key the server issued this machine, `ak_` and 16 characters; sent with every request |
+| `server.secret` | `QORY_SERVER_SECRET` | signs every request; at least 16 characters, never in a repository, never sent |
 | `wall.adapter` | none | `docker`, the one there is. With it set, every `qory run` starts the runtime in a container with no route out except to the runner's proxy; `--wall none` runs once without it, `--wall docker` once with it |
 | `wall.image` | none | the container's image, which holds the runtime and the project's toolchain; `--image` names another. qory builds none, and a wall without an image is refused |
 | `wall.env` | none | names of variables of `qory run`'s environment that go into the container, the model credential say, with `--env` adding to them. The launch template's variables go in; nothing else of the environment does. A name with no value here is left out |
@@ -927,9 +928,11 @@ The egress section is the machine's policy. One run may bring its own, `qory run
 --policy <file>`, a document of the runner contract's policy format kept outside the
 checkout and outside everything the container may write. It narrows only: under a
 section in mode `enforce` the run reaches the file's hosts the section covers, and with
-no section, or one in mode `observe`, the file stands as it is. `QORY_WEBHOOK_SECRET`
-is the runner's own: it never enters a session's environment, and `wall.env` and
-`--env` refuse its name.
+no section, or one in mode `observe`, the file stands as it is; the `deny` lists of
+both hold either way. With a server configured
+the server's run configuration is the policy and `--policy` is refused, unless `--local`
+keeps the run to the files. `QORY_SERVER_SECRET` is the runner's own: it never enters a
+session's environment, and `wall.env` and `--env` refuse its name.
 
 A run's policy also selects credentials, `credentials: [{name: product, argument:
 acme/shop}]`, and may hold a host to paths, `egress.paths`. Both need the wall. The

@@ -19,6 +19,7 @@ import (
 	"github.com/qoryai/runner/wall"
 	"github.com/spf13/cobra"
 
+	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
@@ -31,8 +32,8 @@ const DescriptorsDir = "runtimes"
 
 // newRun builds the run verb, which starts a runtime on the composed harness through
 // the session runner: the launch spec is what qory harness launch prints, the policy
-// and the webhook are files in the user's configuration directory or named by flag, and
-// the runner records the session under .qory/runs in the checkout. The verb is thin:
+// and the server are the runner file in the user's configuration directory or named
+// by flag, and the runner records the session under .qory/runs in the checkout. The verb is thin:
 // it resolves the spec, hands it to the runner and exits with the runtime's status.
 func newRun() *cobra.Command {
 	var h homeOptions
@@ -55,18 +56,25 @@ qory run claude -- -p 'say hello' runs one headless turn.
 
 What the runner does on this machine is ` + config.RunnerFileName + ` in the configuration
 directory, ~/.config/qory, and nowhere else: a repository cannot set it. Its egress
-section is the policy, which can only narrow what the runtime reaches; no section means
-every connection is allowed and recorded, and a file that does not read means no run.
-When the harness declares egress, the hosts its modules and the runtime declare in the
-report, the runtime reaches the declared hosts the policy covers and nothing else; a
-harness that declares nothing leaves the policy's list as it is. --policy names one
-run's own policy, a file in the runner contract's policy format kept outside the
-checkout, for a machine that serves runs of different kinds. It narrows only: under a
-section in mode enforce the run reaches the file's hosts the section covers, and with
-no section, or one in mode observe, the file stands as it is. Its webhook section
-posts every event somewhere as well; when one is configured the runner pings it first
-and does not start unless it answers. --local runs with the files alone, webhook or
-not.
+section is the policy, which can only narrow what the runtime reaches: its allow list,
+and its deny list, whose hosts are denied in either mode, under observe as under
+enforce, whatever allow says. No section means every connection is allowed and
+recorded, and a file that does not read means no run.
+The hosts the harness declares, its modules' and the runtime's in the report, are
+reported beside the policy as harness_hosts and narrow nothing; the policy alone says
+what the runtime reaches. --policy names one run's own policy, a file in the runner
+contract's policy format kept outside the checkout, for a machine without a server
+that serves runs of different kinds. It narrows only: under a section in mode enforce
+the run reaches the file's hosts the section covers, and with no section, or one in
+mode observe, the file stands as it is; the deny lists of both hold either way. The
+file's server section names the server
+every run reports to, with the access key and the secret the server issued this
+machine: the runner fetches the server's configuration first, signed, and does not
+start unless the server answers; the events go where the configuration says, and when
+it names a run configuration that is the run's policy, fetched for the checkout's forge
+and repository and reloaded when the server says it changed, so --policy is refused.
+--local runs with the files alone and the machine's policy; the server is not
+contacted.
 
 Any runtime the harness is composed for runs this way. What qory run knows of one, how
 its hooks are installed, what its output means and which signal asks it to leave, is a
@@ -93,10 +101,13 @@ the engine in a virtual machine, on a Mac, the runtime's hooks do not reach the 
 
 At a terminal the session runs on a pseudo-terminal, so the runtime's own interface
 works and its bytes are still captured; --headless, or no terminal, runs it on pipes and
-reads its structured output. Either way the record is .qory/runs/<id>/ in the checkout:
+reads its structured output. An argument the runtime's descriptor names as headless,
+-p for Claude Code, runs it on pipes as well, since with it the runtime has no interface
+whoever started it: qory run claude -- -p '…' needs no flag. Either way the record is
+.qory/runs/<id>/ in the checkout:
 events.jsonl, one event per line, and output.log, the session's bytes. The exit status
-is the runtime's. qory run resend sends a finished run's record to the webhook again,
-after a runner that died or a receiver that was away.
+is the runtime's. qory run resend sends a finished run's record to the server again,
+after a runner that died or a server that was away.
 
 A run holds no credential it can be spared. The credentials section of ` + config.RunnerFileName + `
 defines what this machine has: a token from a variable of qory's environment, from a
@@ -114,7 +125,10 @@ paths the same way with no credential.
 A caller that starts runs for a system of its own names them: --run-id gives the run
 the id the caller already holds, a UUID in lower case, and --label key=value, repeatable,
 puts the caller's own names, a key in a queue, a repository, an issue, into
-ai.qory.run.started, where a receiver finds them. --timeout stops a runtime that still
+ai.qory.run.started, where a receiver finds them. Two come from the checkout's origin
+remote unless --label names them: forge, the remote's host, and repository, its path
+without the leading slash and .git, github.com and acme/shop say; a checkout with no
+remote, or one on this machine, carries neither. --timeout stops a runtime that still
 runs after that long, 5h30m say: ai.qory.run.exited says the limit was the reason, and
 the exit status is ` + fmt.Sprint(exitTimeout) + `, as timeout(1) has it. Stopped at the limit or by a signal to
 qory run, the runtime gets --stop-signal, SIGTERM unless named or the runtime's descriptor names one, and, --stop-grace later,
@@ -159,13 +173,19 @@ every run on the machine; --timeout 0 lifts the file's.
 			}
 			user := config.UserDir()
 			var pol *session.Policy
-			var hook *session.Webhook
+			var server *session.Server
 			if r := conf.Runner; r != nil {
 				if r.Egress != nil {
-					pol = &session.Policy{Version: 1, Egress: session.PolicyEgress{Mode: r.Egress.Mode, Allow: r.Egress.Allow}}
+					pol = &session.Policy{Version: 1, Egress: session.PolicyEgress{Mode: r.Egress.Mode, Allow: r.Egress.Allow, Deny: r.Egress.Deny}}
+				}
+				if r.Server != nil {
+					server = &session.Server{Version: 1, URL: r.Server.URL, AccessKey: r.Server.AccessKey, Secret: r.Server.Secret}
 				}
 			}
 			if policyFile != "" {
+				if server != nil && !local {
+					return input(fmt.Errorf("--policy is the run's own policy without a server; with server configured the server's run configuration is the policy, and --local runs with the files alone"))
+				}
 				if pol, err = runPolicy(policyFile, at.root, pol); err != nil {
 					return err
 				}
@@ -174,6 +194,7 @@ every run on the machine; --timeout 0 lifts the file's.
 			if err != nil {
 				return err
 			}
+			named = withOrigin(named, at.root)
 			if err := session.CheckLabels(named); err != nil {
 				return input(err)
 			}
@@ -203,11 +224,6 @@ every run on the machine; --timeout 0 lifts the file's.
 			if err := session.CheckStopSignal(stopSignal); err != nil {
 				return input(fmt.Errorf("--stop-signal: %w", err))
 			}
-			if r := conf.Runner; r != nil {
-				if r.Webhook != nil {
-					hook = &session.Webhook{Version: 1, URL: r.Webhook.URL, Secret: r.Webhook.Secret, Events: r.Webhook.Events}
-				}
-			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			stderr := cmd.ErrOrStderr()
@@ -222,7 +238,7 @@ every run on the machine; --timeout 0 lifts the file's.
 				Stdout:        cmd.OutOrStdout(),
 				Stderr:        stderr,
 				Policy:        pol,
-				Webhook:       hook,
+				Server:        server,
 				Local:         local,
 				Declared:      rep.Hosts(),
 				RunsDir:       filepath.Join(at.root, ".qory", "runs"),
@@ -260,7 +276,7 @@ every run on the machine; --timeout 0 lifts the file's.
 			u := ui.New(stderr)
 			record := ui.Short(res.Dir, at.root)
 			if res.Undelivered > 0 {
-				u.Fail(fmt.Errorf("%d events did not reach the webhook; %s/undelivered holds them", res.Undelivered, record))
+				u.Fail(fmt.Errorf("%d events did not reach the server; %s/undelivered holds them", res.Undelivered, record))
 			}
 			switch {
 			case res.TimedOut:
@@ -277,11 +293,11 @@ every run on the machine; --timeout 0 lifts the file's.
 			return nil
 		},
 	}
-	c.Flags().BoolVar(&local, "local", false, "record to files only, even when a webhook is configured")
-	c.Flags().BoolVar(&headless, "headless", false, "run on pipes even at a terminal, and read the runtime's structured output")
-	c.Flags().StringVar(&policyFile, "policy", "", "this run's own policy, a file outside the checkout in the runner contract's policy format; it narrows the egress section of "+config.RunnerFileName+" and never widens it")
+	c.Flags().BoolVar(&local, "local", false, "record to files only and run under the machine's policy, even when a server is configured; the server is not contacted")
+	c.Flags().BoolVar(&headless, "headless", false, "run on pipes even at a terminal, and read the runtime's structured output; implied by an argument the runtime's descriptor names as headless, -p for claude")
+	c.Flags().StringVar(&policyFile, "policy", "", "this run's own policy, a file outside the checkout in the runner contract's policy format; it narrows the egress section of "+config.RunnerFileName+" and never widens it, and is refused with a server configured unless --local")
 	c.Flags().StringVar(&runID, "run-id", "", "the run's id when the caller already holds one: a UUID in lower case (default a new one)")
-	c.Flags().StringArrayVar(&labels, "label", nil, "the caller's own name for the run, key=value, reported in ai.qory.run.started; repeatable")
+	c.Flags().StringArrayVar(&labels, "label", nil, "the caller's own name for the run, key=value, reported in ai.qory.run.started; repeatable. forge and repository come from the origin remote unless named")
 	c.Flags().DurationVar(&timeout, "timeout", 0, "stop a runtime that still runs after this long, 5h30m say, and exit "+fmt.Sprint(exitTimeout)+" (default no limit; "+config.RunnerFileName+": run.timeout)")
 	c.Flags().StringVar(&stopSignal, "stop-signal", "", "the signal that asks the runtime to leave when the runner stops it: SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2 (default SIGTERM; "+config.RunnerFileName+": run.stop_signal)")
 	c.Flags().DurationVar(&grace, "stop-grace", 0, "how long the runtime gets between the stop signal and SIGKILL when the runner stops it (default 10s; "+config.RunnerFileName+": run.stop_grace)")
@@ -357,13 +373,29 @@ func parseLabels(labels []string) (map[string]string, error) {
 }
 
 // withoutRunners is the environment without the runner's own variables, which are never
-// the session's: with the webhook's secret a session could sign events of its own.
+// the session's: with the server's secret a session could sign requests of its own.
 func withoutRunners(env []string) []string {
 	out := make([]string, 0, len(env))
 	for _, kv := range env {
-		if name, _, _ := strings.Cut(kv, "="); name != config.EnvWebhookSecret {
+		if name, _, _ := strings.Cut(kv, "="); name != config.EnvServerSecret {
 			out = append(out, kv)
 		}
+	}
+	return out
+}
+
+// withOrigin adds the labels the checkout's origin remote gives, forge and repository,
+// to the caller's, which win: a caller that names them knows better than the remote,
+// and one that names neither gets what [checkout.Origin] reads. A checkout with no
+// origin, or one on this machine, adds nothing.
+func withOrigin(labels map[string]string, root string) map[string]string {
+	forge, repository, ok := checkout.Origin(root)
+	if !ok {
+		return labels
+	}
+	out := map[string]string{"forge": forge, "repository": repository}
+	for k, v := range labels {
+		out[k] = v
 	}
 	return out
 }
@@ -403,7 +435,7 @@ func enclose(spec *session.Spec, r *config.Runner, o wallOptions, exe, root, hom
 	}
 	env := withEnv(nil, launchEnv)
 	for _, n := range append(append([]string{}, section.Env...), o.env...) {
-		if n == config.EnvWebhookSecret {
+		if n == config.EnvServerSecret {
 			return input(fmt.Errorf("--env %s: the variable is the runner's own and never the session's", n))
 		}
 		if v, ok := os.LookupEnv(n); ok {
@@ -464,19 +496,20 @@ func newResend() *cobra.Command {
 	var wait time.Duration
 	c := &cobra.Command{
 		Use:   "resend <run-id>",
-		Short: "Send a finished run's record to the webhook again, completing it first",
-		Long: `Send the record of a run that is over to the webhook of ` + config.RunnerFileName + `, for a run
-whose runner died or whose receiver was away: the step a job runs last, whatever
+		Short: "Send a finished run's record to the server again, completing it first",
+		Long: `Send the record of a run that is over to the server of ` + config.RunnerFileName + `, for a run
+whose runner died or whose server was away: the step a job runs last, whatever
 happened before it. The run is named by its id, the directory under .qory/runs in this
-checkout.
+checkout. The server's configuration is fetched first, signed, and says where the
+events go.
 
-The run directory says what the receiver accepted, so only the rest is sent, in order,
+The run directory says what the server accepted, so only the rest is sent, in order,
 until it is accepted or --wait is over. A record with no ai.qory.run.exited, which a
 runner that died leaves, gets one first, with the reason runner_lost, and the
 containers and networks the run's wall left are removed. A run whose runner still
-lives is refused. A receiver may see an event twice and discards it by its id.
+lives is refused. A server may see an event twice and discards it by its id.
 
-The exit status is 0 when the receiver has everything, 1 when events remain, which
+The exit status is 0 when the server has everything, 1 when events remain, which
 are under the run directory's undelivered then.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -488,12 +521,12 @@ are under the run directory's undelivered then.`,
 				return input(err)
 			}
 			r := conf.Runner
-			if r == nil || r.Webhook == nil {
-				return input(fmt.Errorf("%s names no webhook to send the record to", config.RunnerFileName))
+			if r == nil || r.Server == nil {
+				return input(fmt.Errorf("%s names no server to send the record to", config.RunnerFileName))
 			}
 			spec := session.ResendSpec{
 				Dir:           filepath.Join(at.root, ".qory", "runs", args[0]),
-				Webhook:       &session.Webhook{Version: 1, URL: r.Webhook.URL, Secret: r.Webhook.Secret, Events: r.Webhook.Events},
+				Server:        &session.Server{Version: 1, URL: r.Server.URL, AccessKey: r.Server.AccessKey, Secret: r.Server.Secret},
 				RunnerVersion: build().title(),
 				Report:        func(line string) { fmt.Fprintln(cmd.ErrOrStderr(), "qory run resend:", line) },
 			}
@@ -524,11 +557,11 @@ are under the run directory's undelivered then.`,
 				u.Fail(fmt.Errorf("%d events were accepted and %d still are not; %s/undelivered holds them", res.Sent, res.Undelivered, ui.Short(spec.Dir, at.root)))
 				return reported(&exitError{code: 1})
 			}
-			u.Success("%d events were accepted; the receiver has the whole record", res.Sent)
+			u.Success("%d events were accepted; the server has the whole record", res.Sent)
 			return nil
 		},
 	}
-	c.Flags().DurationVar(&wait, "wait", 2*time.Minute, "how long to keep trying a receiver that does not accept")
+	c.Flags().DurationVar(&wait, "wait", 2*time.Minute, "how long to keep trying a server that does not accept")
 	return c
 }
 

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -25,19 +26,24 @@ import (
 // the policy the agent runs under or where the run's events go.
 const RunnerFileName = "runner.yaml"
 
-// EnvWebhookSecret is the environment variable that holds the webhook secret when the
+// EnvServerSecret is the environment variable that holds the server's secret when the
 // file does not.
-const EnvWebhookSecret = "QORY_WEBHOOK_SECRET"
+const EnvServerSecret = "QORY_SERVER_SECRET"
+
+// accessKey is the shape of a server's access key: ak_ and 16 characters of Crockford
+// base32 in lower case.
+var accessKey = regexp.MustCompile(`^ak_[0-9a-hjkmnp-tv-z]{16}$`)
 
 // Runner is the machine's runner file, read.
 type Runner struct {
 	// File is the path read.
 	File string
 	// Egress is the run policy's egress section, nil when the file names none: observe
-	// everything, deny nothing.
+	// everything, with no list to deny by.
 	Egress *RunnerEgress
-	// Webhook is where every event is posted as well, nil when the file names none.
-	Webhook *RunnerWebhook
+	// Server is the server every run reports to, nil when the file names none: the
+	// events go to files alone.
+	Server *RunnerServer
 	// Wall is what the runtime is enclosed in, nil when the file names none: the runtime
 	// is a process of this machine.
 	Wall *RunnerWall
@@ -137,18 +143,25 @@ type RunnerEgress struct {
 	Mode string
 	// Allow are the hosts the runtime may reach, each a lower-case name or a *. suffix.
 	Allow []string
+	// Deny are the hosts the runtime may not reach, in the same grammar, in either
+	// mode: the runner decides them before the mode and the allow list. Passed to the
+	// runner as written.
+	Deny []string
 }
 
-// RunnerWebhook is the webhook section.
-type RunnerWebhook struct {
-	// URL is https, or http to a loopback address.
+// RunnerServer is the server section: the runner contract's server document, where a
+// run discovers what to post its events to and where its configuration comes from.
+type RunnerServer struct {
+	// URL is the server: https, or http to a loopback address, a scheme and a host
+	// alone.
 	URL string
-	// Secret signs every delivery; from the file, or from [EnvWebhookSecret].
+	// AccessKey names the key the server issued this machine: ak_ and 16 characters.
+	AccessKey string
+	// Secret signs every request; from the file, or from [EnvServerSecret]. It never
+	// travels.
 	Secret string
 	// FromEnv is set when the secret came from the environment.
 	FromEnv bool
-	// Events are the types to post, nil for every type.
-	Events []string
 }
 
 // runnerFile is runner.yaml as written.
@@ -157,13 +170,17 @@ type runnerFile struct {
 	Egress     *struct {
 		Mode  *string   `yaml:"mode"`
 		Allow *[]string `yaml:"allow"`
+		Deny  *[]string `yaml:"deny"`
 	} `yaml:"egress,omitempty"`
-	Webhook *struct {
-		URL    *string   `yaml:"url"`
-		Secret *string   `yaml:"secret"`
-		Events *[]string `yaml:"events"`
-	} `yaml:"webhook,omitempty"`
-	Run *struct {
+	Server *struct {
+		URL       *string `yaml:"url"`
+		AccessKey *string `yaml:"access_key"`
+		Secret    *string `yaml:"secret"`
+	} `yaml:"server,omitempty"`
+	// Webhook is the section qory 0.10.0 replaced with server, read only to refuse it
+	// by name instead of as a key the file does not read.
+	Webhook yaml.Node `yaml:"webhook,omitempty"`
+	Run     *struct {
 		Timeout    *string `yaml:"timeout"`
 		StopSignal *string `yaml:"stop_signal"`
 		StopGrace  *string `yaml:"stop_grace"`
@@ -229,37 +246,49 @@ func LoadRunner() (*Runner, error) {
 				r.Egress.Allow = append(r.Egress.Allow, host)
 			}
 		}
+		if e.Deny != nil {
+			for _, host := range *e.Deny {
+				if !module.EgressHost.MatchString(host) {
+					return nil, fmt.Errorf("%s: egress.deny: %q is not a lower-case host name or a *. suffix; no port, path or scheme", path, host)
+				}
+				r.Egress.Deny = append(r.Egress.Deny, host)
+			}
+		}
 	}
-	if w := f.Webhook; w != nil {
+	if f.Webhook.Kind != 0 {
+		return nil, fmt.Errorf("%s: webhook: qory 0.10.0 replaced this section with server; see the runner file docs", path)
+	}
+	if w := f.Server; w != nil {
 		if w.URL == nil || *w.URL == "" {
-			return nil, fmt.Errorf("%s: webhook.url is required", path)
+			return nil, fmt.Errorf("%s: server.url is required", path)
 		}
 		u, err := url.Parse(*w.URL)
-		if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
-			return nil, fmt.Errorf("%s: webhook.url %q is not an https URL, or an http URL to this machine", path, *w.URL)
+		if err != nil || u.Host == "" || u.Opaque != "" || (u.Scheme != "https" && u.Scheme != "http") {
+			return nil, fmt.Errorf("%s: server.url %q is not an https URL, or an http URL to this machine", path, *w.URL)
 		}
 		if u.Scheme == "http" && !loopback(u.Hostname()) {
-			return nil, fmt.Errorf("%s: webhook.url %q is http to a host that is not this machine; a receiver elsewhere is reached over https", path, *w.URL)
+			return nil, fmt.Errorf("%s: server.url %q is http to a host that is not this machine; a server elsewhere is reached over https", path, *w.URL)
 		}
-		r.Webhook = &RunnerWebhook{URL: *w.URL}
+		if u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.User != nil || strings.HasSuffix(*w.URL, "#") {
+			return nil, fmt.Errorf("%s: server.url %q is more than a scheme and a host; the server names its own paths", path, *w.URL)
+		}
+		if w.AccessKey == nil || *w.AccessKey == "" {
+			return nil, fmt.Errorf("%s: server.access_key is required", path)
+		}
+		if !accessKey.MatchString(*w.AccessKey) {
+			return nil, fmt.Errorf("%s: server.access_key %q is not an access key: ak_ and 16 characters", path, *w.AccessKey)
+		}
+		r.Server = &RunnerServer{URL: *w.URL, AccessKey: *w.AccessKey}
 		switch {
 		case w.Secret != nil && *w.Secret != "":
-			r.Webhook.Secret = *w.Secret
-		case os.Getenv(EnvWebhookSecret) != "":
-			r.Webhook.Secret, r.Webhook.FromEnv = os.Getenv(EnvWebhookSecret), true
+			r.Server.Secret = *w.Secret
+		case os.Getenv(EnvServerSecret) != "":
+			r.Server.Secret, r.Server.FromEnv = os.Getenv(EnvServerSecret), true
 		default:
-			return nil, fmt.Errorf("%s: webhook.secret is missing; set it there or in %s", path, EnvWebhookSecret)
+			return nil, fmt.Errorf("%s: server.secret is missing; set it there or in %s", path, EnvServerSecret)
 		}
-		if len(r.Webhook.Secret) < 16 {
-			return nil, fmt.Errorf("%s: webhook.secret is shorter than 16 characters", path)
-		}
-		if w.Events != nil {
-			for _, typ := range *w.Events {
-				if typ == "" {
-					return nil, fmt.Errorf("%s: webhook.events names an empty type", path)
-				}
-			}
-			r.Webhook.Events = append([]string{}, (*w.Events)...)
+		if len(r.Server.Secret) < 16 {
+			return nil, fmt.Errorf("%s: server.secret is shorter than 16 characters", path)
 		}
 	}
 	if run := f.Run; run != nil {
@@ -346,7 +375,7 @@ func LoadRunner() (*Runner, error) {
 		}
 		if w.Env != nil {
 			for _, name := range *w.Env {
-				if name == EnvWebhookSecret {
+				if name == EnvServerSecret {
 					return nil, fmt.Errorf("%s: wall.env: %s is the runner's own and never the session's", path, name)
 				}
 				if !envName.MatchString(name) {
@@ -459,27 +488,19 @@ func (r *Runner) Rows() []Row {
 	if r != nil {
 		origin = r.File
 	}
-	rows := []Row{{"runner.egress.mode", "observe", Default}, {"runner.egress.allow", "(none)", Default}}
+	rows := []Row{{"runner.egress.mode", "observe", Default}, {"runner.egress.allow", "(none)", Default}, {"runner.egress.deny", "(none)", Default}}
 	if r != nil && r.Egress != nil {
 		rows[0] = Row{"runner.egress.mode", r.Egress.Mode, origin}
 		rows[1] = Row{"runner.egress.allow", listOrNone(r.Egress.Allow), origin}
+		rows[2] = Row{"runner.egress.deny", listOrNone(r.Egress.Deny), origin}
 	}
-	if r != nil && r.Webhook != nil {
-		secret := "(set)"
-		if r.Webhook.FromEnv {
-			secret = "(from " + EnvWebhookSecret + ")"
-		}
-		events := "*"
-		if len(r.Webhook.Events) > 0 {
-			events = strings.Join(r.Webhook.Events, ", ")
-		}
+	if r != nil && r.Server != nil {
 		rows = append(rows,
-			Row{"runner.webhook.url", r.Webhook.URL, origin},
-			Row{"runner.webhook.secret", secret, origin},
-			Row{"runner.webhook.events", events, origin},
+			Row{"runner.server.url", r.Server.URL, origin},
+			Row{"runner.server.access_key", r.Server.AccessKey, origin},
 		)
 	} else {
-		rows = append(rows, Row{"runner.webhook.url", "(none)", Default})
+		rows = append(rows, Row{"runner.server.url", "(none)", Default})
 	}
 	if r != nil && r.Timeout > 0 {
 		rows = append(rows, Row{"runner.run.timeout", r.Timeout.String(), origin})

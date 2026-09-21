@@ -4,6 +4,68 @@ Every release of qory, newest first, in the shape of [Keep a Changelog](https://
 The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0 a minor
 release may change what an existing document does, and says so under Upgrading.
 
+## [0.10.0] - 2026-09-21
+
+### Upgrading
+
+- The `webhook` section of `runner.yaml` is gone, and a file that still has it is
+  refused with a message that says so. Put a `server` section in its place: `url`, the
+  server's scheme and host with nothing after, `access_key`, the key the control plane
+  issued this machine, and `secret`, in the file or in `QORY_SERVER_SECRET`;
+  `QORY_WEBHOOK_SECRET` is not read any more, and `wall.env` and `--env` refuse the new
+  name as they refused the old. At start the runner fetches the server's configuration,
+  signed with the key and the secret, posts the events where it says, and takes the
+  server's run configuration as the run's policy when it names one. A receiver of your
+  own implements the same contract, the runner's `contracts/runner/v1` at revision 1:
+  the discovery document and the events endpoint.
+- `qory run --policy` is refused when a server is configured, unless `--local` keeps
+  the run to the files: with a server the server's run configuration is the policy.
+- `qory config` lists `runner.server.url` and `runner.server.access_key` where it listed
+  `runner.webhook.*`; the secret is never listed.
+- The hosts a harness declares no longer narrow the policy. The runner reports them as
+  `harness_hosts` in `ai.qory.run.policy_applied`, renamed from `declared`, and `allow`
+  is the policy's own list. A machine that relied on the narrowing puts the hosts in
+  `egress.allow`.
+- Needs `github.com/qoryai/runner` 0.4.1, which replaces the webhook with the server.
+
+### Added
+
+- `egress.deny` in `runner.yaml`: hosts the runtime may not reach, in `allow`'s
+  grammar, denied in either mode, under `observe` as under `enforce`, whatever
+  `allow` says of them. The list goes to the runner as written, `qory config` lists
+  it as `runner.egress.deny`, and a run's own `--policy` keeps the file's deny list
+  beside its own whatever the modes. Observe records every connection and denies
+  only what `deny` names.
+- The `server` section of `runner.yaml`: `url`, `access_key` and `secret`, the runner
+  contract's server document, read and refused in the file's voice, and described by
+  `runner.schema.json`.
+- Two labels from the checkout's origin remote, unless `--label` names them: `forge`,
+  the remote's host, and `repository`, its path without the leading slash and `.git`,
+  so `git@github.com:acme/shop.git` is `github.com` and `acme/shop`. They go into
+  `ai.qory.run.started` as every label does, and the runner asks the server for the run
+  configuration by them. A checkout with no remote, or one on this machine, carries
+  neither, and nothing else is read from the remote.
+- What the runner reports at contract revision 1: `outcome` on every
+  `ai.qory.run.egress`, `connected`, `dial_failed` or `refused`; `harness_hosts`,
+  `source: fetched` with the `url` and the server's `run_configuration` digest on
+  `ai.qory.run.policy_applied`, and a second `policy_applied` when the server's run
+  configuration changes during a run; `contract_version` in the ping.
+
+### Changed
+
+- `qory run claude -- -p '…'` at a terminal runs on pipes and is recorded as not
+  interactive, with no flag to say so: an argument the runtime's descriptor names as
+  headless, `-p` and `--print` for Claude Code, means the runtime runs without an
+  interface whoever started it, and the runner takes it as `--headless`. The
+  descriptor names the arguments, not the command, since runtimes differ in how they
+  say it; a runtime whose descriptor names none is on the pseudo-terminal at a terminal
+  as before, and `--headless` still says so by hand. Needs `github.com/qoryai/runner`
+  0.4.1.
+- `qory run resend` sends the record to the server: it fetches the server's
+  configuration first and posts where it says.
+- The help of `qory run` and `qory run resend`, the README, the contract's runner file
+  section and the security policy say server where they said webhook.
+
 ## [0.9.0] - 2026-09-19
 
 ### Upgrading
@@ -591,7 +653,7 @@ The first release: a stack of modules composed into one tree, linked into the ch
 and kept out of git, with a report naming the module of every entry and a refusal when
 two modules provide the same one.
 
-[Unreleased]: https://github.com/qoryai/qory/compare/v0.9.0...HEAD
+[0.10.0]: https://github.com/qoryai/qory/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/qoryai/qory/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/qoryai/qory/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/qoryai/qory/compare/v0.6.0...v0.7.0
