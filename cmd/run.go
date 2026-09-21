@@ -101,7 +101,10 @@ the engine in a virtual machine, on a Mac, the runtime's hooks do not reach the 
 
 At a terminal the session runs on a pseudo-terminal, so the runtime's own interface
 works and its bytes are still captured; --headless, or no terminal, runs it on pipes and
-reads its structured output. Either way the record is .qory/runs/<id>/ in the checkout:
+reads its structured output. An argument the runtime's descriptor names as headless,
+-p for Claude Code, runs it on pipes as well, since with it the runtime has no interface
+whoever started it: qory run claude -- -p '…' needs no flag. Either way the record is
+.qory/runs/<id>/ in the checkout:
 events.jsonl, one event per line, and output.log, the session's bytes. The exit status
 is the runtime's. qory run resend sends a finished run's record to the server again,
 after a runner that died or a server that was away.
@@ -291,7 +294,7 @@ every run on the machine; --timeout 0 lifts the file's.
 		},
 	}
 	c.Flags().BoolVar(&local, "local", false, "record to files only and run under the machine's policy, even when a server is configured; the server is not contacted")
-	c.Flags().BoolVar(&headless, "headless", false, "run on pipes even at a terminal, and read the runtime's structured output")
+	c.Flags().BoolVar(&headless, "headless", false, "run on pipes even at a terminal, and read the runtime's structured output; implied by an argument the runtime's descriptor names as headless, -p for claude")
 	c.Flags().StringVar(&policyFile, "policy", "", "this run's own policy, a file outside the checkout in the runner contract's policy format; it narrows the egress section of "+config.RunnerFileName+" and never widens it, and is refused with a server configured unless --local")
 	c.Flags().StringVar(&runID, "run-id", "", "the run's id when the caller already holds one: a UUID in lower case (default a new one)")
 	c.Flags().StringArrayVar(&labels, "label", nil, "the caller's own name for the run, key=value, reported in ai.qory.run.started; repeatable. forge and repository come from the origin remote unless named")

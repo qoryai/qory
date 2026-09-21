@@ -59,7 +59,10 @@ the engine in a virtual machine, on a Mac, the runtime's hooks do not reach the 
 
 At a terminal the session runs on a pseudo-terminal, so the runtime's own interface
 works and its bytes are still captured; --headless, or no terminal, runs it on pipes and
-reads its structured output. Either way the record is .qory/runs/<id>/ in the checkout:
+reads its structured output. An argument the runtime's descriptor names as headless,
+-p for Claude Code, runs it on pipes as well, since with it the runtime has no interface
+whoever started it: qory run claude -- -p '…' needs no flag. Either way the record is
+.qory/runs/<id>/ in the checkout:
 events.jsonl, one event per line, and output.log, the session's bytes. The exit status
 is the runtime's. qory run resend sends a finished run's record to the server again,
 after a runner that died or a server that was away.
@@ -104,7 +107,7 @@ qory run [runtime] [-- argument...] [flags]
 ```
       --cpus string           how many processors' worth of time the container gets (runner.yaml: wall.cpus)
       --env stringArray       a variable of this environment that goes into the container under a wall, by name; repeatable (runner.yaml: wall.env)
-      --headless              run on pipes even at a terminal, and read the runtime's structured output
+      --headless              run on pipes even at a terminal, and read the runtime's structured output; implied by an argument the runtime's descriptor names as headless, -p for claude
   -h, --help                  help for run
       --home string           where the harness is composed: a directory outside the checkout, one home per checkout under it, or .qory/harness (qory.yaml: harness.home)
       --image string          the container's image under a wall (runner.yaml: wall.image)

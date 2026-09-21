@@ -53,6 +53,14 @@ release may change what an existing document does, and says so under Upgrading.
 
 ### Changed
 
+- `qory run claude -- -p '…'` at a terminal runs on pipes and is recorded as not
+  interactive, with no flag to say so: an argument the runtime's descriptor names as
+  headless, `-p` and `--print` for Claude Code, means the runtime runs without an
+  interface whoever started it, and the runner takes it as `--headless`. The
+  descriptor names the arguments, not the command, since runtimes differ in how they
+  say it; a runtime whose descriptor names none is on the pseudo-terminal at a terminal
+  as before, and `--headless` still says so by hand. The runner is pinned at
+  `bcb3f47`.
 - `qory run resend` sends the record to the server: it fetches the server's
   configuration first and posts where it says.
 - The help of `qory run` and `qory run resend`, the README, the contract's runner file

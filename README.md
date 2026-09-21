@@ -434,7 +434,7 @@ reason, and `qory run` exits 124.
 A system that starts runs of its own names them and brings each its policy:
 
 ```sh
-qory run --headless --run-id "$uuid" --label run_key=1234 --label issue=77 \
+qory run --run-id "$uuid" --label run_key=1234 --label issue=77 \
   --policy /etc/factory/shop-policy.yaml --timeout 5h30m --stop-grace 30s -- -p "$prompt"
 ```
 

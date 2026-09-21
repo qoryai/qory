@@ -28,12 +28,8 @@ github.com/mattn/go-runewidth v0.0.16 h1:E5ScNMtiwvlvB5paMFdw9p4kSQzbXFikJ5SQO6T
 github.com/mattn/go-runewidth v0.0.16/go.mod h1:Jdepj2loyihRzMpdS35Xk/zdY8IAYHsh153qUoGf23w=
 github.com/muesli/termenv v0.16.0 h1:S5AlUN9dENB57rsbnkPyfdGuWIlkmzJjbFf0Tf5FWUc=
 github.com/muesli/termenv v0.16.0/go.mod h1:ZRfOIKPFDYQoDFF4Olj7/QJbW60Ol/kL1pU3VfY/Cnk=
-github.com/qoryai/runner v0.3.1-0.20260920214744-e2d0e9c757ac h1:YIiZFtqsnUZ96LzzyTk/SAWHIFXr2nNcUxzu+HEImn4=
-github.com/qoryai/runner v0.3.1-0.20260920214744-e2d0e9c757ac/go.mod h1:qxaAVqLnxJJx5ece/GSKi/4sK5/XPI8WqZvQAeWxpb8=
-github.com/qoryai/runner v0.3.1-0.20260920222340-70f9fe7baf53 h1:6F8qntoIr6riUR3r7s38fKddeBVU/hQ3mNOdhyLXdxs=
-github.com/qoryai/runner v0.3.1-0.20260920222340-70f9fe7baf53/go.mod h1:qxaAVqLnxJJx5ece/GSKi/4sK5/XPI8WqZvQAeWxpb8=
-github.com/qoryai/runner v0.3.1-0.20260920235118-f8643a6c206a h1:RnfSq8H2Yowkglo1ljkfbMOluxBKxv53Q8dLSUCa3eI=
-github.com/qoryai/runner v0.3.1-0.20260920235118-f8643a6c206a/go.mod h1:qxaAVqLnxJJx5ece/GSKi/4sK5/XPI8WqZvQAeWxpb8=
+github.com/qoryai/runner v0.3.1-0.20260921182736-bcb3f47ab935 h1:C3So1wmtWbyFAFJV+xzTX0QBI51g1b+ga0jn663vVpA=
+github.com/qoryai/runner v0.3.1-0.20260921182736-bcb3f47ab935/go.mod h1:qxaAVqLnxJJx5ece/GSKi/4sK5/XPI8WqZvQAeWxpb8=
 github.com/rivo/uniseg v0.2.0/go.mod h1:J6wj4VEh+S6ZtnVlnTBMWIodfgj8LQOQFoIToxlJtxc=
 github.com/rivo/uniseg v0.4.7 h1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=
 github.com/rivo/uniseg v0.4.7/go.mod h1:FN3SvrM+Zdj16jyLfmOkMNblXMcoc8DfTHruCPUcx88=
