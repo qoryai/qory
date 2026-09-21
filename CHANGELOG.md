@@ -26,7 +26,7 @@ release may change what an existing document does, and says so under Upgrading.
   `harness_hosts` in `ai.qory.run.policy_applied`, renamed from `declared`, and `allow`
   is the policy's own list. A machine that relied on the narrowing puts the hosts in
   `egress.allow`.
-- Needs `github.com/qoryai/runner` 0.4.0, which replaces the webhook with the server.
+- Needs `github.com/qoryai/runner` 0.4.1, which replaces the webhook with the server.
 
 ### Added
 
@@ -59,8 +59,8 @@ release may change what an existing document does, and says so under Upgrading.
   interface whoever started it, and the runner takes it as `--headless`. The
   descriptor names the arguments, not the command, since runtimes differ in how they
   say it; a runtime whose descriptor names none is on the pseudo-terminal at a terminal
-  as before, and `--headless` still says so by hand. The runner is pinned at
-  `bcb3f47`.
+  as before, and `--headless` still says so by hand. Needs `github.com/qoryai/runner`
+  0.4.1.
 - `qory run resend` sends the record to the server: it fetches the server's
   configuration first and posts where it says.
 - The help of `qory run` and `qory run resend`, the README, the contract's runner file
@@ -653,7 +653,6 @@ The first release: a stack of modules composed into one tree, linked into the ch
 and kept out of git, with a report naming the module of every entry and a refusal when
 two modules provide the same one.
 
-[Unreleased]: https://github.com/qoryai/qory/compare/v0.10.0...HEAD
 [0.10.0]: https://github.com/qoryai/qory/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/qoryai/qory/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/qoryai/qory/compare/v0.7.0...v0.8.0
