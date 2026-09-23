@@ -45,11 +45,16 @@ var (
 
 // New returns a UI that writes to w. It asks lipgloss what w supports, so the UI colours
 // its output when w is a terminal and NO_COLOR is unset, and writes the same text plain
-// otherwise. The decision is made here, once per UI, and not at each call.
+// otherwise. The decision is made here, once per UI, and not at each call. A w from
+// [Buzz] is asked about through to the terminal it prints to.
 func New(w io.Writer) *UI {
-	r := lipgloss.NewRenderer(w)
+	probe := w
+	if s, ok := w.(*Swarm); ok {
+		probe = s.w
+	}
+	r := lipgloss.NewRenderer(probe)
 	columns := 0
-	if f, ok := w.(*os.File); ok {
+	if f, ok := probe.(*os.File); ok {
 		if cols, _, err := term.GetSize(f.Fd()); err == nil {
 			columns = cols
 		}

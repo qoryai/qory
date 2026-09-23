@@ -300,6 +300,7 @@ prints. --no-links keeps the checkout untouched with the home inside it too.
 --verbose prints one line per entry, the entry and the module it came from.`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			defer buzzing(cmd)()
 			o := composeOptions{file: file, runtime: runtime, model: model, dryRun: dryRun, check: check, verbose: verbose(cmd), homeOptions: h}
 			if cmd.Flags().Changed("force") {
 				if check {

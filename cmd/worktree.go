@@ -96,6 +96,8 @@ func asker(in io.Reader, rows io.Writer) func(string) (string, error) {
 		}
 		if !strings.HasSuffix(line, "\n") {
 			fmt.Fprintln(rows)
+		} else if s, ok := rows.(*ui.Swarm); ok {
+			s.Returned()
 		}
 		return strings.ToLower(strings.TrimSpace(line)), nil
 	}
@@ -200,6 +202,7 @@ prints, and the compose lists its entries. Without it a command's output is show
 when the command fails.`,
 		Args: maxArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			defer buzzing(cmd)()
 			if cmd.Flags().Changed("pr") && pr < 1 {
 				return input(fmt.Errorf("--pr takes a pull request number, got %d", pr))
 			}
@@ -384,6 +387,7 @@ runs, and what every worktree.run.remove command prints. Without it a command's 
 is shown only when the command fails.`,
 		Args: maxArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			defer buzzing(cmd)()
 			main, err := mainCheckout()
 			if err != nil {
 				return err
