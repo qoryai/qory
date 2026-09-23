@@ -1,6 +1,10 @@
 package cmd
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/spf13/cobra"
+
+	"github.com/qoryai/qory/internal/ui"
+)
 
 // Version is the release version, set at build time with
 //
@@ -60,6 +64,26 @@ Shortcuts:
 func verbose(cmd *cobra.Command) bool {
 	v, _ := cmd.Root().PersistentFlags().GetBool("verbose")
 	return v
+}
+
+// buzzing starts a [ui.Swarm] under what cmd prints to the terminal, and returns what
+// stops it. The swarm goes under the output when that is the terminal, with the errors
+// printing through it too when they go there as well, and under the errors when only
+// they do, which is where a verb run with --path by the shell function prints its rows.
+// A command calls it first thing, deferring the stop, when it works for a while between
+// lines and never hands the terminal to another program.
+func buzzing(cmd *cobra.Command) (stop func()) {
+	out, errOut := cmd.OutOrStdout(), cmd.ErrOrStderr()
+	if s := ui.Buzz(out); s != nil {
+		cmd.SetOut(s)
+		cmd.SetErr(s.Beside(errOut))
+		return s.Stop
+	}
+	if s := ui.Buzz(errOut); s != nil {
+		cmd.SetErr(s)
+		return s.Stop
+	}
+	return func() {}
 }
 
 // noArgs is [cobra.NoArgs] returning an input error, so a stray argument exits with
