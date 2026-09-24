@@ -473,6 +473,75 @@ func TestWorktreeRemoveAsksAboutOwnCommits(t *testing.T) {
 	wantsRow(t, out, "branch", "feature  (deleted; every commit of it is on the remote, in the main checkout or on its base)")
 }
 
+// TestWorktreeRemoveFindsTheBranchLanded is remove on branches whose pull requests
+// another machine merged, pushed and deleted since the last fetch, so their commits are
+// on no remote branch: with --offline the stale base does not carry them and the branch
+// is asked about; without it the base is fetched and a squash of the whole change, or
+// the commits rebased one by one, let the branch go quietly. A branch with a commit
+// made after its squash is still asked about.
+func TestWorktreeRemoveFindsTheBranchLanded(t *testing.T) {
+	root := worktreeRepo(t)
+	other := clone(t, gitOut(t, root, "remote", "get-url", "origin"))
+	pushed := func(branch string) string {
+		if _, err := run(t, "wa", branch, "--no-compose"); err != nil {
+			t.Fatal(err)
+		}
+		wt := filepath.Join(filepath.Dir(root), "wt-"+branch)
+		commitOn(t, wt, branch+"-1.txt", branch+" one")
+		commitOn(t, wt, branch+"-2.txt", branch+" two")
+		runGit(t, wt, "push", "--quiet", "origin", branch)
+		runGit(t, other, "pull", "--quiet")
+		return wt
+	}
+	// merged is the other machine's merge: pushed to main, the branch deleted, and the
+	// remote branch pruned here without main fetched.
+	merged := func(branch string) string {
+		runGit(t, other, "push", "--quiet", "origin", "main", ":"+branch)
+		runGit(t, root, "branch", "--quiet", "--delete", "--remotes", "origin/"+branch)
+		return gitOut(t, other, "rev-parse", "HEAD")
+	}
+
+	pushed("squashed")
+	commitOn(t, other, "elsewhere.txt", "main moves on")
+	runGit(t, other, "merge", "--quiet", "--squash", "origin/squashed")
+	runGit(t, other, "commit", "-q", "-m", "Squashed (#1)")
+	squash := merged("squashed")
+	commitOn(t, other, "after.txt", "main moves on again")
+	runGit(t, other, "push", "--quiet", "origin", "main")
+	_, err := runNoTTY(t, "wr", "squashed", "--offline")
+	if err == nil || !strings.Contains(err.Error(), "branch squashed holds 2 commits no remote branch") {
+		t.Fatalf("offline: %v", err)
+	}
+	out, err := runNoTTY(t, "wr", "squashed", "-v")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "  git fetch --quiet origin +refs/heads/main:refs/remotes/origin/main\n", "  the branch's whole change is on origin/main as "+squash[:7]+"\n")
+	wantsRow(t, out, "branch", "squashed  (deleted; landed on origin/main as "+squash[:7]+")")
+	if gitOut(t, root, "branch", "--list", "squashed") != "" {
+		t.Errorf("the branch stayed")
+	}
+
+	pushed("rebased")
+	runGit(t, other, "cherry-pick", "origin/rebased~1", "origin/rebased")
+	last := merged("rebased")
+	out, err = runNoTTY(t, "wr", "rebased")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "branch", "rebased  (deleted; landed on origin/main as "+last[:7]+")")
+
+	wt := pushed("later")
+	runGit(t, other, "merge", "--quiet", "--squash", "origin/later")
+	runGit(t, other, "commit", "-q", "-m", "Later (#3)")
+	merged("later")
+	commitOn(t, wt, "later-3.txt", "later three")
+	_, err = runNoTTY(t, "wr", "later")
+	if err == nil || !strings.Contains(err.Error(), "branch later holds 3 commits no remote branch") {
+		t.Fatalf("a commit after the squash: %v", err)
+	}
+}
+
 // TestWorktreeBranchSettingKeepsTheBranch is worktree.branch: keep in the user's file,
 // which --delete-branch overrides, and a value that is neither delete nor keep.
 func TestWorktreeBranchSettingKeepsTheBranch(t *testing.T) {

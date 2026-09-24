@@ -13,9 +13,12 @@ with uncommitted changes to tracked files is refused unless --force.
 
 The branch goes with the worktree, unless --keep-branch or worktree.branch: keep in
 qory.yaml. It goes quietly when every commit of it is on a remote branch, in the main
-checkout or on the base it was cut from. A branch holding commits nothing else does is
-asked about: push it and delete, keep it, delete it anyway, or stop; --delete-branch
-answers delete, and the deleted commits stay in git's reflog for 30 days.
+checkout or on the base it was cut from. It goes quietly too when its change landed on
+the base by a squash or rebase merge, which writes new commits: the base is fetched, and
+the branch's commits, or its whole change as one, are found there by patch; --offline
+skips the fetch. A branch holding commits nothing else does is asked about: push it and
+delete, keep it, delete it anyway, or stop; --delete-branch answers delete, and the
+deleted commits stay in git's reflog for 30 days.
 
 --verbose prints how the branch's own commits were counted, each git command as it
 runs, and what every worktree.run.remove command prints. Without it a command's output
@@ -32,6 +35,7 @@ qory worktree remove [<branch, name or path>] [flags]
       --force           remove a worktree with uncommitted changes
   -h, --help            help for remove
       --keep-branch     keep the branch after the worktree (qory.yaml: worktree.branch)
+      --offline         do not fetch the base to see whether the branch landed on it; use the refs already fetched
       --path            print the main checkout's path alone on stdout, the rows on stderr
 ```
 

@@ -4,6 +4,18 @@ Every release of qory, newest first, in the shape of [Keep a Changelog](https://
 The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0 a minor
 release may change what an existing document does, and says so under Upgrading.
 
+## [Unreleased]
+
+### Changed
+
+- `qory worktree remove` lets a branch go without asking when its pull request was
+  merged by squash or by rebase. Such a merge writes new commits on the base, so the
+  branch's own were on no remote branch once GitHub deleted it, and remove asked about
+  them as if they were unpushed. The base is fetched first, and the branch's commits, or
+  its whole change as one, are found on it by patch; the branch row names the commit it
+  landed as. A branch with commits made after the merge is still asked about.
+  `--offline` skips the fetch.
+
 ## [0.10.0] - 2026-09-21
 
 ### Upgrading
@@ -653,6 +665,7 @@ The first release: a stack of modules composed into one tree, linked into the ch
 and kept out of git, with a report naming the module of every entry and a refusal when
 two modules provide the same one.
 
+[Unreleased]: https://github.com/qoryai/qory/compare/v0.10.0...HEAD
 [0.10.0]: https://github.com/qoryai/qory/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/qoryai/qory/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/qoryai/qory/compare/v0.7.0...v0.8.0
