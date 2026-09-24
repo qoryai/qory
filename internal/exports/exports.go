@@ -297,6 +297,9 @@ func read(root string) (*document, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
+	if err := RefuseAliases(file, data); err != nil {
+		return nil, "", err
+	}
 	var doc document
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
 	dec.KnownFields(true)
@@ -337,6 +340,38 @@ func decodeError(path string, err error) error {
 		return fmt.Errorf("%s: %skey %q is not one %s reads", path, m[1], m[2], filepath.Base(path))
 	}
 	return fmt.Errorf("%s: %w", path, err)
+}
+
+// RefuseAliases fails on the first YAML alias in the file at path, a *name or a <<: *name
+// merge; an anchor alone copies nothing and stands. The file's readers other than qory
+// refuse an alias, since a few hundred bytes of them chained can expand to gigabytes, and
+// read such a file as unreadable without a word to its author. qory refuses the alias too,
+// so the file fails where it is written. A file that does not parse is left to the
+// decoder, which says why.
+func RefuseAliases(path string, data []byte) error {
+	var doc yaml.Node
+	if yaml.Unmarshal(data, &doc) != nil {
+		return nil
+	}
+	if a := firstAlias(&doc); a != nil {
+		return fmt.Errorf("%s: line %d: *%s is a YAML alias, which %s may not hold; write the value out in full where it is used", path, a.Line, a.Value, filepath.Base(path))
+	}
+	return nil
+}
+
+// firstAlias returns the first alias node under n in document order, nil for none. The
+// node tree holds an alias as one node, so the walk is as long as the file however far
+// the aliases would expand.
+func firstAlias(n *yaml.Node) *yaml.Node {
+	if n.Kind == yaml.AliasNode {
+		return n
+	}
+	for _, c := range n.Content {
+		if a := firstAlias(c); a != nil {
+			return a
+		}
+	}
+	return nil
 }
 
 // segment reports whether name is one plain path segment: no separator of either kind, no

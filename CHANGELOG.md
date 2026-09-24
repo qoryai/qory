@@ -6,6 +6,15 @@ release may change what an existing document does, and says so under Upgrading.
 
 ## [Unreleased]
 
+### Upgrading
+
+- A `qory.yaml` or `harness.yaml` holding a YAML alias, a `*name` or a `<<: *name`
+  merge, is refused with the alias's line and name, exit 2. Other readers of the file
+  already refuse an alias, since a few hundred bytes of them chained can expand to
+  gigabytes, and they read such a file as unreadable without saying so to its author;
+  qory now fails on it where it is written. An anchor that no alias uses is still read.
+  Write the value out in full where the alias stood.
+
 ### Changed
 
 - `qory worktree remove` lets a branch go without asking when its pull request was
