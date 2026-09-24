@@ -62,7 +62,7 @@ func (f *fakeServer) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		io.WriteString(w, `{"error":"unauthorized"}`)
 	}
-	if r.Header.Get("X-Qory-Access-Key") != testAccessKey || r.Header.Get("X-Qory-Contract-Version") != "1" || !strings.HasPrefix(r.Header.Get("User-Agent"), "qory-runner/") {
+	if r.Header.Get("X-Qory-Access-Key") != testAccessKey || r.Header.Get("X-Qory-Contract-Version") != "2" || !strings.HasPrefix(r.Header.Get("User-Agent"), "qory-runner/") {
 		unauthorized()
 		return
 	}
@@ -625,8 +625,8 @@ func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
 
 // TestRunReportsToTheServer is a run with a server configured: the runner fetches the
 // server's configuration, signed with the key and the secret, pings, takes the server's
-// run configuration as the policy, asked for by the checkout's forge and repository,
-// and posts every event where the configuration says; the record says the policy was
+// run configuration as the policy, asked for with every label of the run (the
+// checkout's forge and repository among them), and posts every event where the configuration says; the record says the policy was
 // fetched and from where.
 func TestRunReportsToTheServer(t *testing.T) {
 	root := newCheckout(t)
@@ -645,11 +645,11 @@ func TestRunReportsToTheServer(t *testing.T) {
 	if allow, _ := applied[0]["allow"].([]any); len(applied) != 1 || applied[0]["source"] != "fetched" || applied[0]["mode"] != "enforce" || len(allow) != 1 || allow[0] != "api.example" || applied[0]["url"] != srv.URL+"/v1/run-configuration" || applied[0]["run_configuration"] != digest(`{"version":1,"security_policy":`+srv.policy+`}`) {
 		t.Errorf("run.policy_applied %v", applied)
 	}
-	if srv.refused != 0 || strings.Join(srv.queries, " ") != "forge=git.example.com&repository=acme%2Fapp" {
+	if srv.refused != 0 || strings.Join(srv.queries, " ") != "forge=git.example.com&issue=77&repository=acme%2Fapp" {
 		t.Errorf("the server refused %d requests and was asked %q", srv.refused, srv.queries)
 	}
 	got := srv.byType()
-	if ping := got["ai.qory.ping"]; len(ping) != 1 || ping[0]["contract_version"] != float64(1) {
+	if ping := got["ai.qory.ping"]; len(ping) != 1 || ping[0]["contract_version"] != float64(2) {
 		t.Errorf("the ping: %v", ping)
 	}
 	if started := got["ai.qory.run.started"]; len(started) != 1 || started[0]["labels"].(map[string]any)["issue"] != "77" || started[0]["labels"].(map[string]any)["repository"] != "acme/app" {

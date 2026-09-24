@@ -439,7 +439,8 @@ qory run --run-id "$uuid" --label run_key=1234 --label issue=77 \
 ```
 
 `--run-id` is the id the caller already holds, a UUID in lower case, and the labels go
-into `ai.qory.run.started`, where a receiver ties the run to what it knows. Two labels
+into `ai.qory.run.started` and onto the run configuration request, where a server ties
+the run to what it knows and chooses its policy. Two labels
 come from the checkout's origin remote unless `--label` names them: `forge`, the
 remote's host, and `repository`, its path without the leading slash and `.git`, so
 `git@github.com:acme/shop.git` is `github.com` and `acme/shop`; a checkout with no
