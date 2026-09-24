@@ -418,7 +418,7 @@ the same, the run, its log and its egress recorded and the session's own events 
 
 A module declares the hosts it reaches under `egress` in its manifest, and the compose
 unions them into the report. The runner reports them as `harness_hosts` in
-`ai.qory.run.policy_applied`, for a receiver to compare with the policy; they decide
+`dev.qory.run.policy_applied`, for a receiver to compare with the policy; they decide
 nothing. The policy alone says what the runtime reaches.
 
 With a server configured the runner starts by fetching the server's configuration,
@@ -428,7 +428,7 @@ configuration, that is the run's policy, fetched for the checkout's forge and re
 and reloaded when the server says it changed. `--local` runs with the files alone and
 the machine's policy; the server is not contacted. A denied connection is recorded and
 the session goes on; only a time limit you set ends a session: `--timeout 5h30m`, or
-`run.timeout`, stops the runtime then, `ai.qory.run.exited` says the limit was the
+`run.timeout`, stops the runtime then, `dev.qory.run.exited` says the limit was the
 reason, and `qory run` exits 124.
 
 A system that starts runs of its own names them and brings each its policy:
@@ -439,7 +439,7 @@ qory run --run-id "$uuid" --label run_key=1234 --label issue=77 \
 ```
 
 `--run-id` is the id the caller already holds, a UUID in lower case, and the labels go
-into `ai.qory.run.started` and onto the run configuration request, where a server ties
+into `dev.qory.run.started` and onto the run configuration request, where a server ties
 the run to what it knows and chooses its policy. Two labels
 come from the checkout's origin remote unless `--label` names them: `forge`, the
 remote's host, and `repository`, its path without the leading slash and `.git`, so
@@ -503,7 +503,7 @@ hosts and, for each request to one, the method, the path and the credential's na
 
 A job ends with `qory run resend <run-id>`, whatever happened before it. It sends the
 server what it has not accepted of the run's record, and nothing twice. After a runner
-that died it first closes the record, `ai.qory.run.exited` with `reason: runner_lost`,
+that died it first closes the record, `dev.qory.run.exited` with `reason: runner_lost`,
 and removes the containers and networks the run's wall left. It refuses a run that is
 still going, and exits 1 when the server still has not taken everything after
 `--wait`, two minutes unless named. The formats are in the runner's

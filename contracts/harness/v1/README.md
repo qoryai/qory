@@ -358,7 +358,7 @@ itself. No ports, no paths, no schemes. The grammar is the runner contract's, th
 kept identical by a test; a host that is not in it is refused by name. The declarations of
 every composed module are unioned into the report's `egress` (§The report), and `qory run`
 hands the union to the runner, which reports it as `harness_hosts` in
-`ai.qory.run.policy_applied` beside the policy's own list, for a receiver to compare the
+`dev.qory.run.policy_applied` beside the policy's own list, for a receiver to compare the
 two: the declaration decides nothing, the policy alone says what the run reaches. An
 `exclude` or an `only` does not touch the declaration; a module composed at all declares.
 A module with no `egress` key declares nothing, and a harness in which no module declares
@@ -917,7 +917,7 @@ wall:                            # the container the runtime starts in; absent: 
 | `wall.user` | `qory run`'s own | the `uid:gid` the container runs as. Root is refused, so a machine where qory runs as root names another, one that can write the checkout |
 | `wall.mounts` | none | what the container sees of the machine beside the checkout and the composed home, each at its own path: an absolute path, with `:ro` after it for one the container cannot change; `--mount` adds to them. A socket, or a directory holding a container runtime's, is refused |
 | `wall.cpus`, `wall.memory`, `wall.pids_limit`, `wall.shm_size` | the engine's | what the container may use, as `docker run`'s flags of those names read them: `3.5`, `14g`, `4096`, `2g`. A flag of the same name sets another for one run |
-| `run.timeout` | none | how long a runtime may run, a duration such as `5h30m`. At the limit the runner stops it, `ai.qory.run.exited` carries `reason: timeout`, and `qory run` exits 124. `--timeout` names another for one run, and `--timeout 0` none |
+| `run.timeout` | none | how long a runtime may run, a duration such as `5h30m`. At the limit the runner stops it, `dev.qory.run.exited` carries `reason: timeout`, and `qory run` exits 124. `--timeout` names another for one run, and `--timeout 0` none |
 | `run.stop_signal` | the runtime's descriptor's, else `SIGTERM` | the signal that asks a runtime to leave when the runner stops it, at the limit or on a signal to `qory run`: `SIGTERM`, `SIGINT`, `SIGHUP`, `SIGQUIT`, `SIGUSR1` or `SIGUSR2`. Runtimes differ in what a signal means, one closes its session on SIGINT and drops it on SIGTERM, so the runtime's descriptor says which and the machine may name another; `--stop-signal` names another for one run |
 | `run.stop_grace` | the runtime's descriptor's, else `10s` | how long a runtime gets between the stop signal and SIGKILL; `--stop-grace` names another |
 | `wall.ca_env` | `SSL_CERT_FILE`, `GIT_SSL_CAINFO`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE` | the variables that point a program in the container at the authorities it trusts, the image's own and the run's, when a run holds a credential or has path rules |

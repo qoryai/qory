@@ -41,7 +41,7 @@ func TestDeclaredEgressReachesTheRun(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	_, evs := events(t, root)
-	applied := evs["ai.qory.run.policy_applied"]
+	applied := evs["dev.qory.run.policy_applied"]
 	if len(applied) != 1 {
 		t.Fatalf("policy_applied %v", applied)
 	}
@@ -77,7 +77,7 @@ func TestAnEmptyDeclarationStillHasTheRuntime(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	_, evs := events(t, root)
-	applied := evs["ai.qory.run.policy_applied"]
+	applied := evs["dev.qory.run.policy_applied"]
 	if len(applied) != 1 || list(applied[0]["allow"]) != "api.anthropic.com *.example.com" || list(applied[0]["harness_hosts"]) != "api.anthropic.com" {
 		t.Errorf("policy_applied %v", applied)
 	}
