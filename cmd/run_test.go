@@ -62,7 +62,7 @@ func (f *fakeServer) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		io.WriteString(w, `{"error":"unauthorized"}`)
 	}
-	if r.Header.Get("X-Qory-Access-Key") != testAccessKey || r.Header.Get("X-Qory-Contract-Version") != "2" || !strings.HasPrefix(r.Header.Get("User-Agent"), "qory-runner/") {
+	if r.Header.Get("X-Qory-Access-Key") != testAccessKey || r.Header.Get("X-Qory-Contract-Version") != "1" || !strings.HasPrefix(r.Header.Get("User-Agent"), "qory-runner/") {
 		unauthorized()
 		return
 	}
@@ -649,7 +649,7 @@ func TestRunReportsToTheServer(t *testing.T) {
 		t.Errorf("the server refused %d requests and was asked %q", srv.refused, srv.queries)
 	}
 	got := srv.byType()
-	if ping := got["ai.qory.ping"]; len(ping) != 1 || ping[0]["contract_version"] != float64(2) {
+	if ping := got["ai.qory.ping"]; len(ping) != 1 || ping[0]["contract_version"] != float64(1) {
 		t.Errorf("the ping: %v", ping)
 	}
 	if started := got["ai.qory.run.started"]; len(started) != 1 || started[0]["labels"].(map[string]any)["issue"] != "77" || started[0]["labels"].(map[string]any)["repository"] != "acme/app" {
