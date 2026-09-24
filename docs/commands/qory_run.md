@@ -29,8 +29,9 @@ file's server section names the server
 every run reports to, with the access key and the secret the server issued this
 machine: the runner fetches the server's configuration first, signed, and does not
 start unless the server answers; the events go where the configuration says, and when
-it names a run configuration that is the run's policy, fetched for the checkout's forge
-and repository and reloaded when the server says it changed, so --policy is refused.
+it names a run configuration that is the run's policy, fetched with the run's labels,
+the checkout's forge and repository among them, and reloaded when the server says it
+changed, so --policy is refused.
 --local runs with the files alone and the machine's policy; the server is not
 contacted.
 
@@ -83,11 +84,11 @@ paths the same way with no credential.
 A caller that starts runs for a system of its own names them: --run-id gives the run
 the id the caller already holds, a UUID in lower case, and --label key=value, repeatable,
 puts the caller's own names, a key in a queue, a repository, an issue, into
-ai.qory.run.started, where a receiver finds them. Two come from the checkout's origin
-remote unless --label names them: forge, the remote's host, and repository, its path
-without the leading slash and .git, github.com and acme/shop say; a checkout with no
-remote, or one on this machine, carries neither. --timeout stops a runtime that still
-runs after that long, 5h30m say: ai.qory.run.exited says the limit was the reason, and
+dev.qory.run.started and onto the run configuration request, where a server finds them.
+Two come from the checkout's origin remote unless --label names them: forge, the
+remote's host, and repository, its path without the leading slash and .git, github.com
+and acme/shop say; a checkout with no remote, or one on this machine, carries neither.
+--timeout stops a runtime that still runs after that long, 5h30m say: dev.qory.run.exited says the limit was the reason, and
 the exit status is 124, as timeout(1) has it. Stopped at the limit or by a signal to
 qory run, the runtime gets --stop-signal, SIGTERM unless named or the runtime's descriptor names one, and, --stop-grace later,
 10s unless named, SIGKILL: the time a session needs to close what it has open. Runtimes
@@ -111,7 +112,7 @@ qory run [runtime] [-- argument...] [flags]
   -h, --help                  help for run
       --home string           where the harness is composed: a directory outside the checkout, one home per checkout under it, or .qory/harness (qory.yaml: harness.home)
       --image string          the container's image under a wall (runner.yaml: wall.image)
-      --label stringArray     the caller's own name for the run, key=value, reported in ai.qory.run.started; repeatable. forge and repository come from the origin remote unless named
+      --label stringArray     the caller's own name for the run, key=value, reported in dev.qory.run.started; repeatable. forge and repository come from the origin remote unless named
       --local                 record to files only and run under the machine's policy, even when a server is configured; the server is not contacted
       --memory string         the most memory the container gets, 8g say (runner.yaml: wall.memory)
       --mount stringArray     a file or directory of this machine the container sees as well, at its own path, with :ro after it for one it cannot change; repeatable (runner.yaml: wall.mounts)

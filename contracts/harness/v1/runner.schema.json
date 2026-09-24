@@ -73,7 +73,7 @@
       "additionalProperties": false,
       "properties": {
         "timeout": {
-          "description": "How long a runtime may run, as a duration: 5h30m. At the limit the runner stops it and ai.qory.run.exited says so. Default no limit. --timeout names another for one run.",
+          "description": "How long a runtime may run, as a duration: 5h30m. At the limit the runner stops it and dev.qory.run.exited says so. Default no limit. --timeout names another for one run.",
           "type": "string",
           "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"
         },

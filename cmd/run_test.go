@@ -218,22 +218,22 @@ func TestRunRecordsTheSession(t *testing.T) {
 	}
 	wants(t, out, "hello from ", " with --settings ", " --extra one", "claude exited 3; recorded in .qory/runs/")
 	dir, evs := events(t, root)
-	started := evs["ai.qory.run.started"]
+	started := evs["dev.qory.run.started"]
 	if len(started) != 1 || started[0]["command"] != script || started[0]["interactive"] != false {
 		t.Errorf("run.started %v", started)
 	}
 	if labels, _ := started[0]["labels"].(map[string]any); len(labels) != 2 || labels["forge"] != "git.example.com" || labels["repository"] != "acme/app" {
 		t.Errorf("the labels from the origin remote: %v", started[0]["labels"])
 	}
-	applied := evs["ai.qory.run.policy_applied"]
+	applied := evs["dev.qory.run.policy_applied"]
 	if len(applied) != 1 || applied[0]["mode"] != "enforce" || applied[0]["source"] != "config" {
 		t.Errorf("run.policy_applied %v", applied)
 	}
-	exited := evs["ai.qory.run.exited"]
+	exited := evs["dev.qory.run.exited"]
 	if len(exited) != 1 || exited[0]["exit_code"] != float64(3) || exited[0]["state"] != "failed" {
 		t.Errorf("run.exited %v", exited)
 	}
-	if len(evs["ai.qory.ping"]) != 0 {
+	if len(evs["dev.qory.ping"]) != 0 {
 		t.Error("a ping was sent with no server configured")
 	}
 	log, err := os.ReadFile(filepath.Join(dir, "output.log"))
@@ -264,7 +264,7 @@ func TestRunExitsZeroQuietly(t *testing.T) {
 	}
 	wants(t, out, "claude exited 0; recorded in .qory/runs/")
 	_, evs := events(t, root)
-	if applied := evs["ai.qory.run.policy_applied"]; len(applied) != 1 || applied[0]["mode"] != "observe" || applied[0]["source"] != "none" {
+	if applied := evs["dev.qory.run.policy_applied"]; len(applied) != 1 || applied[0]["mode"] != "observe" || applied[0]["source"] != "none" {
 		t.Errorf("run.policy_applied %v", applied)
 	}
 }
@@ -453,7 +453,7 @@ func TestRunBehindAWall(t *testing.T) {
 		t.Error("a value of the environment is on a command line")
 	}
 	dir, evs := events(t, root)
-	if started := evs["ai.qory.run.started"]; len(started) != 1 || started[0]["wall"] != "docker" || started[0]["image"] != "example.com/agent:2" {
+	if started := evs["dev.qory.run.started"]; len(started) != 1 || started[0]["wall"] != "docker" || started[0]["image"] != "example.com/agent:2" {
 		t.Errorf("run.started %v", started)
 	}
 	settings, err := os.ReadFile(filepath.Join(dir, "settings.json"))
@@ -470,8 +470,8 @@ func TestRunBehindAWall(t *testing.T) {
 	if out, err := run(t, "run", "claude", "--wall", "none"); cmd.ExitCode(err) != 3 {
 		t.Fatalf("--wall none: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
-	if _, evs := events(t, root); evs["ai.qory.run.started"][0]["wall"] != nil {
-		t.Errorf("--wall none still walled: %v", evs["ai.qory.run.started"])
+	if _, evs := events(t, root); evs["dev.qory.run.started"][0]["wall"] != nil {
+		t.Errorf("--wall none still walled: %v", evs["dev.qory.run.started"])
 	}
 }
 
@@ -568,10 +568,10 @@ harness:
 		"sibling: from beside the checkout", "sibling: read-only", "shm: 262144 pids: 512")
 	lacks(t, out, "direct: connected", "this machine: this machine", "sibling: written")
 	_, evs := events(t, root)
-	if egress := evs["ai.qory.run.egress"]; len(egress) != 2 || egress[0]["decision"] != "allowed" || egress[1]["decision"] != "denied" || egress[1]["rule"] != "wall:own-address" {
+	if egress := evs["dev.qory.run.egress"]; len(egress) != 2 || egress[0]["decision"] != "allowed" || egress[1]["decision"] != "denied" || egress[1]["rule"] != "wall:own-address" {
 		t.Errorf("run.egress %v", egress)
 	}
-	if runtime.GOOS == "linux" && len(evs["ai.qory.session.ended"]) != 1 {
+	if runtime.GOOS == "linux" && len(evs["dev.qory.session.ended"]) != 1 {
 		t.Errorf("the hook did not reach the runner: %v", evs)
 	}
 }
@@ -611,22 +611,22 @@ func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
 	if filepath.Base(dir) != id {
 		t.Errorf("the run is recorded in %s", dir)
 	}
-	if labels, _ := evs["ai.qory.run.started"][0]["labels"].(map[string]any); labels["run_key"] != "queue/1234" || labels["issue"] != "77" || labels["repository"] != "acme/shop" || labels["forge"] != "git.example.com" {
-		t.Errorf("run.started %v", evs["ai.qory.run.started"])
+	if labels, _ := evs["dev.qory.run.started"][0]["labels"].(map[string]any); labels["run_key"] != "queue/1234" || labels["issue"] != "77" || labels["repository"] != "acme/shop" || labels["forge"] != "git.example.com" {
+		t.Errorf("run.started %v", evs["dev.qory.run.started"])
 	}
-	applied := evs["ai.qory.run.policy_applied"][0]
+	applied := evs["dev.qory.run.policy_applied"][0]
 	if allow, _ := applied["allow"].([]any); applied["mode"] != "enforce" || len(allow) != 1 || allow[0] != "api.github.com" {
 		t.Errorf("run.policy_applied %v", applied)
 	}
-	if exited := evs["ai.qory.run.exited"][0]; exited["reason"] != "timeout" || exited["state"] != "failed" {
+	if exited := evs["dev.qory.run.exited"][0]; exited["reason"] != "timeout" || exited["state"] != "failed" {
 		t.Errorf("run.exited %v", exited)
 	}
 }
 
 // TestRunReportsToTheServer is a run with a server configured: the runner fetches the
 // server's configuration, signed with the key and the secret, pings, takes the server's
-// run configuration as the policy, asked for by the checkout's forge and repository,
-// and posts every event where the configuration says; the record says the policy was
+// run configuration as the policy, asked for with every label of the run (the
+// checkout's forge and repository among them), and posts every event where the configuration says; the record says the policy was
 // fetched and from where.
 func TestRunReportsToTheServer(t *testing.T) {
 	root := newCheckout(t)
@@ -641,21 +641,21 @@ func TestRunReportsToTheServer(t *testing.T) {
 	}
 	wants(t, out, "claude exited 0")
 	_, evs := events(t, root)
-	applied := evs["ai.qory.run.policy_applied"]
+	applied := evs["dev.qory.run.policy_applied"]
 	if allow, _ := applied[0]["allow"].([]any); len(applied) != 1 || applied[0]["source"] != "fetched" || applied[0]["mode"] != "enforce" || len(allow) != 1 || allow[0] != "api.example" || applied[0]["url"] != srv.URL+"/v1/run-configuration" || applied[0]["run_configuration"] != digest(`{"version":1,"security_policy":`+srv.policy+`}`) {
 		t.Errorf("run.policy_applied %v", applied)
 	}
-	if srv.refused != 0 || strings.Join(srv.queries, " ") != "forge=git.example.com&repository=acme%2Fapp" {
+	if srv.refused != 0 || strings.Join(srv.queries, " ") != "forge=git.example.com&issue=77&repository=acme%2Fapp" {
 		t.Errorf("the server refused %d requests and was asked %q", srv.refused, srv.queries)
 	}
 	got := srv.byType()
-	if ping := got["ai.qory.ping"]; len(ping) != 1 || ping[0]["contract_version"] != float64(1) {
+	if ping := got["dev.qory.ping"]; len(ping) != 1 || ping[0]["contract_version"] != float64(1) {
 		t.Errorf("the ping: %v", ping)
 	}
-	if started := got["ai.qory.run.started"]; len(started) != 1 || started[0]["labels"].(map[string]any)["issue"] != "77" || started[0]["labels"].(map[string]any)["repository"] != "acme/app" {
+	if started := got["dev.qory.run.started"]; len(started) != 1 || started[0]["labels"].(map[string]any)["issue"] != "77" || started[0]["labels"].(map[string]any)["repository"] != "acme/app" {
 		t.Errorf("the server's run.started: %v", started)
 	}
-	if len(got["ai.qory.run.exited"]) != 1 || len(got["ai.qory.run.policy_applied"]) != 1 {
+	if len(got["dev.qory.run.exited"]) != 1 || len(got["dev.qory.run.policy_applied"]) != 1 {
 		t.Errorf("the server's events: %v", got)
 	}
 
@@ -669,8 +669,8 @@ func TestRunReportsToTheServer(t *testing.T) {
 	if out, err := run(t, "run"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if _, evs := events(t, root); evs["ai.qory.run.policy_applied"][0]["source"] != "config" || len(srv.byType()["ai.qory.run.exited"]) != 1 {
-		t.Errorf("without a run section: %v", evs["ai.qory.run.policy_applied"])
+	if _, evs := events(t, root); evs["dev.qory.run.policy_applied"][0]["source"] != "config" || len(srv.byType()["dev.qory.run.exited"]) != 1 {
+		t.Errorf("without a run section: %v", evs["dev.qory.run.policy_applied"])
 	}
 	if err := os.RemoveAll(filepath.Join(root, ".qory", "runs")); err != nil {
 		t.Fatal(err)
@@ -714,7 +714,7 @@ func TestResendClosesAndDeliversARunItsRunnerLeft(t *testing.T) {
 	}
 	wants(t, out, "runner_lost", fmt.Sprintf("%d events were accepted", len(lines)))
 	got := srv.events
-	if last := got[len(got)-1]; len(got) != len(lines) || last["type"] != "ai.qory.run.exited" || last["data"].(map[string]any)["reason"] != "runner_lost" {
+	if last := got[len(got)-1]; len(got) != len(lines) || last["type"] != "dev.qory.run.exited" || last["data"].(map[string]any)["reason"] != "runner_lost" {
 		t.Errorf("the server got %d events, the last %v", len(got), last)
 	}
 	if out, err := run(t, "run", "resend", id); err != nil || !strings.Contains(out, "0 events were accepted") || len(srv.events) != len(lines) {
@@ -759,11 +759,11 @@ harness:
 	}
 	wants(t, out, "codex exited 0")
 	dir, evs := events(t, root)
-	started := evs["ai.qory.run.started"]
+	started := evs["dev.qory.run.started"]
 	if len(started) != 1 || started[0]["runtime"] != "codex" || started[0]["runtime_version"] != nil {
 		t.Errorf("run.started %v", started)
 	}
-	if len(evs["ai.qory.session.result"]) != 0 || len(evs["ai.qory.run.exited"]) != 1 {
+	if len(evs["dev.qory.session.result"]) != 0 || len(evs["dev.qory.run.exited"]) != 1 {
 		t.Errorf("a bare runtime's events: %v", evs)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "settings.json")); !os.IsNotExist(err) {
@@ -782,7 +782,7 @@ stop: {signal: SIGHUP}
 rules:
   - source: output
     match: {kind: done}
-    type: ai.qory.session.result
+    type: dev.qory.session.result
     data: {session_id: session, outcome: text, is_error: ok}
 `)
 	t.Setenv("QORY_TEST_WAIT", "1")
@@ -791,13 +791,13 @@ rules:
 		t.Fatalf("%v\n%s", err, out)
 	}
 	_, evs = events(t, root)
-	if started := evs["ai.qory.run.started"]; len(started) != 1 || started[0]["runtime_version"] != "0.9" {
+	if started := evs["dev.qory.run.started"]; len(started) != 1 || started[0]["runtime_version"] != "0.9" {
 		t.Errorf("run.started %v", started)
 	}
-	if result := evs["ai.qory.session.result"]; len(result) != 1 || result[0]["outcome"] != "all good" {
+	if result := evs["dev.qory.session.result"]; len(result) != 1 || result[0]["outcome"] != "all good" {
 		t.Errorf("session.result %v", result)
 	}
-	if exited := evs["ai.qory.run.exited"]; len(exited) != 1 || exited[0]["exit_code"] != float64(7) {
+	if exited := evs["dev.qory.run.exited"]; len(exited) != 1 || exited[0]["exit_code"] != float64(7) {
 		t.Errorf("the descriptor's signal did not ask it to leave: %v", exited)
 	}
 }

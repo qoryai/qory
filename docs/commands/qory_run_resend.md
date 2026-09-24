@@ -11,7 +11,7 @@ checkout. The server's configuration is fetched first, signed, and says where th
 events go.
 
 The run directory says what the server accepted, so only the rest is sent, in order,
-until it is accepted or --wait is over. A record with no ai.qory.run.exited, which a
+until it is accepted or --wait is over. A record with no dev.qory.run.exited, which a
 runner that died leaves, gets one first, with the reason runner_lost, and the
 containers and networks the run's wall left are removed. A run whose runner still
 lives is refused. A server may see an event twice and discards it by its id.
