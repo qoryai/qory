@@ -96,7 +96,8 @@ func TestNearerFilesWin(t *testing.T) {
 
 // TestLoadRefusesAMistake is every value a file cannot carry: an unknown key, a wrong
 // kind, an update that is neither always nor never, a timeout that is not a duration, an
-// empty cache, a variable that is not a name, and qory's own variable.
+// empty cache, a variable that is not a name, qory's own variable, and a YAML alias,
+// plain, as a merge key, or chained to expand as far as it likes.
 func TestLoadRefusesAMistake(t *testing.T) {
 	hermetic(t)
 	for _, c := range []struct{ body, want string }{
@@ -124,6 +125,9 @@ func TestLoadRefusesAMistake(t *testing.T) {
 		{"env: {1A: x}\n", "env: 1A is not an environment variable name"},
 		{"env: {QORY_HARNESS_HOME: x}\n", "env.QORY_HARNESS_HOME is qory's own"},
 		{"harness: {runtime: []}\n", "harness.runtime is empty"},
+		{"harness: {model: &m opus}\nworktree: {base: *m}\n", "line 3: *m is a YAML alias, which qory.yaml may not hold"},
+		{"env: &e {A: x}\nharness:\n  extensions:\n    ci:\n      <<: *e\n", "line 6: *e is a YAML alias"},
+		{"a: &a [x, x, x, x]\nb: &b [*a, *a, *a, *a]\nc: [*b, *b, *b, *b]\n", "line 3: *a is a YAML alias"},
 	} {
 		root := t.TempDir()
 		write(t, filepath.Join(root, "qory.yaml"), c.body)
@@ -131,6 +135,21 @@ func TestLoadRefusesAMistake(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.HasPrefix(err.Error(), root) {
 			t.Errorf("%q: error %v, want one naming the file and %q", c.body, err, c.want)
 		}
+	}
+}
+
+// TestAnAnchorAloneReads is a qory.yaml naming an anchor no alias uses: the anchor
+// copies nothing, so the file is read.
+func TestAnAnchorAloneReads(t *testing.T) {
+	hermetic(t)
+	root := t.TempDir()
+	write(t, filepath.Join(root, "qory.yaml"), "harness: {model: &m opus}\n")
+	c, err := config.Load(root, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Model != "opus" {
+		t.Errorf("model %q, want opus", c.Model)
 	}
 }
 

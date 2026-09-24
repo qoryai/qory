@@ -932,16 +932,19 @@ func insideRel(p string) bool {
 	return p != "" && !filepath.IsAbs(p) && clean != "." && clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator))
 }
 
-// read decodes one file. An unknown key is an error, and so is a second document and an
-// apiVersion other than [stack.APIVersion] or a retired spelling of it. A file naming no
-// apiVersion is read as the newest format this qory reads, which is that one: the file
-// is a repository's or a machine's own, not a delivered document, so it need carry no
-// version to bump. A file naming a retired spelling is read as that format too, and the
-// spelling is kept so the compose can say the line wants rewriting.
+// read decodes one file. An unknown key is an error, and so are a YAML alias, a second
+// document and an apiVersion other than [stack.APIVersion] or a retired spelling of it.
+// A file naming no apiVersion is read as the newest format this qory reads, which is
+// that one: the file is a repository's or a machine's own, not a delivered document, so
+// it need carry no version to bump. A file naming a retired spelling is read as that
+// format too, and the spelling is kept so the compose can say the line wants rewriting.
 func read(path string) (file, error) {
 	var f file
 	data, err := os.ReadFile(path)
 	if err != nil {
+		return f, err
+	}
+	if err := exports.RefuseAliases(path, data); err != nil {
 		return f, err
 	}
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
