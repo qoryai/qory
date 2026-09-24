@@ -14,8 +14,33 @@ release may change what an existing document does, and says so under Upgrading.
   gigabytes, and they read such a file as unreadable without saying so to its author;
   qory now fails on it where it is written. An anchor that no alias uses is still read.
   Write the value out in full where the alias stood.
+- Every event the runner reports is named under `dev.qory`, where it was `ai.qory`:
+  `dev.qory.run.started`, `dev.qory.run.egress`, `dev.qory.ping` and the rest. The prefix
+  is the reverse-DNS name of qory.dev, the domain of the contract's identifiers, like its
+  schema URLs. A receiver of your own that matched on `ai.qory.*` matches `dev.qory.*`.
+  `qory run resend` of a run recorded before this release posts its events under the new
+  names; the record on disk stays as it was written. The wall's containers and networks
+  are labelled `dev.qory.run`, and the ones an older runner left are still reaped.
+- Needs `github.com/qoryai/runner` 0.5.1, contract `v1` revision 1 as amended in 0.5.0
+  and 0.5.1.
+
+### Added
+
+- A swarm of bees under `qory worktree add`, `qory worktree remove` and
+  `qory harness compose` while they work with nothing to print, over git, a fetch or a
+  configured command: three bees circling in braille on the line under the last one
+  printed, once the output has been quiet for 250 ms. Every write clears it first, so a
+  fast command never shows it, and the cursor is hidden while it is drawn and shown again
+  when it is cleared, when the command ends and on an interrupt. It does not run off a
+  terminal, with `TERM=dumb`, in CI, or under `run` and `launch`, which hand the terminal
+  to another program.
 
 ### Changed
+
+- The run configuration request carries every label of the run, the ones `--label`
+  names and the two from the origin remote, where it carried `forge` and `repository`
+  alone: the server decides which of them name what the run works on. A server that
+  reads only those two finds them as before.
 
 - `qory worktree remove` lets a branch go without asking when its pull request was
   merged by squash or by rebase. Such a merge writes new commits on the base, so the
