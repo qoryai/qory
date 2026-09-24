@@ -94,7 +94,8 @@ func TestReadIsNilWithoutASection(t *testing.T) {
 // TestReadRefuses is every mistake in the section: a section naming nothing, a name
 // that is not a segment or is listed twice, a directory outside the repository or
 // missing from the map form, a key inside the section the reader does not know, and
-// another apiVersion. A key elsewhere in the file is not the section's to refuse.
+// another apiVersion. A key elsewhere in the file is not the section's to refuse, but a
+// YAML alias anywhere in it is the file's to refuse.
 func TestReadRefuses(t *testing.T) {
 	for _, c := range []struct{ body, want string }{
 		{"exports: {}\n", "exports names no stacks and no modules"},
@@ -124,6 +125,14 @@ func TestReadRefuses(t *testing.T) {
 	root = write(t, "exports: {modules: [core]}\nharnes: {runtime: claude}\n")
 	if _, err := exports.Read(root); err != nil {
 		t.Errorf("a key outside the section was refused: %v", err)
+	}
+	root = t.TempDir()
+	file := filepath.Join(root, exports.AltFileName)
+	if err := os.WriteFile(file, []byte("harness:\n  extensions:\n    ci: &ci {ignore: [lint]}\n    cd: *ci\nexports: {modules: [core]}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := exports.Read(root); err == nil || err.Error() != file+": line 4: *ci is a YAML alias, which harness.yaml may not hold; write the value out in full where it is used" {
+		t.Errorf("an alias outside the section: %v", err)
 	}
 }
 
