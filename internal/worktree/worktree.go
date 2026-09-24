@@ -42,9 +42,10 @@ type Options struct {
 	Onto bool
 	// Rebase answers the question Onto asks with yes.
 	Rebase bool
-	// Offline skips the fetch an add starts with, so the refs already there are used.
+	// Offline skips the fetch an add starts with, and the fetch of the base a remove
+	// makes to see whether a branch landed on it, so the refs already there are used.
 	Offline bool
-	// Timeout is the longest the fetch, or the push a remove offers, may run; 0 for no
+	// Timeout is the longest a fetch, or the push a remove offers, may run; 0 for no
 	// limit.
 	Timeout time.Duration
 	// Attach is a branch of the remote the worktree attaches to, from [RemoteBranch] or
@@ -133,6 +134,12 @@ type Removed struct {
 	// Own is how many commits the branch held that nothing else did: no remote branch,
 	// not the main checkout, not the base it was cut from.
 	Own int
+	// Landed is the commit of LandedOn that carries the branch's change after a squash
+	// or rebase merge wrote it anew, "" when none does. A branch that landed goes
+	// quietly, whatever Own says.
+	Landed string
+	// LandedOn is the base Landed is on.
+	LandedOn string
 	// Pushed says the branch was pushed to Upstream before it was deleted.
 	Pushed bool
 	// Upstream is the remote branch of the branch's name, "" without a remote.
@@ -681,8 +688,10 @@ func (r runner) mustRev(dir, ref string) string {
 // main checkout and a worktree with uncommitted changes to tracked files, the latter
 // unless Options.Force. The branch goes with the worktree unless Options.KeepBranch:
 // quietly when every commit of it is on a remote branch, in the main checkout or on the
-// base it was cut from, and after a question otherwise, whose answers are to push the
-// branch first, keep it, delete it anyway, or stop; Options.DeleteBranch answers delete.
+// base it was cut from, or when its change landed on the base by a squash or rebase
+// merge, and after a question otherwise, whose answers are to push the branch first,
+// keep it, delete it anyway, or stop; Options.DeleteBranch answers delete. The base is
+// fetched first, unless Options.Offline, when the branch holds commits of its own.
 func Remove(main, path string, o Options) (Removed, error) {
 	r := runner{main: main, timeout: o.Timeout, trace: o.Trace}
 	rm := Removed{Path: path, Main: main}
@@ -707,8 +716,21 @@ func Remove(main, path string, o Options) (Removed, error) {
 		rm.Own, last = r.own(path, branch)
 	}
 	deleteBranch := branch != "" && !o.KeepBranch
+	if deleteBranch && rm.Own > 0 {
+		// A pull request merged by squash or rebase leaves the branch's commits on no
+		// remote branch; its change is on the base in commits of their own, which the
+		// base is fetched for, since the merge may be newer than the last fetch.
+		if base := r.landingBase(branch); base != "" {
+			if !o.Offline && r.fetchBase(base) {
+				rm.Own, last = r.own(path, branch)
+			}
+			if rm.Own > 0 {
+				rm.Landed, rm.LandedOn = r.landed(path, base), base
+			}
+		}
+	}
 	if deleteBranch {
-		if rm.Own > 0 && !o.DeleteBranch {
+		if rm.Own > 0 && rm.Landed == "" && !o.DeleteBranch {
 			held := fmt.Sprintf("branch %s holds %d commit%s no remote branch, the main checkout or its base holds", branch, rm.Own, plural(rm.Own))
 			if o.Ask == nil {
 				return rm, fmt.Errorf("%s; push them, or remove with --keep-branch or --delete-branch", held)
@@ -810,6 +832,86 @@ func (r runner) own(path, branch string) (int, string) {
 	subject, _ := r.git(path, "log", "-1", "--format=%s", commits[0])
 	r.say("%s holds %d commit%s of its own, the newest %s %q", branch, len(commits), plural(len(commits)), short(commits[0]), subject)
 	return len(commits), subject
+}
+
+// landingBase is the base a branch's change lands on: its recorded base, else the
+// default one, read as [ResolveBase] reads it; "" when there is none.
+func (r runner) landingBase(branch string) string {
+	b, err := r.resolveBase(r.remoteOf(), r.recordedBase(branch))
+	if err != nil {
+		return ""
+	}
+	return b.Ref
+}
+
+// fetchBase fetches base when it is a branch of the remote, and reports whether it
+// moved. A fetch that fails leaves base as last fetched, and the trace says so.
+func (r runner) fetchBase(base string) bool {
+	remote := r.remoteOf()
+	name, ok := strings.CutPrefix(base, remote+"/")
+	if remote == "" || !ok || !r.refExists("refs/remotes/"+base) {
+		return false
+	}
+	before := r.mustRev(r.main, base)
+	if _, err := r.net(r.main, "fetch", "--quiet", remote, "+refs/heads/"+name+":refs/remotes/"+base); err != nil {
+		r.say("%s is read as last fetched, since the fetch failed: %v", base, err)
+		return false
+	}
+	return r.mustRev(r.main, base) != before
+}
+
+// landed is the commit of base that carries the branch's change, when a merge wrote
+// that change anew instead of taking the branch's commits: a rebase merge, each commit
+// replayed, or a squash merge, the whole change in one. Commits are matched by patch,
+// the way git cherry matches them, and the newest match is the one returned; "" when
+// base carries none of it, or not all of it.
+func (r runner) landed(path, base string) string {
+	marks, err := r.git(path, "log", "--cherry-mark", "--right-only", "--no-merges", "--format=%m", base+"...HEAD")
+	if err == nil && marks != "" && strings.Trim(strings.ReplaceAll(marks, "\n", ""), "=") == "" {
+		if on := r.matching(path, base, "HEAD"); on != "" {
+			r.say("every commit of the branch is on %s by patch, the newest as %s", base, short(on))
+			return on
+		}
+	}
+	// A squash is found by making it here: the branch's tree on the commit where the
+	// branch last met base, whose patch is the branch's whole change.
+	fork, err := r.git(path, "merge-base", "HEAD", base)
+	if err != nil {
+		return ""
+	}
+	tree, err := r.git(path, "rev-parse", "HEAD^{tree}")
+	if err != nil {
+		return ""
+	}
+	if forkTree, _ := r.git(path, "rev-parse", fork+"^{tree}"); tree == forkTree {
+		return ""
+	}
+	squash, err := r.git(path, "-c", "user.name=qory", "-c", "user.email=qory@localhost", "commit-tree", "--no-gpg-sign", tree, "-p", fork, "-m", "squash")
+	if err != nil {
+		return ""
+	}
+	on := r.matching(path, base, squash)
+	if on == "" {
+		r.say("%s carries neither the branch's commits nor its whole change as one", base)
+		return ""
+	}
+	r.say("the branch's whole change is on %s as %s", base, short(on))
+	return on
+}
+
+// matching is the newest commit of base, since it met commit, whose patch is that of a
+// commit on commit's side; "" for none.
+func (r runner) matching(path, base, commit string) string {
+	out, err := r.git(path, "log", "--cherry-mark", "--left-only", "--no-merges", "--format=%m%H", base+"..."+commit)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if on, ok := strings.CutPrefix(line, "="); ok {
+			return on
+		}
+	}
+	return ""
 }
 
 // short is the first seven characters of a commit hash.

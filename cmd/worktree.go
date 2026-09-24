@@ -365,7 +365,7 @@ func notAt(p worktree.Path) string {
 // newWorktreeRemove builds the remove verb. With --path, stdout carries the main
 // checkout's path alone, for a shell to go back to.
 func newWorktreeRemove(use string) *cobra.Command {
-	var force, keepBranch, deleteBranch, pathOnly bool
+	var force, keepBranch, deleteBranch, offline, pathOnly bool
 	c := &cobra.Command{
 		Use:   use + " [<branch, name or path>]",
 		Short: "Remove a worktree, the one you stand in by default, and its branch",
@@ -378,9 +378,12 @@ with uncommitted changes to tracked files is refused unless --force.
 
 The branch goes with the worktree, unless --keep-branch or worktree.branch: keep in
 qory.yaml. It goes quietly when every commit of it is on a remote branch, in the main
-checkout or on the base it was cut from. A branch holding commits nothing else does is
-asked about: push it and delete, keep it, delete it anyway, or stop; --delete-branch
-answers delete, and the deleted commits stay in git's reflog for 30 days.
+checkout or on the base it was cut from. It goes quietly too when its change landed on
+the base by a squash or rebase merge, which writes new commits: the base is fetched, and
+the branch's commits, or its whole change as one, are found there by patch; --offline
+skips the fetch. A branch holding commits nothing else does is asked about: push it and
+delete, keep it, delete it anyway, or stop; --delete-branch answers delete, and the
+deleted commits stay in git's reflog for 30 days.
 
 --verbose prints how the branch's own commits were counted, each git command as it
 runs, and what every worktree.run.remove command prints. Without it a command's output
@@ -396,7 +399,7 @@ is shown only when the command fails.`,
 			if err != nil {
 				return err
 			}
-			o.Force, o.DeleteBranch = force, deleteBranch
+			o.Force, o.DeleteBranch, o.Offline = force, deleteBranch, offline
 			if keepBranch {
 				o.KeepBranch = true
 			}
@@ -471,6 +474,7 @@ is shown only when the command fails.`,
 	c.Flags().BoolVar(&force, "force", false, "remove a worktree with uncommitted changes")
 	c.Flags().BoolVar(&keepBranch, "keep-branch", false, "keep the branch after the worktree (qory.yaml: worktree.branch)")
 	c.Flags().BoolVar(&deleteBranch, "delete-branch", false, "delete the branch even when it holds commits nothing else does, without asking")
+	c.Flags().BoolVar(&offline, "offline", false, "do not fetch the base to see whether the branch landed on it; use the refs already fetched")
 	c.Flags().BoolVar(&pathOnly, "path", false, "print the main checkout's path alone on stdout, the rows on stderr")
 	c.MarkFlagsMutuallyExclusive("keep-branch", "delete-branch")
 	return c
@@ -483,6 +487,8 @@ func branchRow(r worktree.Removed) string {
 	switch {
 	case r.BranchDeleted && r.Pushed:
 		return r.Branch + "  (pushed to " + r.Upstream + ", then deleted)"
+	case r.BranchDeleted && r.Landed != "":
+		return r.Branch + "  (deleted; landed on " + r.LandedOn + " as " + r.Landed[:min(7, len(r.Landed))] + ")"
 	case r.BranchDeleted && r.Own > 0:
 		return r.Branch + "  (deleted with " + own + "; git reflog finds " + map[bool]string{true: "it", false: "them"}[r.Own == 1] + " for 30 days)"
 	case r.BranchDeleted:
