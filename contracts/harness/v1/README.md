@@ -893,6 +893,7 @@ what `qory run` passes to it.
 apiVersion: qory.dev/v1alpha1
 egress:                          # the run policy; absent: observe everything, nothing to deny by
   mode: enforce                  # or observe: record every connection, deny only what deny lists
+                                 # and ambiguous paths
   allow: [api.anthropic.com, "*.github.com"]
   deny: [gist.github.com]        # denied in either mode, whatever allow lists
 server:                          # the server every run reports to; absent: files only
@@ -908,7 +909,7 @@ wall:                            # the container the runtime starts in; absent: 
 
 | Key | Default | Meaning |
 |---|---|---|
-| `egress.mode` | `observe` | `observe` records every connection and denies only what `deny` lists; `enforce` denies a connection to a host outside `allow` as well, and records the denial |
+| `egress.mode` | `observe` | `observe` records every connection and denies only what `deny` lists and a path that could be read two ways; `enforce` denies a connection to a host outside `allow` as well, and records the denial |
 | `egress.allow` | none | the hosts the runtime may reach: a lower-case name, or `*.` and a name for every host below it, the grammar of a module's `egress` (§The module manifest). The hosts the harness declares are reported beside it as `harness_hosts` and narrow nothing |
 | `egress.deny` | none | the hosts the runtime may not reach, in `allow`'s grammar, in either mode: the runner decides them before the mode and the allow list, so a host an entry covers is denied under `observe` as under `enforce`, whatever `allow` lists, with the entry as the rule recorded |
 | `server.url` | none | the server the run reports to: `https`, or `http` to this machine, a scheme and a host with nothing after. With it set, `qory run` fetches the server's configuration, signed, and does not start unless the server answers; the events go where it defines, and its run configuration, when it defines one, is the run's policy. `--local` runs with the files alone and the server is not contacted |
@@ -943,9 +944,10 @@ A run's policy also selects credentials, `credentials: [{name: product, argument
 acme/shop}]`, and may restrict a host to paths, `egress.paths`. Both need the wall. The
 runner keeps a selected credential outside the container, and its proxy sets it on the
 requests to the hosts it is for, ending the container's TLS for those hosts alone with
-an authority made for the run. Of a host with paths the run reaches those and no other.
-A policy defines no credential: it chooses among the ones this file has, its
-`credentials` and the ones its `integrations` define, alike.
+an authority made for the run. The proxy sets a credential on the paths it lists alone,
+and under `enforce` the run reaches a host with paths on those and no other. A policy
+defines no credential: it chooses among the ones this file has, its `credentials` and
+the ones its `integrations` define, alike.
 
 `qory config` lists the file's values under `runner.`; a file that does not read stops
 every command, the way a `qory.yaml` that does not read does. The schema is

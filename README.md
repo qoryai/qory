@@ -393,6 +393,7 @@ repository cannot set it:
 apiVersion: qory.dev/v1alpha1
 egress:                  # what the runtime may reach; enforce denies the rest
   mode: enforce          # or observe: record everything, deny only what deny lists
+                         # and ambiguous paths
   allow: [api.anthropic.com, "*.github.com"]
   deny: [gist.github.com]                # denied in either mode, whatever allow lists
 server:                  # the server every run reports to; optional
@@ -491,10 +492,12 @@ to the hosts it is for. The container gets a placeholder where a program wants a
 credential set, and never the token. An **adapter** is a program of yours written for one
 kind of host, such as a source code host: it runs outside the container and prints the
 token, its expiry, and the hosts, the scheme and the paths the token is for, so `qory`
-defines no host of its own. Its paths are the run's whole reach on those hosts: a
-credential for `acme/shop` opens no other organization's repository, and a path the
-adapter leaves out, such as the host's GraphQL endpoint, is not reached. `egress.paths`
-in a policy limits a host to paths the same way with no credential. The
+defines no host of its own. Its paths are where the token goes on those hosts, and under
+`enforce` the run's whole reach there: the runner refuses every other path on them,
+another organization's repository included. Under `observe` it sends such a request on
+without the token and records it. `egress.paths` in a policy limits a host to paths the
+same way, with or without a credential; on a host with a credential a path passes under
+`enforce` when it matches both lists, and `observe` sends the rest on and records it. The
 [runner's contract](https://github.com/qoryai/runner/tree/main/contracts/runner/v1#credentials)
 has the adapter's document and the rules.
 

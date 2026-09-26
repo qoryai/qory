@@ -54,6 +54,7 @@
 //	apiVersion: qory.dev/v1alpha1
 //	egress:                      # the run policy: absent is observe everything
 //	  mode: enforce              # or observe: record every connection, deny only what deny lists
+//	                             # and ambiguous paths
 //	  allow: [api.anthropic.com, "*.github.com"]
 //	  deny: [gist.github.com]    # denied in either mode, whatever allow lists
 //	server:                      # the server every run reports to; absent is files only
