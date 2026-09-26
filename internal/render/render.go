@@ -110,7 +110,7 @@ type Runtime interface {
 }
 
 // Launcher is a runtime whose program takes the harness from outside the checkout, so a
-// home composed without links into the checkout still reaches it: the runtime renders
+// home composed without links into the checkout reaches it too: the runtime renders
 // what the program takes from outside into its directory in the home, such as a plugin
 // or a configuration directory, and Template defines how to start the program on it. A
 // runtime that does not implement it reads its harness through the links alone.
@@ -230,7 +230,7 @@ func sortedKeys(m map[string]string) []string {
 }
 
 // CopyFile copies the file at src to dir/name through [WriteFile], for a runtime that
-// hands a file it wrote to its program twice over, once in place and once in a plugin.
+// passes a file it wrote to its program twice over, once in place and once in a plugin.
 func CopyFile(src, dir, name string) error {
 	data, err := os.ReadFile(src)
 	if err != nil {
@@ -319,7 +319,7 @@ func Names() []string {
 // Composed reports the runtimes the home already contains, by the directories in it that
 // are named after a registered runtime. It returns nothing when the home does not exist,
 // which is the first compose of a checkout. A directory of any other name is ignored, so
-// a home written by a qory build that knows more runtimes loses only what this build
+// a home written by a qory build that renders more runtimes loses only what this build
 // cannot render.
 func Composed(home string) []Runtime {
 	entries, err := os.ReadDir(home)
@@ -630,7 +630,7 @@ func CheckFiles(res *compose.Result) error {
 // and is passed over for a soft one, and so is a path behind a directory the checkout
 // links elsewhere, such as a committed .github symlink, since nothing there is qory's.
 // With force, a tracked and unmodified file or directory of the checkout is removed first
-// and its path recorded, for either kind of link; anything untracked or modified is still
+// and its path recorded, for either kind of link; anything untracked or modified is
 // refused, because git checkout -- cannot restore it.
 //
 // LinkInto also removes what a previous compose linked and this one does not: a link the

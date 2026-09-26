@@ -205,8 +205,8 @@ type Expansion struct {
 // key. The credential role defines the credential whose name is the key, with the
 // adapter [integration.CredentialAdapter] returns, unless the file's credentials section
 // defines that name itself: then the file's definition stands, [Runner.Shadowed] lists
-// the key, and the integration's credential is not defined. A role qory does not know is
-// left alone. Once Expand succeeds, each further call does nothing; after an error, the
+// the key, and the integration's credential is not defined. Roles qory does not expand are
+// left as they are. Once Expand succeeds, each further call does nothing; after an error, the
 // next call describes again.
 func (r *Runner) Expand(ctx context.Context, e Expansion) error {
 	if r == nil || r.expanded {
@@ -237,7 +237,7 @@ func (r *Runner) Expand(ctx context.Context, e Expansion) error {
 			return fail("%v", err)
 		}
 		if d.Credential == nil {
-			return fail("%s plays no role qory expands, %s, and defines nothing", in.Program, strings.Join(d.Roles, ", "))
+			return fail("%s plays %s, none of which qory expands, and defines nothing", in.Program, rolesText(d.Roles))
 		}
 		// The version is the program's to word, and is printed as a terminal takes it.
 		in.Path, in.Version = found, integration.Printable(d.ProgramVersion)
@@ -477,4 +477,16 @@ func chainTrusted(path string, stat func(string) (fileOwner, error), euid uint32
 			return nil
 		}
 	}
+}
+
+// rolesText is the roles a description lists, as a phrase: "the role a", or "the roles a,
+// b and c".
+func rolesText(roles []string) string {
+	switch len(roles) {
+	case 0:
+		return "no role"
+	case 1:
+		return "the role " + roles[0]
+	}
+	return "the roles " + strings.Join(roles[:len(roles)-1], ", ") + " and " + roles[len(roles)-1]
 }

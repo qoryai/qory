@@ -858,7 +858,7 @@ func composeError(err error) error {
 // a single line could carry. The main package matches it with errors.Is and prints nothing
 // further. A collision is the one case: [printCollision] shows the modules involved
 // and the stack lines that resolve it, and the command returns the collision wrapped so
-// that [ExitCode] still sees it.
+// that [ExitCode] sees it.
 var ErrReported = errors.New("reported")
 
 // reportedError wraps an error a command printed itself. It matches [ErrReported] and

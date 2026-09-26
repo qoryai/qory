@@ -111,7 +111,7 @@ func (u *UI) Heading(text string) {
 var marked bool
 
 // Marked reports whether a title with the mark has been printed in this process. A caller
-// that prints an error outside a command uses it to decide whether the output still needs
+// that prints an error outside a command uses it to decide whether the output needs
 // a title; see [UI.Title].
 func Marked() bool { return marked }
 
@@ -150,7 +150,7 @@ func (u *UI) Fields(rows [][2]string) {
 // Table prints indented rows with every column padded to the widest cell in it, two
 // spaces between columns and no trailing space. The first column is bold. Widths are the
 // display width of a cell, counting a wide rune as two columns, so a cell that contains
-// an icon still lines up. Rows may differ in length; a short row simply ends early.
+// an icon lines up. Rows may differ in length; a short row simply ends early.
 func (u *UI) Table(rows [][]string) {
 	var widths []int
 	for _, r := range rows {

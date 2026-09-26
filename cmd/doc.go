@@ -24,7 +24,7 @@
 // with locate, it calls the packages that do the work, it prints through the ui package,
 // and it returns an error. It contains no knowledge of modules, entries or runtimes; that
 // lives in the stack, compose and render packages. Nor of how a session is observed:
-// qory run hands a launch spec to the session package of the runner module,
+// qory run passes a launch spec to the session package of the runner module,
 // github.com/qoryai/runner, and exits with what comes back, and qory run forward, hidden,
 // is the hook command the runner installs. The set of runtimes a build can
 // render for is decided here, by the blank imports at the top of harness.go: a runtime

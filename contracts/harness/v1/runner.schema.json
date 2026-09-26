@@ -194,7 +194,7 @@
             "pattern": "^/"
           },
           "adapter": {
-            "description": "A program of yours, by its absolute path, and its arguments: it knows one kind of host, such as a source code host, runs outside the container, and prints one JSON document, the runner contract's credential.schema.json: the token, when it expires, and the hosts, the scheme and the paths it is for. ${argument} in an argument is replaced by the argument the run's policy defines. The runner runs the adapter again before the token expires and when a host refuses it.",
+            "description": "A program of yours, by its absolute path, and its arguments: it is written for one kind of host, such as a source code host, runs outside the container, and prints one JSON document, the runner contract's credential.schema.json: the token, when it expires, and the hosts, the scheme and the paths it is for. ${argument} in an argument is replaced by the argument the run's policy defines. The runner runs the adapter again before the token expires and when a host refuses it.",
             "type": "array",
             "minItems": 1,
             "items": {
@@ -262,7 +262,7 @@
       }
     },
     "integrations": {
-      "description": "The integrations this machine declares, by key: programs that speak the integration contract, https://qory.dev/contracts/integration/v1/. qory runs <program> describe, checks the settings against the description, and expands each role it knows; the credential role defines the credential whose name is the key, unless credentials defines that name itself. An integration that plays no role qory knows is refused.",
+      "description": "The integrations this machine declares, by key: programs that speak the integration contract, https://qory.dev/contracts/integration/v1/. qory runs <program> describe, checks the settings against the description, and expands each role it supports; the credential role defines the credential whose name is the key, unless credentials defines that name itself. An integration that plays no role qory expands is refused.",
       "type": "object",
       "propertyNames": {
         "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
@@ -278,7 +278,7 @@
             "pattern": "^(/|[^/]*$)"
           },
           "settings": {
-            "description": "The settings document, which the description's settings schema checks; absent is {}. It goes on the command line of every role, so it contains no value of a writeOnly setting: a secret is set through <name>_file, the path of the file that contains it.",
+            "description": "The settings document, which the description's settings schema checks; absent is {}. It goes on the command line of every role, so it contains no value of a writeOnly setting: a secret is set through <setting>_file, the path of the file that contains it.",
             "type": "object"
           }
         }

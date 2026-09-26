@@ -449,7 +449,7 @@ func TestAnUnknownRoleIsLeftAlone(t *testing.T) {
 	}
 	fakeIntegration(t, dir, "qory-queue", `{"version": 1, "name": "queue", "title": "Queue", "program_version": "1", "settings": {"type": "object"}, "roles": {"work_source": {}, "output": {}}}`)
 	path := runnerFile(t, "integrations:\n  queue:\n")
-	if _, err := expand(t); err == nil || err.Error() != path+": integrations.queue: qory-queue plays no role qory expands, output, work_source, and defines nothing" {
+	if _, err := expand(t); err == nil || err.Error() != path+": integrations.queue: qory-queue plays the roles output and work_source, none of which qory expands, and defines nothing" {
 		t.Errorf("no known role: %v", err)
 	}
 }

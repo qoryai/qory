@@ -201,7 +201,7 @@ type Report struct {
 	// absent when the repository has no base to resolve.
 	Worktree *Worktree `json:"worktree,omitempty"`
 	// Qory is the build that wrote the report, absent when the build contains no version.
-	// The command sets it after [New], which knows nothing about the binary.
+	// The command sets it after [New], which has no information about the binary.
 	Qory *Build `json:"qory,omitempty"`
 }
 

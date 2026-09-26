@@ -18,7 +18,7 @@
 // [Version] is the format version, and a stored report contains it as its version field.
 // Version 1 contains the fields of Report, each under the JSON name in its struct tag.
 // Within a version a field keeps its name and its meaning, and a reader may rely on that.
-// A higher version may add fields, so a reader ignores a field it does not know and
+// A higher version may add fields, so a reader ignores a field it does not read and
 // refuses a version it does not read. [Read] does neither: it decodes any JSON containing
 // these names, and a caller that cares compares the version itself.
 //

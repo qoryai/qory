@@ -271,7 +271,7 @@ func Detect(exe string, release bool, gobin string) Channel {
 }
 
 // GoBin is the directory go install writes binaries to: GOBIN when set, else bin under
-// the first GOPATH entry, else ~/go/bin. It runs the go command, which knows a value set
+// the first GOPATH entry, else ~/go/bin. It runs the go command, which reads a value set
 // with go env -w, and reads the environment when there is no go command.
 func GoBin() string {
 	if out, err := exec.Command("go", "env", "GOBIN", "GOPATH").Output(); err == nil {

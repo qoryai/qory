@@ -4,7 +4,7 @@
 // and [Resolved.Dirty] reports whether git sees uncommitted changes under it. A git
 // source is a repository at a ref, fetched once into the cache under [CacheDir], one
 // clone per commit, and pinned by the commit the ref resolved to. The report contains pin
-// and dirty mark, so a reader of one compose knows what it ran on.
+// and dirty mark, so a reader of one compose sees what it ran on.
 //
 // [Resolve] joins a relative path onto the stack's directory and checks that the result
 // is a directory, or fetches the git source and returns the module's directory inside the

@@ -3,7 +3,7 @@
 // A [Runtime] renders for one program that runs the harness, such as Claude Code or Codex
 // CLI, and its Name is the stack's target.runtime value. Each runtime is a package
 // under internal/render that calls [Register] from its init, so the command module decides
-// which runtimes a binary knows by importing them for their side effect alone:
+// which runtimes a binary renders by importing them for their side effect alone:
 //
 //	import _ "github.com/qoryai/qory/internal/render/claude"
 //
@@ -45,7 +45,7 @@
 //     own and the compose can report the path it did not link.
 //
 // Under force, a path git could restore, tracked and unmodified, is removed for either
-// kind of link and returned as replaced; anything else is still refused. LinkInto also
+// kind of link and returned as replaced; anything else is refused. LinkInto also
 // removes what a previous compose linked and this one does not request.
 //
 // [Unlink] takes the links back. It removes the runtime's links that qory wrote, which

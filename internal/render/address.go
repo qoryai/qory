@@ -90,7 +90,7 @@ func Keys(res *compose.Result) []string {
 // Addressing is the section a launch path appends to the instructions it writes: the
 // names the session registers the composed agents, skills and commands under on that
 // path, and the entry each bound role is, so a session that meets a name a document
-// wrote in prose knows the registered one. A reference in a document is already
+// wrote in prose finds the registered one. A reference in a document is already
 // resolved; this covers the rest. It is "" when the compose contains none of those kinds
 // the runtime places, so a harness of hooks and settings alone adds no section, and it is
 // derived from the same address the substitution uses, so the two cannot disagree.
