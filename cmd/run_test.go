@@ -294,6 +294,127 @@ func TestRunRefusesWhatItCannotStart(t *testing.T) {
 	}
 }
 
+// TestRunExpandsTheIntegrationsTheMachineDeclares declares integrations found on the
+// PATH. qory config describes every one and lists it and the credential it defines. A
+// run under a policy of its own describes the ones the policy selects and names the
+// program it found: one that does not describe stops the run before it starts, with the
+// program's line, and leaves no record, and one the policy does not select is not
+// described. With a server, which supplies the policy, every one is described. A name
+// the credentials section defines as well is named on a line of its own, and a run does
+// not describe that integration, which config still does.
+func TestRunExpandsTheIntegrationsTheMachineDeclares(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, fakeRuntime(t))
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	writeFile(t, filepath.Join(bin, "qory-tracker"), "#!/bin/sh\ntest \"$1\" = describe || exit 64\necho '{\"version\": 1, \"name\": \"tracker\", \"title\": \"Tracker\", \"program_version\": \"0.3.0\", \"settings\": {\"type\": \"object\"}, \"roles\": {\"credential\": {\"argument\": \"[A-Z]+\", \"hosts\": [\"tracker.acme.example\"]}}}'\n")
+	writeFile(t, filepath.Join(bin, "qory-broken"), "#!/bin/sh\necho 'the settings file is missing' >&2\nexit 1\n")
+	for _, p := range []string{"qory-tracker", "qory-broken"} {
+		if err := os.Chmod(filepath.Join(bin, p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tracker, err := filepath.EvalSymlinks(filepath.Join(bin, "qory-tracker"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := filepath.Join(filepath.Dir(tracker), "qory-broken")
+	file := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml")
+	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\nintegrations:\n  tracker: {settings: {project: SHOP}}\n")
+	out, err := run(t, "config")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "runner.credentials.tracker", "integration tracker", "runner.integrations.tracker", tracker+" 0.3.0")
+	policy := func(name string) string {
+		path := filepath.Join(t.TempDir(), "policy.yaml")
+		writeFile(t, path, "version: 1\negress:\n  mode: observe\ncredentials:\n  - {name: "+name+", argument: SHOP}\n")
+		return path
+	}
+	t.Setenv("QORY_TEST_EXIT", "0")
+	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\nintegrations:\n  tracker: {settings: {project: SHOP}}\n  broken: {}\n")
+	out, err = run(t, "run")
+	if err != nil {
+		t.Fatalf("a run that selects no integration: %v\n%s", err, out)
+	}
+	lacks(t, out, "integration tracker", "integration broken")
+	if err := os.RemoveAll(filepath.Join(root, ".qory", "runs")); err != nil {
+		t.Fatal(err)
+	}
+	// A policy that selects a credential needs a wall, which the runner asks for once
+	// the integration it selects is described.
+	out, err = run(t, "run", "--policy", policy("tracker"))
+	wants(t, out, "qory run: integration tracker: "+tracker+" 0.3.0\n")
+	lacks(t, out, "integration broken")
+	if err == nil || !strings.Contains(err.Error(), "need a wall") {
+		t.Errorf("a run that selects tracker: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(root, ".qory", "runs")); err != nil {
+		t.Fatal(err)
+	}
+	want := "runner.yaml: integrations.broken: " + broken + " describe: exit status 1: the settings file is missing"
+	if _, err := run(t, "run", "--policy", policy("broken")); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), want) {
+		t.Errorf("a run that selects broken: %v", err)
+	}
+	if _, err := run(t, "config"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), want) {
+		t.Errorf("config with an integration that does not describe: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".qory", "runs")); !errors.Is(err, os.ErrNotExist) {
+		t.Error("a run that did not start left a record")
+	}
+	srv := newFakeServer(t, "")
+	serverFile(t, srv, "integrations:\n  broken: {}\n")
+	if _, err := run(t, "run"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), want) {
+		t.Errorf("a run whose policy the server supplies: %v", err)
+	}
+	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\ncredentials:\n  tracker:\n    env: TRACKER_TOKEN\n    hosts: [tracker.acme.example]\n    auth: {scheme: bearer}\nintegrations:\n  tracker: {settings: {project: SHOP}}\n")
+	line := "runner.yaml: credentials.tracker defines the credential tracker, and integrations.tracker defines none\n"
+	out, err = run(t, "config")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "qory config: "+line, tracker+" 0.3.0, shadowed by credentials.tracker")
+	out, err = run(t, "run")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "qory run: "+line)
+	// A run describes every integration when the server supplies the policy, but one
+	// the credentials section shadows defines nothing for it and is not described.
+	serverFile(t, srv, "credentials:\n  broken:\n    env: BROKEN_TOKEN\n    hosts: [broken.acme.example]\n    auth: {scheme: bearer}\nintegrations:\n  broken: {}\n")
+	out, err = run(t, "run")
+	if err != nil {
+		t.Fatalf("a run with a shadowed integration that does not describe: %v\n%s", err, out)
+	}
+	wants(t, out, "qory run: runner.yaml: credentials.broken defines the credential broken, and integrations.broken defines none\n")
+	if _, err := run(t, "config"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), want) {
+		t.Errorf("config describes a shadowed integration: %v", err)
+	}
+}
+
+// TestConfigRefusesAProgramInTheCheckoutAlone runs qory config from a directory that is
+// no git working tree, above the program the runner file names: the program is
+// described. From a checkout that holds the program, it is refused.
+func TestConfigRefusesAProgramInTheCheckoutAlone(t *testing.T) {
+	dir := emptyDir(t)
+	program := filepath.Join(dir, "tools", "acme-tracker")
+	writeFile(t, program, "#!/bin/sh\necho '{\"version\": 1, \"name\": \"tracker\", \"title\": \"Tracker\", \"program_version\": \"0.3.0\", \"settings\": {\"type\": \"object\"}, \"roles\": {\"credential\": {\"argument\": \"[A-Z]+\", \"hosts\": [\"tracker.acme.example\"]}}}'\n")
+	if err := os.Chmod(program, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "apiVersion: qory.dev/v1alpha1\nintegrations:\n  tracker: {program: "+program+"}\n")
+	out, err := run(t, "config")
+	if err != nil {
+		t.Fatalf("config outside a checkout: %v\n%s", err, out)
+	}
+	wants(t, out, program+" 0.3.0")
+	runGit(t, dir, "init", "--quiet", "--initial-branch=main")
+	if _, err := run(t, "config"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "inside "+dir+", which a run may write") {
+		t.Errorf("config in the checkout that holds the program: %v", err)
+	}
+}
+
 // TestForwardHandsAHookToTheRun is the hidden forward verb: it sends its stdin to the
 // socket the environment names as one hooks record, prints nothing and exits 0; with
 // no socket in the environment it still exits 0 and says why on stderr.
@@ -401,6 +522,51 @@ esac
 		t.Fatal(err)
 	}
 	return script, log
+}
+
+// TestRunRefusesAProgramUnderAReadWriteMount declares an integration whose program is
+// in a directory the wall mounts: mounted read-write, --mount or wall.mounts, the
+// container could rewrite it, and run and config refuse it; mounted read-only, the run
+// describes it and names it.
+func TestRunRefusesAProgramUnderAReadWriteMount(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, "claude")
+	docker, _ := fakeDocker(t)
+	helper := staticELF(t)
+	tools := t.TempDir()
+	program := filepath.Join(tools, "bin", "acme-tracker")
+	writeFile(t, program, "#!/bin/sh\ntest \"$1\" = describe || exit 64\necho '{\"version\": 1, \"name\": \"tracker\", \"title\": \"Tracker\", \"program_version\": \"0.3.0\", \"settings\": {\"type\": \"object\"}, \"roles\": {\"credential\": {\"argument\": \"[A-Z]+\", \"hosts\": [\"tracker.acme.example\"]}}}'\n")
+	if err := os.Chmod(program, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resolvedProgram, err := filepath.EvalSymlinks(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml")
+	wallSection := "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: " + docker + "\n  helper: " + helper + "\n"
+	integrations := "integrations:\n  tracker: {program: " + program + "}\n"
+	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\n"+wallSection+integrations)
+	policy := filepath.Join(t.TempDir(), "policy.yaml")
+	writeFile(t, policy, "version: 1\negress:\n  mode: observe\ncredentials:\n  - {name: tracker, argument: SHOP}\n")
+	refused := "inside " + tools + ", which a run may write"
+	if _, err := run(t, "run", "claude", "--policy", policy, "--mount", tools); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), refused) {
+		t.Errorf("a program under a read-write --mount: %v", err)
+	}
+	out, err := run(t, "run", "claude", "--policy", policy, "--mount", tools+":ro")
+	wants(t, out, "qory run: integration tracker: "+resolvedProgram+" 0.3.0\n")
+	if err != nil && strings.Contains(err.Error(), refused) {
+		t.Errorf("a program under a read-only --mount: %v", err)
+	}
+	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\n"+wallSection+"  mounts: ["+tools+"]\n"+integrations)
+	if _, err := run(t, "config"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), refused) {
+		t.Errorf("config with the program under a read-write wall.mounts: %v", err)
+	}
+	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\n"+wallSection+"  mounts: [\""+tools+":ro\"]\n"+integrations)
+	if out, err := run(t, "config"); err != nil {
+		t.Errorf("config with the program under a read-only wall.mounts: %v\n%s", err, out)
+	}
 }
 
 // TestRunBehindAWall runs the composed runtime behind the Docker wall with a program

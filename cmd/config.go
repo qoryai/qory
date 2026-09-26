@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -12,8 +13,9 @@ import (
 
 // newConfig builds the config verb, which prints every effective setting with its value
 // and the file it came from, for the checkout the process stands in. It reads the
-// configuration files alone and needs no git working tree, so a person can check what a
-// compose would read before there is anything to compose.
+// configuration files, and runs describe of each integration the runner file declares,
+// and needs no git working tree, so a person can check what a compose or a run would
+// read before there is anything to compose.
 func newConfig() *cobra.Command {
 	return &cobra.Command{
 		Use:   "config",
@@ -25,6 +27,12 @@ order, each overriding the one before it: the user's, in $XDG_CONFIG_HOME/qory o
 ~/.config/qory, then the ones in the checkout's ancestor directories the current user
 owns, the farthest first, then the one in the checkout root. A compose flag overrides
 every file.
+
+The machine's ` + config.RunnerFileName + ` is listed under runner. Each integration it declares is
+described as before a run, its program's describe run and its settings checked, and
+listed with the program found and the credential it defines; one that does not describe
+is an error. An integration whose key the credentials section defines as well is listed
+as shadowed by it, and a line on standard error says so.
 
 --verbose adds nothing here.`,
 		Args: noArgs,
@@ -39,6 +47,25 @@ every file.
 			}
 			conf, err := config.Load(root, true)
 			if err != nil {
+				return input(err)
+			}
+			for _, key := range conf.Runner.Shadowed() {
+				fmt.Fprintln(cmd.ErrOrStderr(), "qory config:", shadowed(key))
+			}
+			// A directory outside a git working tree is no checkout. The wall's read-write
+			// mounts are what a run may write besides.
+			var workspace []string
+			if checkout.ExcludeFile(root) != "" {
+				workspace = []string{root}
+			}
+			if r := conf.Runner; r != nil && r.Wall != nil {
+				for _, m := range r.Wall.Mounts {
+					if !m.ReadOnly {
+						workspace = append(workspace, m.Path)
+					}
+				}
+			}
+			if err := conf.Runner.Expand(cmd.Context(), config.Expansion{Workspace: workspace}); err != nil {
 				return input(err)
 			}
 			u := ui.New(cmd.OutOrStdout())

@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qory.dev/contracts/integration/v1/description.schema.json",
+  "title": "Integration description",
+  "description": "What <program> describe prints on its standard output, once, as one JSON document, and exits 0: the integration's name, the domains it serves, the settings it takes and the roles it plays. It takes no settings and reaches no network. A program that fails prints nothing on standard output, one line on standard error naming what failed, and exits non-zero. A reader expands a declared integration into its definitions from this document, so the reader holds no table of integrations.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "name", "title", "program_version", "settings", "roles"],
+  "properties": {
+    "version": {"description": "The contract's version.", "const": 1},
+    "name": {
+      "description": "The integration's name: the key a machine's configuration declares it under, unless the machine chooses another, and so the name of what it defines there. The key names the runner's credential and the program qory-<key> of this repository's, so the name is the credential's grammar without the dot.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+    },
+    "title": {"description": "A human name, for a form or a listing.", "type": "string", "minLength": 1},
+    "description": {"description": "A sentence or two on what the integration does, for a form or a listing.", "type": "string"},
+    "domains": {
+      "description": "The domains the integration serves, each a domain name, software say. A control plane offers a workspace the integrations whose domains hold the workspace's domain name exactly, the same string, and those whose description has no domains in every domain: the field is absent, never an empty list. A declared integration expands the same whatever its domains: they decide what is offered, not what runs.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"}
+    },
+    "program_version": {"description": "The program's own version, as it was built.", "type": "string", "minLength": 1},
+    "settings": {
+      "description": "A JSON Schema, draft 2020-12, of the settings document: an object. A property marked writeOnly is a secret: a form shows it as one, written and never read back, a log leaves it out, and it stays off every command line. A secret is a property of the settings object itself, never a nested one, and a secret <name> has a setting <name>_file, a file that holds it, which a command line carries in its place.",
+      "allOf": [
+        {"$ref": "https://json-schema.org/draft/2020-12/schema"},
+        {"type": "object", "required": ["type"], "properties": {"type": {"const": "object"}}}
+      ]
+    },
+    "roles": {
+      "description": "The roles the program plays, by name. A reader expands the roles it knows and leaves the others as they are. tool, work_source and output are reserved, each for a contract of its own.",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^[a-z][a-z_]{0,63}$"},
+      "properties": {
+        "credential": {
+          "description": "The runner's credential adapter. The program is started as <program> credential --settings <json> -- <argument> and prints the runner's credential document.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["argument", "hosts"],
+          "properties": {
+            "argument": {"description": "A regular expression, RE2, the policy's argument must match whole: the definition's argument.", "type": "string", "minLength": 1},
+            "hosts": {
+              "description": "The hosts the adapter answers for: the definition's hosts, the most an answer may claim.",
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {"type": "string", "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"}
+            }
+          }
+        }
+      }
+    }
+  }
+}

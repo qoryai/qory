@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -56,8 +57,15 @@ type Runner struct {
 	StopGrace  time.Duration
 	// Credentials are the credentials this machine defines, in the file's order. A
 	// run's policy selects among them by name; the runner holds each outside the
-	// container and its proxy sets it on the requests to the hosts it is for.
+	// container and its proxy sets it on the requests to the hosts it is for. The ones
+	// an integration defines are added by [Runner.Expand].
 	Credentials []RunnerCredential
+	// Integrations are the integrations this machine declares, in the file's order:
+	// programs that speak the integration contract, which [Runner.Expand] describes and
+	// expands into the definitions they give.
+	Integrations []RunnerIntegration
+
+	expanded bool
 }
 
 // RunnerCredential is one entry of the credentials section. Exactly one of Env, File
@@ -72,6 +80,9 @@ type RunnerCredential struct {
 	Scheme, Username, Header string
 	Paths                    []string
 	Placeholders             []string
+	// Integration is the key of the integration the definition was expanded from,
+	// empty for one of the file's credentials section.
+	Integration string
 }
 
 // WallDocker is the one wall adapter there is.
@@ -185,8 +196,9 @@ type runnerFile struct {
 		StopSignal *string `yaml:"stop_signal"`
 		StopGrace  *string `yaml:"stop_grace"`
 	} `yaml:"run,omitempty"`
-	Credentials yaml.Node `yaml:"credentials,omitempty"`
-	Wall        *struct {
+	Credentials  yaml.Node `yaml:"credentials,omitempty"`
+	Integrations yaml.Node `yaml:"integrations,omitempty"`
+	Wall         *struct {
 		Adapter *string   `yaml:"adapter"`
 		Image   *string   `yaml:"image"`
 		Command *string   `yaml:"command"`
@@ -318,6 +330,11 @@ func LoadRunner() (*Runner, error) {
 	}
 	if f.Credentials.Kind != 0 {
 		if r.Credentials, err = readCredentials(path, &f.Credentials); err != nil {
+			return nil, err
+		}
+	}
+	if f.Integrations.Kind != 0 {
+		if r.Integrations, err = readIntegrations(path, &f.Integrations); err != nil {
 			return nil, err
 		}
 	}
@@ -523,10 +540,23 @@ func (r *Runner) Rows() []Row {
 			switch {
 			case c.File != "":
 				from = "file " + c.File
+			case c.Integration != "":
+				from = "integration " + c.Integration
 			case len(c.Adapter) > 0:
 				from = "adapter " + c.Adapter[0]
 			}
 			rows = append(rows, Row{"runner.credentials." + c.Name, from, origin})
+		}
+		shadowed := r.Shadowed()
+		for _, in := range r.Integrations {
+			program := in.Program
+			if in.Path != "" {
+				program = in.Path + " " + in.Version
+			}
+			if slices.Contains(shadowed, in.Key) {
+				program += ", shadowed by credentials." + in.Key
+			}
+			rows = append(rows, Row{"runner.integrations." + in.Key, program, origin})
 		}
 	}
 	if r != nil && r.Wall != nil {

@@ -81,6 +81,27 @@ credential names and no other, another organization's repositories say, and ever
 other host stays a tunnel nobody reads. The policy's egress.paths holds a host to
 paths the same way with no credential.
 
+An integration is an adapter published apart that describes itself: Qory's own
+qory-<name>, qory-github say, or a program of yours. The integrations section of
+runner.yaml declares each under a key with its settings, and names its program
+when it is not qory-<key> on the PATH; where the PATH is not the machine owner's alone,
+program names it by its absolute path. qory runs a program the run cannot write: one
+outside the checkout and outside every mount the wall gives the container read-write,
+judged by where its links lead. The program and every directory above it up to /, and
+above each link on the way, belong to root or to the user running qory, and so does
+each link; other users may write none of them, and a group may write one when it is
+root's, wheel, admin, or the owner's primary group named as the owner is. A directory
+root owns with the sticky bit set keeps the rule. qory run names the program it found
+on a line of its own. Before a run qory runs <program> describe for each integration
+the run's policy selects, every one when the server supplies the policy, checks the
+settings against the description, and defines the credential named by the key, with
+the adapter <program> credential --settings <json> -- ${argument}. A policy selects it
+by the key like any other. The settings go on that command line, so a secret among
+them is refused and given as the file that holds it. A name the credentials section
+defines itself is the section's, a line says so, and the run describes that
+integration no further. An integration that does not describe, or whose settings its
+description refuses, means no run.
+
 A caller that starts runs for a system of its own names them: --run-id gives the run
 the id the caller already holds, a UUID in lower case, and --label key=value, repeatable,
 puts the caller's own names, a key in a queue, a repository, an issue, into

@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "name": "github",
+  "title": "GitHub",
+  "description": "Mints a GitHub App installation token for the repositories a run asks for, with the permissions the machine allows and no more.",
+  "domains": [
+    "software"
+  ],
+  "program_version": "dev",
+  "settings": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "app_id"
+    ],
+    "oneOf": [
+      {
+        "required": [
+          "private_key_file"
+        ]
+      },
+      {
+        "required": [
+          "private_key"
+        ]
+      }
+    ],
+    "properties": {
+      "app_id": {
+        "title": "App id",
+        "description": "The GitHub App's numeric id, or its client id.",
+        "type": [
+          "integer",
+          "string"
+        ],
+        "minimum": 1,
+        "pattern": "^[A-Za-z0-9.]{1,64}$"
+      },
+      "installation_id": {
+        "title": "Installation id",
+        "description": "The App's installation on the account whose repositories runs ask for. Absent means it is looked up from the repositories on every call.",
+        "type": "integer",
+        "minimum": 1
+      },
+      "permissions": {
+        "title": "Permissions",
+        "description": "The most a run's token gets, by GitHub's permission name, of those a run may be given: read or write, never admin. At least one; absent is the default. Administration, secrets, environments and every organisation's and member's permission are refused.",
+        "type": "object",
+        "minProperties": 1,
+        "propertyNames": {
+          "enum": [
+            "actions",
+            "checks",
+            "contents",
+            "deployments",
+            "issues",
+            "metadata",
+            "pages",
+            "pull_requests",
+            "statuses",
+            "workflows"
+          ]
+        },
+        "additionalProperties": {
+          "enum": [
+            "read",
+            "write"
+          ]
+        },
+        "default": {
+          "contents": "write",
+          "pull_requests": "write"
+        }
+      },
+      "api_url": {
+        "title": "API",
+        "description": "GitHub's API, https, or http on loopback alone. Another than the default is for a test: GitHub Enterprise Server is not supported.",
+        "type": "string",
+        "pattern": "^(https://[^\\s/@]+|http://(127\\.0\\.0\\.1|\\[::1\\]|localhost)(:[0-9]{1,5})?)(/[^\\s]*)?$",
+        "default": "https://api.github.com"
+      },
+      "private_key_file": {
+        "title": "Private key file",
+        "description": "A file that holds the App's private key and that only its owner reads: how a machine hands the key in.",
+        "type": "string",
+        "minLength": 1
+      },
+      "private_key": {
+        "title": "Private key",
+        "description": "The App's private key, the PEM GitHub hands out. Secret: written, never read back, and never on a command line.",
+        "type": "string",
+        "writeOnly": true,
+        "minLength": 1
+      }
+    }
+  },
+  "roles": {
+    "credential": {
+      "argument": "[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}(,[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100})*",
+      "hosts": [
+        "github.com",
+        "api.github.com"
+      ]
+    }
+  }
+}

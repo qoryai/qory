@@ -494,6 +494,71 @@ policy holds a host to paths the same way with no credential. The
 [runner's contract](https://github.com/qoryai/runner/tree/main/contracts/runner/v1#credentials)
 has the adapter's document and the rules.
 
+An **integration** is an adapter published apart that describes itself: Qory's own
+`qory-<name>`, such as `qory-github` from
+[qoryai/integrations](https://github.com/qoryai/integrations), or a program of yours
+under a name of your own. Declare it and `qory` writes the definition:
+
+```yaml
+# ~/.config/qory/runner.yaml
+integrations:
+  github:                                 # qory-github, found on the PATH
+    settings:
+      app_id: 123456
+      private_key_file: /etc/qory/github-app.pem
+      permissions: {contents: write, pull_requests: write}
+  tracker:                                # a program of yours, by its path
+    program: /opt/acme/bin/acme-tracker
+    settings: {url: https://tracker.acme.example}
+```
+
+Before a run `qory` runs `<program> describe`. The program prints its description, the
+settings it takes as a JSON Schema and the roles it plays, and `qory` checks the
+settings against it. The credential role defines the credential named by the key, as if
+the file said
+
+```yaml
+credentials:
+  github:
+    adapter: [/usr/local/bin/qory-github, credential, --settings, '{"app_id":123456,"private_key_file":"/etc/qory/github-app.pem","permissions":{"contents":"write","pull_requests":"write"}}', --, "${argument}"]
+    argument: '[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}(,[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100})*'
+    hosts: [github.com, api.github.com]
+```
+
+and a policy selects it by the key, `{name: github, argument: acme/shop}`. `program`
+names the program by its absolute path or by a name on the `PATH`; without it the
+program is `qory-<key>` on the `PATH`. On a machine whose `PATH` is not its owner's
+alone, name each program by its absolute path with `program`. `qory` runs a program the
+run cannot write: one outside the checkout and outside every mount the wall gives the
+container read-write, `wall.mounts` and `--mount` without `:ro`, judged by where its
+links lead: a link on a `PATH` entry the checkout controls that resolves outside the
+checkout is judged by where it resolves. The rule holds for each run as it starts, so a
+program written into a directory while that directory was mounted read-write is judged
+by where it is on every later run; keep a program's directory out of the read-write
+mounts. The resolved file, every directory above it up to `/`, and every directory above
+each link on the way, the `PATH` directory among them, keep one rule: root or the user
+running `qory` owns each, and each link on the way; other users may write none; and a
+group may write one when the group is root's, gid 0, `wheel` or `admin`, or the owner's
+primary group, named as the owner is. A directory root owns with the sticky bit set,
+`/tmp` or `/nix/store`, keeps the rule. A default Homebrew install and a `~/go/bin` of a
+user's private group keep it. `qory run` names the program it found on a line of its
+own. The settings go on the adapter's command line, which other processes of the machine
+can read, so a secret is refused there: the description marks it, a property of the
+settings themselves, and the settings give the file that holds it, `private_key_file`
+and never `private_key`. The settings are compact JSON, byte for byte what `qory-github
+setup` prints: `<`, `>`, `&`, U+2028 and U+2029 escaped, and every `$` written `\u0024`,
+so the adapter's `${argument}` is the policy's argument alone. A name the `credentials`
+section defines itself is the section's: `qory run` and `qory config` say so on a line
+of their own, `qory config` describes the integration and lists it as shadowed, and a
+run leaves it undescribed. A run whose policy is on this machine describes the
+integrations its `credentials` select; a run whose policy the server supplies describes
+every one. A program that does not answer within 10 seconds, a description the
+[integration
+contract](https://github.com/qoryai/integrations/tree/main/contracts/integration/v1)
+refuses, settings the description refuses, and an integration that plays no role `qory`
+knows stop the run before it starts. `qory config` describes every integration and lists
+what each defines.
+
 For those hosts, and no other, the proxy ends the container's TLS itself, with an
 authority made for the run whose key never leaves the runner. The container is given
 one bundle to trust, its image's own authorities and the run's certificate, through

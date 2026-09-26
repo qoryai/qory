@@ -260,6 +260,29 @@
           }
         }
       }
+    },
+    "integrations": {
+      "description": "The integrations this machine declares, by key: programs that speak the integration contract, https://qory.dev/contracts/integration/v1/. qory runs <program> describe, checks the settings against the description, and expands each role it knows; the credential role defines the credential named by the key, unless credentials defines that name itself. An integration that plays no role qory knows is refused.",
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+      },
+      "additionalProperties": {
+        "type": ["object", "null"],
+        "additionalProperties": false,
+        "properties": {
+          "program": {
+            "description": "The program: an absolute path, or a name looked up on the PATH. Default qory-<key>. qory runs it from outside the checkout and outside every mount the wall gives the container read-write, judged by where its links lead. The resolved program, every directory above it up to /, and every directory above each link on the way belong to root or the user running qory, and so does each link; other users may write none of them, except a directory root owns with the sticky bit set, which keeps the rule; a group may write one when it is root's (gid 0), wheel, admin, or the owner's primary group named as the owner is.",
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(/|[^/]*$)"
+          },
+          "settings": {
+            "description": "The settings document, which the description's settings schema checks; absent is {}. It goes on the command line of every role, so it holds no value of a writeOnly setting: a secret is given as the file that holds it, <name>_file.",
+            "type": "object"
+          }
+        }
+      }
     }
   }
 }

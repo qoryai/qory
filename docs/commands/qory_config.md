@@ -12,6 +12,12 @@ order, each overriding the one before it: the user's, in $XDG_CONFIG_HOME/qory o
 owns, the farthest first, then the one in the checkout root. A compose flag overrides
 every file.
 
+The machine's runner.yaml is listed under runner. Each integration it declares is
+described as before a run, its program's describe run and its settings checked, and
+listed with the program found and the credential it defines; one that does not describe
+is an error. An integration whose key the credentials section defines as well is listed
+as shadowed by it, and a line on standard error says so.
+
 --verbose adds nothing here.
 
 ```
