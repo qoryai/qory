@@ -14,7 +14,7 @@ import (
 )
 
 // The fixtures under testdata/fixtures are contracts/integration/v1/fixtures of
-// github.com/qoryai/integrations at 48a655307774073553a3ce9de5bbc30bdf9a09a6, copied
+// github.com/qoryai/integrations at b381dad9d10058c6b77de256bf117e699db25923, copied
 // with the schema.
 
 // program writes a program that answers describe with doc and exits 0.
@@ -34,7 +34,7 @@ func program(t *testing.T, doc string) string {
 func TestTheSchemaCopyHoldsToTheContractsFixtures(t *testing.T) {
 	valid, _ := filepath.Glob("testdata/fixtures/*.json")
 	invalid, _ := filepath.Glob("testdata/fixtures/invalid/*.json")
-	if len(valid) != 3 || len(invalid) != 6 {
+	if len(valid) != 4 || len(invalid) != 9 {
 		t.Fatalf("fixtures %v %v", valid, invalid)
 	}
 	for _, f := range valid {
@@ -227,5 +227,22 @@ func TestANameOfTheDescriptionIsPrintedAsATerminalTakesIt(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "settings.y?[2J is required with settings.x?[2J") {
 		t.Errorf("dependentRequired: %v", err)
+	}
+}
+
+// TestADescriptionThatNamesItsDomainsIsRead describes qory-github as it describes itself,
+// with the domains it serves, and a machine's own program that names two: each reads as
+// one that names none, since a declared integration expands the same whatever its
+// domains.
+func TestADescriptionThatNamesItsDomainsIsRead(t *testing.T) {
+	for _, f := range []string{"testdata/fixtures/github.json", "testdata/fixtures/acme-chat.json"} {
+		doc, _ := os.ReadFile(f)
+		if !strings.Contains(string(doc), `"domains"`) {
+			t.Fatalf("%s names no domains", f)
+		}
+		d, err := integration.Describe(context.Background(), program(t, string(doc)))
+		if err != nil || d.Credential == nil {
+			t.Errorf("%s: %+v, %v", f, d, err)
+		}
 	}
 }

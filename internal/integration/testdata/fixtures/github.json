@@ -3,6 +3,9 @@
   "name": "github",
   "title": "GitHub",
   "description": "Mints a GitHub App installation token for the repositories a run asks for, with the permissions the machine allows and no more.",
+  "domains": [
+    "software"
+  ],
   "program_version": "dev",
   "settings": {
     "type": "object",

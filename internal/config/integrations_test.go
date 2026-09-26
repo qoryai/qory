@@ -32,9 +32,9 @@ func fixture(t *testing.T, name string) string {
 // place of each $.
 var dollar = string([]byte{'\\', 'u', '0', '0', '2', '4'})
 
-// setupPrints is what qory-github setup prints for the runner file, as the
-// integrations README has it at 48a655307774073553a3ce9de5bbc30bdf9a09a6: the definition
-// the declaration below expands to.
+// setupPrints is what qory-github setup prints for the runner file, as github/README.md
+// of qoryai/integrations has it at b381dad9d10058c6b77de256bf117e699db25923: the
+// definition the declaration below expands to.
 const setupPrints = `credentials:
   github:
     adapter: [qory-github, credential, --settings, '{"app_id":123456,"private_key_file":"/home/dev/.config/qory/github-app.pem"}', --, "${argument}"]

@@ -33,7 +33,7 @@ import (
 )
 
 // descriptionSchema is contracts/integration/v1/description.schema.json of
-// github.com/qoryai/integrations at commit 48a655307774073553a3ce9de5bbc30bdf9a09a6,
+// github.com/qoryai/integrations at commit b381dad9d10058c6b77de256bf117e699db25923,
 // copied as it is. A new revision of the contract is copied over it, with its commit
 // named here.
 //

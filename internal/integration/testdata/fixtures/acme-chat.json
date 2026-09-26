@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "name": "acme-chat",
+  "title": "Acme chat",
+  "description": "Messages of Acme chat: a token for a run's channel.",
+  "domains": ["software", "marketing"],
+  "program_version": "0.1.0",
+  "settings": {"type": "object"},
+  "roles": {
+    "credential": {"argument": "[a-z][a-z0-9-]{0,79}", "hosts": ["chat.acme.example"]}
+  }
+}
