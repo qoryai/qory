@@ -2,7 +2,7 @@
   "version": 1,
   "name": "github",
   "title": "GitHub",
-  "description": "Mints a GitHub App installation token for the repositories a run asks for, with the permissions the machine allows and no more.",
+  "description": "Mints a GitHub App installation token for the repositories a run works on, with the permissions the machine allows and no more.",
   "domains": [
     "software"
   ],
@@ -38,13 +38,13 @@
       },
       "installation_id": {
         "title": "Installation id",
-        "description": "The App's installation on the account whose repositories runs ask for. Absent means it is looked up from the repositories on every call.",
+        "description": "The App's installation on the account whose repositories runs work on. Absent means it is looked up from the repositories on every call.",
         "type": "integer",
         "minimum": 1
       },
       "permissions": {
         "title": "Permissions",
-        "description": "The most a run's token gets, by GitHub's permission name, of those a run may be given: read or write, never admin. At least one; absent is the default. Administration, secrets, environments and every organisation's and member's permission are refused.",
+        "description": "The most a run's token gets, by GitHub's permission name, of those a run may be granted: read or write, never admin. At least one; absent is the default. Administration, secrets, environments and every organisation's and member's permission are refused.",
         "type": "object",
         "minProperties": 1,
         "propertyNames": {
@@ -81,7 +81,7 @@
       },
       "private_key_file": {
         "title": "Private key file",
-        "description": "A file that holds the App's private key and that only its owner reads: how a machine hands the key in.",
+        "description": "A file that contains the App's private key and that only its owner reads: how a machine hands the key in.",
         "type": "string",
         "minLength": 1
       },

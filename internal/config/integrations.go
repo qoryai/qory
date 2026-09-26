@@ -174,8 +174,8 @@ func writeJSON(b *bytes.Buffer, n *yaml.Node, at string) error {
 }
 
 // writeString writes s as a JSON string as encoding/json's Marshal writes it, with <,
-// >, &, U+2028 and U+2029 escaped: the bytes qory-github setup prints for the same
-// settings.
+// >, &, U+2028 and U+2029 escaped: the compact JSON of step 4 of the integration
+// contract's "Declaring an integration".
 func writeString(b *bytes.Buffer, s string) {
 	out, _ := json.Marshal(s)
 	b.Write(out)

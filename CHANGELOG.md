@@ -14,9 +14,10 @@ release may change what an existing document does, and says so under Upgrading.
   and `settings`. `qory` runs `<program> describe`, checks the settings against the
   description, and defines the credential named by the key, whose adapter is `<program>
   credential --settings <json> -- ${argument}` and whose `argument` and `hosts` are the
-  description's. The settings word is byte for byte what `qory-github setup` prints,
-  every `$` written `\u0024`. `qory` holds no table of integrations: Qory's own
-  `qory-github` and a program of yours are found and set up the same way. `qory run`
+  description's. The settings word is compact JSON, every `$` written `\u0024`,
+  as the integration contract defines for a declaration. `qory` holds no table of
+  integrations: Qory's own `qory-github` and a program of yours are found and set up the
+  same way. `qory run`
   describes the integrations the run's policy selects, every one when the server
   supplies the policy, and names each program it found; `qory config` describes every
   one. A program runs from outside the checkout and outside every mount the wall gives

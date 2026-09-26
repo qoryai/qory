@@ -14,7 +14,7 @@ import (
 )
 
 // The fixtures under testdata/fixtures are contracts/integration/v1/fixtures of
-// github.com/qoryai/integrations at b381dad9d10058c6b77de256bf117e699db25923, copied
+// github.com/qoryai/integrations at 44236bb3bdbac84f53cb44b3497f2f790591cfcd, copied
 // with the schema.
 
 // program writes a program that answers describe with doc and exits 0.

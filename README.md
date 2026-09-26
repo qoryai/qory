@@ -545,9 +545,10 @@ user's private group keep it. `qory run` names the program it found on a line of
 own. The settings go on the adapter's command line, which other processes of the machine
 can read, so a secret is refused there: the description marks it, a property of the
 settings themselves, and the settings give the file that holds it, `private_key_file`
-and never `private_key`. The settings are compact JSON, byte for byte what `qory-github
-setup` prints: `<`, `>`, `&`, U+2028 and U+2029 escaped, and every `$` written `\u0024`,
-so the adapter's `${argument}` is the policy's argument alone. A name the `credentials`
+and never `private_key`. The settings are compact JSON as Go's `encoding/json` writes
+it, `<`, `>`, `&`, U+2028 and U+2029 escaped, and every `$` in them is written `\u0024`,
+as the integration contract defines for a declaration, so the adapter's `${argument}` is
+the policy's argument alone. A name the `credentials`
 section defines itself is the section's: `qory run` and `qory config` say so on a line
 of their own, `qory config` describes the integration and lists it as shadowed, and a
 run leaves it undescribed. A run whose policy is on this machine describes the
