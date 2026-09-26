@@ -117,7 +117,7 @@ source code host, and prints the token with the hosts, the scheme and the paths 
 for. A run's policy selects credentials by name, with an argument for an adapter, such
 as a repository, and defines none. Behind a wall the runner keeps each outside the
 container and its proxy sets it on the requests to the hosts it is for, ending the
-container's TLS for those hosts alone with an authority made for the run, which the
+container's TLS for those hosts with an authority made for the run, which the
 container is configured to trust beside its image's own, through the variables
 wall.ca_env lists, such as SSL_CERT_FILE and NODE_EXTRA_CA_CERTS. Of those hosts the
 token goes only to the paths the credential lists; under enforce the runner refuses
