@@ -93,7 +93,7 @@ func TestOnBaseRefusesWhatIsNoDocument(t *testing.T) {
 	base := filepath.Join(tmp, "tree", stack.FileName)
 	path := filepath.Join(tmp, "app", "harness.yaml")
 	for _, c := range []struct{ body, want string }{
-		{"harness: {runtime: codex}\n", path + ": the harness section names no modules, no stack to extend and no extensions"},
+		{"harness: {runtime: codex}\n", path + ": the harness section lists no modules, no stack to extend and no extensions"},
 		{"harness:\n  nope: 1\n", path + `: line 2: key "nope" is not one harness.yaml reads`},
 	} {
 		writeRaw(t, path, c.body)

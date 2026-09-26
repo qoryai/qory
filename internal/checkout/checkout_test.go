@@ -275,13 +275,13 @@ func TestRestorableIsTrackedAndUnmodified(t *testing.T) {
 		t.Errorf("a modified file: %q", reason)
 	}
 	write(t, filepath.Join(root, ".claude", "settings.local.json"), "{}\n")
-	if reason := checkout.Restorable(root, filepath.Join(root, ".claude")); reason != "holds files git does not track" {
+	if reason := checkout.Restorable(root, filepath.Join(root, ".claude")); reason != "contains files git does not track" {
 		t.Errorf("a directory with an untracked file in it: %q", reason)
 	}
 	write(t, filepath.Join(root, ".gitignore"), ".claude/settings.local.json\n")
 	git(t, root, "add", ".gitignore")
 	git(t, root, "commit", "-q", "-m", "ignore")
-	if reason := checkout.Restorable(root, filepath.Join(root, ".claude")); reason != "holds files git does not track" {
+	if reason := checkout.Restorable(root, filepath.Join(root, ".claude")); reason != "contains files git does not track" {
 		t.Errorf("a directory with an ignored file in it: %q", reason)
 	}
 	if reason := checkout.Restorable(root, filepath.Join(t.TempDir(), "elsewhere")); reason != "is outside the checkout" {
@@ -300,7 +300,7 @@ func TestRestorableSeesUntrackedFilesTheConfigurationHides(t *testing.T) {
 	git(t, root, "add", "-A")
 	git(t, root, "commit", "-q", "-m", "first")
 	write(t, filepath.Join(root, ".claude", "settings.local.json"), "{}\n")
-	if reason := checkout.Restorable(root, filepath.Join(root, ".claude")); reason != "holds files git does not track" {
+	if reason := checkout.Restorable(root, filepath.Join(root, ".claude")); reason != "contains files git does not track" {
 		t.Errorf("a directory with an untracked file the configuration hides: %q", reason)
 	}
 }

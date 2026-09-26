@@ -14,7 +14,7 @@ import (
 	"github.com/qoryai/qory/internal/ui"
 )
 
-// Version is the report format version a [New] report carries.
+// Version is the report format version a [New] report contains.
 const Version = 1
 
 // NoLinks is the Links value of a compose that wrote nothing into the checkout.
@@ -37,8 +37,8 @@ type Module struct {
 	Dirty bool `json:"dirty,omitempty"`
 	// Variant is the variant chosen for the target runtime, absent for a module without one.
 	Variant string `json:"variant,omitempty"`
-	// Link is the checkout-root name that links to the module's directory, absent when the
-	// stack names none.
+	// Link is the checkout-root name that links to the module's directory, absent when
+	// the stack sets none.
 	Link string `json:"link,omitempty"`
 	// Base marks a module of the base stack, when a checkout's qory.yaml extends one.
 	Base bool `json:"base,omitempty"`
@@ -56,12 +56,12 @@ type Base struct {
 }
 
 // Build is the qory that wrote the report, so two reports of one checkout, from a
-// runner and a laptop say, show whether the same qory composed them.
+// runner and a laptop, show whether the same qory composed them.
 type Build struct {
 	// Version is the version without a leading v: the release, the tag of a source build
 	// at that tag, or the pseudo-version of a source build between tags.
 	Version string `json:"version"`
-	// Commit is the commit the binary was built from, "" when the build carries none.
+	// Commit is the commit the binary was built from, "" when the build contains none.
 	Commit string `json:"commit,omitempty"`
 	// Source is "release" for a release build and "source" for a go install or go build.
 	Source string `json:"source"`
@@ -76,7 +76,7 @@ type Entry struct {
 	// Module is the name of the module that provides the entry.
 	Module string `json:"module"`
 	// For is the entry, as <kind>/<name>, that required this one, when the module's only
-	// block brought it in for that entry rather than naming it; absent otherwise.
+	// block brought it in for that entry rather than listing it; absent otherwise.
 	For string `json:"for,omitempty"`
 	// References are the entries the entry's documents reference, as <kind>/<name> keys
 	// as written, a role's name included; absent when it references none.
@@ -87,15 +87,14 @@ type Entry struct {
 type Exclude struct {
 	// Module is the module the entry was dropped from.
 	Module string `json:"module"`
-	// Kind is the entry kind the exclude named.
+	// Kind is the entry kind the exclude lists.
 	Kind string `json:"kind"`
 	// Name is the dropped entry's name.
 	Name string `json:"name"`
 }
 
-// Runtimes are the runtime names of a target. It reads a JSON string as well as an array,
-// so a report written by a qory that targeted one runtime, before a target could name
-// several, still prints.
+// Runtimes are the runtime names of a target. It reads a JSON string, one runtime, as
+// well as an array.
 type Runtimes []string
 
 // UnmarshalJSON accepts one name or an array of names.
@@ -115,17 +114,17 @@ func (r *Runtimes) UnmarshalJSON(data []byte) error {
 
 // Target is the runtimes and the model the harness was rendered for.
 type Target struct {
-	// Runtimes are the programs the home holds after the compose, such as claude or
-	// codex: the ones the compose targeted first, in the order the stack names them,
-	// then the ones composed earlier and refreshed. The field is always an array, of one
-	// name when the home holds one.
+	// Runtimes are the programs the home contains after the compose, such as claude or
+	// codex: the ones the compose targeted first, in the order the stack lists them,
+	// then the ones a previous compose wrote, refreshed. The field is always an array, of
+	// one name when the home contains one.
 	Runtimes Runtimes `json:"runtime"`
 	// Model is the model written into the runtime's settings, absent when the stack
-	// names none.
+	// sets none.
 	Model string `json:"model,omitempty"`
 }
 
-// Worktree is what the report carries of the configuration's worktree section.
+// Worktree is what the report contains of the configuration's worktree section.
 type Worktree struct {
 	// Base is the repository's base branch, worktree.base resolved.
 	Base *WorktreeBase `json:"base,omitempty"`
@@ -137,14 +136,14 @@ type Worktree struct {
 // derives nothing itself.
 type WorktreeBase struct {
 	// Branch is the branch's name with no remote before it, what a pull request targets;
-	// absent when worktree.base names a tag or a commit.
+	// absent when worktree.base is a tag or a commit.
 	Branch string `json:"branch,omitempty"`
 	// Ref is what git reads, for a diff or a merge: <remote>/<branch> when the remote
-	// holds the branch, else the base as the configuration wrote it.
+	// has the branch, else the base as the configuration wrote it.
 	Ref string `json:"ref"`
-	// Source says what named the base: the absolute path of the file that set
+	// Source is what selected the base: the absolute path of the file that set
 	// worktree.base, "remote HEAD" for the remote's HEAD branch, or "checkout" for the
-	// main checkout's current branch, the default of a repository whose remote names no
+	// main checkout's current branch, the default of a repository whose remote has no
 	// HEAD branch.
 	Source string `json:"source"`
 }
@@ -165,7 +164,7 @@ type Report struct {
 	// Checkout is the absolute path of the git working tree composed into.
 	Checkout string `json:"checkout"`
 	// Home is the absolute path of the composed tree: .qory/harness in the checkout, or a
-	// directory outside it, one per checkout under the root harness.home names.
+	// directory outside it, one per checkout under the root harness.home defines.
 	Home string `json:"home"`
 	// Links is "none" when the compose wrote nothing into the checkout, no link and no
 	// exclude line, so a runtime reads the home through its launch spec; absent when the
@@ -179,7 +178,7 @@ type Report struct {
 	Excludes []Exclude `json:"excludes"`
 	// Replaced are the checkout paths whose tracked file or directory the compose removed
 	// under --force to put a link there, absent when it replaced none. git checkout --
-	// restores each of them, and qory harness remove says so.
+	// restores each of them, and qory harness remove prints that.
 	Replaced []string `json:"replaced,omitempty"`
 	// Env are the variables the harness exports, name to value with $QORY_HARNESS_HOME in
 	// place of the home, absent when it exports none.
@@ -189,11 +188,11 @@ type Report struct {
 	Bind map[string]string `json:"bind,omitempty"`
 	// Egress is the union of the hosts the modules declared, sorted by host, each with
 	// the modules that declared it, the target runtime among them for the hosts its
-	// program reaches. Absent when no module declares egress, which leaves a run's
-	// policy as it is; an empty list when the modules declare and name no host between
+	// program reaches. Absent when no module declares egress, which leaves a run's policy
+	// as it is; an empty list when the modules declare egress and list no host between
 	// them, which under an enforce policy reaches nothing.
 	Egress []Egress `json:"egress,omitzero"`
-	// Extensions are the stack's extensions, carried as written, absent when it has
+	// Extensions are the stack's extensions, copied as written, absent when it has
 	// none.
 	Extensions map[string]any `json:"extensions,omitempty"`
 	// Base is the stack the checkout's qory.yaml extends, absent for a stack.
@@ -201,8 +200,8 @@ type Report struct {
 	// Worktree is the worktree section of the configuration as the compose resolved it,
 	// absent when the repository has no base to resolve.
 	Worktree *Worktree `json:"worktree,omitempty"`
-	// Qory is the build that wrote the report, absent when the build carries no version.
-	// The command sets it after [New], which knows nothing about the binary.
+	// Qory is the build that wrote the report, absent when the build contains no version.
+	// The command sets it after [New], which has no information about the binary.
 	Qory *Build `json:"qory,omitempty"`
 }
 

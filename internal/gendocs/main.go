@@ -1,5 +1,5 @@
 // Command gendocs writes the command reference, one Markdown page per command, into the
-// directory given as its argument.
+// directory passed as its argument.
 //
 // The reference is checked in under docs/commands. Regenerate it after changing a command
 // and commit the result:
@@ -7,13 +7,13 @@
 //	go run ./internal/gendocs docs/commands
 //
 // CI runs gendocs into a scratch directory and diffs the output against docs/commands, so
-// a page that no longer matches its command fails the build.
+// a page that does not match its command fails the build.
 //
 // The pages come from cobra's Markdown generator over the tree [cmd.Root] builds. The
 // generator's timestamp line is turned off, so regenerating an unchanged tree writes the
 // same bytes and the diff stays empty. gendocs creates the directory when it is missing
 // and overwrites the pages of the commands it generates, leaving any other file in there
-// alone. It exits 2 when it is not given exactly one argument, and 1 when it cannot
+// alone. It exits 2 when it does not receive exactly one argument, and 1 when it cannot
 // create the directory or write a page.
 package main
 

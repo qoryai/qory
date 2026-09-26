@@ -1,1 +1,1 @@
-bind agents/reviewer names a role, and module core ships agent reviewer; a role's name is no entry's
+bind agents/reviewer defines a role, and module core ships agent reviewer; a role's name is no entry's

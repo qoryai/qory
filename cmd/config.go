@@ -22,7 +22,7 @@ func newConfig() *cobra.Command {
 		Short: "Print the effective configuration and where each value comes from",
 		Long: `Print the effective configuration and where each value comes from.
 
-Every setting has a default. A qory.yaml sets the keys it names; the files apply in this
+Every setting has a default. A qory.yaml sets the keys it contains; the files apply in this
 order, each overriding the one before it: the user's, in $XDG_CONFIG_HOME/qory or
 ~/.config/qory, then the ones in the checkout's ancestor directories the current user
 owns, the farthest first, then the one in the checkout root. A compose flag overrides
@@ -32,7 +32,7 @@ The machine's ` + config.RunnerFileName + ` is listed under runner. Each integra
 described as before a run, its program's describe run and its settings checked, and
 listed with the program found and the credential it defines; one that does not describe
 is an error. An integration whose key the credentials section defines as well is listed
-as shadowed by it, and a line on standard error says so.
+as shadowed by it, and a line on standard error reports it.
 
 --verbose adds nothing here.`,
 		Args: noArgs,

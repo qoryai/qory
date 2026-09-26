@@ -4,8 +4,8 @@
 // started as <program> <role> --settings <json> -- [the role's own arguments].
 // [Describe] runs the program and reads its answer, [Description.CheckSettings] checks
 // a settings document against it, and [CredentialAdapter] is the credential role's
-// adapter, a runner definition's adapter word for word. The package holds no table of
-// integrations: what one takes and does is its description's to say, so Qory's own
+// adapter, a runner definition's adapter word for word. The package contains no table of
+// integrations: what one takes and does is defined by its description, so Qory's own
 // qory-<name> programs and a machine's own are read the same way.
 //
 // The contract's repository is not a module this one requires, so the description's
@@ -33,7 +33,7 @@ import (
 )
 
 // descriptionSchema is contracts/integration/v1/description.schema.json of
-// github.com/qoryai/integrations at commit b381dad9d10058c6b77de256bf117e699db25923,
+// github.com/qoryai/integrations at commit 44236bb3bdbac84f53cb44b3497f2f790591cfcd,
 // copied as it is. A new revision of the contract is copied over it, with its commit
 // named here.
 //
@@ -67,7 +67,7 @@ type Description struct {
 	Name string
 	// ProgramVersion is the program's version, as it was built.
 	ProgramVersion string
-	// Roles names every role the program plays, known here or not, sorted.
+	// Roles lists every role the program plays, known here or not, sorted.
 	Roles []string
 	// Credential is the credential role, nil when the program plays none.
 	Credential *Credential
@@ -77,7 +77,7 @@ type Description struct {
 }
 
 // Credential is the credential role of a description: what the runner definition it
-// expands to holds beside its adapter.
+// expands to contains beside its adapter.
 type Credential struct {
 	// Argument is a regular expression, RE2, the policy's argument matches whole.
 	Argument string
@@ -103,7 +103,7 @@ var contract = sync.OnceValues(func() (*jsonschema.Schema, error) {
 // environment, no standard input, and / as its working directory. program is a path.
 // The program runs in a process group of its own, and the whole group is stopped when
 // describe returns, so no process of its group outlives it. Describe refuses a program
-// that does not exit 0 within [DescribeWait], giving the one line it wrote on standard
+// that does not exit 0 within [DescribeWait], with the one line it wrote on standard
 // error, and an answer that is not one JSON document the contract's schema accepts.
 func Describe(ctx context.Context, program string) (*Description, error) {
 	ctx, cancel := context.WithTimeout(ctx, describeWait)
@@ -122,7 +122,7 @@ func Describe(ctx context.Context, program string) (*Description, error) {
 			return nil, fmt.Errorf("%s describe did not answer within %s", program, describeWait)
 		}
 		if errors.Is(err, exec.ErrWaitDelay) {
-			return nil, fmt.Errorf("%s describe exited and left a process holding its output", program)
+			return nil, fmt.Errorf("%s describe exited and left a process that keeps its output open", program)
 		}
 		// The line is the program's own to word, and never a secret: the contract says so.
 		if line := firstLine(stderr.String()); line != "" {
@@ -161,7 +161,7 @@ func firstLine(s string) string {
 	return Printable(strings.TrimSpace(line))
 }
 
-// Printable is text a program gave, a line of its standard error or a string of its
+// Printable is text a program wrote, a line of its standard error or a string of its
 // description, as it is printed to a terminal: at most [maxLine] runes, with ... after
 // what is cut, and each character that does not print as ?, so it stays one line and
 // moves no cursor.
@@ -230,9 +230,9 @@ func read(doc map[string]any) (*Description, error) {
 
 // CheckSettings checks a settings document, one JSON object, against the description's
 // settings schema. A value for a writeOnly property is refused before anything else,
-// since every role is started with the settings on its command line; the error names
-// the setting and the <name>_file that takes its place. No error carries a value of the
-// document: each names a setting and the rule it breaks.
+// since every role is started with the settings on its command line; the error contains
+// the setting and the <name>_file that takes its place. No error contains a value of the
+// document: each contains a setting and the rule it breaks.
 func (d *Description) CheckSettings(settings []byte) error {
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(settings))
 	if err != nil {
@@ -241,7 +241,7 @@ func (d *Description) CheckSettings(settings []byte) error {
 	if m, ok := doc.(map[string]any); ok {
 		for _, name := range d.secrets {
 			if _, set := m[name]; set {
-				return fmt.Errorf("settings.%s is a secret, and the settings go on a command line; give %s_file, a file that holds it, in its place", name, name)
+				return fmt.Errorf("settings.%s is a secret, and the settings go on a command line; set %s_file, the path of a file that contains it, in its place", name, name)
 			}
 		}
 	}

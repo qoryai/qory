@@ -19,22 +19,23 @@ import (
 
 // APIVersion is the format version this qory reads, [exports.APIVersion], and the one a
 // retired spelling of it, [exports.RetiredAPIVersions], is read as. A stack
-// that carries another one is refused, and the message names this one.
+// that declares another one is refused, and the message contains this one.
 const APIVersion = exports.APIVersion
 
 // FileName is the stack's file name on disk, in a directory of the harness repository
 // that delivers it, or in an ancestor directory covering several checkouts. The file name
-// is what says which document a file holds; the document carries no kind. A checkout's
+// defines which document a file contains; the document declares no kind. A checkout's
 // own stack, and the stack it extends, are in the harness section of its qory.yaml, which
-// [github.com/qoryai/qory/internal/config] reads and turns into a Stack with [NewCompose].
+// [github.com/qoryai/qory/internal/config] reads and turns into a Stack with
+// [NewCompose].
 const FileName = exports.StackFileName
 
-// Kinds are the atomic entry kinds an exclude may name. An exclude that names anything else
-// is refused.
+// Kinds are the atomic entry kinds an exclude may list. An exclude that lists anything
+// else is refused.
 var Kinds = []string{"skills", "agents", "commands", "output-styles", "hooks", "mcp", "files"}
 
 // Source is where a module comes from: a directory, a git repository at a ref, or an
-// export of a repository, one it names in the exports section of its qory.yaml.
+// export of a repository, one it lists in the exports section of its qory.yaml.
 //
 //	source: {path: ../harness/core}
 //	source: {git: https://github.com/acme/harness, ref: v2.4.0}
@@ -42,16 +43,16 @@ var Kinds = []string{"skills", "agents", "commands", "output-styles", "hooks", "
 //	source: {git: https://github.com/acme/harness, ref: v2.4.0, module: nextjs}
 //	source: {path: ../harness, module: nextjs}
 //
-// A path source is pinned by nothing and reads the directory as it stands. A git source is
-// pinned by the commit the ref resolves to, and its path, when given, is the module's
-// directory inside the repository. With a module or a stack named, the source is the
+// A path source is pinned by nothing and reads the directory as it stands. A git source
+// is pinned by the commit the ref resolves to, and its path, when set, is the module's
+// directory inside the repository. With a module or a stack selected, the source is the
 // repository, the clone or the path, and the export's directory is what the repository's
-// qory.yaml says it is, so the publisher may move it. The same shape names the base a
+// qory.yaml sets, so the publisher may move it. The same shape selects the base a
 // checkout extends, with stack in place of module.
 type Source struct {
-	// Path is the module directory, relative to the stack file unless it is absolute; with
-	// Git set, the module's directory inside the repository, relative to its root. With
-	// Module or Stack set and no Git, the repository whose export is read.
+	// Path is the module directory, relative to the stack file unless it is absolute;
+	// with Git set, the module's directory inside the repository, relative to its root.
+	// With Module or Stack set and no Git, the repository whose export is read.
 	Path string `yaml:"path,omitempty"`
 	// Git is the repository URL, in any form git clones from.
 	Git string `yaml:"git,omitempty"`
@@ -86,11 +87,11 @@ func (s Source) String() string {
 // exported reports whether the source names an export of a repository.
 func (s Source) exported() bool { return s.Module != "" || s.Stack != "" }
 
-// Module is one entry of the stack's ordered list of modules. An entry gives a name, a
+// Module is one entry of the stack's ordered list of modules. An entry has a name, a
 // source, or both: a name alone reads <name> under the modules directory of the
-// repository the stack is in, modules/ at its root unless the root's qory.yaml says
-// otherwise under exports.dir; a source alone takes the module's name from its manifest;
-// both means the manifest must carry that name.
+// repository the stack is in, modules/ at its root unless the root's qory.yaml sets
+// another under exports.dir; a source alone takes the module's name from its manifest;
+// both means the manifest must declare that name.
 type Module struct {
 	// Name is the module's name, the one its manifest declares. Alone, it is the address
 	// too: <name> under [Stack.ModulesDir] under [Stack.Root].
@@ -98,19 +99,20 @@ type Module struct {
 	// Source is where the module is read from, when it is not in the repository's
 	// modules directory.
 	Source Source `yaml:"source,omitempty"`
-	// Exclude names what of the module the compose leaves out: entries by kind, the
+	// Exclude lists what of the module the compose leaves out: entries by kind, the
 	// instruction section, settings fragments, exported variables. Everything else is
 	// composed.
 	Exclude Selection `yaml:"exclude,omitempty"`
-	// Only names the only things of the module the compose takes, with the same keys as
-	// Exclude, and brings in what the named entries require from the module; everything
-	// else is left out. Exclude beside it names entries brought in that way to leave out.
+	// Only lists the only things of the module the compose takes, with the same keys as
+	// Exclude, and brings in what the listed entries require from the module; everything
+	// else is left out. Exclude beside it lists entries brought in that way to leave out.
 	Only Selection `yaml:"only,omitempty"`
-	// Base marks a module that came from the base stack a checkout's qory.yaml extends. It
-	// is set by [Extend], not by the YAML, which also rewrites the module's source so it
-	// resolves from the checkout's qory.yaml.
+	// Base marks a module that came from the base stack a checkout's qory.yaml extends.
+	// It is set by [Extend], not by the YAML, which also rewrites the module's source so
+	// it resolves from the checkout's qory.yaml.
 	Base bool `yaml:"-"`
-	// Variant forces one of the module's variants instead of the one named like the runtime.
+	// Variant forces one of the module's variants instead of the one named like the
+	// runtime.
 	Variant string `yaml:"variant,omitempty"`
 	// Link is a name at the checkout root that links to the module's directory, so a
 	// permission rule or a script reaches the module's files by a checkout-relative path.
@@ -120,15 +122,15 @@ type Module struct {
 // Target is the set of runtimes the harness is rendered for.
 type Target struct {
 	// Runtimes are the programs that run the harness, such as claude or codex. In the
-	// file the key is runtime, and it holds either one name or a list of them.
+	// file the key is runtime, and it contains either one name or a list of them.
 	Runtimes Runtimes `yaml:"runtime"`
 	// Model is written into the settings of every targeted runtime that has a place for
-	// it. A target naming several runtimes usually leaves it out, because one model name
-	// rarely means anything to two of them.
+	// it. A target that lists several runtimes usually leaves it out, because one model
+	// name rarely means anything to two of them.
 	Model string `yaml:"model,omitempty"`
 }
 
-// Runtimes is the list of runtime names a target names. Both spellings decode into it, so
+// Runtimes is the list of runtime names a target lists. Both spellings decode into it, so
 // a stack for one runtime stays as short as it reads:
 //
 //	target:
@@ -138,7 +140,7 @@ type Target struct {
 //	  runtime: [claude, codex]
 //
 // The order is the order of the file, and it is the order the runtimes are rendered and
-// reported in. The first name is the one a message names when it can only name one.
+// reported in. The first name is the one a message contains when it can contain only one.
 type Runtimes []string
 
 // UnmarshalYAML accepts a single name or a sequence of names.
@@ -163,9 +165,9 @@ func (r *Runtimes) UnmarshalYAML(n *yaml.Node) error {
 // for several.
 func (r Runtimes) String() string { return strings.Join(r, ", ") }
 
-// Validate refuses an empty target, an empty name in it, and the same runtime twice. It is
-// called on a loaded stack, and again by the command module after the --runtime flag has
-// replaced what the stack said.
+// Validate refuses an empty target, an empty name in it, and the same runtime twice. It
+// is called on a loaded stack, and again by the command module after the --runtime flag
+// has replaced what the stack set.
 func (r Runtimes) Validate() error {
 	if len(r) == 0 {
 		return errors.New("target.runtime is required")
@@ -173,10 +175,10 @@ func (r Runtimes) Validate() error {
 	seen := map[string]bool{}
 	for _, name := range r {
 		if name == "" {
-			return errors.New("target.runtime names an empty runtime")
+			return errors.New("target.runtime lists an empty runtime")
 		}
 		if seen[name] {
-			return fmt.Errorf("target.runtime names %s twice", name)
+			return fmt.Errorf("target.runtime lists %s twice", name)
 		}
 		seen[name] = true
 	}
@@ -211,7 +213,7 @@ type Extending struct {
 	Target *TargetPolicy `yaml:"target,omitempty"`
 }
 
-// TargetPolicy is what a stack says under extending.target: the runtimes and the
+// TargetPolicy is what a stack sets under extending.target: the runtimes and the
 // models it is written for. A resolved target outside either list fails the compose,
 // and a stack that lists models makes the model required, since a target without one
 // runs whatever the runtime defaults to, which is a model the stack did not list.
@@ -221,13 +223,13 @@ type Extending struct {
 //	    runtime: [claude]
 //	    model: [opus, sonnet]
 //
-// Either key may be left out, and the other alone is the policy; a block naming
+// Either key may be left out, and the other alone is the policy; a block that lists
 // neither is refused.
 type TargetPolicy struct {
 	// Runtime lists the runtimes a checkout may compose for, one name or a list.
 	Runtime Names `yaml:"runtime,omitempty"`
-	// Model lists the models a checkout may compose with, one name or a list. Given,
-	// a target names one of them.
+	// Model lists the models a checkout may compose with, one name or a list. When set,
+	// a target selects one of them.
 	Model Names `yaml:"model,omitempty"`
 }
 
@@ -256,7 +258,7 @@ func (n *Names) UnmarshalYAML(node *yaml.Node) error {
 // validate refuses a policy naming nothing, an empty name and a name given twice.
 func (t *TargetPolicy) validate() error {
 	if len(t.Runtime) == 0 && len(t.Model) == 0 {
-		return errors.New("extending.target names no runtime and no model; it lists the runtimes, the models, or both, a checkout may compose for")
+		return errors.New("extending.target lists no runtime and no model; it lists the runtimes, the models, or both, a checkout may compose for")
 	}
 	for _, l := range []struct {
 		key   string
@@ -265,10 +267,10 @@ func (t *TargetPolicy) validate() error {
 		seen := map[string]bool{}
 		for _, name := range l.names {
 			if name == "" {
-				return fmt.Errorf("extending.target.%s names an empty name", l.key)
+				return fmt.Errorf("extending.target.%s lists an empty name", l.key)
 			}
 			if seen[name] {
-				return fmt.Errorf("extending.target.%s names %s twice", l.key, name)
+				return fmt.Errorf("extending.target.%s lists %s twice", l.key, name)
 			}
 			seen[name] = true
 		}
@@ -277,7 +279,7 @@ func (t *TargetPolicy) validate() error {
 }
 
 // Check refuses a resolved target outside the policy: a runtime not listed, a model not
-// listed, and, when models are listed, no model at all. base names the stack in the
+// listed, and, when models are listed, no model at all. base is the stack in the
 // message, as the report shows it.
 func (t *TargetPolicy) Check(target Target, base string) error {
 	if t == nil {
@@ -292,7 +294,7 @@ func (t *TargetPolicy) Check(target Target, base string) error {
 	}
 	if len(t.Model) > 0 {
 		if target.Model == "" {
-			return fmt.Errorf("the target names no model, and the base stack %s is written for one of these; models: %s", base, strings.Join(t.Model, ", "))
+			return fmt.Errorf("the target sets no model, and the base stack %s is written for one of these; models: %s", base, strings.Join(t.Model, ", "))
 		}
 		if !slices.Contains(t.Model, target.Model) {
 			return fmt.Errorf("model %s is not one the base stack %s is written for; models: %s", target.Model, base, strings.Join(t.Model, ", "))
@@ -301,73 +303,74 @@ func (t *TargetPolicy) Check(target Target, base string) error {
 	return nil
 }
 
-// Stack is one qory-stack.yaml, validated, or the document a checkout's qory.yaml holds
-// under harness: the checkout's own stack, with a Target and Modules, or a Stack whose
-// Extends names the base, with the Target the checkout composes for; [Extend] merges
-// that one onto its base and returns the stack that composes. A qory-stack.yaml
-// carries no Target: it is delivered to be extended, and the checkout extending it
-// says what it composes for.
+// Stack is one qory-stack.yaml, validated, or the document a checkout's qory.yaml
+// contains under harness: the checkout's own stack, with a Target and Modules, or a Stack
+// whose Extends selects the base, with the Target the checkout composes for; [Extend]
+// merges that one onto its base and returns the stack that composes. A qory-stack.yaml
+// has no Target: it is delivered to be extended, and the checkout extending it
+// sets what it composes for.
 type Stack struct {
 	APIVersion string `yaml:"apiVersion"`
 	// Qory is the range of qory versions the stack is written for, from the qory key,
 	// joined by [Load] with the qory key of the qory.yaml at the root of the
-	// repository the stack is in; empty when neither names one. The compose refuses a
+	// repository the stack is in; empty when neither sets one. The compose refuses a
 	// qory outside it.
 	Qory Constraint `yaml:"qory,omitempty"`
 	// Name is the stack's name in the report. A stack that leaves it out is named after
 	// the checkout by the caller.
 	Name string `yaml:"name,omitempty"`
-	// Description says what the stack is for, carried into the report.
+	// Description is what the stack is for, copied into the report.
 	Description string `yaml:"description,omitempty"`
-	// Extends, in a checkout's qory.yaml, names the base stack it appends to: a directory holding
-	// a qory-stack.yaml, as a path or inside a git repository at a ref. The base's modules come
-	// first and cannot be changed.
+	// Extends, in a checkout's qory.yaml, selects the base stack it appends to: a
+	// directory that contains a qory-stack.yaml, as a path or inside a git repository at
+	// a ref. The base's modules come first and cannot be changed.
 	Extends Source `yaml:"extends,omitempty"`
 	// Target is the runtime and model the harness is rendered for, in a checkout's
 	// qory.yaml: required for its own stack, and beside Extends the target the checkout
 	// composes the base for, which the machine's configuration and the flags may
-	// replace. A qory-stack.yaml carries none, and one that does is refused.
+	// replace. A qory-stack.yaml has none, and one that has one is refused.
 	Target Target `yaml:"target,omitempty"`
 	// Modules are the modules to compose, in the order they merge.
 	Modules []Module `yaml:"modules"`
-	// Bind names the entry that fills each role a document references, <kind>/<role> to
-	// the entry's name in that kind, so a module writes ${qory:agents/coder} and the stack
-	// says which agent that is. A document that extends a stack adds to the base's
-	// bindings and may rebind a role of the base's.
+	// Bind selects the entry that fills each role a document references, <kind>/<role> to
+	// the entry's name in that kind, so a module writes ${qory:agents/coder} and the
+	// stack selects which agent that is. A document that extends a stack adds to the
+	// base's bindings and may rebind a role of the base's.
 	Bind map[string]string `yaml:"bind,omitempty"`
 	// Extending, on a stack, is what a checkout's own modules may ship. A stack that
 	// leaves it out cannot be extended.
 	Extending *Extending `yaml:"extending,omitempty"`
-	// Extensions are values qory carries into the report and does not read: a map of
+	// Extensions are values qory copies into the report and does not read: a map of
 	// keys to values of any shape, for the scripts of a team that keep their own
 	// settings beside the stack.
 	Extensions map[string]any `yaml:"extensions,omitempty"`
 
 	// RetiredAPIVersion is the apiVersion the file declared when it is a retired
 	// spelling of [APIVersion], one of [exports.RetiredAPIVersions], "" when the file
-	// names the current one. It is set as the stack is validated, and APIVersion holds
-	// what the file is read as; a compose says which files want the line rewritten.
+	// declares the current one. It is set as the stack is validated, and APIVersion
+	// contains what the file is read as; a compose reports which files want the line
+	// rewritten.
 	RetiredAPIVersion string `yaml:"-"`
 
 	// File is the absolute path the stack was read from, set by [Load], not by the YAML.
 	File string `yaml:"-"`
 	// Root is the root of the repository the stack is in, set by [Load]: git's toplevel
-	// for the stack's directory, else that directory. A module named without a source is
+	// for the stack's directory, else that directory. A module listed without a source is
 	// read from ModulesDir under it.
 	Root string `yaml:"-"`
-	// ModulesDir is the directory a module named without a source is read from, relative
-	// to Root, set by [Load]: what the root's qory.yaml says under exports.dir, else
+	// ModulesDir is the directory a module listed without a source is read from, relative
+	// to Root, set by [Load]: what the root's qory.yaml sets under exports.dir, else
 	// modules. A stack built without [Load] reads modules.
 	ModulesDir string `yaml:"-"`
 }
 
-// Dir returns the directory holding the stack file. A module's relative path source
+// Dir returns the directory that contains the stack file. A module's relative path source
 // resolves against it.
 func (p *Stack) Dir() string { return filepath.Dir(p.File) }
 
 // SourceOf is the source a module entry reads from: its own, or <name> under
 // [Stack.ModulesDir] for an entry with a name alone, which resolves against [Stack.Root];
-// [Stack.DirOf] says which. The relative form is what the report records, so it reads
+// [Stack.DirOf] reports which. The relative form is what the report records, so it reads
 // the same on every machine.
 func (p *Stack) SourceOf(l Module) Source {
 	if l.Source.Path == "" && l.Source.Git == "" {
@@ -407,7 +410,7 @@ func Load(path string) (*Stack, error) {
 		return nil, decodeError(path, err)
 	}
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("%s: holds more than one document; a stack is one", path)
+		return nil, fmt.Errorf("%s: contains more than one document; a stack is one", path)
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -447,9 +450,9 @@ func (p *Stack) locate() error {
 	return err
 }
 
-// NewCompose validates p as the document a checkout's qory.yaml holds under harness, read
-// at path: the checkout's own stack when it sets a target, or, when it names a stack under
-// extends, the document that appends to that base.
+// NewCompose validates p as the document a checkout's qory.yaml contains under harness,
+// read at path: the checkout's own stack when it sets a target, or, when it selects a
+// stack under extends, the document that appends to that base.
 func NewCompose(path string, p *Stack) (*Stack, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -485,15 +488,14 @@ func decodeError(path string, err error) error {
 }
 
 // validate checks the whole document before a caller sees it, so a document that reaches
-// the compose is known to carry what it is asked for, a runtime for a checkout's own
-// stack, a base for a document that extends one and no target for a stack file, at
-// least one module unless the document extends a stack, each with a name or a source, no name
-// twice, excludes and onlys over known kinds and parts, an exclude beside an only naming
-// entries the only does not, links
-// that are one path segment and named once,
+// the compose is known to contain what the compose requires: a runtime for a checkout's
+// own stack, a base for a document that extends one and no target for a stack file, at
+// least one module unless the document extends a stack, each with a name or a source, no
+// name twice, excludes and onlys over known kinds and parts, an exclude beside an only
+// that lists entries the only does not, links that are one path segment and listed once,
 // extensions that are maps, and an extending block over known kinds without hooks and
-// servers. Whether a source holds a module, and whether its manifest carries the name the
-// entry gives, is the compose's check.
+// servers. Whether a source contains a module, and whether its manifest defines the name
+// the entry sets, is the compose's check.
 func (p *Stack) validate(compose bool) error {
 	current, err := exports.ResolveAPIVersion(p.APIVersion)
 	if err != nil {
@@ -508,7 +510,7 @@ func (p *Stack) validate(compose bool) error {
 				return fmt.Errorf("extends: %w", err)
 			}
 			if p.Extends.Module != "" {
-				return fmt.Errorf("extends names module %s; a checkout extends a stack, and a module goes under modules", p.Extends.Module)
+				return fmt.Errorf("extends selects module %s; a checkout extends a stack, and a module goes under modules", p.Extends.Module)
 			}
 		}
 		if p.Extending != nil {
@@ -532,23 +534,23 @@ func (p *Stack) validate(compose bool) error {
 	if p.Extending != nil {
 		for _, k := range p.Extending.Kinds {
 			if !isKind(k) {
-				return fmt.Errorf("extending.kinds names kind %q; kinds: %s", k, strings.Join(Kinds, ", "))
+				return fmt.Errorf("extending.kinds lists kind %q; kinds: %s", k, strings.Join(Kinds, ", "))
 			}
 			if k == "hooks" || k == "mcp" {
-				return fmt.Errorf("extending.kinds names %s, which an extending module may never ship; the runner executes those without the agent", k)
+				return fmt.Errorf("extending.kinds lists %s, which an extending module may never ship; the runner executes those without the agent", k)
 			}
 			if k == "files" {
-				return errors.New("extending.kinds names files; the paths an extending module's files may sit under go in extending.files")
+				return errors.New("extending.kinds lists files; the paths an extending module's files may sit under go in extending.files")
 			}
 		}
 		for _, key := range p.Extending.Settings {
 			if key == "" || strings.HasPrefix(key, ".") || strings.HasSuffix(key, ".") {
-				return fmt.Errorf("extending.settings names %q, which is not a dotted key path", key)
+				return fmt.Errorf("extending.settings lists %q, which is not a dotted key path", key)
 			}
 		}
 		for _, prefix := range p.Extending.Files {
 			if !filePrefix(prefix) {
-				return fmt.Errorf("extending.files names %q, which is not a <runtime>/<path> prefix; a prefix is relative, holds no dot segment and starts with the runtime", prefix)
+				return fmt.Errorf("extending.files lists %q, which is not a <runtime>/<path> prefix; a prefix is relative, contains no dot segment and starts with the runtime", prefix)
 			}
 		}
 		if p.Extending.Target != nil {
@@ -573,7 +575,7 @@ func (p *Stack) validate(compose bool) error {
 	// repository's own beside the base, its extensions say; a stack, and a document
 	// holding a checkout's own stack, names a module.
 	if len(p.Modules) == 0 && (!compose || !p.extends()) {
-		return errors.New("modules is empty; a stack names at least one module")
+		return errors.New("modules is empty; a stack lists at least one module")
 	}
 	seen := map[string]bool{}
 	links := map[string]string{}
@@ -582,10 +584,10 @@ func (p *Stack) validate(compose bool) error {
 		if l.Name != "" {
 			who = "module " + l.Name
 			if !segment(l.Name) {
-				return fmt.Errorf("modules[%d]: name %q is not one path segment; a module name holds no slash, backslash, @ or leading dot", i, l.Name)
+				return fmt.Errorf("modules[%d]: name %q is not one path segment; a module name contains no slash, backslash, @ or leading dot", i, l.Name)
 			}
 			if seen[l.Name] {
-				return fmt.Errorf("module %s is named twice", l.Name)
+				return fmt.Errorf("module %s is listed twice", l.Name)
 			}
 			seen[l.Name] = true
 		}
@@ -594,10 +596,10 @@ func (p *Stack) validate(compose bool) error {
 				return fmt.Errorf("%s: %w", who, err)
 			}
 			if l.Source.Stack != "" {
-				return fmt.Errorf("%s: source names stack %s; a module's source names a module, and a stack goes under extends", who, l.Source.Stack)
+				return fmt.Errorf("%s: source selects stack %s; a module's source selects a module, and a stack goes under extends", who, l.Source.Stack)
 			}
 		} else if l.Name == "" {
-			return fmt.Errorf("%s: a module gives a name, a source, or both", who)
+			return fmt.Errorf("%s: a module has a name, a source, or both", who)
 		}
 		// The blocks are parsed on the stack's own entry, not on the loop's copy.
 		if err := p.Modules[i].Exclude.parse(); err != nil {
@@ -611,7 +613,7 @@ func (p *Stack) validate(compose bool) error {
 		}
 		if l.Link != "" {
 			if !segment(l.Link) || l.Link == ".qory" {
-				return fmt.Errorf("%s: link %q is not one path segment; a link holds no slash, backslash, @ or leading dot", who, l.Link)
+				return fmt.Errorf("%s: link %q is not one path segment; a link contains no slash, backslash, @ or leading dot", who, l.Link)
 			}
 			if links[l.Link] != "" {
 				return fmt.Errorf("%s and %s both link %s", links[l.Link], who, l.Link)
@@ -631,12 +633,12 @@ func (l Module) besideOnly() error {
 		return nil
 	}
 	if l.Exclude.Instructions || l.Exclude.Settings.Set() || l.Exclude.Env.Set() {
-		return errors.New("exclude beside only names a part; only leaves every part it does not name out, so exclude names entries only brings in")
+		return errors.New("exclude beside only selects a part; only leaves every part it does not select out, so exclude selects entries only brings in")
 	}
 	for _, kind := range l.Exclude.KindNames() {
 		for _, name := range l.Exclude.Kinds[kind] {
 			if slices.Contains(l.Only.Kinds[kind], name) {
-				return fmt.Errorf("%s/%s is named in only and in exclude; name it in one", kind, name)
+				return fmt.Errorf("%s/%s is listed in only and in exclude; list it in one", kind, name)
 			}
 		}
 	}
@@ -649,11 +651,11 @@ func (l Module) besideOnly() error {
 // export or a path, not both.
 func (s Source) validate() error {
 	if s.Module != "" && s.Stack != "" {
-		return errors.New("source names both a module and a stack; it names one export")
+		return errors.New("source selects both a module and a stack; it selects one export")
 	}
 	for _, e := range []struct{ key, name string }{{"module", s.Module}, {"stack", s.Stack}} {
 		if e.name != "" && !segment(e.name) {
-			return fmt.Errorf("source.%s %q is not one path segment; an export's name holds no slash, backslash, @ or leading dot", e.key, e.name)
+			return fmt.Errorf("source.%s %q is not one path segment; an export's name contains no slash, backslash, @ or leading dot", e.key, e.name)
 		}
 	}
 	if s.Git == "" {
@@ -662,7 +664,7 @@ func (s Source) validate() error {
 		}
 		if s.Path == "" {
 			if s.exported() {
-				return errors.New("source.path is required; with an export named, it is the repository exporting it")
+				return errors.New("source.path is required; with an export selected, it is the repository exporting it")
 			}
 			return errors.New("source.path is required")
 		}
@@ -672,7 +674,7 @@ func (s Source) validate() error {
 		return errors.New("source.ref is required with source.git")
 	}
 	if s.Path != "" && s.exported() {
-		return errors.New("source.path and an export both name the directory; an export's directory is what the repository's qory.yaml says")
+		return errors.New("source.path and an export both select the directory; an export's directory is what the repository's qory.yaml sets")
 	}
 	if s.Path != "" {
 		clean := filepath.Clean(s.Path)
@@ -691,7 +693,7 @@ func segment(name string) bool {
 	return name != "" && !strings.ContainsAny(name, `/\@`) && !strings.HasPrefix(name, ".")
 }
 
-// Referable are the kinds a reference and a binding may name, see the module package.
+// Referable are the kinds a reference and a binding may refer to, see the module package.
 var Referable = []string{"agents", "commands", "skills"}
 
 // isReferable reports whether k is a kind a role may be of.
@@ -738,10 +740,10 @@ func filePrefix(s string) bool {
 	return true
 }
 
-// FileAllowed reports whether a files entry name, <runtime>/<path>, is one of the prefixes
-// or under one, by path segment: claude/rules and claude/rules/ both cover
-// claude/rules/a/b.md and neither covers claude/rules-private/x.md, and a prefix naming a
-// file covers that file only.
+// FileAllowed reports whether a files entry name, <runtime>/<path>, is one of the
+// prefixes or under one, by path segment: claude/rules and claude/rules/ both cover
+// claude/rules/a/b.md and neither covers claude/rules-private/x.md, and a prefix that is
+// a file's path covers that file only.
 func FileAllowed(name string, prefixes []string) bool {
 	for _, p := range prefixes {
 		p = strings.TrimSuffix(p, "/")
@@ -752,12 +754,13 @@ func FileAllowed(name string, prefixes []string) bool {
 	return false
 }
 
-// Extend returns the stack the checkout's qory.yaml p composes on base: the base's modules first,
-// marked [Module.Base], each with its source rewritten to resolve from p, then p's
-// modules; p's target, since a base carries none; both files' extensions. The result's Qory is p's; the
-// base's range is the caller's to carry and check, as [Base.Qory] does. It refuses a base that extends
-// another and a base without an extending block. An extension key both files set is
-// p's. The result's File and Root are p's.
+// Extend returns the stack the checkout's qory.yaml p composes on base: the base's
+// modules first, marked [Module.Base], each with its source rewritten to resolve from p,
+// then p's modules; p's target, since a base has none; both files' extensions. The
+// result's Qory is p's; the base's range is the caller's to keep and check, as
+// [Base.Qory] does. It refuses a base that extends another and a base without an
+// extending block. An extension key both files set is p's. The result's File and Root are
+// p's.
 func Extend(base, p *Stack) (*Stack, error) {
 	if base.Extends.Path != "" || base.Extends.Git != "" {
 		return nil, fmt.Errorf("%s extends %s, and a stack does not extend another", base.File, base.Extends.String())
@@ -773,7 +776,8 @@ func Extend(base, p *Stack) (*Stack, error) {
 			// A base module read by path: inside the base's repository, which is the
 			// extends source's clone for a git base, so the module becomes a git source
 			// at the same ref and gets the commit as its pin; a path relative to the
-			// checkout's qory.yaml for a base on disk, so the report reads on any machine.
+			// checkout's qory.yaml for a base on disk, so the report reads on any
+			// machine.
 			abs := base.SourceOf(l).Path
 			if !filepath.IsAbs(abs) {
 				abs = filepath.Join(base.DirOf(l), abs)
@@ -798,7 +802,7 @@ func Extend(base, p *Stack) (*Stack, error) {
 	}
 	for _, l := range p.Modules {
 		if inBase[l.Name] {
-			return nil, fmt.Errorf("module %s belongs to the base stack; a checkout's qory.yaml cannot name a base module, exclude from it or replace it", l.Name)
+			return nil, fmt.Errorf("module %s belongs to the base stack; a checkout's qory.yaml cannot list a base module, exclude from it or replace it", l.Name)
 		}
 	}
 	out.Modules = append(out.Modules, p.Modules...)

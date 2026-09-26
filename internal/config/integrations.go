@@ -26,7 +26,7 @@ import (
 var integrationKey = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
 // ProgramPrefix is what an integration's key follows in the name of its program when
-// the entry names none: qory-github for github, looked up on the PATH.
+// the entry sets none: qory-github for github, looked up on the PATH.
 const ProgramPrefix = "qory-"
 
 // RunnerIntegration is one entry of the integrations section: a program that speaks
@@ -35,13 +35,13 @@ type RunnerIntegration struct {
 	// Key is the name the machine declares the integration under, and the name of what
 	// it defines: the credential of its credential role.
 	Key string
-	// Program is the program as the entry names it, [ProgramPrefix] and the key when it
-	// names none: an absolute path, or a name looked up on the PATH.
+	// Program is the program as the entry sets it, [ProgramPrefix] and the key when it
+	// sets none: an absolute path, or a name looked up on the PATH.
 	Program string
 	// Settings is the settings document as compact JSON, its keys in the file's order;
 	// {} when the entry has none.
 	Settings []byte
-	// Path and Version are the program found and the version its description gives,
+	// Path and Version are the program found and the version its description contains,
 	// set by [Runner.Expand].
 	Path, Version string
 }
@@ -81,7 +81,7 @@ func readIntegrations(path string, node *yaml.Node) ([]RunnerIntegration, error)
 					return nil, fmt.Errorf("%s: integrations.%s.program is a path or a name on the PATH", path, key)
 				}
 				if strings.ContainsRune(value.Value, '/') && !filepath.IsAbs(value.Value) {
-					return nil, fmt.Errorf("%s: integrations.%s.program %q is not an absolute path; name a program by its absolute path or by a name on the PATH", path, key, value.Value)
+					return nil, fmt.Errorf("%s: integrations.%s.program %q is not an absolute path; set program to an absolute path or a name on the PATH", path, key, value.Value)
 				}
 				in.Program = value.Value
 			case "settings":
@@ -109,20 +109,20 @@ func readIntegrations(path string, node *yaml.Node) ([]RunnerIntegration, error)
 func writeJSON(b *bytes.Buffer, n *yaml.Node, at string) error {
 	switch n.Kind {
 	case yaml.AliasNode:
-		return fmt.Errorf("%s: line %d: *%s is a YAML alias, which the settings may not hold; write the value out in full", at, n.Line, n.Value)
+		return fmt.Errorf("%s: line %d: *%s is a YAML alias, which the settings may not contain; write the value out in full", at, n.Line, n.Value)
 	case yaml.MappingNode:
 		b.WriteByte('{')
 		seen := map[string]bool{}
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			k := n.Content[i]
 			if k.Kind == yaml.AliasNode || k.ShortTag() == "!!merge" {
-				return fmt.Errorf("%s: line %d: a YAML alias or merge, which the settings may not hold; write the value out in full", at, k.Line)
+				return fmt.Errorf("%s: line %d: a YAML alias or merge, which the settings may not contain; write the value out in full", at, k.Line)
 			}
 			if k.Kind != yaml.ScalarNode || k.ShortTag() != "!!str" {
 				return fmt.Errorf("%s: line %d: a key that is not a string", at, k.Line)
 			}
 			if seen[k.Value] {
-				return fmt.Errorf("%s.%s is given twice", at, k.Value)
+				return fmt.Errorf("%s.%s appears twice", at, k.Value)
 			}
 			seen[k.Value] = true
 			if i > 0 {
@@ -153,14 +153,14 @@ func writeJSON(b *bytes.Buffer, n *yaml.Node, at string) error {
 		case "!!bool", "!!int", "!!float":
 			var v any
 			if err := n.Decode(&v); err != nil {
-				return fmt.Errorf("%s is not a number or a boolean JSON holds", at)
+				return fmt.Errorf("%s is not a number or a boolean that JSON can represent", at)
 			}
 			if f, ok := v.(float64); ok && (math.IsInf(f, 0) || math.IsNaN(f)) {
-				return fmt.Errorf("%s is not a number JSON holds", at)
+				return fmt.Errorf("%s is not a number that JSON can represent", at)
 			}
 			out, err := json.Marshal(v)
 			if err != nil {
-				return fmt.Errorf("%s is not a value JSON holds", at)
+				return fmt.Errorf("%s is not a value that JSON can represent", at)
 			}
 			b.Write(out)
 		default:
@@ -168,45 +168,46 @@ func writeJSON(b *bytes.Buffer, n *yaml.Node, at string) error {
 			writeString(b, n.Value)
 		}
 	default:
-		return fmt.Errorf("%s: line %d: not a value the settings hold", at, n.Line)
+		return fmt.Errorf("%s: line %d: not a value the settings can contain", at, n.Line)
 	}
 	return nil
 }
 
 // writeString writes s as a JSON string as encoding/json's Marshal writes it, with <,
-// >, &, U+2028 and U+2029 escaped: the bytes qory-github setup prints for the same
-// settings.
+// >, &, U+2028 and U+2029 escaped: the compact JSON of step 4 of the integration
+// contract's "Declaring an integration".
 func writeString(b *bytes.Buffer, s string) {
 	out, _ := json.Marshal(s)
 	b.Write(out)
 }
 
-// Expansion says which integrations [Runner.Expand] describes, and where their programs
-// may not be.
+// Expansion selects which integrations [Runner.Expand] describes, and where their
+// programs may not be.
 type Expansion struct {
 	// Workspace are the files and directories a run may write: its checkout, and the
-	// mounts a wall gives the container read-write. A program that is one of them, or
+	// mounts a wall passes to the container read-write. A program that is one of them, or
 	// under one, is refused: what a run may change may not choose what runs with the
 	// machine's credentials.
 	Workspace []string
-	// Only, when set, says which integrations are described, by key: the ones a run's
+	// Only, when set, selects which integrations are described, by key: the ones a run's
 	// policy selects. Nil describes every one.
 	Only func(key string) bool
 }
 
 // Expand describes the integrations the file declares, every one or the ones
-// [Expansion.Only] names, and adds the credentials they define to r.Credentials, after
+// [Expansion.Only] selects, and adds the credentials they define to r.Credentials, after
 // the file's own, in the section's order. For each it finds the program, runs <program>
 // describe as [integration.Describe] does, and checks the settings against the
 // description. The program is found by its absolute path, or on the PATH, and is
-// refused in a directory of [Expansion.Workspace] and where [trusted] refuses it. A program that is not found or does not answer, settings the description refuses, and an integration that
-// plays no role qory knows are errors naming the file and the key. The credential role
-// defines the credential named by the key, with the adapter
-// [integration.CredentialAdapter] gives, unless the file's credentials section defines
-// that name itself: then the file's definition stands, [Runner.Shadowed] names the key,
-// and the integration's credential is not defined. A role qory does not know is left
-// alone. Once Expand succeeds, later calls do nothing; after an error, a later call
-// describes again.
+// refused in a directory of [Expansion.Workspace] and where [trusted] refuses it. A
+// program that is not found or does not answer, settings the description refuses, and an
+// integration that plays no role qory expands are errors that contain the file and the
+// key. The credential role defines the credential whose name is the key, with the
+// adapter [integration.CredentialAdapter] returns, unless the file's credentials section
+// defines that name itself: then the file's definition stands, [Runner.Shadowed] lists
+// the key, and the integration's credential is not defined. Roles qory does not expand are
+// left as they are. Once Expand succeeds, each further call does nothing; after an error, the
+// next call describes again.
 func (r *Runner) Expand(ctx context.Context, e Expansion) error {
 	if r == nil || r.expanded {
 		return nil
@@ -236,7 +237,7 @@ func (r *Runner) Expand(ctx context.Context, e Expansion) error {
 			return fail("%v", err)
 		}
 		if d.Credential == nil {
-			return fail("%s plays no role qory knows, %s, and would define nothing", in.Program, strings.Join(d.Roles, ", "))
+			return fail("%s plays %s, none of which qory expands, and defines nothing", in.Program, rolesText(d.Roles))
 		}
 		// The version is the program's to word, and is printed as a terminal takes it.
 		in.Path, in.Version = found, integration.Printable(d.ProgramVersion)
@@ -256,7 +257,7 @@ func (r *Runner) Expand(ctx context.Context, e Expansion) error {
 
 // Shadowed are the keys of the integrations whose name the file's credentials section
 // defines itself, in the section's order: the section's definition is the one a run
-// holds.
+// receives.
 func (r *Runner) Shadowed() []string {
 	if r == nil {
 		return nil
@@ -284,11 +285,11 @@ func program(name string, workspace []string) (string, error) {
 	found, err := exec.LookPath(name)
 	switch {
 	case errors.Is(err, exec.ErrDot):
-		return "", fmt.Errorf("%s is found as %s through the PATH entry %q, which is relative; qory runs a program from an absolute directory of the PATH, or named by its absolute path with program", name, dotted(found), relativeEntry(found, name))
+		return "", fmt.Errorf("%s is found as %s through the PATH entry %q, which is relative; qory runs a program from an absolute directory of the PATH; install it in one, or set its absolute path with the `program` key", name, dotted(found), relativeEntry(found, name))
 	case err != nil && filepath.IsAbs(name):
 		return "", fmt.Errorf("%s is not a program this user may run", name)
 	case err != nil:
-		return "", fmt.Errorf("%s is not on the PATH; install it there, or name the program by its path with program", name)
+		return "", fmt.Errorf("%s is not on the PATH; install it there, or set program to its path", name)
 	}
 	if found, err = filepath.Abs(found); err != nil {
 		return "", err
@@ -476,4 +477,16 @@ func chainTrusted(path string, stat func(string) (fileOwner, error), euid uint32
 			return nil
 		}
 	}
+}
+
+// rolesText is the roles a description lists, as a phrase: "the role a", or "the roles a,
+// b and c".
+func rolesText(roles []string) string {
+	switch len(roles) {
+	case 0:
+		return "no role"
+	case 1:
+		return "the role " + roles[0]
+	}
+	return "the roles " + strings.Join(roles[:len(roles)-1], ", ") + " and " + roles[len(roles)-1]
 }

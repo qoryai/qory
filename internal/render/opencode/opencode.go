@@ -1,10 +1,10 @@
 // Package opencode renders for OpenCode, which reads a project's .opencode directory for
 // agents, commands and hooks, opencode.json for its config, AGENTS.md at the checkout
 // root, and skills from .agents/skills. All four are linked into the checkout,
-// opencode.json only when a module ships one, the stack names a model, or the compose
-// holds an MCP server. The model is written into it as model and the servers as mcp, in
-// OpenCode's own shape. OpenCode has no output styles, so that kind is skipped. A files
-// entry named opencode/<path> lands at .opencode/<path>.
+// opencode.json only when a module ships one, the stack sets a model, or the compose
+// contains an MCP server. The model is written into it as model and the servers as mcp,
+// in OpenCode's own shape. OpenCode has no output styles, so that kind is skipped. A
+// files entry named opencode/<path> lands at .opencode/<path>.
 //
 // The paths under .opencode a files entry may not take, see [render.Reserved]:
 //
@@ -14,7 +14,7 @@
 //	agents         agents are linked there; ship it as agents/<name>
 //	skills         qory links them there for a launch; ship it as skills/<name>
 //
-// OpenCode also reads a directory named by OPENCODE_CONFIG_DIR the way it reads a
+// OpenCode also reads the directory at OPENCODE_CONFIG_DIR the way it reads a
 // project's .opencode, and the runtime's directory is one: opencode.json, the agents,
 // the commands, the hooks and the skills linked under skills/. [Template] sets the
 // variable. The instructions are read from the checkout alone. The checkout's .opencode
@@ -72,10 +72,10 @@ func (opencode) Reserved() []render.Reserved {
 
 // Render links the commands and hooks as they are, since OpenCode reads the same Markdown
 // with frontmatter, writes agents/<name>.md with the agent's description, mode and model,
-// and writes opencode.json when a module ships the file, the stack names a model or the
-// compose holds an MCP server: the model as model, and each server under mcp as OpenCode
-// reads it, {type: remote, url} for a server with a url, else {type: local, command:
-// [command, args...], environment: env}.
+// and writes opencode.json when a module ships the file, the stack sets a model or the
+// compose contains an MCP server: the model as model, and each server under mcp as
+// OpenCode reads it, {type: remote, url} for a server with a url, else {type: local,
+// command: [command, args...], environment: env}.
 func (opencode) Render(res *compose.Result, dir, home string) error {
 	if err := render.PlaceEntries(res, dir, render.Bare, "commands", "hooks", "skills"); err != nil {
 		return err

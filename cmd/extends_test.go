@@ -206,7 +206,7 @@ func TestExtendsNeedsARuntimeFromSomewhere(t *testing.T) {
 	if err == nil || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("err = %v, exit %d\n%s", err, cmd.ExitCode(err), out)
 	}
-	wants(t, err.Error(), "target.runtime is required; the base stack nextjs-15@", " carries no target, so the document sets one beside extends, or the configuration or --runtime does")
+	wants(t, err.Error(), "target.runtime is required; the base stack nextjs-15@", " defines no target, so the document sets one beside extends, or the configuration or --runtime does")
 	gone(t, root, ".qory", ".claude")
 	out, err = run(t, "harness", "compose", "--runtime", "claude")
 	if err != nil {
@@ -293,7 +293,7 @@ func TestExtendsGovernsFilesByPrefix(t *testing.T) {
 	os.RemoveAll(filepath.Join(root, "modules", "app", "files", "claude", "rules-private"))
 	writeFile(t, compose, strings.Replace(consumerCompose(openBase), "    - name: app\n", "    - name: app\n    - name: core\n      exclude: {skills: [review]}\n", 1))
 	_, err = run(t, "harness", "compose")
-	if err == nil || !strings.Contains(err.Error(), "module core belongs to the base stack; a checkout's qory.yaml cannot name a base module, exclude from it or replace it") || cmd.ExitCode(err) != cmd.ExitInput {
+	if err == nil || !strings.Contains(err.Error(), "module core belongs to the base stack; a checkout's qory.yaml cannot list a base module, exclude from it or replace it") || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("a base module named: err = %v, exit %d", err, cmd.ExitCode(err))
 	}
 }

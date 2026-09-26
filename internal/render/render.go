@@ -21,10 +21,11 @@ import (
 // Link is one path in a checkout that points into the composed home.
 //
 // A link whose home path is a file is one symlink. A link whose home path is a directory,
-// such as .claude, is written as a real directory in the checkout holding one symlink per
-// entry of it, a file or a directory such as .claude/skills, so the checkout keeps its own
-// files beside them: Claude Code writes .claude/settings.local.json when a person answers
-// a permission prompt, and a repository may own .github/agents. [LinkInto] has the rules.
+// such as .claude, is written as a real directory in the checkout containing one symlink
+// per entry of it, a file or a directory such as .claude/skills, so the checkout keeps
+// its own files beside them: Claude Code writes .claude/settings.local.json when a person
+// answers a permission prompt, and a repository may own .github/agents. [LinkInto] has
+// the rules.
 type Link struct {
 	// Checkout is the path relative to the checkout root, such as ".claude".
 	Checkout string
@@ -32,7 +33,7 @@ type Link struct {
 	Home string
 	// Soft marks a link that yields to whatever qory did not write at its path.
 	Soft bool
-	// Except names the entries of a directory link's home directory that get no link in
+	// Except lists the entries of a directory link's home directory that get no link in
 	// the checkout, such as the plugin a runtime renders for a launch from outside it.
 	Except []string
 }
@@ -54,11 +55,11 @@ type ForeignPathError struct {
 	Path string
 	// Target is the link target when Path is a symlink, "" when it is a file or directory.
 	Target string
-	// Reason is set when force was asked for and refused, and says why.
+	// Reason is set when force was requested and refused, and states why.
 	Reason string
 }
 
-// Error names the path and what qory found there.
+// Error returns the path and what qory found there.
 func (e *ForeignPathError) Error() string {
 	switch {
 	case e.Reason != "":
@@ -95,12 +96,12 @@ type Runtime interface {
 	// Name is the target.runtime value.
 	Name() string
 	// Render writes the runtime's own files into dir, the runtime's directory inside a
-	// staging copy of the home. Paths written into files name home, where the tree ends up.
-	// The shared parts, AGENTS.md, skills/ and hooks/, are already at the home's root.
-	// [Build] links the runtime's files entries into dir after Render returns.
+	// staging copy of the home. Paths written into files contain home, where the tree
+	// ends up. The shared parts, AGENTS.md, skills/ and hooks/, are already at the home's
+	// root. [Build] links the runtime's files entries into dir after Render returns.
 	Render(res *compose.Result, dir, home string) error
-	// Links are the paths a checkout needs so the program reads the home. A nil res asks for
-	// the full set, which is what [Unlink] removes.
+	// Links are the paths a checkout needs so the program reads the home. A nil res
+	// requests the full set, which is what [Unlink] removes.
 	Links(res *compose.Result) []Link
 	// Skips are the entry kinds the runtime has no place for.
 	Skips() []string
@@ -109,36 +110,37 @@ type Runtime interface {
 }
 
 // Launcher is a runtime whose program takes the harness from outside the checkout, so a
-// home composed without links into the checkout still reaches it: the runtime renders
-// what the program takes from outside into its directory in the home, a plugin or a
-// configuration directory say, and Template says how to start the program on it. A
+// home composed without links into the checkout reaches it too: the runtime renders
+// what the program takes from outside into its directory in the home, such as a plugin
+// or a configuration directory, and Template defines how to start the program on it. A
 // runtime that does not implement it reads its harness through the links alone.
 type Launcher interface {
 	// Template is how the program is started on a home, see [Template].
 	Template() Template
 }
 
-// Declarer is a runtime whose program reaches hosts of its own, its model endpoint say,
-// which no module declares. When the modules of a harness declare egress, the compose
-// adds these to the report's union under the runtime's name, so a stack does not have
-// to know the endpoint; when none declares, they are not needed, since the run's policy
-// stands as it is.
+// Declarer is a runtime whose program reaches hosts of its own, such as its model
+// endpoint, which no module declares. When the modules of a harness declare egress, the
+// compose adds these to the report's union under the runtime's name, so a stack does not
+// have to know the endpoint; when none declares, they are not needed, since the run's
+// policy stands as it is.
 type Declarer interface {
 	// Egress are the hosts the program reaches, in the grammar of a module's egress key.
 	Egress() []string
 }
 
 // Template is how a runtime's program is started on the harness in a home: the program,
-// groups of arguments, and environment variables, each naming the home's files through
-// two placeholders, ${home} for the home and ${dir} for the runtime's directory in it. A
-// runtime ships its own as the default, and the configuration's harness.launch key
-// overrides any field of it. [LaunchFor] resolves one against a home.
+// groups of arguments, and environment variables, each referring to the home's files
+// through two placeholders, ${home} for the home and ${dir} for the runtime's directory
+// in it. A runtime ships its own as the default, and the configuration's harness.launch
+// key overrides any field of it. [LaunchFor] resolves one against a home.
 type Template struct {
 	// Command is the program, as found on the PATH or by its path.
 	Command string
-	// Args are the arguments in groups, a flag and its value say. A group naming a path
-	// under ${home} or ${dir} that the compose did not write, mcp.json without a server
-	// say, is left out whole, so a flag never names a file that is not there.
+	// Args are the arguments in groups, such as a flag and its value. A group containing
+	// a path under ${home} or ${dir} that the compose did not write, such as mcp.json
+	// without a server, is left out whole, so a flag never refers to a file that is not
+	// there.
 	Args [][]string
 	// Env are the variables set for the program, under the same rule as a group.
 	Env map[string]string
@@ -148,7 +150,7 @@ type Template struct {
 type Launch struct {
 	// Command is the program.
 	Command string
-	// Args are the arguments, every placeholder replaced and every group naming a
+	// Args are the arguments, every placeholder replaced and every group containing a
 	// missing path left out.
 	Args []string
 	// Env are the variables to set, nil when there are none.
@@ -157,7 +159,7 @@ type Launch struct {
 
 // LaunchFor resolves the runtime's launch template against home: the runtime's own, with
 // every field the override sets in its place. A runtime without a template is an error
-// saying that its program reads the harness from the checkout alone, through the links
+// stating that its program reads the harness from the checkout alone, through the links
 // a compose writes there.
 func LaunchFor(p Runtime, home string, override *Template) (Launch, error) {
 	l, ok := p.(Launcher)
@@ -228,7 +230,7 @@ func sortedKeys(m map[string]string) []string {
 }
 
 // CopyFile copies the file at src to dir/name through [WriteFile], for a runtime that
-// hands a file it wrote to its program twice over, once in place and once in a plugin.
+// passes a file it wrote to its program twice over, once in place and once in a plugin.
 func CopyFile(src, dir, name string) error {
 	data, err := os.ReadFile(src)
 	if err != nil {
@@ -238,12 +240,12 @@ func CopyFile(src, dir, name string) error {
 }
 
 // WritePlugin writes the manifest a plugin in Claude Code's layout starts with, at
-// dir/<manifestDir>/plugin.json, naming the plugin [PluginName] with the stack's
-// description, places the composed skills and commands under dir for the plugin's
-// address, see [PluginAddress], and copies the agents with their references resolved
-// the same way: Claude Code reads a plugin's agents directory by entry type and passes
-// over a link there, where it follows one in a checkout's .claude/agents and a plugin's
-// skills, so a linked agent registers nowhere and a copied one as <plugin>:<name>.
+// dir/<manifestDir>/plugin.json, setting the plugin's name to [PluginName] with the
+// stack's description, places the composed skills and commands under dir for the plugin's
+// address, see [PluginAddress], and copies the agents with their references resolved the
+// same way: Claude Code reads a plugin's agents directory by entry type and passes over a
+// link there, where it follows one in a checkout's .claude/agents and a plugin's skills,
+// so a linked agent registers nowhere and a copied one as <plugin>:<name>.
 func WritePlugin(res *compose.Result, dir, manifestDir string, extra map[string]any) error {
 	if err := PlaceEntries(res, dir, PluginAddress, "skills", "commands"); err != nil {
 		return err
@@ -267,12 +269,12 @@ func WritePlugin(res *compose.Result, dir, manifestDir string, extra map[string]
 	return WriteJSON(dir, filepath.Join(manifestDir, "plugin.json"), manifest)
 }
 
-// PluginName is the name a rendered plugin's manifest declares, the prefix a program
-// puts before the plugin's agents, skills and commands: harness:reviewer for the agent,
+// PluginName is the name a rendered plugin's manifest declares, the prefix a program puts
+// before the plugin's agents, skills and commands: harness:reviewer for the agent,
 // /harness:review for the skill. It is the same for every stack, so a launcher and its
-// prompts can name a skill without knowing the stack. [PluginAddress] is the same fact
-// as an [Address], and the one source of both the manifest and every name written for
-// the plugin's path.
+// prompts can refer to a skill without knowing the stack. [PluginAddress] is the same
+// fact as an [Address], and the one source of both the manifest and every name written
+// for the plugin's path.
 const PluginName = "harness"
 
 // PluginAddress is the address of a plugin named [PluginName]: every kind registers as
@@ -314,10 +316,11 @@ func Names() []string {
 	return names
 }
 
-// Composed reports the runtimes the home already holds, by the directories in it that are
-// named after a registered runtime. It returns nothing when the home does not exist, which
-// is the first compose of a checkout. A directory of any other name is ignored, so a home
-// written by a later qory that knows more runtimes loses only what this build cannot render.
+// Composed reports the runtimes the home already contains, by the directories in it that
+// are named after a registered runtime. It returns nothing when the home does not exist,
+// which is the first compose of a checkout. A directory of any other name is ignored, so
+// a home written by a qory build that renders more runtimes loses only what this build
+// cannot render.
 func Composed(home string) []Runtime {
 	entries, err := os.ReadDir(home)
 	if err != nil {
@@ -337,14 +340,15 @@ func Composed(home string) []Runtime {
 }
 
 // Build writes the composed home for one or more runtimes. It stages the tree with
-// [BuildAt] in home with ".tmp" appended, discarding whatever that path held, then
+// [BuildAt] in home with ".tmp" appended, discarding whatever that path contained, then
 // removes the old home and renames the staging directory over it. A failure before the
 // rename leaves the previous home as it was.
 //
-// Every runtime the home is to hold must be passed in one call, because the rename replaces
-// the whole tree. A caller composing for one runtime passes the runtimes already in the home
-// alongside it, which [Composed] reports, so that the links of a checkout composed for
-// several runtimes keep resolving and stay current. Build with no runtime is an error.
+// Every runtime the home is to contain must be passed in one call, because the rename
+// replaces the whole tree. A caller composing for one runtime passes the runtimes already
+// in the home alongside it, which [Composed] reports, so that the links of a checkout
+// composed for several runtimes keep resolving and stay current. Build with no runtime is
+// an error.
 func Build(res *compose.Result, home string, runtimes ...Runtime) (err error) {
 	if len(runtimes) == 0 {
 		return errors.New("build needs at least one runtime")
@@ -375,14 +379,14 @@ func Build(res *compose.Result, home string, runtimes ...Runtime) (err error) {
 }
 
 // BuildAt writes the composed tree into stage, addressed as home: the paths written into
-// files, $QORY_HARNESS_HOME and a server's command say, name home, where the tree is read
-// from, while the files themselves go under stage. [Build] stages beside the home and
-// renames; a check stages elsewhere and compares. BuildAt links the shared skills and
-// hooks for the bare address, links every module's directory as modules/<name> and
-// writes AGENTS.md at the staging root with its references resolved the same way, since
-// every checkout link reads them, then calls each runtime's Render for the subdirectory named after it and
-// links the runtime's files entries into that subdirectory. The links point at the
-// modules by absolute path, so a tree staged anywhere holds the same links.
+// files, such as $QORY_HARNESS_HOME and a server's command, contain home, where the tree
+// is read from, while the files themselves go under stage. [Build] stages beside the home
+// and renames; a check stages elsewhere and compares. BuildAt links the shared skills and
+// hooks for the bare address, links every module's directory as modules/<name> and writes
+// AGENTS.md at the staging root with its references resolved the same way, since every
+// checkout link reads them, then calls each runtime's Render for the subdirectory named
+// after it and links the runtime's files entries into that subdirectory. The links point
+// at the modules by absolute path, so a tree staged anywhere contains the same links.
 //
 // The files come after Render, so a files entry at a path Render wrote fails the build.
 // [CheckFiles] refuses such an entry before a build, and the failure here is the check
@@ -425,18 +429,18 @@ type Difference struct {
 	// Path is the path relative to the trees' roots, with forward slashes.
 	Path string
 	// What is how the trees differ there: "changed" for a file whose bytes differ,
-	// "missing" for a path the first tree holds and the second does not, "extra" for one
-	// only the second holds, "target" for a link pointing elsewhere, and "kind" for a file
-	// where the other tree holds a directory or a link.
+	// "missing" for a path the first tree contains and the second does not, "extra" for
+	// one only the second contains, "target" for a link pointing elsewhere, and "kind"
+	// for a file where the other tree contains a directory or a link.
 	What string
 }
 
 // Diff compares the tree at want with the tree at have and lists every path at which they
-// differ, sorted by path. A link is compared by its target and not followed, a file by its
-// bytes, and a directory in both trees is the same whatever it holds, since what it holds
-// is compared on its own. A check renders the home again into a scratch directory and
-// calls Diff with that as want and the home as have, so "missing" is a path a compose
-// would write and "extra" one it would remove. A root that does not exist is an empty
+// differ, sorted by path. A link is compared by its target and not followed, a file by
+// its bytes, and a directory in both trees is the same whatever it contains, since what
+// it contains is compared on its own. A check renders the home again into a scratch
+// directory and calls Diff with that as want and the home as have, so "missing" is a path
+// a compose writes and "extra" one it removes. A root that does not exist is an empty
 // tree.
 func Diff(want, have string) ([]Difference, error) {
 	a, err := readTree(want)
@@ -581,14 +585,15 @@ func FileFor(e compose.Entry, runtime string) (string, bool) {
 	return path, true
 }
 
-// CheckFiles refuses a files entry that names no registered runtime or a path the runtime
-// reserves, and returns the first refusal in the result's order. Every entry is checked,
-// for the target runtime or not, so a module shipping a wrong file is refused wherever it
-// composes. The command module calls it right after the compose, before [Build].
+// CheckFiles refuses a files entry whose first segment is no registered runtime, or whose
+// path the runtime reserves, and returns the first refusal in the result's order. Every
+// entry is checked, for the target runtime or not, so a module shipping a wrong file is
+// refused wherever it composes. The command module calls it right after the compose,
+// before [Build].
 //
-// The refusal names the module and the entry as it sits in the module, files/<runtime>/<path>,
-// and ends with the runtime's [Reserved] clause, or with the runtimes qory renders when the
-// first segment is none of them.
+// The refusal states the module and the entry as it sits in the module,
+// files/<runtime>/<path>, and ends with the runtime's [Reserved] clause, or with the
+// runtimes qory renders when the first segment is none of them.
 func CheckFiles(res *compose.Result) error {
 	for _, e := range res.Entries {
 		if e.Kind != FilesKind {
@@ -614,30 +619,30 @@ func CheckFiles(res *compose.Result) error {
 // clone-local exclude file, each link's line leaving the file with the link. home is the
 // composed tree under that qory directory.
 //
-// A link to a file is one symlink. A link to a directory is a real directory in the checkout
-// holding one symlink per entry of the home's directory, a file or a directory such as
-// .claude/skills, so the checkout's own files there stay: .claude/settings.local.json
-// beside qory's .claude/settings.json. A symlink qory wrote at the directory's path, the
-// way a release before this one linked .claude whole, is removed and the directory made;
-// a directory the home leaves empty gets no directory and no link.
+// A link to a file is one symlink. A link to a directory is a real directory in the
+// checkout containing one symlink per entry of the home's directory, a file or a
+// directory such as .claude/skills, so the checkout's own files there stay:
+// .claude/settings.local.json beside qory's .claude/settings.json. A symlink qory wrote
+// at the directory's path is removed and the directory made; a directory the home leaves
+// empty gets no directory and no link.
 //
-// A path holding something qory did not write is a [*ForeignPathError] for a hard link and
-// is passed over for a soft one, and so is a path behind a directory the checkout links
-// elsewhere, such as a committed .github symlink, since nothing there is qory's. With
-// force, a tracked and unmodified file or directory of the checkout is removed first and
-// its path recorded, for either kind of link; anything untracked or modified is still
-// refused, because git checkout -- could not bring it back.
+// A path containing something qory did not write is a [*ForeignPathError] for a hard link
+// and is passed over for a soft one, and so is a path behind a directory the checkout
+// links elsewhere, such as a committed .github symlink, since nothing there is qory's.
+// With force, a tracked and unmodified file or directory of the checkout is removed first
+// and its path recorded, for either kind of link; anything untracked or modified is
+// refused, because git checkout -- cannot restore it.
 //
-// LinkInto also takes back what an earlier compose linked and this one does not: a link the
-// runtime no longer asks for, such as AGENTS.override.md once the compose produces no
-// instructions, a file inside a linked directory the home no longer has, and a link the
-// runtime wrote for a files entry the compose no longer holds, such as
-// .github/instructions/web.instructions.md, which Links with a nil result cannot name.
+// LinkInto also removes what a previous compose linked and this one does not: a link the
+// runtime does not request, such as AGENTS.override.md when the compose produces no
+// instructions, a file inside a linked directory the home does not have, and a link the
+// runtime wrote for a files entry the compose does not contain, such as
+// .github/instructions/web.instructions.md, which Links with a nil result cannot list.
 // For the last, LinkInto walks the checkout directories the runtime's links stand in,
-// .github say, and removes every symlink into the runtime's directory in the home that
-// the current links do not ask for, then each directory that is left empty. It removes
-// only links that point into the qory directory. It stops at the first error, so the links
-// before it are already written.
+// such as .github, and removes every symlink into the runtime's directory in the home
+// that the current links do not request, then each directory that is left empty. It
+// removes only links that point into the qory directory. It stops at the first error, so
+// the links before it are already written.
 func LinkInto(p Runtime, res *compose.Result, root, home string, force bool) (Linked, error) {
 	var out Linked
 	if err := exclude(root, "/"+checkout.Dir); err != nil {
@@ -980,11 +985,11 @@ func prune(root, path string, keep map[string]bool) error {
 // nothing was removed from is left as it was.
 //
 // Anything else at a link's path is not qory's to remove: a hard link's path fails, and a
-// soft link's path is left alone, which is how a checkout's own AGENTS.md survives. Inside a
-// linked directory only the symlinks into the qory directory go, so
-// .claude/settings.local.json stays and so does the directory holding it. A link the
-// runtime wrote for a files entry, which Links with a nil result cannot name, goes the way
-// [LinkInto] takes one back and is returned by its own path, such as
+// soft link's path is left alone, which is how a checkout's own AGENTS.md survives.
+// Inside a linked directory only the symlinks into the qory directory go, so
+// .claude/settings.local.json stays and so does the directory containing it. A link the
+// runtime wrote for a files entry, which Links with a nil result cannot list, goes the
+// way [LinkInto] removes one and is returned by its own path, such as
 // .github/instructions/web.instructions.md. Each removed link's line leaves the
 // clone-local exclude file with it. Unlink leaves the home for the caller to remove, and
 // the qory directory's own line with it, through [RemoveExclude].
@@ -1044,19 +1049,19 @@ func Unlink(p Runtime, root string, others ...Runtime) ([]string, error) {
 	return removed, err
 }
 
-// LinkModules writes the links a stack asks for to its modules: for every module with a
+// LinkModules writes the links a stack requests to its modules: for every module with a
 // Link, a hard link at root/<Link> pointing, relative, at home/modules/<name>, under the
 // rules of a hard file link of [LinkInto]: a path qory did not write is a
 // [*ForeignPathError], and so is a symlinked parent, or replaced under force when git can
 // restore it, with its path recorded; anything untracked or modified is refused with the
-// reason git gives. The link is hard because permission rules and scripts name the path.
-// Every link written is listed in the clone-local exclude file. LinkModules then takes back
-// the links of previous, the names an earlier compose linked, that no module links now,
-// when qory wrote them; a name that now holds something else is left alone.
+// reason git returns. The link is hard because permission rules and scripts refer to the
+// path. Every link written is listed in the clone-local exclude file. LinkModules then
+// removes the links of previous, the names a previous compose linked, that no module
+// links now, when qory wrote them; a name that now contains something else is left alone.
 //
 // Before it writes anything, a Link at a path a registered runtime links, or at the qory
-// directory, is refused with an error naming the runtime, because a module link there
-// would stand where the runtime's link goes.
+// directory, is refused with an error that states the runtime, because a module link
+// there takes the place of the runtime's link.
 func LinkModules(res *compose.Result, root, home string, previous []string, force bool) (Linked, error) {
 	var out Linked
 	for _, l := range res.Modules {
@@ -1118,7 +1123,7 @@ func moduleLinkFree(name string) error {
 }
 
 // UnlinkModules removes the module links of the names in links that qory wrote, each with
-// its exclude line, and returns the names it removed. A name holding anything else, or
+// its exclude line, and returns the names it removed. A name containing anything else, or
 // nothing, is passed over and no error.
 func UnlinkModules(root string, links []string) ([]string, error) {
 	var removed []string
@@ -1142,12 +1147,12 @@ func UnlinkModules(root string, links []string) ([]string, error) {
 // the qory directory, the home and its modules directory.
 var modulesPrefix = filepath.Join(checkout.Dir, "harness", "modules") + string(filepath.Separator)
 
-// UnlinkModuleLinks removes every module link in the checkout root without the report that
-// names them, which is how a remove works after rm -rf .qory. It reads the root's own
-// entries and takes each symlink whose relative target, cleaned, is under
-// .qory/harness/modules, under the rules of [UnlinkModules], each with its exclude line, and
-// returns the names removed in sorted order. A symlink to anywhere else, an absolute one,
-// and a link inside a directory stay.
+// UnlinkModuleLinks removes every module link in the checkout root without the report
+// that lists them, which is how a remove works after rm -rf .qory. It reads the root's
+// own entries and takes each symlink whose relative target, cleaned, is under
+// .qory/harness/modules, under the rules of [UnlinkModules], each with its exclude line,
+// and returns the names removed in sorted order. A symlink to anywhere else, an absolute
+// one, and a link inside a directory stay.
 func UnlinkModuleLinks(root string) ([]string, error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -1452,7 +1457,7 @@ func Skipped(p Runtime, res *compose.Result) []string {
 // patch, when it is not nil, is called with each file's name and its merged map before
 // the encoding, and changing the map there is how a runtime writes the target model.
 // Names in ensure are written even when no module contributed to them, so a model reaches
-// a file that would otherwise not exist.
+// a file that otherwise does not exist.
 func WriteSettings(res *compose.Result, runtime, dir, home string, ensure []string, patch func(file string, m map[string]any)) error {
 	files := res.SettingsFiles(runtime)
 	for _, e := range ensure {
@@ -1489,7 +1494,7 @@ func WriteSettings(res *compose.Result, runtime, dir, home string, ensure []stri
 }
 
 // EncodeTOML encodes a settings map as TOML. A list whose every element is a map becomes
-// an array of tables, which the encoder will not do for a list of the untyped maps a JSON
+// an array of tables, which the encoder does not do for a list of the untyped maps a JSON
 // or YAML decoder produces.
 func EncodeTOML(m map[string]any) ([]byte, error) {
 	var b bytes.Buffer
@@ -1531,10 +1536,10 @@ func tables(v any) any {
 }
 
 // WriteAgents writes one Markdown file per composed agent at dir/sub/<name><suffix>,
-// where suffix carries the runtime's extension, such as ".agent.md", with every
-// reference resolved for the path addr names. Each file is the agent's body under
-// frontmatter holding only the keys in keep that the source agent has, so a key one
-// runtime reads does not reach another. When keep names "name" and the source has none,
+// where suffix contains the runtime's extension, such as ".agent.md", with every
+// reference resolved for the path addr addresses. Each file is the agent's body under
+// frontmatter containing only the keys in keep that the source agent has, so a key one
+// runtime reads does not reach another. When keep lists "name" and the source has none,
 // the entry's name fills it. The keys come out in alphabetical order, not the order of
 // keep.
 func WriteAgents(res *compose.Result, addr Address, dir, sub, suffix string, keep ...string) error {
@@ -1609,7 +1614,7 @@ func WriteJSON(dir, name string, v any) error {
 }
 
 // WriteFile writes data to dir/name with mode 0644, creating the parent directories and
-// overwriting a file already there. name may hold separators, such as
+// overwriting a file already there. name may contain separators, such as
 // "agents/reviewer.md".
 func WriteFile(dir, name string, data []byte) error {
 	path := filepath.Join(dir, name)

@@ -17,7 +17,7 @@ import (
 //
 // The bee flies right to left, the way the glyph faces. With a total known, from
 // [Flight.Progress], where it is along the track is how much is done, and it reaches the
-// jar when all of it is. Without one it makes the trip over and over, and the line says
+// jar when all of it is. Without one it makes the trip over and over, and the line shows
 // how long the wait has been.
 //
 // The line is redrawn in place, so it is drawn on a terminal only, and not when TERM is
@@ -25,8 +25,8 @@ import (
 // the same text without it. A flight ends one of two ways. [Flight.Stop] clears the
 // line, so nothing of it is left above what the command prints next, which is for a wait
 // whose result the command reports itself, and for one that failed. [Flight.Land]
-// leaves the line where it is, the bee home, the jar now full and the stripes all the way
-// along the track, and says what was done in place of what was waited for:
+// leaves the line where it is, the bee home, the jar full and the stripes all the way
+// along the track, and shows what was done in place of what was waited for:
 //
 //	🍯━━━━━━━━━━━━━━━━━━━━━━━━━━  downloaded qory 0.6.0  7.4 MB
 //
@@ -91,8 +91,8 @@ func (f *Flight) Stop() {
 }
 
 // Land ends the flight and leaves its line in place, finished: the pot where the jar
-// was, the stripes along the whole track, then text, which says what was done, then
-// faint what it took, the size when a total was given and else the
+// was, the stripes along the whole track, then text, which states what was done, then
+// faint what it took, the size when a total was set and else the
 // seconds waited, when that is a second or more. The line is printed wherever the UI
 // writes, a terminal or not.
 func (f *Flight) Land(text string) {

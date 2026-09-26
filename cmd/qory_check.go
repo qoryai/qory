@@ -19,7 +19,7 @@ type versionError struct {
 
 // Error is one line: the file, the version, the range, and what to do.
 func (e *versionError) Error() string {
-	return fmt.Sprintf("%s: this qory is %s, and %s wants %s; install a qory in that range, or ask its owner", e.file, e.version, e.what, e.want)
+	return fmt.Sprintf("%s: this qory is %s, and %s wants %s; install a qory in that range, or contact its owner", e.file, e.version, e.what, e.want)
 }
 
 // qoryChecks checks the documents a command reads against the running qory, one call

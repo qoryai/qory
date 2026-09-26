@@ -20,7 +20,7 @@ func TestSetupShellWritesTheHook(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, out, "These lines would go to the end of ~/.zshrc", "source <(command qory setup completion zsh)", "qory() {", "Add them? [y/N]", "Nothing written.")
+	wants(t, out, "These lines are added to the end of ~/.zshrc if you answer y", "source <(command qory setup completion zsh)", "qory() {", "Add them? [y/N]", "Nothing written.")
 	if _, err := os.Stat(rc); err == nil {
 		t.Fatal("a no wrote the file")
 	}
@@ -39,13 +39,13 @@ func TestSetupShellWritesTheHook(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, out, "~/.zshrc already holds the lines; nothing to add")
+	wants(t, out, "~/.zshrc already contains the lines; nothing to add")
 	if again, _ := os.ReadFile(rc); string(again) != string(data) {
 		t.Error("the second run changed the file")
 	}
 	t.Setenv("SHELL", "/bin/tcsh")
 	_, _, err = runSplit(t, "y\n", "setup", "shell")
-	if err == nil || !strings.Contains(err.Error(), "the tcsh shell is not yet supported; qory knows bash, fish, zsh, and welcomes a contribution") || cmd.ExitCode(err) != cmd.ExitInput {
+	if err == nil || !strings.Contains(err.Error(), "the tcsh shell is not supported; qory has a setup for bash, fish, zsh, and welcomes a contribution") || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("tcsh: %v", err)
 	}
 	t.Setenv("SHELL", "/usr/local/bin/fish")
@@ -81,7 +81,7 @@ func TestSetupCompletionPrintsTheScript(t *testing.T) {
 	wants(t, out, "complete -c qory")
 	t.Setenv("SHELL", "/bin/tcsh")
 	_, err = run(t, "setup", "completion")
-	if err == nil || !strings.Contains(err.Error(), "the tcsh shell is not yet supported; qory completes bash, fish, powershell and zsh") {
+	if err == nil || !strings.Contains(err.Error(), "the tcsh shell is not supported; qory completes bash, fish, powershell and zsh") {
 		t.Errorf("tcsh: %v", err)
 	}
 	if _, err := run(t, "completion", "zsh"); err == nil {

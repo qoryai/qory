@@ -96,8 +96,8 @@ func newSetupShell() *cobra.Command {
 a remove back to the main checkout to your shell's rc file. A program cannot change the
 directory of the shell that ran it, so the function runs worktree add and remove with
 --path and cd's to the path they print. The shell is the one in $SHELL; setup shell shows
-the lines, asks before writing them, and says how to reload. With --print it prints the
-lines and writes nothing, for an rc file a tool of yours owns:
+the lines, requests a confirmation before writing them, and prints how to reload. With
+--print it prints the lines and writes nothing, for an rc file a tool of yours owns:
 eval "$(qory setup shell --print)".`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -114,7 +114,7 @@ eval "$(qory setup shell --print)".`,
 					names = append(names, name)
 				}
 				sort.Strings(names)
-				return input(fmt.Errorf("the %s shell is not yet supported; qory knows %s, and welcomes a contribution for yours at https://github.com/qoryai/qory", nameOrNone(shell), strings.Join(names, ", ")))
+				return input(fmt.Errorf("the %s shell is not supported; qory has a setup for %s, and welcomes a contribution for yours at https://github.com/qoryai/qory", nameOrNone(shell), strings.Join(names, ", ")))
 			}
 			lines := strings.ReplaceAll(sh.lines, "{completion}", sh.load)
 			if print {
@@ -127,10 +127,10 @@ eval "$(qory setup shell --print)".`,
 			}
 			rc := filepath.Join(home, strings.TrimPrefix(sh.rc, "~/"))
 			if data, err := os.ReadFile(rc); err == nil && strings.Contains(string(data), hookMarker) {
-				u.Success("%s already holds the lines; nothing to add", sh.rc)
+				u.Success("%s already contains the lines; nothing to add", sh.rc)
 				return nil
 			}
-			u.Text("These lines would go to the end of " + sh.rc + ":")
+			u.Text("These lines are added to the end of " + sh.rc + " if you answer y:")
 			u.Blank()
 			u.Code(strings.Split(strings.TrimRight(lines, "\n"), "\n")...)
 			u.Blank()
@@ -180,11 +180,11 @@ func newSetupCompletion() *cobra.Command {
 	return &cobra.Command{
 		Use:   "completion [bash|zsh|fish|powershell]",
 		Short: "Print the completion script; setup shell makes your shell source it",
-		Long: `Print the completion script for a shell, the one in $SHELL unless named. The script
-is for the shell to source at every start, not to read or to keep: it is generated from
-the command tree, so it always matches the binary. The lines setup shell adds source it;
-to source it yourself, source <(qory setup completion zsh) in zsh or bash, and
-qory setup completion fish | source in fish.`,
+		Long: `Print the completion script for a shell, the one in $SHELL unless the argument selects
+another. The script is for the shell to source at every start, not to read or to keep: it
+is generated from the command tree, so it always matches the binary. The lines setup
+shell adds source it; to source it yourself, source <(qory setup completion zsh) in zsh or
+bash, and qory setup completion fish | source in fish.`,
 		Args:      maxArgs(1),
 		ValidArgs: []string{"bash", "zsh", "fish", "powershell"},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -204,7 +204,7 @@ qory setup completion fish | source in fish.`,
 			case "powershell":
 				return root.GenPowerShellCompletionWithDesc(out)
 			}
-			return input(fmt.Errorf("the %s shell is not yet supported; qory completes bash, fish, powershell and zsh, and welcomes a contribution for yours at https://github.com/qoryai/qory", nameOrNone(shell)))
+			return input(fmt.Errorf("the %s shell is not supported; qory completes bash, fish, powershell and zsh, and welcomes a contribution for yours at https://github.com/qoryai/qory", nameOrNone(shell)))
 		},
 	}
 }

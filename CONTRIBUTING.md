@@ -55,7 +55,7 @@ go vet ./...
 go run github.com/mgechev/revive@v1.16.0 -config revive.toml ./...
 ```
 
-A change to the compose format starts with a fixture. Each fixture directory holds a
+A change to the compose format starts with a fixture. Each fixture directory contains a
 `qory-stack.yaml`, its modules under `modules/`, and under `expected/` either
 `entries.txt` (one `kind/name module` line per composed entry, with `AGENTS.md` beside it
 and a merged settings file at `settings/<runtime>/<file>.json`, a TOML target as
@@ -71,20 +71,20 @@ for the behaviour it pins, not for the function it calls.
 
 ## Doc comments
 
-Every package and every exported name carries a doc comment, and CI fails without one. The
+Every package and every exported name has a doc comment, and CI fails without one. The
 conventions, beyond what `revive` can check:
 
 - The first sentence starts with the name and is a complete sentence: `Compose reads ...`,
   `Stack is ...`. A package comment starts `Package x `.
-- A package comment says what the package owns, the words it defines, how a caller uses it,
-  and the invariants a caller must not break. It goes in `doc.go` when it runs past about
-  eight lines.
-- Exported struct fields carry a comment when the name alone does not settle what goes in
+- A package comment states what the package owns, the words it defines, how a caller uses
+  it, and the invariants a caller must not break. It goes in `doc.go` when it runs past
+  about eight lines.
+- Exported struct fields have a comment when the name alone does not settle what goes in
   them, in what format, or who sets them.
 - Unexported types, and unexported functions longer than a few lines, are documented too.
-  The comment says why the code exists or what is subtle in it, never what the next line
+  The comment states why the code exists or what is subtle in it, never what the next line
   does.
-- Say what the code does, including what it refuses, what it overwrites, what it leaves
+- Describe what the code does, including what it refuses, what it overwrites, what it leaves
   behind, and which errors a caller matches with `errors.Is` or `errors.As`.
 - Link identifiers as `[Stack]`, `[stack.Load]`. Indent code blocks with a tab, write
   lists as two spaces and a dash, and wrap at 90 columns.
@@ -92,12 +92,12 @@ conventions, beyond what `revive` can check:
 One vocabulary, no synonyms: **runtime** is the program that runs the harness, such as
 Claude Code; **stack** is `qory-stack.yaml`, the ordered modules and the target for one kind
 of work; **configuration** is `qory.yaml`, the repository's own document at its root and
-the machine's elsewhere, whose `harness` section names the stack a checkout extends and
+the machine's elsewhere, whose `harness` section selects the stack a checkout extends and
 the modules it appends; **manifest** is `qory-module.yaml`; **base** is the stack a
 checkout extends; **module**, **source**, **entry**, **kind**, **variant**, **exclude**,
 **collision**, **home**, **checkout**, **link**, **pin** and **report** mean what
-`contracts/harness/v1/README.md` says they mean. A runtime is never a provider, a tool or a vendor; a configuration is
-never a setting file or a preference.
+`contracts/harness/v1/README.md` defines them to mean. A runtime is never a provider, a
+tool or a vendor; a configuration is never a setting file or a preference.
 
 The command reference under `docs/commands/` is generated: run
 `go run ./internal/gendocs docs/commands` after changing a command and commit the result.
@@ -108,11 +108,11 @@ A release is a tag on a branch named after it, `v0.3.0`, opened as one pull requ
 branch adds the release's section to `CHANGELOG.md`, `[X.Y.Z] - YYYY-MM-DD` with the day
 the tag lands and a compare link at the foot of the file; a fix that goes to `main`
 outside a release branch goes under `[Unreleased]` until the next one. Anything a person
-upgrading has to do stands under Upgrading in the section. The release workflow takes
-that section as the release body, above the commit list goreleaser writes, and refuses a
-tag whose version has no section; `scripts/changelog-section.sh 0.3.0` prints what it
-would take. Pushing `vX.Y.Z` to the GitHub mirror runs `.github/workflows/release.yml`,
-which builds the archives for macOS and Linux with goreleaser, publishes them with their
+upgrading has to do stands under Upgrading in the section. The release workflow takes that
+section as the release body, above the commit list goreleaser writes, and refuses a tag
+whose version has no section; `scripts/changelog-section.sh 0.3.0` prints the section it
+takes. Pushing `vX.Y.Z` to the GitHub mirror runs `.github/workflows/release.yml`, which
+builds the archives for macOS and Linux with goreleaser, publishes them with their
 checksums, and updates the Homebrew cask when `HOMEBREW_TAP_TOKEN` is set. Check the
 configuration before tagging:
 
@@ -124,7 +124,7 @@ goreleaser build --snapshot --clean --single-target
 `qory version` reports the version without the `v`, `0.2.0` for the tag `v0.2.0`, in a
 release build and in a source build at that tag; a source build between tags reports the
 pseudo-version Go stamped, and one without version control reports the commit alone. The
-`source` row, `release` or `source`, tells the two kinds of build apart, and
+`source` row, `release` or `source`, distinguishes the two kinds of build, and
 `qory version --json` prints every field as one object for a script.
 
-Commit messages say what changed and why it was needed, in the imperative.
+Commit messages state what changed and why it was needed, in the imperative.

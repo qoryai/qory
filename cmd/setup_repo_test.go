@@ -60,7 +60,7 @@ func TestSetupRepoSetsTheRepositoryUp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err, out)
 	}
-	wantsRow(t, out, "kept", "qory.yaml  (its harness section names the stack)")
+	wantsRow(t, out, "kept", "qory.yaml  (its harness section defines the stack)")
 	lacks(t, out, "wrote", "initialised")
 	if after := snapshot(t, root); len(after) != len(before) {
 		t.Errorf("a second run changed the tree: %d paths, then %d", len(before), len(after))
@@ -79,7 +79,7 @@ func TestSetupRepoKeepsAStackThatIsThere(t *testing.T) {
 	if err != nil {
 		t.Fatal(err, out)
 	}
-	wantsRow(t, out, "kept", "qory.yaml  (its harness section names the stack)")
+	wantsRow(t, out, "kept", "qory.yaml  (its harness section defines the stack)")
 	lacks(t, out, "wrote")
 	gone(t, root, "qory-stack.yaml", "harness")
 

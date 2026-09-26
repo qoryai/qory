@@ -43,7 +43,7 @@ func TestQoryKeyRefusesAQoryOutsideTheRange(t *testing.T) {
 	if got := cmd.ExitCode(err); got != cmd.ExitVersion {
 		t.Errorf("exit %d, want %d", got, cmd.ExitVersion)
 	}
-	wants(t, err.Error(), "qory.yaml: this qory is 0.2.1, and the file wants >=0.3.0 <0.4.0; install a qory in that range, or ask its owner")
+	wants(t, err.Error(), "qory.yaml: this qory is 0.2.1, and the file wants >=0.3.0 <0.4.0; install a qory in that range, or contact its owner")
 	gone(t, root, ".qory", ".claude")
 
 	release(t, "0.3.4")

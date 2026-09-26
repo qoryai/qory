@@ -64,10 +64,10 @@ func newVersion() *cobra.Command {
 type buildInfo struct {
 	// Version is the version without a leading v: 0.3.0 for the release v0.3.0 and for a
 	// source build at that tag, the pseudo-version Go stamped for a source build between
-	// tags, and "" for a build that carries none.
+	// tags, and "" for a build that has none.
 	Version string `json:"version"`
 	// Commit is the commit the binary was built from, twelve characters, "" when the
-	// build carries none.
+	// build has none.
 	Commit string `json:"commit"`
 	// Dirty is set when the tree had uncommitted changes at build time.
 	Dirty bool `json:"dirty"`
@@ -81,8 +81,8 @@ type buildInfo struct {
 }
 
 // build reads what the binary knows about itself: [Version] and [Commit] set at build
-// time, and what Go recorded about the build. A release build carries its version in
-// [Version]. A source build carries "dev" there and its version is what Go recorded for
+// time, and what Go recorded about the build. A release build has its version in
+// [Version]. A source build has "dev" there and its version is what Go recorded for
 // the main module: the tag for a build at a clean tagged commit, a pseudo-version for a
 // build between tags, and nothing for a build without version control. The commit is
 // Go's vcs.revision, else [Commit].

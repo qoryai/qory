@@ -173,10 +173,10 @@ func TestReadRefusesADirectoryUnderHooks(t *testing.T) {
 // null parses and gets no decoder message.
 func TestReadRefusesAnMCPServerThatIsNotAnObject(t *testing.T) {
 	for _, c := range []struct{ body, want string }{
-		{"[]\n", "module core: mcp/db.json does not hold a JSON object: json: cannot unmarshal array into Go value of type map[string]interface {}"},
-		{"not json\n", "module core: mcp/db.json does not hold a JSON object: invalid character 'o' in literal null (expecting 'u')"},
-		{"{\"command\": \"x\",}\n", "module core: mcp/db.json does not hold a JSON object: invalid character '}' looking for beginning of object key string"},
-		{"null\n", "module core: mcp/db.json does not hold a JSON object"},
+		{"[]\n", "module core: mcp/db.json does not contain a JSON object: json: cannot unmarshal array into Go value of type map[string]interface {}"},
+		{"not json\n", "module core: mcp/db.json does not contain a JSON object: invalid character 'o' in literal null (expecting 'u')"},
+		{"{\"command\": \"x\",}\n", "module core: mcp/db.json does not contain a JSON object: invalid character '}' looking for beginning of object key string"},
+		{"null\n", "module core: mcp/db.json does not contain a JSON object"},
 	} {
 		dir := tree(t, map[string]string{"mcp/db.json": c.body})
 		_, err := Read("core", dir, nil, "")
@@ -194,8 +194,8 @@ func TestReadRefusesAnMCPServerThatIsNotAnObject(t *testing.T) {
 func TestReadRefusesAnMCPServerNoRuntimeCouldStart(t *testing.T) {
 	for _, c := range []struct{ body, want string }{
 		{`{"comand": "x"}`, `module core: mcp/db.json: key "comand" is not one of an MCP server's; keys: type, command, args, env, url, headers, description`},
-		{`{"command": "x", "url": "https://x"}`, "module core: mcp/db.json: names both a command and a url; a server is one or the other"},
-		{`{"args": ["x"]}`, "module core: mcp/db.json: names neither a command nor a url"},
+		{`{"command": "x", "url": "https://x"}`, "module core: mcp/db.json: sets both a command and a url; a server is one or the other"},
+		{`{"args": ["x"]}`, "module core: mcp/db.json: sets neither a command nor a url"},
 	} {
 		dir := tree(t, map[string]string{"mcp/db.json": c.body})
 		_, err := Read("core", dir, nil, "")
@@ -308,7 +308,7 @@ func TestReadRefusesAVariantThatLeavesTheModule(t *testing.T) {
 		variant Variant
 		want    string
 	}{
-		{"unknown kind", Variant{"prompts": "prompts"}, `module multi: variant codex names kind "prompts"`},
+		{"unknown kind", Variant{"prompts": "prompts"}, `module multi: variant codex sets kind "prompts"`},
 		{"empty path", Variant{"agents": ""}, `module multi: variant codex reads agents from "", which is not a directory inside the module`},
 		{"the module root", Variant{"agents": "."}, `module multi: variant codex reads agents from ".", which is not a directory inside the module`},
 		{"a parent", Variant{"agents": "../other"}, `module multi: variant codex reads agents from "../other", which is not a directory inside the module`},
@@ -336,7 +336,7 @@ func TestReadManifestRefusesADirectoryWithoutOne(t *testing.T) {
 	if err == nil {
 		t.Fatalf("read %+v from a directory without a manifest", m)
 	}
-	want := dir + " has no qory-module.yaml; a module carries one naming it"
+	want := dir + " has no qory-module.yaml; a module has one that defines its name"
 	if err.Error() != want {
 		t.Fatalf("error %q, want %q", err, want)
 	}
@@ -398,7 +398,7 @@ func TestReadManifestRefuses(t *testing.T) {
 		{
 			"a default that is not a variant",
 			"apiVersion: qory.dev/v1alpha1\nname: core\nvariants:\n  codex:\n    agents: agents/codex\n  default: claude\n",
-			`variants.default names "claude", which is not a variant`,
+			`variants.default selects "claude", which is not a variant`,
 		},
 		{
 			"a default that is not a string",

@@ -1,15 +1,14 @@
 // Package worktree adds, removes and lists the linked worktrees of a repository, and
-// prepares a new one the way the repository's qory.yaml says: files linked or copied from
-// the main checkout, or from anywhere on the machine, and commands run in the new
-// worktree. What it does with git is plain: the remote fetched first, so the base and
-// the branch are the remote's; a worktree per branch, beside the main checkout unless
-// the configuration says where else; a new branch cut off a base with no upstream on it,
-// and its upstream set to a remote branch of its own name, whether that branch exists
-// yet or not, so a push from the worktree creates or updates that branch and never
-// touches the base. The base is recorded in the branch's git config, so a later add can
-// move the branch onto another one and a remove can tell whether the branch holds
-// anything of its own, which decides whether it goes with the worktree quietly or after
-// a question.
+// prepares a new one the way the repository's qory.yaml defines: files linked or copied
+// from the main checkout, or from anywhere on the machine, and commands run in the new
+// worktree. What it does with git is plain: the remote fetched first, so the base and the
+// branch are the remote's; a worktree per branch, beside the main checkout unless the
+// configuration sets another place; a new branch cut off a base with no upstream on it,
+// and its upstream set to a remote branch of its own name, whether that branch exists or
+// not, so a push from the worktree creates or updates that branch and never touches the
+// base. The base is recorded in the branch's git config, so another add can move the
+// branch onto another one and a remove can determine whether the branch has anything of
+// its own, which decides whether it goes with the worktree quietly or after a question.
 package worktree
 
 import (
@@ -27,7 +26,7 @@ import (
 	"time"
 )
 
-// Options is what an add or a remove is told, from the configuration and the flags.
+// Options is the input of an add or a remove, from the configuration and the flags.
 type Options struct {
 	// Dir is where worktrees go, relative to the main checkout unless absolute.
 	Dir string
@@ -37,10 +36,10 @@ type Options struct {
 	// Base is the base a new branch starts from, read as [ResolveBase] reads it: "" for
 	// the remote's HEAD branch, else the main checkout's current branch.
 	Base string
-	// Onto says Base was asked for on the command line, so a branch that already exists
+	// Onto is set when Base comes from the command line, so a branch that already exists
 	// is moved or rebased onto it after Ask, instead of left where it is.
 	Onto bool
-	// Rebase answers the question Onto asks with yes.
+	// Rebase answers yes to the question Onto leads to.
 	Rebase bool
 	// Offline skips the fetch an add starts with, and the fetch of the base a remove
 	// makes to see whether a branch landed on it, so the refs already there are used.
@@ -50,10 +49,10 @@ type Options struct {
 	Timeout time.Duration
 	// Attach is a branch of the remote the worktree attaches to, from [RemoteBranch] or
 	// [PullRequest]; its zero value attaches to nothing. The branch is fetched, checked
-	// out under the name Attach.Name gives and set to track it.
+	// out under the name Attach.Name returns and set to track it.
 	Attach Remote
-	// As names the worktree instead of its branch: it is what {branch} in Name becomes,
-	// "" for the branch.
+	// As is the worktree's name in place of its branch's: it is what {branch} in Name
+	// becomes, "" for the branch.
 	As string
 	// PullRef is the ref the remote publishes a pull request's head under, {n} for its
 	// number, "" to probe [PullRefs].
@@ -70,24 +69,25 @@ type Options struct {
 	Force bool
 	// KeepBranch keeps the branch after the worktree is removed; the default deletes it.
 	KeepBranch bool
-	// DeleteBranch deletes the branch even when it holds commits nothing else does,
-	// without asking.
+	// DeleteBranch deletes the branch even when it has commits nothing else has, without
+	// a question.
 	DeleteBranch bool
 	// Ask puts a question to the user and returns the answer, trimmed and lower-cased,
 	// "" for none. It is nil when nobody is there to answer, and a question is then an
-	// error naming the flag that answers it.
+	// error that states the flag that answers it.
 	Ask func(question string) (string, error)
 	// Output is where the commands' output goes as they run; nil keeps it, and a command
-	// that fails carries what it printed in its [*RunError].
+	// that fails returns what it printed in its [*RunError].
 	Output io.Writer
-	// Trace is told each git command as it runs, and how the commits a branch holds of
+	// Trace receives each git command as it runs, and how the commits a branch has of
 	// its own are counted; nil for none.
 	Trace func(line string)
 }
 
 // Path is one thing brought into a new worktree: From is where it comes from, relative
 // to the main checkout unless absolute, and To is where it goes, relative to the
-// worktree. A path named alone in the configuration has the two the same.
+// worktree. A path the configuration lists as a plain string, without from and to, has
+// the two the same.
 type Path struct {
 	From, To string
 }
@@ -101,15 +101,15 @@ type Added struct {
 	Path string
 	// Branch is the branch checked out in it.
 	Branch string
-	// How says where the branch came from: "new off <base>", "local", "remote", "fetched
+	// How is where the branch came from: "new off <base>", "local", "remote", "fetched
 	// from <remote>" for Options.Attach, or "already there" for a worktree that was
 	// already there on that branch, and what Options.Onto did with it after a semicolon.
 	How string
 	// Upstream is the remote branch the worktree pushes to, "" without a remote or when
 	// Head is set.
 	Upstream string
-	// Head is the remote's ref the branch pulls from when it is a pull request's head that
-	// no branch of the remote holds, a fork's or a deleted one, as "<remote> <ref>"; a
+	// Head is the remote's ref the branch pulls from when it is a pull request's head
+	// that no branch of the remote has, a fork's or a deleted one, as "<remote> <ref>"; a
 	// push from the worktree goes nowhere then. It is "" otherwise.
 	Head string
 	// Linked and Copied are the paths brought in.
@@ -131,20 +131,20 @@ type Removed struct {
 	Main string
 	// Ran are the commands run before the removal, in order.
 	Ran []string
-	// Own is how many commits the branch held that nothing else did: no remote branch,
+	// Own is how many commits the branch had that nothing else had: no remote branch,
 	// not the main checkout, not the base it was cut from.
 	Own int
-	// Landed is the commit of LandedOn that carries the branch's change after a squash
+	// Landed is the commit of LandedOn that contains the branch's change after a squash
 	// or rebase merge wrote it anew, "" when none does. A branch that landed goes
-	// quietly, whatever Own says.
+	// quietly, whatever Own is.
 	Landed string
 	// LandedOn is the base Landed is on.
 	LandedOn string
-	// Pushed says the branch was pushed to Upstream before it was deleted.
+	// Pushed is set when the branch was pushed to Upstream before it was deleted.
 	Pushed bool
 	// Upstream is the remote branch of the branch's name, "" without a remote.
 	Upstream string
-	// BranchDeleted says whether the branch went with the worktree.
+	// BranchDeleted reports whether the branch went with the worktree.
 	BranchDeleted bool
 }
 
@@ -154,7 +154,7 @@ type Entry struct {
 	Path, Branch string
 	// Main marks the main checkout.
 	Main bool
-	// Composed says whether a qory compose report is there for it, and Report is that
+	// Composed reports whether a qory compose report is there for it, and Report is that
 	// report's path, "" when there is none.
 	Composed bool
 	Report   string
@@ -188,7 +188,7 @@ func (e *RunError) Unwrap() error { return e.Err }
 // tracked by [Add].
 type Remote struct {
 	// Branch is the branch on the remote, "" for a pull request whose head no branch of
-	// the remote holds: one from a fork, or one whose branch is deleted.
+	// the remote has: one from a fork, or one whose branch is deleted.
 	Branch string
 	// PR is the pull request's number, 0 for a plain branch.
 	PR int
@@ -199,14 +199,14 @@ type Remote struct {
 
 // PullRefs are the refs a remote publishes a pull request's head under, {n} for its
 // number: GitHub's and Forgejo's, GitLab's, Bitbucket Server's. [PullRequest] probes
-// them in order when Options.PullRef names none.
+// them in order when Options.PullRef sets none.
 var PullRefs = []string{"refs/pull/{n}/head", "refs/merge-requests/{n}/head", "refs/pull-requests/{n}/from"}
 
 // attached reports whether r names anything.
 func (r Remote) attached() bool { return r.Branch != "" || r.PR != 0 }
 
 // Name is the local branch the remote's is checked out as: its own name, or pr-<n> for
-// a pull request whose head no branch of the remote holds.
+// a pull request whose head no branch of the remote has.
 func (r Remote) Name() string {
 	if r.Branch != "" {
 		return r.Branch
@@ -241,9 +241,9 @@ func (r Remote) how(remote string) string {
 }
 
 // RemoteBranch finds branch on the repository's remote, for [Add] to attach a worktree
-// to. It asks the remote, so a branch pushed from elsewhere is found without a fetch, and
-// one the remote does not have is an error saying so. Options.Timeout bounds the
-// question and Options.Trace is told it.
+// to. It requests the remote's refs, so a branch pushed from elsewhere is found without a
+// fetch, and one the remote does not have is an error that states so. Options.Timeout
+// bounds the request and Options.Trace receives it.
 func RemoteBranch(main, branch string, o Options) (Remote, error) {
 	if err := checkName(branch); err != nil {
 		return Remote{}, err
@@ -259,13 +259,13 @@ func RemoteBranch(main, branch string, o Options) (Remote, error) {
 }
 
 // PullRequest finds pull request n on the repository's remote, for [Add] to attach a
-// worktree to: the ref the remote publishes its head under, Options.PullRef with {n}
-// for the number or each of [PullRefs] in turn when that is "", and the branch of the remote at the
-// same commit, which is the pull request's branch when the remote holds it. No hosting
-// API is asked, so any host that publishes the head as a ref serves; one that does not
-// is an error naming what was looked for. A head that two branches hold is an error
-// too, since which one to track is a guess. Options.Timeout bounds the question and
-// Options.Trace is told it.
+// worktree to: the ref the remote publishes its head under, Options.PullRef with {n} for
+// the number or each of [PullRefs] in turn when that is "", and the branch of the remote
+// at the same commit, which is the pull request's branch when the remote has it. It sends
+// no request to a hosting API, so any host that publishes the head as a ref serves; one
+// that does not is an error that lists what was looked for. A head that two branches
+// point at is an error too, since which one to track is a guess. Options.Timeout bounds
+// the request and Options.Trace receives it.
 func PullRequest(main string, n int, o Options) (Remote, error) {
 	if n < 1 {
 		return Remote{}, fmt.Errorf("%d is not a pull request number", n)
@@ -291,7 +291,7 @@ func PullRequest(main string, n int, o Options) (Remote, error) {
 		}
 	}
 	if r.Head == "" {
-		return r, fmt.Errorf("pull request %d not found on %s; looked for %s. worktree.pr in qory.yaml names the ref your host uses, with {n} for the number; a host that publishes none takes --branch with the pull request's branch", n, remote, strings.Join(heads, ", "))
+		return r, fmt.Errorf("pull request %d not found on %s; looked for %s. worktree.pr in qory.yaml defines the ref your host uses, with {n} for the number; a host that publishes none takes --branch with the pull request's branch", n, remote, strings.Join(heads, ", "))
 	}
 	var branches []string
 	for name, s := range refs {
@@ -305,7 +305,7 @@ func PullRequest(main string, n int, o Options) (Remote, error) {
 	case 1:
 		r.Branch = branches[0]
 	default:
-		return r, fmt.Errorf("pull request %d is at the tip of %d branches of %s, %s; --branch says which to attach to", n, len(branches), remote, strings.Join(branches, ", "))
+		return r, fmt.Errorf("pull request %d is at the tip of %d branches of %s, %s; --branch selects the one to attach to", n, len(branches), remote, strings.Join(branches, ", "))
 	}
 	return r, nil
 }
@@ -338,7 +338,7 @@ func checkName(branch string) error {
 	return nil
 }
 
-// Main returns the main checkout of the repository holding dir: the first worktree git
+// Main returns the main checkout of the repository containing dir: the first worktree git
 // lists, which is the one with the repository's own git directory.
 func Main(dir string) (string, error) {
 	out, err := runner{}.git(dir, "worktree", "list", "--porcelain")
@@ -357,7 +357,7 @@ func Main(dir string) (string, error) {
 // its report is at the default place, .qory/harness-report.json in it.
 func List(main string) ([]Entry, error) { return ListWith(main, nil) }
 
-// ListWith is [List] with reportFor saying where each worktree's report is, for a home
+// ListWith is [List] with reportFor returning where each worktree's report is, for a home
 // composed outside the worktree; nil, or "" for a worktree, means the default place.
 func ListWith(main string, reportFor func(path string) string) ([]Entry, error) {
 	out, err := runner{}.git(main, "worktree", "list", "--porcelain")
@@ -421,7 +421,7 @@ func PathFor(main, name string, o Options) string {
 // was cut from recorded in its git config. With Options.Attach, the remote's branch is
 // fetched and the worktree tracks it: a new local branch starts at it, one that exists
 // is fast-forwarded to it when that is possible, and a pull request's head that no
-// branch of the remote holds is pulled from its ref and pushed nowhere. With
+// branch of the remote has is pulled from its ref and pushed nowhere. With
 // Options.Onto, a branch that existed is moved or rebased onto Options.Base, see
 // [runner.onto]. Then every Options.Link is linked and every Options.Copy copied into
 // the worktree, each skipped with a note when its destination is already there or its
@@ -482,7 +482,7 @@ func Add(main, branch string, o Options) (Added, error) {
 	existed := true
 	if info, err := os.Stat(a.Path); err == nil {
 		if !info.IsDir() {
-			return a, fmt.Errorf("%s is a file, where the worktree of %s would go", a.Path, branch)
+			return a, fmt.Errorf("%s is a file, at the path of the worktree of %s", a.Path, branch)
 		}
 		on, err := r.git(a.Path, "branch", "--show-current")
 		if err != nil {
@@ -630,7 +630,7 @@ func (r runner) onto(remote string, a *Added, o Options) error {
 		}
 		question := fmt.Sprintf("%s sits on %s with no commits of its own. Move it onto %s? [Y/n] ", a.Branch, old, o.Base)
 		if n > 0 {
-			question = fmt.Sprintf("%s holds %d commit%s off %s. Rebase %s onto %s? [y/N] ", a.Branch, n, plural(n), old, map[bool]string{true: "them", false: "it"}[n > 1], o.Base)
+			question = fmt.Sprintf("%s has %d commit%s off %s. Rebase %s onto %s? [y/N] ", a.Branch, n, plural(n), old, map[bool]string{true: "them", false: "it"}[n > 1], o.Base)
 		}
 		answer, err := o.Ask(question)
 		if err != nil {
@@ -691,7 +691,7 @@ func (r runner) mustRev(dir, ref string) string {
 // base it was cut from, or when its change landed on the base by a squash or rebase
 // merge, and after a question otherwise, whose answers are to push the branch first,
 // keep it, delete it anyway, or stop; Options.DeleteBranch answers delete. The base is
-// fetched first, unless Options.Offline, when the branch holds commits of its own.
+// fetched first, unless Options.Offline, when the branch has commits of its own.
 func Remove(main, path string, o Options) (Removed, error) {
 	r := runner{main: main, timeout: o.Timeout, trace: o.Trace}
 	rm := Removed{Path: path, Main: main}
@@ -731,7 +731,7 @@ func Remove(main, path string, o Options) (Removed, error) {
 	}
 	if deleteBranch {
 		if rm.Own > 0 && rm.Landed == "" && !o.DeleteBranch {
-			held := fmt.Sprintf("branch %s holds %d commit%s no remote branch, the main checkout or its base holds", branch, rm.Own, plural(rm.Own))
+			held := fmt.Sprintf("branch %s has %d commit%s that no remote branch, the main checkout or its base has", branch, rm.Own, plural(rm.Own))
 			if o.Ask == nil {
 				return rm, fmt.Errorf("%s; push them, or remove with --keep-branch or --delete-branch", held)
 			}
@@ -825,12 +825,12 @@ func (r runner) own(path, branch string) (int, string) {
 	r.say("counting the commits of %s that are not on %s", branch, strings.Join(notOn, ", "))
 	out, err := r.git(path, args...)
 	if err != nil || out == "" {
-		r.say("%s holds no commit of its own", branch)
+		r.say("%s has no commit of its own", branch)
 		return 0, ""
 	}
 	commits := strings.Split(out, "\n")
 	subject, _ := r.git(path, "log", "-1", "--format=%s", commits[0])
-	r.say("%s holds %d commit%s of its own, the newest %s %q", branch, len(commits), plural(len(commits)), short(commits[0]), subject)
+	r.say("%s has %d commit%s of its own, the newest %s %q", branch, len(commits), plural(len(commits)), short(commits[0]), subject)
 	return len(commits), subject
 }
 
@@ -892,7 +892,7 @@ func (r runner) landed(path, base string) string {
 	}
 	on := r.matching(path, base, squash)
 	if on == "" {
-		r.say("%s carries neither the branch's commits nor its whole change as one", base)
+		r.say("%s contains neither the branch's commits nor its whole change as one", base)
 		return ""
 	}
 	r.say("the branch's whole change is on %s as %s", base, short(on))
@@ -954,34 +954,34 @@ type Base struct {
 	// Branch is the branch's name without a remote before it, what a pull request
 	// targets; "" when the base is a tag or a commit.
 	Branch string
-	// Ref is what git reads: <remote>/<branch> when the remote holds the branch, else the
-	// base as it was given.
+	// Ref is what git reads: <remote>/<branch> when the remote has the branch, else the
+	// base as it was set.
 	Ref string
-	// From says what named the base: [FromGiven], [FromRemoteHead] or [FromCheckout].
+	// From is what selected the base: [FromGiven], [FromRemoteHead] or [FromCheckout].
 	From string
 }
 
-// What named a [Base].
+// What selected a [Base].
 const (
-	// FromGiven is a base the caller gave: --base, or worktree.base of a qory.yaml.
+	// FromGiven is a base the caller set: --base, or worktree.base of a qory.yaml.
 	FromGiven = "given"
 	// FromRemoteHead is the remote's HEAD branch, the default.
 	FromRemoteHead = "remote HEAD"
 	// FromCheckout is the main checkout's current branch, the default of a repository
-	// whose remote names no HEAD branch, or that has no remote.
+	// whose remote has no HEAD branch, or that has no remote.
 	FromCheckout = "checkout"
 )
 
 // ResolveBase resolves the base of the repository whose main checkout is main: the one
-// given, else the remote's HEAD branch, else the main checkout's current branch. It reads
+// set, else the remote's HEAD branch, else the main checkout's current branch. It reads
 // the refs already fetched and reaches no remote.
 //
-// A given base that names a branch of the remote is read there, as <remote>/<base>, the
-// same way the default is, so a clone that never checked the branch out has it and a
-// local copy that fell behind is not what new work starts from; heads/<base> names the
-// local branch. Any other base is read as given: a tag, a commit, a branch no remote
-// holds, or <remote>/<branch> written out. One that resolves to nothing is an error
-// naming it.
+// A set base that is a branch of the remote is read there, as <remote>/<base>, the same
+// way the default is, so a clone that never checked the branch out has it and a local
+// copy that fell behind is not what new work starts from; heads/<base> selects the local
+// branch. Any other base is read as it is set: a tag, a commit, a branch no remote has,
+// or <remote>/<branch> written out. One that resolves to nothing is an error that
+// states it.
 func ResolveBase(main, base string) (Base, error) {
 	r := runner{main: main}
 	return r.resolveBase(r.remoteOf(), base)
@@ -1010,10 +1010,10 @@ func (r runner) resolveBase(remote, base string) (Base, error) {
 	}
 	current, err := r.git(r.main, "branch", "--show-current")
 	if err != nil || current == "" {
-		return Base{}, errors.New("no base: the remote has no HEAD branch and the main checkout is on no branch; give --base")
+		return Base{}, errors.New("no base: the remote has no HEAD branch and the main checkout is on no branch; pass --base")
 	}
 	if !r.resolves(current) {
-		return Base{}, fmt.Errorf("%s has no commit yet; a worktree branch starts from a commit, so commit once and add again", current)
+		return Base{}, fmt.Errorf("%s has no commit; a worktree branch starts from a commit, so commit once and add again", current)
 	}
 	return Base{Branch: current, Ref: current, From: FromCheckout}, nil
 }

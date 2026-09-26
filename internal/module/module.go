@@ -17,15 +17,15 @@ import (
 	"github.com/qoryai/qory/internal/stack"
 )
 
-// ManifestName is the manifest's file name at the module root. Every module carries one; it
-// is what names the module.
+// ManifestName is the manifest's file name at the module root. Every module has one; it
+// defines the module's name.
 const ManifestName = "qory-module.yaml"
 
 // InstructionsName is the module's instruction file, read by every runtime.
 const InstructionsName = "AGENTS.md"
 
 // Variant maps an entry kind to the directory that variant reads it from, relative to the
-// module root. A kind the variant does not name is read from the directory named like the
+// module root. A kind the variant does not list is read from the directory named like the
 // kind.
 type Variant map[string]string
 
@@ -35,33 +35,34 @@ type Manifest struct {
 	APIVersion string `yaml:"apiVersion"`
 	// RetiredAPIVersion is the apiVersion the file declared when it is a retired
 	// spelling of the current one, one of [exports.RetiredAPIVersions], "" when the file
-	// names the current one; a compose says which files want the line rewritten.
+	// declares the current one; a compose reports which files want the line rewritten.
 	RetiredAPIVersion string
 	// Name is the module's name, the one the stack refers to it by.
 	Name string `yaml:"name"`
-	// Description says what the module is for, carried into the report.
+	// Description is what the module is for, copied into the report.
 	Description string
 	// Variants are the module's variants by name, without the default key.
 	Variants map[string]Variant
-	// Default is the variant a runtime without its own gets, or "fail" to refuse the compose.
-	// It comes from the default key among the variants.
+	// Default is the variant a runtime without its own gets, or "fail" to refuse the
+	// compose. It comes from the default key among the variants.
 	Default string
-	// Env are the environment variables the module exports, name to a path inside the module
-	// relative to its root, cleaned, "." for the root itself. The compose turns each into
-	// $QORY_HARNESS_HOME/modules/<name>/<path> and the runtimes with a place for environment
-	// write them. A key is a POSIX environment variable name other than QORY_HARNESS_HOME.
+	// Env are the environment variables the module exports, name to a path inside the
+	// module relative to its root, cleaned, "." for the root itself. The compose turns
+	// each into $QORY_HARNESS_HOME/modules/<name>/<path> and the runtimes with a place
+	// for environment write them. A key is a POSIX environment variable name other than
+	// QORY_HARNESS_HOME.
 	Env map[string]string
 	// Requires is what the module's entries need composed beside them: per entry this
-	// module ships, keyed <kind>/<name>, the entries it needs as <kind>/<name>, sorted. In
-	// the file each is one item naming the entry by its singular kind and what it needs
-	// by the plural kinds an exclude uses, see [ReadManifest]. A required entry may come
-	// from any module; the compose refuses a stack that leaves one out.
+	// module ships, keyed <kind>/<name>, the entries it needs as <kind>/<name>, sorted.
+	// In the file each is one item that selects the entry by its singular kind and what
+	// it needs by the plural kinds an exclude uses, see [ReadManifest]. A required entry
+	// may come from any module; the compose refuses a stack that leaves one out.
 	Requires map[string][]string
 	// Egress are the hosts the module's skills, hooks and servers reach, sorted, each
 	// once: a lower-case host name, or "*." followed by a name for every host below it,
-	// in the grammar the runner contract gives a policy's allow list. Nil when the
+	// in the grammar the runner contract defines for a policy's allow list. Nil when the
 	// manifest has no egress key; empty, and not nil, when it declares an empty list,
-	// which says the module reaches nothing. The runner tells the two apart.
+	// which states that the module reaches nothing. The runner distinguishes the two.
 	Egress []string
 }
 
@@ -69,8 +70,9 @@ type Manifest struct {
 // policy.schema.json, egress.allow items, which defines it once for both contracts.
 var EgressHost = regexp.MustCompile(`^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
-// rawManifest decodes qory-module.yaml as it is written, where the variants map holds both the
-// variants and the default, a string among the maps. [ReadManifest] splits the two apart.
+// rawManifest decodes qory-module.yaml as it is written, where the variants map contains
+// both the variants and the default, a string among the maps. [ReadManifest] splits the
+// two apart.
 type rawManifest struct {
 	APIVersion  string                 `yaml:"apiVersion"`
 	Name        string                 `yaml:"name"`
@@ -97,7 +99,8 @@ func singularOf(kind string) string {
 	return kind
 }
 
-// Describe names an entry for a message the way a requires item does, "skill deploy".
+// Describe returns an entry's text for a message the way a requires item writes it,
+// "skill deploy".
 func Describe(kind, name string) string { return singularOf(kind) + " " + name }
 
 // Entry is one atomic entry: a skill, an agent, a command, an output style, a hook script
@@ -105,9 +108,9 @@ func Describe(kind, name string) string { return singularOf(kind) + " " + name }
 type Entry struct {
 	// Kind is one of skills, agents, commands, output-styles, hooks, mcp and files.
 	Kind string
-	// Name identifies the entry within its kind: the skill directory name, the Markdown file
-	// name without its extension, the hook file name with its extension, the MCP server's
-	// file name without .json, or a file's <runtime>/<path> under files/.
+	// Name identifies the entry within its kind: the skill directory name, the Markdown
+	// file name without its extension, the hook file name with its extension, the MCP
+	// server's file name without .json, or a file's <runtime>/<path> under files/.
 	Name string
 	// Path is absolute: the skill directory, the Markdown file, the hook script, the MCP
 	// server's JSON file or the file itself.
@@ -129,11 +132,11 @@ type Module struct {
 	Variant string
 	// Entries are the module's entries, sorted by kind, then by name.
 	Entries []Entry
-	// Settings are the settings/<runtime>/<file> fragments: per runtime, per target file, the
-	// absolute path of the one fragment this module contributes to it.
+	// Settings are the settings/<runtime>/<file> fragments: per runtime, per target file,
+	// the absolute path of the one fragment this module contributes to it.
 	Settings map[string]map[string]string
-	// MCP holds the MCP servers by name, each the JSON object its mcp/<name>.json file
-	// holds, as written, with every $QORY_HARNESS_HOME still in place.
+	// MCP contains the MCP servers by name, each the JSON object its mcp/<name>.json file
+	// contains, with every $QORY_HARNESS_HOME as written, before substitution.
 	MCP map[string]map[string]any
 	// Instructions is the absolute AGENTS.md path, or "" when the module ships none.
 	Instructions string
@@ -154,16 +157,16 @@ func readRequirement(item map[string]yaml.Node) (entry string, needs []string, e
 		if one && !(k == "mcp" && node.Kind == yaml.SequenceNode) {
 			var name string
 			if err := node.Decode(&name); err != nil || name == "" {
-				return "", nil, fmt.Errorf("%s names no entry; it is the entry's name, as %s: <name>", k, k)
+				return "", nil, fmt.Errorf("%s selects no entry; it is the entry's name, as %s: <name>", k, k)
 			}
 			if entry != "" {
-				return "", nil, fmt.Errorf("names two entries; an item names one, as skill: <name>, and lists what it needs under skills, agents, commands, output-styles, hooks, mcp and files")
+				return "", nil, fmt.Errorf("selects two entries; an item selects one, as skill: <name>, and lists what it needs under skills, agents, commands, output-styles, hooks, mcp and files")
 			}
 			entry = kind + "/" + name
 			continue
 		}
 		if !isKind(k) {
-			return "", nil, fmt.Errorf("key %q is not one requires reads; an item names its entry as skill, agent, command, output-style, hook, mcp or file, and what it needs under skills, agents, commands, output-styles, hooks, mcp and files", k)
+			return "", nil, fmt.Errorf("key %q is not one requires reads; an item selects its entry as skill, agent, command, output-style, hook, mcp or file, and what it needs under skills, agents, commands, output-styles, hooks, mcp and files", k)
 		}
 		var names []string
 		if err := node.Decode(&names); err != nil || len(names) == 0 {
@@ -171,13 +174,13 @@ func readRequirement(item map[string]yaml.Node) (entry string, needs []string, e
 		}
 		for _, name := range names {
 			if name == "" {
-				return "", nil, fmt.Errorf("%s names an empty entry", k)
+				return "", nil, fmt.Errorf("%s lists an empty entry", k)
 			}
 			needs = append(needs, k+"/"+name)
 		}
 	}
 	if entry == "" {
-		return "", nil, fmt.Errorf("names no entry; an item names one, as skill: <name>, and lists what it needs under skills, agents, commands, output-styles, hooks, mcp and files")
+		return "", nil, fmt.Errorf("selects no entry; an item selects one, as skill: <name>, and lists what it needs under skills, agents, commands, output-styles, hooks, mcp and files")
 	}
 	if len(needs) == 0 {
 		return "", nil, fmt.Errorf("lists nothing the entry needs under skills, agents, commands, output-styles, hooks, mcp or files")
@@ -226,17 +229,17 @@ func decodeError(path string, err error) error {
 }
 
 // ReadManifest reads and validates qory-module.yaml at dir. A directory without one is
-// not a module, and the error says so and names the directory, because a source that
-// points at the wrong directory is the mistake this catches.
+// not a module, and the error states that and contains the directory, because a source
+// that points at the wrong directory is the mistake this catches.
 //
-// An unknown field is an error, so is an apiVersion other than [stack.APIVersion] or a
-// retired spelling of it, a
-// missing name, a default that names something other than a declared
-// variant or "fail", an env key that is not an environment variable name or is
-// QORY_HARNESS_HOME, and an env value that is not a relative path inside the module.
-// Every error names the manifest path. The env values come back cleaned, "." for the root.
+// These are errors: an unknown field, an apiVersion other than [stack.APIVersion] or a
+// retired spelling of it, a missing name, a default that selects something other than
+// a declared variant or "fail", an env key that is not an environment variable name or
+// is QORY_HARNESS_HOME, and an env value that is not a relative path inside the module.
+// Every error contains the manifest path. The env values come back cleaned, "." for the
+// root.
 //
-// A requires item names one entry of the module by its singular kind and lists what it
+// A requires item selects one entry of the module by its singular kind and lists what it
 // needs under the plural kinds:
 //
 //	requires:
@@ -244,14 +247,14 @@ func decodeError(path string, err error) error {
 //	    commands: [ship]
 //	    agents: [reviewer]
 //
-// An item with no entry or two, a key that is neither, an empty list, and an entry named
+// An item with no entry or two, a key that is neither, an empty list, and an entry listed
 // twice are errors. Whether the entry is one the module ships is [Read]'s check, since
 // the entries are read then. The result is keyed <kind>/<name> with sorted values.
 func ReadManifest(dir string) (*Manifest, error) {
 	path := filepath.Join(dir, ManifestName)
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("%s has no %s; a module carries one naming it", dir, ManifestName)
+		return nil, fmt.Errorf("%s has no %s; a module has one that defines its name", dir, ManifestName)
 	}
 	if err != nil {
 		return nil, err
@@ -296,7 +299,7 @@ func ReadManifest(dir string) (*Manifest, error) {
 		}
 		if _, dup := m.Requires[entry]; dup {
 			kind, name, _ := strings.Cut(entry, "/")
-			return nil, fmt.Errorf("%s: requires names %s twice", path, Describe(kind, name))
+			return nil, fmt.Errorf("%s: requires lists %s twice", path, Describe(kind, name))
 		}
 		if m.Requires == nil {
 			m.Requires = map[string][]string{}
@@ -333,19 +336,21 @@ func ReadManifest(dir string) (*Manifest, error) {
 	}
 	if m.Default != "" && m.Default != "fail" {
 		if _, ok := m.Variants[m.Default]; !ok {
-			return nil, fmt.Errorf("%s: variants.default names %q, which is not a variant", path, m.Default)
+			return nil, fmt.Errorf("%s: variants.default selects %q, which is not a variant", path, m.Default)
 		}
 	}
 	return m, nil
 }
 
 // SelectVariant picks the variant for a runtime: the forced one from the stack, else the
-// one named like the runtime, else the manifest's default. A module with no manifest and a
-// manifest that declares no variant serve every runtime from the module root, and return "".
+// one named like the runtime, else the manifest's default. A module with no manifest and
+// a manifest that declares no variant serve every runtime from the module root, and
+// return "".
 //
 // It returns an error when the stack forces a variant the module does not have, or forces
-// one on a module that declares none, and when the module has no variant for the runtime and
-// its default is missing or "fail". Every message lists the variant names the module has.
+// one on a module that declares none, and when the module has no variant for the runtime
+// and its default is missing or "fail". Every message lists the variant names the module
+// has.
 func SelectVariant(m *Manifest, forced, runtime string) (string, error) {
 	if m == nil || len(m.Variants) == 0 {
 		if forced != "" {
@@ -385,20 +390,21 @@ func names(v map[string]Variant) string {
 // stack's name for the module and appears in every error. The variant is the one
 // [SelectVariant] returned for m; "" reads every kind from the module root.
 //
-// A kind the variant redirects is read from the directory it names, which must be a
+// A kind the variant redirects is read from the directory it sets, which must be a
 // relative directory inside the module: an empty value, ".", an absolute path and a path
-// leaving the module are all refused. A variant that names a kind outside the seven known
+// leaving the module are all refused. A variant that sets a kind outside the seven known
 // kinds is refused too.
 //
 // A kind directory that is not there leaves the module without entries of that kind. A
 // skills subdirectory without SKILL.md is an error. In the Markdown kinds only .md files
 // count. Under hooks every file is a hook and a directory is an error, because a hook is
-// named by its file name and a script's helpers belong elsewhere in the module, reached as
-// $QORY_HARNESS_HOME/modules/<name>/<path>. Under mcp every .json file is one server and must hold
-// a JSON object. Under files every file below a runtime directory is one entry named
-// <runtime>/<path>, at any depth, and a file directly under files is an error. A name
-// starting with a dot is skipped everywhere. Settings are read from settings/ at the module
-// root, which no variant redirects, and AGENTS.md from the root as well.
+// identified by its file name and a script's helpers belong elsewhere in the module,
+// reached as $QORY_HARNESS_HOME/modules/<name>/<path>. Under mcp every .json file is one
+// server and must contain a JSON object. Under files every file below a runtime directory
+// is one entry named <runtime>/<path>, at any depth, and a file directly under files is
+// an error. A name starting with a dot is skipped everywhere. Settings are read from
+// settings/ at the module root, which no variant redirects, and AGENTS.md from the root
+// as well.
 func Read(name, dir string, m *Manifest, variant string) (*Module, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -409,7 +415,7 @@ func Read(name, dir string, m *Manifest, variant string) (*Module, error) {
 	if m != nil && variant != "" {
 		for kind, sub := range m.Variants[variant] {
 			if _, ok := dirs[kind]; !ok {
-				return nil, fmt.Errorf("module %s: variant %s names kind %q", name, variant, kind)
+				return nil, fmt.Errorf("module %s: variant %s sets kind %q", name, variant, kind)
 			}
 			clean := filepath.Clean(sub)
 			if sub == "" || clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
@@ -475,7 +481,7 @@ func Read(name, dir string, m *Manifest, variant string) (*Module, error) {
 		for _, key := range sortedKeys(m.Requires) {
 			if !shipped[key] {
 				kind, entry, _ := strings.Cut(key, "/")
-				return nil, fmt.Errorf("module %s: requires names %s, which the module does not ship", name, Describe(kind, entry))
+				return nil, fmt.Errorf("module %s: requires lists %s, which the module does not ship", name, Describe(kind, entry))
 			}
 		}
 	}
@@ -499,9 +505,9 @@ func Read(name, dir string, m *Manifest, variant string) (*Module, error) {
 	return l, nil
 }
 
-// inside checks that path, with every symlink resolved, is under the module root. A module
-// may link an entry to elsewhere in itself; a link that leaves the module would make the
-// harness read a file the report does not show, and is refused.
+// inside checks that path, with every symlink resolved, is under the module root. A
+// module may link an entry to elsewhere in itself; a link that leaves the module is
+// refused, since the harness reads through it a file the report does not show.
 func inside(root, path string) error {
 	realRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
@@ -574,9 +580,9 @@ func readSkills(rel, dir string) ([]Entry, error) {
 	return es, nil
 }
 
-// readMarkdown lists the .md files of dir as entries of kind, named without the extension.
-// A directory, a link to one, or any other extension in there is not an entry of this
-// kind.
+// readMarkdown lists the .md files of dir as entries of kind, named without the
+// extension. A directory, a link to one, or any other extension in there is not an entry
+// of this kind.
 func readMarkdown(kind, dir string) ([]Entry, error) {
 	items, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -668,12 +674,13 @@ func readFiles(rel, dir string) ([]Entry, error) {
 	return es, nil
 }
 
-// readSettings lists settings/<runtime>/<file>: the directory name is the runtime, the file
-// name is the target file that runtime reads, and a module contributes at most one fragment
-// per target file. A runtime directory holding no file at all is left out of the map. A
-// link to a directory counts as the directory, the way the other readers count one. A
-// directory under a runtime's directory is an error rather than a skip, so a module that
-// keeps a runtime's other files there learns where they go: files/<runtime>/<path>.
+// readSettings lists settings/<runtime>/<file>: the directory name is the runtime, the
+// file name is the target file that runtime reads, and a module contributes at most one
+// fragment per target file. A runtime directory holding no file at all is left out of the
+// map. A link to a directory counts as the directory, the way the other readers count
+// one. A directory under a runtime's directory is an error rather than a skip, so a
+// module that keeps a runtime's other files there learns where they go:
+// files/<runtime>/<path>.
 func readSettings(dir string) (map[string]map[string]string, error) {
 	runtimes, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -707,7 +714,7 @@ func readSettings(dir string) (map[string]map[string]string, error) {
 				return nil, err
 			}
 			if info.IsDir() {
-				return nil, fmt.Errorf("settings/%s/%s is a directory; settings holds one fragment per target file, and a runtime's other files go under files/%s/%s", p.Name(), f.Name(), p.Name(), f.Name())
+				return nil, fmt.Errorf("settings/%s/%s is a directory; settings contains one fragment per target file, and a runtime's other files go under files/%s/%s", p.Name(), f.Name(), p.Name(), f.Name())
 			}
 			if out[p.Name()] == nil {
 				out[p.Name()] = map[string]string{}
@@ -751,11 +758,11 @@ func readHooks(name, rel, dir string) ([]Entry, error) {
 	return es, nil
 }
 
-// serverKeys are the keys an MCP server object may carry, the ones Claude Code's .mcp.json
-// reads: the transport, the command with its arguments and environment for a stdio
-// server, the URL with its headers for a remote one, and a description for the report,
-// which the compose drops on emit. Any other key is refused, the way every other document
-// of the contract refuses one.
+// serverKeys are the keys an MCP server object may contain, the ones Claude Code's
+// .mcp.json reads: the transport, the command with its arguments and environment for a
+// stdio server, the URL with its headers for a remote one, and a description for the
+// report, which the compose drops on emit. Any other key is refused, the way every other
+// document of the contract refuses one.
 var serverKeys = map[string]bool{"type": true, "command": true, "args": true, "env": true, "url": true, "headers": true, "description": true}
 
 // readMCP lists mcp/<name>.json as MCP server entries named without the extension, and
@@ -792,10 +799,10 @@ func readMCP(rel, dir string) ([]Entry, map[string]map[string]any, error) {
 		file := filepath.ToSlash(filepath.Join(rel, it.Name()))
 		var server map[string]any
 		if err := json.Unmarshal(data, &server); err != nil {
-			return nil, nil, fmt.Errorf("%s does not hold a JSON object: %w", file, err)
+			return nil, nil, fmt.Errorf("%s does not contain a JSON object: %w", file, err)
 		}
 		if server == nil {
-			return nil, nil, fmt.Errorf("%s does not hold a JSON object", file)
+			return nil, nil, fmt.Errorf("%s does not contain a JSON object", file)
 		}
 		if err := checkServer(server); err != nil {
 			return nil, nil, fmt.Errorf("%s: %w", file, err)
@@ -825,9 +832,9 @@ func checkServer(server map[string]any) error {
 	url, hasURL := server["url"]
 	switch {
 	case hasCommand && hasURL:
-		return errors.New("names both a command and a url; a server is one or the other")
+		return errors.New("sets both a command and a url; a server is one or the other")
 	case !hasCommand && !hasURL:
-		return errors.New("names neither a command nor a url")
+		return errors.New("sets neither a command nor a url")
 	case hasCommand && !nonEmptyString(command):
 		return errors.New("command is not a non-empty string")
 	case hasURL && !nonEmptyString(url):
@@ -845,7 +852,7 @@ func checkServer(server map[string]any) error {
 		}
 		for _, a := range list {
 			if _, ok := a.(string); !ok {
-				return fmt.Errorf("args holds %v, which is not a string", a)
+				return fmt.Errorf("args contains %v, which is not a string", a)
 			}
 		}
 	}

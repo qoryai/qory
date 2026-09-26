@@ -35,8 +35,8 @@ func TestNewComposeReadsTheCheckoutsOwnStack(t *testing.T) {
 	}{
 		{"no runtime", Target{Model: "opus"}, "target.runtime is required"},
 		{"an empty list", Target{Runtimes: Runtimes{}}, "target.runtime is required"},
-		{"an empty name", Target{Runtimes: Runtimes{"claude", ""}}, "target.runtime names an empty runtime"},
-		{"the same runtime twice", Target{Runtimes: Runtimes{"claude", "codex", "claude"}}, "target.runtime names claude twice"},
+		{"an empty name", Target{Runtimes: Runtimes{"claude", ""}}, "target.runtime lists an empty runtime"},
+		{"the same runtime twice", Target{Runtimes: Runtimes{"claude", "codex", "claude"}}, "target.runtime lists claude twice"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := compose(t, &Stack{Target: c.target, Modules: []Module{{Name: "app"}}})
@@ -49,7 +49,7 @@ func TestNewComposeReadsTheCheckoutsOwnStack(t *testing.T) {
 		})
 	}
 	_, err = compose(t, &Stack{Target: Target{Runtimes: Runtimes{"claude"}}})
-	if want := "modules is empty; a stack names at least one module"; err == nil || !strings.HasSuffix(err.Error(), want) {
+	if want := "modules is empty; a stack lists at least one module"; err == nil || !strings.HasSuffix(err.Error(), want) {
 		t.Errorf("an own stack without modules: err = %v, want %q", err, want)
 	}
 }
@@ -78,8 +78,8 @@ func TestNewComposeReadsATargetBesideExtends(t *testing.T) {
 		target Target
 		want   string
 	}{
-		{"an empty name", Target{Runtimes: Runtimes{"claude", ""}}, "target.runtime names an empty runtime"},
-		{"the same runtime twice", Target{Runtimes: Runtimes{"claude", "claude"}}, "target.runtime names claude twice"},
+		{"an empty name", Target{Runtimes: Runtimes{"claude", ""}}, "target.runtime lists an empty runtime"},
+		{"the same runtime twice", Target{Runtimes: Runtimes{"claude", "claude"}}, "target.runtime lists claude twice"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := compose(t, &Stack{Extends: base, Target: c.target})

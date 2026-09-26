@@ -1,5 +1,5 @@
 // Package gemini renders for Gemini CLI, which reads a project's .gemini directory,
-// holding its settings.json and the skills, agents, commands and hooks under it, and
+// containing its settings.json and the skills, agents, commands and hooks under it, and
 // GEMINI.md at the checkout root. Both are linked into the checkout, and settings.json
 // gets the target model as model.name and the MCP servers as mcpServers. Gemini CLI has
 // no output styles, so that kind is skipped. A files entry named gemini/<path> lands at
@@ -13,10 +13,11 @@
 //	agents         agents are linked there; ship it as agents/<name>
 //	commands       commands are linked there; ship it as commands/<name>
 //
-// Gemini CLI also reads its system settings from the file GEMINI_CLI_SYSTEM_SETTINGS_PATH
-// names, over the user's and the workspace's, so the model, the servers and the hooks in
-// settings.json reach a session from outside the checkout; the skills, agents, commands
-// and instructions are read from the checkout alone. [Template] sets the variable.
+// Gemini CLI also reads its system settings from the file at
+// GEMINI_CLI_SYSTEM_SETTINGS_PATH, over the user's and the workspace's, so the model, the
+// servers and the hooks in settings.json reach a session from outside the checkout; the
+// skills, agents, commands and instructions are read from the checkout alone. [Template]
+// sets the variable.
 package gemini
 
 import (

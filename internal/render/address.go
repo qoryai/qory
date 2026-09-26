@@ -10,13 +10,13 @@ import (
 	"github.com/qoryai/qory/internal/module"
 )
 
-// Address is how a delivery path names a composed entry: the name the program registers
-// an entry of kind and name under when it reads the entry from that path. A checkout link
-// and most launch paths register the name as the module wrote it, see [Bare]; a plugin
-// puts its own name before it, see [Prefixed]. A renderer passes the address of the path
-// it writes for wherever it puts a document in front of the program, so a reference in
-// the document resolves to the name the session there answers to, and the launch verb
-// prints the same names for a launcher to build its prompt from.
+// Address is how a delivery path addresses a composed entry: the name the program
+// registers an entry of kind and name under when it reads the entry from that path. A
+// checkout link and most launch paths register the name as the module wrote it, see
+// [Bare]; a plugin puts its own name before it, see [Prefixed]. A renderer passes the
+// address of the path it writes for wherever it puts a document in front of the program,
+// so a reference in the document resolves to the name the session there answers to, and
+// the launch verb prints the same names for a launcher to build its prompt from.
 type Address func(kind, name string) string
 
 // Bare is the address of a path where every kind registers under the name the module
@@ -24,7 +24,8 @@ type Address func(kind, name string) string
 func Bare(kind, name string) string { return name }
 
 // Prefixed is the address of a plugin loaded under prefix, where an agent, a skill and a
-// command all register as <prefix>:<name>, the way Claude Code names a plugin's entries.
+// command all register as <prefix>:<name>, the way Claude Code registers a plugin's
+// entries.
 func Prefixed(prefix string) Address {
 	return func(kind, name string) string { return prefix + ":" + name }
 }
@@ -50,7 +51,7 @@ func AddressOf(p Runtime) Address {
 // Addresses lists, per kind, the name each composed agent, skill and command registers
 // under at addr, and each bound role beside them as the name of the entry it is bound to,
 // leaving out the kinds in skips. entries are the composed entries as <kind>/<name>
-// keys, bind the bindings, both as a result or a report holds them. It is what the
+// keys, bind the bindings, both as a result or a report contains them. It is what the
 // launch verb prints and what [Addressing] states; a kind with nothing in it is absent.
 func Addresses(entries []string, bind map[string]string, addr Address, skips []string) map[string]map[string]string {
 	out := map[string]map[string]string{}
@@ -89,9 +90,9 @@ func Keys(res *compose.Result) []string {
 // Addressing is the section a launch path appends to the instructions it writes: the
 // names the session registers the composed agents, skills and commands under on that
 // path, and the entry each bound role is, so a session that meets a name a document
-// wrote in prose knows the registered one. A reference in a document is already
-// resolved; this covers the rest. It is "" when the compose holds none of those kinds
-// the runtime places, so a harness of hooks and settings alone says nothing, and it is
+// wrote in prose finds the registered one. A reference in a document is already
+// resolved; this covers the rest. It is "" when the compose contains none of those kinds
+// the runtime places, so a harness of hooks and settings alone adds no section, and it is
 // derived from the same address the substitution uses, so the two cannot disagree.
 func Addressing(res *compose.Result, addr Address, skips []string) string {
 	names := Addresses(Keys(res), res.Bind, addr, skips)
@@ -156,16 +157,15 @@ func sortedNames(m map[string]string) []string {
 }
 
 // PlaceEntries puts every composed entry of the kinds in keep into the tree at
-// dir/<kind>/<name>, for the path addr names. Skills and hooks keep their name, the
+// dir/<kind>/<name>, for the path addr addresses. Skills and hooks keep their name, the
 // Markdown kinds get ".md" appended. An entry whose documents reference nothing is one
-// symlink pointing at the entry in its module, as every entry has been. An entry with a
-// reference is placed with the references resolved: a single file is written, a skill
-// becomes a real directory holding a link per file and directory that carries no
-// reference and a written copy of each Markdown file that does, so the module's files
-// stay live wherever nothing had to change. Every kind directory named is created, with
-// no entry of that kind as well, so a checkout link to it resolves. Entries of any other
-// kind are left out, and it is the caller's job to pass every kind the runtime reads
-// from the directory.
+// symlink pointing at the entry in its module. An entry with a reference is placed with
+// the references resolved: a single file is written, a skill becomes a real directory
+// containing a link per file and directory that contains no reference and a written copy
+// of each Markdown file that does, so the module's files stay live wherever nothing had
+// to change. Every kind directory in keep is created, with no entry of that kind as well,
+// so a checkout link to it resolves. Entries of any other kind are left out, and it is
+// the caller's job to pass every kind the runtime reads from the directory.
 func PlaceEntries(res *compose.Result, dir string, addr Address, keep ...string) error {
 	wanted := map[string]bool{}
 	for _, k := range keep {
@@ -266,9 +266,9 @@ func hasReference(dir string) (bool, error) {
 	return found, err
 }
 
-// ReadDocument reads the Markdown entry at path for the path addr names, with every
+// ReadDocument reads the Markdown entry at path for the path addr addresses, with every
 // reference resolved before the frontmatter and body are split, so a renderer that
-// rewrites an agent or a command into the program's own shape carries the registered
+// rewrites an agent or a command into the program's own shape writes the registered
 // names into it.
 func ReadDocument(res *compose.Result, addr Address, path string) (module.Document, error) {
 	data, err := os.ReadFile(path)

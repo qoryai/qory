@@ -22,9 +22,9 @@
 //
 // A command in this package does four things and nothing else. It finds where it stands
 // with locate, it calls the packages that do the work, it prints through the ui package,
-// and it returns an error. It holds no knowledge of modules, entries or runtimes; that
+// and it returns an error. It contains no knowledge of modules, entries or runtimes; that
 // lives in the stack, compose and render packages. Nor of how a session is observed:
-// qory run hands a launch spec to the session package of the runner module,
+// qory run passes a launch spec to the session package of the runner module,
 // github.com/qoryai/runner, and exits with what comes back, and qory run forward, hidden,
 // is the hook command the runner installs. The set of runtimes a build can
 // render for is decided here, by the blank imports at the top of harness.go: a runtime
@@ -33,13 +33,13 @@
 //
 // Every command ends with a look for a newer release: [StartUpdateCheck] begins it before
 // the command runs and prints a notice after, when the output is a terminal and the
-// newest release is ahead of the build. The look asks GitHub at most once an hour and reads
-// its cache otherwise; qory update installs what it found and clears the cache.
+// newest release is ahead of the build. The look requests GitHub's latest release at most
+// once an hour and reads its cache otherwise; qory update installs what it found and clears the cache.
 //
 // Errors reach the person in one of two ways. A plain error travels up to the main
 // package, which prints it under the mark. An error a command has already printed itself,
 // a collision with its suggested fix being the one case, is returned wrapped so that it
 // matches [ErrReported]: main recognises it and prints nothing further. Either way main
 // exits with [ExitCode]: 2 for a mistake in the input, 3 for a collision, 4 for a path
-// qory would not replace, the runtime's own status after a qory run, 1 for anything else.
+// qory refuses to replace, the runtime's own status after a qory run, 1 for anything else.
 package cmd

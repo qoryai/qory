@@ -1,1 +1,1 @@
-module core: requires names skill release, which the module does not ship
+module core: requires lists skill release, which the module does not ship

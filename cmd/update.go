@@ -37,15 +37,16 @@ source checkout is not updated; rebuild it, or install a release.
 
 --check reports whether a newer release exists and installs nothing.
 
-A build from the main branch between releases carries a pseudo-version, which is ahead
-of the newest release. Such a build is not updated on its own: on a terminal, update
-offers to install the release over it and asks; in a script, --release says yes.
+A build from the main branch between releases has a pseudo-version, which is ahead of
+the newest release. Such a build is not updated on its own: on a terminal, update offers
+to install the release over it and requests a confirmation; in a script, --release
+confirms it.
 
 Every command looks for a newer release, when its error output is a terminal, and prints
-a notice after its own output when the newest release is ahead of its version. GitHub is
-asked at most once an hour; between asks the answer is read from a file under the user's
-cache directory. A build from the main branch between releases carries a pseudo-version
-and is told of a release only when it is behind one. QORY_NO_UPDATE_CHECK=1 turns the
+a notice after its own output when the newest release is ahead of its version. GitHub's
+latest release is requested at most once an hour; between requests the answer is read
+from a file under the user's cache directory. A build from the main branch between
+releases has a pseudo-version and gets a notice of a release only when it is behind one. QORY_NO_UPDATE_CHECK=1 turns the
 look off, and so does CI being set.
 
 --verbose adds nothing here.`,
@@ -69,7 +70,7 @@ look off, and so does CI being set.
 				_ = cache.Write(update.Record{Checked: time.Now(), Current: b.Version, Latest: latest})
 			}
 			if b.Version == "" {
-				u.Text("This build carries no version, so nothing says whether it is behind.")
+				u.Text("This build has no version, so whether it is behind is unknown.")
 				u.Success("the newest release is %s", latest)
 				return nil
 			}
@@ -163,7 +164,7 @@ look off, and so does CI being set.
 		},
 	}
 	c.Flags().BoolVar(&check, "check", false, "report whether a newer release exists and install nothing")
-	c.Flags().BoolVar(&toRelease, "release", false, "install the newest release over a build that is ahead of it, without asking")
+	c.Flags().BoolVar(&toRelease, "release", false, "install the newest release over a build that is ahead of it, without a confirmation prompt")
 	return c
 }
 
@@ -212,7 +213,7 @@ var noticeOff bool
 // beside the command, and the result waits for it no longer than the request's timeout.
 //
 // Nothing is looked for when QORY_NO_UPDATE_CHECK or CI is set, when w is not a terminal,
-// when the build carries no version, or when the command is qory update. A pseudo-version
+// when the build has no version, or when the command is qory update. A pseudo-version
 // is compared like a release, so a build from main sees a notice only when a release is
 // ahead of it. A failed look is silent; the next command tries again.
 func StartUpdateCheck(w io.Writer) func() {

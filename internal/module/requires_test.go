@@ -49,13 +49,13 @@ func TestReadManifestRefusesRequires(t *testing.T) {
 		yaml string
 		want string
 	}{
-		{"no entry", head + "  - commands: [ship]\n", "requires[0]: names no entry"},
-		{"two entries", head + "  - skill: deploy\n    agent: reviewer\n    commands: [ship]\n", "requires[0]: names two entries"},
+		{"no entry", head + "  - commands: [ship]\n", "requires[0]: selects no entry"},
+		{"two entries", head + "  - skill: deploy\n    agent: reviewer\n    commands: [ship]\n", "requires[0]: selects two entries"},
 		{"an unknown key", head + "  - skill: deploy\n    scripts: [ship]\n", `requires[0]: key "scripts" is not one requires reads`},
 		{"an empty list", head + "  - skill: deploy\n    commands: []\n", "requires[0]: commands is empty"},
 		{"nothing needed", head + "  - skill: deploy\n", "requires[0]: lists nothing the entry needs"},
-		{"an empty entry name", head + "  - skill: \"\"\n    commands: [ship]\n", "requires[0]: skill names no entry"},
-		{"an entry twice", head + "  - skill: deploy\n    commands: [ship]\n  - skill: deploy\n    agents: [reviewer]\n", "requires names skill deploy twice"},
+		{"an empty entry name", head + "  - skill: \"\"\n    commands: [ship]\n", "requires[0]: skill selects no entry"},
+		{"an entry twice", head + "  - skill: deploy\n    commands: [ship]\n  - skill: deploy\n    agents: [reviewer]\n", "requires lists skill deploy twice"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -93,7 +93,7 @@ func TestReadRefusesARequirementOfAnEntryNotShipped(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = Read("core", dir, m, "")
-	if err == nil || err.Error() != "module core: requires names skill release, which the module does not ship" {
+	if err == nil || err.Error() != "module core: requires lists skill release, which the module does not ship" {
 		t.Fatalf("err = %v", err)
 	}
 	m.Requires = map[string][]string{"skills/deploy": {"commands/ship"}, "files/claude/rules/one.md": {"hooks/guard.sh"}}

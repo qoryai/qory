@@ -1,11 +1,11 @@
 // Package any renders for a program that follows the AGENTS.md convention and has no
 // package of its own, reading the instructions from AGENTS.md at the checkout root and
 // skills from .agents/skills. Both are linked into the checkout, and the package writes
-// nothing of its own, because the home's root already holds them. The convention names no
-// place for a model, so the target model is not written, and none for agents, commands,
-// output styles, hooks or MCP servers, so those five kinds are skipped. The convention
-// names no directory in the checkout either, so a files entry named any/<path> is skipped
-// too, and no path is reserved.
+// nothing of its own, because the home's root already contains them. The convention
+// defines no place for a model, so the target model is not written, and none for agents,
+// commands, output styles, hooks or MCP servers, so those five kinds are skipped. The
+// convention defines no directory in the checkout either, so a files entry named
+// any/<path> is skipped too, and no path is reserved.
 package any
 
 import (
@@ -34,7 +34,7 @@ func (runtime) Links(res *compose.Result) []render.Link {
 	return links
 }
 
-// Skips are the six kinds the convention names no place for: agents, commands, output
+// Skips are the six kinds the convention defines no place for: agents, commands, output
 // styles, hooks, MCP servers and files.
 func (runtime) Skips() []string {
 	return []string{"agents", "commands", "output-styles", "hooks", "mcp", "files"}
@@ -43,6 +43,6 @@ func (runtime) Skips() []string {
 // Reserved is empty: the runtime writes nothing under its directory.
 func (runtime) Reserved() []render.Reserved { return nil }
 
-// Render writes nothing of its own, because the home's root already holds AGENTS.md and
-// the skills the links point at.
+// Render writes nothing of its own, because the home's root already contains AGENTS.md
+// and the skills the links point at.
 func (runtime) Render(*compose.Result, string, string) error { return nil }

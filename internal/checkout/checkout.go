@@ -30,7 +30,7 @@ func Root(dir string) (string, error) {
 var remotePath = regexp.MustCompile(`^(?:[a-z+]+://[^/]*/|[^/]+:)?(.*)$`)
 
 // RepoKey returns owner/name from the origin remote of the checkout at root, so
-// git@git.example.com:acme/app.git and https://git.example.com/acme/app both give
+// git@git.example.com:acme/app.git and https://git.example.com/acme/app both return
 // acme/app: the last two segments of the remote's path, without a .git suffix or a
 // trailing slash. It returns the base name of root when root has no origin remote, when
 // git cannot be run, or when the path has fewer than two segments, so a host is never
@@ -46,11 +46,11 @@ func RepoKey(root string) string {
 	return filepath.Base(root)
 }
 
-// Origin returns the forge and the repository the origin remote of the checkout at root
-// names, the labels a run carries to a receiver: the forge is the remote's host, and
+// Origin returns the forge and the repository of the origin remote of the checkout at
+// root, the labels a run sends to a receiver: the forge is the remote's host, and
 // the repository its path without the leading slash and a trailing .git, so
 // git@git.example.com:acme/app.git, ssh://git@git.example.com:2222/acme/app and
-// https://git.example.com/acme/app all give git.example.com and acme/app. A user and a
+// https://git.example.com/acme/app all return git.example.com and acme/app. A user and a
 // port are not part of the host. It returns ok false, and nothing else, when root has no
 // origin remote, when git cannot be run, when the remote is a path of this machine, a
 // file:// URL or a bare path, or when the host or the path is empty: a run of a
@@ -95,11 +95,12 @@ var scpRemote = regexp.MustCompile(`^(?:[^@/:]+@)?([^@/:]+):(.*)$`)
 // and its report.
 const Dir = ".qory"
 
-// Key names the checkout at root among every checkout on the machine, for its home under
-// a directory outside it: the root's base name, so a person reads which checkout a home
-// is for, and eight hex digits of the SHA-256 of the root's real path, so two checkouts
-// of one name, a main checkout and a worktree of it say, get two homes. The root's
-// symlinks are resolved first, so a checkout reached through two paths has one key.
+// Key identifies the checkout at root among every checkout on the machine, for its home
+// under a directory outside it: the root's base name, so a person reads which checkout a
+// home is for, and eight hex digits of the SHA-256 of the root's real path, so two
+// checkouts of one name, such as a main checkout and a worktree of it, get two homes. The
+// root's symlinks are resolved first, so a checkout reached through two paths has one
+// key.
 func Key(root string) string {
 	real := root
 	if resolved, err := filepath.EvalSymlinks(root); err == nil {
@@ -123,7 +124,7 @@ func Init(dir string) error {
 // ExcludeFile returns the absolute path of the clone-local exclude file of the checkout
 // at root, info/exclude inside the git directory, which a worktree or a separate git
 // directory can put outside root. It returns "" when root is outside a working tree or
-// git is not installed. The file itself need not exist yet.
+// git is not installed. The file itself need not exist.
 func ExcludeFile(root string) string {
 	out, err := git(root, "rev-parse", "--git-path", "info/exclude")
 	if err != nil {
@@ -135,10 +136,10 @@ func ExcludeFile(root string) string {
 	return out
 }
 
-// Worktrees returns the working trees of the repository holding root, as git lists them
-// and root's own among them. They all share the repository's one [ExcludeFile], so a line
-// in it hides the path it names in every one of them at once. It returns nil when root is
-// outside a working tree or git is not installed.
+// Worktrees returns the working trees of the repository that contains root, as git lists
+// them and root's own among them. They all share the repository's one [ExcludeFile], so a
+// line in it hides the path it contains in every one of them at once. It returns nil when
+// root is outside a working tree or git is not installed.
 func Worktrees(root string) []string {
 	out, err := git(root, "worktree", "list", "--porcelain")
 	if err != nil {
@@ -156,10 +157,10 @@ func Worktrees(root string) []string {
 // Restorable reports whether git checkout -- could bring path back after qory removes it,
 // which is when path is tracked and unmodified. It returns "" then, and otherwise the
 // reason, phrased to follow the path in a message: "is not tracked in git", "has
-// uncommitted changes" or "holds files git does not track". A directory counts as
-// tracked when it holds a tracked file, and as not restorable when git status reports
-// anything under it, an untracked or an ignored file included, because checkout would
-// not bring those back. A path outside a working tree, or a host without git, is not
+// uncommitted changes" or "contains files git does not track". A directory counts as
+// tracked when it contains a tracked file, and as not restorable when git status reports
+// anything under it, an untracked or an ignored file included, because checkout does not
+// bring those back. A path outside a working tree, or a host without git, is not
 // restorable.
 func Restorable(root, path string) string {
 	rel, err := filepath.Rel(root, path)
@@ -176,7 +177,7 @@ func Restorable(root, path string) string {
 	case err != nil:
 		return "has uncommitted changes"
 	case strings.Contains("\n"+out, "\n??") || strings.Contains("\n"+out, "\n!!"):
-		return "holds files git does not track"
+		return "contains files git does not track"
 	case out != "":
 		return "has uncommitted changes"
 	}

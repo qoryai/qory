@@ -1,1 +1,1 @@
-module nextjs: only env names nothing the module ships; it exports no variable
+module nextjs: only env selects nothing the module ships; it exports no variable

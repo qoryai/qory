@@ -18,7 +18,7 @@ import (
 
 // Base is the stack a checkout's qory.yaml appends to, as the report records it.
 type Base struct {
-	// Name is the base stack's name, or the name of the directory holding it.
+	// Name is the base stack's name, or the name of the directory that contains it.
 	Name string
 	// Source is the extends source as the stack writes it.
 	Source string
@@ -31,22 +31,22 @@ type Base struct {
 	// command checks the running qory against it, as it does the checkout's own.
 	Qory stack.Constraint
 	// RetiredAPIVersion is the apiVersion the base's file declared when it is a retired
-	// spelling of the current one, "" otherwise, so the command can say the base wants
-	// the line rewritten.
+	// spelling of the current one, "" otherwise, so the command can report that the base
+	// wants the line rewritten.
 	RetiredAPIVersion string
 }
 
-// String names the base in a message, <name>@<pin>.
+// String returns the base for a message, <name>@<pin>.
 func (b *Base) String() string { return b.Name + "@" + b.Pin }
 
 // LoadBase resolves the base stack p extends and returns the stack to compose, the
 // base's modules first and closed, with the base recorded for the result. It is
-// [stack.Extend] with the base fetched: the extends source names a directory holding
-// [stack.FileName]; pin is the commit the last report recorded for it, "" for none. A
-// stack, which extends nothing, comes back as it is with a nil base.
+// [stack.Extend] with the base fetched: the extends source selects a directory that
+// contains [stack.FileName]; pin is the commit the last report recorded for it, "" for
+// none. A stack, which extends nothing, comes back as it is with a nil base.
 //
-// A git source that cannot be fetched is a [*source.FetchError] whose message says the
-// stack is not reachable from here, because a base is usually reachable from the
+// A git source that cannot be fetched is a [*source.FetchError] whose message reports
+// that the stack is not reachable from here, because a base is usually reachable from the
 // machine that runs the harness and not from every laptop.
 func LoadBase(p *stack.Stack, pin string, opts Options) (*stack.Stack, *Base, error) {
 	if p.Extends.Path == "" && p.Extends.Git == "" {
@@ -63,7 +63,7 @@ func LoadBase(p *stack.Stack, pin string, opts Options) (*stack.Stack, *Base, er
 	file := filepath.Join(src.Dir, stack.FileName)
 	base, err := stack.Load(file)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil, fmt.Errorf("extends %s: %s holds no %s", p.Extends.String(), src.Dir, stack.FileName)
+		return nil, nil, fmt.Errorf("extends %s: %s contains no %s", p.Extends.String(), src.Dir, stack.FileName)
 	}
 	if err != nil {
 		return nil, nil, err
@@ -73,8 +73,8 @@ func LoadBase(p *stack.Stack, pin string, opts Options) (*stack.Stack, *Base, er
 
 // ExtendOn returns the stack the checkout's document p composes on base, a stack the
 // caller has read, with the base recorded for the result: [LoadBase] once the base is
-// on disk, and what compose -f does with the stack it names in a checkout whose
-// document extends one. p.Extends names the base as the report records it, and pin is
+// on disk, and what compose -f does with the stack it selects in a checkout whose
+// document extends one. p.Extends is the base as the report records it, and pin is
 // what it resolved to.
 func ExtendOn(p, base *stack.Stack, pin string) (*stack.Stack, *Base, error) {
 	merged, err := stack.Extend(base, p)

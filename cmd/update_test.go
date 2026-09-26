@@ -68,7 +68,7 @@ func TestUpdateSaysTheNewestReleaseForABuildWithoutAVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, out, "carries no version", "✓ the newest release is 99.0.0")
+	wants(t, out, "has no version", "✓ the newest release is 99.0.0")
 	lacks(t, out, "up to date", "changelog")
 }
 

@@ -21,14 +21,14 @@ earlier one.
 
 - A repository decides what only the machine may: anything in a checkout, its
   `qory.yaml`, a module, a composed harness, changes what `~/.config/qory/runner.yaml`
-  says about egress, the server, credentials, integrations or the wall, or a run's
+  defines for egress, the server, credentials, integrations or the wall, or a run's
   `--policy` widens the machine's.
-- `qory run` hands a session something it is not given: the server's secret, a
-  credential, a variable of your environment that was not named for a walled run.
-- Composing a harness writes outside the checkout and the home it was told to use.
+- `qory run` passes a session something it must not receive: the server's secret, a
+  credential, a variable of your environment that was not listed for a walled run.
+- Composing a harness writes outside the checkout and the home it was set to use.
 - `qory update` installs an archive that does not match the release's checksums.
 
-The wall, the proxy, credentials held outside the enclosure and the signed delivery are
+The wall, the proxy, credentials kept outside the enclosure and the signed delivery are
 the [runner](https://github.com/qoryai/runner)'s, and so is their
 [security policy](https://github.com/qoryai/runner/blob/main/SECURITY.md): what they
 guarantee, and the limits that are how they work and not a flaw. Reports about them

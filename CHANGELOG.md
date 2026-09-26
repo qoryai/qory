@@ -2,40 +2,40 @@
 
 Every release of qory, newest first, in the shape of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0 a minor
-release may change what an existing document does, and says so under Upgrading.
+release may change what an existing document does, and states it under Upgrading.
 
 ## [Unreleased]
 
 ### Added
 
 - The `integrations` section of `runner.yaml` declares the integrations a machine uses,
-  each a program that speaks the integration contract of qoryai/integrations, under a
-  key: `program`, an absolute path or a name on the `PATH`, `qory-<key>` when absent,
-  and `settings`. `qory` runs `<program> describe`, checks the settings against the
-  description, and defines the credential named by the key, whose adapter is `<program>
-  credential --settings <json> -- ${argument}` and whose `argument` and `hosts` are the
-  description's. The settings word is byte for byte what `qory-github setup` prints,
-  every `$` written `\u0024`. `qory` holds no table of integrations: Qory's own
-  `qory-github` and a program of yours are found and set up the same way. `qory run`
-  describes the integrations the run's policy selects, every one when the server
-  supplies the policy, and names each program it found; `qory config` describes every
-  one. A program runs from outside the checkout and outside every mount the wall gives
-  the container read-write, judged by where its links lead. The resolved program, every
-  directory above it up to `/`, and every directory above each link on the way belong to
-  root or the user running `qory`, and so does each link; other users may write none of
-  them; and a group may write one when it is root's, gid 0, `wheel`, `admin`, or the
-  owner's primary group, named as the owner is. A directory root owns with the sticky
-  bit set keeps the rule, so `/tmp`, `/nix/store`, a default Homebrew install and a user
-  private group's `~/go/bin` keep it. On a machine whose `PATH` is not its owner's
-  alone, `program` names each program by its absolute path. `describe` runs in `/`, in a
-  process group of its own that is stopped with it. A settings schema is draft 2020-12
-  and marks a secret `writeOnly` on a property of the settings themselves; a value of a
-  secret is refused, since the settings go on a command line, and its `<name>_file`
-  gives the file that holds it. A name the `credentials` section defines itself is the
-  section's: `qory run` and `qory config` say so, and `qory config` alone describes that
-  integration. A program that does not describe within 10 seconds, settings its
-  description refuses, and an integration that plays no role `qory` knows stop the run
-  before it starts, with the program's own line.
+  each a program that speaks the integration contract of qoryai/integrations, under a key:
+  `program`, an absolute path or a name on the `PATH`, `qory-<key>` when absent, and
+  `settings`. `qory` runs `<program> describe`, checks the settings against the
+  description, and defines the credential whose name is the key, whose adapter is
+  `<program> credential --settings <json> -- ${argument}` and whose `argument` and `hosts`
+  are the description's. The settings word is compact JSON, every `$` written `\u0024`, as
+  the integration contract defines for a declaration. `qory` contains no table of
+  integrations: Qory's own `qory-github` and a program of yours are found and set up the
+  same way. `qory run` describes the integrations the run's policy selects, every one when
+  the server supplies the policy, and prints each program it found; `qory config`
+  describes every one. A program runs from outside the checkout and outside every mount
+  the wall makes read-write in the container, judged by where its links lead. The resolved
+  program, every directory above it up to `/`, and every directory above each link on the
+  way belong to root or the user running `qory`, and so does each link; other users may
+  write none of them; and a group may write one when it is root's, gid 0, `wheel`,
+  `admin`, or the owner's primary group when that group has the owner's name. A directory
+  root owns with the sticky bit set keeps the rule, so `/tmp`, `/nix/store`, a default
+  Homebrew install and a user private group's `~/go/bin` keep it. On a machine whose
+  `PATH` is not its owner's alone, set `program` to each program's absolute path. `describe`
+  runs in `/`, in a process group of its own that is stopped with it. A settings schema is
+  draft 2020-12 and marks a secret `writeOnly` on a property of the settings themselves; a
+  value of a secret is refused, since the settings go on a command line, and its
+  `<name>_file` defines the path of the file that contains it. A name the `credentials`
+  section defines itself is the section's: `qory run` and `qory config` print this, and
+  `qory config` alone describes that integration. A program that does not describe within
+  10 seconds, settings its description refuses, and an integration that plays no role
+  `qory` expands stop the run before it starts, with the program's own line.
 
 ## [0.11.0] - 2026-09-24
 

@@ -57,12 +57,12 @@ func TestLoadReadsExtendingTarget(t *testing.T) {
 // and a value that is neither a name nor a list.
 func TestLoadRefusesABadExtendingTarget(t *testing.T) {
 	for _, c := range []struct{ block, want string }{
-		{"{}", "extending.target names no runtime and no model; it lists the runtimes, the models, or both, a checkout may compose for"},
-		{"runtime: []", "extending.target names no runtime and no model; it lists the runtimes, the models, or both, a checkout may compose for"},
-		{"runtime: [claude, \"\"]", "extending.target.runtime names an empty name"},
-		{"model: \"\"", "extending.target.model names an empty name"},
-		{"runtime: [claude, codex, claude]", "extending.target.runtime names claude twice"},
-		{"model: [opus, opus]", "extending.target.model names opus twice"},
+		{"{}", "extending.target lists no runtime and no model; it lists the runtimes, the models, or both, a checkout may compose for"},
+		{"runtime: []", "extending.target lists no runtime and no model; it lists the runtimes, the models, or both, a checkout may compose for"},
+		{"runtime: [claude, \"\"]", "extending.target.runtime lists an empty name"},
+		{"model: \"\"", "extending.target.model lists an empty name"},
+		{"runtime: [claude, codex, claude]", "extending.target.runtime lists claude twice"},
+		{"model: [opus, opus]", "extending.target.model lists opus twice"},
 		{"runtime: {claude: opus}", "one name or a list of them"},
 	} {
 		_, err := Load(write(t, policyStack(c.block)))
@@ -89,7 +89,7 @@ func TestTargetPolicyCheck(t *testing.T) {
 	}{
 		{"a runtime outside", Target{Runtimes: Runtimes{"claude", "codex"}, Model: "opus"}, "runtime codex is not one the base stack nextjs@v2.4.0 is written for; runtimes: claude"},
 		{"a model outside", Target{Runtimes: Runtimes{"claude"}, Model: "haiku"}, "model haiku is not one the base stack nextjs@v2.4.0 is written for; models: opus, sonnet"},
-		{"no model with models listed", Target{Runtimes: Runtimes{"claude"}}, "the target names no model, and the base stack nextjs@v2.4.0 is written for one of these; models: opus, sonnet"},
+		{"no model with models listed", Target{Runtimes: Runtimes{"claude"}}, "the target sets no model, and the base stack nextjs@v2.4.0 is written for one of these; models: opus, sonnet"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			err := policy.Check(c.target, base)

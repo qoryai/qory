@@ -28,7 +28,7 @@ func TestDescribeLeavesNoProcessBehind(t *testing.T) {
 		last, want string
 	}{
 		{2 * time.Second, "sleep 30\n", "describe did not answer within 2s"},
-		{5 * time.Second, "exit 0\n", "describe exited and left a process holding its output"},
+		{5 * time.Second, "exit 0\n", "describe exited and left a process that keeps its output open"},
 	} {
 		integration.ShortenDescribeWait(t, c.wait)
 		pidFile := filepath.Join(t.TempDir(), "pid")

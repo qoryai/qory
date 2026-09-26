@@ -20,8 +20,8 @@ import (
 
 // Module is a stack module resolved to a directory.
 type Module struct {
-	// Name is the module's name as its manifest declares it, the name excludes, the tree and
-	// messages use.
+	// Name is the module's name as its manifest declares it, the name excludes, the tree
+	// and messages use.
 	Name string
 	// Description is the manifest's description, "" for none.
 	Description string
@@ -43,8 +43,8 @@ type Module struct {
 	// Base marks a module of the base stack, when a checkout's qory.yaml extends one.
 	Base bool
 	// RetiredAPIVersion is the apiVersion the module's manifest declared when it is a
-	// retired spelling of the current one, "" otherwise, so the command can say the
-	// manifest wants the line rewritten.
+	// retired spelling of the current one, "" otherwise, so the command can report that
+	// the manifest wants the line rewritten.
 	RetiredAPIVersion string
 	// Egress are the hosts the manifest declares the module reaches, sorted; nil when
 	// it declares none, empty when it declares that it reaches nothing. An exclude or
@@ -60,12 +60,12 @@ type Entry struct {
 	Name string
 	// Module is the name of the module that provides the entry.
 	Module string
-	// Path is absolute: the skill directory, the markdown file, the hook script or the MCP
-	// server's JSON file.
+	// Path is absolute: the skill directory, the markdown file, the hook script or the
+	// MCP server's JSON file.
 	Path string
 	// For is the entry, as <kind>/<name>, that required this one, when an only block
-	// brought it in for that entry rather than naming it; "" for an entry composed in its
-	// own right.
+	// brought it in for that entry rather than listing it; "" for an entry composed in
+	// its own right.
 	For string
 	// References are the entries the entry's documents reference, as sorted <kind>/<name>
 	// keys as written, a role's name included; nil for an entry that references none.
@@ -76,7 +76,7 @@ type Entry struct {
 type Exclude struct {
 	// Module is the module the entry was dropped from.
 	Module string
-	// Kind is the entry kind the exclude named.
+	// Kind is the entry kind the exclude listed.
 	Kind string
 	// Name is the dropped entry's name.
 	Name string
@@ -94,21 +94,23 @@ type Result struct {
 	Excludes []Exclude
 	// Settings are the merged fragments: per runtime, per target file, in module order.
 	Settings map[string]map[string]map[string]any
-	// MCP holds the composed MCP servers by name, each the object its module's
-	// mcp/<name>.json holds, with every $QORY_HARNESS_HOME still in place. [Result.MCPFor]
-	// renders it for a home.
+	// MCP contains the composed MCP servers by name, each the object its module's
+	// mcp/<name>.json contains, with every $QORY_HARNESS_HOME as written, before
+	// substitution. [Result.MCPFor] renders it for a home.
 	MCP map[string]map[string]any
 	// Instructions are the modules' AGENTS.md files joined by a blank line, or "".
 	Instructions string
 	// Bind is the stack's bindings, <kind>/<role> to the name of the entry that fills the
-	// role, every one checked against the composed entries; nil when the stack binds none.
+	// role, every one checked against the composed entries; nil when the stack binds
+	// none.
 	Bind map[string]string
 	// Env are the variables the harness exports, name to value, with every
-	// $QORY_HARNESS_HOME still in place: what the module manifests export, as
-	// $QORY_HARNESS_HOME/modules/<name>/<path>, and the configuration's variables over
-	// them. [Result.EnvFor] renders it for a home.
+	// $QORY_HARNESS_HOME as written, before substitution: what the module manifests
+	// export, as $QORY_HARNESS_HOME/modules/<name>/<path>, and the configuration's
+	// variables over them. [Result.EnvFor] renders it for a home.
 	Env map[string]string
-	// Base is the stack the checkout's qory.yaml extends, nil for a stack that extends none.
+	// Base is the stack the checkout's qory.yaml extends, nil for a stack that extends
+	// none.
 	Base *Base
 	// setBy is the module that set each settings leaf, keyed
 	// settings/<runtime>/<file>/<dotted.key.path>, so a later fragment setting the same
@@ -140,8 +142,8 @@ func Compose(p *stack.Stack) (*Result, error) { return ComposeWith(p, Options{})
 
 // ComposeWith reads every module, applies each one's exclude or only block and refuses a
 // collision. The result
-// holds one entry per kind and name, the settings merged per runtime and target file, the
-// MCP servers by name, and the modules' instructions joined. A collision returns a
+// contains one entry per kind and name, the settings merged per runtime and target file,
+// the MCP servers by name, and the modules' instructions joined. A collision returns a
 // [*CollisionError], which a caller matches with errors.As, and a git source that cannot
 // be fetched a [*source.FetchError]. The package comment has the order of the rules and
 // the merge semantics.
@@ -183,7 +185,7 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 			return nil, fmt.Errorf("%s: %w", who, err)
 		}
 		if pl.Name != "" && m.Name != pl.Name {
-			return nil, fmt.Errorf("module %s: the module at %s is named %s in its %s", pl.Name, ps.String(), m.Name, module.ManifestName)
+			return nil, fmt.Errorf("module %s: the module at %s has the name %s in its %s", pl.Name, ps.String(), m.Name, module.ManifestName)
 		}
 		name := m.Name
 		if other, ok := dirs[name]; ok {
@@ -319,12 +321,12 @@ func (r *Result) EnvFor(home string) map[string]string {
 
 // selectVariant picks the one variant of a module that serves every targeted runtime.
 //
-// A variant exists so that a module can ship different material to different runtimes, and a
-// target naming several runtimes can therefore ask a module for two different things at once.
-// The composed tree holds one copy of each entry, so there is nothing to render in that
-// case: the compose refuses and names both runtimes, the way it refuses a collision. A
-// module with no variants, or one whose variants resolve the same way for every targeted
-// runtime, composes for all of them.
+// A variant exists so that a module can ship different material to different runtimes,
+// and a target that lists several runtimes can therefore select two different things of a
+// module at once. The composed tree contains one copy of each entry, so there is nothing
+// to render in that case: the compose refuses and lists both runtimes, the way it refuses
+// a collision. A module with no variants, or one whose variants resolve the same way for
+// every targeted runtime, composes for all of them.
 func selectVariant(m *module.Manifest, pl stack.Module, runtimes stack.Runtimes, name string) (string, error) {
 	first, err := module.SelectVariant(m, pl.Variant, runtimes.First())
 	if err != nil {
@@ -336,7 +338,7 @@ func selectVariant(m *module.Manifest, pl stack.Module, runtimes stack.Runtimes,
 			return "", err
 		}
 		if v != first {
-			return "", fmt.Errorf("module %s reads from %s for %s and from %s for %s; compose one runtime at a time, or give the module one variant for both",
+			return "", fmt.Errorf("module %s reads from %s for %s and from %s for %s; compose one runtime at a time, or select one variant of the module for both",
 				name, variantName(first), runtimes.First(), variantName(v), r)
 		}
 	}
@@ -352,12 +354,12 @@ func variantName(v string) string {
 }
 
 // Need is one thing a composed entry needs beside it: an entry its manifest's requires
-// names, or one its documents reference.
+// lists, or one its documents reference.
 type Need struct {
 	// Key is the entry needed, as <kind>/<name>, a role resolved to the entry the stack
 	// binds it to.
 	Key string
-	// Role is the reference as written when it named a bound role, "" otherwise.
+	// Role is the reference as written when it selected a bound role, "" otherwise.
 	Role string
 	// Reference marks a need a document's reference made, as against the manifest's
 	// requires.
@@ -402,7 +404,7 @@ func needs(l *module.Module, requires map[string][]string, bind map[string]strin
 // entries: a binding to an entry that is not composed, a role bound while an entry of
 // its name is composed, a requirement or a reference that nothing composed meets. Every
 // failure comes at once, one line each, the bindings first, then the entries in their
-// sorted order, so one compose names every site there is to fix.
+// sorted order, so one compose lists every site there is to fix.
 type UnresolvedError struct {
 	// Lines are the failures, one per line, in the order they print.
 	Lines []string
@@ -437,7 +439,7 @@ func checkResolved(res *Result, requires map[string]map[string][]Need) error {
 		if composed[role] {
 			for _, e := range res.Entries {
 				if e.Kind == kind && e.Name == name {
-					lines = append(lines, fmt.Sprintf("bind %s names a role, and module %s ships %s; a role's name is no entry's", role, e.Module, module.Describe(kind, name)))
+					lines = append(lines, fmt.Sprintf("bind %s defines a role, and module %s ships %s; a role's name is no entry's", role, e.Module, module.Describe(kind, name)))
 				}
 			}
 		}
@@ -445,10 +447,10 @@ func checkResolved(res *Result, requires map[string]map[string][]Need) error {
 			continue
 		}
 		if by := leftOut(kind, to); by != "" {
-			lines = append(lines, fmt.Sprintf("bind %s names %s, which module %s leaves out", role, module.Describe(kind, to), by))
+			lines = append(lines, fmt.Sprintf("bind %s selects %s, which module %s leaves out", role, module.Describe(kind, to), by))
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("bind %s names %s, which no module ships", role, module.Describe(kind, to)))
+		lines = append(lines, fmt.Sprintf("bind %s selects %s, which no module ships", role, module.Describe(kind, to)))
 	}
 	for _, e := range res.Entries {
 		for _, need := range requires[e.Module][e.Kind+"/"+e.Name] {
@@ -486,9 +488,10 @@ func (r *Result) Resolve(kind, name string) (string, string) {
 	return kind, name
 }
 
-// Substitute replaces every reference in text with the name address gives the entry it
-// resolves to, a role resolved through the bindings first. A renderer passes the address
-// of the path it writes for: the name the program registers the entry under there.
+// Substitute replaces every reference in text with the name address returns for the
+// entry it resolves to, a role resolved through the bindings first. A renderer passes the
+// address of the path it writes for: the name the program registers the entry under
+// there.
 func (r *Result) Substitute(text string, address func(kind, name string) string) string {
 	return module.Substitute(text, func(kind, name string) string {
 		return address(r.Resolve(kind, name))
@@ -531,7 +534,7 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 	for _, kind := range sel.KindNames() {
 		for _, name := range sel.Kinds[kind] {
 			if !shipped[kind+"/"+name] {
-				return nil, nil, fmt.Errorf("module %s: %s %s/%s names nothing the module ships", l.Name, block, kind, name)
+				return nil, nil, fmt.Errorf("module %s: %s %s/%s selects nothing the module ships", l.Name, block, kind, name)
 			}
 			named[kind+"/"+name] = true
 		}
@@ -563,9 +566,9 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 				key := kind + "/" + name
 				if _, ok := pulled[key]; !ok {
 					if !shipped[key] {
-						return nil, nil, fmt.Errorf("module %s: exclude %s names nothing the module ships", l.Name, key)
+						return nil, nil, fmt.Errorf("module %s: exclude %s selects nothing the module ships", l.Name, key)
 					}
-					return nil, nil, fmt.Errorf("module %s: exclude %s names nothing only brings in; only leaves it out already", l.Name, key)
+					return nil, nil, fmt.Errorf("module %s: exclude %s selects nothing only brings in; only leaves it out", l.Name, key)
 				}
 				delete(pulled, key)
 			}
@@ -584,7 +587,7 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 	l.Entries = kept
 	// The instruction section: named means true in the block.
 	if sel.Instructions && l.Instructions == "" {
-		return nil, nil, fmt.Errorf("module %s: %s instructions names nothing the module ships; it has no %s", l.Name, block, module.InstructionsName)
+		return nil, nil, fmt.Errorf("module %s: %s instructions selects nothing the module ships; it has no %s", l.Name, block, module.InstructionsName)
 	}
 	if l.Instructions != "" && sel.Instructions != only {
 		res.Excludes = append(res.Excludes, Exclude{Module: l.Name, Kind: "instructions", Name: module.InstructionsName})
@@ -598,11 +601,11 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 		}
 	}
 	if sel.Settings.All && len(fragments) == 0 {
-		return nil, nil, fmt.Errorf("module %s: %s settings names nothing the module ships; it has no settings fragment", l.Name, block)
+		return nil, nil, fmt.Errorf("module %s: %s settings selects nothing the module ships; it has no settings fragment", l.Name, block)
 	}
 	for _, name := range sel.Settings.Names {
 		if !fragments[name] {
-			return nil, nil, fmt.Errorf("module %s: %s settings/%s names nothing the module ships", l.Name, block, name)
+			return nil, nil, fmt.Errorf("module %s: %s settings/%s selects nothing the module ships", l.Name, block, name)
 		}
 	}
 	for _, name := range sortedKeys(fragments) {
@@ -619,11 +622,11 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 	}
 	// The exported variables.
 	if sel.Env.All && len(env) == 0 {
-		return nil, nil, fmt.Errorf("module %s: %s env names nothing the module ships; it exports no variable", l.Name, block)
+		return nil, nil, fmt.Errorf("module %s: %s env selects nothing the module ships; it exports no variable", l.Name, block)
 	}
 	for _, name := range sel.Env.Names {
 		if _, ok := env[name]; !ok {
-			return nil, nil, fmt.Errorf("module %s: %s env %s names nothing the module ships", l.Name, block, name)
+			return nil, nil, fmt.Errorf("module %s: %s env %s selects nothing the module ships", l.Name, block, name)
 		}
 	}
 	remaining := map[string]string{}
@@ -646,14 +649,14 @@ type Collision struct {
 	Name string
 	// Modules provide the entry, in stack order.
 	Modules []string
-	// Base names the base stack, as <name>@<pin>, when one of the modules is the base's:
+	// Base is the base stack, as <name>@<pin>, when one of the modules is the base's:
 	// no exclude resolves that collision, the extending module renames its entry.
 	Base string
 }
 
-// CollisionError is the compose refusing an undeclared collision. [Compose] returns it for
-// every colliding entry at once, and the command module matches it with errors.As to print
-// the modules involved and the excludes that resolve them.
+// CollisionError is the compose refusing an undeclared collision. [Compose] returns it
+// for every colliding entry at once, and the command module matches it with errors.As to
+// print the modules involved and the excludes that resolve them.
 type CollisionError struct {
 	// Collisions are the colliding entries, sorted by kind then name.
 	Collisions []Collision
@@ -665,10 +668,11 @@ type CollisionError struct {
 	Order []string
 }
 
-// Suggest returns, per module, the excludes that resolve every collision by keeping the last
-// module that ships each. The modules result holds the names that need an exclude, in the
-// order of the order argument, which a caller passes in stack order. The excludes result
-// is keyed by module name, then by kind, and holds the entry names that module excludes.
+// Suggest returns, per module, the excludes that resolve every collision by keeping the
+// last module that ships each. The modules result contains the names that need an
+// exclude, in the order of the order argument, which a caller passes in stack order. The
+// excludes result is keyed by module name, then by kind, and contains the entry names
+// that module excludes.
 func (e *CollisionError) Suggest(order []string) (modules []string, excludes map[string]map[string][]string) {
 	excludes = map[string]map[string][]string{}
 	for _, c := range e.Collisions {
@@ -690,9 +694,10 @@ func (e *CollisionError) Suggest(order []string) (modules []string, excludes map
 	return modules, excludes
 }
 
-// Error is the plain-text form: each collision with the modules that ship it and their pins,
-// then the excludes that resolve it. Collisions are separated by a blank line and the text
-// carries no trailing newline. The fixtures under contracts/harness/v1 hold it verbatim.
+// Error is the plain-text form: each collision with the modules that ship it and their
+// pins, then the excludes that resolve it. Collisions are separated by a blank line and
+// the text has no trailing newline. The fixtures under contracts/harness/v1 contain it
+// verbatim.
 func (e *CollisionError) Error() string {
 	var b strings.Builder
 	for i, c := range e.Collisions {
@@ -720,8 +725,9 @@ func (e *CollisionError) Error() string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// collisions builds the CollisionError for every entry more than one module owns, and returns
-// nil when no name is owned twice. Keys are sorted, so the message does not follow map order.
+// collisions builds the CollisionError for every entry more than one module owns, and
+// returns nil when no name is owned twice. Keys are sorted, so the message does not
+// follow map order.
 func collisions(owners map[string][]string, modules []Module, base *Base) error {
 	pin := map[string]string{}
 	sources := map[string]string{}
@@ -759,10 +765,11 @@ func collisions(owners map[string][]string, modules []Module, base *Base) error 
 
 // mergeFile decodes one settings fragment of the named module and folds it into the
 // result's target file for the runtime. The extension decides the format, and a TOML
-// document is normalized to the types the JSON decoder produces. The top-level key decides
-// how lists combine, and the mode carries down the whole subtree under that key. A key path
-// another module set to a different value is an error, unless it is env.<NAME> and decided
-// names NAME: the configuration's value is written then, whatever the fragments say.
+// document is normalized to the types the JSON decoder produces. The top-level key
+// decides how lists combine, and the mode applies to the whole subtree under that key.
+// A key path another module set to a different value is an error, unless it is env.<NAME>
+// and decided lists NAME: the configuration's value is written then, whatever the
+// fragments set.
 func mergeFile(res *Result, runtime, file, path, module string, decided map[string]string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -842,9 +849,9 @@ func (m *merger) decide(v any, decided map[string]string) any {
 	return env
 }
 
-// merge folds src into dst at path and returns the result. Maps merge by key; lists follow
-// mode; a scalar, a list in mode once and a value whose type differs from dst's are one
-// leaf: the first module sets it, another may repeat the value and not change it.
+// merge folds src into dst at path and returns the result. Maps merge by key; lists
+// follow mode; a scalar, a list in mode once and a value whose type differs from dst's
+// are one leaf: the first module sets it, another may repeat the value and not change it.
 func (m *merger) merge(dst, src any, path string, mode listMode) (any, error) {
 	key := m.file + "/" + path
 	switch s := src.(type) {
@@ -936,8 +943,8 @@ func contains(list []any, v any) bool {
 
 // SettingsFor is a copy of one merged settings file rendered for a home: every
 // "$QORY_HARNESS_HOME" and "${QORY_HARNESS_HOME}" in a string becomes the home path, at
-// any depth. The copy shares nothing with [Result.Settings], so the caller may write to it.
-// A file no module contributed to is an empty map.
+// any depth. The copy shares nothing with [Result.Settings], so the caller may write to
+// it. A file no module contributed to is an empty map.
 func (r *Result) SettingsFor(runtime, file, home string) map[string]any {
 	src := r.Settings[runtime][file]
 	if src == nil {
@@ -971,8 +978,8 @@ func ForHome(v any, home string) any {
 	return substitute(out, "$QORY_HARNESS_HOME", home)
 }
 
-// SettingsFiles lists the target files modules contributed to for a runtime, sorted by name.
-// A runtime no module ships a fragment for lists nothing.
+// SettingsFiles lists the target files modules contributed to for a runtime, sorted by
+// name. A runtime no module ships a fragment for lists nothing.
 func (r *Result) SettingsFiles(runtime string) []string {
 	var files []string
 	for f := range r.Settings[runtime] {
@@ -982,8 +989,9 @@ func (r *Result) SettingsFiles(runtime string) []string {
 	return files
 }
 
-// normalize turns the map types a TOML decoder produces into the JSON ones merge works on.
-// A TOML array of tables decodes as []map[string]any, which merge does not read as a list.
+// normalize turns the map types a TOML decoder produces into the JSON ones merge works
+// on. A TOML array of tables decodes as []map[string]any, which merge does not read as a
+// list.
 func normalize(v any) any {
 	switch x := v.(type) {
 	case map[string]any:
@@ -1007,8 +1015,9 @@ func normalize(v any) any {
 	}
 }
 
-// substitute returns a copy of v with every occurrence of from inside a string replaced by
-// to. It rebuilds the maps and lists it walks, so the result shares nothing mutable with v.
+// substitute returns a copy of v with every occurrence of from inside a string replaced
+// by to. It rebuilds the maps and lists it walks, so the result shares nothing mutable
+// with v.
 func substitute(v any, from, to string) any {
 	switch x := v.(type) {
 	case string:

@@ -192,31 +192,31 @@ func TestLoadRefuses(t *testing.T) {
 		{
 			"no modules",
 			"apiVersion: qory.dev/v1alpha1\nmodules: []\n",
-			"modules is empty; a stack names at least one module",
+			"modules is empty; a stack lists at least one module",
 			false,
 		},
 		{
 			"a module with neither a name nor a source",
 			"apiVersion: qory.dev/v1alpha1\nmodules:\n  - link: harness\n",
-			"modules[0]: a module gives a name, a source, or both",
+			"modules[0]: a module has a name, a source, or both",
 			false,
 		},
 		{
 			"the second module with neither a name nor a source",
 			"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n    source:\n      path: modules/core\n  - link: harness\n",
-			"modules[1]: a module gives a name, a source, or both",
+			"modules[1]: a module has a name, a source, or both",
 			false,
 		},
 		{
 			"an empty source without a name",
 			"apiVersion: qory.dev/v1alpha1\nmodules:\n  - source: {}\n",
-			"modules[0]: a module gives a name, a source, or both",
+			"modules[0]: a module has a name, a source, or both",
 			false,
 		},
 		{
 			"two modules of one name",
 			"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n    source:\n      path: modules/core\n  - name: core\n    source:\n      path: modules/team\n",
-			"module core is named twice",
+			"module core is listed twice",
 			false,
 		},
 		{
@@ -228,25 +228,25 @@ func TestLoadRefuses(t *testing.T) {
 		{
 			"an exclude over an unknown kind",
 			"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n    source:\n      path: modules/core\n    exclude:\n      prompts: [greet]\n",
-			`module core: exclude names kind "prompts"; kinds: skills, agents, commands, output-styles, hooks, mcp, files; parts: instructions, settings, env`,
+			`module core: exclude selects kind "prompts"; kinds: skills, agents, commands, output-styles, hooks, mcp, files; parts: instructions, settings, env`,
 			false,
 		},
 		{
 			"a module named with a path",
 			"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: ../escaped\n    source: {path: modules/core}\n",
-			`modules[0]: name "../escaped" is not one path segment; a module name holds no slash, backslash, @ or leading dot`,
+			`modules[0]: name "../escaped" is not one path segment; a module name contains no slash, backslash, @ or leading dot`,
 			false,
 		},
 		{
 			"a module named with an at sign",
 			"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: b@a\n    source: {path: modules/core}\n",
-			`modules[0]: name "b@a" is not one path segment; a module name holds no slash, backslash, @ or leading dot`,
+			`modules[0]: name "b@a" is not one path segment; a module name contains no slash, backslash, @ or leading dot`,
 			false,
 		},
 		{
 			"two documents in one file",
 			"apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n    source: {path: modules/core}\n---\nkind: Other\n",
-			"holds more than one document; a stack is one",
+			"contains more than one document; a stack is one",
 			false,
 		},
 		{
@@ -323,7 +323,7 @@ func TestNewComposeAcceptsADocumentWithoutModules(t *testing.T) {
 		t.Fatalf("got %+v", p)
 	}
 	_, err = Load(write(t, "apiVersion: qory.dev/v1alpha1\nmodules: []\n"))
-	if err == nil || !strings.HasSuffix(err.Error(), "modules is empty; a stack names at least one module") {
+	if err == nil || !strings.HasSuffix(err.Error(), "modules is empty; a stack lists at least one module") {
 		t.Fatalf("a stack without modules: %v", err)
 	}
 }

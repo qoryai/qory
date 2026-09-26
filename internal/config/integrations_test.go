@@ -32,15 +32,26 @@ func fixture(t *testing.T, name string) string {
 // place of each $.
 var dollar = string([]byte{'\\', 'u', '0', '0', '2', '4'})
 
-// setupPrints is what qory-github setup prints for the runner file, as github/README.md
-// of qoryai/integrations has it at b381dad9d10058c6b77de256bf117e699db25923: the
-// definition the declaration below expands to.
-const setupPrints = `credentials:
+// declared and expanded are the example of step 4 of "Declaring an integration" in
+// contracts/integration/v1/README.md of qoryai/integrations at
+// 44236bb3bdbac84f53cb44b3497f2f790591cfcd: a declaration of qory-github and of a
+// machine's own program, and the runner's definitions it expands to.
+const (
+	declared = `integrations:
+  github: {settings: {app_id: 123456, private_key_file: /etc/qory/github-app.pem}}
+  tracker: {program: /opt/acme/bin/acme-tracker, settings: {project: "it's $X"}}
+`
+	expanded = `credentials:
   github:
-    adapter: [qory-github, credential, --settings, '{"app_id":123456,"private_key_file":"/home/dev/.config/qory/github-app.pem"}', --, "${argument}"]
+    adapter: [qory-github, credential, --settings, '{"app_id":123456,"private_key_file":"/etc/qory/github-app.pem"}', --, "${argument}"]
     argument: '[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}(,[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100})*'
     hosts: [github.com, api.github.com]
+  tracker:
+    adapter: [/opt/acme/bin/acme-tracker, credential, --settings, '{"project":"it''s \u0024X"}', --, "${argument}"]
+    argument: '[A-Z]+'
+    hosts: [tracker.acme.example]
 `
+)
 
 // fakeIntegration writes a program named name into dir, which only its owner may
 // write, that prints doc for describe and exits 64 for anything else, and returns its
@@ -92,13 +103,15 @@ func expand(t *testing.T) (*config.Runner, error) {
 	return c.Runner, c.Runner.Expand(context.Background(), config.Expansion{})
 }
 
-// TestAnIntegrationExpandsAsItsSetupPrints declares qory-github with no program, finds
-// it on the PATH, and expands it to the definition qory-github setup prints for the
-// same settings, the program by the path it was found at; config lists both.
-func TestAnIntegrationExpandsAsItsSetupPrints(t *testing.T) {
+// TestADeclarationExpandsAsTheIntegrationContractDefines declares qory-github with no
+// program, found on the PATH, and a program of the machine's own by its path, and
+// expands them to the definitions of the contract's example, each program by the path it
+// was found at; config lists both.
+func TestADeclarationExpandsAsTheIntegrationContractDefines(t *testing.T) {
 	hermetic(t)
 	program := fakeIntegration(t, onPath(t), "qory-github", fixture(t, "github.json"))
-	path := runnerFile(t, "integrations:\n  github:\n    settings: {\"app_id\":123456,\"private_key_file\":\"/home/dev/.config/qory/github-app.pem\"}\n")
+	tracker := fakeIntegration(t, t.TempDir(), "acme-tracker", fixture(t, "acme-tracker.json"))
+	path := runnerFile(t, strings.ReplaceAll(declared, "/opt/acme/bin/acme-tracker", tracker))
 	r, err := expand(t)
 	if err != nil {
 		t.Fatal(err)
@@ -110,17 +123,19 @@ func TestAnIntegrationExpandsAsItsSetupPrints(t *testing.T) {
 			Hosts    []string
 		}
 	}
-	if err := yaml.Unmarshal([]byte(setupPrints), &want); err != nil {
+	if err := yaml.Unmarshal([]byte(expanded), &want); err != nil {
 		t.Fatal(err)
 	}
-	w := want.Credentials["github"]
-	w.Adapter[0] = program
-	if len(r.Credentials) != 1 {
+	if len(r.Credentials) != 2 {
 		t.Fatalf("credentials %+v", r.Credentials)
 	}
-	got := r.Credentials[0]
-	if got.Name != "github" || strings.Join(got.Adapter, "\n") != strings.Join(w.Adapter, "\n") || got.Argument != w.Argument || strings.Join(got.Hosts, " ") != strings.Join(w.Hosts, " ") || got.Integration != "github" {
-		t.Errorf("expanded to %+v\nwant %+v", got, w)
+	for i, key := range []string{"github", "tracker"} {
+		w := want.Credentials[key]
+		w.Adapter[0] = map[string]string{"github": program, "tracker": tracker}[key]
+		got := r.Credentials[i]
+		if got.Name != key || strings.Join(got.Adapter, "\n") != strings.Join(w.Adapter, "\n") || got.Argument != w.Argument || strings.Join(got.Hosts, " ") != strings.Join(w.Hosts, " ") || got.Integration != key {
+			t.Errorf("expanded to %+v\nwant %+v", got, w)
+		}
 	}
 	rows := map[string]config.Row{}
 	c, _ := config.Load(t.TempDir(), true)
@@ -157,7 +172,7 @@ func TestAnIntegrationOfYourOwnIsNamedByItsPath(t *testing.T) {
 	} {
 		c := r.Credentials[i]
 		if strings.Contains(c.Adapter[3], "$") {
-			t.Errorf("%s: the settings word %q holds a $", want.name, c.Adapter[3])
+			t.Errorf("%s: the settings word %q contains a $", want.name, c.Adapter[3])
 		}
 		adapter := []string{program, "credential", "--settings", want.settings, "--", "${argument}"}
 		if c.Name != want.name || strings.Join(c.Adapter, "\n") != strings.Join(adapter, "\n") || c.Argument != "[A-Z]+" || strings.Join(c.Hosts, " ") != "tracker.acme.example" {
@@ -199,10 +214,11 @@ func TestTheFilesOwnCredentialWins(t *testing.T) {
 	}
 }
 
-// TestTheSettingsWordIsWhatSetupPrints writes settings with $, &, <, > and the two
-// Unicode line separators as qory-github setup writes them, encoding/json's escapes,
-// then each $ as its escape: byte for byte the word setup prints.
-func TestTheSettingsWordIsWhatSetupPrints(t *testing.T) {
+// TestTheSettingsWordIsCompactJSONWithEveryDollarEscaped writes settings with $, &, <,
+// > and the two Unicode line separators and expands them to the word step 4 of the
+// integration contract's "Declaring an integration" defines: compact JSON as
+// encoding/json writes it, its escapes included, then every $ written \u0024.
+func TestTheSettingsWordIsCompactJSONWithEveryDollarEscaped(t *testing.T) {
 	hermetic(t)
 	fakeIntegration(t, onPath(t), "qory-github", fixture(t, "github.json"))
 	key := "/k/a&b<c>$d" + string(rune(0x2028)) + string(rune(0x2029)) + ".pem"
@@ -220,10 +236,10 @@ func TestTheSettingsWordIsWhatSetupPrints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	setup := bytes.ReplaceAll(settings, []byte("$"), []byte(dollar))
+	marshalled := bytes.ReplaceAll(settings, []byte("$"), []byte(dollar))
 	word := []byte(r.Credentials[0].Adapter[3])
-	if !bytes.Equal(word, []byte(golden)) || !bytes.Equal(word, setup) {
-		t.Errorf("settings word %s\nwant       %s\nsetup      %s", word, golden, setup)
+	if !bytes.Equal(word, []byte(golden)) || !bytes.Equal(word, marshalled) {
+		t.Errorf("settings word %s\nwant       %s\nmarshalled %s", word, golden, marshalled)
 	}
 }
 
@@ -433,7 +449,7 @@ func TestAnUnknownRoleIsLeftAlone(t *testing.T) {
 	}
 	fakeIntegration(t, dir, "qory-queue", `{"version": 1, "name": "queue", "title": "Queue", "program_version": "1", "settings": {"type": "object"}, "roles": {"work_source": {}, "output": {}}}`)
 	path := runnerFile(t, "integrations:\n  queue:\n")
-	if _, err := expand(t); err == nil || err.Error() != path+": integrations.queue: qory-queue plays no role qory knows, output, work_source, and would define nothing" {
+	if _, err := expand(t); err == nil || err.Error() != path+": integrations.queue: qory-queue plays the roles output and work_source, none of which qory expands, and defines nothing" {
 		t.Errorf("no known role: %v", err)
 	}
 }
@@ -453,12 +469,12 @@ func TestExpandRefusesWhatDoesNotDescribe(t *testing.T) {
 	fakeIntegration(t, dir, "qory-v2", strings.Replace(fixture(t, "acme-tracker.json"), `"version": 1,`, `"version": 2,`, 1))
 	fakeIntegration(t, dir, "qory-github", fixture(t, "github.json"))
 	for _, c := range []struct{ body, want string }{
-		{"integrations:\n  absent: {}\n", "integrations.absent: qory-absent is not on the PATH; install it there, or name the program by its path with program"},
+		{"integrations:\n  absent: {}\n", "integrations.absent: qory-absent is not on the PATH; install it there, or set program to its path"},
 		{"integrations:\n  x: {program: /nonexistent/acme-x}\n", "integrations.x: /nonexistent/acme-x is not a program this user may run"},
 		{"integrations:\n  failing: {}\n", "integrations.failing: " + resolved(t, failing) + " describe: exit status 3: the key file /k.pem is readable by others"},
 		{"integrations:\n  garbled: {}\n", "describe did not print one JSON document"},
 		{"integrations:\n  v2: {}\n", "describe printed a description the integration contract refuses: at '/version': value must be 1"},
-		{"integrations:\n  github: {settings: {app_id: 1, private_key_file: /k.pem, private_key: NOT-A-REAL-KEY}}\n", "integrations.github: settings.private_key is a secret, and the settings go on a command line; give private_key_file, a file that holds it, in its place"},
+		{"integrations:\n  github: {settings: {app_id: 1, private_key_file: /k.pem, private_key: NOT-A-REAL-KEY}}\n", "integrations.github: settings.private_key is a secret, and the settings go on a command line; set private_key_file, the path of a file that contains it, in its place"},
 		{"integrations:\n  github: {settings: {app_id: NOT A VALID ID, private_key_file: /k.pem}}\n", "integrations.github: the settings are not what github takes: settings.app_id breaks the schema's pattern"},
 		{"integrations:\n  github: {settings: {app_id: 1, private_key_file: /k.pem, permissions: {contents: NOT-A-LEVEL}}}\n", "settings.permissions.contents breaks the schema's enum"},
 	} {
@@ -488,11 +504,11 @@ func TestIntegrationsSectionRefusesAMistake(t *testing.T) {
 		{"integrations: {github: {program: bin/qory-github}}\n", `integrations.github.program "bin/qory-github" is not an absolute path`},
 		{"integrations: {github: {program: 7}}\n", "integrations.github.program is a path or a name on the PATH"},
 		{"integrations: {github: {settings: [a]}}\n", "integrations.github.settings is a mapping, the settings document"},
-		{"integrations: {github: {settings: {a: 1, a: 2}}}\n", "integrations.github.settings.a is given twice"},
+		{"integrations: {github: {settings: {a: 1, a: 2}}}\n", "integrations.github.settings.a appears twice"},
 		{"integrations: {github: {settings: {1: x}}}\n", "integrations.github.settings: line 1: a key that is not a string"},
-		{"integrations: {github: {settings: {ratio: .nan}}}\n", "integrations.github.settings.ratio is not a number JSON holds"},
+		{"integrations: {github: {settings: {ratio: .nan}}}\n", "integrations.github.settings.ratio is not a number that JSON can represent"},
 		{"integrations: {github: {settings: {a: &b {x: 1}, c: *b}}}\n", "integrations.github.settings.c: line 1: *b is a YAML alias"},
-		{"integrations: {github: {settings: {<<: {app_id: 1}}}}\n", "a YAML alias or merge, which the settings may not hold"},
+		{"integrations: {github: {settings: {<<: {app_id: 1}}}}\n", "a YAML alias or merge, which the settings may not contain"},
 	} {
 		path := runnerFile(t, c.body)
 		_, err := config.Load(t.TempDir(), true)

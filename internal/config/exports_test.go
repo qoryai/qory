@@ -17,12 +17,12 @@ func TestExportsOfTheRootFileAreReadAndChecked(t *testing.T) {
 	root := t.TempDir()
 	write(t, filepath.Join(root, "qory.yaml"), "exports:\n  dir: harness\n  stacks: [nextjs]\n  modules: [core]\n")
 	_, err := config.Load(root, true)
-	if want := filepath.Join(root, "qory.yaml") + ": exports.stacks names nextjs, and harness/stacks/nextjs holds no qory-stack.yaml"; err == nil || err.Error() != want {
+	if want := filepath.Join(root, "qory.yaml") + ": exports.stacks lists nextjs, and harness/stacks/nextjs contains no qory-stack.yaml"; err == nil || err.Error() != want {
 		t.Fatalf("a missing stack: %v\nwant %s", err, want)
 	}
 	write(t, filepath.Join(root, "harness", "stacks", "nextjs", "qory-stack.yaml"), "")
 	_, err = config.Load(root, true)
-	if want := "exports.modules names core, and harness/modules/core holds no qory-module.yaml"; err == nil || !strings.Contains(err.Error(), want) {
+	if want := "exports.modules lists core, and harness/modules/core contains no qory-module.yaml"; err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("a missing module: %v\nwant %s", err, want)
 	}
 	write(t, filepath.Join(root, "harness", "modules", "core", "qory-module.yaml"), "name: core\n")
@@ -72,7 +72,7 @@ func TestExportsElsewhereAreNotARepositorys(t *testing.T) {
 		}
 	}
 	write(t, user, "exports: {}\n")
-	if _, err := config.Load(root, true); err == nil || !strings.Contains(err.Error(), user+": exports names no stacks and no modules") {
+	if _, err := config.Load(root, true); err == nil || !strings.Contains(err.Error(), user+": exports lists no stacks and no modules") {
 		t.Errorf("a mistake in the user's section: %v", err)
 	}
 }
@@ -81,10 +81,10 @@ func TestExportsElsewhereAreNotARepositorys(t *testing.T) {
 func TestLoadRefusesAnExportsMistake(t *testing.T) {
 	hermetic(t)
 	for _, c := range []struct{ body, want string }{
-		{"exports: {}\n", "exports names no stacks and no modules"},
-		{"exports: {stacks: [nextjs, nextjs]}\n", "exports.stacks names nextjs twice"},
+		{"exports: {}\n", "exports lists no stacks and no modules"},
+		{"exports: {stacks: [nextjs, nextjs]}\n", "exports.stacks lists nextjs twice"},
 		{"exports: {dir: ../shared, modules: [core]}\n", `exports.dir stacks "../shared/stacks" is not a directory inside the repository`},
-		{"exports: {dir: {stacks: s}, modules: [core]}\n", "exports.dir names no modules directory; the map form names both"},
+		{"exports: {dir: {stacks: s}, modules: [core]}\n", "exports.dir sets no modules directory; the map form sets both"},
 		{"exports: {module: [core]}\n", `line 2: key "module" is not one qory.yaml reads`},
 	} {
 		root := t.TempDir()

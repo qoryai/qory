@@ -183,10 +183,10 @@ func configFor(root string) (config.Config, error) {
 // placesFor derives the places for the checkout at root from the configuration and the
 // flags. The home is --home, else harness.home, else [config.DefaultHome], a relative
 // value under the checkout root. A home inside the checkout is .qory/harness and nothing
-// else, and .qory has to be a real directory or absent, a symlink a repository committed
-// say, because everything qory writes and removes there goes through that path. A home
-// outside the checkout is a root holding one home per checkout, named by
-// [checkout.Key], so one directory serves every checkout and every worktree, and the
+// else, and .qory has to be a real directory or absent, not a symlink, such as one a
+// repository committed, because everything qory writes and removes there goes through
+// that path. A home outside the checkout is a root containing one home per checkout, with
+// the name [checkout.Key] returns, so one directory serves every checkout and every worktree, and the
 // checkout gets no links: harness.links: checkout is refused there. Inside, the links are
 // written unless harness.links: none or --no-links.
 func placesFor(root string, conf config.Config, o homeOptions) (places, error) {
@@ -277,9 +277,9 @@ func homeFlags(c *cobra.Command, o *homeOptions) {
 // copies, so an edit to a module's instructions or settings leaves the home behind until
 // the next compose, and a check is how a CI gate sees that. --force lets a link replace a
 // tracked, unmodified file of the checkout, and the report records every path it replaced
-// so remove can say how to get it back. --update fetches every git source again. Both
-// flags have their standing value in qory.yaml, and a flag given on the command line,
-// --force=false say, wins over the file.
+// so remove can print how to get it back. --update fetches every git source again. Both
+// flags have their standing value in qory.yaml, and a flag set on the command line, such
+// as --force=false, wins over the file.
 func newCompose(use string, aliases ...string) *cobra.Command {
 	var file, runtime, model string
 	var dryRun, check, force, update bool
@@ -291,7 +291,7 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 		Long: `Compose the stack's modules into the checkout you stand in.
 
 The home, the composed tree, is .qory/harness in the checkout, linked from the paths
-each runtime reads and excluded from git. With --home or harness.home in qory.yaml naming
+each runtime reads and excluded from git. With --home or harness.home in qory.yaml set to
 a directory outside the checkout, the tree goes under that directory instead, one home
 per checkout named after it, and the checkout gets nothing: no link, no .qory, no
 exclude line. A runtime reads such a home through the arguments qory harness launch
@@ -314,15 +314,15 @@ prints. --no-links keeps the checkout untouched with the home inside it too.
 			return runCompose(cmd.OutOrStdout(), cmd.ErrOrStderr(), o)
 		},
 	}
-	c.Flags().StringVarP(&file, "file", "f", "", "the qory-stack.yaml, or the qory.yaml or harness.yaml whose harness section to compose, instead of discovering one. A stack named here, in a checkout whose own document extends one, is that document's base in place of extends")
+	c.Flags().StringVarP(&file, "file", "f", "", "the qory-stack.yaml, or the qory.yaml or harness.yaml whose harness section to compose, instead of discovering one. A stack this flag selects, in a checkout whose own document extends one, is that document's base in place of extends")
 	c.Flags().StringVar(&runtime, "runtime", "", "render for these runtimes instead of target.runtime, comma separated ("+strings.Join(render.Names(), ", ")+"; qory.yaml: runtime)")
 	c.Flags().StringVar(&model, "model", "", "write this model instead of target.model (qory.yaml: model)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the report and write nothing")
-	c.Flags().BoolVar(&check, "check", false, "compare the home with what the stack and modules say now and write nothing; exit 6 when a file or link differs. The links from the checkout into the home and the report are not compared")
+	c.Flags().BoolVar(&check, "check", false, "compare the home with what the stack and modules define and write nothing; exit 6 when a file or link differs. The links from the checkout into the home and the report are not compared")
 	c.Flags().BoolVar(&force, "force", false, "replace a tracked, unmodified file of the checkout where a link goes; git checkout -- restores it (qory.yaml: force)")
 	c.Flags().BoolVar(&update, "update", false, "fetch every git source again instead of reading the cached clone (qory.yaml: update)")
 	homeFlags(c, &h)
-	c.Flags().BoolVar(&h.noLinks, "no-links", false, "write nothing into the checkout, no link and no exclude line; qory harness launch says how a runtime reads the home (qory.yaml: harness.links: none)")
+	c.Flags().BoolVar(&h.noLinks, "no-links", false, "write nothing into the checkout, no link and no exclude line; qory harness launch prints how a runtime reads the home (qory.yaml: harness.links: none)")
 	return c
 }
 
@@ -357,8 +357,8 @@ func (e *staleError) Error() string {
 
 // runCheck is --check: it renders the prepared compose into a scratch directory,
 // addressed as the home, and compares the two trees. The runtimes are the ones a compose
-// would build, the targets and the ones composed earlier, so the comparison is against
-// the tree a compose would write. A home that matches prints up to date and the rows a
+// builds, the targets and the ones a previous compose wrote, so the comparison is against
+// the tree a compose writes. A home that matches prints up to date and the rows a
 // compose prints; one that differs prints one row per path and returns a [*staleError].
 // The links from the checkout into the home and the report are not compared: a missing
 // link is a foreign path or a remove, and the report changes when the home does.
@@ -639,9 +639,9 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 	// them learns that the base stack decides.
 	var skippedConfig [][2]string
 	if base != nil {
-		what := "(named by -f)"
+		what := "(set by -f)"
 		if named.Path != "" || named.Git != "" {
-			what = "(named by -f, in place of extends " + named.String() + ")"
+			what = "(set by -f, in place of extends " + named.String() + ")"
 		}
 		skippedConfig = append(skippedConfig, [2]string{"base", ui.Short(base.File, at.root) + "  " + what})
 	}
@@ -649,7 +649,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 		skippedConfig = append(skippedConfig, [2]string{"skipped", filepath.Base(own) + "  (its harness, git and env keys; the base stack decides under extends)"})
 	}
 	if baseErr != nil {
-		skippedConfig = append(skippedConfig, [2]string{"skipped", "worktree.base  (" + baseErr.Error() + "; the report names no base)"})
+		skippedConfig = append(skippedConfig, [2]string{"skipped", "worktree.base  (" + baseErr.Error() + "; the report lists no base)"})
 	}
 	skippedConfig = append(skippedConfig, checks.rows...)
 	skippedConfig = append(skippedConfig, retired.rows...)
@@ -684,10 +684,10 @@ func reportBase(root string, conf config.Config) (*report.Worktree, error) {
 // the links into the checkout, the module links, the report, and the rows. all is every
 // runtime the home now holds, the targets first.
 func write(out io.Writer, o composeOptions, at places, res *compose.Result, rep, previous report.Report, targets, all []render.Runtime, force bool, skippedConfig [][2]string, u *ui.UI) error {
-	// A path replaced by an earlier compose is still replaced: the report keeps
-	// naming it until remove takes its link, so the restore hint is not lost to a
+	// A path replaced by a previous compose stays replaced: the report keeps
+	// listing it until remove takes its link, so the restore hint is not lost to a
 	// second compose. A link step that fails has replaced what it replaced, so the
-	// report is written on that path too when it holds a replaced path, before
+	// report is written on that path too when it contains a replaced path, before
 	// the error goes up; a compose that replaced nothing leaves the report as it
 	// was, so a report on disk still means a compose that went through.
 	rep.Replaced = previous.Replaced
@@ -727,8 +727,8 @@ func write(out io.Writer, o composeOptions, at places, res *compose.Result, rep,
 		}
 	case at.dir != "":
 		// The home is in the checkout and nothing links to it: the qory directory is
-		// still qory's, and still kept out of git, and the links an earlier compose
-		// wrote go the way a compose takes back what it no longer asks for.
+		// qory's and kept out of git, and the links a previous compose wrote are removed
+		// the way a compose removes what it does not link.
 		if err := render.Exclude(at.root, "/"+checkout.Dir); err != nil {
 			return err
 		}
@@ -750,7 +750,7 @@ func write(out io.Writer, o composeOptions, at places, res *compose.Result, rep,
 	u.Success("composed %s from %s %s", count(len(rep.Entries), "entry", "entries"), count(len(rep.Modules), "module", "modules"), ui.Pot)
 	rows := [][2]string{{"home", ui.Short(at.home, at.root)}}
 	for _, path := range takenBack {
-		rows = append(rows, [2]string{"removed", path + "  (linked by an earlier compose; the checkout gets no links)"})
+		rows = append(rows, [2]string{"removed", path + "  (linked by a previous compose; the checkout gets no links)"})
 	}
 	for _, rt := range all {
 		var links []string
@@ -765,7 +765,7 @@ func write(out io.Writer, o composeOptions, at places, res *compose.Result, rep,
 			row = "no links  (" + launchHint(rt) + ")"
 		}
 		if !slices.Contains(targets, rt) {
-			row += "  (composed here earlier, refreshed)"
+			row += "  (composed here by a previous compose, refreshed)"
 		}
 		rows = append(rows, [2]string{rt.Name(), row})
 		if kept := linked[rt.Name()].Skipped; len(kept) > 0 {
@@ -829,7 +829,7 @@ func applyTarget(p *stack.Stack, base *compose.Base, conf config.Config, runtime
 	}
 	if err := want.Runtimes.Validate(); err != nil {
 		if len(want.Runtimes) == 0 && base != nil {
-			return fmt.Errorf("target.runtime is required; the base stack %s carries no target, so the document sets one beside extends, or the configuration or --runtime does", base)
+			return fmt.Errorf("target.runtime is required; the base stack %s defines no target, so the document sets one beside extends, or the configuration or --runtime does", base)
 		}
 		return err
 	}
@@ -856,9 +856,9 @@ func composeError(err error) error {
 
 // ErrReported marks an error a command has already printed itself, with more detail than
 // a single line could carry. The main package matches it with errors.Is and prints nothing
-// further. A collision is the one case today: [printCollision] shows the modules involved
+// further. A collision is the one case: [printCollision] shows the modules involved
 // and the stack lines that resolve it, and the command returns the collision wrapped so
-// that [ExitCode] still sees it.
+// that [ExitCode] sees it.
 var ErrReported = errors.New("reported")
 
 // reportedError wraps an error a command printed itself. It matches [ErrReported] and
@@ -901,16 +901,16 @@ func input(err error) error {
 	return inputError{err}
 }
 
-// The exit statuses of the qory command. A caller that branches on the status tells a
-// mistake in its input from a collision and from a path qory left alone, and everything
-// else from all three.
+// The exit statuses of the qory command. A caller that branches on the status
+// distinguishes a mistake in its input from a collision and from a path qory left alone,
+// and everything else from all three.
 const (
 	// ExitInput is a mistake in the command line or an input file: a flag or an argument
 	// that does not exist, a stack, a module or a fragment that does not read.
 	ExitInput = 2
 	// ExitCollision is a compose refused because two modules ship the same entry.
 	ExitCollision = 3
-	// ExitForeign is a path qory would not replace or remove, because it did not write it.
+	// ExitForeign is a path qory refuses to replace or remove, because it did not write it.
 	ExitForeign = 4
 	// ExitVersion is a document whose qory key excludes the running qory.
 	ExitVersion = 5
@@ -921,8 +921,8 @@ const (
 
 // ExitCode is the status a process exits with for err: 0 for nil, the runtime's own
 // status for a qory run whose runtime exited with one, [ExitInput], [ExitCollision],
-// [ExitForeign], [ExitVersion] or [ExitStale] for the errors those name, and 1 for every other
-// failure, such as a git source that could not be fetched or a file that could not be
+// [ExitForeign], [ExitVersion] or [ExitStale] for the errors each stands for, and 1 for
+// every other failure, such as a git source that could not be fetched or a file that could not be
 // written. A command unknown to the tree is an input error too; cobra reports it as a
 // plain error whose text starts with "unknown command", which is the one place this
 // package reads an error's text.
@@ -1057,8 +1057,8 @@ The line is the runtime's own launch template, with harness.launch.<runtime> in
 qory.yaml over it: the program, the arguments that hand it the home's files, and the
 variables it takes them from, ${dir} being the runtime's directory in the home. For
 claude it is --plugin-dir, --settings, --mcp-config, --append-system-prompt-file and
---setting-sources user; for codex it is CODEX_HOME. A group of arguments naming a file
-the compose did not write, mcp.json without a server say, is left out. The home is found
+--setting-sources user; for codex it is CODEX_HOME. A group of arguments for a file the
+compose did not write, such as mcp.json without a server, is left out. The home is found
 the way compose finds it, from --home, harness.home or the checkout you stand in; the
 paths printed are absolute, so the line works wherever the home is. --json prints the
 command, the arguments and the variables as one JSON object, for a launcher that spawns
@@ -1067,8 +1067,8 @@ skills and commands under on that launch under addresses, per kind, a bound role
 them as the entry it is bound to: harness:<name> for claude, whose plugin prefixes
 every kind, the name as the module wrote it elsewhere. --address <kind>/<name> prints
 that one registered name alone, for a launcher that builds its first prompt from an
-entry point, /harness:implement say. A runtime that reads its harness from the
-checkout alone has no launch template, and the verb says so.
+entry point, such as /harness:implement. A runtime that reads its harness from the
+checkout alone has no launch template, and the verb reports this.
 
 --verbose adds nothing here.`,
 		Args: noArgs,
@@ -1189,7 +1189,7 @@ func newRemove(use string, aliases ...string) *cobra.Command {
 		Short:   "Remove the composed harness and its links from the checkout",
 		Long: `Remove the composed harness and its links from the checkout.
 
-A home outside the checkout, under the directory --home or harness.home names, is
+A home outside the checkout, under the directory --home or harness.home sets, is
 removed with its report, and the checkout is not touched: nothing was written there.`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {

@@ -1,1 +1,1 @@
-module core: exclude skills/nope names nothing the module ships
+module core: exclude skills/nope selects nothing the module ships

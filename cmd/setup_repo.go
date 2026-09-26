@@ -25,7 +25,7 @@ const moduleDir = "harness"
 // after it to the column of the others.
 const checkoutConfig = `apiVersion: qory.dev/v1alpha1
 
-# This repository's stack. To take a stack as delivered instead, name it under extends
+# This repository's stack. To take a stack as delivered instead, set it under extends
 # beside target: {git: https://github.com/acme/harness, ref: v2.4.0, stack: nextjs}
 harness:
   name: %[1]s%[2]s# the stack's name in the report
@@ -77,7 +77,7 @@ Instructions every agent reads in this repository.
 // value at its default.
 const userConfig = `apiVersion: qory.dev/v1alpha1
 
-# How qory runs on this machine. A checkout's qory.yaml overrides the keys it names.
+# How qory runs on this machine. A checkout's qory.yaml overrides the keys it sets.
 harness:
   #runtime: claude             # render for this runtime, or a list, instead of the document's
   #model: opus                 # write this model instead of the document's
@@ -105,10 +105,10 @@ func newSetupRepo() *cobra.Command {
 		Short: "Write the repository's qory.yaml: its stack, its module, its worktree settings",
 		Long: `Set the repository up for qory.
 
-setup repo writes into the current directory a qory.yaml holding the repository's own
+setup repo writes into the current directory a qory.yaml containing the repository's own
 stack, one runtime and one module, with every key a repository commits shown, and that
 module under harness with its manifest and AGENTS.md. A directory whose qory.yaml already
-names a stack, or that holds a qory-stack.yaml, keeps its stack. A file that is already
+defines a stack, or that contains a qory-stack.yaml, keeps its stack. A file that is already
 there is kept.
 
 This qory.yaml is committed and decides for everyone who clones the repository: the
@@ -133,7 +133,7 @@ machine, for every repository, is the qory.yaml that setup machine writes.`,
 			}
 			switch found, _ := config.DiscoverStack(dir); found {
 			case filepath.Join(dir, config.FileName), filepath.Join(dir, config.AltFileName):
-				rows = append(rows, [2]string{"kept", configName + "  (its harness section names the stack)"})
+				rows = append(rows, [2]string{"kept", configName + "  (its harness section defines the stack)"})
 			case filepath.Join(dir, stack.FileName):
 				rows = append(rows, [2]string{"kept", stack.FileName + "  (the stack is here)"})
 				files = append(files, struct{ path, content string }{configName, worktreeConfig})

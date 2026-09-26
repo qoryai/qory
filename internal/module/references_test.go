@@ -29,8 +29,8 @@ func TestReferencesRefusesWhatIsNotOne(t *testing.T) {
 	for _, c := range [][2]string{
 		{"${qory:agent/coder}", "${qory:agent/coder} is not a reference; after ${qory: comes one of agents, commands, skills, then /<name>"},
 		{"${qory:coder}", "${qory:coder} is not a reference"},
-		{"${qory:agents/}", `${qory:agents/} names "", which is not an entry name`},
-		{"${qory:agents/a/b}", `${qory:agents/a/b} names "a/b", which is not an entry name`},
+		{"${qory:agents/}", `${qory:agents/} refers to "", which is not an entry name`},
+		{"${qory:agents/a/b}", `${qory:agents/a/b} refers to "a/b", which is not an entry name`},
 	} {
 		_, err := References("Dispatch " + c[0] + ".")
 		if err == nil || !strings.Contains(err.Error(), c[1]) {

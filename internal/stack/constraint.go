@@ -16,9 +16,9 @@ import (
 //	qory: ">=0.3.0 <0.4.0"
 //
 // One or more comparators separated by spaces, each an operator, >=, >, <=, < or =,
-// followed by a version with or without a leading v. Every comparator has to hold. A bare
-// version is refused, because one reader takes it for a minimum and another for an exact
-// pin. The zero Constraint accepts every version and prints as "".
+// followed by a version with or without a leading v. An allowed version satisfies every
+// comparator. A bare version is refused, because one reader takes it for a minimum and
+// another for an exact pin. The zero Constraint accepts every version and prints as "".
 type Constraint struct {
 	comparators []comparator
 }
@@ -34,7 +34,8 @@ type comparator struct {
 // match finds >= before >.
 var operators = []string{">=", "<=", ">", "<", "="}
 
-// ParseConstraint reads the value of a qory key. The error says what a value looks like.
+// ParseConstraint reads the value of a qory key. The error describes what a value looks
+// like.
 func ParseConstraint(s string) (Constraint, error) {
 	var c Constraint
 	if strings.TrimSpace(s) == "" {
@@ -71,8 +72,8 @@ func withV(v string) string {
 }
 
 // Allows reports whether version, with or without a leading v, is inside the range. Build
-// metadata on the version, +dirty say, does not count. A version that does not parse is
-// outside every non-empty range.
+// metadata on the version, such as +dirty, does not count. A version that does not parse
+// is outside every non-empty range.
 func (c Constraint) Allows(version string) bool {
 	if len(c.comparators) == 0 {
 		return true
@@ -103,10 +104,10 @@ func (c Constraint) Allows(version string) bool {
 	return true
 }
 
-// Empty reports whether the constraint accepts every version: no qory key was given.
+// Empty reports whether the constraint accepts every version: no qory key was set.
 func (c Constraint) Empty() bool { return len(c.comparators) == 0 }
 
-// String writes the range as a qory key holds it, the versions without the leading v.
+// String writes the range as a qory key contains it, the versions without the leading v.
 func (c Constraint) String() string {
 	parts := make([]string, 0, len(c.comparators))
 	for _, cmp := range c.comparators {
@@ -115,8 +116,8 @@ func (c Constraint) String() string {
 	return strings.Join(parts, " ")
 }
 
-// Join returns a constraint that holds when both do. A comparator both name is kept
-// once, so a stack repeating its repository's range prints it once.
+// Join returns a constraint that a version satisfies when it satisfies both. A comparator
+// both contain is kept once, so a stack repeating its repository's range prints it once.
 func (c Constraint) Join(other Constraint) Constraint {
 	out := Constraint{comparators: append([]comparator{}, c.comparators...)}
 	for _, cmp := range other.comparators {

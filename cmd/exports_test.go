@@ -181,7 +181,7 @@ func TestConfigPrintsThePublishersExports(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = run(t, "config")
-	if want := "qory.yaml: exports.modules names extra, and harness/modules/extra holds no qory-module.yaml"; err == nil || !strings.Contains(err.Error(), want) || cmd.ExitCode(err) != cmd.ExitInput {
+	if want := "qory.yaml: exports.modules lists extra, and harness/modules/extra contains no qory-module.yaml"; err == nil || !strings.Contains(err.Error(), want) || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("a stale list: err = %v, exit %d; want %q", err, cmd.ExitCode(err), want)
 	}
 }

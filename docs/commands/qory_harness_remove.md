@@ -6,7 +6,7 @@ Remove the composed harness and its links from the checkout
 
 Remove the composed harness and its links from the checkout.
 
-A home outside the checkout, under the directory --home or harness.home names, is
+A home outside the checkout, under the directory --home or harness.home sets, is
 removed with its report, and the checkout is not touched: nothing was written there.
 
 ```
@@ -24,7 +24,7 @@ qory harness remove [flags]
 ### Options inherited from parent commands
 
 ```
-  -v, --verbose   print more of what the command does; each command's help says what
+  -v, --verbose   print more of what the command does; each command's help lists what
 ```
 
 ### SEE ALSO

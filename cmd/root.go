@@ -20,19 +20,19 @@ var Version = "dev"
 //	go build -ldflags "-X github.com/qoryai/qory/cmd.Commit=a1b2c3d"
 //
 // It is read only when Go recorded no vcs.revision for the build; a build from a git
-// checkout carries one, and a release does too, so the flag is the fallback for a build
+// checkout has one, and a release does too, so the flag is the fallback for a build
 // from an exported tree.
 var Commit = ""
 
 // Root builds the command tree and returns its root command. Every caller builds its own
 // tree: [Execute] to run one, and the gendocs generator to write the command reference
-// under docs/commands. The tree carries no state between calls, so a test may build it,
+// under docs/commands. The tree keeps no state between calls, so a test may build it,
 // point its output at a buffer, and run it with SetArgs.
 //
 // Usage and errors are silenced on the root, because this tool prints both itself: a
 // command reports its own failure through the ui package, and the main package prints
 // whatever reaches it. A flag cobra cannot parse and an argument a command does not take
-// come back as input errors, so [ExitCode] gives them [ExitInput].
+// come back as input errors, for which [ExitCode] returns [ExitInput].
 func Root() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "qory",
@@ -55,7 +55,7 @@ Shortcuts:
 	root.AddCommand(newVersion(), newUpdate(), newSetup(), newHarness(), newWorktree(), newConfig(), newRun())
 	root.AddCommand(shortcuts()...)
 	root.AddCommand(worktreeShortcuts()...)
-	root.PersistentFlags().BoolP("verbose", "v", false, "print more of what the command does; each command's help says what")
+	root.PersistentFlags().BoolP("verbose", "v", false, "print more of what the command does; each command's help lists what")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return input(err) })
 	return root
 }
@@ -92,9 +92,9 @@ func noArgs(cmd *cobra.Command, args []string) error {
 	return input(cobra.NoArgs(cmd, args))
 }
 
-// Execute builds the command tree, runs the command the arguments name, and returns its
+// Execute builds the command tree, runs the command the arguments select, and returns its
 // error. The caller decides what to print and which status to exit with: [ErrReported]
-// says whether the command printed the failure itself, [ExitCode] which status it gets.
+// reports whether the command printed the failure itself, [ExitCode] which status it gets.
 func Execute() error {
 	return Root().Execute()
 }

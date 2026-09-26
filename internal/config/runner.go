@@ -27,7 +27,7 @@ import (
 // the policy the agent runs under or where the run's events go.
 const RunnerFileName = "runner.yaml"
 
-// EnvServerSecret is the environment variable that holds the server's secret when the
+// EnvServerSecret is the environment variable that contains the server's secret when the
 // file does not.
 const EnvServerSecret = "QORY_SERVER_SECRET"
 
@@ -39,38 +39,38 @@ var accessKey = regexp.MustCompile(`^ak_[0-9a-hjkmnp-tv-z]{16}$`)
 type Runner struct {
 	// File is the path read.
 	File string
-	// Egress is the run policy's egress section, nil when the file names none: observe
+	// Egress is the run policy's egress section, nil when the file has none: observe
 	// everything, with no list to deny by.
 	Egress *RunnerEgress
-	// Server is the server every run reports to, nil when the file names none: the
+	// Server is the server every run reports to, nil when the file sets none: the
 	// events go to files alone.
 	Server *RunnerServer
-	// Wall is what the runtime is enclosed in, nil when the file names none: the runtime
+	// Wall is what the runtime is enclosed in, nil when the file sets none: the runtime
 	// is a process of this machine.
 	Wall *RunnerWall
 	// Timeout is how long a runtime may run on this machine, zero for no limit, and
-	// StopSignal the signal that asks it to leave when the runner stops it and StopGrace
-	// how long it gets between that and SIGKILL, empty and zero for the runner's
-	// defaults. --timeout, --stop-signal and --stop-grace name others for one run.
+	// StopSignal the signal that requests it to stop when the runner stops it and
+	// StopGrace how long it has between that and SIGKILL, empty and zero for the runner's
+	// defaults. --timeout, --stop-signal and --stop-grace set others for one run.
 	Timeout    time.Duration
 	StopSignal string
 	StopGrace  time.Duration
 	// Credentials are the credentials this machine defines, in the file's order. A
-	// run's policy selects among them by name; the runner holds each outside the
+	// run's policy selects among them by name; the runner keeps each outside the
 	// container and its proxy sets it on the requests to the hosts it is for. The ones
 	// an integration defines are added by [Runner.Expand].
 	Credentials []RunnerCredential
 	// Integrations are the integrations this machine declares, in the file's order:
 	// programs that speak the integration contract, which [Runner.Expand] describes and
-	// expands into the definitions they give.
+	// expands into the definitions they return.
 	Integrations []RunnerIntegration
 
 	expanded bool
 }
 
 // RunnerCredential is one entry of the credentials section. Exactly one of Env, File
-// and Adapter says where the token comes from; an adapter says how its token is used,
-// and for the other two Hosts, Scheme, Username, Header and Paths do.
+// and Adapter defines where the token comes from; an adapter defines how its token is
+// used, and for the other two Hosts, Scheme, Username, Header and Paths do.
 type RunnerCredential struct {
 	Name                     string
 	Env, File                string
@@ -91,23 +91,23 @@ const WallDocker = "docker"
 // RunnerWall is the wall section: the container every run on this machine starts the
 // runtime in, with no route out except to the runner's proxy.
 type RunnerWall struct {
-	// Adapter names what builds the wall: docker.
+	// Adapter selects what builds the wall: docker.
 	Adapter string
 	// Image is the agent's image, the runtime and the project's toolchain; the --image
-	// flag names another. It may be empty here and given by the flag.
+	// flag sets another. It may be empty here and set by the flag.
 	Image string
-	// Command is the program the adapter runs, podman say; empty means docker.
+	// Command is the program the adapter runs, such as podman; empty means docker.
 	Command string
 	// Helper is the path of a static Linux build of qory, mounted into the container as
 	// the relay and the hook forwarder; empty means this binary, which only a Linux
 	// machine can use.
 	Helper string
-	// Env names the variables of this environment that go into the container, the model
-	// credential say. Nothing else of the environment does.
+	// Env lists the variables of this environment that go into the container, such as the
+	// model credential. Nothing else of the environment does.
 	Env []string
 	// User is the uid:gid the container runs as; empty means qory run's own, so the
 	// checkout's files keep their owner. Root is refused, so a machine where qory runs
-	// as root names one.
+	// as root sets one.
 	User string
 	// Mounts are what the container sees of this machine beside the checkout and the
 	// composed home, each at its own path; --mount adds to them.
@@ -119,7 +119,7 @@ type RunnerWall struct {
 	Memory  string
 	PIDs    int
 	ShmSize string
-	// CAEnv names the variables that point a program in the container at the bundle of
+	// CAEnv lists the variables that point a program in the container at the bundle of
 	// authorities, when a run has one of its own; nil means the runner's defaults.
 	CAEnv []string
 }
@@ -132,7 +132,7 @@ type RunnerMount struct {
 }
 
 // ParseMount reads a mount as wall.mounts and --mount write it: an absolute path, and
-// :ro after it for one the container cannot change. :rw says the default aloud.
+// :ro after it for one the container cannot change. :rw sets the default explicitly.
 func ParseMount(v string) (RunnerMount, error) {
 	m := RunnerMount{Path: v}
 	if p, ok := strings.CutSuffix(v, ":ro"); ok {
@@ -166,7 +166,7 @@ type RunnerServer struct {
 	// URL is the server: https, or http to a loopback address, a scheme and a host
 	// alone.
 	URL string
-	// AccessKey names the key the server issued this machine: ak_ and 16 characters.
+	// AccessKey is the key the server issued this machine: ak_ and 16 characters.
 	AccessKey string
 	// Secret signs every request; from the file, or from [EnvServerSecret]. It never
 	// travels.
@@ -215,7 +215,8 @@ type runnerFile struct {
 }
 
 // LoadRunner reads the machine's runner file under [UserDir]. No file is no runner
-// configuration and returns nil; a file that does not read is an error naming it.
+// configuration and returns nil; a file that does not read is an error that contains its
+// path.
 func LoadRunner() (*Runner, error) {
 	dir := UserDir()
 	if dir == "" {
@@ -282,7 +283,7 @@ func LoadRunner() (*Runner, error) {
 			return nil, fmt.Errorf("%s: server.url %q is http to a host that is not this machine; a server elsewhere is reached over https", path, *w.URL)
 		}
 		if u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.User != nil || strings.HasSuffix(*w.URL, "#") {
-			return nil, fmt.Errorf("%s: server.url %q is more than a scheme and a host; the server names its own paths", path, *w.URL)
+			return nil, fmt.Errorf("%s: server.url %q is more than a scheme and a host; the server defines its own paths", path, *w.URL)
 		}
 		if w.AccessKey == nil || *w.AccessKey == "" {
 			return nil, fmt.Errorf("%s: server.access_key is required", path)
@@ -314,7 +315,7 @@ func LoadRunner() (*Runner, error) {
 			}
 			v, err := time.ParseDuration(*d.in)
 			if err != nil || v <= 0 {
-				return nil, fmt.Errorf("%s: %s %q is not a duration above zero, 5h30m or 30s say", path, d.key, *d.in)
+				return nil, fmt.Errorf("%s: %s %q is not a duration above zero, such as 5h30m or 30s", path, d.key, *d.in)
 			}
 			*d.out = v
 		}

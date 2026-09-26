@@ -22,6 +22,6 @@ Both modules ship a `greet` skill. The stack keeps this one, the world module's,
 excludes the hello module's. To see `qory` settle a collision:
 
 1. Open `qory-stack.yaml` and delete the two `exclude` lines under the hello module.
-2. Run `qory hc`. It refuses, names both modules, and prints the lines that fix it.
+2. Run `qory hc`. It refuses, lists both modules, and prints the lines that fix it.
 3. Put those lines under the **world** module instead, and run `qory hc` again.
 4. Quit `claude`, start it again, and type `/hello`. The other greet answers.

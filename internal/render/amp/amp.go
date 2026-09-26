@@ -11,7 +11,7 @@
 //
 // Amp also takes its settings file from --settings-file, so the servers and the
 // permissions reach a session from outside the checkout; the skills and the instructions
-// are read from the checkout alone. [Template] names the file.
+// are read from the checkout alone. [Template] passes the file.
 package amp
 
 import (
@@ -56,7 +56,7 @@ func (amp) Reserved() []render.Reserved {
 }
 
 // Render writes the amp settings files, such as settings.json, which gets the MCP servers
-// under amp.mcpServers when the compose holds any, and nothing else. The target model
+// under amp.mcpServers when the compose contains any, and nothing else. The target model
 // reaches no file, because Amp picks the model through its own modes.
 func (amp) Render(res *compose.Result, dir, home string) error {
 	var ensure []string

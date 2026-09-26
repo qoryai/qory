@@ -2,14 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://qory.dev/contracts/harness/v1/stack.schema.json",
   "title": "qory-stack.yaml",
-  "description": "qory-stack.yaml: the ordered modules a harness is composed from, delivered to be extended; the checkout extending it says what it is rendered for.",
+  "description": "qory-stack.yaml: the ordered modules a harness is composed from, delivered to be extended; the checkout extending it defines what it is rendered for.",
   "type": "object",
   "required": ["apiVersion", "modules"],
   "additionalProperties": false,
   "properties": {
     "apiVersion": {"const": "qory.dev/v1alpha1"},
     "qory": {
-      "description": "The qory versions this document is written for: one or more comparators, >=0.3.0 <0.4.0 say; every one has to hold.",
+      "description": "The qory versions this document is written for: one or more comparators, such as >=0.3.0 <0.4.0; every one has to be satisfied.",
       "type": "string",
       "pattern": "^\\s*(>=|<=|>|<|=)v?\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?(\\s+(>=|<=|>|<|=)v?\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?)*\\s*$"
     },
@@ -17,13 +17,13 @@
     "description": {"type": "string"},
     "modules": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/module"}},
     "bind": {
-      "description": "The entry that fills each role a document references: <kind>/<role> to the name of an entry of that kind, so a module writes ${qory:agents/coder} and the stack says which agent that is.",
+      "description": "The entry that fills each role a document references: <kind>/<role> to the name of an entry of that kind, so a module writes ${qory:agents/coder} and the stack defines which agent that is.",
       "type": "object",
       "propertyNames": {"pattern": "^(agents|commands|skills)/[^/\\\\@ .][^/\\\\@ ]*$"},
       "additionalProperties": {"type": "string", "pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"}
     },
     "extensions": {
-      "description": "Values qory carries into the report and does not read: keys of the author's choosing, each a value of any shape.",
+      "description": "Values qory copies into the report and does not read: keys of the author's choosing, each a value of any shape.",
       "type": "object"
     },
     "extending": {
@@ -91,7 +91,7 @@
           "$ref": "#/$defs/selection"
         },
         "only": {
-          "description": "The only things of the module the compose takes; everything not named is left out. Not with exclude.",
+          "description": "The only things of the module the compose takes; everything not listed is left out. Not with exclude.",
           "$ref": "#/$defs/selection"
         },
         "variant": {"type": "string", "minLength": 1},
@@ -103,7 +103,7 @@
       }
     },
     "source": {
-      "description": "A directory; a git repository at a ref with the module's directory inside it; or a module the repository exports, named by module, with path or git and ref naming the repository.",
+      "description": "A directory; a git repository at a ref with the module's directory inside it; or a module the repository exports, selected by module, with path or git and ref defining the repository.",
       "type": "object",
       "additionalProperties": false,
       "properties": {

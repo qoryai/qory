@@ -2,8 +2,8 @@
 // directory for agents, hooks and settings files such as hooks.json, cli.json and
 // mcp.json, AGENTS.md at the checkout root, and skills from .agents/skills. All three are
 // linked into the checkout, and the MCP servers go into mcp.json as mcpServers. The model
-// is a global CLI setting in Cursor and is not written, and Cursor folded commands into
-// skills and has no output styles, so both kinds are skipped. A files entry named
+// is a global CLI setting in Cursor and is not written, and in Cursor commands are skills
+// and there are no output styles, so both kinds are skipped. A files entry named
 // cursor/<path> lands at .cursor/<path>, which is how a module ships a rule as
 // .cursor/rules/nextjs-15.mdc.
 //
@@ -18,10 +18,10 @@
 //	plugin            qory writes the plugin there
 //
 // The Cursor CLI also takes a plugin from outside the checkout, --plugin-dir, in the
-// layout Claude Code's plugins have, and the runtime's directory holds one at plugin/:
+// layout Claude Code's plugins have, and the runtime's directory contains one at plugin/:
 // the skills and the agents linked, and copies of hooks.json as hooks/hooks.json and of
 // mcp.json as .mcp.json, since the CLI has no flag for settings. The instructions are
-// read from the checkout alone. [Template] names the plugin, and the checkout's .cursor
+// read from the checkout alone. [Template] passes the plugin, and the checkout's .cursor
 // never links it.
 package cursor
 
@@ -33,8 +33,8 @@ import (
 	"github.com/qoryai/qory/internal/render"
 )
 
-// Plugin is the plugin's directory under the runtime's directory in the home, what
-// --plugin-dir names.
+// Plugin is the plugin's directory under the runtime's directory in the home, the value
+// of --plugin-dir.
 const Plugin = "plugin"
 
 // Runtime is the target.runtime value for Cursor, and the name of its directory in the
@@ -84,8 +84,8 @@ func (cursor) Reserved() []render.Reserved {
 // Render links the hook scripts, writes agents/<name>.md with the agent's name,
 // description and model, and writes the cursor settings files such as hooks.json,
 // cli.json and mcp.json, the last with the MCP servers under mcpServers when the compose
-// holds any. The target model reaches no file, because Cursor keeps the model in a global
-// CLI setting.
+// contains any. The target model reaches no file, because Cursor keeps the model in a
+// global CLI setting.
 func (cursor) Render(res *compose.Result, dir, home string) error {
 	if err := render.PlaceEntries(res, dir, render.Bare, "hooks"); err != nil {
 		return err
@@ -135,7 +135,7 @@ func renderPlugin(res *compose.Result, dir string) error {
 	return render.WriteJSON(plugin, filepath.Join(".cursor-plugin", "plugin.json"), map[string]any{"name": render.PluginName, "description": render.PluginDescription(res)})
 }
 
-// Template starts the Cursor CLI with the plugin, which carries the skills, the agents,
+// Template starts the Cursor CLI with the plugin, which contains the skills, the agents,
 // the hooks and the servers.
 func (cursor) Template() render.Template {
 	return render.Template{Command: "cursor-agent", Args: [][]string{{"--plugin-dir", "${dir}/" + Plugin}}}

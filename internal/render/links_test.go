@@ -311,7 +311,7 @@ func TestForceLeavesADirectoryHoldingIgnoredFiles(t *testing.T) {
 	}
 	_, err := render.LinkInto(claude, res, root, home, true)
 	var foreign *render.ForeignPathError
-	if !errorsAs(err, &foreign) || foreign.Reason != "holds files git does not track" {
+	if !errorsAs(err, &foreign) || foreign.Reason != "contains files git does not track" {
 		t.Fatalf("err = %v, want a refusal for the ignored file", err)
 	}
 	if data, _ := os.ReadFile(filepath.Join(root, ".claude", "skills", "scratch", "SKILL.md")); string(data) != "a day's work\n" {

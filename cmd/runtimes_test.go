@@ -78,8 +78,8 @@ func TestComposeKeepsARuntimeComposedEarlier(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, ui.Mark+" acme/app · codex", "(composed here earlier, refreshed)")
-	wantsRow(t, out, "claude", claudeLink+"  .mcp.json  (composed here earlier, refreshed)")
+	wants(t, out, ui.Mark+" acme/app · codex", "(composed here by a previous compose, refreshed)")
+	wantsRow(t, out, "claude", claudeLink+"  .mcp.json  (composed here by a previous compose, refreshed)")
 	linkedFor(t, root, "claude", "codex")
 	// The report names every runtime the home holds, the target first.
 	if rep := readReport(t, root); !slices.Equal(rep.Target.Runtimes, []string{"codex", "claude"}) {
@@ -177,8 +177,8 @@ func TestRemoveTakesEveryRuntimesLinks(t *testing.T) {
 func TestComposeRefusesATargetItCannotRender(t *testing.T) {
 	for _, c := range []struct{ name, runtime, want string }{
 		{"an unknown runtime in a list", "claude,nope", `runtime "nope" is not one this qory renders`},
-		{"the same runtime twice", "claude,claude", "target.runtime names claude twice"},
-		{"an empty name", "claude,", "target.runtime names an empty runtime"},
+		{"the same runtime twice", "claude,claude", "target.runtime lists claude twice"},
+		{"an empty name", "claude,", "target.runtime lists an empty runtime"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			root := newCheckout(t)

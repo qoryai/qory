@@ -46,7 +46,7 @@ func TestFileFlagNamesTheBaseOfTheCheckoutsDocument(t *testing.T) {
 		t.Fatalf("compose -f: %v\n%s", err, out)
 	}
 	wants(t, out, "claude opus", "composed")
-	wantsRow(t, out, "base", base+"  (named by -f, in place of extends https://git.example.com/acme/harness#v9:nextjs-15)")
+	wantsRow(t, out, "base", base+"  (set by -f, in place of extends https://git.example.com/acme/harness#v9:nextjs-15)")
 	wantsRow(t, out, "skipped", "qory.yaml  (its harness, git and env keys; the base stack decides under extends)")
 	rep := readReport(t, root)
 	rel, _ := filepath.Rel(root, filepath.Dir(base))
@@ -78,13 +78,13 @@ func TestDocumentLeavesExtendsOutForTheFlag(t *testing.T) {
 	if err == nil || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("without a base: err = %v, exit %d\n%s", err, cmd.ExitCode(err), out)
 	}
-	wants(t, err.Error(), "qory.yaml: harness names no target.runtime and no stack to extend", "leaves extends out for the base that qory harness compose -f <stack> names")
+	wants(t, err.Error(), "qory.yaml: harness sets no target.runtime and no stack to extend", "leaves extends out for the base that qory harness compose -f <stack> selects")
 	gone(t, root, ".qory", ".claude")
 	out, err = run(t, "harness", "compose", "-f", base, "--runtime", "claude")
 	if err != nil {
 		t.Fatalf("compose -f: %v\n%s", err, out)
 	}
-	wantsRow(t, out, "base", base+"  (named by -f)")
+	wantsRow(t, out, "base", base+"  (set by -f)")
 	rep := readReport(t, root)
 	if len(rep.Modules) != 3 || rep.Modules[2].Name != "app" || rep.Extensions["consumer"] == nil {
 		t.Fatalf("report: modules %+v, extensions %v", rep.Modules, rep.Extensions)
@@ -111,7 +111,7 @@ func TestFileFlagKeepsTheDocumentsTarget(t *testing.T) {
 		t.Fatalf("compose -f: %v\n%s", err, out)
 	}
 	wants(t, out, ui.Mark+" acme/app · codex sonnet")
-	wantsRow(t, out, "base", base+"  (named by -f)")
+	wantsRow(t, out, "base", base+"  (set by -f)")
 	rep := readReport(t, root)
 	if rep.Base == nil || !slices.Equal(rep.Target.Runtimes, []string{"codex"}) || rep.Target.Model != "sonnet" || len(rep.Modules) != 3 {
 		t.Fatalf("report: base %+v, target %+v, modules %+v", rep.Base, rep.Target, rep.Modules)
@@ -155,7 +155,7 @@ func TestHarnessYamlIsTheDocumentsOtherName(t *testing.T) {
 	writeFile(t, filepath.Join(root, "qory.yaml"), "worktree: {base: main}\n")
 	for _, args := range [][]string{{"harness", "compose"}, {"config"}} {
 		_, err = run(t, args...)
-		if err == nil || !strings.Contains(err.Error(), root+" holds both qory.yaml and harness.yaml; a directory holds one of the two") {
+		if err == nil || !strings.Contains(err.Error(), root+" contains both qory.yaml and harness.yaml; a directory contains one of the two") {
 			t.Fatalf("%s with both names: %v", strings.Join(args, " "), err)
 		}
 	}
@@ -178,7 +178,7 @@ func TestWorktreeAddTakesTheBaseFromTheFlag(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	wt := filepath.Join(filepath.Dir(root), "wt-feature")
-	wantsRow(t, out, "base", base+"  (named by -f)")
+	wantsRow(t, out, "base", base+"  (set by -f)")
 	wantsRow(t, out, "skipped", "harness.yaml  (its harness, git and env keys; the base stack decides under extends)")
 	rep := readReport(t, wt)
 	if len(rep.Modules) != 3 || rep.Modules[2].Name != "app" || rep.Base == nil || rep.Extensions["consumer"] == nil {
@@ -188,7 +188,7 @@ func TestWorktreeAddTakesTheBaseFromTheFlag(t *testing.T) {
 		t.Errorf("the worktree's own skill is not composed: %v", err)
 	}
 	out, err = run(t, "wa", "other")
-	if err == nil || cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "leaves extends out for the base that qory harness compose -f <stack> names") {
+	if err == nil || cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "leaves extends out for the base that qory harness compose -f <stack> selects") {
 		t.Fatalf("without the flag: err = %v, exit %d\n%s", err, cmd.ExitCode(err), out)
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(root), "wt-other", "harness.yaml")); err != nil {
