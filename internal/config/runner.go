@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -546,10 +547,14 @@ func (r *Runner) Rows() []Row {
 			}
 			rows = append(rows, Row{"runner.credentials." + c.Name, from, origin})
 		}
+		shadowed := r.Shadowed()
 		for _, in := range r.Integrations {
 			program := in.Program
 			if in.Path != "" {
 				program = in.Path + " " + in.Version
+			}
+			if slices.Contains(shadowed, in.Key) {
+				program += ", shadowed by credentials." + in.Key
 			}
 			rows = append(rows, Row{"runner.integrations." + in.Key, program, origin})
 		}

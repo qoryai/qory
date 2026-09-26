@@ -272,7 +272,7 @@
         "additionalProperties": false,
         "properties": {
           "program": {
-            "description": "The program: an absolute path, or a name looked up on the PATH. Default qory-<key>.",
+            "description": "The program: an absolute path, or a name looked up on the PATH. Default qory-<key>. qory runs it from outside the checkout, where only its owner may change it.",
             "type": "string",
             "minLength": 1,
             "pattern": "^(/|[^/]*$)"

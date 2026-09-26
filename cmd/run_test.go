@@ -294,10 +294,13 @@ func TestRunRefusesWhatItCannotStart(t *testing.T) {
 	}
 }
 
-// TestRunExpandsTheIntegrationsTheMachineDeclares declares an integration found on the
-// PATH: qory config runs its describe and lists it and the credential it defines, and a
-// run starts with that credential defined. One that does not describe stops the run
-// before it starts, with the program's line, and leaves no record.
+// TestRunExpandsTheIntegrationsTheMachineDeclares declares integrations found on the
+// PATH. qory config describes every one and lists it and the credential it defines. A
+// run under a policy of its own describes the ones the policy selects and names the
+// program it found: one that does not describe stops the run before it starts, with the
+// program's line, and leaves no record, and one the policy does not select is not
+// described. With a server, which supplies the policy, every one is described. A name
+// the credentials section defines as well is named on a line of its own.
 func TestRunExpandsTheIntegrationsTheMachineDeclares(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -311,29 +314,71 @@ func TestRunExpandsTheIntegrationsTheMachineDeclares(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	tracker, err := filepath.EvalSymlinks(filepath.Join(bin, "qory-tracker"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := filepath.Join(filepath.Dir(tracker), "qory-broken")
 	file := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml")
 	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\nintegrations:\n  tracker: {settings: {project: SHOP}}\n")
 	out, err := run(t, "config")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "runner.credentials.tracker", "integration tracker", "runner.integrations.tracker", filepath.Join(bin, "qory-tracker")+" 0.3.0")
+	wants(t, out, "runner.credentials.tracker", "integration tracker", "runner.integrations.tracker", tracker+" 0.3.0")
+	policy := func(name string) string {
+		path := filepath.Join(t.TempDir(), "policy.yaml")
+		writeFile(t, path, "version: 1\negress:\n  mode: observe\ncredentials:\n  - {name: "+name+", argument: SHOP}\n")
+		return path
+	}
 	t.Setenv("QORY_TEST_EXIT", "0")
-	if out, err := run(t, "run"); err != nil {
-		t.Fatalf("%v\n%s", err, out)
+	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\nintegrations:\n  tracker: {settings: {project: SHOP}}\n  broken: {}\n")
+	out, err = run(t, "run")
+	if err != nil {
+		t.Fatalf("a run that selects no integration: %v\n%s", err, out)
+	}
+	lacks(t, out, "integration tracker", "integration broken")
+	if err := os.RemoveAll(filepath.Join(root, ".qory", "runs")); err != nil {
+		t.Fatal(err)
+	}
+	// A policy that selects a credential needs a wall, which the runner asks for once
+	// the integration it selects is described.
+	out, err = run(t, "run", "--policy", policy("tracker"))
+	wants(t, out, "qory run: integration tracker: "+tracker+" 0.3.0\n")
+	lacks(t, out, "integration broken")
+	if err == nil || !strings.Contains(err.Error(), "need a wall") {
+		t.Errorf("a run that selects tracker: %v", err)
 	}
 	if err := os.RemoveAll(filepath.Join(root, ".qory", "runs")); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\nintegrations:\n  broken: {}\n")
-	for _, verb := range []string{"run", "config"} {
-		if _, err := run(t, verb); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "runner.yaml: integrations.broken: "+filepath.Join(bin, "qory-broken")+" describe: exit status 1: the settings file is missing") {
-			t.Errorf("%s with an integration that does not describe: %v", verb, err)
-		}
+	want := "runner.yaml: integrations.broken: " + broken + " describe: exit status 1: the settings file is missing"
+	if _, err := run(t, "run", "--policy", policy("broken")); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), want) {
+		t.Errorf("a run that selects broken: %v", err)
+	}
+	if _, err := run(t, "config"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), want) {
+		t.Errorf("config with an integration that does not describe: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".qory", "runs")); !errors.Is(err, os.ErrNotExist) {
 		t.Error("a run that did not start left a record")
 	}
+	srv := newFakeServer(t, "")
+	serverFile(t, srv, "integrations:\n  broken: {}\n")
+	if _, err := run(t, "run"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), want) {
+		t.Errorf("a run whose policy the server supplies: %v", err)
+	}
+	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\ncredentials:\n  tracker:\n    env: TRACKER_TOKEN\n    hosts: [tracker.acme.example]\n    auth: {scheme: bearer}\nintegrations:\n  tracker: {settings: {project: SHOP}}\n")
+	line := "runner.yaml: credentials.tracker defines the credential tracker, and integrations.tracker defines none\n"
+	out, err = run(t, "config")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "qory config: "+line, tracker+" 0.3.0, shadowed by credentials.tracker")
+	out, err = run(t, "run")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "qory run: "+line)
 }
 
 // TestForwardHandsAHookToTheRun is the hidden forward verb: it sends its stdin to the

@@ -126,12 +126,16 @@ paths the same way with no credential.
 An integration is an adapter published apart that describes itself: Qory's own
 qory-<name>, qory-github say, or a program of yours. The integrations section of
 ` + config.RunnerFileName + ` declares each under a key with its settings, and names its program
-when it is not qory-<key> on the PATH. Before a run qory runs <program> describe, checks
-the settings against the description, and defines the credential named by the key, with
-the adapter <program> credential --settings <json> -- ${argument}. A policy selects it
-by the key like any other. The settings go on that command line, so a secret among them
-is refused and given as the file that holds it. A name the credentials section defines
-itself is the section's. An integration that does not describe, or whose settings its
+when it is not qory-<key> on the PATH; where the PATH is not the machine owner's alone,
+program names it by its absolute path. qory runs a program outside the checkout that
+only its owner may change, and names the program it found on a line of its own. Before
+a run qory runs <program> describe for each integration the run's policy selects, every
+one when the server supplies the policy, checks the settings against the description,
+and defines the credential named by the key, with the adapter <program> credential
+--settings <json> -- ${argument}. A policy selects it by the key like any other. The
+settings go on that command line, so a secret among them is refused and given as the
+file that holds it. A name the credentials section defines itself is the section's,
+and a line says so. An integration that does not describe, or whose settings its
 description refuses, means no run.
 
 A caller that starts runs for a system of its own names them: --run-id gives the run
@@ -263,8 +267,16 @@ every run on the machine; --timeout 0 lifts the file's.
 				StopGrace:     grace,
 			}
 			if r := conf.Runner; r != nil {
-				if err := r.Expand(ctx); err != nil {
+				for _, key := range r.Shadowed() {
+					fmt.Fprintln(stderr, "qory run:", shadowed(key))
+				}
+				if err := r.Expand(ctx, expansion(pol, server != nil && !local, at.root, cwd)); err != nil {
 					return input(err)
+				}
+				for _, in := range r.Integrations {
+					if in.Path != "" {
+						fmt.Fprintf(stderr, "qory run: integration %s: %s %s\n", in.Key, in.Path, in.Version)
+					}
 				}
 				for _, c := range r.Credentials {
 					def := session.Credential{Name: c.Name, Env: c.Env, File: c.File, Adapter: c.Adapter, Argument: c.Argument, Hosts: c.Hosts, Scheme: c.Scheme, Username: c.Username, Header: c.Header, Paths: c.Paths, Placeholders: c.Placeholders}
@@ -327,6 +339,32 @@ every run on the machine; --timeout 0 lifts the file's.
 	homeFlags(c, &h)
 	c.AddCommand(newResend(), newForward(), newRelay())
 	return c
+}
+
+// expansion is what a run describes of the integrations the runner file declares. A
+// policy this process holds names the credentials the run selects, so the integrations
+// it selects are the ones described; a policy the server supplies arrives once the
+// runner starts, so every declared integration is described before it does. A program
+// in the checkout or the working directory is refused.
+func expansion(pol *session.Policy, fromServer bool, root, cwd string) config.Expansion {
+	e := config.Expansion{Workspace: []string{root, cwd}}
+	if fromServer {
+		return e
+	}
+	selected := map[string]bool{}
+	if pol != nil {
+		for _, c := range pol.Credentials {
+			selected[c.Name] = true
+		}
+	}
+	e.Only = func(key string) bool { return selected[key] }
+	return e
+}
+
+// shadowed is the line that says the credentials section defines the credential an
+// integration of the same key would.
+func shadowed(key string) string {
+	return fmt.Sprintf("%s: credentials.%s defines the credential %s, and integrations.%s defines none", config.RunnerFileName, key, key, key)
 }
 
 // wallOptions are the run verb's wall flags.

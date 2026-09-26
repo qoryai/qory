@@ -84,12 +84,16 @@ paths the same way with no credential.
 An integration is an adapter published apart that describes itself: Qory's own
 qory-<name>, qory-github say, or a program of yours. The integrations section of
 runner.yaml declares each under a key with its settings, and names its program
-when it is not qory-<key> on the PATH. Before a run qory runs <program> describe, checks
-the settings against the description, and defines the credential named by the key, with
-the adapter <program> credential --settings <json> -- ${argument}. A policy selects it
-by the key like any other. The settings go on that command line, so a secret among them
-is refused and given as the file that holds it. A name the credentials section defines
-itself is the section's. An integration that does not describe, or whose settings its
+when it is not qory-<key> on the PATH; where the PATH is not the machine owner's alone,
+program names it by its absolute path. qory runs a program outside the checkout that
+only its owner may change, and names the program it found on a line of its own. Before
+a run qory runs <program> describe for each integration the run's policy selects, every
+one when the server supplies the policy, checks the settings against the description,
+and defines the credential named by the key, with the adapter <program> credential
+--settings <json> -- ${argument}. A policy selects it by the key like any other. The
+settings go on that command line, so a secret among them is refused and given as the
+file that holds it. A name the credentials section defines itself is the section's,
+and a line says so. An integration that does not describe, or whose settings its
 description refuses, means no run.
 
 A caller that starts runs for a system of its own names them: --run-id gives the run

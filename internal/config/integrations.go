@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -170,46 +172,59 @@ func writeJSON(b *bytes.Buffer, n *yaml.Node, at string) error {
 	return nil
 }
 
-// writeString writes s as a JSON string, with <, > and & as they are.
+// writeString writes s as a JSON string as encoding/json's Marshal writes it, with <,
+// >, &, U+2028 and U+2029 escaped: the bytes qory-github setup prints for the same
+// settings.
 func writeString(b *bytes.Buffer, s string) {
-	enc := json.NewEncoder(b)
-	enc.SetEscapeHTML(false)
-	_ = enc.Encode(s)
-	b.Truncate(b.Len() - 1) // the newline Encode ends with
+	out, _ := json.Marshal(s)
+	b.Write(out)
 }
 
-// Expand describes every integration the file declares and adds the credentials they
-// define to r.Credentials, after the file's own, in the section's order. For each it
-// finds the program, runs <program> describe as [integration.Describe] does, and checks
-// the settings against the description; a program that is not found or does not answer,
-// settings the description refuses, and an integration that plays no role qory knows
-// are errors naming the file and the key. The credential role defines the credential
-// named by the key, with the adapter [integration.CredentialAdapter] gives, unless the
-// file's credentials section defines that name itself: then the file's definition
-// stands, and the integration's credential is not defined. A role qory does not know is
-// left alone. Expand runs once; later calls do nothing.
-func (r *Runner) Expand(ctx context.Context) error {
+// Expansion says which integrations [Runner.Expand] describes, and where their programs
+// may not be.
+type Expansion struct {
+	// Workspace are the directories a run works in, its checkout among them. A program
+	// in one of them, or under one, is refused: a repository may not choose what runs
+	// with the machine's credentials.
+	Workspace []string
+	// Only, when set, says which integrations are described, by key: the ones a run's
+	// policy selects. Nil describes every one.
+	Only func(key string) bool
+}
+
+// Expand describes the integrations the file declares, every one or the ones
+// [Expansion.Only] names, and adds the credentials they define to r.Credentials, after
+// the file's own, in the section's order. For each it finds the program, runs <program>
+// describe as [integration.Describe] does, and checks the settings against the
+// description. The program is found by its absolute path, or on the PATH, and is
+// refused in a directory of [Expansion.Workspace] and where users other than its owner
+// may change it. A program that is not found or does not answer, settings the description refuses, and an integration that
+// plays no role qory knows are errors naming the file and the key. The credential role
+// defines the credential named by the key, with the adapter
+// [integration.CredentialAdapter] gives, unless the file's credentials section defines
+// that name itself: then the file's definition stands, [Runner.Shadowed] names the key,
+// and the integration's credential is not defined. A role qory does not know is left
+// alone. Once Expand succeeds, later calls do nothing; after an error, a later call
+// describes again.
+func (r *Runner) Expand(ctx context.Context, e Expansion) error {
 	if r == nil || r.expanded {
 		return nil
 	}
-	r.expanded = true
 	own := map[string]bool{}
 	for _, c := range r.Credentials {
 		own[c.Name] = true
 	}
+	var defined []RunnerCredential
 	for i := range r.Integrations {
 		in := &r.Integrations[i]
+		if e.Only != nil && !e.Only(in.Key) {
+			continue
+		}
 		fail := func(format string, a ...any) error {
 			return fmt.Errorf("%s: integrations.%s: %s", r.File, in.Key, fmt.Sprintf(format, a...))
 		}
-		found, err := exec.LookPath(in.Program)
+		found, err := program(in.Program, e.Workspace)
 		if err != nil {
-			if filepath.IsAbs(in.Program) {
-				return fail("%s is not a program this user may run", in.Program)
-			}
-			return fail("%s is not on the PATH; install it there, or name the program by its path with program", in.Program)
-		}
-		if found, err = filepath.Abs(found); err != nil {
 			return fail("%v", err)
 		}
 		d, err := integration.Describe(ctx, found)
@@ -219,10 +234,10 @@ func (r *Runner) Expand(ctx context.Context) error {
 		if err := d.CheckSettings(in.Settings); err != nil {
 			return fail("%v", err)
 		}
-		in.Path, in.Version = found, d.ProgramVersion
 		if d.Credential == nil {
 			return fail("%s plays no role qory knows, %s, and would define nothing", in.Program, strings.Join(d.Roles, ", "))
 		}
+		in.Path, in.Version = found, d.ProgramVersion
 		if own[in.Key] {
 			continue
 		}
@@ -230,7 +245,77 @@ func (r *Runner) Expand(ctx context.Context) error {
 		if err := (session.Credential{Name: c.Name, Adapter: c.Adapter, Argument: c.Argument, Hosts: c.Hosts}).Check(); err != nil {
 			return fail("%v", err)
 		}
-		r.Credentials = append(r.Credentials, c)
+		defined = append(defined, c)
 	}
+	r.Credentials = append(r.Credentials, defined...)
+	r.expanded = true
 	return nil
+}
+
+// Shadowed are the keys of the integrations whose name the file's credentials section
+// defines itself, in the section's order: the section's definition is the one a run
+// holds.
+func (r *Runner) Shadowed() []string {
+	if r == nil {
+		return nil
+	}
+	var out []string
+	for _, in := range r.Integrations {
+		for _, c := range r.Credentials {
+			if c.Name == in.Key && c.Integration == "" {
+				out = append(out, in.Key)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// program finds an integration's program: name itself when it is an absolute path,
+// else the first of that name in a directory of the PATH. The path returned has its
+// symbolic links resolved, so the file checked is the file started. It refuses a
+// program in or under a directory of workspace, and a program that a group or other
+// users may write, or whose directory they may write, where it is found or where its
+// links lead.
+func program(name string, workspace []string) (string, error) {
+	found, err := exec.LookPath(name)
+	switch {
+	case errors.Is(err, exec.ErrDot):
+		return "", fmt.Errorf("%s is found at %s, through a relative directory of the PATH; qory runs a program from an absolute directory of the PATH, or named by its absolute path with program", name, found)
+	case err != nil && filepath.IsAbs(name):
+		return "", fmt.Errorf("%s is not a program this user may run", name)
+	case err != nil:
+		return "", fmt.Errorf("%s is not on the PATH; install it there, or name the program by its path with program", name)
+	}
+	if found, err = filepath.Abs(found); err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(found)
+	if err != nil {
+		return "", err
+	}
+	for _, dir := range workspace {
+		if dir == "" {
+			continue
+		}
+		if d, err := filepath.EvalSymlinks(dir); err == nil && within(d, resolved) {
+			return "", fmt.Errorf("%s is %s, inside %s, where a run works; qory runs an integration from outside the checkout", name, resolved, dir)
+		}
+	}
+	for _, p := range []string{filepath.Dir(found), resolved, filepath.Dir(resolved)} {
+		info, err := os.Stat(p)
+		if err != nil {
+			return "", err
+		}
+		if info.Mode().Perm()&0o022 != 0 {
+			return "", fmt.Errorf("%s is %s, and %s may be written by users other than its owner; qory runs a program only its owner may change", name, resolved, p)
+		}
+	}
+	return resolved, nil
+}
+
+// within reports whether path is dir or under it; both are clean absolute paths.
+func within(dir, path string) bool {
+	rel, err := filepath.Rel(dir, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

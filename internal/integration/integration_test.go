@@ -1,8 +1,10 @@
 package integration_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,16 +97,109 @@ func TestSettingsAreCheckedWithoutTheirValues(t *testing.T) {
 
 // TestTheCredentialAdapterIsTheContracts is the credential role's adapter: the program,
 // credential, --settings and the settings as one word, -- and ${argument}, with every $
-// of the settings written $, which still reads as the same JSON.
+// of the settings written as JSON's six-character escape for it, which still reads as
+// the same JSON and leaves no $ in the word for the runner to replace.
 func TestTheCredentialAdapterIsTheContracts(t *testing.T) {
-	settings := `{"private_key_file":"/keys/${argument}/$HOME.pem"}`
+	escape := string([]byte{'\\', 'u', '0', '0', '2', '4'})
+	if integration.DollarEscape != escape {
+		t.Fatalf("DollarEscape is %q, want %q", integration.DollarEscape, escape)
+	}
+	settings := `{"private_key_file":"/keys/${argument}/$HOME.pem","team":"$team"}`
 	got := integration.CredentialAdapter("/usr/local/bin/qory-github", []byte(settings))
-	want := []string{"/usr/local/bin/qory-github", "credential", "--settings", `{"private_key_file":"/keys/${argument}/$HOME.pem"}`, "--", "${argument}"}
+	word := `{"private_key_file":"/keys/` + escape + `{argument}/` + escape + `HOME.pem","team":"` + escape + `team"}`
+	want := []string{"/usr/local/bin/qory-github", "credential", "--settings", word, "--", "${argument}"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("adapter %q, want %q", got, want)
 	}
-	var a, b any
-	if json.Unmarshal([]byte(got[3]), &a) != nil || json.Unmarshal([]byte(settings), &b) != nil || a.(map[string]any)["private_key_file"] != b.(map[string]any)["private_key_file"] {
+	if strings.Contains(got[3], "$") || !bytes.Equal([]byte(got[3]), []byte(word)) || strings.Count(got[3], escape) != 3 {
+		t.Errorf("the settings word %q holds a $, or is not %q byte for byte", got[3], word)
+	}
+	var a, b map[string]any
+	if json.Unmarshal([]byte(got[3]), &a) != nil || json.Unmarshal([]byte(settings), &b) != nil || a["private_key_file"] != b["private_key_file"] || a["team"] != "$team" {
 		t.Errorf("the escaped settings read as %v, want %v", a, b)
+	}
+}
+
+// withSettings is the acme-tracker fixture with settings as its settings schema.
+func withSettings(t *testing.T, settings string) string {
+	t.Helper()
+	doc, err := os.ReadFile("testdata/fixtures/acme-tracker.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Replace(string(doc), `"settings": {"type": "object"}`, `"settings": `+settings, 1)
+}
+
+// TestASecretIsAPropertyOfTheSettingsThemselves takes writeOnly on a property of the
+// settings schema's own properties and refuses it anywhere else, wherever the schema
+// nests it: under a nested object, behind a $ref into $defs, in an allOf, in items, and
+// on the settings schema itself.
+func TestASecretIsAPropertyOfTheSettingsThemselves(t *testing.T) {
+	if _, err := integration.Describe(context.Background(), program(t, withSettings(t, `{"type": "object", "properties": {"token": {"type": "string", "writeOnly": true}}}`))); err != nil {
+		t.Errorf("a secret of the settings themselves: %v", err)
+	}
+	for _, c := range []struct{ settings, at string }{
+		{`{"type": "object", "properties": {"auth": {"type": "object", "properties": {"token": {"type": "string", "writeOnly": true}}}}}`, "/properties/auth/properties/token"},
+		{`{"type": "object", "properties": {"auth": {"$ref": "#/$defs/auth"}}, "$defs": {"auth": {"type": "object", "properties": {"token": {"writeOnly": true}}}}}`, "/$defs/auth/properties/token"},
+		{`{"type": "object", "allOf": [{"properties": {"token": {"type": "string", "writeOnly": true}}}]}`, "/allOf/0/properties/token"},
+		{`{"type": "object", "properties": {"tokens": {"type": "array", "items": {"type": "string", "writeOnly": true}}}}`, "/properties/tokens/items"},
+		{`{"type": "object", "if": {"required": ["a"]}, "then": {"properties": {"b": {"writeOnly": true}}}}`, "/then/properties/b"},
+		{`{"type": "object", "additionalProperties": {"writeOnly": true}}`, "/additionalProperties"},
+		{`{"type": "object", "writeOnly": true}`, "/"},
+	} {
+		_, err := integration.Describe(context.Background(), program(t, withSettings(t, c.settings)))
+		if err == nil || !strings.Contains(err.Error(), "the settings schema marks "+c.at+" writeOnly; a secret is a property of the settings themselves") {
+			t.Errorf("%s: %v, want a refusal naming %s", c.settings, err, c.at)
+		}
+	}
+}
+
+// TestTheSettingsSchemaIsDraft2020 takes a settings schema that names draft 2020-12 or
+// no draft, and refuses one that names another.
+func TestTheSettingsSchemaIsDraft2020(t *testing.T) {
+	for _, settings := range []string{`{"type": "object"}`, `{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object"}`} {
+		if _, err := integration.Describe(context.Background(), program(t, withSettings(t, settings))); err != nil {
+			t.Errorf("%s: %v", settings, err)
+		}
+	}
+	settings := `{"$schema": "http://json-schema.org/draft-07/schema#", "type": "object"}`
+	if _, err := integration.Describe(context.Background(), program(t, withSettings(t, settings))); err == nil || !strings.Contains(err.Error(), "the settings schema is written in http://json-schema.org/draft-07/schema#; the integration contract takes draft 2020-12") {
+		t.Errorf("draft-07: %v", err)
+	}
+}
+
+// script writes a program with body after its #! line.
+func script(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "describe")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// TestDescribeKeepsWhatItQuotesShort runs describe in /, refuses a program that prints
+// more than the cap, and quotes the first line of a failure's standard error cut to 200
+// runes, every character that does not print as ?.
+func TestDescribeKeepsWhatItQuotesShort(t *testing.T) {
+	doc, _ := os.ReadFile("testdata/fixtures/acme-tracker.json")
+	d, err := integration.Describe(context.Background(), script(t, "cat <<EOF\n"+strings.Replace(string(doc), `"0.1.0"`, `"$(pwd)"`, 1)+"\nEOF\n"))
+	if err != nil || d.ProgramVersion != "/" {
+		t.Errorf("describe ran in %+v, %v; want /", d, err)
+	}
+	_, err = integration.Describe(context.Background(), script(t, fmt.Sprintf("head -c %d /dev/zero\n", integration.MaxOutput+1)))
+	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("describe printed more than %d bytes", integration.MaxOutput)) {
+		t.Errorf("more than the cap: %v", err)
+	}
+	if _, err := integration.Describe(context.Background(), script(t, fmt.Sprintf("head -c %d /dev/zero | tr '\\0' ' '\necho '{}'\n", integration.MaxOutput-10))); err == nil || !strings.Contains(err.Error(), "a description the integration contract refuses") {
+		t.Errorf("just under the cap is read: %v", err)
+	}
+	_, err = integration.Describe(context.Background(), script(t, "printf 'bad\\033thing\\n' >&2\nexit 1\n"))
+	if err == nil || !strings.HasSuffix(err.Error(), "exit status 1: bad?thing") {
+		t.Errorf("a control character: %v", err)
+	}
+	_, err = integration.Describe(context.Background(), script(t, "printf '%0300d\\n' 0 | tr 0 x >&2\nexit 1\n"))
+	if err == nil || !strings.HasSuffix(err.Error(), "exit status 1: "+strings.Repeat("x", 200)+"...") {
+		t.Errorf("a long line: %v", err)
 	}
 }

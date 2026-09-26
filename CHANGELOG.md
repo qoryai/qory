@@ -11,16 +11,25 @@ release may change what an existing document does, and says so under Upgrading.
 - The `integrations` section of `runner.yaml` declares the integrations a machine uses,
   each a program that speaks the integration contract of qoryai/integrations, under a
   key: `program`, an absolute path or a name on the `PATH`, `qory-<key>` when absent, and
-  `settings`. `qory run` and `qory config` run `<program> describe`, check the settings
-  against the description, and define the credential named by the key, whose adapter is
+  `settings`. `qory` runs `<program> describe`, checks the settings against the
+  description, and defines the credential named by the key, whose adapter is
   `<program> credential --settings <json> -- ${argument}` and whose `argument` and
-  `hosts` are the description's. `qory` holds no table of integrations: Qory's own
-  `qory-github` and a program of yours are found and set up the same way. A value of a
-  setting the description marks `writeOnly` is refused, since the settings go on a
-  command line; its `<name>_file` gives the file that holds it. A name the
-  `credentials` section defines itself is the section's. A program that does not
-  describe within 10 seconds, settings its description refuses, and an integration that
-  plays no role `qory` knows stop the run before it starts, with the program's own line.
+  `hosts` are the description's. The settings word is byte for byte what
+  `qory-github setup` prints, every `$` written `\u0024`. `qory` holds no table of
+  integrations: Qory's own `qory-github` and a program of yours are found and set up the
+  same way. `qory run` describes the integrations the run's policy selects, every one
+  when the server supplies the policy, and names each program it found; `qory config`
+  describes every one. A program runs from outside the checkout, where only its owner
+  may change it, the file and its directory, with its links followed; on a machine
+  whose `PATH` is not its owner's alone, `program` names it by its absolute path.
+  `describe` runs in `/`, in a process group of its own that is stopped with it. A
+  settings schema is draft 2020-12 and marks a secret `writeOnly` on a property of the
+  settings themselves; a value of a secret is refused, since the settings go on a
+  command line, and its `<name>_file` gives the file that holds it. A name the
+  `credentials` section defines itself is the section's, and `qory run` and
+  `qory config` say so. A program that does not describe within 10 seconds, settings
+  its description refuses, and an integration that plays no role `qory` knows stop the
+  run before it starts, with the program's own line.
 
 ## [0.11.0] - 2026-09-24
 

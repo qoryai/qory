@@ -1,7 +1,9 @@
 package config_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +27,10 @@ func fixture(t *testing.T, name string) string {
 	return string(b)
 }
 
+// dollar is JSON's escape for $, the six characters an adapter's settings word holds in
+// place of each $.
+var dollar = string([]byte{'\\', 'u', '0', '0', '2', '4'})
+
 // setupPrints is what qory-github setup prints for the runner file, as the
 // integrations README has it at 48a655307774073553a3ce9de5bbc30bdf9a09a6: the definition
 // the declaration below expands to.
@@ -35,22 +41,42 @@ const setupPrints = `credentials:
     hosts: [github.com, api.github.com]
 `
 
-// fakeIntegration writes a program named name into dir that prints doc for describe,
-// and exits 64 for anything else.
+// fakeIntegration writes a program named name into dir, which only its owner may
+// write, that prints doc for describe and exits 64 for anything else, and returns its
+// path with its links resolved.
 func fakeIntegration(t *testing.T, dir, name, doc string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	write := "#!/bin/sh\ntest \"$1\" = describe || exit 64\ncat <<'EOF'\n" + doc + "\nEOF\n"
 	if err := os.WriteFile(path, []byte(write), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	return path
+	return resolved(t, path)
+}
+
+// resolved is path with its symbolic links resolved, the path Expand starts a program by.
+func resolved(t *testing.T, path string) string {
+	t.Helper()
+	r, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
 }
 
 // onPath puts a new directory at the head of the PATH and returns it.
 func onPath(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return dir
 }
@@ -62,7 +88,7 @@ func expand(t *testing.T) (*config.Runner, error) {
 	if err != nil {
 		return nil, err
 	}
-	return c.Runner, c.Runner.Expand(context.Background())
+	return c.Runner, c.Runner.Expand(context.Background(), config.Expansion{})
 }
 
 // TestAnIntegrationExpandsAsItsSetupPrints declares qory-github with no program, finds
@@ -97,7 +123,7 @@ func TestAnIntegrationExpandsAsItsSetupPrints(t *testing.T) {
 	}
 	rows := map[string]config.Row{}
 	c, _ := config.Load(t.TempDir(), true)
-	if err := c.Runner.Expand(context.Background()); err != nil {
+	if err := c.Runner.Expand(context.Background(), config.Expansion{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, row := range c.Rows() {
@@ -112,7 +138,7 @@ func TestAnIntegrationExpandsAsItsSetupPrints(t *testing.T) {
 
 // TestAnIntegrationOfYourOwnIsNamedByItsPath declares a machine's own program by its
 // path, under a key other than its name, with no settings, and keeps the settings'
-// order as written, every $ in them written $.
+// order as written, every $ in them written as JSON's six-character escape for it.
 func TestAnIntegrationOfYourOwnIsNamedByItsPath(t *testing.T) {
 	hermetic(t)
 	program := fakeIntegration(t, t.TempDir(), "acme-tracker", fixture(t, "acme-tracker.json"))
@@ -126,9 +152,12 @@ func TestAnIntegrationOfYourOwnIsNamedByItsPath(t *testing.T) {
 	}
 	for i, want := range []struct{ name, settings string }{
 		{"tracker", `{}`},
-		{"board", `{"url":"https://tracker.acme.example/$team","depth":2,"labels":["a","b"],"nested":{"on":true,"none":null,"ratio":1.5}}`},
+		{"board", `{"url":"https://tracker.acme.example/` + dollar + `team","depth":2,"labels":["a","b"],"nested":{"on":true,"none":null,"ratio":1.5}}`},
 	} {
 		c := r.Credentials[i]
+		if strings.Contains(c.Adapter[3], "$") {
+			t.Errorf("%s: the settings word %q holds a $", want.name, c.Adapter[3])
+		}
 		adapter := []string{program, "credential", "--settings", want.settings, "--", "${argument}"}
 		if c.Name != want.name || strings.Join(c.Adapter, "\n") != strings.Join(adapter, "\n") || c.Argument != "[A-Z]+" || strings.Join(c.Hosts, " ") != "tracker.acme.example" {
 			t.Errorf("%s expanded to %+v, want the adapter %q", want.name, c, adapter)
@@ -137,11 +166,12 @@ func TestAnIntegrationOfYourOwnIsNamedByItsPath(t *testing.T) {
 }
 
 // TestTheFilesOwnCredentialWins declares an integration under a name the credentials
-// section defines too: the file's definition stands, and the integration is still
-// described and its settings checked.
+// section defines too: the file's definition stands, Shadowed names the key, config
+// lists the integration as shadowed, and the integration is still described and its
+// settings checked.
 func TestTheFilesOwnCredentialWins(t *testing.T) {
 	hermetic(t)
-	fakeIntegration(t, onPath(t), "qory-github", fixture(t, "github.json"))
+	program := fakeIntegration(t, onPath(t), "qory-github", fixture(t, "github.json"))
 	runnerFile(t, "credentials:\n  github:\n    env: GH_TOKEN\n    hosts: [api.github.com]\n    auth: {scheme: bearer}\nintegrations:\n  github: {settings: {app_id: 1, private_key_file: /k.pem}}\n")
 	r, err := expand(t)
 	if err != nil {
@@ -150,9 +180,151 @@ func TestTheFilesOwnCredentialWins(t *testing.T) {
 	if len(r.Credentials) != 1 || r.Credentials[0].Env != "GH_TOKEN" || r.Credentials[0].Integration != "" {
 		t.Errorf("credentials %+v", r.Credentials)
 	}
+	if got := r.Shadowed(); len(got) != 1 || got[0] != "github" {
+		t.Errorf("shadowed %v", got)
+	}
+	for _, row := range r.Rows() {
+		if row.Key == "runner.integrations.github" && row.Value != program+" dev, shadowed by credentials.github" {
+			t.Errorf("row %+v", row)
+		}
+	}
 	runnerFile(t, "credentials:\n  github:\n    env: GH_TOKEN\n    hosts: [api.github.com]\n    auth: {scheme: bearer}\nintegrations:\n  github: {settings: {app_id: 1}}\n")
 	if _, err := expand(t); err == nil || !strings.Contains(err.Error(), "settings.private_key_file is required") {
 		t.Errorf("settings of a shadowed integration: %v", err)
+	}
+	runnerFile(t, "integrations:\n  github: {settings: {app_id: 1, private_key_file: /k.pem}}\n")
+	if r, err := expand(t); err != nil || len(r.Shadowed()) != 0 {
+		t.Errorf("an integration alone is shadowed: %v, %v", r.Shadowed(), err)
+	}
+}
+
+// TestTheSettingsWordIsWhatSetupPrints writes settings with $, &, <, > and the two
+// Unicode line separators as qory-github setup writes them, encoding/json's escapes,
+// then each $ as its escape: byte for byte the word setup prints.
+func TestTheSettingsWordIsWhatSetupPrints(t *testing.T) {
+	hermetic(t)
+	fakeIntegration(t, onPath(t), "qory-github", fixture(t, "github.json"))
+	key := "/k/a&b<c>$d" + string(rune(0x2028)) + string(rune(0x2029)) + ".pem"
+	runnerFile(t, "integrations:\n  github:\n    settings: {app_id: 123456, private_key_file: \"/k/a&b<c>$d\\L\\P.pem\"}\n")
+	r, err := expand(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := func(hex string) string { return string([]byte{'\\', 'u'}) + hex }
+	golden := `{"app_id":123456,"private_key_file":"/k/a` + u("0026") + `b` + u("003c") + `c` + u("003e") + dollar + `d` + u("2028") + u("2029") + `.pem"}`
+	settings, err := json.Marshal(struct {
+		AppID          int64  `json:"app_id"`
+		PrivateKeyFile string `json:"private_key_file"`
+	}{123456, key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setup := bytes.ReplaceAll(settings, []byte("$"), []byte(dollar))
+	word := []byte(r.Credentials[0].Adapter[3])
+	if !bytes.Equal(word, []byte(golden)) || !bytes.Equal(word, setup) {
+		t.Errorf("settings word %s\nwant       %s\nsetup      %s", word, golden, setup)
+	}
+}
+
+// TestAProgramIsFoundWhereOnlyItsOwnerCanChangeIt refuses a program in or under the
+// workspace, found there directly or through a link, a program a group may write, one
+// in a directory others may write, and one found through a relative directory of the
+// PATH, which the error names as that.
+func TestAProgramIsFoundWhereOnlyItsOwnerCanChangeIt(t *testing.T) {
+	hermetic(t)
+	doc := fixture(t, "acme-tracker.json")
+	workspace := t.TempDir()
+	inside := fakeIntegration(t, filepath.Join(workspace, "bin"), "acme-tracker", doc)
+	linked := onPath(t)
+	if err := os.Symlink(inside, filepath.Join(linked, "qory-linked")); err != nil {
+		t.Fatal(err)
+	}
+	writable := t.TempDir()
+	fakeIntegration(t, writable, "acme-tracker", doc)
+	if err := os.Chmod(writable, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	groupWritable := fakeIntegration(t, t.TempDir(), "acme-tracker", doc)
+	if err := os.Chmod(groupWritable, 0o775); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(groupWritable, filepath.Join(linked, "qory-group")); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ body, want string }{
+		{"integrations: {tracker: {program: " + filepath.Join(workspace, "bin", "acme-tracker") + "}}\n", "is " + inside + ", inside " + workspace + ", where a run works"},
+		{"integrations: {linked: {}}\n", "qory-linked is " + inside + ", inside " + workspace + ", where a run works"},
+		{"integrations: {tracker: {program: " + filepath.Join(writable, "acme-tracker") + "}}\n", "may be written by users other than its owner"},
+		{"integrations: {group: {}}\n", "qory-group is " + groupWritable + ", and " + groupWritable + " may be written by users other than its owner"},
+	} {
+		runnerFile(t, c.body)
+		c2, err := config.Load(t.TempDir(), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := c2.Runner.Expand(context.Background(), config.Expansion{Workspace: []string{workspace}}); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: %v, want %q", c.body, err, c.want)
+		}
+	}
+	dir := t.TempDir()
+	fakeIntegration(t, filepath.Join(dir, "rel"), "qory-rel", doc)
+	t.Chdir(dir)
+	t.Setenv("PATH", "rel"+string(os.PathListSeparator)+os.Getenv("PATH"))
+	runnerFile(t, "integrations: {rel: {}}\n")
+	if _, err := expand(t); err == nil || !strings.Contains(err.Error(), "qory-rel is found at rel/qory-rel, through a relative directory of the PATH") {
+		t.Errorf("a relative directory of the PATH: %v", err)
+	}
+}
+
+// TestAFailedExpandRunsAgain expands a file whose program fails, then, the program
+// mended, expands the same file again: the second call describes and defines.
+func TestAFailedExpandRunsAgain(t *testing.T) {
+	hermetic(t)
+	dir := onPath(t)
+	if err := os.WriteFile(filepath.Join(dir, "qory-tracker"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runnerFile(t, "integrations: {tracker: {}}\n")
+	c, err := config.Load(t.TempDir(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Runner.Expand(context.Background(), config.Expansion{}); err == nil {
+		t.Fatal("a program that fails expanded")
+	}
+	fakeIntegration(t, dir, "qory-tracker", fixture(t, "acme-tracker.json"))
+	if err := c.Runner.Expand(context.Background(), config.Expansion{}); err != nil || len(c.Runner.Credentials) != 1 || c.Runner.Credentials[0].Name != "tracker" {
+		t.Errorf("the second call: %+v, %v", c.Runner.Credentials, err)
+	}
+}
+
+// TestOnlyTheSelectedIntegrationsAreDescribed declares a broken integration beside one
+// that describes: selecting the second alone expands it and leaves the first alone,
+// selecting none describes neither, and selecting the first is refused.
+func TestOnlyTheSelectedIntegrationsAreDescribed(t *testing.T) {
+	hermetic(t)
+	dir := onPath(t)
+	fakeIntegration(t, dir, "qory-tracker", fixture(t, "acme-tracker.json"))
+	if err := os.WriteFile(filepath.Join(dir, "qory-broken"), []byte("#!/bin/sh\necho 'the settings file is missing' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runnerFile(t, "integrations: {tracker: {}, broken: {}}\n")
+	for _, c := range []struct {
+		only    string
+		ok      bool
+		defines int
+	}{{"tracker", true, 1}, {"broken", false, 0}, {"", true, 0}} {
+		conf, err := config.Load(t.TempDir(), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = conf.Runner.Expand(context.Background(), config.Expansion{Only: func(key string) bool { return key == c.only }})
+		if (err == nil) != c.ok {
+			t.Errorf("only %q: %v", c.only, err)
+		}
+		if c.ok && len(conf.Runner.Credentials) != c.defines {
+			t.Errorf("only %q defined %+v", c.only, conf.Runner.Credentials)
+		}
 	}
 }
 
@@ -191,7 +363,7 @@ func TestExpandRefusesWhatDoesNotDescribe(t *testing.T) {
 	for _, c := range []struct{ body, want string }{
 		{"integrations:\n  absent: {}\n", "integrations.absent: qory-absent is not on the PATH; install it there, or name the program by its path with program"},
 		{"integrations:\n  x: {program: /nonexistent/acme-x}\n", "integrations.x: /nonexistent/acme-x is not a program this user may run"},
-		{"integrations:\n  failing: {}\n", "integrations.failing: " + failing + " describe: exit status 3: the key file /k.pem is readable by others"},
+		{"integrations:\n  failing: {}\n", "integrations.failing: " + resolved(t, failing) + " describe: exit status 3: the key file /k.pem is readable by others"},
 		{"integrations:\n  garbled: {}\n", "describe did not print one JSON document"},
 		{"integrations:\n  v2: {}\n", "describe printed a description the integration contract refuses: at '/version': value must be 1"},
 		{"integrations:\n  github: {settings: {app_id: 1, private_key_file: /k.pem, private_key: NOT-A-REAL-KEY}}\n", "integrations.github: settings.private_key is a secret, and the settings go on a command line; give private_key_file, a file that holds it, in its place"},
