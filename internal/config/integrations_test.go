@@ -256,7 +256,7 @@ func TestAProgramIsFoundWhereOnlyItsOwnerCanChangeIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range []struct{ body, ws, want string }{
-		{"integrations: {tracker: {program: " + filepath.Join(workspace, "bin", "acme-tracker") + "}}\n", workspace, "is " + inside + ", inside " + workspace + ", which a run may write"},
+		{"integrations: {tracker: {program: " + filepath.Join(workspace, "bin", "acme-tracker") + "}}\n", workspace, inside + ", inside " + workspace + ", which a run may write"},
 		{"integrations: {tracker: {program: " + filepath.Join(workspace, "bin", "acme-tracker") + "}}\n", realWorkspace, "inside " + realWorkspace + ", which a run may write"},
 		{"integrations: {linked: {}}\n", workspace, "qory-linked is " + inside + ", inside " + workspace + ", which a run may write"},
 		{"integrations: {tracker: {program: " + filepath.Join(writable, "acme-tracker") + "}}\n", workspace, resolved(t, writable) + " may be written by every user"},
@@ -308,8 +308,8 @@ func TestTheProgramsVersionIsPrintable(t *testing.T) {
 // TestARelativeLinkIsFollowedFromWhereItStands finds qory-rel in a PATH directory that
 // is itself a link, pbin to real/bin, where qory-rel links to ../lib/qory-rel: the
 // target is taken from real/bin, so the program is real/lib/qory-rel, and that
-// directory is the one checked. A program more links away than the most followed, 40
-// and 3 here, is refused.
+// directory is the one checked. A program as many links away as the most followed, 40
+// and 3 here, is found, and one more is refused.
 func TestARelativeLinkIsFollowedFromWhereItStands(t *testing.T) {
 	hermetic(t)
 	base := t.TempDir()
@@ -348,10 +348,23 @@ func TestARelativeLinkIsFollowedFromWhereItStands(t *testing.T) {
 			t.Fatal(err)
 		}
 		next = link
+		runnerFile(t, "integrations: {far: {program: "+next+"}}\n")
+		_, err := expand(t)
+		switch links := i + 1; {
+		case links <= 3 && err != nil:
+			t.Errorf("%d links, the most followed: %v", links, err)
+		case links > 3 && (err == nil || !strings.HasSuffix(err.Error(), "integrations.far: "+next+" leads through more than 3 links")):
+			t.Errorf("%d links, more than the most: %v", links, err)
+		}
 	}
-	runnerFile(t, "integrations: {far: {program: "+next+"}}\n")
-	if _, err := expand(t); err == nil || !strings.Contains(err.Error(), next+" leads through more than 3 links from "+next) {
-		t.Errorf("more links than the most: %v", err)
+	// A program that is itself a file a run may write is named once, by what it is.
+	runnerFile(t, "integrations: {rel: {program: "+program+"}}\n")
+	conf, err := config.Load(t.TempDir(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conf.Runner.Expand(context.Background(), config.Expansion{Workspace: []string{program}}); err == nil || !strings.HasSuffix(err.Error(), "integrations.rel: "+program+", which a run may write; qory runs an integration from outside the checkout and the container's read-write mounts") {
+		t.Errorf("a program that is a mounted file: %v", err)
 	}
 }
 

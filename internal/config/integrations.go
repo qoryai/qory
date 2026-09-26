@@ -297,16 +297,18 @@ func program(name string, workspace []string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// The program by its name, and by where it resolves when that is another path.
+	who := name
+	if resolved != name {
+		who = name + " is " + resolved
+	}
 	if err := outside(resolved, workspace); err != nil {
-		return "", fmt.Errorf("%s is %s, %w", name, resolved, err)
+		return "", fmt.Errorf("%s, %w", who, err)
 	}
 	// Each link on the way is read from the directory it stands in, resolved, and a
 	// relative target is taken from there.
 	checked, links := []string{resolved}, []string(nil)
-	for hop, i := found, 0; ; i++ {
-		if i == maxLinks {
-			return "", fmt.Errorf("%s leads through more than %d links from %s", name, maxLinks, found)
-		}
+	for hop := found; ; {
 		dir, err := filepath.EvalSymlinks(filepath.Dir(hop))
 		if err != nil {
 			return "", err
@@ -321,6 +323,13 @@ func program(name string, workspace []string) (string, error) {
 			break
 		}
 		links = append(links, hop)
+		if len(links) > maxLinks {
+			from := ""
+			if found != name {
+				from = " from " + found
+			}
+			return "", fmt.Errorf("%s leads through more than %d links%s", name, maxLinks, from)
+		}
 		target, err := os.Readlink(hop)
 		if err != nil {
 			return "", err
@@ -331,7 +340,7 @@ func program(name string, workspace []string) (string, error) {
 		hop = target
 	}
 	if err := ownersOnly(checked, links); err != nil {
-		return "", fmt.Errorf("%s is %s, and %w", name, resolved, err)
+		return "", fmt.Errorf("%s, and %w", who, err)
 	}
 	return resolved, nil
 }
@@ -373,7 +382,11 @@ func outside(path string, workspace []string) error {
 		}
 		for p := path; ; p = filepath.Dir(p) {
 			if info, err := os.Stat(p); err == nil && os.SameFile(ws, info) {
-				return fmt.Errorf("inside %s, which a run may write; qory runs an integration from outside the checkout and the container's read-write mounts", dir)
+				where := "inside " + dir + ", "
+				if p == path {
+					where = ""
+				}
+				return fmt.Errorf("%swhich a run may write; qory runs an integration from outside the checkout and the container's read-write mounts", where)
 			}
 			if p == filepath.Dir(p) {
 				break
