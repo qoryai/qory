@@ -215,7 +215,7 @@
             }
           },
           "paths": {
-            "description": "With env or file, the paths of the hosts the run may request, a path matched whole or up to a final * as a prefix; absent is every path. With an adapter, the most it may claim.",
+            "description": "With env or file, the paths of the hosts the token goes to, and under enforce the only ones the run may request: a path matched whole or up to a final * as a prefix; absent is every path. With an adapter, the most it may claim.",
             "type": "array",
             "uniqueItems": true,
             "items": {
