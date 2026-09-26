@@ -272,7 +272,7 @@
         "additionalProperties": false,
         "properties": {
           "program": {
-            "description": "The program: an absolute path, or a name looked up on the PATH. Default qory-<key>. qory runs it from outside the checkout; it and every directory above it belong to root or the user running qory, and only root's, wheel, admin or the owner's own group may write them besides the owner.",
+            "description": "The program: an absolute path, or a name looked up on the PATH. Default qory-<key>. qory runs it from outside the checkout and outside every mount the wall gives the container read-write, judged by where its links lead. The resolved program, every directory above it up to /, and every directory above each link on the way belong to root or the user running qory, and so does each link; other users may write none of them, except a directory root owns with the sticky bit set, which keeps the rule; a group may write one when it is root's (gid 0), wheel, admin, or the owner's primary group named as the owner is.",
             "type": "string",
             "minLength": 1,
             "pattern": "^(/|[^/]*$)"

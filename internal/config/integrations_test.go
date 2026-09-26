@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -255,9 +256,9 @@ func TestAProgramIsFoundWhereOnlyItsOwnerCanChangeIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range []struct{ body, ws, want string }{
-		{"integrations: {tracker: {program: " + filepath.Join(workspace, "bin", "acme-tracker") + "}}\n", workspace, "is " + inside + ", inside " + workspace + ", where a run works"},
-		{"integrations: {tracker: {program: " + filepath.Join(workspace, "bin", "acme-tracker") + "}}\n", realWorkspace, "inside " + realWorkspace + ", where a run works"},
-		{"integrations: {linked: {}}\n", workspace, "qory-linked is " + inside + ", inside " + workspace + ", where a run works"},
+		{"integrations: {tracker: {program: " + filepath.Join(workspace, "bin", "acme-tracker") + "}}\n", workspace, "is " + inside + ", inside " + workspace + ", which a run may write"},
+		{"integrations: {tracker: {program: " + filepath.Join(workspace, "bin", "acme-tracker") + "}}\n", realWorkspace, "inside " + realWorkspace + ", which a run may write"},
+		{"integrations: {linked: {}}\n", workspace, "qory-linked is " + inside + ", inside " + workspace + ", which a run may write"},
 		{"integrations: {tracker: {program: " + filepath.Join(writable, "acme-tracker") + "}}\n", workspace, resolved(t, writable) + " may be written by every user"},
 		{"integrations: {everyone: {}}\n", workspace, "qory-everyone is " + everyone + ", and " + everyone + " may be written by every user"},
 	} {
@@ -301,6 +302,56 @@ func TestTheProgramsVersionIsPrintable(t *testing.T) {
 		if row.Key == "runner.integrations.tracker" && row.Value != program+" 0.1.0?[2J" {
 			t.Errorf("row %q", row.Value)
 		}
+	}
+}
+
+// TestARelativeLinkIsFollowedFromWhereItStands finds qory-rel in a PATH directory that
+// is itself a link, pbin to real/bin, where qory-rel links to ../lib/qory-rel: the
+// target is taken from real/bin, so the program is real/lib/qory-rel, and that
+// directory is the one checked. A program more links away than the most followed, 40
+// and 3 here, is refused.
+func TestARelativeLinkIsFollowedFromWhereItStands(t *testing.T) {
+	hermetic(t)
+	base := t.TempDir()
+	program := fakeIntegration(t, filepath.Join(base, "real", "lib"), "qory-rel", fixture(t, "acme-tracker.json"))
+	if err := os.MkdirAll(filepath.Join(base, "real", "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for link, target := range map[string]string{
+		filepath.Join(base, "real", "bin", "qory-rel"): filepath.Join("..", "lib", "qory-rel"),
+		filepath.Join(base, "pbin"):                    filepath.Join("real", "bin"),
+	} {
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", filepath.Join(base, "pbin")+string(os.PathListSeparator)+os.Getenv("PATH"))
+	runnerFile(t, "integrations: {rel: {}}\n")
+	if r, err := expand(t); err != nil || r.Integrations[0].Path != program {
+		t.Fatalf("found %+v, %v; want %s", r, err, program)
+	}
+	if err := os.Chmod(filepath.Dir(program), 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := expand(t); err == nil || !strings.Contains(err.Error(), "and "+filepath.Dir(program)+" may be written by every user") {
+		t.Errorf("the link's own directory: %v", err)
+	}
+	if err := os.Chmod(filepath.Dir(program), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config.LowerMaxLinks(t, 3)
+	chain := t.TempDir()
+	next := program
+	for i := range 4 {
+		link := filepath.Join(chain, fmt.Sprintf("l%d", i))
+		if err := os.Symlink(next, link); err != nil {
+			t.Fatal(err)
+		}
+		next = link
+	}
+	runnerFile(t, "integrations: {far: {program: "+next+"}}\n")
+	if _, err := expand(t); err == nil || !strings.Contains(err.Error(), next+" leads through more than 3 links from "+next) {
+		t.Errorf("more links than the most: %v", err)
 	}
 }
 

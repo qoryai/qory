@@ -9,9 +9,10 @@ import (
 	"syscall"
 )
 
-// ownersOnly holds each path and every directory above it to [trusted], as the system
-// names its users and groups.
-func ownersOnly(paths []string) error {
+// ownersOnly holds each path of chains and every directory above it to [trusted], and
+// each of links, a link itself, to its owner alone, as the system names its users and
+// groups.
+func ownersOnly(chains, links []string) error {
 	n := names{
 		User: func(uid uint32) string {
 			if u, err := user.LookupId(strconv.FormatUint(uint64(uid), 10)); err == nil {
@@ -25,10 +26,27 @@ func ownersOnly(paths []string) error {
 			}
 			return ""
 		},
+		Primary: func(uid uint32) (uint32, bool) {
+			u, err := user.LookupId(strconv.FormatUint(uint64(uid), 10))
+			if err != nil {
+				return 0, false
+			}
+			gid, err := strconv.ParseUint(u.Gid, 10, 32)
+			return uint32(gid), err == nil
+		},
 	}
 	euid := uint32(os.Geteuid())
-	for _, p := range paths {
+	for _, p := range chains {
 		if err := chainTrusted(p, lstatOwner, euid, n); err != nil {
+			return err
+		}
+	}
+	for _, l := range links {
+		o, err := lstatOwner(l)
+		if err != nil {
+			return err
+		}
+		if err := ownedBy(l, "a link ", o, euid, n); err != nil {
 			return err
 		}
 	}

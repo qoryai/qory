@@ -8,7 +8,7 @@ import (
 
 // TestTheRuleOfWhoMayChangeAProgram holds synthetic owners and modes to the rule: the
 // installs a machine has, Homebrew's admin group, a user's private group, root's own
-// directories and a sticky /tmp, pass; another user's file, a directory every user may
+// directories and a sticky /tmp or /nix/store, pass; another user's file, a directory every user may
 // write and a group that is neither root's nor the owner's are refused, each named.
 func TestTheRuleOfWhoMayChangeAProgram(t *testing.T) {
 	const me, other = 501, 502
@@ -17,7 +17,11 @@ func TestTheRuleOfWhoMayChangeAProgram(t *testing.T) {
 			return map[uint32]string{0: "root", me: "dev", other: "guest"}[uid]
 		},
 		Group: func(gid uint32) string {
-			return map[uint32]string{0: "wheel", 20: "staff", 80: "admin", 1000: "dev", 1001: "guest", 1002: "builders"}[gid]
+			return map[uint32]string{0: "wheel", 20: "staff", 30: "nixbld", 80: "admin", 1000: "dev", 1001: "guest", 1002: "builders", 1003: "dev"}[gid]
+		},
+		Primary: func(uid uint32) (uint32, bool) {
+			gid, ok := map[uint32]uint32{0: 0, me: 1000, other: 1001}[uid]
+			return gid, ok
 		},
 	}
 	dir := func(perm os.FileMode) os.FileMode { return os.ModeDir | perm }
@@ -31,6 +35,9 @@ func TestTheRuleOfWhoMayChangeAProgram(t *testing.T) {
 		{"a directory the wheel group may write", fileOwner{0, 0, dir(0o775)}, ""},
 		{"~/go/bin under a user private group", fileOwner{me, 1000, dir(0o775)}, ""},
 		{"a sticky /tmp root owns", fileOwner{0, 0, dir(0o777) | os.ModeSticky}, ""},
+		{"/nix/store, root's with the nixbld group, sticky", fileOwner{0, 30, dir(0o775) | os.ModeSticky}, ""},
+		{"a directory root owns with the nixbld group, not sticky", fileOwner{0, 30, dir(0o775)}, "the group nixbld (30)"},
+		{"a group named as the owner that is not the owner's primary one", fileOwner{me, 1003, dir(0o775)}, "the group dev (1003)"},
 		{"the user's program", fileOwner{me, 20, 0o755}, ""},
 		{"a program another user owns", fileOwner{other, 1001, 0o755}, "/x is owned by guest (502), neither root nor the user running qory"},
 		{"a program an unnamed user owns", fileOwner{9999, 20, 0o755}, "/x is owned by 9999, neither root nor"},
@@ -60,12 +67,26 @@ func TestEveryDirectoryAboveAProgramIsHeldToTheRule(t *testing.T) {
 		"/opt/homebrew/bin/qg": {501, 80, 0o755},
 	}
 	stat := func(p string) (fileOwner, error) { return tree[p], nil }
-	n := names{User: func(uint32) string { return "" }, Group: func(gid uint32) string { return map[uint32]string{80: "admin"}[gid] }}
+	n := names{User: func(uint32) string { return "" }, Group: func(gid uint32) string { return map[uint32]string{80: "admin"}[gid] }, Primary: func(uint32) (uint32, bool) { return 20, true }}
 	if err := chainTrusted("/opt/homebrew/bin/qg", stat, 501, n); err != nil {
 		t.Errorf("a Homebrew tree: %v", err)
 	}
 	tree["/opt"] = fileOwner{501, 20, os.ModeDir | 0o777}
 	if err := chainTrusted("/opt/homebrew/bin/qg", stat, 501, n); err == nil || !strings.HasPrefix(err.Error(), "/opt may be written by every user") {
 		t.Errorf("a writable ancestor: %v", err)
+	}
+}
+
+// TestALinkOnTheWayIsOwnedByRootOrTheUser takes a link root or the user running qory
+// owns, whatever its mode, and refuses one another user owns, named as a link.
+func TestALinkOnTheWayIsOwnedByRootOrTheUser(t *testing.T) {
+	n := names{User: func(uid uint32) string { return map[uint32]string{502: "guest"}[uid] }}
+	for _, o := range []fileOwner{{0, 0, os.ModeSymlink | 0o777}, {501, 20, os.ModeSymlink | 0o777}} {
+		if err := ownedBy("/l", "a link ", o, 501, n); err != nil {
+			t.Errorf("%+v: %v", o, err)
+		}
+	}
+	if err := ownedBy("/l", "a link ", fileOwner{502, 20, os.ModeSymlink | 0o777}, 501, n); err == nil || err.Error() != "/l is a link owned by guest (502), neither root nor the user running qory" {
+		t.Errorf("another user's link: %v", err)
 	}
 }

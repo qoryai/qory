@@ -184,9 +184,10 @@ func writeString(b *bytes.Buffer, s string) {
 // Expansion says which integrations [Runner.Expand] describes, and where their programs
 // may not be.
 type Expansion struct {
-	// Workspace are the directories a run works in, its checkout among them. A program
-	// in one of them, or under one, is refused: a repository may not choose what runs
-	// with the machine's credentials.
+	// Workspace are the files and directories a run may write: its checkout, and the
+	// mounts a wall gives the container read-write. A program that is one of them, or
+	// under one, is refused: what a run may change may not choose what runs with the
+	// machine's credentials.
 	Workspace []string
 	// Only, when set, says which integrations are described, by key: the ones a run's
 	// policy selects. Nil describes every one.
@@ -299,13 +300,19 @@ func program(name string, workspace []string) (string, error) {
 	if err := outside(resolved, workspace); err != nil {
 		return "", fmt.Errorf("%s is %s, %w", name, resolved, err)
 	}
-	checked := []string{resolved}
-	for hop, i := found, 0; i < 40; i++ {
+	// Each link on the way is read from the directory it stands in, resolved, and a
+	// relative target is taken from there.
+	checked, links := []string{resolved}, []string(nil)
+	for hop, i := found, 0; ; i++ {
+		if i == maxLinks {
+			return "", fmt.Errorf("%s leads through more than %d links from %s", name, maxLinks, found)
+		}
 		dir, err := filepath.EvalSymlinks(filepath.Dir(hop))
 		if err != nil {
 			return "", err
 		}
 		checked = append(checked, dir)
+		hop = filepath.Join(dir, filepath.Base(hop))
 		info, err := os.Lstat(hop)
 		if err != nil {
 			return "", err
@@ -313,20 +320,25 @@ func program(name string, workspace []string) (string, error) {
 		if info.Mode()&os.ModeSymlink == 0 {
 			break
 		}
+		links = append(links, hop)
 		target, err := os.Readlink(hop)
 		if err != nil {
 			return "", err
 		}
 		if !filepath.IsAbs(target) {
-			target = filepath.Join(filepath.Dir(hop), target)
+			target = filepath.Join(dir, target)
 		}
 		hop = target
 	}
-	if err := ownersOnly(checked); err != nil {
+	if err := ownersOnly(checked, links); err != nil {
 		return "", fmt.Errorf("%s is %s, and %w", name, resolved, err)
 	}
 	return resolved, nil
 }
+
+// maxLinks is the most links a program is followed through, the most Linux follows. A
+// test lowers it.
+var maxLinks = 40
 
 // dotted is a path LookPath found through a relative PATH entry, as a shell writes it.
 func dotted(found string) string {
@@ -350,18 +362,18 @@ func relativeEntry(found, name string) string {
 	return filepath.Dir(found)
 }
 
-// outside refuses a path in or under a directory of workspace. Each directory above the
-// path is compared as a file, [os.SameFile], so a name that differs only in case on a
-// file system that ignores it is the same directory.
+// outside refuses a path that is a file of workspace, or in or under a directory of it.
+// The path and each directory above it are compared as files, [os.SameFile], so a name
+// that differs only in case on a file system that ignores it is the same one.
 func outside(path string, workspace []string) error {
 	for _, dir := range workspace {
 		ws, err := os.Stat(dir)
 		if dir == "" || err != nil {
 			continue
 		}
-		for p := filepath.Dir(path); ; p = filepath.Dir(p) {
+		for p := path; ; p = filepath.Dir(p) {
 			if info, err := os.Stat(p); err == nil && os.SameFile(ws, info) {
-				return fmt.Errorf("inside %s, where a run works; qory runs an integration from outside the checkout", dir)
+				return fmt.Errorf("inside %s, which a run may write; qory runs an integration from outside the checkout and the container's read-write mounts", dir)
 			}
 			if p == filepath.Dir(p) {
 				break
@@ -378,36 +390,52 @@ type fileOwner struct {
 }
 
 // names turns an owner and a group into the names [trusted] compares, "" for one the
-// system does not name.
+// system does not name, and gives a user's primary group.
 type names struct {
-	User  func(uid uint32) string
-	Group func(gid uint32) string
+	User    func(uid uint32) string
+	Group   func(gid uint32) string
+	Primary func(uid uint32) (gid uint32, ok bool)
 }
 
-// stickyByRoot is a directory root owns with the sticky bit set, /tmp say: every user
-// may write it, and a file in it only its owner may rename or remove.
+// stickyByRoot is a directory root owns with the sticky bit set, /tmp or /nix/store
+// say: whoever may write it, a file in it only its owner may rename or remove.
 func stickyByRoot(o fileOwner) bool {
 	return o.Mode.IsDir() && o.UID == 0 && o.Mode&os.ModeSticky != 0
 }
 
 // trusted is the rule a program and every directory above it keep, so that only root
 // and the user running qory may change what an integration runs. The owner is root or
-// that user, euid. Other users may write it only when it is a directory root owns with
-// the sticky bit set. Its group may write it when the group is root's, gid 0, wheel or
-// admin, or the owner's own group, the one named as the owner is.
+// that user, euid. A directory root owns with the sticky bit set keeps the rule. Other
+// users may write nothing else. Its group may write it when the group is root's, gid 0,
+// wheel or admin, or the owner's own group: the owner's primary group, named as the
+// owner is.
 func trusted(path string, o fileOwner, euid uint32, n names) error {
-	if o.UID != 0 && o.UID != euid {
-		return fmt.Errorf("%s is owned by %s, neither root nor the user running qory", path, named(n.User(o.UID), o.UID))
+	if err := ownedBy(path, "", o, euid, n); err != nil {
+		return err
+	}
+	if stickyByRoot(o) {
+		return nil
 	}
 	perm := o.Mode.Perm()
-	if perm&0o002 != 0 && !stickyByRoot(o) {
+	if perm&0o002 != 0 {
 		return fmt.Errorf("%s may be written by every user; qory runs a program only root and its owner may change", path)
 	}
 	if perm&0o020 != 0 {
 		group := n.Group(o.GID)
-		if o.GID != 0 && group != "wheel" && group != "admin" && (group == "" || group != n.User(o.UID)) {
+		primary, ok := n.Primary(o.UID)
+		own := group != "" && group == n.User(o.UID) && ok && primary == o.GID
+		if o.GID != 0 && group != "wheel" && group != "admin" && !own {
 			return fmt.Errorf("%s may be written by the group %s, which is neither root's, wheel, admin nor its owner's own", path, named(group, o.GID))
 		}
+	}
+	return nil
+}
+
+// ownedBy refuses a path, a link when what says so, that neither root nor the user
+// running qory owns.
+func ownedBy(path, what string, o fileOwner, euid uint32, n names) error {
+	if o.UID != 0 && o.UID != euid {
+		return fmt.Errorf("%s is %sowned by %s, neither root nor the user running qory", path, what, named(n.User(o.UID), o.UID))
 	}
 	return nil
 }

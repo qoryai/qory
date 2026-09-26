@@ -344,18 +344,18 @@ func failures(err error, values bool) string {
 }
 
 // broken names the rules under e a settings document breaks, each by the setting and
-// the keyword, never the value. The alternatives of a oneOf or an anyOf are one rule,
+// the keyword, never the value, every name as [Printable] has it. The alternatives of a oneOf or an anyOf are one rule,
 // "or" between them; a property's name the schema does not take is named, since it is
 // the document's key and not its value.
 func broken(e *jsonschema.ValidationError) []string {
-	at := strings.Join(append([]string{"settings"}, e.InstanceLocation...), ".")
+	at := located(e.InstanceLocation)
 	switch k := e.ErrorKind.(type) {
 	case *kind.PropertyNames:
 		loc := e.InstanceLocation
 		if p, ok := propertiesPath(e.SchemaURL); ok && len(p) == len(loc) {
 			loc = p
 		}
-		return []string{strings.Join(append([]string{"settings"}, loc...), ".") + "." + k.Property + " is not a setting it takes"}
+		return []string{located(loc) + "." + Printable(k.Property) + " is not a setting it takes"}
 	case *kind.OneOf, *kind.AnyOf:
 		if len(e.Causes) > 0 {
 			var alternatives []string
@@ -376,19 +376,39 @@ func broken(e *jsonschema.ValidationError) []string {
 	case *kind.Required:
 		var out []string
 		for _, m := range k.Missing {
-			out = append(out, at+"."+m+" is required")
+			out = append(out, at+"."+Printable(m)+" is required")
+		}
+		return out
+	case *kind.DependentRequired:
+		var out []string
+		for _, m := range k.Missing {
+			out = append(out, at+"."+Printable(m)+" is required with "+at+"."+Printable(k.Prop))
 		}
 		return out
 	case *kind.AdditionalProperties:
 		var out []string
 		for _, p := range k.Properties {
-			out = append(out, at+"."+p+" is not a setting it takes")
+			out = append(out, at+"."+Printable(p)+" is not a setting it takes")
 		}
 		return out
 	case *kind.Type:
 		return []string{fmt.Sprintf("%s is %s, where %s is wanted", at, k.Got, strings.Join(k.Want, " or "))}
 	}
-	return []string{at + " breaks the schema's " + strings.Join(e.ErrorKind.KeywordPath(), "/")}
+	var keyword []string
+	for _, k := range e.ErrorKind.KeywordPath() {
+		keyword = append(keyword, Printable(k))
+	}
+	return []string{at + " breaks the schema's " + strings.Join(keyword, "/")}
+}
+
+// located is a place in a settings document, settings.a.b, each name as [Printable]
+// has it: a name is the document's or the description's, and both are printed.
+func located(path []string) string {
+	out := []string{"settings"}
+	for _, p := range path {
+		out = append(out, Printable(p))
+	}
+	return strings.Join(out, ".")
 }
 
 // propertiesPath is the object a propertyNames keyword applies to, read from the

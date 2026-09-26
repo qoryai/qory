@@ -52,11 +52,18 @@ as shadowed by it, and a line on standard error says so.
 			for _, key := range conf.Runner.Shadowed() {
 				fmt.Fprintln(cmd.ErrOrStderr(), "qory config:", shadowed(key))
 			}
-			// A directory outside a git working tree is no checkout, and holds no program
-			// a run could change.
+			// A directory outside a git working tree is no checkout. The wall's read-write
+			// mounts are what a run may write besides.
 			var workspace []string
 			if checkout.ExcludeFile(root) != "" {
 				workspace = []string{root}
+			}
+			if r := conf.Runner; r != nil && r.Wall != nil {
+				for _, m := range r.Wall.Mounts {
+					if !m.ReadOnly {
+						workspace = append(workspace, m.Path)
+					}
+				}
 			}
 			if err := conf.Runner.Expand(cmd.Context(), config.Expansion{Workspace: workspace}); err != nil {
 				return input(err)

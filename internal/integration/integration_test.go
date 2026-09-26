@@ -210,3 +210,22 @@ func TestDescribeKeepsWhatItQuotesShort(t *testing.T) {
 		t.Errorf("a long line: %v", err)
 	}
 }
+
+// TestANameOfTheDescriptionIsPrintedAsATerminalTakesIt checks settings against a schema
+// whose required and dependentRequired names hold a terminal's escape: the error names
+// them with ? in its place.
+func TestANameOfTheDescriptionIsPrintedAsATerminalTakesIt(t *testing.T) {
+	escape := string([]byte{0x5c}) + "u001b"
+	settings := `{"type": "object", "required": ["a` + escape + `[2J"], "dependentRequired": {"x` + escape + `[2J": ["y` + escape + `[2J"]}}`
+	d, err := integration.Describe(context.Background(), program(t, withSettings(t, settings)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = d.CheckSettings([]byte(`{"x` + escape + `[2J": 1}`))
+	if err == nil || !strings.Contains(err.Error(), "settings.a?[2J is required") || strings.ContainsRune(err.Error(), 0x1b) {
+		t.Errorf("required: %v", err)
+	}
+	if !strings.Contains(err.Error(), "settings.y?[2J is required with settings.x?[2J") {
+		t.Errorf("dependentRequired: %v", err)
+	}
+}

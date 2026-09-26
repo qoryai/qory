@@ -410,7 +410,7 @@ func TestConfigRefusesAProgramInTheCheckoutAlone(t *testing.T) {
 	}
 	wants(t, out, program+" 0.3.0")
 	runGit(t, dir, "init", "--quiet", "--initial-branch=main")
-	if _, err := run(t, "config"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "inside "+dir+", where a run works") {
+	if _, err := run(t, "config"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "inside "+dir+", which a run may write") {
 		t.Errorf("config in the checkout that holds the program: %v", err)
 	}
 }
@@ -522,6 +522,51 @@ esac
 		t.Fatal(err)
 	}
 	return script, log
+}
+
+// TestRunRefusesAProgramUnderAReadWriteMount declares an integration whose program is
+// in a directory the wall mounts: mounted read-write, --mount or wall.mounts, the
+// container could rewrite it, and run and config refuse it; mounted read-only, the run
+// describes it and names it.
+func TestRunRefusesAProgramUnderAReadWriteMount(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, "claude")
+	docker, _ := fakeDocker(t)
+	helper := staticELF(t)
+	tools := t.TempDir()
+	program := filepath.Join(tools, "bin", "acme-tracker")
+	writeFile(t, program, "#!/bin/sh\ntest \"$1\" = describe || exit 64\necho '{\"version\": 1, \"name\": \"tracker\", \"title\": \"Tracker\", \"program_version\": \"0.3.0\", \"settings\": {\"type\": \"object\"}, \"roles\": {\"credential\": {\"argument\": \"[A-Z]+\", \"hosts\": [\"tracker.acme.example\"]}}}'\n")
+	if err := os.Chmod(program, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resolvedProgram, err := filepath.EvalSymlinks(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml")
+	wallSection := "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: " + docker + "\n  helper: " + helper + "\n"
+	integrations := "integrations:\n  tracker: {program: " + program + "}\n"
+	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\n"+wallSection+integrations)
+	policy := filepath.Join(t.TempDir(), "policy.yaml")
+	writeFile(t, policy, "version: 1\negress:\n  mode: observe\ncredentials:\n  - {name: tracker, argument: SHOP}\n")
+	refused := "inside " + tools + ", which a run may write"
+	if _, err := run(t, "run", "claude", "--policy", policy, "--mount", tools); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), refused) {
+		t.Errorf("a program under a read-write --mount: %v", err)
+	}
+	out, err := run(t, "run", "claude", "--policy", policy, "--mount", tools+":ro")
+	wants(t, out, "qory run: integration tracker: "+resolvedProgram+" 0.3.0\n")
+	if err != nil && strings.Contains(err.Error(), refused) {
+		t.Errorf("a program under a read-only --mount: %v", err)
+	}
+	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\n"+wallSection+"  mounts: ["+tools+"]\n"+integrations)
+	if _, err := run(t, "config"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), refused) {
+		t.Errorf("config with the program under a read-write wall.mounts: %v", err)
+	}
+	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\n"+wallSection+"  mounts: [\""+tools+":ro\"]\n"+integrations)
+	if out, err := run(t, "config"); err != nil {
+		t.Errorf("config with the program under a read-only wall.mounts: %v\n%s", err, out)
+	}
 }
 
 // TestRunBehindAWall runs the composed runtime behind the Docker wall with a program
