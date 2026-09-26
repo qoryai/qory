@@ -300,7 +300,8 @@ func TestRunRefusesWhatItCannotStart(t *testing.T) {
 // program it found: one that does not describe stops the run before it starts, with the
 // program's line, and leaves no record, and one the policy does not select is not
 // described. With a server, which supplies the policy, every one is described. A name
-// the credentials section defines as well is named on a line of its own.
+// the credentials section defines as well is named on a line of its own, and a run does
+// not describe that integration, which config still does.
 func TestRunExpandsTheIntegrationsTheMachineDeclares(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -379,6 +380,39 @@ func TestRunExpandsTheIntegrationsTheMachineDeclares(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	wants(t, out, "qory run: "+line)
+	// A run describes every integration when the server supplies the policy, but one
+	// the credentials section shadows defines nothing for it and is not described.
+	serverFile(t, srv, "credentials:\n  broken:\n    env: BROKEN_TOKEN\n    hosts: [broken.acme.example]\n    auth: {scheme: bearer}\nintegrations:\n  broken: {}\n")
+	out, err = run(t, "run")
+	if err != nil {
+		t.Fatalf("a run with a shadowed integration that does not describe: %v\n%s", err, out)
+	}
+	wants(t, out, "qory run: runner.yaml: credentials.broken defines the credential broken, and integrations.broken defines none\n")
+	if _, err := run(t, "config"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), want) {
+		t.Errorf("config describes a shadowed integration: %v", err)
+	}
+}
+
+// TestConfigRefusesAProgramInTheCheckoutAlone runs qory config from a directory that is
+// no git working tree, above the program the runner file names: the program is
+// described. From a checkout that holds the program, it is refused.
+func TestConfigRefusesAProgramInTheCheckoutAlone(t *testing.T) {
+	dir := emptyDir(t)
+	program := filepath.Join(dir, "tools", "acme-tracker")
+	writeFile(t, program, "#!/bin/sh\necho '{\"version\": 1, \"name\": \"tracker\", \"title\": \"Tracker\", \"program_version\": \"0.3.0\", \"settings\": {\"type\": \"object\"}, \"roles\": {\"credential\": {\"argument\": \"[A-Z]+\", \"hosts\": [\"tracker.acme.example\"]}}}'\n")
+	if err := os.Chmod(program, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "apiVersion: qory.dev/v1alpha1\nintegrations:\n  tracker: {program: "+program+"}\n")
+	out, err := run(t, "config")
+	if err != nil {
+		t.Fatalf("config outside a checkout: %v\n%s", err, out)
+	}
+	wants(t, out, program+" 0.3.0")
+	runGit(t, dir, "init", "--quiet", "--initial-branch=main")
+	if _, err := run(t, "config"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "inside "+dir+", where a run works") {
+		t.Errorf("config in the checkout that holds the program: %v", err)
+	}
 }
 
 // TestForwardHandsAHookToTheRun is the hidden forward verb: it sends its stdin to the

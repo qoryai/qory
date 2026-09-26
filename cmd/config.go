@@ -52,7 +52,13 @@ as shadowed by it, and a line on standard error says so.
 			for _, key := range conf.Runner.Shadowed() {
 				fmt.Fprintln(cmd.ErrOrStderr(), "qory config:", shadowed(key))
 			}
-			if err := conf.Runner.Expand(cmd.Context(), config.Expansion{Workspace: []string{root, cwd}}); err != nil {
+			// A directory outside a git working tree is no checkout, and holds no program
+			// a run could change.
+			var workspace []string
+			if checkout.ExcludeFile(root) != "" {
+				workspace = []string{root}
+			}
+			if err := conf.Runner.Expand(cmd.Context(), config.Expansion{Workspace: workspace}); err != nil {
 				return input(err)
 			}
 			u := ui.New(cmd.OutOrStdout())

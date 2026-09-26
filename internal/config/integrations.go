@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/qoryai/runner/session"
@@ -197,8 +198,7 @@ type Expansion struct {
 // the file's own, in the section's order. For each it finds the program, runs <program>
 // describe as [integration.Describe] does, and checks the settings against the
 // description. The program is found by its absolute path, or on the PATH, and is
-// refused in a directory of [Expansion.Workspace] and where users other than its owner
-// may change it. A program that is not found or does not answer, settings the description refuses, and an integration that
+// refused in a directory of [Expansion.Workspace] and where [trusted] refuses it. A program that is not found or does not answer, settings the description refuses, and an integration that
 // plays no role qory knows are errors naming the file and the key. The credential role
 // defines the credential named by the key, with the adapter
 // [integration.CredentialAdapter] gives, unless the file's credentials section defines
@@ -237,7 +237,8 @@ func (r *Runner) Expand(ctx context.Context, e Expansion) error {
 		if d.Credential == nil {
 			return fail("%s plays no role qory knows, %s, and would define nothing", in.Program, strings.Join(d.Roles, ", "))
 		}
-		in.Path, in.Version = found, d.ProgramVersion
+		// The version is the program's to word, and is printed as a terminal takes it.
+		in.Path, in.Version = found, integration.Printable(d.ProgramVersion)
 		if own[in.Key] {
 			continue
 		}
@@ -274,14 +275,15 @@ func (r *Runner) Shadowed() []string {
 // program finds an integration's program: name itself when it is an absolute path,
 // else the first of that name in a directory of the PATH. The path returned has its
 // symbolic links resolved, so the file checked is the file started. It refuses a
-// program in or under a directory of workspace, and a program that a group or other
-// users may write, or whose directory they may write, where it is found or where its
-// links lead.
+// program in or under a directory of workspace, judged by where its links lead, and a
+// program [trusted] refuses: the resolved file and every directory above it up to /,
+// and every directory above each link on the way there, the PATH directory it was found
+// in among them.
 func program(name string, workspace []string) (string, error) {
 	found, err := exec.LookPath(name)
 	switch {
 	case errors.Is(err, exec.ErrDot):
-		return "", fmt.Errorf("%s is found at %s, through a relative directory of the PATH; qory runs a program from an absolute directory of the PATH, or named by its absolute path with program", name, found)
+		return "", fmt.Errorf("%s is found as %s through the PATH entry %q, which is relative; qory runs a program from an absolute directory of the PATH, or named by its absolute path with program", name, dotted(found), relativeEntry(found, name))
 	case err != nil && filepath.IsAbs(name):
 		return "", fmt.Errorf("%s is not a program this user may run", name)
 	case err != nil:
@@ -294,28 +296,143 @@ func program(name string, workspace []string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	for _, dir := range workspace {
-		if dir == "" {
-			continue
-		}
-		if d, err := filepath.EvalSymlinks(dir); err == nil && within(d, resolved) {
-			return "", fmt.Errorf("%s is %s, inside %s, where a run works; qory runs an integration from outside the checkout", name, resolved, dir)
-		}
+	if err := outside(resolved, workspace); err != nil {
+		return "", fmt.Errorf("%s is %s, %w", name, resolved, err)
 	}
-	for _, p := range []string{filepath.Dir(found), resolved, filepath.Dir(resolved)} {
-		info, err := os.Stat(p)
+	checked := []string{resolved}
+	for hop, i := found, 0; i < 40; i++ {
+		dir, err := filepath.EvalSymlinks(filepath.Dir(hop))
 		if err != nil {
 			return "", err
 		}
-		if info.Mode().Perm()&0o022 != 0 {
-			return "", fmt.Errorf("%s is %s, and %s may be written by users other than its owner; qory runs a program only its owner may change", name, resolved, p)
+		checked = append(checked, dir)
+		info, err := os.Lstat(hop)
+		if err != nil {
+			return "", err
 		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			break
+		}
+		target, err := os.Readlink(hop)
+		if err != nil {
+			return "", err
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(hop), target)
+		}
+		hop = target
+	}
+	if err := ownersOnly(checked); err != nil {
+		return "", fmt.Errorf("%s is %s, and %w", name, resolved, err)
 	}
 	return resolved, nil
 }
 
-// within reports whether path is dir or under it; both are clean absolute paths.
-func within(dir, path string) bool {
-	rel, err := filepath.Rel(dir, path)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+// dotted is a path LookPath found through a relative PATH entry, as a shell writes it.
+func dotted(found string) string {
+	if strings.ContainsRune(found, filepath.Separator) {
+		return found
+	}
+	return "." + string(filepath.Separator) + found
+}
+
+// relativeEntry is the relative entry of the PATH that LookPath found name through, as
+// found: "." for the empty entry, which means the working directory.
+func relativeEntry(found, name string) string {
+	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+		if dir == "" {
+			dir = "."
+		}
+		if !filepath.IsAbs(dir) && filepath.Join(dir, name) == found {
+			return dir
+		}
+	}
+	return filepath.Dir(found)
+}
+
+// outside refuses a path in or under a directory of workspace. Each directory above the
+// path is compared as a file, [os.SameFile], so a name that differs only in case on a
+// file system that ignores it is the same directory.
+func outside(path string, workspace []string) error {
+	for _, dir := range workspace {
+		ws, err := os.Stat(dir)
+		if dir == "" || err != nil {
+			continue
+		}
+		for p := filepath.Dir(path); ; p = filepath.Dir(p) {
+			if info, err := os.Stat(p); err == nil && os.SameFile(ws, info) {
+				return fmt.Errorf("inside %s, where a run works; qory runs an integration from outside the checkout", dir)
+			}
+			if p == filepath.Dir(p) {
+				break
+			}
+		}
+	}
+	return nil
+}
+
+// fileOwner is what [trusted] reads of a file: its owner, its group and its mode.
+type fileOwner struct {
+	UID, GID uint32
+	Mode     os.FileMode
+}
+
+// names turns an owner and a group into the names [trusted] compares, "" for one the
+// system does not name.
+type names struct {
+	User  func(uid uint32) string
+	Group func(gid uint32) string
+}
+
+// stickyByRoot is a directory root owns with the sticky bit set, /tmp say: every user
+// may write it, and a file in it only its owner may rename or remove.
+func stickyByRoot(o fileOwner) bool {
+	return o.Mode.IsDir() && o.UID == 0 && o.Mode&os.ModeSticky != 0
+}
+
+// trusted is the rule a program and every directory above it keep, so that only root
+// and the user running qory may change what an integration runs. The owner is root or
+// that user, euid. Other users may write it only when it is a directory root owns with
+// the sticky bit set. Its group may write it when the group is root's, gid 0, wheel or
+// admin, or the owner's own group, the one named as the owner is.
+func trusted(path string, o fileOwner, euid uint32, n names) error {
+	if o.UID != 0 && o.UID != euid {
+		return fmt.Errorf("%s is owned by %s, neither root nor the user running qory", path, named(n.User(o.UID), o.UID))
+	}
+	perm := o.Mode.Perm()
+	if perm&0o002 != 0 && !stickyByRoot(o) {
+		return fmt.Errorf("%s may be written by every user; qory runs a program only root and its owner may change", path)
+	}
+	if perm&0o020 != 0 {
+		group := n.Group(o.GID)
+		if o.GID != 0 && group != "wheel" && group != "admin" && (group == "" || group != n.User(o.UID)) {
+			return fmt.Errorf("%s may be written by the group %s, which is neither root's, wheel, admin nor its owner's own", path, named(group, o.GID))
+		}
+	}
+	return nil
+}
+
+// named is a user's or a group's name, with its id beside it, or the id alone.
+func named(name string, id uint32) string {
+	if name == "" {
+		return strconv.FormatUint(uint64(id), 10)
+	}
+	return fmt.Sprintf("%s (%d)", name, id)
+}
+
+// chainTrusted holds path and every directory above it up to / to [trusted], each read
+// by stat.
+func chainTrusted(path string, stat func(string) (fileOwner, error), euid uint32, n names) error {
+	for p := path; ; p = filepath.Dir(p) {
+		o, err := stat(p)
+		if err != nil {
+			return err
+		}
+		if err := trusted(p, o, euid, n); err != nil {
+			return err
+		}
+		if p == filepath.Dir(p) {
+			return nil
+		}
+	}
 }

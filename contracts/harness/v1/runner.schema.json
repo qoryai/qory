@@ -272,7 +272,7 @@
         "additionalProperties": false,
         "properties": {
           "program": {
-            "description": "The program: an absolute path, or a name looked up on the PATH. Default qory-<key>. qory runs it from outside the checkout, where only its owner may change it.",
+            "description": "The program: an absolute path, or a name looked up on the PATH. Default qory-<key>. qory runs it from outside the checkout; it and every directory above it belong to root or the user running qory, and only root's, wheel, admin or the owner's own group may write them besides the owner.",
             "type": "string",
             "minLength": 1,
             "pattern": "^(/|[^/]*$)"

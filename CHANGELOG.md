@@ -19,15 +19,20 @@ release may change what an existing document does, and says so under Upgrading.
   integrations: Qory's own `qory-github` and a program of yours are found and set up the
   same way. `qory run` describes the integrations the run's policy selects, every one
   when the server supplies the policy, and names each program it found; `qory config`
-  describes every one. A program runs from outside the checkout, where only its owner
-  may change it, the file and its directory, with its links followed; on a machine
-  whose `PATH` is not its owner's alone, `program` names it by its absolute path.
+  describes every one. A program runs from outside the checkout, judged by where its links
+  lead. The resolved program, every directory above it up to `/`, and every directory
+  above each link on the way belong to root or the user running `qory`; other users
+  may write none of them, except a directory root owns with the sticky bit set; and a
+  group may write one when it is root's, gid 0, `wheel`, `admin`, or the owner's own
+  group, named as the owner is, so a default Homebrew install and a user private
+  group's `~/go/bin` keep the rule. On a machine whose `PATH` is not its owner's alone,
+  `program` names each program by its absolute path.
   `describe` runs in `/`, in a process group of its own that is stopped with it. A
   settings schema is draft 2020-12 and marks a secret `writeOnly` on a property of the
   settings themselves; a value of a secret is refused, since the settings go on a
   command line, and its `<name>_file` gives the file that holds it. A name the
-  `credentials` section defines itself is the section's, and `qory run` and
-  `qory config` say so. A program that does not describe within 10 seconds, settings
+  `credentials` section defines itself is the section's: `qory run` and `qory config`
+  say so, and `qory config` alone describes that integration. A program that does not describe within 10 seconds, settings
   its description refuses, and an integration that plays no role `qory` knows stop the
   run before it starts, with the program's own line.
 

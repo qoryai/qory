@@ -102,7 +102,7 @@ var contract = sync.OnceValues(func() (*jsonschema.Schema, error) {
 // Describe runs program describe, as the runner starts an adapter: with this process's
 // environment, no standard input, and / as its working directory. program is a path.
 // The program runs in a process group of its own, and the whole group is stopped when
-// describe returns, so no process it started outlives it. Describe refuses a program
+// describe returns, so no process of its group outlives it. Describe refuses a program
 // that does not exit 0 within [DescribeWait], giving the one line it wrote on standard
 // error, and an answer that is not one JSON document the contract's schema accepts.
 func Describe(ctx context.Context, program string) (*Description, error) {
@@ -151,18 +151,24 @@ func Describe(ctx context.Context, program string) (*Description, error) {
 	return d, nil
 }
 
-// maxLine is the most runes of a failed describe's line an error quotes.
+// maxLine is the most runes of a program's text an error or a line quotes.
 const maxLine = 200
 
-// firstLine is the first line of what a program wrote on standard error, trimmed, at
-// most [maxLine] runes, each character that does not print as ? so the line stays one
-// line on a terminal.
+// firstLine is the first line of what a program wrote on standard error, trimmed, as
+// [Printable] has it.
 func firstLine(s string) string {
 	line, _, _ := strings.Cut(strings.TrimSpace(s), "\n")
-	line = strings.TrimSpace(line)
+	return Printable(strings.TrimSpace(line))
+}
+
+// Printable is text a program gave, a line of its standard error or a string of its
+// description, as it is printed to a terminal: at most [maxLine] runes, with ... after
+// what is cut, and each character that does not print as ?, so it stays one line and
+// moves no cursor.
+func Printable(s string) string {
 	var b strings.Builder
 	n := 0
-	for _, r := range line {
+	for _, r := range s {
 		if n == maxLine {
 			b.WriteString("...")
 			break
@@ -192,8 +198,8 @@ func read(doc map[string]any) (*Description, error) {
 		}
 	}
 	settings := doc["settings"].(map[string]any)
-	if v, ok := settings["$schema"]; ok && v != draft2020 {
-		return nil, fmt.Errorf("the settings schema is written in %v; the integration contract takes draft 2020-12, %s", v, draft2020)
+	if v, ok := settings["$schema"]; ok && v != draft2020 && v != draft2020+"#" {
+		return nil, fmt.Errorf("the settings schema is written in %s; the integration contract takes draft 2020-12, %s", Printable(fmt.Sprint(v)), draft2020)
 	}
 	// A secret is a property of the settings themselves and never a nested one, so the
 	// settings' own properties are where writeOnly marks one, and anywhere else it marks
@@ -259,7 +265,7 @@ func CredentialAdapter(program string, settings []byte) []string {
 const DollarEscape = `\` + "u0024"
 
 // draft2020 is the one JSON Schema draft a settings schema is written in, the one its
-// $schema names when it names one.
+// $schema names when it names one, with or without an empty fragment, #.
 const draft2020 = "https://json-schema.org/draft/2020-12/schema"
 
 // subschema, subschemas and schemaMaps are the keywords of JSON Schema whose value is a

@@ -227,9 +227,10 @@ func TestTheSettingsWordIsWhatSetupPrints(t *testing.T) {
 }
 
 // TestAProgramIsFoundWhereOnlyItsOwnerCanChangeIt refuses a program in or under the
-// workspace, found there directly or through a link, a program a group may write, one
-// in a directory others may write, and one found through a relative directory of the
-// PATH, which the error names as that.
+// workspace, found there directly or through a link, and named through a path that
+// differs from the workspace's; a program every user may write, found through a link;
+// one in a directory every user may write; and one found through a relative entry of
+// the PATH, which the error names. The rule itself is TestTheRuleOfWhoMayChangeAProgram.
 func TestAProgramIsFoundWhereOnlyItsOwnerCanChangeIt(t *testing.T) {
 	hermetic(t)
 	doc := fixture(t, "acme-tracker.json")
@@ -239,40 +240,67 @@ func TestAProgramIsFoundWhereOnlyItsOwnerCanChangeIt(t *testing.T) {
 	if err := os.Symlink(inside, filepath.Join(linked, "qory-linked")); err != nil {
 		t.Fatal(err)
 	}
+	// The workspace by its resolved name, the program by the name the test was given.
+	realWorkspace := resolved(t, workspace)
 	writable := t.TempDir()
 	fakeIntegration(t, writable, "acme-tracker", doc)
 	if err := os.Chmod(writable, 0o777); err != nil {
 		t.Fatal(err)
 	}
-	groupWritable := fakeIntegration(t, t.TempDir(), "acme-tracker", doc)
-	if err := os.Chmod(groupWritable, 0o775); err != nil {
+	everyone := fakeIntegration(t, t.TempDir(), "acme-tracker", doc)
+	if err := os.Chmod(everyone, 0o757); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(groupWritable, filepath.Join(linked, "qory-group")); err != nil {
+	if err := os.Symlink(everyone, filepath.Join(linked, "qory-everyone")); err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range []struct{ body, want string }{
-		{"integrations: {tracker: {program: " + filepath.Join(workspace, "bin", "acme-tracker") + "}}\n", "is " + inside + ", inside " + workspace + ", where a run works"},
-		{"integrations: {linked: {}}\n", "qory-linked is " + inside + ", inside " + workspace + ", where a run works"},
-		{"integrations: {tracker: {program: " + filepath.Join(writable, "acme-tracker") + "}}\n", "may be written by users other than its owner"},
-		{"integrations: {group: {}}\n", "qory-group is " + groupWritable + ", and " + groupWritable + " may be written by users other than its owner"},
+	for _, c := range []struct{ body, ws, want string }{
+		{"integrations: {tracker: {program: " + filepath.Join(workspace, "bin", "acme-tracker") + "}}\n", workspace, "is " + inside + ", inside " + workspace + ", where a run works"},
+		{"integrations: {tracker: {program: " + filepath.Join(workspace, "bin", "acme-tracker") + "}}\n", realWorkspace, "inside " + realWorkspace + ", where a run works"},
+		{"integrations: {linked: {}}\n", workspace, "qory-linked is " + inside + ", inside " + workspace + ", where a run works"},
+		{"integrations: {tracker: {program: " + filepath.Join(writable, "acme-tracker") + "}}\n", workspace, resolved(t, writable) + " may be written by every user"},
+		{"integrations: {everyone: {}}\n", workspace, "qory-everyone is " + everyone + ", and " + everyone + " may be written by every user"},
 	} {
 		runnerFile(t, c.body)
-		c2, err := config.Load(t.TempDir(), true)
+		conf, err := config.Load(t.TempDir(), true)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := c2.Runner.Expand(context.Background(), config.Expansion{Workspace: []string{workspace}}); err == nil || !strings.Contains(err.Error(), c.want) {
+		if err := conf.Runner.Expand(context.Background(), config.Expansion{Workspace: []string{c.ws}}); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%q: %v, want %q", c.body, err, c.want)
 		}
 	}
 	dir := t.TempDir()
 	fakeIntegration(t, filepath.Join(dir, "rel"), "qory-rel", doc)
+	fakeIntegration(t, dir, "qory-dot", doc)
 	t.Chdir(dir)
-	t.Setenv("PATH", "rel"+string(os.PathListSeparator)+os.Getenv("PATH"))
-	runnerFile(t, "integrations: {rel: {}}\n")
-	if _, err := expand(t); err == nil || !strings.Contains(err.Error(), "qory-rel is found at rel/qory-rel, through a relative directory of the PATH") {
-		t.Errorf("a relative directory of the PATH: %v", err)
+	t.Setenv("PATH", "rel"+string(os.PathListSeparator)+"."+string(os.PathListSeparator)+os.Getenv("PATH"))
+	for key, want := range map[string]string{
+		"rel": `qory-rel is found as rel/qory-rel through the PATH entry "rel", which is relative`,
+		"dot": `qory-dot is found as ./qory-dot through the PATH entry ".", which is relative`,
+	} {
+		runnerFile(t, "integrations: {"+key+": {}}\n")
+		if _, err := expand(t); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("a relative entry of the PATH: %v, want %q", err, want)
+		}
+	}
+}
+
+// TestTheProgramsVersionIsPrintable describes a program whose version holds a
+// terminal's escape: the version config lists has ? in its place.
+func TestTheProgramsVersionIsPrintable(t *testing.T) {
+	hermetic(t)
+	escape := string([]byte{0x5c}) + "u001b"
+	program := fakeIntegration(t, onPath(t), "qory-tracker", strings.Replace(fixture(t, "acme-tracker.json"), `"0.1.0"`, `"0.1.0`+escape+`[2J"`, 1))
+	runnerFile(t, "integrations: {tracker: {}}\n")
+	r, err := expand(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range r.Rows() {
+		if row.Key == "runner.integrations.tracker" && row.Value != program+" 0.1.0?[2J" {
+			t.Errorf("row %q", row.Value)
+		}
 	}
 }
 

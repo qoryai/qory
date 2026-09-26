@@ -127,15 +127,19 @@ An integration is an adapter published apart that describes itself: Qory's own
 qory-<name>, qory-github say, or a program of yours. The integrations section of
 ` + config.RunnerFileName + ` declares each under a key with its settings, and names its program
 when it is not qory-<key> on the PATH; where the PATH is not the machine owner's alone,
-program names it by its absolute path. qory runs a program outside the checkout that
-only its owner may change, and names the program it found on a line of its own. Before
-a run qory runs <program> describe for each integration the run's policy selects, every
-one when the server supplies the policy, checks the settings against the description,
+program names it by its absolute path. qory runs a program outside the checkout,
+judged by where its links lead, and names the program it found on a line of its own.
+The program and every directory above it up to /, and above each link on the way,
+belong to root or to the user running qory; other users may write none of them, except
+a directory root owns with the sticky bit set, and a group may write one when it is
+root's, wheel, admin, or the owner's own group, named as the owner is. Before a run
+qory runs <program> describe for each integration the run's policy selects, every one
+when the server supplies the policy, checks the settings against the description,
 and defines the credential named by the key, with the adapter <program> credential
 --settings <json> -- ${argument}. A policy selects it by the key like any other. The
 settings go on that command line, so a secret among them is refused and given as the
 file that holds it. A name the credentials section defines itself is the section's,
-and a line says so. An integration that does not describe, or whose settings its
+a line says so, and the run describes that integration no further. An integration that does not describe, or whose settings its
 description refuses, means no run.
 
 A caller that starts runs for a system of its own names them: --run-id gives the run
@@ -270,7 +274,7 @@ every run on the machine; --timeout 0 lifts the file's.
 				for _, key := range r.Shadowed() {
 					fmt.Fprintln(stderr, "qory run:", shadowed(key))
 				}
-				if err := r.Expand(ctx, expansion(pol, server != nil && !local, at.root, cwd)); err != nil {
+				if err := r.Expand(ctx, expansion(r, pol, server != nil && !local, at.root, cwd)); err != nil {
 					return input(err)
 				}
 				for _, in := range r.Integrations {
@@ -344,20 +348,25 @@ every run on the machine; --timeout 0 lifts the file's.
 // expansion is what a run describes of the integrations the runner file declares. A
 // policy this process holds names the credentials the run selects, so the integrations
 // it selects are the ones described; a policy the server supplies arrives once the
-// runner starts, so every declared integration is described before it does. A program
-// in the checkout or the working directory is refused.
-func expansion(pol *session.Policy, fromServer bool, root, cwd string) config.Expansion {
-	e := config.Expansion{Workspace: []string{root, cwd}}
-	if fromServer {
-		return e
+// runner starts, so every declared integration is described before it does. An
+// integration whose key the credentials section defines itself defines nothing for the
+// run and is not described. A program in the checkout, or in the working directory
+// when that is inside the checkout, is refused.
+func expansion(r *config.Runner, pol *session.Policy, fromServer bool, root, cwd string) config.Expansion {
+	e := config.Expansion{Workspace: []string{root}}
+	if cwd != root && reallyWithin(root, cwd) {
+		e.Workspace = append(e.Workspace, cwd)
 	}
+	shadowed := r.Shadowed()
 	selected := map[string]bool{}
 	if pol != nil {
 		for _, c := range pol.Credentials {
 			selected[c.Name] = true
 		}
 	}
-	e.Only = func(key string) bool { return selected[key] }
+	e.Only = func(key string) bool {
+		return !slices.Contains(shadowed, key) && (fromServer || selected[key])
+	}
 	return e
 }
 

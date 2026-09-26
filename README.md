@@ -529,23 +529,30 @@ and a policy selects it by the key, `{name: github, argument: acme/shop}`. `prog
 names the program by its absolute path or by a name on the `PATH`; without it the
 program is `qory-<key>` on the `PATH`. On a machine whose `PATH` is not its owner's
 alone, name each program by its absolute path with `program`. `qory` runs a program
-outside the checkout that only its owner may change, the file and its directory alike,
-with its links followed, and `qory run` names the program it found on a line of its
-own. The settings go on the adapter's command line, which other processes of the
-machine can read, so a secret is refused there: the description marks it, a property of
-the settings themselves, and the settings give the file that holds it,
-`private_key_file` and never `private_key`. The settings are compact JSON, byte for byte
-what `qory-github setup` prints: `<`, `>`, `&`, U+2028 and U+2029 escaped, and every
-`$` written `\u0024`, so the adapter's `${argument}` is the policy's argument alone. A
-name the `credentials` section defines itself is the section's: `qory run` and
-`qory config` say so on a line of their own, and `qory config` lists the integration as
-shadowed. A run whose policy is on this machine describes the integrations its
-`credentials` select; a run whose policy the server supplies describes every one. A
-program that does not answer within 10 seconds, a description the
-[integration contract](https://github.com/qoryai/integrations/tree/main/contracts/integration/v1)
-refuses, settings the description refuses, and an integration that plays no role
-`qory` knows stop the run before it starts. `qory config` describes every integration
-and lists what each defines.
+outside the checkout, judged by where its links lead: a link on a `PATH` entry the
+checkout controls that resolves outside the checkout is judged by where it resolves. The
+resolved file, every directory above it up to `/`, and every directory above each link
+on the way, the `PATH` directory among them, keep one rule: root or the user running
+`qory` owns each; other users may write none, except a directory root owns with the
+sticky bit set, `/tmp` say; and a group may write one when the group is root's, gid 0,
+`wheel` or `admin`, or the owner's own group, named as the owner is. A default Homebrew
+install and a `~/go/bin` of a user's private group keep it. `qory run` names the program
+it found on a line of its own. The settings go on the adapter's command line, which
+other processes of the machine can read, so a secret is refused there: the description
+marks it, a property of the settings themselves, and the settings give the file that
+holds it, `private_key_file` and never `private_key`. The settings are compact JSON,
+byte for byte what `qory-github setup` prints: `<`, `>`, `&`, U+2028 and U+2029 escaped,
+and every `$` written `\u0024`, so the adapter's `${argument}` is the policy's argument
+alone. A name the `credentials` section defines itself is the section's: `qory run` and
+`qory config` say so on a line of their own, `qory config` describes the integration and
+lists it as shadowed, and a run leaves it undescribed. A run whose policy is on this
+machine describes the integrations its `credentials` select; a run whose policy the
+server supplies describes every one. A program that does not answer within 10 seconds, a
+description the [integration
+contract](https://github.com/qoryai/integrations/tree/main/contracts/integration/v1)
+refuses, settings the description refuses, and an integration that plays no role `qory`
+knows stop the run before it starts. `qory config` describes every integration and lists
+what each defines.
 
 For those hosts, and no other, the proxy ends the container's TLS itself, with an
 authority made for the run whose key never leaves the runner. The container is given

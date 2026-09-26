@@ -154,10 +154,11 @@ func TestASecretIsAPropertyOfTheSettingsThemselves(t *testing.T) {
 	}
 }
 
-// TestTheSettingsSchemaIsDraft2020 takes a settings schema that names draft 2020-12 or
-// no draft, and refuses one that names another.
+// TestTheSettingsSchemaIsDraft2020 takes a settings schema that names draft 2020-12,
+// with or without an empty fragment, or no draft, and refuses one that names another,
+// quoting it as a terminal takes it.
 func TestTheSettingsSchemaIsDraft2020(t *testing.T) {
-	for _, settings := range []string{`{"type": "object"}`, `{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object"}`} {
+	for _, settings := range []string{`{"type": "object"}`, `{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object"}`, `{"$schema": "https://json-schema.org/draft/2020-12/schema#", "type": "object"}`} {
 		if _, err := integration.Describe(context.Background(), program(t, withSettings(t, settings))); err != nil {
 			t.Errorf("%s: %v", settings, err)
 		}
@@ -165,6 +166,12 @@ func TestTheSettingsSchemaIsDraft2020(t *testing.T) {
 	settings := `{"$schema": "http://json-schema.org/draft-07/schema#", "type": "object"}`
 	if _, err := integration.Describe(context.Background(), program(t, withSettings(t, settings))); err == nil || !strings.Contains(err.Error(), "the settings schema is written in http://json-schema.org/draft-07/schema#; the integration contract takes draft 2020-12") {
 		t.Errorf("draft-07: %v", err)
+	}
+	// An escape in the $schema is printed as ?, and a long one cut.
+	escape := string([]byte{0x5c}) + "u001b"
+	settings = `{"$schema": "` + escape + `[31mred` + strings.Repeat("x", 300) + `", "type": "object"}`
+	if _, err := integration.Describe(context.Background(), program(t, withSettings(t, settings))); err == nil || !strings.Contains(err.Error(), "written in ?[31mred"+strings.Repeat("x", 192)+"...;") {
+		t.Errorf("a $schema with an escape: %v", err)
 	}
 }
 
