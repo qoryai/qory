@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// Referable are the kinds a reference may name: the entries a document dispatches by
+// Referable are the kinds a reference may refer to: the entries a document dispatches by
 // name, and the ones a runtime may register under another name than the module wrote.
 var Referable = []string{"agents", "commands", "skills"}
 
@@ -18,14 +18,14 @@ var Referable = []string{"agents", "commands", "skills"}
 // checked by [References].
 var reference = regexp.MustCompile(`\$\{qory:([^}]*)\}`)
 
-// HasReference reports whether data holds anything shaped like a reference, so a renderer
-// copies the file with the references resolved instead of linking it.
+// HasReference reports whether data contains anything shaped like a reference, so a
+// renderer copies the file with the references resolved instead of linking it.
 func HasReference(data []byte) bool { return reference.Match(data) }
 
 // References lists the entries text references, as sorted <kind>/<name> keys, each once.
 // A reference is ${qory:<kind>/<name>}: the kind one of [Referable], the name one path
-// segment. Anything else between ${qory: and } is an error naming the reference, so a
-// misspelt one is refused instead of reaching a session as it is.
+// segment. Anything else between ${qory: and } is an error that contains the reference,
+// so a misspelt one is refused instead of reaching a session as it is.
 func References(text string) ([]string, error) {
 	seen := map[string]bool{}
 	for _, m := range reference.FindAllStringSubmatch(text, -1) {
@@ -35,7 +35,7 @@ func References(text string) ([]string, error) {
 			return nil, fmt.Errorf("%s is not a reference; after ${qory: comes one of %s, then /<name>", m[0], strings.Join(Referable, ", "))
 		}
 		if name == "" || strings.ContainsAny(name, `/\@ `) || strings.HasPrefix(name, ".") {
-			return nil, fmt.Errorf("%s names %q, which is not an entry name; a name is one path segment", m[0], name)
+			return nil, fmt.Errorf("%s refers to %q, which is not an entry name; a name is one path segment", m[0], name)
 		}
 		seen[key] = true
 	}
@@ -51,7 +51,7 @@ func References(text string) ([]string, error) {
 }
 
 // Substitute replaces every reference in text with what resolve returns for its kind and
-// name. A reference [References] would refuse is left as written; the compose refused the
+// name. A reference [References] refuses is left as written; the compose refuses the
 // document before a renderer sees it.
 func Substitute(text string, resolve func(kind, name string) string) string {
 	return reference.ReplaceAllStringFunc(text, func(m string) string {

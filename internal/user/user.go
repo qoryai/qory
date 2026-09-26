@@ -1,9 +1,9 @@
 // Package user reads the name to greet a person with from the local configuration.
 //
 // [Name] takes git's configured user name first and the login recorded by the gh CLI
-// second, and returns an empty string when neither names anybody. It reads git config and
-// gh's hosts file and nothing else, so it never touches the network and never asks
-// GitHub who the person is.
+// second, and returns an empty string when neither contains a name. It reads git config
+// and gh's hosts file and nothing else, so it never touches the network and never
+// requests the person's identity from GitHub.
 package user
 
 import (
@@ -15,8 +15,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Name returns a name to greet the person with, or "" when nothing on this machine names
-// one. It tries two sources, in this order:
+// Name returns a name to greet the person with, or "" when nothing on this
+// machine contains one. It tries two sources, in this order:
 //
 //   - the first word of git's user.name, read by running git in the process's working
 //     directory, so a checkout's own config wins over the global one

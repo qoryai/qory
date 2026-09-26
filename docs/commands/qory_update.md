@@ -15,15 +15,16 @@ source checkout is not updated; rebuild it, or install a release.
 
 --check reports whether a newer release exists and installs nothing.
 
-A build from the main branch between releases carries a pseudo-version, which is ahead
-of the newest release. Such a build is not updated on its own: on a terminal, update
-offers to install the release over it and asks; in a script, --release says yes.
+A build from the main branch between releases has a pseudo-version, which is ahead of
+the newest release. Such a build is not updated on its own: on a terminal, update offers
+to install the release over it and requests a confirmation; in a script, --release
+confirms it.
 
 Every command looks for a newer release, when its error output is a terminal, and prints
-a notice after its own output when the newest release is ahead of its version. GitHub is
-asked at most once an hour; between asks the answer is read from a file under the user's
-cache directory. A build from the main branch between releases carries a pseudo-version
-and is told of a release only when it is behind one. QORY_NO_UPDATE_CHECK=1 turns the
+a notice after its own output when the newest release is ahead of its version. GitHub's
+latest release is requested at most once an hour; between requests the answer is read
+from a file under the user's cache directory. A build from the main branch between
+releases has a pseudo-version and gets a notice of a release only when it is behind one. QORY_NO_UPDATE_CHECK=1 turns the
 look off, and so does CI being set.
 
 --verbose adds nothing here.
@@ -37,13 +38,13 @@ qory update [flags]
 ```
       --check     report whether a newer release exists and install nothing
   -h, --help      help for update
-      --release   install the newest release over a build that is ahead of it, without asking
+      --release   install the newest release over a build that is ahead of it, without a confirmation
 ```
 
 ### Options inherited from parent commands
 
 ```
-  -v, --verbose   print more of what the command does; each command's help says what
+  -v, --verbose   print more of what the command does; each command's help lists what
 ```
 
 ### SEE ALSO

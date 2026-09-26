@@ -87,7 +87,7 @@ func TestInitWithoutAName(t *testing.T) {
 	}
 }
 
-// TestInitWithoutAnExample checks the error of a build that carries no example.
+// TestInitWithoutAnExample checks the error of a build that contains no example.
 func TestInitWithoutAnExample(t *testing.T) {
 	emptyDir(t)
 	setExample(t, nil)
@@ -96,7 +96,7 @@ func TestInitWithoutAnExample(t *testing.T) {
 	if err == nil {
 		t.Fatalf("init without an example: no error\n%s", out)
 	}
-	wants(t, err.Error(), "this build carries no example")
+	wants(t, err.Error(), "this build contains no example")
 }
 
 // setExample puts a file tree in place as the example init writes, and puts back whatever

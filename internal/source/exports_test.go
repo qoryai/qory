@@ -127,7 +127,7 @@ func TestResolveNamesARepositoryExportingNothing(t *testing.T) {
 	hermetic(t)
 	root := committedRepo(t)
 	_, err := source.Resolve("/nowhere", stack.Source{Path: root, Module: "core"}, source.Options{})
-	if want := root + " exports nothing: it has no qory.yaml with an exports section, so name its directories with path"; err == nil || err.Error() != want {
+	if want := root + " exports nothing: it has no qory.yaml with an exports section, so select its directories with path"; err == nil || err.Error() != want {
 		t.Errorf("err = %v\nwant %s", err, want)
 	}
 }

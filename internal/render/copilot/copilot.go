@@ -18,10 +18,10 @@
 // Copilot CLI also takes a harness from outside the checkout: --add-dir loads a
 // directory's .github/skills and .github/agents as trusted configuration, and
 // --additional-mcp-config takes a file of servers for one session. The runtime's
-// directory holds workspace/.github with the skills linked and the agents written, and
-// mcp.json with the servers when the compose holds one, so the MCP kind has a place
+// directory contains workspace/.github with the skills linked and the agents written, and
+// mcp.json with the servers when the compose contains one, so the MCP kind has a place
 // there and is not skipped. The hooks and the instructions are read from the checkout
-// alone. [Template] names both.
+// alone. [Template] passes both.
 package copilot
 
 import (
@@ -75,7 +75,7 @@ func (copilot) Links(res *compose.Result) []render.Link {
 func (copilot) Skips() []string { return []string{"commands", "output-styles"} }
 
 // Reserved are the agents and hooks directories Render writes, and workflows, where a
-// file would be a GitHub Actions workflow the repository did not commit.
+// file is a GitHub Actions workflow the repository did not commit.
 func (copilot) Reserved() []render.Reserved {
 	return []render.Reserved{
 		{Path: "agents", Why: "agents are linked there; ship it as agents/<name>"},

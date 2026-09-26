@@ -98,15 +98,15 @@ func TestReadIsNilWithoutASection(t *testing.T) {
 // YAML alias anywhere in it is the file's to refuse.
 func TestReadRefuses(t *testing.T) {
 	for _, c := range []struct{ body, want string }{
-		{"exports: {}\n", "exports names no stacks and no modules"},
-		{"exports: {stacks: [a/b]}\n", `exports.stacks names "a/b", which is not one path segment`},
-		{"exports: {modules: [core, core]}\n", "exports.modules names core twice"},
+		{"exports: {}\n", "exports lists no stacks and no modules"},
+		{"exports: {stacks: [a/b]}\n", `exports.stacks lists "a/b", which is not one path segment`},
+		{"exports: {modules: [core, core]}\n", "exports.modules lists core twice"},
 		{"exports: {dir: ../shared, modules: [core]}\n", `exports.dir stacks "../shared/stacks" is not a directory inside the repository`},
 		{"exports: {dir: /srv/harness, modules: [core]}\n", `exports.dir stacks "/srv/harness/stacks" is not a directory inside the repository`},
-		{"exports: {dir: {stacks: ./s}, modules: [core]}\n", "exports.dir names no modules directory; the map form names both"},
-		{"exports: {dir: {stacks: ./s, module: ./m}}\n", `dir names "module"; a dir map names stacks and modules`},
+		{"exports: {dir: {stacks: ./s}, modules: [core]}\n", "exports.dir sets no modules directory; the map form sets both"},
+		{"exports: {dir: {stacks: ./s, module: ./m}}\n", `dir has the key "module"; a dir map has the keys stacks and modules`},
 		{"exports: {dir: \"\", modules: [core]}\n", "dir is empty; it is a directory relative to the repository root"},
-		{"exports: {dir: [a, b], modules: [core]}\n", "dir is one directory holding stacks/ and modules/, or a map"},
+		{"exports: {dir: [a, b], modules: [core]}\n", "dir is one directory that contains stacks/ and modules/, or a map"},
 		{"exports: {stack: [nextjs]}\n", `key "stack" is not one qory.yaml reads`},
 	} {
 		root := write(t, c.body)
@@ -131,7 +131,7 @@ func TestReadRefuses(t *testing.T) {
 	if err := os.WriteFile(file, []byte("harness:\n  extensions:\n    ci: &ci {ignore: [lint]}\n    cd: *ci\nexports: {modules: [core]}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := exports.Read(root); err == nil || err.Error() != file+": line 4: *ci is a YAML alias, which harness.yaml may not hold; write the value out in full where it is used" {
+	if _, err := exports.Read(root); err == nil || err.Error() != file+": line 4: *ci is a YAML alias, which harness.yaml may not contain; write the value out in full where it is used" {
 		t.Errorf("an alias outside the section: %v", err)
 	}
 }
@@ -161,12 +161,12 @@ func TestVerifyWantsEveryExportOnDisk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := root + "/qory.yaml: exports.stacks names nextjs, and harness/stacks/nextjs holds no qory-stack.yaml"
+	want := root + "/qory.yaml: exports.stacks lists nextjs, and harness/stacks/nextjs contains no qory-stack.yaml"
 	if err := e.Verify(); err == nil || err.Error() != want {
 		t.Errorf("no stack: %v\nwant %s", err, want)
 	}
 	touch(t, filepath.Join(root, "harness", "stacks", "nextjs", "qory-stack.yaml"))
-	want = root + "/qory.yaml: exports.modules names core, and harness/modules/core holds no qory-module.yaml"
+	want = root + "/qory.yaml: exports.modules lists core, and harness/modules/core contains no qory-module.yaml"
 	if err := e.Verify(); err == nil || err.Error() != want {
 		t.Errorf("no module: %v\nwant %s", err, want)
 	}
@@ -196,7 +196,7 @@ func TestReadTakesEitherNameAndNoAPIVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = exports.Read(root)
-	if err == nil || !strings.Contains(err.Error(), "holds both qory.yaml and harness.yaml; a directory holds one of the two") {
+	if err == nil || !strings.Contains(err.Error(), "contains both qory.yaml and harness.yaml; a directory contains one of the two") {
 		t.Fatalf("both names: %v", err)
 	}
 }

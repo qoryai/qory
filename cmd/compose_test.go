@@ -243,7 +243,7 @@ func TestComposeRefuses(t *testing.T) {
 	}{
 		{
 			name:    "no stack in the checkout or above it",
-			wantErr: []string{"no " + stack.FileName + ", and no qory.yaml or harness.yaml whose harness section names modules or a stack to extend, in ", "ancestor directory you own"},
+			wantErr: []string{"no " + stack.FileName + ", and no qory.yaml or harness.yaml whose harness section lists modules or a stack to extend, in ", "ancestor directory you own"},
 		},
 		{
 			name:    "a stack of another format",
@@ -251,9 +251,9 @@ func TestComposeRefuses(t *testing.T) {
 			wantErr: []string{"qory.yaml:", `apiVersion "qory.dev/v2" is not one this qory reads`},
 		},
 		{
-			name:    "an exclude that names nothing the module ships",
+			name:    "an exclude that selects nothing the module ships",
 			fixture: "exclude-names-nothing",
-			wantErr: []string{"module core: exclude skills/nope names nothing the module ships"},
+			wantErr: []string{"module core: exclude skills/nope selects nothing the module ships"},
 		},
 		{
 			name:    "a directory under hooks",
@@ -263,7 +263,7 @@ func TestComposeRefuses(t *testing.T) {
 		{
 			name:    "an MCP server that is not an object",
 			fixture: "mcp-server-fails",
-			wantErr: []string{"mcp/db.json does not hold a JSON object"},
+			wantErr: []string{"mcp/db.json does not contain a JSON object"},
 		},
 	}
 	for _, tc := range tests {

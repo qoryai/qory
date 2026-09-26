@@ -1,17 +1,17 @@
 // Package update finds the newest release of qory and installs it.
 //
 // A release is a tag on GitHub, and every way qory is installed follows those tags: the
-// Homebrew cask, the install script, and go install. [Site.Latest] asks GitHub which
-// release is newest, [Newer] says whether that is ahead of the running binary, and
+// Homebrew cask, the install script, and go install. [Site.Latest] requests the newest
+// release from GitHub, [Newer] reports whether that is ahead of the running binary, and
 // [Site.Install] replaces a release binary with the newest release's archive for its
 // platform, the way the install script does, after checking the archive against the
 // release's checksums.
 //
 // [Check] is what every command runs: it reads the answer from [Cache] when the last look
-// is less than [Interval] old and asks GitHub otherwise, so an hour of commands costs one
-// request. The cache records the version that looked as well as what it found, so a
+// is less than [Interval] old and requests it from GitHub otherwise, so an hour of
+// commands costs one request. The cache records the version that looked as well as what it found, so a
 // binary that has been replaced since starts over rather than reading the old binary's
-// answer. [Detect] tells how the running binary was installed, which decides how
+// answer. [Detect] reports how the running binary was installed, which decides how
 // qory update replaces it.
 package update
 
@@ -47,16 +47,16 @@ type Site struct {
 	API string
 	// Downloads is the base the release archives are downloaded from, https://github.com.
 	Downloads string
-	// Client makes the requests. It carries the timeout, so a check that hangs gives up
-	// rather than holding a command.
+	// Client makes the requests. It has the timeout, so a check that hangs stops rather
+	// than blocking a command.
 	Client *http.Client
-	// Progress, when set, is told how much of a release archive [Site.Install] has
-	// downloaded, in bytes, as it arrives: done of total, total zero when the server
-	// does not say. It is called from the goroutine that downloads.
+	// Progress, when set, receives how much of a release archive [Site.Install] has
+	// downloaded, in bytes, as it arrives: done of total, total zero when the response
+	// has no length. It is called from the goroutine that downloads.
 	Progress func(done, total int64)
 }
 
-// GitHub is the site the releases live on. The client gives up after a few seconds,
+// GitHub is the site the releases live on. The client stops after a few seconds,
 // which bounds how long a command may wait for the daily check.
 var GitHub = Site{
 	API:       "https://api.github.com",
@@ -66,7 +66,7 @@ var GitHub = Site{
 
 // Latest returns the version of the newest release without its leading v, read from the
 // repository's latest-release endpoint. A rate-limited or otherwise refused request is
-// an error that says so.
+// an error that contains the response's status.
 func (s Site) Latest(ctx context.Context) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.API+"/repos/"+Repo+"/releases/latest", nil)
 	if err != nil {
@@ -98,10 +98,10 @@ func (s Site) Latest(ctx context.Context) (string, error) {
 // Newer reports whether latest is a newer version than current. Both are versions
 // without a leading v, and current may be a pseudo-version, which is how a build from
 // the main branch between releases is stamped: v0.4.1-0.<time>-<commit> sorts after the
-// release v0.4.0 it follows and before a release v0.4.1, so such a build is told of a
-// release only when it is behind one. It is false when either is not a version, so a
-// build that carries none is never told to update, and false when the two are equal or
-// current is ahead.
+// release v0.4.0 it follows and before a release v0.4.1, so such a build is notified of
+// a release only when it is behind one. It is false when either is not a version, so a
+// build that has none is never notified of an update, and false when the two are equal
+// or current is ahead.
 func Newer(current, latest string) bool {
 	c, l := "v"+current, "v"+latest
 	if !semver.IsValid(c) || !semver.IsValid(l) {
@@ -111,7 +111,7 @@ func Newer(current, latest string) bool {
 }
 
 // Ahead reports whether current is a newer version than latest: a build from the main
-// branch after the newest release, or a release the site has not published yet. Like
+// branch after the newest release, or a release the site has not published. Like
 // [Newer] it is false when either is not a version.
 func Ahead(current, latest string) bool {
 	return Newer(latest, current)
@@ -123,8 +123,8 @@ func ReleaseURL(version string) string {
 }
 
 // Cache remembers the newest release seen, when it was looked for and which version of
-// qory looked, in one JSON file, so that one command an hour asks GitHub and every other
-// command reads the answer.
+// qory looked, in one JSON file, so that one command an hour sends a request to GitHub
+// and every other command reads the answer.
 type Cache struct {
 	// Path is the file. [CachePath] is where it is kept.
 	Path string
@@ -149,7 +149,7 @@ type Record struct {
 }
 
 // Read returns what the cache remembers. ok is false when the file is missing, unreadable
-// or names no release, which reads as never checked.
+// or contains no release, which reads as never checked.
 func (c Cache) Read() (r Record, ok bool) {
 	data, err := os.ReadFile(c.Path)
 	if err != nil {
@@ -190,7 +190,8 @@ func (c Cache) Clear() error {
 	return nil
 }
 
-// Interval is how long the cached answer is trusted before GitHub is asked again.
+// Interval is how long the cached answer is trusted before it is requested from GitHub
+// again.
 const Interval = time.Hour
 
 // Check returns the newest release for the binary running current: the cached one when
@@ -228,7 +229,7 @@ const (
 	Release
 )
 
-// String names the channel the way qory update reports it.
+// String returns the channel's name the way qory update reports it.
 func (c Channel) String() string {
 	switch c {
 	case Homebrew:
@@ -241,7 +242,7 @@ func (c Channel) String() string {
 	return "source build"
 }
 
-// Detect tells how the binary at exe was installed. A path inside a Homebrew cellar or
+// Detect reports how the binary at exe was installed. A path inside a Homebrew cellar or
 // caskroom is [Homebrew] however it was built. Otherwise a release build, one whose
 // version was set at build time, is [Release]; a source build under gobin, the directory
 // go install writes to, is [GoInstall]; and any other source build is [Source]. exe is
@@ -270,7 +271,7 @@ func Detect(exe string, release bool, gobin string) Channel {
 }
 
 // GoBin is the directory go install writes binaries to: GOBIN when set, else bin under
-// the first GOPATH entry, else ~/go/bin. It asks the go command, which knows a value set
+// the first GOPATH entry, else ~/go/bin. It runs the go command, which knows a value set
 // with go env -w, and reads the environment when there is no go command.
 func GoBin() string {
 	if out, err := exec.Command("go", "env", "GOBIN", "GOPATH").Output(); err == nil {
@@ -298,7 +299,7 @@ func GoBin() string {
 }
 
 // Archive is the name of the release archive for version on the platform goos and
-// goarch, as goreleaser names it: qory_0.4.0_darwin_arm64.tar.gz.
+// goarch, as goreleaser writes it: qory_0.4.0_darwin_arm64.tar.gz.
 func Archive(version, goos, goarch string) string {
 	return fmt.Sprintf("qory_%s_%s_%s.tar.gz", version, goos, goarch)
 }
@@ -307,7 +308,7 @@ func Archive(version, goos, goarch string) string {
 // downloads the release's archive and its checksums, refuses an archive whose SHA-256 is
 // not the one the release lists, takes the qory binary out of the archive, writes it
 // beside exe and renames it over exe, so the file is the old binary or the new one at
-// every moment and never half of either. An error names what failed: a platform the
+// every moment and never half of either. An error states what failed: a platform the
 // release has no build for, a checksum that does not match, or a directory the process
 // may not write to.
 func (s Site) Install(ctx context.Context, version, exe, goos, goarch string) error {
@@ -403,7 +404,7 @@ func extract(data []byte) ([]byte, error) {
 	for {
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
-			return nil, errors.New("the archive holds no qory binary")
+			return nil, errors.New("the archive contains no qory binary")
 		}
 		if err != nil {
 			return nil, err

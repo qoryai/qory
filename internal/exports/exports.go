@@ -7,16 +7,16 @@
 //	  stacks: [nextjs]          # each at <dir>/stacks/<name>/qory-stack.yaml
 //	  modules: [core, nextjs]   # each at <dir>/modules/<name>/qory-module.yaml
 //
-// A consumer names an export instead of a directory, {git: <url>, ref: <ref>, stack:
+// A consumer selects an export instead of a directory, {git: <url>, ref: <ref>, stack:
 // nextjs}, so the publisher may move its directories and only the section changes. The
 // section is the whole public surface: a stack or a module not listed is the publisher's
 // own, whatever directory it is in.
 //
 // dir is where the exports are read from, relative to the repository root. Absent, the
 // stacks are under stacks/ and the modules under modules/ at the root. As one string it
-// is the directory holding both, <dir>/stacks and <dir>/modules. As a map it names each
-// directory on its own, {stacks: ./stacks, modules: ./lib/modules}, and the names are
-// read directly under them. [Read] reads the section of the qory.yaml in a directory,
+// is the directory that contains both, <dir>/stacks and <dir>/modules. As a map it sets
+// each directory on its own, {stacks: ./stacks, modules: ./lib/modules}, and the names
+// are read directly under them. [Read] reads the section of the qory.yaml in a directory,
 // [Exports.Stack] and [Exports.Module] find one export, and [Exports.Verify] checks that
 // every export is there, which is how the publisher's own compose keeps the section true.
 package exports
@@ -37,11 +37,11 @@ import (
 const FileName = "qory.yaml"
 
 // AltFileName is the configuration's second name, read exactly as [FileName]; a
-// directory holds one of the two.
+// directory contains one of the two.
 const AltFileName = "harness.yaml"
 
-// File returns the configuration file dir holds under either name, "" for none, and an
-// error for a directory holding both.
+// File returns the configuration file dir contains under either name, "" for none, and
+// an error for a directory that contains both.
 func File(dir string) (string, error) {
 	var found string
 	for _, name := range []string{FileName, AltFileName} {
@@ -50,7 +50,7 @@ func File(dir string) (string, error) {
 			continue
 		}
 		if found != "" {
-			return "", fmt.Errorf("%s holds both %s and %s; a directory holds one of the two", dir, FileName, AltFileName)
+			return "", fmt.Errorf("%s contains both %s and %s; a directory contains one of the two", dir, FileName, AltFileName)
 		}
 		found = path
 	}
@@ -58,20 +58,20 @@ func File(dir string) (string, error) {
 }
 
 // APIVersion is the format version this qory writes and the newest it reads, the same one
-// every document carries.
+// every document declares.
 const APIVersion = "qory.dev/v1alpha1"
 
-// RetiredAPIVersions maps each version an earlier qory wrote for the format it still
-// reads to the one a document declaring it is read as. Every reader keeps the declared
-// version beside the result, so a compose can say the document wants its line
-// rewritten. A later major release drops an entry.
+// RetiredAPIVersions maps each retired spelling of a version of the format qory reads to
+// the version a document that declares it is read as. Every reader keeps the declared
+// version beside the result, so a compose can report that the document wants its line
+// rewritten.
 var RetiredAPIVersions = map[string]string{"qory.ai/v1alpha1": APIVersion}
 
 // ResolveAPIVersion returns the version a document declaring version is read as:
 // [APIVersion] for itself and for a retired spelling of it, and for any other version an
-// error naming it and the ones read. A reader stores the result in the document's place
-// and, when it differs from what the document declared, keeps the declared spelling
-// beside it, so the compose can say which files want rewriting. A reader prefixes the
+// error that contains it and the ones read. A reader stores the result in the document's
+// place and, when it differs from what the document declared, keeps the declared spelling
+// beside it, so the compose can report which files want rewriting. A reader prefixes the
 // error with the file.
 func ResolveAPIVersion(version string) (string, error) {
 	if version == APIVersion {
@@ -83,7 +83,7 @@ func ResolveAPIVersion(version string) (string, error) {
 	return "", fmt.Errorf("apiVersion %q is not one this qory reads; versions: %s", version, APIVersion)
 }
 
-// StackFileName and ModuleFileName are what an exported directory holds: a stack its
+// StackFileName and ModuleFileName are what an exported directory contains: a stack its
 // qory-stack.yaml, a module its qory-module.yaml.
 const (
 	StackFileName  = "qory-stack.yaml"
@@ -98,8 +98,8 @@ const (
 )
 
 // Dirs is the dir key: where the stacks and where the modules are, each relative to the
-// repository root. In the file it is one string, the directory holding stacks/ and
-// modules/, or a map naming each directory on its own.
+// repository root. In the file it is one string, the directory that contains stacks/ and
+// modules/, or a map that sets each directory on its own.
 type Dirs struct {
 	// Stacks is the directory the exported stacks are under, one directory per stack.
 	Stacks string `yaml:"stacks,omitempty"`
@@ -108,7 +108,7 @@ type Dirs struct {
 }
 
 // UnmarshalYAML accepts the string form, which appends stacks and modules to the one
-// directory, and the map form, which names each directory as it is.
+// directory, and the map form, which sets each directory as it is.
 func (d *Dirs) UnmarshalYAML(n *yaml.Node) error {
 	if n.Kind == yaml.ScalarNode {
 		var one string
@@ -122,7 +122,7 @@ func (d *Dirs) UnmarshalYAML(n *yaml.Node) error {
 		return nil
 	}
 	if n.Kind != yaml.MappingNode {
-		return errors.New("dir is one directory holding stacks/ and modules/, or a map naming stacks and modules directories")
+		return errors.New("dir is one directory that contains stacks/ and modules/, or a map that sets the stacks and modules directories")
 	}
 	type plain Dirs
 	var m plain
@@ -131,7 +131,7 @@ func (d *Dirs) UnmarshalYAML(n *yaml.Node) error {
 	}
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		if k := n.Content[i].Value; k != "stacks" && k != "modules" {
-			return fmt.Errorf("dir names %q; a dir map names stacks and modules", k)
+			return fmt.Errorf("dir has the key %q; a dir map has the keys stacks and modules", k)
 		}
 	}
 	*d = Dirs(m)
@@ -150,17 +150,17 @@ type Section struct {
 	Modules []string `yaml:"modules,omitempty"`
 }
 
-// Validate refuses a section naming nothing and setting no directory, a name that is
+// Validate refuses a section that lists nothing and sets no directory, a name that is
 // not one path segment, a name listed twice, and a directory that is absolute, empty or
 // outside the repository.
 func (s *Section) Validate() error {
 	if s.Dir == nil && len(s.Stacks) == 0 && len(s.Modules) == 0 {
-		return errors.New("exports names no stacks and no modules")
+		return errors.New("exports lists no stacks and no modules")
 	}
 	if s.Dir != nil {
 		for _, d := range []struct{ key, dir string }{{"stacks", s.Dir.Stacks}, {"modules", s.Dir.Modules}} {
 			if d.dir == "" {
-				return fmt.Errorf("exports.dir names no %s directory; the map form names both", d.key)
+				return fmt.Errorf("exports.dir sets no %s directory; the map form sets both", d.key)
 			}
 			clean := filepath.Clean(d.dir)
 			if filepath.IsAbs(d.dir) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
@@ -175,10 +175,10 @@ func (s *Section) Validate() error {
 		seen := map[string]bool{}
 		for _, name := range list.names {
 			if !segment(name) {
-				return fmt.Errorf("exports.%s names %q, which is not one path segment; a name holds no slash, backslash, @ or leading dot", list.key, name)
+				return fmt.Errorf("exports.%s lists %q, which is not one path segment; a name contains no slash, backslash, @ or leading dot", list.key, name)
 			}
 			if seen[name] {
-				return fmt.Errorf("exports.%s names %s twice", list.key, name)
+				return fmt.Errorf("exports.%s lists %s twice", list.key, name)
 			}
 			seen[name] = true
 		}
@@ -205,12 +205,12 @@ type Exports struct {
 	// Stacks and Modules are the exported names, in the order the file lists them.
 	Stacks  []string
 	Modules []string
-	// Dir is where the exports are, relative to Root, defaulted when the file names none.
+	// Dir is where the exports are, relative to Root, defaulted when the file sets none.
 	Dir Dirs
 }
 
 // Stack returns the directory of the exported stack, relative to [Exports.Root], and an
-// error naming the stacks the repository exports when name is not one of them.
+// error that lists the stacks the repository exports when name is not one of them.
 func (e *Exports) Stack(name string) (string, error) {
 	if !contains(e.Stacks, name) {
 		return "", fmt.Errorf("exports no stack named %s; %s", name, listText("stacks", e.Stacks))
@@ -219,7 +219,7 @@ func (e *Exports) Stack(name string) (string, error) {
 }
 
 // Module returns the directory of the exported module, relative to [Exports.Root], and an
-// error naming the modules the repository exports when name is not one of them.
+// error that lists the modules the repository exports when name is not one of them.
 func (e *Exports) Module(name string) (string, error) {
 	if !contains(e.Modules, name) {
 		return "", fmt.Errorf("exports no module named %s; %s", name, listText("modules", e.Modules))
@@ -228,19 +228,19 @@ func (e *Exports) Module(name string) (string, error) {
 }
 
 // Verify checks that every export is there: a qory-stack.yaml in each stack's directory,
-// a qory-module.yaml in each module's. The error names the file that is missing and the
-// export that wants it.
+// a qory-module.yaml in each module's. The error contains the file that is missing and
+// the export that wants it.
 func (e *Exports) Verify() error {
 	for _, name := range e.Stacks {
 		dir, _ := e.Stack(name)
 		if !isFile(filepath.Join(e.Root, dir, StackFileName)) {
-			return fmt.Errorf("%s: exports.stacks names %s, and %s holds no %s", e.File, name, dir, StackFileName)
+			return fmt.Errorf("%s: exports.stacks lists %s, and %s contains no %s", e.File, name, dir, StackFileName)
 		}
 	}
 	for _, name := range e.Modules {
 		dir, _ := e.Module(name)
 		if !isFile(filepath.Join(e.Root, dir, ModuleFileName)) {
-			return fmt.Errorf("%s: exports.modules names %s, and %s holds no %s", e.File, name, dir, ModuleFileName)
+			return fmt.Errorf("%s: exports.modules lists %s, and %s contains no %s", e.File, name, dir, ModuleFileName)
 		}
 	}
 	return nil
@@ -257,10 +257,11 @@ type document struct {
 }
 
 // Read reads the exports section of the qory.yaml in root, under either of its names,
-// and returns it resolved, or nil when root holds no such file or the file has no
+// and returns it resolved, or nil when root contains no such file or the file has no
 // exports section. A file that cannot be decoded, one with another apiVersion, and a
-// section that does not validate are errors naming the file; a file naming no
-// apiVersion is read as [APIVersion], the newest format, as the configuration reads it.
+// section that does not validate are errors that contain the file; a file that declares
+// no apiVersion is read as [APIVersion], the newest format, as the configuration reads
+// it.
 func Read(root string) (*Exports, error) {
 	doc, file, err := read(root)
 	if err != nil || doc == nil || doc.Exports == nil {
@@ -273,10 +274,10 @@ func Read(root string) (*Exports, error) {
 }
 
 // Range returns the qory key of the qory.yaml in root as the file writes it, "" when
-// root holds no such file or the file names no range. It is the range every stack the
-// repository delivers is held to, joined with the stack's own by the stack reader, so
-// the repository states its floor once. The value is not parsed here; the stack reader
-// does that and names the file.
+// root contains no such file or the file sets no range. It is the range every stack the
+// repository delivers must satisfy, joined with the stack's own by the stack reader, so
+// the repository states its floor once. Range does not parse the value; the stack reader
+// parses it and reports the file.
 func Range(root string) (value, file string, err error) {
 	doc, file, err := read(root)
 	if err != nil || doc == nil {
@@ -315,8 +316,8 @@ func read(root string) (*document, string, error) {
 	return &doc, file, nil
 }
 
-// ModulesDir is the directory a module named without a source is read from, relative
-// to the repository root: what the root's exports.dir says, else modules. The error is a
+// ModulesDir is the directory a module listed without a source is read from, relative
+// to the repository root: what the root's exports.dir sets, else modules. The error is a
 // qory.yaml at root that cannot be read.
 func ModulesDir(root string) (string, error) {
 	e, err := Read(root)
@@ -345,16 +346,16 @@ func decodeError(path string, err error) error {
 // RefuseAliases fails on the first YAML alias in the file at path, a *name or a <<: *name
 // merge; an anchor alone copies nothing and stands. The file's readers other than qory
 // refuse an alias, since a few hundred bytes of them chained can expand to gigabytes, and
-// read such a file as unreadable without a word to its author. qory refuses the alias too,
-// so the file fails where it is written. A file that does not parse is left to the
-// decoder, which says why.
+// read such a file as unreadable without a word to its author. qory refuses the alias
+// too, so the file fails where it is written. A file that does not parse is left to the
+// decoder, which reports why.
 func RefuseAliases(path string, data []byte) error {
 	var doc yaml.Node
 	if yaml.Unmarshal(data, &doc) != nil {
 		return nil
 	}
 	if a := firstAlias(&doc); a != nil {
-		return fmt.Errorf("%s: line %d: *%s is a YAML alias, which %s may not hold; write the value out in full where it is used", path, a.Line, a.Value, filepath.Base(path))
+		return fmt.Errorf("%s: line %d: *%s is a YAML alias, which %s may not contain; write the value out in full where it is used", path, a.Line, a.Value, filepath.Base(path))
 	}
 	return nil
 }

@@ -75,7 +75,7 @@ func TestSettingsAreCheckedWithoutTheirValues(t *testing.T) {
 		t.Errorf("settings it takes: %v", err)
 	}
 	for _, c := range []struct{ settings, want string }{
-		{`{"app_id":123456,"private_key":"PEM-NOT-A-REAL-KEY"}`, "settings.private_key is a secret, and the settings go on a command line; give private_key_file, a file that holds it, in its place"},
+		{`{"app_id":123456,"private_key":"PEM-NOT-A-REAL-KEY"}`, "settings.private_key is a secret, and the settings go on a command line; set private_key_file, the path of a file that contains it, in its place"},
 		{`{"private_key_file":"/k.pem"}`, "the settings are not what github takes: settings.app_id is required"},
 		{`{"app_id":1,"private_key_file":"/k.pem","region":"SECRET-REGION"}`, "settings.region is not a setting it takes"},
 		{`{"app_id":"SECRET VALUE","private_key_file":"/k.pem"}`, "settings.app_id breaks the schema's pattern"},

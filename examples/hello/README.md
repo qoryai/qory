@@ -13,9 +13,9 @@ qory harness remove      # or: qory hr; removes it again
 ```
 
 Then delete the `exclude` lines in `qory.yaml` and compose again. `qory` refuses,
-names both modules, and prints the lines that resolve it. Put them under the world module
+lists both modules, and prints the lines that resolve it. Put them under the world module
 instead, compose, start `claude` again and type `/hello`: the other greet answers, and
-says where to go from there.
+shows where to go from there.
 
 ## The same harness for another agent
 
@@ -25,5 +25,5 @@ codex                                    # then: greet me
 ```
 
 Codex reads `AGENTS.override.md` and `.agents/skills`, so the greeting is there. It has no
-place for commands, so `/hello` is a Claude Code thing and the compose says which entry it
-skipped.
+place for commands, so `/hello` is a Claude Code thing and the compose reports which entry
+it skipped.

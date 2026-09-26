@@ -14,7 +14,7 @@ import (
 	"github.com/charmbracelet/x/term"
 )
 
-// A Swarm is what a command shows while it works and has nothing to say yet: a few bees
+// A Swarm is what a command shows while it works and has nothing to print: a few bees
 // circling in a space one row high and two cells wide, on the line under the last one
 // printed.
 //
@@ -23,20 +23,21 @@ import (
 //
 // Each bee is two dots, its head in the yellow of the stripes and where it just was in
 // their black, and each circles on its own orbit at its own speed, so the swarm never
-// quite repeats. The dots are braille, eight to a cell, and a terminal gives a cell one
-// colour, so a cell takes the colour of most of its dots, yellow on a tie.
+// quite repeats. The dots are braille, eight to a cell, and a terminal draws a cell in
+// one colour, so a cell takes the colour of most of its dots, yellow on a tie.
 //
-// A [Flight] stands for one wait the command names and measures. A swarm names nothing:
-// it stands under a whole command, and shows only once the output has been quiet for
-// [swarmDelay] with the cursor at the start of a line, so a command that answers at once
-// never shows it, and a question waiting on a line of its own keeps its line.
+// A [Flight] stands for one wait the command labels and measures. A swarm labels
+// nothing: it stands under a whole command, and shows only once the output has been
+// quiet for [swarmDelay] with the cursor at the start of a line, so a command that
+// answers at once never shows it, and a question waiting on a line of its own keeps its
+// line.
 //
 // A Swarm is a writer. The command prints through it, and every write clears the swarm
 // first, then lets the swarm come back once the output is quiet again. What prints to
-// the terminal around it, a child process given the terminal, would be drawn over, so a
-// command that hands the terminal to another program does not buzz. The cursor is hidden
-// while the swarm is drawn, and shown again when it is cleared, when it stops, and on an
-// interrupt, before the signal is let through.
+// the terminal around it, such as a child process handed the terminal, is drawn over,
+// so a command that hands the terminal to another program does not buzz. The cursor is
+// hidden while the swarm is drawn, and shown again when it is cleared, when it stops,
+// and on an interrupt, before the signal is let through.
 type Swarm struct {
 	w io.Writer
 	s *swarm
@@ -114,8 +115,8 @@ func (s *Swarm) Write(p []byte) (int, error) {
 	return n, err
 }
 
-// Returned tells the swarm that the cursor is at the start of a line although nothing
-// printed through it says so: the terminal's echo of an answer typed to a question put
+// Returned records that the cursor is at the start of a line although nothing printed
+// through it put it there: the terminal's echo of an answer typed to a question put
 // it there. Without it the swarm stays away until the next line is printed.
 func (s *Swarm) Returned() {
 	s.s.mu.Lock()

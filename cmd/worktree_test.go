@@ -137,7 +137,7 @@ func TestWorktreeAddNeedsACommit(t *testing.T) {
 	if err == nil {
 		t.Fatalf("add in a repository with no commit succeeded:\n%s", out)
 	}
-	wants(t, err.Error(), "main has no commit yet; a worktree branch starts from a commit, so commit once and add again")
+	wants(t, err.Error(), "main has no commit; a worktree branch starts from a commit, so commit once and add again")
 }
 
 // TestWorktreeAddReusesAndRefuses is add run twice for one branch, once from inside the
@@ -251,7 +251,7 @@ func TestWorktreeAddMovesAnExistingBranchOntoABase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, stdout)
 	}
-	wants(t, stdout, "feature holds 1 commit off v0.4.0. Rebase it onto v0.5.0? [y/N]")
+	wants(t, stdout, "feature has 1 commit off v0.4.0. Rebase it onto v0.5.0? [y/N]")
 	wantsRow(t, stdout, "branch", "feature  (already there; kept on v0.4.0, not moved onto v0.5.0)")
 	_, err = runNoTTY(t, "wa", "feature", "--no-compose", "--base", "v0.5.0")
 	if err == nil || !strings.Contains(err.Error(), "feature exists off v0.4.0, so --base v0.5.0 needs an answer: add --rebase to move it onto v0.5.0, or leave --base out to keep it") {
@@ -355,7 +355,7 @@ func TestWorktreeRemoveGuardsAndRuns(t *testing.T) {
 	runGit(t, wt, "add", "new.txt")
 	runGit(t, wt, "commit", "-q", "-m", "new")
 	_, err := runNoTTY(t, "wr", "feature")
-	if err == nil || !strings.Contains(err.Error(), "branch feature holds 1 commit no remote branch, the main checkout or its base holds; push them, or remove with --keep-branch or --delete-branch") {
+	if err == nil || !strings.Contains(err.Error(), "branch feature has 1 commit that no remote branch, the main checkout or its base has; push them, or remove with --keep-branch or --delete-branch") {
 		t.Fatalf("own commit: %v", err)
 	}
 	writeFile(t, filepath.Join(wt, "new.txt"), "y\n")
@@ -370,7 +370,7 @@ func TestWorktreeRemoveGuardsAndRuns(t *testing.T) {
 	wantsRow(t, out, "ran", `touch "$QORY_MAIN/removed-$QORY_BRANCH" && echo "bye $QORY_BRANCH off $QORY_BASE"`)
 	lacks(t, out, "bye feature", "git worktree remove")
 	wantsRow(t, out, "removed", "../wt-feature")
-	wantsRow(t, out, "branch", "feature  (kept with 1 commit nothing else holds; git branch -D feature deletes it)")
+	wantsRow(t, out, "branch", "feature  (kept with 1 commit nothing else has; git branch -D feature deletes it)")
 	wantsRow(t, out, "main", root)
 	if _, err := os.Stat(filepath.Join(root, "removed-feature")); err != nil {
 		t.Errorf("the remove command did not run: %v", err)
@@ -397,8 +397,8 @@ func TestWorktreeRemoveGuardsAndRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, out, "  counting the commits of feature that are not on every remote branch, the main checkout's HEAD "+gitOut(t, root, "rev-parse", "--short=7", "HEAD")+", its recorded base origin/main\n", "  feature holds 1 commit of its own, the newest ", `"new"`, "\nbye feature off origin/main\n", "  git worktree remove --force "+wt+"\n", "  git branch -D feature\n")
-	wantsRow(t, out, "branch", "feature  (deleted with 1 commit nothing else holds; git reflog finds it for 30 days)")
+	wants(t, out, "  counting the commits of feature that are not on every remote branch, the main checkout's HEAD "+gitOut(t, root, "rev-parse", "--short=7", "HEAD")+", its recorded base origin/main\n", "  feature has 1 commit of its own, the newest ", `"new"`, "\nbye feature off origin/main\n", "  git worktree remove --force "+wt+"\n", "  git branch -D feature\n")
+	wantsRow(t, out, "branch", "feature  (deleted with 1 commit nothing else has; git reflog finds it for 30 days)")
 	if gitOut(t, root, "branch", "--list", "feature") != "" {
 		t.Errorf("the branch stayed")
 	}
@@ -428,7 +428,7 @@ func TestWorktreeRemoveAsksAboutOwnCommits(t *testing.T) {
 		return wt
 	}
 	wt := own("feature")
-	question := `branch feature holds 1 commit no remote branch, the main checkout or its base holds (last: "work on feature").`
+	question := `branch feature has 1 commit that no remote branch, the main checkout or its base has (last: "work on feature").`
 	stdout, _, err := runSplit(t, "\n", "wr", "feature")
 	if err == nil || err.Error() != "nothing removed" {
 		t.Fatalf("Enter: %v", err)
@@ -441,14 +441,14 @@ func TestWorktreeRemoveAsksAboutOwnCommits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, stdout)
 	}
-	wantsRow(t, stdout, "branch", "feature  (kept with 1 commit nothing else holds; git branch -D feature deletes it)")
+	wantsRow(t, stdout, "branch", "feature  (kept with 1 commit nothing else has; git branch -D feature deletes it)")
 	runGit(t, root, "branch", "-D", "feature")
 	own("feature")
 	stdout, _, err = runSplit(t, "d\n", "wr", "feature")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, stdout)
 	}
-	wantsRow(t, stdout, "branch", "feature  (deleted with 1 commit nothing else holds; git reflog finds it for 30 days)")
+	wantsRow(t, stdout, "branch", "feature  (deleted with 1 commit nothing else has; git reflog finds it for 30 days)")
 	if gitOut(t, root, "branch", "--list", "feature") != "" {
 		t.Errorf("the branch stayed")
 	}
@@ -509,7 +509,7 @@ func TestWorktreeRemoveFindsTheBranchLanded(t *testing.T) {
 	commitOn(t, other, "after.txt", "main moves on again")
 	runGit(t, other, "push", "--quiet", "origin", "main")
 	_, err := runNoTTY(t, "wr", "squashed", "--offline")
-	if err == nil || !strings.Contains(err.Error(), "branch squashed holds 2 commits no remote branch") {
+	if err == nil || !strings.Contains(err.Error(), "branch squashed has 2 commits that no remote branch") {
 		t.Fatalf("offline: %v", err)
 	}
 	out, err := runNoTTY(t, "wr", "squashed", "-v")
@@ -537,7 +537,7 @@ func TestWorktreeRemoveFindsTheBranchLanded(t *testing.T) {
 	merged("later")
 	commitOn(t, wt, "later-3.txt", "later three")
 	_, err = runNoTTY(t, "wr", "later")
-	if err == nil || !strings.Contains(err.Error(), "branch later holds 3 commits no remote branch") {
+	if err == nil || !strings.Contains(err.Error(), "branch later has 3 commits that no remote branch") {
 		t.Fatalf("a commit after the squash: %v", err)
 	}
 }
@@ -890,7 +890,7 @@ func TestWorktreeAddAttachesToRemoteBranch(t *testing.T) {
 		t.Fatalf("the main checkout's branch: %v", err)
 	}
 	_, err = run(t, "wa")
-	if err == nil || err.Error() != "qory wa takes a branch name, or --branch or --pr to say which branch of the remote to attach to" || cmd.ExitCode(err) != cmd.ExitInput {
+	if err == nil || err.Error() != "qory wa takes a branch name, or --branch or --pr to select which branch of the remote to attach to" || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("no branch: %v", err)
 	}
 	runGit(t, root, "remote", "remove", "origin")
@@ -937,7 +937,7 @@ func TestWorktreeAddAttachesToPullRequest(t *testing.T) {
 	wt = filepath.Join(filepath.Dir(root), "wt-review")
 	wantsRow(t, out, "path", "../wt-review")
 	wantsRow(t, out, "branch", "pr-8  (pull request #8, fetched from origin)")
-	wantsRow(t, out, "pulls from", "origin refs/pull/8/head  (no branch of the remote holds it, a fork's or a deleted one; a push from here goes nowhere)")
+	wantsRow(t, out, "pulls from", "origin refs/pull/8/head  (on no branch of the remote, such as a fork's or a deleted one; a push from here goes nowhere)")
 	lacks(t, out, "pushes to")
 	if got := gitOut(t, wt, "rev-parse", "HEAD"); got != fork {
 		t.Errorf("HEAD %s, want the pull request's %s", got, fork)
@@ -958,7 +958,7 @@ func TestWorktreeAddAttachesToPullRequest(t *testing.T) {
 	wantsRow(t, out, "path", "../wt-topic")
 	wantsRow(t, out, "branch", "topic  (already there)")
 	_, err = run(t, "wa", "--pr", "10", "--no-compose")
-	if err == nil || !strings.HasPrefix(err.Error(), "pull request 10 not found on origin; looked for refs/pull/10/head, refs/merge-requests/10/head, refs/pull-requests/10/from. worktree.pr in qory.yaml names the ref your host uses") || cmd.ExitCode(err) != cmd.ExitInput {
+	if err == nil || !strings.HasPrefix(err.Error(), "pull request 10 not found on origin; looked for refs/pull/10/head, refs/merge-requests/10/head, refs/pull-requests/10/from. worktree.pr in qory.yaml defines the ref your host uses") || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("no such pull request: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(root), "wt-pr-10")); err == nil {
@@ -969,7 +969,7 @@ func TestWorktreeAddAttachesToPullRequest(t *testing.T) {
 	}
 	runGit(t, dev, "push", "--quiet", "origin", "topic:refs/heads/topic-copy")
 	_, err = run(t, "wa", "--pr", "7", "--no-compose")
-	if err == nil || err.Error() != "pull request 7 is at the tip of 2 branches of origin, topic, topic-copy; --branch says which to attach to" {
+	if err == nil || err.Error() != "pull request 7 is at the tip of 2 branches of origin, topic, topic-copy; --branch selects the one to attach to" {
 		t.Fatalf("two branches: %v", err)
 	}
 	configure(t, root, nil, []string{"  pr: refs/changes/{n}/head"})
@@ -983,7 +983,7 @@ func TestWorktreeAddAttachesToPullRequest(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	wantsRow(t, out, "branch", "pr-11  (pull request #11, fetched from origin)")
-	wantsRow(t, out, "pulls from", "origin refs/changes/11/head  (no branch of the remote holds it, a fork's or a deleted one; a push from here goes nowhere)")
+	wantsRow(t, out, "pulls from", "origin refs/changes/11/head  (on no branch of the remote, such as a fork's or a deleted one; a push from here goes nowhere)")
 	out, err = run(t, "config")
 	if err != nil {
 		t.Fatal(err)

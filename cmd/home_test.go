@@ -318,7 +318,7 @@ func TestLaunchNeedsARuntimeWithASpec(t *testing.T) {
 		args []string
 		want string
 	}{
-		{nil, "the harness is composed for claude, goose; --runtime says which to start"},
+		{nil, "the harness is composed for claude, goose; --runtime selects which to start"},
 		{[]string{"--runtime", "gemini"}, "the harness is not composed for gemini; composed: claude, goose"},
 		{[]string{"--runtime", "goose"}, "goose reads its harness from the checkout alone"},
 	} {

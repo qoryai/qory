@@ -177,8 +177,8 @@ func TestRemoveTakesEveryRuntimesLinks(t *testing.T) {
 func TestComposeRefusesATargetItCannotRender(t *testing.T) {
 	for _, c := range []struct{ name, runtime, want string }{
 		{"an unknown runtime in a list", "claude,nope", `runtime "nope" is not one this qory renders`},
-		{"the same runtime twice", "claude,claude", "target.runtime names claude twice"},
-		{"an empty name", "claude,", "target.runtime names an empty runtime"},
+		{"the same runtime twice", "claude,claude", "target.runtime lists claude twice"},
+		{"an empty name", "claude,", "target.runtime lists an empty runtime"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			root := newCheckout(t)

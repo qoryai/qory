@@ -1,1 +1,1 @@
-bind agents/coder names agent rails-coder, which no module ships
+bind agents/coder selects agent rails-coder, which no module ships

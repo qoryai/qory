@@ -64,7 +64,7 @@ func TestReadRefusesADirectoryUnderASettingsRuntime(t *testing.T) {
 		"settings/claude/rules/a.md":    "a\n",
 	})
 	_, err := Read("core", dir, nil, "")
-	want := "module core: settings/claude/rules is a directory; settings holds one fragment per target file, and a runtime's other files go under files/claude/rules"
+	want := "module core: settings/claude/rules is a directory; settings contains one fragment per target file, and a runtime's other files go under files/claude/rules"
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("error %v, want %q", err, want)
 	}

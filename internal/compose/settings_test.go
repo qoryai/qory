@@ -287,7 +287,7 @@ modules:
 	if err == nil {
 		t.Fatal("composed with an exclude that names nothing")
 	}
-	if want := "module core: exclude skills/gone names nothing the module ships"; err.Error() != want {
+	if want := "module core: exclude skills/gone selects nothing the module ships"; err.Error() != want {
 		t.Fatalf("error %q, want %q", err, want)
 	}
 }
@@ -411,7 +411,7 @@ func TestComposeRecordsEveryModule(t *testing.T) {
 		"modules/a/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: acme-core\n",
 		"modules/a/commands/ship.md": "ship\n",
 	})
-	if err == nil || err.Error() != "module a: the module at modules/a is named acme-core in its qory-module.yaml" {
+	if err == nil || err.Error() != "module a: the module at modules/a has the name acme-core in its qory-module.yaml" {
 		t.Fatalf("err = %v", err)
 	}
 	res, err := composeTree(t, map[string]string{
@@ -480,7 +480,7 @@ func TestComposeRefuses(t *testing.T) {
 				"bare/a/":      "",
 				"modules/b/":   "",
 			},
-			want: filepath.Join("bare", "a") + " has no qory-module.yaml; a module carries one naming it",
+			want: filepath.Join("bare", "a") + " has no qory-module.yaml; a module has one that defines its name",
 		},
 		{
 			name: "one name composed from two sources",

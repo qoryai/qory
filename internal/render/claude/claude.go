@@ -1,18 +1,18 @@
 // Package claude renders for Claude Code, which reads a project's .claude directory: the
 // skills, agents, commands, output styles and hooks under it, its settings.json, and
 // CLAUDE.md beside them, and .mcp.json at the checkout root for the MCP servers. The
-// checkout gets .claude, a real directory holding one link per file of the runtime's
+// checkout gets .claude, a real directory containing one link per file of the runtime's
 // directory in the home, so Claude Code's own settings.local.json stays beside them, and
-// a soft .mcp.json when the compose holds a server. The target model is written into
+// a soft .mcp.json when the compose contains a server. The target model is written into
 // settings.json as model. Claude Code has a place for every entry kind, so nothing is
 // skipped, and a files entry named claude/<path> lands at .claude/<path>, which is how a
 // module ships .claude/rules/nextjs-15.md.
 //
 // Claude Code also takes a harness from outside the checkout, and the runtime's directory
-// holds the launch spec for that: plugin/ is a plugin in Claude Code's own layout, the
+// contains the launch spec for that: plugin/ is a plugin in Claude Code's own layout, the
 // skills, agents, commands and output styles under a .claude-plugin/plugin.json, which
 // --plugin-dir loads for one session; settings.json goes to --settings, mcp.json to
-// --mcp-config and launch/CLAUDE.md to --append-system-prompt-file. [Template] holds
+// --mcp-config and launch/CLAUDE.md to --append-system-prompt-file. [Template] contains
 // those arguments, and neither the plugin nor the launch directory is linked into the
 // checkout. The plugin's agents are copies where everything else in the home is a link,
 // see [render.WritePlugin]: Claude Code passes over a link in a plugin's agents
@@ -28,7 +28,7 @@
 // name; launch/CLAUDE.md, read at launch alone, resolves it to the plugin's and ends
 // with the names the session registers, see [render.Addressing]. The plugin's own
 // documents resolve to the plugin's names as well, so a skill that dispatches an agent
-// names the one the session has.
+// refers to the one the session has.
 //
 // The paths under .claude a files entry may not take, see [render.Reserved]:
 //
@@ -56,13 +56,13 @@ import (
 // the home.
 const Runtime = "claude"
 
-// Plugin is the plugin's directory under the runtime's directory in the home, what
-// --plugin-dir names.
+// Plugin is the plugin's directory under the runtime's directory in the home, the value
+// of --plugin-dir.
 const Plugin = "plugin"
 
-// Launch is the directory under the runtime's directory that holds what a launch reads
-// and a checkout must not: CLAUDE.md with the plugin's names, what
-// --append-system-prompt-file names.
+// Launch is the directory under the runtime's directory that contains what a launch reads
+// and a checkout must not: CLAUDE.md with the plugin's names, the file
+// --append-system-prompt-file reads.
 const Launch = "launch"
 
 // claude implements [render.Runtime] for Claude Code.
@@ -119,8 +119,8 @@ func (claude) Reserved() []render.Reserved {
 // and the instructions as CLAUDE.md, with its references resolved to the bare names.
 // The instructions are written in full rather than imported from AGENTS.md: Claude Code
 // resolves a link to its real path and treats an import found through it as external,
-// which it asks about on every start. Then it writes the plugin, see [Plugin], and the
-// launch instructions, see [Launch].
+// which it shows an approval prompt for on every start. Then it writes the plugin, see
+// [Plugin], and the launch instructions, see [Launch].
 func (claude) Render(res *compose.Result, dir, home string) error {
 	if err := render.PlaceEntries(res, dir, render.Bare, "skills", "agents", "commands", "output-styles", "hooks"); err != nil {
 		return err

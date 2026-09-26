@@ -16,7 +16,7 @@ qory version [flags]
 ### Options inherited from parent commands
 
 ```
-  -v, --verbose   print more of what the command does; each command's help says what
+  -v, --verbose   print more of what the command does; each command's help lists what
 ```
 
 ### SEE ALSO

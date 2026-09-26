@@ -8,8 +8,8 @@ Add qory's completions and a function that follows a worktree add into the workt
 a remove back to the main checkout to your shell's rc file. A program cannot change the
 directory of the shell that ran it, so the function runs worktree add and remove with
 --path and cd's to the path they print. The shell is the one in $SHELL; setup shell shows
-the lines, asks before writing them, and says how to reload. With --print it prints the
-lines and writes nothing, for an rc file a tool of yours owns:
+the lines, requests a confirmation before writing them, and prints how to reload. With
+--print it prints the lines and writes nothing, for an rc file a tool of yours owns:
 eval "$(qory setup shell --print)".
 
 ```
@@ -26,7 +26,7 @@ qory setup shell [flags]
 ### Options inherited from parent commands
 
 ```
-  -v, --verbose   print more of what the command does; each command's help says what
+  -v, --verbose   print more of what the command does; each command's help lists what
 ```
 
 ### SEE ALSO

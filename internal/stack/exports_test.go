@@ -31,10 +31,10 @@ func TestSourceStringNamesAnExport(t *testing.T) {
 func TestLoadRefusesAnExportWrittenWrong(t *testing.T) {
 	head := "apiVersion: qory.dev/v1alpha1\nmodules:\n"
 	for _, c := range []struct{ module, want string }{
-		{"  - name: core\n    source: {git: https://h, ref: v1, stack: nextjs}\n", "module core: source names stack nextjs; a module's source names a module, and a stack goes under extends"},
-		{"  - name: core\n    source: {git: https://h, ref: v1, module: core, stack: nextjs}\n", "module core: source names both a module and a stack; it names one export"},
-		{"  - name: core\n    source: {git: https://h, ref: v1, path: modules/core, module: core}\n", "module core: source.path and an export both name the directory; an export's directory is what the repository's qory.yaml says"},
-		{"  - source: {module: core}\n", "modules[0]: source.path is required; with an export named, it is the repository exporting it"},
+		{"  - name: core\n    source: {git: https://h, ref: v1, stack: nextjs}\n", "module core: source selects stack nextjs; a module's source selects a module, and a stack goes under extends"},
+		{"  - name: core\n    source: {git: https://h, ref: v1, module: core, stack: nextjs}\n", "module core: source selects both a module and a stack; it selects one export"},
+		{"  - name: core\n    source: {git: https://h, ref: v1, path: modules/core, module: core}\n", "module core: source.path and an export both select the directory; an export's directory is what the repository's qory.yaml sets"},
+		{"  - source: {module: core}\n", "modules[0]: source.path is required; with an export selected, it is the repository exporting it"},
 		{"  - name: core\n    source: {git: https://h, ref: v1, module: a/b}\n", `module core: source.module "a/b" is not one path segment`},
 		{"  - name: core\n    source: {git: https://h, module: core}\n", "module core: source.ref is required with source.git"},
 	} {
@@ -47,12 +47,12 @@ func TestLoadRefusesAnExportWrittenWrong(t *testing.T) {
 	// extends names a stack; a module there is refused.
 	path := filepath.Join(t.TempDir(), "qory.yaml")
 	_, err := NewCompose(path, &Stack{APIVersion: APIVersion, Extends: Source{Git: "https://h", Ref: "v1", Module: "core"}, Modules: []Module{{Name: "app"}}})
-	if want := "extends names module core; a checkout extends a stack, and a module goes under modules"; err == nil || !strings.HasSuffix(err.Error(), want) {
+	if want := "extends selects module core; a checkout extends a stack, and a module goes under modules"; err == nil || !strings.HasSuffix(err.Error(), want) {
 		t.Errorf("extends a module: err = %v, want %q", err, want)
 	}
 	// extends by an export alone is a compose document, and needs its repository.
 	_, err = NewCompose(path, &Stack{APIVersion: APIVersion, Extends: Source{Stack: "nextjs"}, Modules: []Module{{Name: "app"}}})
-	if want := "extends: source.path is required; with an export named, it is the repository exporting it"; err == nil || !strings.HasSuffix(err.Error(), want) {
+	if want := "extends: source.path is required; with an export selected, it is the repository exporting it"; err == nil || !strings.HasSuffix(err.Error(), want) {
 		t.Errorf("extends without a repository: err = %v, want %q", err, want)
 	}
 }
@@ -83,7 +83,7 @@ func TestAModuleByNameReadsTheRepositoryModulesDir(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "qory.yaml"), []byte("apiVersion: qory.dev/v1alpha1\nexports: {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = Load(path); err == nil || !strings.Contains(err.Error(), "exports names no stacks and no modules") {
+	if _, err = Load(path); err == nil || !strings.Contains(err.Error(), "exports lists no stacks and no modules") {
 		t.Errorf("a broken exports section: %v", err)
 	}
 }

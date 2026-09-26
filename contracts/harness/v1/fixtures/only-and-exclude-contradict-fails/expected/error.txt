@@ -1,1 +1,1 @@
-qory.yaml: module ops: skills/deploy is named in only and in exclude; name it in one
+qory.yaml: module ops: skills/deploy is listed in only and in exclude; list it in one

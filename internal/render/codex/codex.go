@@ -1,6 +1,6 @@
 // Package codex renders for Codex CLI, which reads a project's .codex directory, skills
 // from .agents/skills, and AGENTS.override.md ahead of AGENTS.md. The checkout gets a
-// link for each of those three, and .codex holds config.toml with the target model as
+// link for each of those three, and .codex contains config.toml with the target model as
 // model, the MCP servers as mcp_servers and the exported variables as
 // shell_environment_policy.set, plus one TOML file per agent. Codex reads
 // prompt files from the user's home only and has no output styles, so commands and output
@@ -71,14 +71,14 @@ func (codex) Reserved() []render.Reserved {
 }
 
 // Render writes config.toml, with the target model as model, the MCP servers as
-// mcp_servers, one table per server holding the object as the module wrote it, the
+// mcp_servers, one table per server containing the object as the module wrote it, the
 // exported variables and QORY_HARNESS_HOME under shell_environment_policy.set, which
-// Codex passes to every command it runs, and any other codex settings fragment, then one agents/<name>.toml per agent carrying the
-// agent's name, description and its body as developer_instructions. The instructions
-// written as AGENTS.md end with the names the session registers, see
-// [render.Addressing]: a Codex home registers them as the modules wrote them, and the
-// file says so. Codex reads a project .codex only in a project the user has marked
-// trusted.
+// Codex passes to every command it runs, and any other codex settings fragment, then one
+// agents/<name>.toml per agent containing the agent's name, description and its body as
+// developer_instructions. The instructions written as AGENTS.md end with the names the
+// session registers, see [render.Addressing]: a Codex home registers them as the modules
+// wrote them, and the file states that. Codex reads a project .codex only in a project
+// the user has marked trusted.
 func (codex) Render(res *compose.Result, dir, home string) error {
 	err := render.WriteSettings(res, Runtime, dir, home, []string{"config.toml"}, func(file string, m map[string]any) {
 		if file != "config.toml" {

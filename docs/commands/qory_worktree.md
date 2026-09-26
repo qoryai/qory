@@ -6,10 +6,10 @@ Add, remove and list the worktrees of the repository you stand in
 
 Add, remove and list the worktrees of the repository you stand in.
 
-A worktree is one branch checked out beside the main checkout, prepared the way the
-repository's qory.yaml says under worktree: files linked or copied from the main checkout
-or from elsewhere on the machine, commands run in the new worktree, and the harness
-composed into it when the repository holds a stack. Where a worktree goes and what it is
+A worktree is one branch checked out beside the main checkout, prepared as the worktree
+section of the repository's qory.yaml defines: files linked or copied from the main
+checkout or from elsewhere on the machine, commands run in the new worktree, and the
+harness composed into it when the repository contains a stack. Where a worktree goes and what it is
 called is the machine's choice, in the same section of the user's qory.yaml.
 
 Shortcuts:
@@ -26,7 +26,7 @@ Shortcuts:
 ### Options inherited from parent commands
 
 ```
-  -v, --verbose   print more of what the command does; each command's help says what
+  -v, --verbose   print more of what the command does; each command's help lists what
 ```
 
 ### SEE ALSO

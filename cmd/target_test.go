@@ -46,7 +46,7 @@ func TestExtendingTargetHoldsTheCheckoutsTarget(t *testing.T) {
 	document("{runtime: claude, model: haiku}")
 	refuse("a model outside", "model haiku is not one the base stack ", " is written for; models: opus, sonnet")
 	document("{runtime: claude}")
-	refuse("no model", "the target names no model, and the base stack ", " is written for one of these; models: opus, sonnet")
+	refuse("no model", "the target sets no model, and the base stack ", " is written for one of these; models: opus, sonnet")
 	document("{runtime: claude, model: sonnet}")
 	refuse("--runtime outside", "runtime codex is not one the base stack ", " is written for; runtimes: claude", "--runtime", "codex")
 	refuse("--model outside", "model haiku is not one the base stack ", " is written for; models: opus, sonnet", "--model", "haiku")

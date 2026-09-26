@@ -8,12 +8,12 @@
   "properties": {
     "apiVersion": {"description": "Optional; the newest format this qory reads when left out.", "const": "qory.dev/v1alpha1"},
     "qory": {
-      "description": "The qory versions this document is written for: one or more comparators, >=0.3.0 <0.4.0 say; every one has to hold.",
+      "description": "The qory versions this document is written for: one or more comparators, such as >=0.3.0 <0.4.0; every one has to be satisfied.",
       "type": "string",
       "pattern": "^\\s*(>=|<=|>|<|=)v?\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?(\\s+(>=|<=|>|<|=)v?\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?)*\\s*$"
     },
     "harness": {
-      "description": "The machine's choices for a compose, and in a checkout's file its document: the checkout's own stack, a target and modules, or the stack it extends, the target it composes it for and the modules it appends. A document may leave extends out when qory harness compose -f <stack> names the base, and a document that extends a stack may name no modules, carrying its target and extensions alone.",
+      "description": "The machine's choices for a compose, and in a checkout's file its document: the checkout's own stack, a target and modules, or the stack it extends, the target it composes it for and the modules it appends. A document may leave extends out when qory harness compose -f <stack> selects the base, and a document that extends a stack may list no modules, containing its target and extensions alone.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -27,7 +27,7 @@
         "force": {"type": "boolean"},
         "update": {"type": "string", "enum": ["always", "never"]},
         "home": {
-          "description": "Where the harness is composed: .qory/harness in the checkout, or a directory outside it, absolute or under ~, holding one home per checkout.",
+          "description": "Where the harness is composed: .qory/harness in the checkout, or a directory outside it, absolute or under ~, containing one home per checkout.",
           "type": "string",
           "minLength": 1
         },
@@ -37,7 +37,7 @@
           "enum": ["checkout", "none"]
         },
         "launch": {
-          "description": "How a runtime's program is started on the home, by runtime name, for qory harness launch: each key given stands in for the runtime's own. ${home} is the home, ${dir} the runtime's directory in it.",
+          "description": "How a runtime's program is started on the home, by runtime name, for qory harness launch: each key set here replaces the runtime's own. ${home} is the home, ${dir} the runtime's directory in it.",
           "type": "object",
           "additionalProperties": {
             "type": "object",
@@ -45,7 +45,7 @@
             "properties": {
               "command": {"description": "The program.", "type": "string", "minLength": 1},
               "args": {
-                "description": "The arguments in groups, a flag and its value say; a group naming a file under ${home} or ${dir} that the compose did not write is left out.",
+                "description": "The arguments in groups, such as a flag and its value; a group that refers to a file under ${home} or ${dir} that the compose did not write is left out.",
                 "type": "array",
                 "items": {
                   "oneOf": [
@@ -66,11 +66,11 @@
         "name": {"type": "string", "minLength": 1},
         "description": {"type": "string"},
         "extends": {
-          "description": "The stack this checkout extends: a directory holding a qory-stack.yaml, or a stack the repository exports, named by stack. Left out when qory harness compose -f <stack> names the base.",
+          "description": "The stack this checkout extends: a directory containing a qory-stack.yaml, or a stack the repository exports, selected by stack. Left out when qory harness compose -f <stack> selects the base.",
           "$ref": "#/$defs/base"
         },
         "target": {
-          "description": "The runtime and model the checkout composes for: required for its own stack, and beside extends what it composes the base for, which harness.runtime, harness.model and the flags stand over. A delivered stack carries none.",
+          "description": "The runtime and model the checkout composes for: required for its own stack, and beside extends what it composes the base for, which harness.runtime, harness.model and the flags override. A delivered stack has none.",
           "type": "object",
           "required": ["runtime"],
           "additionalProperties": false,
@@ -86,13 +86,13 @@
         },
         "modules": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/module"}},
         "bind": {
-          "description": "The entry that fills each role a document references: <kind>/<role> to the name of an entry of that kind, so a module writes ${qory:agents/coder} and the stack says which agent that is.",
+          "description": "The entry that fills each role a document references: <kind>/<role> to the name of an entry of that kind, so a module writes ${qory:agents/coder} and the stack defines which agent that is.",
           "type": "object",
           "propertyNames": {"pattern": "^(agents|commands|skills)/[^/\\\\@ .][^/\\\\@ ]*$"},
           "additionalProperties": {"type": "string", "pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"}
         },
         "extensions": {
-          "description": "Values qory carries into the report and does not read: keys of the author's choosing, each a value of any shape.",
+          "description": "Values qory copies into the report and does not read: keys of the author's choosing, each a value of any shape.",
           "type": "object"
         }
       }
@@ -134,7 +134,7 @@
       "minProperties": 1,
       "properties": {
         "dir": {
-          "description": "Where the exports are, relative to the repository root: one directory holding stacks/ and modules/, or a map naming the stacks and the modules directories as they are.",
+          "description": "Where the exports are, relative to the repository root: one directory containing stacks/ and modules/, or a map that defines the stacks and the modules directories' paths as they are.",
           "oneOf": [
             {"type": "string", "minLength": 1},
             {
@@ -209,7 +209,7 @@
           "$ref": "#/$defs/selection"
         },
         "only": {
-          "description": "The only things of the module the compose takes; everything not named is left out. Not with exclude.",
+          "description": "The only things of the module the compose takes; everything not listed is left out. Not with exclude.",
           "$ref": "#/$defs/selection"
         },
         "variant": {"type": "string", "minLength": 1},
@@ -221,7 +221,7 @@
       }
     },
     "source": {
-      "description": "A directory; a git repository at a ref with the module's directory inside it; or a module the repository exports, named by module, with path or git and ref naming the repository.",
+      "description": "A directory; a git repository at a ref with the module's directory inside it; or a module the repository exports, selected by module, with path or git and ref defining the repository.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -236,7 +236,7 @@
       ]
     },
     "base": {
-      "description": "A directory holding a qory-stack.yaml; a git repository at a ref with that directory inside it; or a stack the repository exports, named by stack, with path or git and ref naming the repository.",
+      "description": "A directory containing a qory-stack.yaml; a git repository at a ref with that directory inside it; or a stack the repository exports, selected by stack, with path or git and ref defining the repository.",
       "type": "object",
       "additionalProperties": false,
       "properties": {

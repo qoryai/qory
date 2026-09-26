@@ -19,7 +19,7 @@ import (
 // package sets it from the files embedded in the binary.
 var Example fs.FS
 
-// ExampleRoot is the directory inside Example that holds the example.
+// ExampleRoot is the directory inside Example that contains the example.
 const ExampleRoot = "examples/hello"
 
 // newSetupExample builds the setup example verb, which writes the hello example into the
@@ -84,7 +84,7 @@ func newSetupExample() *cobra.Command {
 // to dir, or "" when none does.
 func standing(dir string) (string, error) {
 	if Example == nil {
-		return "", errors.New("this build carries no example")
+		return "", errors.New("this build contains no example")
 	}
 	root, err := fs.Sub(Example, ExampleRoot)
 	if err != nil {
@@ -106,7 +106,7 @@ func standing(dir string) (string, error) {
 // writeExample copies the example tree into dir and returns the paths it wrote, relative to dir.
 func writeExample(dir string) ([]string, error) {
 	if Example == nil {
-		return nil, errors.New("this build carries no example")
+		return nil, errors.New("this build contains no example")
 	}
 	root, err := fs.Sub(Example, ExampleRoot)
 	if err != nil {

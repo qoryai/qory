@@ -449,7 +449,7 @@ func TestAnUnknownRoleIsLeftAlone(t *testing.T) {
 	}
 	fakeIntegration(t, dir, "qory-queue", `{"version": 1, "name": "queue", "title": "Queue", "program_version": "1", "settings": {"type": "object"}, "roles": {"work_source": {}, "output": {}}}`)
 	path := runnerFile(t, "integrations:\n  queue:\n")
-	if _, err := expand(t); err == nil || err.Error() != path+": integrations.queue: qory-queue plays no role qory knows, output, work_source, and would define nothing" {
+	if _, err := expand(t); err == nil || err.Error() != path+": integrations.queue: qory-queue plays no role qory knows, output, work_source, and defines nothing" {
 		t.Errorf("no known role: %v", err)
 	}
 }
@@ -469,12 +469,12 @@ func TestExpandRefusesWhatDoesNotDescribe(t *testing.T) {
 	fakeIntegration(t, dir, "qory-v2", strings.Replace(fixture(t, "acme-tracker.json"), `"version": 1,`, `"version": 2,`, 1))
 	fakeIntegration(t, dir, "qory-github", fixture(t, "github.json"))
 	for _, c := range []struct{ body, want string }{
-		{"integrations:\n  absent: {}\n", "integrations.absent: qory-absent is not on the PATH; install it there, or name the program by its path with program"},
+		{"integrations:\n  absent: {}\n", "integrations.absent: qory-absent is not on the PATH; install it there, or set program to its path"},
 		{"integrations:\n  x: {program: /nonexistent/acme-x}\n", "integrations.x: /nonexistent/acme-x is not a program this user may run"},
 		{"integrations:\n  failing: {}\n", "integrations.failing: " + resolved(t, failing) + " describe: exit status 3: the key file /k.pem is readable by others"},
 		{"integrations:\n  garbled: {}\n", "describe did not print one JSON document"},
 		{"integrations:\n  v2: {}\n", "describe printed a description the integration contract refuses: at '/version': value must be 1"},
-		{"integrations:\n  github: {settings: {app_id: 1, private_key_file: /k.pem, private_key: NOT-A-REAL-KEY}}\n", "integrations.github: settings.private_key is a secret, and the settings go on a command line; give private_key_file, a file that holds it, in its place"},
+		{"integrations:\n  github: {settings: {app_id: 1, private_key_file: /k.pem, private_key: NOT-A-REAL-KEY}}\n", "integrations.github: settings.private_key is a secret, and the settings go on a command line; set private_key_file, the path of a file that contains it, in its place"},
 		{"integrations:\n  github: {settings: {app_id: NOT A VALID ID, private_key_file: /k.pem}}\n", "integrations.github: the settings are not what github takes: settings.app_id breaks the schema's pattern"},
 		{"integrations:\n  github: {settings: {app_id: 1, private_key_file: /k.pem, permissions: {contents: NOT-A-LEVEL}}}\n", "settings.permissions.contents breaks the schema's enum"},
 	} {
@@ -504,11 +504,11 @@ func TestIntegrationsSectionRefusesAMistake(t *testing.T) {
 		{"integrations: {github: {program: bin/qory-github}}\n", `integrations.github.program "bin/qory-github" is not an absolute path`},
 		{"integrations: {github: {program: 7}}\n", "integrations.github.program is a path or a name on the PATH"},
 		{"integrations: {github: {settings: [a]}}\n", "integrations.github.settings is a mapping, the settings document"},
-		{"integrations: {github: {settings: {a: 1, a: 2}}}\n", "integrations.github.settings.a is given twice"},
+		{"integrations: {github: {settings: {a: 1, a: 2}}}\n", "integrations.github.settings.a appears twice"},
 		{"integrations: {github: {settings: {1: x}}}\n", "integrations.github.settings: line 1: a key that is not a string"},
-		{"integrations: {github: {settings: {ratio: .nan}}}\n", "integrations.github.settings.ratio is not a number JSON holds"},
+		{"integrations: {github: {settings: {ratio: .nan}}}\n", "integrations.github.settings.ratio is not a number JSON can contain"},
 		{"integrations: {github: {settings: {a: &b {x: 1}, c: *b}}}\n", "integrations.github.settings.c: line 1: *b is a YAML alias"},
-		{"integrations: {github: {settings: {<<: {app_id: 1}}}}\n", "a YAML alias or merge, which the settings may not hold"},
+		{"integrations: {github: {settings: {<<: {app_id: 1}}}}\n", "a YAML alias or merge, which the settings may not contain"},
 	} {
 		path := runnerFile(t, c.body)
 		_, err := config.Load(t.TempDir(), true)

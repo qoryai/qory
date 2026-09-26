@@ -19,7 +19,7 @@ Shortcuts:
 
 ```
   -h, --help      help for qory
-  -v, --verbose   print more of what the command does; each command's help says what
+  -v, --verbose   print more of what the command does; each command's help lists what
 ```
 
 ### SEE ALSO

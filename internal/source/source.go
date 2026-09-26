@@ -1,17 +1,17 @@
 // Package source resolves a module's source to a directory on disk and a pin.
 //
 // A path source is a directory as it stands, pinned by nothing: its pin is [WorkingTree],
-// and [Resolved.Dirty] says whether git sees uncommitted changes under it. A git source is
-// a repository at a ref, fetched once into the cache under [CacheDir], one clone per
-// commit, and pinned by the commit the ref resolved to. The report carries pin and dirty
-// mark, so a reader of one compose knows what it ran on.
+// and [Resolved.Dirty] reports whether git sees uncommitted changes under it. A git
+// source is a repository at a ref, fetched once into the cache under [CacheDir], one
+// clone per commit, and pinned by the commit the ref resolved to. The report contains pin
+// and dirty mark, so a reader of one compose knows what it ran on.
 //
 // [Resolve] joins a relative path onto the stack's directory and checks that the result
 // is a directory, or fetches the git source and returns the module's directory inside the
-// clone. A source naming an export, a module or a stack the repository lists in the
+// clone. A source that selects an export, a module or a stack the repository lists in the
 // exports section of its qory.yaml, resolves the repository the same way and then reads
 // the export's directory from that section, so the publisher's layout is the publisher's
-// alone. Whether that directory holds a module is a question for
+// alone. Whether that directory contains a module is a question for
 // [github.com/qoryai/qory/internal/module].
 package source
 
@@ -37,8 +37,8 @@ const WorkingTree = "working-tree"
 
 // Resolved is a module's directory and how it is pinned.
 type Resolved struct {
-	// Dir is the module directory: the source path when it is absolute, else baseDir joined
-	// with it; for a git source, the path inside the clone.
+	// Dir is the module directory: the source path when it is absolute, else baseDir
+	// joined with it; for a git source, the path inside the clone.
 	Dir string
 	// Pin is what the source resolved to, [WorkingTree] for a path source and the commit,
 	// twelve characters of it, for a git source.
@@ -48,7 +48,7 @@ type Resolved struct {
 }
 
 // FetchError is a git source that could not be fetched: the remote is unreachable, the
-// ref does not exist, or git is not installed. It carries git's own message. The command
+// ref does not exist, or git is not installed. It contains git's own message. The command
 // module matches it with errors.As, because it is not a mistake in an input file.
 type FetchError struct {
 	// Source is the git URL and ref that failed, as the stack writes them.
@@ -59,7 +59,7 @@ type FetchError struct {
 	Err error
 }
 
-// Error names the source and quotes git.
+// Error returns the source and quotes git.
 func (e *FetchError) Error() string {
 	msg := strings.TrimSpace(e.Output)
 	if msg == "" {
@@ -88,7 +88,7 @@ type Options struct {
 // Resolve turns a source into a directory and its pin. A relative path resolves against
 // baseDir, which a caller passes absolute, such as [stack.Stack.Dir].
 //
-// A git source is read from the cache. The pin, when given, is the commit this checkout
+// A git source is read from the cache. The pin, when set, is the commit this checkout
 // was composed from last time, and it is read again when its clone is there, so the
 // checkout stays on its commit whatever another checkout resolved the same ref to.
 // Without a pin, the ref's last resolution serves; a ref never resolved is fetched. An
@@ -97,11 +97,11 @@ type Options struct {
 // killed and reported as a [*FetchError].
 //
 // The error for a path that is not there comes from the operating system unchanged, and a
-// caller can match it with errors.Is and os.ErrNotExist. A path that is there but is not a
-// directory gets an error naming the path. A git source that cannot be fetched returns a
-// [*FetchError]. A source naming an export the repository does not list, or whose
-// repository has no qory.yaml with an exports section, gets an error naming the
-// repository and what it exports.
+// caller can match it with errors.Is and os.ErrNotExist. A path that is there but is not
+// a directory gets an error that contains the path. A git source that cannot be fetched
+// returns a [*FetchError]. A source that selects an export the repository does not list,
+// or whose repository has no qory.yaml with an exports section, gets an error that
+// contains the repository and what it exports.
 func Resolve(baseDir string, s stack.Source, opts Options) (Resolved, error) {
 	if s.Git != "" {
 		return resolveGit(s, opts)
@@ -140,7 +140,7 @@ func exported(repo, where string, s stack.Source) (string, error) {
 		return "", err
 	}
 	if e == nil {
-		return "", fmt.Errorf("%s exports nothing: it has no %s with an exports section, so name its directories with path", where, exports.FileName)
+		return "", fmt.Errorf("%s exports nothing: it has no %s with an exports section, so select its directories with path", where, exports.FileName)
 	}
 	var rel string
 	if s.Stack != "" {
@@ -154,7 +154,8 @@ func exported(repo, where string, s stack.Source) (string, error) {
 	return rel, nil
 }
 
-// exportName is the export a source names, for a message: "module core" or "stack nextjs".
+// exportName is the export a source names, for a message: "module core" or "stack
+// nextjs".
 func exportName(s stack.Source) string {
 	if s.Stack != "" {
 		return "stack " + s.Stack
@@ -164,8 +165,8 @@ func exportName(s stack.Source) string {
 
 // CacheDir is where git sources are fetched to: qory/sources under the user's cache
 // directory, ~/Library/Caches on macOS and $XDG_CACHE_HOME or ~/.cache on Linux. Each
-// source has a directory named after its URL, holding one clone per commit and, under
-// refs/, one file per ref naming the commit it last resolved to.
+// source has a directory named after its URL, which contains one clone per commit and,
+// under refs/, one file per ref that contains the commit it last resolved to.
 func CacheDir() (string, error) {
 	base, err := os.UserCacheDir()
 	if err != nil {
@@ -174,8 +175,8 @@ func CacheDir() (string, error) {
 	return filepath.Join(base, "qory", "sources"), nil
 }
 
-// resolveGit finds the commit the ref resolves to, fetches it once, and returns the module's
-// directory in the clone and the commit as the pin.
+// resolveGit finds the commit the ref resolves to, fetches it once, and returns the
+// module's directory in the clone and the commit as the pin.
 //
 // Clones are kept per commit, never per ref, so a checkout composed from a branch keeps
 // reading the commit it was composed from until its own compose asks for an update. The
@@ -235,8 +236,8 @@ func resolveGit(s stack.Source, opts Options) (Resolved, error) {
 	if !info.IsDir() {
 		return Resolved{}, fmt.Errorf("%s is not a directory in %s at %s", sub, s.Git, s.Ref)
 	}
-	// A path inside the clone may be a symlink the repository carries; the module it names
-	// must still be inside the clone.
+	// A path inside the clone may be a symlink the repository carries; the module it
+	// names must still be inside the clone.
 	real, err := filepath.EvalSymlinks(module)
 	if err != nil {
 		return Resolved{}, err
@@ -282,11 +283,11 @@ func cloned(dir string) bool {
 
 // fetch fetches the ref of the source at depth one into a fresh clone under dir, named
 // after the commit it resolved to, and returns that commit. It clones into a temporary
-// sibling and renames it into place once the checkout is done, so a fetch that fails or is
-// cut short leaves the clones already there as they were and nothing half-made behind. A
-// ref that resolves to a commit already cloned is fetched, since the commit is known only
-// afterwards, and the clone there is kept. The ref may be a tag, a branch or a commit by
-// its full id, when the remote allows fetching a commit by id.
+// sibling and renames it into place once the checkout is done, so a fetch that fails or
+// is cut short leaves the clones already there as they were and nothing half-made behind.
+// A ref that resolves to a commit already cloned is fetched, since the commit is known
+// only afterwards, and the clone there is kept. The ref may be a tag, a branch or a
+// commit by its full id, when the remote allows fetching a commit by id.
 func fetch(dir string, s stack.Source, timeout time.Duration) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
@@ -322,8 +323,8 @@ func fetch(dir string, s stack.Source, timeout time.Duration) (string, error) {
 	if cloned(clone) {
 		return commit, nil
 	}
-	// Two composes may fetch the same source at once. Each renames its own temporary clone
-	// into place; the second rename fails because the first landed, and that is the
+	// Two composes may fetch the same source at once. Each renames its own temporary
+	// clone into place; the second rename fails because the first landed, and that is the
 	// clone to use. A clone left there without its done mark is one cut short, and it is
 	// moved aside so this fetch can land.
 	if _, err := os.Stat(clone); err == nil {
@@ -378,9 +379,9 @@ func git(dir string, timeout time.Duration, args ...string) ([]byte, error) {
 }
 
 // dirty reports whether git sees uncommitted changes under dir, untracked files included.
-// It asks git about dir alone, so changes elsewhere in the same repository do not count. A
-// directory outside a git working tree, and a host without git, read as clean, because the
-// dirty mark is a note in the report and not a reason to refuse a compose.
+// It asks git about dir alone, so changes elsewhere in the same repository do not count.
+// A directory outside a git working tree, and a host without git, read as clean, because
+// the dirty mark is a note in the report and not a reason to refuse a compose.
 func dirty(dir string) bool {
 	cmd := exec.Command("git", "status", "--porcelain", "--", ".")
 	cmd.Dir = dir

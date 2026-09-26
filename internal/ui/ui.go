@@ -13,7 +13,7 @@ import (
 )
 
 // UI writes styled text to one writer, and decides once, in [New], whether that writer
-// gets colour. It holds no buffer: every method writes through as it is called, and none
+// gets colour. It has no buffer: every method writes through as it is called, and none
 // of them reports a write error.
 type UI struct {
 	w       io.Writer
@@ -36,17 +36,17 @@ var Green = lipgloss.Color("#2FD174")
 // shade. The black is the terminal's bright black, the eighth colour of its palette,
 // which every theme keeps visible against its own background, dark grey on a dark
 // ground and near black on a light one. Neither is an adaptive colour, because those
-// make lipgloss ask the terminal for its background and wait for the answer, which a
+// make lipgloss request the terminal's background and wait for the answer, which a
 // terminal that answers late or not at all turns into stray characters or a pause.
 var (
 	Yellow = lipgloss.Color("#FFD21E")
 	Black  = lipgloss.Color("8")
 )
 
-// New returns a UI that writes to w. It asks lipgloss what w supports, so the UI colours
-// its output when w is a terminal and NO_COLOR is unset, and writes the same text plain
-// otherwise. The decision is made here, once per UI, and not at each call. A w from
-// [Buzz] is asked about through to the terminal it prints to.
+// New returns a UI that writes to w. It reads from lipgloss what w supports, so the UI
+// colours its output when w is a terminal and NO_COLOR is unset, and writes the same text
+// plain otherwise. The decision is made here, once per UI, and not at each call. For a w
+// from [Buzz], lipgloss reads the terminal it prints to.
 func New(w io.Writer) *UI {
 	probe := w
 	if s, ok := w.(*Swarm); ok {
@@ -83,7 +83,7 @@ const (
 )
 
 // Success prints a line that starts with a check mark, then format with args applied to
-// it, as [fmt.Printf] would.
+// it, as [fmt.Printf] does.
 func (u *UI) Success(format string, args ...any) {
 	fmt.Fprintf(u.w, "%s %s\n", u.ok.Render("✓"), fmt.Sprintf(format, args...))
 }
@@ -136,7 +136,7 @@ func (u *UI) Title(name string, rest ...string) {
 
 // Fields prints one indented row per pair, the key faint and padded to the width of the
 // widest key, then the value. The width is counted in bytes, so a key outside ASCII pads
-// short. The rows keep the order given, and a key may repeat.
+// short. The rows keep the order passed, and a key may repeat.
 func (u *UI) Fields(rows [][2]string) {
 	width := 0
 	for _, r := range rows {
@@ -149,8 +149,8 @@ func (u *UI) Fields(rows [][2]string) {
 
 // Table prints indented rows with every column padded to the widest cell in it, two
 // spaces between columns and no trailing space. The first column is bold. Widths are the
-// display width of a cell, counting a wide rune as two columns, so a cell holding an icon
-// still lines up. Rows may differ in length; a short row simply ends early.
+// display width of a cell, counting a wide rune as two columns, so a cell that contains
+// an icon still lines up. Rows may differ in length; a short row simply ends early.
 func (u *UI) Table(rows [][]string) {
 	var widths []int
 	for _, r := range rows {
@@ -186,8 +186,8 @@ func (u *UI) Text(lines ...string) {
 }
 
 // Code prints one line per argument, bold and indented one step further than [UI.Text],
-// as a block the reader can paste. Each line is printed as given, so the caller carries
-// any indentation inside the block in the string.
+// as a block the reader can paste. Each line is printed as passed, so the caller writes
+// any indentation inside the block into the string.
 func (u *UI) Code(lines ...string) {
 	for _, l := range lines {
 		fmt.Fprintf(u.w, "    %s\n", u.name.Render(l))
@@ -199,7 +199,7 @@ func (u *UI) Code(lines ...string) {
 // above and below them and three columns at each side, the whole indented one step and
 // set off by a blank line before and after. It is the shape of a notice that has to be
 // seen among a command's output, such as that a newer release is available. A line may
-// carry styling from [UI.Strong], [UI.Brand] or [UI.Alert]; the frame is measured on the
+// contain styling from [UI.Strong], [UI.Brand] or [UI.Alert]; the frame is measured on the
 // text and not the escape codes.
 //
 // On a terminal too narrow for the frame the lines are printed without it, indented and

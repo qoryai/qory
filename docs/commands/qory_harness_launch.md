@@ -13,8 +13,8 @@ The line is the runtime's own launch template, with harness.launch.<runtime> in
 qory.yaml over it: the program, the arguments that hand it the home's files, and the
 variables it takes them from, ${dir} being the runtime's directory in the home. For
 claude it is --plugin-dir, --settings, --mcp-config, --append-system-prompt-file and
---setting-sources user; for codex it is CODEX_HOME. A group of arguments naming a file
-the compose did not write, mcp.json without a server say, is left out. The home is found
+--setting-sources user; for codex it is CODEX_HOME. A group of arguments for a file the
+compose did not write, such as mcp.json without a server, is left out. The home is found
 the way compose finds it, from --home, harness.home or the checkout you stand in; the
 paths printed are absolute, so the line works wherever the home is. --json prints the
 command, the arguments and the variables as one JSON object, for a launcher that spawns
@@ -23,8 +23,8 @@ skills and commands under on that launch under addresses, per kind, a bound role
 them as the entry it is bound to: harness:<name> for claude, whose plugin prefixes
 every kind, the name as the module wrote it elsewhere. --address <kind>/<name> prints
 that one registered name alone, for a launcher that builds its first prompt from an
-entry point, /harness:implement say. A runtime that reads its harness from the
-checkout alone has no launch template, and the verb says so.
+entry point, such as /harness:implement. A runtime that reads its harness from the
+checkout alone has no launch template, and the verb reports this.
 
 --verbose adds nothing here.
 
@@ -45,7 +45,7 @@ qory harness launch [flags]
 ### Options inherited from parent commands
 
 ```
-  -v, --verbose   print more of what the command does; each command's help says what
+  -v, --verbose   print more of what the command does; each command's help lists what
 ```
 
 ### SEE ALSO
