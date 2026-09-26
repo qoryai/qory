@@ -117,12 +117,14 @@ source code host, and prints the token with the hosts, the scheme and the paths 
 for. A run's policy selects credentials by name, with an argument for an adapter, such
 as a repository, and defines none. Behind a wall the runner keeps each outside the
 container and its proxy sets it on the requests to the hosts it is for, ending the
-container's TLS for those hosts alone with an authority made for the run, which the
+container's TLS for those hosts with an authority made for the run, which the
 container is configured to trust beside its image's own, through the variables
-wall.ca_env lists, such as SSL_CERT_FILE and NODE_EXTRA_CA_CERTS. Of those hosts the run
-reaches the paths the credential lists and no other, not another organization's
-repositories, and every other host stays a tunnel nobody reads. The policy's egress.paths limits a host to
-paths the same way with no credential.
+wall.ca_env lists, such as SSL_CERT_FILE and NODE_EXTRA_CA_CERTS. Of those hosts the
+token goes only to the paths the credential lists; under enforce the runner refuses
+every other path, another organization's repositories included, and under observe it
+sends such a request on without the token and records it. The policy's egress.paths
+limits a host to paths as well, with or without a credential, and the proxy ends the
+container's TLS for such a host too. Every other host stays a tunnel nobody reads.
 
 An integration is an adapter published apart that describes itself: Qory's own
 qory-<name>, such as qory-github, or a program of yours. The integrations section of

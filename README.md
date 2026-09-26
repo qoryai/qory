@@ -491,10 +491,14 @@ to the hosts it is for. The container gets a placeholder where a program wants a
 credential set, and never the token. An **adapter** is a program of yours written for one
 kind of host, such as a source code host: it runs outside the container and prints the
 token, its expiry, and the hosts, the scheme and the paths the token is for, so `qory`
-defines no host of its own. Its paths are the run's whole reach on those hosts: a
-credential for `acme/shop` opens no other organization's repository, and a path the
-adapter leaves out, such as the host's GraphQL endpoint, is not reached. `egress.paths`
-in a policy limits a host to paths the same way with no credential. The
+defines no host of its own. Its paths are where the token goes on those hosts, and under
+`enforce` the run's whole reach there: the runner refuses every other path on them,
+another organization's repository included. Under `observe` the runner sends such a
+request on without the token and records it. `egress.paths` in a policy limits a host to
+paths as well, with or without a credential: on a host with both, a path passes under
+`enforce` when it matches both lists, and under `observe` the runner sends the rest on and
+records it, with the token where the adapter's paths match. On these hosts a path that
+could be read two ways, such as one with an encoded slash, is refused in either mode. The
 [runner's contract](https://github.com/qoryai/runner/tree/main/contracts/runner/v1#credentials)
 has the adapter's document and the rules.
 
