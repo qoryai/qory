@@ -45,7 +45,7 @@ func TestSetupShellWritesTheHook(t *testing.T) {
 	}
 	t.Setenv("SHELL", "/bin/tcsh")
 	_, _, err = runSplit(t, "y\n", "setup", "shell")
-	if err == nil || !strings.Contains(err.Error(), "the tcsh shell is not supported; qory knows bash, fish, zsh, and welcomes a contribution") || cmd.ExitCode(err) != cmd.ExitInput {
+	if err == nil || !strings.Contains(err.Error(), "the tcsh shell is not supported; qory has a setup for bash, fish, zsh, and welcomes a contribution") || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Fatalf("tcsh: %v", err)
 	}
 	t.Setenv("SHELL", "/usr/local/bin/fish")

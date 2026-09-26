@@ -258,7 +258,7 @@ ref resolves anew. A checkout that has never composed the source takes the ref's
 resolution from the cache, not the remote's current head. `qory harness compose --update`
 resolves every git source's ref again, which is how a branch ref moves, and it moves for
 that checkout alone: clones are kept per commit, and another checkout composed from the
-earlier commit keeps reading it until its own `--update`. A path inside the repository
+previous commit keeps reading it until its own `--update`. A path inside the repository
 that links outside it is refused. `path` defines the module's directory inside the
 repository, for a repository that contains several modules. The report and the messages
 write a git source as `<url>#<ref>` or `<url>#<ref>:<path>`.
@@ -366,7 +366,7 @@ two: the declaration decides nothing, the policy alone defines what the run reac
 `exclude` or an `only` does not touch the declaration; a module composed at all declares.
 A module with no `egress` key declares nothing, and a harness in which no module declares
 passes the runner no list. `egress: []` is a declaration that the module reaches nothing
-of its own. A stack that ships a module declaring `egress` sets `qory: ">=0.5.0"`.
+of its own.
 
 A module's tree contains these entry kinds:
 
@@ -418,7 +418,7 @@ The schema is [module.schema.json](module.schema.json).
 
 A document that dispatches another composed entry refers to it by a reference, and the
 compose resolves the reference to the name the session registers the entry under, which
-the module cannot know: a program that loads the harness as a plugin puts its own name
+the module does not define: a program that loads the harness as a plugin puts its own name
 before every agent, skill and command, `harness:reviewer`, where the checkout's links and
 most launch paths register the name as written. A reference is `${qory:<kind>/<name>}`,
 the kind `agents`, `skills` or `commands`, the name one path segment:
@@ -450,7 +450,7 @@ the program registers an entry under when it reads it there, and the document is
 placed with its references resolved at that address (§Rendering). A launch path whose
 program renames the entries also gets the names written into the instructions it reads,
 under a heading of its own after the modules' text, so a session that meets an unmarked
-name in prose knows the registered one; `qory harness launch --json` prints the same
+name in prose finds the registered one; `qory harness launch --json` prints the same
 names under `addresses` (§Launching). A module's own text is never rewritten for one
 runtime: the resolution happens in the composed tree, per path.
 
@@ -539,8 +539,8 @@ link's name is no collision, since no link is written. A runtime reads such a ho
 through its launch spec (§Launching). A relative value is under the checkout root, and
 the one value allowed inside the checkout is `.qory/harness`. `harness.links: none`, or
 `--no-links`, keeps the checkout untouched with the home inside it too: `.qory` is
-written and excluded, and nothing else; a compose with links off takes back the links an
-earlier compose wrote. `harness.links: checkout`, the default inside, is refused with a
+written and excluded, and nothing else; a compose with links off removes the links a
+previous compose wrote. `harness.links: checkout`, the default inside, is refused with a
 home outside the checkout. The report records the checkout the home was composed for, so
 `inspect`, `remove` and `--check` find the pair from either side: standing in the
 checkout, or anywhere with `--home` set to the tree. `qory worktree add` composes each
@@ -582,15 +582,16 @@ containing one symlink per entry of the tree's directory, `.claude/skills` and
 agents under `.github/agents` beside the linked ones. A directory a module's files make in
 the tree, such as `.claude/rules`, is one such symlink, like `.claude/skills`: a repository
 that keeps its own rules there moves them into a module, under `extends` into its own
-module with `claude/rules/` in the base's `files` list. A compose also takes back what an
-earlier one linked and this one does not. `qory harness remove --runtime <name>` takes one
+module with `claude/rules/` in the base's `files` list. A compose also removes what a
+previous one linked and this one does not. `qory harness remove --runtime <name>` takes one
 runtime's links and leaves a link another composed runtime shares, such as `.agents/skills`.
 A link is written, pruned or removed only where the checkout is: a directory on the way
 that is itself a symlink, such as a committed `.github` link, is passed over for a soft link
 and refused for a hard one, and nothing behind it is touched. An exclude line goes with
 its link, and the `.qory` line with the directory, so the exclude file hides no path the
 repository adds there; worktrees of one repository share one exclude file, so a remove in
-one worktree drops the lines the links of another still use until its next compose.
+one worktree drops lines the links of another use; that worktree's next compose writes
+them again.
 
 A module's `link` is a hard link at the checkout root to `modules/<name>` in the tree,
 written after the runtimes' links, excluded, pruned when the stack drops it, and
@@ -614,7 +615,7 @@ it is skipped and reported, so a repository's instructions stay its own. With
 `--force`, a file or directory that git tracks and that is unmodified is removed for the
 link, either kind, and listed in the report under `replaced`; `git checkout --` brings it
 back, and `qory harness remove` prints that command. Anything untracked or modified, and a
-directory containing an untracked or ignored file, is still refused, because git cannot
+directory containing an untracked or ignored file, is refused, because git cannot
 restore it. A compose that fails after replacing something has written the report already,
 so the hint is not lost.
 
@@ -702,7 +703,7 @@ package for one of them under `internal/render/` implements one interface.
 A runtime whose program takes a harness from outside the checkout reads a home the
 checkout does not link to. `qory harness launch --runtime <name>` prints the command
 that starts the program on the composed home, on one line quoted for a POSIX shell, so
-a launcher runs it as it is and knows nothing of the home's layout; `--json` prints the
+a launcher runs it as it is and depends on nothing of the home's layout; `--json` prints the
 same as one object, `{command, args, env, addresses}`, for a launcher that spawns without
 a shell:
 
@@ -754,8 +755,8 @@ reports it with status 2: `goose` and `any`.
 The hooks and the servers of `claude` reach the session through the settings and the
 MCP file, the same files the checkout's links point at, and not through the plugin, so
 nothing runs twice; `cursor` gets copies in the plugin because its CLI has no other way
-in. Each template matches the program's command line as qory ships it; where a program's
-flags differ from its template, set `harness.launch` to replace it.
+in. Each template matches the program's command line as qory ships the template; where a
+program's flags differ from its template, set `harness.launch` to replace the template.
 
 ## The report
 
@@ -925,7 +926,7 @@ wall:                            # the container the runtime starts in; absent: 
 | `run.stop_grace` | the runtime's descriptor's, else `10s` | how long a runtime gets between the stop signal and SIGKILL; `--stop-grace` sets another |
 | `wall.ca_env` | `SSL_CERT_FILE`, `GIT_SSL_CAINFO`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE` | the variables that point a program in the container at the authorities it trusts, the image's own and the run's, when a run has a credential or path rules |
 | `credentials.<name>` | none | a credential this machine has for its runs. Exactly one of `env`, a variable of `qory run`'s environment, `file`, an absolute path read whenever the token is used, and `adapter`, a program by its absolute path with its arguments, defines where the token comes from. An adapter prints the token with the hosts, the scheme and the paths it is for, the runner contract's `credential.schema.json`, and takes the policy's argument as `${argument}` when `argument`, a regular expression, matches it whole; its `hosts` and `paths` here are the most it may claim. With `env` and `file`, `hosts`, `auth` (`scheme: bearer`, `basic` with `username`, or `header` with `header`) and `paths` define how the token is used. `placeholders` lists variables the container gets with a value that is no credential |
-| `integrations.<key>` | none | an integration this machine declares: a program that speaks the [integration contract](https://github.com/qoryai/integrations/tree/main/contracts/integration/v1), `program`, an absolute path or a name on the `PATH`, `qory-<key>` when absent, with `settings`, its settings document, `{}` when absent. The key is 1 to 64 of `a-z`, `0-9`, `_` and `-`, starting with a letter or a digit. The program is outside the checkout and outside every mount the wall makes read-write in the container, judged by where its links lead: a link on a `PATH` entry the checkout controls that resolves outside the checkout is judged by where it resolves. The rule applies to each run as it starts, so a program written into a directory while that directory was mounted read-write is judged by where it is at the start of each run; keep a program's directory out of the read-write mounts. The resolved program, every directory above it up to `/`, and every directory above each link on the way belong to root or the user running qory, and so does each link; other users may write none of them; a group may write one when it is root's, gid 0, `wheel`, `admin`, or the owner's primary group when its name is the owner's; a directory root owns with the sticky bit set keeps the rule. On a machine whose `PATH` is not its owner's alone, set `program` to its absolute path. `<program> describe` runs in `/`, in a process group of its own, for 10 seconds at most; its settings schema is draft 2020-12 and marks a secret `writeOnly` on a property of the settings themselves, `properties.<name>`. qory checks the settings against the description; a value of a `writeOnly` setting is refused, since the settings go on a command line, and the setting's `<name>_file` defines the path of the file that contains it. The `credential` role defines the credential `<key>`: `adapter: [<program>, credential, --settings, <json>, --, "${argument}"]`, the settings as compact JSON with `<`, `>`, `&`, U+2028 and U+2029 escaped and every `$` written `\u0024`, and the role's `argument` and `hosts`. `qory run` describes the integrations a policy on this machine selects, and every one when the server supplies the policy; `qory config` describes every one. A name `credentials` defines itself is that section's: the integration defines no credential under it, `qory run` and `qory config` print a line that states it, and `qory config` alone describes it. A role qory does not know is left alone, and an integration that plays none it knows is refused |
+| `integrations.<key>` | none | an integration this machine declares: a program that speaks the [integration contract](https://github.com/qoryai/integrations/tree/main/contracts/integration/v1), `program`, an absolute path or a name on the `PATH`, `qory-<key>` when absent, with `settings`, its settings document, `{}` when absent. The key is 1 to 64 of `a-z`, `0-9`, `_` and `-`, starting with a letter or a digit. The program is outside the checkout and outside every mount the wall makes read-write in the container, judged by where its links lead: a link on a `PATH` entry the checkout controls that resolves outside the checkout is judged by where it resolves. The rule applies to each run as it starts, so a program written into a directory while that directory was mounted read-write is judged by where it is at the start of each run; keep a program's directory out of the read-write mounts. The resolved program, every directory above it up to `/`, and every directory above each link on the way belong to root or the user running qory, and so does each link; other users may write none of them; a group may write one when it is root's, gid 0, `wheel`, `admin`, or the owner's primary group when its name is the owner's; a directory root owns with the sticky bit set keeps the rule. On a machine whose `PATH` is not its owner's alone, set `program` to its absolute path. `<program> describe` runs in `/`, in a process group of its own, for 10 seconds at most; its settings schema is draft 2020-12 and marks a secret `writeOnly` on a property of the settings themselves, `properties.<name>`. qory checks the settings against the description; a value of a `writeOnly` setting is refused, since the settings go on a command line, and the setting's `<name>_file` defines the path of the file that contains it. The `credential` role defines the credential `<key>`: `adapter: [<program>, credential, --settings, <json>, --, "${argument}"]`, the settings as compact JSON with `<`, `>`, `&`, U+2028 and U+2029 escaped and every `$` written `\u0024`, and the role's `argument` and `hosts`. `qory run` describes the integrations a policy on this machine selects, and every one when the server supplies the policy; `qory config` describes every one. A name `credentials` defines itself is that section's: the integration defines no credential under it, `qory run` and `qory config` print a line that states it, and `qory config` alone describes it. A role qory does not expand is left alone, and an integration that plays none it expands is refused |
 | `wall.helper` | this binary, on Linux | the absolute path of a static Linux build of qory for the engine's architecture, mounted read-only into the container as the relay and the hook forwarder. Required where qory itself is not a Linux build |
 
 The egress section is the machine's policy. One run may bring its own, `qory run

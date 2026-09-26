@@ -49,7 +49,7 @@ type Runner struct {
 	// is a process of this machine.
 	Wall *RunnerWall
 	// Timeout is how long a runtime may run on this machine, zero for no limit, and
-	// StopSignal the signal that requests it to exit when the runner stops it and
+	// StopSignal the signal that requests it to stop when the runner stops it and
 	// StopGrace how long it has between that and SIGKILL, empty and zero for the runner's
 	// defaults. --timeout, --stop-signal and --stop-grace set others for one run.
 	Timeout    time.Duration

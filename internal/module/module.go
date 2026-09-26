@@ -136,7 +136,7 @@ type Module struct {
 	// the absolute path of the one fragment this module contributes to it.
 	Settings map[string]map[string]string
 	// MCP contains the MCP servers by name, each the JSON object its mcp/<name>.json file
-	// contains, with every $QORY_HARNESS_HOME as written, not yet substituted.
+	// contains, with every $QORY_HARNESS_HOME as written, before substitution.
 	MCP map[string]map[string]any
 	// Instructions is the absolute AGENTS.md path, or "" when the module ships none.
 	Instructions string

@@ -35,9 +35,9 @@ changed, so --policy is refused.
 --local runs with the files alone and the machine's policy; the server is not
 contacted.
 
-Any runtime the harness is composed for runs this way. What qory run knows of one, how
-its hooks are installed, what its output means and which signal requests it to stop, is
-a descriptor in the runner contract's format: the runner's own, Claude Code's, or
+Any runtime the harness is composed for runs this way. qory run reads what it needs of one,
+how its hooks are installed, what its output means and which signal requests it to stop,
+from a descriptor in the runner contract's format: the runner's own, Claude Code's, or
 <runtime>.yaml under runtimes in the same directory, which describes a
 runtime the runner ships nothing for or replaces what it ships. A runtime with neither
 runs all the same: the run, its log and its egress are recorded, the events of the
@@ -59,7 +59,7 @@ own Linux build, mounted read-only: this binary on Linux, wall.helper elsewhere.
 the engine in a virtual machine, on a Mac, the runtime's hooks do not reach the runner.
 
 At a terminal the session runs on a pseudo-terminal, so the runtime's own interface
-works and its bytes are still captured; --headless, or no terminal, runs it on pipes and
+works and its bytes are captured as well; --headless, or no terminal, runs it on pipes and
 reads its structured output. An argument the runtime's descriptor lists as headless,
 -p for Claude Code, runs it on pipes as well, since with it the runtime has no interface
 whoever started it: qory run claude -- -p '…' needs no flag. Either way the record is
@@ -70,16 +70,16 @@ after a runner that died or a server that was away.
 
 A run has no credential it can be spared. The credentials section of runner.yaml
 defines what this machine has: a token from a variable of qory's environment, from a
-file, or from an adapter, a program of yours that knows one kind of host, such as a
+file, or from an adapter, a program of yours written for one kind of host, such as a
 source code host, and prints the token with the hosts, the scheme and the paths it is
 for. A run's policy selects credentials by name, with an argument for an adapter, such
 as a repository, and defines none. Behind a wall the runner keeps each outside the
 container and its proxy sets it on the requests to the hosts it is for, ending the
 container's TLS for those hosts alone with an authority made for the run, which the
-container is configured to trust beside its image's own, through SSL_CERT_FILE,
-NODE_EXTRA_CA_CERTS and the like. Of those hosts the run reaches the paths the
-credential lists and no other, not another organization's repositories, and every
-other host stays a tunnel nobody reads. The policy's egress.paths limits a host to
+container is configured to trust beside its image's own, through the variables
+wall.ca_env lists, such as SSL_CERT_FILE and NODE_EXTRA_CA_CERTS. Of those hosts the run
+reaches the paths the credential lists and no other, not another organization's
+repositories, and every other host stays a tunnel nobody reads. The policy's egress.paths limits a host to
 paths the same way with no credential.
 
 An integration is an adapter published apart that describes itself: Qory's own
@@ -98,9 +98,10 @@ integration the run's policy selects, every one when the server supplies the pol
 checks the settings against the description, and defines the credential whose name is
 the key, with the adapter <program> credential --settings <json> -- ${argument}. A
 policy selects it by the key like any other. The settings go on that command line, so
-a secret among them is refused: the machine's owner sets <name>_file to the path of the
+a secret among them is refused: the machine's owner sets <setting>_file to the path of the
 file that contains it. A name the credentials section defines itself is the section's,
-qory prints a line, and the run describes that integration no
+qory prints a line stating that the credentials section defines the
+credential and the integration defines none, and the run describes that integration no
 further. An integration that does not describe, or whose
 settings its description refuses, means no run.
 
@@ -111,7 +112,7 @@ issue, into dev.qory.run.started and onto the run configuration request, where a
 finds them. Two come from the checkout's origin remote unless --label sets them: forge,
 the remote's host, and repository, its path without the leading slash and .git, such as
 github.com and acme/shop; a checkout with no remote, or one on this machine, has neither.
---timeout stops a runtime that still runs after that long, such as 5h30m:
+--timeout stops a runtime that runs longer than that, such as 5h30m:
 dev.qory.run.exited records the limit as the reason, and the exit status is 124,
 as timeout(1) has it. Stopped at the limit or by a signal to qory run, the runtime gets
 --stop-signal, SIGTERM unless set or the runtime's descriptor sets one, and, after
@@ -147,7 +148,7 @@ qory run [runtime] [-- argument...] [flags]
       --shm-size string       the size of /dev/shm in the container, such as 2g (runner.yaml: wall.shm_size)
       --stop-grace duration   how long the runtime gets between the stop signal and SIGKILL when the runner stops it (default 10s; runner.yaml: run.stop_grace)
       --stop-signal string    the signal that requests the runtime to stop when the runner stops it: SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2 (default SIGTERM; runner.yaml: run.stop_signal)
-      --timeout duration      stop a runtime that still runs after this long, such as 5h30m, and exit 124 (default no limit; runner.yaml: run.timeout)
+      --timeout duration      stop a runtime that runs longer than this, such as 5h30m, and exit 124 (default no limit; runner.yaml: run.timeout)
       --wall string           start the runtime in a container with no route out except to the proxy: docker, or none (runner.yaml: wall.adapter)
 ```
 

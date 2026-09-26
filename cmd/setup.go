@@ -114,7 +114,7 @@ eval "$(qory setup shell --print)".`,
 					names = append(names, name)
 				}
 				sort.Strings(names)
-				return input(fmt.Errorf("the %s shell is not supported; qory knows %s, and welcomes a contribution for yours at https://github.com/qoryai/qory", nameOrNone(shell), strings.Join(names, ", ")))
+				return input(fmt.Errorf("the %s shell is not supported; qory has a setup for %s, and welcomes a contribution for yours at https://github.com/qoryai/qory", nameOrNone(shell), strings.Join(names, ", ")))
 			}
 			lines := strings.ReplaceAll(sh.lines, "{completion}", sh.load)
 			if print {

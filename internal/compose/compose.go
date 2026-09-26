@@ -95,8 +95,8 @@ type Result struct {
 	// Settings are the merged fragments: per runtime, per target file, in module order.
 	Settings map[string]map[string]map[string]any
 	// MCP contains the composed MCP servers by name, each the object its module's
-	// mcp/<name>.json contains, with every $QORY_HARNESS_HOME as written, not yet
-	// substituted. [Result.MCPFor] renders it for a home.
+	// mcp/<name>.json contains, with every $QORY_HARNESS_HOME as written, before
+	// substitution. [Result.MCPFor] renders it for a home.
 	MCP map[string]map[string]any
 	// Instructions are the modules' AGENTS.md files joined by a blank line, or "".
 	Instructions string
@@ -105,7 +105,7 @@ type Result struct {
 	// none.
 	Bind map[string]string
 	// Env are the variables the harness exports, name to value, with every
-	// $QORY_HARNESS_HOME as written, not yet substituted: what the module manifests
+	// $QORY_HARNESS_HOME as written, before substitution: what the module manifests
 	// export, as $QORY_HARNESS_HOME/modules/<name>/<path>, and the configuration's
 	// variables over them. [Result.EnvFor] renders it for a home.
 	Env map[string]string

@@ -77,9 +77,9 @@ changed, so --policy is refused.
 --local runs with the files alone and the machine's policy; the server is not
 contacted.
 
-Any runtime the harness is composed for runs this way. What qory run knows of one, how
-its hooks are installed, what its output means and which signal requests it to stop, is
-a descriptor in the runner contract's format: the runner's own, Claude Code's, or
+Any runtime the harness is composed for runs this way. qory run reads what it needs of one,
+how its hooks are installed, what its output means and which signal requests it to stop,
+from a descriptor in the runner contract's format: the runner's own, Claude Code's, or
 <runtime>.yaml under ` + DescriptorsDir + ` in the same directory, which describes a
 runtime the runner ships nothing for or replaces what it ships. A runtime with neither
 runs all the same: the run, its log and its egress are recorded, the events of the
@@ -101,7 +101,7 @@ own Linux build, mounted read-only: this binary on Linux, wall.helper elsewhere.
 the engine in a virtual machine, on a Mac, the runtime's hooks do not reach the runner.
 
 At a terminal the session runs on a pseudo-terminal, so the runtime's own interface
-works and its bytes are still captured; --headless, or no terminal, runs it on pipes and
+works and its bytes are captured as well; --headless, or no terminal, runs it on pipes and
 reads its structured output. An argument the runtime's descriptor lists as headless,
 -p for Claude Code, runs it on pipes as well, since with it the runtime has no interface
 whoever started it: qory run claude -- -p '…' needs no flag. Either way the record is
@@ -112,16 +112,16 @@ after a runner that died or a server that was away.
 
 A run has no credential it can be spared. The credentials section of ` + config.RunnerFileName + `
 defines what this machine has: a token from a variable of qory's environment, from a
-file, or from an adapter, a program of yours that knows one kind of host, such as a
+file, or from an adapter, a program of yours written for one kind of host, such as a
 source code host, and prints the token with the hosts, the scheme and the paths it is
 for. A run's policy selects credentials by name, with an argument for an adapter, such
 as a repository, and defines none. Behind a wall the runner keeps each outside the
 container and its proxy sets it on the requests to the hosts it is for, ending the
 container's TLS for those hosts alone with an authority made for the run, which the
-container is configured to trust beside its image's own, through SSL_CERT_FILE,
-NODE_EXTRA_CA_CERTS and the like. Of those hosts the run reaches the paths the
-credential lists and no other, not another organization's repositories, and every
-other host stays a tunnel nobody reads. The policy's egress.paths limits a host to
+container is configured to trust beside its image's own, through the variables
+wall.ca_env lists, such as SSL_CERT_FILE and NODE_EXTRA_CA_CERTS. Of those hosts the run
+reaches the paths the credential lists and no other, not another organization's
+repositories, and every other host stays a tunnel nobody reads. The policy's egress.paths limits a host to
 paths the same way with no credential.
 
 An integration is an adapter published apart that describes itself: Qory's own
@@ -140,9 +140,10 @@ integration the run's policy selects, every one when the server supplies the pol
 checks the settings against the description, and defines the credential whose name is
 the key, with the adapter <program> credential --settings <json> -- ${argument}. A
 policy selects it by the key like any other. The settings go on that command line, so
-a secret among them is refused: the machine's owner sets <name>_file to the path of the
+a secret among them is refused: the machine's owner sets <setting>_file to the path of the
 file that contains it. A name the credentials section defines itself is the section's,
-qory prints a line, and the run describes that integration no
+qory prints a line stating that the credentials section defines the
+credential and the integration defines none, and the run describes that integration no
 further. An integration that does not describe, or whose
 settings its description refuses, means no run.
 
@@ -153,7 +154,7 @@ issue, into dev.qory.run.started and onto the run configuration request, where a
 finds them. Two come from the checkout's origin remote unless --label sets them: forge,
 the remote's host, and repository, its path without the leading slash and .git, such as
 github.com and acme/shop; a checkout with no remote, or one on this machine, has neither.
---timeout stops a runtime that still runs after that long, such as 5h30m:
+--timeout stops a runtime that runs longer than that, such as 5h30m:
 dev.qory.run.exited records the limit as the reason, and the exit status is ` + fmt.Sprint(exitTimeout) + `,
 as timeout(1) has it. Stopped at the limit or by a signal to qory run, the runtime gets
 --stop-signal, SIGTERM unless set or the runtime's descriptor sets one, and, after
@@ -335,7 +336,7 @@ every run on the machine; --timeout 0 lifts the file's.
 	c.Flags().StringVar(&policyFile, "policy", "", "this run's own policy, a file outside the checkout in the runner contract's policy format; it narrows the egress section of "+config.RunnerFileName+" and never widens it, and is refused with a server configured unless --local")
 	c.Flags().StringVar(&runID, "run-id", "", "the run's id when the caller already has one: a UUID in lower case (default a new one)")
 	c.Flags().StringArrayVar(&labels, "label", nil, "the caller's own name for the run, key=value, reported in dev.qory.run.started; repeatable. forge and repository come from the origin remote unless set")
-	c.Flags().DurationVar(&timeout, "timeout", 0, "stop a runtime that still runs after this long, such as 5h30m, and exit "+fmt.Sprint(exitTimeout)+" (default no limit; "+config.RunnerFileName+": run.timeout)")
+	c.Flags().DurationVar(&timeout, "timeout", 0, "stop a runtime that runs longer than this, such as 5h30m, and exit "+fmt.Sprint(exitTimeout)+" (default no limit; "+config.RunnerFileName+": run.timeout)")
 	c.Flags().StringVar(&stopSignal, "stop-signal", "", "the signal that requests the runtime to stop when the runner stops it: SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2 (default SIGTERM; "+config.RunnerFileName+": run.stop_signal)")
 	c.Flags().DurationVar(&grace, "stop-grace", 0, "how long the runtime gets between the stop signal and SIGKILL when the runner stops it (default 10s; "+config.RunnerFileName+": run.stop_grace)")
 	c.Flags().StringVar(&o.name, "wall", "", "start the runtime in a container with no route out except to the proxy: "+config.WallDocker+", or none ("+config.RunnerFileName+": wall.adapter)")
@@ -478,10 +479,11 @@ func withOrigin(labels map[string]string, root string) map[string]string {
 const wallOff = "none"
 
 // enclose puts the spec behind a wall when a flag or the runner file sets one. The
-// runtime then runs in a container, so every path of this machine is rewritten: the
+// runtime then runs in a container, so what refers to this machine changes: the
 // environment is the launch template's and the variables set for the wall, never the
-// process's; the forwarder is the helper's path inside; and the container is shown the
-// checkout and the composed home, which is all a launch template's paths point into.
+// process's, and the forwarder is the helper's path inside the container. The checkout,
+// the composed home, which is all a launch template's paths point into, and the mounts
+// keep their paths inside the container.
 func enclose(spec *session.Spec, r *config.Runner, o wallOptions, exe, root, home string, launchEnv map[string]string) error {
 	var section config.RunnerWall
 	if r != nil && r.Wall != nil {
@@ -580,8 +582,8 @@ the events go.
 The run directory records what the server accepted, so only the rest is sent, in order,
 until it is accepted or --wait is over. A record with no dev.qory.run.exited, which a
 runner that died leaves, gets one first, with the reason runner_lost, and the
-containers and networks the run's wall left are removed. A run whose runner still
-lives is refused. A server may see an event twice and discards it by its id.
+containers and networks the run's wall left are removed. A run whose runner is
+alive is refused. A server may see an event twice and discards it by its id.
 
 The exit status is 0 when the server has everything, 1 when events remain, which
 are under the run directory's undelivered then.`,
@@ -614,7 +616,7 @@ are under the run directory's undelivered then.`,
 			res, err := session.Resend(ctx, spec)
 			switch {
 			case errors.Is(err, session.ErrRunning):
-				return input(fmt.Errorf("the run %s is still going", args[0]))
+				return input(fmt.Errorf("the run %s is running", args[0]))
 			case errors.Is(err, os.ErrNotExist):
 				return input(fmt.Errorf("no run %s is recorded in this checkout", args[0]))
 			case err != nil:
@@ -628,7 +630,7 @@ are under the run directory's undelivered then.`,
 				u.Success("removed %d containers and networks the run left", res.Reaped)
 			}
 			if res.Undelivered > 0 {
-				u.Fail(fmt.Errorf("%d events were accepted and %d still are not; %s/undelivered contains them", res.Sent, res.Undelivered, ui.Short(spec.Dir, at.root)))
+				u.Fail(fmt.Errorf("%d events were accepted and %d were not; %s/undelivered contains them", res.Sent, res.Undelivered, ui.Short(spec.Dir, at.root)))
 				return reported(&exitError{code: 1})
 			}
 			u.Success("%d events were accepted; the server has the whole record", res.Sent)

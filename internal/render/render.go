@@ -1061,7 +1061,7 @@ func Unlink(p Runtime, root string, others ...Runtime) ([]string, error) {
 //
 // Before it writes anything, a Link at a path a registered runtime links, or at the qory
 // directory, is refused with an error that states the runtime, because a module link
-// there would be placed where the runtime's link goes.
+// there takes the place of the runtime's link.
 func LinkModules(res *compose.Result, root, home string, previous []string, force bool) (Linked, error) {
 	var out Linked
 	for _, l := range res.Modules {

@@ -412,8 +412,8 @@ run:                     # optional
 ```
 
 `qory run` runs whichever runtime the harness is composed for, and none of the above is
-particular to one. What the runner knows of a runtime is a descriptor, a file of data in
-the [runner
+particular to one. The runner reads what it needs of a runtime from a descriptor, a file
+of data in the [runner
 contract](https://github.com/qoryai/runner/blob/main/contracts/runner/v1/README.md#the-runtime)'s
 format: how its hooks are installed, what its output means as events, which signal
 requests it to stop. The runner ships Claude Code's.
@@ -445,7 +445,7 @@ qory run --run-id "$uuid" --label run_key=1234 --label issue=77 \
 
 `--run-id` is the id the caller already has, a UUID in lower case, and the labels go
 into `dev.qory.run.started` and onto the run configuration request, where a server ties
-the run to what it knows and chooses its policy. Two labels come from the checkout's
+the run to its own records and chooses its policy. Two labels come from the checkout's
 origin remote unless `--label` sets them: `forge`, the remote's host, and `repository`, its path without the leading slash and `.git`, so
 `git@github.com:acme/shop.git` is `github.com` and `acme/shop`; a checkout with no
 remote, or one on this machine, has neither. `--policy` is one run's own policy, in
@@ -488,7 +488,7 @@ credentials:
 
 The runner keeps each token outside the container, and its proxy sets it on the requests
 to the hosts it is for. The container gets a placeholder where a program wants a
-credential set, and never the token. An **adapter** is a program of yours that knows one
+credential set, and never the token. An **adapter** is a program of yours written for one
 kind of host, such as a source code host: it runs outside the container and prints the
 token, its expiry, and the hosts, the scheme and the paths the token is for, so `qory`
 defines no host of its own. Its paths are the run's whole reach on those hosts: a
@@ -549,9 +549,9 @@ private group keep it. `qory run` prints the program it found on a line of its o
 settings go on the adapter's command line, which other processes of the machine can read,
 so a secret is refused there: the description marks it, a property of the settings
 themselves, and the settings define the path of the file that contains it,
-`private_key_file` and never `private_key`. The settings are compact JSON as Go's
-`encoding/json` writes it, `<`, `>`, `&`, U+2028 and U+2029 escaped, and every `$` in them
-is written `\u0024`, as the integration contract defines for a declaration, so the
+`private_key_file` and never `private_key`. The settings are compact JSON with the keys
+in the file's order, `<`, `>`, `&`, U+2028 and U+2029 escaped, and every `$` in them
+written `\u0024`, as the integration contract defines for a declaration, so the
 adapter's `${argument}` is the policy's argument alone. A name the `credentials` section
 defines itself is the section's: `qory run` and `qory config` print this on a line of
 their own, `qory config` describes the integration and lists it as shadowed, and a run
@@ -560,7 +560,7 @@ its `credentials` select; a run whose policy the server supplies describes every
 program that does not answer within 10 seconds, a description the [integration
 contract](https://github.com/qoryai/integrations/tree/main/contracts/integration/v1)
 refuses, settings the description refuses, and an integration that plays no role `qory`
-knows stop the run before it starts. `qory config` describes every integration and lists
+expands stop the run before it starts. `qory config` describes every integration and lists
 what each defines.
 
 For those hosts, and no other, the proxy ends the container's TLS itself, with an
@@ -574,7 +574,7 @@ A job ends with `qory run resend <run-id>`, whatever happened before it. It send
 server what it has not accepted of the run's record, and nothing twice. After a runner
 that died it first closes the record, `dev.qory.run.exited` with `reason: runner_lost`,
 and removes the containers and networks the run's wall left. It refuses a run that is
-still going, and exits 1 when the server still has not taken everything after
+running, and exits 1 when the server has not accepted everything after
 `--wait`, two minutes unless set. The formats are in the runner's
 [contract](https://github.com/qoryai/runner/tree/main/contracts/runner/v1).
 

@@ -35,7 +35,7 @@ release may change what an existing document does, and states it under Upgrading
   section defines itself is the section's: `qory run` and `qory config` print this, and
   `qory config` alone describes that integration. A program that does not describe within
   10 seconds, settings its description refuses, and an integration that plays no role
-  `qory` knows stop the run before it starts, with the program's own line.
+  `qory` expands stop the run before it starts, with the program's own line.
 
 ## [0.11.0] - 2026-09-24
 

@@ -13,8 +13,8 @@ the events go.
 The run directory records what the server accepted, so only the rest is sent, in order,
 until it is accepted or --wait is over. A record with no dev.qory.run.exited, which a
 runner that died leaves, gets one first, with the reason runner_lost, and the
-containers and networks the run's wall left are removed. A run whose runner still
-lives is refused. A server may see an event twice and discards it by its id.
+containers and networks the run's wall left are removed. A run whose runner is
+alive is refused. A server may see an event twice and discards it by its id.
 
 The exit status is 0 when the server has everything, 1 when events remain, which
 are under the run directory's undelivered then.

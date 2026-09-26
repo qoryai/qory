@@ -201,7 +201,7 @@ type Expansion struct {
 // description. The program is found by its absolute path, or on the PATH, and is
 // refused in a directory of [Expansion.Workspace] and where [trusted] refuses it. A
 // program that is not found or does not answer, settings the description refuses, and an
-// integration that plays no role qory knows are errors that contain the file and the
+// integration that plays no role qory expands are errors that contain the file and the
 // key. The credential role defines the credential whose name is the key, with the
 // adapter [integration.CredentialAdapter] returns, unless the file's credentials section
 // defines that name itself: then the file's definition stands, [Runner.Shadowed] lists
@@ -237,7 +237,7 @@ func (r *Runner) Expand(ctx context.Context, e Expansion) error {
 			return fail("%v", err)
 		}
 		if d.Credential == nil {
-			return fail("%s plays no role qory knows, %s, and defines nothing", in.Program, strings.Join(d.Roles, ", "))
+			return fail("%s plays no role qory expands, %s, and defines nothing", in.Program, strings.Join(d.Roles, ", "))
 		}
 		// The version is the program's to word, and is printed as a terminal takes it.
 		in.Path, in.Version = found, integration.Printable(d.ProgramVersion)

@@ -183,7 +183,7 @@ defines the worktree's name instead: qory worktree add review --pr 7 makes ../wt
 --base on a branch that already exists moves it: a branch with no commits of its own is
 reset onto the base, one with commits has them rebased onto it, either after a question
 or at once with --rebase. The base a branch was cut from is recorded in its git config,
-which is how add knows what the branch's own commits are; a branch made without qory
+from which add determines the branch's own commits; a branch made without qory
 counts from the remote's HEAD branch. A no keeps the branch where it is.
 
 Then every worktree.link is linked and every worktree.copy copied into the worktree: a

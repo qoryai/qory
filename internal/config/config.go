@@ -91,8 +91,8 @@ import (
 // ancestor of the checkout, or in the checkout root.
 const FileName = exports.FileName
 
-// AltFileName is the file's second name, for a repository whose committed file mentions
-// nothing of the tool that reads it. It is read exactly as [FileName] is, at every level,
+// AltFileName is the file's second name, for a repository whose committed file does not
+// mention the tool that reads it. It is read exactly as [FileName] is, at every level,
 // and a directory contains one of the two names, never both.
 const AltFileName = exports.AltFileName
 
@@ -832,7 +832,7 @@ func (c *Config) applyWorktree(path string, w *worktreeSection) error {
 	}
 	if w.Name != nil {
 		if !strings.Contains(*w.Name, "{branch}") {
-			return fmt.Errorf("%s: worktree.name %q contains no {branch}; two worktrees would share one directory", path, *w.Name)
+			return fmt.Errorf("%s: worktree.name %q contains no {branch}, and without it two worktrees share one directory", path, *w.Name)
 		}
 		if strings.ContainsAny(*w.Name, `/\`) {
 			return fmt.Errorf("%s: worktree.name %q contains a slash; it is one directory name under worktree.dir", path, *w.Name)
