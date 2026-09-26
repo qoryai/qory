@@ -922,6 +922,7 @@ wall:                            # the container the runtime starts in; absent: 
 | `run.stop_grace` | the runtime's descriptor's, else `10s` | how long a runtime gets between the stop signal and SIGKILL; `--stop-grace` names another |
 | `wall.ca_env` | `SSL_CERT_FILE`, `GIT_SSL_CAINFO`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE` | the variables that point a program in the container at the authorities it trusts, the image's own and the run's, when a run holds a credential or has path rules |
 | `credentials.<name>` | none | a credential this machine has for its runs. Exactly one of `env`, a variable of `qory run`'s environment, `file`, an absolute path read whenever the token is used, and `adapter`, a program by its absolute path with its arguments, says where the token comes from. An adapter prints the token with the hosts, the scheme and the paths it is for, the runner contract's `credential.schema.json`, and takes the policy's argument as `${argument}` when `argument`, a regular expression, matches it whole; its `hosts` and `paths` here are the most it may claim. With `env` and `file`, `hosts`, `auth` (`scheme: bearer`, `basic` with `username`, or `header` with `header`) and `paths` say how the token is used. `placeholders` names variables the container gets with a value that is no credential |
+| `integrations.<key>` | none | an integration this machine declares: a program that speaks the [integration contract](https://github.com/qoryai/integrations/tree/main/contracts/integration/v1), `program`, an absolute path or a name on the `PATH`, `qory-<key>` when absent, with `settings`, its settings document, `{}` when absent. The key is 1 to 64 of `a-z`, `0-9`, `_` and `-`, starting with a letter or a digit. `qory run` and `qory config` run `<program> describe`, for 10 seconds at most, and check the settings against the description; a value of a `writeOnly` setting is refused, since the settings go on a command line, and the setting's `<name>_file` gives the file that holds it. The `credential` role defines the credential `<key>`: `adapter: [<program>, credential, --settings, <json>, --, "${argument}"]`, the settings as compact JSON with every `$` written `\u0024`, and the role's `argument` and `hosts`. A name `credentials` defines itself is that section's, and the integration defines no credential under it. A role qory does not know is left alone, and an integration that plays none it knows is refused |
 | `wall.helper` | this binary, on Linux | the absolute path of a static Linux build of qory for the engine's architecture, mounted read-only into the container as the relay and the hook forwarder. Required where qory itself is not a Linux build |
 
 The egress section is the machine's policy. One run may bring its own, `qory run
@@ -939,7 +940,8 @@ acme/shop}]`, and may hold a host to paths, `egress.paths`. Both need the wall. 
 runner keeps a selected credential outside the container, and its proxy sets it on the
 requests to the hosts it is for, ending the container's TLS for those hosts alone with
 an authority made for the run. Of a host with paths the run reaches those and no other.
-A policy defines no credential: it chooses among the ones this file has.
+A policy defines no credential: it chooses among the ones this file has, its
+`credentials` and the ones its `integrations` define, alike.
 
 `qory config` lists the file's values under `runner.`; a file that does not read stops
 every command, the way a `qory.yaml` that does not read does. The schema is

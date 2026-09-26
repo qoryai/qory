@@ -294,6 +294,48 @@ func TestRunRefusesWhatItCannotStart(t *testing.T) {
 	}
 }
 
+// TestRunExpandsTheIntegrationsTheMachineDeclares declares an integration found on the
+// PATH: qory config runs its describe and lists it and the credential it defines, and a
+// run starts with that credential defined. One that does not describe stops the run
+// before it starts, with the program's line, and leaves no record.
+func TestRunExpandsTheIntegrationsTheMachineDeclares(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, fakeRuntime(t))
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	writeFile(t, filepath.Join(bin, "qory-tracker"), "#!/bin/sh\ntest \"$1\" = describe || exit 64\necho '{\"version\": 1, \"name\": \"tracker\", \"title\": \"Tracker\", \"program_version\": \"0.3.0\", \"settings\": {\"type\": \"object\"}, \"roles\": {\"credential\": {\"argument\": \"[A-Z]+\", \"hosts\": [\"tracker.acme.example\"]}}}'\n")
+	writeFile(t, filepath.Join(bin, "qory-broken"), "#!/bin/sh\necho 'the settings file is missing' >&2\nexit 1\n")
+	for _, p := range []string{"qory-tracker", "qory-broken"} {
+		if err := os.Chmod(filepath.Join(bin, p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	file := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml")
+	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\nintegrations:\n  tracker: {settings: {project: SHOP}}\n")
+	out, err := run(t, "config")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "runner.credentials.tracker", "integration tracker", "runner.integrations.tracker", filepath.Join(bin, "qory-tracker")+" 0.3.0")
+	t.Setenv("QORY_TEST_EXIT", "0")
+	if out, err := run(t, "run"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if err := os.RemoveAll(filepath.Join(root, ".qory", "runs")); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\nintegrations:\n  broken: {}\n")
+	for _, verb := range []string{"run", "config"} {
+		if _, err := run(t, verb); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "runner.yaml: integrations.broken: "+filepath.Join(bin, "qory-broken")+" describe: exit status 1: the settings file is missing") {
+			t.Errorf("%s with an integration that does not describe: %v", verb, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, ".qory", "runs")); !errors.Is(err, os.ErrNotExist) {
+		t.Error("a run that did not start left a record")
+	}
+}
+
 // TestForwardHandsAHookToTheRun is the hidden forward verb: it sends its stdin to the
 // socket the environment names as one hooks record, prints nothing and exits 0; with
 // no socket in the environment it still exits 0 and says why on stderr.

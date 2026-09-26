@@ -4,6 +4,24 @@ Every release of qory, newest first, in the shape of [Keep a Changelog](https://
 The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0 a minor
 release may change what an existing document does, and says so under Upgrading.
 
+## [Unreleased]
+
+### Added
+
+- The `integrations` section of `runner.yaml` declares the integrations a machine uses,
+  each a program that speaks the integration contract of qoryai/integrations, under a
+  key: `program`, an absolute path or a name on the `PATH`, `qory-<key>` when absent, and
+  `settings`. `qory run` and `qory config` run `<program> describe`, check the settings
+  against the description, and define the credential named by the key, whose adapter is
+  `<program> credential --settings <json> -- ${argument}` and whose `argument` and
+  `hosts` are the description's. `qory` holds no table of integrations: Qory's own
+  `qory-github` and a program of yours are found and set up the same way. A value of a
+  setting the description marks `writeOnly` is refused, since the settings go on a
+  command line; its `<name>_file` gives the file that holds it. A name the
+  `credentials` section defines itself is the section's. A program that does not
+  describe within 10 seconds, settings its description refuses, and an integration that
+  plays no role `qory` knows stop the run before it starts, with the program's own line.
+
 ## [0.11.0] - 2026-09-24
 
 ### Upgrading
@@ -699,6 +717,7 @@ The first release: a stack of modules composed into one tree, linked into the ch
 and kept out of git, with a report naming the module of every entry and a refusal when
 two modules provide the same one.
 
+[Unreleased]: https://github.com/qoryai/qory/compare/v0.11.0...HEAD
 [0.11.0]: https://github.com/qoryai/qory/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/qoryai/qory/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/qoryai/qory/compare/v0.8.0...v0.9.0

@@ -21,8 +21,8 @@ earlier one.
 
 - A repository decides what only the machine may: anything in a checkout, its
   `qory.yaml`, a module, a composed harness, changes what `~/.config/qory/runner.yaml`
-  says about egress, the server, credentials or the wall, or a run's `--policy` widens
-  the machine's.
+  says about egress, the server, credentials, integrations or the wall, or a run's
+  `--policy` widens the machine's.
 - `qory run` hands a session something it is not given: the server's secret, a
   credential, a variable of your environment that was not named for a walled run.
 - Composing a harness writes outside the checkout and the home it was told to use.

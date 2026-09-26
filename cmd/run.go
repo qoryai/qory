@@ -123,6 +123,17 @@ credential names and no other, another organization's repositories say, and ever
 other host stays a tunnel nobody reads. The policy's egress.paths holds a host to
 paths the same way with no credential.
 
+An integration is an adapter published apart that describes itself: Qory's own
+qory-<name>, qory-github say, or a program of yours. The integrations section of
+` + config.RunnerFileName + ` declares each under a key with its settings, and names its program
+when it is not qory-<key> on the PATH. Before a run qory runs <program> describe, checks
+the settings against the description, and defines the credential named by the key, with
+the adapter <program> credential --settings <json> -- ${argument}. A policy selects it
+by the key like any other. The settings go on that command line, so a secret among them
+is refused and given as the file that holds it. A name the credentials section defines
+itself is the section's. An integration that does not describe, or whose settings its
+description refuses, means no run.
+
 A caller that starts runs for a system of its own names them: --run-id gives the run
 the id the caller already holds, a UUID in lower case, and --label key=value, repeatable,
 puts the caller's own names, a key in a queue, a repository, an issue, into
@@ -252,6 +263,9 @@ every run on the machine; --timeout 0 lifts the file's.
 				StopGrace:     grace,
 			}
 			if r := conf.Runner; r != nil {
+				if err := r.Expand(ctx); err != nil {
+					return input(err)
+				}
 				for _, c := range r.Credentials {
 					def := session.Credential{Name: c.Name, Env: c.Env, File: c.File, Adapter: c.Adapter, Argument: c.Argument, Hosts: c.Hosts, Scheme: c.Scheme, Username: c.Username, Header: c.Header, Paths: c.Paths, Placeholders: c.Placeholders}
 					if err := def.Check(); err != nil {

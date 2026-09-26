@@ -260,6 +260,29 @@
           }
         }
       }
+    },
+    "integrations": {
+      "description": "The integrations this machine declares, by key: programs that speak the integration contract, https://qory.dev/contracts/integration/v1/. qory runs <program> describe, checks the settings against the description, and expands each role it knows; the credential role defines the credential named by the key, unless credentials defines that name itself. An integration that plays no role qory knows is refused.",
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+      },
+      "additionalProperties": {
+        "type": ["object", "null"],
+        "additionalProperties": false,
+        "properties": {
+          "program": {
+            "description": "The program: an absolute path, or a name looked up on the PATH. Default qory-<key>.",
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(/|[^/]*$)"
+          },
+          "settings": {
+            "description": "The settings document, which the description's settings schema checks; absent is {}. It goes on the command line of every role, so it holds no value of a writeOnly setting: a secret is given as the file that holds it, <name>_file.",
+            "type": "object"
+          }
+        }
+      }
     }
   }
 }
