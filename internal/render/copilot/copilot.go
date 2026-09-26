@@ -50,7 +50,7 @@ func (copilot) Name() string { return Runtime }
 // Everything under .github is soft because a repository commonly owns it, and AGENTS.md
 // is left out when the compose produced no instructions. A nil res lists no files links,
 // because only a compose knows them; [render.LinkInto] and [render.Unlink] find the ones
-// an earlier compose wrote by their targets.
+// a previous compose wrote by their targets.
 func (copilot) Links(res *compose.Result) []render.Link {
 	links := []render.Link{
 		{Checkout: ".github/agents", Home: Runtime + "/agents", Soft: true},

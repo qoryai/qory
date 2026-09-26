@@ -33,11 +33,11 @@ import (
 // line.
 //
 // A Swarm is a writer. The command prints through it, and every write clears the swarm
-// first, then lets the swarm come back once the output is quiet again. What prints to
-// the terminal around it, such as a child process handed the terminal, is drawn over,
-// so a command that hands the terminal to another program does not buzz. The cursor is
-// hidden while the swarm is drawn, and shown again when it is cleared, when it stops,
-// and on an interrupt, before the signal is let through.
+// first, then lets the swarm come back once the output is quiet again. What prints to the
+// terminal around it, such as a child process that has the terminal, would be drawn over,
+// so the swarm stays off while a command passes the terminal to another program. The
+// cursor is hidden while the swarm is drawn, and shown again when it is cleared, when it
+// stops, and on an interrupt, before the signal is let through.
 type Swarm struct {
 	w io.Writer
 	s *swarm

@@ -28,8 +28,8 @@ mode observe, the file stands as it is; the deny lists of both apply either way.
 file's server section defines the server
 every run reports to, with the access key and the secret the server issued this
 machine: the runner fetches the server's configuration first, signed, and does not
-start unless the server answers; the events go where the configuration defines, and when
-it defines a run configuration that is the run's policy, fetched with the run's labels,
+start unless the server answers; the events go to the URL the configuration defines,
+and when it defines a run configuration that is the run's policy, fetched with the run's labels,
 the checkout's forge and repository among them, and reloaded when the server reports it
 changed, so --policy is refused.
 --local runs with the files alone and the machine's policy; the server is not
@@ -76,7 +76,8 @@ for. A run's policy selects credentials by name, with an argument for an adapter
 as a repository, and defines none. Behind a wall the runner keeps each outside the
 container and its proxy sets it on the requests to the hosts it is for, ending the
 container's TLS for those hosts alone with an authority made for the run, which the
-container trusts beside its image's own. Of those hosts the run reaches the paths the
+container is configured to trust beside its image's own, through SSL_CERT_FILE,
+NODE_EXTRA_CA_CERTS and the like. Of those hosts the run reaches the paths the
 credential lists and no other, not another organization's repositories, and every
 other host stays a tunnel nobody reads. The policy's egress.paths limits a host to
 paths the same way with no credential.
@@ -85,7 +86,7 @@ An integration is an adapter published apart that describes itself: Qory's own
 qory-<name>, such as qory-github, or a program of yours. The integrations section of
 runner.yaml declares each under a key with its settings, and defines its
 program when it is not qory-<key> on the PATH; where the PATH is not the machine owner's
-alone, program defines it by its absolute path. qory runs a program the run cannot
+alone, set program to its absolute path. qory runs a program the run cannot
 write: one outside the checkout and outside every read-write mount of the wall's
 container, judged by where its links lead. The program and every directory above it up
 to /, and above each link on the way, belong to root or to the user running qory, and
@@ -97,9 +98,10 @@ integration the run's policy selects, every one when the server supplies the pol
 checks the settings against the description, and defines the credential whose name is
 the key, with the adapter <program> credential --settings <json> -- ${argument}. A
 policy selects it by the key like any other. The settings go on that command line, so
-a secret among them is refused and set as the file that contains it. A name the
-credentials section defines itself is the section's, a line states this, and the run
-describes that integration no further. An integration that does not describe, or whose
+a secret among them is refused: the machine's owner sets <name>_file to the path of the
+file that contains it. A name the credentials section defines itself is the section's,
+qory prints a line, and the run describes that integration no
+further. An integration that does not describe, or whose
 settings its description refuses, means no run.
 
 A caller that starts runs for a system of its own identifies them: --run-id sets the

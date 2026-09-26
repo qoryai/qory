@@ -95,8 +95,8 @@ type Result struct {
 	// Settings are the merged fragments: per runtime, per target file, in module order.
 	Settings map[string]map[string]map[string]any
 	// MCP contains the composed MCP servers by name, each the object its module's
-	// mcp/<name>.json contains, with every $QORY_HARNESS_HOME as written. [Result.MCPFor]
-	// renders it for a home.
+	// mcp/<name>.json contains, with every $QORY_HARNESS_HOME as written, not yet
+	// substituted. [Result.MCPFor] renders it for a home.
 	MCP map[string]map[string]any
 	// Instructions are the modules' AGENTS.md files joined by a blank line, or "".
 	Instructions string
@@ -105,9 +105,9 @@ type Result struct {
 	// none.
 	Bind map[string]string
 	// Env are the variables the harness exports, name to value, with every
-	// $QORY_HARNESS_HOME as written: what the module manifests export, as
-	// $QORY_HARNESS_HOME/modules/<name>/<path>, and the configuration's variables over
-	// them. [Result.EnvFor] renders it for a home.
+	// $QORY_HARNESS_HOME as written, not yet substituted: what the module manifests
+	// export, as $QORY_HARNESS_HOME/modules/<name>/<path>, and the configuration's
+	// variables over them. [Result.EnvFor] renders it for a home.
 	Env map[string]string
 	// Base is the stack the checkout's qory.yaml extends, nil for a stack that extends
 	// none.
@@ -322,10 +322,10 @@ func (r *Result) EnvFor(home string) map[string]string {
 // selectVariant picks the one variant of a module that serves every targeted runtime.
 //
 // A variant exists so that a module can ship different material to different runtimes,
-// and a target naming several runtimes can therefore ask a module for two different
-// things at once. The composed tree holds one copy of each entry, so there is nothing to
-// render in that case: the compose refuses and names both runtimes, the way it refuses a
-// collision. A module with no variants, or one whose variants resolve the same way for
+// and a target that lists several runtimes can therefore select two different things of a
+// module at once. The composed tree contains one copy of each entry, so there is nothing
+// to render in that case: the compose refuses and lists both runtimes, the way it refuses
+// a collision. A module with no variants, or one whose variants resolve the same way for
 // every targeted runtime, composes for all of them.
 func selectVariant(m *module.Manifest, pl stack.Module, runtimes stack.Runtimes, name string) (string, error) {
 	first, err := module.SelectVariant(m, pl.Variant, runtimes.First())
@@ -766,10 +766,10 @@ func collisions(owners map[string][]string, modules []Module, base *Base) error 
 // mergeFile decodes one settings fragment of the named module and folds it into the
 // result's target file for the runtime. The extension decides the format, and a TOML
 // document is normalized to the types the JSON decoder produces. The top-level key
-// decides how lists combine, and the mode carries down the whole subtree under that key.
+// decides how lists combine, and the mode applies to the whole subtree under that key.
 // A key path another module set to a different value is an error, unless it is env.<NAME>
-// and decided names NAME: the configuration's value is written then, whatever the
-// fragments say.
+// and decided lists NAME: the configuration's value is written then, whatever the
+// fragments set.
 func mergeFile(res *Result, runtime, file, path, module string, decided map[string]string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {

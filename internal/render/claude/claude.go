@@ -75,8 +75,8 @@ func (claude) Name() string { return Runtime }
 
 // Links are the hard link .claude, a directory link so the checkout's own files in it
 // stay, without the plugin and the launch directory, which a checkout has no use for and
-// whose names would be wrong in it, and a soft .mcp.json at the checkout root, left out
-// when the runtime writes no mcp.json, see [Render].
+// whose names are wrong for a session in it, and a soft .mcp.json at the checkout root,
+// left out when the runtime writes no mcp.json, see [Render].
 func (claude) Links(res *compose.Result) []render.Link {
 	links := []render.Link{{Checkout: ".claude", Home: Runtime, Except: []string{Plugin, Launch}}}
 	if res == nil || writesMCP(res) {

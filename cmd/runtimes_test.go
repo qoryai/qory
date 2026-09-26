@@ -78,8 +78,8 @@ func TestComposeKeepsARuntimeComposedEarlier(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, ui.Mark+" acme/app · codex", "(composed here earlier, refreshed)")
-	wantsRow(t, out, "claude", claudeLink+"  .mcp.json  (composed here earlier, refreshed)")
+	wants(t, out, ui.Mark+" acme/app · codex", "(composed here by a previous compose, refreshed)")
+	wantsRow(t, out, "claude", claudeLink+"  .mcp.json  (composed here by a previous compose, refreshed)")
 	linkedFor(t, root, "claude", "codex")
 	// The report names every runtime the home holds, the target first.
 	if rep := readReport(t, root); !slices.Equal(rep.Target.Runtimes, []string{"codex", "claude"}) {

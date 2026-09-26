@@ -130,7 +130,7 @@ eval "$(qory setup shell --print)".`,
 				u.Success("%s already contains the lines; nothing to add", sh.rc)
 				return nil
 			}
-			u.Text("These lines go to the end of " + sh.rc + ":")
+			u.Text("These lines are added to the end of " + sh.rc + " if you answer y:")
 			u.Blank()
 			u.Code(strings.Split(strings.TrimRight(lines, "\n"), "\n")...)
 			u.Blank()

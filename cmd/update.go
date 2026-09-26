@@ -164,7 +164,7 @@ look off, and so does CI being set.
 		},
 	}
 	c.Flags().BoolVar(&check, "check", false, "report whether a newer release exists and install nothing")
-	c.Flags().BoolVar(&toRelease, "release", false, "install the newest release over a build that is ahead of it, without a confirmation")
+	c.Flags().BoolVar(&toRelease, "release", false, "install the newest release over a build that is ahead of it, without a confirmation prompt")
 	return c
 }
 

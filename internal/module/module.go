@@ -62,7 +62,7 @@ type Manifest struct {
 	// once: a lower-case host name, or "*." followed by a name for every host below it,
 	// in the grammar the runner contract defines for a policy's allow list. Nil when the
 	// manifest has no egress key; empty, and not nil, when it declares an empty list,
-	// which declares that the module reaches nothing. The runner distinguishes the two.
+	// which states that the module reaches nothing. The runner distinguishes the two.
 	Egress []string
 }
 
@@ -70,7 +70,7 @@ type Manifest struct {
 // policy.schema.json, egress.allow items, which defines it once for both contracts.
 var EgressHost = regexp.MustCompile(`^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
-// rawManifest decodes qory-module.yaml as it is written, where the variants map holds
+// rawManifest decodes qory-module.yaml as it is written, where the variants map contains
 // both the variants and the default, a string among the maps. [ReadManifest] splits the
 // two apart.
 type rawManifest struct {
@@ -136,7 +136,7 @@ type Module struct {
 	// the absolute path of the one fragment this module contributes to it.
 	Settings map[string]map[string]string
 	// MCP contains the MCP servers by name, each the JSON object its mcp/<name>.json file
-	// contains, as written, with every $QORY_HARNESS_HOME in it.
+	// contains, with every $QORY_HARNESS_HOME as written, not yet substituted.
 	MCP map[string]map[string]any
 	// Instructions is the absolute AGENTS.md path, or "" when the module ships none.
 	Instructions string
@@ -229,14 +229,13 @@ func decodeError(path string, err error) error {
 }
 
 // ReadManifest reads and validates qory-module.yaml at dir. A directory without one is
-// not a module, and the error reports that and the directory, because a source that
-// points at the wrong directory is the mistake this catches.
+// not a module, and the error states that and contains the directory, because a source
+// that points at the wrong directory is the mistake this catches.
 //
-// An unknown field is an error, so is an apiVersion other than [stack.APIVersion] or a
-// retired spelling of it, a
-// missing name, a default that selects something other than a declared
-// variant or "fail", an env key that is not an environment variable name or is
-// QORY_HARNESS_HOME, and an env value that is not a relative path inside the module.
+// These are errors: an unknown field, an apiVersion other than [stack.APIVersion] or a
+// retired spelling of it, a missing name, a default that selects something other than
+// a declared variant or "fail", an env key that is not an environment variable name or
+// is QORY_HARNESS_HOME, and an env value that is not a relative path inside the module.
 // Every error contains the manifest path. The env values come back cleaned, "." for the
 // root.
 //
@@ -507,8 +506,8 @@ func Read(name, dir string, m *Manifest, variant string) (*Module, error) {
 }
 
 // inside checks that path, with every symlink resolved, is under the module root. A
-// module may link an entry to elsewhere in itself; a link that leaves the module would
-// make the harness read a file the report does not show, and is refused.
+// module may link an entry to elsewhere in itself; a link that leaves the module is
+// refused, since the harness reads through it a file the report does not show.
 func inside(root, path string) error {
 	realRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
@@ -759,7 +758,7 @@ func readHooks(name, rel, dir string) ([]Entry, error) {
 	return es, nil
 }
 
-// serverKeys are the keys an MCP server object may carry, the ones Claude Code's
+// serverKeys are the keys an MCP server object may contain, the ones Claude Code's
 // .mcp.json reads: the transport, the command with its arguments and environment for a
 // stdio server, the URL with its headers for a remote one, and a description for the
 // report, which the compose drops on emit. Any other key is refused, the way every other

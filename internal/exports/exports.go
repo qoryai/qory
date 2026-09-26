@@ -131,7 +131,7 @@ func (d *Dirs) UnmarshalYAML(n *yaml.Node) error {
 	}
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		if k := n.Content[i].Value; k != "stacks" && k != "modules" {
-			return fmt.Errorf("dir has the key %q; a dir map has the keys stacks and modules", k)
+			return fmt.Errorf("dir has the key %q, which a dir map does not have; its keys are stacks and modules", k)
 		}
 	}
 	*d = Dirs(m)

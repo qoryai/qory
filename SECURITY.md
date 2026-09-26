@@ -10,12 +10,12 @@ of what you send.
 
 You get an answer within three working days. We tell you what we found, fix what is a
 vulnerability in a new release, and publish an advisory that credits you unless you
-prefer otherwise.
+would rather it did not.
 
 ## Supported versions
 
-The latest release. Below 1.0 a fix is a new release, and an earlier release gets no
-fix.
+The latest release. Below 1.0 a fix is a new release and is not carried back to an
+earlier one.
 
 ## What is a vulnerability here
 
@@ -23,7 +23,7 @@ fix.
   `qory.yaml`, a module, a composed harness, changes what `~/.config/qory/runner.yaml`
   defines for egress, the server, credentials, integrations or the wall, or a run's
   `--policy` widens the machine's.
-- `qory run` hands a session something it must not receive: the server's secret, a
+- `qory run` passes a session something it must not receive: the server's secret, a
   credential, a variable of your environment that was not listed for a walled run.
 - Composing a harness writes outside the checkout and the home it was set to use.
 - `qory update` installs an archive that does not match the release's checksums.

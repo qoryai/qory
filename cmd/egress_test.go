@@ -9,10 +9,10 @@ import (
 	"github.com/qoryai/qory/internal/report"
 )
 
-// TestDeclaredEgressReachesTheRun is decision 0053 end to end: the modules' declarations
-// are unioned in the report with the runtime's own host under the runtime's name, the
-// inspect shows them, and qory run hands the hosts to the runner, which records them
-// as harness_hosts beside the policy's own list and narrows nothing by them.
+// TestDeclaredEgressReachesTheRun checks declared egress end to end: the modules'
+// declarations are unioned in the report with the runtime's own host under the runtime's
+// name, the inspect shows them, and qory run passes the hosts to the runner, which records
+// them as harness_hosts beside the policy's own list and leaves that list as it is.
 func TestDeclaredEgressReachesTheRun(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "egress-declared", root)

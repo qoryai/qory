@@ -172,7 +172,7 @@ func TestAnIntegrationOfYourOwnIsNamedByItsPath(t *testing.T) {
 	} {
 		c := r.Credentials[i]
 		if strings.Contains(c.Adapter[3], "$") {
-			t.Errorf("%s: the settings word %q holds a $", want.name, c.Adapter[3])
+			t.Errorf("%s: the settings word %q contains a $", want.name, c.Adapter[3])
 		}
 		adapter := []string{program, "credential", "--settings", want.settings, "--", "${argument}"}
 		if c.Name != want.name || strings.Join(c.Adapter, "\n") != strings.Join(adapter, "\n") || c.Argument != "[A-Z]+" || strings.Join(c.Hosts, " ") != "tracker.acme.example" {
@@ -506,7 +506,7 @@ func TestIntegrationsSectionRefusesAMistake(t *testing.T) {
 		{"integrations: {github: {settings: [a]}}\n", "integrations.github.settings is a mapping, the settings document"},
 		{"integrations: {github: {settings: {a: 1, a: 2}}}\n", "integrations.github.settings.a appears twice"},
 		{"integrations: {github: {settings: {1: x}}}\n", "integrations.github.settings: line 1: a key that is not a string"},
-		{"integrations: {github: {settings: {ratio: .nan}}}\n", "integrations.github.settings.ratio is not a number JSON can contain"},
+		{"integrations: {github: {settings: {ratio: .nan}}}\n", "integrations.github.settings.ratio is not a number that JSON can represent"},
 		{"integrations: {github: {settings: {a: &b {x: 1}, c: *b}}}\n", "integrations.github.settings.c: line 1: *b is a YAML alias"},
 		{"integrations: {github: {settings: {<<: {app_id: 1}}}}\n", "a YAML alias or merge, which the settings may not contain"},
 	} {

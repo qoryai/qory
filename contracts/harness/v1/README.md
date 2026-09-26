@@ -13,7 +13,7 @@ What `qory harness compose` reads and what it writes.
 Every module has a `qory-module.yaml`; it defines the module's name, and a directory
 without one is not a module. `qory.yaml` is optional: every setting has a default. It has
 a second name, `harness.yaml`, read exactly as `qory.yaml` at every level, for a
-repository whose committed file is not to refer to the tool that reads it. Each file
+repository whose committed file does not mention the tool that reads it. Each file
 name is fixed, so a repository with several stacks has one directory per stack, each
 with its `qory-stack.yaml`. A directory contains `qory-stack.yaml` or a `qory.yaml` or
 `harness.yaml` whose `harness` section defines modules or a stack to extend, never both,
@@ -26,9 +26,8 @@ format this qory reads, `qory.dev/v1alpha1`. A reader refuses a version it does 
 and lists the versions it does. `v1alpha1` marks the format as subject to change.
 
 The group is `qory.dev`, the domain of the open format and its documentation. A
-retired version of the same format is read as the current one, and a compose prints a
-`retired` row with the file and the line to write. A major release of qory stops reading
-it.
+retired version of the same format, `qory.ai/v1alpha1`, is read as the current one, and a
+compose prints a `retired` row with the file and the line to write.
 
 ## Discovery
 
@@ -155,7 +154,7 @@ schema is [config.schema.json](config.schema.json).
 | Field | Required | Meaning |
 |---|---|---|
 | `apiVersion` | yes | `qory.dev/v1alpha1`; a retired version is read as it, with a `retired` row |
-| `qory` | no | the qory versions the stack is written for: comparators such as `>=0.3.0 <0.4.0`, every one of which has to match. A compose on a qory outside the range is refused with status 5; a build from source between tags, which has no version, composes and prints that the range was not checked. A stack is checked against its own range joined with the `qory` key of the `qory.yaml`, or `harness.yaml`, at the root of the repository it sits in, read when the stack file is read, on every path, so a repository delivering stacks states its floor once; a stack that sets no key is checked against the repository's alone, and a checkout extending the stack against the joined range. A comparator both list is kept once |
+| `qory` | no | the qory versions the stack is written for: comparators such as `>=0.3.0 <0.4.0`, every one of which has to match. A compose on a qory outside the range is refused with status 5; a build from source between tags, which has no version, composes and prints that the range was not checked. A stack is checked against its own range joined with the `qory` key of the `qory.yaml`, or `harness.yaml`, at the root of the repository it sits in, read when the stack file is read, on every path, so a repository delivering stacks states its floor once; a stack that sets no key is checked against the repository's alone, and a checkout extending the stack is checked against the joined range. A comparator both list is kept once |
 | `name` | no | the stack's name in the report. Default: `owner/name` from the origin remote, else the directory name |
 | `description` | no | what the stack is for, copied into the report and printed by `qory harness inspect` |
 | `modules` | yes | ordered, at least one. Order decides the order of the instruction sections |
@@ -215,7 +214,8 @@ checkout appends:
   path covers that file only. A module shipping anything else fails the compose and the
   message lists it. A base without the block is closed to extension.
 - An entry of an appended module that collides with a base entry fails with status 3, and
-  the message states that the entry belongs to the base, `<name>@<pin>`, and to rename it;
+  the message states that the entry belongs to the base, `<name>@<pin>`, and that it needs
+  a new name;
   no exclude resolves it. The message lists that one entry and nothing else of the base.
 - Both stacks' `extensions` go into the report, merged by top-level key: a key the
   checkout sets replaces the base's value whole, and a key it leaves alone stays the
@@ -341,9 +341,9 @@ contains the module at `modules/<name>`, and the report and every message use it
 directory the module is stored under is not consulted. `env` lists the variables the module exports, each the path of a file or directory inside
 the module, `.` for its root. The compose writes each as
 `$QORY_HARNESS_HOME/modules/<name>/<path>` and the runtimes with a place for environment
-get it there (§Runtimes), so a script the module ships reads its own location from its
-own variable. Two modules exporting one name with different values fail the compose
-unless the configuration's `env` sets it; `QORY_HARNESS_HOME` is qory's own.
+get it there (§Runtimes), so a script the module ships reads its own location from the
+same variable wherever the home is. Two modules exporting one name with different values
+fail the compose unless the configuration's `env` sets it; `QORY_HARNESS_HOME` is qory's own.
 `requires`, optional, is one item per entry of the module that needs other entries
 composed beside it: the entry by its singular kind, `skill`, `agent`, `command`,
 `output-style`, `hook`, `mcp` or `file`, and what it needs under the plural kinds an
@@ -357,15 +357,16 @@ lower-case host name, or `*.` followed by a name for every host below it and not
 itself. No ports, no paths, no schemes. The grammar is the runner contract's, the
 `egress.allow` entry of a run policy at
 `https://qory.dev/contracts/runner/v1/policy.schema.json`, copied into the module schema and
-kept identical by a test; a host outside it is refused, with the host in the message. The
+kept identical by a test; a host outside the grammar is refused, with the host in the
+message. The
 declarations of every composed module are unioned into the report's `egress` (§The
 report), and `qory run` passes the union to the runner, which reports it as `harness_hosts` in
 `dev.qory.run.policy_applied` beside the policy's own list, for a receiver to compare the
 two: the declaration decides nothing, the policy alone defines what the run reaches. An
 `exclude` or an `only` does not touch the declaration; a module composed at all declares.
 A module with no `egress` key declares nothing, and a harness in which no module declares
-hands the runner no list. `egress: []` is a declaration that the module reaches nothing
-of its own. The stack that ships a module that declares sets `qory: ">=0.5.0"`.
+passes the runner no list. `egress: []` is a declaration that the module reaches nothing
+of its own. A stack that ships a module declaring `egress` sets `qory: ">=0.5.0"`.
 
 A module's tree contains these entry kinds:
 
@@ -753,8 +754,8 @@ reports it with status 2: `goose` and `any`.
 The hooks and the servers of `claude` reach the session through the settings and the
 MCP file, the same files the checkout's links point at, and not through the plugin, so
 nothing runs twice; `cursor` gets copies in the plugin because its CLI has no other way
-in. Each template follows the program's own command line; where a program's flags
-differ, `harness.launch` replaces the template.
+in. Each template matches the program's command line as qory ships it; where a program's
+flags differ from its template, set `harness.launch` to replace it.
 
 ## The report
 
@@ -802,8 +803,8 @@ the files of the checkout's ancestor directories contain the machine's choices; 
 in the checkout root is committed with the repository and contains what the repository
 needs. Every key may appear at any level and the nearest file wins. A directory contains
 one of the two names, never both, and `qory setup repo` writes under the name the
-directory already uses. `harness.yaml` is for a repository whose committed file is not to
-refer to the tool that reads it.
+directory already uses. `harness.yaml` is for a repository whose committed file does not
+mention the tool that reads it.
 
 ```yaml
 apiVersion: qory.dev/v1alpha1     # optional; the newest format this qory reads when left out
@@ -924,7 +925,7 @@ wall:                            # the container the runtime starts in; absent: 
 | `run.stop_grace` | the runtime's descriptor's, else `10s` | how long a runtime gets between the stop signal and SIGKILL; `--stop-grace` sets another |
 | `wall.ca_env` | `SSL_CERT_FILE`, `GIT_SSL_CAINFO`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE` | the variables that point a program in the container at the authorities it trusts, the image's own and the run's, when a run has a credential or path rules |
 | `credentials.<name>` | none | a credential this machine has for its runs. Exactly one of `env`, a variable of `qory run`'s environment, `file`, an absolute path read whenever the token is used, and `adapter`, a program by its absolute path with its arguments, defines where the token comes from. An adapter prints the token with the hosts, the scheme and the paths it is for, the runner contract's `credential.schema.json`, and takes the policy's argument as `${argument}` when `argument`, a regular expression, matches it whole; its `hosts` and `paths` here are the most it may claim. With `env` and `file`, `hosts`, `auth` (`scheme: bearer`, `basic` with `username`, or `header` with `header`) and `paths` define how the token is used. `placeholders` lists variables the container gets with a value that is no credential |
-| `integrations.<key>` | none | an integration this machine declares: a program that speaks the [integration contract](https://github.com/qoryai/integrations/tree/main/contracts/integration/v1), `program`, an absolute path or a name on the `PATH`, `qory-<key>` when absent, with `settings`, its settings document, `{}` when absent. The key is 1 to 64 of `a-z`, `0-9`, `_` and `-`, starting with a letter or a digit. The program is outside the checkout and outside every mount the wall makes read-write in the container, judged by where its links lead: a link on a `PATH` entry the checkout controls that resolves outside the checkout is judged by where it resolves. The rule applies to each run as it starts, so a program written into a directory while that directory was mounted read-write is judged by where it is at the start of each run; keep a program's directory out of the read-write mounts. The resolved program, every directory above it up to `/`, and every directory above each link on the way belong to root or the user running qory, and so does each link; other users may write none of them; a group may write one when it is root's, gid 0, `wheel`, `admin`, or the owner's primary group when its name is the owner's; a directory root owns with the sticky bit set keeps the rule. On a machine whose `PATH` is not its owner's alone, `program` defines it by its absolute path. `<program> describe` runs in `/`, in a process group of its own, for 10 seconds at most; its settings schema is draft 2020-12 and marks a secret `writeOnly` on a property of the settings themselves, `properties.<name>`. qory checks the settings against the description; a value of a `writeOnly` setting is refused, since the settings go on a command line, and the setting's `<name>_file` defines the path of the file that contains it. The `credential` role defines the credential `<key>`: `adapter: [<program>, credential, --settings, <json>, --, "${argument}"]`, the settings as compact JSON with `<`, `>`, `&`, U+2028 and U+2029 escaped and every `$` written `\u0024`, and the role's `argument` and `hosts`. `qory run` describes the integrations a policy on this machine selects, and every one when the server supplies the policy; `qory config` describes every one. A name `credentials` defines itself is that section's: the integration defines no credential under it, `qory run` and `qory config` report it, and `qory config` alone describes it. A role qory does not know is left alone, and an integration that plays none it knows is refused |
+| `integrations.<key>` | none | an integration this machine declares: a program that speaks the [integration contract](https://github.com/qoryai/integrations/tree/main/contracts/integration/v1), `program`, an absolute path or a name on the `PATH`, `qory-<key>` when absent, with `settings`, its settings document, `{}` when absent. The key is 1 to 64 of `a-z`, `0-9`, `_` and `-`, starting with a letter or a digit. The program is outside the checkout and outside every mount the wall makes read-write in the container, judged by where its links lead: a link on a `PATH` entry the checkout controls that resolves outside the checkout is judged by where it resolves. The rule applies to each run as it starts, so a program written into a directory while that directory was mounted read-write is judged by where it is at the start of each run; keep a program's directory out of the read-write mounts. The resolved program, every directory above it up to `/`, and every directory above each link on the way belong to root or the user running qory, and so does each link; other users may write none of them; a group may write one when it is root's, gid 0, `wheel`, `admin`, or the owner's primary group when its name is the owner's; a directory root owns with the sticky bit set keeps the rule. On a machine whose `PATH` is not its owner's alone, set `program` to its absolute path. `<program> describe` runs in `/`, in a process group of its own, for 10 seconds at most; its settings schema is draft 2020-12 and marks a secret `writeOnly` on a property of the settings themselves, `properties.<name>`. qory checks the settings against the description; a value of a `writeOnly` setting is refused, since the settings go on a command line, and the setting's `<name>_file` defines the path of the file that contains it. The `credential` role defines the credential `<key>`: `adapter: [<program>, credential, --settings, <json>, --, "${argument}"]`, the settings as compact JSON with `<`, `>`, `&`, U+2028 and U+2029 escaped and every `$` written `\u0024`, and the role's `argument` and `hosts`. `qory run` describes the integrations a policy on this machine selects, and every one when the server supplies the policy; `qory config` describes every one. A name `credentials` defines itself is that section's: the integration defines no credential under it, `qory run` and `qory config` print a line that states it, and `qory config` alone describes it. A role qory does not know is left alone, and an integration that plays none it knows is refused |
 | `wall.helper` | this binary, on Linux | the absolute path of a static Linux build of qory for the engine's architecture, mounted read-only into the container as the relay and the hook forwarder. Required where qory itself is not a Linux build |
 
 The egress section is the machine's policy. One run may bring its own, `qory run

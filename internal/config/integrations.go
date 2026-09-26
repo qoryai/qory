@@ -81,7 +81,7 @@ func readIntegrations(path string, node *yaml.Node) ([]RunnerIntegration, error)
 					return nil, fmt.Errorf("%s: integrations.%s.program is a path or a name on the PATH", path, key)
 				}
 				if strings.ContainsRune(value.Value, '/') && !filepath.IsAbs(value.Value) {
-					return nil, fmt.Errorf("%s: integrations.%s.program %q is not an absolute path; program is an absolute path or a name on the PATH", path, key, value.Value)
+					return nil, fmt.Errorf("%s: integrations.%s.program %q is not an absolute path; set program to an absolute path or a name on the PATH", path, key, value.Value)
 				}
 				in.Program = value.Value
 			case "settings":
@@ -153,14 +153,14 @@ func writeJSON(b *bytes.Buffer, n *yaml.Node, at string) error {
 		case "!!bool", "!!int", "!!float":
 			var v any
 			if err := n.Decode(&v); err != nil {
-				return fmt.Errorf("%s is not a number or a boolean JSON can contain", at)
+				return fmt.Errorf("%s is not a number or a boolean that JSON can represent", at)
 			}
 			if f, ok := v.(float64); ok && (math.IsInf(f, 0) || math.IsNaN(f)) {
-				return fmt.Errorf("%s is not a number JSON can contain", at)
+				return fmt.Errorf("%s is not a number that JSON can represent", at)
 			}
 			out, err := json.Marshal(v)
 			if err != nil {
-				return fmt.Errorf("%s is not a value JSON can contain", at)
+				return fmt.Errorf("%s is not a value that JSON can represent", at)
 			}
 			b.Write(out)
 		default:
@@ -285,7 +285,7 @@ func program(name string, workspace []string) (string, error) {
 	found, err := exec.LookPath(name)
 	switch {
 	case errors.Is(err, exec.ErrDot):
-		return "", fmt.Errorf("%s is found as %s through the PATH entry %q, which is relative; qory runs a program from an absolute directory of the PATH, or from the absolute path program sets", name, dotted(found), relativeEntry(found, name))
+		return "", fmt.Errorf("%s is found as %s through the PATH entry %q, which is relative; qory runs a program from an absolute directory of the PATH; install it in one, or set its absolute path with the `program` key", name, dotted(found), relativeEntry(found, name))
 	case err != nil && filepath.IsAbs(name):
 		return "", fmt.Errorf("%s is not a program this user may run", name)
 	case err != nil:

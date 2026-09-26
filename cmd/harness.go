@@ -183,10 +183,10 @@ func configFor(root string) (config.Config, error) {
 // placesFor derives the places for the checkout at root from the configuration and the
 // flags. The home is --home, else harness.home, else [config.DefaultHome], a relative
 // value under the checkout root. A home inside the checkout is .qory/harness and nothing
-// else, and .qory has to be a real directory or absent, a symlink a repository committed
-// say, because everything qory writes and removes there goes through that path. A home
-// outside the checkout is a root holding one home per checkout, named by
-// [checkout.Key], so one directory serves every checkout and every worktree, and the
+// else, and .qory has to be a real directory or absent, not a symlink, such as one a
+// repository committed, because everything qory writes and removes there goes through
+// that path. A home outside the checkout is a root containing one home per checkout, with
+// the name [checkout.Key] returns, so one directory serves every checkout and every worktree, and the
 // checkout gets no links: harness.links: checkout is refused there. Inside, the links are
 // written unless harness.links: none or --no-links.
 func placesFor(root string, conf config.Config, o homeOptions) (places, error) {
@@ -277,9 +277,9 @@ func homeFlags(c *cobra.Command, o *homeOptions) {
 // copies, so an edit to a module's instructions or settings leaves the home behind until
 // the next compose, and a check is how a CI gate sees that. --force lets a link replace a
 // tracked, unmodified file of the checkout, and the report records every path it replaced
-// so remove can say how to get it back. --update fetches every git source again. Both
-// flags have their standing value in qory.yaml, and a flag given on the command line,
-// --force=false say, wins over the file.
+// so remove can print how to get it back. --update fetches every git source again. Both
+// flags have their standing value in qory.yaml, and a flag set on the command line, such
+// as --force=false, wins over the file.
 func newCompose(use string, aliases ...string) *cobra.Command {
 	var file, runtime, model string
 	var dryRun, check, force, update bool
@@ -318,7 +318,7 @@ prints. --no-links keeps the checkout untouched with the home inside it too.
 	c.Flags().StringVar(&runtime, "runtime", "", "render for these runtimes instead of target.runtime, comma separated ("+strings.Join(render.Names(), ", ")+"; qory.yaml: runtime)")
 	c.Flags().StringVar(&model, "model", "", "write this model instead of target.model (qory.yaml: model)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the report and write nothing")
-	c.Flags().BoolVar(&check, "check", false, "compare the home with what the stack and modules define now and write nothing; exit 6 when a file or link differs. The links from the checkout into the home and the report are not compared")
+	c.Flags().BoolVar(&check, "check", false, "compare the home with what the stack and modules define and write nothing; exit 6 when a file or link differs. The links from the checkout into the home and the report are not compared")
 	c.Flags().BoolVar(&force, "force", false, "replace a tracked, unmodified file of the checkout where a link goes; git checkout -- restores it (qory.yaml: force)")
 	c.Flags().BoolVar(&update, "update", false, "fetch every git source again instead of reading the cached clone (qory.yaml: update)")
 	homeFlags(c, &h)
@@ -357,8 +357,8 @@ func (e *staleError) Error() string {
 
 // runCheck is --check: it renders the prepared compose into a scratch directory,
 // addressed as the home, and compares the two trees. The runtimes are the ones a compose
-// would build, the targets and the ones composed earlier, so the comparison is against
-// the tree a compose would write. A home that matches prints up to date and the rows a
+// builds, the targets and the ones a previous compose wrote, so the comparison is against
+// the tree a compose writes. A home that matches prints up to date and the rows a
 // compose prints; one that differs prints one row per path and returns a [*staleError].
 // The links from the checkout into the home and the report are not compared: a missing
 // link is a foreign path or a remove, and the report changes when the home does.
@@ -684,10 +684,10 @@ func reportBase(root string, conf config.Config) (*report.Worktree, error) {
 // the links into the checkout, the module links, the report, and the rows. all is every
 // runtime the home now holds, the targets first.
 func write(out io.Writer, o composeOptions, at places, res *compose.Result, rep, previous report.Report, targets, all []render.Runtime, force bool, skippedConfig [][2]string, u *ui.UI) error {
-	// A path replaced by an earlier compose is still replaced: the report keeps
-	// naming it until remove takes its link, so the restore hint is not lost to a
+	// A path replaced by a previous compose stays replaced: the report keeps
+	// listing it until remove takes its link, so the restore hint is not lost to a
 	// second compose. A link step that fails has replaced what it replaced, so the
-	// report is written on that path too when it holds a replaced path, before
+	// report is written on that path too when it contains a replaced path, before
 	// the error goes up; a compose that replaced nothing leaves the report as it
 	// was, so a report on disk still means a compose that went through.
 	rep.Replaced = previous.Replaced
@@ -727,8 +727,8 @@ func write(out io.Writer, o composeOptions, at places, res *compose.Result, rep,
 		}
 	case at.dir != "":
 		// The home is in the checkout and nothing links to it: the qory directory is
-		// still qory's, and still kept out of git, and the links an earlier compose
-		// wrote go the way a compose takes back what it no longer asks for.
+		// qory's and kept out of git, and the links a previous compose wrote are removed
+		// the way a compose removes what it does not link.
 		if err := render.Exclude(at.root, "/"+checkout.Dir); err != nil {
 			return err
 		}
@@ -750,7 +750,7 @@ func write(out io.Writer, o composeOptions, at places, res *compose.Result, rep,
 	u.Success("composed %s from %s %s", count(len(rep.Entries), "entry", "entries"), count(len(rep.Modules), "module", "modules"), ui.Pot)
 	rows := [][2]string{{"home", ui.Short(at.home, at.root)}}
 	for _, path := range takenBack {
-		rows = append(rows, [2]string{"removed", path + "  (linked by an earlier compose; the checkout gets no links)"})
+		rows = append(rows, [2]string{"removed", path + "  (linked by a previous compose; the checkout gets no links)"})
 	}
 	for _, rt := range all {
 		var links []string
@@ -765,7 +765,7 @@ func write(out io.Writer, o composeOptions, at places, res *compose.Result, rep,
 			row = "no links  (" + launchHint(rt) + ")"
 		}
 		if !slices.Contains(targets, rt) {
-			row += "  (composed here earlier, refreshed)"
+			row += "  (composed here by a previous compose, refreshed)"
 		}
 		rows = append(rows, [2]string{rt.Name(), row})
 		if kept := linked[rt.Name()].Skipped; len(kept) > 0 {

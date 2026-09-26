@@ -106,7 +106,7 @@ With the install script, which puts the release binary in `~/.local/bin`:
 curl -fsSL https://raw.githubusercontent.com/qoryai/qory/main/install.sh | sh
 ```
 
-From source, with Go 1.27 or newer:
+From source, with Go 1.27 or above:
 
 ```sh
 go install github.com/qoryai/qory@latest
@@ -117,7 +117,8 @@ installed, with `brew`, with `go install`, or by replacing the release binary in
 after checking it against the release's checksums. Every command looks for a newer release
 when it runs on a terminal, requesting the latest release from GitHub at most once an
 hour, and prints a notice after its output when the newest release is ahead of its
-version. A build from `main` between releases prints it only when it is behind a release.
+version. A build from `main` between releases prints the notice only when it is behind a
+release.
 Set `QORY_NO_UPDATE_CHECK=1` to turn that off; it is off when `CI` is set.
 
 ## Try it
@@ -163,7 +164,7 @@ qory run --wall docker --image hello-agent:1 --env CLAUDE_CODE_OAUTH_TOKEN -- -p
 ```
 
 On a Mac, set `wall.helper` to the Linux build of the same `qory` release first; see
-[Running a session](#running-a-session). That run hands the token to the container. The
+[Running a session](#running-a-session). That run passes the token to the container. The
 last step keeps it outside: define in `~/.config/qory/runner.yaml` what this machine has
 and what the agent may reach,
 
@@ -248,7 +249,7 @@ pull request's branch.
 
 Where a worktree goes and what it is called is your choice, not the repository's:
 `worktree.dir`, `worktree.name` and `worktree.branch` in your own `qory.yaml`, which `qory
-setup machine` writes. A file whose path the repository must not contain goes there too:
+setup machine` writes. A file whose path the repository's `qory.yaml` must not mention goes there too:
 
 ```yaml
 # ~/.config/qory/qory.yaml
@@ -328,7 +329,7 @@ runtime wants, its settings and its MCP file, each joined from the modules' frag
 Editing a module's file is live through the link. Editing a module's instruction section
 or a settings fragment is not: the merged copy is generated, and it stays as it was until
 the next compose. `qory harness compose --check` compares the home with what the stack
-and modules define now and exits 6 when a merged copy is behind, which is the check a CI
+and modules define and exits 6 when a merged copy is behind, which is the check a CI
 job runs.
 
 What the checkout contains is links too. `.claude` is a real directory with one symlink
@@ -368,7 +369,7 @@ Copilot the skills and agents through `--add-dir`, Amp and Gemini their settings
 Every line is the tool's own template, and `harness.launch.<runtime>` in your
 `qory.yaml` changes the command, the arguments or the variables when a tool's flags
 move. `--json` prints the same as one object. The contract lists what each tool takes
-from outside and what it still reads from the checkout.
+from outside and what it reads from the checkout.
 
 ## Running a session
 
@@ -405,7 +406,7 @@ wall:                    # start the runtime in a container; optional
   mounts: [/srv/odoo:ro]                # what else of your machine it sees; optional
   memory: 14g                           # and cpus, pids_limit, shm_size; optional
 run:                     # optional
-  timeout: 5h30m         # stop a runtime that still runs then
+  timeout: 5h30m         # stop a runtime that runs this long
   stop_signal: SIGINT    # requests it to stop; the runtime's descriptor's, else SIGTERM
   stop_grace: 30s        # between that signal and SIGKILL; 10s
 ```
@@ -435,7 +436,7 @@ the session goes on; only a time limit you set ends a session: `--timeout 5h30m`
 `run.timeout`, stops the runtime then, `dev.qory.run.exited` records the limit as the
 reason, and `qory run` exits 124.
 
-A system that starts runs of its own sets their id and labels and passes each its policy:
+A system that starts runs of its own sets their id and labels, and passes each its policy:
 
 ```sh
 qory run --run-id "$uuid" --label run_key=1234 --label issue=77 \
@@ -444,9 +445,8 @@ qory run --run-id "$uuid" --label run_key=1234 --label issue=77 \
 
 `--run-id` is the id the caller already has, a UUID in lower case, and the labels go
 into `dev.qory.run.started` and onto the run configuration request, where a server ties
-the run to what it knows and chooses its policy. Two labels
-come from the checkout's origin remote unless `--label` sets them: `forge`, the
-remote's host, and `repository`, its path without the leading slash and `.git`, so
+the run to what it knows and chooses its policy. Two labels come from the checkout's
+origin remote unless `--label` sets them: `forge`, the remote's host, and `repository`, its path without the leading slash and `.git`, so
 `git@github.com:acme/shop.git` is `github.com` and `acme/shop`; a checkout with no
 remote, or one on this machine, has neither. `--policy` is one run's own policy, in
 the runner contract's format, kept outside the checkout, for a machine without a server.
@@ -530,9 +530,9 @@ credentials:
 ```
 
 and a policy selects it by the key, `{name: github, argument: acme/shop}`. `program`
-defines the program by its absolute path or by a name on the `PATH`; without it the
-program is `qory-<key>` on the `PATH`. On a machine whose `PATH` is not its owner's alone,
-set each program's absolute path with `program`. `qory` runs a program the run cannot
+sets the program's absolute path or its name on the `PATH`; without it the program is
+`qory-<key>` on the `PATH`. On a machine whose `PATH` is not its owner's alone, set
+`program` to each program's absolute path. `qory` runs a program the run cannot
 write: one outside the checkout and outside every mount the wall makes read-write in the
 container, `wall.mounts` and `--mount` without `:ro`, judged by where its links lead: a
 link on a `PATH` entry the checkout controls that resolves outside the checkout is judged

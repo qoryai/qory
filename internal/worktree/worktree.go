@@ -86,7 +86,8 @@ type Options struct {
 
 // Path is one thing brought into a new worktree: From is where it comes from, relative
 // to the main checkout unless absolute, and To is where it goes, relative to the
-// worktree. A path the configuration writes alone has the two the same.
+// worktree. A path the configuration lists as a plain string, without from and to, has
+// the two the same.
 type Path struct {
 	From, To string
 }

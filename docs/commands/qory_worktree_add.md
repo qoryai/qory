@@ -29,8 +29,8 @@ the remote publishes, refs/pull/<n>/head on GitHub and Forgejo, refs/merge-reque
 on GitLab, refs/pull-requests/<n>/from on Bitbucket Server, or the ref worktree.pr in
 qory.yaml defines with {n} for the number; no request goes to a hosting API. The branch of
 the remote at that head is the one checked out, so a push goes to the pull request; a head
-on no branch of the remote, such as a fork's, is checked out as pr-<n>, pulled from its
-ref and pushed nowhere. With either flag the branch may be left out, and when present it
+on no branch of the remote, as a pull request from a fork has, is checked out as pr-<n>,
+pulled from its ref and pushed nowhere. With either flag the branch may be left out, and when present it
 defines the worktree's name instead: qory worktree add review --pr 7 makes ../wt-review.
 
 --base on a branch that already exists moves it: a branch with no commits of its own is
@@ -69,7 +69,7 @@ qory worktree add [<branch>] [flags]
       --offline         do not fetch the remote first; use the refs already fetched
       --path            print the worktree's path alone on stdout, the rows on stderr
       --pr int          a pull request of the remote to attach to, by number: its branch fetched, checked out and tracked; <branch> then defines the worktree's name
-      --rebase          move or rebase a branch that already exists onto --base without a question
+      --rebase          move or rebase a branch that already exists onto --base without a confirmation prompt
 ```
 
 ### Options inherited from parent commands

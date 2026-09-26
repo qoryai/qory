@@ -293,7 +293,7 @@ func TestNoLinksKeepsTheHomeInTheCheckout(t *testing.T) {
 		t.Error("harness.links: none left the runtime's links in the checkout")
 	}
 	for _, path := range []string{".claude", ".mcp.json", "harness"} {
-		wants(t, out, "  removed  "+path+"  (linked by an earlier compose; the checkout gets no links)\n")
+		wants(t, out, "  removed  "+path+"  (linked by a previous compose; the checkout gets no links)\n")
 	}
 	if _, err := os.Lstat(filepath.Join(root, "harness")); err == nil {
 		t.Error("harness.links: none left the module link in the checkout")

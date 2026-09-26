@@ -832,7 +832,7 @@ func (c *Config) applyWorktree(path string, w *worktreeSection) error {
 	}
 	if w.Name != nil {
 		if !strings.Contains(*w.Name, "{branch}") {
-			return fmt.Errorf("%s: worktree.name %q contains no {branch}; without it every worktree gets the same directory", path, *w.Name)
+			return fmt.Errorf("%s: worktree.name %q contains no {branch}; two worktrees would share one directory", path, *w.Name)
 		}
 		if strings.ContainsAny(*w.Name, `/\`) {
 			return fmt.Errorf("%s: worktree.name %q contains a slash; it is one directory name under worktree.dir", path, *w.Name)
@@ -925,7 +925,7 @@ func worktreePath(path, key string, e pathEntry) (Path, error) {
 		}
 	}
 	if !insideRel(to) {
-		return Path{}, fmt.Errorf("%s: %s sets to %q for %s, which is not a path inside the worktree", path, key, to, e.From)
+		return Path{}, fmt.Errorf("%s: %s maps %s to %q, which is not a path inside the worktree", path, key, e.From, to)
 	}
 	return Path{From: from, To: to}, nil
 }

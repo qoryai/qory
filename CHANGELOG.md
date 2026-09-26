@@ -27,7 +27,7 @@ release may change what an existing document does, and states it under Upgrading
   `admin`, or the owner's primary group when that group has the owner's name. A directory
   root owns with the sticky bit set keeps the rule, so `/tmp`, `/nix/store`, a default
   Homebrew install and a user private group's `~/go/bin` keep it. On a machine whose
-  `PATH` is not its owner's alone, `program` sets each program's absolute path. `describe`
+  `PATH` is not its owner's alone, set `program` to each program's absolute path. `describe`
   runs in `/`, in a process group of its own that is stopped with it. A settings schema is
   draft 2020-12 and marks a secret `writeOnly` on a property of the settings themselves; a
   value of a secret is refused, since the settings go on a command line, and its

@@ -31,7 +31,7 @@ qory worktree remove [<branch, name or path>] [flags]
 ### Options
 
 ```
-      --delete-branch   delete the branch even when it has commits nothing else has, without a question
+      --delete-branch   delete the branch even when it has commits nothing else has, without a confirmation prompt
       --force           remove a worktree with uncommitted changes
   -h, --help            help for remove
       --keep-branch     keep the branch after the worktree (qory.yaml: worktree.branch)

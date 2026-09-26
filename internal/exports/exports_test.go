@@ -104,7 +104,7 @@ func TestReadRefuses(t *testing.T) {
 		{"exports: {dir: ../shared, modules: [core]}\n", `exports.dir stacks "../shared/stacks" is not a directory inside the repository`},
 		{"exports: {dir: /srv/harness, modules: [core]}\n", `exports.dir stacks "/srv/harness/stacks" is not a directory inside the repository`},
 		{"exports: {dir: {stacks: ./s}, modules: [core]}\n", "exports.dir sets no modules directory; the map form sets both"},
-		{"exports: {dir: {stacks: ./s, module: ./m}}\n", `dir has the key "module"; a dir map has the keys stacks and modules`},
+		{"exports: {dir: {stacks: ./s, module: ./m}}\n", `dir has the key "module", which a dir map does not have; its keys are stacks and modules`},
 		{"exports: {dir: \"\", modules: [core]}\n", "dir is empty; it is a directory relative to the repository root"},
 		{"exports: {dir: [a, b], modules: [core]}\n", "dir is one directory that contains stacks/ and modules/, or a map"},
 		{"exports: {stack: [nextjs]}\n", `key "stack" is not one qory.yaml reads`},

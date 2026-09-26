@@ -91,7 +91,7 @@ func (s *Selection) parse() error {
 		return nil
 	}
 	if n.Kind != yaml.MappingNode {
-		return errors.New("is a mapping of kinds and parts to what they name")
+		return errors.New("is a mapping of kinds and parts to what they select")
 	}
 	*s = Selection{}
 	for i := 0; i+1 < len(n.Content); i += 2 {
@@ -114,7 +114,7 @@ func (s *Selection) parse() error {
 		case key == "instructions":
 			var all bool
 			if err := value.Decode(&all); err != nil || !all {
-				return errors.New("instructions is true, which selects the module's AGENTS.md")
+				return errors.New("instructions is true, for the module's AGENTS.md: exclude leaves it out, only keeps it")
 			}
 			s.Instructions = true
 		case key == "settings", key == "env":

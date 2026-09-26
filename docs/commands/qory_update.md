@@ -38,7 +38,7 @@ qory update [flags]
 ```
       --check     report whether a newer release exists and install nothing
   -h, --help      help for update
-      --release   install the newest release over a build that is ahead of it, without a confirmation
+      --release   install the newest release over a build that is ahead of it, without a confirmation prompt
 ```
 
 ### Options inherited from parent commands

@@ -40,11 +40,11 @@ func TestSelectionRefusesAMistake(t *testing.T) {
 		"exclude:\n  prompts: [greet]":                         `module core: exclude selects kind "prompts"; kinds: skills, agents, commands, output-styles, hooks, mcp, files; parts: instructions, settings, env`,
 		"only:\n  skills: []":                                  "module core: only skills is a list of entry names",
 		"only:\n  skills: greet":                               "module core: only skills is a list of entry names",
-		"exclude:\n  instructions: false":                      "module core: exclude instructions is true, which selects the module's AGENTS.md",
+		"exclude:\n  instructions: false":                      "module core: exclude instructions is true, for the module's AGENTS.md: exclude leaves it out, only keeps it",
 		"exclude:\n  settings: false":                          "module core: exclude settings is true or a list of names",
 		"exclude:\n  env: []":                                  "module core: exclude env is true or a list of names",
 		"exclude:\n  env: [\"\"]":                              "module core: exclude env lists an empty name",
-		"exclude: [skills]":                                    "module core: exclude is a mapping of kinds and parts to what they name",
+		"exclude: [skills]":                                    "module core: exclude is a mapping of kinds and parts to what they select",
 		"only:\n  skills: [a]\nexclude:\n  instructions: true": "module core: exclude beside only selects a part; only leaves every part it does not select out, so exclude selects entries only brings in",
 		"only:\n  skills: [a]\nexclude:\n  skills: [a]":        "module core: skills/a is listed in only and in exclude; list it in one",
 	}

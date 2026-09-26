@@ -176,8 +176,8 @@ the remote publishes, refs/pull/<n>/head on GitHub and Forgejo, refs/merge-reque
 on GitLab, refs/pull-requests/<n>/from on Bitbucket Server, or the ref worktree.pr in
 qory.yaml defines with {n} for the number; no request goes to a hosting API. The branch of
 the remote at that head is the one checked out, so a push goes to the pull request; a head
-on no branch of the remote, such as a fork's, is checked out as pr-<n>, pulled from its
-ref and pushed nowhere. With either flag the branch may be left out, and when present it
+on no branch of the remote, as a pull request from a fork has, is checked out as pr-<n>,
+pulled from its ref and pushed nowhere. With either flag the branch may be left out, and when present it
 defines the worktree's name instead: qory worktree add review --pr 7 makes ../wt-review.
 
 --base on a branch that already exists moves it: a branch with no commits of its own is
@@ -280,7 +280,7 @@ when the command fails.`,
 	c.Flags().StringVar(&base, "base", "", "the branch, tag or commit a new branch starts from, or an existing one is moved onto; a branch the remote has is read there (qory.yaml: worktree.base; default: the remote's HEAD branch)")
 	c.Flags().StringVar(&remoteBranch, "branch", "", "a branch of the remote to attach to: fetched, checked out and tracked; <branch> then defines the worktree's name")
 	c.Flags().IntVar(&pr, "pr", 0, "a pull request of the remote to attach to, by number: its branch fetched, checked out and tracked; <branch> then defines the worktree's name")
-	c.Flags().BoolVar(&rebase, "rebase", false, "move or rebase a branch that already exists onto --base without a question")
+	c.Flags().BoolVar(&rebase, "rebase", false, "move or rebase a branch that already exists onto --base without a confirmation prompt")
 	c.MarkFlagsMutuallyExclusive("branch", "pr", "base")
 	c.Flags().BoolVar(&offline, "offline", false, "do not fetch the remote first; use the refs already fetched")
 	c.MarkFlagsMutuallyExclusive("offline", "branch")
@@ -317,7 +317,7 @@ func printAdded(u *ui.UI, main string, a worktree.Added) {
 		rows = append(rows, [2]string{"pushes to", a.Upstream})
 	}
 	if a.Head != "" {
-		rows = append(rows, [2]string{"pulls from", a.Head + "  (on no branch of the remote, such as a fork's or a deleted one; a push from here goes nowhere)"})
+		rows = append(rows, [2]string{"pulls from", a.Head + "  (on no branch of the remote, as for a pull request from a fork or from a deleted branch; a push from here goes nowhere)"})
 	}
 	for _, p := range a.Linked {
 		rows = append(rows, [2]string{"linked", p.To + "  (" + from(p) + ")"})
@@ -473,7 +473,7 @@ is shown only when the command fails.`,
 	}
 	c.Flags().BoolVar(&force, "force", false, "remove a worktree with uncommitted changes")
 	c.Flags().BoolVar(&keepBranch, "keep-branch", false, "keep the branch after the worktree (qory.yaml: worktree.branch)")
-	c.Flags().BoolVar(&deleteBranch, "delete-branch", false, "delete the branch even when it has commits nothing else has, without a question")
+	c.Flags().BoolVar(&deleteBranch, "delete-branch", false, "delete the branch even when it has commits nothing else has, without a confirmation prompt")
 	c.Flags().BoolVar(&offline, "offline", false, "do not fetch the base to see whether the branch landed on it; use the refs already fetched")
 	c.Flags().BoolVar(&pathOnly, "path", false, "print the main checkout's path alone on stdout, the rows on stderr")
 	c.MarkFlagsMutuallyExclusive("keep-branch", "delete-branch")

@@ -154,7 +154,7 @@ func exported(repo, where string, s stack.Source) (string, error) {
 	return rel, nil
 }
 
-// exportName is the export a source names, for a message: "module core" or "stack
+// exportName is the export a source selects, for a message: "module core" or "stack
 // nextjs".
 func exportName(s stack.Source) string {
 	if s.Stack != "" {
@@ -236,8 +236,8 @@ func resolveGit(s stack.Source, opts Options) (Resolved, error) {
 	if !info.IsDir() {
 		return Resolved{}, fmt.Errorf("%s is not a directory in %s at %s", sub, s.Git, s.Ref)
 	}
-	// A path inside the clone may be a symlink the repository carries; the module it
-	// names must still be inside the clone.
+	// A path inside the clone may be a symlink the repository contains; the module it
+	// points to must still be inside the clone.
 	real, err := filepath.EvalSymlinks(module)
 	if err != nil {
 		return Resolved{}, err
@@ -379,7 +379,7 @@ func git(dir string, timeout time.Duration, args ...string) ([]byte, error) {
 }
 
 // dirty reports whether git sees uncommitted changes under dir, untracked files included.
-// It asks git about dir alone, so changes elsewhere in the same repository do not count.
+// It runs git on dir alone, so changes elsewhere in the same repository do not count.
 // A directory outside a git working tree, and a host without git, read as clean, because
 // the dirty mark is a note in the report and not a reason to refuse a compose.
 func dirty(dir string) bool {

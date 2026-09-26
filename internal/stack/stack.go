@@ -488,15 +488,14 @@ func decodeError(path string, err error) error {
 }
 
 // validate checks the whole document before a caller sees it, so a document that reaches
-// the compose is known to carry what it is asked for, a runtime for a checkout's own
-// stack, a base for a document that extends one and no target for a stack file, at
+// the compose is known to contain what the compose requires: a runtime for a checkout's
+// own stack, a base for a document that extends one and no target for a stack file, at
 // least one module unless the document extends a stack, each with a name or a source, no
 // name twice, excludes and onlys over known kinds and parts, an exclude beside an only
-// naming entries the only does not, links
-// that are one path segment and named once,
+// that lists entries the only does not, links that are one path segment and listed once,
 // extensions that are maps, and an extending block over known kinds without hooks and
-// servers. Whether a source holds a module, and whether its manifest carries the name the
-// entry gives, is the compose's check.
+// servers. Whether a source contains a module, and whether its manifest defines the name
+// the entry sets, is the compose's check.
 func (p *Stack) validate(compose bool) error {
 	current, err := exports.ResolveAPIVersion(p.APIVersion)
 	if err != nil {

@@ -20,7 +20,7 @@ func TestSetupShellWritesTheHook(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, out, "These lines go to the end of ~/.zshrc", "source <(command qory setup completion zsh)", "qory() {", "Add them? [y/N]", "Nothing written.")
+	wants(t, out, "These lines are added to the end of ~/.zshrc if you answer y", "source <(command qory setup completion zsh)", "qory() {", "Add them? [y/N]", "Nothing written.")
 	if _, err := os.Stat(rc); err == nil {
 		t.Fatal("a no wrote the file")
 	}

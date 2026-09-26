@@ -937,7 +937,7 @@ func TestWorktreeAddAttachesToPullRequest(t *testing.T) {
 	wt = filepath.Join(filepath.Dir(root), "wt-review")
 	wantsRow(t, out, "path", "../wt-review")
 	wantsRow(t, out, "branch", "pr-8  (pull request #8, fetched from origin)")
-	wantsRow(t, out, "pulls from", "origin refs/pull/8/head  (on no branch of the remote, such as a fork's or a deleted one; a push from here goes nowhere)")
+	wantsRow(t, out, "pulls from", "origin refs/pull/8/head  (on no branch of the remote, as for a pull request from a fork or from a deleted branch; a push from here goes nowhere)")
 	lacks(t, out, "pushes to")
 	if got := gitOut(t, wt, "rev-parse", "HEAD"); got != fork {
 		t.Errorf("HEAD %s, want the pull request's %s", got, fork)
@@ -983,7 +983,7 @@ func TestWorktreeAddAttachesToPullRequest(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	wantsRow(t, out, "branch", "pr-11  (pull request #11, fetched from origin)")
-	wantsRow(t, out, "pulls from", "origin refs/changes/11/head  (on no branch of the remote, such as a fork's or a deleted one; a push from here goes nowhere)")
+	wantsRow(t, out, "pulls from", "origin refs/changes/11/head  (on no branch of the remote, as for a pull request from a fork or from a deleted branch; a push from here goes nowhere)")
 	out, err = run(t, "config")
 	if err != nil {
 		t.Fatal(err)
