@@ -26,11 +26,11 @@ import (
 // quite repeats. The dots are braille, eight to a cell, and a terminal draws a cell in
 // one colour, so a cell takes the colour of most of its dots, yellow on a tie.
 //
-// A [Flight] stands for one wait the command labels and measures. A swarm labels
-// nothing: it stands under a whole command, and shows only once the output has been
-// quiet for [swarmDelay] with the cursor at the start of a line, so a command that
-// answers at once never shows it, and a question waiting on a line of its own keeps its
-// line.
+// A [Flight] draws the same swarm beside one wait the command labels and measures. A
+// Swarm labels nothing: it stands under a whole command, and shows only once the output
+// has been quiet for [swarmDelay] with the cursor at the start of a line, so a command
+// that answers at once never shows it, and a question waiting on a line of its own keeps
+// its line.
 //
 // A Swarm is a writer. The command prints through it, and every write clears the swarm
 // first, then lets the swarm come back once the output is quiet again. What prints to the

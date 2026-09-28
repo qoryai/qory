@@ -3,32 +3,28 @@ package ui
 import (
 	"fmt"
 	"os"
-	"strings"
 	"sync"
 	"time"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
-// A Flight is the line a command shows while it waits: the bee flying to the jar, its
-// stripes trailing behind it, then what is being waited for.
+// A Flight is the line a command shows while it waits: the swarm circling, then what is
+// being waited for and how far along the wait is.
 //
-//	🫙·········🐝━━━━━━━━━━━━━━━  downloading qory 0.6.0  62% of 7.4 MB
+//	⢌⠢  downloading qory 0.6.0  62% of 7.4 MB
 //
-// The bee flies right to left, the way the glyph faces. With a total known, from
-// [Flight.Progress], where it is along the track is how much is done, and it reaches the
-// jar when all of it is. Without one it makes the trip over and over, and the line shows
-// how long the wait has been.
+// The swarm is the one a [Swarm] draws, at the same pace. With a total known, from
+// [Flight.Progress], the line shows how much of it is done; without one, how long the
+// wait has been.
 //
 // The line is redrawn in place, so it is drawn on a terminal only, and not when TERM is
 // dumb or CI is set. Anywhere else a Flight draws nothing, and the command's output is
 // the same text without it. A flight ends one of two ways. [Flight.Stop] clears the
 // line, so nothing of it is left above what the command prints next, which is for a wait
 // whose result the command reports itself, and for one that failed. [Flight.Land]
-// leaves the line where it is, the bee home, the jar full and the stripes all the way
-// along the track, and shows what was done in place of what was waited for:
+// leaves the line where it is, the pot in place of the swarm, and shows what was done in
+// place of what was waited for:
 //
-//	🍯━━━━━━━━━━━━━━━━━━━━━━━━━━  downloaded qory 0.6.0  7.4 MB
+//	🍯  downloaded qory 0.6.0  7.4 MB
 //
 // and prints that line off a terminal too, so a command of several steps lists each one
 // it finished wherever it runs.
@@ -46,16 +42,6 @@ type Flight struct {
 	stop     chan struct{}
 	finished chan struct{}
 }
-
-const (
-	// flightTick is how often the line is redrawn, and how long the bee takes over one
-	// cell of a trip with no total.
-	flightTick = 80 * time.Millisecond
-	// flightTrack is how many cells lie between the jar and the right end of the track,
-	// on a terminal wide enough for them, and flightTrackMin the fewest worth drawing.
-	flightTrack    = 24
-	flightTrackMin = 8
-)
 
 // Fly starts a flight labelled with what is being waited for, and returns it. The
 // caller ends it, on every path, with [Flight.Stop] or [Flight.Land], before it prints
@@ -90,11 +76,10 @@ func (f *Flight) Stop() {
 	f.stop = nil
 }
 
-// Land ends the flight and leaves its line in place, finished: the pot where the jar
-// was, the stripes along the whole track, then text, which states what was done, then
-// faint what it took, the size when a total was set and else the
-// seconds waited, when that is a second or more. The line is printed wherever the UI
-// writes, a terminal or not.
+// Land ends the flight and leaves its line in place, finished: the pot where the swarm
+// was, then text, which states what was done, then faint what it took, the size when a
+// total was set and else the seconds waited, when that is a second or more. The line is
+// printed wherever the UI writes, a terminal or not.
 func (f *Flight) Land(text string) {
 	f.Stop()
 	f.mu.Lock()
@@ -103,7 +88,8 @@ func (f *Flight) Land(text string) {
 	fmt.Fprintln(f.u.w, f.u.landed(text, total, time.Since(f.start)))
 }
 
-// landed is the line [Flight.Land] leaves.
+// landed is the line [Flight.Land] leaves. The pot is two columns wide, as the swarm is,
+// so the text stays where it was.
 func (u *UI) landed(text string, total int64, elapsed time.Duration) string {
 	took := ""
 	switch {
@@ -112,30 +98,7 @@ func (u *UI) landed(text string, total int64, elapsed time.Duration) string {
 	case elapsed >= time.Second:
 		took = fmt.Sprintf("  %ds", int(elapsed.Seconds()))
 	}
-	track := u.track(text + took)
-	if track < flightTrackMin {
-		return "  " + Pot + " " + text + u.key.Render(took)
-	}
-	// The stripes take the bee's two columns too, so the text stays where it was.
-	track += 2
-	cells := make([]string, track)
-	steps := make([]int, track)
-	for i := range cells {
-		cells[i] = "━"
-		steps[i] = track - 1 - i
-	}
-	return "  " + Pot + u.edge(cells, steps) + "  " + text + u.key.Render(took)
-}
-
-// track is how many cells the track of a flight gets beside text: [flightTrack], or as
-// many as keep the line inside the terminal. That is the width less text, two columns of
-// margin, two each for the jar and the bee, two before the text, and one spare so the
-// cursor never sits in the last column.
-func (u *UI) track(text string) int {
-	if u.columns == 0 {
-		return flightTrack
-	}
-	return min(flightTrack, u.columns-lipgloss.Width(text)-9)
+	return "  " + Pot + "  " + text + u.key.Render(took)
 }
 
 // clearLine returns the cursor to the start of the line and erases the line.
@@ -145,7 +108,7 @@ const clearLine = "\r\x1b[2K"
 // frame is drawn after one tick, so a wait shorter than that shows nothing.
 func (f *Flight) fly() {
 	defer close(f.finished)
-	ticker := time.NewTicker(flightTick)
+	ticker := time.NewTicker(swarmTick)
 	defer ticker.Stop()
 	drawn := false
 	for step := 0; ; step++ {
@@ -165,10 +128,9 @@ func (f *Flight) fly() {
 	}
 }
 
-// flightLine is one frame of a flight: the jar, the cells still ahead of the bee, the bee,
-// its stripes back to the right end of the track, the label, and how far along the wait
-// is. The track is shortened to keep the line inside the terminal, since a line that
-// wraps cannot be redrawn in place, and left out when there is no room for one.
+// flightLine is one frame of a flight: the swarm at step, the label, and how far along
+// the wait is, the share of the total done when there is one and else the seconds
+// waited.
 func (u *UI) flightLine(label string, step int, done, total int64, elapsed time.Duration) string {
 	text := label + "  "
 	if total > 0 {
@@ -177,23 +139,7 @@ func (u *UI) flightLine(label string, step int, done, total int64, elapsed time.
 	} else {
 		text += fmt.Sprintf("%ds", int(elapsed.Seconds()))
 	}
-	track := u.track(text)
-	if track < flightTrackMin {
-		return "  " + Mark + " " + text
-	}
-	flown := step % (track + 1)
-	if total > 0 {
-		flown = int(done * int64(track) / total)
-	}
-	// The stripes are counted from the right end, where the bee set off, so a stripe
-	// stays where it is as the bee flies on.
-	cells := make([]string, flown)
-	steps := make([]int, flown)
-	for i := range cells {
-		cells[i] = "━"
-		steps[i] = flown - 1 - i
-	}
-	return "  " + Jar + u.key.Render(strings.Repeat("·", track-flown)) + Mark + u.edge(cells, steps) + "  " + text
+	return u.swarmFrame(step) + "  " + text
 }
 
 // megabytes writes a count of bytes as megabytes to one decimal place.
