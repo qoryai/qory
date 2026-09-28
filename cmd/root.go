@@ -36,17 +36,28 @@ var Commit = ""
 func Root() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "qory",
-		Short: "Compose the harness a runtime loads from modules",
-		Long: `Compose the harness a runtime loads from modules, for Claude Code, Codex, Gemini CLI,
-OpenCode, Cursor, Copilot CLI, Amp, Goose, and any tool that reads AGENTS.md.
+		Short: "Get your coding agent ready to work, and keep it in check",
+		Long: `qory gets your coding agent ready to work, and keeps it in check.
+
+  harness   build the agent's harness from modules, once for every agent you use
+  worktree  give each branch its own worktree, ready to work
+  run       run the agent behind a proxy: recorded, fenced, no tokens inside
+
+It serves Claude Code, Codex, Gemini CLI, OpenCode, Cursor, Copilot CLI, Amp, Goose, and
+any tool that reads AGENTS.md.
+
+Start with qory setup repo in a repository, or qory setup example to try it.
 
 Shortcuts:
   hc  harness compose
   hi  harness inspect
   hr  harness remove
+  hl  harness launch
   wa  worktree add
   wr  worktree remove
-  wl  worktree list`,
+  wl  worktree list
+
+More: https://github.com/qoryai/qory`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}

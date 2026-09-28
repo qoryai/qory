@@ -18,13 +18,10 @@ import (
 func newSetup() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "setup",
-		Short: "Set up the repository, the machine's configuration, or your shell",
-		Long: `Set up the repository, the machine's configuration, or your shell.
+		Short: "Set up a repository, this machine, or your shell",
+		Long: `Set up a repository, this machine, or your shell.
 
-setup repo writes the repository's qory.yaml and its own module; setup example writes the
-hello example, a stack and two modules; setup machine writes the machine's qory.yaml; setup shell adds qory's completions and a function that follows a
-worktree add and remove to your shell's rc file; setup completion prints the completion
-script that function loads.`,
+Start with qory setup repo in a repository, or qory setup example to try qory.`,
 	}
 	c.AddCommand(newSetupRepo(), newSetupExample(), newSetupMachine(), newSetupShell(), newSetupCompletion())
 	return c
@@ -91,14 +88,17 @@ func newSetupShell() *cobra.Command {
 	var print bool
 	c := &cobra.Command{
 		Use:   "shell",
-		Short: "Add completions and a function that follows worktree add and remove to your shell",
-		Long: `Add qory's completions and a function that follows a worktree add into the worktree and
-a remove back to the main checkout to your shell's rc file. A program cannot change the
-directory of the shell that ran it, so the function runs worktree add and remove with
---path and cd's to the path they print. The shell is the one in $SHELL; setup shell shows
-the lines, requests a confirmation before writing them, and prints how to reload. With
---print it prints the lines and writes nothing, for an rc file a tool of yours owns:
-eval "$(qory setup shell --print)".`,
+		Short: "Add completions, and make your shell follow worktree add and remove",
+		Long: `Add qory's completions to your shell's rc file, and a function that follows worktrees:
+it changes into a new worktree on add, and back to the main checkout on remove.
+
+A program cannot change the directory of the shell that ran it. So the function runs
+worktree add and remove with --path, and changes to the path they print.
+
+The shell is the one in $SHELL. setup shell shows the lines, asks before writing them,
+and says how to reload. --print prints them and writes nothing.`,
+		Example: `  qory setup shell                     # add the lines to your rc file
+  eval "$(qory setup shell --print)"   # or load them from an rc file a tool of yours owns`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := cmd.OutOrStdout()
@@ -163,7 +163,7 @@ eval "$(qory setup shell --print)".`,
 			return nil
 		},
 	}
-	c.Flags().BoolVar(&print, "print", false, "print the lines and write nothing, for an rc file a tool of yours owns")
+	c.Flags().BoolVar(&print, "print", false, "print the lines and write nothing")
 	return c
 }
 
@@ -179,12 +179,13 @@ func nameOrNone(shell string) string {
 func newSetupCompletion() *cobra.Command {
 	return &cobra.Command{
 		Use:   "completion [bash|zsh|fish|powershell]",
-		Short: "Print the completion script; setup shell makes your shell source it",
-		Long: `Print the completion script for a shell, the one in $SHELL unless the argument selects
-another. The script is for the shell to source at every start, not to read or to keep: it
-is generated from the command tree, so it always matches the binary. The lines setup
-shell adds source it; to source it yourself, source <(qory setup completion zsh) in zsh or
-bash, and qory setup completion fish | source in fish.`,
+		Short: "Print the completion script for your shell",
+		Long: `Print the completion script for the shell in $SHELL, or the one the argument names.
+
+Source it at every start; do not keep a copy. It is generated from this binary, so it
+always matches it. The lines setup shell adds already source it.`,
+		Example: `  source <(qory setup completion zsh)   # zsh or bash
+  qory setup completion fish | source   # fish`,
 		Args:      maxArgs(1),
 		ValidArgs: []string{"bash", "zsh", "fish", "powershell"},
 		RunE: func(cmd *cobra.Command, args []string) error {

@@ -1,11 +1,11 @@
 ## qory worktree list
 
-List the repository's worktrees with their branches
+List the worktrees and their branches
 
 ### Synopsis
 
-List the repository's worktrees with their branches, the main checkout first, and
-which of them contain a composed harness.
+List the repository's worktrees and their branches, the main checkout first. Each
+row says whether the worktree has a composed harness.
 
 --verbose adds the path of each composed worktree's report.
 
@@ -27,5 +27,5 @@ qory worktree list [flags]
 
 ### SEE ALSO
 
-* [qory worktree](qory_worktree.md)	 - Add, remove and list the worktrees of the repository you stand in
+* [qory worktree](qory_worktree.md)	 - Add, remove and list worktrees
 

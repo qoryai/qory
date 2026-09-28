@@ -1,16 +1,14 @@
 ## qory worktree
 
-Add, remove and list the worktrees of the repository you stand in
+Add, remove and list worktrees
 
 ### Synopsis
 
 Add, remove and list the worktrees of the repository you stand in.
 
-A worktree is one branch checked out beside the main checkout, prepared as the worktree
-section of the repository's qory.yaml defines: files linked or copied from the main
-checkout or from elsewhere on the machine, commands run in the new worktree, and the
-harness composed into it when the repository contains a stack. Where a worktree goes and what it is
-called is the machine's choice, in the same section of the user's qory.yaml.
+A worktree is one branch, checked out beside the main checkout. qory prepares it the way
+the repository's qory.yaml says: files linked or copied in, commands run, the harness
+composed. Where worktrees go and what they are called is set in your own qory.yaml.
 
 Shortcuts:
   wa  worktree add
@@ -31,8 +29,8 @@ Shortcuts:
 
 ### SEE ALSO
 
-* [qory](qory.md)	 - Compose the harness a runtime loads from modules
-* [qory worktree add](qory_worktree_add.md)	 - Add a worktree for a branch, prepare it, and compose the harness into it
-* [qory worktree list](qory_worktree_list.md)	 - List the repository's worktrees with their branches
-* [qory worktree remove](qory_worktree_remove.md)	 - Remove a worktree, the one you stand in by default, and its branch
+* [qory](qory.md)	 - Get your coding agent ready to work, and keep it in check
+* [qory worktree add](qory_worktree_add.md)	 - Add a worktree for a branch, ready to work
+* [qory worktree list](qory_worktree_list.md)	 - List the worktrees and their branches
+* [qory worktree remove](qory_worktree_remove.md)	 - Remove a worktree and its branch
 

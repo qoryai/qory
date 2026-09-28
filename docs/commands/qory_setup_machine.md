@@ -1,17 +1,18 @@
 ## qory setup machine
 
-Write your qory.yaml in ~/.config/qory: how qory runs on this machine
+Write your own qory.yaml: how qory runs on this machine
 
 ### Synopsis
 
-Write the machine's qory.yaml, in $XDG_CONFIG_HOME/qory or ~/.config/qory: how qory runs
-on this machine, every key shown at its default. A file that is already there is kept.
+Write your own qory.yaml, in ~/.config/qory ($XDG_CONFIG_HOME/qory). Every key is shown
+at its default. A file already there is kept.
 
-This qory.yaml is yours, never committed, and applies to every repository you work in:
-the runtime and model to compose for instead of the document's, force and update, where a
-worktree goes and what it is called, the git timeout and cache, and environment
-variables. The repository's own qory.yaml, which setup repo writes, is read on top of it,
-and qory config shows every key with the file it came from.
+This file is yours, and never committed. It applies to every repository: the runtime and
+model, force and update, where worktrees go and what they are called, the git timeout
+and cache, and environment variables.
+
+A repository's own qory.yaml is read on top of it. qory config shows where each value
+came from.
 
 ```
 qory setup machine [flags]
@@ -31,5 +32,5 @@ qory setup machine [flags]
 
 ### SEE ALSO
 
-* [qory setup](qory_setup.md)	 - Set up the repository, the machine's configuration, or your shell
+* [qory setup](qory_setup.md)	 - Set up a repository, this machine, or your shell
 

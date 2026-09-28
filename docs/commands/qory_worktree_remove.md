@@ -1,42 +1,46 @@
 ## qory worktree remove
 
-Remove a worktree, the one you stand in by default, and its branch
+Remove a worktree and its branch
 
 ### Synopsis
 
-Remove a worktree, the one you stand in by default, and its branch. A worktree is
-selected by its branch, its path, or the name it was added as beside --branch or --pr.
+Remove a worktree and its branch. By default, the worktree you stand in. Select
+another by its branch, its path, or the name it was added as.
 
-Every worktree.run.remove of qory.yaml runs in the worktree first, with QORY_WORKTREE,
-QORY_MAIN, QORY_BRANCH and, when the branch's base is recorded, QORY_BASE set. A worktree
-with uncommitted changes to tracked files is refused unless --force.
+worktree.run.remove runs in the worktree first. A worktree with uncommitted changes is
+refused unless --force.
 
-The branch goes with the worktree, unless --keep-branch or worktree.branch: keep in
-qory.yaml. It goes quietly when every commit of it is on a remote branch, in the main
-checkout or on the base it was cut from. It goes quietly too when its change landed on
-the base by a squash or rebase merge, which writes new commits: the base is fetched, and
-the branch's commits, or its whole change as one, are found there by patch; --offline
-skips the fetch. For a branch with commits nothing else has, a question offers: push it
-and delete, keep it, delete it anyway, or stop; --delete-branch answers delete, and the
-deleted commits stay in git's reflog for 30 days.
+The branch goes quietly when its work is already elsewhere: on the remote, in the main
+checkout, or on its base, even when merged there by squash or rebase. Otherwise qory
+asks: push, keep, delete anyway, or stop. --keep-branch keeps it. --delete-branch deletes
+it without asking.
 
---verbose prints how the branch's own commits were counted, each git command as it
-runs, and what every worktree.run.remove command prints. Without it a command's output
-is shown only when the command fails.
+--verbose prints how the branch's own commits were counted, each git command, and what
+the configured commands print.
+
+More: https://github.com/qoryai/qory/blob/main/docs/worktrees.md
 
 ```
 qory worktree remove [<branch, name or path>] [flags]
 ```
 
+### Examples
+
+```
+  qory worktree remove                 # the worktree you stand in
+  qory worktree remove feature         # by branch, path or name
+  qory worktree remove --keep-branch   # keep the branch
+```
+
 ### Options
 
 ```
-      --delete-branch   delete the branch even when it has commits nothing else has, without a confirmation prompt
+      --delete-branch   delete the branch without asking, even with commits nothing else has
       --force           remove a worktree with uncommitted changes
   -h, --help            help for remove
       --keep-branch     keep the branch after the worktree (qory.yaml: worktree.branch)
-      --offline         do not fetch the base to see whether the branch landed on it; use the refs already fetched
-      --path            print the main checkout's path alone on stdout, the rows on stderr
+      --offline         skip the fetch that checks whether the branch landed on its base
+      --path            print only the main checkout's path on stdout; the rows go to stderr
 ```
 
 ### Options inherited from parent commands
@@ -47,5 +51,5 @@ qory worktree remove [<branch, name or path>] [flags]
 
 ### SEE ALSO
 
-* [qory worktree](qory_worktree.md)	 - Add, remove and list the worktrees of the repository you stand in
+* [qory worktree](qory_worktree.md)	 - Add, remove and list worktrees
 

@@ -22,14 +22,12 @@ import (
 func newWorktree() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "worktree",
-		Short: "Add, remove and list the worktrees of the repository you stand in",
+		Short: "Add, remove and list worktrees",
 		Long: `Add, remove and list the worktrees of the repository you stand in.
 
-A worktree is one branch checked out beside the main checkout, prepared as the worktree
-section of the repository's qory.yaml defines: files linked or copied from the main
-checkout or from elsewhere on the machine, commands run in the new worktree, and the
-harness composed into it when the repository contains a stack. Where a worktree goes and what it is
-called is the machine's choice, in the same section of the user's qory.yaml.
+A worktree is one branch, checked out beside the main checkout. qory prepares it the way
+the repository's qory.yaml says: files linked or copied in, commands run, the harness
+composed. Where worktrees go and what they are called is set in your own qory.yaml.
 
 Shortcuts:
   wa  worktree add
@@ -150,56 +148,31 @@ func newWorktreeAdd(use string) *cobra.Command {
 	var offline, rebase, pathOnly, noCompose bool
 	c := &cobra.Command{
 		Use:   use + " [<branch>]",
-		Short: "Add a worktree for a branch, prepare it, and compose the harness into it",
+		Short: "Add a worktree for a branch, ready to work",
 		Long: `Add a worktree for a branch, prepare it, and compose the harness into it.
 
-The remote is fetched first, whole, so the base is the remote's tip and a branch pushed
-from another machine is found; git.timeout in qory.yaml bounds the fetch. A fetch that
-fails stops the add, and --offline skips it to go on with the refs already fetched.
+The remote is fetched first, so a new branch starts at the remote's tip. --offline skips
+the fetch.
 
-The worktree goes where worktree.dir and worktree.name in qory.yaml set, beside the main
-checkout as wt-<branch> by default. A branch that exists locally is checked out; one that
-exists on the remote is tracked; a new one is cut off --base, else worktree.base, else the
-remote's HEAD branch, else the branch the main checkout is on, which has to have a commit.
-A base that matches a branch of the remote is read there, as <remote>/<base>, so a branch
-never checked out serves and a local copy that fell behind is not used; heads/<base>
-selects the local branch. There is no upstream on the base: the worktree pushes to a
-remote branch of its own name, created by the first push. A worktree already there on the
-branch is reused, and the rows report it.
+A new branch starts from --base, else worktree.base, else the remote's HEAD branch. A
+branch that exists, here or on the remote, is checked out as it is. With --base, it is
+moved onto the base, after a question or at once with --rebase.
 
---branch attaches the worktree to a branch of the remote, to go on with work pushed from
-elsewhere: the branch is fetched, checked out under its own name and set to track the
-remote's, and one the remote does not have is refused instead of cut new. A local branch
-of that name is fast-forwarded to the remote's when that is possible. --pr attaches it to
-a pull request the same way, by number: the pull request's head is found among the refs
-the remote publishes, refs/pull/<n>/head on GitHub and Forgejo, refs/merge-requests/<n>/head
-on GitLab, refs/pull-requests/<n>/from on Bitbucket Server, or the ref worktree.pr in
-qory.yaml defines with {n} for the number; no request goes to a hosting API. The branch of
-the remote at that head is the one checked out, so a push goes to the pull request; a head
-on no branch of the remote, as a pull request from a fork has, is checked out as pr-<n>,
-pulled from its ref and pushed nowhere. With either flag the branch may be left out, and when present it
-defines the worktree's name instead: qory worktree add review --pr 7 makes ../wt-review.
+--branch attaches to a branch of the remote. --pr attaches to a pull request, by number.
+With either, <branch> only names the worktree.
 
---base on a branch that already exists moves it: a branch with no commits of its own is
-reset onto the base, one with commits has them rebased onto it, either after a question
-or at once with --rebase. The base a branch was cut from is recorded in its git config,
-from which add determines the branch's own commits; a branch made without qory
-counts from the remote's HEAD branch. A no keeps the branch where it is.
+Then qory links and copies what worktree.link and worktree.copy list, runs
+worktree.run.add, and composes the harness when the repository has a stack.
 
-Then every worktree.link is linked and every worktree.copy copied into the worktree: a
-path listed alone comes from the main checkout, {from: <path>, to: <path>} from anywhere
-on the machine, from absolute or under ~, to the path in the worktree. A destination
-already there is kept, a dangling link too, and a source that is not there is reported.
-Every worktree.run.add is run in the worktree with QORY_WORKTREE, QORY_MAIN, QORY_BRANCH
-and, when the branch's base is recorded, QORY_BASE set, and the harness is composed into
-it when the repository contains a qory-stack.yaml or a qory.yaml that defines one. -f
-selects the stack to compose instead, as it does on harness compose: a stack the
-worktree's own document extends composes on it as its base, which is how a runner that has
-the stack tree supplies one.
+--verbose prints each git command, what the configured commands print, and the composed
+entries. Without it, a command's output shows only when it fails.
 
---verbose prints each git command as it runs and what every worktree.run.add command
-prints, and the compose lists its entries. Without it a command's output is shown only
-when the command fails.`,
+More: https://github.com/qoryai/qory/blob/main/docs/worktrees.md`,
+		Example: `  qory worktree add feature                # ../wt-feature, on branch feature
+  qory worktree add feature --base v1.2.0  # start from a tag
+  qory worktree add --branch feature       # go on with a branch pushed from elsewhere
+  qory worktree add --pr 7                 # check out pull request 7
+  qory worktree add review --pr 7          # the same, in ../wt-review`,
 		Args: maxArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			defer buzzing(cmd)()
@@ -277,17 +250,17 @@ when the command fails.`,
 			return nil
 		},
 	}
-	c.Flags().StringVar(&base, "base", "", "the branch, tag or commit a new branch starts from, or an existing one is moved onto; a branch the remote has is read there (qory.yaml: worktree.base; default: the remote's HEAD branch)")
-	c.Flags().StringVar(&remoteBranch, "branch", "", "a branch of the remote to attach to: fetched, checked out and tracked; <branch> then defines the worktree's name")
-	c.Flags().IntVar(&pr, "pr", 0, "a pull request of the remote to attach to, by number: its branch fetched, checked out and tracked; <branch> then defines the worktree's name")
-	c.Flags().BoolVar(&rebase, "rebase", false, "move or rebase a branch that already exists onto --base without a confirmation prompt")
+	c.Flags().StringVar(&base, "base", "", "the branch, tag or commit a new branch starts from, or an existing one moves onto (qory.yaml: worktree.base; default: the remote's HEAD branch)")
+	c.Flags().StringVar(&remoteBranch, "branch", "", "a branch of the remote to attach to; <branch> then names the worktree")
+	c.Flags().IntVar(&pr, "pr", 0, "a pull request of the remote to attach to, by number; <branch> then names the worktree")
+	c.Flags().BoolVar(&rebase, "rebase", false, "move a branch that already exists onto --base without asking")
 	c.MarkFlagsMutuallyExclusive("branch", "pr", "base")
-	c.Flags().BoolVar(&offline, "offline", false, "do not fetch the remote first; use the refs already fetched")
+	c.Flags().BoolVar(&offline, "offline", false, "skip the fetch; use the refs already fetched")
 	c.MarkFlagsMutuallyExclusive("offline", "branch")
 	c.MarkFlagsMutuallyExclusive("offline", "pr")
-	c.Flags().BoolVar(&pathOnly, "path", false, "print the worktree's path alone on stdout, the rows on stderr")
+	c.Flags().BoolVar(&pathOnly, "path", false, "print only the worktree's path on stdout; the rows go to stderr")
 	c.Flags().BoolVar(&noCompose, "no-compose", false, "do not compose the harness into the worktree")
-	c.Flags().StringVarP(&file, "file", "f", "", "the qory-stack.yaml to compose into the worktree, or the qory.yaml or harness.yaml whose harness section to compose, instead of discovering one; a stack selected here is the base of the worktree's own document, as on harness compose")
+	c.Flags().StringVarP(&file, "file", "f", "", "the stack, qory.yaml or harness.yaml to compose, instead of the one found; as on harness compose")
 	c.MarkFlagsMutuallyExclusive("file", "no-compose")
 	return c
 }
@@ -368,26 +341,25 @@ func newWorktreeRemove(use string) *cobra.Command {
 	var force, keepBranch, deleteBranch, offline, pathOnly bool
 	c := &cobra.Command{
 		Use:   use + " [<branch, name or path>]",
-		Short: "Remove a worktree, the one you stand in by default, and its branch",
-		Long: `Remove a worktree, the one you stand in by default, and its branch. A worktree is
-selected by its branch, its path, or the name it was added as beside --branch or --pr.
+		Short: "Remove a worktree and its branch",
+		Long: `Remove a worktree and its branch. By default, the worktree you stand in. Select
+another by its branch, its path, or the name it was added as.
 
-Every worktree.run.remove of qory.yaml runs in the worktree first, with QORY_WORKTREE,
-QORY_MAIN, QORY_BRANCH and, when the branch's base is recorded, QORY_BASE set. A worktree
-with uncommitted changes to tracked files is refused unless --force.
+worktree.run.remove runs in the worktree first. A worktree with uncommitted changes is
+refused unless --force.
 
-The branch goes with the worktree, unless --keep-branch or worktree.branch: keep in
-qory.yaml. It goes quietly when every commit of it is on a remote branch, in the main
-checkout or on the base it was cut from. It goes quietly too when its change landed on
-the base by a squash or rebase merge, which writes new commits: the base is fetched, and
-the branch's commits, or its whole change as one, are found there by patch; --offline
-skips the fetch. For a branch with commits nothing else has, a question offers: push it
-and delete, keep it, delete it anyway, or stop; --delete-branch answers delete, and the
-deleted commits stay in git's reflog for 30 days.
+The branch goes quietly when its work is already elsewhere: on the remote, in the main
+checkout, or on its base, even when merged there by squash or rebase. Otherwise qory
+asks: push, keep, delete anyway, or stop. --keep-branch keeps it. --delete-branch deletes
+it without asking.
 
---verbose prints how the branch's own commits were counted, each git command as it
-runs, and what every worktree.run.remove command prints. Without it a command's output
-is shown only when the command fails.`,
+--verbose prints how the branch's own commits were counted, each git command, and what
+the configured commands print.
+
+More: https://github.com/qoryai/qory/blob/main/docs/worktrees.md`,
+		Example: `  qory worktree remove                 # the worktree you stand in
+  qory worktree remove feature         # by branch, path or name
+  qory worktree remove --keep-branch   # keep the branch`,
 		Args: maxArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			defer buzzing(cmd)()
@@ -473,9 +445,9 @@ is shown only when the command fails.`,
 	}
 	c.Flags().BoolVar(&force, "force", false, "remove a worktree with uncommitted changes")
 	c.Flags().BoolVar(&keepBranch, "keep-branch", false, "keep the branch after the worktree (qory.yaml: worktree.branch)")
-	c.Flags().BoolVar(&deleteBranch, "delete-branch", false, "delete the branch even when it has commits nothing else has, without a confirmation prompt")
-	c.Flags().BoolVar(&offline, "offline", false, "do not fetch the base to see whether the branch landed on it; use the refs already fetched")
-	c.Flags().BoolVar(&pathOnly, "path", false, "print the main checkout's path alone on stdout, the rows on stderr")
+	c.Flags().BoolVar(&deleteBranch, "delete-branch", false, "delete the branch without asking, even with commits nothing else has")
+	c.Flags().BoolVar(&offline, "offline", false, "skip the fetch that checks whether the branch landed on its base")
+	c.Flags().BoolVar(&pathOnly, "path", false, "print only the main checkout's path on stdout; the rows go to stderr")
 	c.MarkFlagsMutuallyExclusive("keep-branch", "delete-branch")
 	return c
 }
@@ -504,9 +476,9 @@ func branchRow(r worktree.Removed) string {
 func newWorktreeList(use string) *cobra.Command {
 	return &cobra.Command{
 		Use:   use,
-		Short: "List the repository's worktrees with their branches",
-		Long: `List the repository's worktrees with their branches, the main checkout first, and
-which of them contain a composed harness.
+		Short: "List the worktrees and their branches",
+		Long: `List the repository's worktrees and their branches, the main checkout first. Each
+row says whether the worktree has a composed harness.
 
 --verbose adds the path of each composed worktree's report.`,
 		Args: noArgs,

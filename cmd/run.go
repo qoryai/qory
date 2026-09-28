@@ -45,129 +45,36 @@ func newRun() *cobra.Command {
 	var stopSignal string
 	c := &cobra.Command{
 		Use:   "run [runtime] [-- argument...]",
-		Short: "Start a runtime on the composed harness, observed and recorded",
-		Long: `Start a runtime on the composed harness, the way qory harness launch does, inside
-the session runner: every connection the runtime makes goes through a proxy on this
-machine and is recorded, and the session's output, the runner's observations and the
-runtime's own reports are written as events. The runtime is the one the harness is
-composed for, or the one the first argument selects when it is composed for several;
-arguments after -- go to the runtime after the launch template's own, so
-qory run claude -- -p 'say hello' runs one headless turn.
+		Short: "Run the agent on its harness, observed and recorded",
+		Long: `Run the agent on the composed harness, inside the session runner.
 
-What the runner does on this machine is ` + config.RunnerFileName + ` in the configuration
-directory, ~/.config/qory, and nowhere else: a repository cannot set it. Its egress
-section is the policy, which can only narrow what the runtime reaches: its allow list,
-and its deny list, whose hosts are denied in either mode, under observe as under
-enforce, whatever allow lists. No section means every connection is allowed and
-recorded, and a file that does not read means no run.
-The hosts the harness declares, its modules' and the runtime's in the report, are
-reported beside the policy as harness_hosts and narrow nothing; the policy alone defines
-what the runtime reaches. --policy selects one run's own policy, a file in the runner
-contract's policy format kept outside the checkout, for a machine without a server
-that serves runs of different kinds. It narrows only: under a section in mode enforce
-the run reaches the file's hosts the section covers, and with no section, or one in
-mode observe, the file stands as it is; the deny lists of both apply either way. The
-file's server section defines the server
-every run reports to, with the access key and the secret the server issued this
-machine: the runner fetches the server's configuration first, signed, and does not
-start unless the server answers; the events go to the URL the configuration defines,
-and when it defines a run configuration that is the run's policy, fetched with the run's labels,
-the checkout's forge and repository among them, and reloaded when the server reports it
-changed, so --policy is refused.
---local runs with the files alone and the machine's policy; the server is not
-contacted.
+Every connection goes through a proxy on this machine and is recorded. The session is
+written to .qory/runs/<id>/: events.jsonl and output.log. The exit status is the
+agent's.
 
-Any runtime the harness is composed for runs this way. qory run reads what it needs of one,
-how its hooks are installed, what its output means and which signal requests it to stop,
-from a descriptor in the runner contract's format: the runner's own, Claude Code's, or
-<runtime>.yaml under ` + DescriptorsDir + ` in the same directory, which describes a
-runtime the runner ships nothing for or replaces what it ships. A runtime with neither
-runs all the same: the run, its log and its egress are recorded, the events of the
-session inside it are not.
+The agent is the runtime the harness is composed for. Name one first when it is composed
+for several. Arguments after -- go to the agent. At a terminal the agent runs with its
+own interface; --headless, no terminal, or a headless argument such as -p runs it on
+pipes.
 
-A wall starts the runtime in a container with no route out except to that proxy, so a
-program that ignores the proxy reaches nothing instead of going unseen: --wall docker,
-or a wall section in ` + config.RunnerFileName + `, and --wall none for one run without the
-section's. --image, or wall.image, sets the container's image, which contains the runtime
-and the project's toolchain; qory builds none. The container sees the checkout and the
-composed home, at their own paths, and nothing else of this machine; of the environment
-it gets the launch template's variables and the ones --env or wall.env lists, such as the
-model credential, and nothing else. --mount, or wall.mounts, shows it more of this
-machine at its own path, such as a sibling checkout, with :ro after the path for what it
-must not change; never a socket. --cpus, --memory, --pids-limit and --shm-size, or the
-keys of the same names under wall, limit what it uses; a browser needs more /dev/shm
-than an engine's default. Inside, the relay and the hook forwarder are qory's
-own Linux build, mounted read-only: this binary on Linux, wall.helper elsewhere. With
-the engine in a virtual machine, on a Mac, the runtime's hooks do not reach the runner.
+` + config.RunnerFileName + ` in ~/.config/qory sets what the runner does on this machine. A repository
+cannot set it:
 
-At a terminal the session runs on a pseudo-terminal, so the runtime's own interface
-works and its bytes are captured as well; --headless, or no terminal, runs it on pipes and
-reads its structured output. An argument the runtime's descriptor lists as headless,
--p for Claude Code, runs it on pipes as well, since with it the runtime has no interface
-whoever started it: qory run claude -- -p '…' needs no flag. Either way the record is
-.qory/runs/<id>/ in the checkout:
-events.jsonl, one event per line, and output.log, the session's bytes. The exit status
-is the runtime's. qory run resend sends a finished run's record to the server again,
-after a runner that died or a server that was away.
+  egress        the hosts the agent may reach: enforce or observe, allow and deny
+  wall          run the agent in a container whose one way out is the proxy
+  credentials   tokens the proxy sets on requests; behind a wall the agent never has them
+  integrations  programs that supply such tokens, such as qory-github
+  server        the server every run reports to; --local skips it
+  run           a time limit, and how the agent is stopped
 
-A run has no credential it can be spared. The credentials section of ` + config.RunnerFileName + `
-defines what this machine has: a token from a variable of qory's environment, from a
-file, or from an adapter, a program of yours written for one kind of host, such as a
-source code host, and prints the token with the hosts, the scheme and the paths it is
-for. A run's policy selects credentials by name, with an argument for an adapter, such
-as a repository, and defines none. Behind a wall the runner keeps each outside the
-container and its proxy sets it on the requests to the hosts it is for, ending the
-container's TLS for those hosts with an authority made for the run, which the
-container is configured to trust beside its image's own, through the variables
-wall.ca_env lists, such as SSL_CERT_FILE and NODE_EXTRA_CA_CERTS. Of those hosts the
-token goes only to the paths the credential lists; under enforce the runner refuses
-every other path, another organization's repositories included, and under observe it
-sends such a request on without the token and records it. The policy's egress.paths
-limits a host to paths as well, with or without a credential, and the proxy ends the
-container's TLS for such a host too. Every other host stays a tunnel nobody reads.
+--verbose adds nothing here.
 
-An integration is an adapter published apart that describes itself: Qory's own
-qory-<name>, such as qory-github, or a program of yours. The integrations section of
-` + config.RunnerFileName + ` declares each under a key with its settings, and defines its
-program when it is not qory-<key> on the PATH; where the PATH is not the machine owner's
-alone, set program to its absolute path. qory runs a program the run cannot
-write: one outside the checkout and outside every read-write mount of the wall's
-container, judged by where its links lead. The program and every directory above it up
-to /, and above each link on the way, belong to root or to the user running qory, and
-so does each link; other users may write none of them, and a group may write one when
-it is root's, wheel, admin, or the owner's primary group when its name is the owner's.
-A directory root owns with the sticky bit set keeps the rule. qory run prints the program
-it found on a line of its own. Before a run qory runs <program> describe for each
-integration the run's policy selects, every one when the server supplies the policy,
-checks the settings against the description, and defines the credential whose name is
-the key, with the adapter <program> credential --settings <json> -- ${argument}. A
-policy selects it by the key like any other. The settings go on that command line, so
-a secret among them is refused: the machine's owner sets <setting>_file to the path of the
-file that contains it. A name the credentials section defines itself is the section's,
-qory prints a line stating that the credentials section defines the
-credential and the integration defines none, and the run describes that integration no
-further. An integration that does not describe, or whose
-settings its description refuses, means no run.
-
-A caller that starts runs for a system of its own identifies them: --run-id sets the
-run's id to the one the caller already has, a UUID in lower case, and --label
-key=value, repeatable, puts the caller's own names, a key in a queue, a repository, an
-issue, into dev.qory.run.started and onto the run configuration request, where a server
-finds them. Two come from the checkout's origin remote unless --label sets them: forge,
-the remote's host, and repository, its path without the leading slash and .git, such as
-github.com and acme/shop; a checkout with no remote, or one on this machine, has neither.
---timeout stops a runtime that runs longer than that, such as 5h30m:
-dev.qory.run.exited records the limit as the reason, and the exit status is ` + fmt.Sprint(exitTimeout) + `,
-as timeout(1) has it. Stopped at the limit or by a signal to qory run, the runtime gets
---stop-signal, SIGTERM unless set or the runtime's descriptor sets one, and, after
---stop-grace, 10s unless set, SIGKILL: the time a session needs to close what it has
-open. Runtimes differ in what a signal means, one closes its session on SIGINT and drops
-it on SIGTERM, so the signal is yours to choose: SIGTERM, SIGINT, SIGHUP, SIGQUIT,
-SIGUSR1 or SIGUSR2.
-run.timeout, run.stop_signal and run.stop_grace in ` + config.RunnerFileName + ` set them for
-every run on the machine; --timeout 0 lifts the file's.
-
---verbose adds nothing here.`,
+More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
+		Example: `  qory run                                          # the agent, at your terminal
+  qory run claude -- -p "Reply pong"                # one headless turn
+  qory run --wall docker --image agent:1            # in a container
+  qory run --policy ~/policy.yaml -- -p "$prompt"   # with this run's own policy
+  qory run --timeout 5h30m -- -p "$prompt"          # stop it after five and a half hours`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			dash := cmd.ArgsLenAtDash()
 			if dash < 0 {
@@ -333,19 +240,19 @@ every run on the machine; --timeout 0 lifts the file's.
 			return nil
 		},
 	}
-	c.Flags().BoolVar(&local, "local", false, "record to files only and run under the machine's policy, even when a server is configured; the server is not contacted")
-	c.Flags().BoolVar(&headless, "headless", false, "run on pipes even at a terminal, and read the runtime's structured output; implied by an argument the runtime's descriptor lists as headless, -p for claude")
-	c.Flags().StringVar(&policyFile, "policy", "", "this run's own policy, a file outside the checkout in the runner contract's policy format; it narrows the egress section of "+config.RunnerFileName+" and never widens it, and is refused with a server configured unless --local")
-	c.Flags().StringVar(&runID, "run-id", "", "the run's id when the caller already has one: a UUID in lower case (default a new one)")
-	c.Flags().StringArrayVar(&labels, "label", nil, "the caller's own name for the run, key=value, reported in dev.qory.run.started; repeatable. forge and repository come from the origin remote unless set")
-	c.Flags().DurationVar(&timeout, "timeout", 0, "stop a runtime that runs longer than this, such as 5h30m, and exit "+fmt.Sprint(exitTimeout)+" (default no limit; "+config.RunnerFileName+": run.timeout)")
-	c.Flags().StringVar(&stopSignal, "stop-signal", "", "the signal that requests the runtime to stop when the runner stops it: SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2 (default SIGTERM; "+config.RunnerFileName+": run.stop_signal)")
-	c.Flags().DurationVar(&grace, "stop-grace", 0, "how long the runtime gets between the stop signal and SIGKILL when the runner stops it (default 10s; "+config.RunnerFileName+": run.stop_grace)")
-	c.Flags().StringVar(&o.name, "wall", "", "start the runtime in a container with no route out except to the proxy: "+config.WallDocker+", or none ("+config.RunnerFileName+": wall.adapter)")
-	c.Flags().StringVar(&o.image, "image", "", "the container's image under a wall ("+config.RunnerFileName+": wall.image)")
-	c.Flags().StringArrayVar(&o.env, "env", nil, "a variable of this environment that goes into the container under a wall, by name; repeatable ("+config.RunnerFileName+": wall.env)")
-	c.Flags().StringArrayVar(&o.mounts, "mount", nil, "a file or directory of this machine the container sees as well, at its own path, with :ro after it for one it cannot change; repeatable ("+config.RunnerFileName+": wall.mounts)")
-	c.Flags().StringVar(&o.limits.CPUs, "cpus", "", "how many processors' worth of time the container gets ("+config.RunnerFileName+": wall.cpus)")
+	c.Flags().BoolVar(&local, "local", false, "run without the server: record to files, under the machine's policy")
+	c.Flags().BoolVar(&headless, "headless", false, "run on pipes even at a terminal; -p for claude implies it")
+	c.Flags().StringVar(&policyFile, "policy", "", "this run's own policy file, kept outside the checkout; it narrows the egress of "+config.RunnerFileName+", never widens it (with a server: needs --local)")
+	c.Flags().StringVar(&runID, "run-id", "", "the run's id, a UUID in lower case (default a new one)")
+	c.Flags().StringArrayVar(&labels, "label", nil, "a key=value name for the run, reported in its events; repeatable (forge and repository come from the origin remote)")
+	c.Flags().DurationVar(&timeout, "timeout", 0, "stop the agent after this long, such as 5h30m, and exit "+fmt.Sprint(exitTimeout)+" (default no limit; "+config.RunnerFileName+": run.timeout)")
+	c.Flags().StringVar(&stopSignal, "stop-signal", "", "the signal that stops the agent: SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2 (default SIGTERM; "+config.RunnerFileName+": run.stop_signal)")
+	c.Flags().DurationVar(&grace, "stop-grace", 0, "the time between the stop signal and SIGKILL (default 10s; "+config.RunnerFileName+": run.stop_grace)")
+	c.Flags().StringVar(&o.name, "wall", "", "run the agent in a container whose one way out is the proxy: "+config.WallDocker+", or none ("+config.RunnerFileName+": wall.adapter)")
+	c.Flags().StringVar(&o.image, "image", "", "the container's image ("+config.RunnerFileName+": wall.image)")
+	c.Flags().StringArrayVar(&o.env, "env", nil, "a variable to pass into the container, by name; repeatable ("+config.RunnerFileName+": wall.env)")
+	c.Flags().StringArrayVar(&o.mounts, "mount", nil, "a path of this machine the container sees too, :ro for read-only; repeatable ("+config.RunnerFileName+": wall.mounts)")
+	c.Flags().StringVar(&o.limits.CPUs, "cpus", "", "how many CPUs the container gets, such as 1.5 ("+config.RunnerFileName+": wall.cpus)")
 	c.Flags().StringVar(&o.limits.Memory, "memory", "", "the most memory the container gets, such as 8g ("+config.RunnerFileName+": wall.memory)")
 	c.Flags().IntVar(&o.limits.PIDs, "pids-limit", 0, "the most processes and threads in the container ("+config.RunnerFileName+": wall.pids_limit)")
 	c.Flags().StringVar(&o.limits.ShmSize, "shm-size", "", "the size of /dev/shm in the container, such as 2g ("+config.RunnerFileName+": wall.shm_size)")
@@ -574,21 +481,21 @@ func newResend() *cobra.Command {
 	var wait time.Duration
 	c := &cobra.Command{
 		Use:   "resend <run-id>",
-		Short: "Send a finished run's record to the server again, completing it first",
-		Long: `Send the record of a run that is over to the server of ` + config.RunnerFileName + `, for a run
-whose runner died or whose server was away: the step a job runs last, whatever
-happened before it. The run is selected by its id, the directory under .qory/runs in
-this checkout. The server's configuration is fetched first, signed, and defines where
-the events go.
+		Short: "Send a finished run's record to the server again",
+		Long: `Send a finished run's record to the server in ` + config.RunnerFileName + ` again: after a runner that
+died, or a server that was away. A job runs it last, whatever happened before.
 
-The run directory records what the server accepted, so only the rest is sent, in order,
-until it is accepted or --wait is over. A record with no dev.qory.run.exited, which a
-runner that died leaves, gets one first, with the reason runner_lost, and the
-containers and networks the run's wall left are removed. A run whose runner is
-alive is refused. A server may see an event twice and discards it by its id.
+Only what the server has not accepted is sent. A record the runner left open is closed
+first, and the containers and networks its wall left are removed. A run that is still
+running is refused.
 
-The exit status is 0 when the server has everything, 1 when events remain, which
-are under the run directory's undelivered then.`,
+The exit status is 0 when the server has everything, and 1 when events remain.
+
+--verbose adds nothing here.
+
+More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-record`,
+		Example: `  qory run resend "$run_id"             # the last step of a job
+  qory run resend "$run_id" --wait 10m  # keep trying for ten minutes`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			at, conf, err := locate(homeOptions{})

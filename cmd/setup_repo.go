@@ -102,18 +102,18 @@ var notAName = regexp.MustCompile(`[^a-z0-9._-]+`)
 func newSetupRepo() *cobra.Command {
 	return &cobra.Command{
 		Use:   "repo",
-		Short: "Write the repository's qory.yaml: its stack, its module, its worktree settings",
+		Short: "Write the repository's qory.yaml and its own module",
 		Long: `Set the repository up for qory.
 
-setup repo writes into the current directory a qory.yaml containing the repository's own
-stack, one runtime and one module, with every key a repository commits shown, and that
-module under harness with its manifest and AGENTS.md. A directory whose qory.yaml already
-defines a stack, or that contains a qory-stack.yaml, keeps its stack. A file that is already
-there is kept.
+It writes a qory.yaml into the current directory: the repository's own stack, with one
+runtime and one module, and every key a repository commits. It writes that module under
+harness/, with its manifest and AGENTS.md.
 
-This qory.yaml is committed and decides for everyone who clones the repository: the
-stack under harness, and what a worktree needs under worktree. How qory runs on one
-machine, for every repository, is the qory.yaml that setup machine writes.`,
+A stack already there, in qory.yaml or qory-stack.yaml, is kept. So is every file that is
+already there.
+
+Commit this qory.yaml. It decides for everyone who clones the repository: the stack, and
+what a worktree needs. Your own settings go in the qory.yaml that setup machine writes.`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			u := ui.New(cmd.OutOrStdout())
@@ -170,15 +170,16 @@ machine, for every repository, is the qory.yaml that setup machine writes.`,
 func newSetupMachine() *cobra.Command {
 	return &cobra.Command{
 		Use:   "machine",
-		Short: "Write your qory.yaml in ~/.config/qory: how qory runs on this machine",
-		Long: `Write the machine's qory.yaml, in $XDG_CONFIG_HOME/qory or ~/.config/qory: how qory runs
-on this machine, every key shown at its default. A file that is already there is kept.
+		Short: "Write your own qory.yaml: how qory runs on this machine",
+		Long: `Write your own qory.yaml, in ~/.config/qory ($XDG_CONFIG_HOME/qory). Every key is shown
+at its default. A file already there is kept.
 
-This qory.yaml is yours, never committed, and applies to every repository you work in:
-the runtime and model to compose for instead of the document's, force and update, where a
-worktree goes and what it is called, the git timeout and cache, and environment
-variables. The repository's own qory.yaml, which setup repo writes, is read on top of it,
-and qory config shows every key with the file it came from.`,
+This file is yours, and never committed. It applies to every repository: the runtime and
+model, force and update, where worktrees go and what they are called, the git timeout
+and cache, and environment variables.
+
+A repository's own qory.yaml is read on top of it. qory config shows where each value
+came from.`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			u := ui.New(cmd.OutOrStdout())
