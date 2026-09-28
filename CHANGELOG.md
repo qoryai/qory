@@ -58,7 +58,7 @@ release may change what an existing document does, and states it under Upgrading
   terminated host when the image's AWS configuration sets a bundle of its own.
 - The README, `qory run`'s help and the harness contract describe a credential's paths
   as where its token goes, and under `enforce` as the run's whole reach on its hosts;
-  under `observe` the runner sends a request to another path of them on without the
+  under `observe` the runner sends a request to any other path there on without the
   token and records it. The README also states how `egress.paths` combines with a
   credential's paths in each mode, and that a path that could be read two ways, such as
   one with an encoded slash, is refused on these hosts in either mode; the help states
