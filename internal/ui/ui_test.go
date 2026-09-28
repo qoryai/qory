@@ -150,9 +150,9 @@ func TestShortShortensAPathAgainstARoot(t *testing.T) {
 	}
 }
 
-// TestMarkIsStable guards the three marks the output and the docs both name.
+// TestMarkIsStable guards the two marks the output and the docs both name.
 func TestMarkIsStable(t *testing.T) {
-	if ui.Mark != "🐝" || ui.Jar != "🫙" || ui.Pot != "🍯" {
-		t.Errorf("marks changed: %q %q %q", ui.Mark, ui.Jar, ui.Pot)
+	if ui.Mark != "🐝" || ui.Pot != "🍯" {
+		t.Errorf("marks changed: %q %q", ui.Mark, ui.Pot)
 	}
 }
