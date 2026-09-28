@@ -1,22 +1,23 @@
 ## qory config
 
-Print the effective configuration and where each value comes from
+Show every setting, its value, and the file it came from
 
 ### Synopsis
 
-Print the effective configuration and where each value comes from.
+Print every setting, its value, and the file it came from.
 
-Every setting has a default. A qory.yaml sets the keys it contains; the files apply in this
-order, each overriding the one before it: the user's, in $XDG_CONFIG_HOME/qory or
-~/.config/qory, then the ones in the checkout's ancestor directories the current user
-owns, the farthest first, then the one in the checkout root. A compose flag overrides
-every file.
+Every setting has a default. The qory.yaml files apply in this order, each over the one
+before it:
+
+  1. yours, in ~/.config/qory ($XDG_CONFIG_HOME/qory)
+  2. those in the directories above the checkout that you own, the farthest first
+  3. the checkout's own
+
+A compose flag overrides every file.
 
 The machine's runner.yaml is listed under runner. Each integration it declares is
-described as before a run, its program's describe run and its settings checked, and
-listed with the program found and the credential it defines; one that does not describe
-is an error. An integration whose key the credentials section defines as well is listed
-as shadowed by it, and a line on standard error reports it.
+described as before a run; one that does not describe is an error. An integration whose
+name the credentials section defines too is listed as shadowed.
 
 --verbose adds nothing here.
 
@@ -38,5 +39,5 @@ qory config [flags]
 
 ### SEE ALSO
 
-* [qory](qory.md)	 - Compose the harness a runtime loads from modules
+* [qory](qory.md)	 - Get your coding agent ready to work, and keep it in check
 

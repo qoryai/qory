@@ -9,6 +9,11 @@ release may change what an existing document does, and states it under Upgrading
 ### Changed
 
 - `qory update` shows a simpler progress indicator.
+- Every command's help is short: what the command does, a few examples, and a link to
+  the page with the details. The details are in `docs/harness.md`, `docs/worktrees.md`
+  and `docs/run.md`.
+- The README says in a few lines what qory does: it builds the harness, prepares the
+  worktree, and runs the agent safely. Everything else moved to those three pages.
 
 ## [0.12.0] - 2026-09-28
 

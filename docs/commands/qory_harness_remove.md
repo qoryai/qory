@@ -1,13 +1,13 @@
 ## qory harness remove
 
-Remove the composed harness and its links from the checkout
+Remove the harness and its links from the checkout
 
 ### Synopsis
 
 Remove the composed harness and its links from the checkout.
 
-A home outside the checkout, under the directory --home or harness.home sets, is
-removed with its report, and the checkout is not touched: nothing was written there.
+A home outside the checkout, under --home or harness.home, is removed with its report.
+The checkout is not touched: nothing was written there.
 
 ```
 qory harness remove [flags]
@@ -29,5 +29,5 @@ qory harness remove [flags]
 
 ### SEE ALSO
 
-* [qory harness](qory_harness.md)	 - Compose, inspect, remove and launch the harness of a checkout
+* [qory harness](qory_harness.md)	 - Build the agent's harness from modules
 

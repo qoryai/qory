@@ -1,36 +1,37 @@
 ## qory update
 
-Update qory to the newest release
+Install the newest release of qory
 
 ### Synopsis
 
-Update qory to the newest release.
+Install the newest release of qory from GitHub, the way this qory was installed:
 
-The newest release is read from GitHub. How it is installed follows how this qory was
-installed. A Homebrew install runs brew upgrade qory. A go install runs go install
-github.com/qoryai/qory@latest. A release binary, the install script's or a downloaded
-one, is replaced in place: the release's archive for this platform is downloaded, checked
-against the release's checksums, and renamed over the running binary. A build from a
-source checkout is not updated; rebuild it, or install a release.
+  Homebrew        brew upgrade qory
+  go install      go install github.com/qoryai/qory@latest
+  release binary  download the archive, check it against the release's checksums,
+                  and replace the binary in place
 
---check reports whether a newer release exists and installs nothing.
+A build from a source checkout is not updated. Rebuild it, or install a release.
 
-A build from the main branch between releases has a pseudo-version, which is ahead of
-the newest release. Such a build is not updated on its own: on a terminal, update offers
-to install the release over it and requests a confirmation; in a script, --release
-confirms it.
+A build from main between releases is ahead of the newest release. update asks before it
+installs the release over it. In a script, --release says yes.
 
-Every command looks for a newer release, when its error output is a terminal, and prints
-a notice after its own output when the newest release is ahead of its version. GitHub's
-latest release is requested at most once an hour; between requests the answer is read
-from a file under the user's cache directory. A build from the main branch between
-releases has a pseudo-version and gets a notice of a release only when it is behind one. QORY_NO_UPDATE_CHECK=1 turns the
-look off, and so does CI being set.
+Every command checks for a newer release when it runs at a terminal. When there is one,
+it prints a notice after its output. It asks GitHub at most once an hour, and caches the
+answer. A build from main gets a notice only when a release is ahead of it.
+QORY_NO_UPDATE_CHECK=1 turns the check off. So does CI.
 
 --verbose adds nothing here.
 
 ```
 qory update [flags]
+```
+
+### Examples
+
+```
+  qory update           # install the newest release
+  qory update --check   # only report whether there is one
 ```
 
 ### Options
@@ -49,5 +50,5 @@ qory update [flags]
 
 ### SEE ALSO
 
-* [qory](qory.md)	 - Compose the harness a runtime loads from modules
+* [qory](qory.md)	 - Get your coding agent ready to work, and keep it in check
 

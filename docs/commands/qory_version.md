@@ -21,5 +21,5 @@ qory version [flags]
 
 ### SEE ALSO
 
-* [qory](qory.md)	 - Compose the harness a runtime loads from modules
+* [qory](qory.md)	 - Get your coding agent ready to work, and keep it in check
 

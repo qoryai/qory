@@ -1,10 +1,10 @@
 ## qory harness inspect
 
-Print the report of the composed harness
+Show where every entry of the harness came from
 
 ### Synopsis
 
-Print the report of the composed harness.
+Print the report of the composed harness: every entry, and the module it came from.
 
 --verbose adds nothing here.
 
@@ -27,5 +27,5 @@ qory harness inspect [flags]
 
 ### SEE ALSO
 
-* [qory harness](qory_harness.md)	 - Compose, inspect, remove and launch the harness of a checkout
+* [qory harness](qory_harness.md)	 - Build the agent's harness from modules
 

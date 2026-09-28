@@ -1,26 +1,31 @@
 ## qory run resend
 
-Send a finished run's record to the server again, completing it first
+Send a finished run's record to the server again
 
 ### Synopsis
 
-Send the record of a run that is over to the server of runner.yaml, for a run
-whose runner died or whose server was away: the step a job runs last, whatever
-happened before it. The run is selected by its id, the directory under .qory/runs in
-this checkout. The server's configuration is fetched first, signed, and defines where
-the events go.
+Send a finished run's record to the server in runner.yaml again: after a runner that
+died, or a server that was away. A job runs it last, whatever happened before.
 
-The run directory records what the server accepted, so only the rest is sent, in order,
-until it is accepted or --wait is over. A record with no dev.qory.run.exited, which a
-runner that died leaves, gets one first, with the reason runner_lost, and the
-containers and networks the run's wall left are removed. A run whose runner is
-alive is refused. A server may see an event twice and discards it by its id.
+Only what the server has not accepted is sent. A record the runner left open is closed
+first, and the containers and networks its wall left are removed. A run that is still
+running is refused.
 
-The exit status is 0 when the server has everything, 1 when events remain, which
-are under the run directory's undelivered then.
+The exit status is 0 when the server has everything, and 1 when events remain.
+
+--verbose adds nothing here.
+
+More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-record
 
 ```
 qory run resend <run-id> [flags]
+```
+
+### Examples
+
+```
+  qory run resend "$run_id"             # the last step of a job
+  qory run resend "$run_id" --wait 10m  # keep trying for ten minutes
 ```
 
 ### Options
@@ -38,5 +43,5 @@ qory run resend <run-id> [flags]
 
 ### SEE ALSO
 
-* [qory run](qory_run.md)	 - Start a runtime on the composed harness, observed and recorded
+* [qory run](qory_run.md)	 - Run the agent on its harness, observed and recorded
 

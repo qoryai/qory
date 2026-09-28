@@ -1,17 +1,23 @@
 ## qory setup completion
 
-Print the completion script; setup shell makes your shell source it
+Print the completion script for your shell
 
 ### Synopsis
 
-Print the completion script for a shell, the one in $SHELL unless the argument selects
-another. The script is for the shell to source at every start, not to read or to keep: it
-is generated from the command tree, so it always matches the binary. The lines setup
-shell adds source it; to source it yourself, source <(qory setup completion zsh) in zsh or
-bash, and qory setup completion fish | source in fish.
+Print the completion script for the shell in $SHELL, or the one the argument names.
+
+Source it at every start; do not keep a copy. It is generated from this binary, so it
+always matches it. The lines setup shell adds already source it.
 
 ```
 qory setup completion [bash|zsh|fish|powershell] [flags]
+```
+
+### Examples
+
+```
+  source <(qory setup completion zsh)   # zsh or bash
+  qory setup completion fish | source   # fish
 ```
 
 ### Options
@@ -28,5 +34,5 @@ qory setup completion [bash|zsh|fish|powershell] [flags]
 
 ### SEE ALSO
 
-* [qory setup](qory_setup.md)	 - Set up the repository, the machine's configuration, or your shell
+* [qory setup](qory_setup.md)	 - Set up a repository, this machine, or your shell
 

@@ -44,7 +44,14 @@ func newHarness() *cobra.Command {
 	harness := &cobra.Command{
 		Use:     "harness",
 		Aliases: []string{"h"},
-		Short:   "Compose, inspect, remove and launch the harness of a checkout",
+		Short:   "Build the agent's harness from modules",
+		Long: `Build the agent's harness from modules.
+
+A harness is what an agent reads: instructions, skills, agents, commands, settings and
+MCP servers. A module is one piece of it. The stack in qory.yaml lists modules in order.
+compose builds one tree from them, for every agent the stack targets.
+
+More: https://github.com/qoryai/qory/blob/main/docs/harness.md`,
 		// A verb this noun does not have is an input error, not a help page and exit 0.
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
@@ -287,17 +294,24 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 	c := &cobra.Command{
 		Use:     use,
 		Aliases: aliases,
-		Short:   "Compose the stack's modules into the checkout you stand in",
-		Long: `Compose the stack's modules into the checkout you stand in.
+		Short:   "Build the harness into the checkout you stand in",
+		Long: `Build the harness from the stack's modules into the checkout you stand in.
 
-The home, the composed tree, is .qory/harness in the checkout, linked from the paths
-each runtime reads and excluded from git. With --home or harness.home in qory.yaml set to
-a directory outside the checkout, the tree goes under that directory instead, one home
-per checkout named after it, and the checkout gets nothing: no link, no .qory, no
-exclude line. A runtime reads such a home through the arguments qory harness launch
-prints. --no-links keeps the checkout untouched with the home inside it too.
+The tree goes to .qory/harness. Each agent's own paths link into it. Git does not see it.
+When two modules provide the same entry, compose refuses until the stack picks one.
 
---verbose prints one line per entry, the entry and the module it came from.`,
+With --home, or harness.home in qory.yaml, the tree goes outside the checkout, one home
+per checkout. The checkout then gets nothing. qory harness launch prints how an agent
+reads such a home. --no-links writes the tree to .qory/harness, with no link and no
+exclude line.
+
+--verbose prints each entry and the module it came from.
+
+More: https://github.com/qoryai/qory/blob/main/docs/harness.md`,
+		Example: `  qory harness compose                   # build the harness here
+  qory harness compose --runtime codex   # for Codex instead
+  qory harness compose --dry-run         # print the report, write nothing
+  qory harness compose --check           # in CI: exit 6 when the tree is behind`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			defer buzzing(cmd)()
@@ -314,15 +328,15 @@ prints. --no-links keeps the checkout untouched with the home inside it too.
 			return runCompose(cmd.OutOrStdout(), cmd.ErrOrStderr(), o)
 		},
 	}
-	c.Flags().StringVarP(&file, "file", "f", "", "the qory-stack.yaml, or the qory.yaml or harness.yaml whose harness section to compose, instead of discovering one. A stack this flag selects, in a checkout whose own document extends one, is that document's base in place of extends")
+	c.Flags().StringVarP(&file, "file", "f", "", "the qory-stack.yaml, qory.yaml or harness.yaml to compose instead of the one found; when the checkout's own document extends a stack, this one is its base")
 	c.Flags().StringVar(&runtime, "runtime", "", "render for these runtimes instead of target.runtime, comma separated ("+strings.Join(render.Names(), ", ")+"; qory.yaml: runtime)")
 	c.Flags().StringVar(&model, "model", "", "write this model instead of target.model (qory.yaml: model)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the report and write nothing")
-	c.Flags().BoolVar(&check, "check", false, "compare the home with what the stack and modules define and write nothing; exit 6 when a file or link differs. The links from the checkout into the home and the report are not compared")
-	c.Flags().BoolVar(&force, "force", false, "replace a tracked, unmodified file of the checkout where a link goes; git checkout -- restores it (qory.yaml: force)")
-	c.Flags().BoolVar(&update, "update", false, "fetch every git source again instead of reading the cached clone (qory.yaml: update)")
+	c.Flags().BoolVar(&check, "check", false, "compare the home with the stack and modules, write nothing, and exit 6 when a file or link differs; the checkout's links and the report are not compared")
+	c.Flags().BoolVar(&force, "force", false, "replace a tracked, unmodified file where a link goes; git checkout -- restores it (qory.yaml: force)")
+	c.Flags().BoolVar(&update, "update", false, "fetch every git source again, not the cached clone (qory.yaml: update)")
 	homeFlags(c, &h)
-	c.Flags().BoolVar(&h.noLinks, "no-links", false, "write nothing into the checkout, no link and no exclude line; qory harness launch prints how a runtime reads the home (qory.yaml: harness.links: none)")
+	c.Flags().BoolVar(&h.noLinks, "no-links", false, "write no link and no exclude line into the checkout; harness launch prints how an agent reads the home (qory.yaml: harness.links: none)")
 	return c
 }
 
@@ -996,8 +1010,8 @@ func newInspect(use string, aliases ...string) *cobra.Command {
 	c := &cobra.Command{
 		Use:     use,
 		Aliases: aliases,
-		Short:   "Print the report of the composed harness",
-		Long: `Print the report of the composed harness.
+		Short:   "Show where every entry of the harness came from",
+		Long: `Print the report of the composed harness: every entry, and the module it came from.
 
 --verbose adds nothing here.`,
 		Args: noArgs,
@@ -1047,30 +1061,24 @@ func newLaunch(use string, aliases ...string) *cobra.Command {
 	c := &cobra.Command{
 		Use:     use,
 		Aliases: aliases,
-		Short:   "Print the command that starts a runtime on the composed harness",
-		Long: `Print the command that starts a runtime on the composed harness, on one line quoted for a
-POSIX shell, so a launcher runs it as it is, with arguments of its own after it:
+		Short:   "Print the command that starts an agent on the harness",
+		Long: `Print the command that starts an agent on the composed harness.
 
-  cd <checkout> && eval "$(qory harness launch --runtime claude)"
+The command is one line, quoted for a POSIX shell. Run it as it is, with your own
+arguments after it. It is the agent's launch template; harness.launch.<runtime> in
+qory.yaml changes it. The paths are absolute, so the line works from anywhere.
 
-The line is the runtime's own launch template, with harness.launch.<runtime> in
-qory.yaml over it: the program, the arguments that hand it the home's files, and the
-variables it takes them from, ${dir} being the runtime's directory in the home. For
-claude it is --plugin-dir, --settings, --mcp-config, --append-system-prompt-file and
---setting-sources user; for codex it is CODEX_HOME. A group of arguments for a file the
-compose did not write, such as mcp.json without a server, is left out. The home is found
-the way compose finds it, from --home, harness.home or the checkout you stand in; the
-paths printed are absolute, so the line works wherever the home is. --json prints the
-command, the arguments and the variables as one JSON object, for a launcher that spawns
-the program without a shell, with the names the session registers the composed agents,
-skills and commands under on that launch under addresses, per kind, a bound role beside
-them as the entry it is bound to: harness:<name> for claude, whose plugin prefixes
-every kind, the name as the module wrote it elsewhere. --address <kind>/<name> prints
-that one registered name alone, for a launcher that builds its first prompt from an
-entry point, such as /harness:implement. A runtime that reads its harness from the
-checkout alone has no launch template, and the verb reports this.
+--json prints the same as one JSON object, with the name the session gives each composed
+agent, skill and command. --address <kind>/<name> prints one of those names alone.
 
---verbose adds nothing here.`,
+An agent that reads its harness from the checkout alone has no launch template.
+
+--verbose adds nothing here.
+
+More: https://github.com/qoryai/qory/blob/main/docs/harness.md#a-home-outside-the-checkout`,
+		Example: `  eval "$(qory harness launch --runtime claude)"   # start Claude Code on the harness
+  qory harness launch --json                       # the same, as JSON, for a launcher
+  qory harness launch --address skills/deploy      # the name the session gives a skill`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			at, conf, err := locate(h)
@@ -1116,8 +1124,8 @@ checkout alone has no launch template, and the verb reports this.
 		},
 	}
 	c.Flags().StringVar(&runtime, "runtime", "", "the runtime to start, one the harness is composed for; the only one when left out")
-	c.Flags().BoolVar(&asJSON, "json", false, "print the command, the arguments, the variables and the registered names as one JSON object")
-	c.Flags().StringVar(&address, "address", "", "print the name the session registers this <kind>/<name>, or bound role, under on this launch, and nothing else")
+	c.Flags().BoolVar(&asJSON, "json", false, "print the command, arguments, variables and registered names as one JSON object")
+	c.Flags().StringVar(&address, "address", "", "print only the name the session gives this <kind>/<name> or bound role, such as skills/deploy")
 	homeFlags(c, &h)
 	return c
 }
@@ -1186,11 +1194,11 @@ func newRemove(use string, aliases ...string) *cobra.Command {
 	c := &cobra.Command{
 		Use:     use,
 		Aliases: aliases,
-		Short:   "Remove the composed harness and its links from the checkout",
+		Short:   "Remove the harness and its links from the checkout",
 		Long: `Remove the composed harness and its links from the checkout.
 
-A home outside the checkout, under the directory --home or harness.home sets, is
-removed with its report, and the checkout is not touched: nothing was written there.`,
+A home outside the checkout, under --home or harness.home, is removed with its report.
+The checkout is not touched: nothing was written there.`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			at, _, err := locate(h)

@@ -27,7 +27,7 @@ const ExampleRoot = "examples/hello"
 func newSetupExample() *cobra.Command {
 	return &cobra.Command{
 		Use:   "example",
-		Short: "Write the hello example into the current directory: a stack and two modules",
+		Short: "Write the hello example here: a stack and two modules",
 		Args:  noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := os.Getwd()
