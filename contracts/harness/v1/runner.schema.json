@@ -163,7 +163,7 @@
           "pattern": "^[0-9]+[bkmgBKMG]?$"
         },
         "ca_env": {
-          "description": "The variables that point a program in the container at the bundle of authorities it trusts, the image's own and the run's, when a run has an authority of its own. Default SSL_CERT_FILE, GIT_SSL_CAINFO, NODE_EXTRA_CA_CERTS, REQUESTS_CA_BUNDLE, CURL_CA_BUNDLE.",
+          "description": "The variables that point a program in the container at the bundle of authorities it trusts, the image's own and the run's, when a run has an authority of its own. Default SSL_CERT_FILE, GIT_SSL_CAINFO, NODE_EXTRA_CA_CERTS, REQUESTS_CA_BUNDLE, CURL_CA_BUNDLE, AWS_CA_BUNDLE.",
           "type": "array",
           "uniqueItems": true,
           "items": {

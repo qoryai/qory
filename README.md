@@ -570,8 +570,8 @@ what each defines.
 For those hosts, and no other, the proxy ends the container's TLS itself, with an
 authority made for the run whose key never leaves the runner. The container receives
 one bundle to trust, its image's own authorities and the run's certificate, through
-`SSL_CERT_FILE`, `GIT_SSL_CAINFO`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE` and
-`CURL_CA_BUNDLE`, or the variables `wall.ca_env` lists. The record lists the terminated
+`SSL_CERT_FILE`, `GIT_SSL_CAINFO`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`,
+`CURL_CA_BUNDLE` and `AWS_CA_BUNDLE`, or the variables `wall.ca_env` lists. The record lists the terminated
 hosts and, for each request to one, the method, the path and the credential's name.
 
 A job ends with `qory run resend <run-id>`, whatever happened before it. It sends the
