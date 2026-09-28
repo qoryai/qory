@@ -4,7 +4,15 @@ Every release of qory, newest first, in the shape of [Keep a Changelog](https://
 The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0 a minor
 release may change what an existing document does, and states it under Upgrading.
 
-## [Unreleased]
+## [0.12.0] - 2026-09-28
+
+### Upgrading
+
+- `qory run resend` reads the `ai.qory` types of a record written before 0.11.0 as they
+  are written, not as `dev.qory`, and the reap after a runner that died removes the
+  containers and networks labelled `dev.qory.run` alone; ones labelled `ai.qory.run` stay
+  until you remove them.
+- Needs `github.com/qoryai/runner` 0.6.0, contract `v1` revision 1.
 
 ### Added
 
@@ -36,6 +44,31 @@ release may change what an existing document does, and states it under Upgrading
   `qory config` alone describes that integration. A program that does not describe within
   10 seconds, settings its description refuses, and an integration that plays no role
   `qory` expands stop the run before it starts, with the program's own line.
+- What the runner reports at 0.6.0, in a run's record and in the events the server
+  receives: `request_id`, the proxy's own id of the request, and `status`, the status the
+  host answered, on every `dev.qory.run.egress` that is one request, a plain one or one
+  inside a terminated connection; and `argument`, the argument the policy passed, on each
+  credential use in `dev.qory.run.policy_applied`, so the record lists the repositories a
+  token was minted for.
+
+### Changed
+
+- A policy's credential `argument` may have up to 4096 characters, where it had 256, so
+  one argument lists several repositories, `acme/shop,acme/lib`. The credential's
+  `argument` pattern matches it whole.
+- A wall points `AWS_CA_BUNDLE` at the run's bundle as well when `wall.ca_env` is
+  absent, beside `SSL_CERT_FILE`, `GIT_SSL_CAINFO`, `NODE_EXTRA_CA_CERTS`,
+  `REQUESTS_CA_BUNDLE` and `CURL_CA_BUNDLE`, so the AWS CLI and botocore trust a
+  terminated host when the image's AWS configuration sets a bundle of its own.
+- The README, `qory run`'s help and the harness contract describe a credential's paths
+  as where its token goes, and under `enforce` as the run's whole reach on its hosts;
+  under `observe` the runner sends a request to another path of them on without the
+  token and records it. The README and the help also state how `egress.paths` combines
+  with a credential's paths in each mode, and that the proxy ends the container's TLS for
+  a host with `egress.paths`.
+- Command help, printed messages and errors, the README and the harness contract use
+  plain verbs in the present tense. The meaning is unchanged; the error for an
+  integration that defines nothing lists the roles it plays.
 
 ## [0.11.0] - 2026-09-24
 
@@ -732,7 +765,7 @@ The first release: a stack of modules composed into one tree, linked into the ch
 and kept out of git, with a report naming the module of every entry and a refusal when
 two modules provide the same one.
 
-[Unreleased]: https://github.com/qoryai/qory/compare/v0.11.0...HEAD
+[0.12.0]: https://github.com/qoryai/qory/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/qoryai/qory/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/qoryai/qory/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/qoryai/qory/compare/v0.8.0...v0.9.0

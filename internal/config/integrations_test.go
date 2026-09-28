@@ -33,9 +33,9 @@ func fixture(t *testing.T, name string) string {
 var dollar = string([]byte{'\\', 'u', '0', '0', '2', '4'})
 
 // declared and expanded are the example of step 4 of "Declaring an integration" in
-// contracts/integration/v1/README.md of qoryai/integrations at
-// 44236bb3bdbac84f53cb44b3497f2f790591cfcd: a declaration of qory-github and of a
-// machine's own program, and the runner's definitions it expands to.
+// contracts/integration/v1/README.md of qoryai/integrations at v0.1.0: a declaration of
+// qory-github and of a machine's own program, and the runner's definitions it expands
+// to.
 const (
 	declared = `integrations:
   github: {settings: {app_id: 123456, private_key_file: /etc/qory/github-app.pem}}
