@@ -14,8 +14,7 @@ import (
 )
 
 // The fixtures under testdata/fixtures are contracts/integration/v1/fixtures of
-// github.com/qoryai/integrations at 44236bb3bdbac84f53cb44b3497f2f790591cfcd, copied
-// with the schema.
+// github.com/qoryai/integrations at v0.1.0, copied with the schema.
 
 // program writes a program that answers describe with doc and exits 0.
 func program(t *testing.T, doc string) string {

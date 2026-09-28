@@ -4,7 +4,11 @@ Every release of qory, newest first, in the shape of [Keep a Changelog](https://
 The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0 a minor
 release may change what an existing document does, and states it under Upgrading.
 
-## [Unreleased]
+## [0.12.0] - 2026-09-28
+
+### Upgrading
+
+- Needs `github.com/qoryai/runner` 0.6.0, contract `v1` revision 1 as amended in 0.6.0.
 
 ### Added
 
@@ -33,9 +37,48 @@ release may change what an existing document does, and states it under Upgrading
   value of a secret is refused, since the settings go on a command line, and its
   `<name>_file` defines the path of the file that contains it. A name the `credentials`
   section defines itself is the section's: `qory run` and `qory config` print this, and
-  `qory config` alone describes that integration. A program that does not describe within
+  `qory config` alone describes that integration. A program that describes nothing within
   10 seconds, settings its description refuses, and an integration that plays no role
   `qory` expands stop the run before it starts, with the program's own line.
+- What the runner reports at 0.6.0, in a run's record and in the events the server
+  receives: `request_id`, the proxy's own id of the request, and `status`, the status the
+  host returned, when it returned one, on every `dev.qory.run.egress` that is one request,
+  a plain one or one inside a terminated connection; and `argument`, the argument the
+  policy passed, on each credential use in `dev.qory.run.policy_applied`, so the record
+  lists the repositories a token was minted for.
+
+### Changed
+
+- A policy's credential `argument` may have up to 4096 characters, where it had 256, so
+  one argument lists several repositories, `acme/shop,acme/lib`. The credential's
+  `argument` pattern matches it whole.
+- A wall points `AWS_CA_BUNDLE` at the run's bundle as well when `wall.ca_env` is
+  absent, beside `SSL_CERT_FILE`, `GIT_SSL_CAINFO`, `NODE_EXTRA_CA_CERTS`,
+  `REQUESTS_CA_BUNDLE` and `CURL_CA_BUNDLE`, so the AWS CLI and botocore trust a
+  terminated host when the image's AWS configuration sets a bundle of its own.
+- The README, `qory run`'s help and the harness contract describe a credential's paths
+  as where its token goes, and under `enforce` as the run's whole reach on its hosts;
+  under `observe` the runner sends a request to any other path there on without the
+  token and records it. The README also states how `egress.paths` combines with a
+  credential's paths in each mode, and that a path that could be read two ways, such as
+  one with an encoded slash, is refused on these hosts in either mode; the help states
+  that the proxy ends the container's TLS for a host with `egress.paths`.
+- Command help, printed messages and errors, the README and the harness contract use
+  plain verbs in the present tense. The meaning is unchanged; the error for an
+  integration that defines nothing lists the roles it plays.
+- A policy, the server's run configuration or a `--policy` file, may contain `image` and
+  `tools`, as the runner's contract allows; `runner.yaml` defines images and tools in a
+  later release, so a policy that selects one stops the run before it starts, with the
+  runner's error, and a run configuration the server sends during a run that selects one
+  is refused and leaves the policy in force.
+- IP forwarding is off in the wall's relay container, for IPv4 and IPv6, so the relay
+  connects the container's network to the ordinary one only through the proxy.
+
+### Fixed
+
+- A request's trailer reaches the host of a terminated connection, a credential's host or
+  a host with `egress.paths`, so a client that sends a checksum as a trailer sends it
+  upstream.
 
 ## [0.11.0] - 2026-09-24
 
@@ -732,7 +775,7 @@ The first release: a stack of modules composed into one tree, linked into the ch
 and kept out of git, with a report naming the module of every entry and a refusal when
 two modules provide the same one.
 
-[Unreleased]: https://github.com/qoryai/qory/compare/v0.11.0...HEAD
+[0.12.0]: https://github.com/qoryai/qory/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/qoryai/qory/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/qoryai/qory/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/qoryai/qory/compare/v0.8.0...v0.9.0
