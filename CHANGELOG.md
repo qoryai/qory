@@ -8,10 +8,6 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Upgrading
 
-- `qory run resend` reads the `ai.qory` types of a record written before 0.11.0 as they
-  are written, not as `dev.qory`, and the reap after a runner that died removes the
-  containers and networks labelled `dev.qory.run` alone; ones labelled `ai.qory.run` stay
-  until you remove them.
 - Needs `github.com/qoryai/runner` 0.6.0, contract `v1` revision 1.
 
 ### Added
