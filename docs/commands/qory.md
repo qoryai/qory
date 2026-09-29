@@ -37,6 +37,7 @@ More: https://github.com/qoryai/qory
 
 * [qory config](qory_config.md)	 - Show every setting, its value, and the file it came from
 * [qory harness](qory_harness.md)	 - Build the agent's harness from modules
+* [qory image](qory_image.md)	 - Check an image the wall runs the agent in
 * [qory run](qory_run.md)	 - Run the agent on its harness, observed and recorded
 * [qory setup](qory_setup.md)	 - Set up a repository, this machine, or your shell
 * [qory update](qory_update.md)	 - Install the newest release of qory

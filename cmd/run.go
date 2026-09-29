@@ -440,6 +440,7 @@ func enclose(spec *session.Spec, r *config.Runner, o wallOptions, selected strin
 		if fromServer {
 			err = fmt.Errorf("%w; with a server, set one even when its run configuration selects an image: that arrives once the run starts, and may select none", err)
 		}
+		err = fmt.Errorf("%w; Qory publishes one, ghcr.io/qoryai/agent", err)
 		return input(err)
 	}
 	for _, i := range section.Images {
@@ -471,12 +472,9 @@ func enclose(spec *session.Spec, r *config.Runner, o wallOptions, selected strin
 		}
 		more = append(more, wall.Mount{Path: m.Path, ReadOnly: m.ReadOnly})
 	}
-	helper := section.Helper
-	if helper == "" {
-		if runtime.GOOS != "linux" {
-			return input(fmt.Errorf("the container runs qory's Linux build as its relay, its hook forwarder and what starts an image's own Docker, and this is the %s build; set wall.helper in %s to the Linux one", runtime.GOOS, config.RunnerFileName))
-		}
-		helper = exe
+	helper, err := wallHelper(section, exe)
+	if err != nil {
+		return err
 	}
 	spec.Env = env
 	spec.Wall = &wall.Docker{Command: section.Command, Helper: helper, RelayArgs: relayArgs, NestArgs: nestArgs, User: section.User, CAEnv: section.CAEnv}
@@ -500,6 +498,20 @@ func enclose(spec *session.Spec, r *config.Runner, o wallOptions, selected strin
 		spec.Limits.ShmSize = o.limits.ShmSize
 	}
 	return nil
+}
+
+// wallHelper is the static Linux build of qory the wall mounts into its containers, as
+// the relay and the hook forwarder, and qory image check runs as the probe:
+// wall.helper, else on Linux exe, the binary running. Elsewhere this binary cannot run in
+// a container, and a section without wall.helper is an input error.
+func wallHelper(section config.RunnerWall, exe string) (string, error) {
+	if section.Helper != "" {
+		return section.Helper, nil
+	}
+	if runtime.GOOS != "linux" {
+		return "", input(fmt.Errorf("the container runs qory's Linux build as its relay, its hook forwarder and what starts an image's own Docker, and this is the %s build; set wall.helper in %s to the Linux one", runtime.GOOS, config.RunnerFileName))
+	}
+	return exe, nil
 }
 
 // newResend builds the resend verb: the last step of a job that started a run, whatever

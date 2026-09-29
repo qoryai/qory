@@ -42,6 +42,23 @@ release may change what an existing document does, and states it under Upgrading
   and the containers it starts get the proxy. `dockerd`, `containerd`, `runc` and
   `iptables` come from the image's system directories, and the daemon gets none of the
   run's environment but the proxy and the run's certificate bundle.
+- The images the wall runs the agent in, built from `images/` and pushed to ghcr.io with
+  each release for linux/amd64 and linux/arm64, tagged with the version; the release's
+  `images.txt` names each by digest. `ghcr.io/qoryai/agent` holds Claude Code 2.1.273, the
+  version the runner's descriptor is written against, git, gh 2.101.0 and Node 24 on
+  Debian 13, with `HOME=/home/agent` writable by any user, no setuid or setgid file and no
+  entry point. `agent-docker` adds the daemon and command of Docker 29.8.1, for a Docker of
+  the agent's own, which the runner starts. `agent-go` and `agent-go-docker` add Go 1.27.1
+  to each.
+- `qory image check [image...]` checks an image against what the wall needs of it, and
+  `wall.image` when no image is named. From outside it reads the image the engine holds:
+  its platform, `HOME` in its environment, and whether the reference is pinned by digest.
+  Then it starts the image as the wall starts the agent, as a user the image does not
+  know, with no capability and no network, and qory's Linux build, `wall.helper` on a Mac,
+  checks from inside: `HOME` takes a file, the authorities are where the wall reads them,
+  `/bin/sh` is there, `claude` is the descriptor's version, `git` and `gh` run, and no file
+  is setuid or setgid. It reports whether `dockerd` is in a system directory, with what it
+  needs. The exit status is 1 when a check fails.
 
 ### Changed
 
