@@ -69,7 +69,7 @@ func TestRunnerFileReadsTheWall(t *testing.T) {
 	for _, row := range c.Rows() {
 		rows[row.Key] = row
 	}
-	for key, want := range map[string]string{"runner.wall.adapter": "docker", "runner.wall.image": "example.com/agent:1", "runner.wall.env": "ANTHROPIC_API_KEY, GH_TOKEN", "runner.wall.command": "podman", "runner.wall.helper": "/opt/qory/qory-linux",
+	for key, want := range map[string]string{"runner.wall.adapter": "docker", "runner.wall.image": "example.com/agent:1 (a reference)", "runner.wall.env": "ANTHROPIC_API_KEY, GH_TOKEN", "runner.wall.command": "podman", "runner.wall.helper": "/opt/qory/qory-linux",
 		"runner.wall.mounts": "/srv/data:ro, /srv/cache", "runner.wall.cpus": "3.5", "runner.wall.memory": "14g", "runner.wall.pids_limit": "4096", "runner.wall.shm_size": "2g",
 		"runner.run.timeout": "5h30m0s", "runner.run.stop_grace": "30s", "runner.run.stop_signal": "SIGINT", "runner.wall.ca_env": "SSL_CERT_FILE, MY_TOOLS_CA",
 		"runner.credentials.product": "adapter /opt/adapters/git-host", "runner.credentials.model": "env MODEL_TOKEN"} {

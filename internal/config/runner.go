@@ -104,8 +104,8 @@ type RunnerWall struct {
 	// Command is the program the adapter runs, such as podman; empty means docker.
 	Command string
 	// Helper is the path of a static Linux build of qory, mounted into the container as
-	// the relay and the hook forwarder; empty means this binary, which only a Linux
-	// machine can use.
+	// the relay, the hook forwarder and what starts an image's own Docker; empty means
+	// this binary, which only a Linux machine can use.
 	Helper string
 	// Env lists the variables of this environment that go into the container, such as the
 	// model credential. Nothing else of the environment does.
@@ -574,7 +574,7 @@ func (r *Runner) Rows() []Row {
 	if r != nil && r.Wall != nil {
 		rows = append(rows,
 			Row{"runner.wall.adapter", r.Wall.Adapter, origin},
-			Row{"runner.wall.image", listOrNone(strings.Fields(r.Wall.Image)), origin},
+			Row{"runner.wall.image", defaultRow(r.Wall), origin},
 		)
 		for _, i := range r.Wall.Images {
 			rows = append(rows, Row{"runner.wall.images." + i.Name, imageRow(i), origin})

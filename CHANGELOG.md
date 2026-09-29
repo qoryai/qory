@@ -11,22 +11,28 @@ release may change what an existing document does, and states it under Upgrading
 - `wall.images` in `runner.yaml` defines the agent's images by name, each with `ref`, its
   reference, and when it needs them `runtime`, the container runtime the wall starts it
   under, and `docker`. A run's policy selects one by its name, `image: <name>`, from the
-  server or from `--policy`; a run whose policy selects none starts in the default.
-  `wall.image` and `--image` take a name of `wall.images` or a reference, and read a name
-  as that image first. A policy `qory run` holds that selects an image `wall.images` does
-  not define, or selects one for a run without a wall, is an input error before the run
-  starts. A run whose policy selects an image needs no default.
-  A name defined twice, a key an image does not have, and `docker: true` without a
+  server or from `--policy`, and its selection wins over the default. `wall.image` sets
+  the default and `--image` another for one run, each a name of `wall.images` or a
+  reference, a name read as that image first. A `--policy` that selects an image
+  `wall.images` does not define, or selects one for a run without a wall, is an input
+  error before the run starts. A run whose own `--policy` selects an image needs no
+  default; a machine that reports to a server sets `wall.image`, because the server's run
+  configuration arrives once the run starts and may select none, and the refusal says
+  so. A name defined twice, a key an image does not have, and `docker: true` without a
   `runtime` stop every command, the way any mistake in `runner.yaml` does. `qory config`
-  lists each image with its runtime and its daemon. `dev.qory.run.started` names the image
-  a run started in, `image_name`, `container_runtime` and `docker` among its fields.
+  lists each image with its runtime and its daemon, and shows whether `wall.image` is a
+  name of `wall.images` or a reference. `dev.qory.run.started` names the image a run
+  started in, with `image_name`, and `container_runtime` and `docker: true` when they
+  apply; `dev.qory.run.policy_applied` records the policy's `image`.
 - A Docker of the agent's own, experimental: an image with `docker: true` under
   `runtime: sysbox-runc` starts with `qory run nest`, a hidden verb of `qory`'s Linux
   build, as the container's entry point. It runs the runner's `wall.Nest`: `dockerd` on
   its Unix socket alone, then the agent as its user with no capabilities. The containers
   the agent starts are inside the wall, and what they reach goes through the proxy and
-  is recorded. With runner 0.6.0 the image holds `/run/qory` with mode `0755`, or the
-  containers the agent starts get no proxy and reach nothing.
+  is recorded. Define such an image only where every run may get one: any policy can
+  select it. In this release, an image with `docker: true` must also hold `/run/qory`,
+  owned by root, mode `0755`: without it, the containers the agent starts get no proxy
+  and reach nothing.
 
 ### Changed
 

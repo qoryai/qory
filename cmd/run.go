@@ -179,7 +179,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				Local:         local,
 				Declared:      rep.Hosts(),
 				RunsDir:       filepath.Join(at.root, ".qory", "runs"),
-				Forwarder:     []string{exe, "run", "forward"},
+				Forwarder:     append([]string{exe}, forwardArgs...),
 				RunnerVersion: build().title(),
 				RunID:         runID,
 				Labels:        named,
@@ -191,7 +191,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if pol != nil {
 				selected = pol.Image
 			}
-			if err := enclose(&spec, conf.Runner, o, selected, exe, at.root, rep.Home, launch.Env); err != nil {
+			if err := enclose(&spec, conf.Runner, o, selected, server != nil && !local, exe, at.root, rep.Home, launch.Env); err != nil {
 				return err
 			}
 			if policyFile != "" {
@@ -254,7 +254,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	c.Flags().StringVar(&stopSignal, "stop-signal", "", "the signal that stops the agent: SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2 (default SIGTERM; "+config.RunnerFileName+": run.stop_signal)")
 	c.Flags().DurationVar(&grace, "stop-grace", 0, "the time between the stop signal and SIGKILL (default 10s; "+config.RunnerFileName+": run.stop_grace)")
 	c.Flags().StringVar(&o.name, "wall", "", "run the agent in a container whose one way out is the proxy: "+config.WallDocker+", or none ("+config.RunnerFileName+": wall.adapter)")
-	c.Flags().StringVar(&o.image, "image", "", "the container's image: a name of wall.images, or a reference ("+config.RunnerFileName+": wall.image)")
+	c.Flags().StringVar(&o.image, "image", "", "the container's image unless the run's policy selects one: a name of wall.images, or a reference ("+config.RunnerFileName+": wall.image)")
 	c.Flags().StringArrayVar(&o.env, "env", nil, "a variable to pass into the container, by name; repeatable ("+config.RunnerFileName+": wall.env)")
 	c.Flags().StringArrayVar(&o.mounts, "mount", nil, "a path of this machine the container sees too, :ro for read-only; repeatable ("+config.RunnerFileName+": wall.mounts)")
 	c.Flags().StringVar(&o.limits.CPUs, "cpus", "", "how many CPUs the container gets, such as 1.5 ("+config.RunnerFileName+": wall.cpus)")
@@ -402,10 +402,12 @@ const wallOff = "none"
 // The images wall.images defines go to the runner, which reads the default, --image or
 // wall.image, as the name of one of them first and as a reference otherwise, and
 // starts the one the policy selects instead. selected is the image the policy this
-// process holds selects, empty when it selects none or the server supplies the policy:
-// qory refuses a selection the runner would refuse before the run, so it is an input
-// error, and a run whose policy selects an image needs no default.
-func enclose(spec *session.Spec, r *config.Runner, o wallOptions, selected, exe, root, home string, launchEnv map[string]string) error {
+// process holds selects, empty when it selects none: qory refuses a selection the runner
+// would refuse before the run, so it is an input error, and a run whose policy selects
+// an image needs no default. fromServer says the server's run configuration is the
+// policy; it arrives once the run starts, and may select no image, so such a run needs a
+// default.
+func enclose(spec *session.Spec, r *config.Runner, o wallOptions, selected string, fromServer bool, exe, root, home string, launchEnv map[string]string) error {
 	var section config.RunnerWall
 	if r != nil && r.Wall != nil {
 		section = *r.Wall
@@ -434,7 +436,11 @@ func enclose(spec *session.Spec, r *config.Runner, o wallOptions, selected, exe,
 		spec.Image = section.Image
 	}
 	if spec.Image == "" && selected == "" {
-		return input(fmt.Errorf("a wall needs the container's image: --image, or wall.image in %s, a name of wall.images or a reference", config.RunnerFileName))
+		err := fmt.Errorf("a wall needs the container's image: --image, or wall.image in %s, a name of wall.images or a reference", config.RunnerFileName)
+		if fromServer {
+			err = fmt.Errorf("%w; with a server, set one even when its run configuration selects an image: that arrives once the run starts, and may select none", err)
+		}
+		return input(err)
 	}
 	for _, i := range section.Images {
 		spec.Images = append(spec.Images, i.Session())
@@ -468,13 +474,13 @@ func enclose(spec *session.Spec, r *config.Runner, o wallOptions, selected, exe,
 	helper := section.Helper
 	if helper == "" {
 		if runtime.GOOS != "linux" {
-			return input(fmt.Errorf("the container runs qory's Linux build as its relay and hook forwarder, and this is the %s build; set wall.helper in %s to the Linux one", runtime.GOOS, config.RunnerFileName))
+			return input(fmt.Errorf("the container runs qory's Linux build as its relay, its hook forwarder and what starts an image's own Docker, and this is the %s build; set wall.helper in %s to the Linux one", runtime.GOOS, config.RunnerFileName))
 		}
 		helper = exe
 	}
 	spec.Env = env
-	spec.Wall = &wall.Docker{Command: section.Command, Helper: helper, RelayArgs: []string{"run", "relay"}, NestArgs: []string{"run", "nest"}, User: section.User, CAEnv: section.CAEnv}
-	spec.Forwarder = []string{wall.HelperPath, "run", "forward"}
+	spec.Wall = &wall.Docker{Command: section.Command, Helper: helper, RelayArgs: relayArgs, NestArgs: nestArgs, User: section.User, CAEnv: section.CAEnv}
+	spec.Forwarder = append([]string{wall.HelperPath}, forwardArgs...)
 	spec.Mounts = []wall.Mount{{Path: root}}
 	if !reallyWithin(root, home) {
 		spec.Mounts = append(spec.Mounts, wall.Mount{Path: home, ReadOnly: true})
@@ -583,15 +589,29 @@ func reallyWithin(root, path string) bool {
 	return within(root, path)
 }
 
+// The arguments that select the hidden verbs the wall runs from qory's own binary: the
+// relay, the start of a Docker of the agent's own, and the hook forwarder, which also
+// runs on this machine without a wall. Each verb carries [inWall], so no look for a
+// release runs inside a container.
+var (
+	relayArgs   = []string{"run", "relay"}
+	nestArgs    = []string{"run", "nest"}
+	forwardArgs = []string{"run", "forward"}
+)
+
+// inWall is the annotation of a verb the wall runs inside a container.
+const inWall = "qory.dev/in-wall"
+
 // newRelay builds the hidden relay verb, what the wall starts in the relay's container
 // from qory's own binary: it listens on a port for each forward, port=host:port, and
 // copies every connection to that address, the runner's proxy. It is the one peer the
 // runtime's container reaches.
 func newRelay() *cobra.Command {
 	return &cobra.Command{
-		Use:    "relay port=host:port...",
-		Short:  "Forward the wall's fixed ports to the run's proxy",
-		Hidden: true,
+		Use:         "relay port=host:port...",
+		Short:       "Forward the wall's fixed ports to the run's proxy",
+		Hidden:      true,
+		Annotations: map[string]string{inWall: "relay"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
@@ -611,6 +631,7 @@ func newNest() *cobra.Command {
 		Use:                "nest --user uid:gid -- command [argument...]",
 		Short:              "Start the container's own Docker, then the agent as its user",
 		Hidden:             true,
+		Annotations:        map[string]string{inWall: "nest"},
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return wall.Nest(args)
@@ -625,10 +646,11 @@ func newNest() *cobra.Command {
 // goes to stderr, which a runtime shows only for a hook that failed.
 func newForward() *cobra.Command {
 	return &cobra.Command{
-		Use:    "forward",
-		Short:  "Forward a hook's input to the run that installed it",
-		Hidden: true,
-		Args:   noArgs,
+		Use:         "forward",
+		Short:       "Forward a hook's input to the run that installed it",
+		Hidden:      true,
+		Annotations: map[string]string{inWall: "forward"},
+		Args:        noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := session.Forward(cmd.Context(), cmd.InOrStdin()); err != nil {
 				fmt.Fprintln(cmd.ErrOrStderr(), "qory run forward:", err)

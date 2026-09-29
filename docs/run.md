@@ -569,8 +569,8 @@ What to know:
 - **The model credential.** It goes in by name, with `wall.env` or `--env`. Then it is
   the agent's. A subscription login kept in a Mac's Keychain does not reach a container.
   Use an API key, or a token from `claude setup-token`.
-- **The helper on a Mac.** Inside the container, the relay and the hook forwarder are
-  `qory`'s own Linux build, mounted read-only. On Linux, that is the binary you run. On a Mac, download the
+- **The helper on a Mac.** Inside the container, the relay, the hook forwarder and what
+  starts an image's own Docker are `qory`'s own Linux build, mounted read-only. On Linux, that is the binary you run. On a Mac, download the
   Linux archive of the same release, for your engine's architecture. Set `wall.helper` to
   that binary.
 - **What the container sees.** The checkout it was started in, and no other directory.
@@ -625,18 +625,25 @@ image: go-docker
 - `ref` is the image. Pin it by digest to run the same image every time.
 - `runtime` is the container runtime the wall starts the image under. Your engine must
   have it. Without it, the engine's default runs the image.
-- `wall.image` and `--image` take a name of `wall.images`, or a reference. A name is
-  read as that image first.
-- A run whose policy selects no image starts in the default. A run whose policy selects
-  one needs no default.
-- `qory config` lists the images.
+- `wall.image` sets the default, and `--image` sets another for one run: a name of
+  `wall.images`, or a reference. A name is read as that image first.
+- A policy's selection wins over the default, `--image` included. A run whose policy
+  selects no image starts in the default.
+- A run whose own `--policy` selects an image needs no default. A machine that reports
+  to a server sets `wall.image`: the server's run configuration arrives once the run
+  starts, and may select none.
+- `qory config` lists the images, and shows whether `wall.image` is a name of
+  `wall.images` or a reference. A mistyped name shows as a reference.
 
-Before the run starts, `qory run` refuses a policy that selects an image `wall.images`
-does not define, and a policy that selects an image for a run without a wall. `qory run`
-and `qory config` refuse `docker: true` without a `runtime`.
+Before the run starts, `qory run` refuses a `--policy` that selects an image
+`wall.images` does not define, or one for a run without a wall. A server's run
+configuration that selects such an image stops the run as it starts. Every command that
+reads `runner.yaml` refuses `docker: true` without a `runtime`.
 
-`dev.qory.run.started` names the image the run started in: `image`, the reference, and
-for an image of `wall.images` also `image_name`, `container_runtime` and `docker`.
+`dev.qory.run.started` names the image the run started in: `image`, the reference. For an
+image of `wall.images` it also has `image_name`, and `container_runtime` and
+`docker: true` when they apply. `dev.qory.run.policy_applied` records `image` when the
+policy selects one.
 
 ### A Docker of the agent's own
 
@@ -645,16 +652,28 @@ for an image of `wall.images` also `image_name`, `container_runtime` and `docker
 With `docker: true`, the agent gets a Docker daemon inside its container, never your
 machine's. Its tests can start a database. It can build and run images.
 
+Define an image with `docker: true` only where every run may get one: any policy can
+select it.
+
 It needs [Sysbox](https://github.com/nestybox/sysbox), registered with your engine as
 `sysbox-runc`, and `runtime: sysbox-runc` on the image. Sysbox gives the container a root
-of its own, a user of your machine that is not root. The image holds `dockerd` in a
-system directory, such as `/usr/local/bin`, and the directory `/run/qory` with mode
-`0755`.
+of its own, a user of your machine that is not root. A Mac's own engine has no Sysbox:
+run these images on a Linux machine that has it.
+
+What the image holds:
+
+- `dockerd`, in `/usr/local/sbin`, `/usr/local/bin`, `/usr/sbin`, `/usr/bin`, `/sbin`
+  or `/bin`. The run's `PATH` is never searched.
+- The agent's user and group, in its `/etc/passwd` and `/etc/group`, when `wall.user`
+  names the user by name, or by a uid with no gid.
+- For now, `/run/qory`, owned by root, mode `0755`. Without it, the containers the agent
+  starts get no proxy and reach nothing. A later release drops this.
 
 How it works:
 
-- `qory`'s helper starts the container as its root. It starts `dockerd` on its Unix
-  socket alone, then runs the agent as its user, with no capabilities.
+- The wall starts the container as its root, and `qory`'s helper runs there as that
+  root. It starts `dockerd` on its Unix socket alone, then runs the agent as its user,
+  with no capabilities.
 - The agent reaches the daemon's socket through its group. Whoever reaches the socket is
   the container's root: inside the container, and nowhere else.
 - The containers the agent starts are inside the wall. A plain one, one on the host's

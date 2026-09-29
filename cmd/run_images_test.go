@@ -19,20 +19,26 @@ func imagesSection(docker, helper string) string {
 		"  command: " + docker + "\n  helper: " + helper + "\n  user: \"1000:1000\"\n"
 }
 
-// imagePolicy writes a run's own policy, outside the checkout, that selects image.
+// imagePolicy writes a run's own policy, outside the checkout, that selects image, or no
+// image when it is empty.
 func imagePolicy(t *testing.T, image string) string {
 	t.Helper()
+	body := "version: 1\negress:\n  mode: observe\n"
+	if image != "" {
+		body += "image: " + image + "\n"
+	}
 	path := filepath.Join(t.TempDir(), "policy.yaml")
-	writeFile(t, path, "version: 1\negress:\n  mode: observe\nimage: "+image+"\n")
+	writeFile(t, path, body)
 	return path
 }
 
 // TestRunStartsTheImageTheMachineDefines runs behind the Docker wall with a program
-// standing in for docker. wall.image names the default by its name in wall.images, and
-// --image and the run's policy select another by name; a reference is still one. An
-// image with a Docker of its own starts under its runtime as the container's root, with
-// qory's helper as the entry point in its nest mode, the agent's user and the launch
-// after it; the record names the image, its runtime and its daemon.
+// standing in for docker. wall.image names the default by its name in wall.images,
+// --image sets another by name, and the run's policy, its own or the server's, selects
+// one by name over both; a reference is still one. An image with a Docker of its own
+// starts under its runtime as the container's root, with qory's helper as the entry
+// point in its nest mode, the agent's user and the launch after it; the record names the
+// image, its runtime and its daemon.
 func TestRunStartsTheImageTheMachineDefines(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -59,6 +65,10 @@ func TestRunStartsTheImageTheMachineDefines(t *testing.T) {
 		{"--image, by name", []string{"--image", "go-docker"}, nested, []string{"--entrypoint claude"},
 			map[string]any{"image": "example.com/agent-go-docker:1", "image_name": "go-docker", "container_runtime": "sysbox-runc", "docker": true}},
 		{"the policy's selection", []string{"--policy", imagePolicy(t, "go-docker")}, nested, []string{"--entrypoint claude"},
+			map[string]any{"image": "example.com/agent-go-docker:1", "image_name": "go-docker", "container_runtime": "sysbox-runc", "docker": true}},
+		{"the policy's selection over --image", []string{"--image", "go", "--policy", imagePolicy(t, "go-docker")}, nested, []string{"--entrypoint claude"},
+			map[string]any{"image": "example.com/agent-go-docker:1", "image_name": "go-docker", "container_runtime": "sysbox-runc", "docker": true}},
+		{"--image over the policy's none", []string{"--image", "go-docker", "--policy", imagePolicy(t, "")}, nested, []string{"--entrypoint claude"},
 			map[string]any{"image": "example.com/agent-go-docker:1", "image_name": "go-docker", "container_runtime": "sysbox-runc", "docker": true}},
 		{"--image, a reference", []string{"--image", "example.com/other:3"},
 			[]string{"--entrypoint claude example.com/other:3 --settings"},
@@ -92,15 +102,32 @@ func TestRunStartsTheImageTheMachineDefines(t *testing.T) {
 			}
 		}
 	}
+	if err := os.RemoveAll(filepath.Join(root, ".qory", "runs")); err != nil {
+		t.Fatal(err)
+	}
+	srv := newFakeServer(t, `{"version":1,"egress":{"mode":"observe"},"image":"go-docker"}`)
+	serverFile(t, srv, strings.TrimPrefix(imagesSection(docker, helper), "apiVersion: qory.dev/v1alpha1\n"))
+	if out, err := run(t, "run", "claude", "--image", "go"); cmd.ExitCode(err) != 4 {
+		t.Fatalf("the server's selection: run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	_, evs := events(t, root)
+	if started := evs["dev.qory.run.started"]; len(started) != 1 || started[0]["image_name"] != "go-docker" || started[0]["docker"] != true {
+		t.Errorf("the server's selection: run.started %v", started)
+	}
+	if applied := evs["dev.qory.run.policy_applied"]; len(applied) != 1 || applied[0]["image"] != "go-docker" {
+		t.Errorf("the server's selection: run.policy_applied %v", applied)
+	}
 }
 
 // TestRunRefusesAnImageSelectionItCannotStart pins the refusals of an image before
 // anything starts, each an input error that leaves no record: a policy that selects an
 // image the machine does not define, or names a reference, which the runner's policy
 // format refuses, or selects one for a run without a wall, a Docker of its own without a
-// runtime, and a wall with no image at all. A run whose policy selects an image needs no
-// default. A run configuration from the server that selects an image the machine does
-// not define is the runner's to refuse, in its words.
+// runtime, and a wall with no image at all. A run whose own policy selects an image
+// needs no default; a run whose policy the server supplies does, since the server's run
+// configuration arrives once the run starts and may select none, and the refusal says
+// so. A run configuration from the server that selects an image the machine does not
+// define is the runner's to refuse, in its words.
 func TestRunRefusesAnImageSelectionItCannotStart(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -122,6 +149,10 @@ func TestRunRefusesAnImageSelectionItCannotStart(t *testing.T) {
 			t.Errorf("%v: %v (exit %d), want %q and exit %d\n%s", c.args, err, cmd.ExitCode(err), c.want, cmd.ExitInput, out)
 		}
 	}
+	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\n")
+	if _, err := run(t, "run", "--wall", "docker", "--policy", imagePolicy(t, "go")); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "the policy selects the image go, which wall.images in runner.yaml does not define") {
+		t.Errorf("--wall docker with no wall section, under a policy that selects an image: %v", err)
+	}
 	writeFile(t, file, strings.Replace(imagesSection(docker, helper), "runtime: sysbox-runc, ", "", 1))
 	want := "runner.yaml: wall.images.go-docker: docker needs a runtime that runs a daemon without privileges, such as runtime: sysbox-runc"
 	for _, args := range [][]string{{"run"}, {"config"}} {
@@ -142,7 +173,22 @@ func TestRunRefusesAnImageSelectionItCannotStart(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(root, ".qory", "runs")); err != nil {
 		t.Fatal(err)
 	}
-	srv := newFakeServer(t, `{"version":1,"egress":{"mode":"observe"},"image":"media"}`)
+	noDefault := strings.TrimPrefix(strings.Replace(imagesSection(docker, helper), "  image: go\n", "", 1), "apiVersion: qory.dev/v1alpha1\n")
+	srv := newFakeServer(t, `{"version":1,"egress":{"mode":"observe"},"image":"go"}`)
+	serverFile(t, srv, noDefault)
+	if _, err := run(t, "run"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "a name of wall.images or a reference; with a server, set one even when its run configuration selects an image: that arrives once the run starts, and may select none") {
+		t.Errorf("a run whose policy the server supplies, with no default: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".qory", "runs")); !errors.Is(err, os.ErrNotExist) {
+		t.Error("a refused run left a record")
+	}
+	if out, err := run(t, "run", "--local", "--policy", imagePolicy(t, "go")); cmd.ExitCode(err) != 4 {
+		t.Errorf("a --local run whose own policy selects an image, with no default: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	if err := os.RemoveAll(filepath.Join(root, ".qory", "runs")); err != nil {
+		t.Fatal(err)
+	}
+	srv = newFakeServer(t, `{"version":1,"egress":{"mode":"observe"},"image":"media"}`)
 	serverFile(t, srv, strings.TrimPrefix(imagesSection(docker, helper), "apiVersion: qory.dev/v1alpha1\n"))
 	if _, err := run(t, "run"); err == nil || !strings.Contains(err.Error(), `the policy selects the image "media", which this machine does not define`) {
 		t.Errorf("a server's run configuration that selects an image the machine does not define: %v", err)
@@ -160,7 +206,7 @@ func TestConfigListsTheImages(t *testing.T) {
 	}
 	rows := fieldRows(out)
 	for key, want := range map[string]string{
-		"runner.wall.image":            "go",
+		"runner.wall.image":            "go (wall.images.go)",
 		"runner.wall.images.go":        "example.com/agent-go:1",
 		"runner.wall.images.go-docker": "example.com/agent-go-docker:1, runtime sysbox-runc, docker (experimental)",
 	} {

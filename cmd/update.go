@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"slices"
 	"strings"
 	"time"
 
@@ -200,10 +199,12 @@ func runTool(cmd *cobra.Command, u *ui.UI, waiting, landed, name string, args ..
 	return nil
 }
 
-// walledVerb reports whether args select a hidden verb the wall runs inside a
-// container: qory run nest, relay or forward.
+// walledVerb reports whether args select a verb the wall runs inside a container, one
+// that carries [inWall]: qory run nest, relay or forward. The command tree finds it, so a
+// flag before it, such as -v, is read as the tree reads it.
 func walledVerb(args []string) bool {
-	return len(args) > 1 && args[0] == "run" && slices.Contains([]string{"nest", "relay", "forward"}, args[1])
+	c, _, err := Root().Find(args)
+	return err == nil && c.Annotations[inWall] != ""
 }
 
 // noticeOff is set by qory update, which reports the newest release itself and needs no

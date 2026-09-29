@@ -52,7 +52,7 @@ qory run [runtime] [-- argument...] [flags]
       --headless              run on pipes even at a terminal; -p for claude implies it
   -h, --help                  help for run
       --home string           where the harness is composed: a directory outside the checkout, one home per checkout under it, or .qory/harness (qory.yaml: harness.home)
-      --image string          the container's image: a name of wall.images, or a reference (runner.yaml: wall.image)
+      --image string          the container's image unless the run's policy selects one: a name of wall.images, or a reference (runner.yaml: wall.image)
       --label stringArray     a key=value name for the run, reported in its events; repeatable (forge and repository come from the origin remote)
       --local                 run without the server: record to files, under the machine's policy
       --memory string         the most memory the container gets, such as 8g (runner.yaml: wall.memory)

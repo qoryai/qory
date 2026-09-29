@@ -901,7 +901,14 @@ server:                          # the server every run reports to; absent: file
   secret: ...                    # at least 16 characters; or QORY_SERVER_SECRET in the environment
 wall:                            # the container the runtime starts in; absent: a process of this machine
   adapter: docker
-  image: example.com/agent:1     # yours: the runtime and the toolchain; or --image
+  image: go                      # the default: a name of images, or a reference; or --image
+  images:                        # the images a run's policy selects by name: image: go-docker
+    go:
+      ref: example.com/agent-go@sha256:…      # yours: the runtime and the toolchain
+    go-docker:
+      ref: example.com/agent-go-docker@sha256:…
+      runtime: sysbox-runc       # the container runtime the wall starts it under
+      docker: true               # experimental: a Docker of the agent's own
   env: [ANTHROPIC_API_KEY]       # names; the values come from qory run's environment
   helper: /opt/qory/qory-linux   # a static Linux build of qory; absent on Linux: this binary
 ```
@@ -915,8 +922,8 @@ wall:                            # the container the runtime starts in; absent: 
 | `server.access_key` | none | the key the server issued this machine, `ak_` and 16 characters; sent with every request |
 | `server.secret` | `QORY_SERVER_SECRET` | signs every request; at least 16 characters, never in a repository, never sent |
 | `wall.adapter` | none | `docker`, the one there is. With it set, every `qory run` starts the runtime in a container with no route out except to the runner's proxy; `--wall none` runs once without it, `--wall docker` once with it |
-| `wall.image` | none | the container's image when the run's policy selects none, which contains the runtime and the project's toolchain: the name of one of `wall.images`, or a reference. A name `wall.images` defines is read as that image first; `--image` sets another, read the same way. qory builds none, and a wall without an image is refused unless the run's policy selects one |
-| `wall.images.<name>` | none | an image this machine defines, which a run's policy selects by its name, `image: <name>`, the runner contract's §Images. The name is in a credential's grammar. `ref`, required, is the reference, pinned by digest where the machine wants the same image every time; `runtime` is the container runtime the wall starts it under, one the engine has, such as `sysbox-runc`, the engine's default when absent; `docker: true`, experimental, gives the agent a Docker daemon of its own inside the container, which the helper starts before the agent, and needs a `runtime` that runs one without privileges. A policy this machine holds that selects a name the section does not define, or selects one for a run without a wall, is refused before the run, and so is `docker: true` without a `runtime` when the file is read |
+| `wall.image` | none | the container's image when the run's policy selects none, which contains the runtime and the project's toolchain: the name of one of `wall.images`, or a reference. A name `wall.images` defines is read as that image first; `--image` sets another for one run, read the same way, and a policy's selection wins over both. qory builds none, and a wall without an image is refused unless the run's own `--policy` selects one; a machine that reports to a server sets it, because the server's run configuration arrives once the run starts and may select none |
+| `wall.images.<name>` | none | an image this machine defines, which a run's policy selects by its name, `image: <name>`, the runner contract's §Images. The name is in a credential's grammar. `ref`, required, is the reference, pinned by digest where the machine wants the same image every time; `runtime` is the container runtime the wall starts it under, one the engine has, such as `sysbox-runc`, the engine's default when absent; `docker: true`, experimental, gives the agent a Docker daemon of its own inside the container, which the helper starts before the agent, and needs a `runtime` that runs one without privileges. A `--policy` that selects a name the section does not define, or selects one for a run without a wall, is refused before the run; every command that reads the file refuses `docker: true` without a `runtime`. `qory config` shows whether `wall.image` is a name of this section or a reference. Define an image with `docker: true` only where every run may get one: any policy can select it |
 | `wall.env` | none | names of variables of `qory run`'s environment that go into the container, such as the model credential, with `--env` adding to them. The launch template's variables go in; nothing else of the environment does. A name with no value here is left out |
 | `wall.command` | `docker` | the program the adapter runs, such as `podman`, supported where the runner's conformance suite passes |
 | `wall.user` | `qory run`'s own | the `uid:gid` the container runs as. Root is refused, so a machine where qory runs as root sets another, one that can write the checkout |

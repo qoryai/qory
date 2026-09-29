@@ -104,7 +104,7 @@
           ]
         },
         "image": {
-          "description": "The agent's image when the run's policy selects none, the runtime and the project's toolchain: the name of one of images, or a reference. A name images defines is read as that image first. May be left out when --image sets one, or when the run's policy selects an image.",
+          "description": "The agent's image when the run's policy selects none, the runtime and the project's toolchain: the name of one of images, or a reference. A name images defines is read as that image first. --image sets another for one run, and a policy's selection wins over both. May be left out when --image sets one, or when the run's own --policy selects an image; a machine that reports to a server sets it, because the server's run configuration may select none.",
           "type": "string",
           "minLength": 1,
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._/:@-]*$"
@@ -133,7 +133,7 @@
                 "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
               },
               "docker": {
-                "description": "Experimental. The agent gets a Docker daemon of its own inside the container, which qory's helper starts before the agent; the image holds dockerd. Needs a runtime that runs a daemon without privileges: sysbox-runc. Default false.",
+                "description": "Experimental. The agent gets a Docker daemon of its own inside the container, which qory's helper starts before the agent; the image holds dockerd. Needs a runtime that runs a daemon without privileges: sysbox-runc. Any policy can select the image, so define one only where every run may get a daemon. Default false.",
                 "type": "boolean"
               }
             },
@@ -160,7 +160,7 @@
           "minLength": 1
         },
         "helper": {
-          "description": "The absolute path of a static Linux build of qory, mounted read-only into the container as the relay and the hook forwarder. Default this binary, which only a Linux machine can use.",
+          "description": "The absolute path of a static Linux build of qory, mounted read-only into the container as the relay, the hook forwarder and what starts the daemon of an image with docker: true. Default this binary, which only a Linux machine can use.",
           "type": "string",
           "pattern": "^/"
         },

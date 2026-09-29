@@ -31,7 +31,9 @@ wall:
 `
 
 // TestRunnerFileReadsTheImages reads wall.images in the file's order, keeps wall.image as
-// written, and lists each image with its reference, its runtime and its daemon.
+// written, and lists each image with its reference, its runtime and its daemon, and the
+// default with what it is read as: a name of wall.images, or a reference, which a name
+// mistyped is.
 func TestRunnerFileReadsTheImages(t *testing.T) {
 	hermetic(t)
 	path := runnerFile(t, imagesFile)
@@ -68,7 +70,7 @@ func TestRunnerFileReadsTheImages(t *testing.T) {
 		t.Errorf("the image rows are %v", keys)
 	}
 	for key, want := range map[string]string{
-		"runner.wall.image":            "go",
+		"runner.wall.image":            "go (wall.images.go)",
 		"runner.wall.images.go":        want[0].Ref,
 		"runner.wall.images.go-docker": "ghcr.io/qoryai/agent-go-docker:1, runtime sysbox-runc, docker (experimental)",
 		"runner.wall.images.plain.v2":  "example.com/agent:2, runtime runc",
@@ -77,6 +79,16 @@ func TestRunnerFileReadsTheImages(t *testing.T) {
 			t.Errorf("%s: %+v, want %q from %s", key, rows[key], want, path)
 		}
 	}
+	runnerFile(t, strings.Replace(imagesFile, "image: go\n", "image: go-dokcer\n", 1))
+	if c, err = config.Load(t.TempDir(), true); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range c.Rows() {
+		if row.Key == "runner.wall.image" && row.Value != "go-dokcer (a reference)" {
+			t.Errorf("a name mistyped is listed as %+v", row)
+		}
+	}
+
 }
 
 // TestRunnerFileRefusesAnImageItCannotRun is every refusal of wall.images, each naming

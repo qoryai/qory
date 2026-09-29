@@ -125,6 +125,19 @@ func (w *RunnerWall) Defines(name string) bool {
 	return w != nil && slices.ContainsFunc(w.Images, func(i RunnerImage) bool { return i.Name == name })
 }
 
+// defaultRow is wall.image's value in the rows: the value and what it is read as, the
+// image of wall.images it names or a reference, so a name mistyped shows as a
+// reference.
+func defaultRow(w *RunnerWall) string {
+	switch {
+	case w.Image == "":
+		return "(none)"
+	case w.Defines(w.Image):
+		return w.Image + " (wall.images." + w.Image + ")"
+	}
+	return w.Image + " (a reference)"
+}
+
 // imageRow is an image's value in the rows: its reference, then its runtime and its
 // daemon when it has them.
 func imageRow(i RunnerImage) string {
