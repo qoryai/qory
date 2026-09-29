@@ -366,9 +366,10 @@ has the adapter's document and the rules.
 An **integration** is an adapter published on its own, that describes itself. It is
 either:
 
-- Qory's own `qory-<name>`, such as `qory-github` from
-  [qoryai/integrations](https://github.com/qoryai/integrations), or
-- a program of yours, under a name of your own.
+- Qory's own `qory-<name>`, each in a repository of its own, such as
+  [`qory-github`](https://github.com/qoryai/qory-github), or
+- a program of yours, under a name of your own, started from the
+  [integration template](https://github.com/qoryai/integration-template).
 
 Declare it, and `qory` writes the definition:
 

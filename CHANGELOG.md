@@ -14,6 +14,9 @@ release may change what an existing document does, and states it under Upgrading
   and `docs/run.md`.
 - The README says in a few lines what qory does: it builds the harness, prepares the
   worktree, and runs the agent safely. Everything else moved to those three pages.
+- `docs/run.md` links `qory-github` to its own repository, qoryai/qory-github, and a
+  program of your own to the integration template, qoryai/integration-template. The
+  integration contract stays in qoryai/integrations.
 
 ## [0.12.0] - 2026-09-28
 
