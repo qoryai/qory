@@ -73,6 +73,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 		Example: `  qory run                                          # the agent, at your terminal
   qory run claude -- -p "Reply pong"                # one headless turn
   qory run --wall docker --image agent:1            # in a container
+  qory run --image go-docker                        # in an image runner.yaml defines
   qory run --policy ~/policy.yaml -- -p "$prompt"   # with this run's own policy
   qory run --timeout 5h30m -- -p "$prompt"          # stop it after five and a half hours`,
 		Args: func(cmd *cobra.Command, args []string) error {
@@ -186,7 +187,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				StopSignal:    stopSignal,
 				StopGrace:     grace,
 			}
-			if err := enclose(&spec, conf.Runner, o, exe, at.root, rep.Home, launch.Env); err != nil {
+			selected := ""
+			if pol != nil {
+				selected = pol.Image
+			}
+			if err := enclose(&spec, conf.Runner, o, selected, exe, at.root, rep.Home, launch.Env); err != nil {
 				return err
 			}
 			if policyFile != "" {
@@ -249,7 +254,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	c.Flags().StringVar(&stopSignal, "stop-signal", "", "the signal that stops the agent: SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2 (default SIGTERM; "+config.RunnerFileName+": run.stop_signal)")
 	c.Flags().DurationVar(&grace, "stop-grace", 0, "the time between the stop signal and SIGKILL (default 10s; "+config.RunnerFileName+": run.stop_grace)")
 	c.Flags().StringVar(&o.name, "wall", "", "run the agent in a container whose one way out is the proxy: "+config.WallDocker+", or none ("+config.RunnerFileName+": wall.adapter)")
-	c.Flags().StringVar(&o.image, "image", "", "the container's image ("+config.RunnerFileName+": wall.image)")
+	c.Flags().StringVar(&o.image, "image", "", "the container's image: a name of wall.images, or a reference ("+config.RunnerFileName+": wall.image)")
 	c.Flags().StringArrayVar(&o.env, "env", nil, "a variable to pass into the container, by name; repeatable ("+config.RunnerFileName+": wall.env)")
 	c.Flags().StringArrayVar(&o.mounts, "mount", nil, "a path of this machine the container sees too, :ro for read-only; repeatable ("+config.RunnerFileName+": wall.mounts)")
 	c.Flags().StringVar(&o.limits.CPUs, "cpus", "", "how many CPUs the container gets, such as 1.5 ("+config.RunnerFileName+": wall.cpus)")
@@ -257,7 +262,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	c.Flags().IntVar(&o.limits.PIDs, "pids-limit", 0, "the most processes and threads in the container ("+config.RunnerFileName+": wall.pids_limit)")
 	c.Flags().StringVar(&o.limits.ShmSize, "shm-size", "", "the size of /dev/shm in the container, such as 2g ("+config.RunnerFileName+": wall.shm_size)")
 	homeFlags(c, &h)
-	c.AddCommand(newResend(), newForward(), newRelay())
+	c.AddCommand(newResend(), newForward(), newRelay(), newNest())
 	return c
 }
 
@@ -393,7 +398,14 @@ const wallOff = "none"
 // process's, and the forwarder is the helper's path inside the container. The checkout,
 // the composed home, which is all a launch template's paths point into, and the mounts
 // keep their paths inside the container.
-func enclose(spec *session.Spec, r *config.Runner, o wallOptions, exe, root, home string, launchEnv map[string]string) error {
+//
+// The images wall.images defines go to the runner, which reads the default, --image or
+// wall.image, as the name of one of them first and as a reference otherwise, and
+// starts the one the policy selects instead. selected is the image the policy this
+// process holds selects, empty when it selects none or the server supplies the policy:
+// qory refuses a selection the runner would refuse before the run, so it is an input
+// error, and a run whose policy selects an image needs no default.
+func enclose(spec *session.Spec, r *config.Runner, o wallOptions, selected, exe, root, home string, launchEnv map[string]string) error {
 	var section config.RunnerWall
 	if r != nil && r.Wall != nil {
 		section = *r.Wall
@@ -406,17 +418,26 @@ func enclose(spec *session.Spec, r *config.Runner, o wallOptions, exe, root, hom
 		if o.walled() {
 			return input(fmt.Errorf("--image, --env, --mount and the limits are for a run behind a wall; --wall %s starts one", config.WallDocker))
 		}
+		if selected != "" {
+			return input(fmt.Errorf("the policy selects the image %s, which needs a wall: wall in %s, or --wall %s", selected, config.RunnerFileName, config.WallDocker))
+		}
 		return nil
 	}
 	if name != config.WallDocker {
 		return input(fmt.Errorf("--wall %s: the walls are %s, and %s for a run without one", name, config.WallDocker, wallOff))
 	}
+	if selected != "" && !section.Defines(selected) {
+		return input(fmt.Errorf("the policy selects the image %s, which wall.images in %s does not define", selected, config.RunnerFileName))
+	}
 	spec.Image = o.image
 	if spec.Image == "" {
 		spec.Image = section.Image
 	}
-	if spec.Image == "" {
-		return input(fmt.Errorf("a wall needs the container's image: --image, or wall.image in %s; qory builds none", config.RunnerFileName))
+	if spec.Image == "" && selected == "" {
+		return input(fmt.Errorf("a wall needs the container's image: --image, or wall.image in %s, a name of wall.images or a reference", config.RunnerFileName))
+	}
+	for _, i := range section.Images {
+		spec.Images = append(spec.Images, i.Session())
 	}
 	env := withEnv(nil, launchEnv)
 	for _, n := range append(append([]string{}, section.Env...), o.env...) {
@@ -452,7 +473,7 @@ func enclose(spec *session.Spec, r *config.Runner, o wallOptions, exe, root, hom
 		helper = exe
 	}
 	spec.Env = env
-	spec.Wall = &wall.Docker{Command: section.Command, Helper: helper, RelayArgs: []string{"run", "relay"}, User: section.User, CAEnv: section.CAEnv}
+	spec.Wall = &wall.Docker{Command: section.Command, Helper: helper, RelayArgs: []string{"run", "relay"}, NestArgs: []string{"run", "nest"}, User: section.User, CAEnv: section.CAEnv}
 	spec.Forwarder = []string{wall.HelperPath, "run", "forward"}
 	spec.Mounts = []wall.Mount{{Path: root}}
 	if !reallyWithin(root, home) {
@@ -575,6 +596,24 @@ func newRelay() *cobra.Command {
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			return wall.Relay(ctx, args, cmd.OutOrStdout())
+		},
+	}
+}
+
+// newNest builds the hidden nest verb, what the wall starts from qory's own binary as the
+// entry point of a container whose image has a Docker of the agent's own: it runs as
+// the container's root, which the runtime maps to a user of the machine's that is not
+// root, starts dockerd on its socket alone, drops every capability and executes the
+// launch as the agent's user. Its arguments, --user uid:gid, -- and the launch, go to
+// [wall.Nest] as they are, so it parses no flag of its own. It returns only on an error.
+func newNest() *cobra.Command {
+	return &cobra.Command{
+		Use:                "nest --user uid:gid -- command [argument...]",
+		Short:              "Start the container's own Docker, then the agent as its user",
+		Hidden:             true,
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return wall.Nest(args)
 		},
 	}
 }

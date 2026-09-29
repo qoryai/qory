@@ -37,8 +37,30 @@ func TestStartUpdateCheckIsSilentOffATerminal(t *testing.T) {
 	t.Cleanup(func() { Version = was })
 	Version = "0.0.1"
 	var out strings.Builder
-	StartUpdateCheck(&out)()
+	StartUpdateCheck(&out, nil)()
 	if out.Len() != 0 {
 		t.Errorf("a buffer got a notice:\n%s", out.String())
+	}
+}
+
+// TestNoUpdateCheckInsideTheWall pins the verbs the wall runs inside a container, which
+// never look for a release: there the look would be a connection in the run's record,
+// made as the container's root by nest.
+func TestNoUpdateCheckInsideTheWall(t *testing.T) {
+	for _, c := range []struct {
+		args   []string
+		inside bool
+	}{
+		{[]string{"run", "nest", "--user", "1000:1000", "--", "claude"}, true},
+		{[]string{"run", "relay", "3128=172.30.0.1:40000"}, true},
+		{[]string{"run", "forward"}, true},
+		{[]string{"run", "claude", "--", "-p", "hi"}, false},
+		{[]string{"run"}, false},
+		{[]string{"config"}, false},
+		{nil, false},
+	} {
+		if walledVerb(c.args) != c.inside {
+			t.Errorf("%v: inside the wall %v, want %v", c.args, !c.inside, c.inside)
+		}
 	}
 }

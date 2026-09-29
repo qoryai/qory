@@ -104,10 +104,55 @@
           ]
         },
         "image": {
-          "description": "The agent's image: the runtime and the project's toolchain. qory builds none. May be left out when --image sets one.",
+          "description": "The agent's image when the run's policy selects none, the runtime and the project's toolchain: the name of one of images, or a reference. A name images defines is read as that image first. May be left out when --image sets one, or when the run's policy selects an image.",
           "type": "string",
           "minLength": 1,
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._/:@-]*$"
+        },
+        "images": {
+          "description": "The images this machine defines, by name. A run's policy selects one by its name, as it selects credentials, and names no reference; image and --image name the default by it. The runner contract's Images.",
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "ref"
+            ],
+            "properties": {
+              "ref": {
+                "description": "The image's reference, pinned by digest where the machine wants the same image every time.",
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._/:@-]*$"
+              },
+              "runtime": {
+                "description": "The container runtime the wall starts the image under, one the engine has, such as sysbox-runc. Default the engine's.",
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+              },
+              "docker": {
+                "description": "Experimental. The agent gets a Docker daemon of its own inside the container, which qory's helper starts before the agent; the image holds dockerd. Needs a runtime that runs a daemon without privileges: sysbox-runc. Default false.",
+                "type": "boolean"
+              }
+            },
+            "if": {
+              "properties": {
+                "docker": {
+                  "const": true
+                }
+              },
+              "required": [
+                "docker"
+              ]
+            },
+            "then": {
+              "required": [
+                "runtime"
+              ]
+            }
+          }
         },
         "command": {
           "description": "The program the adapter runs, such as podman. Default docker.",

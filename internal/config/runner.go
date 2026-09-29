@@ -93,9 +93,14 @@ const WallDocker = "docker"
 type RunnerWall struct {
 	// Adapter selects what builds the wall: docker.
 	Adapter string
-	// Image is the agent's image, the runtime and the project's toolchain; the --image
-	// flag sets another. It may be empty here and set by the flag.
+	// Image is the agent's image when the run's policy selects none, the runtime and the
+	// project's toolchain: the name of one of Images, or a reference. A name Images
+	// defines is read as that image first. The --image flag sets another; it may be
+	// empty here and set by the flag.
 	Image string
+	// Images are the images this machine defines, in the file's order; a run's policy
+	// selects among them by name.
+	Images []RunnerImage
 	// Command is the program the adapter runs, such as podman; empty means docker.
 	Command string
 	// Helper is the path of a static Linux build of qory, mounted into the container as
@@ -201,6 +206,7 @@ type runnerFile struct {
 	Wall         *struct {
 		Adapter *string   `yaml:"adapter"`
 		Image   *string   `yaml:"image"`
+		Images  yaml.Node `yaml:"images,omitempty"`
 		Command *string   `yaml:"command"`
 		Helper  *string   `yaml:"helper"`
 		Env     *[]string `yaml:"env"`
@@ -346,6 +352,11 @@ func LoadRunner() (*Runner, error) {
 		r.Wall = &RunnerWall{Adapter: *w.Adapter}
 		if w.Image != nil {
 			r.Wall.Image = *w.Image
+		}
+		if w.Images.Kind != 0 {
+			if r.Wall.Images, err = readImages(path, &w.Images); err != nil {
+				return nil, err
+			}
 		}
 		if w.Command != nil {
 			r.Wall.Command = *w.Command
@@ -564,8 +575,11 @@ func (r *Runner) Rows() []Row {
 		rows = append(rows,
 			Row{"runner.wall.adapter", r.Wall.Adapter, origin},
 			Row{"runner.wall.image", listOrNone(strings.Fields(r.Wall.Image)), origin},
-			Row{"runner.wall.env", listOrNone(r.Wall.Env), origin},
 		)
+		for _, i := range r.Wall.Images {
+			rows = append(rows, Row{"runner.wall.images." + i.Name, imageRow(i), origin})
+		}
+		rows = append(rows, Row{"runner.wall.env", listOrNone(r.Wall.Env), origin})
 		if r.Wall.Command != "" {
 			rows = append(rows, Row{"runner.wall.command", r.Wall.Command, origin})
 		}

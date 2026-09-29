@@ -39,6 +39,7 @@ qory run [runtime] [-- argument...] [flags]
   qory run                                          # the agent, at your terminal
   qory run claude -- -p "Reply pong"                # one headless turn
   qory run --wall docker --image agent:1            # in a container
+  qory run --image go-docker                        # in an image runner.yaml defines
   qory run --policy ~/policy.yaml -- -p "$prompt"   # with this run's own policy
   qory run --timeout 5h30m -- -p "$prompt"          # stop it after five and a half hours
 ```
@@ -51,7 +52,7 @@ qory run [runtime] [-- argument...] [flags]
       --headless              run on pipes even at a terminal; -p for claude implies it
   -h, --help                  help for run
       --home string           where the harness is composed: a directory outside the checkout, one home per checkout under it, or .qory/harness (qory.yaml: harness.home)
-      --image string          the container's image (runner.yaml: wall.image)
+      --image string          the container's image: a name of wall.images, or a reference (runner.yaml: wall.image)
       --label stringArray     a key=value name for the run, reported in its events; repeatable (forge and repository come from the origin remote)
       --local                 run without the server: record to files, under the machine's policy
       --memory string         the most memory the container gets, such as 8g (runner.yaml: wall.memory)

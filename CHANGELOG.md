@@ -6,6 +6,28 @@ release may change what an existing document does, and states it under Upgrading
 
 ## [Unreleased]
 
+### Added
+
+- `wall.images` in `runner.yaml` defines the agent's images by name, each with `ref`, its
+  reference, and when it needs them `runtime`, the container runtime the wall starts it
+  under, and `docker`. A run's policy selects one by its name, `image: <name>`, from the
+  server or from `--policy`; a run whose policy selects none starts in the default.
+  `wall.image` and `--image` take a name of `wall.images` or a reference, and read a name
+  as that image first. A policy `qory run` holds that selects an image `wall.images` does
+  not define, or selects one for a run without a wall, is an input error before the run
+  starts. A run whose policy selects an image needs no default.
+  A name defined twice, a key an image does not have, and `docker: true` without a
+  `runtime` stop every command, the way any mistake in `runner.yaml` does. `qory config`
+  lists each image with its runtime and its daemon. `dev.qory.run.started` names the image
+  a run started in, `image_name`, `container_runtime` and `docker` among its fields.
+- A Docker of the agent's own, experimental: an image with `docker: true` under
+  `runtime: sysbox-runc` starts with `qory run nest`, a hidden verb of `qory`'s Linux
+  build, as the container's entry point. It runs the runner's `wall.Nest`: `dockerd` on
+  its Unix socket alone, then the agent as its user with no capabilities. The containers
+  the agent starts are inside the wall, and what they reach goes through the proxy and
+  is recorded. With runner 0.6.0 the image holds `/run/qory` with mode `0755`, or the
+  containers the agent starts get no proxy and reach nothing.
+
 ### Changed
 
 - Under `extends`, `qory harness compose` says what it read from the repository's
@@ -19,6 +41,9 @@ release may change what an existing document does, and states it under Upgrading
   replaced by a previous compose, the refusal says so. For a tracked, unmodified path it
   prints the `--force` command and the `git checkout --` that restores it. For any other
   path it says why `--force` refuses it and names the changed files, five at most.
+- The verbs the wall runs inside a container, `qory run nest`, `relay` and `forward`,
+  never look for a newer release. At a terminal there, the look runs as the container's
+  root and puts a connection the agent did not make in the run's record.
 
 ## [0.12.1] - 2026-09-30
 

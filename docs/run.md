@@ -561,7 +561,8 @@ Turn it on with a `wall` section, or with `--wall docker --image <image>` for on
 - The runner, the policy, the record and the server's secret stay outside.
 
 A wall needs the `docker` command, and an engine behind it. It also needs an image of
-yours that contains the runtime. `qory` builds none.
+yours that contains the runtime. `qory` builds none. `wall.images` defines several, and
+a run's policy selects one: see [The agent's images](#the-agents-images).
 
 What to know:
 
@@ -591,3 +592,78 @@ What to know:
   runtime's hooks do not reach the runner. So a walled run there has no hook events. The
   log, the egress record and the structured output are there. On a Linux host, the hooks
   cross.
+
+## The agent's images
+
+A machine that serves several kinds of work defines several images in `runner.yaml`,
+each by a name. A run's policy selects one by that name, as it selects credentials. A
+repository never names an image.
+
+```yaml
+# ~/.config/qory/runner.yaml
+wall:
+  adapter: docker
+  image: go                 # the default: a name below, or a reference
+  images:
+    go:
+      ref: ghcr.io/acme/agent-go@sha256:…
+    go-docker:              # experimental: a Docker of the agent's own
+      ref: ghcr.io/acme/agent-go-docker@sha256:…
+      runtime: sysbox-runc
+      docker: true
+```
+
+```yaml
+# the run's policy, from the server or passed with --policy
+version: 1
+egress:
+  mode: enforce
+  allow: [api.anthropic.com]
+image: go-docker
+```
+
+- `ref` is the image. Pin it by digest to run the same image every time.
+- `runtime` is the container runtime the wall starts the image under. Your engine must
+  have it. Without it, the engine's default runs the image.
+- `wall.image` and `--image` take a name of `wall.images`, or a reference. A name is
+  read as that image first.
+- A run whose policy selects no image starts in the default. A run whose policy selects
+  one needs no default.
+- `qory config` lists the images.
+
+Before the run starts, `qory run` refuses a policy that selects an image `wall.images`
+does not define, and a policy that selects an image for a run without a wall. `qory run`
+and `qory config` refuse `docker: true` without a `runtime`.
+
+`dev.qory.run.started` names the image the run started in: `image`, the reference, and
+for an image of `wall.images` also `image_name`, `container_runtime` and `docker`.
+
+### A Docker of the agent's own
+
+*Experimental. It may change, or go, in a minor release.*
+
+With `docker: true`, the agent gets a Docker daemon inside its container, never your
+machine's. Its tests can start a database. It can build and run images.
+
+It needs [Sysbox](https://github.com/nestybox/sysbox), registered with your engine as
+`sysbox-runc`, and `runtime: sysbox-runc` on the image. Sysbox gives the container a root
+of its own, a user of your machine that is not root. The image holds `dockerd` in a
+system directory, such as `/usr/local/bin`, and the directory `/run/qory` with mode
+`0755`.
+
+How it works:
+
+- `qory`'s helper starts the container as its root. It starts `dockerd` on its Unix
+  socket alone, then runs the agent as its user, with no capabilities.
+- The agent reaches the daemon's socket through its group. Whoever reaches the socket is
+  the container's root: inside the container, and nowhere else.
+- The containers the agent starts are inside the wall. A plain one, one on the host's
+  network and a privileged one all reach the proxy and nothing else. What they reach is
+  decided and recorded like the agent's own traffic.
+- The daemon pulls through the proxy, so allow the registries it pulls from. For Docker
+  Hub: `registry-1.docker.io`, `auth.docker.io`, and the hosts it sends the layers from,
+  such as `production.cloudfront.docker.com`. The record lists the ones it was denied.
+- The containers the agent starts do not trust the run's authority unless the agent mounts
+  its bundle into them.
+- Mount nothing into such a run that your machine's root must protect. Whether the
+  container's root reaches the mounts as your machine's root is not yet verified.
