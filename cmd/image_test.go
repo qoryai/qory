@@ -11,14 +11,26 @@ import (
 	"github.com/qoryai/qory/cmd"
 )
 
+// probeLines are the lines of a probe's report for each of its checks but claude, which
+// pass, and the fact about Docker.
+const probeLines = `{"name":"home","result":"pass","detail":"HOME is /home/agent, and the user 65532:65532 writes in it"},` +
+	`{"name":"authorities","result":"pass","detail":"the authorities are in /etc/ssl/certs/ca-certificates.crt, 1 certificates"},` +
+	`{"name":"shell","result":"pass","detail":"/bin/sh runs the runtime hooks"},` +
+	`{"name":"git","result":"pass","detail":"git version 2.47.3"},` +
+	`{"name":"gh","result":"pass","detail":"gh version 2.101.0"},` +
+	`{"name":"docker","result":"info","detail":"no dockerd: the image carries no Docker of the agent own"}`
+
 // fakeImageDocker puts a program named docker first on the PATH. It logs every command
 // line, runs an engine for linux/amd64 that holds every image but example.com/missing:1,
-// and answers a run with a probe's report: one whose claude line fails for
-// example.com/broken:1, one whose lines pass otherwise.
+// exports a container's files as a tar stream of one program, and answers a run with a
+// probe's report: one whose claude line fails for example.com/broken:1, one whose lines
+// pass otherwise.
 func fakeImageDocker(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	log := filepath.Join(dir, "docker.log")
+	files := filepath.Join(dir, "files")
+	writeFile(t, filepath.Join(files, "usr", "bin", "git"), "")
 	writeFile(t, filepath.Join(dir, "docker"), `#!/bin/sh
 echo "$*" >> `+log+`
 for last; do :; done
@@ -29,10 +41,13 @@ image)
 	example.com/missing:1) echo "Error response from daemon: No such image: $last" >&2; exit 1 ;;
 	*) echo '{"Os":"linux","Architecture":"amd64","RepoDigests":[],"Config":{"Env":["PATH=/usr/bin","HOME=/home/agent"]}}' ;;
 	esac ;;
+create) echo c0ffee ;;
+export) tar -cf - -C `+files+` usr ;;
+rm) ;;
 run)
 	case "$*" in
-	*example.com/broken:1*) echo '{"version":1,"checks":[{"name":"claude","result":"fail","detail":"no claude on the image PATH, /usr/bin"}]}' ;;
-	*) echo '{"version":1,"checks":[{"name":"home","result":"pass","detail":"HOME is /home/agent, and the user 65532:65532 writes in it"},{"name":"docker","result":"info","detail":"no dockerd: the image carries no Docker of the agent own"}]}' ;;
+	*example.com/broken:1*) echo '{"version":1,"checks":[`+probeLines+`,{"name":"claude","result":"fail","detail":"no claude on the image PATH, /usr/bin"}]}' ;;
+	*) echo '{"version":1,"checks":[`+probeLines+`,{"name":"claude","result":"pass","detail":"claude at /usr/local/bin/claude is 2.1.273"}]}' ;;
 	esac ;;
 *) exit 64 ;;
 esac
@@ -74,7 +89,8 @@ func TestImageCheckChecksTheMachinesImage(t *testing.T) {
 		"example.com/agent:1\n✓ the engine holds it, for linux/amd64",
 		"✓ the image sets HOME=/home/agent",
 		"✓ HOME is /home/agent, and the user 65532:65532 writes in it",
-		"  reference  not pinned by digest, and the image has none: a local build",
+		"✓ none of the image's 3 files is setuid or setgid or has capabilities of its own",
+		"  reference  not pinned by digest, and the engine holds no digest of it: a local build",
 		"  docker     no dockerd",
 		"✓ example.com/agent:1 has what the wall needs",
 	)
@@ -86,7 +102,7 @@ func TestImageCheckChecksTheMachinesImage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, string(data), "run --rm --pull never --network none --user 65532:65532 --cap-drop ALL --security-opt no-new-privileges --init --mount type=bind,src="+helper+",dst=/qory/qory,readonly --entrypoint /qory/qory example.com/agent:1 image probe --claude-version "+rt.Version()+"\n")
+	wants(t, string(data), "create --pull never --network none --entrypoint /qory/qory example.com/agent:1\nexport c0ffee\nrm --force --volumes c0ffee\n", "run --rm --pull never --network none --user 65532:65532 --cap-drop ALL --security-opt no-new-privileges --init --mount type=bind,src="+helper+",dst=/qory/qory,readonly --entrypoint /qory/qory example.com/agent:1 image probe --claude-version "+rt.Version()+"\n")
 }
 
 // TestImageCheckFailsWhenOneImageFails checks three images, one the engine does not hold
@@ -136,9 +152,10 @@ func TestImageCheckRefusesWhatItCannotCheck(t *testing.T) {
 	}
 }
 
-// TestImageCheckDoesNotProbeWithABuildOfAnotherArchitecture gives an arm64 build of qory
-// for an image the engine holds for amd64: the line says so, and nothing runs.
-func TestImageCheckDoesNotProbeWithABuildOfAnotherArchitecture(t *testing.T) {
+// TestImageCheckRefusesABuildForAnotherEngine gives an arm64 build of qory for an engine
+// that runs amd64: the probe would not run there, whatever the image, so the check is
+// refused before any image is read.
+func TestImageCheckRefusesABuildForAnotherEngine(t *testing.T) {
 	emptyDir(t)
 	log := fakeImageDocker(t)
 	helper := staticELF(t)
@@ -152,10 +169,9 @@ func TestImageCheckDoesNotProbeWithABuildOfAnotherArchitecture(t *testing.T) {
 	}
 	imageRunner(t, helper, "example.com/agent:1")
 	out, err := run(t, "image", "check")
-	if cmd.ExitCode(err) != 1 {
-		t.Fatalf("exit %d\n%s", cmd.ExitCode(err), out)
+	if cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "is for arm64, and the engine runs linux/amd64; set wall.helper to the Linux build for amd64") {
+		t.Fatalf("exit %d, %v\n%s", cmd.ExitCode(err), err, out)
 	}
-	wants(t, out, "is qory's Linux build for arm64, and the image is for amd64; the wall runs it inside, so set wall.helper to the build for amd64", "✗ example.com/agent:1 lacks what the wall needs")
 	lines, _ := os.ReadFile(log)
-	lacks(t, string(lines), "run --rm")
+	lacks(t, string(lines), "image inspect", "run --rm")
 }

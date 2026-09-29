@@ -3,7 +3,6 @@ package image_test
 import (
 	"context"
 	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -128,7 +127,6 @@ func TestProbePassesAnImageWithWhatTheWallNeeds(t *testing.T) {
 	want(t, checks, "claude", image.Pass, "/usr/local/bin/claude is 2.1.273")
 	want(t, checks, "git", image.Pass, "git version 2.47.3")
 	want(t, checks, "gh", image.Pass, "gh version 2.101.0 (2026-09-15)")
-	want(t, checks, "setuid", image.Pass)
 	want(t, checks, "docker", image.Info, "no dockerd")
 	if image.Failed(r.Checks) {
 		t.Errorf("a line failed: %+v", r.Checks)
@@ -176,64 +174,47 @@ func TestProbeRefusesAnotherClaude(t *testing.T) {
 	want(t, byName(p.Report(context.Background())), "claude", image.Pass, "is 2.1.270")
 }
 
-// TestProbeFindsSetuidFilesOutsideTheMounts sets the setuid bit on a program of the
-// image and on files where other file systems are mounted: the line fails and names the
-// image's alone.
-func TestProbeFindsSetuidFilesOutsideTheMounts(t *testing.T) {
-	files := agentFiles()
-	for _, p := range []string{"usr/bin/passwd", "proc/1/exe", "qory/qory", "etc/hosts", "mnt/data/bin/su"} {
-		files[p] = ""
-	}
-	root := imageRoot(t, files)
-	for _, p := range []string{"usr/bin/passwd", "proc/1/exe", "qory/qory", "etc/hosts", "mnt/data/bin/su"} {
-		if err := os.Chmod(filepath.Join(root, p), 0o755|fs.ModeSetuid); err != nil {
-			t.Fatal(err)
-		}
-	}
-	p := image.Probe{Root: root, Env: env(map[string]string{"HOME": "/home/agent", "PATH": "/usr/local/bin:/usr/bin"}), Exec: goodVersions().exec, Mounts: []string{"/", "/etc/hosts", "/mnt/data"}}
-	checks := byName(p.Report(context.Background()))
-	want(t, checks, "setuid", image.Fail, "setuid or setgid: /usr/bin/passwd;", "chmod ug-s")
-	for _, other := range []string{"/proc", "/qory", "/etc/hosts", "/mnt/data"} {
-		if strings.Contains(checks["setuid"].Detail, other) {
-			t.Errorf("the walk entered %s: %s", other, checks["setuid"].Detail)
-		}
-	}
-}
-
 // TestProbeSaysWhetherTheImageCarriesADocker puts dockerd in a system directory, with
-// and without what it needs on the PATH, and in a directory of the PATH that is not a
-// system one, where the runner never looks.
+// and without what it runs there, with and without the docker command on the PATH, and
+// in a directory of the PATH that is not a system one, where the runner never looks.
 func TestProbeSaysWhetherTheImageCarriesADocker(t *testing.T) {
 	files := agentFiles()
-	for _, name := range []string{"dockerd", "docker", "containerd", "containerd-shim-runc-v2", "runc"} {
+	for _, name := range []string{"dockerd", "docker", "containerd", "containerd-shim-runc-v2", "runc", "docker-init", "docker-proxy"} {
 		files["usr/local/bin/"+name] = ""
 	}
 	files["usr/sbin/iptables"] = ""
 	files["opt/docker/bin/dockerd"] = ""
 	root := imageRoot(t, files)
-	p := image.Probe{Root: root, Env: env(map[string]string{"HOME": "/home/agent", "PATH": "/usr/local/bin:/usr/sbin:/usr/bin"}), Exec: goodVersions().exec}
-	want(t, byName(p.Report(context.Background())), "docker", image.Pass, "/usr/local/bin/dockerd", "can carry a Docker of the agent's own")
+	p := image.Probe{Root: root, Env: env(map[string]string{"HOME": "/home/agent", "PATH": "/usr/local/bin:/usr/bin"}), Exec: goodVersions().exec}
+	want(t, byName(p.Report(context.Background())), "docker", image.Pass, "/usr/local/bin/dockerd", "iptables in the system's directories", "can carry a Docker of the agent's own")
 
-	p.Env = env(map[string]string{"HOME": "/home/agent", "PATH": "/usr/local/bin:/usr/bin"})
-	want(t, byName(p.Report(context.Background())), "docker", image.Fail, "iptables is not on the image's PATH")
+	if err := os.Rename(filepath.Join(root, "usr/local/bin/docker"), filepath.Join(root, "opt/docker/bin/docker")); err != nil {
+		t.Fatal(err)
+	}
+	want(t, byName(p.Report(context.Background())), "docker", image.Fail, "the docker command is not on the image's PATH")
+	p.Env = env(map[string]string{"HOME": "/home/agent", "PATH": "/opt/docker/bin:/usr/local/bin"})
+	want(t, byName(p.Report(context.Background())), "docker", image.Pass)
+
+	if err := os.Rename(filepath.Join(root, "usr/sbin/iptables"), filepath.Join(root, "opt/docker/bin/iptables")); err != nil {
+		t.Fatal(err)
+	}
+	want(t, byName(p.Report(context.Background())), "docker", image.Fail, "iptables is not in /usr/local/sbin")
 
 	if err := os.Remove(filepath.Join(root, "usr/local/bin/dockerd")); err != nil {
 		t.Fatal(err)
 	}
-	p.Env = env(map[string]string{"HOME": "/home/agent", "PATH": "/opt/docker/bin:/usr/local/bin:/usr/sbin"})
 	want(t, byName(p.Report(context.Background())), "docker", image.Info, "no dockerd in /usr/local/sbin")
 }
 
-// TestMountPointsReadsMountinfo reads the fifth field of each line, with the octal
-// escape of a space undone.
-func TestMountPointsReadsMountinfo(t *testing.T) {
-	info := "1 0 0:1 / / rw - overlay overlay rw\n" +
-		"2 1 0:2 / /proc rw - proc proc rw\n" +
-		"3 1 0:3 /x /etc/hosts rw - ext4 /dev/vda rw\n" +
-		`4 1 0:4 / /mnt/with\040space rw - tmpfs tmpfs rw` + "\n" +
-		"short line\n"
-	got := strings.Join(image.MountPoints([]byte(info)), "|")
-	if got != "/|/proc|/etc/hosts|/mnt/with space" {
-		t.Errorf("mount points %q", got)
+// TestProbeReportsEveryCheck has the report hold one line for each of the checks the
+// outside counts on, in their order.
+func TestProbeReportsEveryCheck(t *testing.T) {
+	p := image.Probe{Root: imageRoot(t, agentFiles()), Env: env(nil), Exec: goodVersions().exec}
+	var names []string
+	for _, c := range p.Report(context.Background()).Checks {
+		names = append(names, c.Name)
+	}
+	if strings.Join(names, " ") != strings.Join(image.ProbeChecks, " ") {
+		t.Errorf("lines %v, want %v", names, image.ProbeChecks)
 	}
 }

@@ -23,14 +23,15 @@ func newImage() *cobra.Command {
 		Short: "Check an image the wall runs the agent in",
 		Long: `Check an image the wall runs the agent in.
 
-Qory publishes four with each release, for linux/amd64 and linux/arm64:
+Four are defined under images/ in qory's repository, for linux/amd64 and linux/arm64:
 
-  ghcr.io/qoryai/agent             Claude Code, git and gh
-  ghcr.io/qoryai/agent-docker      the same, and a Docker daemon of the agent's own
-  ghcr.io/qoryai/agent-go          agent, and Go
-  ghcr.io/qoryai/agent-go-docker   agent-docker, and Go
+  agent             Claude Code, git and gh
+  agent-docker      agent, and a Docker daemon of the agent's own
+  agent-go          agent, and Go
+  agent-go-docker   agent-docker, and Go
 
-Build yours FROM one of them, and check it with qory image check.`,
+Build them from the checkout of the release you run, build yours FROM one of them, and
+check it with qory image check.`,
 	}
 	c.AddCommand(newImageCheck(), newImageProbe())
 	return c
@@ -49,20 +50,20 @@ func newImageCheck() *cobra.Command {
 of ` + config.RunnerFileName + `.
 
 From outside, it reads the image the engine holds: its platform, HOME in its
-environment, and whether the reference is pinned by digest. Then it starts the image the
-way the wall starts the agent, as a user the image does not know, with no capability and
-no network, and qory's Linux build checks from inside:
+environment, whether the reference is pinned by digest, and every file, for one that is
+setuid or setgid or has capabilities of its own. Then it starts the image the way the
+wall starts the agent, as a user the image does not know, with no capability and no
+network, and qory's Linux build checks from inside:
 
   - HOME is a directory that user writes in
   - the system's authorities are where the wall reads them
   - /bin/sh is there, for the runtime's hooks
   - claude is the version the runner's descriptor is written against
   - git and gh run
-  - no file is setuid or setgid
-  - dockerd, for a Docker of the agent's own, and what it needs
+  - dockerd, for a Docker of the agent's own, and what it runs
 
-The Linux build is this binary on Linux, and wall.helper elsewhere. The docker command
-is wall.command, or docker.
+The Linux build is wall.helper, for the engine's architecture; on Linux, this binary
+when wall.helper is not set. The docker command is wall.command, or docker.
 
 The exit status is 0 when every image passes, and 1 when one fails.
 
@@ -70,7 +71,7 @@ The exit status is 0 when every image passes, and 1 when one fails.
 
 More: https://github.com/qoryai/qory/blob/main/docs/run.md#the-agents-image`,
 		Example: `  qory image check                                # wall.image of ` + config.RunnerFileName + `
-  qory image check ghcr.io/qoryai/agent:0.13.0
+  qory image check qory-agent
   qory image check my-agent:1 my-agent-docker:1`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			stop := buzzing(cmd)
@@ -116,6 +117,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#the-agents-image`,
 			if err != nil {
 				return err
 			}
+			// The probe runs as the engine runs it, whatever the image's architecture.
+			if want := image.Arch(platform); arch != want {
+				return input(fmt.Errorf("qory's Linux build %s is for %s, and the engine runs %s; set wall.helper to the Linux build for %s", helper, arch, platform, want))
+			}
 
 			u := ui.New(cmd.OutOrStdout())
 			u.Title("qory image check", "engine "+platform)
@@ -128,7 +133,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#the-agents-image`,
 			for _, ref := range refs {
 				u.Blank()
 				u.Heading(ref)
-				checks := engine.Check(cmd.Context(), platform, image.Target{Ref: ref, Helper: helper, HelperArch: arch, Claude: rt.Version()})
+				checks := engine.Check(cmd.Context(), platform, image.Target{Ref: ref, Helper: helper, Claude: rt.Version()})
 				var facts [][2]string
 				for _, c := range checks {
 					switch c.Result {
@@ -148,11 +153,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#the-agents-image`,
 			u.Blank()
 			switch {
 			case len(failed) > 0 && len(refs) == 1:
-				u.Fail(fmt.Errorf("%s lacks what the wall needs", refs[0]))
-				return reported(&exitError{code: 1})
+				err := fmt.Errorf("%s lacks what the wall needs", refs[0])
+				u.Fail(err)
+				return reported(err)
 			case len(failed) > 0:
-				u.Fail(fmt.Errorf("%d of %d images lack what the wall needs: %s", len(failed), len(refs), strings.Join(failed, ", ")))
-				return reported(&exitError{code: 1})
+				err := fmt.Errorf("%d of %d images lack what the wall needs: %s", len(failed), len(refs), strings.Join(failed, ", "))
+				u.Fail(err)
+				return reported(err)
 			case len(refs) == 1:
 				u.Success("%s has what the wall needs %s", refs[0], ui.Pot)
 			default:
@@ -175,11 +182,8 @@ func newImageProbe() *cobra.Command {
 		Hidden: true,
 		Args:   noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			mounts, _ := os.ReadFile("/proc/self/mountinfo")
 			p := image.Probe{
 				Root:   "/",
-				Env:    os.Getenv,
-				Mounts: image.MountPoints(mounts),
 				Claude: claude,
 				User:   fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
 			}

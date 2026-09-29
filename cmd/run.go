@@ -440,7 +440,7 @@ func enclose(spec *session.Spec, r *config.Runner, o wallOptions, selected strin
 		if fromServer {
 			err = fmt.Errorf("%w; with a server, set one even when its run configuration selects an image: that arrives once the run starts, and may select none", err)
 		}
-		err = fmt.Errorf("%w; Qory publishes one, ghcr.io/qoryai/agent", err)
+		err = fmt.Errorf("%w; to build Qory's and check yours, see https://github.com/qoryai/qory/blob/main/docs/run.md#the-agents-image", err)
 		return input(err)
 	}
 	for _, i := range section.Images {

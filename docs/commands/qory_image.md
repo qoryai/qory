@@ -6,14 +6,15 @@ Check an image the wall runs the agent in
 
 Check an image the wall runs the agent in.
 
-Qory publishes four with each release, for linux/amd64 and linux/arm64:
+Four are defined under images/ in qory's repository, for linux/amd64 and linux/arm64:
 
-  ghcr.io/qoryai/agent             Claude Code, git and gh
-  ghcr.io/qoryai/agent-docker      the same, and a Docker daemon of the agent's own
-  ghcr.io/qoryai/agent-go          agent, and Go
-  ghcr.io/qoryai/agent-go-docker   agent-docker, and Go
+  agent             Claude Code, git and gh
+  agent-docker      agent, and a Docker daemon of the agent's own
+  agent-go          agent, and Go
+  agent-go-docker   agent-docker, and Go
 
-Build yours FROM one of them, and check it with qory image check.
+Build them from the checkout of the release you run, build yours FROM one of them, and
+check it with qory image check.
 
 ### Options
 

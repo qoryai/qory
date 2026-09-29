@@ -8,20 +8,20 @@ Check that an image has what the wall needs of it. With no image, check wall.ima
 of runner.yaml.
 
 From outside, it reads the image the engine holds: its platform, HOME in its
-environment, and whether the reference is pinned by digest. Then it starts the image the
-way the wall starts the agent, as a user the image does not know, with no capability and
-no network, and qory's Linux build checks from inside:
+environment, whether the reference is pinned by digest, and every file, for one that is
+setuid or setgid or has capabilities of its own. Then it starts the image the way the
+wall starts the agent, as a user the image does not know, with no capability and no
+network, and qory's Linux build checks from inside:
 
   - HOME is a directory that user writes in
   - the system's authorities are where the wall reads them
   - /bin/sh is there, for the runtime's hooks
   - claude is the version the runner's descriptor is written against
   - git and gh run
-  - no file is setuid or setgid
-  - dockerd, for a Docker of the agent's own, and what it needs
+  - dockerd, for a Docker of the agent's own, and what it runs
 
-The Linux build is this binary on Linux, and wall.helper elsewhere. The docker command
-is wall.command, or docker.
+The Linux build is wall.helper, for the engine's architecture; on Linux, this binary
+when wall.helper is not set. The docker command is wall.command, or docker.
 
 The exit status is 0 when every image passes, and 1 when one fails.
 
@@ -37,7 +37,7 @@ qory image check [image...] [flags]
 
 ```
   qory image check                                # wall.image of runner.yaml
-  qory image check ghcr.io/qoryai/agent:0.13.0
+  qory image check qory-agent
   qory image check my-agent:1 my-agent-docker:1
 ```
 

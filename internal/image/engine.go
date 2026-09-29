@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -23,7 +25,7 @@ const ProbeUser = "65532:65532"
 var ProbeArgs = []string{"image", "probe"}
 
 // ProbeWait is how long the probe's container may run, the start of every program in it
-// included.
+// included, and how long the image's files may take to read.
 const ProbeWait = 5 * time.Minute
 
 // engineWait is how long one question to the engine may take.
@@ -49,25 +51,24 @@ func Pinned(ref string) bool { return strings.Contains(ref, "@sha256:") }
 type Engine struct {
 	// Command is the program: docker, or what wall.command names. Empty means docker.
 	Command string
-	// Run runs the command with its arguments and returns its standard output and its
-	// standard error. Nil runs it on this machine.
-	Run func(ctx context.Context, argv []string) (stdout, stderr []byte, err error)
+	// Run runs the command with its arguments, writes its standard output to stdout as
+	// it comes, and returns its standard error. Nil runs it on this machine.
+	Run func(ctx context.Context, argv []string, stdout io.Writer) (stderr []byte, err error)
 }
 
 // Target is one image to check, and what the check needs to probe it.
 type Target struct {
 	// Ref is the image's reference, as a run names it.
 	Ref string
-	// Helper is the path on this machine of qory's static Linux build, the probe, and
-	// HelperArch its architecture as [HelperArch] reads it.
-	Helper     string
-	HelperArch string
+	// Helper is the path on this machine of qory's static Linux build for the engine's
+	// architecture, the probe.
+	Helper string
 	// Claude is the version claude --version must report; empty takes any.
 	Claude string
 }
 
-// run runs one docker command within its limit.
-func (e Engine) run(ctx context.Context, wait time.Duration, args ...string) ([]byte, []byte, error) {
+// stream runs one docker command within its limit, its standard output to stdout.
+func (e Engine) stream(ctx context.Context, wait time.Duration, stdout io.Writer, args ...string) ([]byte, error) {
 	command := e.Command
 	if command == "" {
 		command = "docker"
@@ -76,13 +77,20 @@ func (e Engine) run(ctx context.Context, wait time.Duration, args ...string) ([]
 	defer cancel()
 	argv := append([]string{command}, args...)
 	if e.Run != nil {
-		return e.Run(ctx, argv)
+		return e.Run(ctx, argv, stdout)
 	}
-	var stdout, stderr bytes.Buffer
+	var stderr bytes.Buffer
 	c := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	c.Stdout, c.Stderr = &stdout, &stderr
+	c.Stdout, c.Stderr = stdout, &stderr
 	err := c.Run()
-	return stdout.Bytes(), stderr.Bytes(), err
+	return stderr.Bytes(), err
+}
+
+// run runs one docker command within its limit and returns both its streams.
+func (e Engine) run(ctx context.Context, wait time.Duration, args ...string) ([]byte, []byte, error) {
+	var stdout bytes.Buffer
+	stderr, err := e.stream(ctx, wait, &stdout, args...)
+	return stdout.Bytes(), stderr, err
 }
 
 // Platform is what the engine runs, os/arch in Go's words: linux/arm64. An engine that
@@ -106,10 +114,11 @@ type inspected struct {
 	}
 }
 
-// Check checks one image on an engine that runs platform, from outside and then with the
-// probe, and returns every line in the order they print. An image the engine does not
-// hold is one failed line, and a probe of another architecture than the image's is not
-// run.
+// Check checks one image on an engine that runs platform, from outside, then its files,
+// then with the probe, and returns every line in the order they print. An image the
+// engine does not hold is one failed line. An image of another platform than the
+// engine's fails its first line and is checked all the same: the probe runs natively,
+// since it is built for the engine, and the image's programs as the engine runs them.
 func (e Engine) Check(ctx context.Context, platform string, t Target) []Check {
 	out, errOut, err := e.run(ctx, engineWait, "image", "inspect", "--format", "{{json .}}", t.Ref)
 	if err != nil {
@@ -127,11 +136,7 @@ func (e Engine) Check(ctx context.Context, platform string, t Target) []Check {
 	if own != platform {
 		checks[0] = Check{"image", Fail, "the image is for " + own + ", and the engine runs " + platform + "; pull or build it for " + platform}
 	}
-	checks = append(checks, homeSet(img.Config.Env))
-	checks = append(checks, reference(t.Ref, img.RepoDigests))
-	if t.HelperArch != img.Architecture {
-		return append(checks, Check{"probe", Fail, fmt.Sprintf("the probe, %s, is qory's Linux build for %s, and the image is for %s; the wall runs it inside, so set wall.helper to the build for %s", t.Helper, t.HelperArch, img.Architecture, img.Architecture)})
-	}
+	checks = append(checks, homeSet(img.Config.Env), reference(t.Ref, img.RepoDigests), e.files(ctx, t.Ref))
 	return append(checks, e.probe(ctx, t)...)
 }
 
@@ -146,20 +151,60 @@ func homeSet(env []string) Check {
 	return Check{"home", Fail, "the image sets no HOME, so the engine gives /; set one any user may write, such as ENV HOME=/home/agent with mode 1777"}
 }
 
-// reference reports whether the reference is pinned by digest, and names the digest the
-// engine holds the image under when it is not.
+// reference reports whether the reference is pinned by digest. When it is not, it names
+// the digest the engine holds the image under, which is a registry's only when the image
+// came from one or went to one: an engine that keeps images in containerd gives a local
+// build a digest too.
 func reference(ref string, digests []string) Check {
 	if Pinned(ref) {
 		return Check{"reference", Info, "pinned by digest"}
 	}
-	if len(digests) > 0 {
-		return Check{"reference", Info, "not pinned by digest; " + digests[0] + " names this image"}
+	for _, d := range digests {
+		if _, digest, ok := strings.Cut(d, "@"); ok {
+			return Check{"reference", Info, "not pinned by digest; the engine holds the image as " + digest + ", which a registry serves only if the image was pulled from it or pushed to it"}
+		}
 	}
-	return Check{"reference", Info, "not pinned by digest, and the image has none: a local build"}
+	return Check{"reference", Info, "not pinned by digest, and the engine holds no digest of it: a local build"}
+}
+
+// files reads the image's whole file system, as docker export writes it from a container
+// created and never started, for setuid and setgid files and files with capabilities of
+// their own. Reading it from outside sees every file, whatever a user inside may read.
+func (e Engine) files(ctx context.Context, ref string) Check {
+	out, errOut, err := e.run(ctx, engineWait, "create", "--pull", "never", "--network", "none", "--entrypoint", wall.HelperPath, ref)
+	id := strings.TrimSpace(string(out))
+	if err != nil || id == "" {
+		return Check{"files", Fail, "the image's files were not read: docker create: " + lastLine(errOut, err)}
+	}
+	defer e.run(context.WithoutCancel(ctx), engineWait, "rm", "--force", "--volumes", id)
+	r, w := io.Pipe()
+	scanned := make(chan struct {
+		s   Special
+		err error
+	}, 1)
+	go func() {
+		s, err := Scan(r)
+		r.CloseWithError(err)
+		scanned <- struct {
+			s   Special
+			err error
+		}{s, err}
+	}()
+	errOut, err = e.stream(ctx, ProbeWait, w, "export", id)
+	w.CloseWithError(err)
+	got := <-scanned
+	switch {
+	case err != nil:
+		return Check{"files", Fail, "the image's files were not read to the end: docker export: " + lastLine(errOut, err)}
+	case got.err != nil:
+		return Check{"files", Fail, "the image's files were not read to the end: " + got.err.Error()}
+	}
+	return got.s.check()
 }
 
 // probe runs the probe in a container of the image, started as the wall starts an
-// agent, and returns its lines, or the one line that says why it did not run.
+// agent, and returns its lines, or the one line that says why it did not run. A report
+// that lacks one of [ProbeChecks], or has a line of no known result, fails.
 func (e Engine) probe(ctx context.Context, t Target) []Check {
 	if strings.ContainsAny(t.Helper, ",\"\n") {
 		return []Check{{"probe", Fail, "the probe's path " + t.Helper + " holds a comma or a quote and cannot be mounted"}}
@@ -185,7 +230,22 @@ func (e Engine) probe(ctx context.Context, t Target) []Check {
 		}
 		return []Check{{"probe", Fail, "the probe did not run in the image: " + why}}
 	}
-	return rep.Checks
+	checks := rep.Checks
+	var lacks []string
+	for _, name := range ProbeChecks {
+		if !slices.ContainsFunc(checks, func(c Check) bool { return c.Name == name }) {
+			lacks = append(lacks, name)
+		}
+	}
+	for i, c := range checks {
+		if c.Result != Pass && c.Result != Fail && c.Result != Info {
+			checks[i] = Check{c.Name, Fail, fmt.Sprintf("the probe's %s line has the result %q, which this qory does not read: %s", c.Name, c.Result, c.Detail)}
+		}
+	}
+	if len(lacks) > 0 {
+		checks = append(checks, Check{"probe", Fail, "the probe's report has no line for " + strings.Join(lacks, ", ") + ", so the image was not checked for it; set wall.helper to the Linux build of this qory"})
+	}
+	return checks
 }
 
 // lastLine is the last line a command printed on its standard error, or its error when
@@ -199,6 +259,12 @@ func lastLine(stderr []byte, err error) string {
 		return err.Error()
 	}
 	return "no answer"
+}
+
+// Arch is the architecture of a platform, os/arch: arm64 of linux/arm64.
+func Arch(platform string) string {
+	_, arch, _ := strings.Cut(platform, "/")
+	return arch
 }
 
 // HelperArch reads the architecture of qory's Linux build at path, in Go's words: amd64

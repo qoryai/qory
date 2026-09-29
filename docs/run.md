@@ -66,13 +66,15 @@ cat .qory/runs/*/events.jsonl   # what it reached, what it printed, how it ended
 Without a wall, the proxy sees only programs that honour it. A **wall** starts the agent
 in a container. The container's one route out is the proxy.
 
-A wall needs the `docker` command. It also needs an image that contains the agent. Qory
-publishes one with each release, `ghcr.io/qoryai/agent`, tagged with the version `qory
-version` prints. See [The agent's image](#the-agents-image).
+A wall needs the `docker` command. It also needs an image that contains the agent. Build
+Qory's from the checkout of the `qory` release you run. See [The agent's
+image](#the-agents-image).
 
 ```sh
+git clone --branch v<version> https://github.com/qoryai/qory    # the version qory version prints
+docker build -t qory-agent qory/images/agent
 export CLAUDE_CODE_OAUTH_TOKEN=...       # from `claude setup-token`; or ANTHROPIC_API_KEY
-qory run --wall docker --image ghcr.io/qoryai/agent:0.13.0 --env CLAUDE_CODE_OAUTH_TOKEN -- -p "/hello"
+qory run --wall docker --image qory-agent --env CLAUDE_CODE_OAUTH_TOKEN -- -p "/hello"
 ```
 
 On a Mac, first set `wall.helper` to the Linux build of the same `qory` release. See
@@ -98,7 +100,7 @@ credentials:
     placeholders: [CLAUDE_CODE_OAUTH_TOKEN]
 wall:
   adapter: docker
-  image: ghcr.io/qoryai/agent:0.13.0
+  image: qory-agent
 ```
 
 Then pass the run a policy that selects the credential. Keep the policy outside the
@@ -145,7 +147,7 @@ server:                  # the server every run reports to; optional
   secret: fixture-secret-not-a-real-one # or QORY_SERVER_SECRET in the environment
 wall:                    # start the runtime in a container; optional
   adapter: docker
-  image: ghcr.io/qoryai/agent:0.13.0@sha256:…  # Qory's, or yours FROM it
+  image: example.com/agent@sha256:…     # the runtime and your toolchain, FROM Qory's
   env: [ANTHROPIC_API_KEY]              # names; nothing else of your environment goes in
   memory: 14g                           # at most 14 GB of memory; also cpus, pids_limit, shm_size; optional
 run:                     # optional
@@ -553,7 +555,7 @@ Turn it on with a `wall` section, or with `--wall docker --image <image>` for on
 - The runner, the policy, the record and the server's secret stay outside.
 
 A wall needs the `docker` command, and an engine behind it. It also needs an image that
-contains the runtime: one Qory publishes, or yours FROM it. See [The agent's
+contains the runtime: Qory's, or yours FROM it. See [The agent's
 image](#the-agents-image). `wall.images` defines several, and a run's policy selects
 one: see [The agent's images](#the-agents-images).
 
@@ -588,23 +590,30 @@ What to know:
 
 ### The agent's image
 
-Qory publishes four images with each release, for `linux/amd64` and `linux/arm64`,
-tagged with the release's version. The release's `images.txt` names each one by digest.
+`qory`'s repository defines four images under `images/`, for `linux/amd64` and
+`linux/arm64`. They are not published. Build them from the checkout of the `qory` release
+you run, since each release pins the runtime at the version its runner is written
+against:
+
+```sh
+git clone --branch v<version> https://github.com/qoryai/qory && cd qory
+docker build -t qory-agent images/agent
+docker build -t qory-agent-docker --build-arg BASE=qory-agent images/agent-docker
+docker build -t qory-agent-go --build-arg BASE=qory-agent images/agent-go
+docker build -t qory-agent-go-docker --build-arg BASE=qory-agent-docker \
+  --build-arg TITLE=agent-go-docker images/agent-go
+```
 
 | Image | What it holds |
 |---|---|
-| `ghcr.io/qoryai/agent` | Claude Code at the version the runner's descriptor is written against, `git`, `gh`, Node, the system's authorities |
-| `ghcr.io/qoryai/agent-docker` | `agent`, and Docker's daemon and command |
-| `ghcr.io/qoryai/agent-go` | `agent`, and Go |
-| `ghcr.io/qoryai/agent-go-docker` | `agent-docker`, and Go |
+| `agent` | Claude Code at the version the runner's descriptor is written against, `git`, `gh`, Node, the system's authorities |
+| `agent-docker` | `agent`, and Docker's daemon and command |
+| `agent-go` | `agent`, and Go |
+| `agent-go-docker` | `agent-docker`, and Go |
 
-Name the image by digest in `wall.image`, so every run starts the same one:
-
-```yaml
-wall:
-  adapter: docker
-  image: ghcr.io/qoryai/agent:0.13.0@sha256:…   # a line of images.txt
-```
+Every version and every download's sum is a build argument, with its default in the
+Dockerfile. A build checks each download against its sum, and installs Debian's packages
+from the snapshot the base image was built from.
 
 What each of them does:
 
@@ -624,7 +633,7 @@ What each of them does:
 To add what your agents need, build yours FROM one of them, and check it:
 
 ```dockerfile
-FROM ghcr.io/qoryai/agent:0.13.0@sha256:…
+FROM qory-agent
 RUN apt-get update && apt-get install -y --no-install-recommends python3 \
  && rm -rf /var/lib/apt/lists/*
 ```
@@ -634,29 +643,25 @@ docker build -t my-agent:1 .
 qory image check my-agent:1
 ```
 
+Push it to a registry of yours and name it by digest in `wall.image`, so every run
+starts the same one.
+
 `qory image check` checks an image against what the wall needs of it. With no image, it
 checks `wall.image`. It prints a line per check, and exits 1 when one fails.
 
 - From outside: the engine holds the image, for the platform the engine runs; the image
-  sets `HOME`; the reference is pinned by digest or not, which fails nothing.
+  sets `HOME`; the reference is pinned by digest or not, which fails nothing. Then it
+  reads every file of the image, as `docker export` writes them, and fails a file that
+  is setuid or setgid or has capabilities of its own.
 - From inside: it starts the image the way the wall starts the agent, as a user the image
   does not know, with no capability and no network. `qory`'s Linux build then checks
   that `HOME` takes a file from that user, the authorities are where the wall reads
   them, `/bin/sh` is there for the runtime's hooks, `claude` is the version the runner's
-  descriptor is written against, `git` and `gh` run, and no file is setuid or setgid. It
-  reports whether `dockerd` is in a system directory, and checks what it needs beside it.
+  descriptor is written against, and `git` and `gh` run. It reports whether `dockerd` is
+  in a system directory, and checks that what the daemon runs is there too.
 
-The Linux build is the one the wall uses: on a Mac, `wall.helper`, for the image's
-architecture.
-
-To build the images from a checkout of `qory`:
-
-```sh
-docker build -t qory-agent images/agent
-docker build -t qory-agent-docker --build-arg BASE=qory-agent images/agent-docker
-docker build -t qory-agent-go --build-arg BASE=qory-agent images/agent-go
-docker build -t qory-agent-go-docker --build-arg BASE=qory-agent-docker images/agent-go
-```
+The Linux build is the one the wall uses: `wall.helper`, for your engine's architecture,
+or on Linux the `qory` you run when `wall.helper` is not set.
 
 ## The agent's images
 
