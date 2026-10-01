@@ -57,6 +57,9 @@ type ForeignPathError struct {
 	Target string
 	// Reason is set when force was requested and refused, and states why.
 	Reason string
+	// Above marks a symlinked directory above the path a link goes to, which qory writes
+	// no link through and force does not replace.
+	Above bool
 }
 
 // Error returns the path and what qory found there.
@@ -922,7 +925,7 @@ func inside(root, path string) error {
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
 			target, _ := os.Readlink(dir)
-			return &ForeignPathError{Path: dir, Target: target}
+			return &ForeignPathError{Path: dir, Target: target, Above: true}
 		}
 	}
 	return nil

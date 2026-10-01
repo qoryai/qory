@@ -333,6 +333,10 @@ type Config struct {
 	Runner *Runner
 	// Files are the files read, in the order they were applied.
 	Files []string
+	// Ignored are the keys the checkout root's file sets that a compose under extends
+	// leaves out, such as harness.model, git and env, in the order the file is read; nil
+	// when the file sets none or its machine keys are read.
+	Ignored []string
 	// origins maps a row key to the file that set it, or [Default].
 	origins map[string]string
 }
@@ -715,6 +719,7 @@ func (c *Config) apply(path string, machine bool) (file, error) {
 		return f, err
 	}
 	if !machine {
+		c.Ignored = f.machineKeys()
 		return f, nil
 	}
 	if h := f.Harness; h != nil {
@@ -815,6 +820,33 @@ func (c *Config) apply(path string, machine bool) (file, error) {
 		c.origins["env."+name] = path
 	}
 	return f, nil
+}
+
+// machineKeys lists the machine's keys the file sets: the harness keys that are not its
+// document, then git and env.
+func (f file) machineKeys() []string {
+	var keys []string
+	if h := f.Harness; h != nil {
+		for _, k := range []struct {
+			name string
+			set  bool
+		}{
+			{"runtime", h.Runtime != nil}, {"model", h.Model != nil}, {"force", h.Force != nil},
+			{"update", h.Update != nil}, {"home", h.Home != nil}, {"links", h.Links != nil},
+			{"launch", h.Launch != nil},
+		} {
+			if k.set {
+				keys = append(keys, "harness."+k.name)
+			}
+		}
+	}
+	if f.Git != nil && (f.Git.Timeout != nil || f.Git.Cache != nil) {
+		keys = append(keys, "git")
+	}
+	if len(f.Env) > 0 {
+		keys = append(keys, "env")
+	}
+	return keys
 }
 
 // applyWorktree sets the worktree keys the section names. A list replaces the one before
@@ -1072,6 +1104,18 @@ func (c Config) Origin(key string) string {
 		return o
 	}
 	return Default
+}
+
+// SetBy lists, in name order, the keys under section, such as "worktree", whose value
+// came from the file at path.
+func (c Config) SetBy(path, section string) []string {
+	var keys []string
+	for _, key := range sortedNames(c.origins) {
+		if strings.HasPrefix(key, section+".") && c.origins[key] == path {
+			keys = append(keys, key)
+		}
+	}
+	return keys
 }
 
 // Rows lists every effective value with its origin: the qory ranges when a file sets

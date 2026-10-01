@@ -47,7 +47,8 @@ func TestFileFlagNamesTheBaseOfTheCheckoutsDocument(t *testing.T) {
 	}
 	wants(t, out, "claude opus", "composed")
 	wantsRow(t, out, "base", base+"  (set by -f, in place of extends https://git.example.com/acme/harness#v9:nextjs-15)")
-	wantsRow(t, out, "skipped", "qory.yaml  (its harness, git and env keys; the base stack decides under extends)")
+	wantsRow(t, out, "read", "qory.yaml  (target claude opus, 1 module, 1 extension)")
+	wantsNoRow(t, out, "ignored")
 	rep := readReport(t, root)
 	rel, _ := filepath.Rel(root, filepath.Dir(base))
 	if rep.Base == nil || rep.Base.Name != "nextjs-15" || rep.Base.Source != rel || rep.Base.Pin != "working-tree" {
@@ -133,7 +134,8 @@ func TestHarnessYamlIsTheDocumentsOtherName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compose -f: %v\n%s", err, out)
 	}
-	wantsRow(t, out, "skipped", "harness.yaml  (its harness, git and env keys; the base stack decides under extends)")
+	wantsRow(t, out, "read", "harness.yaml  (target claude, 1 module, 1 extension)")
+	wantsNoRow(t, out, "ignored")
 	if out, err := run(t, "harness", "remove"); err != nil {
 		t.Fatalf("remove: %v\n%s", err, out)
 	}
@@ -179,7 +181,8 @@ func TestWorktreeAddTakesTheBaseFromTheFlag(t *testing.T) {
 	}
 	wt := filepath.Join(filepath.Dir(root), "wt-feature")
 	wantsRow(t, out, "base", base+"  (set by -f)")
-	wantsRow(t, out, "skipped", "harness.yaml  (its harness, git and env keys; the base stack decides under extends)")
+	wantsRow(t, out, "read", "harness.yaml  (1 module, 1 extension)")
+	wantsNoRow(t, out, "ignored")
 	rep := readReport(t, wt)
 	if len(rep.Modules) != 3 || rep.Modules[2].Name != "app" || rep.Base == nil || rep.Extensions["consumer"] == nil {
 		t.Fatalf("report: %+v", rep)
@@ -228,7 +231,8 @@ func TestARetiredAPIVersionComposesWithARow(t *testing.T) {
 	}
 	wants(t, out, "claude opus", "composed")
 	wantsRow(t, out, "retired", row)
-	wantsRow(t, out, "skipped", "qory.yaml  (its harness, git and env keys; the base stack decides under extends)")
+	wantsRow(t, out, "read", "qory.yaml  (target claude opus, 1 module, 1 extension)")
+	wantsNoRow(t, out, "ignored")
 	rep := readReport(t, root)
 	if len(rep.Modules) != 3 || rep.Modules[2].Name != "app" || rep.Extensions["consumer"] == nil || rep.Extensions["acme"] == nil {
 		t.Fatalf("report: modules %+v, extensions %v", rep.Modules, rep.Extensions)

@@ -85,14 +85,14 @@ func TestModuleLinkRefusesTheCheckoutsOwnPath(t *testing.T) {
 	writeOwnStack(t, root, linkedStack)
 	writeFile(t, filepath.Join(root, "harness", "own.txt"), "mine\n")
 	_, err := run(t, "harness", "compose")
-	if cmd.ExitCode(err) != cmd.ExitForeign || !strings.Contains(err.Error(), "harness is not a link qory wrote") {
+	if cmd.ExitCode(err) != cmd.ExitForeign || !strings.Contains(err.Error(), "harness is a directory git does not track, not a link qory wrote.") {
 		t.Fatalf("own directory: err = %v, exit %d", err, cmd.ExitCode(err))
 	}
 	if data, _ := os.ReadFile(filepath.Join(root, "harness", "own.txt")); string(data) != "mine\n" {
 		t.Errorf("the checkout's own directory was touched: %q", data)
 	}
 	_, err = run(t, "harness", "compose", "--force")
-	if cmd.ExitCode(err) != cmd.ExitForeign || !strings.Contains(err.Error(), "is not tracked in git") {
+	if cmd.ExitCode(err) != cmd.ExitForeign || !strings.Contains(err.Error(), "--force does not replace it: git does not track it") {
 		t.Fatalf("untracked directory under --force: err = %v", err)
 	}
 	runGit(t, root, "add", "-A")
@@ -112,7 +112,7 @@ func TestModuleLinkRefusesTheCheckoutsOwnPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = run(t, "harness", "compose")
-	if cmd.ExitCode(err) != cmd.ExitForeign || !strings.Contains(err.Error(), "harness links to docs") {
+	if cmd.ExitCode(err) != cmd.ExitForeign || !strings.Contains(err.Error(), "harness is a link to docs, not a link qory wrote.") {
 		t.Fatalf("foreign symlink: err = %v", err)
 	}
 	if err := os.Remove(filepath.Join(root, "harness")); err != nil {

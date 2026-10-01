@@ -6,6 +6,20 @@ release may change what an existing document does, and states it under Upgrading
 
 ## [Unreleased]
 
+### Changed
+
+- Under `extends`, `qory harness compose` says what it read from the repository's
+  `qory.yaml`: a `read` row with the target, the modules, the extensions and the
+  `worktree` keys it took. An `ignored` row names the keys of the file it left out, such
+  as `harness.model`, `git` and `env`, and only when the file sets any. The `skipped`
+  row that named the whole file is gone.
+- When a path `qory` did not write stands where a link goes, the compose names the path
+  relative to the checkout and says what is there: a tracked directory or file, one git
+  does not track, or a link to somewhere else. When the report lists the path as
+  replaced by a previous compose, the refusal says so. For a tracked, unmodified path it
+  prints the `--force` command and the `git checkout --` that restores it. For any other
+  path it says why `--force` refuses it and names the changed files, five at most.
+
 ## [0.12.1] - 2026-09-30
 
 ### Changed

@@ -109,7 +109,7 @@ func TestComposeForceReplacesTrackedFiles(t *testing.T) {
 	if err == nil {
 		t.Fatalf("composed over a tracked settings.json:\n%s", out)
 	}
-	wants(t, err.Error(), ".claude/settings.json is not a link qory wrote")
+	wants(t, err.Error(), ".claude/settings.json is a tracked file, not a link qory wrote.\nIt has no local changes. To replace it: qory harness compose --force\n(git checkout -- .claude/settings.json restores it)")
 
 	out, err = run(t, "hc", "--runtime", "claude,any", "--force")
 	if err != nil {
@@ -162,7 +162,7 @@ func TestComposeForceReplacesTrackedFiles(t *testing.T) {
 	if err == nil {
 		t.Fatalf("composed over a modified AGENTS.md:\n%s", out)
 	}
-	wants(t, err.Error(), "AGENTS.md has uncommitted changes; qory does not replace it")
+	wants(t, err.Error(), "AGENTS.md is a tracked file, not a link qory wrote.\n--force does not replace it: it has uncommitted changes, which git checkout -- would not bring back.\nCommit or stash the changes, then: qory harness compose --force")
 }
 
 // ownedByCheckout checks that path is still a regular file holding what the checkout wrote,

@@ -258,6 +258,14 @@ func wantsRow(t *testing.T, out, key, value string) {
 	}
 }
 
+// wantsNoRow fails when out prints a row named key.
+func wantsNoRow(t *testing.T, out, key string) {
+	t.Helper()
+	if got := fieldRows(out)[key]; len(got) > 0 {
+		t.Errorf("row %q = %q, want none:\n%s", key, got, out)
+	}
+}
+
 // snapshot records the checkout tree: every path to its kind, a link to its target and a
 // file to the digest of its content. The git directory is left out, because git writes
 // there on its own. Links are read and not followed, so a snapshot never leaves the tree.

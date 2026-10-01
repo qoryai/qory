@@ -246,6 +246,33 @@ func TestExtendsRefusesAClosedBase(t *testing.T) {
 	}
 }
 
+// TestExtendsReadsTheOwnFileAndNamesWhatItLeavesOut is the checkout's qory.yaml under
+// extends: the compose says what it read from the file, its document and its worktree
+// keys, and names the machine keys the file sets that it left out. A file that sets
+// none gets no ignored row.
+func TestExtendsReadsTheOwnFileAndNamesWhatItLeavesOut(t *testing.T) {
+	url := baseRepo(t)
+	root := consumerCheckout(t, url)
+	writeFile(t, filepath.Join(root, "qory.yaml"), consumerCompose(url, "  model: sonnet\n")+"worktree:\n  base: main\n  dir: ../wt\ngit:\n  timeout: 2m\nenv:\n  REGION: eu\n")
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "commit", "-q", "-m", "app")
+	out, err := run(t, "harness", "compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "read", "qory.yaml  (target claude opus, 1 module, 1 extension, worktree.base main, worktree.dir)")
+	wantsRow(t, out, "ignored", "qory.yaml: harness.model, git, env  (under extends, only ~/.config/qory/qory.yaml and the files above the checkout set these)")
+	wantsNoRow(t, out, "skipped")
+
+	writeFile(t, filepath.Join(root, "qory.yaml"), consumerCompose(url))
+	out, err = run(t, "harness", "compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "read", "qory.yaml  (target claude opus, 1 module, 1 extension)")
+	wantsNoRow(t, out, "ignored")
+}
+
 // TestExtendsGovernsFilesByPrefix is the base opening claude/rules to consumers: a rule
 // file lands in .claude/rules through the link, a file under another path is refused
 // naming the prefixes, a consumer naming a base module to exclude from it is told the
@@ -271,12 +298,14 @@ func TestExtendsGovernsFilesByPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantsRow(t, out, "skipped", "qory.yaml  (its harness, git and env keys; the base stack decides under extends)")
+	wantsRow(t, out, "read", "qory.yaml  (target claude opus, 1 module, 1 extension)")
+	wantsRow(t, out, "ignored", "qory.yaml: harness.runtime  (under extends, only ~/.config/qory/qory.yaml and the files above the checkout set these)")
 	out, err = run(t, "harness", "compose", "--dry-run")
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantsRow(t, out, "skipped", "qory.yaml  (its harness, git and env keys; the base stack decides under extends)")
+	wantsRow(t, out, "read", "qory.yaml  (target claude opus, 1 module, 1 extension)")
+	wantsRow(t, out, "ignored", "qory.yaml: harness.runtime  (under extends, only ~/.config/qory/qory.yaml and the files above the checkout set these)")
 	if data, err := os.ReadFile(filepath.Join(root, ".claude", "rules", "web.md")); err != nil || string(data) != "# web\n" {
 		t.Fatalf("the rule through the link: %q, %v", data, err)
 	}
