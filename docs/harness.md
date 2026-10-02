@@ -100,6 +100,17 @@ A runner may already have the stack tree. It selects the base with
 `qory harness compose -f <stack>` instead. The repository's file then contains no
 version, ref or URL of it.
 
+Under `extends`, the compose reads the repository's file for its document and its
+`worktree` keys. Its `git` and `env` keys and its machine keys under `harness`, such as
+`model` or `force`, are left out: your own `qory.yaml` and the files above the checkout
+set those. The compose prints a `read` row with what it took from the file, and an
+`ignored` row with the keys it left out, when the file sets any:
+
+```text
+read     qory.yaml  (target claude opus, 1 module, 12 extensions, worktree.base main)
+ignored  qory.yaml: harness.model, env  (under extends, only ~/.config/qory/qory.yaml and the files above the checkout set these)
+```
+
 ## Publish stacks and modules
 
 `stack` and `module` select what a harness repository publishes. It lists them in the
@@ -297,6 +308,20 @@ uses it to build its first prompt from an entry point, such as `/harness:impleme
 
 `--force`, `--update` and `--no-links` have keys in `qory.yaml` too: `force`, `update` and
 `harness.links: none`.
+
+A link never takes the place of a path `qory` did not write unless you say so. The
+compose stops, names the path, and says whether `--force` replaces it:
+
+```text
+✗ harness is a tracked directory, not a link qory wrote.
+  A previous compose replaced it (the report lists it as replaced); it has been restored since.
+  It has no local changes. To replace it again: qory harness compose --force
+  (git checkout -- harness restores it)
+```
+
+`--force` replaces only a path git can restore. A path git does not track, or one with
+changes, is refused under `--force` too. The refusal says why and names the changed
+files.
 
 ## Removing the harness
 

@@ -184,6 +184,37 @@ func Restorable(root, path string) string {
 	return ""
 }
 
+// Changes lists what git status reports under path, the files a git checkout -- of path
+// would not bring back: modified, staged, deleted, untracked and ignored, each relative to
+// the checkout root with forward slashes, in git's order. A path outside a working tree,
+// or a host without git, lists none.
+func Changes(root, path string) []string {
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil
+	}
+	cmd := exec.Command("git", "status", "--porcelain", "-z", "--ignored", "--untracked-files=all", "--", rel)
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var paths []string
+	entries := strings.Split(string(out), "\x00")
+	for i := 0; i < len(entries); i++ {
+		e := entries[i]
+		if len(e) < 4 {
+			continue
+		}
+		paths = append(paths, e[3:])
+		// A rename or a copy carries the path it came from as the next entry.
+		if e[0] == 'R' || e[0] == 'C' {
+			i++
+		}
+	}
+	return paths
+}
+
 // git runs one git command in dir and returns its standard output with surrounding space
 // trimmed. The error carries git's own message in the Stderr field of [exec.ExitError],
 // and every caller in this package discards it and falls back instead, because a

@@ -531,6 +531,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 	// qory.yaml are not read: the runner's configuration is the only one that
 	// stands over the document.
 	extends := p.Extends.Path != "" || p.Extends.Git != ""
+	doc := p
 	conf, err := config.Load(root, !extends)
 	if err != nil {
 		return nil, input(err)
@@ -660,7 +661,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 		skippedConfig = append(skippedConfig, [2]string{"base", ui.Short(base.File, at.root) + "  " + what})
 	}
 	if own, _ := config.FileIn(at.root); extends && own != "" {
-		skippedConfig = append(skippedConfig, [2]string{"skipped", filepath.Base(own) + "  (its harness, git and env keys; the base stack decides under extends)"})
+		skippedConfig = append(skippedConfig, ownFileRows(own, doc, conf)...)
 	}
 	if baseErr != nil {
 		skippedConfig = append(skippedConfig, [2]string{"skipped", "worktree.base  (" + baseErr.Error() + "; the report lists no base)"})
@@ -668,6 +669,55 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 	skippedConfig = append(skippedConfig, checks.rows...)
 	skippedConfig = append(skippedConfig, retired.rows...)
 	return &prepared{at: at, res: res, rep: rep, previous: previous, targets: targets, force: force, rows: skippedConfig, u: u}, nil
+}
+
+// ownFileRows are the rows for the checkout's own qory.yaml under extends: what the
+// compose read from it, its document and its worktree keys, and the keys it sets that
+// the compose left out, which only the files of the machine set under extends. doc is
+// the document the compose read before the base was put under it; it is the own file's
+// when it was read from there.
+func ownFileRows(own string, doc *stack.Stack, conf config.Config) [][2]string {
+	name := filepath.Base(own)
+	var read []string
+	if same(doc.File, own) {
+		if t := strings.TrimSpace(doc.Target.Runtimes.String() + " " + doc.Target.Model); t != "" {
+			read = append(read, "target "+t)
+		}
+		if n := len(doc.Modules); n > 0 {
+			read = append(read, count(n, "module", "modules"))
+		}
+		if n := len(doc.Bind); n > 0 {
+			read = append(read, count(n, "binding", "bindings"))
+		}
+		if n := len(doc.Extensions); n > 0 {
+			read = append(read, count(n, "extension", "extensions"))
+		}
+	}
+	for _, key := range conf.SetBy(own, "worktree") {
+		if key == "worktree.base" {
+			key += " " + conf.Worktree.Base
+		}
+		read = append(read, key)
+	}
+	var rows [][2]string
+	if len(read) > 0 {
+		rows = append(rows, [2]string{"read", name + "  (" + strings.Join(read, ", ") + ")"})
+	}
+	if len(conf.Ignored) > 0 {
+		user := "your qory.yaml"
+		if dir := config.UserDir(); dir != "" {
+			user = ui.Short(filepath.Join(dir, name), "")
+		}
+		rows = append(rows, [2]string{"ignored", name + ": " + strings.Join(conf.Ignored, ", ") + "  (under extends, only " + user + " and the files above the checkout set these)"})
+	}
+	return rows
+}
+
+// same reports whether two paths name one file once made absolute and clean.
+func same(a, b string) bool {
+	a, errA := filepath.Abs(a)
+	b, errB := filepath.Abs(b)
+	return errA == nil && errB == nil && a == b
 }
 
 // reportBase resolves the configuration's worktree.base for the report of the checkout at
@@ -725,7 +775,7 @@ func write(out io.Writer, o composeOptions, at places, res *compose.Result, rep,
 			l, err := render.LinkInto(rt, res, at.root, at.home, force)
 			linked[rt.Name()] = l
 			if err := record(l, err); err != nil {
-				return err
+				return explainForeign(err, at.root, o.file, rep.Replaced, force)
 			}
 		}
 		var previousLinks []string
@@ -737,7 +787,7 @@ func write(out io.Writer, o composeOptions, at places, res *compose.Result, rep,
 		var err error
 		moduleLinks, err = render.LinkModules(res, at.root, at.home, previousLinks, force)
 		if err := record(moduleLinks, err); err != nil {
-			return composeError(err)
+			return composeError(explainForeign(err, at.root, o.file, rep.Replaced, force))
 		}
 	case at.dir != "":
 		// The home is in the checkout and nothing links to it: the qory directory is
@@ -965,6 +1015,106 @@ func ExitCode(err error) int {
 	default:
 		return 1
 	}
+}
+
+// foreignError is a [*render.ForeignPathError] of the compose's link step, worded for
+// the person: what stands at the path, what a previous compose did there, and whether
+// --force replaces it. It unwraps to the refusal, so [ExitCode] and errors.As see it.
+type foreignError struct {
+	err  *render.ForeignPathError
+	text string
+}
+
+// Error is the worded refusal, its first line the path and what stands there.
+func (e *foreignError) Error() string { return e.text }
+
+// Unwrap returns the refusal it words.
+func (e *foreignError) Unwrap() error { return e.err }
+
+// maxChanges is how many changed files a refusal names before it counts the rest.
+const maxChanges = 5
+
+// explainForeign words a refusal of the compose's link step, err, for the checkout at
+// root, and returns any other error as it is, and a symlinked directory above a link's path
+// too, which no flag replaces. It states only what qory knows: what git says of the
+// path, whether replaced, the paths the report lists as replaced by a previous compose,
+// names it, and whether --force replaces it. file is the stack -f
+// named, "" for none, so the command it prints composes the same stack.
+func explainForeign(err error, root, file string, replaced []string, force bool) error {
+	var foreign *render.ForeignPathError
+	if !errors.As(err, &foreign) || foreign.Above {
+		return err
+	}
+	rel, relErr := filepath.Rel(root, foreign.Path)
+	if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return err
+	}
+	rel = filepath.ToSlash(rel)
+	reason := checkout.Restorable(root, foreign.Path)
+	if reason == "" && force {
+		return err
+	}
+	tracked := reason != "is not tracked in git"
+	var what string
+	info, statErr := os.Lstat(foreign.Path)
+	switch {
+	case statErr != nil:
+		return err
+	case info.Mode()&os.ModeSymlink != 0:
+		what = "a link to " + foreign.Target
+	case info.IsDir() && tracked:
+		what = "a tracked directory"
+	case info.IsDir():
+		what = "a directory git does not track"
+	case tracked:
+		what = "a tracked file"
+	default:
+		what = "a file git does not track"
+	}
+	lines := []string{rel + " is " + what + ", not a link qory wrote."}
+	again := ""
+	if slices.Contains(replaced, rel) {
+		lines = append(lines, "A previous compose replaced it (the report lists it as replaced); it has been restored since.")
+		again = " again"
+	}
+	command := "qory harness compose"
+	if file != "" {
+		command += " -f " + file
+	}
+	command += " --force"
+	switch {
+	case reason == "":
+		lines = append(lines, "It has no local changes. To replace it"+again+": "+command,
+			"(git checkout -- "+rel+" restores it)")
+	case !tracked:
+		lines = append(lines, flagRefuses(force)+": git does not track it, so git checkout -- could not restore it.",
+			"Move it out of the way and compose again, or commit it, then: "+command)
+	default:
+		changes := checkout.Changes(root, foreign.Path)
+		named := changes
+		if len(changes) > maxChanges {
+			named = append(slices.Clip(changes[:maxChanges]), fmt.Sprintf("and %d more", len(changes)-maxChanges))
+		}
+		line := flagRefuses(force) + ": it " + reason + ", which git checkout -- would not bring back"
+		if len(named) > 0 && !slices.Equal(named, []string{rel}) {
+			line += ": " + strings.Join(named, ", ")
+		}
+		next := "Commit or stash the changes, then: "
+		if reason != "has uncommitted changes" {
+			next = "Commit them or move them out of " + rel + ", then: "
+		}
+		lines = append(lines, line+".", next+command)
+	}
+	return &foreignError{err: foreign, text: strings.Join(lines, "\n")}
+}
+
+// flagRefuses opens the line that says --force does not replace a path: it refused, when
+// the compose ran with it, and would refuse otherwise.
+func flagRefuses(force bool) string {
+	if force {
+		return "--force does not replace it"
+	}
+	return "--force would not replace it either"
 }
 
 // printCollision prints what happened, the modules involved, and the stack lines that

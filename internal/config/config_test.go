@@ -170,7 +170,7 @@ func TestAnEmptyFileSetsNothing(t *testing.T) {
 
 // TestOwnFileKeepsItsWorktreeSectionUnderExtends is the checkout's own file read with
 // own false, as a compose under extends reads it: its worktree keys apply and its
-// harness, git and env keys do not.
+// harness, git and env keys do not, and are listed as ignored.
 func TestOwnFileKeepsItsWorktreeSectionUnderExtends(t *testing.T) {
 	hermetic(t)
 	root := t.TempDir()
@@ -184,6 +184,20 @@ func TestOwnFileKeepsItsWorktreeSectionUnderExtends(t *testing.T) {
 	}
 	if c.Worktree.Base != "develop" || len(c.Worktree.Link) != 1 || c.Worktree.Link[0].String() != ".env" {
 		t.Errorf("worktree keys were not read: %+v", c.Worktree)
+	}
+	own := filepath.Join(root, "qory.yaml")
+	if got := strings.Join(c.Ignored, ", "); got != "harness.runtime, harness.force, git, env" {
+		t.Errorf("ignored = %q", got)
+	}
+	if got := strings.Join(c.SetBy(own, "worktree"), ", "); got != "worktree.base, worktree.link" {
+		t.Errorf("set by the own file = %q", got)
+	}
+	c, err = config.Load(root, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Ignored != nil {
+		t.Errorf("ignored with own true = %q", c.Ignored)
 	}
 }
 
