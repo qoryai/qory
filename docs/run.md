@@ -309,7 +309,7 @@ three kinds:
 |---|---|---|
 | `runtime` | the agent's runtime, such as Claude Code. Its descriptor declares the secrets it needs | the declaration's hosts, by its scheme |
 | `service` | an API with a static key: exact hosts, a scheme, and the secrets it needs | the service's hosts, by its scheme |
-| `integration` | a program that mints a credential for the run, or serves a tool | the hosts its description lists, as its answer says. See [Integrations](#integrations) |
+| `integration` | a program that mints a credential for the run | the hosts its description lists, as its answer says. See [Integrations](#integrations) |
 
 A run's connections come from the server's run configuration when it has a
 `connections` member, even an empty one. Otherwise they come from `runner.yaml`'s
@@ -419,9 +419,9 @@ that sends it to a host they do not cover stops the run, `secret_hosts_exceeded`
 
 ### TLS on credential hosts
 
-For the hosts a connection sets a value on, the hosts a tool serves, and the hosts with
-path rules, and no other, the proxy ends the container's TLS itself. It uses an authority
-made for the run. The authority's key never leaves the runner.
+For the hosts a connection sets a value on and the hosts with path rules, and no other,
+the proxy ends the container's TLS itself. It uses an authority made for the run. The
+authority's key never leaves the runner.
 
 The container receives one bundle to trust: its image's own authorities, and the run's
 certificate. The bundle goes in through these variables:
@@ -443,9 +443,9 @@ Every other host stays a tunnel that nobody reads.
 ## Integrations
 
 An **integration** is a program that connects a run to an outside system, and describes
-itself. It gives a run what the agent must not hold: a credential minted for the run, or
-a tool the agent reaches over MCP. The program runs on your machine, outside the wall.
-The agent never holds its secrets, or the credential it mints.
+itself. It gives a run credentials, through its credential role: a credential minted for
+the run, which the agent must not hold. The program runs on your machine, outside the
+wall. The agent never holds its secrets, or the credential it mints.
 
 - Qory publishes its own, each in a repository of its own, such as
   [`qory-github`](https://github.com/qoryai/qory-github). Its integration is named
@@ -480,19 +480,16 @@ no settings and reaches no network. Every release publishes the same bytes as
 | `publisher` | who publishes the program, as the program names it. Nothing verifies it |
 | `program_version` | the program's own version, a string. A release's is `X.Y.Z`, its version |
 | `settings` | a JSON Schema of the settings the program takes. A property marked `writeOnly` is a secret |
-| `roles` | the ways it offers: `credential`, `tool`, or both. A description may also hold a role the contract reserves, such as `work_source`; a run leaves it as it is |
+| `roles` | the ways it offers, each under its role's name, such as `credential`. A run starts only the roles its connection's `ways` names, and leaves any other role of the description as it is |
 
 Each role lists, in `settings`, the names of the settings it may receive, and in
 `required` the ones it needs. A secret is listed by its `<name>`. Its value comes either
 as `<name>` or as `<name>_file`, the path of a file that holds it.
 
-- The **credential** role mints or fetches a token for the run's argument. `argument` is
-  the pattern the argument must match whole. A role without `argument` ignores the
-  connection's argument and gets the empty string. `hosts` are the most hosts the token
-  may be set on.
-- The **tool** role is an MCP server reached over HTTP. `serves` are the hosts whose
-  requests go to it. `mcp` is its MCP URL, on one of those hosts. `argument` and
-  `placeholders` are optional.
+The **credential** role mints or fetches a token for the run's argument. `argument` is
+the pattern the argument must match whole. A role without `argument` ignores the
+connection's argument and gets the empty string. `hosts` are the most hosts the token
+may be set on.
 
 The description of `github`, shortened. Its argument is one repository or several of one
 owner, separated by commas:
@@ -514,18 +511,17 @@ owner, separated by commas:
 ### Install an integration
 
 ```sh
-qory integration install <source> [--version X.Y.Z] [--forge-kind K] [--replace]
+qory integration install <source> [--version X.Y.Z] [--replace]
 ```
 
 ```sh
 qory integration install github.com/qoryai/qory-github --version 1.4.0
-qory integration install git.example.com/acme/tracker --forge-kind forgejo
+qory integration install gitlab.com/acme/tools/tracker
 qory integration install https://downloads.example.com/tracker/description.json
 ```
 
 - `--version X.Y.Z` installs that release. Without it, `qory` installs the latest.
-- `--forge-kind` names the forge kind of a host that implies none.
-- `--replace` lets an install replace an entry that was installed from another source.
+- `--replace` lets an install replace an entry installed from another source.
 
 Install the version your connections name. A server's connection always names one, and
 the program's `program_version` must equal it exactly, else the run is refused,
@@ -537,35 +533,32 @@ a program of its choosing on your machine.
 
 #### Sources
 
-The source is where the integration's releases are. It has one of two forms:
+The source is where the integration's public releases are. It is one of:
 
-- **A repository on a forge**, `<host>/<path>`, with no scheme and no `.git` at the end.
-  The path has two segments or more, each of 1 to 100 characters:
-  `github.com/qoryai/qory-github`, `gitlab.com/acme/tools/tracker`,
-  `git.example.com/acme/tracker`.
+- **A repository on GitHub**, `github.com/<owner>/<repo>`, such as
+  `github.com/qoryai/qory-github`.
+- **A project on GitLab**, `gitlab.com/<group>/<project>`, or in subgroups
+  `gitlab.com/<group>/<subgroup>/<project>`, such as `gitlab.com/acme/tools/tracker`.
+- **A repository on Codeberg**, `codeberg.org/<owner>/<repo>`.
 - **An `https://` URL of a release's `description.json`.** It ends in
   `/description.json`, and the release's other files are in the same directory. A URL
   source is one release.
 
-The forge kind says how to read a forge: `github`, `gitlab` or `forgejo`. Gitea counts as
-`forgejo`. On `github.com`, `gitlab.com` and `codeberg.org` the host implies it. On any
-other host, pass it with `--forge-kind`. A `--forge-kind` that contradicts the host, or
-one beside a URL source, is refused.
+A repository source has no scheme and no `.git` at the end. In every form, each path
+segment is 1 to 100 characters, and starts with a letter, a digit, `_` or `-`. So no `.`
+or `..`, and no `%`.
 
-Each form is refused unless:
+A URL source is refused unless:
 
 - the host is a lower-case DNS name with at least one dot, whose last label starts with a
   letter. So no IP address, port, userinfo, query or fragment;
 - the host is not `localhost`, and does not end in `.localhost`, `.local`, `.internal` or
-  `.home.arpa`;
-- each path segment starts with a letter, a digit, `_` or `-`. So no `.` or `..`, and no
-  `%`.
+  `.home.arpa`.
 
 `qory` also refuses a host whose address is loopback, private, link-local or unspecified.
 It checks the address it connects to.
 
-Installing needs the release's files to be downloadable without a token. `qory` sends
-none.
+A release's files must be downloadable without a token.
 
 #### What install downloads and checks
 
@@ -577,19 +570,19 @@ A release is three kinds of file:
 - `checksums.txt`, the SHA-256 of each archive and of `description.json`.
 
 `X.Y.Z` is the release's version: three numbers, no leading zeros, nothing before or
-after. On a forge the release is tagged `vX.Y.Z`.
+after. On GitHub, GitLab and Codeberg the release is tagged `vX.Y.Z`.
 
-From a forge, `qory` installs release `X.Y.Z` with `--version`, else the latest: on
-`github` and `forgejo` the newest that is neither a draft nor a prerelease, on `gitlab`
-the one with the latest `released_at`, an upcoming release included. From a URL source,
-it installs the release at that URL, and `--version` must be its `program_version`. It
+From a repository, `qory` installs release `X.Y.Z` with `--version`, else the latest: on
+GitHub and Codeberg the newest that is neither a draft nor a prerelease, on GitLab the
+one with the latest `released_at`, an upcoming release included. From a URL source, it
+installs the release at that URL, and `--version` must be its `program_version`. It
 fetches each file of release `X.Y.Z` here:
 
-| Forge kind | A file of release `X.Y.Z` |
+| Source | A file of release `X.Y.Z` |
 |---|---|
-| `github` | `https://<host>/<owner>/<repo>/releases/download/vX.Y.Z/<file>` |
-| `forgejo` | `https://<host>/<owner>/<repo>/releases/download/vX.Y.Z/<file>` |
-| `gitlab` | `https://<host>/api/v4/projects/<path, URL-encoded>/releases/vX.Y.Z/downloads/<file>` |
+| `github.com/<owner>/<repo>` | `https://github.com/<owner>/<repo>/releases/download/vX.Y.Z/<file>` |
+| `gitlab.com/<path>` | `https://gitlab.com/api/v4/projects/<path, URL-encoded>/releases/vX.Y.Z/downloads/<file>`, through GitLab's API |
+| `codeberg.org/<owner>/<repo>` | `https://codeberg.org/<owner>/<repo>/releases/download/vX.Y.Z/<file>` |
 | a URL source | `<file>` in the directory of `description.json` |
 
 The [release rule](https://github.com/qoryai/integrations#release-rule) has the rest.
@@ -611,7 +604,7 @@ Then `qory`:
 A step that fails stops the install, and `runner.yaml` stays as it was.
 
 `qory` prints the integration's name and version, and its publisher beside the source's
-owner. The owner is what the source proves: the forge namespace, such as
+owner. The owner is what the source proves: the owner on GitHub or Codeberg, such as
 `github.com/qoryai`, the group path on GitLab, or the host of a URL source. A publisher
 that differs from the owner is shown as the program gives it.
 
@@ -726,8 +719,7 @@ connection names:
 | `id` | the connection's id |
 | `name` | the integration's name: its key under `integrations:` |
 | `source`, `version` | where its releases are, and the `program_version` it must have. A server's connection always has both. In `runner.yaml` they are optional |
-| `forge_kind` | `github`, `gitlab` or `forgejo`, for a forge whose host implies none |
-| `ways` | the roles the run uses: `credential`, `tool`, or both. At least one, each a role the description defines |
+| `ways` | the roles the run uses, such as `credential`. At least one, each a role the description defines |
 | `argument` | the run's one argument, such as `acme/shop`. Each chosen role that has an `argument` pattern must match it whole. A role without one ignores it and gets the empty string |
 | `settings` | the plain settings |
 | `secrets` | each secret the chosen roles list, by its setting's name, linked to a secret |
@@ -750,7 +742,7 @@ A server's run configuration carries the connections it chose for the run:
  "secrets": {"private_key": {"id": "sec_9c4r7t2y5b8n1h3e", "name": "GITHUB_APP_PRIVATE_KEY"}}}
 ```
 
-- The server checks `source`, `forge_kind`, `ways`, `argument` and `settings` against the
+- The server checks `source`, `ways`, `argument` and `settings` against the
   release's `description.json`, and that each key of `secrets` is a secret a chosen role
   lists.
 - A secret with an `id` is a value the server stores. The runner fetches it for the run,
@@ -786,9 +778,8 @@ secrets:
 - An entry of `secrets.local` takes its value from `file` or `env`, or holds several
   under `values`, each by a value id, which a reference selects with `value_id`.
 - `hosts` is required on every entry: the most hosts the value may be sent to. For an
-  integration, the hosts compared are those of each chosen role that lists the secret:
-  the credential role's `hosts`, the tool role's `serves`. A host it does not cover stops
-  the run, `secret_hosts_exceeded`.
+  integration, the hosts compared are the credential role's `hosts`, when it lists the
+  secret. A host it does not cover stops the run, `secret_hosts_exceeded`.
 - `secrets.providers` lists where a reference is looked up, in order. It is `[local]`
   unless set.
 - A `<name>_file` setting may stand in `settings` here, such as
@@ -802,11 +793,10 @@ receives the raw value, and where it sends it is the program's.
 #### Settings and secrets
 
 The runner hands each role its settings on standard input, never on a command line or in
-the environment. It starts each role as:
+the environment. It starts the credential role as:
 
 ```sh
 <program> credential -- <argument>
-<program> tool -- <argument>
 ```
 
 `--` is always there, with exactly one argument after it. It is the empty string when the
@@ -845,7 +835,7 @@ the run with its code:
 
 | Check | Code |
 |---|---|
-| `source` and `forge_kind` are well formed: the patterns, a refused host, a forge kind missing, misplaced or contradicting the host | `run_configuration_invalid` |
+| `source` is well formed: the patterns, and no refused host | `run_configuration_invalid` |
 | the run has a wall | `connection_needs_wall` |
 | the machine has an entry of that `name` | `integration_missing` |
 | for a server's connection, the argument and the settings stay within the entry's `arguments` and `settings`, and no `<name>_file` setting is there | `integration_argument_not_allowed`, `integration_settings_not_allowed` |
@@ -853,20 +843,17 @@ the run with its code:
 | the description's `name` is the connection's | `integration_name_mismatch` |
 | its `program_version` is the connection's `version`, when the connection has one | `integration_version_mismatch` |
 | the connection's `source` is the entry's, and the SHA-256 of `describe`'s output is the entry's `description_sha256` | `integration_source_mismatch` |
-| the description is usable: a tool's `mcp` host is one of its `serves` | `integration_description_invalid` |
 | each role of `ways` is one the description defines | `integration_role_missing` |
 | for a server's connection, each role of `ways` is within the entry's `ways` | `integration_way_not_allowed` |
 | the argument matches each chosen role's `argument` pattern. A role without one ignores the argument | `integration_argument_not_allowed` |
 | each role's settings document passes the checks of [Settings and secrets](#settings-and-secrets) | `integration_settings_not_allowed`, `integration_settings_invalid`, `integration_settings_too_large` |
 | every secret resolves, and a value of this machine goes only to hosts its `hosts` cover | `secret_unresolved`, `secret_hosts_exceeded` |
-| no host is set by two connections, or both set by a connection and served by a tool | `connection_host_conflict` |
+| no host is set by two connections | `connection_host_conflict` |
 | no `*.` host covers a public suffix | `connection_host_public_suffix` |
 | no placeholder is a name the run sets or reserves, or one the run passes a value for | `placeholder_conflict` |
 | the credential role starts and answers within a minute, with a document its schema accepts | `integration_failed` |
 | the answer claims no host or path above the description's `hosts` and the entry's `paths` | `integration_hosts_exceeded` |
 | the answer sets no header the runner reserves | `connection_header_reserved` |
-| under `enforce`, the allow list covers each tool's `serves` | `tool_host_denied` |
-| each tool listens within a minute | `tool_not_started` |
 
 An entry without `source` and `description_sha256`, such as a program of your own, is
 checked by name and version alone.
@@ -922,21 +909,6 @@ Under `observe`:
 In either mode, a path that could be read two ways is refused on these hosts, such as one
 with an encoded slash.
 
-### The tool role
-
-With `tool` in `ways`, the runner starts `<program> tool -- <argument>` before the agent,
-outside the wall, with the role's settings on standard input. The tool listens on a Unix
-socket of the runner's, `QORY_TOOL_LISTEN`.
-
-- The proxy ends TLS for each host of the role's `serves`, decides each request by the
-  policy, and sends the tool the requests it allows.
-- `qory` adds the role's `mcp` URL to the run's own MCP client configuration, never to
-  the checkout's `.mcp.json`. The agent reaches the tool by that URL, through the proxy,
-  and the checkout carries nothing of it.
-- Each of the role's `placeholders` is a variable in the container, set to a placeholder
-  for the agent's MCP client to send. The tool, not the proxy, checks it.
-- The tool's secrets stay outside the container. SIGTERM ends it when the run ends.
-
 ### Upgrade an integration
 
 Install it again, at the new version:
@@ -950,7 +922,6 @@ qory integration install github.com/qoryai/qory-github --version 1.5.0
   too.
 - An install from another source than the entry's is refused unless `--replace` is
   given. The message names both sources.
-- The entry records no forge kind. A host that implies none needs `--forge-kind` again.
 
 One entry holds one `path`, so the machine serves one version at a time. A server's
 connection names a version, and a run whose connection names another than the installed
@@ -968,11 +939,9 @@ owner. An entry whose program does not describe is an error.
 A run's record shows what each connection did:
 
 - `dev.qory.run.policy_applied` lists each connection: its id, `name`, `source`,
-  `forge_kind` when it has one, `version`, `ways` and `argument`; its secrets by name,
-  never a value; where and how the proxy sets the token, `uses`; and `hosts_denied`. A
-  tool is listed among `tools` with its connection, its hosts and its argument.
-- `dev.qory.run.egress` names the `connection` whose token a request carried, and the
-  `tool` a request went to.
+  `version`, `ways` and `argument`; its secrets by name, never a value; where and how the
+  proxy sets the token, `uses`; and `hosts_denied`.
+- `dev.qory.run.egress` names the `connection` whose token a request carried.
 
 ## Resending a run's record
 
