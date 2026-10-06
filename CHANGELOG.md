@@ -63,9 +63,10 @@ release may change what an existing document does, and states it under Upgrading
   capabilities of its own. Then it starts the image as the wall starts the agent, as a user
   the image does not know, with no capability and no network, and qory's Linux build,
   `wall.helper` or on Linux qory itself, checks from inside: `HOME` takes a file, the
-  authorities are where the wall reads them, `/bin/sh` is there, `claude` is the
-  descriptor's version, and `git` and `gh` run. It reports whether `dockerd` is in a system
-  directory, with what it runs. The exit status is 1 when a check fails.
+  authorities are where the wall reads them, `/bin/sh` is there for the runtime's hooks
+  and the runner's API-key approval, `claude` is the descriptor's version, and `git` and
+  `gh` run. It reports whether `dockerd` is in a system directory, with what it runs. The
+  exit status is 1 when a check fails.
 
 ### Changed
 
