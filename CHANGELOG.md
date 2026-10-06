@@ -8,8 +8,8 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Upgrading
 
-- Needs `github.com/qoryai/runner` at commit `64f2861` of its `main`,
-  `v0.6.1-0.20261006192656-64f28618fa9b`, contract `v1` revision 1 as amended there. Its
+- Needs `github.com/qoryai/runner` at commit `531c920` of its `next`,
+  `v0.6.1-0.20261006204946-531c9201119f`, contract `v1` revision 1 as amended there. Its
   `wall.Nest` makes `/run/qory` root's with mode `0755`, where 0.6.0 made it `0700` and
   the agent's `docker` command could not read its configuration beneath it.
 
