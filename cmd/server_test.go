@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/qoryai/runner/accesskey"
 
@@ -278,5 +279,128 @@ func TestRunEndsWhenTheServerClosesIt(t *testing.T) {
 	out, err := run(t, "run")
 	if cmd.ExitCode(err) != 1 || !strings.Contains(out+err.Error(), "the server closed the run") {
 		t.Errorf("a closed run: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+}
+
+// TestTheMarkerKeepsEveryUnwalledRunOut is the stored-secrets marker: an unwalled run
+// that contacts no server is refused before it starts, --local included, and one with a
+// server once discovery is read, whichever key it signs with; a run's lock file names it
+// unwalled and stays for a key command to remove.
+func TestTheMarkerKeepsEveryUnwalledRunOut(t *testing.T) {
+	root, srv := serverRun(t, "", "")
+	dir := configDir()
+	if err := dir.WriteMarker(); err != nil {
+		t.Fatal(err)
+	}
+	marker := dir.Path(runnerdir.MarkerFile)
+	want := "the stored-secrets marker " + marker + " exists: this machine's access key may receive stored secrets, so every run needs a wall: --wall docker, or wall in runner.yaml (server_needs_wall)"
+	for _, args := range [][]string{{"run", "--local"}, {"run"}} {
+		clearRuns(t, root)
+		out, err := run(t, args...)
+		if cmd.ExitCode(err) != 1 || err.Error() != want {
+			t.Errorf("%v: %v (exit %d)\n%s", args, err, cmd.ExitCode(err), out)
+		}
+		if strings.Contains(out, "hello from") {
+			t.Errorf("%v: the runtime ran", args)
+		}
+	}
+	if got := srv.byType(); len(got["dev.qory.ping"]) != 0 {
+		t.Errorf("a refused run pinged: %v", got)
+	}
+	// The secret from the environment leaves the marker as it is.
+	t.Setenv("QORY_ACCESS_KEY_SECRET", srv.key.Secret())
+	clearRuns(t, root)
+	if _, err := run(t, "run"); cmd.ExitCode(err) != 1 || !strings.Contains(err.Error(), "server_needs_wall") {
+		t.Errorf("a key from the environment: %v", err)
+	}
+	if has, _ := dir.HasMarker(); !has {
+		t.Error("a discovery under the environment's key removed the marker")
+	}
+	t.Setenv("QORY_ACCESS_KEY_SECRET", "")
+	writeFile(t, filepath.Join(string(dir), "runner.yaml"), "apiVersion: qory.dev/v1alpha1\n")
+	clearRuns(t, root)
+	if _, err := run(t, "run"); cmd.ExitCode(err) != 1 || !strings.Contains(err.Error(), "server_needs_wall") {
+		t.Errorf("a runner file without a server: %v", err)
+	}
+
+	dir.RemoveMarker()
+	clearRuns(t, root)
+	if out, err := run(t, "run"); err != nil {
+		t.Fatalf("without the marker: %v\n%s", err, out)
+	}
+	entries, _ := os.ReadDir(filepath.Join(root, ".qory", "runs"))
+	b, err := os.ReadFile(filepath.Join(dir.Path(runnerdir.LocksDir), entries[0].Name()+".lock"))
+	if err != nil || string(b) != "unwalled\n" {
+		t.Errorf("the run's lock file: %q, %v", b, err)
+	}
+}
+
+// TestDiscoverySettlesTheMarker is the marker rule of a signed discovery under the
+// secret of access-key-secret: one that lists secrets writes it and refuses the
+// unwalled run after reading it; one that lists none deletes the moved-aside secrets
+// and removes the marker, so the run goes on; a key that awaits approval leaves both.
+func TestDiscoverySettlesTheMarker(t *testing.T) {
+	root, srv := serverRun(t, "", "")
+	dir := configDir()
+	srv.secrets = true
+	if _, err := run(t, "run"); cmd.ExitCode(err) != 1 || !strings.Contains(err.Error(), "the server lists stored secrets for this machine's access key, so every run needs a wall") {
+		t.Errorf("discovery with secrets: %v", err)
+	}
+	if has, _ := dir.HasMarker(); !has {
+		t.Error("discovery with secrets wrote no marker")
+	}
+	srv.secrets = false
+	old := dir.Path(runnerdir.OldPrefix + "1700000000")
+	writeFile(t, old, newKey(t).Secret()+"\n")
+	srv.pending = true
+	clearRuns(t, root)
+	if _, err := run(t, "run"); err == nil || !strings.Contains(err.Error(), "key_pending") {
+		t.Errorf("a pending key: %v", err)
+	}
+	if has, _ := dir.HasMarker(); !has {
+		t.Error("an unsuccessful discovery removed the marker")
+	}
+	if _, err := os.Stat(old); err != nil {
+		t.Error("an unsuccessful discovery deleted the secret moved aside")
+	}
+	srv.pending = false
+	clearRuns(t, root)
+	if out, err := run(t, "run"); err != nil {
+		t.Fatalf("discovery without secrets: %v\n%s", err, out)
+	}
+	if has, _ := dir.HasMarker(); has {
+		t.Error("discovery without secrets kept the marker")
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Error("the secret moved aside is still there")
+	}
+}
+
+// TestARunWaitsForAKeyCommand is a run that starts while a key command holds the key
+// lock: it waits, and goes on once the lock is dropped.
+func TestARunWaitsForAKeyCommand(t *testing.T) {
+	_, _ = serverRun(t, "", "")
+	lock, err := configDir().LockKey(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := run(t, "run", "--local")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("the run did not wait: %v", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	lock.Release()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("the run after the lock: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("the run never started")
 	}
 }

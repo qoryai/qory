@@ -1,10 +1,14 @@
 package cmd
 
 import (
+	"crypto/rand"
+	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/qoryai/runner/accesskey"
 	"github.com/qoryai/runner/session"
@@ -149,4 +153,120 @@ func explain(err error, id *serverIdentity) error {
 		return err
 	}
 	return &refusedError{text: text, err: err}
+}
+
+// codeServerNeedsWall is the refusal of an unwalled run while the machine keeps stored
+// secrets: the server's discovery lists them, or the stored-secrets marker exists.
+const codeServerNeedsWall = "server_needs_wall"
+
+// needsWall is the server_needs_wall refusal, saying why.
+func needsWall(dir runnerdir.Dir, listed bool) error {
+	why := "the stored-secrets marker " + dir.Path(runnerdir.MarkerFile) + " exists: this machine's access key may receive stored secrets"
+	if listed {
+		why = "the server lists stored secrets for this machine's access key"
+	}
+	return &refusedError{
+		text: fmt.Sprintf("%s, so every run needs a wall: --wall %s, or wall in %s", why, config.WallDocker, config.RunnerFileName),
+		err:  &session.Refusal{Code: codeServerNeedsWall},
+	}
+}
+
+// startRun is the start of every run, before anything is started: under the key lock
+// held shared, it refuses an unwalled run that contacts no server while the
+// stored-secrets marker exists, then creates and holds the run's own lock file, naming
+// whether it is walled, and drops the key lock. A key command, which holds the key lock
+// exclusively, so waits for starting runs, and they for it. In a directory that cannot
+// be written no key command can work either, and the run goes on without the locks.
+func startRun(dir runnerdir.Dir, runID string, walled, noServer bool) (*runnerdir.Lock, error) {
+	if dir == "" {
+		return nil, nil
+	}
+	key, err := dir.LockKey(false)
+	if err != nil && !errors.Is(err, runnerdir.ErrReadOnly) {
+		return nil, fmt.Errorf("the key lock: %w", err)
+	}
+	defer key.Release()
+	// A marker that cannot be looked at counts as one.
+	marker, _ := dir.HasMarker()
+	if marker && noServer && !walled {
+		return nil, needsWall(dir, false)
+	}
+	if key == nil {
+		return nil, nil
+	}
+	return dir.LockRun(runID, walled)
+}
+
+// discovered is what a run against the server does once the server's signed discovery
+// is read, before the ping: it prints the node. When the run's secret is the one in
+// access-key-secret, still there, it then, under the key lock held exclusively, deletes
+// every secret moved aside, since the key's signed discovery succeeded; writes the
+// stored-secrets marker when discovery lists secrets, a marker it cannot write being no
+// run; and removes it when discovery lists none and that secret is the directory's only
+// one. An unwalled run is refused, server_needs_wall, when discovery lists secrets or
+// the marker still exists.
+func discovered(dir runnerdir.Dir, id *serverIdentity, walled bool, report io.Writer) func(session.Discovery) error {
+	return func(d session.Discovery) error {
+		fmt.Fprintf(report, "qory run: node %s, instance %s\n", d.NodeID, id.instanceID)
+		if id.key.source == fromFile {
+			if err := settleMarker(dir, id.key.key, d.Secrets); err != nil {
+				return err
+			}
+		}
+		if walled {
+			return nil
+		}
+		if d.Secrets {
+			return needsWall(dir, true)
+		}
+		if marker, _ := dir.HasMarker(); marker {
+			return needsWall(dir, false)
+		}
+		return nil
+	}
+}
+
+// settleMarker is the marker rule of a signed discovery under the secret of
+// access-key-secret, under the key lock held exclusively.
+func settleMarker(dir runnerdir.Dir, key *accesskey.Key, secrets bool) error {
+	lock, err := dir.LockKey(true)
+	if errors.Is(err, runnerdir.ErrReadOnly) {
+		if secrets {
+			if err := dir.WriteMarker(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("the key lock: %w", err)
+	}
+	defer lock.Release()
+	if !dir.SameSecret(key) {
+		return nil
+	}
+	if err := dir.DeleteOldSecrets(); err != nil {
+		return fmt.Errorf("delete the secrets moved aside: %w", err)
+	}
+	if secrets {
+		return dir.WriteMarker()
+	}
+	if old, err := dir.OldSecrets(); err == nil && len(old) == 0 {
+		return dir.RemoveMarker()
+	}
+	return nil
+}
+
+// newRunID returns a new run id, a UUID version 7 in the canonical lower-case form, so
+// the run's lock file is named before the runner starts.
+func newRunID() string {
+	var b [16]byte
+	binary.BigEndian.PutUint64(b[:8], uint64(time.Now().UnixMilli())<<16)
+	if _, err := rand.Read(b[6:]); err != nil {
+		panic(err)
+	}
+	b[6] = b[6]&0x0f | 0x70
+	b[8] = b[8]&0x3f | 0x80
+	h := hex.EncodeToString(b[:])
+	return h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
 }

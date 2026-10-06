@@ -196,12 +196,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				StopSignal:    stopSignal,
 				StopGrace:     grace,
 			}
+			if spec.RunID == "" {
+				spec.RunID = newRunID()
+			}
 			if id != nil {
 				spec.AccessKey, spec.InstanceID, spec.InstanceName = id.key.key, id.instanceID, id.instanceName
-				spec.Discovered = func(d session.Discovery) error {
-					fmt.Fprintf(stderr, "qory run: node %s, instance %s\n", d.NodeID, id.instanceID)
-					return nil
-				}
 			}
 			selected := ""
 			if pol != nil {
@@ -216,6 +215,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						return input(fmt.Errorf("--policy %s is inside %s, which the container may write; keep it outside or mount that read-only", policyFile, m.Path))
 					}
 				}
+			}
+			walled := spec.Wall != nil
+			runLock, err := startRun(machineDir(), spec.RunID, walled, id == nil)
+			if err != nil {
+				return err
+			}
+			defer runLock.Release()
+			if id != nil {
+				spec.Discovered = discovered(machineDir(), id, walled, stderr)
 			}
 			if r := conf.Runner; r != nil {
 				for _, key := range r.Shadowed() {
