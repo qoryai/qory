@@ -15,7 +15,7 @@ import (
 // pass, and the fact about Docker.
 const probeLines = `{"name":"home","result":"pass","detail":"HOME is /home/agent, and the user 65532:65532 writes in it"},` +
 	`{"name":"authorities","result":"pass","detail":"the authorities are in /etc/ssl/certs/ca-certificates.crt, 1 certificates"},` +
-	`{"name":"shell","result":"pass","detail":"/bin/sh runs the runtime hooks"},` +
+	`{"name":"shell","result":"pass","detail":"/bin/sh runs the runtime hooks and the API-key approval"},` +
 	`{"name":"git","result":"pass","detail":"git version 2.47.3"},` +
 	`{"name":"gh","result":"pass","detail":"gh version 2.101.0"},` +
 	`{"name":"docker","result":"info","detail":"no dockerd: the image carries no Docker of the agent own"}`

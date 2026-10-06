@@ -662,9 +662,10 @@ one fails.
 - From inside: it starts the image the way the wall starts the agent, as a user the image
   does not know, with no capability and no network. `qory`'s Linux build then checks
   that `HOME` takes a file from that user, the authorities are where the wall reads
-  them, `/bin/sh` is there for the runtime's hooks, `claude` is the version the runner's
-  descriptor is written against, and `git` and `gh` run. It reports whether `dockerd` is
-  in a system directory, and checks that what the daemon runs is there too.
+  them, `/bin/sh` is there for the runtime's hooks and the runner's API-key approval,
+  `claude` is the version the runner's descriptor is written against, and `git` and
+  `gh` run. It reports whether `dockerd` is in a system directory, and checks that what
+  the daemon runs is there too.
 
 The Linux build is the one the wall uses: `wall.helper`, for your engine's architecture,
 or on Linux the `qory` you run when `wall.helper` is not set.

@@ -16,7 +16,7 @@ network, and qory's Linux build checks from inside:
 
   - HOME is a directory that user writes in
   - the system's authorities are where the wall reads them
-  - /bin/sh is there, for the runtime's hooks
+  - /bin/sh is there, for the runtime's hooks and the runner's API-key approval
   - claude is the version the runner's descriptor is written against
   - git and gh run
   - dockerd, for a Docker of the agent's own, and what it runs

@@ -164,13 +164,15 @@ func (p Probe) authorities() Check {
 	return Check{"authorities", Fail, "no bundle of authorities in " + strings.Join(Bundles, ", ") + "; install the system's, ca-certificates on Debian, so the wall can add the run's authority after them"}
 }
 
-// shell checks for /bin/sh, which a runtime's hooks run under.
+// shell checks for /bin/sh, which a runtime's hooks run under, as sh -c, and the
+// runner's approval of an API key's placeholder for an interactive Claude Code, as
+// /bin/sh and the script it writes into the run directory.
 func (p Probe) shell() Check {
 	info, err := os.Stat(p.host("/bin/sh"))
 	if err != nil || !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
-		return Check{"shell", Fail, "no /bin/sh; the runtime's hooks run under sh -c"}
+		return Check{"shell", Fail, "no /bin/sh; the runtime's hooks and the runner's API-key approval run under sh"}
 	}
-	return Check{"shell", Pass, "/bin/sh runs the runtime's hooks"}
+	return Check{"shell", Pass, "/bin/sh runs the runtime's hooks and the API-key approval"}
 }
 
 // version is the first version number in what a program printed: 2.1.273 in

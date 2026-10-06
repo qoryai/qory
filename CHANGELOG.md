@@ -8,10 +8,13 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Upgrading
 
-- Needs `github.com/qoryai/runner` at commit `531c920` of its `next`,
-  `v0.6.1-0.20261006204946-531c9201119f`, contract `v1` revision 1 as amended there. Its
+- Needs `github.com/qoryai/runner` at commit `f6f92b8` of its `next`,
+  `v0.6.1-0.20261006214431-f6f92b84df85`, contract `v1` revision 1 as amended there. Its
   `wall.Nest` makes `/run/qory` root's with mode `0755`, where 0.6.0 made it `0700` and
-  the agent's `docker` command could not read its configuration beneath it.
+  the agent's `docker` command could not read its configuration beneath it. An
+  interactive Claude Code run with an API key behind the wall starts through the runner's
+  approval script, `/bin/sh` and `approve-key.sh` in the run directory, which pre-approves
+  the key's placeholder; `dev.qory.run.started` records that command.
 
 ### Added
 
@@ -60,9 +63,10 @@ release may change what an existing document does, and states it under Upgrading
   capabilities of its own. Then it starts the image as the wall starts the agent, as a user
   the image does not know, with no capability and no network, and qory's Linux build,
   `wall.helper` or on Linux qory itself, checks from inside: `HOME` takes a file, the
-  authorities are where the wall reads them, `/bin/sh` is there, `claude` is the
-  descriptor's version, and `git` and `gh` run. It reports whether `dockerd` is in a system
-  directory, with what it runs. The exit status is 1 when a check fails.
+  authorities are where the wall reads them, `/bin/sh` is there for the runtime's hooks
+  and the runner's API-key approval, `claude` is the descriptor's version, and `git` and
+  `gh` run. It reports whether `dockerd` is in a system directory, with what it runs. The
+  exit status is 1 when a check fails.
 
 ### Changed
 
