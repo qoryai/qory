@@ -544,9 +544,9 @@ The source is where the integration's public releases are. It is one of:
   `/description.json`, and the release's other files are in the same directory. A URL
   source is one release.
 
-A repository source has no scheme and no `.git` at the end. In every form, each path
-segment is 1 to 100 characters, and starts with a letter, a digit, `_` or `-`. So no `.`
-or `..`, and no `%`.
+A repository source on any other host is refused. A repository source has no scheme and
+no `.git` at the end. In every form, each path segment is 1 to 100 characters, and starts
+with a letter, a digit, `_` or `-`. So no `.` or `..`, and no `%`.
 
 A URL source is refused unless:
 
