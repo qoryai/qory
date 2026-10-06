@@ -647,7 +647,7 @@ policy selects one.
 
 ### A Docker of the agent's own
 
-*Experimental. It may change, or go, in a minor release.*
+*Experimental. It may change, or go, without notice.*
 
 With `docker: true`, the agent gets a Docker daemon inside its container, never your
 machine's. Its tests can start a database. It can build and run images.
@@ -662,18 +662,26 @@ run these images on a Linux machine that has it.
 
 What the image holds:
 
-- `dockerd`, in `/usr/local/sbin`, `/usr/local/bin`, `/usr/sbin`, `/usr/bin`, `/sbin`
-  or `/bin`. The run's `PATH` is never searched.
+- `dockerd`, and what it starts, `containerd`, `runc` and `iptables` among them, in
+  `/usr/local/sbin`, `/usr/local/bin`, `/usr/sbin`, `/usr/bin`, `/sbin` or `/bin`. These
+  directories are the daemon's whole `PATH`; the run's `PATH` is never searched.
+  `docker:dind` has them there.
 - The agent's user and group, in its `/etc/passwd` and `/etc/group`, when `wall.user`
   names the user by name, or by a uid with no gid.
-- For now, `/run/qory`, owned by root, mode `0755`. Without it, the containers the agent
-  starts get no proxy and reach nothing. A later release drops this.
 
 How it works:
 
 - The wall starts the container as its root, and `qory`'s helper runs there as that
   root. It starts `dockerd` on its Unix socket alone, then runs the agent as its user,
   with no capabilities.
+- The daemon gets none of the run's environment but the proxy and, when the run has
+  one, its certificate bundle. The agent gets the run's environment.
+- The helper writes the agent's docker configuration, which gives the containers the
+  agent starts the proxy, to `/run/qory/docker`: the agent's alone, mode `0700`, in a
+  `/run/qory` that is root's, mode `0755`, so the agent's `docker` command reads it. A
+  `/run/qory` already in the image is set to that owner and mode, and a link at either
+  path stops the run. A `DOCKER_CONFIG` the run sets, and not empty, takes the place of
+  this configuration, and must then set the proxy itself.
 - The agent reaches the daemon's socket through its group. Whoever reaches the socket is
   the container's root: inside the container, and nowhere else.
 - The containers the agent starts are inside the wall. A plain one, one on the host's

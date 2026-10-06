@@ -6,6 +6,13 @@ release may change what an existing document does, and states it under Upgrading
 
 ## [Unreleased]
 
+### Upgrading
+
+- Needs `github.com/qoryai/runner` at commit `64f2861` of its `main`,
+  `v0.6.1-0.20261006192656-64f28618fa9b`, contract `v1` revision 1 as amended there. Its
+  `wall.Nest` makes `/run/qory` root's with mode `0755`, where 0.6.0 made it `0700` and
+  the agent's `docker` command could not read its configuration beneath it.
+
 ### Added
 
 - `wall.images` in `runner.yaml` defines the agent's images by name, each with `ref`, its
@@ -30,9 +37,11 @@ release may change what an existing document does, and states it under Upgrading
   its Unix socket alone, then the agent as its user with no capabilities. The containers
   the agent starts are inside the wall, and what they reach goes through the proxy and
   is recorded. Define such an image only where every run may get one: any policy can
-  select it. In this release, an image with `docker: true` must also hold `/run/qory`,
-  owned by root, mode `0755`: without it, the containers the agent starts get no proxy
-  and reach nothing.
+  select it. The helper makes `/run/qory` root's with mode `0755` and the agent's docker
+  configuration beneath it the agent's alone, so the agent's `docker` command reads it
+  and the containers it starts get the proxy. `dockerd`, `containerd`, `runc` and
+  `iptables` come from the image's system directories, and the daemon gets none of the
+  run's environment but the proxy and the run's certificate bundle.
 
 ### Changed
 
