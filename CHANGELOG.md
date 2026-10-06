@@ -81,6 +81,17 @@ release may change what an existing document does, and states it under Upgrading
   never look for a newer release. At a terminal there, the look runs as the container's
   root and puts a connection the agent did not make in the run's record.
 - `qory run` behind a wall with no image names the page that says how to build Qory's.
+- `docs/run.md` has one section, Integrations, on using an integration: what it
+  describes; `qory integration install <source>`, from a forge path, with `--forge-kind`
+  where the host implies none, or from the URL of a release's `description.json`; what
+  it downloads and checks, and the `integrations:` entry it writes, `path`, `source` and
+  `description_sha256`, with the machine's bounds `ways`, `arguments`, `settings` and
+  `paths`; a connection's `ways`, argument, settings and secrets, from a server or from
+  `runner.yaml`'s `connections:` and `secrets.local`; each role's settings on standard
+  input; the checks at a run's start with their codes; the credential role, the tool
+  role and its MCP URL; upgrading; and `qory config`. An adapter in `credentials:`,
+  settings on a command line, and `server.secret` with `QORY_SERVER_SECRET` are gone
+  from the page.
 
 ## [0.12.1] - 2026-09-30
 
