@@ -8,10 +8,13 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Upgrading
 
-- Needs `github.com/qoryai/runner` at commit `531c920` of its `next`,
-  `v0.6.1-0.20261006204946-531c9201119f`, contract `v1` revision 1 as amended there. Its
+- Needs `github.com/qoryai/runner` at commit `f6f92b8` of its `next`,
+  `v0.6.1-0.20261006214431-f6f92b84df85`, contract `v1` revision 1 as amended there. Its
   `wall.Nest` makes `/run/qory` root's with mode `0755`, where 0.6.0 made it `0700` and
-  the agent's `docker` command could not read its configuration beneath it.
+  the agent's `docker` command could not read its configuration beneath it. An
+  interactive Claude Code run with an API key behind the wall starts through the runner's
+  approval script, `/bin/sh` and `approve-key.sh` in the run directory, which pre-approves
+  the key's placeholder; `dev.qory.run.started` records that command.
 
 ### Added
 
