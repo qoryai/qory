@@ -116,7 +116,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					pol = &session.Policy{Version: 1, Egress: session.PolicyEgress{Mode: r.Egress.Mode, Allow: r.Egress.Allow, Deny: r.Egress.Deny}}
 				}
 				if r.Server != nil {
-					server = &session.Server{Version: 1, URL: r.Server.URL, AccessKey: r.Server.AccessKey, Secret: r.Server.Secret}
+					server = sessionServer(r.Server)
 				}
 			}
 			if policyFile != "" {
@@ -161,14 +161,23 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if err := session.CheckStopSignal(stopSignal); err != nil {
 				return input(fmt.Errorf("--stop-signal: %w", err))
 			}
+			// The access key's variables are read, and gone from qory's environment, before
+			// anything is started.
+			stderr := cmd.ErrOrStderr()
+			var id *serverIdentity
+			if server != nil && !local {
+				if id, err = identify(conf.Runner, stderr, "run"); err != nil {
+					return err
+				}
+			}
+			forgetAccessKeyEnv()
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			stderr := cmd.ErrOrStderr()
 			spec := session.Spec{
 				Runtime:       rt,
 				Command:       launch.Command,
 				Args:          append(append([]string{}, launch.Args...), extra...),
-				Env:           withEnv(withoutRunners(os.Environ()), launch.Env),
+				Env:           withEnv(os.Environ(), launch.Env),
 				Dir:           cwd,
 				Interactive:   !headless && isTerminal(cmd.InOrStdin()) && isTerminal(cmd.OutOrStdout()),
 				Stdin:         cmd.InOrStdin(),
@@ -186,6 +195,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				Timeout:       timeout,
 				StopSignal:    stopSignal,
 				StopGrace:     grace,
+			}
+			if id != nil {
+				spec.AccessKey, spec.InstanceID, spec.InstanceName = id.key.key, id.instanceID, id.instanceName
+				spec.Discovered = func(d session.Discovery) error {
+					fmt.Fprintf(stderr, "qory run: node %s, instance %s\n", d.NodeID, id.instanceID)
+					return nil
+				}
 			}
 			selected := ""
 			if pol != nil {
@@ -223,7 +239,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			res, err := session.Run(ctx, spec)
 			if err != nil {
-				return err
+				return explain(err, id)
 			}
 			u := ui.New(stderr)
 			record := ui.Short(res.Dir, at.root)
@@ -231,6 +247,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				u.Fail(fmt.Errorf("%d events did not reach the server; %s/undelivered contains them", res.Undelivered, record))
 			}
 			switch {
+			case res.RunClosed:
+				u.Fail(fmt.Errorf("the server closed the run, and %s was stopped; recorded in %s", name, record))
+				return reported(&exitError{code: 1})
 			case res.TimedOut:
 				u.Fail(fmt.Errorf("%s was stopped at the limit of %s; recorded in %s", name, timeout, record))
 				return reported(&exitError{code: exitTimeout})
@@ -361,18 +380,6 @@ func parseLabels(labels []string) (map[string]string, error) {
 	return out, nil
 }
 
-// withoutRunners is the environment without the runner's own variables, which are never
-// the session's: with the server's secret a session could sign requests of its own.
-func withoutRunners(env []string) []string {
-	out := make([]string, 0, len(env))
-	for _, kv := range env {
-		if name, _, _ := strings.Cut(kv, "="); name != config.EnvServerSecret {
-			out = append(out, kv)
-		}
-	}
-	return out
-}
-
 // withOrigin adds the labels the checkout's origin remote gives, forge and repository,
 // to the caller's, which win: a caller that names them knows better than the remote,
 // and one that names neither gets what [checkout.Origin] reads. A checkout with no
@@ -448,7 +455,7 @@ func enclose(spec *session.Spec, r *config.Runner, o wallOptions, selected strin
 	}
 	env := withEnv(nil, launchEnv)
 	for _, n := range append(append([]string{}, section.Env...), o.env...) {
-		if n == config.EnvServerSecret {
+		if config.RunnersOwn(n) {
 			return input(fmt.Errorf("--env %s: the variable is the runner's own and never the session's", n))
 		}
 		if v, ok := os.LookupEnv(n); ok {
@@ -548,9 +555,16 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 			if r == nil || r.Server == nil {
 				return input(fmt.Errorf("%s defines no server to send the record to", config.RunnerFileName))
 			}
+			id, err := identify(r, cmd.ErrOrStderr(), "run resend")
+			if err != nil {
+				return err
+			}
 			spec := session.ResendSpec{
 				Dir:           filepath.Join(at.root, ".qory", "runs", args[0]),
-				Server:        &session.Server{Version: 1, URL: r.Server.URL, AccessKey: r.Server.AccessKey, Secret: r.Server.Secret},
+				Server:        sessionServer(r.Server),
+				AccessKey:     id.key.key,
+				InstanceID:    id.instanceID,
+				InstanceName:  id.instanceName,
 				RunnerVersion: build().title(),
 				Report:        func(line string) { fmt.Fprintln(cmd.ErrOrStderr(), "qory run resend:", line) },
 			}
@@ -568,7 +582,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 			case errors.Is(err, os.ErrNotExist):
 				return input(fmt.Errorf("no run %s is recorded in this checkout", args[0]))
 			case err != nil:
-				return err
+				return explain(err, id)
 			}
 			u := ui.New(cmd.ErrOrStderr())
 			if res.Closed {

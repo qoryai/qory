@@ -1,0 +1,282 @@
+package cmd_test
+
+import (
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/qoryai/runner/accesskey"
+
+	"github.com/qoryai/qory/cmd"
+	"github.com/qoryai/qory/internal/runnerdir"
+)
+
+// fixtureSecret is the runner contract's published fixture access key secret, which
+// qory refuses as a machine's own.
+const fixtureSecret = "qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA"
+
+// serverRun is a checkout composed for the fake runtime, which exits 0, with a fake
+// server in the runner file and the machine's access key beside it.
+func serverRun(t *testing.T, policy, more string) (string, *fakeServer) {
+	t.Helper()
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, fakeRuntime(t))
+	t.Setenv("QORY_TEST_EXIT", "0")
+	srv := newFakeServer(t, policy)
+	serverFile(t, srv, more)
+	return root, srv
+}
+
+// configDir is the runner file's directory of the test's environment.
+func configDir() runnerdir.Dir {
+	return runnerdir.Dir(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory"))
+}
+
+// clearRuns removes the checkout's run records, so the next run is the one recorded.
+func clearRuns(t *testing.T, root string) {
+	t.Helper()
+	if err := os.RemoveAll(filepath.Join(root, ".qory", "runs")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+var instanceShape = regexp.MustCompile(`^i_[A-Za-z0-9_-]{22}$`)
+
+// TestRunSignsWithTheAccessKeyAndNamesTheInstance is a run against a server: every
+// request is signed under the machine's access key, carries the instance id qory keeps
+// in instance-id, mode 0600, and the display name, instance.name or the host name; qory
+// prints the node discovery lists. The next run keeps the id.
+func TestRunSignsWithTheAccessKeyAndNamesTheInstance(t *testing.T) {
+	root, srv := serverRun(t, "", "instance:\n  name: build-01\n")
+	// A variable that names nothing of qory's changes nothing.
+	t.Setenv("QORY_SERVER_SECRET", "anything")
+	out, err := run(t, "run")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	dir := configDir()
+	b, err := os.ReadFile(dir.Path(runnerdir.InstanceFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := strings.SplitN(string(b), "\n", 2)[0]
+	if !instanceShape.MatchString(id) {
+		t.Fatalf("instance-id holds %q", b)
+	}
+	if info, _ := os.Stat(dir.Path(runnerdir.InstanceFile)); info.Mode().Perm() != 0o600 {
+		t.Errorf("instance-id is mode %v", info.Mode())
+	}
+	wants(t, out, "qory run: node "+testNode+", instance "+id, "claude exited 0")
+	if srv.refused != 0 || len(srv.instances) < 3 {
+		t.Fatalf("refused %d, requests %v", srv.refused, srv.instances)
+	}
+	for _, in := range srv.instances {
+		if in != [2]string{id, "build-01"} {
+			t.Errorf("a request named the instance %v", in)
+		}
+	}
+	clearRuns(t, root)
+	serverFile(t, srv, "")
+	srv.instances = nil
+	if out, err := run(t, "run"); err != nil || !strings.Contains(out, "instance "+id) {
+		t.Fatalf("the second run: %v\n%s", err, out)
+	}
+	host, _ := os.Hostname()
+	if want := accesskey.DefaultName(host); srv.instances[0] != [2]string{id, want} {
+		t.Errorf("without instance.name the request named %v, want %q", srv.instances[0], want)
+	}
+}
+
+// TestRunRegeneratesAnInstanceIDThatIsNotThisMachines is an instance-id file whose id
+// fails the pattern, one whose hash is another machine's, and one that is a link: each
+// is replaced by a new id. In a directory that cannot be written, the id is the
+// process's own and qory says so.
+func TestRunRegeneratesAnInstanceIDThatIsNotThisMachines(t *testing.T) {
+	root, srv := serverRun(t, "", "")
+	dir := configDir()
+	path := dir.Path(runnerdir.InstanceFile)
+	elsewhere := filepath.Join(t.TempDir(), "elsewhere")
+	writeFile(t, elsewhere, string(accesskey.InstanceFile("i_fromElsewhere", runnerdir.MachineID())))
+	for name, write := range map[string]func(){
+		"a bad id": func() { writeFile(t, path, "../x\n"+accesskey.MachineHash(runnerdir.MachineID())+"\n") },
+		"another machine's": func() {
+			writeFile(t, path, string(accesskey.InstanceFile("i_copiedWithTheHome", []byte("another-machine"))))
+		},
+		"a link":             func() { os.Remove(path); os.Symlink(elsewhere, path) },
+		"one line":           func() { writeFile(t, path, "i_justTheId\n") },
+		"an empty directory": func() { os.Remove(path) },
+	} {
+		write()
+		clearRuns(t, root)
+		srv.instances = nil
+		out, err := run(t, "run")
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", name, err, out)
+		}
+		id, ok := dir.ReadInstanceID(runnerdir.MachineID())
+		if !ok || !instanceShape.MatchString(id) || srv.instances[0][0] != id {
+			t.Errorf("%s: the file holds %q, the server saw %v", name, id, srv.instances)
+		}
+		if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() {
+			t.Errorf("%s: instance-id is %v, %v", name, info, err)
+		}
+	}
+	if b, _ := os.ReadFile(elsewhere); !strings.HasPrefix(string(b), "i_fromElsewhere\n") {
+		t.Errorf("the link's target was written: %q", b)
+	}
+
+	os.Remove(path)
+	if err := os.Chmod(string(dir), 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(string(dir), 0o700) })
+	clearRuns(t, root)
+	srv.instances = nil
+	out, err := run(t, "run")
+	if err != nil {
+		t.Fatalf("a read-only directory: %v\n%s", err, out)
+	}
+	if _, err := os.Lstat(path); !os.IsNotExist(err) || !instanceShape.MatchString(srv.instances[0][0]) {
+		t.Errorf("a read-only directory: %v, the server saw %v", err, srv.instances)
+	}
+	wants(t, out, "qory run: instance "+srv.instances[0][0]+", this process's own: "+path+" cannot be written")
+}
+
+// TestRunRefusesAnAccessKeySecretTheRulesRefuse is access-key-secret that grants the
+// group or others anything, is a link, holds the published fixture key or no secret, a
+// directory others may read, and a server with no secret or no access key id: each is
+// refused before any request, and no error contains a secret.
+func TestRunRefusesAnAccessKeySecretTheRulesRefuse(t *testing.T) {
+	root, srv := serverRun(t, "", "")
+	dir := configDir()
+	path := dir.Path(runnerdir.SecretFile)
+	elsewhere := filepath.Join(t.TempDir(), "secret")
+	writeFile(t, elsewhere, srv.key.Secret()+"\n")
+	if err := os.Chmod(elsewhere, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name  string
+		setup func()
+		want  string
+	}{
+		{"group-readable", func() { os.Chmod(path, 0o640) }, path + " is mode 0640, which grants access to the group or others: chmod 600 " + path},
+		{"world-readable", func() { os.Chmod(path, 0o604) }, "is mode 0604"},
+		{"a link", func() { os.Remove(path); os.Symlink(elsewhere, path) }, path + " is a symbolic link; it must be the file itself"},
+		{"the fixture", func() { os.Remove(path); writeFile(t, path, fixtureSecret+"\n"); os.Chmod(path, 0o600) }, path + ": it holds the runner contract's published fixture key, whose secret anyone can read"},
+		{"no secret", func() { os.Remove(path); writeFile(t, path, "ak_f1xt0re000000000\n"); os.Chmod(path, 0o600) }, path + ": not an access key secret: one line, qak_ and 43 characters of base64url"},
+		{"two lines", func() { os.Remove(path); writeFile(t, path, srv.key.Secret()+"\n\n"); os.Chmod(path, 0o600) }, "not an access key secret"},
+		{"the directory", func() { os.Chmod(string(dir), 0o755) }, string(dir) + " is mode 0755, which grants access to the group or others; it holds the access key's secret: chmod 700 " + string(dir)},
+		{"none", func() { os.Remove(path) }, "no access key secret for the server " + srv.URL + ": qory access-key enrol makes one, or set QORY_ACCESS_KEY_SECRET"},
+	} {
+		writeSecret(t, srv.key)
+		c.setup()
+		clearRuns(t, root)
+		out, err := run(t, "run")
+		if cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v (exit %d), want %q\n%s", c.name, err, cmd.ExitCode(err), c.want, out)
+		}
+		if err != nil && (strings.Contains(err.Error(), srv.key.Secret()[4:]) || strings.Contains(err.Error(), fixtureSecret[4:])) {
+			t.Errorf("%s: the error contains the secret", c.name)
+		}
+		os.Chmod(string(dir), 0o700)
+	}
+	if srv.refused != 0 || len(srv.instances) != 0 {
+		t.Errorf("a refused run sent %d requests", len(srv.instances))
+	}
+	writeSecret(t, srv.key)
+	writeFile(t, filepath.Join(string(dir), "runner.yaml"), "server:\n  url: "+srv.URL+"\n  apiary_public_key: "+pinLine(srv.signer)+"\n")
+	if _, err := run(t, "run"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "runner.yaml: the server has no access_key_id: qory access-key enrol writes it, or set server.access_key_id or QORY_ACCESS_KEY_ID") {
+		t.Errorf("no access key id: %v", err)
+	}
+}
+
+// TestRunTakesTheSecretFromTheEnvironment is QORY_ACCESS_KEY_SECRET, which wins over the
+// file, and one that is not a secret, refused without being quoted. The variables are
+// gone from what the run starts.
+func TestRunTakesTheSecretFromTheEnvironment(t *testing.T) {
+	root, srv := serverRun(t, "", "")
+	writeSecret(t, newKey(t))
+	t.Setenv("QORY_ACCESS_KEY_SECRET", srv.key.Secret())
+	if out, err := run(t, "run"); err != nil || srv.refused != 0 {
+		t.Fatalf("the secret from the environment: %v, %d refused\n%s", err, srv.refused, out)
+	}
+	if _, ok := os.LookupEnv("QORY_ACCESS_KEY_SECRET"); ok {
+		t.Error("the secret stayed in qory's environment")
+	}
+	for _, v := range []string{fixtureSecret, "qak_short", srv.key.Secret() + " "} {
+		t.Setenv("QORY_ACCESS_KEY_SECRET", v)
+		clearRuns(t, root)
+		_, err := run(t, "run")
+		if cmd.ExitCode(err) != cmd.ExitInput || !strings.HasPrefix(err.Error(), "QORY_ACCESS_KEY_SECRET: ") || strings.Contains(err.Error(), v[4:]) {
+			t.Errorf("%.8s…: %v", v, err)
+		}
+	}
+}
+
+// TestRunSaysWhatARefusalMeans is each refusal of the server and of the runner at the
+// start, said with what to do, its code and exit status 1, and nothing run: an access
+// key that awaits approval, one the server does not know, an instance beyond the node's
+// limit, an answer that does not verify under the pin, no pin, and a run the server
+// closes.
+func TestRunSaysWhatARefusalMeans(t *testing.T) {
+	root, srv := serverRun(t, "", "")
+	fingerprint := srv.key.Fingerprint()
+	refusal := func(name string, want ...string) {
+		t.Helper()
+		clearRuns(t, root)
+		out, err := run(t, "run")
+		for _, w := range want {
+			if cmd.ExitCode(err) != 1 || !strings.Contains(err.Error(), w) {
+				t.Errorf("%s: %v (exit %d), want %q\n%s", name, err, cmd.ExitCode(err), w, out)
+			}
+		}
+		if strings.Contains(out, "hello from") {
+			t.Errorf("%s: the runtime ran", name)
+		}
+	}
+	srv.pending = true
+	refusal("pending", "the access key "+fingerprint+" awaits approval: an owner or administrator of the server compares this fingerprint with the one the server shows, and approves the key (", "key_pending (status 409)")
+	srv.pending = false
+
+	writeSecret(t, newKey(t))
+	refusal("unknown", "the server does not accept the access key ", "it does not know the key, or has revoked it; enrol a new key with qory access-key enrol (", "unauthorized (status 401)")
+	writeSecret(t, srv.key)
+
+	srv.full = true
+	refusal("full", "the node's live instances have reached its limit, so the instance i_", "does not start: wait for a run of another instance to end, or have an owner or administrator clear that instance (", "instance_limit (status 409)")
+	srv.full = false
+
+	serverFile(t, srv, "")
+	writeFile(t, filepath.Join(string(configDir()), "runner.yaml"), "server:\n  url: "+srv.URL+"\n  access_key_id: "+testAccessKey+"\n  apiary_public_key: "+pinLine(newKey(t))+"\n")
+	refusal("another pin", "an answer of the server does not verify under the pinned apiary_public_key, so the run does not start: check server.url and the pin (", "answer_unsigned")
+
+	writeFile(t, filepath.Join(string(configDir()), "runner.yaml"), "server:\n  url: "+srv.URL+"\n  access_key_id: "+testAccessKey+"\n")
+	refusal("no pin", "the server has no pinned apiary_public_key, so no answer of it could be verified: qory access-key enrol writes it, or set server.apiary_public_key in runner.yaml or QORY_APIARY_PUBLIC_KEY (", "apiary_public_key_missing")
+	if srv.refused != 1 {
+		t.Errorf("the server refused %d requests, want the unknown key's one", srv.refused)
+	}
+}
+
+// TestRunEndsWhenTheServerClosesIt is a server that closes the run: the runtime is
+// stopped, or never starts, and qory exits 1 saying so.
+func TestRunEndsWhenTheServerClosesIt(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	script := filepath.Join(t.TempDir(), "slow-runtime")
+	writeFile(t, script, "#!/bin/sh\nexec sleep 30\n")
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	composedForFake(t, root, script)
+	srv := newFakeServer(t, "")
+	serverFile(t, srv, "")
+	srv.closed = true
+	out, err := run(t, "run")
+	if cmd.ExitCode(err) != 1 || !strings.Contains(out+err.Error(), "the server closed the run") {
+		t.Errorf("a closed run: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+}

@@ -58,8 +58,11 @@
 //	  deny: [gist.github.com]    # denied in either mode, whatever allow lists
 //	server:                      # the server every run reports to; absent is files only
 //	  url: https://qory.example  # a scheme and a host
-//	  access_key: ak_f1xt0re000000000
-//	  secret: ...                # or QORY_SERVER_SECRET in the environment
+//	  access_key_id: ak_f1xt0re000000000   # or QORY_ACCESS_KEY_ID; its secret is access-key-secret
+//	  apiary_public_key:         # the pin, or QORY_APIARY_PUBLIC_KEY
+//	    - {alg: ed25519, public_key: <the server's key>}
+//	instance:
+//	  name: build-01             # this instance's display name; the host name by default
 //
 // [Load] discovers and reads the files, [Config] is the result, and [Config.Rows] lists
 // where each value came from. [DiscoverStack] finds what a checkout composes, its

@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"os/exec"
 	"slices"
 	"sort"
@@ -28,6 +29,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/qoryai/runner/accesskey"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 )
@@ -109,6 +111,8 @@ func Describe(ctx context.Context, program string) (*Description, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, program, "describe")
 	cmd.Dir = "/"
+	// The access key's variables are the runner's alone: describe never receives them.
+	cmd.Env = accesskey.WithoutVariables(os.Environ())
 	stdout, stderr := &capped{}, &capped{}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	// A process left holding the output is not waited for past the limit.

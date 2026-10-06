@@ -8,12 +8,12 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/qoryai/runner/accesskey"
 	"github.com/qoryai/runner/session"
 	"gopkg.in/yaml.v3"
 
@@ -27,14 +27,6 @@ import (
 // the policy the agent runs under or where the run's events go.
 const RunnerFileName = "runner.yaml"
 
-// EnvServerSecret is the environment variable that contains the server's secret when the
-// file does not.
-const EnvServerSecret = "QORY_SERVER_SECRET"
-
-// accessKey is the shape of a server's access key: ak_ and 16 characters of Crockford
-// base32 in lower case.
-var accessKey = regexp.MustCompile(`^ak_[0-9a-hjkmnp-tv-z]{16}$`)
-
 // Runner is the machine's runner file, read.
 type Runner struct {
 	// File is the path read.
@@ -45,6 +37,9 @@ type Runner struct {
 	// Server is the server every run reports to, nil when the file sets none: the
 	// events go to files alone.
 	Server *RunnerServer
+	// InstanceName is instance.name, this instance's display name on the server, empty
+	// when the file sets none: the host name, or its first label.
+	InstanceName string
 	// Wall is what the runtime is enclosed in, nil when the file sets none: the runtime
 	// is a process of this machine.
 	Wall *RunnerWall
@@ -166,18 +161,31 @@ type RunnerEgress struct {
 }
 
 // RunnerServer is the server section: the runner contract's server document, where a
-// run discovers what to post its events to and where its configuration comes from.
+// run discovers what to post its events to and where its configuration comes from. The
+// access key's secret is never in it: it is the file access-key-secret beside the
+// runner file, or QORY_ACCESS_KEY_SECRET.
 type RunnerServer struct {
 	// URL is the server: https, or http to a loopback address, a scheme and a host
 	// alone.
 	URL string
-	// AccessKey is the key the server issued this machine: ak_ and 16 characters.
-	AccessKey string
-	// Secret signs every request; from the file, or from [EnvServerSecret]. It never
-	// travels.
-	Secret string
-	// FromEnv is set when the secret came from the environment.
-	FromEnv bool
+	// AccessKeyID is the access key's id, ak_ and 16 characters, which the server
+	// assigned when the key enrolled; empty until one is enrolled. AccessKeyIDFrom is
+	// where it came from: the runner file's path, or [EnvOrigin] and the variable.
+	AccessKeyID     string
+	AccessKeyIDFrom string
+	// Pin is apiary_public_key, the server's keys every answer is verified under; empty
+	// when neither the file nor the environment pins one. PinFrom is where it came from.
+	Pin     accesskey.Pin
+	PinFrom string
+}
+
+// EnvOrigin starts the origin of a value read from a variable: "$" and its name.
+const EnvOrigin = "$"
+
+// pinEntry is one entry of server.apiary_public_key as written.
+type pinEntry struct {
+	Alg       *string `yaml:"alg"`
+	PublicKey *string `yaml:"public_key"`
 }
 
 // runnerFile is runner.yaml as written.
@@ -189,10 +197,16 @@ type runnerFile struct {
 		Deny  *[]string `yaml:"deny"`
 	} `yaml:"egress,omitempty"`
 	Server *struct {
-		URL       *string `yaml:"url"`
-		AccessKey *string `yaml:"access_key"`
-		Secret    *string `yaml:"secret"`
+		URL             *string     `yaml:"url"`
+		AccessKeyID     *string     `yaml:"access_key_id"`
+		ApiaryPublicKey *[]pinEntry `yaml:"apiary_public_key"`
+		// Secret and AccessKey are read only to say where what they would hold belongs.
+		Secret    yaml.Node `yaml:"secret,omitempty"`
+		AccessKey yaml.Node `yaml:"access_key,omitempty"`
 	} `yaml:"server,omitempty"`
+	Instance *struct {
+		Name *string `yaml:"name"`
+	} `yaml:"instance,omitempty"`
 	// Webhook is the section qory 0.10.0 replaced with server, read only to refuse it
 	// by name instead of as a key the file does not read.
 	Webhook yaml.Node `yaml:"webhook,omitempty"`
@@ -278,37 +292,15 @@ func LoadRunner() (*Runner, error) {
 		return nil, fmt.Errorf("%s: webhook: qory 0.10.0 replaced this section with server; see the runner file docs", path)
 	}
 	if w := f.Server; w != nil {
-		if w.URL == nil || *w.URL == "" {
-			return nil, fmt.Errorf("%s: server.url is required", path)
+		if r.Server, err = readServer(path, w.URL, w.AccessKeyID, w.ApiaryPublicKey, &w.Secret, &w.AccessKey); err != nil {
+			return nil, err
 		}
-		u, err := url.Parse(*w.URL)
-		if err != nil || u.Host == "" || u.Opaque != "" || (u.Scheme != "https" && u.Scheme != "http") {
-			return nil, fmt.Errorf("%s: server.url %q is not an https URL, or an http URL to this machine", path, *w.URL)
+	}
+	if in := f.Instance; in != nil && in.Name != nil {
+		if err := accesskey.CheckName(*in.Name); err != nil {
+			return nil, fmt.Errorf("%s: instance.name: %w", path, err)
 		}
-		if u.Scheme == "http" && !loopback(u.Hostname()) {
-			return nil, fmt.Errorf("%s: server.url %q is http to a host that is not this machine; a server elsewhere is reached over https", path, *w.URL)
-		}
-		if u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.User != nil || strings.HasSuffix(*w.URL, "#") {
-			return nil, fmt.Errorf("%s: server.url %q is more than a scheme and a host; the server defines its own paths", path, *w.URL)
-		}
-		if w.AccessKey == nil || *w.AccessKey == "" {
-			return nil, fmt.Errorf("%s: server.access_key is required", path)
-		}
-		if !accessKey.MatchString(*w.AccessKey) {
-			return nil, fmt.Errorf("%s: server.access_key %q is not an access key: ak_ and 16 characters", path, *w.AccessKey)
-		}
-		r.Server = &RunnerServer{URL: *w.URL, AccessKey: *w.AccessKey}
-		switch {
-		case w.Secret != nil && *w.Secret != "":
-			r.Server.Secret = *w.Secret
-		case os.Getenv(EnvServerSecret) != "":
-			r.Server.Secret, r.Server.FromEnv = os.Getenv(EnvServerSecret), true
-		default:
-			return nil, fmt.Errorf("%s: server.secret is missing; set it there or in %s", path, EnvServerSecret)
-		}
-		if len(r.Server.Secret) < 16 {
-			return nil, fmt.Errorf("%s: server.secret is shorter than 16 characters", path)
-		}
+		r.InstanceName = *in.Name
 	}
 	if run := f.Run; run != nil {
 		for _, d := range []struct {
@@ -404,7 +396,7 @@ func LoadRunner() (*Runner, error) {
 		}
 		if w.Env != nil {
 			for _, name := range *w.Env {
-				if name == EnvServerSecret {
+				if RunnersOwn(name) {
 					return nil, fmt.Errorf("%s: wall.env: %s is the runner's own and never the session's", path, name)
 				}
 				if !envName.MatchString(name) {
@@ -415,6 +407,127 @@ func LoadRunner() (*Runner, error) {
 		}
 	}
 	return r, nil
+}
+
+// DefaultInstanceName is the display name of an instance whose runner file sets none:
+// the host name, or its first label when the whole does not fit a name, or empty when
+// neither does, and then the server is sent none.
+func DefaultInstanceName() string {
+	host, _ := os.Hostname()
+	return accesskey.DefaultName(host)
+}
+
+// InstanceNameOrDefault is the instance's display name: instance.name, else
+// [DefaultInstanceName].
+func (r *Runner) InstanceNameOrDefault() string {
+	if r != nil && r.InstanceName != "" {
+		return r.InstanceName
+	}
+	return DefaultInstanceName()
+}
+
+// RunnersOwn reports whether a variable is the runner's own, never the session's: the
+// access key's secret, its id and the pin.
+func RunnersOwn(name string) bool {
+	return name == accesskey.EnvSecret || name == accesskey.EnvID || name == accesskey.EnvPin
+}
+
+// readServer reads the server section. The access key's id and the pin come from the
+// file, else from QORY_ACCESS_KEY_ID and QORY_APIARY_PUBLIC_KEY; both set is refused.
+// Neither is required here: qory access-key enrol writes them, and a run without them is
+// refused when it starts. A value that contains an access key secret is refused without
+// being quoted.
+func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *yaml.Node) (*RunnerServer, error) {
+	if secret.Kind != 0 {
+		return nil, fmt.Errorf("%s: server.secret is not a key of %s: the access key's secret is the file %s beside it, or %s", path, RunnerFileName, "access-key-secret", accesskey.EnvSecret)
+	}
+	if key.Kind != 0 {
+		return nil, fmt.Errorf("%s: server.access_key is not a key of %s: the access key's id is server.access_key_id", path, RunnerFileName)
+	}
+	if rawURL == nil || *rawURL == "" {
+		return nil, fmt.Errorf("%s: server.url is required", path)
+	}
+	if accesskey.ContainsSecret(*rawURL) {
+		return nil, fmt.Errorf("%s: server.url: %w", path, accesskey.ErrSecretInDocument)
+	}
+	if err := CheckServerURL(*rawURL); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	s := &RunnerServer{URL: *rawURL}
+	envID, envPin := os.Getenv(accesskey.EnvID), os.Getenv(accesskey.EnvPin)
+	switch {
+	case id != nil && envID != "":
+		return nil, fmt.Errorf("%s: server.access_key_id is set, and so is %s; set one of them", path, accesskey.EnvID)
+	case id != nil:
+		if err := accesskey.CheckID(*id); err != nil {
+			return nil, fmt.Errorf("%s: server.access_key_id: %w", path, err)
+		}
+		s.AccessKeyID, s.AccessKeyIDFrom = *id, path
+	case envID != "":
+		if err := accesskey.CheckID(envID); err != nil {
+			return nil, fmt.Errorf("%s: %w", accesskey.EnvID, err)
+		}
+		s.AccessKeyID, s.AccessKeyIDFrom = envID, EnvOrigin+accesskey.EnvID
+	}
+	switch {
+	case pin != nil && envPin != "":
+		return nil, fmt.Errorf("%s: server.apiary_public_key is set, and so is %s; set one of them", path, accesskey.EnvPin)
+	case pin != nil:
+		for i, e := range *pin {
+			if e.Alg == nil || e.PublicKey == nil {
+				return nil, fmt.Errorf("%s: server.apiary_public_key[%d] has alg and public_key", path, i)
+			}
+			if accesskey.ContainsSecret(*e.Alg) || accesskey.ContainsSecret(*e.PublicKey) {
+				return nil, fmt.Errorf("%s: server.apiary_public_key: %w", path, accesskey.ErrSecretInDocument)
+			}
+			s.Pin = append(s.Pin, accesskey.ServerKey{Alg: *e.Alg, PublicKey: *e.PublicKey})
+		}
+		if err := checkPin(s.Pin); err != nil {
+			return nil, fmt.Errorf("%s: server.apiary_public_key: %w", path, err)
+		}
+		s.PinFrom = path
+	case envPin != "":
+		p, err := accesskey.ParsePin([]byte(envPin))
+		if err == nil {
+			err = checkPin(p)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", accesskey.EnvPin, err)
+		}
+		s.Pin, s.PinFrom = p, EnvOrigin+accesskey.EnvPin
+	}
+	return s, nil
+}
+
+// checkPin refuses a pin the runner cannot verify under, and one that lists a key of
+// the runner contract's published fixtures, whose secrets anyone can read.
+func checkPin(p accesskey.Pin) error {
+	if err := p.Check(); err != nil {
+		return err
+	}
+	if p.Fixture() {
+		return errors.New("it lists the runner contract's published fixture key, whose secret anyone can read; pin your server's own key")
+	}
+	return nil
+}
+
+// CheckServerURL refuses a server URL that is not https, or http to this machine, with
+// a scheme and a host alone.
+func CheckServerURL(raw string) error {
+	if accesskey.ContainsSecret(raw) {
+		return fmt.Errorf("server.url: %w", accesskey.ErrSecretInDocument)
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || u.Opaque != "" || (u.Scheme != "https" && u.Scheme != "http") {
+		return fmt.Errorf("server.url %q is not an https URL, or an http URL to this machine", raw)
+	}
+	if u.Scheme == "http" && !loopback(u.Hostname()) {
+		return fmt.Errorf("server.url %q is http to a host that is not this machine; a server elsewhere is reached over https", raw)
+	}
+	if u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.User != nil || strings.HasSuffix(raw, "#") {
+		return fmt.Errorf("server.url %q is more than a scheme and a host; the server defines its own paths", raw)
+	}
+	return nil
 }
 
 // credentialFile is one entry of the credentials section as written.
@@ -524,12 +637,28 @@ func (r *Runner) Rows() []Row {
 		rows[2] = Row{"runner.egress.deny", listOrNone(r.Egress.Deny), origin}
 	}
 	if r != nil && r.Server != nil {
-		rows = append(rows,
-			Row{"runner.server.url", r.Server.URL, origin},
-			Row{"runner.server.access_key", r.Server.AccessKey, origin},
-		)
+		rows = append(rows, Row{"runner.server.url", r.Server.URL, origin})
+		if r.Server.AccessKeyID != "" {
+			rows = append(rows, Row{"runner.server.access_key_id", r.Server.AccessKeyID, r.Server.AccessKeyIDFrom})
+		} else {
+			rows = append(rows, Row{"runner.server.access_key_id", "(none: qory access-key enrol writes it)", Default})
+		}
+		if len(r.Server.Pin) > 0 {
+			var fingerprints []string
+			for _, k := range r.Server.Pin.Keys() {
+				fingerprints = append(fingerprints, k.Fingerprint())
+			}
+			rows = append(rows, Row{"runner.server.apiary_public_key", "fingerprint " + strings.Join(fingerprints, ", "), r.Server.PinFrom})
+		} else {
+			rows = append(rows, Row{"runner.server.apiary_public_key", "(none: qory access-key enrol writes it)", Default})
+		}
 	} else {
 		rows = append(rows, Row{"runner.server.url", "(none)", Default})
+	}
+	if r != nil && r.InstanceName != "" {
+		rows = append(rows, Row{"runner.instance.name", r.InstanceName, origin})
+	} else {
+		rows = append(rows, Row{"runner.instance.name", DefaultInstanceName(), Default})
 	}
 	if r != nil && r.Timeout > 0 {
 		rows = append(rows, Row{"runner.run.timeout", r.Timeout.String(), origin})

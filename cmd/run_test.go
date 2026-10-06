@@ -1,7 +1,6 @@
 package cmd_test
 
 import (
-	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -20,92 +19,146 @@ import (
 	"testing"
 	"time"
 
+	"github.com/qoryai/runner/accesskey"
+	"github.com/qoryai/runner/receiver"
+
 	"github.com/qoryai/qory/cmd"
+	"github.com/qoryai/qory/internal/runnerdir"
 )
 
-// The server's credentials in every test: the runner contract's published fixture key
-// and secret.
-const (
-	testAccessKey = "ak_f1xt0re000000000"
-	testSecret    = "fixture-secret-not-a-real-one"
-)
+// testAccessKey is the access key id of every test's server.
+const testAccessKey = "ak_f1xt0re000000000"
 
-// fakeServer stands in for the server the runner reports to, the way the runner
-// contract has it: it verifies the key and the signature of every request, answers the
-// configuration document, the run configuration with the policy it was given, and
-// accepts every batch, keeping the events and the queries it saw.
+// testNode is the node every test's server names in discovery.
+const testNode = "nd_0123456789abcdef"
+
+// fakeServer stands in for the server the runner reports to: the runner's own
+// receiver, which verifies every request under the machine's access key and signs
+// every answer under a key of its own, with the configuration document, the run
+// configuration with the policy it was given, and a store that keeps the events. It
+// keeps the queries it saw, and counts the requests it refused with a 401.
 type fakeServer struct {
 	*httptest.Server
-	mu      sync.Mutex
-	policy  string
-	queries []string
-	events  []map[string]any
-	refused int
+	// signer is the server's signing key, which the runner file pins; key is the
+	// machine's access key, whose secret serverFile writes.
+	signer, key *accesskey.Key
+	mu          sync.Mutex
+	policy      string
+	queries     []string
+	events      []map[string]any
+	refused     int
+	// instances are the X-Qory-Instance-Id and X-Qory-Instance-Name of every request.
+	instances [][2]string
+	// pending, secrets, full and closed make the server answer key_pending, list
+	// secrets in discovery, answer the ping with instance_limit, and close every run.
+	pending, secrets, full, closed bool
 }
 
 // newFakeServer starts a server whose run configuration carries policy, the JSON of a
 // security_policy, or names no run section when policy is empty.
 func newFakeServer(t *testing.T, policy string) *fakeServer {
 	t.Helper()
-	f := &fakeServer{policy: policy}
-	f.Server = httptest.NewServer(http.HandlerFunc(f.serve))
+	f := &fakeServer{policy: policy, signer: newKey(t), key: newKey(t)}
+	h := &receiver.Handler{
+		Signer: f.signer,
+		Store:  f,
+		Keys: func(id string) (receiver.AccessKey, bool) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			return receiver.AccessKey{PublicKey: f.key.PublicKey(), Pending: f.pending}, id == testAccessKey
+		},
+		Configuration: func() ([]byte, string) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			doc := `{"version":1,"node_id":"` + testNode + `","events":{"url":"` + f.URL + `/v1/events","types":["*"]}`
+			if f.policy != "" {
+				doc += `,"run":{"url":"` + f.URL + `/v1/run-configuration"}`
+			}
+			if f.secrets {
+				doc += `,"secrets":{"url":"` + f.URL + `/v1/secrets"}`
+			}
+			doc += `,"apiary_public_key":[{"alg":"ed25519","public_key":"` + f.signer.PublicKey().String() + `"}]}`
+			return []byte(doc), digest(doc)
+		},
+		RunConfiguration: func(map[string]string) ([]byte, string, bool) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			doc := `{"version":1,"security_policy":` + f.policy + `}`
+			return []byte(doc), digest(doc), f.policy != ""
+		},
+		Admit: func(string, string) bool {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			return !f.full
+		},
+		Closed: func(string) bool {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			return f.closed
+		},
+	}
+	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		if r.URL.Path == "/v1/run-configuration" {
+			f.queries = append(f.queries, r.URL.RawQuery)
+		}
+		f.instances = append(f.instances, [2]string{r.Header.Get("X-Qory-Instance-Id"), r.Header.Get("X-Qory-Instance-Name")})
+		f.mu.Unlock()
+		rec := &statusRecorder{ResponseWriter: w}
+		h.ServeHTTP(rec, r)
+		if rec.status == http.StatusUnauthorized {
+			f.mu.Lock()
+			f.refused++
+			f.mu.Unlock()
+		}
+	}))
 	t.Cleanup(f.Close)
 	return f
 }
 
-// serve answers one request of the contract, or 401 with the contract's body.
-func (f *fakeServer) serve(w http.ResponseWriter, r *http.Request) {
+// newKey is a new Ed25519 key, for an access key or a server's signing key.
+func newKey(t *testing.T) *accesskey.Key {
+	t.Helper()
+	k, err := accesskey.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return k
+}
+
+// statusRecorder remembers the status an answer was written with.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+// Seen reports whether the server stored an event id before.
+func (f *fakeServer) Seen(id string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	unauthorized := func() {
-		f.refused++
-		w.WriteHeader(http.StatusUnauthorized)
-		io.WriteString(w, `{"error":"unauthorized"}`)
-	}
-	if r.Header.Get("X-Qory-Access-Key") != testAccessKey || r.Header.Get("X-Qory-Contract-Version") != "1" || !strings.HasPrefix(r.Header.Get("User-Agent"), "qory-runner/") {
-		unauthorized()
-		return
-	}
-	mac := hmac.New(sha256.New, []byte(testSecret))
-	switch r.Method {
-	case http.MethodGet:
-		mac.Write([]byte("GET\n" + r.URL.RequestURI() + "\n" + r.Header.Get("X-Qory-Timestamp")))
-	case http.MethodPost:
-		body, _ := io.ReadAll(r.Body)
-		mac.Write(body)
-		r.Body = io.NopCloser(strings.NewReader(string(body)))
-	}
-	if r.Header.Get("X-Qory-Signature-256") != "sha256="+hex.EncodeToString(mac.Sum(nil)) {
-		unauthorized()
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	switch r.Method + " " + r.URL.Path {
-	case "GET /.well-known/qory-configuration":
-		doc := `{"version":1,"events":{"url":"` + f.URL + `/v1/events","types":["*"]}`
-		if f.policy != "" {
-			doc += `,"run":{"url":"` + f.URL + `/v1/run-configuration"}`
+	for _, ev := range f.events {
+		if ev["id"] == id {
+			return true
 		}
-		doc += "}"
-		w.Header().Set("X-Qory-Configuration", digest(doc))
-		io.WriteString(w, doc)
-	case "GET /v1/run-configuration":
-		f.queries = append(f.queries, r.URL.RawQuery)
-		doc := `{"version":1,"security_policy":` + f.policy + `}`
-		w.Header().Set("X-Qory-Run-Configuration", digest(doc))
-		w.Header().Set("ETag", `"`+digest(doc)+`"`)
-		io.WriteString(w, doc)
-	case "POST /v1/events":
-		var batch []map[string]any
-		if r.Header.Get("X-Qory-Delivery") == "" || json.NewDecoder(r.Body).Decode(&batch) != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		f.events = append(f.events, batch...)
-		w.WriteHeader(http.StatusAccepted)
-	default:
-		w.WriteHeader(http.StatusNotFound)
 	}
+	return false
+}
+
+// Append keeps one event.
+func (f *fakeServer) Append(_ string, line []byte) error {
+	var ev map[string]any
+	if err := json.Unmarshal(line, &ev); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, ev)
+	return nil
 }
 
 // digest is the server's digest of a document, as the contract's headers carry it.
@@ -127,11 +180,34 @@ func (f *fakeServer) byType() map[string][]map[string]any {
 	return out
 }
 
-// serverFile writes a runner file with the fake server as its server section, and what
-// more the test wants after it.
+// pinLine is the runner file's apiary_public_key for a server's signing key.
+func pinLine(k *accesskey.Key) string {
+	return "[{alg: ed25519, public_key: " + k.PublicKey().String() + "}]"
+}
+
+// serverFile writes a runner file with the fake server as its server section, its
+// access key id and its pin, and what more the test wants after it, and the machine's
+// access key secret beside it, the directory mode 0700.
 func serverFile(t *testing.T, srv *fakeServer, more string) {
 	t.Helper()
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "apiVersion: qory.dev/v1alpha1\nserver:\n  url: "+srv.URL+"\n  access_key: "+testAccessKey+"\n  secret: "+testSecret+"\n"+more)
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "apiVersion: qory.dev/v1alpha1\nserver:\n  url: "+srv.URL+"\n  access_key_id: "+testAccessKey+"\n  apiary_public_key: "+pinLine(srv.signer)+"\n"+more)
+	writeSecret(t, srv.key)
+}
+
+// writeSecret writes the machine's access-key-secret, replacing one there, in the
+// runner file's directory made mode 0700.
+func writeSecret(t *testing.T, k *accesskey.Key) {
+	t.Helper()
+	dir := runnerdir.Dir(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory"))
+	if _, err := dir.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(dir.Path(runnerdir.SecretFile)); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if err := dir.WriteSecret(k); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // fakeRuntime writes a program that stands in for a runtime: it prints its run id and
@@ -657,7 +733,9 @@ func TestRunRefusesAWallItCannotBuild(t *testing.T) {
 		{[]string{"run", "--mount", "/srv"}, "behind a wall"},
 		{[]string{"run", "--shm-size", "2g"}, "behind a wall"},
 		{[]string{"run", "--wall", "docker", "--image", "i", "--mount", "srv"}, "not an absolute path"},
-		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_SERVER_SECRET"}, "the runner's own"},
+		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_ACCESS_KEY_SECRET"}, "--env QORY_ACCESS_KEY_SECRET: the variable is the runner's own"},
+		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_ACCESS_KEY_ID"}, "the runner's own"},
+		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_APIARY_PUBLIC_KEY"}, "the runner's own"},
 		{[]string{"run", "--label", "issue"}, "not key=value"},
 		{[]string{"run", "--label", "Issue=1"}, "label key"},
 		{[]string{"run", "--run-id", "../x"}, "not a UUID"},
@@ -745,20 +823,22 @@ harness:
 // TestRunIsNamedLimitedAndUnderItsOwnPolicy is a run started by a system of its own: the
 // id and the labels are the caller's, and win over the origin remote's, the run's
 // policy file narrows the machine's and never widens it, the runtime is stopped at the
-// limit with timeout(1)'s status, and the server's secret in qory's environment is not
-// in the session's. With a server configured the run's own policy is refused, unless
+// limit with timeout(1)'s status, and the access key's variables in qory's environment
+// are not in the session's. With a server configured the run's own policy is refused, unless
 // --local keeps the run to the files.
 func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	script := filepath.Join(t.TempDir(), "slow-runtime")
-	writeFile(t, script, "#!/bin/sh\ntest -z \"$QORY_SERVER_SECRET\" || exit 7\nexec sleep 30\n")
+	writeFile(t, script, "#!/bin/sh\ntest -z \"$QORY_ACCESS_KEY_SECRET$QORY_ACCESS_KEY_ID$QORY_APIARY_PUBLIC_KEY\" || exit 7\nexec sleep 30\n")
 	if err := os.Chmod(script, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	composedForFake(t, root, script)
-	t.Setenv("QORY_SERVER_SECRET", testSecret)
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "apiVersion: qory.dev/v1alpha1\negress:\n  mode: enforce\n  allow: [\"*.github.com\", api.anthropic.com]\nserver:\n  url: https://qory.example\n  access_key: "+testAccessKey+"\n")
+	t.Setenv("QORY_ACCESS_KEY_SECRET", newKey(t).Secret())
+	t.Setenv("QORY_ACCESS_KEY_ID", testAccessKey)
+	t.Setenv("QORY_APIARY_PUBLIC_KEY", `[{"alg":"ed25519","public_key":"`+newKey(t).PublicKey().String()+`"}]`)
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "apiVersion: qory.dev/v1alpha1\negress:\n  mode: enforce\n  allow: [\"*.github.com\", api.anthropic.com]\nserver:\n  url: https://qory.example\n")
 	policy := filepath.Join(t.TempDir(), "run-policy.yaml")
 	writeFile(t, policy, "version: 1\negress:\n  mode: enforce\n  allow: [api.github.com, pypi.org]\n")
 	if _, err := run(t, "run", "--policy", policy); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "--policy is the run's own policy without a server; with server configured the server's run configuration is the policy") {
