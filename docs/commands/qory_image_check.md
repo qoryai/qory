@@ -5,7 +5,8 @@ Check that an image has what the wall needs of it
 ### Synopsis
 
 Check that an image has what the wall needs of it. With no image, check wall.image
-of runner.yaml.
+of runner.yaml. A name of wall.images is read as that image's ref first, as
+qory run reads --image.
 
 From outside, it reads the image the engine holds: its platform, HOME in its
 environment, whether the reference is pinned by digest, and every file, for one that is
@@ -27,7 +28,7 @@ The exit status is 0 when every image passes, and 1 when one fails.
 
 --verbose adds nothing here.
 
-More: https://github.com/qoryai/qory/blob/main/docs/run.md#the-agents-image
+More: https://github.com/qoryai/qory/blob/main/docs/run.md#qorys-images
 
 ```
 qory image check [image...] [flags]
@@ -38,6 +39,7 @@ qory image check [image...] [flags]
 ```
   qory image check                                # wall.image of runner.yaml
   qory image check qory-agent
+  qory image check go-docker                      # an image wall.images defines
   qory image check my-agent:1 my-agent-docker:1
 ```
 

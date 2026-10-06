@@ -7,7 +7,8 @@
 # that asks for a newer toolchain fails instead of downloading one. GOPATH and the caches
 # are under HOME, which any user may write. There is no C compiler, so cgo is off.
 #
-# Build them from the checkout of the qory release you run, after agent and agent-docker:
+# Build them from a checkout of qory at the commit qory version prints, after agent and
+# agent-docker:
 #
 #	docker build -t qory-agent-go --build-arg BASE=qory-agent images/agent-go
 #	docker build -t qory-agent-go-docker --build-arg BASE=qory-agent-docker \

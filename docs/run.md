@@ -66,12 +66,13 @@ cat .qory/runs/*/events.jsonl   # what it reached, what it printed, how it ended
 Without a wall, the proxy sees only programs that honour it. A **wall** starts the agent
 in a container. The container's one route out is the proxy.
 
-A wall needs the `docker` command. It also needs an image that contains the agent. Build
-Qory's from the checkout of the `qory` release you run. See [The agent's
-image](#the-agents-image).
+A wall needs the `docker` command. It also needs an image that contains the agent. Qory
+publishes none: build Qory's from a checkout of `qory` at the commit `qory version`
+prints. See [Qory's images](#qorys-images).
 
 ```sh
-git clone --branch v<version> https://github.com/qoryai/qory    # the version qory version prints
+git clone https://github.com/qoryai/qory
+git -C qory checkout <commit>            # the commit qory version prints
 docker build -t qory-agent qory/images/agent
 export CLAUDE_CODE_OAUTH_TOKEN=...       # from `claude setup-token`; or ANTHROPIC_API_KEY
 qory run --wall docker --image qory-agent --env CLAUDE_CODE_OAUTH_TOKEN -- -p "/hello"
@@ -555,9 +556,9 @@ Turn it on with a `wall` section, or with `--wall docker --image <image>` for on
 - The runner, the policy, the record and the server's secret stay outside.
 
 A wall needs the `docker` command, and an engine behind it. It also needs an image that
-contains the runtime: Qory's, or yours FROM it. See [The agent's
-image](#the-agents-image). `wall.images` defines several, and a run's policy selects
-one: see [The agent's images](#the-agents-images).
+contains the runtime: Qory's, or yours FROM it. See [Qory's images](#qorys-images).
+`wall.images` defines several, and a run's policy selects one: see [The agent's
+images](#the-agents-images).
 
 What to know:
 
@@ -588,15 +589,17 @@ What to know:
   log, the egress record and the structured output are there. On a Linux host, the hooks
   cross.
 
-### The agent's image
+### Qory's images
 
 `qory`'s repository defines four images under `images/`, for `linux/amd64` and
-`linux/arm64`. They are not published. Build them from the checkout of the `qory` release
-you run, since each release pins the runtime at the version its runner is written
-against:
+`linux/arm64`. They are not published: you build them, by hand as below, and a workflow
+of the repository builds and checks them on a change. Build them from a checkout of
+`qory` at the commit `qory version` prints, since each commit pins the runtime at the
+version its runner is written against:
 
 ```sh
-git clone --branch v<version> https://github.com/qoryai/qory && cd qory
+git clone https://github.com/qoryai/qory && cd qory
+git checkout <commit>                    # the commit qory version prints
 docker build -t qory-agent images/agent
 docker build -t qory-agent-docker --build-arg BASE=qory-agent images/agent-docker
 docker build -t qory-agent-go --build-arg BASE=qory-agent images/agent-go
@@ -624,8 +627,9 @@ What each of them does:
   themselves nor ask for input, and Claude Code sends no telemetry or error reports,
   which a run under `enforce` would otherwise show as denied connections.
 - **Docker.** `agent-docker` holds the daemon for a Docker of the agent's own, under a
-  runtime such as Sysbox. The image starts nothing: the runner starts the daemon.
-  `qory run` does not start one yet.
+  runtime such as Sysbox. The image starts nothing: define it in `wall.images` with
+  `runtime: sysbox-runc` and `docker: true`, and `qory run nest` starts the daemon. See
+  [A Docker of the agent's own](#a-docker-of-the-agents-own).
 - **Go.** `agent-go` has Go at the version the image pins, with `GOTOOLCHAIN=local`, so a
   `go.mod` that asks for a newer one fails instead of downloading it. `GOPATH` and the
   caches are under `HOME`. It has no C compiler, so cgo is off.
@@ -643,11 +647,13 @@ docker build -t my-agent:1 .
 qory image check my-agent:1
 ```
 
-Push it to a registry of yours and name it by digest in `wall.image`, so every run
-starts the same one.
+Push it to a registry of yours and name it by digest, in `wall.image` or as a `ref` of
+`wall.images`, so every run starts the same one.
 
 `qory image check` checks an image against what the wall needs of it. With no image, it
-checks `wall.image`. It prints a line per check, and exits 1 when one fails.
+checks `wall.image`. A name of `wall.images`, given or in `wall.image`, is read as that
+image's `ref` first, as `--image` reads it. It prints a line per check, and exits 1 when
+one fails.
 
 - From outside: the engine holds the image, for the platform the engine runs; the image
   sets `HOME`; the reference is pinned by digest or not, which fails nothing. Then it
@@ -735,7 +741,8 @@ What the image holds:
 - `dockerd`, and what it starts, `containerd`, `runc` and `iptables` among them, in
   `/usr/local/sbin`, `/usr/local/bin`, `/usr/sbin`, `/usr/bin`, `/sbin` or `/bin`. These
   directories are the daemon's whole `PATH`; the run's `PATH` is never searched.
-  `docker:dind` has them there.
+  [Qory's](#qorys-images) `agent-docker` and `agent-go-docker` have them there, as does
+  `docker:dind`. `qory image check` says whether an image does.
 - The agent's user and group, in its `/etc/passwd` and `/etc/group`, when `wall.user`
   names the user by name, or by a uid with no gid.
 

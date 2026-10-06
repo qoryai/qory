@@ -7,7 +7,7 @@
 # the launch command, or qory's helper, itself.
 #
 # Every version and every sum is a build argument, with its default below. Build it from
-# the checkout of the qory release you run, for linux/amd64 or linux/arm64:
+# a checkout of qory at the commit qory version prints, for linux/amd64 or linux/arm64:
 #
 #	docker build -t qory-agent images/agent
 #	qory image check qory-agent

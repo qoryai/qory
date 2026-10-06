@@ -47,12 +47,14 @@ release may change what an existing document does, and states it under Upgrading
   the version the runner's descriptor is written against, git, gh 2.101.0 and Node 24 on
   Debian 13, with `HOME=/home/agent` writable by any user, no setuid or setgid file and no
   entry point. `agent-docker` adds the daemon and command of Docker 29.8.1, for a Docker of
-  the agent's own; `qory run` does not start one yet. `agent-go` and `agent-go-docker` add
-  Go 1.27.1 to each. Every version and sum is a build argument, every download is checked
-  against its sum, and Debian's packages come from the snapshot the base image was built
-  from. A workflow builds the four on a change to them and checks them.
+  the agent's own, which `qory run nest` starts when `wall.images` defines the image with
+  `docker: true`. `agent-go` and `agent-go-docker` add Go 1.27.1 to each. Every version and
+  sum is a build argument, every download is checked against its sum, and Debian's
+  packages come from the snapshot the base image was built from. A workflow builds the
+  four on a change to them and checks them, and pushes them nowhere.
 - `qory image check [image...]` checks an image against what the wall needs of it, and
-  `wall.image` when no image is named. From outside it reads the image the engine holds:
+  `wall.image` when no image is named; a name of `wall.images` is read as that image's
+  `ref`, as `qory run` reads `--image`. From outside it reads the image the engine holds:
   its platform, `HOME` in its environment, whether the reference is pinned by digest, and
   every file, as `docker export` writes them, for one that is setuid or setgid or has
   capabilities of its own. Then it starts the image as the wall starts the agent, as a user

@@ -2,15 +2,17 @@
 # Docker's daemon, its containerd and runc, and the docker command, from Docker's static
 # release, and iptables for the daemon's networks.
 #
-# The image starts nothing. Under a runtime that runs a daemon without privileges, such as
-# sysbox-runc, the runner's helper starts dockerd as the enclosure's root, on
-# /var/run/docker.sock alone and with the system's directories alone as its PATH, then
-# runs the agent as its user: so every program the daemon runs is in /usr/local/bin or
+# The image starts nothing. Defined in wall.images with docker: true, under a runtime
+# that runs a daemon without privileges, such as sysbox-runc, the wall starts it with
+# qory run nest as its entry point: qory's helper starts dockerd as the enclosure's root,
+# on /var/run/docker.sock alone and with the system's directories alone as its PATH, then
+# runs the agent as its user. So every program the daemon runs is in /usr/local/bin or
 # /usr/sbin, and there is no entry point here, no daemon.json, nothing that listens on a
 # port, and no volume for /var/lib/docker, which the wall gives a volume of the run's.
+# The helper makes /run/qory, where it writes the agent's docker configuration, itself.
 # qory image check reports the image as able to carry a Docker.
 #
-# Build it FROM agent, from the checkout of the qory release you run:
+# Build it FROM agent, from a checkout of qory at the commit qory version prints:
 #
 #	docker build -t qory-agent-docker --build-arg BASE=qory-agent images/agent-docker
 
@@ -64,11 +66,7 @@ RUN apt="-o Dir::Etc::SourceList=/tmp/snapshot.sources -o Dir::Etc::SourceParts=
 
 COPY --from=docker /out/ /usr/local/bin/
 
-# Runner 0.6.0 creates /run/qory as 0700 root when it writes the agent's docker
-# configuration beneath it, which the agent then cannot read; this can go once the
-# runner creates the directory itself.
-RUN install -d -m 0755 /run/qory \
- && dockerd --version \
+RUN dockerd --version \
  && containerd --version \
  && runc --version \
  && docker --version \

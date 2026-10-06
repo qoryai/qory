@@ -175,3 +175,39 @@ func TestImageCheckRefusesABuildForAnotherEngine(t *testing.T) {
 	lines, _ := os.ReadFile(log)
 	lacks(t, string(lines), "image inspect", "run --rm")
 }
+
+// TestImageCheckReadsANameOfWallImages checks wall.image when it names an image of
+// wall.images, and such a name given, as qory run reads them: as that image's ref, with
+// the name in the heading and the last line.
+func TestImageCheckReadsANameOfWallImages(t *testing.T) {
+	emptyDir(t)
+	log := fakeImageDocker(t)
+	helper := staticELF(t)
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), `apiVersion: qory.dev/v1alpha1
+wall:
+  adapter: docker
+  helper: `+helper+`
+  image: go
+  images:
+    go:
+      ref: example.com/agent-go:1
+    broken:
+      ref: example.com/broken:1
+`)
+	out, err := run(t, "image", "check")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "go (example.com/agent-go:1)\n✓ the engine holds it, for linux/amd64", "✓ go has what the wall needs")
+	out, err = run(t, "image", "check", "broken", "example.com/agent:1")
+	if cmd.ExitCode(err) != 1 {
+		t.Fatalf("exit %d, %v\n%s", cmd.ExitCode(err), err, out)
+	}
+	wants(t, out, "broken (example.com/broken:1)\n", "✗ 1 of 2 images lack what the wall needs: broken")
+	data, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants(t, string(data), "--entrypoint /qory/qory example.com/agent-go:1 image probe", "--entrypoint /qory/qory example.com/broken:1 image probe")
+	lacks(t, string(data), " go\n", " broken\n")
+}

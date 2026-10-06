@@ -13,8 +13,8 @@ Four are defined under images/ in qory's repository, for linux/amd64 and linux/a
   agent-go          agent, and Go
   agent-go-docker   agent-docker, and Go
 
-Build them from the checkout of the release you run, build yours FROM one of them, and
-check it with qory image check.
+They are not published. Build them from a checkout of qory at the commit qory version
+prints, build yours FROM one of them, and check it with qory image check.
 
 ### Options
 
