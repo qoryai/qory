@@ -51,7 +51,7 @@ died, or a server that was away. See [Resending a run's record](#resending-a-run
 ## Try it: the hello example
 
 This walkthrough uses the hello example from the [README](../README.md#try-it). Run it in
-that directory. It goes in three steps: observed, then behind a wall, then with the token
+that directory. It goes in two steps: observed, then behind a wall with the model's token
 kept outside.
 
 ### Observed
@@ -74,18 +74,13 @@ prints. See [Qory's images](#qorys-images).
 git clone https://github.com/qoryai/qory
 git -C qory checkout <commit>            # the commit qory version prints
 docker build -t qory-agent qory/images/agent
-export CLAUDE_CODE_OAUTH_TOKEN=...       # from `claude setup-token`; or ANTHROPIC_API_KEY
-qory run --wall docker --image qory-agent --env CLAUDE_CODE_OAUTH_TOKEN -- -p "/hello"
 ```
 
 On a Mac, first set `wall.helper` to the Linux build of the same `qory` release. See
 [The wall](#the-wall).
 
-This run passes the token into the container. The last step keeps it outside.
-
-### With the token kept outside
-
-Define what this machine has, and what the agent may reach, in
+A walled run of Claude Code takes its model credential from a connection, never from the
+container's environment. Define the wall, the connection and what the agent may reach in
 `~/.config/qory/runner.yaml`:
 
 ```yaml
@@ -93,41 +88,36 @@ apiVersion: qory.dev/v1alpha1
 egress:
   mode: enforce
   allow: [api.anthropic.com]
-credentials:
-  model:
-    env: CLAUDE_CODE_OAUTH_TOKEN
-    hosts: [api.anthropic.com]
-    auth: {scheme: bearer}
-    placeholders: [CLAUDE_CODE_OAUTH_TOKEN]
 wall:
   adapter: docker
   image: qory-agent
-```
-
-Then pass the run a policy that selects the credential. Keep the policy outside the
-checkout:
-
-```yaml
-# ~/hello-policy.yaml
-version: 1
-egress:
-  mode: enforce
-  allow: [api.anthropic.com]
-credentials:
-  - name: model
+connections:
+  - kind: runtime
+    id: claude
+    name: claude
+    secrets: {oauth_token: {source: external, name: CLAUDE_OAUTH}}
+secrets:
+  local:
+    CLAUDE_OAUTH:
+      env: CLAUDE_OAUTH
+      hosts: [api.anthropic.com]
 ```
 
 ```sh
-qory run --policy ~/hello-policy.yaml -- -p "/hello"
+export CLAUDE_OAUTH=...                  # from `claude setup-token`
+qory run -- -p "/hello"
 ```
 
 The agent greets you as before. What changed:
 
 - Inside the container, `CLAUDE_CODE_OAUTH_TOKEN` is a placeholder.
 - The proxy sets the real token on each request to `api.anthropic.com`.
-- The record lists those requests with the credential's name. It never lists the
+- The record lists those requests with the connection's id, `claude`. It never lists the
   token's value.
 - Everything else the agent tries to reach is denied and recorded.
+
+From now on every run on this machine needs a wall, since `runner.yaml` has a
+connection. See [Credentials the agent never has](#credentials-the-agent-never-has).
 
 ## runner.yaml
 
@@ -150,15 +140,23 @@ server:                  # the server every run reports to; optional
 wall:                    # start the runtime in a container; optional
   adapter: docker
   image: example.com/agent@sha256:…     # the runtime and your toolchain, FROM Qory's
-  env: [ANTHROPIC_API_KEY]              # names; nothing else of your environment goes in
+  env: [NODE_ENV]                       # names; nothing else of your environment goes in
   memory: 14g                           # at most 14 GB of memory; also cpus, pids_limit, shm_size; optional
+connections:             # what each credential comes from; optional
+  - kind: runtime                       # the model credential, kept outside the container
+    id: claude
+    name: claude
+    secrets: {oauth_token: {source: external, name: CLAUDE_OAUTH}}
+secrets:                 # this machine's values, each with the hosts it may go to
+  local:
+    CLAUDE_OAUTH: {env: CLAUDE_OAUTH, hosts: [api.anthropic.com]}
 run:                     # optional
   timeout: 5h30m         # stop a runtime that runs this long
   stop_signal: SIGINT    # requests it to stop; the runtime's descriptor's, else SIGTERM
   stop_grace: 30s        # between that signal and SIGKILL; 10s
 ```
 
-Without an `egress` section, every connection is allowed and recorded. A `runner.yaml`
+Without an `egress` section, everything the runtime reaches is allowed and recorded. A `runner.yaml`
 that does not read means no run.
 
 ## Runtimes
@@ -173,7 +171,8 @@ It says:
 
 - how the runtime's hooks are installed,
 - what its output means as events,
-- which signal asks it to stop.
+- which signal asks it to stop,
+- which secrets it needs: see [The model credential](#the-model-credential).
 
 The runner ships the descriptor for Claude Code. `~/.config/qory/runtimes/<runtime>.yaml`
 describes another runtime, or replaces the one shipped.
@@ -223,12 +222,23 @@ every run on the machine.
 ## The server
 
 With a server configured, the runner starts by fetching the server's configuration. It
-signs that fetch with the access key and the secret. It does not start unless the server
-answers.
+signs every request with the access key's secret, and checks every answer against the
+server's key it pins, `apiary_public_key`. It does not start unless the server answers.
 
-The configuration defines where the events go. When it selects a run configuration, that
-is the run's policy. The runner fetches it with the run's labels, the checkout's forge
-and repository among them. It reloads it when the server reports it changed.
+The configuration defines where the events go, and whether the server has a run
+configuration. The runner fetches the run configuration with the run's labels, the
+checkout's forge and repository among them. It reloads it when the server reports it
+changed. It may hold:
+
+- `security_policy`, the server's policy. The node's policy narrows it: see [A run's own
+  policy](#a-runs-own-policy). Without it, the node's policy is the run's.
+- `connections`, the run's connections. When the member is there, even empty, it is the
+  whole set. Without it, `runner.yaml`'s apply. See [Credentials the agent never
+  has](#credentials-the-agent-never-has).
+- `variables`, which reach the agent's process. The server leads: the node's own
+  variables, `wall.env` and `--env`, apply only to the names whose server value the run
+  does not apply. An unwalled run gets none of the server's variables unless
+  `variables.unwalled: accept` is set.
 
 `--local` runs with the files alone and the machine's policy. The server is not
 contacted.
@@ -259,8 +269,7 @@ A checkout with no remote, or with a remote on this machine, has neither label.
 ### A run's own policy
 
 `--policy` passes one run's own policy. It is in the runner contract's format. Keep it
-outside the checkout. It is for a machine without a server, one that serves runs of
-different kinds.
+outside the checkout. It suits a machine that serves runs of different kinds.
 
 It only narrows. The `egress` section of the machine's `runner.yaml` decides how:
 
@@ -271,58 +280,148 @@ It only narrows. The `egress` section of the machine's `runner.yaml` decides how
 
 The `deny` lists of both apply either way.
 
-With a server configured, the server's run configuration is the policy, and `--policy` is
-refused. `--local` keeps `--policy`.
+The two together are the node's policy. With a server whose run configuration has a
+`security_policy`, the node's policy narrows the server's:
+
+- The mode is `enforce` when either side sets it.
+- Under `enforce`, a host passes only when the allow list of every side under `enforce`
+  covers it.
+- A host either side's `deny` covers is denied, in either mode.
+- On a host either side limits to paths, a request must match an entry of every side
+  that lists the host.
+- An image both sides select must be the same, else the run does not start,
+  `image_unknown`.
+
+`--local` keeps `--policy`, and the server is not contacted.
 
 The access key's secret stays the runner's. A run that passes `QORY_ACCESS_KEY_SECRET`
 into the session does not start, `variable_reserved`.
 
 ## Credentials the agent never has
 
-Behind a wall, a run needs no credential inside the container. `runner.yaml` defines the
-credentials the machine has. A credential's token comes from one of two places:
+Behind a wall, a run needs no credential inside the container. Connections decide every
+credential a run sends. A policy selects none.
 
-- a variable of `qory run`'s environment, `env`,
-- a file, `file`.
+A **connection** links each secret something needs to a secret. What needs one is of
+three kinds:
 
-A token a program mints for the run, such as a GitHub token for the run's repository,
-comes from an integration instead. See [Integrations](#integrations).
+| Kind | What it is | Where the value goes |
+|---|---|---|
+| `runtime` | the agent's runtime, such as Claude Code. Its descriptor declares the secrets it needs | the declaration's hosts, by its scheme |
+| `service` | an API with a static key: exact hosts, a scheme, and the secrets it needs | the service's hosts, by its scheme |
+| `integration` | a program that mints a credential for the run, or serves a tool | the hosts its description lists, as its answer says. See [Integrations](#integrations) |
 
-A run's policy selects among the credentials by name. A policy defines no credential of
-its own.
+A run's connections come from the server's run configuration when it has a
+`connections` member, even an empty one. Otherwise they come from `runner.yaml`'s
+`connections:`.
 
-```yaml
-# ~/.config/qory/runner.yaml
-credentials:
-  model:                                  # a token from qory run's environment
-    env: CLAUDE_CODE_OAUTH_TOKEN
-    hosts: [api.anthropic.com]
-    auth: {scheme: bearer}                # or basic with a username, or header with a name
-    placeholders: [CLAUDE_CODE_OAUTH_TOKEN]
-```
-
-```yaml
-# the run's policy, passed with --policy
-version: 1
-egress:
-  mode: enforce
-  allow: [api.anthropic.com]
-credentials:
-  - name: model
-```
+Connections need a wall. A run with a connection and no wall does not start,
+`connection_needs_wall`.
 
 How it works:
 
-- The runner keeps each token outside the container.
-- Its proxy sets the token on the requests to the hosts the token is for.
+- The runner keeps each value outside the container.
+- Its proxy sets the value on the requests to the connection's hosts.
 - Where a program wants a credential set, the container gets a placeholder. It never gets
-  the token.
+  the value.
+
+### The model credential
+
+Claude Code declares two secrets for its model, and a run uses one of them:
+
+| Declaration | Variable | How it is sent |
+|---|---|---|
+| `api_key` | `ANTHROPIC_API_KEY` | the header `x-api-key` |
+| `oauth_token` | `CLAUDE_CODE_OAUTH_TOKEN` | `bearer` |
+
+Both go to `api.anthropic.com`, on the paths `/v1/*`. A walled run of Claude Code needs a
+runtime connection that supplies one of them:
+
+```yaml
+# ~/.config/qory/runner.yaml
+connections:
+  - kind: runtime
+    id: claude
+    name: claude                          # the runtime
+    secrets: {oauth_token: {source: external, name: CLAUDE_OAUTH}}   # or api_key
+secrets:
+  local:
+    CLAUDE_OAUTH:
+      env: CLAUDE_OAUTH                   # read once at run start
+      hosts: [api.anthropic.com]
+```
+
+- Inside the container, the chosen declaration's variable holds a placeholder,
+  `qory-sets-the-credential-outside-the-enclosure`. The runtime's other declared and
+  reserved variables are empty there.
+- Under `enforce`, a request to `api.anthropic.com` outside `/v1/` is refused. Under
+  `observe`, it is sent on without the value, and recorded.
+- With no runtime connection that supplies one, a walled run does not start,
+  `runtime_secret_missing`. A connection that supplies both is refused,
+  `runtime_secret_choice`.
+- A walled run whose environment holds `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY` or
+  `CLAUDE_CODE_OAUTH_TOKEN` does not start, `runtime_secret_conflict`. That environment
+  is what `wall.env`, `--env` and the launch pass in. So never pass the model credential
+  with them.
+- A mount that is or contains `~/.claude/.credentials.json` is refused,
+  `mount_contains_credential_files`.
+
+### A static key
+
+An API that takes a static key is a **service**. Its connection defines it inline:
+
+```yaml
+# ~/.config/qory/runner.yaml
+connections:
+  - kind: service
+    id: tracker
+    name: Acme tracker
+    hosts: [api.tracker.example.com]
+    paths: [/v2/*]                        # optional: the requests the key is set on
+    auth: {scheme: bearer, secret: key}
+    declares: [{id: key, title: Tracker key, name: TRACKER_KEY}]
+    secrets: {key: {source: external, name: TRACKER_KEY}}
+secrets:
+  local:
+    TRACKER_KEY:
+      file: ~/.config/qory/tracker.key    # read at each use
+      hosts: [api.tracker.example.com]
+```
+
+- `hosts` are exact DNS names: no `*.`, no IP address, else `connection_host_invalid`.
+- `auth.scheme` is `bearer`, `header` with `header`, or `basic` with `username` or
+  `username_secret`. `auth.secret` is the declaration whose value is sent.
+- A declaration with `name` gets the placeholder in that variable.
+- A service takes no argument. A credential that needs one, or every host below a domain,
+  is an integration.
+
+### Secrets of this machine
+
+`secrets.local` holds this machine's values, each under a name:
+
+- `env`, a variable of `qory run`'s environment, read once at run start;
+- `file`, a file read at each use;
+- or `values`, several values, each under a value id, which a reference selects with
+  `value_id`.
+
+`hosts` is required on every entry: the most hosts the value may be sent to. A connection
+that sends it to a host they do not cover stops the run, `secret_hosts_exceeded`.
+
+- A connection names a value of this machine with `{source: external, name: <NAME>}`.
+  The connections in `runner.yaml` name no other kind.
+- `secrets.providers` lists where such a name is looked up, in order. It is `[local]`
+  unless set. A name no provider has stops the run, `secret_unresolved`.
+- A run that passes a variable an `env` entry reads into the container does not start,
+  `variable_reserved`.
+- A value the server stores is sealed to this machine's access key and fetched for the
+  run. A host that receives one is verified against public roots only. A host that
+  receives this machine's values alone is verified against the machine's trust store.
 
 ### TLS on credential hosts
 
-For the hosts a credential is for, and no other, the proxy ends the container's TLS
-itself. It uses an authority made for the run. The authority's key never leaves the
-runner.
+For the hosts a connection sets a value on, the hosts a tool serves, and the hosts with
+path rules, and no other, the proxy ends the container's TLS itself. It uses an authority
+made for the run. The authority's key never leaves the runner.
 
 The container receives one bundle to trust: its image's own authorities, and the run's
 certificate. The bundle goes in through these variables:
@@ -337,10 +436,9 @@ certificate. The bundle goes in through these variables:
 Or through the variables `wall.ca_env` lists.
 
 The record lists the terminated hosts. For each request to one, it lists the method, the
-path and the credential's name.
+path and the `connection`, the id of the connection whose value it carried.
 
-A host that a policy's `egress.paths` limits to paths is terminated too, with or without a
-credential. Every other host stays a tunnel that nobody reads.
+Every other host stays a tunnel that nobody reads.
 
 ## Integrations
 
@@ -380,22 +478,24 @@ no settings and reaches no network. Every release publishes the same bytes as
 | `name` | the integration's name, such as `github`. Its entry in `runner.yaml` and every connection to it use this name |
 | `title`, `description` | text for a listing or a form |
 | `publisher` | who publishes the program, as the program names it. Nothing verifies it |
-| `program_version` | the program's version, `X.Y.Z`: the version of its release |
+| `program_version` | the program's own version, a string. A release's is `X.Y.Z`, its version |
 | `settings` | a JSON Schema of the settings the program takes. A property marked `writeOnly` is a secret |
-| `roles` | the ways it offers: `credential`, `tool`, or both |
+| `roles` | the ways it offers: `credential`, `tool`, or both. A description may also hold a role the contract reserves, such as `work_source`; a run leaves it as it is |
 
 Each role lists, in `settings`, the names of the settings it may receive, and in
 `required` the ones it needs. A secret is listed by its `<name>`. Its value comes either
 as `<name>` or as `<name>_file`, the path of a file that holds it.
 
 - The **credential** role mints or fetches a token for the run's argument. `argument` is
-  the pattern the argument must match whole. `hosts` are the most hosts the token may be
-  set on.
+  the pattern the argument must match whole. A role without `argument` ignores the
+  connection's argument and gets the empty string. `hosts` are the most hosts the token
+  may be set on.
 - The **tool** role is an MCP server reached over HTTP. `serves` are the hosts whose
   requests go to it. `mcp` is its MCP URL, on one of those hosts. `argument` and
   `placeholders` are optional.
 
-The description of `github`, shortened:
+The description of `github`, shortened. Its argument is one repository or several of one
+owner, separated by commas:
 
 ```json
 {"version": 1, "name": "github", "title": "GitHub",
@@ -405,7 +505,7 @@ The description of `github`, shortened:
    "private_key": {"title": "Private key", "type": "string", "writeOnly": true,
                    "x-secret-name": "GITHUB_APP_PRIVATE_KEY"},
    "private_key_file": {"title": "Private key file", "type": "string"}}},
- "roles": {"credential": {"argument": "[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}",
+ "roles": {"credential": {"argument": "[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}(,[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100})*",
                           "hosts": ["github.com", "api.github.com"],
                           "settings": ["app_id", "private_key"],
                           "required": ["app_id", "private_key"]}}}
@@ -414,10 +514,22 @@ The description of `github`, shortened:
 ### Install an integration
 
 ```sh
-qory integration install github.com/qoryai/qory-github
+qory integration install <source> [--version X.Y.Z] [--forge-kind K] [--replace]
+```
+
+```sh
+qory integration install github.com/qoryai/qory-github --version 1.4.0
 qory integration install git.example.com/acme/tracker --forge-kind forgejo
 qory integration install https://downloads.example.com/tracker/description.json
 ```
+
+- `--version X.Y.Z` installs that release. Without it, `qory` installs the latest.
+- `--forge-kind` names the forge kind of a host that implies none.
+- `--replace` lets an install replace an entry that was installed from another source.
+
+Install the version your connections name. A server's connection always names one, and
+the program's `program_version` must equal it exactly, else the run is refused,
+`integration_version_mismatch`. The latest release is a convenience.
 
 An integration is installed only when you run this command. A run never installs one,
 and nothing a server sends makes the machine install one: a server that could would run
@@ -427,11 +539,13 @@ a program of its choosing on your machine.
 
 The source is where the integration's releases are. It has one of two forms:
 
-- **A repository on a forge**, `<host>/<path>`, with no scheme and no `.git` at the end:
+- **A repository on a forge**, `<host>/<path>`, with no scheme and no `.git` at the end.
+  The path has two segments or more, each of 1 to 100 characters:
   `github.com/qoryai/qory-github`, `gitlab.com/acme/tools/tracker`,
   `git.example.com/acme/tracker`.
-- **An `https://` URL of a release's `description.json`.** The release's other files are
-  in the same directory. A URL source is one release.
+- **An `https://` URL of a release's `description.json`.** It ends in
+  `/description.json`, and the release's other files are in the same directory. A URL
+  source is one release.
 
 The forge kind says how to read a forge: `github`, `gitlab` or `forgejo`. Gitea counts as
 `forgejo`. On `github.com`, `gitlab.com` and `codeberg.org` the host implies it. On any
@@ -465,10 +579,11 @@ A release is three kinds of file:
 `X.Y.Z` is the release's version: three numbers, no leading zeros, nothing before or
 after. On a forge the release is tagged `vX.Y.Z`.
 
-From a forge, `qory` installs the latest release: on `github` and `forgejo` the newest
-that is neither a draft nor a prerelease, on `gitlab` the one released last. From a URL
-source, it installs the release at that URL. It fetches each file of release `X.Y.Z`
-here:
+From a forge, `qory` installs release `X.Y.Z` with `--version`, else the latest: on
+`github` and `forgejo` the newest that is neither a draft nor a prerelease, on `gitlab`
+the one with the latest `released_at`, an upcoming release included. From a URL source,
+it installs the release at that URL, and `--version` must be its `program_version`. It
+fetches each file of release `X.Y.Z` here:
 
 | Forge kind | A file of release `X.Y.Z` |
 |---|---|
@@ -484,12 +599,14 @@ Then `qory`:
    `checksums.txt`;
 2. checks the description against the integration contract, and that its
    `program_version` is the release's version;
-3. fetches the archive for this machine, and checks it against `checksums.txt`;
-4. puts the program under `~/.local/share/qory/integrations/<name>/<version>/`
-   (`$XDG_DATA_HOME/qory`), and holds it to the rules of [Who may own and write
-   it](#who-may-own-and-write-it);
-5. runs `<program> describe`, which must print `description.json` byte for byte;
-6. writes the entry in `runner.yaml`.
+3. refuses a release whose `name` has an entry installed from another source, unless
+   `--replace` is given. The message names both sources;
+4. fetches the archive for this machine, and checks it against `checksums.txt`;
+5. puts the program at `$XDG_DATA_HOME/qory/integrations/<name>/<version>/<program>`,
+   `~/.local/share/qory` when `XDG_DATA_HOME` is not set, and holds it to the rules of
+   [Who may own and write it](#who-may-own-and-write-it);
+6. runs `<program> describe`, which must print `description.json` byte for byte;
+7. writes the entry in `runner.yaml`.
 
 A step that fails stops the install, and `runner.yaml` stays as it was.
 
@@ -525,16 +642,21 @@ integrations:
 `qory integration install` writes `path`, `source` and `description_sha256`. You write
 the bounds.
 
+One entry holds one `path`, so the machine serves one version of an integration at a
+time.
+
 A program of your own that has no release has an entry you write yourself, with `path`
-alone. The runner checks it by name and version alone. A server checks each connection
-against the release's `description.json`, so a server connects only an integration
-published as a release.
+alone. The runner checks such an entry by name and version only, not by a digest, so
+keeping the program at that path unchanged is yours to do. A server checks each
+connection against the release's `description.json`, so a server connects only an
+integration published as a release.
 
 #### Bounds on what a server chooses
 
 The server leads; the machine only narrows. An entry may bound what a server's
-connection chooses. `arguments`, `settings` and `paths` bound the connections in
-`runner.yaml` too.
+connection chooses. The bounds apply to connections a server sends, and to no other. A
+connection in `runner.yaml` is the owner's own: it meets each chosen role's description
+alone.
 
 | Bound | What it allows | Otherwise |
 |---|---|---|
@@ -543,9 +665,14 @@ connection chooses. `arguments`, `settings` and `paths` bound the connections in
 | `settings` | per setting, a fixed value or `{pattern: <RE2>}`. A setting it does not list is refused | `integration_settings_not_allowed` |
 | `paths` | by host, the most paths the credential role's answer may claim | `integration_hosts_exceeded` |
 
-A `<name>_file` setting is a path on this machine, so a server never sends one. One comes
-from `runner.yaml` alone: from a connection there, or from a fixed value of `settings`
-here.
+A fixed value of `settings` is this machine's. For a server's connection, the runner
+writes it into the document of every chosen role that lists the setting. The server's
+value for that setting must be absent or equal to it, else
+`integration_settings_not_allowed`. A `{pattern: <RE2>}` bounds the server's value.
+
+A `<name>_file` setting is a path on this machine. A server's connection that holds one
+is refused, `integration_settings_not_allowed`. One comes from `runner.yaml` alone: from
+a connection there, or from a fixed value of `settings` here.
 
 A server's connection that references a secret of this machine (see [In
 runner.yaml](#in-runneryaml)) needs both `arguments` and `settings`. Without
@@ -561,8 +688,8 @@ settings must be `{}`, else `integration_settings_not_allowed`.
   program's directory stops the run, `mount_contains_runner_files`. So does one that
   holds a `<name>_file` setting's file.
 
-`qory` judges a program by where its links lead. A link on a `PATH` entry the checkout
-controls, which resolves outside the checkout, is judged by where it resolves.
+`qory` judges a program by where its links lead: a `path` that is a link is judged by
+where it resolves.
 
 The rule applies to each run as it starts. A program written into a directory while that
 directory was mounted is judged by where it is, on every run that follows. So keep a
@@ -601,7 +728,7 @@ connection names:
 | `source`, `version` | where its releases are, and the `program_version` it must have. A server's connection always has both. In `runner.yaml` they are optional |
 | `forge_kind` | `github`, `gitlab` or `forgejo`, for a forge whose host implies none |
 | `ways` | the roles the run uses: `credential`, `tool`, or both. At least one, each a role the description defines |
-| `argument` | the run's one argument, such as `acme/shop`. Each chosen role that has an `argument` pattern matches it whole. A role without one gets an empty argument |
+| `argument` | the run's one argument, such as `acme/shop`. Each chosen role that has an `argument` pattern must match it whole. A role without one ignores it and gets the empty string |
 | `settings` | the plain settings |
 | `secrets` | each secret the chosen roles list, by its setting's name, linked to a secret |
 
@@ -666,6 +793,8 @@ secrets:
   unless set.
 - A `<name>_file` setting may stand in `settings` here, such as
   `private_key_file: /home/dev/.config/qory/github-app.pem`, in place of the secret.
+- The entry's bounds do not apply here: a connection in `runner.yaml` is the owner's own,
+  and meets each chosen role's description alone.
 
 `hosts` bounds where the proxy sets the credential the program mints. The program itself
 receives the raw value, and where it sends it is the program's.
@@ -680,7 +809,8 @@ the environment. It starts each role as:
 <program> tool -- <argument>
 ```
 
-`--` is always there, with exactly one argument after it, empty when the role takes none.
+`--` is always there, with exactly one argument after it. It is the empty string when the
+role has no `argument` pattern, or the connection gives no argument.
 Standard input is one JSON document:
 
 - the settings that role lists, and nothing else, a secret as `<name>` or `<name>_file`;
@@ -718,15 +848,15 @@ the run with its code:
 | `source` and `forge_kind` are well formed: the patterns, a refused host, a forge kind missing, misplaced or contradicting the host | `run_configuration_invalid` |
 | the run has a wall | `connection_needs_wall` |
 | the machine has an entry of that `name` | `integration_missing` |
-| the argument and the settings stay within the entry's `arguments` and `settings` | `integration_argument_not_allowed`, `integration_settings_not_allowed` |
+| for a server's connection, the argument and the settings stay within the entry's `arguments` and `settings`, and no `<name>_file` setting is there | `integration_argument_not_allowed`, `integration_settings_not_allowed` |
 | `describe` starts, exits 0, and prints a description the contract accepts | `integration_failed` |
 | the description's `name` is the connection's | `integration_name_mismatch` |
 | its `program_version` is the connection's `version`, when the connection has one | `integration_version_mismatch` |
 | the connection's `source` is the entry's, and the SHA-256 of `describe`'s output is the entry's `description_sha256` | `integration_source_mismatch` |
 | the description is usable: a tool's `mcp` host is one of its `serves` | `integration_description_invalid` |
 | each role of `ways` is one the description defines | `integration_role_missing` |
-| each role of `ways` is within the entry's `ways` | `integration_way_not_allowed` |
-| the argument matches each chosen role's `argument` pattern | `integration_argument_not_allowed` |
+| for a server's connection, each role of `ways` is within the entry's `ways` | `integration_way_not_allowed` |
+| the argument matches each chosen role's `argument` pattern. A role without one ignores the argument | `integration_argument_not_allowed` |
 | each role's settings document passes the checks of [Settings and secrets](#settings-and-secrets) | `integration_settings_not_allowed`, `integration_settings_invalid`, `integration_settings_too_large` |
 | every secret resolves, and a value of this machine goes only to hosts its `hosts` cover | `secret_unresolved`, `secret_hosts_exceeded` |
 | no host is set by two connections, or both set by a connection and served by a tool | `connection_host_conflict` |
@@ -809,19 +939,24 @@ socket of the runner's, `QORY_TOOL_LISTEN`.
 
 ### Upgrade an integration
 
-Install it again:
+Install it again, at the new version:
 
 ```sh
-qory integration install github.com/qoryai/qory-github
+qory integration install github.com/qoryai/qory-github --version 1.5.0
 ```
 
-`qory` installs the latest release, as the first time. The entry keeps its name and its
-bounds. `path` and `description_sha256` become the new release's, and `source` the one
-you installed from.
+- The entry keeps its name and its bounds: `ways`, `arguments`, `settings` and `paths`.
+- `path`, `source` and `description_sha256` become the new release's, with `--replace`
+  too.
+- An install from another source than the entry's is refused unless `--replace` is
+  given. The message names both sources.
+- The entry records no forge kind. A host that implies none needs `--forge-kind` again.
 
-A server's connection names a version. A run whose connection names another version than
-the installed program's is refused, `integration_version_mismatch`. So move the machine
-and the server's connection to a new version together.
+One entry holds one `path`, so the machine serves one version at a time. A server's
+connection names a version, and a run whose connection names another than the installed
+program's is refused, `integration_version_mismatch`. So change the connection's version
+on the server and install that version on the machine together. Runs in between are
+refused.
 
 ### See an integration
 
@@ -875,7 +1010,8 @@ Turn it on with a `wall` section, or with `--wall docker --image <image>` for on
 - The container sees the checkout and the composed home, at their own paths, and nothing
   else of your machine.
 - Of your environment, the container gets the launch template's variables and the ones
-  `wall.env` or `--env` lists. Nothing else.
+  `wall.env` or `--env` lists. Nothing else. These are the node's variables: with a
+  server, they apply only to the names whose server value the run does not apply.
 - The runner, the policy, the record and the access key's secret stay outside.
 
 A wall needs the `docker` command, and an engine behind it. It also needs an image that
@@ -885,9 +1021,11 @@ images](#the-agents-images).
 
 What to know:
 
-- **The model credential.** It goes in by name, with `wall.env` or `--env`. Then it is
-  the agent's. A subscription login kept in a Mac's Keychain does not reach a container.
-  Use an API key, or a token from `claude setup-token`.
+- **The model credential.** It comes from a runtime connection, and stays outside: see
+  [The model credential](#the-model-credential). `wall.env` and `--env` never carry it;
+  a walled run whose environment holds it does not start, `runtime_secret_conflict`. A
+  subscription login kept in a Mac's Keychain does not reach a container. Use an API
+  key, or a token from `claude setup-token`.
 - **The helper on a Mac.** Inside the container, the relay, the hook forwarder and what
   starts an image's own Docker are `qory`'s own Linux build, mounted read-only. On Linux, that is the binary you run. On a Mac, download the
   Linux archive of the same release, for your engine's architecture. Set `wall.helper` to
