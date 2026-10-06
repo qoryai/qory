@@ -85,6 +85,24 @@ release may change what an existing document does, and states it under Upgrading
   never look for a newer release. At a terminal there, the look runs as the container's
   root and puts a connection the agent did not make in the run's record.
 - `qory run` behind a wall with no image names the page that says how to build Qory's.
+- `docs/run.md` has one section, Integrations, on using an integration: what it
+  describes; `qory integration install <source>`, from a forge path, with `--forge-kind`
+  where the host implies none, or from the URL of a release's `description.json`, the
+  latest release or the one `--version` names, with `--replace` for another source; what
+  it downloads and checks, and the `integrations:` entry it writes, `path`, `source` and
+  `description_sha256`, with the machine's bounds `ways`, `arguments`, `settings` and
+  `paths`; a connection's `ways`, argument, settings and secrets, from a server or from
+  `runner.yaml`'s `connections:` and `secrets.local`; each role's settings on standard
+  input; the checks at a run's start with their codes; the credential role, the tool
+  role and its MCP URL; upgrading; and `qory config`. Its bounds apply to the
+  connections a server sends alone.
+- `docs/run.md` describes every credential as a connection: the model credential as a
+  `runtime` connection with a `secrets.local` value, a static key as a `service`
+  connection, and the hello example's walled run with them. A policy selects no
+  credential, and the page drops `credentials:`, the settings on a command line, and
+  `server.secret` with `QORY_SERVER_SECRET`. A server's run configuration may carry a
+  `security_policy`, which the node's policy, `runner.yaml`'s `egress` and `--policy`,
+  narrows, and connections and variables.
 
 ## [0.12.1] - 2026-09-30
 
