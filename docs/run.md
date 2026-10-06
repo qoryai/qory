@@ -555,8 +555,9 @@ A URL source is refused unless:
 - the host is not `localhost`, and does not end in `.localhost`, `.local`, `.internal` or
   `.home.arpa`.
 
-`qory` also refuses a host whose address is loopback, private, link-local or unspecified.
-It checks the address it connects to.
+For every source, and after every redirect, `qory` refuses to download from an address
+that is loopback, private, link-local or unspecified. It checks the address it connects
+to.
 
 A release's files must be downloadable without a token.
 
