@@ -70,9 +70,11 @@ func TestTargetRefuses(t *testing.T) {
 		{"an empty name", "    runtime: [claude, \"\"]\n", false, "target.runtime lists an empty runtime"},
 		{"the same runtime twice", "    runtime: [claude, codex, claude]\n", false, "target.runtime lists claude twice"},
 		{"a mapping", "    runtime: {claude: opus}\n", false, "one runtime name or a list of them"},
+		{"a verb the wall runs", "    runtime: [claude, forward]\n", false, "target.runtime lists forward, a name no runtime can have: qory run forward is the verb the wall starts inside a container; name another runtime"},
 		{"an empty name beside extends", "    runtime: [claude, \"\"]\n", true, "target.runtime lists an empty runtime"},
 		{"the same runtime twice beside extends", "    runtime: [claude, claude]\n", true, "target.runtime lists claude twice"},
 		{"a mapping beside extends", "    runtime: {claude: opus}\n", true, "one runtime name or a list of them"},
+		{"a verb the wall runs beside extends", "    runtime: nest\n", true, "target.runtime lists nest, a name no runtime can have: qory run nest is the verb the wall starts inside a container; name another runtime"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := composeTarget(t, c.target, c.extends)

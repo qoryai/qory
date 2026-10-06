@@ -727,6 +727,11 @@ func (c *Config) apply(path string, machine bool) (file, error) {
 			if len(*h.Runtime) == 0 {
 				return f, fmt.Errorf("%s: harness.runtime is empty; it is one runtime or a list of them", path)
 			}
+			for _, name := range *h.Runtime {
+				if why := stack.Reserved(name); why != "" {
+					return f, fmt.Errorf("%s: harness.runtime lists %s, %s; name another runtime", path, name, why)
+				}
+			}
 			if err := h.Runtime.Validate(); err != nil {
 				return f, fmt.Errorf("%s: harness.%w", path, err)
 			}
@@ -777,6 +782,9 @@ func (c *Config) apply(path string, machine bool) (file, error) {
 			c.origins["harness.links"] = path
 		}
 		for _, name := range sortedNames(h.Launch) {
+			if why := stack.Reserved(name); why != "" {
+				return f, fmt.Errorf("%s: harness.launch lists %s, %s; leave it out", path, name, why)
+			}
 			l, err := launchOf(path, name, h.Launch[name])
 			if err != nil {
 				return f, err

@@ -886,6 +886,9 @@ func applyTarget(p *stack.Stack, base *compose.Base, conf config.Config, runtime
 		want.Runtimes = stack.Runtimes(strings.Split(runtime, ","))
 		for i, r := range want.Runtimes {
 			want.Runtimes[i] = strings.TrimSpace(r)
+			if why := stack.Reserved(want.Runtimes[i]); why != "" {
+				return fmt.Errorf("--runtime lists %s, %s; name another runtime", want.Runtimes[i], why)
+			}
 		}
 	}
 	if model != "" {
@@ -1363,6 +1366,9 @@ The checkout is not touched: nothing was written there.`,
 			}
 			u.Title(name)
 			if runtime != "" {
+				if why := stack.Reserved(runtime); why != "" {
+					return input(fmt.Errorf("--runtime names %s, %s; name another runtime", runtime, why))
+				}
 				rt, err := render.Lookup(runtime)
 				if err != nil {
 					return input(err)

@@ -62,6 +62,7 @@ func TestLoadRefusesABadExtendingTarget(t *testing.T) {
 		{"runtime: [claude, \"\"]", "extending.target.runtime lists an empty name"},
 		{"model: \"\"", "extending.target.model lists an empty name"},
 		{"runtime: [claude, codex, claude]", "extending.target.runtime lists claude twice"},
+		{"runtime: [claude, relay]", "extending.target.runtime lists relay, a name no runtime can have: qory run relay is the verb the wall starts inside a container; leave it out"},
 		{"model: [opus, opus]", "extending.target.model lists opus twice"},
 		{"runtime: {claude: opus}", "one name or a list of them"},
 	} {

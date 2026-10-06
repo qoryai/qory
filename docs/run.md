@@ -177,6 +177,10 @@ It says:
 The runner ships the descriptor for Claude Code. `~/.config/qory/runtimes/<runtime>.yaml`
 describes another runtime, or replaces the one shipped.
 
+No runtime can be named `nest`, `relay` or `forward`. `qory run nest`, `qory run relay`
+and `qory run forward` are the verbs the wall starts inside a container, so qory refuses
+those names wherever a runtime is named, and never reads a descriptor by them.
+
 A runtime that nothing describes still runs. The run, its log and its egress are
 recorded. The session's own events are not.
 

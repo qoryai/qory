@@ -125,6 +125,8 @@ func TestLoadRefusesAMistake(t *testing.T) {
 		{"env: {1A: x}\n", "env: 1A is not an environment variable name"},
 		{"env: {QORY_HARNESS_HOME: x}\n", "env.QORY_HARNESS_HOME is qory's own"},
 		{"harness: {runtime: []}\n", "harness.runtime is empty"},
+		{"harness: {runtime: [claude, nest]}\n", "harness.runtime lists nest, a name no runtime can have: qory run nest is the verb the wall starts inside a container; name another runtime"},
+		{"harness: {launch: {relay: {command: relay}}}\n", "harness.launch lists relay, a name no runtime can have: qory run relay is the verb the wall starts inside a container; leave it out"},
 		{"harness: {model: &m opus}\nworktree: {base: *m}\n", "line 3: *m is a YAML alias, which qory.yaml may not contain"},
 		{"env: &e {A: x}\nharness:\n  extensions:\n    ci:\n      <<: *e\n", "line 6: *e is a YAML alias"},
 		{"a: &a [x, x, x, x]\nb: &b [*a, *a, *a, *a]\nc: [*b, *b, *b, *b]\n", "line 3: *a is a YAML alias"},

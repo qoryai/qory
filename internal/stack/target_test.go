@@ -37,6 +37,7 @@ func TestNewComposeReadsTheCheckoutsOwnStack(t *testing.T) {
 		{"an empty list", Target{Runtimes: Runtimes{}}, "target.runtime is required"},
 		{"an empty name", Target{Runtimes: Runtimes{"claude", ""}}, "target.runtime lists an empty runtime"},
 		{"the same runtime twice", Target{Runtimes: Runtimes{"claude", "codex", "claude"}}, "target.runtime lists claude twice"},
+		{"a verb the wall runs", Target{Runtimes: Runtimes{"claude", "nest"}}, "target.runtime lists nest, a name no runtime can have: qory run nest is the verb the wall starts inside a container; name another runtime"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := compose(t, &Stack{Target: c.target, Modules: []Module{{Name: "app"}}})
@@ -107,5 +108,22 @@ func TestRuntimesValidateIsCalledOnTheFlagToo(t *testing.T) {
 	}
 	if (Runtimes{}).First() != "" {
 		t.Error("First of an empty list is not empty")
+	}
+}
+
+// TestValidateRefusesEveryReservedRuntime is each name of [ReservedRuntimes] as a target,
+// alone and after another runtime, refused with why; a name that only begins like one
+// is a runtime's.
+func TestValidateRefusesEveryReservedRuntime(t *testing.T) {
+	for _, name := range ReservedRuntimes {
+		want := "target.runtime lists " + name + ", a name no runtime can have: qory run " + name + " is the verb the wall starts inside a container; name another runtime"
+		for _, r := range []Runtimes{{name}, {"claude", name}} {
+			if err := r.Validate(); err == nil || err.Error() != want {
+				t.Errorf("%v: %v, want %q", r, err, want)
+			}
+		}
+		if err := (Runtimes{name + "-agent"}).Validate(); err != nil {
+			t.Errorf("%s-agent: %v", name, err)
+		}
 	}
 }

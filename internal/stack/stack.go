@@ -165,9 +165,9 @@ func (r *Runtimes) UnmarshalYAML(n *yaml.Node) error {
 // for several.
 func (r Runtimes) String() string { return strings.Join(r, ", ") }
 
-// Validate refuses an empty target, an empty name in it, and the same runtime twice. It
-// is called on a loaded stack, and again by the command module after the --runtime flag
-// has replaced what the stack set.
+// Validate refuses an empty target, an empty name in it, the same runtime twice and a
+// name of [ReservedRuntimes]. It is called on a loaded stack, and again by the command
+// module after the --runtime flag has replaced what the stack set.
 func (r Runtimes) Validate() error {
 	if len(r) == 0 {
 		return errors.New("target.runtime is required")
@@ -180,9 +180,27 @@ func (r Runtimes) Validate() error {
 		if seen[name] {
 			return fmt.Errorf("target.runtime lists %s twice", name)
 		}
+		if why := Reserved(name); why != "" {
+			return fmt.Errorf("target.runtime lists %s, %s; name another runtime", name, why)
+		}
 		seen[name] = true
 	}
 	return nil
+}
+
+// ReservedRuntimes are the names no runtime can have. Each is a verb of qory run that the
+// wall starts inside a container, so qory run <name> runs the verb and never a runtime of
+// that name. The cmd package's tests hold the list to the verbs that carry its in-wall
+// annotation.
+var ReservedRuntimes = []string{"forward", "nest", "relay"}
+
+// Reserved is why a runtime cannot be named name, for a message that has named it, when
+// the name is one of [ReservedRuntimes], and "" for a name a runtime can have.
+func Reserved(name string) string {
+	if !slices.Contains(ReservedRuntimes, name) {
+		return ""
+	}
+	return fmt.Sprintf("a name no runtime can have: qory run %s is the verb the wall starts inside a container", name)
 }
 
 // First is the runtime a single-runtime caller means, and "" for an empty target.
@@ -255,7 +273,8 @@ func (n *Names) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-// validate refuses a policy naming nothing, an empty name and a name given twice.
+// validate refuses a policy naming nothing, an empty name, a name given twice and a
+// runtime of [ReservedRuntimes].
 func (t *TargetPolicy) validate() error {
 	if len(t.Runtime) == 0 && len(t.Model) == 0 {
 		return errors.New("extending.target lists no runtime and no model; it lists the runtimes, the models, or both, a checkout may compose for")
@@ -271,6 +290,9 @@ func (t *TargetPolicy) validate() error {
 			}
 			if seen[name] {
 				return fmt.Errorf("extending.target.%s lists %s twice", l.key, name)
+			}
+			if why := Reserved(name); why != "" && l.key == "runtime" {
+				return fmt.Errorf("extending.target.runtime lists %s, %s; leave it out", name, why)
 			}
 			seen[name] = true
 		}

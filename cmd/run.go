@@ -23,6 +23,7 @@ import (
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
+	"github.com/qoryai/qory/internal/stack"
 	"github.com/qoryai/qory/internal/ui"
 )
 
@@ -682,6 +683,12 @@ func resolveLaunch(rep report.Report, conf config.Config, runtime string) (strin
 			return "", render.Launch{}, input(fmt.Errorf("the harness is composed for %s; --runtime selects which to start", strings.Join(rep.Target.Runtimes, ", ")))
 		}
 		name = rep.Target.Runtimes[0]
+	}
+	if why := stack.Reserved(name); why != "" {
+		if runtime == "" {
+			return "", render.Launch{}, input(fmt.Errorf("the harness is composed for %s, %s; compose it for another runtime", name, why))
+		}
+		return "", render.Launch{}, input(fmt.Errorf("%s is %s; name another runtime", name, why))
 	}
 	if !slices.Contains(rep.Target.Runtimes, name) {
 		return "", render.Launch{}, input(fmt.Errorf("the harness is not composed for %s; composed: %s", name, strings.Join(rep.Target.Runtimes, ", ")))

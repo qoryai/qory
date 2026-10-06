@@ -80,6 +80,12 @@ release may change what an existing document does, and states it under Upgrading
 - The verbs the wall runs inside a container, `qory run nest`, `relay` and `forward`,
   never look for a newer release. At a terminal there, the look runs as the container's
   root and puts a connection the agent did not make in the run's record.
+- No runtime can be named `nest`, `relay` or `forward`: `qory run <name>` runs the verb
+  of that name, which the wall starts inside a container, never a runtime. `target.runtime`
+  in a stack or a `qory.yaml`, `extending.target.runtime`, `harness.runtime` and
+  `harness.launch` in the configuration, and `--runtime` of `qory harness compose`,
+  `launch` and `remove` refuse such a name as an input error that says why. `qory config`
+  shows the refusal like any other mistake in the file, where it listed the name before.
 - `qory run` behind a wall with no image names the page that says how to build Qory's.
 
 ## [0.12.1] - 2026-09-30
