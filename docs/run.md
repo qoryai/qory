@@ -42,9 +42,11 @@ The session runs on pipes instead, and `qory` reads the runtime's structured out
 
 Each run is recorded on your machine, outside the checkout, in qory's state directory:
 `~/.local/state/qory/runs/<checkout>-<hash>/<id>/`, or under `$XDG_STATE_HOME/qory` when
-that is set. `<checkout>` is the checkout's directory name, and `<hash>` the first 12 hex
-digits of the SHA-256 of its full path, with links resolved. Each checkout has its own
-folder, and only you can read it (mode 0700). The run's last line names the folder:
+that is set to an absolute path. `<checkout>` is the checkout's directory name, and
+`<hash>` the first 12 hex digits of the SHA-256 of its full path, with links resolved.
+Each checkout has its own folder. The state directory, its `runs` directory and the
+checkout's folder are mode 0700: only you can open them. qory names the run's folder
+when the run ends:
 
 ```
 qory run: the record is in /home/you/.local/state/qory/runs/app-3f9a1c0b7d2e/0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f
@@ -1210,8 +1212,8 @@ Turn it on with a `wall` section, or with `--wall docker --image <image>` for on
 
 - The runtime starts in a container, on a network with no route out.
 - It reaches the proxy, and nothing else, through a relay.
-- The container sees the checkout and the composed home, at their own paths, and nothing
-  else of your machine.
+- The container sees the checkout and the composed home, at their own paths, and the
+  run's own record directory, read-only. It sees nothing else of your machine.
 - Of your environment, the container gets the ones `wall.env` or `--env` lists, and
   nothing else. The harness's launch variables, fixed and defaults, reach the agent in
   the container as they do outside it. See [A run's variables](#a-runs-variables).
@@ -1233,8 +1235,8 @@ What to know:
   starts an image's own Docker are `qory`'s own Linux build, mounted read-only. On Linux, that is the binary you run. On a Mac, download the
   Linux archive of the same release, for your engine's architecture. Set `wall.helper` to
   that binary.
-- **What the container sees.** The checkout it was started in, and no other directory.
-  `--mount <path>[:ro]` or `wall.mounts` shows it another one, at its own path, such as a
+- **What the container sees.** The checkout it was started in, and the run's own record
+  directory, read-only, and no other directory. `--mount <path>[:ro]` or `wall.mounts` shows it another one, at its own path, such as a
   sibling checkout the session reads. A socket is never mounted. A mount is refused
   before the run starts, `mount_contains_runner_files`, when it is, contains or lies
   inside one of these:
@@ -1242,7 +1244,8 @@ What to know:
     key and the user `qory.yaml`;
   - a file qory reads from that directory and a link takes elsewhere: where the last
     link leads, and, for a mount that is or contains it, every link on the way;
-  - qory's state directory, which holds the run records;
+  - qory's state directory, which holds the run records, and, for a mount that is or
+    contains it, every link on the way to it;
   - one of the runner's own program and temporary files, such as a program it starts
     outside the wall.
 
@@ -1258,11 +1261,13 @@ What to know:
   qory run: the mount <host path> contains <path>, which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path
   ```
 
-  For the state directory, it says:
+  For the state directory, or a link on the way to it, it says:
 
   ```
   qory run: the mount <host path> contains <dir>, which holds qory's run records; the agent could change them, so the run does not start. Mount a narrower path
   ```
+
+  For a read-only mount, it says `the agent could read them` instead.
 
   When the path is the checkout or the working directory, it says `the workspace <path>`
   instead of `the mount <path>`.

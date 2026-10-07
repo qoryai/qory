@@ -8,8 +8,8 @@ Run the agent on the composed harness, inside the session runner.
 
 Every connection goes through a proxy on this machine and is recorded. The record,
 events.jsonl and output.log, goes to a folder of the checkout's under
-~/.local/state/qory/runs ($XDG_STATE_HOME/qory/runs), and the last line names it. The
-exit status is the agent's.
+~/.local/state/qory/runs ($XDG_STATE_HOME/qory/runs when that is set to an absolute
+path), and qory names it when the run ends. The exit status is the agent's.
 
 The agent is the runtime the harness is composed for. Name one first when it is composed
 for several. Arguments after -- go to the agent. At a terminal the agent runs with its

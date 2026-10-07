@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"net/url"
 	"os"
 	"os/signal"
@@ -59,8 +60,8 @@ func newRun() *cobra.Command {
 
 Every connection goes through a proxy on this machine and is recorded. The record,
 events.jsonl and output.log, goes to a folder of the checkout's under
-~/.local/state/qory/runs ($XDG_STATE_HOME/qory/runs), and the last line names it. The
-exit status is the agent's.
+~/.local/state/qory/runs ($XDG_STATE_HOME/qory/runs when that is set to an absolute
+path), and qory names it when the run ends. The exit status is the agent's.
 
 The agent is the runtime the harness is composed for. Name one first when it is composed
 for several. Arguments after -- go to the agent. At a terminal the agent runs with its
@@ -247,8 +248,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return err
 				}
 			}
-			var links map[string]string
-			spec.RunnerFiles, links = runnerFiles(runnerDir, state)
+			if err := makeRunsDir(state, spec.RunsDir); err != nil {
+				return err
+			}
+			own := runnerFiles(runnerDir, state, spec.RunsDir)
+			spec.RunnerFiles = own.files
 			walled := spec.Wall != nil
 			spec.LaunchFixed, spec.LaunchDefaults, spec.HarnessHome = launch.Fixed, launch.Defaults, launch.HarnessHome
 			runLock, err := startRun(machineDir(), spec.RunID, walled, id == nil)
@@ -284,42 +288,46 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					spec.Credentials = append(spec.Credentials, def)
 				}
 			}
-			if err := makeRunsDir(state, spec.RunsDir); err != nil {
-				return err
-			}
 			record := filepath.Join(spec.RunsDir, spec.RunID)
+			u := ui.New(stderr)
 			res, err := session.Run(ctx, spec)
 			if err != nil {
-				// A run that started has a record, however it ended.
-				if _, statErr := os.Stat(record); statErr == nil {
-					fmt.Fprintln(stderr, "qory run: the record is in", record)
+				if m := mountRefused(err, passed{runnerDir: runnerDir, stateDir: state, spec: &spec, root: at.root, own: own}); m != nil {
+					err = m
+				} else {
+					err = explain(err, id)
 				}
-				if m := mountRefused(err, passed{runnerDir: runnerDir, stateDir: state, spec: &spec, root: at.root, links: links}); m != nil {
-					return m
+				// A run that started has a record, however it ended: the line naming it
+				// follows the error, so qory prints the error itself.
+				if _, statErr := os.Stat(record); statErr != nil {
+					return err
 				}
-				return explain(err, id)
+				if !ui.Marked() {
+					u.Title("qory")
+				}
+				u.Fail(err)
+				fmt.Fprintln(stderr, "qory run: the record is in", record)
+				return reported(err)
 			}
 			defer fmt.Fprintln(stderr, "qory run: the record is in", record)
-			u := ui.New(stderr)
-			short := ui.Short(res.Dir, at.root)
 			if res.Undelivered > 0 {
-				u.Fail(fmt.Errorf("%d events did not reach the server; %s/undelivered contains them", res.Undelivered, short))
+				u.Fail(fmt.Errorf("%d events did not reach the server; %s/undelivered contains them", res.Undelivered, ui.Short(res.Dir, at.root)))
 			}
 			switch {
 			case res.RunClosed:
-				u.Fail(fmt.Errorf("the server closed the run, and %s was stopped; recorded in %s", name, short))
+				u.Fail(fmt.Errorf("the server closed the run, and %s was stopped", name))
 				return reported(&exitError{code: 1})
 			case res.TimedOut:
-				u.Fail(fmt.Errorf("%s was stopped at the limit of %s; recorded in %s", name, timeout, short))
+				u.Fail(fmt.Errorf("%s was stopped at the limit of %s", name, timeout))
 				return reported(&exitError{code: exitTimeout})
 			case res.Signal != "":
-				u.Fail(fmt.Errorf("%s was ended by %s; recorded in %s", name, res.Signal, short))
+				u.Fail(fmt.Errorf("%s was ended by %s", name, res.Signal))
 				return reported(&exitError{code: 1})
 			case res.ExitCode != 0:
-				u.Fail(fmt.Errorf("%s exited %d; recorded in %s", name, res.ExitCode, short))
+				u.Fail(fmt.Errorf("%s exited %d", name, res.ExitCode))
 				return reported(&exitError{code: res.ExitCode})
 			}
-			u.Success("%s exited 0; recorded in %s", name, short)
+			u.Success("%s exited 0", name)
 			return nil
 		},
 	}
@@ -612,13 +620,13 @@ func whyUnused(from, why, host string) string {
 // passed is what qory passed the runner that its refusal of a mount names: runnerDir,
 // the configuration directory, absolute, "" for none; stateDir, qory's state directory;
 // the spec, whose RunsDir, Mounts and Dir the refusal may name; root, the checkout,
-// which is the workspace's root in Mounts behind a wall; and links, which maps a link's
-// place, as [configLinks] passed it, to the link.
+// which is the workspace's root in Mounts behind a wall; and own, the runner's files
+// qory passed, with the links among them.
 type passed struct {
 	runnerDir, stateDir string
 	spec                *session.Spec
 	root                string
-	links               map[string]string
+	own                 ownFiles
 }
 
 // workspace reports whether path is the workspace: the checkout root as Mounts holds
@@ -638,22 +646,19 @@ func (p passed) place(path string) string {
 	return "the mount " + path
 }
 
-// writable reports whether the run passed path writable: the mode of the first entry of
-// Mounts with that path, or of the last when last is set, and Dir, writable, for one
-// Mounts does not hold. ok is false for a path the run did not pass.
-func (p passed) writable(path string, last bool) (writable, ok bool) {
+// modes is how the run passed path: writable, read-only, or both, from the entries of
+// Mounts with that path, and Dir, writable. last is the mode of the last of them, Dir
+// counting after every mount, as the runner counts it.
+func (p passed) modes(path string) (writable, readOnly, last bool) {
 	for _, m := range p.spec.Mounts {
 		if m.Path == path {
-			writable, ok = !m.ReadOnly, true
-			if !last {
-				return writable, ok
-			}
+			writable, readOnly, last = writable || !m.ReadOnly, readOnly || m.ReadOnly, !m.ReadOnly
 		}
 	}
-	if !ok && path == p.spec.Dir {
-		return true, true
+	if path == p.spec.Dir {
+		writable, last = true, true
 	}
-	return writable, ok
+	return writable, readOnly, last
 }
 
 // mountRefused words the runner's refusals of the run's places behind a wall for the
@@ -662,21 +667,21 @@ func (p passed) writable(path string, last bool) (writable, ok bool) {
 // mount_contains_runner_files is a place that is, contains or lies inside one of the
 // runner's files. A refusal of the configuration directory says the agent could read
 // the access key when access-key-secret is there and the place is or contains it; one
-// of the runs directory or of
-// qory's state directory, that it could change the run records; one of any other path,
-// or of the directory without the key, that it could change one of the runner's files.
-// A link's place is named as the link.
+// of the runs directory, of qory's state directory or of a link on the way to them,
+// that it could read the run records through a read-only mount and change them through
+// any other; one of any other path, or of the directory without the key, that it could
+// change one of the runner's files. A link's place is named as the link.
 //
 // mount_mode_conflict is a place inside another of the other mode, with the modes
-// qory passed. The runner refuses only two places of different modes, so when what qory
-// passed does not tell them apart, as for one path passed twice, the inner's is the
-// other one of the outer's.
+// qory passed. The runner refuses only two places of different modes: the inner's is
+// the one it was passed with, and the outer's the other one. An inner passed with both
+// modes is the later entry when the two names are one path, Dir counting last; for two
+// paths, the outer's one mode decides, else the inner's last entry.
 //
-// mount_shared_with_run is a place another walled run still going can change, or that
-// holds one of that run's places this run's agent could change. A git worktree inside
-// the other run's checkout is the common case, and the text says where to make one. The
-// runner names the runs directory for this run's own record, which the person never
-// mounted; that refusal is left to the rest.
+// mount_shared_with_run is a place another walled run still going also mounts: one
+// agent could change what the other mounts. A git worktree inside the other run's
+// checkout is the common case, and the text says where to make one. The runner names
+// the runs directory for this run's own records, which another run can write.
 //
 // A place is the workspace when it is the checkout root or Dir, and a mount otherwise.
 func mountRefused(err error, p passed) error {
@@ -689,9 +694,20 @@ func mountRefused(err error, p passed) error {
 	case ref.Code == codeMountContainsRunnerFiles && len(ref.Names) == 2:
 		mount, path := ref.Names[0], ref.Names[1]
 		how := overlap(mount, path)
+		shown := path
+		if l, ok := p.own.links[path]; ok {
+			shown = l
+		}
 		switch {
-		case path == p.spec.RunsDir || path == p.stateDir:
-			text = fmt.Sprintf("%s %s %s, which holds qory's run records; the agent could change them, so the run does not start. Mount a narrower path", p.place(mount), how, path)
+		case path == p.spec.RunsDir || path == p.stateDir || p.own.records[path]:
+			// A place the run passed with no mode is a mount it no longer knows: the
+			// agent may be able to write it.
+			writable, readOnly, _ := p.modes(mount)
+			what := "change"
+			if readOnly && !writable {
+				what = "read"
+			}
+			text = fmt.Sprintf("%s %s %s, which holds qory's run records; the agent could %s them, so the run does not start. Mount a narrower path", p.place(mount), how, shown, what)
 		default:
 			// The key is at stake only for a place that is or contains the key's own file.
 			key := p.runnerDir != "" && path == p.runnerDir
@@ -699,30 +715,39 @@ func mountRefused(err error, p passed) error {
 				at := session.Overlap(mount, runnerdir.Dir(p.runnerDir).Path(runnerdir.SecretFile))
 				key = at == "is" || at == "contains"
 			}
-			if l, ok := p.links[path]; ok {
-				path = l
-			}
-			text = fmt.Sprintf("%s %s %s, which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path", p.place(mount), how, path)
+			text = fmt.Sprintf("%s %s %s, which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path", p.place(mount), how, shown)
 			if key && runnerdir.Dir(p.runnerDir).HasSecret() {
-				text = fmt.Sprintf("%s %s %s, which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path", p.place(mount), how, path)
+				text = fmt.Sprintf("%s %s %s, which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path", p.place(mount), how, shown)
 			}
 		}
 	case ref.Code == codeMountModeConflict && len(ref.Names) == 2:
 		inner, outer := ref.Names[0], ref.Names[1]
-		innerWritable, innerOK := p.writable(inner, true)
-		outerWritable, outerOK := p.writable(outer, false)
+		inW, inR, inLast := p.modes(inner)
+		outW, outR, _ := p.modes(outer)
+		var innerWritable bool
 		switch {
-		case !innerOK && !outerOK:
+		case inW != inR:
+			innerWritable = inW
+		case inW && inner == outer:
+			innerWritable = inLast
+		case outW != outR:
+			innerWritable = !outW
+		case inW:
+			innerWritable = inLast
+		default:
 			return nil
-		case !outerOK:
-			outerWritable = !innerWritable
-		case !innerOK || innerWritable == outerWritable:
-			innerWritable = !outerWritable
 		}
-		text = fmt.Sprintf("the mount %s (%s) lies inside %s, which is %s: a part of a mount can't have another mode, so the run does not start. Give both the same mode, or leave %s out", inner, mode(innerWritable), outer, mode(outerWritable), inner)
-	case ref.Code == codeMountSharedWithRun && len(ref.Names) == 3 && ref.Names[0] != p.spec.RunsDir:
+		text = fmt.Sprintf("the mount %s (%s) lies inside %s, which is %s: a part of a mount can't have another mode, so the run does not start. Give both the same mode, or leave %s out", inner, mode(innerWritable), outer, mode(!innerWritable), inner)
+	case ref.Code == codeMountSharedWithRun && len(ref.Names) == 3 && ref.Names[0] == p.spec.RunsDir:
+		runs, other, otherPath := ref.Names[0], ref.Names[1], ref.Names[2]
+		how := map[string]string{"is": "is", "lies inside": "lie inside", "contains": "contain"}[session.Overlap(runs, otherPath)]
+		if how == "" {
+			how = "overlap"
+		}
+		text = fmt.Sprintf("this run's records %s %s %s, which the run %s, still going on this machine, can write: its agent could change them, so the run does not start. Wait for %s to end, or keep qory's state directory out of its mounts", runs, how, otherPath, other, other)
+	case ref.Code == codeMountSharedWithRun && len(ref.Names) == 3:
 		path, other, otherPath := ref.Names[0], ref.Names[1], ref.Names[2]
-		text = fmt.Sprintf("%s %s %s, which the run %s, still going on this machine, can write: one agent could change what the other mounts, so the run does not start. Wait for %s to end, or work in a checkout of its own", p.place(path), overlap(path, otherPath), otherPath, other, other)
+		text = fmt.Sprintf("%s %s %s, which the run %s, still going on this machine, also mounts: one agent could change what the other mounts, so the run does not start. Wait for %s to end, or work in a checkout of its own", p.place(path), overlap(path, otherPath), otherPath, other, other)
 		if info, err := os.Lstat(filepath.Join(path, ".git")); err == nil && info.Mode().IsRegular() {
 			text += "; make the worktree beside the checkout, not inside it"
 		}
@@ -749,15 +774,70 @@ func mode(writable bool) string {
 	return "read-only"
 }
 
+// ownFiles is what qory passes the runner as its files: files, in order; links, which
+// maps a link's place to the link, for the person; and records, the ones that guard the
+// run records.
+type ownFiles struct {
+	files   []string
+	links   map[string]string
+	records map[string]bool
+}
+
 // runnerFiles is what qory passes the runner as its files: the configuration directory
-// runnerDir, absolute, when there is one, then qory's state directory, which holds the
-// run records, then what [configLinks] adds, with the links it shows.
-func runnerFiles(runnerDir, state string) ([]string, map[string]string) {
-	if runnerDir == "" {
-		return []string{state}, nil
+// runnerDir, absolute, when there is one; then qory's state directory, which holds the
+// run records, and what [recordLinks] adds for it and the runs directory runs; then
+// what [configLinks] adds.
+func runnerFiles(runnerDir, state, runs string) ownFiles {
+	own := ownFiles{links: map[string]string{}, records: map[string]bool{}}
+	if runnerDir != "" {
+		own.files = append(own.files, runnerDir)
 	}
-	files, links := configLinks(runnerDir)
-	return append([]string{runnerDir, state}, files...), links
+	own.files = append(own.files, state)
+	files, shown := recordLinks(state, runs)
+	for _, f := range files {
+		own.records[f] = true
+	}
+	own.files = append(own.files, files...)
+	if runnerDir != "" {
+		more, links := configLinks(runnerDir)
+		for _, f := range more {
+			if !slices.Contains(own.files, f) {
+				own.files = append(own.files, f)
+			}
+		}
+		maps.Copy(shown, links)
+	}
+	own.links = shown
+	return own
+}
+
+// recordLinks is what qory passes the runner for the run records when a link is on the
+// way to them: the path of the runs directory runs, absolute, under the state directory
+// state, is followed one link at a time, as [configLinks] follows its files, and every
+// link on the way outside state goes as its place, [linkPlace], since the agent could
+// point it at a directory of its own; shown maps the place back to the link. Where the
+// path leads goes too when a link takes it out of state, and the path as it is when it
+// loops or cannot be read, which the runner then refuses.
+func recordLinks(state, runs string) (files []string, shown map[string]string) {
+	resolved, err := filepath.EvalSymlinks(state)
+	exists := err == nil
+	inside := func(p string) bool { return exists && within(resolved, p) }
+	shown = map[string]string{}
+	links, target, err := followLinks(runs)
+	for _, l := range links {
+		if !inside(filepath.Dir(l)) {
+			place := linkPlace(l)
+			shown[place] = l
+			files = append(files, place)
+		}
+	}
+	switch {
+	case err != nil:
+		files = append(files, runs)
+	case target != "" && !inside(target):
+		files = append(files, target)
+	}
+	return files, shown
 }
 
 // configLinks is what qory passes the runner for the files it reads from its
