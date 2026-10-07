@@ -271,7 +271,8 @@ changed. It may hold:
   policy](#a-runs-own-policy). Without it, the node's policy is the run's.
 - `connections`, the run's connections. Connections go per kind and name: the
   machine's, `runner.yaml`'s `connections:`, fill the rest, and where both have one of
-  the same kind and name, the server's wins. See [Credentials the agent never
+  the same kind and name, the server's wins. One of the machine's whose hosts overlap a
+  server connection's is left out and shown. See [Credentials the agent never
   has](#credentials-the-agent-never-has).
 - `variables`, which reach the agent's process. A value of the server wins over every
   source but the values qory and the runtime fix, and a run without a wall gets none of
@@ -527,7 +528,8 @@ three kinds:
 
 A run's connections go per kind and name. The server's run configuration sets the
 ones it has, and `runner.yaml`'s `connections:` fill the rest. Where both have one of
-the same kind and name, the server's wins.
+the same kind and name, the server's wins. One of `runner.yaml`'s whose hosts overlap a
+server connection's is left out and shown.
 
 Connections need a wall. A run with a connection and no wall does not start,
 `connection_needs_wall`.
@@ -941,7 +943,8 @@ connection names:
 
 A run's connections go per kind and name. The server's run configuration sets the ones
 it has, and `runner.yaml`'s `connections:` fill the rest. Where both have one of the same
-kind and name, the server's wins.
+kind and name, the server's wins. One of `runner.yaml`'s whose hosts overlap a server
+connection's is left out and shown.
 
 Connections need a wall. A run with a connection and no wall does not start,
 `connection_needs_wall`.
@@ -969,8 +972,9 @@ A server's run configuration carries the connections it chose for the run:
 #### In runner.yaml
 
 A machine without a server takes its connections from `runner.yaml`. With a server, the
-connections there fill in the kinds and names the server leaves out. Their secrets come
-from `secrets.local`:
+connections there fill in the kinds and names the server leaves out, and one whose hosts
+overlap a server connection's is left out and shown. Their secrets come from
+`secrets.local`:
 
 ```yaml
 # ~/.config/qory/runner.yaml

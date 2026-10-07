@@ -166,9 +166,7 @@ release may change what an existing document does, and states it under Upgrading
   `--env` loses, `qory run` says why, such as `qory run: LOG_LEVEL from --env is not
   used: apiary.example.com sets it`, `no source may set it` or `the harness sets it`.
   `--env` works without a wall; `--image`, `--mount` and the limits need one. A run
-  without a wall gets none of the server's variables. A run's connections go per kind
-  and name: `runner.yaml`'s fill the rest, and where both have one of the same kind and
-  name, the server's wins.
+  without a wall gets none of the server's variables.
 - A mount, `--mount` or `wall.mounts`, that is, contains or lies inside the directory
   that holds this machine's access key, or any other of the runner's files, is refused
   before the run starts, `mount_contains_runner_files`: `qory run: the mount <host
