@@ -293,6 +293,36 @@ func TestResolveGitTakesTheTagOfANameThatIsBoth(t *testing.T) {
 	}
 }
 
+// TestResolveGitTakesATagPushedOverACachedBranch is a name cached as a branch, rel at the
+// first commit, and then a tag rel pushed at the second, with the branch deleted: the
+// next resolve takes the tag's commit, not the branch's cached one, and records it as a
+// tag.
+func TestResolveGitTakesATagPushedOverACachedBranch(t *testing.T) {
+	url, first, second := remote(t)
+	dir := strings.TrimPrefix(url, "file://")
+	cache := t.TempDir()
+	run(t, dir, "branch", "rel", first)
+	src := stack.Source{Git: url, Ref: "rel"}
+	a, err := source.Resolve("/nowhere", src, source.Options{Cache: cache})
+	if err != nil || a.Pin != short(first) {
+		t.Fatalf("the branch: pin %q (%v), want %s", a.Pin, err, short(first))
+	}
+	run(t, dir, "branch", "-q", "-D", "rel")
+	run(t, dir, "tag", "-a", "-m", "release", "rel", second)
+	got, err := source.Resolve("/nowhere", src, source.Options{Cache: cache, Pin: a.Pin})
+	if err != nil || got.Pin != short(second) {
+		t.Fatalf("the tag: pin %q (%v), want %s", got.Pin, err, short(second))
+	}
+	if data, _ := os.ReadFile(refsFile(t, cache, "rel")); string(data) != "tag "+second+"\n" {
+		t.Errorf("the refs file reads %q, want the tag's commit", data)
+	}
+	// With both clones cached, a name that is a tag and a branch again is the tag.
+	run(t, dir, "branch", "rel", first)
+	if got, err := source.Resolve("/nowhere", src, source.Options{Cache: t.TempDir()}); err != nil || got.Pin != short(second) {
+		t.Errorf("tag and branch: pin %q (%v), want the tag's %s", got.Pin, err, short(second))
+	}
+}
+
 // TestResolveGitLooksUpOnceForManyModules is two modules from one repository at main in
 // one compose, sharing a memo: the remote is asked once, and a push between the two
 // leaves both on one commit.

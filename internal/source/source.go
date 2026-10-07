@@ -346,9 +346,11 @@ var abbreviated = regexp.MustCompile(`^[0-9a-fA-F]{4,}$`)
 // with refs/, so refs/heads/feature/main is never main; a name that is both is the tag,
 // as git fetch takes it. A branch takes the remote's commit, fetched when its clone is
 // not cached; when the fetch lands on another commit, someone pushed in between and the
-// fetch's commit is taken. A tag keeps the commit cached for it, the pin's first, then
-// the refs file's, and is fetched only when nothing is cached; a ref the refs file
-// records as a tag, with its clone cached, is not looked up at all.
+// fetch's commit is taken. A ref the refs file records as a tag keeps the commit cached
+// for it, the pin's first, then the refs file's, and is not looked up at all. A tag the
+// cache did not know as one, such as a name cached as a branch before a tag of that name
+// was pushed, takes the tag's commit as the remote lists it, fetched when its clone is not
+// cached, and is recorded as a tag from then on.
 //
 // A remote that cannot be reached, or does not answer within the timeout, leaves the
 // cached commit with a warning; with nothing cached the error is a [*FetchError]. A
@@ -381,23 +383,35 @@ func commitOf(dir string, s stack.Source, opts Options) (memoEntry, error) {
 			tag = ""
 		}
 	}
-	found, err := lsRemote(dir, s, opts.Timeout, tag, branch)
+	names := []string{branch}
+	if tag != "" {
+		// An annotated tag's own line names the tag object; the line ending in ^{} names
+		// the commit it points at.
+		names = append(names, tag, tag+"^{}")
+	}
+	found, err := lsRemote(dir, s, opts.Timeout, names...)
 	if err != nil {
 		if cached != "" {
 			return memoEntry{commit: cached, warning: fmt.Sprintf("%s#%s: could not reach the remote; kept %s", s.Git, s.Ref, cached[:12])}, nil
 		}
 		return memoEntry{}, err
 	}
-	if _, ok := found[tag]; ok && tag != "" {
-		if cached == "" {
+	if commit, ok := found[tag]; ok && tag != "" {
+		// A tag known as one, with a clone cached, returned above. What is cached now was
+		// resolved as something else, a branch of the same name say, or nothing is; the
+		// tag's own commit is taken, from the cache when its clone is there.
+		if peeled, ok := found[tag+"^{}"]; ok {
+			commit = peeled
+		}
+		if !cloned(filepath.Join(dir, commit)) {
 			return fetched(dir, refFile, s, tag, kindTag, opts.Timeout)
 		}
-		if kind != kindTag {
-			if err := writeRef(refFile, kindTag, cached); err != nil {
+		if kind != kindTag || recorded != commit {
+			if err := writeRef(refFile, kindTag, commit); err != nil {
 				return memoEntry{}, err
 			}
 		}
-		return memoEntry{commit: cached}, nil
+		return memoEntry{commit: commit}, nil
 	}
 	if remote, ok := found[branch]; ok {
 		if !cloned(filepath.Join(dir, remote)) {
