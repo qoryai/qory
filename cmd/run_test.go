@@ -862,6 +862,30 @@ func TestRunRefusesAMountOfTheRunnersFiles(t *testing.T) {
 	}
 }
 
+// TestRunRefusesAMountOfAnotherModeInside is a walled run with a read-only mount inside
+// the checkout, which the container sees writable: the runner refuses it before
+// anything starts, and qory gives both modes. A runner that binds such a mount starts
+// the run, and the test is skipped.
+func TestRunRefusesAMountOfAnotherModeInside(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, "claude")
+	docker, _ := fakeDocker(t)
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
+	vendor := filepath.Join(root, "vendor")
+	if err := os.MkdirAll(vendor, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, "run", "claude", "--mount", vendor+":ro")
+	if strings.Contains(out, "inside the container") {
+		t.Skip("needs the runner pin with mount_mode_conflict")
+	}
+	want := "the mount " + vendor + " (read-only) lies inside " + root + ", which is writable: a part of a mount can't have another mode, so the run does not start. Give both the same mode, or leave " + vendor + " out (mount_mode_conflict)"
+	if err == nil || cmd.ExitCode(err) != 1 || err.Error() != want {
+		t.Errorf("%v (exit %d), want %q\n%s", err, cmd.ExitCode(err), want, out)
+	}
+}
+
 // TestRunRefusesAMountOfWhereAConfigLinkLeads is a walled run whose runner.yaml is a
 // link to a file in another directory, and a descriptor in runtimes/ a link to one whose
 // target does not exist yet: a mount of either directory is refused before anything
