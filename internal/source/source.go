@@ -358,8 +358,8 @@ var abbreviated = regexp.MustCompile(`^[0-9a-fA-F]{4,}$`)
 // commit with a warning; with nothing cached the error is a [*FetchError]. A fetch that
 // fails after the lookup answered is a [*FetchError] too, whatever the cache holds. A
 // remote that answers without the ref is a [*GoneError], whatever the cache holds,
-// except for a ref that may be an abbreviated commit id, which is read from the cache
-// or fetched as it is.
+// except for a ref of unknown kind that may be an abbreviated commit id, which is read
+// from the cache or fetched as it is.
 func commitOf(dir string, s stack.Source, opts Options) (memoEntry, error) {
 	refFile := filepath.Join(dir, "refs", cacheName(s.Ref))
 	if commitID.MatchString(s.Ref) && !opts.Update {
@@ -427,7 +427,10 @@ func commitOf(dir string, s stack.Source, opts Options) (memoEntry, error) {
 		}
 		return memoEntry{commit: remote}, nil
 	}
-	if !abbreviated.MatchString(s.Ref) {
+	// A ref the refs file knows as a branch or a tag was one, so the remote no longer
+	// having it is gone, whatever the name looks like. Only a ref of unknown kind that
+	// looks like hex may be an abbreviated commit.
+	if !abbreviated.MatchString(s.Ref) || kind == kindBranch || kind == kindTag {
 		return memoEntry{}, &GoneError{URL: s.Git, Ref: s.Ref}
 	}
 	if cached != "" {

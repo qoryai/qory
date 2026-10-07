@@ -372,6 +372,26 @@ func TestResolveGitFailsForADeletedBranch(t *testing.T) {
 	}
 }
 
+// TestResolveGitFailsForADeletedBranchNamedLikeHex is a branch named cafe, which reads as
+// an abbreviated commit too: once the cache knows it as a branch, its deletion on the
+// remote is the gone error, not a fetch of cafe as a commit.
+func TestResolveGitFailsForADeletedBranchNamedLikeHex(t *testing.T) {
+	url, _, second := remote(t)
+	dir := strings.TrimPrefix(url, "file://")
+	opts := source.Options{Cache: t.TempDir()}
+	run(t, dir, "branch", "cafe")
+	src := stack.Source{Git: url, Ref: "cafe"}
+	if got, err := source.Resolve("/nowhere", src, opts); err != nil || got.Pin != short(second) {
+		t.Fatalf("pin %q (%v), want %s", got.Pin, err, short(second))
+	}
+	run(t, dir, "branch", "-q", "-D", "cafe")
+	_, err := source.Resolve("/nowhere", src, opts)
+	var gone *source.GoneError
+	if want := url + " has no branch or tag cafe; to keep the old harness, set ref to a commit id"; !errors.As(err, &gone) || err.Error() != want {
+		t.Errorf("err = %v\nwant %s", err, want)
+	}
+}
+
 // TestResolveGitReadsTheOldRefsFile is a refs file written before it recorded the kind,
 // the commit alone: a branch offline keeps the commit it names, and a tag rewrites it
 // with its kind.
