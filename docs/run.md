@@ -221,6 +221,37 @@ on `SIGTERM`. So the signal is yours to choose: `SIGTERM`, `SIGINT`, `SIGHUP`, `
 `run.timeout`, `run.stop_signal` and `run.stop_grace` in `runner.yaml` set these for
 every run on the machine.
 
+## A run's variables
+
+Several sources may set a variable of the agent's process. For each name, the run takes
+the value of the highest source that sets it:
+
+1. The values qory and the runtime fix: the runner's own names, `QORY_HARNESS_HOME`, and
+   the harness's fixed variables, such as `CODEX_HOME`. No other source overrides them.
+2. The server's run configuration. See [The server](#the-server).
+3. `--env`, the run's own.
+4. `wall.env`, the machine's.
+5. The harness's defaults: `env` in `qory.yaml`, the `env` of
+   `harness.launch.<runtime>`, and the `env` a settings fragment sets.
+6. The shell `qory run` starts in. A walled run takes none of it but the names
+   `wall.env` and `--env` list.
+
+`--env` and `wall.env` name variables of `qory run`'s environment. `--env` needs no
+wall; `--image`, `--mount` and the limits do. A run without a wall gets none of the
+server's variables.
+
+A value that loses is left out, and the run starts. When a value of `--env` loses, `qory
+run` prints a line that says why:
+
+```
+qory run: LOG_LEVEL from --env is not used: apiary.example.com sets it
+qory run: LOG_LEVEL from --env is not used: no source may set it
+qory run: LOG_LEVEL from --env is not used: the harness sets it
+```
+
+`dev.qory.run.policy_applied` lists every variable by name, never a value: the source
+whose value applies, and each value that lost, with its source and why.
+
 ## The server
 
 With a server configured, the runner starts by fetching the server's configuration. It
@@ -234,15 +265,13 @@ changed. It may hold:
 
 - `security_policy`, the server's policy. The node's policy narrows it: see [A run's own
   policy](#a-runs-own-policy). Without it, the node's policy is the run's.
-- `connections`, the run's connections. When the member is there, even empty, it is the
-  whole set. Without it, `runner.yaml`'s apply. See [Credentials the agent never
+- `connections`, the run's connections. Connections go per kind and name: the
+  machine's, `runner.yaml`'s `connections:`, fill the rest, and where both have one of
+  the same kind and name, the server's wins. See [Credentials the agent never
   has](#credentials-the-agent-never-has).
-- `variables`, which reach the agent's process. The server leads: the node's own
-  variables, `wall.env` and `--env`, apply only to the names whose server value the run
-  does not apply. A name the harness's launch template sets keeps the template's value:
-  the server's variable of that name is left out, and `dev.qory.run.policy_applied`
-  lists it as denied. An unwalled run gets none of the server's variables unless
-  `variables.unwalled: accept` is set.
+- `variables`, which reach the agent's process. A value of the server wins over every
+  source but the values qory and the runtime fix, and a run without a wall gets none of
+  them. See [A run's variables](#a-runs-variables).
 
 `--local` runs with the files alone and the machine's policy. The server is not
 contacted.
@@ -253,8 +282,8 @@ The server knows this machine by its access key, an Ed25519 key. Its secret stay
 the machine, and the server keeps only its public key. A machine gets its key in one of
 two ways: it enrols one with a code, or an owner or administrator of the server pastes
 its public key into the node. See [Enrol with a code](#enrol-with-a-code) and [Paste the
-public key](#paste-the-public-key). A key is never rotated: a new one is enrolled,
-approved, and the old one revoked.
+public key](#paste-the-public-key). A key is never rotated: a new one is enrolled, and
+the old one revoked.
 
 `runner.yaml`'s `server` section holds two values of the key:
 
@@ -315,7 +344,6 @@ refusal means and what to do, then the runner's words and the code:
 | Code | What it means |
 | --- | --- |
 | `unauthorized` | the server refused the request: it does not know the access key, has revoked it, or this machine's clock is more than five minutes off; check the clock, else enrol a new key |
-| `key_pending` | the key awaits approval: an owner or administrator of the server compares the fingerprint qory prints with the one the server shows |
 | `answer_unsigned` | an answer does not verify under the pin |
 | `instance_limit` | the node's live instances are at its limit |
 | `run_closed` | the server closed the run before it started; the exit status is 1 |
@@ -331,9 +359,8 @@ qory access-key enrol https://apiary.example qec_…
 
 qory makes the key, keeps its secret in `access-key-secret`, mode `0600`, and prints its
 fingerprint. It sends the server the public key, named `instance.name`, else the host
-name; when the host name does not fit a name, set `instance.name`. The key then awaits
-approval: the owner or administrator compares the fingerprint qory printed with the one
-the server shows. Until then every run is refused, `key_pending`.
+name; when the host name does not fit a name, set `instance.name`. The key is active as
+soon as the server answers.
 
 The server's answer is signed. qory writes `server.access_key_id` into `runner.yaml`,
 and `server.url` and the pin, `server.apiary_public_key`, when the file has none. A pin
@@ -354,13 +381,13 @@ When the enrolment does not complete:
 
 | Answer | What qory does |
 | --- | --- |
-| 401, `unauthorized` | the code was used or has expired. The secret made for it is moved aside, and enrolling needs a new code. If you did not use the code, tell the owner or administrator: they must reject the pending key |
+| 401, `unauthorized` | the code was used or has expired. The secret made for it is moved aside, and enrolling needs a new code. If you did not use the code, someone else did: tell the owner or administrator who made it. The code's issuer must revoke the key it enrolled |
 | `key_invalid` | the server refused the key. The secret made for it is moved aside, and enrolling needs a new code |
-| `key_limit` | the node already holds a key awaiting approval, or two approved keys. qory keeps the key: once one of them is revoked or rejected, the same command within the 15 minutes succeeds |
+| `key_limit` | the node already holds two keys. qory keeps the key: once an owner or administrator has revoked one of them, the same command within the 15 minutes succeeds |
 | `answer_unsigned`, or no answer | the answer does not verify under the server's key the code names, or never came. `runner.yaml` is not changed. qory keeps the key, and the same command within the 15 minutes retries with it |
 
 A secret enrol moves aside goes to `access-key-secret.old.<Unix time>`. It is deleted
-once a new key is approved and a run uses it.
+once a new key is enrolled and a run uses it.
 
 #### Paste the public key
 
@@ -370,8 +397,9 @@ qory access-key create
 
 qory makes a key, keeps its secret in `access-key-secret`, and prints the public key and
 its fingerprint. An owner or administrator of the server pastes the public key into the
-node or node pool, where it is approved at once. Its page then shows the `server` lines
-for `runner.yaml`: `server.url`, `server.access_key_id` and `server.apiary_public_key`.
+node or node pool, where it is active as soon as it is entered. Its page then shows the
+`server` lines for `runner.yaml`: `server.url`, `server.access_key_id` and
+`server.apiary_public_key`.
 `create` does not write `runner.yaml`.
 
 When `access-key-secret` exists, `create` refuses: move it aside yourself first.
@@ -404,10 +432,10 @@ needs `server.url` alone.
 
 The key is for another machine, so `enrol --print` leaves the server and the pin of
 this machine's `runner.yaml` aside: it checks the code against `QORY_APIARY_PUBLIC_KEY`
-when that is set. The key's name is still this machine's, and the key still awaits
-approval. It keeps nothing, so an enrolment whose answer is lost or does not verify
-cannot be retried: get a new code, and have the owner or administrator reject the key
-qory printed the fingerprint of, should it await approval.
+when that is set. The key's name is still this machine's, and the key is active as soon
+as the server answers. It keeps nothing, so an enrolment whose answer is lost or does
+not verify cannot be retried: get a new code, and have the owner or administrator
+revoke the key qory printed the fingerprint of, should the server show it.
 
 #### Stored secrets need a wall
 
@@ -493,9 +521,9 @@ three kinds:
 | `service` | an API with a static key: exact hosts, a scheme, and the secrets it needs | the service's hosts, by its scheme |
 | `integration` | a program that mints a credential for the run | the hosts its description lists, as its answer says. See [Integrations](#integrations) |
 
-A run's connections come from the server's run configuration when it has a
-`connections` member, even an empty one. Otherwise they come from `runner.yaml`'s
-`connections:`.
+A run's connections go per kind and name. The server's run configuration sets the
+ones it has, and `runner.yaml`'s `connections:` fill the rest. Where both have one of
+the same kind and name, the server's wins.
 
 Connections need a wall. A run with a connection and no wall does not start,
 `connection_needs_wall`.
@@ -907,9 +935,9 @@ connection names:
 | `settings` | the plain settings |
 | `secrets` | each secret the chosen roles list, by its setting's name, linked to a secret |
 
-A run's connections come from the server's run configuration when it has a `connections`
-member. That member is the whole set, even when it is empty. Otherwise they come from
-`runner.yaml`'s `connections:`.
+A run's connections go per kind and name. The server's run configuration sets the ones
+it has, and `runner.yaml`'s `connections:` fill the rest. Where both have one of the same
+kind and name, the server's wins.
 
 Connections need a wall. A run with a connection and no wall does not start,
 `connection_needs_wall`.
@@ -936,8 +964,9 @@ A server's run configuration carries the connections it chose for the run:
 
 #### In runner.yaml
 
-A machine without a server, or a run whose server sends no `connections`, takes its
-connections from `runner.yaml`. Its secrets come from `secrets.local`:
+A machine without a server takes its connections from `runner.yaml`. With a server, the
+connections there fill in the kinds and names the server leaves out. Their secrets come
+from `secrets.local`:
 
 ```yaml
 # ~/.config/qory/runner.yaml
@@ -1161,9 +1190,9 @@ Turn it on with a `wall` section, or with `--wall docker --image <image>` for on
 - It reaches the proxy, and nothing else, through a relay.
 - The container sees the checkout and the composed home, at their own paths, and nothing
   else of your machine.
-- Of your environment, the container gets the launch template's variables and the ones
-  `wall.env` or `--env` lists. Nothing else. These are the node's variables: with a
-  server, they apply only to the names whose server value the run does not apply.
+- Of your environment, the container gets the ones `wall.env` or `--env` lists, and
+  nothing else. The harness's launch variables, fixed and defaults, reach the agent in
+  the container as they do outside it. See [A run's variables](#a-runs-variables).
 - The runner, the policy, the record and the access key's secret stay outside.
 
 A wall needs the `docker` command, and an engine behind it. It also needs an image that
@@ -1184,7 +1213,14 @@ What to know:
   that binary.
 - **What the container sees.** The checkout it was started in, and no other directory.
   `--mount <path>[:ro]` or `wall.mounts` shows it another one, at its own path, such as a
-  sibling checkout the session reads. A socket is never mounted.
+  sibling checkout the session reads. A socket is never mounted. A mount that is,
+  contains or lies inside the directory that holds this machine's access key, or any
+  other of the runner's files, such as a program it starts outside the wall, is refused
+  before the run starts, `mount_contains_runner_files`:
+
+  ```
+  qory run: the mount <host path> contains <dir>, which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path
+  ```
 - **Git in a worktree.** In a git worktree, the repository's data lives in the main
   checkout, outside the worktree. So git inside the container works there only with that
   directory mounted. A clone works as it is.

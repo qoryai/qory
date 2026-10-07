@@ -666,13 +666,14 @@ Per runtime, the files written into its directory:
   bare names.
 - **codex**: `config.toml` with the model, the servers as `[mcp_servers.<name>]` tables,
   and any other `settings/codex/` file, without `shell_environment_policy.set`, whose
-  variables are the launch's; Codex passes its own environment to every command it
-  runs, and by default filters no name, `*KEY*`, `*SECRET*` and `*TOKEN*` included, unless
-  a fragment's `shell_environment_policy` says otherwise, one `agents/<name>.toml` per agent with the body as
+  variables are the launch's, one `agents/<name>.toml` per agent with the body as
   `developer_instructions`, and for a launch the skills linked under `skills/` and the
-  instructions as `AGENTS.md`, neither linked into the checkout (§Launching). Codex reads
-  `AGENTS.override.md` before `AGENTS.md`, and a project `.codex` only in a trusted
-  project.
+  instructions as `AGENTS.md`, neither linked into the checkout (§Launching). Codex
+  passes its own environment to every command it runs. Codex 0.76.0 or later filters no
+  name by default. An older Codex drops the names that contain `KEY`, `SECRET` or
+  `TOKEN`, unless a fragment's `shell_environment_policy` sets
+  `ignore_default_excludes = true`. Codex reads `AGENTS.override.md` before `AGENTS.md`,
+  and a project `.codex` only in a trusted project.
 - **gemini**: `settings.json` with `model.name` and `mcpServers`, links for skills and hooks,
   one `agents/<name>.md` with `name` and `description`, one `commands/<name>.toml` with
   `$ARGUMENTS` as `{{args}}`. Gemini reads a project `.gemini` only in a trusted folder.

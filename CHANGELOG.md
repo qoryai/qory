@@ -26,9 +26,8 @@ release may change what an existing document does, and states it under Upgrading
   node and the instance, and `qory config` lists `runner.server.access_key_id`,
   `runner.server.apiary_public_key` by fingerprint and `runner.instance.name`.
 - `qory run` and `qory run resend` say what a refusal of the server means and what to do:
-  `unauthorized`, `key_pending` with the key's fingerprint, `answer_unsigned`,
-  `instance_limit`, `apiary_public_key_missing` and `run_closed`. A run the server closes
-  before it starts exits 1.
+  `unauthorized`, `answer_unsigned`, `instance_limit`, `apiary_public_key_missing` and
+  `run_closed`. A run the server closes before it starts exits 1.
 - When the server lists stored secrets for the machine's access key, every run needs a
   wall: an unwalled run is refused, `server_needs_wall`. The marker `stored-secrets`
   beside `runner.yaml` keeps refusing unwalled runs, `--local` included, until a server's
@@ -93,9 +92,9 @@ release may change what an existing document does, and states it under Upgrading
   section has none, into `runner.yaml`, keeping its comments, its order and every other
   key; the pin is the server's keys the code carries. The same command within the code's
   15 minutes retries with the same key. A used or expired code and a refused key move the
-  secret made for the code aside and say a new code is needed; a node that already holds a
-  pending key or two approved ones keeps it, and the same command succeeds once one is
-  revoked or rejected; an answer that does not verify changes nothing.
+  secret made for the code aside and say a new code is needed; a node that already holds
+  two keys keeps it, and the same command succeeds once an owner or administrator has
+  revoked one; an answer that does not verify changes nothing.
   `qory access-key create` makes a key whose public key an owner or administrator pastes
   into a node or node pool, and refuses when `access-key-secret` exists. With `--print`
   neither writes a key or a setting: enrol prints `QORY_ACCESS_KEY_ID`,
@@ -125,18 +124,20 @@ release may change what an existing document does, and states it under Upgrading
     `harness.launch.<runtime>`, and the `env` a settings fragment sets, Claude Code's
     `settings.json` `env` or Codex's `shell_environment_policy.set`.
 
-  The variables layer as before: a fragment's, the modules' exports over them, `qory.yaml`
-  over both. A variable `qory.yaml` sets over a module's export is a default. Every
+  The variables layer: a fragment's, the modules' exports over them, `qory.yaml` over
+  both. A variable `qory.yaml` sets over a module's export is a default. Every
   runtime with a launch template gets them, Gemini CLI, OpenCode, Cursor, Copilot and Amp
   too; `goose` and `any` have no launch and get none. Codex passes its environment to
-  every command it runs and, by default, filters no name, `*KEY*`, `*SECRET*` and
-  `*TOKEN*` included. The report records them per runtime under `launch_env`, each with
-  its value, where it comes from and whether it is fixed, and `qory harness inspect`
-  lists them with fixed or default and their source. `qory harness compose --check`
-  compares them with the report's, so a changed export, `qory.yaml` `env` or fragment
-  variable is stale, one row `launch_env/<runtime>/<NAME>` each. `qory run` passes them to the
-  runner; behind a wall it leaves out `QORY_HARNESS_HOME`, which the runner refuses to
-  pass into a container.
+  every command it runs. Codex 0.76.0 or later filters no name by default; an older
+  Codex drops the names that contain `KEY`, `SECRET` or `TOKEN`, unless a settings
+  fragment sets `ignore_default_excludes = true`. The report records them per runtime
+  under `launch_env`, each with its value, where it comes from and whether it is fixed,
+  and `qory harness inspect` lists them with fixed or default and their source.
+  `qory harness compose --check` compares them with the report's, so a changed export,
+  `qory.yaml` `env` or fragment variable is stale, one row `launch_env/<runtime>/<NAME>`
+  each. `qory run` passes them to the runner, the fixed ones as fixed and the defaults
+  as defaults, and the home, which the runner sets as `QORY_HARNESS_HOME`. They reach
+  the agent in the container and outside it alike.
 - qory builds against `github.com/qoryai/runner` at commit `4176ff4` of its `next`,
   `v0.6.1-0.20261006224758-4176ff4da645`, contract `v1` revision 1 as amended there.
   `runner.yaml`'s `egress` narrows the `security_policy` of a server's run
@@ -155,10 +156,28 @@ release may change what an existing document does, and states it under Upgrading
   whether or not a server is configured, and `wall.env` or `--env` naming it is refused.
   A machine that reports to a server needs its own access key: `server.access_key_id`,
   the `server.apiary_public_key` pin and the secret.
-- The variables the harness's launch template sets go to the runner as the run's own:
-  a variable of a server's run configuration of the same name is left out,
-  `dev.qory.run.policy_applied` lists it as denied, and the agent gets the launch
-  template's value.
+- A run's variables follow one order, highest first: the values qory and the runtime
+  fix, such as `QORY_HARNESS_HOME` and `CODEX_HOME`, which no other source overrides;
+  the server's run configuration; `--env`; `wall.env`; the harness's defaults, `env` in
+  `qory.yaml`, the `env` of `harness.launch.<runtime>` and a settings fragment's `env`;
+  and the shell. A value that loses is left out, and the run starts. When a value of
+  `--env` loses, `qory run` says why, such as `qory run: LOG_LEVEL from --env is not
+  used: apiary.example.com sets it`, `no source may set it` or `the harness sets it`.
+  `--env` works without a wall; `--image`, `--mount` and the limits need one. A run
+  without a wall gets none of the server's variables. A run's connections go per kind
+  and name: `runner.yaml`'s fill the rest, and where both have one of the same kind and
+  name, the server's wins.
+- A mount, `--mount` or `wall.mounts`, that is, contains or lies inside the directory
+  that holds this machine's access key, or any other of the runner's files, is refused
+  before the run starts, `mount_contains_runner_files`: `qory run: the mount <host
+  path> contains <dir>, which holds this machine's access key; the agent could read the
+  key, so the run does not start. Mount a narrower path`.
+- A key `qory access-key enrol` enrols is active as soon as the server answers, and
+  enrol says so: `the key is active: runs can start`. `key_limit` means the node already
+  holds two keys; once an owner or administrator has revoked one, the same command
+  within the code's 15 minutes succeeds. A 401 for a code you did not use means the
+  code's issuer must revoke the key it enrolled. A key pasted into a node or node pool
+  is active as soon as it is entered.
 - `qory harness compose` takes a branch's current commit on every compose, without
   `--update`. A tag or a commit id stays pinned. Offline, it keeps the cached commit and
   warns.
