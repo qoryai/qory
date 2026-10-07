@@ -52,8 +52,6 @@ var instanceShape = regexp.MustCompile(`^i_[A-Za-z0-9_-]{22}$`)
 // prints the node discovery lists. The next run keeps the id.
 func TestRunSignsWithTheAccessKeyAndNamesTheInstance(t *testing.T) {
 	root, srv := serverRun(t, "", "instance:\n  name: build-01\n")
-	// A variable that names nothing of qory's changes nothing.
-	t.Setenv("QORY_SERVER_SECRET", "anything")
 	out, err := run(t, "run")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)

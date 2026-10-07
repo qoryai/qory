@@ -432,17 +432,29 @@ func RunnersOwn(name string) bool {
 	return name == accesskey.EnvSecret || name == accesskey.EnvID || name == accesskey.EnvPin
 }
 
+// envWorkspaceSecret is the variable that held a workspace access key's secret, before
+// a machine signed with an access key of its own. It is refused, as server.access_key
+// and server.secret are.
+const envWorkspaceSecret = "QORY_SERVER_SECRET"
+
+// enrolAsNode ends the refusal of a workspace access key: what to do instead.
+const enrolAsNode = "enrol this machine as a node: qory access-key enrol <server> <code>, or qory access-key create and add its public key to the node; see https://github.com/qoryai/qory/blob/main/docs/run.md#the-access-key-and-the-instance"
+
 // readServer reads the server section. The access key's id and the pin come from the
 // file, else from QORY_ACCESS_KEY_ID and QORY_APIARY_PUBLIC_KEY; both set is refused.
 // Neither is required here: qory access-key enrol writes them, and a run without them is
 // refused when it starts. A value that contains an access key secret is refused without
-// being quoted.
+// being quoted. server.access_key, server.secret and QORY_SERVER_SECRET, a workspace
+// access key's, are refused with what to do instead.
 func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *yaml.Node) (*RunnerServer, error) {
-	if secret.Kind != 0 {
-		return nil, fmt.Errorf("%s: server.secret is not a key of %s: the access key's secret is the file %s beside it, or %s", path, RunnerFileName, "access-key-secret", accesskey.EnvSecret)
-	}
 	if key.Kind != 0 {
-		return nil, fmt.Errorf("%s: server.access_key is not a key of %s: the access key's id is server.access_key_id", path, RunnerFileName)
+		return nil, fmt.Errorf("%s: server.access_key is a workspace access key, which servers no longer accept; %s", path, enrolAsNode)
+	}
+	if secret.Kind != 0 {
+		return nil, fmt.Errorf("%s: server.secret is a workspace access key's secret, which servers no longer accept; %s", path, enrolAsNode)
+	}
+	if os.Getenv(envWorkspaceSecret) != "" {
+		return nil, fmt.Errorf("%s holds a workspace access key's secret, which servers no longer accept; unset it, and %s", envWorkspaceSecret, enrolAsNode)
 	}
 	if rawURL == nil || *rawURL == "" {
 		return nil, fmt.Errorf("%s: server.url is required", path)
