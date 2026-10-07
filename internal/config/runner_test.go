@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/qoryai/runner/accesskey"
+	"github.com/santhosh-tekuri/jsonschema/v6"
+	"gopkg.in/yaml.v3"
 
 	"github.com/qoryai/qory/internal/config"
 )
@@ -247,6 +249,42 @@ func TestRunnerFileRefusesAMistake(t *testing.T) {
 		_, err := config.Load(t.TempDir(), true)
 		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.HasPrefix(err.Error(), path) {
 			t.Errorf("%q: error %v, want one naming the file and %q", c.body, err, c.want)
+		}
+	}
+}
+
+// TestTheRunnerSchemaTakesTheServerSection holds runner.schema.json to what the reader
+// takes of server and instance: url, access_key_id and the pin, each of the last two
+// optional since the environment may hold it, and instance.name; the workspace access
+// key's keys and a server with no url fail it.
+func TestTheRunnerSchemaTakesTheServerSection(t *testing.T) {
+	schema, err := jsonschema.NewCompiler().Compile(filepath.Join("..", "..", "contracts", "harness", "v1", "runner.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, pin := serverKey(t)
+	for _, c := range []struct {
+		body  string
+		valid bool
+	}{
+		{"server: {url: \"https://qory.example\"}\n", true},
+		{"server: {url: \"https://qory.example\", access_key_id: ak_0123456789abcdef, apiary_public_key: " + pin + "}\n", true},
+		{"instance: {name: build-01}\n", true},
+		{"server: {access_key_id: ak_0123456789abcdef}\n", false},
+		{"server: {url: \"https://qory.example\", access_key_id: AK_0123456789ABCDEF}\n", false},
+		{"server: {url: \"https://qory.example\", apiary_public_key: []}\n", false},
+		{"server: {url: \"https://qory.example\", apiary_public_key: [{alg: rsa, public_key: abc}]}\n", false},
+		{"server: {url: \"https://qory.example\", access_key: ak_0123456789abcdef}\n", false},
+		{"server: {url: \"https://qory.example\", secret: sixteen-characters-at-least}\n", false},
+		{"instance: {name: \"-build\"}\n", false},
+		{"instance: {id: i_x}\n", false},
+	} {
+		var doc any
+		if err := yaml.Unmarshal([]byte("apiVersion: qory.dev/v1alpha1\n"+c.body), &doc); err != nil {
+			t.Fatal(err)
+		}
+		if err := schema.Validate(doc); (err == nil) != c.valid {
+			t.Errorf("%q: %v, want valid %v", c.body, err, c.valid)
 		}
 	}
 }
