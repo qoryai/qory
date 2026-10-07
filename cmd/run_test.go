@@ -44,9 +44,11 @@ type fakeServer struct {
 	signer, key *accesskey.Key
 	mu          sync.Mutex
 	policy      string
-	queries     []string
-	events      []map[string]any
-	refused     int
+	// variables is the JSON of the run configuration's variables, none when empty.
+	variables string
+	queries   []string
+	events    []map[string]any
+	refused   int
 	// instances are the X-Qory-Instance-Id and X-Qory-Instance-Name of every request.
 	instances [][2]string
 	// pending, secrets, full and closed make the server answer key_pending, list
@@ -83,7 +85,11 @@ func newFakeServer(t *testing.T, policy string) *fakeServer {
 		RunConfiguration: func(map[string]string) ([]byte, string, bool) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
-			doc := `{"version":1,"security_policy":` + f.policy + `}`
+			doc := `{"version":1,"security_policy":` + f.policy
+			if f.variables != "" {
+				doc += `,"variables":` + f.variables
+			}
+			doc += `}`
 			return []byte(doc), digest(doc), f.policy != ""
 		},
 		Admit: func(string, string) bool {
@@ -714,6 +720,51 @@ func TestRunBehindAWall(t *testing.T) {
 	}
 	if _, evs := events(t, root); evs["dev.qory.run.started"][0]["wall"] != nil {
 		t.Errorf("--wall none still walled: %v", evs["dev.qory.run.started"])
+	}
+}
+
+// TestALaunchVariableWinsOverTheServers is a walled run whose server's run configuration
+// sets a variable of the name the harness's launch template sets too: the agent gets the
+// launch template's value, the server's is left out and reported as denied in
+// dev.qory.run.policy_applied, and a server variable of another name reaches the agent.
+func TestALaunchVariableWinsOverTheServers(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "qory.yaml"), `apiVersion: qory.dev/v1alpha1
+harness:
+  launch:
+    claude:
+      command: claude
+      args:
+        - [--settings, "${dir}/settings.json"]
+      env: {SHARED_NAME: from-launch}
+`)
+	if out, err := run(t, "harness", "compose", "--runtime", "claude", "--no-links"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	docker, log := fakeDocker(t)
+	srv := newFakeServer(t, `{"version":1,"egress":{"mode":"observe"}}`)
+	srv.variables = `{"SHARED_NAME":"from-server","SERVER_ONLY":"from-server"}`
+	serverFile(t, srv, "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
+	out, err := run(t, "run", "claude")
+	if cmd.ExitCode(err) != 4 {
+		t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	data, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants(t, string(data), "env: SHARED_NAME=from-launch\n", "env: SERVER_ONLY=from-server\n")
+	lacks(t, string(data), "SHARED_NAME=from-server")
+	_, evs := events(t, root)
+	for _, applied := range [][]map[string]any{evs["dev.qory.run.policy_applied"], srv.byType()["dev.qory.run.policy_applied"]} {
+		if len(applied) != 1 {
+			t.Fatalf("run.policy_applied %v", applied)
+		}
+		vars, _ := applied[0]["variables"].(map[string]any)
+		if fmt.Sprint(vars["denied"]) != "[SHARED_NAME]" || fmt.Sprint(vars["names"]) != "[SERVER_ONLY]" {
+			t.Errorf("run.policy_applied variables %v", vars)
+		}
 	}
 }
 

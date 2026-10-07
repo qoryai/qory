@@ -239,7 +239,9 @@ changed. It may hold:
   has](#credentials-the-agent-never-has).
 - `variables`, which reach the agent's process. The server leads: the node's own
   variables, `wall.env` and `--env`, apply only to the names whose server value the run
-  does not apply. An unwalled run gets none of the server's variables unless
+  does not apply. A name the harness's launch template sets keeps the template's value:
+  the server's variable of that name is left out, and `dev.qory.run.policy_applied`
+  lists it as denied. An unwalled run gets none of the server's variables unless
   `variables.unwalled: accept` is set.
 
 `--local` runs with the files alone and the machine's policy. The server is not
