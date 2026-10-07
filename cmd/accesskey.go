@@ -107,7 +107,7 @@ func newAccessKeyCreate() *cobra.Command {
 		Long: `Make a new access key for this machine and print its public key and fingerprint.
 
 An owner or administrator of the server pastes the public key into an existing node or
-node pool, where it is approved at once. Its page then shows the lines for the server
+node pool, where it is active at once. Its page then shows the lines for the server
 section of ` + config.RunnerFileName + `: server.url, server.access_key_id and server.apiary_public_key.
 
 The secret goes into access-key-secret beside ` + config.RunnerFileName + `. When that file exists,
@@ -537,7 +537,7 @@ func create(out, errOut io.Writer, print bool) error {
 	}
 	fmt.Fprintf(info, "public key %s\n", key.PublicKey())
 	fmt.Fprintf(info, "fingerprint %s\n", key.Fingerprint())
-	fmt.Fprintf(info, "An owner or administrator of the server pastes the public key into the node or node pool, where it is approved at once; its page then shows the server lines for %s.\n", config.RunnerFileName)
+	fmt.Fprintf(info, "An owner or administrator of the server pastes the public key into the node or node pool, where it is active at once; its page then shows the server lines for %s.\n", config.RunnerFileName)
 	if print {
 		fmt.Fprintf(info, "Only %s belongs in the CI's secret store. No key or setting was written on this machine.\n", accesskey.EnvSecret)
 		fmt.Fprintf(out, "%s=%s\n", accesskey.EnvSecret, key.Secret())

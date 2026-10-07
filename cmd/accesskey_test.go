@@ -881,7 +881,7 @@ func TestCreateKeepsTheKeyAndRefusesASecondOne(t *testing.T) {
 	}
 	key := heldKey(t)
 	wants(t, out, "public key "+key.PublicKey().String()+"\n", "fingerprint "+key.Fingerprint()+"\n",
-		"An owner or administrator of the server pastes the public key into the node or node pool, where it is approved at once; its page then shows the server lines for runner.yaml.",
+		"An owner or administrator of the server pastes the public key into the node or node pool, where it is active at once; its page then shows the server lines for runner.yaml.",
 		"wrote the secret to "+dir.Path(runnerdir.SecretFile))
 	lacks(t, out, key.Secret())
 	for _, name := range []string{runnerdir.SecretFile, runnerdir.MarkerFile} {

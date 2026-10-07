@@ -7,7 +7,7 @@ Make an access key whose public key an administrator pastes into the server
 Make a new access key for this machine and print its public key and fingerprint.
 
 An owner or administrator of the server pastes the public key into an existing node or
-node pool, where it is approved at once. Its page then shows the lines for the server
+node pool, where it is active at once. Its page then shows the lines for the server
 section of runner.yaml: server.url, server.access_key_id and server.apiary_public_key.
 
 The secret goes into access-key-secret beside runner.yaml. When that file exists,
