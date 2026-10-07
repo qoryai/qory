@@ -781,8 +781,10 @@ harness:
 // TestRunRefusesAMountOfTheRunnersFiles is a walled run with a mount of the home,
 // which contains qory's configuration directory, and one of that directory itself: the
 // runner refuses both before anything starts, and qory says the agent could read the
-// access key, with how the mount and the directory stand to each other. A mount of a
-// directory the runner keeps its own files in, the tools' sockets, says so.
+// access key, with how the mount and the directory stand to each other. Without
+// access-key-secret in the directory, it says the agent could change one of the
+// runner's files. A mount of a directory the runner keeps its own files in, the tools'
+// sockets, says so.
 func TestRunRefusesAMountOfTheRunnersFiles(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -795,11 +797,19 @@ func TestRunRefusesAMountOfTheRunnersFiles(t *testing.T) {
 	// the home, so a mount of it holds the runner's files and not the access key.
 	tmp := tempDir(t)
 	t.Setenv("TMPDIR", tmp)
-	for _, c := range []struct{ mount, want, ending string }{
-		{home, "the mount " + home + " contains " + configDir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)", ""},
-		{configDir + ":ro", "the mount " + configDir + " is " + configDir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)", ""},
-		{tmp, "the mount " + tmp + " contains " + filepath.Join(tmp, "qory-tool-"), ", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
+	secret := filepath.Join(configDir, "access-key-secret")
+	for _, c := range []struct {
+		secret              bool
+		mount, want, ending string
+	}{
+		{false, home, "the mount " + home + " contains " + configDir + ", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)", ""},
+		{true, home, "the mount " + home + " contains " + configDir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)", ""},
+		{true, configDir + ":ro", "the mount " + configDir + " is " + configDir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)", ""},
+		{true, tmp, "the mount " + tmp + " contains " + filepath.Join(tmp, "qory-tool-"), ", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
 	} {
+		if c.secret {
+			writeFile(t, secret, "not read\n")
+		}
 		out, err := run(t, "run", "claude", "--mount", c.mount)
 		if err == nil || cmd.ExitCode(err) != 1 || !strings.HasPrefix(err.Error(), c.want) || !strings.HasSuffix(err.Error(), c.ending) || c.ending == "" && err.Error() != c.want {
 			t.Errorf("--mount %s: %v (exit %d), want %q ... %q\n%s", c.mount, err, cmd.ExitCode(err), c.want, c.ending, out)

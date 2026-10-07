@@ -26,6 +26,7 @@ import (
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
+	"github.com/qoryai/qory/internal/runnerdir"
 	"github.com/qoryai/qory/internal/ui"
 )
 
@@ -588,8 +589,10 @@ func whyUnused(from, why, host string) string {
 // mountRefused words the runner's mount_contains_runner_files for the person: a mount
 // of the wall that is, contains or lies inside one of the runner's files, which the
 // runner refuses before the run starts and again just before it wraps the agent.
-// runnerDir is the directory qory passed as the runner's, which holds the access key.
-// Any other error is nil here.
+// runnerDir is the directory qory passed as the runner's: a refusal of it says the agent
+// could read the access key when access-key-secret is there, and one of any other path,
+// or of the directory without the key, that the agent could change one of the runner's
+// files. Any other error is nil here.
 func mountRefused(err error, runnerDir string) error {
 	var ref *session.Refusal
 	if !errors.As(err, &ref) || ref.Code != codeMountContainsRunnerFiles || len(ref.Names) != 2 {
@@ -601,7 +604,7 @@ func mountRefused(err error, runnerDir string) error {
 		how = "overlaps"
 	}
 	text := fmt.Sprintf("the mount %s %s %s, which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path", mount, how, path)
-	if runnerDir != "" && path == runnerDir {
+	if runnerDir != "" && path == runnerDir && runnerdir.Dir(runnerDir).HasSecret() {
 		text = fmt.Sprintf("the mount %s %s %s, which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path", mount, how, path)
 	}
 	return &refusedError{text: text, err: &session.Refusal{Code: ref.Code}}

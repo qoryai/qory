@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -76,13 +77,20 @@ func TestUnusedEnvSaysWhy(t *testing.T) {
 
 // TestMountRefusedSaysHowTheMountStands is the runner's mount_contains_runner_files
 // worded with Overlap's relation: a mount that lies inside the runner's directory reads
-// the access key, a mount of another of the runner's files could change it, and any
-// other error is left to the rest.
+// the access key when access-key-secret is there, and could change one of the runner's
+// files when it is not; a mount of another of the runner's files could change it, and
+// any other error is left to the rest.
 func TestMountRefusedSaysHowTheMountStands(t *testing.T) {
 	dir := t.TempDir()
 	inner := filepath.Join(dir, "locks")
 	refusal := func(mount, path string) error {
 		return fmt.Errorf("wrapped: %w", &session.Refusal{Code: "mount_contains_runner_files", Names: []string{mount, path}})
+	}
+	if got, want := mountRefused(refusal(inner, dir), dir).Error(), "the mount "+inner+" lies inside "+dir+", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"; got != want {
+		t.Errorf("lies inside, no access key: %q, want %q", got, want)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "access-key-secret"), []byte("secret\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	if got, want := mountRefused(refusal(inner, dir), dir).Error(), "the mount "+inner+" lies inside "+dir+", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)"; got != want {
 		t.Errorf("lies inside: %q, want %q", got, want)
