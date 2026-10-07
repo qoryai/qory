@@ -22,7 +22,7 @@ type UI struct {
 	name    lipgloss.Style // the first column of a table and a line of code: bold
 	ok      lipgloss.Style // the check mark of a success line: bold green
 	bad     lipgloss.Style // the cross of a failure line: bold red
-	yellow  lipgloss.Style // one stripe of a box's frame: the bee's yellow
+	yellow  lipgloss.Style // one stripe of a box's frame and the warning sign: the bee's yellow
 	black   lipgloss.Style // the other stripe: the bee's black
 	columns int            // the width of w when it is a terminal, else 0
 }
@@ -85,6 +85,13 @@ const (
 // it, as [fmt.Printf] does.
 func (u *UI) Success(format string, args ...any) {
 	fmt.Fprintf(u.w, "%s %s\n", u.ok.Render("✓"), fmt.Sprintf(format, args...))
+}
+
+// Warn prints a line that starts with a warning sign, then format with args applied to
+// it, as [fmt.Printf] does: something the person should see that does not stop the
+// command.
+func (u *UI) Warn(format string, args ...any) {
+	fmt.Fprintf(u.w, "%s %s\n", u.yellow.Render("⚠"), fmt.Sprintf(format, args...))
 }
 
 // Fail prints err on a line that starts with a cross. A multi-line error keeps its lines
