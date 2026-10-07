@@ -242,7 +242,7 @@ func TestRunSaysWhatARefusalMeans(t *testing.T) {
 	srv.pending = false
 
 	writeSecret(t, newKey(t))
-	refusal("unknown", "the server refused the request of the access key ", ": it does not know the key, has revoked it, or this machine's clock is more than five minutes off; check the clock, else enrol a new key with qory access-key enrol (", "unauthorized (status 401)")
+	refusal("unknown", "the server refused a request signed with the access key ", ": it does not know the key, has revoked it, or this machine's clock is more than five minutes off; check the clock, else enrol a new key with qory access-key enrol (", "unauthorized (status 401)")
 	writeSecret(t, srv.key)
 
 	srv.full = true
