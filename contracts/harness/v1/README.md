@@ -246,20 +246,16 @@ control, not the format's.
 A **path source** reads a directory as it stands. Its pin is `working-tree`, marked dirty in
 the report when git sees uncommitted changes under it.
 
-A **git source** reads a repository at a ref: a tag, a branch, or a commit by its full id.
-The ref is resolved once and its commit fetched, at depth one, into
-`qory/sources/<url>/<commit>` under the user's cache directory, the URL made into a
-directory name with a short hash appended, beside a `refs/<ref>` file containing the
-commit the ref last resolved to; the pin is that commit. A compose after that reads the
-cache and needs no network: the checkout's own report records which commit it was
-composed from, and that commit serves again as long as the stack sets the same URL and
-ref. An edited
-ref resolves anew. A checkout that has never composed the source takes the ref's last
-resolution from the cache, not the remote's current head. `qory harness compose --update`
-resolves every git source's ref again, which is how a branch ref moves, and it moves for
-that checkout alone: clones are kept per commit, and another checkout composed from the
-previous commit keeps reading it until its own `--update`. A path inside the repository
-that links outside it is refused. `path` defines the module's directory inside the
+A **git source** reads a repository at a ref: a branch, a tag, or a commit by its full id.
+Its commit is fetched, at depth one, into `qory/sources/<url>/<commit>` under the user's
+cache directory, the URL made into a directory name with a short hash appended, beside a
+`refs/<ref>` file containing whether the ref is a branch or a tag and the commit it last
+resolved to; the pin is that commit. A branch follows the remote: each compose takes its
+current commit, and the module's row shows when it moved. A tag or a full commit id stays
+pinned to its commit. Offline, compose keeps the cached commit and warns. A branch that is
+gone from the remote fails; to keep the old harness, set `ref` to a commit id. An edited
+ref resolves anew. `qory harness compose --update` re-fetches every git source, tags
+included. A path inside the repository that links outside it is refused. `path` defines the module's directory inside the
 repository, for a repository that contains several modules. The report and the messages
 write a git source as `<url>#<ref>` or `<url>#<ref>:<path>`.
 
