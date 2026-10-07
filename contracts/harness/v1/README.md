@@ -881,8 +881,9 @@ nowhere else: it has no counterpart in a repository or an ancestor directory, so
 checkout cannot set the policy the agent runs under, which server the run reports to or
 what the agent is enclosed in. `egress` and `server` are the runner contract's objects,
 `https://qory.dev/contracts/runner/v1/`, in the runner contract's grammar; `qory run`
-passes them to the runner as they are. `wall` chooses that contract's wall and defines
-what `qory run` passes to it.
+passes them to the runner as they are, `server` with the access key's id and the pin
+from the environment when the file holds none. `wall` chooses that contract's wall and
+defines what `qory run` passes to it.
 
 ```yaml
 # ~/.config/qory/runner.yaml
@@ -892,9 +893,12 @@ egress:                          # the run policy; absent: observe everything, n
   allow: [api.anthropic.com, "*.github.com"]
   deny: [gist.github.com]        # denied in either mode, whatever allow lists
 server:                          # the server every run reports to; absent: files only
-  url: https://qory.example      # a scheme and a host; https, or http to this machine
-  access_key: ak_f1xt0re000000000 # the key the server issued this machine
-  secret: ...                    # at least 16 characters; or QORY_SERVER_SECRET in the environment
+  url: https://apiary.example    # a scheme and a host; https, or http to this machine
+  access_key_id: ak_0123456789abcdef # the machine's access key; or QORY_ACCESS_KEY_ID
+  apiary_public_key:             # the pin, the server's keys; or QORY_APIARY_PUBLIC_KEY
+    - {alg: ed25519, public_key: mptNqtgGKgLhLZxmOGfpBQkdeBNH7QN3Qs9ETNumy8Q}
+instance:                        # this machine as the server shows it
+  name: build-01                 # this instance's name on the server; absent: the host name
 wall:                            # the container the runtime starts in; absent: a process of this machine
   adapter: docker
   image: go                      # the default: a name of images, or a reference; or --image
@@ -915,8 +919,9 @@ wall:                            # the container the runtime starts in; absent: 
 | `egress.allow` | none | the hosts the runtime may reach: a lower-case name, or `*.` and a name for every host below it, the grammar of a module's `egress` (§The module manifest). The hosts the harness declares are reported beside it as `harness_hosts` and narrow nothing |
 | `egress.deny` | none | the hosts the runtime may not reach, in `allow`'s grammar, in either mode: the runner decides them before the mode and the allow list, so a host an entry covers is denied under `observe` as under `enforce`, whatever `allow` lists, with the entry as the rule recorded |
 | `server.url` | none | the server the run reports to: `https`, or `http` to this machine, a scheme and a host with nothing after. With it set, `qory run` fetches the server's configuration, signed, and does not start unless the server answers; the events go where it defines, and its run configuration, when it defines one, is the run's policy. `--local` runs with the files alone and the server is not contacted |
-| `server.access_key` | none | the key the server issued this machine, `ak_` and 16 characters; sent with every request |
-| `server.secret` | `QORY_SERVER_SECRET` | signs every request; at least 16 characters, never in a repository, never sent |
+| `server.access_key_id` | `QORY_ACCESS_KEY_ID` | the id of the machine's access key, an Ed25519 key: `ak_` and 16 characters, which the server assigns when the key enrols; `qory access-key enrol` writes it. Set in the file and in the environment, it is refused. A run without one does not start |
+| `server.apiary_public_key` | `QORY_APIARY_PUBLIC_KEY`, as JSON | the pin: the server's Ed25519 public keys, each `{alg: ed25519, public_key: <base64url>}`, a list so the key can rotate. Every answer of the server is verified under one of them. `qory access-key enrol` writes it when there is none. Set in the file and in the environment, it is refused; a pin that lists the runner contract's published fixture key is refused. A run without one does not start, `apiary_public_key_missing` |
+| `instance.name` | the host name, or its first label when the whole does not fit | this instance's display name on the server, and the name an enrolled key gets: 1 to 64 of `A-Z`, `a-z`, `0-9`, dot, underscore and dash, starting with a letter or a digit. The instance's id is qory's own, kept in the file `instance-id` beside `runner.yaml` |
 | `wall.adapter` | none | `docker`, the one there is. With it set, every `qory run` starts the runtime in a container with no route out except to the runner's proxy; `--wall none` runs once without it, `--wall docker` once with it |
 | `wall.image` | none | the container's image when the run's policy selects none, which contains the runtime and the project's toolchain: the name of one of `wall.images`, or a reference. A name `wall.images` defines is read as that image first; `--image` sets another for one run, read the same way, and a policy's selection wins over both. qory builds none, and a wall without an image is refused unless the run's own `--policy` selects one; a machine that reports to a server sets it, because the server's run configuration arrives once the run starts and may select none |
 | `wall.images.<name>` | none | an image this machine defines, which a run's policy selects by its name, `image: <name>`, the runner contract's §Images. The name is in a credential's grammar. `ref`, required, is the reference, pinned by digest where the machine wants the same image every time; `runtime` is the container runtime the wall starts it under, one the engine has, such as `sysbox-runc`, the engine's default when absent; `docker: true`, experimental, gives the agent a Docker daemon of its own inside the container, which the helper starts before the agent, and needs a `runtime` that runs one without privileges. A `--policy` that selects a name the section does not define, or selects one for a run without a wall, is refused before the run; every command that reads the file refuses `docker: true` without a `runtime`. `qory config` shows whether `wall.image` is a name of this section or a reference. Define an image with `docker: true` only where every run may get one: any policy can select it |
@@ -940,8 +945,22 @@ section in mode `enforce` the run reaches the file's hosts the section covers, a
 no section, or one in mode `observe`, the file stands as it is; the `deny` lists of
 both apply either way. With a server configured
 the server's run configuration is the policy and `--policy` is refused, unless `--local`
-keeps the run to the files. `QORY_SERVER_SECRET` is the runner's own: it never enters a
-session's environment, and `wall.env` and `--env` refuse its name.
+keeps the run to the files.
+
+The access key's secret is never in the file. `qory run` and `qory run resend` read it
+from the descriptor `--access-key-secret-fd` names, else from `QORY_ACCESS_KEY_SECRET`,
+else from the file `access-key-secret` beside `runner.yaml`: one line, `qak_` and 43
+characters, read only from a regular file the user owns that grants nothing to the group
+or to others, in a directory that is the user's alone. The runner contract's published
+fixture key is refused. `QORY_ACCESS_KEY_ID`, `QORY_ACCESS_KEY_SECRET`,
+`QORY_APIARY_PUBLIC_KEY` and `QORY_SERVER_SECRET` are the runner's own: qory takes them
+from its environment when a command starts, so they never enter a session's
+environment, and `wall.env` and `--env` refuse their names. `server.access_key`,
+`server.secret` and `QORY_SERVER_SECRET` held a workspace access key, which servers no
+longer accept: the two keys are refused, and so is `QORY_SERVER_SECRET` when the file
+has a `server` section. The machine enrols as a node instead:
+`qory access-key enrol <server> <code>`, or `qory access-key create` with its public key
+added to the node.
 
 A run's policy also selects credentials, `credentials: [{name: product, argument:
 acme/shop}]`, may restrict a host to paths, `egress.paths`, and may select an image among
