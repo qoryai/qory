@@ -8,15 +8,48 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Upgrading
 
-- Needs `github.com/qoryai/runner` at commit `f6f92b8` of its `next`,
-  `v0.6.1-0.20261006214431-f6f92b84df85`, contract `v1` revision 1 as amended there. Its
+- Needs `github.com/qoryai/runner` at commit `4176ff4` of its `next`,
+  `v0.6.1-0.20261006224758-4176ff4da645`, contract `v1` revision 1 as amended there. With
+  it, `runner.yaml`'s `egress` narrows the `security_policy` of a server's run
+  configuration, where the server's policy used to replace it. A server's run
+  configuration may carry variables: they reach a walled run's agent, and an unwalled
+  run gets none of them. Its
   `wall.Nest` makes `/run/qory` root's with mode `0755`, where 0.6.0 made it `0700` and
   the agent's `docker` command could not read its configuration beneath it. An
   interactive Claude Code run with an API key behind the wall starts through the runner's
   approval script, `/bin/sh` and `approve-key.sh` in the run directory, which pre-approves
   the key's placeholder; `dev.qory.run.started` records that command.
+- A server no longer accepts a workspace access key. `server.access_key` and
+  `server.secret` in `runner.yaml`, and `QORY_SERVER_SECRET` in the environment, are
+  refused, and the refusal says to enrol the machine as a node. A machine that reports to
+  a server needs its own access key: `server.access_key_id`, the `server.apiary_public_key`
+  pin and the secret.
 
 ### Added
+
+- Every request to the server is signed with the machine's Ed25519 access key, and every
+  answer is verified under the server's keys the machine pins. `runner.yaml`'s `server`
+  section is `url`, `access_key_id` and `apiary_public_key`; `QORY_ACCESS_KEY_ID` and
+  `QORY_APIARY_PUBLIC_KEY` hold the id and the pin when the file does not, and a value set
+  in both is refused. The secret is read from `QORY_ACCESS_KEY_SECRET`, else from the
+  file `access-key-secret` beside `runner.yaml`, which is read only when it is a regular
+  file you own that grants nothing to the group or others, in a directory that is yours
+  alone. The runner contract's published fixture key is refused, as a secret or in the
+  pin. qory removes the three variables from its environment once it reads them, and
+  `wall.env` or `--env` naming one is refused.
+- Each machine is an instance of its node, named on every request: its id is kept in
+  `instance-id` beside `runner.yaml`, replaced when it was not made on this machine, and
+  `instance.name` sets its display name, the host name unless set. `qory run` prints the
+  node and the instance, and `qory config` lists `runner.server.access_key_id`,
+  `runner.server.apiary_public_key` by fingerprint and `runner.instance.name`.
+- `qory run` and `qory run resend` say what a refusal of the server means and what to do:
+  `unauthorized`, `key_pending` with the key's fingerprint, `answer_unsigned`,
+  `instance_limit`, `apiary_public_key_missing` and `run_closed`. A run the server closes
+  before it starts exits 1.
+- When the server lists stored secrets for the machine's access key, every run needs a
+  wall: an unwalled run is refused, `server_needs_wall`. The marker `stored-secrets`
+  beside `runner.yaml` keeps refusing unwalled runs, `--local` included, until a server's
+  configuration read with the secret of `access-key-secret` lists none.
 
 - `wall.images` in `runner.yaml` defines the agent's images by name, each with `ref`, its
   reference, and when it needs them `runtime`, the container runtime the wall starts it
