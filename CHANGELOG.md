@@ -167,11 +167,15 @@ release may change what an existing document does, and states it under Upgrading
   used: apiary.example.com sets it`, `no source may set it` or `the harness sets it`.
   `--env` works without a wall; `--image`, `--mount` and the limits need one. A run
   without a wall gets none of the server's variables.
-- A mount, `--mount` or `wall.mounts`, that is, contains or lies inside the directory
-  that holds this machine's access key, or any other of the runner's files, is refused
-  before the run starts, `mount_contains_runner_files`: `qory run: the mount <host
-  path> contains <dir>, which holds this machine's access key; the agent could read the
-  key, so the run does not start. Mount a narrower path`.
+- A mount, `--mount` or `wall.mounts`, is refused before the run starts,
+  `mount_contains_runner_files`, when it is, contains or lies inside this machine's qory
+  configuration directory, which holds `runner.yaml`, the access key and the user
+  `qory.yaml`; a file qory reads from that directory and a link takes elsewhere; or one
+  of the runner's own program and temporary files. With the access key in the
+  directory, `qory run` says `the mount <host path> contains <dir>, which holds this
+  machine's access key; the agent could read the key, so the run does not start. Mount a
+  narrower path`; otherwise it says the path `holds one of the runner's files; the
+  agent could change it`.
 - A key `qory access-key enrol` enrols is active as soon as the server answers, and
   enrol says so: `the key is active: runs can start`. `key_limit` means the node already
   holds two keys; once an owner or administrator has revoked one, the same command

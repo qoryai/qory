@@ -1221,13 +1221,26 @@ What to know:
   that binary.
 - **What the container sees.** The checkout it was started in, and no other directory.
   `--mount <path>[:ro]` or `wall.mounts` shows it another one, at its own path, such as a
-  sibling checkout the session reads. A socket is never mounted. A mount that is,
-  contains or lies inside the directory that holds this machine's access key, or any
-  other of the runner's files, such as a program it starts outside the wall, is refused
-  before the run starts, `mount_contains_runner_files`:
+  sibling checkout the session reads. A socket is never mounted. A mount is refused
+  before the run starts, `mount_contains_runner_files`, when it is, contains or lies
+  inside one of these:
+  - this machine's qory configuration directory, which holds `runner.yaml`, the access
+    key and the user `qory.yaml`;
+  - a file qory reads from that directory and a link takes elsewhere, where the link
+    leads;
+  - one of the runner's own program and temporary files, such as a program it starts
+    outside the wall.
+
+  With the access key in the configuration directory, `qory run` says:
 
   ```
   qory run: the mount <host path> contains <dir>, which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path
+  ```
+
+  For any other, it says:
+
+  ```
+  qory run: the mount <host path> contains <path>, which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path
   ```
 - **Git in a worktree.** In a git worktree, the repository's data lives in the main
   checkout, outside the worktree. So git inside the container works there only with that
