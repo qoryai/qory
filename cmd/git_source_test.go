@@ -193,7 +193,8 @@ func TestComposeWarnsOffline(t *testing.T) {
 }
 
 // TestComposeChecksAMovedBranch is --check on a module at main: up to date while the
-// branch stays, and stale once a push changes the module, without --update.
+// branch stays and after a push that leaves the module as it was, though the branch
+// moved, and stale once a push changes the module, without --update.
 func TestComposeChecksAMovedBranch(t *testing.T) {
 	root := newCheckout(t)
 	remote, url := branchRemote(t)
@@ -208,6 +209,12 @@ func TestComposeChecksAMovedBranch(t *testing.T) {
 	}
 	wants(t, out, "up to date")
 	wantsNoRow(t, out, "module")
+	runGit(t, remote, "commit", "-q", "--allow-empty", "-m", "nothing for the module")
+	out, err = run(t, "hc", "--check")
+	if err != nil {
+		t.Fatalf("a push that leaves the module as it was: %v\n%s", err, out)
+	}
+	wants(t, out, "up to date", "core  main "+first+" → ")
 	writeFile(t, filepath.Join(remote, "AGENTS.md"), "# v2\n")
 	runGit(t, remote, "commit", "-q", "-am", "second")
 	out, err = run(t, "hc", "--check")

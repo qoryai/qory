@@ -32,7 +32,7 @@ func TestDiffNamesEveryWayTwoTreesDiffer(t *testing.T) {
 	symlink(t, "/modules/app/hooks/guard.sh", filepath.Join(want, "hooks"))
 	write(t, filepath.Join(have, "hooks"), "not a link\n")
 
-	got, err := render.Diff(want, have)
+	got, err := render.Diff(want, have, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,12 +46,12 @@ func TestDiffNamesEveryWayTwoTreesDiffer(t *testing.T) {
 	if !reflect.DeepEqual(got, expected) {
 		t.Errorf("differences = %+v\nwant %+v", got, expected)
 	}
-	same, err := render.Diff(want, want)
+	same, err := render.Diff(want, want, "")
 	if err != nil || len(same) != 0 {
 		t.Errorf("a tree against itself: %v, %v", same, err)
 	}
 	// A home that is not there is an empty tree, so every path of the render is missing.
-	none, err := render.Diff(want, filepath.Join(have, "nowhere"))
+	none, err := render.Diff(want, filepath.Join(have, "nowhere"), "")
 	if err != nil || len(none) == 0 || none[0].What != "missing" {
 		t.Errorf("against a missing tree: %v, %v", none, err)
 	}
@@ -62,5 +62,85 @@ func symlink(t *testing.T, target, path string) {
 	t.Helper()
 	if err := os.Symlink(target, path); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestDiffComparesALinkIntoTheCacheByWhatItHolds links the render and the home into two
+// clones of one module under the cache: identical trees at different paths are the same,
+// whatever the clones' .git holds, and a changed byte, an added file, a removed file, a
+// changed mode or a target that is not there differ. A link outside the cache still
+// compares by its target.
+func TestDiffComparesALinkIntoTheCacheByWhatItHolds(t *testing.T) {
+	clone := func(t *testing.T, dir string) string {
+		t.Helper()
+		write(t, filepath.Join(dir, ".git", "HEAD"), filepath.Base(dir)+"\n")
+		write(t, filepath.Join(dir, "modules", "core", "AGENTS.md"), "# Core\n")
+		write(t, filepath.Join(dir, "modules", "core", "hooks", "guard.sh"), "#!/bin/sh\n")
+		if err := os.Chmod(filepath.Join(dir, "modules", "core", "hooks", "guard.sh"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		symlink(t, "AGENTS.md", filepath.Join(dir, "modules", "core", "CLAUDE.md"))
+		return dir
+	}
+	cases := []struct {
+		name   string
+		change func(t *testing.T, mod string)
+		want   []render.Difference
+	}{
+		{"identical", func(*testing.T, string) {}, nil},
+		{"a changed byte", func(t *testing.T, mod string) { write(t, filepath.Join(mod, "AGENTS.md"), "# Core!\n") }, []render.Difference{{Path: "modules/core", What: "target"}}},
+		{"an added file", func(t *testing.T, mod string) { write(t, filepath.Join(mod, "README.md"), "") }, []render.Difference{{Path: "modules/core", What: "target"}}},
+		{"a removed file", func(t *testing.T, mod string) {
+			if err := os.Remove(filepath.Join(mod, "AGENTS.md")); err != nil {
+				t.Fatal(err)
+			}
+		}, []render.Difference{{Path: "modules/core", What: "target"}}},
+		{"a changed mode", func(t *testing.T, mod string) {
+			if err := os.Chmod(filepath.Join(mod, "hooks", "guard.sh"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}, []render.Difference{{Path: "modules/core", What: "target"}}},
+		{"a target that is not there", func(t *testing.T, mod string) {
+			if err := os.RemoveAll(mod); err != nil {
+				t.Fatal(err)
+			}
+		}, []render.Difference{{Path: "modules/core", What: "target"}}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cache := t.TempDir()
+			a := clone(t, filepath.Join(cache, "harness", "aaaa"))
+			b := clone(t, filepath.Join(cache, "harness", "bbbb"))
+			c.change(t, filepath.Join(b, "modules", "core"))
+			want, have := t.TempDir(), t.TempDir()
+			write(t, filepath.Join(want, "keep"), "")
+			write(t, filepath.Join(have, "keep"), "")
+			if err := os.MkdirAll(filepath.Join(want, "modules"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(have, "modules"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			symlink(t, filepath.Join(a, "modules", "core"), filepath.Join(want, "modules", "core"))
+			symlink(t, filepath.Join(b, "modules", "core"), filepath.Join(have, "modules", "core"))
+			got, err := render.Diff(want, have, cache)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, c.want) {
+				t.Errorf("differences = %+v, want %+v", got, c.want)
+			}
+		})
+	}
+	// The same two identical clones outside the cache compare by their targets.
+	elsewhere := t.TempDir()
+	a := clone(t, filepath.Join(elsewhere, "aaaa"))
+	b := clone(t, filepath.Join(elsewhere, "bbbb"))
+	want, have := t.TempDir(), t.TempDir()
+	symlink(t, a, filepath.Join(want, "core"))
+	symlink(t, b, filepath.Join(have, "core"))
+	got, err := render.Diff(want, have, t.TempDir())
+	if err != nil || !reflect.DeepEqual(got, []render.Difference{{Path: "core", What: "target"}}) {
+		t.Errorf("links outside the cache: %+v (%v), want a target difference", got, err)
 	}
 }

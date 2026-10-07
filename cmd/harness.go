@@ -374,6 +374,8 @@ func (e *staleError) Error() string {
 // builds, the targets and the ones a previous compose wrote, so the comparison is against
 // the tree a compose writes. A home that matches prints up to date and the rows a
 // compose prints; one that differs prints one row per path and returns a [*staleError].
+// A link into a clone of a git source is compared by what the clone holds, so a branch
+// that moved to a commit whose files are the same is up to date.
 // The links from the checkout into the home and the report are not compared: a missing
 // link is a foreign path or a remove, and the report changes when the home does.
 func runCheck(out io.Writer, pr *prepared) error {
@@ -389,7 +391,7 @@ func runCheck(out io.Writer, pr *prepared) error {
 	if err := render.BuildAt(pr.res, stage, pr.at.home, allRuntimes(pr.at.home, pr.targets)...); err != nil {
 		return err
 	}
-	differences, err := render.Diff(stage, pr.at.home)
+	differences, err := render.Diff(stage, pr.at.home, pr.cache)
 	if err != nil {
 		return err
 	}
@@ -415,6 +417,7 @@ type prepared struct {
 	previous report.Report
 	targets  []render.Runtime
 	force    bool
+	cache    string      // where git sources are fetched, so a check compares a link into a clone by what it holds
 	rows     [][2]string // the rows every outcome prints after its own: skipped keys, unchecked ranges
 	u        *ui.UI
 }
@@ -670,7 +673,11 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 	}
 	skippedConfig = append(skippedConfig, checks.rows...)
 	skippedConfig = append(skippedConfig, retired.rows...)
-	return &prepared{at: at, res: res, rep: rep, previous: previous, targets: targets, force: force, rows: skippedConfig, u: u}, nil
+	cache := conf.Git.Cache
+	if cache == "" {
+		cache, _ = source.CacheDir()
+	}
+	return &prepared{at: at, res: res, rep: rep, previous: previous, targets: targets, force: force, cache: cache, rows: skippedConfig, u: u}, nil
 }
 
 // resolvedRows prints a warning for each git source whose remote could not be reached, one
