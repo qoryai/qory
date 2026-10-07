@@ -326,6 +326,8 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	}
 	now := keyClock()
 	var key *accesskey.Key
+	// earlier is where this run moved the secret that was here, "" when it moved none.
+	var earlier string
 	switch {
 	case print:
 		if key, err = makeKey(); err != nil {
@@ -344,6 +346,7 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 		if moved != "" {
 			fmt.Fprintf(info, "moved the access key secret that was here aside: %s\n", moved)
 		}
+		earlier = moved
 		if key, err = makeKey(); err != nil {
 			return err
 		}
@@ -365,7 +368,7 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 		return enrolFailed(dir, err, fingerprint, print, now)
 	}
 	if ans.Pin.Fixture() {
-		return errors.New("the server's answer lists the runner contract's published fixture key, whose secret anyone can read: it is no server to pin; nothing was written")
+		return refuseFixturePin(dir, print, earlier, now)
 	}
 	kind := "node"
 	if ans.NodeKind == "pool" {
@@ -407,6 +410,33 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	}
 	fmt.Fprintf(info, "wrote %s to %s\n", written, path)
 	return nil
+}
+
+// refuseFixturePin refuses a 201 whose pin lists the runner contract's published
+// fixture key. --print wrote nothing; otherwise the runner file is left as it is, the
+// secret made for the code is moved aside and the pending enrolment ends, and the
+// message names where each secret moved aside went, the one that was here before
+// included.
+func refuseFixturePin(dir runnerdir.Dir, print bool, earlier string, now time.Time) error {
+	const text = "the server's answer lists the runner contract's published fixture key, whose secret anyone can read: it is no server to pin; "
+	if print {
+		return errors.New(text + "nothing was written")
+	}
+	msg := text + config.RunnerFileName + " was not changed"
+	if err := dir.RemovePending(); err != nil {
+		return fmt.Errorf("%s; %w", msg, err)
+	}
+	moved, err := dir.MoveAside(now)
+	if err != nil {
+		return fmt.Errorf("%s; %w", msg, err)
+	}
+	if moved != "" {
+		msg += "; the secret made for it was moved aside to " + moved
+	}
+	if earlier != "" {
+		msg += "; the access key secret that was here was moved aside to " + earlier
+	}
+	return errors.New(msg)
 }
 
 // enrolFailed acts on an enrolment that got no 201: on the refusal's code alone, never

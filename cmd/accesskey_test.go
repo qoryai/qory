@@ -508,8 +508,11 @@ func TestEnrolAfterTheWorkspaceKeysAreRemoved(t *testing.T) {
 }
 
 // TestEnrolRefusesAFixturePin is a server that signs with the runner contract's
-// published fixture signing key: its answer verifies, and qory refuses to pin it and
-// writes nothing.
+// published fixture signing key: its answer verifies, and qory refuses to pin it.
+// --print says nothing was written, and no file of the directory changes. Without it
+// the runner file is left as it is, the secret made for the code and the one that was
+// here before are both moved aside, the pending enrolment ends, and the message names
+// both secrets' new paths.
 func TestEnrolRefusesAFixturePin(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
@@ -523,14 +526,73 @@ func TestEnrolRefusesAFixturePin(t *testing.T) {
 	}
 	srv.signer, srv.signBy = fixture, fixture
 	writeFile(t, runnerFile(), "instance:\n  name: build-01\n")
-	for _, args := range [][]string{{srv.URL, srv.code(1, false)}, {"--print", srv.URL, srv.code(2, false)}} {
-		out, errOut, err := runSplit(t, "", append([]string{"access-key", "enrol"}, args...)...)
-		if err == nil || !strings.Contains(err.Error(), "the server's answer lists the runner contract's published fixture key, whose secret anyone can read: it is no server to pin; nothing was written") {
-			t.Errorf("%v: %v", args, err)
+	own := newKey(t)
+	writeSecret(t, own)
+	dir := configDir()
+	const refused = "the server's answer lists the runner contract's published fixture key, whose secret anyone can read: it is no server to pin; "
+
+	// --print writes nothing.
+	before := snapshot(t, string(dir))
+	out, errOut, err := runSplit(t, "", "access-key", "enrol", "--print", srv.URL, srv.code(2, false))
+	if err == nil || err.Error() != refused+"nothing was written" {
+		t.Errorf("--print: %v", err)
+	}
+	if strings.Contains(out, "QORY_") || strings.Contains(errOut, "QORY_ACCESS_KEY_SECRET=") {
+		t.Errorf("--print printed the key:\n%s", out)
+	}
+	after := snapshot(t, string(dir))
+	delete(after, "locks")
+	delete(after, filepath.Join("locks", runnerdir.KeyLock))
+	delete(before, "locks")
+	delete(before, filepath.Join("locks", runnerdir.KeyLock))
+	for p, v := range after {
+		if before[p] != v {
+			t.Errorf("--print: %s changed", p)
 		}
-		if strings.Contains(out, "QORY_") || strings.Contains(errOut, "QORY_ACCESS_KEY_SECRET=") {
-			t.Errorf("%v printed the key:\n%s", args, out)
+	}
+	if len(after) != len(before) {
+		t.Errorf("--print: files before %v, after %v", before, after)
+	}
+
+	// Without --print the runner file stays and both secrets are moved aside.
+	out, errOut, enrolErr := runSplit(t, "", "access-key", "enrol", srv.URL, srv.code(1, false))
+	if enrolErr == nil {
+		t.Fatalf("enrolled:\n%s%s", out, errOut)
+	}
+	if strings.Contains(out, "QORY_") || strings.Contains(errOut, "QORY_ACCESS_KEY_SECRET=") {
+		t.Errorf("printed the key:\n%s", out)
+	}
+	old, err := dir.OldSecrets()
+	if err != nil || len(old) != 2 {
+		t.Fatalf("moved aside %v, %v", old, err)
+	}
+	sent := srv.sent()
+	var made, earlier string
+	for _, name := range old {
+		b, err := os.ReadFile(dir.Path(name))
+		if err != nil {
+			t.Fatal(err)
 		}
+		k, err := runnerdir.ParseSecret(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch k.PublicKey().String() {
+		case own.PublicKey().String():
+			earlier = dir.Path(name)
+		case sent[len(sent)-1].PublicKey:
+			made = dir.Path(name)
+		}
+	}
+	if made == "" || earlier == "" {
+		t.Fatalf("the secrets moved aside %v are not the one made for the code and the one that was here", old)
+	}
+	want := refused + "runner.yaml was not changed; the secret made for it was moved aside to " + made + "; the access key secret that was here was moved aside to " + earlier
+	if enrolErr.Error() != want {
+		t.Errorf("the refusal\n%v\nwant\n%s", enrolErr, want)
+	}
+	if exists(dir.Path(runnerdir.SecretFile)) || exists(dir.Path(runnerdir.PendingFile)) {
+		t.Errorf("secret %v, pending %v", exists(dir.Path(runnerdir.SecretFile)), exists(dir.Path(runnerdir.PendingFile)))
 	}
 	if got := readRunnerFile(t); got != "instance:\n  name: build-01\n" {
 		t.Errorf("the runner file changed:\n%s", got)
