@@ -732,7 +732,8 @@ func TestRunBehindAWall(t *testing.T) {
 // configuration sets a variable of the name harness.launch sets too, a default its
 // author wrote: the agent gets the server's value, the launch's is left out and reported
 // as overridden in dev.qory.run.policy_applied, and a server variable of another name
-// reaches the agent; the fragment's A and B are the harness's own defaults.
+// reaches the agent; the fragment's A and B are the harness's own defaults. A value of
+// --env the server's overrides is left out too, and qory says which host set the name.
 func TestTheServersVariableWinsOverALaunchDefault(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -750,17 +751,20 @@ harness:
 	}
 	docker, log := fakeDocker(t)
 	srv := newFakeServer(t, `{"version":1,"egress":{"mode":"observe"}}`)
-	srv.variables = `{"SHARED_NAME":{"value":"from-server"},"SERVER_ONLY":{"value":"from-server"}}`
+	srv.variables = `{"SHARED_NAME":{"value":"from-server"},"SERVER_ONLY":{"value":"from-server"},"LOG_LEVEL":{"value":"debug"}}`
+	t.Setenv("LOG_LEVEL", "info")
 	serverFile(t, srv, "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
-	out, err := run(t, "run", "claude")
+	out, err := run(t, "run", "claude", "--env", "LOG_LEVEL")
 	if cmd.ExitCode(err) != 4 {
 		t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
+	host := strings.TrimPrefix(srv.URL, "http://")
+	wants(t, out, "qory run: LOG_LEVEL from --env is not used: "+host+" sets it\n")
 	data, err := os.ReadFile(log)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, string(data), "env: SHARED_NAME=from-server\n", "env: SERVER_ONLY=from-server\n")
+	wants(t, string(data), "env: SHARED_NAME=from-server\n", "env: SERVER_ONLY=from-server\n", "env: LOG_LEVEL=debug\n")
 	lacks(t, string(data), "SHARED_NAME=from-launch")
 	_, evs := events(t, root)
 	for _, applied := range [][]map[string]any{evs["dev.qory.run.policy_applied"], srv.byType()["dev.qory.run.policy_applied"]} {
@@ -768,9 +772,42 @@ harness:
 			t.Fatalf("run.policy_applied %v", applied)
 		}
 		got, _ := json.Marshal(applied[0]["variables"])
-		if want := `[{"from":"harness","lost":[],"name":"A"},{"from":"harness","lost":[],"name":"B"},{"from":"apiary","lost":[],"name":"SERVER_ONLY"},{"from":"apiary","lost":[{"from":"harness","why":"overridden"}],"name":"SHARED_NAME"}]`; string(got) != want {
+		if want := `[{"from":"harness","lost":[],"name":"A"},{"from":"harness","lost":[],"name":"B"},{"from":"apiary","lost":[{"from":"run","why":"overridden"}],"name":"LOG_LEVEL"},{"from":"apiary","lost":[],"name":"SERVER_ONLY"},{"from":"apiary","lost":[{"from":"harness","why":"overridden"}],"name":"SHARED_NAME"}]`; string(got) != want {
 			t.Errorf("run.policy_applied variables %s, want %s", got, want)
 		}
+	}
+}
+
+// TestRunTakesEnvWithoutAWall is --env on a run without a wall: a value no other
+// source sets reaches the agent and is recorded as the run's, and qory says, a line
+// each, that a value of a name the harness computes, a module's export, and of one no
+// source may set, PATH, are not used.
+func TestRunTakesEnvWithoutAWall(t *testing.T) {
+	root := newCheckout(t)
+	writeFile(t, filepath.Join(root, "modules", "core", "qory-module.yaml"), "apiVersion: qory.dev/v1alpha1\nname: core\nenv:\n  CORE_SCRIPTS: scripts\n")
+	writeFile(t, filepath.Join(root, "modules", "core", "scripts", "run.sh"), "#!/bin/sh\n")
+	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.dev/v1alpha1\nharness:\n  target:\n    runtime: claude\n  modules:\n    - name: core\n      source: {path: modules/core}\n")
+	script := filepath.Join(t.TempDir(), "fake-runtime")
+	writeFile(t, script, "#!/bin/sh\necho \"FLAG_NAMED=$FLAG_NAMED CORE_SCRIPTS=$CORE_SCRIPTS\"\n")
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	composedForFake(t, root, script)
+	t.Setenv("FLAG_NAMED", "goes in")
+	t.Setenv("CORE_SCRIPTS", "/elsewhere")
+	out, err := run(t, "run", "claude", "--env", "FLAG_NAMED", "--env", "CORE_SCRIPTS", "--env", "PATH")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out,
+		"qory run: CORE_SCRIPTS from --env is not used: the harness sets it\n",
+		"qory run: PATH from --env is not used: no source may set it\n",
+		"FLAG_NAMED=goes in CORE_SCRIPTS="+filepath.Join(root, ".qory", "harness", "modules", "core", "scripts")+"\n")
+	lacks(t, out, "FLAG_NAMED from --env")
+	_, evs := events(t, root)
+	got, _ := json.Marshal(evs["dev.qory.run.policy_applied"][0]["variables"])
+	if want := `[{"from":"fixed","lost":[{"from":"run","why":"fixed"},{"from":"shell","why":"fixed"}],"name":"CORE_SCRIPTS"},{"from":"run","lost":[{"from":"shell","why":"overridden"}],"name":"FLAG_NAMED"},{"from":"shell","lost":[{"from":"run","why":"denied"}],"name":"PATH"}]`; string(got) != want {
+		t.Errorf("run.policy_applied variables %s, want %s", got, want)
 	}
 }
 

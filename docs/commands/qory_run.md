@@ -49,7 +49,7 @@ qory run [runtime] [-- argument...] [flags]
 ```
       --access-key-secret-fd int   read the access key's secret from this file descriptor, 3 or above; it wins over QORY_ACCESS_KEY_SECRET and the access-key-secret file
       --cpus string                how many CPUs the container gets, such as 1.5 (runner.yaml: wall.cpus)
-      --env stringArray            a variable to pass into the container, by name; repeatable (runner.yaml: wall.env)
+      --env stringArray            a variable of this shell to pass to the agent, by name, with a wall or without; it wins over wall.env of runner.yaml; repeatable
       --headless                   run on pipes even at a terminal; -p for claude implies it
   -h, --help                       help for run
       --home string                where the harness is composed: a directory outside the checkout, one home per checkout under it, or .qory/harness (qory.yaml: harness.home)

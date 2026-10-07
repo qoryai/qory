@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -235,6 +237,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if id != nil {
 				spec.Discovered = discovered(machineDir(), id, walled, stderr)
 			}
+			apiary := ""
+			if server != nil {
+				apiary = server.URL
+			}
+			spec.OnVariables = unusedEnv(stderr, apiary)
 			if r := conf.Runner; r != nil {
 				for _, key := range r.Shadowed() {
 					fmt.Fprintln(stderr, "qory run:", shadowed(key))
@@ -292,7 +299,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	c.Flags().DurationVar(&grace, "stop-grace", 0, "the time between the stop signal and SIGKILL (default 10s; "+config.RunnerFileName+": run.stop_grace)")
 	c.Flags().StringVar(&o.name, "wall", "", "run the agent in a container whose one way out is the proxy: "+config.WallDocker+", or none ("+config.RunnerFileName+": wall.adapter)")
 	c.Flags().StringVar(&o.image, "image", "", "the container's image unless the run's policy selects one: a name of wall.images, or a reference ("+config.RunnerFileName+": wall.image)")
-	c.Flags().StringArrayVar(&o.env, "env", nil, "a variable to pass into the container, by name; repeatable ("+config.RunnerFileName+": wall.env)")
+	c.Flags().StringArrayVar(&o.env, "env", nil, "a variable of this shell to pass to the agent, by name, with a wall or without; it wins over wall.env of "+config.RunnerFileName+"; repeatable")
 	c.Flags().StringArrayVar(&o.mounts, "mount", nil, "a path of this machine the container sees too, :ro for read-only; repeatable ("+config.RunnerFileName+": wall.mounts)")
 	c.Flags().StringVar(&o.limits.CPUs, "cpus", "", "how many CPUs the container gets, such as 1.5 ("+config.RunnerFileName+": wall.cpus)")
 	c.Flags().StringVar(&o.limits.Memory, "memory", "", "the most memory the container gets, such as 8g ("+config.RunnerFileName+": wall.memory)")
@@ -350,9 +357,10 @@ type wallOptions struct {
 	limits wall.Limits
 }
 
-// walled reports whether a flag that means something only behind a wall was given.
+// walled reports whether a flag that means something only behind a wall was given:
+// --env is the run's own variables, with a wall or without.
 func (o wallOptions) walled() bool {
-	return o.image != "" || len(o.env) > 0 || len(o.mounts) > 0 || o.limits != (wall.Limits{})
+	return o.image != "" || len(o.mounts) > 0 || o.limits != (wall.Limits{})
 }
 
 // exitTimeout is the exit status of a run stopped at its --timeout, timeout(1)'s.
@@ -418,9 +426,10 @@ func withOrigin(labels map[string]string, root string) map[string]string {
 // wallOff is the --wall value that runs without the wall the runner file sets.
 const wallOff = "none"
 
-// enclose puts the spec behind a wall when a flag or the runner file sets one. The
-// runtime then runs in a container, so what refers to this machine changes: the
-// environment it inherits is the variables set for the wall, never the process's, and
+// enclose puts the spec behind a wall when a flag or the runner file sets one, and sets
+// the run's own variables, --env, with a wall or without. The runtime then runs in a
+// container, so what refers to this machine changes: it inherits nothing of the
+// process's environment, the machine's variables, wall.env, go in beside the run's, and
 // the forwarder is the helper's path inside the container. The launch's variables, its
 // fixed ones, its defaults and its home, go to the runner behind a wall or not: the
 // checkout, the composed home, which is all a launch template's paths point into, and
@@ -443,9 +452,14 @@ func enclose(spec *session.Spec, r *config.Runner, o wallOptions, selected strin
 	if name == "" {
 		name = section.Adapter
 	}
+	run, err := passedVariables(o.env)
+	if err != nil {
+		return err
+	}
+	spec.Variables.Run = run
 	if name == "" || name == wallOff {
 		if o.walled() {
-			return input(fmt.Errorf("--image, --env, --mount and the limits are for a run behind a wall; --wall %s starts one", config.WallDocker))
+			return input(fmt.Errorf("--image, --mount and the limits are for a run behind a wall; --wall %s starts one", config.WallDocker))
 		}
 		if selected != "" {
 			return input(fmt.Errorf("the policy selects the image %s, which needs a wall: wall in %s, or --wall %s", selected, config.RunnerFileName, config.WallDocker))
@@ -473,17 +487,9 @@ func enclose(spec *session.Spec, r *config.Runner, o wallOptions, selected strin
 	for _, i := range section.Images {
 		spec.Images = append(spec.Images, i.Session())
 	}
-	var env []string
-	for _, n := range append(append([]string{}, section.Env...), o.env...) {
-		if config.RunnersOwn(n) {
-			return input(fmt.Errorf("--env %s: the variable is the runner's own and never the session's", n))
-		}
-		if v, ok := os.LookupEnv(n); ok {
-			env = withEnv(env, map[string]string{n: v})
-		}
-	}
-	if env == nil {
-		env = []string{}
+	machine, err := passedVariables(section.Env)
+	if err != nil {
+		return err
 	}
 	var more []wall.Mount
 	for _, m := range section.Mounts {
@@ -503,7 +509,8 @@ func enclose(spec *session.Spec, r *config.Runner, o wallOptions, selected strin
 	if err != nil {
 		return err
 	}
-	spec.Env = env
+	spec.Env = []string{}
+	spec.Variables.Machine = machine
 	spec.Wall = &wall.Docker{Command: section.Command, Helper: helper, RelayArgs: relayArgs, NestArgs: nestArgs, User: section.User, CAEnv: section.CAEnv}
 	spec.Forwarder = append([]string{wall.HelperPath}, forwardArgs...)
 	spec.Mounts = []wall.Mount{{Path: root}}
@@ -525,6 +532,63 @@ func enclose(spec *session.Spec, r *config.Runner, o wallOptions, selected strin
 		spec.Limits.ShmSize = o.limits.ShmSize
 	}
 	return nil
+}
+
+// unusedEnv is what a run does once the runner has resolved its variables: it prints a
+// line for each --env value that another source's value or a rule left out, saying
+// which. serverURL is the server's, which names the host whose value won, empty for
+// none.
+func unusedEnv(report io.Writer, serverURL string) func(session.Applied) {
+	host := "the server"
+	if u, err := url.Parse(serverURL); err == nil && u.Host != "" {
+		host = u.Host
+	}
+	return func(applied session.Applied) {
+		for _, v := range applied {
+			for _, l := range v.Lost {
+				if l.From != session.FromRun {
+					continue
+				}
+				fmt.Fprintf(report, "qory run: %s from --env is not used: %s\n", v.Name, whyUnused(v.From, l.Why, host))
+			}
+		}
+	}
+}
+
+// whyUnused says why a value of --env was left out: why is the runner's reason, and from
+// the source whose value the run applies instead, host naming the server's.
+func whyUnused(from, why, host string) string {
+	switch why {
+	case session.WhyDenied:
+		return "no source may set it"
+	case session.WhyFixed:
+		return "the harness sets it"
+	case session.WhyOverridden:
+		switch from {
+		case session.FromApiary:
+			return host + " sets it"
+		case session.FromFixed:
+			return "the harness sets it"
+		}
+		return "the " + from + " value wins"
+	}
+	return "the runner left it out (" + why + ")"
+}
+
+// passedVariables is the variables named, by name, with their values in this process's
+// environment, NAME=value; a name the environment does not set passes nothing. A name
+// of the runner's own is refused.
+func passedVariables(names []string) ([]string, error) {
+	var out []string
+	for _, n := range names {
+		if config.RunnersOwn(n) {
+			return nil, input(fmt.Errorf("--env %s: the variable is the runner's own and never the session's", n))
+		}
+		if v, ok := os.LookupEnv(n); ok {
+			out = withEnv(out, map[string]string{n: v})
+		}
+	}
+	return out, nil
 }
 
 // wallHelper is the static Linux build of qory the wall mounts into its containers, as
