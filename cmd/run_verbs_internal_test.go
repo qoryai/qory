@@ -79,11 +79,13 @@ func TestUnusedEnvSaysWhy(t *testing.T) {
 }
 
 // TestMountRefusedSaysHowTheMountStands is the runner's mount_contains_runner_files
-// worded with Overlap's relation: a mount that lies inside the runner's directory reads
-// the access key when access-key-secret is there, and could change one of the runner's
-// files when it is not; a mount of another of the runner's files could change it, and
-// any other error is left to the rest. The checkout root and the working directory are
-// the workspace.
+// worded with Overlap's relation: a mount that is or contains the runner's directory
+// reads the access key when access-key-secret is there; one that lies inside it, beside
+// the key, could change one of the runner's files, with the key there or not, as could
+// a mount of another of the runner's files, or of a link qory passed as its place, which
+// is named as the link even when the link is the runner's directory; and any other
+// error is left to the rest. The checkout root and the working directory are the
+// workspace.
 func TestMountRefusedSaysHowTheMountStands(t *testing.T) {
 	dir := t.TempDir()
 	inner := filepath.Join(dir, "locks")
@@ -97,8 +99,22 @@ func TestMountRefusedSaysHowTheMountStands(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "access-key-secret"), []byte("secret\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := mountRefused(refusal(inner, dir), at(dir)).Error(), "the mount "+inner+" lies inside "+dir+", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)"; got != want {
-		t.Errorf("lies inside: %q, want %q", got, want)
+	for _, beside := range []string{inner, filepath.Join(dir, "runtimes")} {
+		if got, want := mountRefused(refusal(beside, dir), at(dir)).Error(), "the mount "+beside+" lies inside "+dir+", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"; got != want {
+			t.Errorf("lies inside, beside the key: %q, want %q", got, want)
+		}
+	}
+	parent := filepath.Dir(dir)
+	for _, c := range []struct{ mount, how string }{{dir, "is"}, {parent, "contains"}} {
+		if got, want := mountRefused(refusal(c.mount, dir), at(dir)).Error(), "the mount "+c.mount+" "+c.how+" "+dir+", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)"; got != want {
+			t.Errorf("%s: %q, want %q", c.how, got, want)
+		}
+	}
+	// A link's place that shows as the runner's directory itself: the mount holds the
+	// link, not the key, which the agent cannot reach through it.
+	place := linkPlace(dir)
+	if got, want := mountRefused(refusal(parent, place), passed{runnerDir: dir, spec: &session.Spec{}, links: map[string]string{place: dir}}).Error(), "the mount "+parent+" contains "+dir+", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"; got != want {
+		t.Errorf("a link's place: %q, want %q", got, want)
 	}
 	other := filepath.Join(dir, "wall-files")
 	if got, want := mountRefused(refusal(dir, other), at(filepath.Join(dir, "elsewhere"))).Error(), "the mount "+dir+" contains "+other+", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"; got != want {
@@ -111,7 +127,7 @@ func TestMountRefusedSaysHowTheMountStands(t *testing.T) {
 	if got, want := mountRefused(refusal(root, dir), ws).Error(), "the workspace "+root+" contains "+dir+", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)"; got != want {
 		t.Errorf("the workspace's root: %q, want %q", got, want)
 	}
-	if got, want := mountRefused(refusal(inner, dir), ws).Error(), "the workspace "+inner+" lies inside "+dir+", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)"; got != want {
+	if got, want := mountRefused(refusal(inner, dir), ws).Error(), "the workspace "+inner+" lies inside "+dir+", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"; got != want {
 		t.Errorf("the working directory: %q, want %q", got, want)
 	}
 	if got, want := mountRefused(refusal(dir, other), ws).Error(), "the mount "+dir+" contains "+other+", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"; got != want {
@@ -313,7 +329,8 @@ func TestRunnerFilesPutsTheStateDirAfterTheConfigDir(t *testing.T) {
 // passed as it is, so the runner cannot resolve it and refuses the run; and a link in
 // runtimes/ that is not a descriptor is not followed, while one whose .yaml is in upper
 // case is, as a disk that ignores case opens it. A configuration directory that is a
-// link goes as the link's place, though it holds none of the files yet.
+// link goes as the link's place, though it holds none of the files yet, as does a link
+// on the way to one that does not exist yet.
 func TestConfigLinksGuardsTheLinksOnTheWay(t *testing.T) {
 	resolve := func(p string) string {
 		r, err := filepath.EvalSymlinks(p)
@@ -368,6 +385,30 @@ func TestConfigLinksGuardsTheLinksOnTheWay(t *testing.T) {
 	}
 	if files, _ := configLinks(linked); !slices.Equal(files, []string{linkPlace(linked)}) {
 		t.Errorf("a linked directory: files %q", files)
+	}
+	// A configuration directory that does not exist yet: a dangling link to it, and a
+	// link above it to a directory without it, are guarded all the same, a mount of the
+	// directory that holds either refused.
+	above := resolve(t.TempDir())
+	dangling := filepath.Join(above, "qory")
+	if err := os.Symlink(filepath.Join(resolve(t.TempDir()), "missing", "qory"), dangling); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(above, ".config")
+	if err := os.Symlink(resolve(t.TempDir()), config); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ dir, link string }{
+		{dangling, dangling},
+		{filepath.Join(config, "qory"), config},
+	} {
+		files, shown := configLinks(c.dir)
+		if want := []string{linkPlace(c.link)}; !slices.Equal(files, want) || shown[want[0]] != c.link {
+			t.Errorf("%s: files %q, shown %q, want %q", c.dir, files, shown, want)
+		}
+		if how := session.Overlap(above, linkPlace(c.link)); how != "contains" {
+			t.Errorf("%s: a mount of %s %q the link", c.dir, above, how)
+		}
 	}
 	for _, name := range []string{"goose.yaml", "-a", "]a", "^a", `\a`, "[a", "a*b?c[d]"} {
 		pattern := filepath.Base(linkPlace(filepath.Join(hop, name)))
