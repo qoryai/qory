@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -189,8 +190,9 @@ func TestASecretMovedAsideGetsANameNoFileHas(t *testing.T) {
 }
 
 // TestTheMarkerAndThePendingEnrolment are the stored-secrets marker, written 0600 and
-// kept when written twice, and enrolment-pending, which matches its code for 15
-// minutes.
+// kept when written twice, and enrolment-pending, which holds the key's fingerprint and
+// not its secret, and matches its code and its key for 15 minutes; a record without a
+// key's fingerprint matches nothing.
 func TestTheMarkerAndThePendingEnrolment(t *testing.T) {
 	d := newDir(t)
 	if has, err := d.HasMarker(); has || err != nil {
@@ -212,37 +214,55 @@ func TestTheMarkerAndThePendingEnrolment(t *testing.T) {
 
 	const code = "qec_F1XT0RE0000000000000000000.uoES-kuj1vk0sq0qoGlmAg"
 	now := time.Unix(1700000000, 0)
-	if d.Pending(code, now) {
+	k, other := newKey(t), newKey(t)
+	key := k.PublicKey()
+	if d.Pending(code, key, now) {
 		t.Error("pending with no file")
 	}
-	if err := d.WritePending(code, now); err != nil {
+	if err := d.WritePending(code, key, now); err != nil {
 		t.Fatal(err)
 	}
-	if b, _ := os.ReadFile(d.Path(runnerdir.PendingFile)); strings.Contains(string(b), "F1XT0RE") || mode(t, d.Path(runnerdir.PendingFile)) != 0o600 {
-		t.Errorf("enrolment-pending holds %q", b)
+	b, _ := os.ReadFile(d.Path(runnerdir.PendingFile))
+	if strings.Contains(string(b), "F1XT0RE") || strings.Contains(string(b), k.Secret()) || !strings.Contains(string(b), "\n"+k.Fingerprint()+"\n") || mode(t, d.Path(runnerdir.PendingFile)) != 0o600 {
+		t.Errorf("enrolment-pending holds %d bytes: no code and no secret, the key's fingerprint", len(b))
 	}
 	for _, c := range []struct {
+		name string
 		code string
+		key  accesskey.PublicKey
 		at   time.Time
 		want bool
 	}{
-		{code, now, true},
-		{code, now.Add(14*time.Minute + 59*time.Second), true},
-		{code, now.Add(15 * time.Minute), false},
-		{code, now.Add(-time.Second), false},
-		{"qec_F1XT0RE0000000000000000001.uoES-kuj1vk0sq0qoGlmAg", now, false},
+		{"the code and its key", code, key, now, true},
+		{"within its 15 minutes", code, key, now.Add(14*time.Minute + 59*time.Second), true},
+		{"after its 15 minutes", code, key, now.Add(15 * time.Minute), false},
+		{"before it was written", code, key, now.Add(-time.Second), false},
+		{"another code", "qec_F1XT0RE0000000000000000001.uoES-kuj1vk0sq0qoGlmAg", key, now, false},
+		{"another key", code, other.PublicKey(), now, false},
 	} {
-		if got := d.Pending(c.code, c.at); got != c.want {
-			t.Errorf("%s at %v: %v", c.code, c.at.Sub(now), got)
+		if got := d.Pending(c.code, c.key, c.at); got != c.want {
+			t.Errorf("%s: %v", c.name, got)
 		}
 	}
-	if err := d.WritePending(code, now.Add(time.Hour)); err != nil || !d.Pending(code, now.Add(time.Hour)) {
+	if err := d.WritePending(code, key, now.Add(time.Hour)); err != nil || !d.Pending(code, key, now.Add(time.Hour)) {
 		t.Errorf("rewritten: %v", err)
 	}
+	if err := d.WritePending(code, other.PublicKey(), now); err != nil || d.Pending(code, key, now) || !d.Pending(code, other.PublicKey(), now) {
+		t.Errorf("rewritten for another key: %v", err)
+	}
 	d.RemovePending()
-	if d.Pending(code, now) {
+	if d.Pending(code, key, now) {
 		t.Error("pending after removal")
 	}
+	// A record of the code and the time alone, with no key's fingerprint, matches no key.
+	lines := strings.SplitN(string(b), "\n", 3)
+	if err := os.WriteFile(d.Path(runnerdir.PendingFile), []byte(lines[0]+"\n"+strconv.FormatInt(now.Unix(), 10)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if d.Pending(code, key, now) {
+		t.Error("a record without a key's fingerprint matched")
+	}
+	d.RemovePending()
 }
 
 // TestTheInstanceIDIsKeptForThisMachine is an id written with the machine's hash and

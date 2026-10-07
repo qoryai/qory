@@ -344,10 +344,12 @@ Before it makes a key, qory checks the code against the pin `runner.yaml` has, s
 of another server is refused. When `runner.yaml` names another `server.url`, enrol
 refuses: enrol with that server, or change `server.url` first.
 
-A secret already there is moved aside, to `access-key-secret.old.<Unix time>`. It is
-deleted once the new key is approved and a run uses it.
+When `access-key-secret` exists, enrol refuses, so it never replaces this machine's key:
+move it aside yourself first to enrol a new key, or use `--print` for a key kept
+elsewhere. The one exception is a retry: the same command, with the same code, within
+the 15 minutes, while `access-key-secret` still holds the key made for it, retries with
+that key.
 
-The same command, with the same code, within the 15 minutes retries with the same key.
 When the enrolment does not complete:
 
 | Answer | What qory does |
@@ -356,6 +358,9 @@ When the enrolment does not complete:
 | `key_invalid` | the server refused the key. The secret made for it is moved aside, and enrolling needs a new code |
 | `key_limit` | the node already holds a key awaiting approval, or two approved keys. qory keeps the key: once one of them is revoked or rejected, the same command within the 15 minutes succeeds |
 | `answer_unsigned`, or no answer | the answer does not verify under the server's key the code names, or never came. `runner.yaml` is not changed. qory keeps the key, and the same command within the 15 minutes retries with it |
+
+A secret enrol moves aside goes to `access-key-secret.old.<Unix time>`. It is deleted
+once a new key is approved and a run uses it.
 
 #### Paste the public key
 

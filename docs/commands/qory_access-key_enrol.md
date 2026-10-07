@@ -14,8 +14,11 @@ public key where the section has none yet. The key then awaits approval: an owne
 administrator compares the fingerprint qory printed with the one the server shows, and
 until then every run is refused with key_pending.
 
-A secret already here is moved aside first, and deleted once the new key is approved
-and a run uses it. Run the same command again within 15 minutes and it retries with the same key.
+When access-key-secret exists, enrol refuses, so it never replaces this machine's key:
+move it aside yourself first to enrol a new key, or use --print for a key kept
+elsewhere. The one exception is a retry: run the same command again within the code's
+15 minutes, while access-key-secret still holds the key made for it, and it retries
+with that key.
 
 The key's name is instance.name of runner.yaml, else this machine's host name.
 

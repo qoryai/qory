@@ -137,21 +137,24 @@ func TestEnrolmentKnownAnswers(t *testing.T) {
 				t.Errorf("%s, tampered %v: %s, want %s", a.Note, tamper, ref.Code, want)
 			}
 			dir := runnerdir.Dir(t.TempDir())
+			if _, err := dir.Ensure(); err != nil {
+				t.Fatal(err)
+			}
 			mine, _ := accesskey.Generate()
 			now := time.Now()
 			if err := dir.WriteSecret(mine); err != nil {
 				t.Fatal(err)
 			}
-			if err := dir.WritePending(published.Code, now); err != nil {
+			if err := dir.WritePending(published.Code, mine.PublicKey(), now); err != nil {
 				t.Fatal(err)
 			}
-			got := enrolFailed(dir, err, mine.Fingerprint(), false, now)
+			got := enrolFailed(dir, err, mine, false, now)
 			if !errors.As(got, &ref) {
 				t.Errorf("%s: the refusal is lost: %v", a.Note, got)
 			}
 			keep := want != accesskey.CodeKeyInvalid
-			if dir.HasSecret() != keep || dir.Pending(published.Code, now) != keep {
-				t.Errorf("%s, tampered %v: secret %v, pending %v", a.Note, tamper, dir.HasSecret(), dir.Pending(published.Code, now))
+			if dir.HasSecret() != keep || dir.Pending(published.Code, mine.PublicKey(), now) != keep {
+				t.Errorf("%s, tampered %v: secret %v, pending %v", a.Note, tamper, dir.HasSecret(), dir.Pending(published.Code, mine.PublicKey(), now))
 			}
 			n++
 		}
@@ -202,6 +205,57 @@ func TestKeyCommandsRefuseAFixtureKey(t *testing.T) {
 		}
 		if dir.HasSecret() {
 			t.Fatalf("%v wrote the fixture secret", args)
+		}
+	}
+}
+
+// TestARefusalMovesAsideOnlyTheKeyMadeForTheCode is unauthorized, key_invalid and a
+// fixture pin while access-key-secret holds a key other than the one the enrolment
+// sent: the pending enrolment ends, that key stays, and no message says a secret was
+// moved aside.
+func TestARefusalMovesAsideOnlyTheKeyMadeForTheCode(t *testing.T) {
+	sent, err := accesskey.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name string
+		act  func(runnerdir.Dir, time.Time) error
+	}{
+		{"unauthorized", func(dir runnerdir.Dir, now time.Time) error {
+			return enrolFailed(dir, &accesskey.Refusal{Code: accesskey.CodeUnauthorized, Status: http.StatusUnauthorized}, sent, false, now)
+		}},
+		{"key_invalid", func(dir runnerdir.Dir, now time.Time) error {
+			return enrolFailed(dir, &accesskey.Refusal{Code: accesskey.CodeKeyInvalid, Status: http.StatusConflict}, sent, false, now)
+		}},
+		{"a fixture pin", func(dir runnerdir.Dir, now time.Time) error {
+			return refuseFixturePin(dir, sent, false, now)
+		}},
+	} {
+		dir := runnerdir.Dir(t.TempDir())
+		if _, err := dir.Ensure(); err != nil {
+			t.Fatal(err)
+		}
+		mine, err := accesskey.Generate()
+		if err != nil {
+			t.Fatal(err)
+		}
+		now := time.Now()
+		if err := dir.WriteSecret(mine); err != nil {
+			t.Fatal(err)
+		}
+		if err := dir.WritePending("qec_F1XT0RE0000000000000000000.uoES-kuj1vk0sq0qoGlmAg", sent.PublicKey(), now); err != nil {
+			t.Fatal(err)
+		}
+		got := c.act(dir, now)
+		if got == nil || strings.Contains(got.Error(), "moved aside") {
+			t.Errorf("%s: %v", c.name, got)
+		}
+		if old, _ := dir.OldSecrets(); !dir.SameSecret(mine) || len(old) != 0 {
+			t.Errorf("%s: this machine's key was moved aside", c.name)
+		}
+		if _, err := os.Lstat(dir.Path(runnerdir.PendingFile)); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("%s: the pending enrolment stayed: %v", c.name, err)
 		}
 	}
 }
