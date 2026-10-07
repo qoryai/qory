@@ -49,6 +49,52 @@ func head(t *testing.T, dir string) string {
 // short is the twelve characters of a commit id the pin carries.
 func short(id string) string { return id[:12] }
 
+// traced runs f with git tracing to a file and returns the git commands every git process
+// f started ran, one line each, such as "git ls-remote -- <url> refs/heads/main".
+func traced(t *testing.T, f func()) []string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "trace")
+	t.Setenv("GIT_TRACE", path)
+	f()
+	os.Setenv("GIT_TRACE", "0")
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var commands []string
+	for _, line := range strings.Split(string(data), "\n") {
+		if _, command, ok := strings.Cut(line, "trace: built-in: "); ok {
+			commands = append(commands, command)
+		}
+	}
+	return commands
+}
+
+// count is how many of the traced commands are the git subcommand named.
+func count(commands []string, sub string) int {
+	n := 0
+	for _, c := range commands {
+		if strings.HasPrefix(c, "git "+sub+" ") {
+			n++
+		}
+	}
+	return n
+}
+
+// refsFile is the file under cache that records what ref resolved to, for the one source
+// the cache holds.
+func refsFile(t *testing.T, cache, ref string) string {
+	t.Helper()
+	matches, _ := filepath.Glob(filepath.Join(cache, "*", "refs", ref+"-*"))
+	if len(matches) != 1 {
+		t.Fatalf("refs files for %s: %v", ref, matches)
+	}
+	return matches[0]
+}
+
 // TestResolveGitPinsTheRefToItsCommit fetches a tag and reports the commit as the pin, with
 // the module's directory inside the clone.
 func TestResolveGitPinsTheRefToItsCommit(t *testing.T) {
@@ -75,55 +121,310 @@ func TestResolveGitPinsTheRefToItsCommit(t *testing.T) {
 	}
 }
 
-// TestResolveGitReadsTheCacheUntilUpdate is a branch ref: the cached clone serves the
-// second compose without the network, and --update moves it.
-func TestResolveGitReadsTheCacheUntilUpdate(t *testing.T) {
+// TestResolveGitFollowsABranch is a branch ref that moves on the remote: the next compose,
+// without an update, lands on the new commit, and the clone of the old one stays as it
+// was for a checkout composed from it.
+func TestResolveGitFollowsABranch(t *testing.T) {
 	url, first, second := remote(t)
 	dir := strings.TrimPrefix(url, "file://")
-	src := stack.Source{Git: url, Ref: "main", Path: "modules/core"}
-	got, err := source.Resolve("/nowhere", src, source.Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Pin != short(second) {
-		t.Fatalf("pin %q, want %s", got.Pin, short(second))
-	}
-	// The branch moves back to the first commit; the cache still holds the second.
+	opts := source.Options{Cache: t.TempDir()}
 	run(t, dir, "reset", "-q", "--hard", "v1")
-	got, err = source.Resolve("/nowhere", src, source.Options{})
-	if err != nil || got.Pin != short(second) {
-		t.Fatalf("cached pin %q (%v), want %s", got.Pin, err, short(second))
+	src := stack.Source{Git: url, Ref: "main", Path: "modules/core"}
+	got, err := source.Resolve("/nowhere", src, opts)
+	if err != nil || got.Pin != short(first) {
+		t.Fatalf("pin %q (%v), want %s", got.Pin, err, short(first))
 	}
 	before := got.Dir
-	got, err = source.Resolve("/nowhere", src, source.Options{Update: true})
-	if err != nil || got.Pin != short(first) {
-		t.Fatalf("updated pin %q (%v), want %s", got.Pin, err, short(first))
+	run(t, dir, "reset", "-q", "--hard", second)
+	got, err = source.Resolve("/nowhere", src, opts)
+	if err != nil || got.Pin != short(second) || got.Warning != "" {
+		t.Fatalf("after the push: %+v (%v), want %s", got, err, short(second))
 	}
-	// The clone the earlier compose linked into is still there, unchanged: another
-	// checkout composed from it keeps reading the commit it was composed from.
-	if data, err := os.ReadFile(filepath.Join(before, "AGENTS.md")); err != nil || string(data) != "# Core v2\n" {
-		t.Errorf("the earlier clone reads %q (%v) after an update", data, err)
+	if data, err := os.ReadFile(filepath.Join(got.Dir, "AGENTS.md")); err != nil || string(data) != "# Core v2\n" {
+		t.Errorf("the new clone reads %q (%v)", data, err)
 	}
-	// Without the remote, the cache alone serves the compose, and an update that cannot
-	// fetch fails without touching what is there.
+	if data, err := os.ReadFile(filepath.Join(before, "AGENTS.md")); err != nil || string(data) != "# Core v1\n" {
+		t.Errorf("the earlier clone reads %q (%v) after the branch moved", data, err)
+	}
+}
+
+// TestResolveGitMovesACheckoutPinnedToTheOldCommit is a second checkout whose report pins
+// the branch's old commit: its next compose takes the new one and says what it had.
+func TestResolveGitMovesACheckoutPinnedToTheOldCommit(t *testing.T) {
+	url, first, second := remote(t)
+	dir := strings.TrimPrefix(url, "file://")
+	cache := t.TempDir()
+	src := stack.Source{Git: url, Ref: "main"}
+	run(t, dir, "reset", "-q", "--hard", "v1")
+	a, err := source.Resolve("/nowhere", src, source.Options{Cache: cache})
+	if err != nil || a.Pin != short(first) {
+		t.Fatalf("a: pin %q (%v), want %s", a.Pin, err, short(first))
+	}
+	run(t, dir, "reset", "-q", "--hard", second)
+	if _, err := source.Resolve("/nowhere", src, source.Options{Cache: cache}); err != nil {
+		t.Fatal(err)
+	}
+	again, err := source.Resolve("/nowhere", src, source.Options{Cache: cache, Pin: a.Pin})
+	if err != nil || again.Pin != short(second) || again.Previous != a.Pin {
+		t.Fatalf("a again: %+v (%v), want %s moved from %s", again, err, short(second), a.Pin)
+	}
+	same, err := source.Resolve("/nowhere", src, source.Options{Cache: cache, Pin: again.Pin})
+	if err != nil || same.Previous != "" {
+		t.Errorf("a pin that did not move: %+v (%v), want no previous pin", same, err)
+	}
+}
+
+// TestResolveGitKeepsATag is a tag after a new commit on main: it stays on its commit, and
+// once its clone is cached it runs no git command, so it resolves with the remote gone
+// and no warning.
+func TestResolveGitKeepsATag(t *testing.T) {
+	url, first, _ := remote(t)
+	dir := strings.TrimPrefix(url, "file://")
+	opts := source.Options{Cache: t.TempDir()}
+	src := stack.Source{Git: url, Ref: "v1", Path: "modules/core"}
+	if got, err := source.Resolve("/nowhere", src, opts); err != nil || got.Pin != short(first) {
+		t.Fatalf("pin %q (%v), want %s", got.Pin, err, short(first))
+	}
+	write(t, filepath.Join(dir, "modules", "core", "AGENTS.md"), "# Core v3\n")
+	run(t, dir, "commit", "-q", "-am", "third")
 	if err := os.RemoveAll(dir); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := source.Resolve("/nowhere", src, source.Options{}); err != nil || got.Pin != short(first) {
-		t.Fatalf("offline pin %q (%v), want %s", got.Pin, err, short(first))
+	var got source.Resolved
+	var err error
+	commands := traced(t, func() { got, err = source.Resolve("/nowhere", src, opts) })
+	if err != nil || got.Pin != short(first) || got.Warning != "" {
+		t.Fatalf("offline: %+v (%v), want %s and no warning", got, err, short(first))
 	}
-	if _, err := source.Resolve("/nowhere", src, source.Options{Update: true}); err == nil {
-		t.Fatal("an update without the remote succeeded")
+	if len(commands) != 0 {
+		t.Errorf("a cached tag ran git: %v", commands)
 	}
-	if got, err := source.Resolve("/nowhere", src, source.Options{}); err != nil || got.Pin != short(first) {
-		t.Fatalf("pin after a failed update %q (%v), want %s", got.Pin, err, short(first))
+}
+
+// TestResolveGitReadsACommitWithoutTheRemote pins a source by a full commit id: once its
+// clone is cached, it resolves with the remote gone and runs no git command.
+func TestResolveGitReadsACommitWithoutTheRemote(t *testing.T) {
+	url, first, _ := remote(t)
+	opts := source.Options{Cache: t.TempDir()}
+	src := stack.Source{Git: url, Ref: first}
+	if _, err := source.Resolve("/nowhere", src, opts); err != nil {
+		t.Fatal(err)
 	}
-	if entries, _ := os.ReadDir(filepath.Dir(filepath.Dir(filepath.Dir(got.Dir)))); len(entries) != 3 {
-		var names []string
-		for _, e := range entries {
-			names = append(names, e.Name())
+	if err := os.RemoveAll(strings.TrimPrefix(url, "file://")); err != nil {
+		t.Fatal(err)
+	}
+	var got source.Resolved
+	var err error
+	commands := traced(t, func() { got, err = source.Resolve("/nowhere", src, opts) })
+	if err != nil || got.Pin != short(first) || got.Warning != "" {
+		t.Fatalf("offline: %+v (%v), want %s", got, err, short(first))
+	}
+	if len(commands) != 0 {
+		t.Errorf("a cached commit ran git: %v", commands)
+	}
+}
+
+// TestResolveGitKeepsTheCacheOffline is a branch whose remote cannot be reached, gone or
+// slower than the timeout: with a clone cached, the compose keeps it and warns, the
+// checkout's pin first; with nothing cached, it fails with a FetchError as before.
+func TestResolveGitKeepsTheCacheOffline(t *testing.T) {
+	url, first, second := remote(t)
+	dir := strings.TrimPrefix(url, "file://")
+	cache := t.TempDir()
+	src := stack.Source{Git: url, Ref: "main"}
+	run(t, dir, "reset", "-q", "--hard", "v1")
+	a, err := source.Resolve("/nowhere", src, source.Options{Cache: cache})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run(t, dir, "reset", "-q", "--hard", second)
+	if _, err := source.Resolve("/nowhere", src, source.Options{Cache: cache}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := source.Resolve("/nowhere", src, source.Options{Cache: cache, Timeout: time.Nanosecond})
+	if want := url + "#main: could not reach the remote; kept " + short(second); err != nil || got.Pin != short(second) || got.Warning != want {
+		t.Errorf("past the timeout: %+v (%v), want the warning %q", got, err, want)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	got, err = source.Resolve("/nowhere", src, source.Options{Cache: cache, Pin: a.Pin})
+	if want := url + "#main: could not reach the remote; kept " + short(first); err != nil || got.Pin != short(first) || got.Warning != want || got.Previous != "" {
+		t.Errorf("offline with a pin: %+v (%v), want the warning %q", got, err, want)
+	}
+	_, err = source.Resolve("/nowhere", src, source.Options{Cache: t.TempDir()})
+	var fetch *source.FetchError
+	if !errors.As(err, &fetch) || !strings.HasPrefix(err.Error(), "fetching "+url+"#main: ") {
+		t.Errorf("offline with nothing cached: %v, want a FetchError", err)
+	}
+	if _, err := source.Resolve("/nowhere", src, source.Options{Cache: cache, Update: true}); !errors.As(err, &fetch) {
+		t.Errorf("an update offline: %v, want a FetchError", err)
+	}
+}
+
+// TestResolveGitMatchesABranchByItsFullName is a remote with refs/heads/feature/main: it
+// never answers for main, before or after main is deleted.
+func TestResolveGitMatchesABranchByItsFullName(t *testing.T) {
+	url, first, second := remote(t)
+	dir := strings.TrimPrefix(url, "file://")
+	opts := source.Options{Cache: t.TempDir()}
+	run(t, dir, "branch", "feature/main", first)
+	src := stack.Source{Git: url, Ref: "main"}
+	if got, err := source.Resolve("/nowhere", src, opts); err != nil || got.Pin != short(second) {
+		t.Fatalf("pin %q (%v), want %s", got.Pin, err, short(second))
+	}
+	run(t, dir, "checkout", "-q", "feature/main")
+	run(t, dir, "branch", "-q", "-D", "main")
+	var gone *source.GoneError
+	if _, err := source.Resolve("/nowhere", src, opts); !errors.As(err, &gone) {
+		t.Errorf("main without main: %v, want a GoneError", err)
+	}
+}
+
+// TestResolveGitTakesTheTagOfANameThatIsBoth is a name that is a tag and a branch: it
+// resolves to the tag, as git fetch does.
+func TestResolveGitTakesTheTagOfANameThatIsBoth(t *testing.T) {
+	url, first, _ := remote(t)
+	dir := strings.TrimPrefix(url, "file://")
+	run(t, dir, "tag", "-a", "-m", "release", "main", first)
+	got, err := source.Resolve("/nowhere", stack.Source{Git: url, Ref: "main"}, source.Options{Cache: t.TempDir()})
+	if err != nil || got.Pin != short(first) {
+		t.Errorf("pin %q (%v), want the tag's %s", got.Pin, err, short(first))
+	}
+}
+
+// TestResolveGitTakesATagPushedOverACachedBranch is a name cached as a branch, rel at the
+// first commit, and then a tag rel pushed at the second, with the branch deleted: the
+// next resolve takes the tag's commit, not the branch's cached one, and records it as a
+// tag.
+func TestResolveGitTakesATagPushedOverACachedBranch(t *testing.T) {
+	url, first, second := remote(t)
+	dir := strings.TrimPrefix(url, "file://")
+	cache := t.TempDir()
+	run(t, dir, "branch", "rel", first)
+	src := stack.Source{Git: url, Ref: "rel"}
+	a, err := source.Resolve("/nowhere", src, source.Options{Cache: cache})
+	if err != nil || a.Pin != short(first) {
+		t.Fatalf("the branch: pin %q (%v), want %s", a.Pin, err, short(first))
+	}
+	run(t, dir, "branch", "-q", "-D", "rel")
+	run(t, dir, "tag", "-a", "-m", "release", "rel", second)
+	got, err := source.Resolve("/nowhere", src, source.Options{Cache: cache, Pin: a.Pin})
+	if err != nil || got.Pin != short(second) {
+		t.Fatalf("the tag: pin %q (%v), want %s", got.Pin, err, short(second))
+	}
+	if data, _ := os.ReadFile(refsFile(t, cache, "rel")); string(data) != "tag "+second+"\n" {
+		t.Errorf("the refs file reads %q, want the tag's commit", data)
+	}
+	// With both clones cached, a name that is a tag and a branch again is the tag.
+	run(t, dir, "branch", "rel", first)
+	if got, err := source.Resolve("/nowhere", src, source.Options{Cache: t.TempDir()}); err != nil || got.Pin != short(second) {
+		t.Errorf("tag and branch: pin %q (%v), want the tag's %s", got.Pin, err, short(second))
+	}
+}
+
+// TestResolveGitLooksUpOnceForManyModules is two modules from one repository at main in
+// one compose, sharing a memo: the remote is asked once, and a push between the two
+// leaves both on one commit.
+func TestResolveGitLooksUpOnceForManyModules(t *testing.T) {
+	url, _, second := remote(t)
+	dir := strings.TrimPrefix(url, "file://")
+	opts := source.Options{Cache: t.TempDir(), Memo: source.NewMemo()}
+	var a, b source.Resolved
+	var errA, errB error
+	commands := traced(t, func() {
+		a, errA = source.Resolve("/nowhere", stack.Source{Git: url, Ref: "main", Path: "modules/core"}, opts)
+	})
+	write(t, filepath.Join(dir, "modules", "core", "AGENTS.md"), "# Core v3\n")
+	run(t, dir, "commit", "-q", "-am", "third")
+	commands = append(commands, traced(t, func() {
+		b, errB = source.Resolve("/nowhere", stack.Source{Git: url, Ref: "main"}, opts)
+	})...)
+	if errA != nil || errB != nil {
+		t.Fatal(errA, errB)
+	}
+	if a.Pin != short(second) || b.Pin != a.Pin {
+		t.Errorf("pins %s and %s, want both %s", a.Pin, b.Pin, short(second))
+	}
+	if n := count(commands, "ls-remote"); n != 1 {
+		t.Errorf("ls-remote ran %d times, want once: %v", n, commands)
+	}
+}
+
+// TestResolveGitFailsForADeletedBranch is a branch deleted on the remote: the compose
+// fails with the gone error, although the cache holds its clone.
+func TestResolveGitFailsForADeletedBranch(t *testing.T) {
+	url, _, _ := remote(t)
+	dir := strings.TrimPrefix(url, "file://")
+	opts := source.Options{Cache: t.TempDir()}
+	run(t, dir, "branch", "topic")
+	src := stack.Source{Git: url, Ref: "topic"}
+	first, err := source.Resolve("/nowhere", src, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run(t, dir, "branch", "-q", "-D", "topic")
+	_, err = source.Resolve("/nowhere", src, source.Options{Cache: opts.Cache, Pin: first.Pin})
+	var gone *source.GoneError
+	want := url + " has no branch or tag topic; to keep the old harness, set ref to a commit id"
+	if !errors.As(err, &gone) || err.Error() != want {
+		t.Errorf("err = %v\nwant %s", err, want)
+	}
+}
+
+// TestResolveGitFailsForADeletedBranchNamedLikeHex is a branch named cafe, which reads as
+// an abbreviated commit too: once the cache knows it as a branch, its deletion on the
+// remote is the gone error, not a fetch of cafe as a commit.
+func TestResolveGitFailsForADeletedBranchNamedLikeHex(t *testing.T) {
+	url, _, second := remote(t)
+	dir := strings.TrimPrefix(url, "file://")
+	opts := source.Options{Cache: t.TempDir()}
+	run(t, dir, "branch", "cafe")
+	src := stack.Source{Git: url, Ref: "cafe"}
+	if got, err := source.Resolve("/nowhere", src, opts); err != nil || got.Pin != short(second) {
+		t.Fatalf("pin %q (%v), want %s", got.Pin, err, short(second))
+	}
+	run(t, dir, "branch", "-q", "-D", "cafe")
+	_, err := source.Resolve("/nowhere", src, opts)
+	var gone *source.GoneError
+	if want := url + " has no branch or tag cafe; to keep the old harness, set ref to a commit id"; !errors.As(err, &gone) || err.Error() != want {
+		t.Errorf("err = %v\nwant %s", err, want)
+	}
+}
+
+// TestResolveGitReadsTheOldRefsFile is a refs file written before it recorded the kind,
+// the commit alone: a branch offline keeps the commit it names, and a tag rewrites it
+// with its kind.
+func TestResolveGitReadsTheOldRefsFile(t *testing.T) {
+	url, first, second := remote(t)
+	cache := t.TempDir()
+	opts := source.Options{Cache: cache}
+	if _, err := source.Resolve("/nowhere", stack.Source{Git: url, Ref: "v1"}, opts); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := source.Resolve("/nowhere", stack.Source{Git: url, Ref: "main"}, opts); err != nil || got.Pin != short(second) {
+		t.Fatalf("main: pin %q (%v), want %s", got.Pin, err, short(second))
+	}
+	tag, branch := refsFile(t, cache, "v1"), refsFile(t, cache, "main")
+	for path, want := range map[string]string{tag: "tag " + first + "\n", branch: "branch " + second + "\n"} {
+		if data, err := os.ReadFile(path); err != nil || string(data) != want {
+			t.Errorf("%s reads %q (%v), want %q", filepath.Base(path), data, err, want)
 		}
-		t.Errorf("the source's cache holds %v, want the two clones and refs", names)
+	}
+	write(t, tag, first+"\n")
+	if got, err := source.Resolve("/nowhere", stack.Source{Git: url, Ref: "v1"}, opts); err != nil || got.Pin != short(first) {
+		t.Fatalf("v1: pin %q (%v), want %s", got.Pin, err, short(first))
+	}
+	if data, _ := os.ReadFile(tag); string(data) != "tag "+first+"\n" {
+		t.Errorf("the old refs file of a tag reads %q after a compose", data)
+	}
+	write(t, branch, first+"\n")
+	if err := os.RemoveAll(strings.TrimPrefix(url, "file://")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := source.Resolve("/nowhere", stack.Source{Git: url, Ref: "main"}, opts)
+	if err != nil || got.Pin != short(first) || got.Warning == "" {
+		t.Errorf("main offline: %+v (%v), want the old file's %s and a warning", got, err, short(first))
 	}
 }
 
@@ -142,15 +443,21 @@ func TestResolveGitFetchesACommit(t *testing.T) {
 	}
 }
 
-// TestResolveGitRefuses covers a ref the remote does not have, a path the repository does
-// not hold, and a remote that is not there, and checks that a failed fetch leaves no clone
-// behind to be read as an empty module next time.
+// TestResolveGitRefuses covers a ref the remote does not have, an abbreviated commit it
+// cannot fetch, a path the repository does not hold, and a remote that is not there, and
+// checks that a failed resolve leaves no clone behind to be read as an empty module next
+// time.
 func TestResolveGitRefuses(t *testing.T) {
 	url, _, _ := remote(t)
 	var fetch *source.FetchError
+	var gone *source.GoneError
 	_, err := source.Resolve("/nowhere", stack.Source{Git: url, Ref: "v9"}, source.Options{})
-	if !errors.As(err, &fetch) || !strings.HasPrefix(err.Error(), "fetching "+url+"#v9: ") {
+	if !errors.As(err, &gone) || err.Error() != url+" has no branch or tag v9; to keep the old harness, set ref to a commit id" {
 		t.Errorf("missing ref: %v", err)
+	}
+	_, err = source.Resolve("/nowhere", stack.Source{Git: url, Ref: "abc1234"}, source.Options{})
+	if !errors.As(err, &fetch) || !strings.HasPrefix(err.Error(), "fetching "+url+"#abc1234: ") {
+		t.Errorf("missing abbreviated commit: %v", err)
 	}
 	cache, _ := source.CacheDir()
 	if entries, _ := os.ReadDir(cache); len(entries) != 0 {
@@ -176,15 +483,16 @@ func TestResolveGitRefuses(t *testing.T) {
 }
 
 // TestResolveGitTakesTheRefAsARef is a stack a repository carries: a ref written as a git
-// option is a ref git cannot find, never an option git acts on, and -q is not --quiet.
+// option is a ref the remote does not have, never an option git acts on, and -q is not
+// --quiet.
 func TestResolveGitTakesTheRefAsARef(t *testing.T) {
 	url, _, _ := remote(t)
 	marker := filepath.Join(t.TempDir(), "ran")
-	var fetch *source.FetchError
+	var gone *source.GoneError
 	for _, ref := range []string{"--upload-pack=touch " + marker + " #", "-q"} {
 		_, err := source.Resolve("/nowhere", stack.Source{Git: url, Ref: ref}, source.Options{})
-		if !errors.As(err, &fetch) {
-			t.Errorf("ref %q: err = %v, want a FetchError", ref, err)
+		if !errors.As(err, &gone) {
+			t.Errorf("ref %q: err = %v, want a GoneError", ref, err)
 		}
 	}
 	if _, err := os.Stat(marker); err == nil {
@@ -192,55 +500,31 @@ func TestResolveGitTakesTheRefAsARef(t *testing.T) {
 	}
 }
 
-// TestResolveGitKeepsTheCheckoutsPin is two checkouts on one branch: the second's update
-// moves the ref, and the first, composing again with its own pin, stays where it was.
-func TestResolveGitKeepsTheCheckoutsPin(t *testing.T) {
-	url, first, second := remote(t)
-	dir := strings.TrimPrefix(url, "file://")
-	src := stack.Source{Git: url, Ref: "main"}
-	run(t, dir, "reset", "-q", "--hard", "v1")
-	a, err := source.Resolve("/nowhere", src, source.Options{})
-	if err != nil || a.Pin != short(first) {
-		t.Fatalf("a: pin %q (%v), want %s", a.Pin, err, short(first))
-	}
-	run(t, dir, "reset", "-q", "--hard", second)
-	b, err := source.Resolve("/nowhere", src, source.Options{Update: true})
-	if err != nil || b.Pin != short(second) {
-		t.Fatalf("b: pin %q (%v), want %s", b.Pin, err, short(second))
-	}
-	again, err := source.Resolve("/nowhere", src, source.Options{Pin: a.Pin})
-	if err != nil || again.Pin != a.Pin || again.Dir != a.Dir {
-		t.Fatalf("a again: %+v (%v), want its own pin %s", again, err, a.Pin)
-	}
-	// A pin whose clone is gone falls back to the ref's last resolution.
-	if err := os.RemoveAll(a.Dir); err != nil {
-		t.Fatal(err)
-	}
-	fresh, err := source.Resolve("/nowhere", src, source.Options{Pin: a.Pin})
-	if err != nil || fresh.Pin != b.Pin {
-		t.Fatalf("a without its clone: %+v (%v), want %s", fresh, err, b.Pin)
-	}
-}
-
 // TestResolveGitFetchesOnceForManyComposes is six composes fetching one source at the same
-// moment: every one gets the commit, and the cache holds one clone.
+// moment: every one gets the commit, each asks the remote once, and the cache holds one
+// clone.
 func TestResolveGitFetchesOnceForManyComposes(t *testing.T) {
 	url, _, second := remote(t)
 	src := stack.Source{Git: url, Ref: "main", Path: "modules/core"}
 	results := make(chan error, 6)
-	for i := 0; i < 6; i++ {
-		go func() {
-			got, err := source.Resolve("/nowhere", src, source.Options{})
-			if err == nil && got.Pin != short(second) {
-				err = errors.New("pin " + got.Pin)
-			}
-			results <- err
-		}()
-	}
-	for i := 0; i < 6; i++ {
-		if err := <-results; err != nil {
-			t.Errorf("compose %d: %v", i, err)
+	commands := traced(t, func() {
+		for i := 0; i < 6; i++ {
+			go func() {
+				got, err := source.Resolve("/nowhere", src, source.Options{})
+				if err == nil && got.Pin != short(second) {
+					err = errors.New("pin " + got.Pin)
+				}
+				results <- err
+			}()
 		}
+		for i := 0; i < 6; i++ {
+			if err := <-results; err != nil {
+				t.Errorf("compose %d: %v", i, err)
+			}
+		}
+	})
+	if n := count(commands, "ls-remote"); n != 6 {
+		t.Errorf("ls-remote ran %d times for six composes, want six", n)
 	}
 	cache, _ := source.CacheDir()
 	sources, _ := os.ReadDir(cache)

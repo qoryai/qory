@@ -25,6 +25,14 @@ type Base struct {
 	// Pin is what the source resolved to: the commit for a git source, "working-tree" for
 	// a path.
 	Pin string
+	// Ref is the git source's ref as the stack writes it, "" for a path.
+	Ref string
+	// Previous is the pin the last compose recorded for the base, when this compose
+	// resolved it to another commit, such as a branch that moved; "" otherwise.
+	Previous string
+	// Warning is set when the base's remote could not be reached and the cached commit was
+	// kept; see [source.Resolved.Warning].
+	Warning string
 	// Extending is what the base lets an extending module ship.
 	Extending *stack.Extending
 	// Qory is the range of qory versions the base is written for, empty for none. The
@@ -43,7 +51,8 @@ func (b *Base) String() string { return b.Name + "@" + b.Pin }
 // base's modules first and closed, with the base recorded for the result. It is
 // [stack.Extend] with the base fetched: the extends source selects a directory that
 // contains [stack.FileName]; pin is the commit the last report recorded for it, "" for
-// none. A stack, which extends nothing, comes back as it is with a nil base.
+// none, and the source resolves the way a module's does, with opts.Memo shared with the
+// modules. A stack, which extends nothing, comes back as it is with a nil base.
 //
 // A git source that cannot be fetched is a [*source.FetchError] whose message reports
 // that the stack is not reachable from here, because a base is usually reachable from the
@@ -52,7 +61,7 @@ func LoadBase(p *stack.Stack, pin string, opts Options) (*stack.Stack, *Base, er
 	if p.Extends.Path == "" && p.Extends.Git == "" {
 		return p, nil, nil
 	}
-	src, err := source.Resolve(p.Dir(), p.Extends, source.Options{Pin: pin, Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout})
+	src, err := source.Resolve(p.Dir(), p.Extends, source.Options{Pin: pin, Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Memo: opts.Memo})
 	var fetch *source.FetchError
 	if errors.As(err, &fetch) {
 		return nil, nil, fmt.Errorf("the stack %s is not reachable from here: %w", p.Extends.String(), err)
@@ -68,7 +77,12 @@ func LoadBase(p *stack.Stack, pin string, opts Options) (*stack.Stack, *Base, er
 	if err != nil {
 		return nil, nil, err
 	}
-	return ExtendOn(p, base, src.Pin)
+	merged, b, err := ExtendOn(p, base, src.Pin)
+	if err != nil {
+		return nil, nil, err
+	}
+	b.Ref, b.Previous, b.Warning = p.Extends.Ref, src.Previous, src.Warning
+	return merged, b, nil
 }
 
 // ExtendOn returns the stack the checkout's document p composes on base, a stack the

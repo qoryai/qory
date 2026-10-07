@@ -154,6 +154,14 @@ For a real repository, run `qory setup repo` instead.
   You get a refusal, with the lines that resolve it.
 - **Part of a module**, when that is all you want. See below.
 
+### Branches, tags and commits
+
+A git source's `ref` is a branch, a tag or a full commit id. A branch follows the remote:
+each compose takes its current commit, and the module's row shows when it moved, such as
+`core  main c522a5b0b1c2 → 9f1e2d3a4b5c`. A tag or a full commit id stays pinned to its
+commit. Offline, compose keeps the cached commit and warns. A branch that is gone from the
+remote fails; to keep the old harness, set `ref` to a commit id.
+
 ### Take part of a module
 
 - `exclude` leaves things out: entries, the instruction section, settings fragments or
@@ -300,7 +308,7 @@ uses it to build its first prompt from an entry point, such as `/harness:impleme
 | `--runtime claude,codex` | Render for these runtimes instead of the document's.                                           |
 | `--model opus`           | Write this model instead of the document's.                                                    |
 | `--force`                | Replace a tracked, unmodified file where a link goes. `git checkout --` restores it.           |
-| `--update`               | Fetch every git source again, instead of reading the cached clone.                             |
+| `--update`               | Re-fetch every git source, tags included.                                                      |
 | `--check`                | Exit 6 when a file or link of the home differs from the stack and modules. Write nothing.      |
 |                          | The checkout's links and the report are not compared.                                          |
 | `--home <dir>`           | Compose under a directory outside the checkout. Write nothing into the checkout.               |
