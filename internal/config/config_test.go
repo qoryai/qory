@@ -12,16 +12,22 @@ import (
 )
 
 // hermetic points HOME and the configuration directory at temporary paths, so no test
-// reads the machine's own qory.yaml.
+// reads the machine's own qory.yaml, and sets none of the server's variables.
 func hermetic(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	for _, name := range []string{"QORY_ACCESS_KEY_SECRET", "QORY_ACCESS_KEY_ID", "QORY_APIARY_PUBLIC_KEY", "QORY_SERVER_SECRET"} {
-		t.Setenv(name, "")
-	}
+	serverVariables(t, config.ServerVariables{})
 	return home
+}
+
+// serverVariables makes v what qory took of the server's variables when it started,
+// until the test ends.
+func serverVariables(t *testing.T, v config.ServerVariables) {
+	t.Helper()
+	config.SetServerVariables(v)
+	t.Cleanup(func() { config.SetServerVariables(config.ServerVariables{}) })
 }
 
 func write(t *testing.T, path, body string) {

@@ -3,6 +3,7 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 
+	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/ui"
 )
 
@@ -60,6 +61,11 @@ Shortcuts:
 More: https://github.com/qoryai/qory`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		// The server's variables are read into memory and removed from the environment
+		// before any command starts anything, so nothing qory starts inherits them. No
+		// command of the tree sets a PersistentPreRun of its own, which would replace
+		// this one.
+		PersistentPreRun: func(*cobra.Command, []string) { config.TakeServerVariables() },
 	}
 	// The completion script is qory setup completion, and setup shell loads it.
 	root.CompletionOptions.DisableDefaultCmd = true

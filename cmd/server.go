@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"time"
 
 	"github.com/qoryai/runner/accesskey"
@@ -37,12 +36,12 @@ type accessKey struct {
 	source keySource
 }
 
-// readAccessKey reads the access key's secret: QORY_ACCESS_KEY_SECRET, else the file
-// access-key-secret in the runner file's directory. A secret that is not one, a file the
-// rules refuse and the published fixture key are errors that never contain the value.
-// No secret anywhere is (nil, nil).
+// readAccessKey reads the access key's secret: QORY_ACCESS_KEY_SECRET, as qory took it
+// when it started, else the file access-key-secret in the runner file's directory. A
+// secret that is not one, a file the rules refuse and the published fixture key are
+// errors that never contain the value. No secret anywhere is (nil, nil).
 func readAccessKey(dir runnerdir.Dir) (*accessKey, error) {
-	if v, ok := os.LookupEnv(accesskey.EnvSecret); ok && v != "" {
+	if v := config.TakenServerVariables().AccessKeySecret; v != "" {
 		k, err := runnerdir.ParseSecret([]byte(v))
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", accesskey.EnvSecret, err)
@@ -62,14 +61,6 @@ func readAccessKey(dir runnerdir.Dir) (*accessKey, error) {
 	return &accessKey{key: k, source: fromFile}, nil
 }
 
-// forgetAccessKeyEnv removes the access key's variables from qory's own environment once
-// they are read, so nothing qory starts inherits them: the secret, the id and the pin.
-func forgetAccessKeyEnv() {
-	for _, name := range []string{accesskey.EnvSecret, accesskey.EnvID, accesskey.EnvPin} {
-		os.Unsetenv(name)
-	}
-}
-
 // serverIdentity is what a request to the server is signed and named with: the access
 // key, the instance id and the instance's display name.
 type serverIdentity struct {
@@ -85,7 +76,6 @@ type serverIdentity struct {
 func identify(r *config.Runner, report io.Writer, verb string) (*serverIdentity, error) {
 	dir := machineDir()
 	key, err := readAccessKey(dir)
-	forgetAccessKeyEnv()
 	if err != nil {
 		return nil, input(err)
 	}

@@ -125,8 +125,7 @@ func TestRunnerFileDefaults(t *testing.T) {
 		t.Errorf("empty file: %+v, %v", c.Runner, err)
 	}
 	signer, _ := serverKey(t)
-	t.Setenv(accesskey.EnvID, "ak_0123456789abcdef")
-	t.Setenv(accesskey.EnvPin, `[{"alg":"ed25519","public_key":"`+signer.PublicKey().String()+`"}]`)
+	serverVariables(t, config.ServerVariables{AccessKeyID: "ak_0123456789abcdef", ApiaryPublicKey: `[{"alg":"ed25519","public_key":"` + signer.PublicKey().String() + `"}]`})
 	runnerFile(t, "server:\n  url: http://127.0.0.1:8787\n")
 	c, err = config.Load(t.TempDir(), true)
 	if err != nil || c.Runner.Server == nil || c.Runner.Server.AccessKeyID != "ak_0123456789abcdef" || c.Runner.Server.AccessKeyIDFrom != "$QORY_ACCESS_KEY_ID" || len(c.Runner.Server.Pin) != 1 || c.Runner.Server.PinFrom != "$QORY_APIARY_PUBLIC_KEY" || c.Runner.Egress != nil {
@@ -142,8 +141,7 @@ func TestRunnerFileDefaults(t *testing.T) {
 
 	// Neither is required in the file, since enrolment writes them; both are required
 	// of a run.
-	t.Setenv(accesskey.EnvID, "")
-	t.Setenv(accesskey.EnvPin, "")
+	serverVariables(t, config.ServerVariables{})
 	if c, err = config.Load(t.TempDir(), true); err != nil || c.Runner.Server.AccessKeyID != "" || c.Runner.Server.Pin != nil {
 		t.Fatalf("a server section with a url alone: %+v, %v", c.Runner.Server, err)
 	}
@@ -157,12 +155,11 @@ func TestRunnerFileRefusesTheIDAndThePinTwice(t *testing.T) {
 	signer, pin := serverKey(t)
 	envPin := `[{"alg":"ed25519","public_key":"` + signer.PublicKey().String() + `"}]`
 	path := runnerFile(t, "server:\n  url: https://qory.example\n  access_key_id: ak_f1xt0re000000000\n  apiary_public_key: "+pin+"\n")
-	t.Setenv(accesskey.EnvID, "ak_0123456789abcdef")
+	serverVariables(t, config.ServerVariables{AccessKeyID: "ak_0123456789abcdef"})
 	if _, err := config.Load(t.TempDir(), true); err == nil || err.Error() != path+": server.access_key_id is set, and so is QORY_ACCESS_KEY_ID; set one of them" {
 		t.Errorf("the id twice: %v", err)
 	}
-	t.Setenv(accesskey.EnvID, "")
-	t.Setenv(accesskey.EnvPin, envPin)
+	serverVariables(t, config.ServerVariables{ApiaryPublicKey: envPin})
 	if _, err := config.Load(t.TempDir(), true); err == nil || err.Error() != path+": server.apiary_public_key is set, and so is QORY_APIARY_PUBLIC_KEY; set one of them" {
 		t.Errorf("the pin twice: %v", err)
 	}
@@ -175,8 +172,7 @@ func TestRunnerFileRefusesTheIDAndThePinTwice(t *testing.T) {
 		{"", `[{"alg":"ed25519","public_key":"` + secret + `"}]`, "QORY_APIARY_PUBLIC_KEY: the document contains an access key secret"},
 		{"", `[{"alg":"ed25519","public_key":"rcFAEfgtHFbZVqpPnXPYhYNhpgYEhSXg0Ixjjcdd2Mc"}]`, "QORY_APIARY_PUBLIC_KEY: it lists the runner contract's published fixture key"},
 	} {
-		t.Setenv(accesskey.EnvID, c.id)
-		t.Setenv(accesskey.EnvPin, c.pin)
+		serverVariables(t, config.ServerVariables{AccessKeyID: c.id, ApiaryPublicKey: c.pin})
 		_, err := config.Load(t.TempDir(), true)
 		if err == nil || !strings.HasPrefix(err.Error(), c.want) || strings.Contains(err.Error(), "AQIDBAUG") {
 			t.Errorf("%q %q: %v, want %q", c.id, c.pin, err, c.want)
@@ -190,7 +186,7 @@ func TestRunnerFileRefusesTheIDAndThePinTwice(t *testing.T) {
 func TestRunnerFileRefusesTheWorkspaceSecretVariable(t *testing.T) {
 	hermetic(t)
 	runnerFile(t, "server:\n  url: https://qory.example\n")
-	t.Setenv("QORY_SERVER_SECRET", "sixteen-characters-at-least")
+	serverVariables(t, config.ServerVariables{WorkspaceSecret: "sixteen-characters-at-least"})
 	_, err := config.Load(t.TempDir(), true)
 	want := "QORY_SERVER_SECRET holds a workspace access key's secret, which servers no longer accept; unset it, and enrol this machine as a node: qory access-key enrol <server> <code>, or qory access-key create and add its public key to the node; see https://github.com/qoryai/qory/blob/main/docs/run.md#the-access-key-and-the-instance"
 	if err == nil || err.Error() != want {

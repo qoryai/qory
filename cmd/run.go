@@ -161,8 +161,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if err := session.CheckStopSignal(stopSignal); err != nil {
 				return input(fmt.Errorf("--stop-signal: %w", err))
 			}
-			// The access key's variables are read, and gone from qory's environment, before
-			// anything is started.
 			stderr := cmd.ErrOrStderr()
 			var id *serverIdentity
 			if server != nil && !local {
@@ -170,7 +168,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return err
 				}
 			}
-			forgetAccessKeyEnv()
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			spec := session.Spec{

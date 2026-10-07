@@ -267,9 +267,10 @@ yours alone. The runner contract's published fixture key is refused.
 A run without the id or the secret does not start. One without a pin does not start
 either, `apiary_public_key_missing`.
 
-The three variables stay the runner's. qory removes them from its environment as soon
-as it reads them, so no session, tool or integration it starts inherits them. A
-`wall.env` or `--env` that names one is refused.
+The three variables stay the runner's. Every qory command reads them into memory when it
+starts, and removes them from its environment before it starts anything. So no session,
+worktree command, tool or integration it starts inherits them. A `wall.env` or `--env`
+that names one is refused.
 
 `server.access_key`, `server.secret` and `QORY_SERVER_SECRET` held a workspace access
 key, which servers no longer accept. Each is refused: enrol the machine as a node

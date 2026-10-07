@@ -35,8 +35,10 @@ release may change what an existing document does, and states it under Upgrading
   file `access-key-secret` beside `runner.yaml`, which is read only when it is a regular
   file you own that grants nothing to the group or others, in a directory that is yours
   alone. The runner contract's published fixture key is refused, as a secret or in the
-  pin. qory removes the three variables from its environment once it reads them, and
-  `wall.env` or `--env` naming one is refused.
+  pin. Every qory command reads the three variables into memory when it starts and
+  removes them from its environment before it starts anything, so no session, worktree
+  command, tool or integration inherits them; `wall.env` or `--env` naming one is
+  refused.
 - Each machine is an instance of its node, named on every request: its id is kept in
   `instance-id` beside `runner.yaml`, replaced when it was not made on this machine, and
   `instance.name` sets its display name, the host name unless set. `qory run` prints the
