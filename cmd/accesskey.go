@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,8 +43,8 @@ never rotated: a new one is enrolled, approved, and the old one revoked.
   enrol   enrol a new key with a code from the server
   create  make a key whose public key an administrator pastes into the server
 
-With --print, either command writes nothing on this machine and prints the key for a
-CI's settings instead.
+With --print, either command writes no key or setting on this machine and prints the
+key for a CI's settings instead.
 
 More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	}
@@ -72,8 +73,10 @@ and a run uses it. Run the same command again within 15 minutes and it retries w
 
 The key's name is instance.name of ` + config.RunnerFileName + `, else this machine's host name.
 
---print writes no file and prints QORY_ACCESS_KEY_ID, QORY_ACCESS_KEY_SECRET and
-QORY_APIARY_PUBLIC_KEY for a CI's settings. Only the secret belongs in its secret store.
+--print writes no key or setting and prints QORY_ACCESS_KEY_ID, QORY_ACCESS_KEY_SECRET
+and QORY_APIARY_PUBLIC_KEY for a CI's settings. Only the secret belongs in its secret
+store. The key is for another machine, so the server and the pin of ` + config.RunnerFileName + ` do not
+apply; the code is checked against QORY_APIARY_PUBLIC_KEY when it is set.
 
 --verbose adds nothing here.
 
@@ -90,7 +93,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			return enrol(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], args[1], print)
 		},
 	}
-	c.Flags().BoolVar(&print, "print", false, "write no file; print the key's three settings for a CI")
+	c.Flags().BoolVar(&print, "print", false, "write no key or setting; print the key's three settings for a CI")
 	return c
 }
 
@@ -109,7 +112,8 @@ section of ` + config.RunnerFileName + `: server.url, server.access_key_id and s
 The secret goes into access-key-secret beside ` + config.RunnerFileName + `. When that file exists,
 create refuses: move it aside yourself first.
 
---print writes no file and prints QORY_ACCESS_KEY_SECRET for a CI's secret store.
+--print writes no key or setting and prints QORY_ACCESS_KEY_SECRET for a CI's secret
+store.
 
 --verbose adds nothing here.
 
@@ -121,7 +125,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			return create(cmd.OutOrStdout(), cmd.ErrOrStderr(), print)
 		},
 	}
-	c.Flags().BoolVar(&print, "print", false, "write no file; print the key's secret for a CI")
+	c.Flags().BoolVar(&print, "print", false, "write no key or setting; print the key's secret for a CI")
 	return c
 }
 
@@ -146,13 +150,36 @@ func makeKey() (*accesskey.Key, error) {
 }
 
 // refuseKeyEnv refuses a key command that keeps its key on this machine while the
-// environment sets the access key's id or the pin: with the runner file holding them
-// too, every run would stop on a value set in both.
+// environment sets the access key's id, its secret or the pin: the id and the pin in
+// runner.yaml too would stop every run on a value set in both, and a secret in the
+// environment would win over the one the command keeps.
 func refuseKeyEnv(verb string) error {
-	for _, name := range []string{accesskey.EnvID, accesskey.EnvPin} {
+	var set []string
+	for _, name := range []string{accesskey.EnvID, accesskey.EnvSecret, accesskey.EnvPin} {
 		if keyEnv(name) != "" {
-			return input(fmt.Errorf("%s is set, and qory access-key %s keeps the key in this machine's files, where %s and the variable would both set it: unset %s and %s, or use --print", name, verb, config.RunnerFileName, accesskey.EnvID, accesskey.EnvPin))
+			set = append(set, name)
 		}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	names, is, they, them := set[0], "is", "it", "it"
+	if len(set) > 1 {
+		names = strings.Join(set[:len(set)-1], ", ") + " and " + set[len(set)-1]
+		is, they, them = "are", "they", "them"
+	}
+	return input(fmt.Errorf("%s %s set, and qory access-key %s keeps the key in this machine's files, which %s would contradict: unset %s, or use --print", names, is, verb, they, them))
+}
+
+// checkOrigin refuses a server the enrolment cannot reach, before a key is made: runner's
+// enrolment posts over https, or over http to localhost, 127.0.0.1 or [::1] alone.
+func checkOrigin(server string) error {
+	u, err := url.Parse(server)
+	if err != nil {
+		return err
+	}
+	if h := u.Hostname(); u.Scheme == "http" && h != "localhost" && h != "127.0.0.1" && h != "::1" {
+		return fmt.Errorf("the server %s is http to a host other than localhost, 127.0.0.1 or [::1], which enrolment does not reach; use https", server)
 	}
 	return nil
 }
@@ -196,10 +223,12 @@ func prepareDir(dir runnerdir.Dir, out io.Writer) error {
 	return nil
 }
 
-// effectivePin is the pin the runner file or QORY_APIARY_PUBLIC_KEY sets, nil when
-// neither does. A pin that lists a published fixture key is refused.
-func effectivePin(r *config.Runner) (accesskey.Pin, error) {
-	if r != nil && r.Server != nil && len(r.Server.Pin) > 0 {
+// effectivePin is the pin a code is checked against, nil when there is none: the
+// runner file's, else QORY_APIARY_PUBLIC_KEY. With --print the key is for another
+// machine, so the runner file's is not, and the variable's alone is. A pin that lists a
+// published fixture key is refused.
+func effectivePin(r *config.Runner, print bool) (accesskey.Pin, error) {
+	if !print && r != nil && r.Server != nil && len(r.Server.Pin) > 0 {
 		return r.Server.Pin, nil
 	}
 	v := keyEnv(accesskey.EnvPin)
@@ -223,6 +252,9 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	if err := config.CheckServerURL(server); err != nil {
 		return input(err)
 	}
+	if err := checkOrigin(server); err != nil {
+		return input(err)
+	}
 	code, err := accesskey.NormaliseCode(rawCode)
 	if err != nil {
 		return input(err)
@@ -236,10 +268,10 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	if err != nil {
 		return input(err)
 	}
-	if r != nil && r.Server != nil && r.Server.URL != server {
+	if !print && r != nil && r.Server != nil && r.Server.URL != server {
 		return input(fmt.Errorf("%s names the server %s, and this command %s: enrol with the server %s names, or change its server.url first", r.File, r.Server.URL, server, config.RunnerFileName))
 	}
-	pin, err := effectivePin(r)
+	pin, err := effectivePin(r, print)
 	if err != nil {
 		return err
 	}
@@ -334,7 +366,7 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(info, "Only %s belongs in the CI's secret store; %s and %s are plain settings. Nothing was written on this machine.\n", accesskey.EnvSecret, accesskey.EnvID, accesskey.EnvPin)
+		fmt.Fprintf(info, "Only %s belongs in the CI's secret store; %s and %s are plain settings. No key or setting was written on this machine.\n", accesskey.EnvSecret, accesskey.EnvID, accesskey.EnvPin)
 		fmt.Fprintf(out, "%s=%s\n%s=%s\n%s=%s\n", accesskey.EnvID, ans.AccessKeyID, accesskey.EnvSecret, key.Secret(), accesskey.EnvPin, pinJSON)
 		return nil
 	}
@@ -452,7 +484,7 @@ func create(out, errOut io.Writer, print bool) error {
 	fmt.Fprintf(info, "fingerprint %s\n", key.Fingerprint())
 	fmt.Fprintf(info, "An owner or administrator of the server pastes the public key into the node or node pool, where it is approved at once; its page then shows the server lines for %s.\n", config.RunnerFileName)
 	if print {
-		fmt.Fprintf(info, "Only %s belongs in the CI's secret store. Nothing was written on this machine.\n", accesskey.EnvSecret)
+		fmt.Fprintf(info, "Only %s belongs in the CI's secret store. No key or setting was written on this machine.\n", accesskey.EnvSecret)
 		fmt.Fprintf(out, "%s=%s\n", accesskey.EnvSecret, key.Secret())
 		return nil
 	}

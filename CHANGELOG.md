@@ -81,10 +81,14 @@ release may change what an existing document does, and states it under Upgrading
   same command succeeds once one is revoked or rejected; an answer that does not verify
   changes nothing. `qory access-key create` makes a key whose public key an owner or
   administrator pastes into a node or node pool, and refuses when `access-key-secret`
-  exists. With `--print` neither writes a file: enrol prints `QORY_ACCESS_KEY_ID`,
-  `QORY_ACCESS_KEY_SECRET` and `QORY_APIARY_PUBLIC_KEY` for a CI's settings, create the
-  secret. Both refuse while `QORY_ACCESS_KEY_ID` or `QORY_APIARY_PUBLIC_KEY` is set,
-  unless `--print` is given, and refuse a key or a pin of the runner contract's published
+  exists. With `--print` neither writes a key or a setting: enrol prints
+  `QORY_ACCESS_KEY_ID`, `QORY_ACCESS_KEY_SECRET` and `QORY_APIARY_PUBLIC_KEY` for a CI's
+  settings, create the secret. The key is for another machine, so enrol `--print` leaves
+  `runner.yaml`'s server and pin aside and checks the code against
+  `QORY_APIARY_PUBLIC_KEY` when it is set. Without `--print` both refuse while
+  `QORY_ACCESS_KEY_ID`, `QORY_ACCESS_KEY_SECRET` or `QORY_APIARY_PUBLIC_KEY` is set. Enrol
+  refuses a server over http to another host than `localhost`, `127.0.0.1` or `[::1]`
+  before it makes a key. Both refuse a key or a pin of the runner contract's published
   fixtures.
 - `--access-key-secret-fd <n>` on `qory run` and `qory run resend` reads the access key's
   secret from that file descriptor, 3 or above, and closes it; it wins over

@@ -320,7 +320,10 @@ func TestEnrolRefusesBeforeItMakesAKey(t *testing.T) {
 		{"not a code", "", nil, []string{srv.URL, "qec_F1XT0RE000000000000000000U." + srv.signer.Fingerprint()}, "which is not a character of Crockford's base32"},
 		{"plain http elsewhere", "", nil, []string{"http://apiary.example", srv.code(1, false)}, `server.url "http://apiary.example" is http to a host that is not this machine`},
 		{"a path", "", nil, []string{"https://apiary.example/x", srv.code(1, false)}, "is more than a scheme and a host"},
-		{"the id in the environment", "", map[string]string{"QORY_ACCESS_KEY_ID": "ak_0123456789abcdef"}, []string{srv.URL, srv.code(1, false)}, "QORY_ACCESS_KEY_ID is set, and qory access-key enrol keeps the key in this machine's files, where runner.yaml and the variable would both set it: unset QORY_ACCESS_KEY_ID and QORY_APIARY_PUBLIC_KEY, or use --print"},
+		{"http to another loopback address", "", nil, []string{"http://127.0.0.2:8080", srv.code(1, false)}, "the server http://127.0.0.2:8080 is http to a host other than localhost, 127.0.0.1 or [::1], which enrolment does not reach; use https"},
+		{"the id in the environment", "", map[string]string{"QORY_ACCESS_KEY_ID": "ak_0123456789abcdef"}, []string{srv.URL, srv.code(1, false)}, "QORY_ACCESS_KEY_ID is set, and qory access-key enrol keeps the key in this machine's files, which it would contradict: unset it, or use --print"},
+		{"the secret in the environment", "", map[string]string{"QORY_ACCESS_KEY_SECRET": newKey(t).Secret()}, []string{srv.URL, srv.code(1, false)}, "QORY_ACCESS_KEY_SECRET is set, and qory access-key enrol keeps the key in this machine's files, which it would contradict: unset it, or use --print"},
+		{"all three in the environment", "", map[string]string{"QORY_ACCESS_KEY_ID": "ak_0123456789abcdef", "QORY_ACCESS_KEY_SECRET": newKey(t).Secret(), "QORY_APIARY_PUBLIC_KEY": `[{"alg":"ed25519","public_key":"` + srv.signer.PublicKey().String() + `"}]`}, []string{srv.URL, srv.code(1, false)}, "QORY_ACCESS_KEY_ID, QORY_ACCESS_KEY_SECRET and QORY_APIARY_PUBLIC_KEY are set, and qory access-key enrol keeps the key in this machine's files, which they would contradict: unset them, or use --print"},
 		{"the pin in the environment", "", map[string]string{"QORY_APIARY_PUBLIC_KEY": `[{"alg":"ed25519","public_key":"` + srv.signer.PublicKey().String() + `"}]`}, []string{srv.URL, srv.code(1, false)}, "QORY_APIARY_PUBLIC_KEY is set, and qory access-key enrol keeps the key"},
 	} {
 		os.RemoveAll(string(configDir()))
@@ -499,14 +502,16 @@ func TestEnrolRefusesAFixturePin(t *testing.T) {
 }
 
 // TestEnrolPrintWritesNothing is --print on a machine with a key of its own and a
-// runner file: stdout is exactly the three settings, unquoted, the pin compact JSON of
+// runner file naming another server and pinning another key, which --print leaves
+// aside: stdout is exactly the three settings, unquoted, the pin compact JSON of
 // the keys the code carries; stderr says the rest; no file of the directory changes,
 // and the machine's own key stays.
 func TestEnrolPrintWritesNothing(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
 	srv.rotate = true
-	writeFile(t, runnerFile(), commentedRunner)
+	// The machine's own server and pin are another's: the key is for another machine.
+	writeFile(t, runnerFile(), commentedRunner+"server:\n  url: https://apiary.example\n  access_key_id: ak_0000000000000000\n  apiary_public_key: "+pinLine(newKey(t))+"\n")
 	own := newKey(t)
 	writeSecret(t, own)
 	dir := configDir()
@@ -535,7 +540,7 @@ func TestEnrolPrintWritesNothing(t *testing.T) {
 		t.Errorf("the pin printed does not read: %v", err)
 	}
 	wants(t, errOut, "access key fingerprint "+key.Fingerprint(), "enrolled as ak_0123456789abcdef in the node nd_0123456789abcdef", "stored secrets: no", "awaiting approval",
-		"Only QORY_ACCESS_KEY_SECRET belongs in the CI's secret store; QORY_ACCESS_KEY_ID and QORY_APIARY_PUBLIC_KEY are plain settings. Nothing was written on this machine.")
+		"Only QORY_ACCESS_KEY_SECRET belongs in the CI's secret store; QORY_ACCESS_KEY_ID and QORY_APIARY_PUBLIC_KEY are plain settings. No key or setting was written on this machine.")
 	if strings.Contains(errOut, key.Secret()) {
 		t.Error("stderr carries the secret")
 	}
@@ -562,8 +567,10 @@ func TestEnrolPrintWritesNothing(t *testing.T) {
 		t.Errorf("a lost answer: %v", err)
 	}
 
-	// The variables are a CI's own business with --print.
+	// The variables are a CI's own business with --print, on a machine whose runner file
+	// sets no server.
 	srv.status, srv.body, srv.signBy = http.StatusCreated, nil, srv.signer
+	writeFile(t, runnerFile(), commentedRunner)
 	t.Setenv("QORY_ACCESS_KEY_ID", "ak_0123456789abcdef")
 	if _, _, err := runSplit(t, "", "access-key", "enrol", "--print", srv.URL, srv.code(3, false)); err != nil {
 		t.Errorf("--print with QORY_ACCESS_KEY_ID set: %v", err)
@@ -623,7 +630,7 @@ func TestCreateKeepsTheKeyAndRefusesASecondOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, stderr, "public key "+printed.PublicKey().String(), "fingerprint "+printed.Fingerprint(), "Only QORY_ACCESS_KEY_SECRET belongs in the CI's secret store. Nothing was written on this machine.")
+	wants(t, stderr, "public key "+printed.PublicKey().String(), "fingerprint "+printed.Fingerprint(), "Only QORY_ACCESS_KEY_SECRET belongs in the CI's secret store. No key or setting was written on this machine.")
 	lacks(t, stderr, printed.Secret())
 	if after := snapshot(t, string(dir)); len(after) != len(before) {
 		t.Errorf("create --print wrote files: before %v, after %v", before, after)

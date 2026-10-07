@@ -19,8 +19,10 @@ and a run uses it. Run the same command again within 15 minutes and it retries w
 
 The key's name is instance.name of runner.yaml, else this machine's host name.
 
---print writes no file and prints QORY_ACCESS_KEY_ID, QORY_ACCESS_KEY_SECRET and
-QORY_APIARY_PUBLIC_KEY for a CI's settings. Only the secret belongs in its secret store.
+--print writes no key or setting and prints QORY_ACCESS_KEY_ID, QORY_ACCESS_KEY_SECRET
+and QORY_APIARY_PUBLIC_KEY for a CI's settings. Only the secret belongs in its secret
+store. The key is for another machine, so the server and the pin of runner.yaml do not
+apply; the code is checked against QORY_APIARY_PUBLIC_KEY when it is set.
 
 --verbose adds nothing here.
 
@@ -41,7 +43,7 @@ qory access-key enrol <server> <code> [flags]
 
 ```
   -h, --help    help for enrol
-      --print   write no file; print the key's three settings for a CI
+      --print   write no key or setting; print the key's three settings for a CI
 ```
 
 ### Options inherited from parent commands

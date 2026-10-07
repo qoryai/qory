@@ -13,8 +13,8 @@ never rotated: a new one is enrolled, approved, and the old one revoked.
   enrol   enrol a new key with a code from the server
   create  make a key whose public key an administrator pastes into the server
 
-With --print, either command writes nothing on this machine and prints the key for a
-CI's settings instead.
+With --print, either command writes no key or setting on this machine and prints the
+key for a CI's settings instead.
 
 More: https://github.com/qoryai/qory/blob/main/docs/run.md
 

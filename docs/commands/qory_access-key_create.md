@@ -13,7 +13,8 @@ section of runner.yaml: server.url, server.access_key_id and server.apiary_publi
 The secret goes into access-key-secret beside runner.yaml. When that file exists,
 create refuses: move it aside yourself first.
 
---print writes no file and prints QORY_ACCESS_KEY_SECRET for a CI's secret store.
+--print writes no key or setting and prints QORY_ACCESS_KEY_SECRET for a CI's secret
+store.
 
 --verbose adds nothing here.
 
@@ -34,7 +35,7 @@ qory access-key create [flags]
 
 ```
   -h, --help    help for create
-      --print   write no file; print the key's secret for a CI
+      --print   write no key or setting; print the key's secret for a CI
 ```
 
 ### Options inherited from parent commands
