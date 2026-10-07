@@ -1231,7 +1231,7 @@ What to know:
   - one of the runner's own program and temporary files, such as a program it starts
     outside the wall.
 
-  With the access key in the configuration directory, `qory run` says:
+  For a mount that is or contains the access key, `qory run` says:
 
   ```
   qory run: the mount <host path> contains <dir>, which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path

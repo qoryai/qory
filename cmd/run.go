@@ -593,9 +593,9 @@ func whyUnused(from, why, host string) string {
 // of the wall that is, contains or lies inside one of the runner's files, which the
 // runner refuses before the run starts and again just before it wraps the agent.
 // runnerDir is the directory qory passed as the runner's: a refusal of it says the agent
-// could read the access key when access-key-secret is there, and one of any other path,
-// or of the directory without the key, that the agent could change one of the runner's
-// files. links maps a link's place, as [configLinks] passed it, to the link, which the
+// could read the access key when access-key-secret is there and the mount is or
+// contains it, and one of any other path, of a part of the directory, or of the
+// directory without the key, that the agent could change one of the runner's files. links maps a link's place, as [configLinks] passed it, to the link, which the
 // text names instead. Any other error is nil here.
 func mountRefused(err error, runnerDir string, links map[string]string) error {
 	var ref *session.Refusal
@@ -607,7 +607,12 @@ func mountRefused(err error, runnerDir string, links map[string]string) error {
 	if how == "" {
 		how = "overlaps"
 	}
+	// The key is at stake only for a mount that is or contains the key's own file.
 	key := runnerDir != "" && path == runnerDir
+	if key {
+		at := session.Overlap(mount, runnerdir.Dir(runnerDir).Path(runnerdir.SecretFile))
+		key = at == "is" || at == "contains"
+	}
 	if l, ok := links[path]; ok {
 		path = l
 	}
@@ -624,18 +629,20 @@ func mountRefused(err error, runnerDir string, links map[string]string) error {
 // runtimes/*.yaml in any case, as a disk that ignores case opens them. Each is followed
 // from dir as given, one link at a time, each part of its path that is a link included,
 // dir's own, and every link on the way and where it leads is one of the runner's files,
-// since a mount of either would let the agent change what the next run reads. The runner resolves its files through links,
-// so a link goes as its place, [linkPlace], and shown maps that back to the link for the
-// person. What lies in the resolved dir is left out: dir is one of the runner's files
-// itself. A file whose chain ends at a part that does not exist yet is passed as it is,
-// and the runner follows it to where the target will be; one whose chain loops or
-// cannot be read is passed as it is too, and the runner, unable to resolve it, refuses
-// the run.
+// since a mount of either would let the agent change what the next run reads. dir is
+// followed even when it, or a part of it, does not exist yet: a link on the way could
+// still be pointed at a directory of the agent's. The runner resolves its files through
+// links, so a link goes as its place, [linkPlace], and shown maps that back to the link
+// for the person. What lies in the resolved dir is left out: dir is one of the runner's
+// files itself. A file whose chain ends at a part that does not exist yet is passed as
+// it is, and the runner follows it to where the target will be; one whose chain loops
+// or cannot be read is passed as it is too, and the runner, unable to resolve it,
+// refuses the run.
 func configLinks(dir string) (files []string, shown map[string]string) {
+	// Without dir, nothing lies in it yet.
 	resolved, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		return nil, nil
-	}
+	exists := err == nil
+	inside := func(p string) bool { return exists && within(resolved, p) }
 	names := append([]string{".", config.RunnerFileName, DescriptorsDir}, config.Names...)
 	if entries, err := os.ReadDir(filepath.Join(dir, DescriptorsDir)); err == nil {
 		for _, e := range entries {
@@ -652,21 +659,23 @@ func configLinks(dir string) (files []string, shown map[string]string) {
 	}
 	for _, name := range names {
 		path := filepath.Join(dir, name)
-		if _, err := os.Lstat(path); err != nil {
+		if _, err := os.Lstat(path); err != nil && name != "." {
 			continue
 		}
 		links, target, err := followLinks(path)
 		for _, l := range links {
-			if !within(resolved, filepath.Dir(l)) {
+			if !inside(filepath.Dir(l)) {
 				place := linkPlace(l)
 				shown[place] = l
 				add(place)
 			}
 		}
 		switch {
+		case name == ".":
+			// dir is passed itself, and the runner follows it.
 		case err != nil || target == "":
 			add(path)
-		case !within(resolved, target):
+		case !inside(target):
 			add(target)
 		}
 	}
