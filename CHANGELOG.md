@@ -125,7 +125,8 @@ release may change what an existing document does, and states it under Upgrading
   records that command.
 - `server.access_key` and `server.secret` in `runner.yaml` are refused, and so is
   `QORY_SERVER_SECRET` when `runner.yaml` has a `server` section; the refusal says to
-  enrol the machine as a node, since a server accepts no workspace access key. qory
+  remove the two keys, or unset the variable, and then enrol the machine as a node,
+  since a server accepts no workspace access key. qory
   removes `QORY_SERVER_SECRET` from its environment with the access key's variables,
   whether or not a server is configured, and `wall.env` or `--env` naming it is refused.
   A machine that reports to a server needs its own access key: `server.access_key_id`,

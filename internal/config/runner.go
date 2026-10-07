@@ -476,6 +476,10 @@ func RunnersOwn(name string) bool {
 // enrolAsNode ends the refusal of a workspace access key: what to do instead.
 const enrolAsNode = "enrol this machine as a node: qory access-key enrol <server> <code>, or qory access-key create and add its public key to the node; see https://github.com/qoryai/qory/blob/main/docs/run.md#the-access-key-and-the-instance"
 
+// removeThenEnrol ends the refusal of a workspace access key in the runner file: the
+// keys go first, since qory access-key enrol reads the file and would refuse them too.
+const removeThenEnrol = "remove server.access_key and server.secret from " + RunnerFileName + ", then " + enrolAsNode
+
 // readServer reads the server section. The access key's id and the pin come from the
 // file, else from QORY_ACCESS_KEY_ID and QORY_APIARY_PUBLIC_KEY as qory took them when
 // it started, [TakenServerVariables]; both set is refused.
@@ -485,10 +489,10 @@ const enrolAsNode = "enrol this machine as a node: qory access-key enrol <server
 // access key's, are refused with what to do instead.
 func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *yaml.Node) (*RunnerServer, error) {
 	if key.Kind != 0 {
-		return nil, fmt.Errorf("%s: server.access_key is a workspace access key, which servers no longer accept; %s", path, enrolAsNode)
+		return nil, fmt.Errorf("%s: server.access_key is a workspace access key, which servers no longer accept; %s", path, removeThenEnrol)
 	}
 	if secret.Kind != 0 {
-		return nil, fmt.Errorf("%s: server.secret is a workspace access key's secret, which servers no longer accept; %s", path, enrolAsNode)
+		return nil, fmt.Errorf("%s: server.secret is a workspace access key's secret, which servers no longer accept; %s", path, removeThenEnrol)
 	}
 	env := TakenServerVariables()
 	if env.WorkspaceSecret != "" {

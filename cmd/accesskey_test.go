@@ -471,6 +471,42 @@ func TestEnrolActsOnTheRefusalsCode(t *testing.T) {
 	}
 }
 
+// TestEnrolAfterTheWorkspaceKeysAreRemoved is a runner file that still holds a
+// workspace access key: enrol refuses it, and the refusal says to remove the keys
+// first, since enrol reads the file too. Once they are removed and the server section
+// keeps only its URL, the same command enrols.
+func TestEnrolAfterTheWorkspaceKeysAreRemoved(t *testing.T) {
+	emptyDir(t)
+	srv := newEnrolServer(t)
+	for i, c := range []struct{ keys, want string }{
+		{"  access_key: ak_f1xt0re000000000\n  secret: qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\n", "server.access_key is a workspace access key, which servers no longer accept; remove server.access_key and server.secret from runner.yaml, then enrol this machine as a node: qory access-key enrol <server> <code>"},
+		{"  secret: qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\n", "server.secret is a workspace access key's secret, which servers no longer accept; remove server.access_key and server.secret from runner.yaml, then enrol this machine as a node: qory access-key enrol <server> <code>"},
+	} {
+		os.RemoveAll(string(configDir()))
+		writeFile(t, runnerFile(), "server:\n  url: "+srv.URL+"\n"+c.keys+"instance:\n  name: build-01\n")
+		_, err := run(t, "access-key", "enrol", srv.URL, srv.code(byte(i), false))
+		if err == nil || cmd.ExitCode(err) != cmd.ExitInput {
+			t.Fatalf("%d: %v", i, err)
+		}
+		wants(t, err.Error(), runnerFile()+": "+c.want)
+		if exists(configDir().Path(runnerdir.SecretFile)) {
+			t.Errorf("%d: a key was made", i)
+		}
+	}
+	if len(srv.sent()) != 0 {
+		t.Fatalf("sent %+v", srv.sent())
+	}
+	writeFile(t, runnerFile(), "server:\n  url: "+srv.URL+"\ninstance:\n  name: build-01\n")
+	out, err := run(t, "access-key", "enrol", srv.URL, srv.code(3, false))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "enrolled as ak_0123456789abcdef", "wrote server.access_key_id and server.apiary_public_key to "+runnerFile())
+	if len(srv.sent()) != 1 {
+		t.Errorf("sent %d requests", len(srv.sent()))
+	}
+}
+
 // TestEnrolRefusesAFixturePin is a server that signs with the runner contract's
 // published fixture signing key: its answer verifies, and qory refuses to pin it and
 // writes nothing.

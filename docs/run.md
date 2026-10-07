@@ -292,9 +292,11 @@ that names one is refused.
 
 `server.access_key`, `server.secret` and `QORY_SERVER_SECRET` held a workspace access
 key, which servers no longer accept. The two keys are refused, and so is
-`QORY_SERVER_SECRET` when `runner.yaml` has a `server` section: enrol the machine as a
-node instead. qory removes `QORY_SERVER_SECRET` from its environment with the three
-variables, server or not, and a `wall.env` or `--env` that names it is refused.
+`QORY_SERVER_SECRET` when `runner.yaml` has a `server` section. Remove the two keys from
+`runner.yaml` and unset `QORY_SERVER_SECRET` first, since `qory access-key enrol` reads
+the file and refuses them too, then enrol the machine as a node. qory removes
+`QORY_SERVER_SECRET` from its environment with the three variables, server or not, and
+a `wall.env` or `--env` that names it is refused.
 
 Each machine that runs qory is an **instance** of its node. qory names it on every
 request:

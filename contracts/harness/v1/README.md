@@ -958,9 +958,10 @@ from its environment when a command starts, so they never enter a session's
 environment, and `wall.env` and `--env` refuse their names. `server.access_key`,
 `server.secret` and `QORY_SERVER_SECRET` held a workspace access key, which servers no
 longer accept: the two keys are refused, and so is `QORY_SERVER_SECRET` when the file
-has a `server` section. The machine enrols as a node instead:
-`qory access-key enrol <server> <code>`, or `qory access-key create` with its public key
-added to the node.
+has a `server` section. The two keys are removed from the file and `QORY_SERVER_SECRET`
+is unset first, since `qory access-key enrol` reads the file and refuses them too; then
+the machine enrols as a node: `qory access-key enrol <server> <code>`, or
+`qory access-key create` with its public key added to the node.
 
 A run's policy also selects credentials, `credentials: [{name: product, argument:
 acme/shop}]`, may restrict a host to paths, `egress.paths`, and may select an image among
