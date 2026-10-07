@@ -144,8 +144,8 @@ func (m *Memo) put(url, ref string, e memoEntry) {
 type Options struct {
 	// Pin is the commit this checkout was composed from last time, as the report recorded
 	// it, "" for none. A tag stays on it while its clone is cached; a branch takes the
-	// remote's commit whatever the pin, and keeps the pin only when the remote cannot be
-	// reached. A pin that differs from the new commit comes back as [Resolved.Previous].
+	// remote's commit whatever the pin, and keeps the pin only when the lookup on the
+	// remote fails. A pin that differs from the new commit comes back as [Resolved.Previous].
 	Pin string
 	// Update fetches the ref again, a tag and a commit id included, instead of reading
 	// the pin or the cached resolution.
@@ -163,19 +163,21 @@ type Options struct {
 // baseDir, which a caller passes absolute, such as [stack.Stack.Dir].
 //
 // A git source at a full commit id is read from the cache, and fetched only when its
-// clone is not there. Any other ref is looked up on the remote: a branch takes the
-// remote's current commit, fetched when its clone is not cached, and a tag stays on the
-// commit cached for it, the pin's first, fetched only when nothing is cached. A ref the
-// cache knows as a tag needs no network at all. A remote that cannot be reached leaves
-// the cached commit in place with [Resolved.Warning] set. An update fetches every ref
-// again. A git command that runs past the timeout is killed and counts as a remote that
-// cannot be reached.
+// clone is not there. A ref the cache knows as a tag stays on the commit cached for it,
+// the pin's first, and needs no network at all. Any other ref is looked up on the remote
+// with git ls-remote: a branch takes the remote's current commit, and a tag the cache did
+// not know as one takes the commit the remote lists for it, each fetched when its clone
+// is not cached. When the lookup fails, because the remote cannot be reached or git runs
+// past the timeout and is killed, the cached commit is kept with [Resolved.Warning] set.
+// A fetch after a lookup that answered is not covered by that: when it fails or runs past
+// the timeout, the resolve fails, whatever the cache holds. An update fetches every ref
+// again, and fails when the fetch does.
 //
 // The error for a path that is not there comes from the operating system unchanged, and a
 // caller can match it with errors.Is and os.ErrNotExist. A path that is there but is not
-// a directory gets an error that contains the path. A git source that cannot be fetched,
-// with nothing cached to keep, returns a [*FetchError]. A remote that answers without the
-// branch or tag returns a [*GoneError]. A source that selects an export the repository
+// a directory gets an error that contains the path. A git source whose lookup fails with
+// nothing cached, or whose fetch fails, returns a [*FetchError]. A remote that answers
+// without the branch or tag returns a [*GoneError]. A source that selects an export the repository
 // does not list, or whose repository has no qory.yaml with an exports section, gets an
 // error that contains the repository and what it exports.
 func Resolve(baseDir string, s stack.Source, opts Options) (Resolved, error) {
@@ -352,8 +354,9 @@ var abbreviated = regexp.MustCompile(`^[0-9a-fA-F]{4,}$`)
 // was pushed, takes the tag's commit as the remote lists it, fetched when its clone is not
 // cached, and is recorded as a tag from then on.
 //
-// A remote that cannot be reached, or does not answer within the timeout, leaves the
-// cached commit with a warning; with nothing cached the error is a [*FetchError]. A
+// A lookup that fails, the remote not reached or git past the timeout, leaves the cached
+// commit with a warning; with nothing cached the error is a [*FetchError]. A fetch that
+// fails after the lookup answered is a [*FetchError] too, whatever the cache holds. A
 // remote that answers without the ref is a [*GoneError], whatever the cache holds,
 // except for a ref that may be an abbreviated commit id, which is read from the cache
 // or fetched as it is.
