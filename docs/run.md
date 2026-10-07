@@ -136,7 +136,7 @@ server:                  # the server every run reports to; optional
   url: https://qory.example             # a scheme and a host, nothing after
   access_key_id: ak_0123456789abcdef    # this machine's access key; its secret is not in this file
   apiary_public_key:                    # the server's key, which signs every answer
-    - {alg: ed25519, public_key: LNbtPVGftDMLodQfQQ-SkcF26madoQUGTXd7GohGEkA}
+    - {alg: ed25519, public_key: mptNqtgGKgLhLZxmOGfpBQkdeBNH7QN3Qs9ETNumy8Q}
 instance:                # optional
   name: build-01         # how the server shows this machine; the host name by default
 wall:                    # start the runtime in a container; optional

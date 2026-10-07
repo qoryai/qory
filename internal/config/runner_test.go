@@ -285,3 +285,41 @@ func TestTheRunnerSchemaTakesTheServerSection(t *testing.T) {
 		}
 	}
 }
+
+// TestTheDocsExampleServerReads is the server section of the runner file docs/run.md
+// shows: it reads, its access key id is one, and its pin is a key the runner verifies
+// under that is no published fixture's.
+func TestTheDocsExampleServerReads(t *testing.T) {
+	hermetic(t)
+	data, err := os.ReadFile(filepath.Join("..", "..", "docs", "run.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const start = "```yaml\n# ~/.config/qory/runner.yaml\n"
+	doc := string(data)
+	i := strings.Index(doc, start)
+	if i < 0 {
+		t.Fatal("docs/run.md shows no runner.yaml")
+	}
+	example, _, _ := strings.Cut(doc[i+len(start):], "```")
+	var section []string
+	for _, line := range strings.SplitAfter(example, "\n") {
+		if strings.HasPrefix(line, "server:") || len(section) > 0 && strings.HasPrefix(line, " ") {
+			section = append(section, line)
+		} else if len(section) > 0 {
+			break
+		}
+	}
+	if len(section) == 0 {
+		t.Fatal("the runner.yaml of docs/run.md has no server section")
+	}
+	runnerFile(t, "apiVersion: qory.dev/v1alpha1\n"+strings.Join(section, ""))
+	c, err := config.Load(t.TempDir(), true)
+	if err != nil {
+		t.Fatalf("the docs' server section: %v\n%s", err, strings.Join(section, ""))
+	}
+	s := c.Runner.Server
+	if s == nil || accesskey.CheckID(s.AccessKeyID) != nil || len(s.Pin) == 0 || s.Pin.Check() != nil || s.Pin.Fixture() {
+		t.Errorf("the docs' server section: %+v", s)
+	}
+}
