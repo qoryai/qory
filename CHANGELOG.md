@@ -190,7 +190,10 @@ release may change what an existing document does, and states it under Upgrading
 - A key `qory access-key enrol` enrols is active as soon as the server answers, and
   enrol says so: `the key is active: runs can start`. `key_limit` means the node already
   holds two keys; once an owner or administrator has revoked one, the same command
-  within the code's 15 minutes succeeds. A 401 for a code you did not use means the
+  within the code's 15 minutes succeeds. A signed 429, `rate_limited`, means the code
+  was tried too often: qory keeps the key and says `the server refused the attempt: this
+  code was tried too often; run the same command again later, within the code's 15
+  minutes`. A 401 for a code you did not use means the
   code's issuer must revoke the key it enrolled. A key pasted into a node or node pool
   is active as soon as it is entered.
 - `qory harness compose` takes a branch's current commit on every compose, without

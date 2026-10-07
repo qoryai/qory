@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -83,9 +84,10 @@ func fixtureAccessKey(t *testing.T) *accesskey.Key {
 // TestEnrolmentKnownAnswers posts the published enrolment requests, under the fixture
 // access key, to a server that answers each with a published answer and its published
 // signature, and acts on each as enrol does: the 201 verifies and pins the fixture
-// signing key, which enrol refuses to pin; a signed key_limit keeps the secret and the
-// pending enrolment; a signed key_invalid moves the secret aside and ends it; the same
-// answer tampered with is answer_unsigned and acts on nothing.
+// signing key, which enrol refuses to pin; a signed key_limit, and a signed 429
+// rate_limited where the contract publishes one, keeps the secret and the pending
+// enrolment; a signed key_invalid moves the secret aside and ends it; the same answer
+// tampered with is answer_unsigned and acts on nothing.
 func TestEnrolmentKnownAnswers(t *testing.T) {
 	requests, answers := knownEnrolment(t)
 	key := fixtureAccessKey(t)
@@ -95,11 +97,12 @@ func TestEnrolmentKnownAnswers(t *testing.T) {
 			body := contractFile(t, a.Body)
 			if tamper {
 				body = bytes.Replace(body, []byte(`"key_`), []byte(`"key_x`), 1)
+				body = bytes.Replace(body, []byte(`"rate_`), []byte(`"rate_x`), 1)
 				body = bytes.Replace(body, []byte(`"stored_secrets":false`), []byte(`"stored_secrets":true`), 1)
 			}
-			status := http.StatusConflict
-			if a.Lines[1] == "201" {
-				status = http.StatusCreated
+			status, err := strconv.Atoi(a.Lines[1])
+			if err != nil {
+				t.Fatalf("%s: status %q", a.Note, a.Lines[1])
 			}
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set(accesskey.HeaderSignature, a.Signature)
@@ -132,6 +135,9 @@ func TestEnrolmentKnownAnswers(t *testing.T) {
 			want := accesskey.CodeAnswerUnsigned
 			if !tamper {
 				want = map[bool]string{true: accesskey.CodeKeyLimit, false: accesskey.CodeKeyInvalid}[strings.Contains(a.Body, "key-limit")]
+				if status == http.StatusTooManyRequests {
+					want = codeRateLimited
+				}
 			}
 			if ref.Code != want {
 				t.Errorf("%s, tampered %v: %s, want %s", a.Note, tamper, ref.Code, want)
@@ -159,8 +165,8 @@ func TestEnrolmentKnownAnswers(t *testing.T) {
 			n++
 		}
 	}
-	if n != 10 {
-		t.Errorf("%d answers acted on; want the 201 and four refusals, each tampered too", n)
+	if n != 2*len(answers) || n < 10 {
+		t.Errorf("%d answers acted on of %d; want the 201 and every refusal, four at least, each tampered too", n, len(answers))
 	}
 }
 

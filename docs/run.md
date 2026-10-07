@@ -401,6 +401,7 @@ When the enrolment does not complete:
 | 401, `unauthorized` | the code was used or has expired. The secret made for it is moved aside, and enrolling needs a new code. If you did not use the code, someone else did: tell the owner or administrator who made it. The code's issuer must revoke the key it enrolled |
 | `key_invalid` | the server refused the key. The secret made for it is moved aside, and enrolling needs a new code |
 | `key_limit` | the node already holds two keys. qory keeps the key: once an owner or administrator has revoked one of them, the same command within the 15 minutes succeeds |
+| 429, `rate_limited`, signed | this code was tried too often. `runner.yaml` is not changed. qory keeps the key, and the same command, run later within the code's 15 minutes, retries with it. An unsigned 429 is an `answer_unsigned` |
 | `answer_unsigned`, or no answer | the answer does not verify under the server's key the code names, or never came. `runner.yaml` is not changed. qory keeps the key, and the same command within the 15 minutes retries with it |
 
 A secret enrol moves aside goes to `access-key-secret.old.<Unix time>`. It is deleted

@@ -637,6 +637,44 @@ func TestEnrolActsOnTheRefusalsCode(t *testing.T) {
 	}
 }
 
+// TestEnrolRateLimitedKeepsTheKey is the server's signed 429, rate_limited: the same
+// command later retries, so the secret and the pending enrolment stay, and the runner
+// file is not changed; with --print the text is the same. An unsigned 429 is an answer
+// that does not verify, as any other. A runner that does not verify a signed 429 reads it
+// as unsigned, and the test is skipped.
+func TestEnrolRateLimitedKeepsTheKey(t *testing.T) {
+	emptyDir(t)
+	srv := newEnrolServer(t)
+	dir := configDir()
+	writeFile(t, runnerFile(), "instance:\n  name: build-01\n")
+	srv.status, srv.body, srv.signBy = http.StatusTooManyRequests, []byte(`{"error":"rate_limited"}`), nil
+	_, err := run(t, "access-key", "enrol", srv.URL, srv.code(1, false))
+	if want := "the server did not enrol the key (HTTP 429, unsigned); try again later (enrolment: answer_unsigned (status 429))"; err == nil || err.Error() != want {
+		t.Errorf("an unsigned 429: %v, want %q", err, want)
+	}
+	if !exists(dir.Path(runnerdir.SecretFile)) || !exists(dir.Path(runnerdir.PendingFile)) || movedAside(t) != 0 {
+		t.Error("an unsigned 429: the secret or the pending enrolment is gone")
+	}
+	srv.status, srv.body, srv.signBy = http.StatusTooManyRequests, []byte(`{"error":"rate_limited","apiary_public_key":`+srv.keys()+`}`), srv.signer
+	_, err = run(t, "access-key", "enrol", srv.URL, srv.code(1, false))
+	if err != nil && strings.Contains(err.Error(), "(HTTP 429, unsigned)") {
+		t.Skip("needs the runner pin with rate_limited")
+	}
+	const want = "the server refused the attempt: this code was tried too often; run the same command again later, within the code's 15 minutes (rate_limited)"
+	if err == nil || cmd.ExitCode(err) == cmd.ExitInput || err.Error() != want {
+		t.Errorf("a signed 429: %v, want %q", err, want)
+	}
+	if !exists(dir.Path(runnerdir.SecretFile)) || !exists(dir.Path(runnerdir.PendingFile)) || movedAside(t) != 0 {
+		t.Error("a signed 429: the secret or the pending enrolment is gone")
+	}
+	if got := readRunnerFile(t); got != "instance:\n  name: build-01\n" {
+		t.Errorf("the runner file changed:\n%s", got)
+	}
+	if _, _, err := runSplit(t, "", "access-key", "enrol", "--print", srv.URL, srv.code(2, false)); err == nil || err.Error() != want {
+		t.Errorf("a signed 429 with --print: %v, want %q", err, want)
+	}
+}
+
 // TestEnrolAfterTheWorkspaceKeysAreRemoved is a runner file that still holds a
 // workspace access key: enrol refuses it, and the refusal says to remove the keys
 // first, since enrol reads the file too. Once they are removed and the server section

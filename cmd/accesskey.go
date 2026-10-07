@@ -444,9 +444,9 @@ func refuseFixturePin(dir runnerdir.Dir, key *accesskey.Key, print bool, now tim
 
 // enrolFailed acts on an enrolment that got no 201: on the refusal's code alone, never
 // on an HTTP status. unauthorized and key_invalid move the secret made for the code
-// aside and end the pending enrolment; key_limit, an unsigned answer and an answer that
-// never came keep both, so the same command within 15 minutes retries with the same
-// key. --print kept nothing, so a lost answer cannot be retried.
+// aside and end the pending enrolment; key_limit, rate_limited, an unsigned answer and
+// an answer that never came keep both, so the same command within 15 minutes retries
+// with the same key. --print kept nothing, so a lost answer cannot be retried.
 func enrolFailed(dir runnerdir.Dir, err error, key *accesskey.Key, print bool, now time.Time) error {
 	fingerprint := key.Fingerprint()
 	var ref *accesskey.Refusal
@@ -479,6 +479,9 @@ func enrolFailed(dir runnerdir.Dir, err error, key *accesskey.Key, print bool, n
 		text = "the server refused the key" + names + ". Enrolling needs a new code" + discard()
 	case accesskey.CodeKeyLimit:
 		text = "the node already holds two keys: once an owner or administrator has revoked one, the same command, run within the code's 15 minutes, succeeds"
+	case codeRateLimited:
+		const text = "the server refused the attempt: this code was tried too often; run the same command again later, within the code's 15 minutes"
+		return &refusedError{text: text, err: &accesskey.Refusal{Code: ref.Code}}
 	case accesskey.CodeAnswerUnsigned:
 		text = fmt.Sprintf("the server did not enrol the key (HTTP %d, unsigned); try again later", ref.Status)
 		if print {
@@ -489,6 +492,10 @@ func enrolFailed(dir runnerdir.Dir, err error, key *accesskey.Key, print bool, n
 	}
 	return &refusedError{text: text, err: err}
 }
+
+// codeRateLimited is the server's signed 429 at enrolment: too many attempts with one
+// code.
+const codeRateLimited = "rate_limited"
 
 // create is qory access-key create: a new key whose public key an administrator pastes
 // into the server.
