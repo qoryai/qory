@@ -39,7 +39,7 @@ func configDir() runnerdir.Dir {
 // clearRuns removes the checkout's run records, so the next run is the one recorded.
 func clearRuns(t *testing.T, root string) {
 	t.Helper()
-	if err := os.RemoveAll(filepath.Join(root, ".qory", "runs")); err != nil {
+	if err := os.RemoveAll(runsDir(t, root)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -328,7 +328,7 @@ func TestTheMarkerKeepsEveryUnwalledRunOut(t *testing.T) {
 	if out, err := run(t, "run"); err != nil {
 		t.Fatalf("without the marker: %v\n%s", err, out)
 	}
-	entries, _ := os.ReadDir(filepath.Join(root, ".qory", "runs"))
+	entries, _ := os.ReadDir(runsDir(t, root))
 	b, err := os.ReadFile(filepath.Join(dir.Path(runnerdir.LocksDir), entries[0].Name()+".lock"))
 	if err != nil || string(b) != "unwalled\n" {
 		t.Errorf("the run's lock file: %q, %v", b, err)

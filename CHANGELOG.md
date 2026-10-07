@@ -113,6 +113,16 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- `qory run` records each run outside the checkout, in qory's state directory:
+  `~/.local/state/qory/runs/<checkout>-<hash>/<id>/`, under `$XDG_STATE_HOME/qory` when
+  that is set, with `<hash>` the first 12 hex digits of the SHA-256 of the checkout's full
+  path, links resolved. The directories are mode 0700. A run's last line names its
+  record, `qory run: the record is in <folder>`, and `qory run resend <id>` finds it from
+  the checkout. Behind a wall, a mount of the state directory, or one that holds it, is
+  refused, `mount_contains_runner_files`: `the mount <path> contains <dir>, which holds
+  qory's run records; the agent could change them, so the run does not start. Mount a
+  narrower path`. A refusal of the checkout or the working directory names it `the
+  workspace <path>`.
 - The harness's environment is the launch's, and no file a runtime reads holds it.
   Claude Code's `settings.json` has no `env`, and Codex's `config.toml` no
   `shell_environment_policy.set`. `qory harness launch` sets every variable through

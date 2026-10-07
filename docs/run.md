@@ -40,7 +40,17 @@ The session runs on pipes instead, and `qory` reads the runtime's structured out
 
 ## The record
 
-Each run is recorded in `.qory/runs/<id>/`:
+Each run is recorded on your machine, outside the checkout, in qory's state directory:
+`~/.local/state/qory/runs/<checkout>-<hash>/<id>/`, or under `$XDG_STATE_HOME/qory` when
+that is set. `<checkout>` is the checkout's directory name, and `<hash>` the first 12 hex
+digits of the SHA-256 of its full path, with links resolved. Each checkout has its own
+folder, and only you can read it (mode 0700). The run's last line names the folder:
+
+```
+qory run: the record is in /home/you/.local/state/qory/runs/app-3f9a1c0b7d2e/0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f
+```
+
+It holds:
 
 - `events.jsonl`: one event per line.
 - `output.log`: the session's bytes.
@@ -58,8 +68,10 @@ kept outside.
 
 ```sh
 qory run -- -p "/hello"         # one headless turn, observed
-cat .qory/runs/*/events.jsonl   # what it reached, what it printed, how it ended
 ```
+
+The last line names the run's record: `events.jsonl` in that folder says what the agent
+reached, what it printed and how it ended.
 
 ### Behind a wall
 
@@ -1169,7 +1181,8 @@ A run's record shows what each connection did:
 is for a run whose runner died, or whose server was away. End a job with it, whatever
 happened before it.
 
-The run is selected by its id: the directory under `.qory/runs` in this checkout. The
+The run is selected by its id: its folder in this checkout's run records, as [The
+record](#the-record) names it. The
 server's configuration is fetched first, signed. It defines where the events go.
 
 - The run directory records what the server accepted. Only the rest is sent, in order.
@@ -1228,6 +1241,7 @@ What to know:
     key and the user `qory.yaml`;
   - a file qory reads from that directory and a link takes elsewhere: where the last
     link leads, and, for a mount that is or contains it, every link on the way;
+  - qory's state directory, which holds the run records;
   - one of the runner's own program and temporary files, such as a program it starts
     outside the wall.
 
@@ -1242,6 +1256,15 @@ What to know:
   ```
   qory run: the mount <host path> contains <path>, which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path
   ```
+
+  For the state directory, it says:
+
+  ```
+  qory run: the mount <host path> contains <dir>, which holds qory's run records; the agent could change them, so the run does not start. Mount a narrower path
+  ```
+
+  When the path is the checkout or the working directory, it says `the workspace <path>`
+  instead of `the mount <path>`.
 - **Git in a worktree.** In a git worktree, the repository's data lives in the main
   checkout, outside the worktree. So git inside the container works there only with that
   directory mounted. A clone works as it is.

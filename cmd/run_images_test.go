@@ -49,7 +49,7 @@ func TestRunStartsTheImageTheMachineDefines(t *testing.T) {
 	nested := []string{
 		"--runtime sysbox-runc --user 0:0 --security-opt no-new-privileges --init --mount type=volume,dst=/var/lib/docker ",
 		"src=" + helper + ",dst=/qory/qory,readonly",
-		"--entrypoint /qory/qory example.com/agent-go-docker:1 run nest --user 1000:1000 -- claude --settings " + root,
+		"--entrypoint /qory/qory example.com/agent-go-docker:1 run nest --user 1000:1000 -- claude --settings " + runsDir(t, root),
 	}
 	for _, c := range []struct {
 		name    string
@@ -59,7 +59,7 @@ func TestRunStartsTheImageTheMachineDefines(t *testing.T) {
 		started map[string]any
 	}{
 		{"the default, by name", nil,
-			[]string{"--entrypoint claude example.com/agent-go:1 --settings " + root},
+			[]string{"--entrypoint claude example.com/agent-go:1 --settings " + runsDir(t, root)},
 			[]string{"--runtime", "run nest", "agent-go-docker"},
 			map[string]any{"image": "example.com/agent-go:1", "image_name": "go", "container_runtime": nil, "docker": nil}},
 		{"--image, by name", []string{"--image", "go-docker"}, nested, []string{"--entrypoint claude"},
@@ -75,7 +75,7 @@ func TestRunStartsTheImageTheMachineDefines(t *testing.T) {
 			[]string{"--runtime", "run nest"},
 			map[string]any{"image": "example.com/other:3", "image_name": nil, "container_runtime": nil, "docker": nil}},
 	} {
-		if err := os.RemoveAll(filepath.Join(root, ".qory", "runs")); err != nil {
+		if err := os.RemoveAll(runsDir(t, root)); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.Remove(log); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -102,7 +102,7 @@ func TestRunStartsTheImageTheMachineDefines(t *testing.T) {
 			}
 		}
 	}
-	if err := os.RemoveAll(filepath.Join(root, ".qory", "runs")); err != nil {
+	if err := os.RemoveAll(runsDir(t, root)); err != nil {
 		t.Fatal(err)
 	}
 	srv := newFakeServer(t, `{"version":1,"egress":{"mode":"observe"},"image":"go-docker"}`)
@@ -164,13 +164,13 @@ func TestRunRefusesAnImageSelectionItCannotStart(t *testing.T) {
 	if _, err := run(t, "run"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "a wall needs the container's image: --image, or wall.image in runner.yaml, a name of wall.images or a reference") {
 		t.Errorf("a wall with no image: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".qory", "runs")); !errors.Is(err, os.ErrNotExist) {
+	if ids := recorded(t, root); len(ids) != 0 {
 		t.Error("a refused run left a record")
 	}
 	if out, err := run(t, "run", "--policy", imagePolicy(t, "go")); cmd.ExitCode(err) != 4 {
 		t.Errorf("a run whose policy selects an image, with no default: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
-	if err := os.RemoveAll(filepath.Join(root, ".qory", "runs")); err != nil {
+	if err := os.RemoveAll(runsDir(t, root)); err != nil {
 		t.Fatal(err)
 	}
 	noDefault := strings.TrimPrefix(strings.Replace(imagesSection(docker, helper), "  image: go\n", "", 1), "apiVersion: qory.dev/v1alpha1\n")
@@ -179,13 +179,13 @@ func TestRunRefusesAnImageSelectionItCannotStart(t *testing.T) {
 	if _, err := run(t, "run"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "a name of wall.images or a reference; with a server, set one even when its run configuration selects an image: that arrives once the run starts, and may select none") {
 		t.Errorf("a run whose policy the server supplies, with no default: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".qory", "runs")); !errors.Is(err, os.ErrNotExist) {
+	if ids := recorded(t, root); len(ids) != 0 {
 		t.Error("a refused run left a record")
 	}
 	if out, err := run(t, "run", "--local", "--policy", imagePolicy(t, "go")); cmd.ExitCode(err) != 4 {
 		t.Errorf("a --local run whose own policy selects an image, with no default: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
-	if err := os.RemoveAll(filepath.Join(root, ".qory", "runs")); err != nil {
+	if err := os.RemoveAll(runsDir(t, root)); err != nil {
 		t.Fatal(err)
 	}
 	srv = newFakeServer(t, `{"version":1,"egress":{"mode":"observe"},"image":"media"}`)

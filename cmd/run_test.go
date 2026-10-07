@@ -258,14 +258,14 @@ harness:
 // by type, with the run directory.
 func events(t *testing.T, root string) (string, map[string][]map[string]any) {
 	t.Helper()
-	runs, err := os.ReadDir(filepath.Join(root, ".qory", "runs"))
+	runs, err := os.ReadDir(runsDir(t, root))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(runs) != 1 {
 		t.Fatalf("%d runs recorded, want 1", len(runs))
 	}
-	dir := filepath.Join(root, ".qory", "runs", runs[0].Name())
+	dir := filepath.Join(runsDir(t, root), runs[0].Name())
 	data, err := os.ReadFile(filepath.Join(dir, "events.jsonl"))
 	if err != nil {
 		t.Fatal(err)
@@ -288,7 +288,8 @@ func events(t *testing.T, root string) (string, map[string][]map[string]any) {
 // spec is the template with the configuration over it plus the arguments after --, the
 // runtime sees the proxy, the socket and the launch's variables, the policy in the configuration directory is
 // applied, the hooks are installed into a copy of the composed settings, the record is
-// written under .qory/runs, and the exit status is the runtime's, reported once.
+// written in the checkout's folder under the state directory, the last line names it,
+// and the exit status is the runtime's, reported once.
 func TestRunRecordsTheSession(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -299,11 +300,15 @@ func TestRunRecordsTheSession(t *testing.T) {
 	if err == nil || cmd.ExitCode(err) != 3 || !errors.Is(err, cmd.ErrReported) {
 		t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
-	wants(t, out, "hello from ", " with --settings ", " --extra one", "claude exited 3; recorded in .qory/runs/")
 	// The launch's variables reach the runtime: the home, and the fragment's A, which the
 	// settings do not hold.
 	wants(t, out, "harness "+filepath.Join(root, ".qory", "harness")+" A=core")
 	dir, evs := events(t, root)
+	short := "~" + strings.TrimPrefix(dir, os.Getenv("HOME"))
+	wants(t, out, "hello from ", " with --settings ", " --extra one", "claude exited 3; recorded in "+short+"\n")
+	if !strings.HasSuffix(out, "\nqory run: the record is in "+dir+"\n") {
+		t.Errorf("the last line does not name the record %s:\n%s", dir, out)
+	}
 	started := evs["dev.qory.run.started"]
 	if len(started) != 1 || started[0]["command"] != script || started[0]["interactive"] != false {
 		t.Errorf("run.started %v", started)
@@ -339,17 +344,33 @@ func TestRunRecordsTheSession(t *testing.T) {
 }
 
 // TestRunExitsZeroQuietly is a runtime that exited 0: no error, a success line naming
-// the record, and no policy means observe.
+// the record, the last line naming it in full, and no policy means observe. The state
+// directory, its runs directory and the checkout's folder are this user's alone, mode
+// 0700, made so where they were not.
 func TestRunExitsZeroQuietly(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, fakeRuntime(t))
 	t.Setenv("QORY_TEST_EXIT", "0")
-	out, err := run(t, "run")
+	state := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory")
+	if err := os.MkdirAll(filepath.Join(state, "runs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const id = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f"
+	out, err := run(t, "run", "--run-id", id)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "claude exited 0; recorded in .qory/runs/")
+	record := filepath.Join(runsDir(t, root), id)
+	wants(t, out, "claude exited 0; recorded in ~"+strings.TrimPrefix(record, os.Getenv("HOME"))+"\n")
+	if !strings.HasSuffix(out, "\nqory run: the record is in "+record+"\n") {
+		t.Errorf("the last line does not name the record %s:\n%s", record, out)
+	}
+	for _, d := range []string{state, filepath.Join(state, "runs"), runsDir(t, root)} {
+		if info, err := os.Stat(d); err != nil || info.Mode().Perm() != 0o700 {
+			t.Errorf("%s: %v, %v", d, info.Mode(), err)
+		}
+	}
 	_, evs := events(t, root)
 	if applied := evs["dev.qory.run.policy_applied"]; len(applied) != 1 || applied[0]["mode"] != "observe" || applied[0]["source"] != "none" {
 		t.Errorf("run.policy_applied %v", applied)
@@ -376,7 +397,7 @@ func TestRunRefusesWhatItCannotStart(t *testing.T) {
 	if _, err := run(t, "run"); err == nil || !strings.Contains(err.Error(), `runner.yaml: egress.mode "log" is not observe or enforce`) {
 		t.Errorf("unreadable runner file: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".qory", "runs")); !errors.Is(err, os.ErrNotExist) {
+	if ids := recorded(t, root); len(ids) != 0 {
 		t.Error("a run that did not start left a record")
 	}
 }
@@ -426,7 +447,7 @@ func TestRunExpandsTheIntegrationsTheMachineDeclares(t *testing.T) {
 		t.Fatalf("a run that selects no integration: %v\n%s", err, out)
 	}
 	lacks(t, out, "integration tracker", "integration broken")
-	if err := os.RemoveAll(filepath.Join(root, ".qory", "runs")); err != nil {
+	if err := os.RemoveAll(runsDir(t, root)); err != nil {
 		t.Fatal(err)
 	}
 	// A policy that selects a credential needs a wall, which the runner asks for once
@@ -437,7 +458,11 @@ func TestRunExpandsTheIntegrationsTheMachineDeclares(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "need a wall") {
 		t.Errorf("a run that selects tracker: %v", err)
 	}
-	if err := os.RemoveAll(filepath.Join(root, ".qory", "runs")); err != nil {
+	// The runner stopped the run once it had started its record, which a line names.
+	if ids := recorded(t, root); len(ids) != 1 || !strings.Contains(out, "qory run: the record is in "+filepath.Join(runsDir(t, root), ids[0])+"\n") {
+		t.Errorf("a run stopped after its record started: %v\n%s", ids, out)
+	}
+	if err := os.RemoveAll(runsDir(t, root)); err != nil {
 		t.Fatal(err)
 	}
 	want := "runner.yaml: integrations.broken: " + broken + " describe: exit status 1: the settings file is missing"
@@ -447,7 +472,7 @@ func TestRunExpandsTheIntegrationsTheMachineDeclares(t *testing.T) {
 	if _, err := run(t, "config"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), want) {
 		t.Errorf("config with an integration that does not describe: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".qory", "runs")); !errors.Is(err, os.ErrNotExist) {
+	if ids := recorded(t, root); len(ids) != 0 {
 		t.Error("a run that did not start left a record")
 	}
 	srv := newFakeServer(t, "")
@@ -693,7 +718,7 @@ func TestRunBehindAWall(t *testing.T) {
 		"--entrypoint /qory/qory example.com/agent:2 run relay 3128=",
 		"src="+helper+",dst=/qory/qory,readonly",
 		"--mount type=bind,src="+root+",dst="+root+" ",
-		"--entrypoint claude example.com/agent:2 --settings "+root,
+		"--entrypoint claude example.com/agent:2 --settings "+runsDir(t, root),
 		" -p hi",
 		"env: MODEL_KEY=not-a-real-key", "env: FLAG_NAMED=goes in", "env: HTTPS_PROXY=http://qory-proxy:3128",
 		"network rm",
@@ -716,7 +741,7 @@ func TestRunBehindAWall(t *testing.T) {
 	wants(t, string(settings), "/qory/qory run forward")
 
 	// --wall none runs without the section's wall, as this machine's process.
-	if err := os.RemoveAll(filepath.Join(root, ".qory", "runs")); err != nil {
+	if err := os.RemoveAll(runsDir(t, root)); err != nil {
 		t.Fatal(err)
 	}
 	composedForFake(t, root, fakeRuntime(t))
@@ -784,7 +809,9 @@ harness:
 // access key, with how the mount and the directory stand to each other. Without
 // access-key-secret in the directory, it says the agent could change one of the
 // runner's files. A mount of a directory the runner keeps its own files in, the tools'
-// sockets, says so.
+// sockets, says so, and one of qory's state directory says the agent could change the
+// run records, as does the workspace when the state directory lies in the checkout. A
+// run refused so has no record, and no line names one.
 func TestRunRefusesAMountOfTheRunnersFiles(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -798,6 +825,7 @@ func TestRunRefusesAMountOfTheRunnersFiles(t *testing.T) {
 	tmp := tempDir(t)
 	t.Setenv("TMPDIR", tmp)
 	secret := filepath.Join(configDir, "access-key-secret")
+	stateHome := os.Getenv("XDG_STATE_HOME")
 	for _, c := range []struct {
 		secret              bool
 		mount, want, ending string
@@ -806,6 +834,8 @@ func TestRunRefusesAMountOfTheRunnersFiles(t *testing.T) {
 		{true, home, "the mount " + home + " contains " + configDir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)", ""},
 		{true, configDir + ":ro", "the mount " + configDir + " is " + configDir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)", ""},
 		{true, tmp, "the mount " + tmp + " contains " + filepath.Join(tmp, "qory-tool-"), ", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
+		{true, stateHome, "the mount " + stateHome + " contains " + filepath.Join(stateHome, "qory") + ", which holds qory's run records; the agent could change them, so the run does not start. Mount a narrower path (mount_contains_runner_files)", ""},
+		{true, filepath.Join(stateHome, "qory", "runs") + ":ro", "the mount " + filepath.Join(stateHome, "qory", "runs") + " lies inside " + filepath.Join(stateHome, "qory") + ", which holds qory's run records; the agent could change them, so the run does not start. Mount a narrower path (mount_contains_runner_files)", ""},
 	} {
 		if c.secret {
 			writeFile(t, secret, "not read\n")
@@ -814,7 +844,15 @@ func TestRunRefusesAMountOfTheRunnersFiles(t *testing.T) {
 		if err == nil || cmd.ExitCode(err) != 1 || !strings.HasPrefix(err.Error(), c.want) || !strings.HasSuffix(err.Error(), c.ending) || c.ending == "" && err.Error() != c.want {
 			t.Errorf("--mount %s: %v (exit %d), want %q ... %q\n%s", c.mount, err, cmd.ExitCode(err), c.want, c.ending, out)
 		}
-		lacks(t, out, "inside the container")
+		lacks(t, out, "inside the container", "the record is in")
+	}
+	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
+	want := "the workspace " + root + " contains " + filepath.Join(root, "state", "qory") + ", which holds qory's run records; the agent could change them, so the run does not start. Mount a narrower path (mount_contains_runner_files)"
+	if out, err := run(t, "run", "claude"); err == nil || err.Error() != want {
+		t.Errorf("the state directory in the checkout: %v, want %q\n%s", err, want, out)
+	}
+	if ids := recorded(t, root); len(ids) != 0 {
+		t.Errorf("a refused run left a record: %v", ids)
 	}
 	if _, err := os.Stat(log); err == nil {
 		data, _ := os.ReadFile(log)
@@ -1025,7 +1063,7 @@ func TestRunRefusesAWallItCannotBuild(t *testing.T) {
 			t.Errorf("%v: %v (exit %d), want %q and exit %d\n%s", c.args, err, cmd.ExitCode(err), c.want, cmd.ExitInput, out)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(root, ".qory", "runs")); err == nil {
+	if ids := recorded(t, root); len(ids) != 0 {
 		t.Error("a refused run left a record")
 	}
 }
@@ -1127,7 +1165,7 @@ func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
 	if _, err := run(t, "run", "--policy", policy); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "--policy is the run's own policy without a server; with server configured the server's run configuration is the policy") {
 		t.Errorf("--policy with a server: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".qory", "runs")); err == nil {
+	if ids := recorded(t, root); len(ids) != 0 {
 		t.Error("a refused run left a record")
 	}
 	// Without a server section, QORY_SERVER_SECRET is taken and removed as the others are.
@@ -1194,7 +1232,7 @@ func TestRunReportsToTheServer(t *testing.T) {
 
 	// A server that names no run configuration leaves the machine's policy; a server
 	// that does not answer is no run.
-	if err := os.RemoveAll(filepath.Join(root, ".qory", "runs")); err != nil {
+	if err := os.RemoveAll(runsDir(t, root)); err != nil {
 		t.Fatal(err)
 	}
 	srv = newFakeServer(t, "")
@@ -1205,7 +1243,7 @@ func TestRunReportsToTheServer(t *testing.T) {
 	if _, evs := events(t, root); evs["dev.qory.run.policy_applied"][0]["source"] != "config" || len(srv.byType()["dev.qory.run.exited"]) != 1 {
 		t.Errorf("without a run section: %v", evs["dev.qory.run.policy_applied"])
 	}
-	if err := os.RemoveAll(filepath.Join(root, ".qory", "runs")); err != nil {
+	if err := os.RemoveAll(runsDir(t, root)); err != nil {
 		t.Fatal(err)
 	}
 	gone := newFakeServer(t, "")
@@ -1214,7 +1252,7 @@ func TestRunReportsToTheServer(t *testing.T) {
 	if _, err := run(t, "run"); err == nil || !strings.Contains(err.Error(), gone.URL) {
 		t.Errorf("a server that does not answer: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".qory", "runs")); err == nil {
+	if ids := recorded(t, root); len(ids) != 0 {
 		t.Error("a run the server did not answer left a record")
 	}
 }
@@ -1222,7 +1260,8 @@ func TestRunReportsToTheServer(t *testing.T) {
 // TestResendClosesAndDeliversARunItsRunnerLeft is a job's last step: the record of a
 // run nobody received, cut short the way a runner that died leaves it, is closed with
 // the reason and sent whole, once, to the server's events endpoint after its
-// configuration was fetched; a run that is not there is the user's mistake.
+// configuration was fetched; a run that is not there is the user's mistake. The record
+// is found from the checkout, reached through a link too.
 func TestResendClosesAndDeliversARunItsRunnerLeft(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -1233,7 +1272,7 @@ func TestResendClosesAndDeliversARunItsRunnerLeft(t *testing.T) {
 	if out, err := run(t, "run", "--local", "--run-id", id); cmd.ExitCode(err) != 3 {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	file := filepath.Join(root, ".qory", "runs", id, "events.jsonl")
+	file := filepath.Join(runsDir(t, root), id, "events.jsonl")
 	data, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatal(err)
@@ -1255,6 +1294,15 @@ func TestResendClosesAndDeliversARunItsRunnerLeft(t *testing.T) {
 	}
 	if _, err := run(t, "run", "resend", "0191f2a4-3c5e-7b8d-9e0f-000000000000"); cmd.ExitCode(err) != cmd.ExitInput {
 		t.Errorf("a run that is not recorded: %v", err)
+	}
+	// The checkout reached through a link has the same folder.
+	link := filepath.Join(t.TempDir(), "linked")
+	if err := os.Symlink(root, link); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(link)
+	if out, err := run(t, "run", "resend", id); err != nil || !strings.Contains(out, "0 events were accepted") {
+		t.Errorf("a resend through a link: %v\n%s", err, out)
 	}
 }
 
@@ -1302,7 +1350,7 @@ harness:
 	if _, err := os.Stat(filepath.Join(dir, "settings.json")); !os.IsNotExist(err) {
 		t.Error("Claude Code's settings were written for another runtime")
 	}
-	if err := os.RemoveAll(filepath.Join(root, ".qory", "runs")); err != nil {
+	if err := os.RemoveAll(runsDir(t, root)); err != nil {
 		t.Fatal(err)
 	}
 
