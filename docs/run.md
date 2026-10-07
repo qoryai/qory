@@ -133,7 +133,7 @@ egress:                  # what the runtime may reach; enforce denies the rest
   allow: [api.anthropic.com, "*.github.com"]
   deny: [gist.github.com]                # denied in either mode, whatever allow lists
 server:                  # the server every run reports to; optional
-  url: https://qory.example             # a scheme and a host, nothing after
+  url: https://apiary.example           # a scheme and a host, nothing after
   access_key_id: ak_0123456789abcdef    # this machine's access key; its secret is not in this file
   apiary_public_key:                    # the server's key, which signs every answer
     - {alg: ed25519, public_key: mptNqtgGKgLhLZxmOGfpBQkdeBNH7QN3Qs9ETNumy8Q}
@@ -249,8 +249,14 @@ contacted.
 
 ### The access key and the instance
 
-The server knows this machine by its access key, an Ed25519 key. `runner.yaml`'s
-`server` section holds two values of it:
+The server knows this machine by its access key, an Ed25519 key. Its secret stays on
+the machine, and the server keeps only its public key. A machine gets its key in one of
+two ways: it enrols one with a code, or an owner or administrator of the server pastes
+its public key into the node. See [Enrol with a code](#enrol-with-a-code) and [Paste the
+public key](#paste-the-public-key). A key is never rotated: a new one is enrolled,
+approved, and the old one revoked.
+
+`runner.yaml`'s `server` section holds two values of the key:
 
 - `access_key_id`, the key's id: `ak_` and 16 characters, which the server assigns.
 - `apiary_public_key`, the pin: the server's public keys. Every answer of the server is
@@ -260,18 +266,28 @@ The server knows this machine by its access key, an Ed25519 key. `runner.yaml`'s
 `QORY_ACCESS_KEY_ID` and `QORY_APIARY_PUBLIC_KEY`, the pin as JSON, hold them when the
 file does not. A value set in both is refused.
 
-The key's secret is never in `runner.yaml`. qory reads it from `QORY_ACCESS_KEY_SECRET`,
-else from the file `access-key-secret` beside `runner.yaml`. The secret is one line:
-`qak_` and 43 characters. The file is read only when it is a regular file, not a link,
-that you own and that grants nothing to the group or to others, in a directory that is
-yours alone. The runner contract's published fixture key is refused.
+The key's secret is never in `runner.yaml`. qory reads it from the file descriptor
+`--access-key-secret-fd` names, else from `QORY_ACCESS_KEY_SECRET`, else from the file
+`access-key-secret` beside `runner.yaml`. The secret is one line: `qak_` and 43
+characters. The file is read only when it is a regular file, not a link, that you own
+and that grants nothing to the group or to others, in a directory that is yours alone.
+The runner contract's published fixture key is refused.
+
+`--access-key-secret-fd` is a flag of `qory run` and `qory run resend`. The descriptor is
+3 or above. qory reads it to its end and closes it first, so nothing it starts inherits
+it:
+
+```sh
+qory run --access-key-secret-fd 3 -- -p "$prompt" 3< "$secret_file"
+```
 
 A run without the id or the secret does not start. One without a pin does not start
 either, `apiary_public_key_missing`.
 
-The three variables stay the runner's. Every qory command reads them into memory when it
-starts, and removes them from its environment before it starts anything. So no session,
-worktree command, tool or integration it starts inherits them. A `wall.env` or `--env`
+`QORY_ACCESS_KEY_ID`, `QORY_ACCESS_KEY_SECRET` and `QORY_APIARY_PUBLIC_KEY` stay the
+runner's. Every qory command reads them into memory when it starts, and removes them
+from its environment before it starts anything. So no session, worktree command, tool or
+integration it starts inherits them. A `wall.env` or `--env`
 that names one is refused.
 
 `server.access_key`, `server.secret` and `QORY_SERVER_SECRET` held a workspace access
@@ -302,6 +318,90 @@ refusal means and what to do, then the runner's words and the code:
 | `instance_limit` | the node's live instances are at its limit |
 | `run_closed` | the server closed the run before it started; the exit status is 1 |
 
+#### Enrol with a code
+
+An owner or administrator of the server creates an enrolment code on the node's page.
+The code is used once, and lasts 15 minutes.
+
+```sh
+qory access-key enrol https://apiary.example qec_…
+```
+
+qory makes the key, keeps its secret in `access-key-secret`, mode `0600`, and prints its
+fingerprint. It sends the server the public key, named `instance.name`, else the host
+name; when the host name does not fit a name, set `instance.name`. The key then awaits
+approval: the owner or administrator compares the fingerprint qory printed with the one
+the server shows. Until then every run is refused, `key_pending`.
+
+The server's answer is signed. qory writes `server.access_key_id` into `runner.yaml`,
+and `server.url` and the pin, `server.apiary_public_key`, when the file has none. A pin
+already there is kept. The rest of the file, its comments and its order stay as they
+are.
+
+Before it makes a key, qory checks the code against the pin `runner.yaml` has, so a code
+of another server is refused. When `runner.yaml` names another `server.url`, enrol
+refuses: enrol with that server, or change `server.url` first.
+
+A secret already there is moved aside, to `access-key-secret.old.<Unix time>`. It is
+deleted once the new key is approved and a run uses it.
+
+The same command, with the same code, within the 15 minutes retries with the same key.
+When the enrolment does not complete:
+
+| Answer | What qory does |
+| --- | --- |
+| 401, `unauthorized` | the code was used or has expired. The secret made for it is moved aside, and enrolling needs a new code. If you did not use the code, tell the owner or administrator: they must reject the pending key |
+| `key_invalid` | the server refused the key. The secret made for it is moved aside, and enrolling needs a new code |
+| `key_limit` | the node already holds a key awaiting approval, or two approved keys. qory keeps the key: once one of them is revoked or rejected, the same command within the 15 minutes succeeds |
+| `answer_unsigned`, or no answer | the answer does not verify under the server's key the code names, or never came. `runner.yaml` is not changed. qory keeps the key, and the same command within the 15 minutes retries with it |
+
+#### Paste the public key
+
+```sh
+qory access-key create
+```
+
+qory makes a key, keeps its secret in `access-key-secret`, and prints the public key and
+its fingerprint. An owner or administrator of the server pastes the public key into the
+node or node pool, where it is approved at once. Its page then shows the `server` lines
+for `runner.yaml`: `server.url`, `server.access_key_id` and `server.apiary_public_key`.
+`create` does not write `runner.yaml`.
+
+When `access-key-secret` exists, `create` refuses: move it aside yourself first.
+
+Both commands refuse while `QORY_ACCESS_KEY_ID`, `QORY_ACCESS_KEY_SECRET` or
+`QORY_APIARY_PUBLIC_KEY` is set: the key they keep in this machine's files would
+contradict the variable. Unset it, or use `--print`. Both also refuse while a run
+without a wall is running on this machine: it must end before a key is made.
+
+#### For a CI
+
+With `--print`, either command writes no key and no setting on this machine. It prints
+the settings on stdout, one `NAME=value` line each, and everything else on stderr.
+
+`qory access-key enrol --print <server> <code>` prints three lines:
+
+```sh
+QORY_ACCESS_KEY_ID=ak_0123456789abcdef
+QORY_ACCESS_KEY_SECRET=qak_…
+QORY_APIARY_PUBLIC_KEY=[{"alg":"ed25519","public_key":"mptNqtgGKgLhLZxmOGfpBQkdeBNH7QN3Qs9ETNumy8Q"}]
+```
+
+`qory access-key create --print` prints one, `QORY_ACCESS_KEY_SECRET=qak_…`. The public
+key and its fingerprint go to stderr, for pasting. The id and the pin come from the
+page of the node or node pool.
+
+Only `QORY_ACCESS_KEY_SECRET` belongs in the CI's secret store. The id and the pin are
+plain settings; `QORY_APIARY_PUBLIC_KEY` is the pin as JSON. The CI's `runner.yaml` then
+needs `server.url` alone.
+
+The key is for another machine, so `enrol --print` leaves the server and the pin of
+this machine's `runner.yaml` aside: it checks the code against `QORY_APIARY_PUBLIC_KEY`
+when that is set. The key's name is still this machine's, and the key still awaits
+approval. It keeps nothing, so an enrolment whose answer is lost or does not verify
+cannot be retried: get a new code, and have the owner or administrator reject the key
+qory printed the fingerprint of, should it await approval.
+
 #### Stored secrets need a wall
 
 When the server lists stored secrets for the machine's access key, every run needs a
@@ -312,7 +412,11 @@ qory then keeps a marker, the file `stored-secrets` beside `runner.yaml`. While 
 there, an unwalled run is refused before it starts, `--local` and a `runner.yaml`
 without a server included. With the secret from `access-key-secret`, a server's
 configuration that lists no stored secrets removes it. With the secret from
-`QORY_ACCESS_KEY_SECRET`, the marker stays as it is.
+`QORY_ACCESS_KEY_SECRET` or `--access-key-secret-fd`, the marker stays as it is.
+
+`qory access-key enrol` and `qory access-key create` write the marker before they make a
+key, unless `--print`, since the new key may receive stored secrets. It is removed as
+above.
 
 ## Runs started by another system
 
