@@ -6,27 +6,6 @@ release may change what an existing document does, and states it under Upgrading
 
 ## [Unreleased]
 
-### Upgrading
-
-- Needs `github.com/qoryai/runner` at commit `4176ff4` of its `next`,
-  `v0.6.1-0.20261006224758-4176ff4da645`, contract `v1` revision 1 as amended there. With
-  it, `runner.yaml`'s `egress` narrows the `security_policy` of a server's run
-  configuration, where the server's policy used to replace it. A server's run
-  configuration may carry variables: they reach a walled run's agent, and an unwalled
-  run gets none of them. Its
-  `wall.Nest` makes `/run/qory` root's with mode `0755`, where 0.6.0 made it `0700` and
-  the agent's `docker` command could not read its configuration beneath it. An
-  interactive Claude Code run with an API key behind the wall starts through the runner's
-  approval script, `/bin/sh` and `approve-key.sh` in the run directory, which pre-approves
-  the key's placeholder; `dev.qory.run.started` records that command.
-- `server.access_key` and `server.secret` in `runner.yaml` are refused, and so is
-  `QORY_SERVER_SECRET` when `runner.yaml` has a `server` section; the refusal says to
-  enrol the machine as a node, since a server accepts no workspace access key. qory
-  removes `QORY_SERVER_SECRET` from its environment with the access key's variables,
-  whether or not a server is configured, and `wall.env` or `--env` naming it is refused.
-  A machine that reports to a server needs its own access key: `server.access_key_id`,
-  the `server.apiary_public_key` pin and the secret.
-
 ### Added
 
 - Every request to the server is signed with the machine's Ed25519 access key, and every
@@ -54,7 +33,6 @@ release may change what an existing document does, and states it under Upgrading
   wall: an unwalled run is refused, `server_needs_wall`. The marker `stored-secrets`
   beside `runner.yaml` keeps refusing unwalled runs, `--local` included, until a server's
   configuration read with the secret of `access-key-secret` lists none.
-
 - `wall.images` in `runner.yaml` defines the agent's images by name, each with `ref`, its
   reference, and when it needs them `runtime`, the container runtime the wall starts it
   under, and `docker`. A run's policy selects one by its name, `image: <name>`, from the
@@ -107,6 +85,27 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- qory builds against `github.com/qoryai/runner` at commit `4176ff4` of its `next`,
+  `v0.6.1-0.20261006224758-4176ff4da645`, contract `v1` revision 1 as amended there.
+  `runner.yaml`'s `egress` narrows the `security_policy` of a server's run
+  configuration. A server's run configuration may carry variables: they reach a walled
+  run's agent, and an unwalled run gets none of them. The runner's `wall.Nest` makes
+  `/run/qory` root's with mode `0755`, so the agent's `docker` command reads its
+  configuration beneath it. An interactive Claude Code run with an API key behind the
+  wall starts through the runner's approval script, `/bin/sh` and `approve-key.sh` in the
+  run directory, which pre-approves the key's placeholder; `dev.qory.run.started`
+  records that command.
+- `server.access_key` and `server.secret` in `runner.yaml` are refused, and so is
+  `QORY_SERVER_SECRET` when `runner.yaml` has a `server` section; the refusal says to
+  enrol the machine as a node, since a server accepts no workspace access key. qory
+  removes `QORY_SERVER_SECRET` from its environment with the access key's variables,
+  whether or not a server is configured, and `wall.env` or `--env` naming it is refused.
+  A machine that reports to a server needs its own access key: `server.access_key_id`,
+  the `server.apiary_public_key` pin and the secret.
+- The variables the harness's launch template sets go to the runner as the run's own:
+  a variable of a server's run configuration of the same name is left out,
+  `dev.qory.run.policy_applied` lists it as denied, and the agent gets the launch
+  template's value.
 - `qory harness compose` takes a branch's current commit on every compose, without
   `--update`. A tag or a commit id stays pinned. Offline, it keeps the cached commit and
   warns.
