@@ -19,11 +19,13 @@ release may change what an existing document does, and states it under Upgrading
   interactive Claude Code run with an API key behind the wall starts through the runner's
   approval script, `/bin/sh` and `approve-key.sh` in the run directory, which pre-approves
   the key's placeholder; `dev.qory.run.started` records that command.
-- A server no longer accepts a workspace access key. `server.access_key` and
-  `server.secret` in `runner.yaml`, and `QORY_SERVER_SECRET` in the environment, are
-  refused, and the refusal says to enrol the machine as a node. A machine that reports to
-  a server needs its own access key: `server.access_key_id`, the `server.apiary_public_key`
-  pin and the secret.
+- `server.access_key` and `server.secret` in `runner.yaml` are refused, and so is
+  `QORY_SERVER_SECRET` when `runner.yaml` has a `server` section; the refusal says to
+  enrol the machine as a node, since a server accepts no workspace access key. qory
+  removes `QORY_SERVER_SECRET` from its environment with the access key's variables,
+  whether or not a server is configured, and `wall.env` or `--env` naming it is refused.
+  A machine that reports to a server needs its own access key: `server.access_key_id`,
+  the `server.apiary_public_key` pin and the secret.
 
 ### Added
 

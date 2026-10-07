@@ -736,6 +736,7 @@ func TestRunRefusesAWallItCannotBuild(t *testing.T) {
 		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_ACCESS_KEY_SECRET"}, "--env QORY_ACCESS_KEY_SECRET: the variable is the runner's own"},
 		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_ACCESS_KEY_ID"}, "the runner's own"},
 		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_APIARY_PUBLIC_KEY"}, "the runner's own"},
+		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_SERVER_SECRET"}, "--env QORY_SERVER_SECRET: the variable is the runner's own and never the session's"},
 		{[]string{"run", "--label", "issue"}, "not key=value"},
 		{[]string{"run", "--label", "Issue=1"}, "label key"},
 		{[]string{"run", "--run-id", "../x"}, "not a UUID"},
@@ -823,22 +824,26 @@ harness:
 // TestRunIsNamedLimitedAndUnderItsOwnPolicy is a run started by a system of its own: the
 // id and the labels are the caller's, and win over the origin remote's, the run's
 // policy file narrows the machine's and never widens it, the runtime is stopped at the
-// limit with timeout(1)'s status, and the access key's variables in qory's environment
-// are not in the session's. With a server configured the run's own policy is refused, unless
-// --local keeps the run to the files.
+// limit with timeout(1)'s status, and the access key's variables and QORY_SERVER_SECRET
+// in qory's environment are not in the session's. With a server configured the run's own
+// policy is refused, unless --local keeps the run to the files.
 func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	script := filepath.Join(t.TempDir(), "slow-runtime")
-	writeFile(t, script, "#!/bin/sh\ntest -z \"$QORY_ACCESS_KEY_SECRET$QORY_ACCESS_KEY_ID$QORY_APIARY_PUBLIC_KEY\" || exit 7\nexec sleep 30\n")
+	writeFile(t, script, "#!/bin/sh\ntest -z \"$QORY_ACCESS_KEY_SECRET$QORY_ACCESS_KEY_ID$QORY_APIARY_PUBLIC_KEY$QORY_SERVER_SECRET\" || exit 7\nexec sleep 30\n")
 	if err := os.Chmod(script, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	composedForFake(t, root, script)
-	t.Setenv("QORY_ACCESS_KEY_SECRET", newKey(t).Secret())
-	t.Setenv("QORY_ACCESS_KEY_ID", testAccessKey)
-	t.Setenv("QORY_APIARY_PUBLIC_KEY", `[{"alg":"ed25519","public_key":"`+newKey(t).PublicKey().String()+`"}]`)
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "apiVersion: qory.dev/v1alpha1\negress:\n  mode: enforce\n  allow: [\"*.github.com\", api.anthropic.com]\nserver:\n  url: https://qory.example\n")
+	setVariables := func() {
+		t.Setenv("QORY_ACCESS_KEY_SECRET", newKey(t).Secret())
+		t.Setenv("QORY_ACCESS_KEY_ID", testAccessKey)
+		t.Setenv("QORY_APIARY_PUBLIC_KEY", `[{"alg":"ed25519","public_key":"`+newKey(t).PublicKey().String()+`"}]`)
+	}
+	setVariables()
+	machine := "apiVersion: qory.dev/v1alpha1\negress:\n  mode: enforce\n  allow: [\"*.github.com\", api.anthropic.com]\n"
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), machine+"server:\n  url: https://qory.example\n")
 	policy := filepath.Join(t.TempDir(), "run-policy.yaml")
 	writeFile(t, policy, "version: 1\negress:\n  mode: enforce\n  allow: [api.github.com, pypi.org]\n")
 	if _, err := run(t, "run", "--policy", policy); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "--policy is the run's own policy without a server; with server configured the server's run configuration is the policy") {
@@ -847,6 +852,10 @@ func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, ".qory", "runs")); err == nil {
 		t.Error("a refused run left a record")
 	}
+	// Without a server section, QORY_SERVER_SECRET is taken and removed as the others are.
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), machine)
+	setVariables()
+	t.Setenv("QORY_SERVER_SECRET", "a-workspace-secret")
 	const id = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f"
 	out, err := run(t, "run", "--local", "--policy", policy, "--run-id", id, "--label", "run_key=queue/1234", "--label", "issue=77", "--label", "repository=acme/shop", "--timeout", "300ms", "--stop-grace", "2s")
 	if cmd.ExitCode(err) != 124 {

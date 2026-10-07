@@ -233,6 +233,7 @@ func TestRunnerFileRefusesAMistake(t *testing.T) {
 		{"wall: {adapter: docker, env: [QORY_ACCESS_KEY_SECRET]}\n", `wall.env: QORY_ACCESS_KEY_SECRET is the runner's own`},
 		{"wall: {adapter: docker, env: [QORY_ACCESS_KEY_ID]}\n", `wall.env: QORY_ACCESS_KEY_ID is the runner's own`},
 		{"wall: {adapter: docker, env: [QORY_APIARY_PUBLIC_KEY]}\n", `wall.env: QORY_APIARY_PUBLIC_KEY is the runner's own`},
+		{"wall: {adapter: docker, env: [QORY_SERVER_SECRET]}\n", `wall.env: QORY_SERVER_SECRET is the runner's own and never the session's`},
 		{"credentials: {product: {adapter: [git-host]}}\n", `credentials.product.adapter is a program by its absolute path`},
 		{"credentials: {product: {command: [/x]}}\n", `credentials.product: key "command" is not one`},
 		{"credentials: [product]\n", `credentials is a mapping`},

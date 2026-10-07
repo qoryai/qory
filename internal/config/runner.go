@@ -427,9 +427,10 @@ func (r *Runner) InstanceNameOrDefault() string {
 }
 
 // RunnersOwn reports whether a variable is the runner's own, never the session's: the
-// access key's secret, its id and the pin.
+// access key's secret, its id and the pin, and QORY_SERVER_SECRET, which held a
+// workspace access key's secret.
 func RunnersOwn(name string) bool {
-	return name == accesskey.EnvSecret || name == accesskey.EnvID || name == accesskey.EnvPin
+	return slices.Contains(serverVariableNames, name)
 }
 
 // enrolAsNode ends the refusal of a workspace access key: what to do instead.

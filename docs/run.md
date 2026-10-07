@@ -273,8 +273,10 @@ worktree command, tool or integration it starts inherits them. A `wall.env` or `
 that names one is refused.
 
 `server.access_key`, `server.secret` and `QORY_SERVER_SECRET` held a workspace access
-key, which servers no longer accept. Each is refused: enrol the machine as a node
-instead.
+key, which servers no longer accept. The two keys are refused, and so is
+`QORY_SERVER_SECRET` when `runner.yaml` has a `server` section: enrol the machine as a
+node instead. qory removes `QORY_SERVER_SECRET` from its environment with the three
+variables, server or not, and a `wall.env` or `--env` that names it is refused.
 
 Each machine that runs qory is an **instance** of its node. qory names it on every
 request:
