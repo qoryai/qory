@@ -34,7 +34,7 @@ qory harness compose [flags]
 ### Options
 
 ```
-      --check            compare the home with the stack and modules, write nothing, and exit 6 when a file or link differs; the checkout's links and the report are not compared
+      --check            compare the home with the stack and modules, write nothing, and exit 6 when a file, a link or a launch variable differs; the checkout's links and the rest of the report are not compared
       --dry-run          print the report and write nothing
   -f, --file string      the qory-stack.yaml, qory.yaml or harness.yaml to compose instead of the one found; when the checkout's own document extends a stack, this one is its base
       --force            replace a tracked, unmodified file where a link goes; git checkout -- restores it (qory.yaml: force)

@@ -319,8 +319,9 @@ uses it to build its first prompt from an entry point, such as `/harness:impleme
 | `--model opus`           | Write this model instead of the document's.                                                    |
 | `--force`                | Replace a tracked, unmodified file where a link goes. `git checkout --` restores it.           |
 | `--update`               | Re-fetch every git source, tags included.                                                      |
-| `--check`                | Exit 6 when a file or link of the home differs from the stack and modules. Write nothing.      |
-|                          | The checkout's links and the report are not compared.                                          |
+| `--check`                | Exit 6 when a file or link of the home, or a variable a launch sets, differs from the stack,   |
+|                          | the modules and `qory.yaml`. Write nothing. The checkout's links and the rest of the report    |
+|                          | are not compared.                                                                              |
 | `--home <dir>`           | Compose under a directory outside the checkout. Write nothing into the checkout.               |
 | `--no-links`             | Write no link and no exclude line into the checkout. The tree goes under `.qory`.              |
 

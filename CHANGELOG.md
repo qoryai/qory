@@ -131,7 +131,9 @@ release may change what an existing document does, and states it under Upgrading
   every command it runs and, by default, filters no name, `*KEY*`, `*SECRET*` and
   `*TOKEN*` included. The report records them per runtime under `launch_env`, each with
   its value, where it comes from and whether it is fixed, and `qory harness inspect`
-  lists them with fixed or default and their source. `qory run` passes them to the
+  lists them with fixed or default and their source. `qory harness compose --check`
+  compares them with the report's, so a changed export, `qory.yaml` `env` or fragment
+  variable is stale, one row `launch_env/<runtime>/<NAME>` each. `qory run` passes them to the
   runner; behind a wall it leaves out `QORY_HARNESS_HOME`, which the runner refuses to
   pass into a container.
 - qory builds against `github.com/qoryai/runner` at commit `4176ff4` of its `next`,

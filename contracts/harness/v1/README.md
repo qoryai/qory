@@ -750,7 +750,10 @@ The line sets the launch's environment through `env`, in three parts with no nam
 The harness's variables layer over the template's: a fragment's, then the modules' over
 them, then the configuration's over both. Each is then fixed or a default by where its
 value came from, so a variable the configuration sets over a module's export is a default.
-`qory run` passes the same environment to the runner.
+`qory run` passes the same environment to the runner. The report keeps these variables
+under `launch_env` (§The report), and `qory harness compose --check` compares them with
+what the compose sets, so a changed export, a changed `env` in the configuration or a
+changed fragment variable is stale, a row `launch_env/<runtime>/<NAME>` each.
 The plugin and the directories below are rendered on every compose, with links or
 without, so `launch` works on a home inside the checkout too, and none of them is linked
 into the checkout. A runtime without a template reads its harness from the checkout

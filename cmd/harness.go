@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -332,7 +333,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/harness.md`,
 	c.Flags().StringVar(&runtime, "runtime", "", "render for these runtimes instead of target.runtime, comma separated ("+strings.Join(render.Names(), ", ")+"; qory.yaml: runtime)")
 	c.Flags().StringVar(&model, "model", "", "write this model instead of target.model (qory.yaml: model)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the report and write nothing")
-	c.Flags().BoolVar(&check, "check", false, "compare the home with the stack and modules, write nothing, and exit 6 when a file or link differs; the checkout's links and the report are not compared")
+	c.Flags().BoolVar(&check, "check", false, "compare the home with the stack and modules, write nothing, and exit 6 when a file, a link or a launch variable differs; the checkout's links and the rest of the report are not compared")
 	c.Flags().BoolVar(&force, "force", false, "replace a tracked, unmodified file where a link goes; git checkout -- restores it (qory.yaml: force)")
 	c.Flags().BoolVar(&update, "update", false, "fetch every git source again, not the cached clone (qory.yaml: update)")
 	homeFlags(c, &h)
@@ -375,9 +376,11 @@ func (e *staleError) Error() string {
 // the tree a compose writes. A home that matches prints up to date and the rows a
 // compose prints; one that differs prints one row per path and returns a [*staleError].
 // A link into a clone of a git source is compared by what the clone holds, so a branch
-// that moved to a commit whose files are the same is up to date.
-// The links from the checkout into the home and the report are not compared: a missing
-// link is a foreign path or a remove, and the report changes when the home does.
+// that moved to a commit whose files are the same is up to date. The variables the
+// compose sets in each launch are compared with the report's launch_env, the one place
+// they are kept, see [envDifferences]. The links from the checkout into the home and the
+// rest of the report are not compared: a missing link is a foreign path or a remove, and
+// the rest of the report changes when the home does.
 func runCheck(out io.Writer, pr *prepared) error {
 	u := pr.u
 	if _, err := os.Stat(pr.at.home); err != nil {
@@ -388,13 +391,19 @@ func runCheck(out io.Writer, pr *prepared) error {
 		return err
 	}
 	defer os.RemoveAll(stage)
-	if err := render.BuildAt(pr.res, stage, pr.at.home, allRuntimes(pr.at.home, pr.targets)...); err != nil {
+	all := allRuntimes(pr.at.home, pr.targets)
+	if err := render.BuildAt(pr.res, stage, pr.at.home, all...); err != nil {
 		return err
 	}
 	differences, err := render.Diff(stage, pr.at.home, pr.cache)
 	if err != nil {
 		return err
 	}
+	env, err := launchEnv(pr.res, all)
+	if err != nil {
+		return input(err)
+	}
+	differences = append(differences, envDifferences(env, pr.previous.LaunchEnv)...)
 	rows := [][2]string{{"home", ui.Short(pr.at.home, pr.at.root)}}
 	if len(differences) == 0 {
 		u.Success("up to date")
@@ -406,6 +415,55 @@ func runCheck(out io.Writer, pr *prepared) error {
 	}
 	u.Fields(append(rows, pr.rows...))
 	return &staleError{Differences: differences}
+}
+
+// envDifferences compares the variables a compose sets in each runtime's launch, want,
+// with the ones the last compose recorded in the report, have, which is the only place
+// they are kept. Each name that differs is one [render.Difference] at
+// launch_env/<runtime>/<NAME>: "changed" for another value, source or kind, "missing" for
+// one the compose sets and the report lacks, "extra" for one the compose no longer sets.
+func envDifferences(want, have map[string][]report.Var) []render.Difference {
+	var out []render.Difference
+	runtimes := map[string]bool{}
+	for rt := range want {
+		runtimes[rt] = true
+	}
+	for rt := range have {
+		runtimes[rt] = true
+	}
+	for _, rt := range slices.Sorted(maps.Keys(runtimes)) {
+		w, h := map[string]report.Var{}, map[string]report.Var{}
+		for _, v := range want[rt] {
+			w[v.Name] = v
+		}
+		for _, v := range have[rt] {
+			h[v.Name] = v
+		}
+		names := map[string]bool{}
+		for name := range w {
+			names[name] = true
+		}
+		for name := range h {
+			names[name] = true
+		}
+		for _, name := range slices.Sorted(maps.Keys(names)) {
+			wv, inWant := w[name]
+			hv, inHave := h[name]
+			what := ""
+			switch {
+			case !inHave:
+				what = "missing"
+			case !inWant:
+				what = "extra"
+			case wv != hv:
+				what = "changed"
+			default:
+				continue
+			}
+			out = append(out, render.Difference{Path: "launch_env/" + rt + "/" + name, What: what})
+		}
+	}
+	return out
 }
 
 // prepared is a compose that has been read and composed but not written: what
