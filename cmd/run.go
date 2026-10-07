@@ -233,7 +233,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if runnerDir, err = filepath.Abs(d); err != nil {
 					return err
 				}
-				spec.RunnerFiles = []string{runnerDir}
+				spec.RunnerFiles = append([]string{runnerDir}, configLinks(runnerDir)...)
 			}
 			walled := spec.Wall != nil
 			spec.LaunchFixed, spec.LaunchDefaults, spec.HarnessHome = launch.Fixed, launch.Defaults, launch.HarnessHome
@@ -608,6 +608,40 @@ func mountRefused(err error, runnerDir string) error {
 		text = fmt.Sprintf("the mount %s %s %s, which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path", mount, how, path)
 	}
 	return &refusedError{text: text, err: &session.Refusal{Code: ref.Code}}
+}
+
+// configLinks is where the files qory reads from its configuration directory dir lead,
+// when a link takes one out of it: runner.yaml, qory.yaml or qory.yml, runtimes/ and the
+// descriptors in it. A mount of where one leads would let the agent change what the next
+// run reads, so each is one of the runner's files. A link whose target does not exist
+// yet is passed as it is, and the runner follows it to where the target will be.
+func configLinks(dir string) []string {
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return nil
+	}
+	names := append([]string{config.RunnerFileName, DescriptorsDir}, config.Names...)
+	if entries, err := os.ReadDir(filepath.Join(dir, DescriptorsDir)); err == nil {
+		for _, e := range entries {
+			names = append(names, filepath.Join(DescriptorsDir, e.Name()))
+		}
+	}
+	var out []string
+	for _, name := range names {
+		path := filepath.Join(dir, name)
+		if _, err := os.Lstat(path); err != nil {
+			continue
+		}
+		target, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			out = append(out, path)
+			continue
+		}
+		if target != filepath.Join(resolved, name) {
+			out = append(out, target)
+		}
+	}
+	return out
 }
 
 // codeMountContainsRunnerFiles is the runner's refusal of a mount that is, contains or
