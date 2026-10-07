@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"errors"
+	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -68,5 +71,33 @@ func TestUnusedEnvSaysWhy(t *testing.T) {
 	unusedEnv(&out, "")(session.Applied{{Name: "LOG_LEVEL", From: session.FromApiary, Lost: []session.Loss{{From: session.FromRun, Why: session.WhyOverridden}}}})
 	if got := out.String(); got != "qory run: LOG_LEVEL from --env is not used: the server sets it\n" {
 		t.Errorf("no server: %q", got)
+	}
+}
+
+// TestMountRefusedSaysHowTheMountStands is the runner's mount_contains_runner_files
+// worded with Overlap's relation: a mount that lies inside the runner's directory reads
+// the access key, a mount of another of the runner's files could change it, and any
+// other error is left to the rest.
+func TestMountRefusedSaysHowTheMountStands(t *testing.T) {
+	dir := t.TempDir()
+	inner := filepath.Join(dir, "locks")
+	refusal := func(mount, path string) error {
+		return fmt.Errorf("wrapped: %w", &session.Refusal{Code: "mount_contains_runner_files", Names: []string{mount, path}})
+	}
+	if got, want := mountRefused(refusal(inner, dir), dir).Error(), "the mount "+inner+" lies inside "+dir+", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)"; got != want {
+		t.Errorf("lies inside: %q, want %q", got, want)
+	}
+	other := filepath.Join(dir, "wall-files")
+	if got, want := mountRefused(refusal(dir, other), filepath.Join(dir, "elsewhere")).Error(), "the mount "+dir+" contains "+other+", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"; got != want {
+		t.Errorf("another file: %q, want %q", got, want)
+	}
+	var ref *session.Refusal
+	if err := mountRefused(refusal(dir, dir), dir); !errors.As(err, &ref) || ref.Code != "mount_contains_runner_files" {
+		t.Errorf("the refusal does not unwrap: %v", err)
+	}
+	for _, err := range []error{errors.New("cannot resolve the mount"), &session.Refusal{Code: "variable_reserved", Names: []string{"A", "B"}}} {
+		if got := mountRefused(err, dir); got != nil {
+			t.Errorf("%v: %v", err, got)
+		}
 	}
 }

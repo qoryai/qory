@@ -227,6 +227,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					}
 				}
 			}
+			runnerDir := ""
+			if d := config.UserDir(); d != "" {
+				if runnerDir, err = filepath.Abs(d); err != nil {
+					return err
+				}
+				spec.RunnerFiles = []string{runnerDir}
+			}
 			walled := spec.Wall != nil
 			spec.LaunchFixed, spec.LaunchDefaults, spec.HarnessHome = launch.Fixed, launch.Defaults, launch.HarnessHome
 			runLock, err := startRun(machineDir(), spec.RunID, walled, id == nil)
@@ -264,6 +271,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			res, err := session.Run(ctx, spec)
 			if err != nil {
+				if m := mountRefused(err, runnerDir); m != nil {
+					return m
+				}
 				return explain(err, id)
 			}
 			u := ui.New(stderr)
@@ -574,6 +584,32 @@ func whyUnused(from, why, host string) string {
 	}
 	return "the runner left it out (" + why + ")"
 }
+
+// mountRefused words the runner's mount_contains_runner_files for the person: a mount
+// of the wall that is, contains or lies inside one of the runner's files, which the
+// runner refuses before the run starts and again just before it wraps the agent.
+// runnerDir is the directory qory passed as the runner's, which holds the access key.
+// Any other error is nil here.
+func mountRefused(err error, runnerDir string) error {
+	var ref *session.Refusal
+	if !errors.As(err, &ref) || ref.Code != codeMountContainsRunnerFiles || len(ref.Names) != 2 {
+		return nil
+	}
+	mount, path := ref.Names[0], ref.Names[1]
+	how := session.Overlap(mount, path)
+	if how == "" {
+		how = "overlaps"
+	}
+	text := fmt.Sprintf("the mount %s %s %s, which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path", mount, how, path)
+	if runnerDir != "" && path == runnerDir {
+		text = fmt.Sprintf("the mount %s %s %s, which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path", mount, how, path)
+	}
+	return &refusedError{text: text, err: &session.Refusal{Code: ref.Code}}
+}
+
+// codeMountContainsRunnerFiles is the runner's refusal of a mount that is, contains or
+// lies inside one of the runner's files.
+const codeMountContainsRunnerFiles = "mount_contains_runner_files"
 
 // passedVariables is the variables named, by name, with their values in this process's
 // environment, NAME=value; a name the environment does not set passes nothing. A name
