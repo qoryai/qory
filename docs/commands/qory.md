@@ -6,9 +6,10 @@ Get your coding agent ready to work, and keep it in check
 
 qory gets your coding agent ready to work, and keeps it in check.
 
-  harness   build the agent's harness from modules, once for every agent you use
-  worktree  give each branch its own worktree, ready to work
-  run       run the agent behind a proxy: recorded, fenced, no tokens inside
+  harness     build the agent's harness from modules, once for every agent you use
+  worktree    give each branch its own worktree, ready to work
+  run         run the agent behind a proxy: recorded, fenced, no tokens inside
+  access-key  make the key this machine signs its runs to the server with
 
 It serves Claude Code, Codex, Gemini CLI, OpenCode, Cursor, Copilot CLI, Amp, Goose, and
 any tool that reads AGENTS.md.
