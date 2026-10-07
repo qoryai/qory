@@ -33,6 +33,14 @@ type Module struct {
 	// Pin is what the source resolved to: "working-tree" for a path, the commit for a git
 	// source.
 	Pin string
+	// Ref is the git source's ref as the stack writes it, "" for a path source.
+	Ref string
+	// Previous is the pin the last compose recorded for the source, when this compose
+	// resolved it to another commit, such as a branch that moved; "" otherwise.
+	Previous string
+	// Warning is set when the git source's remote could not be reached and the cached
+	// commit was kept; see [source.Resolved.Warning].
+	Warning string
 	// Dirty is set when git sees uncommitted changes under Dir.
 	Dirty bool
 	// Variant is the variant chosen for the target runtime, "" for a module without one.
@@ -120,16 +128,20 @@ type Result struct {
 
 // Options are the choices a caller makes for one compose.
 type Options struct {
-	// Update resolves every git source's ref again instead of reading the pin or the
-	// cached resolution, so a branch ref moves.
+	// Update fetches every git source again, a tag and a commit id included, instead of
+	// reading the pin or the cached resolution.
 	Update bool
 	// Pins are the commits the checkout was composed from last time, by source as the
-	// last report recorded it, so a git source stays on its commit until Update.
+	// last report recorded it: a tag stays on its commit, and a branch, which takes the
+	// remote's commit, keeps its pin only when the remote cannot be reached.
 	Pins map[string]string
 	// Cache is the directory git sources are fetched to, "" for [source.CacheDir].
 	Cache string
 	// Timeout is the longest one git command may run, 0 for no limit.
 	Timeout time.Duration
+	// Memo is shared by every git source of one compose, the base stack's included, so one
+	// URL at one ref lands on one commit; nil makes one for the modules of this call.
+	Memo *source.Memo
 	// Env are the configuration's variables, written over what the modules export.
 	Env map[string]string
 	// Base is the base stack [LoadBase] resolved, recorded in the result and enforced on
@@ -155,6 +167,9 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 			res.Bind[role] = to
 		}
 	}
+	if opts.Memo == nil {
+		opts.Memo = source.NewMemo()
+	}
 	owners := map[string][]string{}
 	paths := map[string]string{}
 	fors := map[string]string{}
@@ -170,11 +185,15 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 		if pl.Name == "" {
 			who = "module at " + ps.String()
 		}
-		so := source.Options{Pin: opts.Pins[ps.String()], Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout}
+		so := source.Options{Pin: opts.Pins[ps.String()], Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Memo: opts.Memo}
 		if pl.Base && opts.Base != nil && ps.Git != "" {
-			// A base module is in the base's clone, fetched this compose: its pin is the
-			// base's, and no update fetches it again.
-			so.Pin, so.Update = opts.Base.Pin, false
+			// A base module is fetched with the base this compose, and no update fetches it
+			// again. One in the base's own clone has the base's pin, and the memo puts it on
+			// the base's commit; one from another repository keeps its own pin.
+			so.Update = false
+			if ps.Git == p.Extends.Git && ps.Ref == p.Extends.Ref {
+				so.Pin = opts.Base.Pin
+			}
 		}
 		src, err := source.Resolve(p.DirOf(pl), ps, so)
 		if err != nil {
@@ -200,7 +219,7 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 		if err != nil {
 			return nil, err
 		}
-		rl := Module{Name: name, Description: m.Description, Dir: l.Dir, Source: ps.String(), Pin: src.Pin, Dirty: src.Dirty, Variant: variant, Link: pl.Link, Base: pl.Base, RetiredAPIVersion: m.RetiredAPIVersion, Egress: m.Egress}
+		rl := Module{Name: name, Description: m.Description, Dir: l.Dir, Source: ps.String(), Pin: src.Pin, Ref: ps.Ref, Previous: src.Previous, Warning: src.Warning, Dirty: src.Dirty, Variant: variant, Link: pl.Link, Base: pl.Base, RetiredAPIVersion: m.RetiredAPIVersion, Egress: m.Egress}
 		requires[name] = needs(l, m.Requires, res.Bind)
 		// The selection comes first, so that what the base allows and what the module
 		// exports are checked on what the module contributes, not on what it ships.

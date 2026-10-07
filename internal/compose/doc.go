@@ -17,7 +17,7 @@
 // Compose walks the stack's modules in order and, for each one:
 //
 //  1. Resolves the source to a directory and a pin with [source.Resolve]: a path as it
-//     stands, or a git ref fetched once into the cache and pinned by its commit.
+//     stands, or a git ref resolved to a commit, fetched into the cache and pinned by it.
 //  2. Reads the module's qory-module.yaml with [module.ReadManifest], which defines the
 //     module's name; a directory without one is not a module. An entry that lists the
 //     module by name must use the manifest's name, and a name composes once.
