@@ -144,3 +144,33 @@ func TestDiffComparesALinkIntoTheCacheByWhatItHolds(t *testing.T) {
 		t.Errorf("links outside the cache: %+v (%v), want a target difference", got, err)
 	}
 }
+
+// TestDiffComparesALinkThatLeavesTheCacheByItsTarget is a clone holding a link out of the
+// cache: a target reached through that link, and the link itself inside a module, are
+// compared by their targets, and nothing outside the cache is read, though it is the same
+// on both sides and cannot be listed.
+func TestDiffComparesALinkThatLeavesTheCacheByItsTarget(t *testing.T) {
+	cache, outside := t.TempDir(), t.TempDir()
+	write(t, filepath.Join(outside, "mod", "AGENTS.md"), "# Elsewhere\n")
+	if err := os.Chmod(filepath.Join(outside, "mod"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(filepath.Join(outside, "mod"), 0o755) })
+	for _, c := range []string{"aaaa", "bbbb"} {
+		write(t, filepath.Join(cache, "harness", c, "core", "AGENTS.md"), "# Core\n")
+		symlink(t, filepath.Join(outside, "mod"), filepath.Join(cache, "harness", c, "core", "out"))
+		symlink(t, outside, filepath.Join(cache, "harness", c, "escape"))
+	}
+	want, have := t.TempDir(), t.TempDir()
+	symlink(t, filepath.Join(cache, "harness", "aaaa", "escape", "mod"), filepath.Join(want, "through"))
+	symlink(t, filepath.Join(cache, "harness", "bbbb", "escape", "mod"), filepath.Join(have, "through"))
+	symlink(t, filepath.Join(cache, "harness", "aaaa", "core"), filepath.Join(want, "core"))
+	symlink(t, filepath.Join(cache, "harness", "bbbb", "core"), filepath.Join(have, "core"))
+	got, err := render.Diff(want, have, cache)
+	if err != nil {
+		t.Fatalf("Diff read outside the cache: %v", err)
+	}
+	if expected := []render.Difference{{Path: "through", What: "target"}}; !reflect.DeepEqual(got, expected) {
+		t.Errorf("differences = %+v, want %+v", got, expected)
+	}
+}

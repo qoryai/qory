@@ -505,44 +505,44 @@ func absTarget(root, key, target string) string {
 }
 
 // sameClone reports whether a and b, two link targets, are both inside cache and hold the
-// same content, as [Diff] compares a link into a clone.
+// same content, as [Diff] compares a link into a clone. Each target and the cache are
+// taken with every symlink resolved, so a target that reaches outside the cache through a
+// link inside a clone is not inside it, and its content is never read. A target, or a
+// cache, that is not there is not the same.
 func sameClone(a, b, cache string) (bool, error) {
-	if !inCache(a, cache) || !inCache(b, cache) {
+	if cache == "" {
 		return false, nil
 	}
-	x, err := contents(a)
-	if err != nil || x == nil {
-		return false, err
+	root, err := filepath.EvalSymlinks(cache)
+	if err != nil {
+		return false, nil
 	}
-	y, err := contents(b)
-	if err != nil || y == nil {
-		return false, err
-	}
-	return maps.Equal(x, y), nil
-}
-
-// inCache reports whether path is inside cache, as written or with the cache's symlinks
-// resolved. An empty cache holds nothing.
-func inCache(path, cache string) bool {
-	if cache == "" {
-		return false
-	}
-	roots := []string{filepath.Clean(cache)}
-	if real, err := filepath.EvalSymlinks(cache); err == nil {
-		roots = append(roots, real)
-	}
-	for _, root := range roots {
-		if rel, err := filepath.Rel(root, path); err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return true
+	var trees []map[string]node
+	for _, target := range []string{a, b} {
+		real, err := filepath.EvalSymlinks(target)
+		if err != nil || !below(real, root) {
+			return false, nil
 		}
+		tree, err := contents(real)
+		if err != nil || tree == nil {
+			return false, err
+		}
+		trees = append(trees, tree)
 	}
-	return false
+	return maps.Equal(trees[0], trees[1]), nil
 }
 
-// contents records everything under root, a directory or a single file, keyed relative to
-// root with forward slashes: a link by its target, a file by its bytes and whether it is
-// executable. A .git directory is left out, since git tracks none and a clone's own is
-// not content. A root that is not there is nil.
+// below reports whether path is below root, both without symlinks.
+func below(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// contents records everything under root, a directory or a single file with no symlink
+// in its path, keyed relative to root with forward slashes: a link by its target, never
+// followed, a file by its bytes and whether it is executable. A .git directory is left
+// out, since git tracks none and a clone's own is not content. A root that is not there
+// is nil.
 func contents(root string) (map[string]node, error) {
 	if _, err := os.Lstat(root); errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
