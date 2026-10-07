@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/url"
 	"os"
 	"os/signal"
@@ -228,12 +229,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					}
 				}
 			}
-			runnerDir := ""
+			runnerDir, links := "", map[string]string(nil)
 			if d := config.UserDir(); d != "" {
 				if runnerDir, err = filepath.Abs(d); err != nil {
 					return err
 				}
-				spec.RunnerFiles = append([]string{runnerDir}, configLinks(runnerDir)...)
+				var files []string
+				files, links = configLinks(runnerDir)
+				spec.RunnerFiles = append([]string{runnerDir}, files...)
 			}
 			walled := spec.Wall != nil
 			spec.LaunchFixed, spec.LaunchDefaults, spec.HarnessHome = launch.Fixed, launch.Defaults, launch.HarnessHome
@@ -272,7 +275,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			res, err := session.Run(ctx, spec)
 			if err != nil {
-				if m := mountRefused(err, runnerDir); m != nil {
+				if m := mountRefused(err, runnerDir, links); m != nil {
 					return m
 				}
 				return explain(err, id)
@@ -592,8 +595,9 @@ func whyUnused(from, why, host string) string {
 // runnerDir is the directory qory passed as the runner's: a refusal of it says the agent
 // could read the access key when access-key-secret is there, and one of any other path,
 // or of the directory without the key, that the agent could change one of the runner's
-// files. Any other error is nil here.
-func mountRefused(err error, runnerDir string) error {
+// files. links maps a link's place, as [configLinks] passed it, to the link, which the
+// text names instead. Any other error is nil here.
+func mountRefused(err error, runnerDir string, links map[string]string) error {
 	var ref *session.Refusal
 	if !errors.As(err, &ref) || ref.Code != codeMountContainsRunnerFiles || len(ref.Names) != 2 {
 		return nil
@@ -603,6 +607,9 @@ func mountRefused(err error, runnerDir string) error {
 	if how == "" {
 		how = "overlaps"
 	}
+	if l, ok := links[path]; ok {
+		path = l
+	}
 	text := fmt.Sprintf("the mount %s %s %s, which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path", mount, how, path)
 	if runnerDir != "" && path == runnerDir && runnerdir.Dir(runnerDir).HasSecret() {
 		text = fmt.Sprintf("the mount %s %s %s, which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path", mount, how, path)
@@ -610,38 +617,136 @@ func mountRefused(err error, runnerDir string) error {
 	return &refusedError{text: text, err: &session.Refusal{Code: ref.Code}}
 }
 
-// configLinks is where the files qory reads from its configuration directory dir lead,
-// when a link takes one out of it: runner.yaml, qory.yaml or qory.yml, runtimes/ and the
-// descriptors in it. A mount of where one leads would let the agent change what the next
-// run reads, so each is one of the runner's files. A link whose target does not exist
-// yet is passed as it is, and the runner follows it to where the target will be.
-func configLinks(dir string) []string {
+// configLinks is what qory passes the runner for the files it reads from its
+// configuration directory dir when a link takes one out of it: runner.yaml, qory.yaml or
+// qory.yml, runtimes/ and the descriptors in it, runtimes/*.yaml. Each is followed one
+// link at a time, each part of its path that is a link included, and every link on the
+// way and where it leads is one of the runner's files, since a mount of either would let
+// the agent change what the next run reads. The runner resolves its files through links,
+// so a link goes as its place, [linkPlace], and shown maps that back to the link for the
+// person. What lies in the resolved dir is left out: dir is one of the runner's files
+// itself. A file whose chain ends at a part that does not exist yet is passed as it is,
+// and the runner follows it to where the target will be; one whose chain loops or
+// cannot be read is passed as it is too, and the runner, unable to resolve it, refuses
+// the run.
+func configLinks(dir string) (files []string, shown map[string]string) {
 	resolved, err := filepath.EvalSymlinks(dir)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	names := append([]string{config.RunnerFileName, DescriptorsDir}, config.Names...)
 	if entries, err := os.ReadDir(filepath.Join(dir, DescriptorsDir)); err == nil {
 		for _, e := range entries {
-			names = append(names, filepath.Join(DescriptorsDir, e.Name()))
+			if filepath.Ext(e.Name()) == ".yaml" {
+				names = append(names, filepath.Join(DescriptorsDir, e.Name()))
+			}
 		}
 	}
-	var out []string
+	shown = map[string]string{}
+	add := func(p string) {
+		if !slices.Contains(files, p) {
+			files = append(files, p)
+		}
+	}
 	for _, name := range names {
 		path := filepath.Join(dir, name)
 		if _, err := os.Lstat(path); err != nil {
 			continue
 		}
-		target, err := filepath.EvalSymlinks(path)
-		if err != nil {
-			out = append(out, path)
-			continue
+		links, target, err := followLinks(filepath.Join(resolved, name))
+		for _, l := range links {
+			if !within(resolved, filepath.Dir(l)) {
+				place := linkPlace(l)
+				shown[place] = l
+				add(place)
+			}
 		}
-		if target != filepath.Join(resolved, name) {
-			out = append(out, target)
+		switch {
+		case err != nil || target == "":
+			add(path)
+		case !within(resolved, target):
+			add(target)
 		}
 	}
-	return out
+	return files, shown
+}
+
+// maxLinks is how many links [followLinks] follows in one path before it takes the
+// path for a loop, as the system does.
+const maxLinks = 40
+
+// followLinks follows path, absolute, one link at a time, each part of it that is a link
+// included: the links it meets, in order, and where it leads. A part that does not exist
+// ends the walk with an empty target. A loop, a part that cannot be read, or more than
+// maxLinks links is an error.
+func followLinks(path string) (links []string, target string, err error) {
+	done := "/"
+	rest := strings.Split(path, "/")
+	for hops := 0; len(rest) > 0; {
+		part := rest[0]
+		rest = rest[1:]
+		switch part {
+		case "", ".":
+			continue
+		case "..":
+			done = filepath.Dir(done)
+			continue
+		}
+		next := filepath.Join(done, part)
+		info, err := os.Lstat(next)
+		if errors.Is(err, fs.ErrNotExist) {
+			return links, "", nil
+		}
+		if err != nil {
+			return links, "", err
+		}
+		if info.Mode()&fs.ModeSymlink == 0 {
+			done = next
+			continue
+		}
+		if hops++; hops > maxLinks {
+			return links, "", fmt.Errorf("%s: too many links", path)
+		}
+		to, err := os.Readlink(next)
+		if err != nil {
+			return links, "", err
+		}
+		links = append(links, next)
+		if filepath.IsAbs(to) {
+			done = "/"
+		}
+		rest = append(strings.Split(to, "/"), rest...)
+	}
+	return links, done, nil
+}
+
+// linkPlace is the link at path as the runner can compare it: its directory, and its
+// name as a pattern that matches that one name. The runner resolves each of its files
+// through links, and the link's own path to where it leads, which leaves the link
+// unguarded. The pattern names no file, so the runner compares it by name: a mount of
+// the link's directory, or of one above it, contains it, and one beside the link in that
+// directory does not.
+func linkPlace(path string) string {
+	dir, name := filepath.Split(path)
+	var b strings.Builder
+	for i, r := range name {
+		special := strings.ContainsRune(`*?[\`, r)
+		switch {
+		case i == 0:
+			b.WriteByte('[')
+			if special || strings.ContainsRune(`]-^`, r) {
+				b.WriteByte('\\')
+			}
+			b.WriteRune(r)
+			b.WriteByte(']')
+		case special:
+			b.WriteByte('\\')
+			b.WriteRune(r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return dir + b.String()
 }
 
 // codeMountContainsRunnerFiles is the runner's refusal of a mount that is, contains or

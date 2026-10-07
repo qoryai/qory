@@ -170,8 +170,9 @@ release may change what an existing document does, and states it under Upgrading
 - A mount, `--mount` or `wall.mounts`, is refused before the run starts,
   `mount_contains_runner_files`, when it is, contains or lies inside this machine's qory
   configuration directory, which holds `runner.yaml`, the access key and the user
-  `qory.yaml`; a file qory reads from that directory and a link takes elsewhere; or one
-  of the runner's own program and temporary files. With the access key in the
+  `qory.yaml`; a file qory reads from that directory and a link takes elsewhere, where
+  the last link leads; or one of the runner's own program and temporary files. So is a
+  mount that is or contains any link on the way. With the access key in the
   directory, `qory run` says `the mount <host path> contains <dir>, which holds this
   machine's access key; the agent could read the key, so the run does not start. Mount a
   narrower path`; otherwise it says the path `holds one of the runner's files; the

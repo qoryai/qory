@@ -1226,8 +1226,8 @@ What to know:
   inside one of these:
   - this machine's qory configuration directory, which holds `runner.yaml`, the access
     key and the user `qory.yaml`;
-  - a file qory reads from that directory and a link takes elsewhere, where the link
-    leads;
+  - a file qory reads from that directory and a link takes elsewhere: where the last
+    link leads, and, for a mount that is or contains it, every link on the way;
   - one of the runner's own program and temporary files, such as a program it starts
     outside the wall.
 
