@@ -347,7 +347,8 @@ refuses: enrol with that server, or change `server.url` first.
 When `access-key-secret` exists, enrol refuses, so it never replaces this machine's key:
 move it aside yourself first to enrol a new key, or use `--print` for a key kept
 elsewhere. The one exception is a retry: the same command, with the same code, within
-the 15 minutes retries with the key made for it.
+the 15 minutes, while `access-key-secret` still holds the key made for it, retries with
+that key.
 
 When the enrolment does not complete:
 

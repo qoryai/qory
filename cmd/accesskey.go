@@ -70,7 +70,8 @@ until then every run is refused with key_pending.
 When access-key-secret exists, enrol refuses, so it never replaces this machine's key:
 move it aside yourself first to enrol a new key, or use --print for a key kept
 elsewhere. The one exception is a retry: run the same command again within the code's
-15 minutes and it retries with the key made for it.
+15 minutes, while access-key-secret still holds the key made for it, and it retries
+with that key.
 
 The key's name is instance.name of ` + config.RunnerFileName + `, else this machine's host name.
 
@@ -323,30 +324,29 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	}
 	defer lock.Release()
 	now := keyClock()
-	// retry is the same code again within its 15 minutes, which takes the key made for
-	// it. Any other secret here is this machine's key, which enrol never replaces.
+	// retry is the same code again within its 15 minutes while access-key-secret still
+	// holds the key made for it, which the retry takes. Any other secret here is this
+	// machine's key, which enrol never replaces.
+	var key *accesskey.Key
 	var retry bool
 	if !print {
 		if dir.HasSecret() {
-			if !dir.Pending(code, now) {
+			held, err := dir.ReadSecret()
+			if err != nil || !dir.Pending(code, held.PublicKey(), now) {
 				return input(fmt.Errorf("%s already holds this machine's access key secret, and enrol does not replace it: move it aside yourself first to enrol a new key, or use --print for a key kept elsewhere", dir.Path(runnerdir.SecretFile)))
 			}
-			retry = true
+			key, retry = held, true
 		}
 		if err := dir.WriteMarker(); err != nil {
 			return fmt.Errorf("%w; no key was made", err)
 		}
 	}
-	var key *accesskey.Key
 	switch {
 	case print:
 		if key, err = makeKey(); err != nil {
 			return err
 		}
 	case retry:
-		if key, err = dir.ReadSecret(); err != nil {
-			return err
-		}
 		fmt.Fprintln(info, "this code was tried within the last 15 minutes: retrying with the key made for it")
 	default:
 		if key, err = makeKey(); err != nil {
@@ -355,7 +355,7 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 		if err := dir.WriteSecret(key); err != nil {
 			return err
 		}
-		if err := dir.WritePending(code, now); err != nil {
+		if err := dir.WritePending(code, key.PublicKey(), now); err != nil {
 			return err
 		}
 	}
@@ -367,10 +367,10 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	}
 	ans, err := req.Post(ctx, enrolClient, server, userAgent())
 	if err != nil {
-		return enrolFailed(dir, err, fingerprint, print, now)
+		return enrolFailed(dir, err, key, print, now)
 	}
 	if ans.Pin.Fixture() {
-		return refuseFixturePin(dir, print, now)
+		return refuseFixturePin(dir, key, print, now)
 	}
 	kind := "node"
 	if ans.NodeKind == "pool" {
@@ -414,20 +414,30 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	return nil
 }
 
+// discardKey ends the pending enrolment and moves the secret of key, the one made for
+// the code, aside, returning where it went. A secret access-key-secret holds of any
+// other key is this machine's key, and stays: then nothing is moved and it returns "".
+func discardKey(dir runnerdir.Dir, key *accesskey.Key, now time.Time) (string, error) {
+	if err := dir.RemovePending(); err != nil {
+		return "", err
+	}
+	if !dir.SameSecret(key) {
+		return "", nil
+	}
+	return dir.MoveAside(now)
+}
+
 // refuseFixturePin refuses a 201 whose pin lists the runner contract's published
 // fixture key. --print wrote nothing; otherwise the runner file is left as it is, the
 // secret made for the code is moved aside and the pending enrolment ends, and the
 // message names where that secret went.
-func refuseFixturePin(dir runnerdir.Dir, print bool, now time.Time) error {
+func refuseFixturePin(dir runnerdir.Dir, key *accesskey.Key, print bool, now time.Time) error {
 	const text = "the server's answer lists the runner contract's published fixture key, whose secret anyone can read: it is no server to pin; "
 	if print {
 		return errors.New(text + "nothing was written")
 	}
 	msg := text + config.RunnerFileName + " was not changed"
-	if err := dir.RemovePending(); err != nil {
-		return fmt.Errorf("%s; %w", msg, err)
-	}
-	moved, err := dir.MoveAside(now)
+	moved, err := discardKey(dir, key, now)
 	if err != nil {
 		return fmt.Errorf("%s; %w", msg, err)
 	}
@@ -442,7 +452,8 @@ func refuseFixturePin(dir runnerdir.Dir, print bool, now time.Time) error {
 // aside and end the pending enrolment; key_limit, an unsigned answer and an answer that
 // never came keep both, so the same command within 15 minutes retries with the same
 // key. --print kept nothing, so a lost answer cannot be retried.
-func enrolFailed(dir runnerdir.Dir, err error, fingerprint string, print bool, now time.Time) error {
+func enrolFailed(dir runnerdir.Dir, err error, key *accesskey.Key, print bool, now time.Time) error {
+	fingerprint := key.Fingerprint()
 	var ref *accesskey.Refusal
 	if !errors.As(err, &ref) {
 		if print {
@@ -455,8 +466,7 @@ func enrolFailed(dir runnerdir.Dir, err error, fingerprint string, print bool, n
 		if print {
 			return ""
 		}
-		dir.RemovePending()
-		moved, err := dir.MoveAside(now)
+		moved, err := discardKey(dir, key, now)
 		if err != nil || moved == "" {
 			return ""
 		}
@@ -521,6 +531,11 @@ func create(out, errOut io.Writer, print bool) error {
 		return err
 	}
 	if !print {
+		// A pending enrolment left here was for a key that is gone: the new key is not
+		// one an enrolment made, so no retry may take it.
+		if err := dir.RemovePending(); err != nil {
+			return fmt.Errorf("%w; no key was made", err)
+		}
 		if err := dir.WriteSecret(key); err != nil {
 			return err
 		}

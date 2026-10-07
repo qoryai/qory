@@ -454,7 +454,7 @@ func TestEnrolNeverReplacesTheKey(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := dir.WritePending(normal, time.Now().Add(-runnerdir.PendingFor-time.Minute)); err != nil {
+		if err := dir.WritePending(normal, key.PublicKey(), time.Now().Add(-runnerdir.PendingFor-time.Minute)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -534,6 +534,77 @@ func TestEnrolAfterARefusal(t *testing.T) {
 		t.Error("a new code after unauthorized did not make a new key")
 	}
 	wants(t, readRunnerFile(t), "access_key_id: ak_0123456789abcdef")
+}
+
+// TestEnrolRetriesOnlyWithTheKeyMadeForTheCode is a key_limit, after which the key made
+// for the code is moved aside by hand and another key takes its place, by create or by
+// hand, before the same code is run again within its 15 minutes: the other key is this
+// machine's key, so the same code is refused before it sends anything, as any other
+// code would be, and the key is not moved aside. create removes the pending enrolment.
+func TestEnrolRetriesOnlyWithTheKeyMadeForTheCode(t *testing.T) {
+	for _, byCreate := range []bool{true, false} {
+		emptyDir(t)
+		srv := newEnrolServer(t)
+		writeFile(t, runnerFile(), "instance:\n  name: build-01\n")
+		dir := configDir()
+		code := srv.code(1, false)
+		srv.refusal("key_limit")
+		if _, err := run(t, "access-key", "enrol", srv.URL, code); err == nil || !strings.Contains(err.Error(), "the node already holds a key awaiting approval") {
+			t.Fatalf("key_limit: %v", err)
+		}
+		if !exists(dir.Path(runnerdir.PendingFile)) {
+			t.Fatal("key_limit ended the pending enrolment")
+		}
+		if err := os.Rename(dir.Path(runnerdir.SecretFile), dir.Path("kept-by-hand")); err != nil {
+			t.Fatal(err)
+		}
+		if byCreate {
+			if out, err := run(t, "access-key", "create"); err != nil {
+				t.Fatalf("create: %v\n%s", err, out)
+			}
+			if exists(dir.Path(runnerdir.PendingFile)) {
+				t.Error("create left the pending enrolment")
+			}
+		} else if err := dir.WriteSecret(newKey(t)); err != nil {
+			t.Fatal(err)
+		}
+		mine := heldKey(t)
+		srv.status, srv.body = http.StatusUnauthorized, []byte(`{"error":"unauthorized"}`)
+		out, err := run(t, "access-key", "enrol", srv.URL, code)
+		if cmd.ExitCode(err) != cmd.ExitInput || err.Error() != dir.Path(runnerdir.SecretFile)+keyHere {
+			t.Errorf("create %v: the same code over another key: %v", byCreate, err)
+		}
+		lacks(t, out, "retrying")
+		if n := len(srv.sent()); n != 1 {
+			t.Errorf("create %v: %d enrolments sent", byCreate, n)
+		}
+		if heldKey(t).PublicKey() != mine.PublicKey() || movedAside(t) != 0 {
+			t.Errorf("create %v: the machine's key was moved or replaced", byCreate)
+		}
+	}
+}
+
+// TestCreateEndsAPendingEnrolment is a pending enrolment create finds: the key it makes
+// was made by no enrolment, so it removes the record.
+func TestCreateEndsAPendingEnrolment(t *testing.T) {
+	emptyDir(t)
+	dir := configDir()
+	if _, err := dir.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	normal, err := accesskey.NormaliseCode("qec_F1XT-0RE0-0000-0000-0000-0000-01.uoES-kuj1vk0sq0qoGlmAg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dir.WritePending(normal, newKey(t).PublicKey(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "access-key", "create"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if exists(dir.Path(runnerdir.PendingFile)) {
+		t.Error("create left the pending enrolment")
+	}
 }
 
 // TestEnrolActsOnTheRefusalsCode is each refusal of the server: unauthorized and a

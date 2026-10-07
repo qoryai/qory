@@ -37,7 +37,7 @@ const (
 	// MarkerFile is the stored-secrets marker: while it exists, every run needs a wall.
 	MarkerFile = "stored-secrets"
 	// PendingFile records an enrolment that has not been answered yet: the SHA-256 of
-	// its code and the time.
+	// its code, the fingerprint of the public key made for it and the time.
 	PendingFile = "enrolment-pending"
 	// InstanceFile holds this machine's instance id and the hash of its identity.
 	InstanceFile = "instance-id"
@@ -330,30 +330,32 @@ func codeHash(code string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// WritePending records an enrolment of code at now in enrolment-pending, mode 0600,
-// replacing a record there.
-func (d Dir) WritePending(code string, now time.Time) error {
+// WritePending records an enrolment of code with the key whose public key is key at
+// now in enrolment-pending, mode 0600, replacing a record there. The record holds the
+// key's fingerprint, never its secret.
+func (d Dir) WritePending(code string, key accesskey.PublicKey, now time.Time) error {
 	if err := d.RemovePending(); err != nil {
 		return err
 	}
-	if err := create(d.Path(PendingFile), 0o600, []byte(codeHash(code)+"\n"+strconv.FormatInt(now.Unix(), 10)+"\n")); err != nil {
+	if err := create(d.Path(PendingFile), 0o600, []byte(codeHash(code)+"\n"+key.Fingerprint()+"\n"+strconv.FormatInt(now.Unix(), 10)+"\n")); err != nil {
 		return fmt.Errorf("write %s: %w", d.Path(PendingFile), err)
 	}
 	return nil
 }
 
-// Pending reports whether enrolment-pending records code, and is younger than
-// [PendingFor] at now.
-func (d Dir) Pending(code string, now time.Time) bool {
+// Pending reports whether enrolment-pending records code with the key whose public key
+// is key, and is younger than [PendingFor] at now. A record of another code or another
+// key, or one without a key's fingerprint, is none.
+func (d Dir) Pending(code string, key accesskey.PublicKey, now time.Time) bool {
 	b, err := readPrivate(d.Path(PendingFile), 1024)
 	if err != nil {
 		return false
 	}
 	lines := strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")
-	if len(lines) != 2 || lines[0] != codeHash(code) {
+	if len(lines) != 3 || lines[0] != codeHash(code) || lines[1] != key.Fingerprint() {
 		return false
 	}
-	t, err := strconv.ParseInt(lines[1], 10, 64)
+	t, err := strconv.ParseInt(lines[2], 10, 64)
 	if err != nil {
 		return false
 	}
