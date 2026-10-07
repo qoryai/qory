@@ -284,8 +284,10 @@ func TestRunEndsWhenTheServerClosesIt(t *testing.T) {
 
 // TestTheMarkerKeepsEveryUnwalledRunOut is the stored-secrets marker: an unwalled run
 // that contacts no server is refused before it starts, --local included, and one with a
-// server once discovery is read, whichever key it signs with; a run's lock file names it
-// unwalled and stays for a key command to remove.
+// server once discovery is read, under a key that leaves the marker as it is: the
+// secret from the environment. (Under the secret of access-key-secret a discovery that
+// lists no secrets removes the marker, TestDiscoverySettlesTheMarker.) A run's lock
+// file names it unwalled and stays for a key command to remove.
 func TestTheMarkerKeepsEveryUnwalledRunOut(t *testing.T) {
 	root, srv := serverRun(t, "", "")
 	dir := configDir()
@@ -294,27 +296,28 @@ func TestTheMarkerKeepsEveryUnwalledRunOut(t *testing.T) {
 	}
 	marker := dir.Path(runnerdir.MarkerFile)
 	want := "the stored-secrets marker " + marker + " exists: this machine's access key may receive stored secrets, so every run needs a wall: --wall docker, or wall in runner.yaml (server_needs_wall)"
-	for _, args := range [][]string{{"run", "--local"}, {"run"}} {
+	for _, c := range []struct {
+		name, secret string
+		args         []string
+	}{
+		{"--local", "", []string{"run", "--local"}},
+		{"a key from the environment", srv.key.Secret(), []string{"run"}},
+	} {
+		t.Setenv("QORY_ACCESS_KEY_SECRET", c.secret)
 		clearRuns(t, root)
-		out, err := run(t, args...)
-		if cmd.ExitCode(err) != 1 || err.Error() != want {
-			t.Errorf("%v: %v (exit %d)\n%s", args, err, cmd.ExitCode(err), out)
+		out, err := run(t, c.args...)
+		if cmd.ExitCode(err) != 1 || err == nil || err.Error() != want {
+			t.Errorf("%s: %v (exit %d)\n%s", c.name, err, cmd.ExitCode(err), out)
 		}
 		if strings.Contains(out, "hello from") {
-			t.Errorf("%v: the runtime ran", args)
+			t.Errorf("%s: the runtime ran", c.name)
+		}
+		if has, _ := dir.HasMarker(); !has {
+			t.Errorf("%s: the marker is gone", c.name)
 		}
 	}
 	if got := srv.byType(); len(got["dev.qory.ping"]) != 0 {
 		t.Errorf("a refused run pinged: %v", got)
-	}
-	// The secret from the environment leaves the marker as it is.
-	t.Setenv("QORY_ACCESS_KEY_SECRET", srv.key.Secret())
-	clearRuns(t, root)
-	if _, err := run(t, "run"); cmd.ExitCode(err) != 1 || !strings.Contains(err.Error(), "server_needs_wall") {
-		t.Errorf("a key from the environment: %v", err)
-	}
-	if has, _ := dir.HasMarker(); !has {
-		t.Error("a discovery under the environment's key removed the marker")
 	}
 	t.Setenv("QORY_ACCESS_KEY_SECRET", "")
 	writeFile(t, filepath.Join(string(dir), "runner.yaml"), "apiVersion: qory.dev/v1alpha1\n")
