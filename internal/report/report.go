@@ -183,6 +183,11 @@ type Report struct {
 	// Env are the variables the harness exports, name to value with $QORY_HARNESS_HOME in
 	// place of the home, absent when it exports none.
 	Env map[string]string `json:"env,omitempty"`
+	// LaunchEnv is, per runtime the home holds that has a launch template, the variables
+	// the harness sets when the runtime's program starts, beside the template's and
+	// QORY_HARNESS_HOME, sorted by name; a runtime the harness sets none for is left out,
+	// and so is the field when it sets none for any.
+	LaunchEnv map[string][]Var `json:"launch_env,omitempty"`
 	// Bind is the stack's bindings, <kind>/<role> to the name of the entry that fills the
 	// role, absent when the stack binds none.
 	Bind map[string]string `json:"bind,omitempty"`
@@ -203,6 +208,39 @@ type Report struct {
 	// Qory is the build that wrote the report, absent when the build contains no version.
 	// The command sets it after [New], which has no information about the binary.
 	Qory *Build `json:"qory,omitempty"`
+}
+
+// Var is one variable the harness sets when a runtime's program starts.
+type Var struct {
+	// Name is the variable's name.
+	Name string `json:"name"`
+	// Value is the value with $QORY_HARNESS_HOME in place of the home.
+	Value string `json:"value"`
+	// From is where the value comes from: "module <name>" for a module's export,
+	// "module <name>, settings/<runtime>/<file>" for a settings fragment's variable, and
+	// "configuration" for the configuration's env.
+	From string `json:"from"`
+	// Fixed is true for a value that is qory's own computation, a module's export, and
+	// false for a default, a value an author wrote.
+	Fixed bool `json:"fixed"`
+}
+
+// Vars is a compose's variables in the report's shape.
+func Vars(vars []compose.Var) []Var {
+	out := make([]Var, 0, len(vars))
+	for _, v := range vars {
+		out = append(out, Var{Name: v.Name, Value: v.Value, From: v.From, Fixed: v.Fixed})
+	}
+	return out
+}
+
+// ComposeVars is the report's variables in a compose's shape, for a launch.
+func ComposeVars(vars []Var) []compose.Var {
+	out := make([]compose.Var, 0, len(vars))
+	for _, v := range vars {
+		out = append(out, compose.Var{Name: v.Name, Value: v.Value, From: v.From, Fixed: v.Fixed})
+	}
+	return out
 }
 
 // Egress is one declared host and who declared it.
@@ -415,13 +453,9 @@ func (r Report) PrintBody(w io.Writer) error {
 		}
 		u.Table(rows)
 	}
-	if len(r.Env) > 0 {
+	if rows := r.envRows(); len(rows) > 0 {
 		u.Blank()
 		u.Heading("Env")
-		rows = nil
-		for _, name := range sorted(r.Env) {
-			rows = append(rows, []string{name, r.Env[name]})
-		}
 		u.Table(rows)
 	}
 	if len(r.Extensions) > 0 {
@@ -443,6 +477,39 @@ func (r Report) PrintBody(w io.Writer) error {
 		u.Table(rows)
 	}
 	return nil
+}
+
+// envRows are the Env table's rows: every variable a launch sets, once for all the
+// runtimes it is the same for, with whether it is fixed or a default and where it comes
+// from. A report without launch variables, for a runtime with no launch template, lists
+// the exported variables as they are.
+func (r Report) envRows() [][]string {
+	var rows [][]string
+	if len(r.LaunchEnv) == 0 {
+		for _, name := range sorted(r.Env) {
+			rows = append(rows, []string{name, r.Env[name]})
+		}
+		return rows
+	}
+	seen := map[Var]bool{}
+	var vars []Var
+	for _, rt := range r.Target.Runtimes {
+		for _, v := range r.LaunchEnv[rt] {
+			if !seen[v] {
+				seen[v] = true
+				vars = append(vars, v)
+			}
+		}
+	}
+	sort.SliceStable(vars, func(i, j int) bool { return vars[i].Name < vars[j].Name })
+	for _, v := range vars {
+		kind := "default"
+		if v.Fixed {
+			kind = "fixed"
+		}
+		rows = append(rows, []string{v.Name, v.Value, kind + ", " + v.From})
+	}
+	return rows
 }
 
 // sorted lists a map's keys in order, so the printed rows do not follow map order.

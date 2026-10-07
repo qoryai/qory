@@ -200,11 +200,11 @@ func TestClaudePluginCopiesItsAgents(t *testing.T) {
 	if strings.Contains(string(manifest), `"agents"`) {
 		t.Errorf("the manifest names agents:\n%s", manifest)
 	}
-	l, err := render.LaunchFor(lookup(t, "claude"), home, nil)
+	l, err := render.LaunchFor(lookup(t, "claude"), home, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(l.Env) != 0 || len(l.Args) < 2 || l.Args[0] != "--plugin-dir" || l.Args[1] != plugin {
-		t.Errorf("launch %q env %q, want --plugin-dir %s and no variable", l.Args, l.Env, plugin)
+	if len(l.Fixed)+len(l.Defaults) != 0 || l.HarnessHome != home || len(l.Args) < 2 || l.Args[0] != "--plugin-dir" || l.Args[1] != plugin {
+		t.Errorf("launch %q env %q, want --plugin-dir %s and QORY_HARNESS_HOME alone", l.Args, l.Env(), plugin)
 	}
 }

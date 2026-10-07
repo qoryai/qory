@@ -114,9 +114,10 @@ func (claude) Reserved() []render.Reserved {
 }
 
 // Render places every atomic kind for the checkout's bare names, writes settings.json
-// with the exported variables and QORY_HARNESS_HOME under env and the model, mcp.json
-// with the MCP servers under mcpServers on top of any settings/claude/mcp.json fragment,
-// and the instructions as CLAUDE.md, with its references resolved to the bare names.
+// with the model and without env, whose variables are the launch's, see [EnvAt],
+// mcp.json with the MCP servers under mcpServers on top of any settings/claude/mcp.json
+// fragment, and the instructions as CLAUDE.md, with its references resolved to the bare
+// names.
 // The instructions are written in full rather than imported from AGENTS.md: Claude Code
 // resolves a link to its real path and treats an import found through it as external,
 // which it shows an approval prompt for on every start. Then it writes the plugin, see
@@ -136,7 +137,7 @@ func (claude) Render(res *compose.Result, dir, home string) error {
 		if file != "settings.json" {
 			return
 		}
-		m["env"] = render.Env(m["env"], res, home)
+		render.DropEnv(m, []string{"env"})
 		if res.Stack.Target.Model != "" {
 			m["model"] = res.Stack.Target.Model
 		}
@@ -156,6 +157,10 @@ func (claude) Render(res *compose.Result, dir, home string) error {
 	}
 	return renderPlugin(res, filepath.Join(dir, Plugin))
 }
+
+// EnvAt is settings.json's env: what a fragment sets there is the launch's, a default
+// each, and the file holds no variable.
+func (claude) EnvAt() (string, []string) { return "settings.json", []string{"env"} }
 
 // Address is the plugin's: every kind registers as harness:<name> on the launch path.
 func (claude) Address() render.Address { return render.PluginAddress }
@@ -188,8 +193,8 @@ func renderPlugin(res *compose.Result, dir string) error {
 func (claude) Egress() []string { return []string{"api.anthropic.com"} }
 
 // Template starts Claude Code with the harness in a home: the plugin for the skills,
-// agents, commands and output styles, settings.json for the permissions, the hooks, the
-// environment and the model, mcp.json for the servers when the compose wrote one,
+// agents, commands and output styles, settings.json for the permissions, the hooks and
+// the model, mcp.json for the servers when the compose wrote one,
 // launch/CLAUDE.md appended to the system prompt when the compose produced instructions
 // or a roster to name, and the setting sources cut to the user's, so no .claude of the
 // checkout or a directory above it is read.

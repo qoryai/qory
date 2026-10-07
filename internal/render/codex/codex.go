@@ -1,10 +1,11 @@
 // Package codex renders for Codex CLI, which reads a project's .codex directory, skills
 // from .agents/skills, and AGENTS.override.md ahead of AGENTS.md. The checkout gets a
 // link for each of those three, and .codex contains config.toml with the target model as
-// model, the MCP servers as mcp_servers and the exported variables as
-// shell_environment_policy.set, plus one TOML file per agent. Codex reads
-// prompt files from the user's home only and has no output styles, so commands and output
-// styles are skipped. A files entry named codex/<path> lands at .codex/<path>.
+// model and the MCP servers as mcp_servers, plus one TOML file per agent. The harness's
+// variables, a fragment's shell_environment_policy.set among them, are the launch's.
+// Codex reads prompt files from the user's home only and has no output styles, so
+// commands and output styles are skipped. A files entry named codex/<path> lands at
+// .codex/<path>.
 //
 // The paths under .codex a files entry may not take, see [render.Reserved]:
 //
@@ -71,11 +72,10 @@ func (codex) Reserved() []render.Reserved {
 }
 
 // Render writes config.toml, with the target model as model, the MCP servers as
-// mcp_servers, one table per server containing the object as the module wrote it, the
-// exported variables and QORY_HARNESS_HOME under shell_environment_policy.set, which
-// Codex passes to every command it runs, and any other codex settings fragment, then one
-// agents/<name>.toml per agent containing the agent's name, description and its body as
-// developer_instructions. The instructions written as AGENTS.md end with the names the
+// mcp_servers, one table per server containing the object as the module wrote it, and any
+// other codex settings fragment without shell_environment_policy.set, whose variables are
+// the launch's, see [EnvAt], then one agents/<name>.toml per agent containing the agent's
+// name, description and its body as developer_instructions. The instructions written as AGENTS.md end with the names the
 // session registers, see [render.Addressing]: a Codex home registers them as the modules
 // wrote them, and the file states that. Codex reads a project .codex only in a project
 // the user has marked trusted.
@@ -88,12 +88,7 @@ func (codex) Render(res *compose.Result, dir, home string) error {
 			m["model"] = res.Stack.Target.Model
 		}
 		render.PutServers(m, "mcp_servers", res.MCPFor(home))
-		policy, _ := m["shell_environment_policy"].(map[string]any)
-		if policy == nil {
-			policy = map[string]any{}
-		}
-		policy["set"] = render.Env(policy["set"], res, home)
-		m["shell_environment_policy"] = policy
+		render.DropEnv(m, setKey)
 	})
 	if err != nil {
 		return err
@@ -132,6 +127,19 @@ func (codex) Render(res *compose.Result, dir, home string) error {
 	}
 	return nil
 }
+
+// setKey is where a codex fragment sets variables, which Codex sets in every command it
+// runs.
+var setKey = []string{"shell_environment_policy", "set"}
+
+// EnvAt is config.toml's shell_environment_policy.set: what a fragment sets there is the
+// launch's, a default each, and the file holds no variable. Codex passes its own
+// environment to every command it runs: shell_environment_policy inherits all of it by
+// default and leaves out no name by default, ignore_default_excludes being true, so a
+// variable named like *KEY*, *SECRET* or *TOKEN* reaches the command too. A fragment that
+// sets inherit, exclude, include_only or ignore_default_excludes = false filters the
+// launch's variables the way it filters any other.
+func (codex) EnvAt() (string, []string) { return "config.toml", setKey }
 
 // Template starts Codex with the runtime's directory as its home.
 func (codex) Template() render.Template {

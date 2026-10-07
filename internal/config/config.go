@@ -42,7 +42,7 @@
 //	  timeout: 10m               # the longest one git command may run
 //	  cache: /var/cache/qory     # where git sources are fetched to
 //	env:
-//	  HARNESS_PROFILE: nextjs    # exported to every runtime with a place for it
+//	  HARNESS_PROFILE: nextjs    # set in every launch, a default
 //	exports:                     # what this repository publishes for others, by name
 //	  dir: ./harness             # where stacks/ and modules/ are; default: the root
 //	  stacks: [nextjs]           # harness/stacks/nextjs/qory-stack.yaml
@@ -324,8 +324,8 @@ type Config struct {
 	Worktree Worktree
 	// Git contains the git settings.
 	Git Git
-	// Env are the variables exported to every runtime with a place for them, on top of
-	// what the modules export.
+	// Env are the variables set in every runtime's launch, on top of what the modules
+	// export.
 	Env map[string]string
 	// Exports is what the repository publishes, from the exports section of the checkout
 	// root's file; nil when it lists none. A section in any other file is read and left
@@ -1042,7 +1042,7 @@ func launchOf(path, name string, l launchSection) (Launch, error) {
 				return out, fmt.Errorf("%s: %s.env: %s is not an environment variable name", path, key, k)
 			}
 			if k == "QORY_HARNESS_HOME" {
-				return out, fmt.Errorf("%s: %s.env.QORY_HARNESS_HOME is qory's own; the settings contain it", path, key)
+				return out, fmt.Errorf("%s: %s.env.QORY_HARNESS_HOME is qory's own; every launch sets it to the home", path, key)
 			}
 			out.Env[k] = v
 		}

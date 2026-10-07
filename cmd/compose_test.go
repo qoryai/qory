@@ -184,10 +184,8 @@ func TestComposeFlags(t *testing.T) {
 					t.Errorf("report model = %q", rep.Target.Model)
 				}
 				var settings struct {
-					Model string `json:"model"`
-					Env   struct {
-						Home string `json:"QORY_HARNESS_HOME"`
-					} `json:"env"`
+					Model string         `json:"model"`
+					Env   map[string]any `json:"env"`
 				}
 				data, err := os.ReadFile(filepath.Join(root, ".qory", "harness", "claude", "settings.json"))
 				if err != nil {
@@ -199,8 +197,9 @@ func TestComposeFlags(t *testing.T) {
 				if settings.Model != "sonnet-9" {
 					t.Errorf("settings model = %q", settings.Model)
 				}
-				if settings.Env.Home != filepath.Join(root, ".qory", "harness") {
-					t.Errorf("settings QORY_HARNESS_HOME = %q", settings.Env.Home)
+				// The variables are the launch's, never the settings'.
+				if settings.Env != nil {
+					t.Errorf("settings env = %v, want none", settings.Env)
 				}
 			},
 		},

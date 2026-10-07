@@ -247,7 +247,7 @@ For Claude Code, the command passes:
 | Flag                          | What it carries                                                   |
 | ----------------------------- | ----------------------------------------------------------------- |
 | `--plugin-dir`                | a plugin the compose renders                                      |
-| `--settings`                  | the permissions, hooks, environment and model                     |
+| `--settings`                  | the permissions, hooks and model                                  |
 | `--mcp-config`                | the servers                                                       |
 | `--append-system-prompt-file` | the instructions                                                  |
 | `--setting-sources user`      | no `.claude` of the checkout, or of a directory above it, is read |
@@ -278,6 +278,16 @@ cd <checkout> && eval "$(qory harness launch --runtime claude)"
 - The line is the tool's own launch template: the program, the arguments that hand it the
   home's files, and the variables it takes them from. `${dir}` in a template is the
   tool's directory in the home.
+- The line also sets the harness's variables, through `env`. No settings file holds them:
+  - `QORY_HARNESS_HOME`, the home, comes first.
+  - Then the fixed ones: qory's own. These are the template's variables and what the
+    modules export, each a path in the home.
+  - Then the defaults: what an author wrote. These are `env` in `qory.yaml`, the `env` of
+    `harness.launch.<runtime>`, and the `env` a settings fragment sets: Claude Code's
+    `settings.json` `env` and Codex's `shell_environment_policy.set`.
+
+  `env` in `qory.yaml` over a module's export makes that variable a default.
+  `qory harness inspect` lists each variable with where it comes from.
 - A tool's flags may move. Then `harness.launch.<runtime>` in your `qory.yaml` changes
   the command, the arguments or the variables.
 - A group of arguments for a file the compose did not write is left out, such as
@@ -287,7 +297,7 @@ cd <checkout> && eval "$(qory harness launch --runtime claude)"
 - A tool that reads its harness from the checkout alone has no launch template.
   `qory harness launch` says so.
 
-`--json` prints the command, the arguments and the variables as one JSON object. It is
+`--json` prints the command, the arguments and all those variables as one JSON object. It is
 for a launcher that starts the program without a shell. Under `addresses`, it lists the
 name the session gives each composed agent, skill and command, per kind. A bound role is
 listed beside them, as the entry it is bound to.
@@ -379,7 +389,7 @@ kept. It holds:
 - `force` and `update`,
 - where a worktree goes, and what it is called,
 - the git timeout and cache,
-- environment variables.
+- environment variables, which every launch sets.
 
 The reference, one page per command, is under [commands](commands/qory.md).
 

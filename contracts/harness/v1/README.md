@@ -336,9 +336,9 @@ inspect` prints it beside the module. `name` is the module's identity: the stack
 contains the module at `modules/<name>`, and the report and every message use it. The
 directory the module is stored under is not consulted. `env` lists the variables the module exports, each the path of a file or directory inside
 the module, `.` for its root. The compose writes each as
-`$QORY_HARNESS_HOME/modules/<name>/<path>` and the runtimes with a place for environment
-get it there (§Runtimes), so a script the module ships reads its own location from the
-same variable wherever the home is. Two modules exporting one name with different values
+`$QORY_HARNESS_HOME/modules/<name>/<path>` and every launch sets it as the module's
+absolute path in the home, a fixed variable (§Launching), so a script the module ships
+reads its own location from the same variable wherever the home is. Two modules exporting one name with different values
 fail the compose unless the configuration's `env` sets it; `QORY_HARNESS_HOME` is qory's own.
 `requires`, optional, is one item per entry of the module that needs other entries
 composed beside it: the entry by its singular kind, `skill`, `agent`, `command`,
@@ -594,7 +594,7 @@ written after the runtimes' links, excluded, pruned when the stack drops it, and
 refused when it is a path a runtime links or `.qory`. With links off it is not
 written, and the compose reports it; a script that reaches the module through the
 environment the module exports, such as `HARNESS_HOME`, finds it wherever the home is, since
-the variable is written as the module's absolute path in the home. Hard, because the permission
+every launch sets the variable as the module's absolute path in the home. Hard, because the permission
 rules and scripts of the harness depend on that path: a file or a foreign link there
 fails the compose with status 4, and `--force` replaces it when git can restore it.
 `qory harness remove` takes every link at the checkout root into `modules/`, with or
@@ -617,20 +617,23 @@ so the hint is not lost.
 
 ## Runtimes
 
-| `target.runtime` | Program | Links in the checkout | Model written to | MCP servers written to | Environment written to | Files land in | Kinds with no place |
+| `target.runtime` | Program | Links in the checkout | Model written to | MCP servers written to | A fragment's variables, set in the launch | Files land in | Kinds with no place |
 |---|---|---|---|---|---|---|---|
-| `claude` | Claude Code | `.claude`, `.mcp.json` | `.claude/settings.json` `model` | `.mcp.json` `mcpServers` | `.claude/settings.json` `env` | `.claude/<path>` | none |
-| `codex` | Codex CLI | `.codex`, `.agents/skills`, `AGENTS.override.md` | `.codex/config.toml` `model` | `.codex/config.toml` `mcp_servers` | `.codex/config.toml` `shell_environment_policy.set` | `.codex/<path>` | commands, output-styles |
-| `gemini` | Gemini CLI | `.gemini`, `GEMINI.md` | `.gemini/settings.json` `model.name` | `.gemini/settings.json` `mcpServers` | not written | `.gemini/<path>` | output-styles |
-| `opencode` | OpenCode | `.opencode`, `.agents/skills`, `opencode.json`, `AGENTS.md` | `opencode.json` `model` | `opencode.json` `mcp`, in OpenCode's shape | not written | `.opencode/<path>` | output-styles |
-| `cursor` | Cursor, Cursor CLI | `.cursor`, `.agents/skills`, `AGENTS.md` | not written; a global CLI setting | `.cursor/mcp.json` `mcpServers` | not written | `.cursor/<path>` | commands, output-styles |
-| `copilot` | GitHub Copilot CLI | `.github/agents`, `.github/hooks`, `.agents/skills`, `AGENTS.md` | not written; a user setting | `copilot/mcp.json` `mcpServers`, for a launch (§Launching); not linked, a user file otherwise | not written | `.github/<path>`, one soft link per file | commands, output-styles |
-| `amp` | Amp | `.amp`, `.agents/skills`, `AGENTS.md` | not written; Amp picks by mode | `.amp/settings.json` `amp.mcpServers` | not written | `.amp/<path>` | agents, commands, output-styles |
-| `goose` | Goose | `.agents/skills`, `.agents/agents`, `AGENTS.md` | not written; no project file | not written; a user file | not written | nowhere | commands, output-styles, mcp, files |
-| `any` | any program that reads `AGENTS.md` and `.agents/skills` | `.agents/skills`, `AGENTS.md` | not written | not written | not written | nowhere | agents, commands, output-styles, hooks, mcp, files |
+| `claude` | Claude Code | `.claude`, `.mcp.json` | `.claude/settings.json` `model` | `.mcp.json` `mcpServers` | `settings/claude/settings.json` `env` | `.claude/<path>` | none |
+| `codex` | Codex CLI | `.codex`, `.agents/skills`, `AGENTS.override.md` | `.codex/config.toml` `model` | `.codex/config.toml` `mcp_servers` | `settings/codex/config.toml` `shell_environment_policy.set` | `.codex/<path>` | commands, output-styles |
+| `gemini` | Gemini CLI | `.gemini`, `GEMINI.md` | `.gemini/settings.json` `model.name` | `.gemini/settings.json` `mcpServers` | none | `.gemini/<path>` | output-styles |
+| `opencode` | OpenCode | `.opencode`, `.agents/skills`, `opencode.json`, `AGENTS.md` | `opencode.json` `model` | `opencode.json` `mcp`, in OpenCode's shape | none | `.opencode/<path>` | output-styles |
+| `cursor` | Cursor, Cursor CLI | `.cursor`, `.agents/skills`, `AGENTS.md` | not written; a global CLI setting | `.cursor/mcp.json` `mcpServers` | none | `.cursor/<path>` | commands, output-styles |
+| `copilot` | GitHub Copilot CLI | `.github/agents`, `.github/hooks`, `.agents/skills`, `AGENTS.md` | not written; a user setting | `copilot/mcp.json` `mcpServers`, for a launch (§Launching); not linked, a user file otherwise | none | `.github/<path>`, one soft link per file | commands, output-styles |
+| `amp` | Amp | `.amp`, `.agents/skills`, `AGENTS.md` | not written; Amp picks by mode | `.amp/settings.json` `amp.mcpServers` | none | `.amp/<path>` | agents, commands, output-styles |
+| `goose` | Goose | `.agents/skills`, `.agents/agents`, `AGENTS.md` | not written; no project file | not written; a user file | none; no launch | nowhere | commands, output-styles, mcp, files |
+| `any` | any program that reads `AGENTS.md` and `.agents/skills` | `.agents/skills`, `AGENTS.md` | not written | not written | none; no launch | nowhere | agents, commands, output-styles, hooks, mcp, files |
 
-The environment a runtime gets is the variables the modules export, the configuration's
-`env` over them, and `QORY_HARNESS_HOME` as the tree's absolute path over both.
+No file a runtime reads holds the harness's environment; the launch sets it (§Launching).
+The variables a runtime's settings fragments set, in the column above, come first, the
+variables the modules export over them, and the configuration's `env` over both.
+`QORY_HARNESS_HOME`, the tree's absolute path, is apart from all of them. A runtime without
+a launch, `goose` and `any`, gets none of them.
 
 A `files/<runtime>/<path>` entry may not use a path the runtime reserves under its
 directory, whatever stack composes it: the files qory writes, the directories a kind is
@@ -652,8 +655,8 @@ segment. The refusal lists the module, the entry and the reason, with status 2:
 
 Per runtime, the files written into its directory:
 
-- **claude**: links for every kind, `settings.json` with the environment under `env` and
-  the model, `mcp.json` with the servers, linked as `.mcp.json` at the checkout root, and the
+- **claude**: links for every kind, `settings.json` with the model and without `env`,
+  whose variables are the launch's, `mcp.json` with the servers, linked as `.mcp.json` at the checkout root, and the
   instructions written in full as `CLAUDE.md`. They are not imported from `AGENTS.md`,
   because Claude Code resolves a link to its real path and prompts about an import found
   through one on every start. `plugin/` is the launch spec, a plugin in Claude Code's
@@ -662,8 +665,10 @@ Per runtime, the files written into its directory:
   linked into the checkout, whose `.claude/CLAUDE.md` and `.claude/agents` register the
   bare names.
 - **codex**: `config.toml` with the model, the servers as `[mcp_servers.<name>]` tables,
-  the environment under `[shell_environment_policy.set]`, which Codex passes to every
-  command it runs, and any other `settings/codex/` file, one `agents/<name>.toml` per agent with the body as
+  and any other `settings/codex/` file, without `shell_environment_policy.set`, whose
+  variables are the launch's; Codex passes its own environment to every command it
+  runs, and by default filters no name, `*KEY*`, `*SECRET*` and `*TOKEN*` included, unless
+  a fragment's `shell_environment_policy` says otherwise, one `agents/<name>.toml` per agent with the body as
   `developer_instructions`, and for a launch the skills linked under `skills/` and the
   instructions as `AGENTS.md`, neither linked into the checkout (§Launching). Codex reads
   `AGENTS.override.md` before `AGENTS.md`, and a project `.codex` only in a trusted
@@ -701,7 +706,7 @@ checkout does not link to. `qory harness launch --runtime <name>` prints the com
 that starts the program on the composed home, on one line quoted for a POSIX shell, so
 a launcher runs it as it is and depends on nothing of the home's layout; `--json` prints the
 same as one object, `{command, args, env, addresses}`, for a launcher that spawns without
-a shell:
+a shell, `env` holding every variable the line sets:
 
 ```sh
 cd <checkout> && eval "$(qory harness launch --runtime claude)"
@@ -732,6 +737,20 @@ that refers to a file under either placeholder that the compose did not write, s
 `mcp.json` without a server, is left out whole, and so is a variable; the placeholder and
 what follows it to the end of the word is the file, so `@${dir}/mcp.json` refers to
 `mcp.json`.
+
+The line sets the launch's environment through `env`, in three parts with no name in two:
+
+1. `QORY_HARNESS_HOME`, the home's absolute path.
+2. The fixed variables, qory's own: the variables of the runtime's own template, and what
+   the modules export, each the module's path in the home.
+3. The defaults, what an author wrote: the configuration's `env`, the `env` of
+   `harness.launch.<runtime>`, which stands in for the template's whole and is a default
+   with its placeholders replaced, and the variables a settings fragment sets (§Runtimes).
+
+The harness's variables layer over the template's: a fragment's, then the modules' over
+them, then the configuration's over both. Each is then fixed or a default by where its
+value came from, so a variable the configuration sets over a module's export is a default.
+`qory run` passes the same environment to the runner.
 The plugin and the directories below are rendered on every compose, with links or
 without, so `launch` works on a home inside the checkout too, and none of them is linked
 into the checkout. A runtime without a template reads its harness from the checkout
@@ -740,7 +759,7 @@ reports it with status 2: `goose` and `any`.
 
 | `target.runtime` | Template | Rendered for it under the runtime's directory | Reaches the session from outside | Read from the checkout alone |
 |---|---|---|---|---|
-| `claude` | `claude --plugin-dir ${dir}/plugin --settings ${dir}/settings.json --mcp-config ${dir}/mcp.json --append-system-prompt-file ${dir}/launch/CLAUDE.md --setting-sources user` | `plugin/`, a plugin in Claude Code's layout: the skills and commands linked, or written where a document contains a reference, the agents copied, since Claude Code passes over a link in a plugin's `agents/` where it follows one everywhere else, the output styles under `output-styles/` with the manifest's `outputStyles` pointing there, `.claude-plugin/plugin.json` setting its name to `harness`, so a skill is `/harness:<name>` and an agent `harness:<name>`, and every reference in the plugin resolves to that name; `launch/CLAUDE.md`, the instructions with their references resolved the same way and, after them, the names the session registers, per kind, with each bound role | everything: the plugin, the permissions, hooks, environment and model in `settings.json`, the servers, the instructions appended to the system prompt; `--setting-sources user` keeps every `.claude` of the checkout and of the directories above it out | nothing |
+| `claude` | `claude --plugin-dir ${dir}/plugin --settings ${dir}/settings.json --mcp-config ${dir}/mcp.json --append-system-prompt-file ${dir}/launch/CLAUDE.md --setting-sources user` | `plugin/`, a plugin in Claude Code's layout: the skills and commands linked, or written where a document contains a reference, the agents copied, since Claude Code passes over a link in a plugin's `agents/` where it follows one everywhere else, the output styles under `output-styles/` with the manifest's `outputStyles` pointing there, `.claude-plugin/plugin.json` setting its name to `harness`, so a skill is `/harness:<name>` and an agent `harness:<name>`, and every reference in the plugin resolves to that name; `launch/CLAUDE.md`, the instructions with their references resolved the same way and, after them, the names the session registers, per kind, with each bound role | everything: the plugin, the permissions, hooks and model in `settings.json`, the environment the line sets, the servers, the instructions appended to the system prompt; `--setting-sources user` keeps every `.claude` of the checkout and of the directories above it out | nothing |
 | `cursor` | `cursor-agent --plugin-dir ${dir}/plugin` | `plugin/`, the same layout under `.cursor-plugin/plugin.json`, with the agents in Cursor's shape, a copy of `hooks.json` as `hooks/hooks.json` and of `mcp.json` as `.mcp.json`, since the CLI takes no settings file | the skills, agents, hooks and servers | the instructions, `AGENTS.md` |
 | `copilot` | `copilot --add-dir ${dir}/workspace --additional-mcp-config @${dir}/mcp.json` | `workspace/.github/skills` linked and `workspace/.github/agents` written, which `--add-dir` loads as trusted configuration, and `mcp.json` with the servers under `mcpServers`, so the MCP kind has a place in copilot | the skills, agents and servers | the hooks and the instructions |
 | `codex` | `env CODEX_HOME=${dir} codex` | `skills/` linked and the instructions as `AGENTS.md`, ending with the names the session registers, which a Codex home registers as the modules wrote them, beside `config.toml` and the agents, so the directory is a Codex home | everything | nothing; Codex keeps its login in the same home, `auth.json`, so a launcher authenticates through `OPENAI_API_KEY` or puts `auth.json` there |
@@ -760,7 +779,9 @@ program's flags differ from its template, set `harness.launch` to replace the te
 checkout, `version` 1: the stack name and file, the target, the checkout, the home,
 `links: none` when the compose wrote nothing into the checkout, the modules, the entries with their module, the excludes, the checkout
 paths a `--force` compose replaced, the `env` the harness exports with
-`$QORY_HARNESS_HOME` in place of the home, and the stack's `extensions` as written. The
+`$QORY_HARNESS_HOME` in place of the home, `launch_env`, per runtime with a launch, every
+variable the harness sets in it, `{name, value, from, fixed}`, `from` being `module
+<name>`, `module <name>, settings/<runtime>/<file>` or `configuration`, and the stack's `extensions` as written. The
 target's `runtime` is always an array: the runtimes the home contains after the compose,
 the targeted ones first. A module has its `name`, its `source` as the stack writes it,
 its `pin`, `dirty` when git saw uncommitted changes under a path source, the `variant`
@@ -834,7 +855,7 @@ git:
   timeout: 10m                   # the longest one git command may run
   cache: /var/cache/qory         # where git sources are fetched to
 env:
-  HARNESS_PROFILE: nextjs        # exported to every runtime with a place for it
+  HARNESS_PROFILE: nextjs        # set in every launch, a default
 exports:                         # in a repository delivering stacks or modules (§Exports)
   dir: ./harness                 # where stacks/ and modules/ are; default: the root
   stacks: [nextjs-15]            # harness/stacks/nextjs-15/qory-stack.yaml
@@ -864,7 +885,7 @@ exports:                         # in a repository delivering stacks or modules 
 | `worktree.run.remove` | none | commands run in a worktree before it is removed, in order, with the same variables set |
 | `git.timeout` | `10m` | a git command running past it is stopped and the compose fails; the fetch a worktree add starts with is bounded by it too |
 | `git.cache` | the user's cache directory, `qory/sources` under `~/Library/Caches`, `$XDG_CACHE_HOME` or `~/.cache` | absolute, or relative to the file that sets it |
-| `env` | none | variables written over what the modules export; a name two modules export with different values needs one here |
+| `env` | none | variables every launch sets, over what the modules export and what a settings fragment sets, each a default (§Launching); a name two modules export with different values needs one here |
 | `exports.dir` | the repository root | where the exported stacks and modules are: one directory containing `stacks/` and `modules/`, or `{stacks: <dir>, modules: <dir>}` setting each; relative to the root, inside the repository. Read at the repository root alone |
 | `exports.stacks`, `exports.modules` | none | the names the repository publishes, each one directory under the stacks or modules directory containing its document; a consumer selects them with `stack` and `module` (§Exports) |
 
@@ -925,7 +946,7 @@ wall:                            # the container the runtime starts in; absent: 
 | `wall.adapter` | none | `docker`, the one there is. With it set, every `qory run` starts the runtime in a container with no route out except to the runner's proxy; `--wall none` runs once without it, `--wall docker` once with it |
 | `wall.image` | none | the container's image when the run's policy selects none, which contains the runtime and the project's toolchain: the name of one of `wall.images`, or a reference. A name `wall.images` defines is read as that image first; `--image` sets another for one run, read the same way, and a policy's selection wins over both. qory builds none, and a wall without an image is refused unless the run's own `--policy` selects one; a machine that reports to a server sets it, because the server's run configuration arrives once the run starts and may select none |
 | `wall.images.<name>` | none | an image this machine defines, which a run's policy selects by its name, `image: <name>`, the runner contract's §Images. The name is in a credential's grammar. `ref`, required, is the reference, pinned by digest where the machine wants the same image every time; `runtime` is the container runtime the wall starts it under, one the engine has, such as `sysbox-runc`, the engine's default when absent; `docker: true`, experimental, gives the agent a Docker daemon of its own inside the container, which the helper starts before the agent, and needs a `runtime` that runs one without privileges. A `--policy` that selects a name the section does not define, or selects one for a run without a wall, is refused before the run; every command that reads the file refuses `docker: true` without a `runtime`. `qory config` shows whether `wall.image` is a name of this section or a reference. Define an image with `docker: true` only where every run may get one: any policy can select it |
-| `wall.env` | none | names of variables of `qory run`'s environment that go into the container, such as the model credential, with `--env` adding to them. The launch template's variables go in; nothing else of the environment does. A name with no value here is left out |
+| `wall.env` | none | names of variables of `qory run`'s environment that go into the container, such as the model credential, with `--env` adding to them. The launch's variables go in, but for `QORY_HARNESS_HOME`, which the runner refuses to pass into a container; nothing else of the environment does. A name with no value here is left out |
 | `wall.command` | `docker` | the program the adapter runs, such as `podman`, supported where the runner's conformance suite passes |
 | `wall.user` | `qory run`'s own | the `uid:gid` the container runs as. Root is refused, so a machine where qory runs as root sets another, one that can write the checkout |
 | `wall.mounts` | none | what the container sees of the machine beside the checkout and the composed home, each at its own path: an absolute path, with `:ro` after it for one the container cannot change; `--mount` adds to them. A socket, or a directory containing a container runtime's, is refused |

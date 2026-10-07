@@ -25,7 +25,8 @@
 //
 // A runtime that is a [Launcher] also renders a launch spec into its directory, what
 // its program takes from outside the checkout, and [Launch] lists the arguments that
-// start the program on it; that is how a home the checkout does not link to is read.
+// start the program on it, with the variables the harness sets, see [LaunchEnv]; that is
+// how a home the checkout does not link to is read.
 //
 // # The links
 //

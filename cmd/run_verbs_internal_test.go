@@ -42,3 +42,17 @@ func TestNoRuntimeIsNamedAfterAVerbTheWallRuns(t *testing.T) {
 		}
 	}
 }
+
+// TestLaunchSpecLeavesTheHomeOutBehindAWall is the launch's environment as the runner
+// takes it until it reads the home on its own: QORY_HARNESS_HOME, then the fixed
+// variables, then the defaults; behind a wall, where the runner refuses a QORY_ variable,
+// the fixed ones and the defaults alone.
+func TestLaunchSpecLeavesTheHomeOutBehindAWall(t *testing.T) {
+	l := render.Launch{HarnessHome: "/work/home", Fixed: []string{"CODEX_HOME=/work/home/codex"}, Defaults: []string{"PROFILE=nextjs"}}
+	if got, want := launchSpec(l, false), []string{"QORY_HARNESS_HOME=/work/home", "CODEX_HOME=/work/home/codex", "PROFILE=nextjs"}; !slices.Equal(got, want) {
+		t.Errorf("launchSpec unwalled %q, want %q", got, want)
+	}
+	if got, want := launchSpec(l, true), []string{"CODEX_HOME=/work/home/codex", "PROFILE=nextjs"}; !slices.Equal(got, want) {
+		t.Errorf("launchSpec walled %q, want %q", got, want)
+	}
+}

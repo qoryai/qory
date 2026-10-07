@@ -99,18 +99,19 @@ func TestComposeOutsideTheCheckoutLeavesItUntouched(t *testing.T) {
 	wants(t, string(manifest), `"name": "harness"`, `"outputStyles": "./output-styles"`)
 
 	// The launch line names the home's files by absolute path and cuts the setting
-	// sources to the user's.
+	// sources to the user's. Its variables are the home and the fragments' A and B,
+	// which the settings do not hold.
 	out, err = run(t, "harness", "launch", "--runtime", "claude", "--home", homes)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	claude := filepath.Join(home, "claude")
-	want := strings.Join([]string{"claude", "--plugin-dir", filepath.Join(claude, "plugin"), "--settings", filepath.Join(claude, "settings.json"), "--mcp-config", filepath.Join(claude, "mcp.json"), "--append-system-prompt-file", filepath.Join(claude, "launch", "CLAUDE.md"), "--setting-sources", "user"}, " ")
+	want := strings.Join([]string{"env", "QORY_HARNESS_HOME=" + home, "A=core", "B=1", "claude", "--plugin-dir", filepath.Join(claude, "plugin"), "--settings", filepath.Join(claude, "settings.json"), "--mcp-config", filepath.Join(claude, "mcp.json"), "--append-system-prompt-file", filepath.Join(claude, "launch", "CLAUDE.md"), "--setting-sources", "user"}, " ")
 	if strings.TrimSpace(out) != want {
 		t.Errorf("launch printed\n%s\nwant\n%s", out, want)
 	}
-	// The settings carry the hook by its path in the home, and it runs from there,
-	// with the module environment rendered for the home.
+	// The settings carry the hook by its path in the home, and it runs from there; the
+	// environment is the launch's, not theirs.
 	var settings struct {
 		Env   map[string]string `json:"env"`
 		Hooks map[string][]struct {
@@ -124,8 +125,8 @@ func TestComposeOutsideTheCheckoutLeavesItUntouched(t *testing.T) {
 	if err := json.Unmarshal(data, &settings); err != nil {
 		t.Fatal(err)
 	}
-	if settings.Env["QORY_HARNESS_HOME"] != home {
-		t.Errorf("QORY_HARNESS_HOME = %q, want %q", settings.Env["QORY_HARNESS_HOME"], home)
+	if settings.Env != nil {
+		t.Errorf("settings env = %v, want none", settings.Env)
 	}
 	command := settings.Hooks["PreToolUse"][0].Hooks[0].Command
 	if command != filepath.Join(home, "hooks", "guard.sh") {
@@ -388,14 +389,16 @@ func TestLaunchPerRuntime(t *testing.T) {
 	}
 	home := filepath.Join(root, ".qory", "harness")
 	dir := func(rt string) string { return filepath.Join(home, rt) }
+	// Every line starts with the home; claude's carries its fragments' A and B.
+	at := "env QORY_HARNESS_HOME=" + home + " "
 	lines := map[string]string{
-		"claude":   "claude --plugin-dir " + dir("claude") + "/plugin --settings " + dir("claude") + "/settings.json --mcp-config " + dir("claude") + "/mcp.json --append-system-prompt-file " + dir("claude") + "/launch/CLAUDE.md --setting-sources user",
-		"codex":    "env CODEX_HOME=" + dir("codex") + " codex",
-		"opencode": "env OPENCODE_CONFIG_DIR=" + dir("opencode") + " opencode",
-		"amp":      "amp --settings-file " + dir("amp") + "/settings.json",
-		"gemini":   "env GEMINI_CLI_SYSTEM_SETTINGS_PATH=" + dir("gemini") + "/settings.json gemini",
-		"cursor":   "cursor-agent --plugin-dir " + dir("cursor") + "/plugin",
-		"copilot":  "copilot --add-dir " + dir("copilot") + "/workspace --additional-mcp-config @" + dir("copilot") + "/mcp.json",
+		"claude":   at + "A=core B=1 claude --plugin-dir " + dir("claude") + "/plugin --settings " + dir("claude") + "/settings.json --mcp-config " + dir("claude") + "/mcp.json --append-system-prompt-file " + dir("claude") + "/launch/CLAUDE.md --setting-sources user",
+		"codex":    at + "CODEX_HOME=" + dir("codex") + " codex",
+		"opencode": at + "OPENCODE_CONFIG_DIR=" + dir("opencode") + " opencode",
+		"amp":      at + "amp --settings-file " + dir("amp") + "/settings.json",
+		"gemini":   at + "GEMINI_CLI_SYSTEM_SETTINGS_PATH=" + dir("gemini") + "/settings.json gemini",
+		"cursor":   at + "cursor-agent --plugin-dir " + dir("cursor") + "/plugin",
+		"copilot":  at + "copilot --add-dir " + dir("copilot") + "/workspace --additional-mcp-config @" + dir("copilot") + "/mcp.json",
 	}
 	for rt, want := range lines {
 		out, err := run(t, "harness", "launch", "--runtime", rt)
@@ -438,7 +441,7 @@ func TestLaunchPerRuntime(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("%v:\n%s", err, out)
 	}
-	if got.Command != "codex" || got.Args == nil || len(got.Args) != 0 || got.Env["CODEX_HOME"] != dir("codex") {
+	if got.Command != "codex" || got.Args == nil || len(got.Args) != 0 || got.Env["CODEX_HOME"] != dir("codex") || got.Env["QORY_HARNESS_HOME"] != home || len(got.Env) != 2 {
 		t.Errorf("--json printed %+v", got)
 	}
 }
@@ -471,14 +474,14 @@ harness:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := strings.TrimSpace(out), "/opt/claude/bin/claude --plugin-dir "+home+"/claude/plugin --verbose"; got != want {
+	if got, want := strings.TrimSpace(out), "env QORY_HARNESS_HOME="+home+" A=core B=1 /opt/claude/bin/claude --plugin-dir "+home+"/claude/plugin --verbose"; got != want {
 		t.Errorf("launch printed\n%s\nwant\n%s", got, want)
 	}
 	out, err = run(t, "harness", "launch", "--runtime", "codex")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := strings.TrimSpace(out), "env CODEX_HOME="+home+" 'OPENAI_API_KEY=it'\\''s secret' codex"; got != want {
+	if got, want := strings.TrimSpace(out), "env QORY_HARNESS_HOME="+home+" CODEX_HOME="+home+" 'OPENAI_API_KEY=it'\\''s secret' codex"; got != want {
 		t.Errorf("launch printed\n%s\nwant\n%s", got, want)
 	}
 	out, err = run(t, "config")
@@ -575,4 +578,71 @@ func TestLaunchPrintsTheRegisteredNames(t *testing.T) {
 		t.Fatalf("--address commands/ship for codex printed %q; want a refusal, codex has no commands", out)
 	}
 	wants(t, err.Error(), "commands/ship is not an agent, skill, command or bound role the harness is composed with for codex")
+}
+
+// TestLaunchCarriesTheHarnessEnv is codex composed on a module exporting CORE_SCRIPTS and
+// a qory.yaml setting SERVICE_TOKEN over a module export of the same name: the launch line
+// and --json carry QORY_HARNESS_HOME, then the fixed CODEX_HOME and CORE_SCRIPTS, then the
+// default SERVICE_TOKEN, config.toml holds none of them, and the report records each with
+// where it comes from.
+func TestLaunchCarriesTheHarnessEnv(t *testing.T) {
+	root := newCheckout(t)
+	writeFile(t, filepath.Join(root, "modules", "core", "qory-module.yaml"), "apiVersion: qory.dev/v1alpha1\nname: core\nenv:\n  CORE_SCRIPTS: scripts\n  SERVICE_TOKEN: .\n")
+	writeFile(t, filepath.Join(root, "modules", "core", "scripts", "run.sh"), "#!/bin/sh\n")
+	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.dev/v1alpha1\nharness:\n  target:\n    runtime: codex\n  modules:\n    - name: core\n      source: {path: modules/core}\nenv:\n  SERVICE_TOKEN: example-token\n")
+	if out, err := run(t, "harness", "compose", "--no-links"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	home := filepath.Join(root, ".qory", "harness")
+	out, err := run(t, "harness", "launch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "env QORY_HARNESS_HOME=" + home + " CODEX_HOME=" + home + "/codex CORE_SCRIPTS=" + home + "/modules/core/scripts SERVICE_TOKEN=example-token codex"
+	if got := strings.TrimSpace(out); got != want {
+		t.Errorf("launch printed\n%s\nwant\n%s", got, want)
+	}
+	out, err = run(t, "harness", "launch", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Env map[string]string `json:"env"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("%v:\n%s", err, out)
+	}
+	wantEnv := map[string]string{"QORY_HARNESS_HOME": home, "CODEX_HOME": home + "/codex", "CORE_SCRIPTS": home + "/modules/core/scripts", "SERVICE_TOKEN": "example-token"}
+	if !maps.Equal(got.Env, wantEnv) {
+		t.Errorf("--json env %v, want %v", got.Env, wantEnv)
+	}
+	data, err := os.ReadFile(filepath.Join(home, "codex", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lacks(t, string(data), "shell_environment_policy", "QORY_HARNESS_HOME", "CORE_SCRIPTS", "SERVICE_TOKEN")
+	rep, err := report.Read(filepath.Join(root, ".qory", "harness-report.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantVars := []report.Var{
+		{Name: "CORE_SCRIPTS", Value: "$QORY_HARNESS_HOME/modules/core/scripts", From: "module core", Fixed: true},
+		{Name: "SERVICE_TOKEN", Value: "example-token", From: "configuration"},
+	}
+	if !reflect.DeepEqual(rep.LaunchEnv["codex"], wantVars) {
+		t.Errorf("report launch_env %+v, want %+v", rep.LaunchEnv, wantVars)
+	}
+	out, err = run(t, "harness", "inspect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		if f := strings.Fields(line); len(f) > 0 {
+			rows[f[0]] = strings.Join(f[1:], " ")
+		}
+	}
+	if rows["CORE_SCRIPTS"] != "$QORY_HARNESS_HOME/modules/core/scripts fixed, module core" || rows["SERVICE_TOKEN"] != "example-token default, configuration" {
+		t.Errorf("inspect's env rows:\n%s", out)
+	}
 }

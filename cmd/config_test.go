@@ -70,7 +70,9 @@ func TestConfigRefusesAMistake(t *testing.T) {
 
 // TestComposeReadsTheConfiguration is a qory.yaml naming codex as the runtime and
 // exporting a variable, on a stack that targets claude: the compose renders for codex,
-// the variable lands in config.toml, and --runtime on the command line still wins.
+// the variable is the launch's, a default, and config.toml holds no variable, and
+// --runtime on the command line still wins, with the same for Claude Code's
+// settings.json.
 func TestComposeReadsTheConfiguration(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -85,7 +87,12 @@ func TestComposeReadsTheConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, string(data), "[shell_environment_policy.set]", `HARNESS_PROFILE = "nextjs"`, "QORY_HARNESS_HOME = ")
+	lacks(t, string(data), "shell_environment_policy", "HARNESS_PROFILE", "QORY_HARNESS_HOME")
+	out, err = run(t, "harness", "launch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants(t, out, "HARNESS_PROFILE=nextjs", "QORY_HARNESS_HOME=")
 	out, err = run(t, "harness", "compose", "--runtime", "claude")
 	if err != nil {
 		t.Fatal(err)
@@ -95,5 +102,10 @@ func TestComposeReadsTheConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, string(data), `"HARNESS_PROFILE": "nextjs"`)
+	lacks(t, string(data), `"env"`, "HARNESS_PROFILE", "QORY_HARNESS_HOME")
+	out, err = run(t, "harness", "launch", "--runtime", "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants(t, out, "HARNESS_PROFILE=nextjs", "A=core", "B=1")
 }

@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -117,6 +118,10 @@ type Result struct {
 	// export, as $QORY_HARNESS_HOME/modules/<name>/<path>, and the configuration's
 	// variables over them. [Result.EnvFor] renders it for a home.
 	Env map[string]string
+	// Exported is, for each name in Env whose value a module's manifest exports, that
+	// module. A name the configuration sets is not in it, since its value is the
+	// configuration's.
+	Exported map[string]string
 	// Base is the stack the checkout's qory.yaml extends, nil for a stack that extends
 	// none.
 	Base *Base
@@ -160,7 +165,7 @@ func Compose(p *stack.Stack) (*Result, error) { return ComposeWith(p, Options{})
 // be fetched a [*source.FetchError]. The package comment has the order of the rules and
 // the merge semantics.
 func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
-	res := &Result{Stack: p, Base: opts.Base, Settings: map[string]map[string]map[string]any{}, MCP: map[string]map[string]any{}, Env: map[string]string{}, setBy: map[string]string{}}
+	res := &Result{Stack: p, Base: opts.Base, Settings: map[string]map[string]map[string]any{}, MCP: map[string]map[string]any{}, Env: map[string]string{}, Exported: map[string]string{}, setBy: map[string]string{}}
 	if len(p.Bind) > 0 {
 		res.Bind = map[string]string{}
 		for role, to := range p.Bind {
@@ -320,6 +325,7 @@ func exportEnv(res *Result, exporters map[string]string, module string, env, dec
 		}
 		exporters[name] = module
 		res.Env[name] = value
+		res.Exported[name] = module
 	}
 	return nil
 }
@@ -333,6 +339,82 @@ func (r *Result) EnvFor(home string) map[string]string {
 		out[name] = ForHome(value, home).(string)
 	}
 	return out
+}
+
+// Var is one variable the harness sets when a runtime's program starts, beside the
+// variables of the runtime's launch template and QORY_HARNESS_HOME.
+type Var struct {
+	// Name is the variable's name.
+	Name string
+	// Value is the value with every $QORY_HARNESS_HOME as written, before substitution.
+	Value string
+	// From is where the value comes from: "module <name>" for a variable the module's
+	// manifest exports, "module <name>, settings/<runtime>/<file>" for one a settings
+	// fragment of the module sets, and "configuration" for the configuration's env.
+	From string
+	// Fixed says the value is qory's own computation, a path a module's export names in
+	// the home. Every other value is one an author wrote, a default.
+	Fixed bool
+}
+
+// LaunchEnv is the variables the harness sets when the runtime's program starts, sorted
+// by name. They layer the way the environment always has: the variables the runtime's
+// settings fragments set under the key path in file, then what the modules export over
+// them, then the configuration's env over both. A runtime whose settings have no place for
+// variables passes file as "". Each variable is then fixed or a default by where its value
+// came from: a module's export is fixed, a fragment's or the configuration's value is a
+// default. QORY_HARNESS_HOME is qory's own and never one of them. A fragment's value that
+// is not a string, a number or a boolean is an error, since a variable holds text.
+func (r *Result) LaunchEnv(runtime, file string, path ...string) ([]Var, error) {
+	vars := map[string]Var{}
+	if file != "" {
+		prefix := "settings/" + runtime + "/" + file
+		key := strings.Join(path, ".")
+		var at any = r.Settings[runtime][file]
+		for _, k := range path {
+			m, _ := at.(map[string]any)
+			at = m[k]
+		}
+		env, _ := at.(map[string]any)
+		for _, name := range sortedKeys(env) {
+			if name == "QORY_HARNESS_HOME" {
+				continue
+			}
+			value, err := envValue(env[name])
+			if err != nil {
+				return nil, fmt.Errorf("%s: %s.%s %w", prefix, key, name, err)
+			}
+			vars[name] = Var{Name: name, Value: value, From: "module " + r.setBy[prefix+"/"+key+"."+name] + ", " + prefix}
+		}
+	}
+	for name, value := range r.Env {
+		v := Var{Name: name, Value: value, From: "configuration"}
+		if module, ok := r.Exported[name]; ok {
+			v.From, v.Fixed = "module "+module, true
+		}
+		vars[name] = v
+	}
+	out := make([]Var, 0, len(vars))
+	for _, name := range sortedKeys(vars) {
+		out = append(out, vars[name])
+	}
+	return out, nil
+}
+
+// envValue is a settings value as a variable's text: a string as it is, a number and a
+// boolean as they print.
+func envValue(v any) (string, error) {
+	switch v := v.(type) {
+	case string:
+		return v, nil
+	case bool:
+		return strconv.FormatBool(v), nil
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64), nil
+	case int64:
+		return strconv.FormatInt(v, 10), nil
+	}
+	return "", fmt.Errorf("is not a string, a number or a boolean; a variable's value is text")
 }
 
 // selectVariant picks the one variant of a module that serves every targeted runtime.

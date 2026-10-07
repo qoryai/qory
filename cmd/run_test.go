@@ -224,6 +224,7 @@ func fakeRuntime(t *testing.T) string {
 	script := filepath.Join(t.TempDir(), "fake-runtime")
 	writeFile(t, script, `#!/bin/sh
 echo "hello from $QORY_RUN_ID with $*"
+echo "harness $QORY_HARNESS_HOME A=$A"
 test -n "$HTTP_PROXY" || exit 9
 test -n "$QORY_RUN_SOCKET" || exit 8
 exit ${QORY_TEST_EXIT:-3}
@@ -285,7 +286,7 @@ func events(t *testing.T, root string) (string, map[string][]map[string]any) {
 
 // TestRunRecordsTheSession runs the composed runtime through the runner: the launch
 // spec is the template with the configuration over it plus the arguments after --, the
-// runtime sees the proxy and the socket, the policy in the configuration directory is
+// runtime sees the proxy, the socket and the launch's variables, the policy in the configuration directory is
 // applied, the hooks are installed into a copy of the composed settings, the record is
 // written under .qory/runs, and the exit status is the runtime's, reported once.
 func TestRunRecordsTheSession(t *testing.T) {
@@ -299,6 +300,9 @@ func TestRunRecordsTheSession(t *testing.T) {
 		t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
 	wants(t, out, "hello from ", " with --settings ", " --extra one", "claude exited 3; recorded in .qory/runs/")
+	// The launch's variables reach the runtime: the home, and the fragment's A, which the
+	// settings do not hold.
+	wants(t, out, "harness "+filepath.Join(root, ".qory", "harness")+" A=core")
 	dir, evs := events(t, root)
 	started := evs["dev.qory.run.started"]
 	if len(started) != 1 || started[0]["command"] != script || started[0]["interactive"] != false {
@@ -327,7 +331,8 @@ func TestRunRecordsTheSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	exe, _ := os.Executable()
-	wants(t, string(settings), "QORY_HARNESS_HOME", exe+" run forward", "SessionEnd")
+	wants(t, string(settings), exe+" run forward", "SessionEnd")
+	lacks(t, string(settings), "QORY_HARNESS_HOME", `"env"`)
 	if !strings.Contains(string(settings), "\"timeout\"") {
 		t.Error("the hook has no timeout")
 	}

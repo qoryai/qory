@@ -113,6 +113,27 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- The harness's environment is the launch's, and no file a runtime reads holds it.
+  Claude Code's `settings.json` has no `env`, and Codex's `config.toml` no
+  `shell_environment_policy.set`. `qory harness launch` sets every variable through
+  `env`, and `--json` lists them all under `env`:
+  - `QORY_HARNESS_HOME`, the home, first.
+  - Then the fixed variables, qory's own: the launch template's, and what the modules
+    export.
+  - Then the defaults, what an author wrote: `env` in `qory.yaml`, the `env` of
+    `harness.launch.<runtime>`, and the `env` a settings fragment sets, Claude Code's
+    `settings.json` `env` or Codex's `shell_environment_policy.set`.
+
+  The variables layer as before: a fragment's, the modules' exports over them, `qory.yaml`
+  over both. A variable `qory.yaml` sets over a module's export is a default. Every
+  runtime with a launch template gets them, Gemini CLI, OpenCode, Cursor, Copilot and Amp
+  too; `goose` and `any` have no launch and get none. Codex passes its environment to
+  every command it runs and, by default, filters no name, `*KEY*`, `*SECRET*` and
+  `*TOKEN*` included. The report records them per runtime under `launch_env`, each with
+  its value, where it comes from and whether it is fixed, and `qory harness inspect`
+  lists them with fixed or default and their source. `qory run` passes them to the
+  runner; behind a wall it leaves out `QORY_HARNESS_HOME`, which the runner refuses to
+  pass into a container.
 - qory builds against `github.com/qoryai/runner` at commit `4176ff4` of its `next`,
   `v0.6.1-0.20261006224758-4176ff4da645`, contract `v1` revision 1 as amended there.
   `runner.yaml`'s `egress` narrows the `security_policy` of a server's run

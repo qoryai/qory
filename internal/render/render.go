@@ -150,27 +150,91 @@ type Template struct {
 	Env map[string]string
 }
 
-// Launch is a [Template] resolved against a home: what starts the program.
+// EnvSetter is a runtime whose program reads environment variables from a settings
+// file. The variables a settings fragment sets there are the launch's, a default each,
+// see [compose.Result.LaunchEnv], and the runtime writes them nowhere in the file.
+type EnvSetter interface {
+	// EnvAt is the target file and the key path under which a fragment sets variables.
+	EnvAt() (file string, path []string)
+}
+
+// LaunchEnv is the variables the harness sets when the runtime's program starts, beside
+// the launch template's and QORY_HARNESS_HOME, see [compose.Result.LaunchEnv]. A runtime
+// without a launch template gets none.
+func LaunchEnv(res *compose.Result, p Runtime) ([]compose.Var, error) {
+	if _, ok := p.(Launcher); !ok {
+		return nil, nil
+	}
+	var file string
+	var path []string
+	if s, ok := p.(EnvSetter); ok {
+		file, path = s.EnvAt()
+	}
+	return res.LaunchEnv(p.Name(), file, path...)
+}
+
+// DropEnv removes the key path where a fragment sets variables from a settings map, and
+// each map on the way that is empty after it, so the file a runtime writes holds no
+// variable of the harness.
+func DropEnv(m map[string]any, path []string) {
+	if len(path) == 0 {
+		return
+	}
+	if len(path) == 1 {
+		delete(m, path[0])
+		return
+	}
+	sub, ok := m[path[0]].(map[string]any)
+	if !ok {
+		return
+	}
+	DropEnv(sub, path[1:])
+	if len(sub) == 0 {
+		delete(m, path[0])
+	}
+}
+
+// Launch is a [Template] resolved against a home: what starts the program. Its
+// environment is QORY_HARNESS_HOME, Fixed and Defaults, three sets with no name in two.
 type Launch struct {
 	// Command is the program.
 	Command string
 	// Args are the arguments, every placeholder replaced and every group containing a
 	// missing path left out.
 	Args []string
-	// Env are the variables to set, nil when there are none.
-	Env map[string]string
+	// HarnessHome is the home, which the program gets as QORY_HARNESS_HOME.
+	HarnessHome string
+	// Fixed are the variables whose values are qory's own computations, NAME=value sorted
+	// by name: the runtime's own template's, and what the modules export.
+	Fixed []string
+	// Defaults are the variables whose values an author wrote, NAME=value sorted by name:
+	// the configuration's env, the env of harness.launch, and what a settings fragment
+	// sets. A placeholder in one is replaced and leaves it a default.
+	Defaults []string
+}
+
+// Env is the launch's whole environment, NAME=value: QORY_HARNESS_HOME first, then the
+// fixed variables, then the defaults.
+func (l Launch) Env() []string {
+	out := []string{"QORY_HARNESS_HOME=" + l.HarnessHome}
+	out = append(out, l.Fixed...)
+	return append(out, l.Defaults...)
 }
 
 // LaunchFor resolves the runtime's launch template against home: the runtime's own, with
-// every field the override sets in its place. A runtime without a template is an error
-// stating that its program reads the harness from the checkout alone, through the links
-// a compose writes there.
-func LaunchFor(p Runtime, home string, override *Template) (Launch, error) {
+// every field the override sets in its place, and its environment with the harness's
+// variables, harness, over the template's. A template variable is fixed when it is the
+// runtime's own and a default when the override's env replaced the runtime's; a harness
+// variable is fixed or a default as [compose.Var.Fixed] says. A runtime without a
+// template is an error stating that its program reads the harness from the checkout
+// alone, through the links a compose writes there.
+func LaunchFor(p Runtime, home string, override *Template, harness []compose.Var) (Launch, error) {
 	l, ok := p.(Launcher)
 	if !ok {
 		return Launch{}, fmt.Errorf("%s reads its harness from the checkout alone, through the links a compose with harness.links: checkout writes; qory renders no launch spec for it", p.Name())
 	}
 	t := l.Template()
+	own := true
 	if override != nil {
 		if override.Command != "" {
 			t.Command = override.Command
@@ -180,25 +244,35 @@ func LaunchFor(p Runtime, home string, override *Template) (Launch, error) {
 		}
 		if override.Env != nil {
 			t.Env = override.Env
+			own = false
 		}
 	}
 	dir := filepath.Join(home, p.Name())
-	out := Launch{Command: t.Command}
+	out := Launch{Command: t.Command, HarnessHome: home}
 	for _, group := range t.Args {
 		words, ok := resolveWords(group, home, dir)
 		if ok {
 			out.Args = append(out.Args, words...)
 		}
 	}
+	values := map[string]string{}
+	fixed := map[string]bool{}
 	for _, name := range sortedKeys(t.Env) {
 		words, ok := resolveWords([]string{t.Env[name]}, home, dir)
 		if !ok {
 			continue
 		}
-		if out.Env == nil {
-			out.Env = map[string]string{}
+		values[name], fixed[name] = words[0], own
+	}
+	for _, v := range harness {
+		values[v.Name], fixed[v.Name] = compose.ForHome(v.Value, home).(string), v.Fixed
+	}
+	for _, name := range sortedKeys(values) {
+		if fixed[name] {
+			out.Fixed = append(out.Fixed, name+"="+values[name])
+		} else {
+			out.Defaults = append(out.Defaults, name+"="+values[name])
 		}
-		out.Env[name] = words[0]
 	}
 	return out, nil
 }
@@ -1732,22 +1806,4 @@ func WriteFile(dir, name string, data []byte) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o644)
-}
-
-// Env is the variables a runtime writes where it keeps environment: the fragment's own,
-// which existing is the map already there, then what the harness exports rendered for
-// home, then QORY_HARNESS_HOME as the home, which nothing overrides. The result is a new
-// map with string values, the shape a settings file encodes.
-func Env(existing any, res *compose.Result, home string) map[string]any {
-	env := map[string]any{}
-	if m, ok := existing.(map[string]any); ok {
-		for k, v := range m {
-			env[k] = v
-		}
-	}
-	for name, value := range res.EnvFor(home) {
-		env[name] = value
-	}
-	env["QORY_HARNESS_HOME"] = home
-	return env
 }
