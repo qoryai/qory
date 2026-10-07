@@ -390,7 +390,8 @@ kept. It holds:
 - `force` and `update`,
 - where a worktree goes, and what it is called,
 - the git timeout and cache,
-- environment variables, which every launch sets.
+- environment variables, which every launch sets, but a name the runtime's own launch
+  template sets.
 
 The reference, one page per command, is under [commands](commands/qory.md).
 

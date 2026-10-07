@@ -893,7 +893,7 @@ exports:                         # in a repository delivering stacks or modules 
 | `worktree.run.remove` | none | commands run in a worktree before it is removed, in order, with the same variables set |
 | `git.timeout` | `10m` | a git command running past it is stopped and the compose fails; the fetch a worktree add starts with is bounded by it too |
 | `git.cache` | the user's cache directory, `qory/sources` under `~/Library/Caches`, `$XDG_CACHE_HOME` or `~/.cache` | absolute, or relative to the file that sets it |
-| `env` | none | variables every launch sets, over what the modules export and what a settings fragment sets, each a default (§Launching); a name two modules export with different values needs one here |
+| `env` | none | variables every launch sets, over what the modules export and what a settings fragment sets, each a default (§Launching), but a name the runtime's own launch template sets; a name two modules export with different values needs one here |
 | `exports.dir` | the repository root | where the exported stacks and modules are: one directory containing `stacks/` and `modules/`, or `{stacks: <dir>, modules: <dir>}` setting each; relative to the root, inside the repository. Read at the repository root alone |
 | `exports.stacks`, `exports.modules` | none | the names the repository publishes, each one directory under the stacks or modules directory containing its document; a consumer selects them with `stack` and `module` (§Exports) |
 
