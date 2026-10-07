@@ -275,7 +275,13 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 			return err
 		}
 	}
-	r, err := config.LoadRunner()
+	// With --print the key is for another machine: its server section does not apply,
+	// so neither stops the command, and instance.name alone is read.
+	load := config.LoadRunner
+	if print {
+		load = config.LoadRunnerInstance
+	}
+	r, err := load()
 	if err != nil {
 		return input(err)
 	}

@@ -577,6 +577,38 @@ func TestEnrolPrintWritesNothing(t *testing.T) {
 	}
 }
 
+// TestEnrolPrintLeavesTheServerSectionUnread is --print on a machine whose runner file
+// sets server.access_key_id and the pin while QORY_ACCESS_KEY_ID and
+// QORY_APIARY_PUBLIC_KEY are set too, which stops a run on a value set in both: the
+// key is for another machine, so the server section is not read, and the enrolment
+// succeeds under instance.name. A file that is not YAML still stops it.
+func TestEnrolPrintLeavesTheServerSectionUnread(t *testing.T) {
+	emptyDir(t)
+	srv := newEnrolServer(t)
+	writeFile(t, runnerFile(), commentedRunner+"server:\n  url: https://apiary.example\n  access_key_id: ak_0000000000000000\n  apiary_public_key: "+pinLine(newKey(t))+"\n")
+	t.Setenv("QORY_ACCESS_KEY_ID", "ak_0123456789abcdef")
+	t.Setenv("QORY_APIARY_PUBLIC_KEY", `[{"alg":"ed25519","public_key":"`+srv.signer.PublicKey().String()+`"}]`)
+	out, errOut, err := runSplit(t, "", "access-key", "enrol", "--print", srv.URL, srv.code(1, false))
+	if err != nil {
+		t.Fatalf("--print with the server section and the variables both set: %v\n%s", err, errOut)
+	}
+	if !strings.HasPrefix(out, "QORY_ACCESS_KEY_ID=ak_0123456789abcdef\n") {
+		t.Errorf("stdout:\n%s", out)
+	}
+	if sent := srv.sent(); len(sent) != 1 || sent[0].Name != "build-01" {
+		t.Errorf("the enrolment sent %+v; want the name build-01", sent)
+	}
+
+	writeFile(t, runnerFile(), "instance: [build-01\n")
+	_, _, err = runSplit(t, "", "access-key", "enrol", "--print", srv.URL, srv.code(2, false))
+	if cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), runnerFile()+": ") {
+		t.Errorf("--print with a runner file that is not YAML: %v", err)
+	}
+	if n := len(srv.sent()); n != 1 {
+		t.Errorf("%d enrolments sent; a file that is not YAML sends none", n)
+	}
+}
+
 // TestCreateKeepsTheKeyAndRefusesASecondOne is create: the marker and the secret, mode
 // 0600, and the public key and fingerprint printed; a second create refuses and names
 // the file; the variables refuse it; --print writes nothing and prints the secret

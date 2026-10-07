@@ -98,10 +98,12 @@ release may change what an existing document does, and states it under Upgrading
   administrator pastes into a node or node pool, and refuses when `access-key-secret`
   exists. With `--print` neither writes a key or a setting: enrol prints
   `QORY_ACCESS_KEY_ID`, `QORY_ACCESS_KEY_SECRET` and `QORY_APIARY_PUBLIC_KEY` for a CI's
-  settings, create the secret. The key is for another machine, so enrol `--print` leaves
-  `runner.yaml`'s server and pin aside and checks the code against
-  `QORY_APIARY_PUBLIC_KEY` when it is set. Without `--print` both refuse while
-  `QORY_ACCESS_KEY_ID`, `QORY_ACCESS_KEY_SECRET` or `QORY_APIARY_PUBLIC_KEY` is set. Enrol
+  settings, create the secret. The key is for another machine, so enrol `--print` reads
+  only `instance.name` from `runner.yaml`: its `server` section neither applies nor stops
+  the command, even where it and the variables set the same value, and the code is
+  checked against `QORY_APIARY_PUBLIC_KEY` when it is set. Without `--print` both refuse
+  when qory started with `QORY_ACCESS_KEY_ID`, `QORY_ACCESS_KEY_SECRET` or
+  `QORY_APIARY_PUBLIC_KEY` set. Enrol
   refuses a server over http to another host than `localhost`, `127.0.0.1` or `[::1]`
   before it makes a key. Both refuse a key or a pin of the runner contract's published
   fixtures.

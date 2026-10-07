@@ -238,16 +238,8 @@ type runnerFile struct {
 // configuration and returns nil; a file that does not read is an error that contains its
 // path.
 func LoadRunner() (*Runner, error) {
-	dir := UserDir()
-	if dir == "" {
-		return nil, nil
-	}
-	path := filepath.Join(dir, RunnerFileName)
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
+	path, data, err := readRunnerFile()
+	if data == nil || err != nil {
 		return nil, err
 	}
 	var f runnerFile
@@ -405,6 +397,54 @@ func LoadRunner() (*Runner, error) {
 				r.Wall.Env = append(r.Wall.Env, name)
 			}
 		}
+	}
+	return r, nil
+}
+
+// readRunnerFile reads the machine's runner file under [UserDir]: its path and its
+// content, which is nil when there is no file.
+func readRunnerFile() (string, []byte, error) {
+	dir := UserDir()
+	if dir == "" {
+		return "", nil, nil
+	}
+	path := filepath.Join(dir, RunnerFileName)
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return path, nil, nil
+	}
+	if err != nil {
+		return path, nil, err
+	}
+	if data == nil {
+		data = []byte{}
+	}
+	return path, data, nil
+}
+
+// LoadRunnerInstance reads instance.name alone from the machine's runner file under
+// [UserDir], for a key made for another machine, whose server section does not apply:
+// it is the [Runner] with File and InstanceName set, and nil when there is no file. The
+// file must still be YAML, and instance.name a name; every other key is left unread.
+func LoadRunnerInstance() (*Runner, error) {
+	path, data, err := readRunnerFile()
+	if data == nil || err != nil {
+		return nil, err
+	}
+	var f struct {
+		Instance *struct {
+			Name *string `yaml:"name"`
+		} `yaml:"instance,omitempty"`
+	}
+	if err := yaml.Unmarshal(data, &f); err != nil {
+		return nil, decodeError(path, err)
+	}
+	r := &Runner{File: path}
+	if in := f.Instance; in != nil && in.Name != nil {
+		if err := accesskey.CheckName(*in.Name); err != nil {
+			return nil, fmt.Errorf("%s: instance.name: %w", path, err)
+		}
+		r.InstanceName = *in.Name
 	}
 	return r, nil
 }
