@@ -35,6 +35,7 @@ More: https://github.com/qoryai/qory
 
 ### SEE ALSO
 
+* [qory access-key](qory_access-key.md)	 - Make this machine's access key for its server
 * [qory config](qory_config.md)	 - Show every setting, its value, and the file it came from
 * [qory harness](qory_harness.md)	 - Build the agent's harness from modules
 * [qory image](qory_image.md)	 - Check an image the wall runs the agent in

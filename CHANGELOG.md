@@ -67,6 +67,25 @@ release may change what an existing document does, and states it under Upgrading
   and the runner's API-key approval, `claude` is the descriptor's version, and `git` and
   `gh` run. It reports whether `dockerd` is in a system directory, with what it runs. The
   exit status is 1 when a check fails.
+- `qory access-key enrol <server> <code>` enrols a new access key with a code an owner or
+  administrator of the server created. It checks the code against the pin the machine
+  has before it makes a key, takes the key lock, refuses while a run without a wall is
+  live, writes the `stored-secrets` marker, moves a secret already there aside, keeps the
+  new secret in `access-key-secret`, mode `0600`, prints its fingerprint and posts the
+  enrolment. The server's signed answer writes `server.access_key_id`, and `server.url`
+  and `server.apiary_public_key` where the section has none, into `runner.yaml`, keeping
+  its comments, its order and every other key; the pin is the server's keys the code
+  carries. The same command within the code's 15 minutes retries with the same key. A
+  used or expired code and a refused key move the secret aside and say a new code is
+  needed; a node that already holds a pending key or two approved ones keeps it, and the
+  same command succeeds once one is revoked or rejected; an answer that does not verify
+  changes nothing. `qory access-key create` makes a key whose public key an owner or
+  administrator pastes into a node or node pool, and refuses when `access-key-secret`
+  exists. With `--print` neither writes a file: enrol prints `QORY_ACCESS_KEY_ID`,
+  `QORY_ACCESS_KEY_SECRET` and `QORY_APIARY_PUBLIC_KEY` for a CI's settings, create the
+  secret. Both refuse while `QORY_ACCESS_KEY_ID` or `QORY_APIARY_PUBLIC_KEY` is set,
+  unless `--print` is given, and refuse a key or a pin of the runner contract's published
+  fixtures.
 - `--access-key-secret-fd <n>` on `qory run` and `qory run resend` reads the access key's
   secret from that file descriptor, 3 or above, and closes it; it wins over
   `QORY_ACCESS_KEY_SECRET` and the `access-key-secret` file.
