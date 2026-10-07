@@ -186,14 +186,11 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 			who = "module at " + ps.String()
 		}
 		so := source.Options{Pin: opts.Pins[ps.String()], Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Memo: opts.Memo}
-		if pl.Base && opts.Base != nil && ps.Git != "" {
-			// A base module is fetched with the base this compose, and no update fetches it
-			// again. One in the base's own clone has the base's pin, and the memo puts it on
-			// the base's commit; one from another repository keeps its own pin.
-			so.Update = false
-			if ps.Git == p.Extends.Git && ps.Ref == p.Extends.Ref {
-				so.Pin = opts.Base.Pin
-			}
+		if pl.Base && opts.Base != nil && ps.Git != "" && ps.Git == p.Extends.Git && ps.Ref == p.Extends.Ref {
+			// A base module in the base's own clone was fetched with the base this compose:
+			// it has the base's pin, the memo puts it on the base's commit, and no update
+			// fetches it again. One from another repository resolves as any module does.
+			so.Pin, so.Update = opts.Base.Pin, false
 		}
 		src, err := source.Resolve(p.DirOf(pl), ps, so)
 		if err != nil {

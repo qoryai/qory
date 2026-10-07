@@ -360,3 +360,46 @@ func TestExtendsFollowsTheBasesBranch(t *testing.T) {
 		t.Errorf("instructions after the push:\n%s", instructions)
 	}
 }
+
+// TestExtendsUpdatesABaseModuleFromAnotherRepository is a base listing a module from a
+// second repository at tag v1: the tag moves, a compose stays on the old commit, and
+// compose --update fetches the module again and lands on the new one.
+func TestExtendsUpdatesABaseModuleFromAnotherRepository(t *testing.T) {
+	other := tempDir(t)
+	runGit(t, other, "init", "-q", "-b", "main")
+	runGit(t, other, "config", "user.name", "Publisher")
+	runGit(t, other, "config", "user.email", "op@example.com")
+	writeManifest(t, other, "extra")
+	writeFile(t, filepath.Join(other, "AGENTS.md"), "# Extra v1\n")
+	runGit(t, other, "add", "-A")
+	runGit(t, other, "commit", "-q", "-m", "first")
+	runGit(t, other, "tag", "v1")
+	url := baseRepoWith(t, strings.Replace(baseStack, "  - name: tools\n", "  - name: extra\n    source: {git: file://"+other+", ref: v1}\n  - name: tools\n", 1))
+	root := consumerCheckout(t, url)
+	if out, err := run(t, "harness", "compose"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	pinOf := func() string {
+		for _, l := range readReport(t, root).Modules {
+			if l.Name == "extra" {
+				return l.Pin
+			}
+		}
+		t.Fatal("the report lists no module extra")
+		return ""
+	}
+	first := pinOf()
+	writeFile(t, filepath.Join(other, "AGENTS.md"), "# Extra v2\n")
+	runGit(t, other, "commit", "-q", "-am", "second")
+	runGit(t, other, "tag", "-f", "v1")
+	if out, err := run(t, "harness", "compose"); err != nil || pinOf() != first {
+		t.Fatalf("a compose after the tag moved: pin %s (%v), want %s\n%s", pinOf(), err, first, out)
+	}
+	out, err := run(t, "harness", "compose", "--update")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if pinOf() == first {
+		t.Errorf("compose --update left the base's module from another repository on %s", first)
+	}
+}
