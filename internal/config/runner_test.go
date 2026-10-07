@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/qoryai/runner/accesskey"
+	"github.com/santhosh-tekuri/jsonschema/v6"
+	"gopkg.in/yaml.v3"
 
 	"github.com/qoryai/qory/internal/config"
 )
@@ -123,8 +125,7 @@ func TestRunnerFileDefaults(t *testing.T) {
 		t.Errorf("empty file: %+v, %v", c.Runner, err)
 	}
 	signer, _ := serverKey(t)
-	t.Setenv(accesskey.EnvID, "ak_0123456789abcdef")
-	t.Setenv(accesskey.EnvPin, `[{"alg":"ed25519","public_key":"`+signer.PublicKey().String()+`"}]`)
+	serverVariables(t, config.ServerVariables{AccessKeyID: "ak_0123456789abcdef", ApiaryPublicKey: `[{"alg":"ed25519","public_key":"` + signer.PublicKey().String() + `"}]`})
 	runnerFile(t, "server:\n  url: http://127.0.0.1:8787\n")
 	c, err = config.Load(t.TempDir(), true)
 	if err != nil || c.Runner.Server == nil || c.Runner.Server.AccessKeyID != "ak_0123456789abcdef" || c.Runner.Server.AccessKeyIDFrom != "$QORY_ACCESS_KEY_ID" || len(c.Runner.Server.Pin) != 1 || c.Runner.Server.PinFrom != "$QORY_APIARY_PUBLIC_KEY" || c.Runner.Egress != nil {
@@ -140,8 +141,7 @@ func TestRunnerFileDefaults(t *testing.T) {
 
 	// Neither is required in the file, since enrolment writes them; both are required
 	// of a run.
-	t.Setenv(accesskey.EnvID, "")
-	t.Setenv(accesskey.EnvPin, "")
+	serverVariables(t, config.ServerVariables{})
 	if c, err = config.Load(t.TempDir(), true); err != nil || c.Runner.Server.AccessKeyID != "" || c.Runner.Server.Pin != nil {
 		t.Fatalf("a server section with a url alone: %+v, %v", c.Runner.Server, err)
 	}
@@ -155,12 +155,11 @@ func TestRunnerFileRefusesTheIDAndThePinTwice(t *testing.T) {
 	signer, pin := serverKey(t)
 	envPin := `[{"alg":"ed25519","public_key":"` + signer.PublicKey().String() + `"}]`
 	path := runnerFile(t, "server:\n  url: https://qory.example\n  access_key_id: ak_f1xt0re000000000\n  apiary_public_key: "+pin+"\n")
-	t.Setenv(accesskey.EnvID, "ak_0123456789abcdef")
+	serverVariables(t, config.ServerVariables{AccessKeyID: "ak_0123456789abcdef"})
 	if _, err := config.Load(t.TempDir(), true); err == nil || err.Error() != path+": server.access_key_id is set, and so is QORY_ACCESS_KEY_ID; set one of them" {
 		t.Errorf("the id twice: %v", err)
 	}
-	t.Setenv(accesskey.EnvID, "")
-	t.Setenv(accesskey.EnvPin, envPin)
+	serverVariables(t, config.ServerVariables{ApiaryPublicKey: envPin})
 	if _, err := config.Load(t.TempDir(), true); err == nil || err.Error() != path+": server.apiary_public_key is set, and so is QORY_APIARY_PUBLIC_KEY; set one of them" {
 		t.Errorf("the pin twice: %v", err)
 	}
@@ -173,12 +172,25 @@ func TestRunnerFileRefusesTheIDAndThePinTwice(t *testing.T) {
 		{"", `[{"alg":"ed25519","public_key":"` + secret + `"}]`, "QORY_APIARY_PUBLIC_KEY: the document contains an access key secret"},
 		{"", `[{"alg":"ed25519","public_key":"rcFAEfgtHFbZVqpPnXPYhYNhpgYEhSXg0Ixjjcdd2Mc"}]`, "QORY_APIARY_PUBLIC_KEY: it lists the runner contract's published fixture key"},
 	} {
-		t.Setenv(accesskey.EnvID, c.id)
-		t.Setenv(accesskey.EnvPin, c.pin)
+		serverVariables(t, config.ServerVariables{AccessKeyID: c.id, ApiaryPublicKey: c.pin})
 		_, err := config.Load(t.TempDir(), true)
 		if err == nil || !strings.HasPrefix(err.Error(), c.want) || strings.Contains(err.Error(), "AQIDBAUG") {
 			t.Errorf("%q %q: %v, want %q", c.id, c.pin, err, c.want)
 		}
+	}
+}
+
+// TestRunnerFileRefusesTheWorkspaceSecretVariable is QORY_SERVER_SECRET, which held a
+// workspace access key's secret: with a server section it is refused, the variable named
+// and its value never quoted, and the message says to enrol the machine as a node.
+func TestRunnerFileRefusesTheWorkspaceSecretVariable(t *testing.T) {
+	hermetic(t)
+	runnerFile(t, "server:\n  url: https://qory.example\n")
+	serverVariables(t, config.ServerVariables{WorkspaceSecret: "sixteen-characters-at-least"})
+	_, err := config.Load(t.TempDir(), true)
+	want := "QORY_SERVER_SECRET holds a workspace access key's secret, which servers no longer accept; unset it, and enrol this machine as a node: qory access-key enrol <server> <code>, or qory access-key create and add its public key to the node; see https://github.com/qoryai/qory/blob/main/docs/run.md#the-access-key-and-the-instance"
+	if err == nil || err.Error() != want {
+		t.Errorf("QORY_SERVER_SECRET: %v, want %q", err, want)
 	}
 }
 
@@ -199,9 +211,9 @@ func TestRunnerFileRefusesAMistake(t *testing.T) {
 		{"server: {url: \"https://qory.example/?qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\"}\n", "server.url: the document contains an access key secret"},
 		{"server: {url: \"https://qory.example\", access_key_id: AK_F1XT0RE000000000}\n", `server.access_key_id: the access key id "AK_F1XT0RE000000000" is not ak_ and 16 lower-case Crockford base32 characters`},
 		{"server: {url: \"https://qory.example\", access_key_id: ak_f1xt0re0000000}\n", `server.access_key_id: the access key id "ak_f1xt0re0000000" is not ak_`},
-		{"server: {url: \"https://qory.example\", access_key: ak_f1xt0re000000000}\n", "server.access_key is not a key of runner.yaml: the access key's id is server.access_key_id"},
-		{"server: {url: \"https://qory.example\", secret: qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA}\n", "server.secret is not a key of runner.yaml: the access key's secret is the file access-key-secret beside it, or QORY_ACCESS_KEY_SECRET"},
-		{"server: {url: \"https://qory.example\", apiary_public_key: [{alg: ed25519}]}\n", "server.apiary_public_key[0] has alg and public_key"},
+		{"server: {url: \"https://qory.example\", access_key: ak_f1xt0re000000000}\n", "server.access_key is a workspace access key, which servers no longer accept; enrol this machine as a node: qory access-key enrol <server> <code>, or qory access-key create and add its public key to the node; see https://github.com/qoryai/qory/blob/main/docs/run.md#the-access-key-and-the-instance"},
+		{"server: {url: \"https://qory.example\", secret: qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA}\n", "server.secret is a workspace access key's secret, which servers no longer accept; enrol this machine as a node"},
+		{"server: {url: \"https://qory.example\", apiary_public_key: [{alg: ed25519}]}\n", "server.apiary_public_key[0] needs both alg and public_key"},
 		{"server: {url: \"https://qory.example\", apiary_public_key: [{alg: ed25519, public_key: abc}]}\n", "server.apiary_public_key: the pin: the public key \"abc\": 2 bytes where 32 belong"},
 		{"server: {url: \"https://qory.example\", apiary_public_key: [{alg: rsa, public_key: rcFAEfgtHFbZVqpPnXPYhYNhpgYEhSXg0Ixjjcdd2Mc}]}\n", "server.apiary_public_key: the pin lists a key of alg \"rsa\""},
 		{"server: {url: \"https://qory.example\", apiary_public_key: [{alg: ed25519, public_key: rcFAEfgtHFbZVqpPnXPYhYNhpgYEhSXg0Ixjjcdd2Mc}]}\n", "server.apiary_public_key: it lists the runner contract's published fixture key, whose secret anyone can read"},
@@ -221,6 +233,7 @@ func TestRunnerFileRefusesAMistake(t *testing.T) {
 		{"wall: {adapter: docker, env: [QORY_ACCESS_KEY_SECRET]}\n", `wall.env: QORY_ACCESS_KEY_SECRET is the runner's own`},
 		{"wall: {adapter: docker, env: [QORY_ACCESS_KEY_ID]}\n", `wall.env: QORY_ACCESS_KEY_ID is the runner's own`},
 		{"wall: {adapter: docker, env: [QORY_APIARY_PUBLIC_KEY]}\n", `wall.env: QORY_APIARY_PUBLIC_KEY is the runner's own`},
+		{"wall: {adapter: docker, env: [QORY_SERVER_SECRET]}\n", `wall.env: QORY_SERVER_SECRET is the runner's own and never the session's`},
 		{"credentials: {product: {adapter: [git-host]}}\n", `credentials.product.adapter is a program by its absolute path`},
 		{"credentials: {product: {command: [/x]}}\n", `credentials.product: key "command" is not one`},
 		{"credentials: [product]\n", `credentials is a mapping`},
@@ -234,5 +247,79 @@ func TestRunnerFileRefusesAMistake(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.HasPrefix(err.Error(), path) {
 			t.Errorf("%q: error %v, want one naming the file and %q", c.body, err, c.want)
 		}
+	}
+}
+
+// TestTheRunnerSchemaTakesTheServerSection holds runner.schema.json to what the reader
+// takes of server and instance: url, access_key_id and the pin, each of the last two
+// optional since the environment may hold it, and instance.name; the workspace access
+// key's keys and a server with no url fail it.
+func TestTheRunnerSchemaTakesTheServerSection(t *testing.T) {
+	schema, err := jsonschema.NewCompiler().Compile(filepath.Join("..", "..", "contracts", "harness", "v1", "runner.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, pin := serverKey(t)
+	for _, c := range []struct {
+		body  string
+		valid bool
+	}{
+		{"server: {url: \"https://qory.example\"}\n", true},
+		{"server: {url: \"https://qory.example\", access_key_id: ak_0123456789abcdef, apiary_public_key: " + pin + "}\n", true},
+		{"instance: {name: build-01}\n", true},
+		{"server: {access_key_id: ak_0123456789abcdef}\n", false},
+		{"server: {url: \"https://qory.example\", access_key_id: AK_0123456789ABCDEF}\n", false},
+		{"server: {url: \"https://qory.example\", apiary_public_key: []}\n", false},
+		{"server: {url: \"https://qory.example\", apiary_public_key: [{alg: rsa, public_key: abc}]}\n", false},
+		{"server: {url: \"https://qory.example\", access_key: ak_0123456789abcdef}\n", false},
+		{"server: {url: \"https://qory.example\", secret: sixteen-characters-at-least}\n", false},
+		{"instance: {name: \"-build\"}\n", false},
+		{"instance: {id: i_x}\n", false},
+	} {
+		var doc any
+		if err := yaml.Unmarshal([]byte("apiVersion: qory.dev/v1alpha1\n"+c.body), &doc); err != nil {
+			t.Fatal(err)
+		}
+		if err := schema.Validate(doc); (err == nil) != c.valid {
+			t.Errorf("%q: %v, want valid %v", c.body, err, c.valid)
+		}
+	}
+}
+
+// TestTheDocsExampleServerReads is the server section of the runner file docs/run.md
+// shows: it reads, its access key id is one, and its pin is a key the runner verifies
+// under that is no published fixture's.
+func TestTheDocsExampleServerReads(t *testing.T) {
+	hermetic(t)
+	data, err := os.ReadFile(filepath.Join("..", "..", "docs", "run.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const start = "```yaml\n# ~/.config/qory/runner.yaml\n"
+	doc := string(data)
+	i := strings.Index(doc, start)
+	if i < 0 {
+		t.Fatal("docs/run.md shows no runner.yaml")
+	}
+	example, _, _ := strings.Cut(doc[i+len(start):], "```")
+	var section []string
+	for _, line := range strings.SplitAfter(example, "\n") {
+		if strings.HasPrefix(line, "server:") || len(section) > 0 && strings.HasPrefix(line, " ") {
+			section = append(section, line)
+		} else if len(section) > 0 {
+			break
+		}
+	}
+	if len(section) == 0 {
+		t.Fatal("the runner.yaml of docs/run.md has no server section")
+	}
+	runnerFile(t, "apiVersion: qory.dev/v1alpha1\n"+strings.Join(section, ""))
+	c, err := config.Load(t.TempDir(), true)
+	if err != nil {
+		t.Fatalf("the docs' server section: %v\n%s", err, strings.Join(section, ""))
+	}
+	s := c.Runner.Server
+	if s == nil || accesskey.CheckID(s.AccessKeyID) != nil || len(s.Pin) == 0 || s.Pin.Check() != nil || s.Pin.Fixture() {
+		t.Errorf("the docs' server section: %+v", s)
 	}
 }

@@ -427,22 +427,32 @@ func (r *Runner) InstanceNameOrDefault() string {
 }
 
 // RunnersOwn reports whether a variable is the runner's own, never the session's: the
-// access key's secret, its id and the pin.
+// access key's secret, its id and the pin, and QORY_SERVER_SECRET, which held a
+// workspace access key's secret.
 func RunnersOwn(name string) bool {
-	return name == accesskey.EnvSecret || name == accesskey.EnvID || name == accesskey.EnvPin
+	return slices.Contains(serverVariableNames, name)
 }
 
+// enrolAsNode ends the refusal of a workspace access key: what to do instead.
+const enrolAsNode = "enrol this machine as a node: qory access-key enrol <server> <code>, or qory access-key create and add its public key to the node; see https://github.com/qoryai/qory/blob/main/docs/run.md#the-access-key-and-the-instance"
+
 // readServer reads the server section. The access key's id and the pin come from the
-// file, else from QORY_ACCESS_KEY_ID and QORY_APIARY_PUBLIC_KEY; both set is refused.
+// file, else from QORY_ACCESS_KEY_ID and QORY_APIARY_PUBLIC_KEY as qory took them when
+// it started, [TakenServerVariables]; both set is refused.
 // Neither is required here: qory access-key enrol writes them, and a run without them is
 // refused when it starts. A value that contains an access key secret is refused without
-// being quoted.
+// being quoted. server.access_key, server.secret and QORY_SERVER_SECRET, a workspace
+// access key's, are refused with what to do instead.
 func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *yaml.Node) (*RunnerServer, error) {
-	if secret.Kind != 0 {
-		return nil, fmt.Errorf("%s: server.secret is not a key of %s: the access key's secret is the file %s beside it, or %s", path, RunnerFileName, "access-key-secret", accesskey.EnvSecret)
-	}
 	if key.Kind != 0 {
-		return nil, fmt.Errorf("%s: server.access_key is not a key of %s: the access key's id is server.access_key_id", path, RunnerFileName)
+		return nil, fmt.Errorf("%s: server.access_key is a workspace access key, which servers no longer accept; %s", path, enrolAsNode)
+	}
+	if secret.Kind != 0 {
+		return nil, fmt.Errorf("%s: server.secret is a workspace access key's secret, which servers no longer accept; %s", path, enrolAsNode)
+	}
+	env := TakenServerVariables()
+	if env.WorkspaceSecret != "" {
+		return nil, fmt.Errorf("%s holds a workspace access key's secret, which servers no longer accept; unset it, and %s", envWorkspaceSecret, enrolAsNode)
 	}
 	if rawURL == nil || *rawURL == "" {
 		return nil, fmt.Errorf("%s: server.url is required", path)
@@ -454,7 +464,7 @@ func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *y
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	s := &RunnerServer{URL: *rawURL}
-	envID, envPin := os.Getenv(accesskey.EnvID), os.Getenv(accesskey.EnvPin)
+	envID, envPin := env.AccessKeyID, env.ApiaryPublicKey
 	switch {
 	case id != nil && envID != "":
 		return nil, fmt.Errorf("%s: server.access_key_id is set, and so is %s; set one of them", path, accesskey.EnvID)
@@ -475,7 +485,7 @@ func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *y
 	case pin != nil:
 		for i, e := range *pin {
 			if e.Alg == nil || e.PublicKey == nil {
-				return nil, fmt.Errorf("%s: server.apiary_public_key[%d] has alg and public_key", path, i)
+				return nil, fmt.Errorf("%s: server.apiary_public_key[%d] needs both alg and public_key", path, i)
 			}
 			if accesskey.ContainsSecret(*e.Alg) || accesskey.ContainsSecret(*e.PublicKey) {
 				return nil, fmt.Errorf("%s: server.apiary_public_key: %w", path, accesskey.ErrSecretInDocument)

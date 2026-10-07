@@ -55,7 +55,7 @@ func TestStartUpdateCheckIsSilentOffATerminal(t *testing.T) {
 func TestNoUpdateCheckInsideTheWall(t *testing.T) {
 	var spec session.Spec
 	r := &config.Runner{Wall: &config.RunnerWall{Adapter: config.WallDocker, Image: "example.com/agent:1", Helper: "/opt/qory/qory-linux"}}
-	if err := enclose(&spec, r, wallOptions{}, "", false, "/usr/local/bin/qory", t.TempDir(), t.TempDir(), nil); err != nil {
+	if err := enclose(&spec, r, wallOptions{}, "", false, "/usr/local/bin/qory", t.TempDir(), t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	d, ok := spec.Wall.(*wall.Docker)

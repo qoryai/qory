@@ -134,9 +134,11 @@ egress:                  # what the runtime may reach; enforce denies the rest
   deny: [gist.github.com]                # denied in either mode, whatever allow lists
 server:                  # the server every run reports to; optional
   url: https://qory.example             # a scheme and a host, nothing after
-  access_key_id: ak_f1xt0re000000000    # its secret: access-key-secret, or QORY_ACCESS_KEY_SECRET
+  access_key_id: ak_0123456789abcdef    # this machine's access key; its secret is not in this file
   apiary_public_key:                    # the server's key, which signs every answer
-    - {alg: ed25519, public_key: rcFAEfgtHFbZVqpPnXPYhYNhpgYEhSXg0Ixjjcdd2Mc}
+    - {alg: ed25519, public_key: mptNqtgGKgLhLZxmOGfpBQkdeBNH7QN3Qs9ETNumy8Q}
+instance:                # optional
+  name: build-01         # how the server shows this machine; the host name by default
 wall:                    # start the runtime in a container; optional
   adapter: docker
   image: example.com/agent@sha256:…     # the runtime and your toolchain, FROM Qory's
@@ -237,11 +239,80 @@ changed. It may hold:
   has](#credentials-the-agent-never-has).
 - `variables`, which reach the agent's process. The server leads: the node's own
   variables, `wall.env` and `--env`, apply only to the names whose server value the run
-  does not apply. An unwalled run gets none of the server's variables unless
+  does not apply. A name the harness's launch template sets keeps the template's value:
+  the server's variable of that name is left out, and `dev.qory.run.policy_applied`
+  lists it as denied. An unwalled run gets none of the server's variables unless
   `variables.unwalled: accept` is set.
 
 `--local` runs with the files alone and the machine's policy. The server is not
 contacted.
+
+### The access key and the instance
+
+The server knows this machine by its access key, an Ed25519 key. `runner.yaml`'s
+`server` section holds two values of it:
+
+- `access_key_id`, the key's id: `ak_` and 16 characters, which the server assigns.
+- `apiary_public_key`, the pin: the server's public keys. Every answer of the server is
+  verified under one of them. A pin that lists the runner contract's published fixture
+  key is refused.
+
+`QORY_ACCESS_KEY_ID` and `QORY_APIARY_PUBLIC_KEY`, the pin as JSON, hold them when the
+file does not. A value set in both is refused.
+
+The key's secret is never in `runner.yaml`. qory reads it from `QORY_ACCESS_KEY_SECRET`,
+else from the file `access-key-secret` beside `runner.yaml`. The secret is one line:
+`qak_` and 43 characters. The file is read only when it is a regular file, not a link,
+that you own and that grants nothing to the group or to others, in a directory that is
+yours alone. The runner contract's published fixture key is refused.
+
+A run without the id or the secret does not start. One without a pin does not start
+either, `apiary_public_key_missing`.
+
+The three variables stay the runner's. Every qory command reads them into memory when it
+starts, and removes them from its environment before it starts anything. So no session,
+worktree command, tool or integration it starts inherits them. A `wall.env` or `--env`
+that names one is refused.
+
+`server.access_key`, `server.secret` and `QORY_SERVER_SECRET` held a workspace access
+key, which servers no longer accept. The two keys are refused, and so is
+`QORY_SERVER_SECRET` when `runner.yaml` has a `server` section: enrol the machine as a
+node instead. qory removes `QORY_SERVER_SECRET` from its environment with the three
+variables, server or not, and a `wall.env` or `--env` that names it is refused.
+
+Each machine that runs qory is an **instance** of its node. qory names it on every
+request:
+
+- Its id is kept in the file `instance-id` beside `runner.yaml`, created by the first
+  run with a server. An id that was not made on this machine is replaced. When qory
+  cannot write the directory, the id is the process's own, and qory says so.
+- `instance.name` is its display name on the server. Unless set, it is the host name, or
+  the host name's first label when the whole does not fit: 1 to 64 of `A-Z`, `a-z`,
+  `0-9`, dot, underscore and dash, starting with a letter or a digit.
+
+`qory run` prints the node and the instance once the server's configuration is read:
+`qory run: node <id>, instance <id>`. When the server refuses, qory says what the
+refusal means and what to do, then the runner's words and the code:
+
+| Code | What it means |
+| --- | --- |
+| `unauthorized` | the server refused the request: it does not know the access key, has revoked it, or this machine's clock is more than five minutes off; check the clock, else enrol a new key |
+| `key_pending` | the key awaits approval: an owner or administrator of the server compares the fingerprint qory prints with the one the server shows |
+| `answer_unsigned` | an answer does not verify under the pin |
+| `instance_limit` | the node's live instances are at its limit |
+| `run_closed` | the server closed the run before it started; the exit status is 1 |
+
+#### Stored secrets need a wall
+
+When the server lists stored secrets for the machine's access key, every run needs a
+wall. An unwalled run is refused, `server_needs_wall`, once the server's configuration
+is read.
+
+qory then keeps a marker, the file `stored-secrets` beside `runner.yaml`. While it is
+there, an unwalled run is refused before it starts, `--local` and a `runner.yaml`
+without a server included. With the secret from `access-key-secret`, a server's
+configuration that lists no stored secrets removes it. With the secret from
+`QORY_ACCESS_KEY_SECRET`, the marker stays as it is.
 
 ## Runs started by another system
 
@@ -294,8 +365,8 @@ The two together are the node's policy. With a server whose run configuration ha
 
 `--local` keeps `--policy`, and the server is not contacted.
 
-The access key's secret stays the runner's. A run that passes `QORY_ACCESS_KEY_SECRET`
-into the session does not start, `variable_reserved`.
+The access key's secret stays the runner's: see [The access key and the
+instance](#the-access-key-and-the-instance).
 
 ## Credentials the agent never has
 

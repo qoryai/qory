@@ -173,8 +173,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if err := session.CheckStopSignal(stopSignal); err != nil {
 				return input(fmt.Errorf("--stop-signal: %w", err))
 			}
-			// The access key's variables are read, and gone from qory's environment, before
-			// anything is started.
 			stderr := cmd.ErrOrStderr()
 			var id *serverIdentity
 			if server != nil && !local {
@@ -182,14 +180,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return err
 				}
 			}
-			forgetAccessKeyEnv()
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			spec := session.Spec{
 				Runtime:       rt,
 				Command:       launch.Command,
 				Args:          append(append([]string{}, launch.Args...), extra...),
-				Env:           withEnv(os.Environ(), launch.Env),
+				Env:           os.Environ(),
+				LaunchEnv:     withEnv(nil, launch.Env),
 				Dir:           cwd,
 				Interactive:   !headless && isTerminal(cmd.InOrStdin()) && isTerminal(cmd.OutOrStdout()),
 				Stdin:         cmd.InOrStdin(),
@@ -218,7 +216,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if pol != nil {
 				selected = pol.Image
 			}
-			if err := enclose(&spec, conf.Runner, o, selected, server != nil && !local, exe, at.root, rep.Home, launch.Env); err != nil {
+			if err := enclose(&spec, conf.Runner, o, selected, server != nil && !local, exe, at.root, rep.Home); err != nil {
 				return err
 			}
 			if policyFile != "" {
@@ -422,10 +420,11 @@ const wallOff = "none"
 
 // enclose puts the spec behind a wall when a flag or the runner file sets one. The
 // runtime then runs in a container, so what refers to this machine changes: the
-// environment is the launch template's and the variables set for the wall, never the
-// process's, and the forwarder is the helper's path inside the container. The checkout,
-// the composed home, which is all a launch template's paths point into, and the mounts
-// keep their paths inside the container.
+// environment it inherits is the variables set for the wall, never the process's, and
+// the forwarder is the helper's path inside the container. The launch template's
+// variables are the spec's LaunchEnv, behind a wall or not. The checkout, the composed
+// home, which is all a launch template's paths point into, and the mounts keep their
+// paths inside the container.
 //
 // The images wall.images defines go to the runner, which reads the default, --image or
 // wall.image, as the name of one of them first and as a reference otherwise, and
@@ -435,7 +434,7 @@ const wallOff = "none"
 // an image needs no default. fromServer says the server's run configuration is the
 // policy; it arrives once the run starts, and may select no image, so such a run needs a
 // default.
-func enclose(spec *session.Spec, r *config.Runner, o wallOptions, selected string, fromServer bool, exe, root, home string, launchEnv map[string]string) error {
+func enclose(spec *session.Spec, r *config.Runner, o wallOptions, selected string, fromServer bool, exe, root, home string) error {
 	var section config.RunnerWall
 	if r != nil && r.Wall != nil {
 		section = *r.Wall
@@ -474,7 +473,7 @@ func enclose(spec *session.Spec, r *config.Runner, o wallOptions, selected strin
 	for _, i := range section.Images {
 		spec.Images = append(spec.Images, i.Session())
 	}
-	env := withEnv(nil, launchEnv)
+	var env []string
 	for _, n := range append(append([]string{}, section.Env...), o.env...) {
 		if config.RunnersOwn(n) {
 			return input(fmt.Errorf("--env %s: the variable is the runner's own and never the session's", n))

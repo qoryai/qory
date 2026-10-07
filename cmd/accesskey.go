@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -129,9 +128,21 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	return c
 }
 
-// keyEnv returns one of the access key's variables, QORY_ACCESS_KEY_ID or
-// QORY_APIARY_PUBLIC_KEY: the one place the key commands read them.
-func keyEnv(name string) string { return os.Getenv(name) }
+// keyEnv returns one of the access key's variables, QORY_ACCESS_KEY_ID,
+// QORY_ACCESS_KEY_SECRET or QORY_APIARY_PUBLIC_KEY, as qory took it when it started:
+// the one place the key commands read them.
+func keyEnv(name string) string {
+	v := config.TakenServerVariables()
+	switch name {
+	case accesskey.EnvID:
+		return v.AccessKeyID
+	case accesskey.EnvSecret:
+		return v.AccessKeySecret
+	case accesskey.EnvPin:
+		return v.ApiaryPublicKey
+	}
+	return ""
+}
 
 // userAgent is the User-Agent of every request to the server, the enrolment's included.
 func userAgent() string { return "qory-runner/" + build().title() }

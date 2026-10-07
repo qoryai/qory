@@ -42,12 +42,11 @@
       }
     },
     "server": {
-      "description": "The server every run on this machine reports to, the runner contract's server.schema.json: the runner fetches its configuration, signed, posts the events where the configuration defines and takes its run configuration as the policy. Absent, the events go to files alone.",
+      "description": "The server every run on this machine reports to, the runner contract's server.schema.json without its version: the runner signs every request with the machine's access key, verifies every answer under the pin, fetches the server's configuration, posts the events where it defines and takes its run configuration. The access key's secret is never in this file: it is QORY_ACCESS_KEY_SECRET, else the file access-key-secret beside it. Absent, the events go to files alone.",
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "url",
-        "access_key"
+        "url"
       ],
       "properties": {
         "url": {
@@ -55,15 +54,46 @@
           "type": "string",
           "pattern": "^https?://[^/?#]+$"
         },
-        "access_key": {
-          "description": "The key the server issued this machine: ak_ and 16 characters of lower-case Crockford base32.",
+        "access_key_id": {
+          "description": "The id of the machine's access key, which the server assigns when the key enrols: ak_ and 16 characters of lower-case Crockford base32. May be left out when QORY_ACCESS_KEY_ID is set in the environment; set in both, it is refused. A run without one does not start.",
           "type": "string",
           "pattern": "^ak_[0-9a-hjkmnp-tv-z]{16}$"
         },
-        "secret": {
-          "description": "At least 16 characters; may be left out when QORY_SERVER_SECRET is set in the environment. It signs every request and is never sent.",
+        "apiary_public_key": {
+          "description": "The pin: the server's Ed25519 public keys, a list so the key can rotate. Every answer of the server is verified under one of them. May be left out when QORY_APIARY_PUBLIC_KEY holds it, as JSON; set in both, it is refused. A pin that lists the runner contract's published fixture key is refused. A run without one does not start, apiary_public_key_missing.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "alg",
+              "public_key"
+            ],
+            "properties": {
+              "alg": {
+                "const": "ed25519"
+              },
+              "public_key": {
+                "description": "A raw 32-byte Ed25519 public key, base64url without padding.",
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+              }
+            }
+          }
+        }
+      }
+    },
+    "instance": {
+      "description": "This instance of the machine, as the server shows it. Its id is qory's own, kept in the file instance-id beside this file.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "The instance's display name on the server: 1 to 64 of A-Z, a-z, 0-9, dot, underscore and dash, starting with a letter or a digit. Default the host name.",
           "type": "string",
-          "minLength": 16
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
         }
       }
     },

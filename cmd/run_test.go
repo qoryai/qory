@@ -44,9 +44,11 @@ type fakeServer struct {
 	signer, key *accesskey.Key
 	mu          sync.Mutex
 	policy      string
-	queries     []string
-	events      []map[string]any
-	refused     int
+	// variables is the JSON of the run configuration's variables, none when empty.
+	variables string
+	queries   []string
+	events    []map[string]any
+	refused   int
 	// instances are the X-Qory-Instance-Id and X-Qory-Instance-Name of every request.
 	instances [][2]string
 	// pending, secrets, full and closed make the server answer key_pending, list
@@ -83,7 +85,11 @@ func newFakeServer(t *testing.T, policy string) *fakeServer {
 		RunConfiguration: func(map[string]string) ([]byte, string, bool) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
-			doc := `{"version":1,"security_policy":` + f.policy + `}`
+			doc := `{"version":1,"security_policy":` + f.policy
+			if f.variables != "" {
+				doc += `,"variables":` + f.variables
+			}
+			doc += `}`
 			return []byte(doc), digest(doc), f.policy != ""
 		},
 		Admit: func(string, string) bool {
@@ -717,6 +723,51 @@ func TestRunBehindAWall(t *testing.T) {
 	}
 }
 
+// TestALaunchVariableWinsOverTheServers is a walled run whose server's run configuration
+// sets a variable of the name the harness's launch template sets too: the agent gets the
+// launch template's value, the server's is left out and reported as denied in
+// dev.qory.run.policy_applied, and a server variable of another name reaches the agent.
+func TestALaunchVariableWinsOverTheServers(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "qory.yaml"), `apiVersion: qory.dev/v1alpha1
+harness:
+  launch:
+    claude:
+      command: claude
+      args:
+        - [--settings, "${dir}/settings.json"]
+      env: {SHARED_NAME: from-launch}
+`)
+	if out, err := run(t, "harness", "compose", "--runtime", "claude", "--no-links"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	docker, log := fakeDocker(t)
+	srv := newFakeServer(t, `{"version":1,"egress":{"mode":"observe"}}`)
+	srv.variables = `{"SHARED_NAME":"from-server","SERVER_ONLY":"from-server"}`
+	serverFile(t, srv, "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
+	out, err := run(t, "run", "claude")
+	if cmd.ExitCode(err) != 4 {
+		t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	data, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants(t, string(data), "env: SHARED_NAME=from-launch\n", "env: SERVER_ONLY=from-server\n")
+	lacks(t, string(data), "SHARED_NAME=from-server")
+	_, evs := events(t, root)
+	for _, applied := range [][]map[string]any{evs["dev.qory.run.policy_applied"], srv.byType()["dev.qory.run.policy_applied"]} {
+		if len(applied) != 1 {
+			t.Fatalf("run.policy_applied %v", applied)
+		}
+		vars, _ := applied[0]["variables"].(map[string]any)
+		if fmt.Sprint(vars["denied"]) != "[SHARED_NAME]" || fmt.Sprint(vars["names"]) != "[SERVER_ONLY]" {
+			t.Errorf("run.policy_applied variables %v", vars)
+		}
+	}
+}
+
 // TestRunRefusesAWallItCannotBuild pins the refusals before anything starts: a wall
 // that is not one, no image, a flag that means nothing without a wall.
 func TestRunRefusesAWallItCannotBuild(t *testing.T) {
@@ -736,6 +787,7 @@ func TestRunRefusesAWallItCannotBuild(t *testing.T) {
 		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_ACCESS_KEY_SECRET"}, "--env QORY_ACCESS_KEY_SECRET: the variable is the runner's own"},
 		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_ACCESS_KEY_ID"}, "the runner's own"},
 		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_APIARY_PUBLIC_KEY"}, "the runner's own"},
+		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_SERVER_SECRET"}, "--env QORY_SERVER_SECRET: the variable is the runner's own and never the session's"},
 		{[]string{"run", "--label", "issue"}, "not key=value"},
 		{[]string{"run", "--label", "Issue=1"}, "label key"},
 		{[]string{"run", "--run-id", "../x"}, "not a UUID"},
@@ -823,22 +875,26 @@ harness:
 // TestRunIsNamedLimitedAndUnderItsOwnPolicy is a run started by a system of its own: the
 // id and the labels are the caller's, and win over the origin remote's, the run's
 // policy file narrows the machine's and never widens it, the runtime is stopped at the
-// limit with timeout(1)'s status, and the access key's variables in qory's environment
-// are not in the session's. With a server configured the run's own policy is refused, unless
-// --local keeps the run to the files.
+// limit with timeout(1)'s status, and the access key's variables and QORY_SERVER_SECRET
+// in qory's environment are not in the session's. With a server configured the run's own
+// policy is refused, unless --local keeps the run to the files.
 func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	script := filepath.Join(t.TempDir(), "slow-runtime")
-	writeFile(t, script, "#!/bin/sh\ntest -z \"$QORY_ACCESS_KEY_SECRET$QORY_ACCESS_KEY_ID$QORY_APIARY_PUBLIC_KEY\" || exit 7\nexec sleep 30\n")
+	writeFile(t, script, "#!/bin/sh\ntest -z \"$QORY_ACCESS_KEY_SECRET$QORY_ACCESS_KEY_ID$QORY_APIARY_PUBLIC_KEY$QORY_SERVER_SECRET\" || exit 7\nexec sleep 30\n")
 	if err := os.Chmod(script, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	composedForFake(t, root, script)
-	t.Setenv("QORY_ACCESS_KEY_SECRET", newKey(t).Secret())
-	t.Setenv("QORY_ACCESS_KEY_ID", testAccessKey)
-	t.Setenv("QORY_APIARY_PUBLIC_KEY", `[{"alg":"ed25519","public_key":"`+newKey(t).PublicKey().String()+`"}]`)
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "apiVersion: qory.dev/v1alpha1\negress:\n  mode: enforce\n  allow: [\"*.github.com\", api.anthropic.com]\nserver:\n  url: https://qory.example\n")
+	setVariables := func() {
+		t.Setenv("QORY_ACCESS_KEY_SECRET", newKey(t).Secret())
+		t.Setenv("QORY_ACCESS_KEY_ID", testAccessKey)
+		t.Setenv("QORY_APIARY_PUBLIC_KEY", `[{"alg":"ed25519","public_key":"`+newKey(t).PublicKey().String()+`"}]`)
+	}
+	setVariables()
+	machine := "apiVersion: qory.dev/v1alpha1\negress:\n  mode: enforce\n  allow: [\"*.github.com\", api.anthropic.com]\n"
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), machine+"server:\n  url: https://qory.example\n")
 	policy := filepath.Join(t.TempDir(), "run-policy.yaml")
 	writeFile(t, policy, "version: 1\negress:\n  mode: enforce\n  allow: [api.github.com, pypi.org]\n")
 	if _, err := run(t, "run", "--policy", policy); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "--policy is the run's own policy without a server; with server configured the server's run configuration is the policy") {
@@ -847,6 +903,10 @@ func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, ".qory", "runs")); err == nil {
 		t.Error("a refused run left a record")
 	}
+	// Without a server section, QORY_SERVER_SECRET is taken and removed as the others are.
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), machine)
+	setVariables()
+	t.Setenv("QORY_SERVER_SECRET", "a-workspace-secret")
 	const id = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f"
 	out, err := run(t, "run", "--local", "--policy", policy, "--run-id", id, "--label", "run_key=queue/1234", "--label", "issue=77", "--label", "repository=acme/shop", "--timeout", "300ms", "--stop-grace", "2s")
 	if cmd.ExitCode(err) != 124 {

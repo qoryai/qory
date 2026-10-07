@@ -40,15 +40,15 @@ type accessKey struct {
 }
 
 // readAccessKey reads the access key's secret: the one read from the descriptor
-// --access-key-secret-fd names, when fd is not nil, else QORY_ACCESS_KEY_SECRET, else
-// the file access-key-secret in the runner file's directory. A secret that is not one,
-// a file the rules refuse and the published fixture key are errors that never contain
-// the value. No secret anywhere is (nil, nil).
+// --access-key-secret-fd names, when fd is not nil, else QORY_ACCESS_KEY_SECRET, as qory
+// took it when it started, else the file access-key-secret in the runner file's
+// directory. A secret that is not one, a file the rules refuse and the published fixture
+// key are errors that never contain the value. No secret anywhere is (nil, nil).
 func readAccessKey(dir runnerdir.Dir, fd *accesskey.Key) (*accessKey, error) {
 	if fd != nil {
 		return &accessKey{key: fd, source: fromFD}, nil
 	}
-	if v, ok := os.LookupEnv(accesskey.EnvSecret); ok && v != "" {
+	if v := config.TakenServerVariables().AccessKeySecret; v != "" {
 		k, err := runnerdir.ParseSecret([]byte(v))
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", accesskey.EnvSecret, err)
@@ -106,14 +106,6 @@ func readSecretFD(n int) (*accesskey.Key, error) {
 	return k, nil
 }
 
-// forgetAccessKeyEnv removes the access key's variables from qory's own environment once
-// they are read, so nothing qory starts inherits them: the secret, the id and the pin.
-func forgetAccessKeyEnv() {
-	for _, name := range []string{accesskey.EnvSecret, accesskey.EnvID, accesskey.EnvPin} {
-		os.Unsetenv(name)
-	}
-}
-
 // serverIdentity is what a request to the server is signed and named with: the access
 // key, the instance id and the instance's display name.
 type serverIdentity struct {
@@ -130,7 +122,6 @@ type serverIdentity struct {
 func identify(r *config.Runner, report io.Writer, verb string, fd *accesskey.Key) (*serverIdentity, error) {
 	dir := machineDir()
 	key, err := readAccessKey(dir, fd)
-	forgetAccessKeyEnv()
 	if err != nil {
 		return nil, input(err)
 	}
@@ -185,7 +176,7 @@ func explain(err error, id *serverIdentity) error {
 	case accesskey.CodeApiaryPublicKeyMissing:
 		text = fmt.Sprintf("the server has no pinned apiary_public_key, so no answer of it could be verified: qory access-key enrol writes it, or set server.apiary_public_key in %s or %s", config.RunnerFileName, accesskey.EnvPin)
 	case accesskey.CodeUnauthorized:
-		text = fmt.Sprintf("the server does not accept the access key %s: it does not know the key, or has revoked it; enrol a new key with qory access-key enrol", fingerprint)
+		text = fmt.Sprintf("the server refused the request of the access key %s: it does not know the key, has revoked it, or this machine's clock is more than five minutes off; check the clock, else enrol a new key with qory access-key enrol", fingerprint)
 	case accesskey.CodeAnswerUnsigned:
 		text = "an answer of the server does not verify under the pinned apiary_public_key, so the run does not start: check server.url and the pin"
 	case accesskey.CodeKeyPending:

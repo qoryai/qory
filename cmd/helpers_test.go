@@ -62,7 +62,7 @@ func emptyDir(t *testing.T) string {
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	t.Setenv("GH_CONFIG_DIR", filepath.Join(home, "gh"))
 	t.Setenv("NO_COLOR", "1")
-	for _, name := range []string{"QORY_ACCESS_KEY_SECRET", "QORY_ACCESS_KEY_ID", "QORY_APIARY_PUBLIC_KEY"} {
+	for _, name := range []string{"QORY_ACCESS_KEY_SECRET", "QORY_ACCESS_KEY_ID", "QORY_APIARY_PUBLIC_KEY", "QORY_SERVER_SECRET"} {
 		t.Setenv(name, "")
 	}
 	dir := tempDir(t)
