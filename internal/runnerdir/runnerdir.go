@@ -217,8 +217,7 @@ func create(path string, mode os.FileMode, b []byte) error {
 	return f.Close()
 }
 
-// WriteSecret writes a new access-key-secret, mode 0600, which must not exist: a
-// secret already there is moved aside first, [Dir.MoveAside].
+// WriteSecret writes a new access-key-secret, mode 0600, which must not exist.
 func (d Dir) WriteSecret(k *accesskey.Key) error {
 	if err := create(d.Path(SecretFile), 0o600, []byte(k.Secret()+"\n")); err != nil {
 		return fmt.Errorf("write %s: %w", d.Path(SecretFile), err)

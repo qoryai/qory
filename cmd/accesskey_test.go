@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/qoryai/runner/accesskey"
 
@@ -373,8 +374,8 @@ func TestEnrolRefusesBeforeItMakesAKey(t *testing.T) {
 // TestEnrolRetriesWithTheSameKey is an answer that does not verify, an unsigned 429
 // and a signed 201 under another key, and then the same code again: each keeps the
 // secret and the pending enrolment and writes nothing into the runner file, and the
-// retry sends the same public key. Another code then makes a new key and moves the
-// enrolled one aside.
+// retry sends the same public key. Another code then is refused and keeps the enrolled
+// key.
 func TestEnrolRetriesWithTheSameKey(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
@@ -421,15 +422,118 @@ func TestEnrolRetriesWithTheSameKey(t *testing.T) {
 	if heldKey(t).PublicKey().String() != sent[0].PublicKey {
 		t.Error("access-key-secret holds another key")
 	}
-	if out, err := run(t, "access-key", "enrol", srv.URL, srv.code(4, false)); err != nil {
+	if _, err := run(t, "access-key", "enrol", srv.URL, srv.code(4, false)); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), keyHere) {
+		t.Errorf("another code: %v", err)
+	}
+	if len(srv.sent()) != len(sent) || heldKey(t).PublicKey().String() != sent[0].PublicKey || movedAside(t) != 0 {
+		t.Error("another code replaced the enrolled key")
+	}
+}
+
+// keyHere is the refusal of an enrolment on a machine that holds a key, after the path
+// of access-key-secret.
+const keyHere = " already holds this machine's access key secret, and enrol does not replace it: move it aside yourself first to enrol a new key, or use --print for a key kept elsewhere"
+
+// TestEnrolNeverReplacesTheKey is a successful enrolment, then the same command again,
+// another code, and the same code once its 15 minutes are over: each is refused before
+// it makes a key or sends anything, and names access-key-secret; the secret, the runner
+// file and the rest of the directory stay as they are, and nothing is moved aside.
+func TestEnrolNeverReplacesTheKey(t *testing.T) {
+	emptyDir(t)
+	srv := newEnrolServer(t)
+	writeFile(t, runnerFile(), "instance:\n  name: build-01\n")
+	code := srv.code(1, false)
+	out, err := run(t, "access-key", "enrol", srv.URL, code)
+	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
-	} else {
-		wants(t, out, "moved the access key secret that was here aside: "+dir.Path(runnerdir.OldPrefix))
+	}
+	dir := configDir()
+	key := heldKey(t)
+	expired := func() {
+		normal, err := accesskey.NormaliseCode(code)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := dir.WritePending(normal, time.Now().Add(-runnerdir.PendingFor-time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, c := range []struct {
+		name  string
+		setup func()
+		code  string
+	}{
+		{"the same command again", func() {}, code},
+		{"another code", func() {}, srv.code(2, false)},
+		{"the same code after its 15 minutes", expired, code},
+	} {
+		c.setup()
+		before := snapshot(t, string(dir))
+		_, err := run(t, "access-key", "enrol", srv.URL, c.code)
+		if cmd.ExitCode(err) != cmd.ExitInput || err.Error() != dir.Path(runnerdir.SecretFile)+keyHere {
+			t.Errorf("%s: %v", c.name, err)
+		}
+		after := snapshot(t, string(dir))
+		delete(after, filepath.Join("locks", runnerdir.KeyLock))
+		delete(before, filepath.Join("locks", runnerdir.KeyLock))
+		for p, v := range after {
+			if before[p] != v {
+				t.Errorf("%s: %s changed", c.name, p)
+			}
+		}
+		if len(after) != len(before) {
+			t.Errorf("%s: files before %v, after %v", c.name, before, after)
+		}
+		if heldKey(t).PublicKey() != key.PublicKey() || movedAside(t) != 0 {
+			t.Errorf("%s: the key was replaced", c.name)
+		}
+		if n := len(srv.sent()); n != 1 {
+			t.Errorf("%s: %d enrolments sent", c.name, n)
+		}
+	}
+}
+
+// TestEnrolAfterARefusal is a key_limit, after which the same code succeeds with the
+// same key, and a 401, after which the secret made for the code is moved aside and
+// another code enrols a new key.
+func TestEnrolAfterARefusal(t *testing.T) {
+	emptyDir(t)
+	srv := newEnrolServer(t)
+	writeFile(t, runnerFile(), "instance:\n  name: build-01\n")
+	srv.refusal("key_limit")
+	if _, err := run(t, "access-key", "enrol", srv.URL, srv.code(1, false)); err == nil || !strings.Contains(err.Error(), "the node already holds a key awaiting approval") {
+		t.Fatalf("key_limit: %v", err)
+	}
+	srv.status, srv.body = http.StatusCreated, nil
+	out, err := run(t, "access-key", "enrol", srv.URL, srv.code(1, false))
+	if err != nil {
+		t.Fatalf("the same code after key_limit: %v\n%s", err, out)
+	}
+	wants(t, out, "retrying with the key made for it", "enrolled as ak_0123456789abcdef")
+	sent := srv.sent()
+	if len(sent) != 2 || sent[1].PublicKey != sent[0].PublicKey || heldKey(t).PublicKey().String() != sent[0].PublicKey {
+		t.Error("the same code after key_limit did not keep the key")
+	}
+
+	emptyDir(t)
+	writeFile(t, runnerFile(), "instance:\n  name: build-01\n")
+	srv.status, srv.body = http.StatusUnauthorized, []byte(`{"error":"unauthorized"}`)
+	if _, err := run(t, "access-key", "enrol", srv.URL, srv.code(2, false)); err == nil || !strings.Contains(err.Error(), "this code was used or has expired") {
+		t.Fatalf("unauthorized: %v", err)
+	}
+	if exists(configDir().Path(runnerdir.SecretFile)) || movedAside(t) != 1 {
+		t.Fatal("the secret made for the used code was not moved aside")
+	}
+	srv.status, srv.body = http.StatusCreated, nil
+	out, err = run(t, "access-key", "enrol", srv.URL, srv.code(3, false))
+	if err != nil {
+		t.Fatalf("a new code after unauthorized: %v\n%s", err, out)
 	}
 	sent = srv.sent()
-	if last := sent[len(sent)-1]; last.PublicKey == sent[0].PublicKey || heldKey(t).PublicKey().String() != last.PublicKey || movedAside(t) != 1 {
-		t.Error("another code did not make a new key")
+	if last := sent[len(sent)-1]; last.PublicKey == sent[len(sent)-2].PublicKey || heldKey(t).PublicKey().String() != last.PublicKey {
+		t.Error("a new code after unauthorized did not make a new key")
 	}
+	wants(t, readRunnerFile(t), "access_key_id: ak_0123456789abcdef")
 }
 
 // TestEnrolActsOnTheRefusalsCode is each refusal of the server: unauthorized and a
@@ -509,10 +613,10 @@ func TestEnrolAfterTheWorkspaceKeysAreRemoved(t *testing.T) {
 
 // TestEnrolRefusesAFixturePin is a server that signs with the runner contract's
 // published fixture signing key: its answer verifies, and qory refuses to pin it.
-// --print says nothing was written, and no file of the directory changes. Without it
-// the runner file is left as it is, the secret made for the code and the one that was
-// here before are both moved aside, the pending enrolment ends, and the message names
-// both secrets' new paths.
+// --print, on a machine with a key of its own, says nothing was written, and no file of
+// the directory changes. Without it, once that key is moved aside by hand, the runner
+// file is left as it is, the secret made for the code is moved aside, the pending
+// enrolment ends, and the message names the secret's new path.
 func TestEnrolRefusesAFixturePin(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
@@ -554,7 +658,11 @@ func TestEnrolRefusesAFixturePin(t *testing.T) {
 		t.Errorf("--print: files before %v, after %v", before, after)
 	}
 
-	// Without --print the runner file stays and both secrets are moved aside.
+	// Without --print, once the machine's own key is moved aside by hand, the runner
+	// file stays and the secret made for the code is moved aside.
+	if err := os.Rename(dir.Path(runnerdir.SecretFile), dir.Path("own-secret")); err != nil {
+		t.Fatal(err)
+	}
 	out, errOut, enrolErr := runSplit(t, "", "access-key", "enrol", srv.URL, srv.code(1, false))
 	if enrolErr == nil {
 		t.Fatalf("enrolled:\n%s%s", out, errOut)
@@ -563,31 +671,22 @@ func TestEnrolRefusesAFixturePin(t *testing.T) {
 		t.Errorf("printed the key:\n%s", out)
 	}
 	old, err := dir.OldSecrets()
-	if err != nil || len(old) != 2 {
+	if err != nil || len(old) != 1 {
 		t.Fatalf("moved aside %v, %v", old, err)
 	}
+	b, err := os.ReadFile(dir.Path(old[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	k, err := runnerdir.ParseSecret(b)
+	if err != nil {
+		t.Fatal(err)
+	}
 	sent := srv.sent()
-	var made, earlier string
-	for _, name := range old {
-		b, err := os.ReadFile(dir.Path(name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		k, err := runnerdir.ParseSecret(b)
-		if err != nil {
-			t.Fatal(err)
-		}
-		switch k.PublicKey().String() {
-		case own.PublicKey().String():
-			earlier = dir.Path(name)
-		case sent[len(sent)-1].PublicKey:
-			made = dir.Path(name)
-		}
+	if k.PublicKey().String() != sent[len(sent)-1].PublicKey {
+		t.Fatal("the secret moved aside is not the one made for the code")
 	}
-	if made == "" || earlier == "" {
-		t.Fatalf("the secrets moved aside %v are not the one made for the code and the one that was here", old)
-	}
-	want := refused + "runner.yaml was not changed; the secret made for it was moved aside to " + made + "; the access key secret that was here was moved aside to " + earlier
+	want := refused + "runner.yaml was not changed; the secret made for it was moved aside to " + dir.Path(old[0])
 	if enrolErr.Error() != want {
 		t.Errorf("the refusal\n%v\nwant\n%s", enrolErr, want)
 	}
