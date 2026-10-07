@@ -67,6 +67,11 @@ func TestHelpersRenderTheirLineShape(t *testing.T) {
 			"✓ linked 3 files\n",
 		},
 		{
+			"Warn starts with a warning sign",
+			func(u *ui.UI) { u.Warn("kept %s", "c522a5b0b1c2") },
+			"⚠ kept c522a5b0b1c2\n",
+		},
+		{
 			"Fail starts with a cross",
 			func(u *ui.UI) { u.Fail(errors.New("no stack")) },
 			"✗ no stack\n",

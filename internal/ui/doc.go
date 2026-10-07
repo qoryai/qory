@@ -6,10 +6,11 @@
 // colour, used for the mark and for headings, never for running text.
 //
 // Every command opens its output with [UI.Title] and ends it with [UI.Success] or with
-// [UI.Fail]. In between it prints [UI.Fields] for named values, [UI.Table] for rows,
-// [UI.Heading] for a section, [UI.Text] for prose, [UI.Code] for a block to paste,
-// [UI.Blank] for an empty line, and [UI.Box] for a framed notice that has to be seen,
-// its lines styled with [UI.Strong], [UI.Brand] and [UI.Alert]. A wait is a [Flight], from
+// [UI.Fail]. In between it prints [UI.Warn] for something to see that does not stop it,
+// [UI.Fields] for named values, [UI.Table] for rows, [UI.Heading] for a section,
+// [UI.Text] for prose, [UI.Code] for a block to paste, [UI.Blank] for an empty line,
+// and [UI.Box] for a framed notice that has to be seen, its lines styled with
+// [UI.Strong], [UI.Brand] and [UI.Alert]. A wait is a [Flight], from
 // [UI.Fly]: the swarm circling beside what is waited for, drawn on a terminal only, since
 // it redraws its line in place, and left as a finished line everywhere by [Flight.Land],
 // the pot in place of the swarm. A command that works for a while between lines prints

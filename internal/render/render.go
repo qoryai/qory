@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -445,7 +446,13 @@ type Difference struct {
 // directory and calls Diff with that as want and the home as have, so "missing" is a path
 // a compose writes and "extra" one it removes. A root that does not exist is an empty
 // tree.
-func Diff(want, have string) ([]Difference, error) {
+//
+// cache is the directory git sources are fetched to, "" for none. Two links whose targets
+// are both inside it point into clones, one per commit, so they are compared by what they
+// point at: the paths, the bytes, the executable bit and the kind of everything under
+// the targets, with a clone's .git left out. A branch that moved to a commit whose
+// module is the same then leaves the home up to date. A target that is not there differs.
+func Diff(want, have, cache string) ([]Difference, error) {
 	a, err := readTree(want)
 	if err != nil {
 		return nil, err
@@ -473,13 +480,113 @@ func Diff(want, have string) ([]Difference, error) {
 		case x.kind != y.kind:
 			out = append(out, Difference{p, "kind"})
 		case x.kind == "link" && x.body != y.body:
-			out = append(out, Difference{p, "target"})
+			same, err := sameClone(absTarget(want, p, x.body), absTarget(have, p, y.body), cache)
+			if err != nil {
+				return nil, err
+			}
+			if !same {
+				out = append(out, Difference{p, "target"})
+			}
 		case x.kind == "file" && x.body != y.body:
 			out = append(out, Difference{p, "changed"})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, nil
+}
+
+// absTarget is the absolute target of the link at key under root, whose target reads
+// target.
+func absTarget(root, key, target string) string {
+	if filepath.IsAbs(target) {
+		return filepath.Clean(target)
+	}
+	return filepath.Join(root, filepath.Dir(filepath.FromSlash(key)), target)
+}
+
+// sameClone reports whether a and b, two link targets, are both inside cache and hold the
+// same content, as [Diff] compares a link into a clone. Each target and the cache are
+// taken with every symlink resolved, so a target that reaches outside the cache through a
+// link inside a clone is not inside it, and its content is never read. A target, or a
+// cache, that is not there is not the same.
+func sameClone(a, b, cache string) (bool, error) {
+	if cache == "" {
+		return false, nil
+	}
+	root, err := filepath.EvalSymlinks(cache)
+	if err != nil {
+		return false, nil
+	}
+	var trees []map[string]node
+	for _, target := range []string{a, b} {
+		real, err := filepath.EvalSymlinks(target)
+		if err != nil || !below(real, root) {
+			return false, nil
+		}
+		tree, err := contents(real)
+		if err != nil || tree == nil {
+			return false, err
+		}
+		trees = append(trees, tree)
+	}
+	return maps.Equal(trees[0], trees[1]), nil
+}
+
+// below reports whether path is below root, both without symlinks.
+func below(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// contents records everything under root, a directory or a single file with no symlink
+// in its path, keyed relative to root with forward slashes: a link by its target, never
+// followed, a file by its bytes and whether it is executable. A .git directory is left
+// out, since git tracks none and a clone's own is not content. A root that is not there
+// is nil.
+func contents(root string) (map[string]node, error) {
+	if _, err := os.Lstat(root); errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	nodes := map[string]node{}
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && d.Name() == ".git" && path != root {
+			return filepath.SkipDir
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		key := filepath.ToSlash(rel)
+		switch {
+		case d.Type()&fs.ModeSymlink != 0:
+			target, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			nodes[key] = node{"link", target}
+		case d.IsDir():
+			nodes[key] = node{"dir", ""}
+		default:
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			kind := "file"
+			if info.Mode()&0o111 != 0 {
+				kind = "executable"
+			}
+			nodes[key] = node{kind, string(data)}
+		}
+		return nil
+	})
+	return nodes, err
 }
 
 // node is one path of a tree as [readTree] records it: its kind, "dir", "link" or "file",
