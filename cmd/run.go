@@ -607,22 +607,24 @@ func mountRefused(err error, runnerDir string, links map[string]string) error {
 	if how == "" {
 		how = "overlaps"
 	}
+	key := runnerDir != "" && path == runnerDir
 	if l, ok := links[path]; ok {
 		path = l
 	}
 	text := fmt.Sprintf("the mount %s %s %s, which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path", mount, how, path)
-	if runnerDir != "" && path == runnerDir && runnerdir.Dir(runnerDir).HasSecret() {
+	if key && runnerdir.Dir(runnerDir).HasSecret() {
 		text = fmt.Sprintf("the mount %s %s %s, which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path", mount, how, path)
 	}
 	return &refusedError{text: text, err: &session.Refusal{Code: ref.Code}}
 }
 
 // configLinks is what qory passes the runner for the files it reads from its
-// configuration directory dir when a link takes one out of it: runner.yaml, qory.yaml or
-// qory.yml, runtimes/ and the descriptors in it, runtimes/*.yaml. Each is followed one
-// link at a time, each part of its path that is a link included, and every link on the
-// way and where it leads is one of the runner's files, since a mount of either would let
-// the agent change what the next run reads. The runner resolves its files through links,
+// configuration directory dir, absolute, when a link takes one out of it: dir itself,
+// runner.yaml, qory.yaml or qory.yml, runtimes/ and the descriptors in it,
+// runtimes/*.yaml in any case, as a disk that ignores case opens them. Each is followed
+// from dir as given, one link at a time, each part of its path that is a link included,
+// dir's own, and every link on the way and where it leads is one of the runner's files,
+// since a mount of either would let the agent change what the next run reads. The runner resolves its files through links,
 // so a link goes as its place, [linkPlace], and shown maps that back to the link for the
 // person. What lies in the resolved dir is left out: dir is one of the runner's files
 // itself. A file whose chain ends at a part that does not exist yet is passed as it is,
@@ -634,10 +636,10 @@ func configLinks(dir string) (files []string, shown map[string]string) {
 	if err != nil {
 		return nil, nil
 	}
-	names := append([]string{config.RunnerFileName, DescriptorsDir}, config.Names...)
+	names := append([]string{".", config.RunnerFileName, DescriptorsDir}, config.Names...)
 	if entries, err := os.ReadDir(filepath.Join(dir, DescriptorsDir)); err == nil {
 		for _, e := range entries {
-			if filepath.Ext(e.Name()) == ".yaml" {
+			if strings.EqualFold(filepath.Ext(e.Name()), ".yaml") {
 				names = append(names, filepath.Join(DescriptorsDir, e.Name()))
 			}
 		}
@@ -653,7 +655,7 @@ func configLinks(dir string) (files []string, shown map[string]string) {
 		if _, err := os.Lstat(path); err != nil {
 			continue
 		}
-		links, target, err := followLinks(filepath.Join(resolved, name))
+		links, target, err := followLinks(path)
 		for _, l := range links {
 			if !within(resolved, filepath.Dir(l)) {
 				place := linkPlace(l)

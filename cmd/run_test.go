@@ -915,6 +915,53 @@ func TestRunRefusesAMountOfALinkOnTheWayToAConfigFile(t *testing.T) {
 	}
 }
 
+// TestRunRefusesAMountOfALinkToTheConfigDir is a walled run whose qory configuration
+// directory is a link to one elsewhere: a mount of the directory that holds the link is
+// refused before anything starts, since the agent could point it at a directory of its
+// own, and qory names the link, which does not hold the access key itself; a mount of
+// the directory where it leads is refused as one that holds the key.
+func TestRunRefusesAMountOfALinkToTheConfigDir(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, "claude")
+	docker, log := fakeDocker(t)
+	configHome := os.Getenv("XDG_CONFIG_HOME")
+	configDir := filepath.Join(configHome, "qory")
+	elsewhere := tempDir(t)
+	real := filepath.Join(elsewhere, "qory")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(configDir, real); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(real, "runner.yaml"), "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
+	writeFile(t, filepath.Join(real, "access-key-secret"), "not read\n")
+	if err := os.Symlink(real, configDir); err != nil {
+		t.Fatal(err)
+	}
+	// qory names the link where it is, past the links above it.
+	physical, err := filepath.EvalSymlinks(configHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ mount, want string }{
+		{configHome, "the mount " + configHome + " contains " + filepath.Join(physical, "qory") + ", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
+		{elsewhere, "the mount " + elsewhere + " contains " + configDir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
+	} {
+		out, err := run(t, "run", "claude", "--mount", c.mount)
+		if err == nil || cmd.ExitCode(err) != 1 || err.Error() != c.want {
+			t.Errorf("--mount %s: %v (exit %d), want %q\n%s", c.mount, err, cmd.ExitCode(err), c.want, out)
+		}
+	}
+	if _, err := os.Stat(log); err == nil {
+		data, _ := os.ReadFile(log)
+		if strings.Contains(string(data), " run ") {
+			t.Errorf("a container was started:\n%s", data)
+		}
+	}
+}
+
 // TestRunTakesEnvWithoutAWall is --env on a run without a wall: a value no other
 // source sets reaches the agent and is recorded as the run's, and qory says, a line
 // each, that a value of a name the harness computes, a module's export, and of one no

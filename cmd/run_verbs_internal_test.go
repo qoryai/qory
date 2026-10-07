@@ -115,7 +115,9 @@ func TestMountRefusedSaysHowTheMountStands(t *testing.T) {
 // mount of whose directory the runner refuses and one beside it in that directory it
 // does not; where the chain leads goes as it is; a descriptor whose chain loops is
 // passed as it is, so the runner cannot resolve it and refuses the run; and a link in
-// runtimes/ that is not a descriptor is not followed.
+// runtimes/ that is not a descriptor is not followed, while one whose .yaml is in upper
+// case is, as a disk that ignores case opens it. A configuration directory that is a
+// link goes as the link's place, though it holds none of the files yet.
 func TestConfigLinksGuardsTheLinksOnTheWay(t *testing.T) {
 	resolve := func(p string) string {
 		r, err := filepath.EvalSymlinks(p)
@@ -132,14 +134,17 @@ func TestConfigLinksGuardsTheLinksOnTheWay(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(last, "goose.yaml"), []byte("name: goose\n"), 0o644); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"goose.yaml", "codex.yaml"} {
+		if err := os.WriteFile(filepath.Join(last, name), []byte("name: x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for _, l := range [][2]string{
 		{filepath.Join(last, "goose.yaml"), filepath.Join(hop, "goose.yaml")},
 		{filepath.Join(hop, "goose.yaml"), filepath.Join(runtimes, "goose.yaml")},
 		{"loop.yaml", filepath.Join(runtimes, "loop.yaml")},
 		{"notes", filepath.Join(runtimes, "notes")},
+		{filepath.Join(last, "codex.yaml"), filepath.Join(runtimes, "Codex.YAML")},
 	} {
 		if err := os.Symlink(l[0], l[1]); err != nil {
 			t.Fatal(err)
@@ -147,7 +152,7 @@ func TestConfigLinksGuardsTheLinksOnTheWay(t *testing.T) {
 	}
 	files, shown := configLinks(dir)
 	place := linkPlace(filepath.Join(hop, "goose.yaml"))
-	if want := []string{place, filepath.Join(last, "goose.yaml"), filepath.Join(runtimes, "loop.yaml")}; !slices.Equal(files, want) {
+	if want := []string{filepath.Join(last, "codex.yaml"), place, filepath.Join(last, "goose.yaml"), filepath.Join(runtimes, "loop.yaml")}; !slices.Equal(files, want) {
 		t.Errorf("files %q, want %q", files, want)
 	}
 	if got := shown[place]; got != filepath.Join(hop, "goose.yaml") {
@@ -158,6 +163,15 @@ func TestConfigLinksGuardsTheLinksOnTheWay(t *testing.T) {
 	}
 	if how := session.Overlap(beside, place); how != "" {
 		t.Errorf("a mount beside the link %q it", how)
+	}
+	// A configuration directory that is a link, with none of the files in it yet: the
+	// link is guarded all the same.
+	linked := filepath.Join(resolve(t.TempDir()), "qory")
+	if err := os.Symlink(resolve(t.TempDir()), linked); err != nil {
+		t.Fatal(err)
+	}
+	if files, _ := configLinks(linked); !slices.Equal(files, []string{linkPlace(linked)}) {
+		t.Errorf("a linked directory: files %q", files)
 	}
 	for _, name := range []string{"goose.yaml", "-a", "]a", "^a", `\a`, "[a", "a*b?c[d]"} {
 		pattern := filepath.Base(linkPlace(filepath.Join(hop, name)))
