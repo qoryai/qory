@@ -130,7 +130,7 @@ func explain(err error, id *serverIdentity) error {
 	case accesskey.CodeApiaryPublicKeyMissing:
 		text = fmt.Sprintf("the server has no pinned apiary_public_key, so no answer of it could be verified: qory access-key enrol writes it, or set server.apiary_public_key in %s or %s", config.RunnerFileName, accesskey.EnvPin)
 	case accesskey.CodeUnauthorized:
-		text = fmt.Sprintf("the server does not accept the access key %s: it does not know the key, or has revoked it; enrol a new key with qory access-key enrol", fingerprint)
+		text = fmt.Sprintf("the server refused the request of the access key %s: it does not know the key, has revoked it, or this machine's clock is more than five minutes off; check the clock, else enrol a new key with qory access-key enrol", fingerprint)
 	case accesskey.CodeAnswerUnsigned:
 		text = "an answer of the server does not verify under the pinned apiary_public_key, so the run does not start: check server.url and the pin"
 	case accesskey.CodeKeyPending:

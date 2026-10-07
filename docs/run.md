@@ -294,7 +294,7 @@ refusal means and what to do, then the runner's words and the code:
 
 | Code | What it means |
 | --- | --- |
-| `unauthorized` | the server does not know the access key, or has revoked it |
+| `unauthorized` | the server refused the request: it does not know the access key, has revoked it, or this machine's clock is more than five minutes off; check the clock, else enrol a new key |
 | `key_pending` | the key awaits approval: an owner or administrator of the server compares the fingerprint qory prints with the one the server shows |
 | `answer_unsigned` | an answer does not verify under the pin |
 | `instance_limit` | the node's live instances are at its limit |
