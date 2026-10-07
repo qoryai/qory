@@ -685,8 +685,9 @@ func TestRunRefusesAProgramUnderAReadWriteMount(t *testing.T) {
 // standing in for docker: the wall section and the flags choose the wall and the image,
 // the container is shown the checkout and nothing of this machine's environment but
 // the variables named, the relay and the forwarder are qory's Linux build inside, the
-// record names the wall, and the exit status is the container's. The section names the
-// container's user, because a machine that runs the tests as root has none to default to.
+// record, in the state directory, names the wall, and the exit status is the
+// container's. The section names the container's user, because a machine that runs
+// the tests as root has none to default to.
 func TestRunBehindAWall(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -723,7 +724,9 @@ func TestRunBehindAWall(t *testing.T) {
 		"env: MODEL_KEY=not-a-real-key", "env: FLAG_NAMED=goes in", "env: HTTPS_PROXY=http://qory-proxy:3128",
 		"network rm",
 	)
-	lacks(t, lines, "HOST_ONLY", "NOT_SET_HERE", "env: PATH=", "env: HOME=")
+	lacks(t, lines, "HOST_ONLY", "NOT_SET_HERE", "env: PATH=", "env: HOME=", ".qory/runs")
+	// The record is bound read-only from the state directory, outside the checkout.
+	wants(t, lines, "--mount type=bind,src="+runsDir(t, root)+string(filepath.Separator))
 	if strings.Count(lines, " --mount type=bind,src="+root+",") != 1 {
 		t.Error("the checkout is mounted more than once")
 	}

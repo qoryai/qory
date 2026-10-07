@@ -674,7 +674,9 @@ func (p passed) writable(path string, last bool) (writable, ok bool) {
 //
 // mount_shared_with_run is a place another walled run still going can change, or that
 // holds one of that run's places this run's agent could change. A git worktree inside
-// the other run's checkout is the common case, and the text says where to make one.
+// the other run's checkout is the common case, and the text says where to make one. The
+// runner names the runs directory for this run's own record, which the person never
+// mounted; that refusal is left to the rest.
 //
 // A place is the workspace when it is the checkout root or Dir, and a mount otherwise.
 func mountRefused(err error, p passed) error {
@@ -718,7 +720,7 @@ func mountRefused(err error, p passed) error {
 			innerWritable = !outerWritable
 		}
 		text = fmt.Sprintf("the mount %s (%s) lies inside %s, which is %s: a part of a mount can't have another mode, so the run does not start. Give both the same mode, or leave %s out", inner, mode(innerWritable), outer, mode(outerWritable), inner)
-	case ref.Code == codeMountSharedWithRun && len(ref.Names) == 3:
+	case ref.Code == codeMountSharedWithRun && len(ref.Names) == 3 && ref.Names[0] != p.spec.RunsDir:
 		path, other, otherPath := ref.Names[0], ref.Names[1], ref.Names[2]
 		text = fmt.Sprintf("%s %s %s, which the run %s, still going on this machine, can write: one agent could change what the other mounts, so the run does not start. Wait for %s to end, or work in a checkout of its own", p.place(path), overlap(path, otherPath), otherPath, other, other)
 		if info, err := os.Lstat(filepath.Join(path, ".git")); err == nil && info.Mode().IsRegular() {

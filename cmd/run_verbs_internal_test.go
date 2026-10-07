@@ -205,6 +205,12 @@ func TestMountRefusedSaysTheModes(t *testing.T) {
 			t.Errorf("%s in %s: %v, want %q", c.inner, c.outer, err, want)
 		}
 	}
+	// The workspace, writable, the same as a read-only mount: the runner counts it last.
+	ro := passed{root: root, spec: &session.Spec{Dir: sub, Mounts: []wall.Mount{{Path: sub, ReadOnly: true}}}}
+	want := "the mount " + sub + " (writable) lies inside " + sub + ", which is read-only: a part of a mount can't have another mode, so the run does not start. Give both the same mode, or leave " + sub + " out (mount_mode_conflict)"
+	if err := mountRefused(&session.Refusal{Code: "mount_mode_conflict", Names: []string{sub, sub}}, ro); err == nil || err.Error() != want {
+		t.Errorf("the workspace as a read-only mount: %v, want %q", err, want)
+	}
 	if err := mountRefused(&session.Refusal{Code: "mount_mode_conflict", Names: []string{"/elsewhere/a", "/elsewhere"}}, p); err != nil {
 		t.Errorf("paths the run did not pass: %v", err)
 	}
@@ -212,7 +218,8 @@ func TestMountRefusedSaysTheModes(t *testing.T) {
 
 // TestMountRefusedNamesTheRunStillGoing is mount_shared_with_run, for a mount and for
 // the workspace, each way the paths stand: a git worktree, whose .git is a file, is
-// told where to make one; a checkout of its own, whose .git is a directory, is not.
+// told where to make one; a checkout of its own, whose .git is a directory, is not. A
+// refusal of this run's own record, which names the runs directory, is not worded.
 func TestMountRefusedNamesTheRunStillGoing(t *testing.T) {
 	const other = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f"
 	checkout := t.TempDir()
@@ -245,6 +252,13 @@ func TestMountRefusedNamesTheRunStillGoing(t *testing.T) {
 		if err == nil || err.Error() != want {
 			t.Errorf("%s and %s: %v, want %q", c.path, c.otherPath, err, want)
 		}
+	}
+	// The runner names the runs directory for this run's own record, which nobody
+	// mounted: that refusal is not worded here.
+	runs := filepath.Join(t.TempDir(), "runs", "app-0123456789ab")
+	p := passed{root: checkout, spec: &session.Spec{RunsDir: runs, Mounts: []wall.Mount{{Path: checkout}}, Dir: checkout}}
+	if err := mountRefused(&session.Refusal{Code: "mount_shared_with_run", Names: []string{runs, other, filepath.Dir(runs)}}, p); err != nil {
+		t.Errorf("the runs directory: %v", err)
 	}
 }
 
