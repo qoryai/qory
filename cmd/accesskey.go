@@ -37,7 +37,7 @@ func newAccessKeyCommand() *cobra.Command {
 
 The key is an Ed25519 key. Its secret stays on this machine, in access-key-secret beside
 ` + config.RunnerFileName + ` in ~/.config/qory, and the server keeps only its public key. A key is
-never rotated: a new one is enrolled, approved, and the old one revoked.
+never rotated: a new one is enrolled, and the old one revoked.
 
   enrol   enrol a new key with a code from the server
   create  make a key whose public key an administrator pastes into the server
@@ -63,9 +63,8 @@ administrator of the server created. The code is valid for 15 minutes and used o
 qory makes the key, keeps its secret in access-key-secret, prints its fingerprint and
 sends the server the public key. The server's signed answer gives the key its id, which
 qory writes into the server section of ` + config.RunnerFileName + `, with the server's URL and its
-public key where the section has none yet. The key then awaits approval: an owner or
-administrator compares the fingerprint qory printed with the one the server shows, and
-until then every run is refused with key_pending.
+public key where the section has none yet. The key is active from that answer on: runs
+can start.
 
 When access-key-secret exists, enrol refuses, so it never replaces this machine's key:
 move it aside yourself first to enrol a new key, or use --print for a key kept
@@ -360,7 +359,7 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 		}
 	}
 	fingerprint := key.Fingerprint()
-	fmt.Fprintf(info, "access key fingerprint %s: compare it with the one the server shows\n", fingerprint)
+	fmt.Fprintf(info, "access key fingerprint %s\n", fingerprint)
 	req, err := accesskey.NewEnrolmentRequest(key, code, name, now)
 	if err != nil {
 		return input(err)
@@ -378,11 +377,7 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	}
 	fmt.Fprintf(info, "enrolled as %s in the %s %s\n", ans.AccessKeyID, kind, ans.NodeID)
 	fmt.Fprintf(info, "stored secrets: %s\n", yesNo(ans.StoredSecrets))
-	if ans.Approved {
-		fmt.Fprintln(info, "approved: runs can start")
-	} else {
-		fmt.Fprintf(info, "awaiting approval: an owner or administrator of the server compares the fingerprint %s with the one the server shows and approves the key; until then every run is refused with key_pending\n", fingerprint)
-	}
+	fmt.Fprintln(info, "the key is active: runs can start")
 	if print {
 		pinJSON, err := json.Marshal(ans.Pin)
 		if err != nil {
@@ -457,7 +452,7 @@ func enrolFailed(dir runnerdir.Dir, err error, key *accesskey.Key, print bool, n
 	var ref *accesskey.Refusal
 	if !errors.As(err, &ref) {
 		if print {
-			return fmt.Errorf("the enrolment did not complete: %w; a --print enrolment cannot be retried: get a new code, and have your administrator reject the key %s should it await approval", err, fingerprint)
+			return fmt.Errorf("the enrolment did not complete: %w; a --print enrolment cannot be retried: get a new code, and have your administrator revoke the key %s should it have been enrolled", err, fingerprint)
 		}
 		return fmt.Errorf("the enrolment did not complete: %w; run the same command again within 15 minutes and it retries with the same key", err)
 	}
@@ -475,7 +470,7 @@ func enrolFailed(dir runnerdir.Dir, err error, key *accesskey.Key, print bool, n
 	var text string
 	switch ref.Code {
 	case accesskey.CodeUnauthorized:
-		text = "this code was used or has expired; if you did not use it, tell your administrator, who must reject the pending key. Enrolling needs a new code" + discard()
+		text = "this code was used or has expired; if you did not use it, tell your administrator, who must revoke the key it enrolled. Enrolling needs a new code" + discard()
 	case accesskey.CodeKeyInvalid:
 		names := ""
 		if len(ref.Names) > 0 {
@@ -483,11 +478,11 @@ func enrolFailed(dir runnerdir.Dir, err error, key *accesskey.Key, print bool, n
 		}
 		text = "the server refused the key" + names + ". Enrolling needs a new code" + discard()
 	case accesskey.CodeKeyLimit:
-		text = "the node already holds a key awaiting approval, or two approved keys: once an owner or administrator has revoked or rejected one, the same command, run within the code's 15 minutes, succeeds"
+		text = "the node already holds two keys: once an owner or administrator has revoked one, the same command, run within the code's 15 minutes, succeeds"
 	case accesskey.CodeAnswerUnsigned:
 		text = fmt.Sprintf("the server did not enrol the key (HTTP %d, unsigned); try again later", ref.Status)
 		if print {
-			text += "; a --print enrolment cannot be retried: get a new code, and have your administrator reject the key " + fingerprint + " should it await approval"
+			text += "; a --print enrolment cannot be retried: get a new code, and have your administrator revoke the key " + fingerprint + " should it have been enrolled"
 		}
 	default:
 		return err

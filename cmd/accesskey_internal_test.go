@@ -95,7 +95,7 @@ func TestEnrolmentKnownAnswers(t *testing.T) {
 			body := contractFile(t, a.Body)
 			if tamper {
 				body = bytes.Replace(body, []byte(`"key_`), []byte(`"key_x`), 1)
-				body = bytes.Replace(body, []byte(`"approved":false`), []byte(`"approved":true`), 1)
+				body = bytes.Replace(body, []byte(`"stored_secrets":false`), []byte(`"stored_secrets":true`), 1)
 			}
 			status := http.StatusConflict
 			if a.Lines[1] == "201" {

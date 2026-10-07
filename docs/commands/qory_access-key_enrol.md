@@ -10,9 +10,8 @@ administrator of the server created. The code is valid for 15 minutes and used o
 qory makes the key, keeps its secret in access-key-secret, prints its fingerprint and
 sends the server the public key. The server's signed answer gives the key its id, which
 qory writes into the server section of runner.yaml, with the server's URL and its
-public key where the section has none yet. The key then awaits approval: an owner or
-administrator compares the fingerprint qory printed with the one the server shows, and
-until then every run is refused with key_pending.
+public key where the section has none yet. The key is active from that answer on: runs
+can start.
 
 When access-key-secret exists, enrol refuses, so it never replaces this machine's key:
 move it aside yourself first to enrol a new key, or use --print for a key kept

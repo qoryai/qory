@@ -226,7 +226,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 			}
 			walled := spec.Wall != nil
-			spec.LaunchEnv = launchSpec(launch, walled)
+			spec.LaunchFixed, spec.LaunchDefaults, spec.HarnessHome = launch.Fixed, launch.Defaults, launch.HarnessHome
 			runLock, err := startRun(machineDir(), spec.RunID, walled, id == nil)
 			if err != nil {
 				return err
@@ -421,10 +421,10 @@ const wallOff = "none"
 // enclose puts the spec behind a wall when a flag or the runner file sets one. The
 // runtime then runs in a container, so what refers to this machine changes: the
 // environment it inherits is the variables set for the wall, never the process's, and
-// the forwarder is the helper's path inside the container. The launch's variables are
-// the spec's LaunchEnv, behind a wall or not, see [launchSpec]. The checkout, the composed
-// home, which is all a launch template's paths point into, and the mounts keep their
-// paths inside the container.
+// the forwarder is the helper's path inside the container. The launch's variables, its
+// fixed ones, its defaults and its home, go to the runner behind a wall or not: the
+// checkout, the composed home, which is all a launch template's paths point into, and
+// the mounts keep their paths inside the container.
 //
 // The images wall.images defines go to the runner, which reads the default, --image or
 // wall.image, as the name of one of them first and as a reference otherwise, and
@@ -743,24 +743,6 @@ func resolveLaunch(rep report.Report, conf config.Config, runtime string) (strin
 		return "", render.Launch{}, input(err)
 	}
 	return name, launch, nil
-}
-
-// launchSpec is the launch's environment as the runner takes it today: one list,
-// QORY_HARNESS_HOME, then the fixed variables, then the defaults, every name once. The
-// home is the same path behind a wall, since the wall mounts it where it is, but the
-// runner refuses a QORY_ variable passed into its enclosure, variable_reserved, so a
-// walled run passes the fixed variables and the defaults alone.
-//
-// TODO(run-inputs): the runner replaces Spec.LaunchEnv with LaunchFixed and
-// LaunchDefaults and adds HarnessHome, which it sets as QORY_HARNESS_HOME itself, behind
-// a wall too; this function is what the next piece rewrites to fill those from
-// launch.Fixed, launch.Defaults and launch.HarnessHome.
-func launchSpec(launch render.Launch, walled bool) []string {
-	env := launch.Env()
-	if walled {
-		return env[1:]
-	}
-	return env
 }
 
 // splitAtDash is the runtime named before -- , if one was, and the arguments after it.

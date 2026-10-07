@@ -179,8 +179,6 @@ func explain(err error, id *serverIdentity) error {
 		text = fmt.Sprintf("the server refused a request signed with the access key %s: it does not know the key, has revoked it, or this machine's clock is more than five minutes off; check the clock, else enrol a new key with qory access-key enrol", fingerprint)
 	case accesskey.CodeAnswerUnsigned:
 		text = "an answer of the server does not verify under the pinned apiary_public_key, so the run does not start: check server.url and the pin"
-	case accesskey.CodeKeyPending:
-		text = fmt.Sprintf("the access key %s awaits approval: an owner or administrator of the server compares this fingerprint with the one the server shows, and approves the key", fingerprint)
 	case accesskey.CodeInstanceLimit:
 		text = fmt.Sprintf("the node's live instances have reached its limit, so the instance %s does not start: wait for a run of another instance to end, or have an owner or administrator clear that instance", instance)
 	case accesskey.CodeRunClosed:

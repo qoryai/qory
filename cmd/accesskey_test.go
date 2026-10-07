@@ -36,7 +36,6 @@ type enrolServer struct {
 	// signBy signs the answer, nil for an unsigned one.
 	signBy   *accesskey.Key
 	rotate   bool
-	approved bool
 	requests []accesskey.EnrolmentRequest
 	agents   []string
 }
@@ -61,7 +60,7 @@ func newEnrolServer(t *testing.T) *enrolServer {
 			body = s.answer(true)
 		}
 		if s.signBy != nil && s.status != http.StatusUnauthorized {
-			w.Header().Set(accesskey.HeaderSignature, s.signBy.SignAnswer(accesskey.Answer{Status: s.status, RequestSignature: req.Proof, Body: body}))
+			w.Header().Set(accesskey.HeaderSignature, s.signBy.SignAnswer(accesskey.Answer{Enrolment: true, Status: s.status, RequestSignature: req.Proof, Body: body}))
 		}
 		w.WriteHeader(s.status)
 		w.Write(body)
@@ -86,11 +85,7 @@ func (s *enrolServer) answer(node bool) []byte {
 	if !node {
 		id, kind = "np_0123456789abcdef", "pool"
 	}
-	approved := "false"
-	if s.approved {
-		approved = "true"
-	}
-	return []byte(`{"version":1,"access_key_id":"ak_0123456789abcdef","node_id":"` + id + `","node_kind":"` + kind + `","approved":` + approved + `,"stored_secrets":false,"apiary_public_key":` + s.keys() + `}`)
+	return []byte(`{"version":1,"access_key_id":"ak_0123456789abcdef","node_id":"` + id + `","node_kind":"` + kind + `","stored_secrets":false,"apiary_public_key":` + s.keys() + `}`)
 }
 
 // refusal is a signed 409 of code, listing the server's keys.
@@ -200,15 +195,13 @@ func TestEnrolWritesTheServerSectionAndKeepsTheRest(t *testing.T) {
 	}
 	key := heldKey(t)
 	fp := key.Fingerprint()
-	wants(t, errOut,
-		string(configDir())+" is now mode 0700: it holds the access key's secret",
-		"access key fingerprint "+fp+": compare it with the one the server shows",
-		"enrolled as ak_0123456789abcdef in the node nd_0123456789abcdef",
-		"stored secrets: no",
-		"awaiting approval: an owner or administrator of the server compares the fingerprint "+fp+" with the one the server shows and approves the key; until then every run is refused with key_pending",
-		"wrote server.url, server.access_key_id and server.apiary_public_key to "+runnerFile())
-	if strings.Index(errOut, "access key fingerprint") > strings.Index(errOut, "enrolled as") {
-		t.Error("the fingerprint came after the answer")
+	if want := string(configDir()) + " is now mode 0700: it holds the access key's secret\n" +
+		"access key fingerprint " + fp + "\n" +
+		"enrolled as ak_0123456789abcdef in the node nd_0123456789abcdef\n" +
+		"stored secrets: no\n" +
+		"the key is active: runs can start\n" +
+		"wrote server.url, server.access_key_id and server.apiary_public_key to " + runnerFile() + "\n"; errOut != want {
+		t.Errorf("stderr\n%s\nwant\n%s", errOut, want)
 	}
 	if strings.Contains(out+errOut, key.Secret()) {
 		t.Error("the secret was printed")
@@ -250,19 +243,17 @@ func TestEnrolWritesTheServerSectionAndKeepsTheRest(t *testing.T) {
 // TestEnrolCreatesTheRunnerFileAndPinsOnlyTheCodesKeys is an enrolment on a machine
 // with no runner file during a rotation of the server's key: the answer lists both of
 // the server's keys, and the code carries the current key's fingerprint alone, so the
-// new file, mode 0600, pins that key alone. A node pool and an approved key are said
-// as such.
+// new file, mode 0600, pins that key alone. A node pool is said as such.
 func TestEnrolCreatesTheRunnerFileAndPinsOnlyTheCodesKeys(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
-	srv.rotate, srv.approved = true, true
+	srv.rotate = true
 	srv.body = srv.answer(false)
 	out, err := run(t, "access-key", "enrol", srv.URL, srv.code(1, false))
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "in the node pool np_0123456789abcdef", "approved: runs can start")
-	lacks(t, out, "awaiting approval")
+	wants(t, out, "in the node pool np_0123456789abcdef", "the key is active: runs can start")
 	if m := mode(t, runnerFile()); m != 0o600 {
 		t.Errorf("the runner file is mode %v", m)
 	}
@@ -501,7 +492,7 @@ func TestEnrolAfterARefusal(t *testing.T) {
 	srv := newEnrolServer(t)
 	writeFile(t, runnerFile(), "instance:\n  name: build-01\n")
 	srv.refusal("key_limit")
-	if _, err := run(t, "access-key", "enrol", srv.URL, srv.code(1, false)); err == nil || !strings.Contains(err.Error(), "the node already holds a key awaiting approval") {
+	if _, err := run(t, "access-key", "enrol", srv.URL, srv.code(1, false)); err == nil || !strings.Contains(err.Error(), "the node already holds two keys") {
 		t.Fatalf("key_limit: %v", err)
 	}
 	srv.status, srv.body = http.StatusCreated, nil
@@ -549,7 +540,7 @@ func TestEnrolRetriesOnlyWithTheKeyMadeForTheCode(t *testing.T) {
 		dir := configDir()
 		code := srv.code(1, false)
 		srv.refusal("key_limit")
-		if _, err := run(t, "access-key", "enrol", srv.URL, code); err == nil || !strings.Contains(err.Error(), "the node already holds a key awaiting approval") {
+		if _, err := run(t, "access-key", "enrol", srv.URL, code); err == nil || !strings.Contains(err.Error(), "the node already holds two keys") {
 			t.Fatalf("key_limit: %v", err)
 		}
 		if !exists(dir.Path(runnerdir.PendingFile)) {
@@ -610,7 +601,7 @@ func TestCreateEndsAPendingEnrolment(t *testing.T) {
 // TestEnrolActsOnTheRefusalsCode is each refusal of the server: unauthorized and a
 // signed key_invalid move the secret aside, end the pending enrolment and say a new
 // code is needed; a signed key_limit keeps both and says the same command succeeds once
-// a key is revoked or rejected. The runner file stays as it is.
+// a key is revoked. The runner file stays as it is.
 func TestEnrolActsOnTheRefusalsCode(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
@@ -622,12 +613,12 @@ func TestEnrolActsOnTheRefusalsCode(t *testing.T) {
 		want  []string
 	}{
 		{"unauthorized", func() { srv.status, srv.body = http.StatusUnauthorized, []byte(`{"error":"unauthorized"}`) }, false, []string{
-			"this code was used or has expired; if you did not use it, tell your administrator, who must reject the pending key. Enrolling needs a new code; the secret made for it was moved aside to " + dir.Path(runnerdir.OldPrefix),
+			"this code was used or has expired; if you did not use it, tell your administrator, who must revoke the key it enrolled. Enrolling needs a new code; the secret made for it was moved aside to " + dir.Path(runnerdir.OldPrefix),
 			"(enrolment: the code was used, has expired or was cancelled: unauthorized (status 401))"}},
 		{"key_invalid", func() { srv.refusal("key_invalid", "public_key") }, false, []string{
 			"the server refused the key (public_key). Enrolling needs a new code; the secret made for it was moved aside to "}},
 		{"key_limit", func() { srv.refusal("key_limit") }, true, []string{
-			"the node already holds a key awaiting approval, or two approved keys: once an owner or administrator has revoked or rejected one, the same command, run within the code's 15 minutes, succeeds"}},
+			"the node already holds two keys: once an owner or administrator has revoked one, the same command, run within the code's 15 minutes, succeeds"}},
 	} {
 		os.RemoveAll(string(dir))
 		writeFile(t, runnerFile(), "instance:\n  name: build-01\n")
@@ -807,7 +798,7 @@ func TestEnrolPrintWritesNothing(t *testing.T) {
 	if err != nil || len(pin) != 2 {
 		t.Errorf("the pin printed does not read: %v", err)
 	}
-	wants(t, errOut, "access key fingerprint "+key.Fingerprint(), "enrolled as ak_0123456789abcdef in the node nd_0123456789abcdef", "stored secrets: no", "awaiting approval",
+	wants(t, errOut, "access key fingerprint "+key.Fingerprint(), "enrolled as ak_0123456789abcdef in the node nd_0123456789abcdef", "stored secrets: no", "the key is active: runs can start",
 		"Only QORY_ACCESS_KEY_SECRET belongs in the CI's secret store; QORY_ACCESS_KEY_ID and QORY_APIARY_PUBLIC_KEY are plain settings. No key or setting was written on this machine.")
 	if strings.Contains(errOut, key.Secret()) {
 		t.Error("stderr carries the secret")
@@ -831,7 +822,7 @@ func TestEnrolPrintWritesNothing(t *testing.T) {
 	// A lost answer cannot be retried.
 	srv.status, srv.body, srv.signBy = http.StatusServiceUnavailable, []byte(`{}`), nil
 	_, _, err = runSplit(t, "", "access-key", "enrol", "--print", srv.URL, srv.code(2, false))
-	if err == nil || !strings.Contains(err.Error(), "(HTTP 503, unsigned); try again later; a --print enrolment cannot be retried: get a new code, and have your administrator reject the key ") {
+	if err == nil || !strings.Contains(err.Error(), "(HTTP 503, unsigned); try again later; a --print enrolment cannot be retried: get a new code, and have your administrator revoke the key ") || !strings.Contains(err.Error(), " should it have been enrolled (") {
 		t.Errorf("a lost answer: %v", err)
 	}
 

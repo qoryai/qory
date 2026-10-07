@@ -223,12 +223,10 @@ func TestRunTakesTheSecretFromTheEnvironment(t *testing.T) {
 
 // TestRunSaysWhatARefusalMeans is each refusal of the server and of the runner at the
 // start, said with what to do, its code and exit status 1, and nothing run: an access
-// key that awaits approval, one the server does not know, an instance beyond the node's
-// limit, an answer that does not verify under the pin, no pin, and a run the server
-// closes.
+// key the server does not know, an instance beyond the node's limit, an answer that
+// does not verify under the pin, no pin, and a run the server closes.
 func TestRunSaysWhatARefusalMeans(t *testing.T) {
 	root, srv := serverRun(t, "", "")
-	fingerprint := srv.key.Fingerprint()
 	refusal := func(name string, want ...string) {
 		t.Helper()
 		clearRuns(t, root)
@@ -242,10 +240,6 @@ func TestRunSaysWhatARefusalMeans(t *testing.T) {
 			t.Errorf("%s: the runtime ran", name)
 		}
 	}
-	srv.pending = true
-	refusal("pending", "the access key "+fingerprint+" awaits approval: an owner or administrator of the server compares this fingerprint with the one the server shows, and approves the key (", "key_pending (status 409)")
-	srv.pending = false
-
 	writeSecret(t, newKey(t))
 	refusal("unknown", "the server refused a request signed with the access key ", ": it does not know the key, has revoked it, or this machine's clock is more than five minutes off; check the clock, else enrol a new key with qory access-key enrol (", "unauthorized (status 401)")
 	writeSecret(t, srv.key)
@@ -344,7 +338,7 @@ func TestTheMarkerKeepsEveryUnwalledRunOut(t *testing.T) {
 // TestDiscoverySettlesTheMarker is the marker rule of a signed discovery under the
 // secret of access-key-secret: one that lists secrets writes it and refuses the
 // unwalled run after reading it; one that lists none deletes the moved-aside secrets
-// and removes the marker, so the run goes on; a key that awaits approval leaves both.
+// and removes the marker, so the run goes on; a key the server has revoked leaves both.
 func TestDiscoverySettlesTheMarker(t *testing.T) {
 	root, srv := serverRun(t, "", "")
 	dir := configDir()
@@ -358,10 +352,10 @@ func TestDiscoverySettlesTheMarker(t *testing.T) {
 	srv.secrets = false
 	old := dir.Path(runnerdir.OldPrefix + "1700000000")
 	writeFile(t, old, newKey(t).Secret()+"\n")
-	srv.pending = true
+	srv.revoked = true
 	clearRuns(t, root)
-	if _, err := run(t, "run"); err == nil || !strings.Contains(err.Error(), "key_pending") {
-		t.Errorf("a pending key: %v", err)
+	if _, err := run(t, "run"); err == nil || !strings.Contains(err.Error(), "unauthorized (status 401)") {
+		t.Errorf("a revoked key: %v", err)
 	}
 	if has, _ := dir.HasMarker(); !has {
 		t.Error("an unsuccessful discovery removed the marker")
@@ -369,7 +363,7 @@ func TestDiscoverySettlesTheMarker(t *testing.T) {
 	if _, err := os.Stat(old); err != nil {
 		t.Error("an unsuccessful discovery deleted the secret moved aside")
 	}
-	srv.pending = false
+	srv.revoked = false
 	clearRuns(t, root)
 	if out, err := run(t, "run"); err != nil {
 		t.Fatalf("discovery without secrets: %v\n%s", err, out)
