@@ -67,6 +67,9 @@ release may change what an existing document does, and states it under Upgrading
   and the runner's API-key approval, `claude` is the descriptor's version, and `git` and
   `gh` run. It reports whether `dockerd` is in a system directory, with what it runs. The
   exit status is 1 when a check fails.
+- `--access-key-secret-fd <n>` on `qory run` and `qory run resend` reads the access key's
+  secret from that file descriptor, 3 or above, and closes it; it wins over
+  `QORY_ACCESS_KEY_SECRET` and the `access-key-secret` file.
 
 ### Changed
 

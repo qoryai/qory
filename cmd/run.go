@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/term"
+	"github.com/qoryai/runner/accesskey"
 	"github.com/qoryai/runner/runtimes/catalog"
 	"github.com/qoryai/runner/session"
 	"github.com/qoryai/runner/wall"
@@ -43,6 +44,7 @@ func newRun() *cobra.Command {
 	var labels []string
 	var timeout, grace time.Duration
 	var stopSignal string
+	var secretFD int
 	c := &cobra.Command{
 		Use:   "run [runtime] [-- argument...]",
 		Short: "Run the agent on its harness, observed and recorded",
@@ -87,6 +89,16 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// The descriptor is read and closed first, whatever comes next, so nothing
+			// qory starts inherits it.
+			var fdKey *accesskey.Key
+			if cmd.Flags().Changed(secretFDFlag) {
+				k, err := readSecretFD(secretFD)
+				if err != nil {
+					return err
+				}
+				fdKey = k
+			}
 			runtime, extra := splitAtDash(cmd, args)
 			at, conf, err := locate(h)
 			if err != nil {
@@ -166,7 +178,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			stderr := cmd.ErrOrStderr()
 			var id *serverIdentity
 			if server != nil && !local {
-				if id, err = identify(conf.Runner, stderr, "run"); err != nil {
+				if id, err = identify(conf.Runner, stderr, "run", fdKey); err != nil {
 					return err
 				}
 			}
@@ -287,6 +299,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	c.Flags().StringVar(&o.limits.CPUs, "cpus", "", "how many CPUs the container gets, such as 1.5 ("+config.RunnerFileName+": wall.cpus)")
 	c.Flags().StringVar(&o.limits.Memory, "memory", "", "the most memory the container gets, such as 8g ("+config.RunnerFileName+": wall.memory)")
 	c.Flags().IntVar(&o.limits.PIDs, "pids-limit", 0, "the most processes and threads in the container ("+config.RunnerFileName+": wall.pids_limit)")
+	c.Flags().IntVar(&secretFD, secretFDFlag, 0, secretFDUsage)
 	c.Flags().StringVar(&o.limits.ShmSize, "shm-size", "", "the size of /dev/shm in the container, such as 2g ("+config.RunnerFileName+": wall.shm_size)")
 	homeFlags(c, &h)
 	c.AddCommand(newResend(), newForward(), newRelay(), newNest())
@@ -533,6 +546,7 @@ func wallHelper(section config.RunnerWall, exe string) (string, error) {
 // happened before it.
 func newResend() *cobra.Command {
 	var wait time.Duration
+	var secretFD int
 	c := &cobra.Command{
 		Use:   "resend <run-id>",
 		Short: "Send a finished run's record to the server again",
@@ -552,6 +566,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
   qory run resend "$run_id" --wait 10m  # keep trying for ten minutes`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			var fdKey *accesskey.Key
+			if cmd.Flags().Changed(secretFDFlag) {
+				k, err := readSecretFD(secretFD)
+				if err != nil {
+					return err
+				}
+				fdKey = k
+			}
 			at, conf, err := locate(homeOptions{})
 			if err != nil {
 				return err
@@ -563,7 +585,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 			if r == nil || r.Server == nil {
 				return input(fmt.Errorf("%s defines no server to send the record to", config.RunnerFileName))
 			}
-			id, err := identify(r, cmd.ErrOrStderr(), "run resend")
+			id, err := identify(r, cmd.ErrOrStderr(), "run resend", fdKey)
 			if err != nil {
 				return err
 			}
@@ -608,6 +630,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 		},
 	}
 	c.Flags().DurationVar(&wait, "wait", 2*time.Minute, "how long to keep trying a server that does not accept")
+	c.Flags().IntVar(&secretFD, secretFDFlag, 0, secretFDUsage)
 	return c
 }
 

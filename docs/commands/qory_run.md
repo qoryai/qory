@@ -47,24 +47,25 @@ qory run [runtime] [-- argument...] [flags]
 ### Options
 
 ```
-      --cpus string           how many CPUs the container gets, such as 1.5 (runner.yaml: wall.cpus)
-      --env stringArray       a variable to pass into the container, by name; repeatable (runner.yaml: wall.env)
-      --headless              run on pipes even at a terminal; -p for claude implies it
-  -h, --help                  help for run
-      --home string           where the harness is composed: a directory outside the checkout, one home per checkout under it, or .qory/harness (qory.yaml: harness.home)
-      --image string          the container's image unless the run's policy selects one: a name of wall.images, or a reference (runner.yaml: wall.image)
-      --label stringArray     a key=value name for the run, reported in its events; repeatable (forge and repository come from the origin remote)
-      --local                 run without the server: record to files, under the machine's policy
-      --memory string         the most memory the container gets, such as 8g (runner.yaml: wall.memory)
-      --mount stringArray     a path of this machine the container sees too, :ro for read-only; repeatable (runner.yaml: wall.mounts)
-      --pids-limit int        the most processes and threads in the container (runner.yaml: wall.pids_limit)
-      --policy string         this run's own policy file, kept outside the checkout; it narrows the egress of runner.yaml, never widens it (with a server: needs --local)
-      --run-id string         the run's id, a UUID in lower case (default a new one)
-      --shm-size string       the size of /dev/shm in the container, such as 2g (runner.yaml: wall.shm_size)
-      --stop-grace duration   the time between the stop signal and SIGKILL (default 10s; runner.yaml: run.stop_grace)
-      --stop-signal string    the signal that stops the agent: SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2 (default SIGTERM; runner.yaml: run.stop_signal)
-      --timeout duration      stop the agent after this long, such as 5h30m, and exit 124 (default no limit; runner.yaml: run.timeout)
-      --wall string           run the agent in a container whose one way out is the proxy: docker, or none (runner.yaml: wall.adapter)
+      --access-key-secret-fd int   read the access key's secret from this file descriptor, 3 or above; it wins over QORY_ACCESS_KEY_SECRET and the access-key-secret file
+      --cpus string                how many CPUs the container gets, such as 1.5 (runner.yaml: wall.cpus)
+      --env stringArray            a variable to pass into the container, by name; repeatable (runner.yaml: wall.env)
+      --headless                   run on pipes even at a terminal; -p for claude implies it
+  -h, --help                       help for run
+      --home string                where the harness is composed: a directory outside the checkout, one home per checkout under it, or .qory/harness (qory.yaml: harness.home)
+      --image string               the container's image unless the run's policy selects one: a name of wall.images, or a reference (runner.yaml: wall.image)
+      --label stringArray          a key=value name for the run, reported in its events; repeatable (forge and repository come from the origin remote)
+      --local                      run without the server: record to files, under the machine's policy
+      --memory string              the most memory the container gets, such as 8g (runner.yaml: wall.memory)
+      --mount stringArray          a path of this machine the container sees too, :ro for read-only; repeatable (runner.yaml: wall.mounts)
+      --pids-limit int             the most processes and threads in the container (runner.yaml: wall.pids_limit)
+      --policy string              this run's own policy file, kept outside the checkout; it narrows the egress of runner.yaml, never widens it (with a server: needs --local)
+      --run-id string              the run's id, a UUID in lower case (default a new one)
+      --shm-size string            the size of /dev/shm in the container, such as 2g (runner.yaml: wall.shm_size)
+      --stop-grace duration        the time between the stop signal and SIGKILL (default 10s; runner.yaml: run.stop_grace)
+      --stop-signal string         the signal that stops the agent: SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2 (default SIGTERM; runner.yaml: run.stop_signal)
+      --timeout duration           stop the agent after this long, such as 5h30m, and exit 124 (default no limit; runner.yaml: run.timeout)
+      --wall string                run the agent in a container whose one way out is the proxy: docker, or none (runner.yaml: wall.adapter)
 ```
 
 ### Options inherited from parent commands

@@ -31,8 +31,9 @@ qory run resend <run-id> [flags]
 ### Options
 
 ```
-  -h, --help            help for resend
-      --wait duration   how long to keep trying a server that does not accept (default 2m0s)
+      --access-key-secret-fd int   read the access key's secret from this file descriptor, 3 or above; it wins over QORY_ACCESS_KEY_SECRET and the access-key-secret file
+  -h, --help                       help for resend
+      --wait duration              how long to keep trying a server that does not accept (default 2m0s)
 ```
 
 ### Options inherited from parent commands

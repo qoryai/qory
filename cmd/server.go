@@ -28,6 +28,8 @@ const (
 	fromFile keySource = iota + 1
 	// fromEnv is QORY_ACCESS_KEY_SECRET.
 	fromEnv
+	// fromFD is the descriptor --access-key-secret-fd names.
+	fromFD
 )
 
 // accessKey is the access key a command signs its requests with, and where its secret
@@ -37,11 +39,15 @@ type accessKey struct {
 	source keySource
 }
 
-// readAccessKey reads the access key's secret: QORY_ACCESS_KEY_SECRET, else the file
-// access-key-secret in the runner file's directory. A secret that is not one, a file the
-// rules refuse and the published fixture key are errors that never contain the value.
-// No secret anywhere is (nil, nil).
-func readAccessKey(dir runnerdir.Dir) (*accessKey, error) {
+// readAccessKey reads the access key's secret: the one read from the descriptor
+// --access-key-secret-fd names, when fd is not nil, else QORY_ACCESS_KEY_SECRET, else
+// the file access-key-secret in the runner file's directory. A secret that is not one,
+// a file the rules refuse and the published fixture key are errors that never contain
+// the value. No secret anywhere is (nil, nil).
+func readAccessKey(dir runnerdir.Dir, fd *accesskey.Key) (*accessKey, error) {
+	if fd != nil {
+		return &accessKey{key: fd, source: fromFD}, nil
+	}
 	if v, ok := os.LookupEnv(accesskey.EnvSecret); ok && v != "" {
 		k, err := runnerdir.ParseSecret([]byte(v))
 		if err != nil {
@@ -62,6 +68,44 @@ func readAccessKey(dir runnerdir.Dir) (*accessKey, error) {
 	return &accessKey{key: k, source: fromFile}, nil
 }
 
+// maxSecretFD is the most read from the secret's descriptor: a secret is one line of 47
+// characters.
+const maxSecretFD = 4 << 10
+
+// secretFDFlag is the flag that names the descriptor the access key's secret is read
+// from.
+const secretFDFlag = "access-key-secret-fd"
+
+// secretFDUsage is the help of --access-key-secret-fd.
+const secretFDUsage = "read the access key's secret from this file descriptor, 3 or above; it wins over " + accesskey.EnvSecret + " and the access-key-secret file"
+
+// readSecretFD reads the access key's secret from file descriptor n, to its end, and
+// closes the descriptor, so nothing qory starts inherits it. The standard input, output
+// and error are refused. No error contains the value.
+func readSecretFD(n int) (*accesskey.Key, error) {
+	if n < 3 {
+		return nil, input(fmt.Errorf("--%s %d: the standard input, output and error carry no secret; name a descriptor of 3 or above", secretFDFlag, n))
+	}
+	f := os.NewFile(uintptr(n), "--"+secretFDFlag)
+	if f == nil {
+		return nil, input(fmt.Errorf("--%s %d is not an open descriptor", secretFDFlag, n))
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, maxSecretFD+1))
+	if err != nil {
+		return nil, input(fmt.Errorf("--%s %d: %w", secretFDFlag, n, err))
+	}
+	defer clear(b)
+	if len(b) > maxSecretFD {
+		return nil, input(fmt.Errorf("--%s %d: more than an access key secret", secretFDFlag, n))
+	}
+	k, err := runnerdir.ParseSecret(b)
+	if err != nil {
+		return nil, input(fmt.Errorf("--%s %d: %w", secretFDFlag, n, err))
+	}
+	return k, nil
+}
+
 // forgetAccessKeyEnv removes the access key's variables from qory's own environment once
 // they are read, so nothing qory starts inherits them: the secret, the id and the pin.
 func forgetAccessKeyEnv() {
@@ -80,11 +124,12 @@ type serverIdentity struct {
 
 // identify reads what a command that talks to the runner file's server signs with: the
 // access key's id, which the server section or QORY_ACCESS_KEY_ID holds, its secret,
-// and this instance's id and name. It prints a line when the instance id cannot be kept
-// in the directory and lives for this process alone.
-func identify(r *config.Runner, report io.Writer, verb string) (*serverIdentity, error) {
+// the one read from --access-key-secret-fd when fd is not nil, and this instance's id
+// and name. It prints a line when the instance id cannot be kept in the directory and
+// lives for this process alone.
+func identify(r *config.Runner, report io.Writer, verb string, fd *accesskey.Key) (*serverIdentity, error) {
 	dir := machineDir()
-	key, err := readAccessKey(dir)
+	key, err := readAccessKey(dir, fd)
 	forgetAccessKeyEnv()
 	if err != nil {
 		return nil, input(err)
