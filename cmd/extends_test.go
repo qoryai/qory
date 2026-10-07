@@ -326,3 +326,37 @@ func TestExtendsGovernsFilesByPrefix(t *testing.T) {
 		t.Fatalf("a base module named: err = %v, exit %d", err, cmd.ExitCode(err))
 	}
 }
+
+// TestExtendsFollowsTheBasesBranch is a base at main after a push: the next compose takes
+// the new commit for the base and its modules alike, without --update, and prints the
+// move on the extends row alone.
+func TestExtendsFollowsTheBasesBranch(t *testing.T) {
+	url := baseRepo(t)
+	root := consumerCheckout(t, url)
+	if out, err := run(t, "harness", "compose"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	first := readReport(t, root).Base.Pin
+	dir := strings.TrimPrefix(url, "file://")
+	writeFile(t, filepath.Join(dir, "modules", "core", "AGENTS.md"), "# Core rules, second\n")
+	runGit(t, dir, "commit", "-q", "-am", "second")
+	out, err := run(t, "harness", "compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	rep := readReport(t, root)
+	if rep.Base.Pin == first {
+		t.Fatalf("the base stayed on %s after a push", first)
+	}
+	for _, l := range rep.Modules[:2] {
+		if l.Pin != rep.Base.Pin {
+			t.Errorf("base module %s on %s, want the base's %s", l.Name, l.Pin, rep.Base.Pin)
+		}
+	}
+	wantsRow(t, out, "extends", "nextjs-15  main "+first+" → "+rep.Base.Pin)
+	wantsNoRow(t, out, "module")
+	instructions, _ := os.ReadFile(filepath.Join(root, ".claude", "CLAUDE.md"))
+	if !strings.HasPrefix(string(instructions), "# Core rules, second\n") {
+		t.Errorf("instructions after the push:\n%s", instructions)
+	}
+}

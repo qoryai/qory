@@ -564,8 +564,9 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 		update = *o.update
 	}
 	// The last report pins each git module, and the base, to the commit it was
-	// composed from, so a compose without --update stays there as long as the
-	// stack still names the same source: an edited ref resolves anew.
+	// composed from: a tag stays there, a branch takes the remote's commit and keeps
+	// the pin only offline, and an edited ref resolves anew. The memo puts every
+	// source at one URL and ref, the base included, on one commit for this compose.
 	previous, _ := report.Read(at.report)
 	pins := map[string]string{}
 	for _, l := range previous.Modules {
@@ -573,7 +574,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 			pins[l.Source] = l.Pin
 		}
 	}
-	opts := compose.Options{Update: update, Pins: pins, Cache: conf.Git.Cache, Timeout: conf.Git.Timeout, Env: conf.Env}
+	opts := compose.Options{Update: update, Pins: pins, Cache: conf.Git.Cache, Timeout: conf.Git.Timeout, Env: conf.Env, Memo: source.NewMemo()}
 	var basePin string
 	if previous.Base != nil && previous.Base.Source == p.Extends.String() {
 		basePin = previous.Base.Pin
@@ -625,6 +626,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 	if err := render.CheckFiles(res); err != nil {
 		return nil, input(err)
 	}
+	moved := resolvedRows(res, u)
 	for _, m := range res.Modules {
 		retired.add("module "+m.Name, m.RetiredAPIVersion)
 	}
@@ -652,7 +654,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 	// The machine keys of a qory.yaml at the checkout root are not read under
 	// extends, and a row says so, on a dry run as well, so the person who wrote
 	// them learns that the base stack decides.
-	var skippedConfig [][2]string
+	skippedConfig := moved
 	if base != nil {
 		what := "(set by -f)"
 		if named.Path != "" || named.Git != "" {
@@ -669,6 +671,35 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 	skippedConfig = append(skippedConfig, checks.rows...)
 	skippedConfig = append(skippedConfig, retired.rows...)
 	return &prepared{at: at, res: res, rep: rep, previous: previous, targets: targets, force: force, rows: skippedConfig, u: u}, nil
+}
+
+// resolvedRows prints a warning for each git source whose remote could not be reached, one
+// per URL and ref, and returns a row for the base and each module whose source resolved
+// to another commit than the last compose recorded, such as a branch that moved: the
+// name, the ref, and the old and new pins.
+func resolvedRows(res *compose.Result, u *ui.UI) [][2]string {
+	var rows [][2]string
+	var warnings []string
+	if b := res.Base; b != nil {
+		if b.Warning != "" {
+			warnings = append(warnings, b.Warning)
+		}
+		if b.Previous != "" {
+			rows = append(rows, [2]string{"extends", b.Name + "  " + b.Ref + " " + b.Previous + " → " + b.Pin})
+		}
+	}
+	for _, l := range res.Modules {
+		if l.Warning != "" && !slices.Contains(warnings, l.Warning) {
+			warnings = append(warnings, l.Warning)
+		}
+		if l.Previous != "" {
+			rows = append(rows, [2]string{"module", l.Name + "  " + l.Ref + " " + l.Previous + " → " + l.Pin})
+		}
+	}
+	for _, w := range warnings {
+		u.Warn("%s", w)
+	}
+	return rows
 }
 
 // ownFileRows are the rows for the checkout's own qory.yaml under extends: what the
@@ -908,8 +939,14 @@ func applyTarget(p *stack.Stack, base *compose.Base, conf config.Config, runtime
 
 // composeError classifies what a compose returned: a git source that could not be fetched
 // and a file the operating system would not read are failures of the machine, left as
-// they are; everything else is a mistake in the stack or a module, an input error.
+// they are; everything else is a mistake in the stack or a module, an input error. A ref
+// the remote no longer has is an input error that reads as the source's own message, with
+// no module or extends before it, since it names the URL and the ref itself.
 func composeError(err error) error {
+	var gone *source.GoneError
+	if errors.As(err, &gone) {
+		return input(gone)
+	}
 	var fetch *source.FetchError
 	var pathErr *fs.PathError
 	if errors.As(err, &fetch) || errors.As(err, &pathErr) && !errors.Is(err, fs.ErrNotExist) {
