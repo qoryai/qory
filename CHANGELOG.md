@@ -8,6 +8,9 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- `qory harness compose` takes a branch's current commit on every compose, without
+  `--update`. A tag or a commit id stays pinned. Offline, it keeps the cached commit and
+  warns.
 - Under `extends`, `qory harness compose` says what it read from the repository's
   `qory.yaml`: a `read` row with the target, the modules, the extensions and the
   `worktree` keys it took. An `ignored` row names the keys of the file it left out, such
