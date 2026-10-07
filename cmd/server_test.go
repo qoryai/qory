@@ -127,21 +127,26 @@ func TestRunRegeneratesAnInstanceIDThatIsNotThisMachines(t *testing.T) {
 		t.Errorf("the link's target was written: %q", b)
 	}
 
-	os.Remove(path)
-	if err := os.Chmod(string(dir), 0o500); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Chmod(string(dir), 0o700) })
-	clearRuns(t, root)
-	srv.instances = nil
-	out, err := run(t, "run")
-	if err != nil {
-		t.Fatalf("a read-only directory: %v\n%s", err, out)
-	}
-	if _, err := os.Lstat(path); !os.IsNotExist(err) || !instanceShape.MatchString(srv.instances[0][0]) {
-		t.Errorf("a read-only directory: %v, the server saw %v", err, srv.instances)
-	}
-	wants(t, out, "qory run: instance "+srv.instances[0][0]+", this process's own: "+path+" cannot be written")
+	t.Run("a read-only directory", func(t *testing.T) {
+		if os.Getuid() == 0 {
+			t.Skip("root writes a directory whatever its mode")
+		}
+		os.Remove(path)
+		if err := os.Chmod(string(dir), 0o500); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.Chmod(string(dir), 0o700) })
+		clearRuns(t, root)
+		srv.instances = nil
+		out, err := run(t, "run")
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		if _, err := os.Lstat(path); !os.IsNotExist(err) || !instanceShape.MatchString(srv.instances[0][0]) {
+			t.Errorf("%v, the server saw %v", err, srv.instances)
+		}
+		wants(t, out, "qory run: instance "+srv.instances[0][0]+", this process's own: "+path+" cannot be written")
+	})
 }
 
 // TestRunRefusesAnAccessKeySecretTheRulesRefuse is access-key-secret that grants the

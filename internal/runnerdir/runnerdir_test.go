@@ -272,14 +272,19 @@ func TestTheInstanceIDIsKeptForThisMachine(t *testing.T) {
 		t.Errorf("another process's file: %q", got)
 	}
 
-	ro := newDir(t)
-	os.Chmod(string(ro), 0o500)
-	t.Cleanup(func() { os.Chmod(string(ro), 0o700) })
-	a, kept, err := ro.InstanceID(machine)
-	b, _, _ := ro.InstanceID(machine)
-	if err != nil || kept || a == b || accesskey.CheckInstanceID(a) != nil {
-		t.Errorf("a read-only directory: %q %q %v %v", a, b, kept, err)
-	}
+	t.Run("a read-only directory", func(t *testing.T) {
+		if os.Getuid() == 0 {
+			t.Skip("root writes a directory whatever its mode")
+		}
+		ro := newDir(t)
+		os.Chmod(string(ro), 0o500)
+		t.Cleanup(func() { os.Chmod(string(ro), 0o700) })
+		a, kept, err := ro.InstanceID(machine)
+		b, _, _ := ro.InstanceID(machine)
+		if err != nil || kept || a == b || accesskey.CheckInstanceID(a) != nil {
+			t.Errorf("%q %q %v %v", a, b, kept, err)
+		}
+	})
 }
 
 // TestLocksKeepKeyCommandsAndRunsApart is the key lock, shared by runs and exclusive to
@@ -356,10 +361,15 @@ func TestLocksKeepKeyCommandsAndRunsApart(t *testing.T) {
 		t.Errorf("%d lock files after the runs ended", len(entries))
 	}
 
-	ro := runnerdir.Dir(filepath.Join(t.TempDir(), "ro"))
-	os.Mkdir(string(ro), 0o500)
-	t.Cleanup(func() { os.Chmod(string(ro), 0o700) })
-	if _, err := ro.LockKey(false); err != runnerdir.ErrReadOnly {
-		t.Errorf("a read-only directory: %v", err)
-	}
+	t.Run("a read-only directory", func(t *testing.T) {
+		if os.Getuid() == 0 {
+			t.Skip("root writes a directory whatever its mode")
+		}
+		ro := runnerdir.Dir(filepath.Join(t.TempDir(), "ro"))
+		os.Mkdir(string(ro), 0o500)
+		t.Cleanup(func() { os.Chmod(string(ro), 0o700) })
+		if _, err := ro.LockKey(false); err != runnerdir.ErrReadOnly {
+			t.Errorf("%v", err)
+		}
+	})
 }
