@@ -485,7 +485,7 @@ func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *y
 	case pin != nil:
 		for i, e := range *pin {
 			if e.Alg == nil || e.PublicKey == nil {
-				return nil, fmt.Errorf("%s: server.apiary_public_key[%d] has alg and public_key", path, i)
+				return nil, fmt.Errorf("%s: server.apiary_public_key[%d] needs both alg and public_key", path, i)
 			}
 			if accesskey.ContainsSecret(*e.Alg) || accesskey.ContainsSecret(*e.PublicKey) {
 				return nil, fmt.Errorf("%s: server.apiary_public_key: %w", path, accesskey.ErrSecretInDocument)

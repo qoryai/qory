@@ -213,7 +213,7 @@ func TestRunnerFileRefusesAMistake(t *testing.T) {
 		{"server: {url: \"https://qory.example\", access_key_id: ak_f1xt0re0000000}\n", `server.access_key_id: the access key id "ak_f1xt0re0000000" is not ak_`},
 		{"server: {url: \"https://qory.example\", access_key: ak_f1xt0re000000000}\n", "server.access_key is a workspace access key, which servers no longer accept; enrol this machine as a node: qory access-key enrol <server> <code>, or qory access-key create and add its public key to the node; see https://github.com/qoryai/qory/blob/main/docs/run.md#the-access-key-and-the-instance"},
 		{"server: {url: \"https://qory.example\", secret: qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA}\n", "server.secret is a workspace access key's secret, which servers no longer accept; enrol this machine as a node"},
-		{"server: {url: \"https://qory.example\", apiary_public_key: [{alg: ed25519}]}\n", "server.apiary_public_key[0] has alg and public_key"},
+		{"server: {url: \"https://qory.example\", apiary_public_key: [{alg: ed25519}]}\n", "server.apiary_public_key[0] needs both alg and public_key"},
 		{"server: {url: \"https://qory.example\", apiary_public_key: [{alg: ed25519, public_key: abc}]}\n", "server.apiary_public_key: the pin: the public key \"abc\": 2 bytes where 32 belong"},
 		{"server: {url: \"https://qory.example\", apiary_public_key: [{alg: rsa, public_key: rcFAEfgtHFbZVqpPnXPYhYNhpgYEhSXg0Ixjjcdd2Mc}]}\n", "server.apiary_public_key: the pin lists a key of alg \"rsa\""},
 		{"server: {url: \"https://qory.example\", apiary_public_key: [{alg: ed25519, public_key: rcFAEfgtHFbZVqpPnXPYhYNhpgYEhSXg0Ixjjcdd2Mc}]}\n", "server.apiary_public_key: it lists the runner contract's published fixture key, whose secret anyone can read"},
