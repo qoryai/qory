@@ -226,8 +226,12 @@ every run on the machine.
 Several sources may set a variable of the agent's process. For each name, the run takes
 the value of the highest source that sets it:
 
-1. The values qory and the runtime fix: the runner's own names, `QORY_HARNESS_HOME`, and
-   the harness's fixed variables, such as `CODEX_HOME`. No other source overrides them.
+1. The values qory and the runtime fix: the runner's own names, `QORY_HARNESS_HOME`, the
+   variables of the runtime's own launch template, such as Codex's `CODEX_HOME`, and the
+   harness's fixed variables. No other source overrides them, `env` in `qory.yaml`, a
+   settings fragment's and a module's export included. The `env` of
+   `harness.launch.<runtime>` replaces the template's variables, and its values are
+   defaults.
 2. The server's run configuration. See [The server](#the-server).
 3. `--env`, the run's own.
 4. `wall.env`, the machine's.

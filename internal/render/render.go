@@ -159,9 +159,11 @@ type EnvSetter interface {
 }
 
 // LaunchEnv is the variables the harness sets when the runtime's program starts, beside
-// the launch template's and QORY_HARNESS_HOME, see [compose.Result.LaunchEnv]. A runtime
-// without a launch template gets none.
-func LaunchEnv(res *compose.Result, p Runtime) ([]compose.Var, error) {
+// the launch template's and QORY_HARNESS_HOME, see [compose.Result.LaunchEnv], with
+// override the configuration's harness.launch.<runtime>, nil when it has none. A variable
+// whose name the runtime's own template sets is left out: the template's value is fixed,
+// see [LaunchFor]. A runtime without a launch template gets none.
+func LaunchEnv(res *compose.Result, p Runtime, override *Template) ([]compose.Var, error) {
 	if _, ok := p.(Launcher); !ok {
 		return nil, nil
 	}
@@ -170,7 +172,32 @@ func LaunchEnv(res *compose.Result, p Runtime) ([]compose.Var, error) {
 	if s, ok := p.(EnvSetter); ok {
 		file, path = s.EnvAt()
 	}
-	return res.LaunchEnv(p.Name(), file, path...)
+	vars, err := res.LaunchEnv(p.Name(), file, path...)
+	if err != nil {
+		return nil, err
+	}
+	own := ownEnv(p, override)
+	out := vars[:0]
+	for _, v := range vars {
+		if _, ok := own[v.Name]; !ok {
+			out = append(out, v)
+		}
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+// ownEnv is the variables of the runtime's own launch template, which are fixed and which
+// no variable of the harness replaces; none when override's env replaces the template's,
+// whose variables are then defaults the harness's layer over.
+func ownEnv(p Runtime, override *Template) map[string]string {
+	l, ok := p.(Launcher)
+	if !ok || (override != nil && override.Env != nil) {
+		return nil
+	}
+	return l.Template().Env
 }
 
 // DropEnv removes the key path where a fragment sets variables from a settings map, and
@@ -223,11 +250,12 @@ func (l Launch) Env() []string {
 
 // LaunchFor resolves the runtime's launch template against home: the runtime's own, with
 // every field the override sets in its place, and its environment with the harness's
-// variables, harness, over the template's. A template variable is fixed when it is the
-// runtime's own and a default when the override's env replaced the runtime's; a harness
-// variable is fixed or a default as [compose.Var.Fixed] says. A runtime without a
-// template is an error stating that its program reads the harness from the checkout
-// alone, through the links a compose writes there.
+// variables, harness, beside the template's. The runtime's own template variables are
+// fixed, and a harness variable of the same name does not replace one. When the
+// override's env replaced the runtime's, its variables are defaults and the harness's
+// layer over them. A harness variable is fixed or a default as [compose.Var.Fixed] says.
+// A runtime without a template is an error stating that its program reads the harness
+// from the checkout alone, through the links a compose writes there.
 func LaunchFor(p Runtime, home string, override *Template, harness []compose.Var) (Launch, error) {
 	l, ok := p.(Launcher)
 	if !ok {
@@ -265,6 +293,9 @@ func LaunchFor(p Runtime, home string, override *Template, harness []compose.Var
 		values[name], fixed[name] = words[0], own
 	}
 	for _, v := range harness {
+		if _, ok := t.Env[v.Name]; own && ok {
+			continue
+		}
 		values[v.Name], fixed[v.Name] = compose.ForHome(v.Value, home).(string), v.Fixed
 	}
 	for _, name := range sortedKeys(values) {

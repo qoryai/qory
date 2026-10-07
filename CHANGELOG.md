@@ -157,10 +157,12 @@ release may change what an existing document does, and states it under Upgrading
   A machine that reports to a server needs its own access key: `server.access_key_id`,
   the `server.apiary_public_key` pin and the secret.
 - A run's variables follow one order, highest first: the values qory and the runtime
-  fix, such as `QORY_HARNESS_HOME` and `CODEX_HOME`, which no other source overrides;
-  the server's run configuration; `--env`; `wall.env`; the harness's defaults, `env` in
-  `qory.yaml`, the `env` of `harness.launch.<runtime>` and a settings fragment's `env`;
-  and the shell. A value that loses is left out, and the run starts. When a value of
+  fix, such as `QORY_HARNESS_HOME` and the variables of the runtime's own launch
+  template, Codex's `CODEX_HOME` among them, which no other source overrides, `env` in
+  `qory.yaml`, a settings fragment's and a module's export included; the server's run
+  configuration; `--env`; `wall.env`; the harness's defaults, `env` in `qory.yaml`, the
+  `env` of `harness.launch.<runtime>`, which replaces the template's variables, and a
+  settings fragment's `env`; and the shell. A value that loses is left out, and the run starts. When a value of
   `--env` loses, `qory run` says why, such as `qory run: LOG_LEVEL from --env is not
   used: apiary.example.com sets it`, `no source may set it` or `the harness sets it`.
   `--env` works without a wall; `--image`, `--mount` and the limits need one. A run

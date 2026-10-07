@@ -399,7 +399,7 @@ func runCheck(out io.Writer, pr *prepared) error {
 	if err != nil {
 		return err
 	}
-	env, err := launchEnv(pr.res, all)
+	env, err := launchEnv(pr.res, all, pr.launch)
 	if err != nil {
 		return input(err)
 	}
@@ -474,6 +474,7 @@ type prepared struct {
 	rep      report.Report
 	previous report.Report
 	targets  []render.Runtime
+	launch   map[string]config.Launch // the configuration's harness.launch, which decides whether a template's variables are its own
 	force    bool
 	cache    string      // where git sources are fetched, so a check compares a link into a clone by what it holds
 	rows     [][2]string // the rows every outcome prints after its own: skipped keys, unchecked ranges
@@ -513,7 +514,7 @@ func runCompose(out, errOut io.Writer, o composeOptions) error {
 	for _, rt := range all {
 		rep.Target.Runtimes = append(rep.Target.Runtimes, rt.Name())
 	}
-	if rep.LaunchEnv, err = launchEnv(res, all); err != nil {
+	if rep.LaunchEnv, err = launchEnv(res, all, pr.launch); err != nil {
 		return input(err)
 	}
 	if err := render.Build(res, at.home, all...); err != nil {
@@ -523,11 +524,12 @@ func runCompose(out, errOut io.Writer, o composeOptions) error {
 }
 
 // launchEnv is, per runtime with a launch template, the variables the harness sets when
-// its program starts, as the report records them; nil when it sets none.
-func launchEnv(res *compose.Result, runtimes []render.Runtime) (map[string][]report.Var, error) {
+// its program starts, as the report records them, with launch the configuration's
+// harness.launch; nil when it sets none.
+func launchEnv(res *compose.Result, runtimes []render.Runtime, launch map[string]config.Launch) (map[string][]report.Var, error) {
 	var out map[string][]report.Var
 	for _, rt := range runtimes {
-		vars, err := render.LaunchEnv(res, rt)
+		vars, err := render.LaunchEnv(res, rt, launchOverride(launch, rt.Name()))
 		if err != nil {
 			return nil, err
 		}
@@ -715,7 +717,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 		retired.add("module "+m.Name, m.RetiredAPIVersion)
 	}
 	rep := report.New(res, name, at.root, at.home)
-	if rep.LaunchEnv, err = launchEnv(res, targets); err != nil {
+	if rep.LaunchEnv, err = launchEnv(res, targets, conf.Launch); err != nil {
 		return nil, input(err)
 	}
 	if !at.links {
@@ -761,7 +763,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 	if cache == "" {
 		cache, _ = source.CacheDir()
 	}
-	return &prepared{at: at, res: res, rep: rep, previous: previous, targets: targets, force: force, cache: cache, rows: skippedConfig, u: u}, nil
+	return &prepared{at: at, res: res, rep: rep, previous: previous, targets: targets, launch: conf.Launch, force: force, cache: cache, rows: skippedConfig, u: u}, nil
 }
 
 // resolvedRows prints a warning for each git source whose remote could not be reached, one

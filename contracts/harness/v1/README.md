@@ -748,9 +748,13 @@ The line sets the launch's environment through `env`, in three parts with no nam
    `harness.launch.<runtime>`, which stands in for the template's whole and is a default
    with its placeholders replaced, and the variables a settings fragment sets (§Runtimes).
 
-The harness's variables layer over the template's: a fragment's, then the modules' over
-them, then the configuration's over both. Each is then fixed or a default by where its
-value came from, so a variable the configuration sets over a module's export is a default.
+The variables of the runtime's own template are fixed: a variable of the harness with the
+same name, the configuration's, a fragment's or a module's export, does not replace one,
+and the report leaves it out. When the `env` of `harness.launch.<runtime>` replaces the
+template's, its variables are defaults, and the harness's layer over them. The harness's
+variables layer over each other: a fragment's, then the modules' over them, then the
+configuration's over both. Each is then fixed or a default by where its value came from,
+so a variable the configuration sets over a module's export is a default.
 `qory run` passes the same environment to the runner. The report keeps these variables
 under `launch_env` (§The report), and `qory harness compose --check` compares them with
 what the compose sets, so a changed export, a changed `env` in the configuration or a

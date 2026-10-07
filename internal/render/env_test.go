@@ -75,7 +75,7 @@ func launchFor(t *testing.T, res *compose.Result, home, runtime string, override
 	if err := render.Build(res, home, rt); err != nil {
 		t.Fatal(err)
 	}
-	vars, err := render.LaunchEnv(res, rt)
+	vars, err := render.LaunchEnv(res, rt, override)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,6 +144,56 @@ func TestLaunchOverrideEnvIsADefault(t *testing.T) {
 	}
 }
 
+// TestTheTemplatesOwnVariableStaysFixed is Codex's launch over a compose whose
+// configuration sets CODEX_HOME, a fragment setting it too, and a module exporting
+// OPENCODE_CONFIG_DIR, read by OpenCode: the runtime's own template keeps its value, fixed,
+// and none of the three is a variable of the launch or of the report's launch_env. The
+// same variables passed to the launch as an older report recorded them are left out too.
+// With harness.launch.codex.env replacing the template's, its CODEX_HOME is a default
+// and the configuration's value layers over it.
+func TestTheTemplatesOwnVariableStaysFixed(t *testing.T) {
+	files := withFile("modules/core/settings/codex/config.toml", "[shell_environment_policy.set]\nLOG_LEVEL = \"debug\"\nCODEX_HOME = \"/fragment\"\n")
+	files["modules/core/qory-module.yaml"] = "apiVersion: qory.dev/v1alpha1\nname: core\nenv:\n  HARNESS_HOME: .\n  TOKEN_DIR: tokens\n  OPENCODE_CONFIG_DIR: .\n"
+	res, home := composeEnv(t, files, map[string]string{"CODEX_HOME": "/elsewhere"}, "codex", "opencode")
+	rt := lookup(t, "codex")
+	l := launchFor(t, res, home, "codex", nil)
+	wantFixed := []string{"CODEX_HOME=" + home + "/codex", "HARNESS_HOME=" + home + "/modules/core", "OPENCODE_CONFIG_DIR=" + home + "/modules/core", "TOKEN_DIR=" + home + "/modules/core/tokens"}
+	wantDefaults := []string{"LOG_LEVEL=debug"}
+	if !reflect.DeepEqual(l.Fixed, wantFixed) || !reflect.DeepEqual(l.Defaults, wantDefaults) {
+		t.Errorf("codex launch fixed %q defaults %q\nwant fixed %q defaults %q", l.Fixed, l.Defaults, wantFixed, wantDefaults)
+	}
+	vars, err := render.LaunchEnv(res, rt, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range vars {
+		if v.Name == "CODEX_HOME" {
+			t.Errorf("codex launch_env holds %+v; the template's own CODEX_HOME is fixed", v)
+		}
+	}
+	all := []compose.Var{{Name: "CODEX_HOME", Value: "/elsewhere", From: "configuration"}, {Name: "LOG_LEVEL", Value: "debug", From: "module core, settings/codex/config.toml"}}
+	l, err = render.LaunchFor(rt, home, nil, all)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"CODEX_HOME=" + home + "/codex"}; !reflect.DeepEqual(l.Fixed, want) || !reflect.DeepEqual(l.Defaults, wantDefaults) {
+		t.Errorf("codex launch from a recorded CODEX_HOME: fixed %q defaults %q, want fixed %q defaults %q", l.Fixed, l.Defaults, want, wantDefaults)
+	}
+
+	oc := launchFor(t, res, home, "opencode", nil)
+	wantFixed = []string{"CODEX_HOME=/elsewhere", "HARNESS_HOME=" + home + "/modules/core", "OPENCODE_CONFIG_DIR=" + home + "/opencode", "TOKEN_DIR=" + home + "/modules/core/tokens"}
+	if !reflect.DeepEqual(oc.Fixed, wantFixed[1:]) || !reflect.DeepEqual(oc.Defaults, wantFixed[:1]) {
+		t.Errorf("opencode launch fixed %q defaults %q\nwant fixed %q defaults %q", oc.Fixed, oc.Defaults, wantFixed[1:], wantFixed[:1])
+	}
+
+	l = launchFor(t, res, home, "codex", &render.Template{Env: map[string]string{"CODEX_HOME": "${dir}"}})
+	wantFixed = []string{"HARNESS_HOME=" + home + "/modules/core", "OPENCODE_CONFIG_DIR=" + home + "/modules/core", "TOKEN_DIR=" + home + "/modules/core/tokens"}
+	wantDefaults = []string{"CODEX_HOME=/elsewhere", "LOG_LEVEL=debug"}
+	if !reflect.DeepEqual(l.Fixed, wantFixed) || !reflect.DeepEqual(l.Defaults, wantDefaults) {
+		t.Errorf("codex launch under harness.launch.codex.env: fixed %q defaults %q\nwant fixed %q defaults %q", l.Fixed, l.Defaults, wantFixed, wantDefaults)
+	}
+}
+
 // TestRuntimeWithoutAPlaceGetsTheLaunchEnv is OpenCode, whose settings have no place for
 // variables: its launch carries the exports and the configuration's beside its own
 // OPENCODE_CONFIG_DIR, and no fragment's. Goose has no launch template and gets none.
@@ -154,7 +204,7 @@ func TestRuntimeWithoutAPlaceGetsTheLaunchEnv(t *testing.T) {
 	if !reflect.DeepEqual(l.Fixed, wantFixed) || !reflect.DeepEqual(l.Defaults, []string{"PROFILE=nextjs"}) {
 		t.Errorf("launch fixed %q defaults %q", l.Fixed, l.Defaults)
 	}
-	if vars, err := render.LaunchEnv(res, lookup(t, "goose")); err != nil || vars != nil {
+	if vars, err := render.LaunchEnv(res, lookup(t, "goose"), nil); err != nil || vars != nil {
 		t.Errorf("goose launch env %v %v, want none", vars, err)
 	}
 }

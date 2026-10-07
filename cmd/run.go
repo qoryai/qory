@@ -834,15 +834,21 @@ func resolveLaunch(rep report.Report, conf config.Config, runtime string) (strin
 	if err != nil {
 		return "", render.Launch{}, input(err)
 	}
-	var override *render.Template
-	if l, ok := conf.Launch[name]; ok {
-		override = &render.Template{Command: l.Command, Args: l.Args, Env: l.Env}
-	}
-	launch, err := render.LaunchFor(rt, rep.Home, override, report.ComposeVars(rep.LaunchEnv[name]))
+	launch, err := render.LaunchFor(rt, rep.Home, launchOverride(conf.Launch, name), report.ComposeVars(rep.LaunchEnv[name]))
 	if err != nil {
 		return "", render.Launch{}, input(err)
 	}
 	return name, launch, nil
+}
+
+// launchOverride is harness.launch.<runtime> as a template over the runtime's own, nil
+// when the configuration has none.
+func launchOverride(launch map[string]config.Launch, runtime string) *render.Template {
+	l, ok := launch[runtime]
+	if !ok {
+		return nil
+	}
+	return &render.Template{Command: l.Command, Args: l.Args, Env: l.Env}
 }
 
 // splitAtDash is the runtime named before -- , if one was, and the arguments after it.

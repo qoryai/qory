@@ -646,3 +646,56 @@ func TestLaunchCarriesTheHarnessEnv(t *testing.T) {
 		t.Errorf("inspect's env rows:\n%s", out)
 	}
 }
+
+// TestLaunchKeepsTheTemplatesOwnVariable is a qory.yaml whose env sets CODEX_HOME, the
+// name Codex's own launch template sets: the launch keeps the template's, the report's
+// launch_env leaves the configuration's out, and a check is up to date. With
+// harness.launch.codex.env replacing the template's, the configuration's value is the
+// launch's, the check sees the report lacks it, and a compose records it.
+func TestLaunchKeepsTheTemplatesOwnVariable(t *testing.T) {
+	root := newCheckout(t)
+	writeFile(t, filepath.Join(root, "modules", "core", "qory-module.yaml"), "apiVersion: qory.dev/v1alpha1\nname: core\n")
+	stack := "apiVersion: qory.dev/v1alpha1\nharness:\n  target:\n    runtime: codex\n  modules:\n    - name: core\n      source: {path: modules/core}\n"
+	writeFile(t, filepath.Join(root, "qory.yaml"), stack+"env:\n  CODEX_HOME: /elsewhere\n")
+	if out, err := run(t, "harness", "compose", "--no-links"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	home := filepath.Join(root, ".qory", "harness")
+	out, err := run(t, "harness", "launch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "env QORY_HARNESS_HOME=" + home + " CODEX_HOME=" + home + "/codex codex"; strings.TrimSpace(out) != want {
+		t.Errorf("launch printed\n%s\nwant\n%s", strings.TrimSpace(out), want)
+	}
+	rep, err := report.Read(filepath.Join(root, ".qory", "harness-report.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vars := rep.LaunchEnv["codex"]; len(vars) != 0 {
+		t.Errorf("report launch_env %+v, want none", vars)
+	}
+	if out, err := run(t, "harness", "compose", "--check"); err != nil {
+		t.Fatalf("check after a compose: %v\n%s", err, out)
+	}
+
+	writeFile(t, filepath.Join(root, "qory.yaml"), stack+"  launch:\n    codex: {env: {CODEX_HOME: \"${dir}\"}}\nenv:\n  CODEX_HOME: /elsewhere\n")
+	out, err = run(t, "harness", "compose", "--check")
+	if cmd.ExitCode(err) != cmd.ExitStale {
+		t.Fatalf("check after harness.launch.codex.env: %v\n%s", err, out)
+	}
+	wantsRow(t, out, "launch_env/codex/CODEX_HOME", "missing")
+	if out, err := run(t, "harness", "compose", "--no-links"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	out, err = run(t, "harness", "launch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "env QORY_HARNESS_HOME=" + home + " CODEX_HOME=/elsewhere codex"; strings.TrimSpace(out) != want {
+		t.Errorf("launch under harness.launch.codex.env printed\n%s\nwant\n%s", strings.TrimSpace(out), want)
+	}
+	if out, err := run(t, "harness", "compose", "--check"); err != nil {
+		t.Fatalf("check after the second compose: %v\n%s", err, out)
+	}
+}
