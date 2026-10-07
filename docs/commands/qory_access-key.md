@@ -11,10 +11,9 @@ runner.yaml in ~/.config/qory, and the server keeps only its public key. A key i
 never rotated: a new one is enrolled, and the old one revoked.
 
   enrol   enrol a new key with a code from the server
-  create  make a key whose public key an administrator pastes into the server
 
-With --print, either command writes no key or setting on this machine and prints the
-key for a CI's settings instead.
+With --print, enrol writes no key or setting on this machine and prints the key for a
+CI's settings instead.
 
 More: https://github.com/qoryai/qory/blob/main/docs/run.md
 
@@ -33,6 +32,5 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md
 ### SEE ALSO
 
 * [qory](qory.md)	 - Get your coding agent ready to work, and keep it in check
-* [qory access-key create](qory_access-key_create.md)	 - Make an access key whose public key an administrator pastes into the server
 * [qory access-key enrol](qory_access-key_enrol.md)	 - Enrol a new access key with a code from the server
 

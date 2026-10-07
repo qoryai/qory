@@ -27,8 +27,7 @@ var (
 	enrolClient *http.Client
 )
 
-// newAccessKeyCommand builds the access-key group: enrol a new key with a code, or make
-// one whose public key an administrator pastes.
+// newAccessKeyCommand builds the access-key group: enrol a new key with a code.
 func newAccessKeyCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "access-key",
@@ -40,14 +39,13 @@ The key is an Ed25519 key. Its secret stays on this machine, in access-key-secre
 never rotated: a new one is enrolled, and the old one revoked.
 
   enrol   enrol a new key with a code from the server
-  create  make a key whose public key an administrator pastes into the server
 
-With --print, either command writes no key or setting on this machine and prints the
-key for a CI's settings instead.
+With --print, enrol writes no key or setting on this machine and prints the key for a
+CI's settings instead.
 
 More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	}
-	c.AddCommand(newAccessKeyEnrol(), newAccessKeyCreate())
+	c.AddCommand(newAccessKeyEnrol())
 	return c
 }
 
@@ -98,38 +96,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	return c
 }
 
-// newAccessKeyCreate builds the create verb.
-func newAccessKeyCreate() *cobra.Command {
-	var print bool
-	c := &cobra.Command{
-		Use:   "create",
-		Short: "Make an access key whose public key an administrator pastes into the server",
-		Long: `Make a new access key for this machine and print its public key and fingerprint.
-
-An owner or administrator of the server pastes the public key into an existing node or
-node pool, where it is active at once. Its page then shows the lines for the server
-section of ` + config.RunnerFileName + `: server.url, server.access_key_id and server.apiary_public_key.
-
-The secret goes into access-key-secret beside ` + config.RunnerFileName + `. When that file exists,
-create refuses: move it aside yourself first.
-
---print writes no key or setting and prints QORY_ACCESS_KEY_SECRET for a CI's secret
-store.
-
---verbose adds nothing here.
-
-More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
-		Example: `  qory access-key create
-  qory access-key create --print   # for a CI's secret store`,
-		Args: noArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return create(cmd.OutOrStdout(), cmd.ErrOrStderr(), print)
-		},
-	}
-	c.Flags().BoolVar(&print, "print", false, "write no key or setting; print the key's secret for a CI")
-	return c
-}
-
 // keyEnv returns one of the access key's variables, QORY_ACCESS_KEY_ID,
 // QORY_ACCESS_KEY_SECRET or QORY_APIARY_PUBLIC_KEY, as qory took it when it started:
 // the one place the key commands read them.
@@ -162,11 +128,11 @@ func makeKey() (*accesskey.Key, error) {
 	return k, nil
 }
 
-// refuseKeyEnv refuses a key command that keeps its key on this machine while the
+// refuseKeyEnv refuses an enrolment that keeps its key on this machine while the
 // environment sets the access key's id, its secret or the pin: the id and the pin in
 // runner.yaml too would stop every run on a value set in both, and a secret in the
 // environment would win over the one the command keeps.
-func refuseKeyEnv(verb string) error {
+func refuseKeyEnv() error {
 	var set []string
 	for _, name := range []string{accesskey.EnvID, accesskey.EnvSecret, accesskey.EnvPin} {
 		if keyEnv(name) != "" {
@@ -181,7 +147,7 @@ func refuseKeyEnv(verb string) error {
 		names = strings.Join(set[:len(set)-1], ", ") + " and " + set[len(set)-1]
 		is, they, them = "are", "they", "them"
 	}
-	return input(fmt.Errorf("%s %s set, and qory access-key %s keeps the key in this machine's files, which %s would contradict: unset %s, or use --print", names, is, verb, they, them))
+	return input(fmt.Errorf("%s %s set, and qory access-key enrol keeps the key in this machine's files, which %s would contradict: unset %s, or use --print", names, is, they, them))
 }
 
 // checkOrigin refuses a server the enrolment cannot reach, before a key is made: runner's
@@ -274,7 +240,7 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 		return input(err)
 	}
 	if !print {
-		if err := refuseKeyEnv("enrol"); err != nil {
+		if err := refuseKeyEnv(); err != nil {
 			return err
 		}
 	}
@@ -496,63 +462,6 @@ func enrolFailed(dir runnerdir.Dir, err error, key *accesskey.Key, print bool, n
 // codeRateLimited is the server's signed 429 at enrolment: too many attempts with one
 // code.
 const codeRateLimited = "rate_limited"
-
-// create is qory access-key create: a new key whose public key an administrator pastes
-// into the server.
-func create(out, errOut io.Writer, print bool) error {
-	if !print {
-		if err := refuseKeyEnv("create"); err != nil {
-			return err
-		}
-	}
-	dir := machineDir()
-	if dir == "" {
-		return fmt.Errorf("no configuration directory: set HOME or XDG_CONFIG_HOME")
-	}
-	info := out
-	if print {
-		info = errOut
-	} else if err := prepareDir(dir, info); err != nil {
-		return err
-	}
-	lock, err := keyLock(dir, print)
-	if err != nil {
-		return err
-	}
-	defer lock.Release()
-	if !print {
-		if dir.HasSecret() {
-			return input(fmt.Errorf("%s already holds this machine's access key secret, and create does not replace it: move it aside yourself first, or use --print for a key kept elsewhere", dir.Path(runnerdir.SecretFile)))
-		}
-		if err := dir.WriteMarker(); err != nil {
-			return fmt.Errorf("%w; no key was made", err)
-		}
-	}
-	key, err := makeKey()
-	if err != nil {
-		return err
-	}
-	if !print {
-		// A pending enrolment left here was for a key that is gone: the new key is not
-		// one an enrolment made, so no retry may take it.
-		if err := dir.RemovePending(); err != nil {
-			return fmt.Errorf("%w; no key was made", err)
-		}
-		if err := dir.WriteSecret(key); err != nil {
-			return err
-		}
-	}
-	fmt.Fprintf(info, "public key %s\n", key.PublicKey())
-	fmt.Fprintf(info, "fingerprint %s\n", key.Fingerprint())
-	fmt.Fprintf(info, "An owner or administrator of the server pastes the public key into the node or node pool, where it is active at once; its page then shows the server lines for %s.\n", config.RunnerFileName)
-	if print {
-		fmt.Fprintf(info, "Only %s belongs in the CI's secret store. No key or setting was written on this machine.\n", accesskey.EnvSecret)
-		fmt.Fprintf(out, "%s=%s\n", accesskey.EnvSecret, key.Secret())
-		return nil
-	}
-	fmt.Fprintf(info, "wrote the secret to %s\n", dir.Path(runnerdir.SecretFile))
-	return nil
-}
 
 // yesNo is a flag as a person reads it.
 func yesNo(b bool) string {

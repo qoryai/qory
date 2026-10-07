@@ -171,8 +171,8 @@ func TestEnrolmentKnownAnswers(t *testing.T) {
 }
 
 // TestKeyCommandsRefuseAFixtureKey is a key source that yields the published fixture
-// access key: enrol, create and their --print refuse it, write no secret and print
-// nothing of it.
+// access key: enrol and enrol --print refuse it, write no secret and print nothing of
+// it.
 func TestKeyCommandsRefuseAFixtureKey(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -196,7 +196,7 @@ func TestKeyCommandsRefuseAFixtureKey(t *testing.T) {
 	if err := os.WriteFile(dir.Path("runner.yaml"), []byte("instance:\n  name: build-01\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"enrol", srv.URL, code}, {"enrol", "--print", srv.URL, code}, {"create"}, {"create", "--print"}} {
+	for _, args := range [][]string{{"enrol", srv.URL, code}, {"enrol", "--print", srv.URL, code}} {
 		var out bytes.Buffer
 		root := Root()
 		root.SetArgs(append([]string{"access-key"}, args...))

@@ -350,7 +350,7 @@ func TestEnrolRefusesBeforeItMakesAKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"enrol", srv.URL, srv.code(1, false)}, {"enrol", "--print", srv.URL, srv.code(1, false)}, {"create"}, {"create", "--print"}} {
+	for _, args := range [][]string{{"enrol", srv.URL, srv.code(1, false)}, {"enrol", "--print", srv.URL, srv.code(1, false)}} {
 		out, err := run(t, append([]string{"access-key"}, args...)...)
 		if cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "a run without a wall is running on this machine (0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f): it must end before a key is made") {
 			t.Errorf("%v: %v\n%s", args, err, out)
@@ -528,73 +528,41 @@ func TestEnrolAfterARefusal(t *testing.T) {
 }
 
 // TestEnrolRetriesOnlyWithTheKeyMadeForTheCode is a key_limit, after which the key made
-// for the code is moved aside by hand and another key takes its place, by create or by
-// hand, before the same code is run again within its 15 minutes: the other key is this
-// machine's key, so the same code is refused before it sends anything, as any other
-// code would be, and the key is not moved aside. create removes the pending enrolment.
+// for the code is moved aside by hand and another key takes its place by hand, before
+// the same code is run again within its 15 minutes: the other key is this machine's
+// key, so the same code is refused before it sends anything, as any other code would
+// be, and the key is not moved aside.
 func TestEnrolRetriesOnlyWithTheKeyMadeForTheCode(t *testing.T) {
-	for _, byCreate := range []bool{true, false} {
-		emptyDir(t)
-		srv := newEnrolServer(t)
-		writeFile(t, runnerFile(), "instance:\n  name: build-01\n")
-		dir := configDir()
-		code := srv.code(1, false)
-		srv.refusal("key_limit")
-		if _, err := run(t, "access-key", "enrol", srv.URL, code); err == nil || !strings.Contains(err.Error(), "the node already holds two keys") {
-			t.Fatalf("key_limit: %v", err)
-		}
-		if !exists(dir.Path(runnerdir.PendingFile)) {
-			t.Fatal("key_limit ended the pending enrolment")
-		}
-		if err := os.Rename(dir.Path(runnerdir.SecretFile), dir.Path("kept-by-hand")); err != nil {
-			t.Fatal(err)
-		}
-		if byCreate {
-			if out, err := run(t, "access-key", "create"); err != nil {
-				t.Fatalf("create: %v\n%s", err, out)
-			}
-			if exists(dir.Path(runnerdir.PendingFile)) {
-				t.Error("create left the pending enrolment")
-			}
-		} else if err := dir.WriteSecret(newKey(t)); err != nil {
-			t.Fatal(err)
-		}
-		mine := heldKey(t)
-		srv.status, srv.body = http.StatusUnauthorized, []byte(`{"error":"unauthorized"}`)
-		out, err := run(t, "access-key", "enrol", srv.URL, code)
-		if cmd.ExitCode(err) != cmd.ExitInput || err.Error() != dir.Path(runnerdir.SecretFile)+keyHere {
-			t.Errorf("create %v: the same code over another key: %v", byCreate, err)
-		}
-		lacks(t, out, "retrying")
-		if n := len(srv.sent()); n != 1 {
-			t.Errorf("create %v: %d enrolments sent", byCreate, n)
-		}
-		if heldKey(t).PublicKey() != mine.PublicKey() || movedAside(t) != 0 {
-			t.Errorf("create %v: the machine's key was moved or replaced", byCreate)
-		}
-	}
-}
-
-// TestCreateEndsAPendingEnrolment is a pending enrolment create finds: the key it makes
-// was made by no enrolment, so it removes the record.
-func TestCreateEndsAPendingEnrolment(t *testing.T) {
 	emptyDir(t)
+	srv := newEnrolServer(t)
+	writeFile(t, runnerFile(), "instance:\n  name: build-01\n")
 	dir := configDir()
-	if _, err := dir.Ensure(); err != nil {
+	code := srv.code(1, false)
+	srv.refusal("key_limit")
+	if _, err := run(t, "access-key", "enrol", srv.URL, code); err == nil || !strings.Contains(err.Error(), "the node already holds two keys") {
+		t.Fatalf("key_limit: %v", err)
+	}
+	if !exists(dir.Path(runnerdir.PendingFile)) {
+		t.Fatal("key_limit ended the pending enrolment")
+	}
+	if err := os.Rename(dir.Path(runnerdir.SecretFile), dir.Path("kept-by-hand")); err != nil {
 		t.Fatal(err)
 	}
-	normal, err := accesskey.NormaliseCode("qec_F1XT-0RE0-0000-0000-0000-0000-01.uoES-kuj1vk0sq0qoGlmAg")
-	if err != nil {
+	if err := dir.WriteSecret(newKey(t)); err != nil {
 		t.Fatal(err)
 	}
-	if err := dir.WritePending(normal, newKey(t).PublicKey(), time.Now()); err != nil {
-		t.Fatal(err)
+	mine := heldKey(t)
+	srv.status, srv.body = http.StatusUnauthorized, []byte(`{"error":"unauthorized"}`)
+	out, err := run(t, "access-key", "enrol", srv.URL, code)
+	if cmd.ExitCode(err) != cmd.ExitInput || err.Error() != dir.Path(runnerdir.SecretFile)+keyHere {
+		t.Errorf("the same code over another key: %v", err)
 	}
-	if out, err := run(t, "access-key", "create"); err != nil {
-		t.Fatalf("%v\n%s", err, out)
+	lacks(t, out, "retrying")
+	if n := len(srv.sent()); n != 1 {
+		t.Errorf("%d enrolments sent", n)
 	}
-	if exists(dir.Path(runnerdir.PendingFile)) {
-		t.Error("create left the pending enrolment")
+	if heldKey(t).PublicKey() != mine.PublicKey() || movedAside(t) != 0 {
+		t.Error("the machine's key was moved or replaced")
 	}
 }
 
@@ -683,8 +651,8 @@ func TestEnrolAfterTheWorkspaceKeysAreRemoved(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
 	for i, c := range []struct{ keys, want string }{
-		{"  access_key: ak_f1xt0re000000000\n  secret: qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\n", "server.access_key is a workspace access key, which servers no longer accept; remove server.access_key and server.secret from runner.yaml, then enrol this machine as a node: qory access-key enrol <server> <code>"},
-		{"  secret: qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\n", "server.secret is a workspace access key's secret, which servers no longer accept; remove server.access_key and server.secret from runner.yaml, then enrol this machine as a node: qory access-key enrol <server> <code>"},
+		{"  access_key: ak_f1xt0re000000000\n  secret: qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\n", "server.access_key is a workspace access key, which servers no longer accept; remove server.access_key and server.secret from runner.yaml, then connect this machine as a node: run qory access-key enrol <server> <code>"},
+		{"  secret: qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\n", "server.secret is a workspace access key's secret, which servers no longer accept; remove server.access_key and server.secret from runner.yaml, then connect this machine as a node: run qory access-key enrol <server> <code>"},
 	} {
 		os.RemoveAll(string(configDir()))
 		writeFile(t, runnerFile(), "server:\n  url: "+srv.URL+"\n"+c.keys+"instance:\n  name: build-01\n")
@@ -903,65 +871,5 @@ func TestEnrolPrintLeavesTheServerSectionUnread(t *testing.T) {
 	}
 	if n := len(srv.sent()); n != 1 {
 		t.Errorf("%d enrolments sent; a file that is not YAML sends none", n)
-	}
-}
-
-// TestCreateKeepsTheKeyAndRefusesASecondOne is create: the marker and the secret, mode
-// 0600, and the public key and fingerprint printed; a second create refuses and names
-// the file; the variables refuse it; --print writes nothing and prints the secret
-// alone on stdout.
-func TestCreateKeepsTheKeyAndRefusesASecondOne(t *testing.T) {
-	emptyDir(t)
-	dir := configDir()
-	out, err := run(t, "access-key", "create")
-	if err != nil {
-		t.Fatalf("%v\n%s", err, out)
-	}
-	key := heldKey(t)
-	wants(t, out, "public key "+key.PublicKey().String()+"\n", "fingerprint "+key.Fingerprint()+"\n",
-		"An owner or administrator of the server pastes the public key into the node or node pool, where it is active at once; its page then shows the server lines for runner.yaml.",
-		"wrote the secret to "+dir.Path(runnerdir.SecretFile))
-	lacks(t, out, key.Secret())
-	for _, name := range []string{runnerdir.SecretFile, runnerdir.MarkerFile} {
-		if m := mode(t, dir.Path(name)); m != 0o600 {
-			t.Errorf("%s is mode %v", name, m)
-		}
-	}
-	if exists(runnerFile()) {
-		t.Error("create wrote a runner file")
-	}
-	_, err = run(t, "access-key", "create")
-	if cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), dir.Path(runnerdir.SecretFile)+" already holds this machine's access key secret, and create does not replace it: move it aside yourself first, or use --print for a key kept elsewhere") {
-		t.Errorf("a second create: %v", err)
-	}
-	if heldKey(t).PublicKey() != key.PublicKey() {
-		t.Error("a second create replaced the key")
-	}
-	os.Remove(dir.Path(runnerdir.SecretFile))
-	t.Setenv("QORY_APIARY_PUBLIC_KEY", "[]")
-	if _, err := run(t, "access-key", "create"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "QORY_APIARY_PUBLIC_KEY is set, and qory access-key create keeps the key in this machine's files") {
-		t.Errorf("create with the pin in the environment: %v", err)
-	}
-	if exists(dir.Path(runnerdir.SecretFile)) {
-		t.Error("create with the pin in the environment wrote a secret")
-	}
-
-	before := snapshot(t, string(dir))
-	stdout, stderr, err := runSplit(t, "", "access-key", "create", "--print")
-	if err != nil {
-		t.Fatalf("%v\n%s", err, stderr)
-	}
-	lines := strings.Split(strings.TrimSuffix(stdout, "\n"), "\n")
-	if len(lines) != 1 || !strings.HasPrefix(lines[0], "QORY_ACCESS_KEY_SECRET=qak_") {
-		t.Fatalf("stdout:\n%s", stdout)
-	}
-	printed, err := runnerdir.ParseSecret([]byte(strings.TrimPrefix(lines[0], "QORY_ACCESS_KEY_SECRET=")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	wants(t, stderr, "public key "+printed.PublicKey().String(), "fingerprint "+printed.Fingerprint(), "Only QORY_ACCESS_KEY_SECRET belongs in the CI's secret store. No key or setting was written on this machine.")
-	lacks(t, stderr, printed.Secret())
-	if after := snapshot(t, string(dir)); len(after) != len(before) {
-		t.Errorf("create --print wrote files: before %v, after %v", before, after)
 	}
 }

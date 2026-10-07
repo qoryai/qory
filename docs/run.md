@@ -297,10 +297,10 @@ contacted.
 
 The server knows this machine by its access key, an Ed25519 key. Its secret stays on
 the machine, and the server keeps only its public key. A machine gets its key in one of
-two ways: it enrols one with a code, or an owner or administrator of the server pastes
-its public key into the node. See [Enrol with a code](#enrol-with-a-code) and [Paste the
-public key](#paste-the-public-key). A key is never rotated: a new one is enrolled, and
-the old one revoked.
+two ways: a key generated on the node's page in the server, set on the machine as the
+`QORY_` variables the page shows, or a key the machine enrols with a code, with
+`qory access-key enrol`. See [Enrol with a code](#enrol-with-a-code). A key is never
+rotated: a new one is enrolled, and the old one revoked.
 
 `runner.yaml`'s `server` section holds two values of the key:
 
@@ -407,29 +407,14 @@ When the enrolment does not complete:
 A secret enrol moves aside goes to `access-key-secret.old.<Unix time>`. It is deleted
 once a new key is enrolled and a run uses it.
 
-#### Paste the public key
-
-```sh
-qory access-key create
-```
-
-qory makes a key, keeps its secret in `access-key-secret`, and prints the public key and
-its fingerprint. An owner or administrator of the server pastes the public key into the
-node or node pool, where it is active as soon as it is entered. Its page then shows the
-`server` lines for `runner.yaml`: `server.url`, `server.access_key_id` and
-`server.apiary_public_key`.
-`create` does not write `runner.yaml`.
-
-When `access-key-secret` exists, `create` refuses: move it aside yourself first.
-
-Both commands refuse while `QORY_ACCESS_KEY_ID`, `QORY_ACCESS_KEY_SECRET` or
-`QORY_APIARY_PUBLIC_KEY` is set: the key they keep in this machine's files would
-contradict the variable. Unset it, or use `--print`. Both also refuse while a run
-without a wall is running on this machine: it must end before a key is made.
+Enrol refuses while `QORY_ACCESS_KEY_ID`, `QORY_ACCESS_KEY_SECRET` or
+`QORY_APIARY_PUBLIC_KEY` is set: the key it keeps in this machine's files would
+contradict the variable. Unset it, or use `--print`. It also refuses while a run without
+a wall is running on this machine: it must end before a key is made.
 
 #### For a CI
 
-With `--print`, either command writes no key and no setting on this machine. It prints
+With `--print`, enrol writes no key and no setting on this machine. It prints
 the settings on stdout, one `NAME=value` line each, and everything else on stderr.
 
 `qory access-key enrol --print <server> <code>` prints three lines:
@@ -440,9 +425,7 @@ QORY_ACCESS_KEY_SECRET=qak_…
 QORY_APIARY_PUBLIC_KEY=[{"alg":"ed25519","public_key":"mptNqtgGKgLhLZxmOGfpBQkdeBNH7QN3Qs9ETNumy8Q"}]
 ```
 
-`qory access-key create --print` prints one, `QORY_ACCESS_KEY_SECRET=qak_…`. The public
-key and its fingerprint go to stderr, for pasting. The id and the pin come from the
-page of the node or node pool.
+A key generated on the node's page in the server comes as the same three variables.
 
 Only `QORY_ACCESS_KEY_SECRET` belongs in the CI's secret store. The id and the pin are
 plain settings; `QORY_APIARY_PUBLIC_KEY` is the pin as JSON. The CI's `runner.yaml` then
@@ -467,9 +450,8 @@ without a server included. With the secret from `access-key-secret`, a server's
 configuration that lists no stored secrets removes it. With the secret from
 `QORY_ACCESS_KEY_SECRET` or `--access-key-secret-fd`, the marker stays as it is.
 
-`qory access-key enrol` and `qory access-key create` write the marker before they make a
-key, unless `--print`, since the new key may receive stored secrets. It is removed as
-above.
+`qory access-key enrol` writes the marker before it makes a key, unless `--print`, since
+the new key may receive stored secrets. It is removed as above.
 
 ## Runs started by another system
 

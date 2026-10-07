@@ -95,18 +95,16 @@ release may change what an existing document does, and states it under Upgrading
   secret made for the code aside and say a new code is needed; a node that already holds
   two keys keeps it, and the same command succeeds once an owner or administrator has
   revoked one; an answer that does not verify changes nothing.
-  `qory access-key create` makes a key whose public key an owner or administrator pastes
-  into a node or node pool, and refuses when `access-key-secret` exists. With `--print`
-  neither writes a key or a setting: enrol prints `QORY_ACCESS_KEY_ID`,
-  `QORY_ACCESS_KEY_SECRET` and `QORY_APIARY_PUBLIC_KEY` for a CI's settings, create the
-  secret. The key is for another machine, so enrol `--print` reads only `instance.name`
-  from `runner.yaml`: its `server` section neither applies nor stops the command, even
-  where it and the variables set the same value, and the code is checked against
-  `QORY_APIARY_PUBLIC_KEY` when it is set. Without `--print` both refuse when qory started
-  with `QORY_ACCESS_KEY_ID`, `QORY_ACCESS_KEY_SECRET` or `QORY_APIARY_PUBLIC_KEY` set.
-  Enrol refuses a server over http to another host than `localhost`, `127.0.0.1` or
-  `[::1]` before it makes a key. Both refuse a key or a pin of the runner contract's
-  published fixtures.
+  With `--print` enrol writes no key or setting and prints `QORY_ACCESS_KEY_ID`,
+  `QORY_ACCESS_KEY_SECRET` and `QORY_APIARY_PUBLIC_KEY` for a CI's settings. The key is
+  for another machine, so enrol `--print` reads only `instance.name` from `runner.yaml`:
+  its `server` section neither applies nor stops the command, even where it and the
+  variables set the same value, and the code is checked against `QORY_APIARY_PUBLIC_KEY`
+  when it is set. Without `--print` enrol refuses when qory started with
+  `QORY_ACCESS_KEY_ID`, `QORY_ACCESS_KEY_SECRET` or `QORY_APIARY_PUBLIC_KEY` set. Enrol
+  refuses a server over http to another host than `localhost`, `127.0.0.1` or `[::1]`
+  before it makes a key. It refuses a key or a pin of the runner contract's published
+  fixtures.
 - `--access-key-secret-fd <n>` on `qory run` and `qory run resend` reads the access key's
   secret from that file descriptor, 3 or above, and closes it; it wins over
   `QORY_ACCESS_KEY_SECRET` and the `access-key-secret` file.
@@ -160,7 +158,8 @@ release may change what an existing document does, and states it under Upgrading
   records that command.
 - `server.access_key` and `server.secret` in `runner.yaml` are refused, and so is
   `QORY_SERVER_SECRET` when `runner.yaml` has a `server` section; the refusal says to
-  remove the two keys, or unset the variable, and then enrol the machine as a node,
+  remove the two keys, or unset the variable, and then connect the machine as a node,
+  with `qory access-key enrol` or a key generated on the node's page in the server,
   since a server accepts no workspace access key. qory
   removes `QORY_SERVER_SECRET` from its environment with the access key's variables,
   whether or not a server is configured, and `wall.env` or `--env` naming it is refused.
@@ -194,8 +193,7 @@ release may change what an existing document does, and states it under Upgrading
   was tried too often: qory keeps the key and says `the server refused the attempt: this
   code was tried too often; run the same command again later, within the code's 15
   minutes`. A 401 for a code you did not use means the
-  code's issuer must revoke the key it enrolled. A key pasted into a node or node pool
-  is active as soon as it is entered.
+  code's issuer must revoke the key it enrolled.
 - `qory harness compose` takes a branch's current commit on every compose, without
   `--update`. A tag or a commit id stays pinned. Offline, it keeps the cached commit and
   warns.
