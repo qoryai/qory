@@ -183,13 +183,13 @@ func TestRunnerFileRefusesTheIDAndThePinTwice(t *testing.T) {
 // TestRunnerFileRefusesTheWorkspaceSecretVariable is QORY_SERVER_SECRET, which held a
 // workspace access key's secret: with a server section it is refused, the variable named
 // and its value never quoted, and the message says to connect the machine as a node,
-// with qory access-key enrol or a key generated on the node's page in the server.
+// with qory access-key enrol or a key generated on the node's page in Qory Apiary.
 func TestRunnerFileRefusesTheWorkspaceSecretVariable(t *testing.T) {
 	hermetic(t)
 	runnerFile(t, "server:\n  url: https://qory.example\n")
 	serverVariables(t, config.ServerVariables{WorkspaceSecret: "sixteen-characters-at-least"})
 	_, err := config.Load(t.TempDir(), true)
-	want := "QORY_SERVER_SECRET holds a workspace access key's secret, which servers no longer accept; unset it, and connect this machine as a node: run qory access-key enrol <server> <code>, or generate a key on the node's page in the server and set the QORY_ variables it shows; see https://github.com/qoryai/qory/blob/main/docs/run.md#the-access-key-and-the-instance"
+	want := "QORY_SERVER_SECRET holds a workspace access key's secret, which servers no longer accept; unset it, and connect this machine as a node: run qory access-key enrol <server> <code>, or generate a key on the node's page in Qory Apiary and set the QORY_ variables it shows; see https://github.com/qoryai/qory/blob/main/docs/run.md#the-access-key-and-the-instance"
 	if err == nil || err.Error() != want {
 		t.Errorf("QORY_SERVER_SECRET: %v, want %q", err, want)
 	}
@@ -212,8 +212,8 @@ func TestRunnerFileRefusesAMistake(t *testing.T) {
 		{"server: {url: \"https://qory.example/?qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\"}\n", "server.url: the document contains an access key secret"},
 		{"server: {url: \"https://qory.example\", access_key_id: AK_F1XT0RE000000000}\n", `server.access_key_id: the access key id "AK_F1XT0RE000000000" is not ak_ and 16 lower-case Crockford base32 characters`},
 		{"server: {url: \"https://qory.example\", access_key_id: ak_f1xt0re0000000}\n", `server.access_key_id: the access key id "ak_f1xt0re0000000" is not ak_`},
-		{"server: {url: \"https://qory.example\", access_key: ak_f1xt0re000000000}\n", "server.access_key is a workspace access key, which servers no longer accept; remove server.access_key and server.secret from runner.yaml, then connect this machine as a node: run qory access-key enrol <server> <code>, or generate a key on the node's page in the server and set the QORY_ variables it shows; see https://github.com/qoryai/qory/blob/main/docs/run.md#the-access-key-and-the-instance"},
-		{"server: {url: \"https://qory.example\", secret: qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA}\n", "server.secret is a workspace access key's secret, which servers no longer accept; remove server.access_key and server.secret from runner.yaml, then connect this machine as a node: run qory access-key enrol <server> <code>, or generate a key on the node's page in the server and set the QORY_ variables it shows; see https://github.com/qoryai/qory/blob/main/docs/run.md#the-access-key-and-the-instance"},
+		{"server: {url: \"https://qory.example\", access_key: ak_f1xt0re000000000}\n", "server.access_key is a workspace access key, which servers no longer accept; remove server.access_key and server.secret from runner.yaml, then connect this machine as a node: run qory access-key enrol <server> <code>, or generate a key on the node's page in Qory Apiary and set the QORY_ variables it shows; see https://github.com/qoryai/qory/blob/main/docs/run.md#the-access-key-and-the-instance"},
+		{"server: {url: \"https://qory.example\", secret: qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA}\n", "server.secret is a workspace access key's secret, which servers no longer accept; remove server.access_key and server.secret from runner.yaml, then connect this machine as a node: run qory access-key enrol <server> <code>, or generate a key on the node's page in Qory Apiary and set the QORY_ variables it shows; see https://github.com/qoryai/qory/blob/main/docs/run.md#the-access-key-and-the-instance"},
 		{"server: {url: \"https://qory.example\", apiary_public_key: [{alg: ed25519}]}\n", "server.apiary_public_key[0] needs both alg and public_key"},
 		{"server: {url: \"https://qory.example\", apiary_public_key: [{alg: ed25519, public_key: abc}]}\n", "server.apiary_public_key: the pin: the public key \"abc\": 2 bytes where 32 belong"},
 		{"server: {url: \"https://qory.example\", apiary_public_key: [{alg: rsa, public_key: rcFAEfgtHFbZVqpPnXPYhYNhpgYEhSXg0Ixjjcdd2Mc}]}\n", "server.apiary_public_key: the pin lists a key of alg \"rsa\""},

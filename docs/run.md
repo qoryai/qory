@@ -306,13 +306,13 @@ contacted.
 ### The access key and the instance
 
 The server knows this machine by its access key, an Ed25519 key. A machine gets its key
-in one of two ways: a key generated on the node's page in the server, set on the machine
-as the `QORY_` variables the page shows, or a key the machine enrols with a code, with
-`qory access-key enrol`. See [Enrol with a code](#enrol-with-a-code). The server keeps
-only its public key: a key enrolled with a code is made on the machine, and a key
-generated on the node's page is made in the browser, which shows its secret once, for
-you to put on the machine or in a CI's secret store. A key is never rotated: a new one
-is enrolled or generated, and the old one revoked.
+in one of two ways: a key generated on the node's page in Qory Apiary, set on the
+machine as the `QORY_` variables the page shows, or a key the machine enrols with a
+code, with `qory access-key enrol`. See [Enrol with a code](#enrol-with-a-code). The
+server keeps only its public key: a key enrolled with a code is made on the machine, and
+a key generated on the node's page in Qory Apiary is made in the browser, which shows
+its secret once, for you to put on the machine or in a CI's secret store. A key is never
+rotated: a new one is enrolled or generated, and the old one revoked.
 
 `runner.yaml`'s `server` section holds two values of the key:
 
@@ -353,7 +353,7 @@ key, which servers no longer accept. The two keys are refused, and so is
 `QORY_SERVER_SECRET` when `runner.yaml` has a `server` section. Remove the two keys from
 `runner.yaml` and unset `QORY_SERVER_SECRET` first, since `qory access-key enrol` reads
 the file and refuses them too, then connect the machine as a node, with
-`qory access-key enrol` or a key generated on the node's page in the server. qory
+`qory access-key enrol` or a key generated on the node's page in Qory Apiary. qory
 removes `QORY_SERVER_SECRET` from its environment with the three variables, server or
 not, and a `wall.env` or `--env` that names it is refused.
 
@@ -380,7 +380,7 @@ refusal means and what to do, then the runner's words and the code:
 
 #### Enrol with a code
 
-An owner or administrator of the server creates an enrolment code on the node's page.
+An owner or administrator in Qory Apiary creates an enrolment code on the node's page.
 The code is used once, and lasts 15 minutes.
 
 ```sh
@@ -417,9 +417,9 @@ When the enrolment does not complete:
 
 | Answer | What qory does |
 | --- | --- |
-| 401, `unauthorized` | the code was used or has expired. The secret made for it, in `access-key-secret.new`, is moved aside, and enrolling needs a new code. If you did not use the code, someone else did: tell the owner or administrator who made it. The code's issuer must revoke the key it enrolled |
+| 401, `unauthorized` | the code was used or has expired. The secret made for it, in `access-key-secret.new`, is moved aside, and enrolling needs a new code. If you did not use the code, someone else did: tell the owner or administrator in Qory Apiary who made it. The code's issuer must revoke the key it enrolled |
 | `key_invalid` | the server refused the key. The secret made for it, in `access-key-secret.new`, is moved aside, and enrolling needs a new code |
-| `key_limit` | the node already holds two keys. qory keeps the key: once an owner or administrator has revoked one of them, the same command within the 15 minutes succeeds |
+| `key_limit` | the node already holds two keys. qory keeps the key: once an owner or administrator in Qory Apiary has revoked one of them, the same command within the 15 minutes succeeds |
 | 429, `rate_limited`, signed | this code was tried too often. `runner.yaml` is not changed. qory keeps the key, and the same command, run later within the code's 15 minutes, retries with it. An unsigned 429 is an `answer_unsigned` |
 | `answer_unsigned`, or no answer | the answer does not verify under the server's key the code names, or never came. `runner.yaml` is not changed. qory keeps the key, and the same command within the 15 minutes retries with it |
 
@@ -445,7 +445,7 @@ stays in use until the new one is active. qory makes the new key in
 `runner.yaml` stay as they are until the server's signed answer, so an enrolment that
 does not complete leaves the old key working, and the table above says what to do. Then
 the new secret takes the place of `access-key-secret`, `runner.yaml` names the new key,
-and the old secret is removed. qory names the old key: it still works on the server
+and the old secret is removed. qory names the old key: it still works on Qory Apiary
 until an owner or administrator revokes it on the node's page, unless it is revoked
 already.
 
@@ -460,8 +460,8 @@ Should `enrolment-answer` be lost or damaged after a replacement stopped between
 secret taking the place of `access-key-secret` and `runner.yaml` naming the new key, the
 old key's secret is still in `access-key-secret.replaced` beside `runner.yaml`, which
 still names the old key's id: move it back to `access-key-secret` to restore the
-machine, unless the old key was revoked, and revoke the new key on the node's page,
-since it is active on the server.
+machine, unless the old key was revoked, and revoke the new key on the node's page in
+Qory Apiary, since it is active on the server.
 
 #### When `enrolment-answer` is refused
 
@@ -474,17 +474,18 @@ to do depends on what the directory holds:
 
 - `access-key-secret.new` is still there: the server enrolled the new key, and nothing
   was put in place, so the machine still holds its old key, if it had one. Revoke the
-  new key, the one enrol named in `enrolled as …`, on the node's page, then enrol with a
-  new code, with `--replace` when the machine holds a key; enrol moves the unused new key
-  aside.
+  new key, the one enrol named in `enrolled as …`, on the node's page in Qory Apiary,
+  then enrol with a new code, with `--replace` when the machine holds a key; enrol moves
+  the unused new key aside.
 - `access-key-secret.new` is gone, and `runner.yaml` does not name the new key: the new
   key is in `access-key-secret`, beside another key's id or none. Revoke the new key on
-  the node's page. After a replacement, move `access-key-secret.replaced` back as the
-  paragraph above says; otherwise enrol again with a new code and `--replace`.
+  the node's page in Qory Apiary. After a replacement, move `access-key-secret.replaced`
+  back as the paragraph above says; otherwise enrol again with a new code and
+  `--replace`.
 - `runner.yaml` names the new key: the enrolment is done, and nothing needs running.
-  After a replacement, revoke the old key on the node's page, unless it is revoked
-  already, and delete `access-key-secret.replaced` if it is still there: it holds the
-  old key's secret.
+  After a replacement, revoke the old key on the node's page in Qory Apiary, unless it
+  is revoked already, and delete `access-key-secret.replaced` if it is still there: it
+  holds the old key's secret.
 
 #### For a CI
 
@@ -499,7 +500,7 @@ QORY_ACCESS_KEY_SECRET=qak_…
 QORY_APIARY_PUBLIC_KEY=[{"alg":"ed25519","public_key":"mptNqtgGKgLhLZxmOGfpBQkdeBNH7QN3Qs9ETNumy8Q"}]
 ```
 
-A key generated on the node's page in the server comes as the same three variables.
+A key generated on the node's page in Qory Apiary comes as the same three variables.
 
 Only `QORY_ACCESS_KEY_SECRET` belongs in the CI's secret store. The id and the pin are
 plain settings; `QORY_APIARY_PUBLIC_KEY` is the pin as JSON. The CI's `runner.yaml` then
@@ -509,8 +510,8 @@ The key is for another machine, so `enrol --print` leaves the server and the pin
 this machine's `runner.yaml` aside: it checks the code against `QORY_APIARY_PUBLIC_KEY`
 when that is set. The key's name is still this machine's, and the key is active as soon
 as the server answers. It keeps nothing, so an enrolment whose answer is lost or does
-not verify cannot be retried: get a new code, and have the owner or administrator
-revoke the key qory printed the fingerprint of, should the server show it.
+not verify cannot be retried: get a new code, and have the owner or administrator in
+Qory Apiary revoke the key qory printed the fingerprint of, should the server show it.
 
 #### Stored secrets need a wall
 

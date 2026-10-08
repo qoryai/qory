@@ -139,7 +139,7 @@ func ParseSecret(b []byte) (*accesskey.Key, error) {
 		return nil, errors.New("not an access key secret: one line, " + accesskey.SecretPrefix + " and 43 characters of base64url")
 	}
 	if k.PublicKey().Fixture() {
-		return nil, errors.New("it holds the runner contract's published fixture key, whose secret anyone can read; generate a key of your own with qory access-key enrol, or on the node's page in the server")
+		return nil, errors.New("it holds the runner contract's published fixture key, whose secret anyone can read; generate a key of your own with qory access-key enrol, or on the node's page in Qory Apiary")
 	}
 	return k, nil
 }
