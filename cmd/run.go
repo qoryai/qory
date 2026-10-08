@@ -688,10 +688,12 @@ func (p passed) modes(path string) (writable, readOnly, changed bool) {
 // refuses, the first whose mode differs from an earlier one's, Mounts in order and then
 // Dir; for two paths, the outer's one mode decides, else that same entry.
 //
-// mount_shared_with_run is a place another walled run still going also mounts: one
-// agent could change what the other mounts. A git worktree inside the other run's
-// checkout is the common case, and the text says where to make one. The runner names
-// the runs directory for this run's own records, which another run can write.
+// mount_shared_with_run is a place that is, holds or lies inside one another walled run
+// still going also uses, its mounts or its run directory: one agent could read or
+// change what the other uses. A git worktree inside the other run's checkout is the
+// common case, and the text says where to make one. The runner names the runs directory
+// for this run's own records. Where the runner can no longer tell how two paths stand,
+// such as a place reached through a link, the text says they overlap.
 //
 // A place is the workspace when it is the checkout root or Dir, and a mount otherwise.
 func mountRefused(err error, p passed) error {
@@ -763,10 +765,10 @@ func mountRefused(err error, p passed) error {
 		if how == "" {
 			how = "overlap"
 		}
-		text = fmt.Sprintf("this run's records %s %s %s, which the run %s, still going on this machine, can write: its agent could change them, so the run does not start. Wait for %s to end, or keep qory's state directory out of its mounts", runs, how, otherPath, other, other)
+		text = fmt.Sprintf("this run's records %s %s %s, which the run %s, still going on this machine, also uses: its agent could read or change them, so the run does not start. Wait for %s to end, or keep qory's state directory out of its mounts", runs, how, otherPath, other, other)
 	case ref.Code == codeMountSharedWithRun && len(ref.Names) == 3:
 		path, other, otherPath := ref.Names[0], ref.Names[1], ref.Names[2]
-		text = fmt.Sprintf("%s %s %s, which the run %s, still going on this machine, also mounts: one agent could change what the other mounts, so the run does not start. Wait for %s to end, or work in a checkout of its own", p.place(path), overlap(path, otherPath), otherPath, other, other)
+		text = fmt.Sprintf("%s %s %s, which the run %s, still going on this machine, also uses: one agent could read or change what the other uses, so the run does not start. Wait for %s to end, or work in a checkout of its own", p.place(path), overlap(path, otherPath), otherPath, other, other)
 		if info, err := os.Lstat(filepath.Join(path, ".git")); err == nil && info.Mode().IsRegular() {
 			text += "; make the worktree beside the checkout, not inside it"
 		}
