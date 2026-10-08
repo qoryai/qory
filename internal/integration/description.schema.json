@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://qory.dev/contracts/integration/v1/description.schema.json",
   "title": "Integration description",
-  "description": "What <program> describe prints on its standard output, once, as one JSON document, and exits 0: the integration's name, the domains it serves, the settings it takes and the roles it plays. It takes no settings and reaches no network. A program that fails prints nothing on standard output, one line on standard error describing what failed, and exits non-zero. A reader expands any declared integration into its definitions from this document alone.",
+  "description": "What <program> describe prints on its standard output, once, as one JSON document, and exits 0: the integration's name, the domains it works with, the settings it takes and the roles it plays. It takes no settings and reaches no network. A program that fails prints nothing on standard output, one line on standard error describing what failed, and exits non-zero. A reader expands any declared integration into its definitions from this document alone.",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "name", "title", "program_version", "settings", "roles"],
@@ -16,7 +16,7 @@
     "title": {"description": "A human name, for a form or a listing.", "type": "string", "minLength": 1},
     "description": {"description": "A sentence or two on what the integration does, for a form or a listing.", "type": "string"},
     "domains": {
-      "description": "The domains the integration serves, each a domain name, such as software. A control plane offers a workspace the integrations whose domains include the workspace's domain name exactly, the same string, and those whose description has no domains in every domain: the field is absent, never an empty list. A declared integration expands the same whatever its domains: they decide what is offered, not what runs.",
+      "description": "The domains the integration works with, each a domain name, such as software. The field is absent, never an empty list.",
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,

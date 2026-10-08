@@ -231,8 +231,8 @@ func TestANameOfTheDescriptionIsPrintedAsATerminalTakesIt(t *testing.T) {
 }
 
 // TestADescriptionThatNamesItsDomainsIsRead describes qory-github as it describes itself,
-// with the domains it serves, and a machine's own program that names two: each reads as
-// one that names none, since a declared integration expands the same whatever its
+// with the domains it works with, and a machine's own program that names two: each reads
+// as one that names none, since a declared integration expands the same whatever its
 // domains.
 func TestADescriptionThatNamesItsDomainsIsRead(t *testing.T) {
 	for _, f := range []string{"testdata/fixtures/github.json", "testdata/fixtures/acme-chat.json"} {
