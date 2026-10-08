@@ -602,7 +602,7 @@ func TestEnrolActsOnTheRefusalsCode(t *testing.T) {
 		want  []string
 	}{
 		{"unauthorized", func() { srv.status, srv.body = http.StatusUnauthorized, []byte(`{"error":"unauthorized"}`) }, false, []string{
-			"this code was used or has expired; if you did not use it, tell your administrator, who must revoke the key it enrolled. Enrolling needs a new code; the secret made for it was moved aside to " + dir.Path(runnerdir.OldPrefix),
+			"this code was used or has expired; if you did not use it, tell your administrator in Qory Apiary, who must revoke the key it enrolled. Enrolling needs a new code; the secret made for it was moved aside to " + dir.Path(runnerdir.OldPrefix),
 			"(enrolment: the code was used, has expired or was cancelled: unauthorized (status 401))"}},
 		{"key_invalid", func() { srv.refusal("key_invalid", "public_key") }, false, []string{
 			"the server refused the key (public_key). Enrolling needs a new code; the secret made for it was moved aside to "}},
@@ -845,7 +845,7 @@ func TestEnrolPrintWritesNothing(t *testing.T) {
 	// A lost answer cannot be retried.
 	srv.status, srv.body, srv.signBy = http.StatusServiceUnavailable, []byte(`{}`), nil
 	_, _, err = runSplit(t, "", "access-key", "enrol", "--print", srv.URL, srv.code(2, false))
-	if err == nil || !strings.Contains(err.Error(), "(HTTP 503, unsigned); try again later; a --print enrolment cannot be retried: get a new code, and have your administrator revoke the key ") || !strings.Contains(err.Error(), " should it have been enrolled (") {
+	if err == nil || !strings.Contains(err.Error(), "(HTTP 503, unsigned); try again later; a --print enrolment cannot be retried: get a new code, and have your administrator in Qory Apiary revoke the key ") || !strings.Contains(err.Error(), " should it have been enrolled (") {
 		t.Errorf("a lost answer: %v", err)
 	}
 

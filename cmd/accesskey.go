@@ -595,7 +595,7 @@ func enrolFailed(dir runnerdir.Dir, err error, key *accesskey.Key, print bool, n
 	var ref *accesskey.Refusal
 	if !errors.As(err, &ref) {
 		if print {
-			return fmt.Errorf("the enrolment did not complete: %w; a --print enrolment cannot be retried: get a new code, and have your administrator revoke the key %s should it have been enrolled", err, fingerprint)
+			return fmt.Errorf("the enrolment did not complete: %w; a --print enrolment cannot be retried: get a new code, and have your administrator in Qory Apiary revoke the key %s should it have been enrolled", err, fingerprint)
 		}
 		return fmt.Errorf("the enrolment did not complete: %w; run the same command again within 15 minutes and it retries with the same key", err)
 	}
@@ -613,7 +613,7 @@ func enrolFailed(dir runnerdir.Dir, err error, key *accesskey.Key, print bool, n
 	var text string
 	switch ref.Code {
 	case accesskey.CodeUnauthorized:
-		text = "this code was used or has expired; if you did not use it, tell your administrator, who must revoke the key it enrolled. Enrolling needs a new code" + discard()
+		text = "this code was used or has expired; if you did not use it, tell your administrator in Qory Apiary, who must revoke the key it enrolled. Enrolling needs a new code" + discard()
 	case accesskey.CodeKeyInvalid:
 		names := ""
 		if len(ref.Names) > 0 {
@@ -628,7 +628,7 @@ func enrolFailed(dir runnerdir.Dir, err error, key *accesskey.Key, print bool, n
 	case accesskey.CodeAnswerUnsigned:
 		text = fmt.Sprintf("the server did not enrol the key (HTTP %d, unsigned); try again later", ref.Status)
 		if print {
-			text += "; a --print enrolment cannot be retried: get a new code, and have your administrator revoke the key " + fingerprint + " should it have been enrolled"
+			text += "; a --print enrolment cannot be retried: get a new code, and have your administrator in Qory Apiary revoke the key " + fingerprint + " should it have been enrolled"
 		}
 	default:
 		return err

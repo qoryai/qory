@@ -189,7 +189,7 @@ func TestEnrolReplaceKeepsTheOldKeyOnAFailure(t *testing.T) {
 		{"unauthorized", func(srv *enrolServer) {
 			srv.status, srv.body = http.StatusUnauthorized, []byte(`{"error":"unauthorized"}`)
 		}, nil, nil, discarded,
-			"this code was used or has expired; if you did not use it, tell your administrator, who must revoke the key it enrolled. Enrolling needs a new code; the secret made for it was moved aside to "},
+			"this code was used or has expired; if you did not use it, tell your administrator in Qory Apiary, who must revoke the key it enrolled. Enrolling needs a new code; the secret made for it was moved aside to "},
 		{"key_invalid", func(srv *enrolServer) { srv.refusal("key_invalid", "public_key") }, nil, nil, discarded,
 			"the server refused the key (public_key). Enrolling needs a new code; the secret made for it was moved aside to "},
 		{"a fixture pin", func(srv *enrolServer) { srv.signer, srv.signBy = fixture, fixture }, nil,
