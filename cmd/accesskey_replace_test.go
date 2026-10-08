@@ -292,7 +292,7 @@ func TestEnrolReplaceRetriesWithTheNewKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "moved the new key of an earlier --replace, made for another code or more than 15 minutes ago, aside to "+dir.Path(runnerdir.OldPrefix), oldLine(oldID))
+	wants(t, out, "moved the new key of an earlier enrolment, made for another code or more than 15 minutes ago, aside to "+dir.Path(runnerdir.OldPrefix), oldLine(oldID))
 	lacks(t, out, "retrying")
 	sent = srv.sent()
 	if len(sent) != 2 || sent[0].PublicKey == sent[1].PublicKey {
@@ -623,6 +623,181 @@ func TestEnrolReplaceWithNoKeyEnrols(t *testing.T) {
 	for _, name := range []string{runnerdir.NewSecretFile, runnerdir.ReplacedFile, runnerdir.PendingFile} {
 		if exists(dir.Path(name)) {
 			t.Errorf("%s is there", name)
+		}
+	}
+}
+
+// fixtureSigner is the runner contract's published fixture signing key.
+func fixtureSigner(t *testing.T) *accesskey.Key {
+	t.Helper()
+	seed, err := base64.RawURLEncoding.DecodeString("QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	k, err := accesskey.NewKey(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return k
+}
+
+// TestARefusalNeverTouchesTheActiveKey is a refusal, a 401, a signed key_invalid and a
+// 201 that pins the fixture key, to an enrolment run on a machine whose
+// access-key-secret holds an active key: one a finished enrolment left, with --replace
+// and a new key staged in access-key-secret.new, and one a swap put in place before its
+// kept answer was lost, with the pending enrolment of the code for it, which the same
+// command retries. access-key-secret is the same, byte for byte, afterwards; only a
+// staged access-key-secret.new is moved aside.
+func TestARefusalNeverTouchesTheActiveKey(t *testing.T) {
+	says := map[string]string{
+		"unauthorized": "this code was used or has expired",
+		"key_invalid":  "the server refused the key",
+		"fixture":      "the server's answer lists the runner contract's published fixture key",
+	}
+	for _, refusal := range []string{"unauthorized", "key_invalid", "fixture"} {
+		// A finished enrolment, then --replace, which stages a new key.
+		emptyDir(t)
+		srv := newEnrolServer(t)
+		if refusal == "fixture" {
+			srv.signer, srv.signBy = fixtureSigner(t), fixtureSigner(t)
+			writeSecret(t, newKey(t))
+			writeFile(t, runnerFile(), "instance:\n  name: build-01\n")
+		} else {
+			enrolled(t, srv, newKey(t))
+		}
+		code := srv.code(1, false)
+		switch refusal {
+		case "unauthorized":
+			srv.used[mustNormalise(t, code)] = true
+		case "key_invalid":
+			srv.refusal("key_invalid", "public_key")
+		}
+		active := heldSecret(runnerdir.SecretFile)
+		_, err := run(t, "access-key", "enrol", "--replace", srv.URL, code)
+		if err == nil || !strings.Contains(err.Error(), says[refusal]) {
+			t.Fatalf("%s after a finished enrolment: %v", refusal, err)
+		}
+		if heldSecret(runnerdir.SecretFile) != active {
+			t.Errorf("%s after a finished enrolment: access-key-secret changed", refusal)
+		}
+		if exists(configDir().Path(runnerdir.NewSecretFile)) || movedAside(t) != 1 {
+			t.Errorf("%s after a finished enrolment: the staged key was not moved aside (%d moved)", refusal, movedAside(t))
+		}
+
+		// A swap that put the new key in place, its kept answer lost, then the same
+		// command again, with --replace and without: it retries with the key in
+		// access-key-secret.
+		for _, plain := range []bool{false, true} {
+			emptyDir(t)
+			srv := newEnrolServer(t)
+			if refusal == "fixture" {
+				srv.signer, srv.signBy = fixtureSigner(t), fixtureSigner(t)
+			}
+			code := srv.code(1, false)
+			if refusal == "fixture" {
+				// The fixture server's 201 is refused before any swap, so the state is
+				// made by hand.
+				key := newKey(t)
+				writeSecret(t, key)
+				writeFile(t, runnerFile(), "instance:\n  name: build-01\n")
+				if err := configDir().WritePending(mustNormalise(t, code), key.PublicKey(), time.Now()); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				enrolled(t, srv, newKey(t))
+				restore := stopAt(t, "secret")
+				if _, err := run(t, "access-key", "enrol", "--replace", srv.URL, code); err == nil {
+					t.Fatal("did not stop")
+				}
+				restore()
+				if err := os.Remove(configDir().Path(runnerdir.AnswerFile)); err != nil {
+					t.Fatal(err)
+				}
+				if refusal == "key_invalid" {
+					// The code is not used up yet, so the server answers the enrolled key.
+					srv.used = map[string]bool{}
+				}
+			}
+			active := heldSecret(runnerdir.SecretFile)
+			args := []string{"--replace", srv.URL, code}
+			if plain {
+				args = args[1:]
+			}
+			out, err := run(t, append([]string{"access-key", "enrol"}, args...)...)
+			if err == nil || !strings.Contains(err.Error(), says[refusal]) {
+				t.Fatalf("%s after a swap that lost its answer, %v: %v", refusal, args, err)
+			}
+			wants(t, out, "retrying with the key made for it")
+			lacks(t, err.Error(), "moved aside")
+			if heldSecret(runnerdir.SecretFile) != active || movedAside(t) != 0 {
+				t.Errorf("%s after a swap that lost its answer, %v: access-key-secret changed, %d moved aside", refusal, args, movedAside(t))
+			}
+		}
+	}
+}
+
+// mustNormalise is code as the server keeps it.
+func mustNormalise(t *testing.T, code string) string {
+	t.Helper()
+	normal, err := accesskey.NormaliseCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return normal
+}
+
+// TestALostAnswerKeepsTheActiveKey is an answer that could not be kept, then a step
+// after the swap that fails, and then the same command again, which posts the used code
+// and gets a 401; and an answer kept and then deleted after the swap, with the same
+// rerun. Both with --replace and without: the key the swap put in access-key-secret,
+// active on the server, stays there, byte for byte, and nothing is moved aside.
+func TestALostAnswerKeepsTheActiveKey(t *testing.T) {
+	for _, lost := range []string{"not kept", "deleted"} {
+		for _, replace := range []bool{true, false} {
+			name := fmt.Sprintf("an answer %s, --replace %v", lost, replace)
+			emptyDir(t)
+			srv := newEnrolServer(t)
+			if replace {
+				enrolled(t, srv, newKey(t))
+			} else {
+				writeFile(t, runnerFile(), "instance:\n  name: build-01\n")
+			}
+			dir := configDir()
+			if lost == "not kept" {
+				// A non-empty directory where the answer is first written.
+				writeFile(t, filepath.Join(dir.Path(runnerdir.AnswerFile+".tmp"), "x"), "")
+			}
+			args := []string{"access-key", "enrol", srv.URL, srv.code(1, false)}
+			if replace {
+				args = []string{"access-key", "enrol", "--replace", srv.URL, srv.code(1, false)}
+			}
+			restore := stopAt(t, "secret")
+			if _, err := run(t, args...); err == nil || err.Error() != "stopped after secret" {
+				t.Fatalf("%s: %v", name, err)
+			}
+			restore()
+			if lost == "deleted" {
+				if err := os.Remove(dir.Path(runnerdir.AnswerFile)); err != nil {
+					t.Fatal(err)
+				}
+			} else if exists(dir.Path(runnerdir.AnswerFile)) {
+				t.Fatalf("%s: the answer was kept", name)
+			}
+			k, err := dir.ReadSecret()
+			if err != nil || k.PublicKey().String() != srv.sent()[0].PublicKey {
+				t.Fatalf("%s: access-key-secret does not hold the enrolled key: %v", name, err)
+			}
+			active := heldSecret(runnerdir.SecretFile)
+			_, err = run(t, args...)
+			if err == nil || !strings.Contains(err.Error(), "this code was used or has expired") {
+				t.Errorf("%s: %v", name, err)
+			}
+			if heldSecret(runnerdir.SecretFile) != active || movedAside(t) != 0 {
+				t.Errorf("%s: access-key-secret changed, %d moved aside", name, movedAside(t))
+			}
+			if n := len(srv.sent()); n != 2 {
+				t.Errorf("%s: %d requests", name, n)
+			}
 		}
 	}
 }

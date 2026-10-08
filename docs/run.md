@@ -387,12 +387,13 @@ The code is used once, and lasts 15 minutes.
 qory access-key enrol https://apiary.example qec_…
 ```
 
-qory makes the key, keeps its secret in `access-key-secret`, mode `0600`, and prints its
-fingerprint. It sends the server the public key, named `instance.name`, else the host
-name; when the host name does not fit a name, set `instance.name`. The key is active as
-soon as the server answers.
+qory makes the key, keeps its secret in `access-key-secret.new`, mode `0600`, and prints
+its fingerprint. It sends the server the public key, named `instance.name`, else the
+host name; when the host name does not fit a name, set `instance.name`. The key is
+active as soon as the server answers.
 
-The server's answer is signed. qory writes `server.access_key_id` into `runner.yaml`,
+The server's answer is signed. qory moves the secret to `access-key-secret`, then
+writes `server.access_key_id` into `runner.yaml`,
 and `server.url` and the pin, `server.apiary_public_key`, when the file has none. A pin
 already there is kept. The rest of the file, its comments and its order stay as they
 are.
@@ -416,14 +417,16 @@ When the enrolment does not complete:
 
 | Answer | What qory does |
 | --- | --- |
-| 401, `unauthorized` | the code was used or has expired. The secret made for it is moved aside, and enrolling needs a new code. If you did not use the code, someone else did: tell the owner or administrator who made it. The code's issuer must revoke the key it enrolled |
-| `key_invalid` | the server refused the key. The secret made for it is moved aside, and enrolling needs a new code |
+| 401, `unauthorized` | the code was used or has expired. The secret made for it, in `access-key-secret.new`, is moved aside, and enrolling needs a new code. If you did not use the code, someone else did: tell the owner or administrator who made it. The code's issuer must revoke the key it enrolled |
+| `key_invalid` | the server refused the key. The secret made for it, in `access-key-secret.new`, is moved aside, and enrolling needs a new code |
 | `key_limit` | the node already holds two keys. qory keeps the key: once an owner or administrator has revoked one of them, the same command within the 15 minutes succeeds |
 | 429, `rate_limited`, signed | this code was tried too often. `runner.yaml` is not changed. qory keeps the key, and the same command, run later within the code's 15 minutes, retries with it. An unsigned 429 is an `answer_unsigned` |
 | `answer_unsigned`, or no answer | the answer does not verify under the server's key the code names, or never came. `runner.yaml` is not changed. qory keeps the key, and the same command within the 15 minutes retries with it |
 
 A secret enrol moves aside goes to `access-key-secret.old.<Unix time>`. It is deleted
-once a new key is enrolled and a run uses it.
+once a new key is enrolled and a run uses it. Enrol moves aside only
+`access-key-secret.new`: a refused enrolment never moves or changes
+`access-key-secret`.
 
 Enrol refuses while `QORY_ACCESS_KEY_ID`, `QORY_ACCESS_KEY_SECRET` or
 `QORY_APIARY_PUBLIC_KEY` is set: the key it keeps in this machine's files would

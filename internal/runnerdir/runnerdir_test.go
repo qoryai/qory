@@ -142,21 +142,25 @@ func errUnwrap(err error) error {
 	}
 }
 
-// TestASecretMovedAsideGetsANameNoFileHas moves three secrets aside at the same second:
-// each gets a name of its own, the moved files keep their content, and deleting them
-// leaves the directory's own.
+// TestASecretMovedAsideGetsANameNoFileHas moves three new secrets aside at the same
+// second: each gets a name of its own, the moved files keep their content, and deleting
+// them leaves the directory's own. access-key-secret is never moved.
 func TestASecretMovedAsideGetsANameNoFileHas(t *testing.T) {
 	d := newDir(t)
 	now := time.Unix(1700000000, 0)
+	mine := newKey(t)
+	if err := d.WriteSecret(mine); err != nil {
+		t.Fatal(err)
+	}
 	var keys []*accesskey.Key
 	var names []string
 	for range 3 {
 		k := newKey(t)
 		keys = append(keys, k)
-		if err := d.WriteSecret(k); err != nil {
+		if err := d.WriteNewSecret(k); err != nil {
 			t.Fatal(err)
 		}
-		name, err := d.MoveAside(now)
+		name, err := d.MoveNewAside(now)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -170,17 +174,19 @@ func TestASecretMovedAsideGetsANameNoFileHas(t *testing.T) {
 			t.Errorf("%s does not hold the key moved", name)
 		}
 	}
-	if d.HasSecret() {
-		t.Error("the secret is still there")
+	if d.HasNewSecret() {
+		t.Error("the new secret is still there")
 	}
-	if name, err := d.MoveAside(now); name != "" || err != nil {
+	if name, err := d.MoveNewAside(now); name != "" || err != nil {
 		t.Errorf("nothing to move: %q, %v", name, err)
 	}
 	old, _ := d.OldSecrets()
 	if len(old) != 3 {
 		t.Errorf("old secrets %v", old)
 	}
-	d.WriteSecret(newKey(t))
+	if b, _ := os.ReadFile(d.Path(runnerdir.SecretFile)); string(b) != mine.Secret()+"\n" {
+		t.Error("access-key-secret changed")
+	}
 	if err := d.DeleteOldSecrets(); err != nil {
 		t.Fatal(err)
 	}

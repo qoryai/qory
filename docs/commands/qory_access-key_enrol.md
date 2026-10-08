@@ -7,13 +7,15 @@ Enrol a new access key with a code from the server
 Enrol a new access key for this machine with an enrolment code an owner or
 administrator of the server created. The code is valid for 15 minutes and used once.
 
-qory makes the key, keeps its secret in access-key-secret, prints its fingerprint and
-sends the server the public key. The server's signed answer gives the key its id, which
-qory writes into the server section of runner.yaml, with the server's URL and its
-public key where the section has none yet. The key is active from that answer on: runs
-can start. qory keeps the answer in enrolment-answer until the enrolment is finished:
-should the command stop after the answer came, the same command finishes it on this
-machine, at any time, without asking the server again.
+qory makes the key, keeps its secret in access-key-secret.new, prints its fingerprint
+and sends the server the public key. The server's signed answer gives the key its id:
+qory moves the secret to access-key-secret and writes the id into the server section of
+runner.yaml, with the server's URL and its public key where the section has none yet.
+The key is active from that answer on: runs can start. qory keeps the answer in
+enrolment-answer until the enrolment is finished: should the command stop after the
+answer came, the same command finishes it on this machine, at any time, without asking
+the server again. A refused enrolment moves aside only access-key-secret.new, never
+access-key-secret.
 
 When access-key-secret exists, enrol refuses, so it never replaces this machine's key
 unasked: use --replace to move this machine to a new key, or --print for a key kept

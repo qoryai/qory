@@ -146,9 +146,15 @@ func TestEnrolmentKnownAnswers(t *testing.T) {
 			if _, err := dir.Ensure(); err != nil {
 				t.Fatal(err)
 			}
+			// The key made for the code waits in access-key-secret.new; the
+			// machine's own key in access-key-secret is never touched.
 			mine, _ := accesskey.Generate()
+			active, _ := accesskey.Generate()
 			now := time.Now()
-			if err := dir.WriteSecret(mine); err != nil {
+			if err := dir.WriteNewSecret(mine); err != nil {
+				t.Fatal(err)
+			}
+			if err := dir.WriteSecret(active); err != nil {
 				t.Fatal(err)
 			}
 			if err := dir.WritePending(published.Code, mine.PublicKey(), now); err != nil {
@@ -159,8 +165,11 @@ func TestEnrolmentKnownAnswers(t *testing.T) {
 				t.Errorf("%s: the refusal is lost: %v", a.Note, got)
 			}
 			keep := want != accesskey.CodeKeyInvalid
-			if dir.HasSecret() != keep || dir.Pending(published.Code, mine.PublicKey(), now) != keep {
-				t.Errorf("%s, tampered %v: secret %v, pending %v", a.Note, tamper, dir.HasSecret(), dir.Pending(published.Code, mine.PublicKey(), now))
+			if dir.HasNewSecret() != keep || dir.Pending(published.Code, mine.PublicKey(), now) != keep {
+				t.Errorf("%s, tampered %v: new secret %v, pending %v", a.Note, tamper, dir.HasNewSecret(), dir.Pending(published.Code, mine.PublicKey(), now))
+			}
+			if !dir.SameSecret(active) {
+				t.Errorf("%s, tampered %v: access-key-secret changed", a.Note, tamper)
 			}
 			n++
 		}

@@ -351,7 +351,7 @@ func TestEnrolRefusesBeforeItMakesAKey(t *testing.T) {
 			t.Setenv(k, "")
 		}
 		dir := configDir()
-		for _, name := range []string{runnerdir.SecretFile, runnerdir.MarkerFile, runnerdir.PendingFile} {
+		for _, name := range []string{runnerdir.SecretFile, runnerdir.NewSecretFile, runnerdir.MarkerFile, runnerdir.PendingFile} {
 			if exists(dir.Path(name)) {
 				t.Errorf("%s: %s was written", c.name, name)
 			}
@@ -374,16 +374,16 @@ func TestEnrolRefusesBeforeItMakesAKey(t *testing.T) {
 			t.Errorf("%v: %v\n%s", args, err, out)
 		}
 	}
-	if exists(configDir().Path(runnerdir.SecretFile)) || len(srv.sent()) != 0 {
+	if exists(configDir().Path(runnerdir.SecretFile)) || exists(configDir().Path(runnerdir.NewSecretFile)) || len(srv.sent()) != 0 {
 		t.Error("a key was made while an unwalled run was live")
 	}
 	lock.Release()
 }
 
 // TestEnrolRetriesWithTheSameKey is an answer that does not verify, an unsigned 429
-// and a signed 201 under another key, and then the same code again: each keeps the
-// secret and the pending enrolment and writes nothing into the runner file, and the
-// retry sends the same public key. Another code then is refused and keeps the enrolled
+// and a signed 201 under another key, and then the same code again: each keeps the new
+// secret in access-key-secret.new and the pending enrolment, writes no access-key-secret
+// and nothing into the runner file, and the retry sends the same public key. Another code then is refused and keeps the enrolled
 // key.
 func TestEnrolRetriesWithTheSameKey(t *testing.T) {
 	emptyDir(t)
@@ -408,8 +408,8 @@ func TestEnrolRetriesWithTheSameKey(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: %v", c.name, err)
 		}
-		if !exists(dir.Path(runnerdir.SecretFile)) || !exists(dir.Path(runnerdir.PendingFile)) || movedAside(t) != 0 {
-			t.Errorf("%s: the secret or the pending enrolment is gone", c.name)
+		if exists(dir.Path(runnerdir.SecretFile)) || !exists(dir.Path(runnerdir.NewSecretFile)) || !exists(dir.Path(runnerdir.PendingFile)) || movedAside(t) != 0 {
+			t.Errorf("%s: the new secret or the pending enrolment is gone, or access-key-secret was written", c.name)
 		}
 		if got := readRunnerFile(t); got != "instance:\n  name: build-01\n" {
 			t.Errorf("%s: the runner file changed:\n%s", c.name, got)
@@ -532,7 +532,7 @@ func TestEnrolAfterARefusal(t *testing.T) {
 	if _, err := run(t, "access-key", "enrol", srv.URL, srv.code(2, false)); err == nil || !strings.Contains(err.Error(), "this code was used or has expired") {
 		t.Fatalf("unauthorized: %v", err)
 	}
-	if exists(configDir().Path(runnerdir.SecretFile)) || movedAside(t) != 1 {
+	if exists(configDir().Path(runnerdir.SecretFile)) || exists(configDir().Path(runnerdir.NewSecretFile)) || movedAside(t) != 1 {
 		t.Fatal("the secret made for the used code was not moved aside")
 	}
 	srv.status, srv.body = http.StatusCreated, nil
@@ -548,7 +548,8 @@ func TestEnrolAfterARefusal(t *testing.T) {
 }
 
 // TestEnrolRetriesOnlyWithTheKeyMadeForTheCode is a key_limit, after which the key made
-// for the code is moved aside by hand and another key takes its place by hand, before
+// for the code, in access-key-secret.new, is moved aside by hand and another key is put
+// in access-key-secret by hand, before
 // the same code is run again within its 15 minutes: the other key is this machine's
 // key, so the same code is refused before it sends anything, as any other code would
 // be, and the key is not moved aside.
@@ -565,7 +566,7 @@ func TestEnrolRetriesOnlyWithTheKeyMadeForTheCode(t *testing.T) {
 	if !exists(dir.Path(runnerdir.PendingFile)) {
 		t.Fatal("key_limit ended the pending enrolment")
 	}
-	if err := os.Rename(dir.Path(runnerdir.SecretFile), dir.Path("kept-by-hand")); err != nil {
+	if err := os.Rename(dir.Path(runnerdir.NewSecretFile), dir.Path("kept-by-hand")); err != nil {
 		t.Fatal(err)
 	}
 	if err := dir.WriteSecret(newKey(t)); err != nil {
@@ -616,8 +617,8 @@ func TestEnrolActsOnTheRefusalsCode(t *testing.T) {
 			t.Fatalf("%s: %v", c.name, err)
 		}
 		wants(t, err.Error(), c.want...)
-		if exists(dir.Path(runnerdir.SecretFile)) != c.keep || exists(dir.Path(runnerdir.PendingFile)) != c.keep || (movedAside(t) == 1) == c.keep {
-			t.Errorf("%s: secret %v, pending %v, moved aside %d", c.name, exists(dir.Path(runnerdir.SecretFile)), exists(dir.Path(runnerdir.PendingFile)), movedAside(t))
+		if exists(dir.Path(runnerdir.SecretFile)) || exists(dir.Path(runnerdir.NewSecretFile)) != c.keep || exists(dir.Path(runnerdir.PendingFile)) != c.keep || (movedAside(t) == 1) == c.keep {
+			t.Errorf("%s: secret %v, new secret %v, pending %v, moved aside %d", c.name, exists(dir.Path(runnerdir.SecretFile)), exists(dir.Path(runnerdir.NewSecretFile)), exists(dir.Path(runnerdir.PendingFile)), movedAside(t))
 		}
 		if got := readRunnerFile(t); got != "instance:\n  name: build-01\n" {
 			t.Errorf("%s: the runner file changed:\n%s", c.name, got)
@@ -639,7 +640,7 @@ func TestEnrolRateLimitedKeepsTheKey(t *testing.T) {
 	if want := "the server did not enrol the key (HTTP 429, unsigned); try again later (enrolment: answer_unsigned (status 429))"; err == nil || err.Error() != want {
 		t.Errorf("an unsigned 429: %v, want %q", err, want)
 	}
-	if !exists(dir.Path(runnerdir.SecretFile)) || !exists(dir.Path(runnerdir.PendingFile)) || movedAside(t) != 0 {
+	if !exists(dir.Path(runnerdir.NewSecretFile)) || !exists(dir.Path(runnerdir.PendingFile)) || movedAside(t) != 0 {
 		t.Error("an unsigned 429: the secret or the pending enrolment is gone")
 	}
 	srv.status, srv.body, srv.signBy = http.StatusTooManyRequests, []byte(`{"error":"rate_limited","apiary_public_key":`+srv.keys()+`}`), srv.signer
@@ -648,7 +649,7 @@ func TestEnrolRateLimitedKeepsTheKey(t *testing.T) {
 	if err == nil || cmd.ExitCode(err) == cmd.ExitInput || err.Error() != want {
 		t.Errorf("a signed 429: %v, want %q", err, want)
 	}
-	if !exists(dir.Path(runnerdir.SecretFile)) || !exists(dir.Path(runnerdir.PendingFile)) || movedAside(t) != 0 {
+	if !exists(dir.Path(runnerdir.NewSecretFile)) || !exists(dir.Path(runnerdir.PendingFile)) || movedAside(t) != 0 {
 		t.Error("a signed 429: the secret or the pending enrolment is gone")
 	}
 	if got := readRunnerFile(t); got != "instance:\n  name: build-01\n" {
@@ -677,7 +678,7 @@ func TestEnrolAfterTheWorkspaceKeysAreRemoved(t *testing.T) {
 			t.Fatalf("%d: %v", i, err)
 		}
 		wants(t, err.Error(), runnerFile()+": "+c.want)
-		if exists(configDir().Path(runnerdir.SecretFile)) {
+		if exists(configDir().Path(runnerdir.SecretFile)) || exists(configDir().Path(runnerdir.NewSecretFile)) {
 			t.Errorf("%d: a key was made", i)
 		}
 	}
@@ -774,8 +775,8 @@ func TestEnrolRefusesAFixturePin(t *testing.T) {
 	if enrolErr.Error() != want {
 		t.Errorf("the refusal\n%v\nwant\n%s", enrolErr, want)
 	}
-	if exists(dir.Path(runnerdir.SecretFile)) || exists(dir.Path(runnerdir.PendingFile)) {
-		t.Errorf("secret %v, pending %v", exists(dir.Path(runnerdir.SecretFile)), exists(dir.Path(runnerdir.PendingFile)))
+	if exists(dir.Path(runnerdir.SecretFile)) || exists(dir.Path(runnerdir.NewSecretFile)) || exists(dir.Path(runnerdir.PendingFile)) {
+		t.Errorf("secret %v, new secret %v, pending %v", exists(dir.Path(runnerdir.SecretFile)), exists(dir.Path(runnerdir.NewSecretFile)), exists(dir.Path(runnerdir.PendingFile)))
 	}
 	if got := readRunnerFile(t); got != "instance:\n  name: build-01\n" {
 		t.Errorf("the runner file changed:\n%s", got)

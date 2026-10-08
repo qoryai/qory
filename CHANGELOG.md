@@ -86,16 +86,17 @@ release may change what an existing document does, and states it under Upgrading
   before it makes a key, takes the key lock, refuses while a run without a wall is live,
   refuses, naming `--replace`, when `access-key-secret` exists unless it holds the key
   made for the same code, retried within its 15 minutes, writes the `stored-secrets`
-  marker, keeps the new secret in `access-key-secret`, mode `0600`, prints its
-  fingerprint and posts the enrolment. The server's signed answer writes
-  `server.access_key_id`, and `server.url` and `server.apiary_public_key` where the
+  marker, keeps the new secret in `access-key-secret.new`, mode `0600`, prints its
+  fingerprint and posts the enrolment. The server's signed answer moves the secret to
+  `access-key-secret` and writes `server.access_key_id`, and `server.url` and `server.apiary_public_key` where the
   section has none, into `runner.yaml`, keeping its comments, its order and every other
   key; the pin is the server's keys the code carries. The same command within the code's
   15 minutes retries with the same key. Enrol keeps the server's verified 201, with the
-  request it answers, in `enrolment-answer`, mode `0600`, until `runner.yaml` is
-  written, and after a stop the same command finishes the enrolment from it, at any
+  request it answers, in `enrolment-answer`, mode `0600`, until the enrolment is
+  finished, and after a stop the same command finishes the enrolment from it, at any
   time, without asking the server again. A used or expired code and a refused key move the
-  secret made for the code aside and say a new code is needed; a node that already holds
+  secret made for the code aside from `access-key-secret.new` and say a new code is
+  needed; a refused enrolment never moves or changes `access-key-secret`; a node that already holds
   two keys keeps it, and the same command succeeds once an owner or administrator has
   revoked one; an answer that does not verify changes nothing.
   With `--print` enrol writes no key or setting and prints `QORY_ACCESS_KEY_ID`,

@@ -1,9 +1,9 @@
 // Package runnerdir is the runner file's directory, everything qory keeps on this
 // machine for its server beside runner.yaml: the access key's secret, the moved-aside
-// secrets, the new and the replaced secret of a key being replaced, the instance id, the
-// stored-secrets marker, the pending enrolment and its answer, and the lock files. The
-// directory is the user's configuration directory, $XDG_CONFIG_HOME/qory or
-// ~/.config/qory, mode 0700.
+// secrets, the new secret of a key being enrolled, the replaced secret of a key being
+// replaced, the instance id, the stored-secrets marker, the pending enrolment and its
+// answer, and the lock files. The directory is the user's configuration directory,
+// $XDG_CONFIG_HOME/qory or ~/.config/qory, mode 0700.
 //
 // Every file is created with O_CREAT|O_EXCL|O_NOFOLLOW and an exact mode, and the secret
 // is read only from a regular file the effective user owns that grants nothing to the
@@ -35,8 +35,8 @@ const (
 	SecretFile = "access-key-secret"
 	// OldPrefix starts the name of a secret moved aside, followed by the Unix time.
 	OldPrefix = SecretFile + ".old."
-	// NewSecretFile holds the secret of the key qory access-key enrol --replace makes,
-	// mode 0600, until the server's signed answer puts it in place of access-key-secret.
+	// NewSecretFile holds the secret of the key qory access-key enrol makes, mode 0600,
+	// until the server's signed answer puts it in place of access-key-secret.
 	NewSecretFile = SecretFile + ".new"
 	// ReplacedFile is a second name of the secret --replace replaces, made just before
 	// the new one takes its place and removed once the runner file names the new key.
@@ -224,22 +224,15 @@ func (d Dir) HasSecret() bool {
 	return err == nil
 }
 
-// MoveAside renames access-key-secret to access-key-secret.old.<Unix time>, under a
-// name no existing file has, and returns the new name. A directory with no secret
-// moves nothing and returns "".
-func (d Dir) MoveAside(now time.Time) (string, error) {
-	return d.moveAside(SecretFile, now)
-}
-
-// MoveNewAside renames access-key-secret.new as [Dir.MoveAside] renames the secret.
+// MoveNewAside renames access-key-secret.new to access-key-secret.old.<Unix time>,
+// under a name no existing file has, and returns the new name. A directory with no
+// access-key-secret.new moves nothing and returns "".
+//
+// It is the one way a secret is moved aside, and it takes no name: a refused
+// enrolment moves aside only the key it staged in access-key-secret.new, and never
+// touches access-key-secret, whatever the pending enrolment or a kept answer say.
 func (d Dir) MoveNewAside(now time.Time) (string, error) {
-	return d.moveAside(NewSecretFile, now)
-}
-
-// moveAside renames the file name to access-key-secret.old.<Unix time>, under a name
-// no existing file has, and returns the new name, or "" when there is no such file.
-func (d Dir) moveAside(name string, now time.Time) (string, error) {
-	src := d.Path(name)
+	src := d.Path(NewSecretFile)
 	if _, err := os.Lstat(src); errors.Is(err, fs.ErrNotExist) {
 		return "", nil
 	}
