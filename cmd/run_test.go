@@ -1549,8 +1549,8 @@ rules:
 // be removed, so the runner keeps its entry. While the engine lists that run's
 // containers, it has none, and the next walled run of the same checkout starts. Once
 // listing them fails, the next run cannot tell whether an earlier one is still going,
-// and is refused before the wall runs anything, in qory's words, without the earlier
-// run's id, naming the registry entry to delete when no walled run is going.
+// and is refused before the wall runs anything, in qory's words, giving the command
+// that lists the earlier run's containers by its id, and the registry entry to delete.
 func TestRunRefusesWhenTheEngineCannotBeAsked(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -1606,7 +1606,7 @@ esac
 	if _, statErr := os.Stat(entry); statErr != nil {
 		t.Fatalf("no registry entry for the second run: %v", statErr)
 	}
-	want := "Docker could not be asked whether an earlier walled run is still going, so the run does not start. If no walled run is going on this machine, delete " + entry + " (engine_unreachable)"
+	want := "Docker could not be asked whether an earlier walled run is still going, so the run does not start. If docker ps --all --filter label=dev.qory.run=" + ids[len(ids)-1] + " lists no container, or that Docker is gone for good, delete " + entry + " (engine_unreachable)"
 	if err == nil || err.Error() != want {
 		t.Fatalf("a run beside an earlier one the engine cannot be asked about: %v, want %q", err, want)
 	}

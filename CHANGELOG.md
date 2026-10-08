@@ -37,8 +37,9 @@ release may change what an existing document does, and states it under Upgrading
 - A walled run that cannot ask Docker whether an earlier walled run on this machine is
   still going is refused before anything is bound, `engine_unreachable`: `Docker could
   not be asked whether an earlier walled run is still going, so the run does not start`,
-  and adds `If no walled run is going on this machine, delete <entry>`, the path of that
-  run's registry entry.
+  and adds `If docker ps --all --filter label=dev.qory.run=<id> lists no container, or
+  that Docker is gone for good, delete <entry>`, with the earlier run's id and the path
+  of its registry entry.
 - `wall.images` in `runner.yaml` defines the agent's images by name, each with `ref`, its
   reference, and when it needs them `runtime`, the container runtime the wall starts it
   under, and `docker`. A run's policy selects one by its name, `image: <name>`, from the
@@ -177,8 +178,8 @@ release may change what an existing document does, and states it under Upgrading
   `QORY_HARNESS_HOME`. A module's export is a default like the others: the server's
   value, `--env` and `wall.env` win over it, and the deny list leaves out one whose name
   it holds. They reach the agent in the container and outside it alike.
-- qory builds against `github.com/qoryai/runner` at commit `011a425` of its `next`,
-  `v0.6.1-0.20261008134549-011a425e41ea`, contract `v1` revision 1 as amended there.
+- qory builds against `github.com/qoryai/runner` at commit `65183a6` of its `next`,
+  `v0.6.1-0.20261008152236-65183a62b0b5`, contract `v1` revision 1 as amended there.
   `runner.yaml`'s `egress` narrows the `security_policy` of a server's run
   configuration. A server's run configuration may carry variables: they reach a walled
   run's agent, and an unwalled run gets none of them. The runner's `wall.Nest` makes

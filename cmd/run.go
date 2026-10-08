@@ -716,8 +716,10 @@ func (p passed) modes(path string) (writable, readOnly, changed bool) {
 //
 // engine_unreachable is a walled run that cannot ask the container engine whether an
 // earlier walled run is still going, with that run's id the first name and, when the
-// runner gives it, the path of that run's registry entry the second; the text leaves
-// the id out, and names the entry as the file to delete when no walled run is going.
+// runner gives it, the path of that run's registry entry the second. With both, the
+// text gives the docker ps command that lists that run's containers, by the id, which
+// the runner checks as a run id, and names the entry as the file to delete when it lists
+// none or that Docker is gone for good; with the id alone, it leaves the id out.
 //
 // A place is the workspace when it is the checkout root or Dir, and a mount otherwise.
 func mountRefused(err error, p passed) error {
@@ -809,7 +811,7 @@ func mountRefused(err error, p passed) error {
 	case ref.Code == codeEngineUnreachable && len(ref.Names) == 1:
 		text = "Docker could not be asked whether an earlier walled run is still going, so the run does not start"
 	case ref.Code == codeEngineUnreachable && len(ref.Names) == 2:
-		text = "Docker could not be asked whether an earlier walled run is still going, so the run does not start. If no walled run is going on this machine, delete " + ref.Names[1]
+		text = "Docker could not be asked whether an earlier walled run is still going, so the run does not start. If docker ps --all --filter label=dev.qory.run=" + ref.Names[0] + " lists no container, or that Docker is gone for good, delete " + ref.Names[1]
 	default:
 		return nil
 	}

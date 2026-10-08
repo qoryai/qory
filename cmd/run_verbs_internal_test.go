@@ -702,8 +702,9 @@ func TestUserHomeNeedsAConfigurationDirectory(t *testing.T) {
 // TestEngineUnreachableIsWorded is the runner's engine_unreachable, a walled run that
 // cannot ask the container engine whether an earlier walled run is still going, with
 // that run's id its one name: the text leaves the id out. With the path of that run's
-// registry entry as a second name, the text says to delete it when no walled run is
-// going. Any other number of names falls through to the runner's own words.
+// registry entry as a second name, the text gives the docker ps command that lists that
+// run's containers, and says to delete the entry when it lists none or that Docker is
+// gone for good. Any other number of names falls through to the runner's own words.
 func TestEngineUnreachableIsWorded(t *testing.T) {
 	const id = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f"
 	p := passed{spec: &session.Spec{}}
@@ -713,7 +714,7 @@ func TestEngineUnreachableIsWorded(t *testing.T) {
 	}
 	entry := "/var/state/qory/walled/" + id + ".json"
 	err = mountRefused(&session.Refusal{Code: "engine_unreachable", Names: []string{id, entry}}, p)
-	if want := "Docker could not be asked whether an earlier walled run is still going, so the run does not start. If no walled run is going on this machine, delete " + entry + " (engine_unreachable)"; err == nil || err.Error() != want {
+	if want := "Docker could not be asked whether an earlier walled run is still going, so the run does not start. If docker ps --all --filter label=dev.qory.run=" + id + " lists no container, or that Docker is gone for good, delete " + entry + " (engine_unreachable)"; err == nil || err.Error() != want {
 		t.Errorf("engine_unreachable with the entry: %v, want %q", err, want)
 	}
 	for _, names := range [][]string{nil, {id, entry, entry}} {
