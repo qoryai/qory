@@ -91,7 +91,7 @@ git:
   timeout: 10m                 # the longest one git command may run
   #cache: ~/.cache/qory        # where git sources are fetched to
 #env:
-#  FOO: bar                    # exported to every runtime with a place for it
+#  FOO: bar                    # set in every launch, a default
 `
 
 // notAName matches what a module name does not carry, when it is made from a directory name.

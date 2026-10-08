@@ -6,8 +6,243 @@ release may change what an existing document does, and states it under Upgrading
 
 ## [Unreleased]
 
+### Added
+
+- Messages and docs name Qory Apiary where they mean the Qory Apiary server: the node's
+  page, its owners and administrators, and where a key is revoked.
+- Every request to the server is signed with the machine's Ed25519 access key, and every
+  answer is verified under the server's keys the machine pins. `runner.yaml`'s `server`
+  section is `url`, `access_key_id` and `apiary_public_key`; `QORY_ACCESS_KEY_ID` and
+  `QORY_APIARY_PUBLIC_KEY` hold the id and the pin when the file does not, and a value set
+  in both is refused. The secret is read from `QORY_ACCESS_KEY_SECRET`, else from the
+  file `access-key-secret` beside `runner.yaml`, which is read only when it is a regular
+  file you own that grants nothing to the group or others, in a directory that is yours
+  alone. The runner contract's published fixture key is refused, as a secret or in the
+  pin. Every qory command reads the three variables into memory when it starts and
+  removes them from its environment before it starts anything, so no session, worktree
+  command, tool or integration inherits them; `wall.env` or `--env` naming one is
+  refused.
+- Each machine is an instance of its node, named on every request: its id is kept in
+  `instance-id` beside `runner.yaml`, replaced when it was not made on this machine, and
+  `instance.name` sets its display name, the host name unless set. `qory run` prints the
+  node and the instance, and `qory config` lists `runner.server.access_key_id`,
+  `runner.server.apiary_public_key` by fingerprint and `runner.instance.name`.
+- `qory run` and `qory run resend` say what a refusal of the server means and what to do:
+  `unauthorized`, `answer_unsigned`, `instance_limit`, `apiary_public_key_missing` and
+  `run_closed`. A run the server closes before it starts exits 1.
+- When the server lists stored secrets for the machine's access key, every run needs a
+  wall: an unwalled run is refused, `server_needs_wall`. The marker `stored-secrets`
+  beside `runner.yaml` keeps refusing unwalled runs, `--local` included, until a server's
+  configuration read with the secret of `access-key-secret` lists none.
+- A walled run that cannot ask Docker whether an earlier walled run on this machine is
+  still going is refused before anything is bound, `engine_unreachable`: `Docker could
+  not be asked whether an earlier walled run is still going, so the run does not start`,
+  and adds `If docker ps --all --filter label=dev.qory.run=<id> lists no container, or
+  that Docker is gone for good, delete <entry>`, with the earlier run's id and the path
+  of its registry entry.
+- `wall.images` in `runner.yaml` defines the agent's images by name, each with `ref`, its
+  reference, and when it needs them `runtime`, the container runtime the wall starts it
+  under, and `docker`. A run's policy selects one by its name, `image: <name>`, from the
+  server or from `--policy`, and its selection wins over the default. `wall.image` sets
+  the default and `--image` another for one run, each a name of `wall.images` or a
+  reference, a name read as that image first. A `--policy` that selects an image
+  `wall.images` does not define, or selects one for a run without a wall, is an input
+  error before the run starts. A run whose own `--policy` selects an image needs no
+  default; a machine that reports to a server sets `wall.image`, because the server's run
+  configuration arrives once the run starts and may select none, and the refusal says
+  so. A name defined twice, a key an image does not have, and `docker: true` without a
+  `runtime` stop every command, the way any mistake in `runner.yaml` does. `qory config`
+  lists each image with its runtime and its daemon, and shows whether `wall.image` is a
+  name of `wall.images` or a reference. `dev.qory.run.started` names the image a run
+  started in, with `image_name`, and `container_runtime` and `docker: true` when they
+  apply; `dev.qory.run.policy_applied` records the policy's `image`.
+- A Docker of the agent's own, experimental: an image with `docker: true` under
+  `runtime: sysbox-runc` starts with `qory run nest`, a hidden verb of `qory`'s Linux
+  build, as the container's entry point. It runs the runner's `wall.Nest`: `dockerd` on
+  its Unix socket alone, then the agent as its user with no capabilities. The containers
+  the agent starts are inside the wall, and what they reach goes through the proxy and
+  is recorded. Define such an image only where every run may get one: any policy can
+  select it. The helper makes `/run/qory` root's with mode `0755` and the agent's docker
+  configuration beneath it the agent's alone, so the agent's `docker` command reads it
+  and the containers it starts get the proxy. `dockerd`, `containerd`, `runc` and
+  `iptables` come from the image's system directories, and the daemon gets none of the
+  run's environment but the proxy and the run's certificate bundle.
+- The images the wall runs the agent in, defined under `images/` and built by hand for
+  linux/amd64 or linux/arm64; they are not published. `agent` holds Claude Code 2.1.273,
+  the version the runner's descriptor is written against, git, gh 2.101.0 and Node 24 on
+  Debian 13, with `HOME=/home/agent` writable by any user, no setuid or setgid file and no
+  entry point. `agent-docker` adds the daemon and command of Docker 29.8.1, for a Docker of
+  the agent's own, which `qory run nest` starts when `wall.images` defines the image with
+  `docker: true`. `agent-go` and `agent-go-docker` add Go 1.27.1 to each. Every version and
+  sum is a build argument, every download is checked against its sum, and Debian's
+  packages come from the snapshot the base image was built from. A workflow builds the
+  four on a change to them and checks them, and pushes them nowhere.
+- `qory image check [image...]` checks an image against what the wall needs of it, and
+  `wall.image` when no image is named; a name of `wall.images` is read as that image's
+  `ref`, as `qory run` reads `--image`. From outside it reads the image the engine holds:
+  its platform, `HOME` in its environment, whether the reference is pinned by digest, and
+  every file, as `docker export` writes them, for one that is setuid or setgid or has
+  capabilities of its own. Then it starts the image as the wall starts the agent, as a user
+  the image does not know, with no capability and no network, and qory's Linux build,
+  `wall.helper` or on Linux qory itself, checks from inside: `HOME` takes a file, the
+  authorities are where the wall reads them, `/bin/sh` is there for the runtime's hooks
+  and the runner's API-key approval, `claude` is the descriptor's version, and `git` and
+  `gh` run. It reports whether `dockerd` is in a system directory, with what it runs. The
+  exit status is 1 when a check fails.
+- `qory access-key enrol <server> <code>` enrols a new access key with a code an owner or
+  administrator in Qory Apiary created. It checks the code against the pin the machine has
+  before it makes a key, takes the key lock, refuses while a run without a wall is live,
+  refuses, naming `--replace`, when `access-key-secret` exists unless it holds the key
+  made for the same code, retried within its 15 minutes, writes the `stored-secrets`
+  marker, keeps the new secret in `access-key-secret.new`, mode `0600`, prints its
+  fingerprint and posts the enrolment. The server's signed answer moves the secret to
+  `access-key-secret` and writes `server.access_key_id`, and `server.url` and `server.apiary_public_key` where the
+  section has none, into `runner.yaml`, keeping its comments, its order and every other
+  key; the pin is the server's keys the code carries. The same command within the code's
+  15 minutes retries with the same key. Enrol keeps the server's verified 201, with the
+  request it answers, in `enrolment-answer`, mode `0600`, until the enrolment is
+  finished, and after a stop the same command finishes the enrolment from it, at any
+  time, without asking the server again. A used or expired code and a refused key move the
+  secret made for the code aside from `access-key-secret.new` and say a new code is
+  needed; a refused enrolment never moves or changes `access-key-secret`; a node that already holds
+  two keys keeps it, and the same command succeeds once an owner or administrator in
+  Qory Apiary has revoked one; an answer that does not verify changes nothing.
+  With `--print` enrol writes no key or setting and prints `QORY_ACCESS_KEY_ID`,
+  `QORY_ACCESS_KEY_SECRET` and `QORY_APIARY_PUBLIC_KEY` for a CI's settings. The key is
+  for another machine, so enrol `--print` reads only `instance.name` from `runner.yaml`:
+  its `server` section neither applies nor stops the command, even where it and the
+  variables set the same value, and the code is checked against `QORY_APIARY_PUBLIC_KEY`
+  when it is set. Without `--print` enrol refuses when qory started with
+  `QORY_ACCESS_KEY_ID`, `QORY_ACCESS_KEY_SECRET` or `QORY_APIARY_PUBLIC_KEY` set. Enrol
+  refuses a server over http to another host than `localhost`, `127.0.0.1` or `[::1]`
+  before it makes a key. It refuses a key or a pin of the runner contract's published
+  fixtures.
+- `qory access-key enrol --replace <server> <code>` moves a machine that holds a key to a
+  new one, and the old key stays in use until the new one is active. The new key's
+  secret waits in `access-key-secret.new`, mode `0600`, and `access-key-secret` and
+  `runner.yaml` stay as they are until the server's signed answer, so an enrolment that
+  fails leaves the old key working. Then the new secret takes the old one's place,
+  `runner.yaml` names the new key, and the old secret is removed; enrol ends with
+  `revoke the old key <id> on the node's page, unless it is revoked already: until then
+  it still works on Qory Apiary`. Before the server's answer, the same command within the
+  code's 15 minutes retries with the new key; after it, the same command finishes the
+  replacement from the kept answer, at any time. The
+  enrolment never uses the old key, so a revoked one is replaced too. On a machine
+  without a key, `--replace` enrols as the command does without it; with `--print` it is
+  refused.
+- `--access-key-secret-fd <n>` on `qory run` and `qory run resend` reads the access key's
+  secret from that file descriptor, 3 or above, and closes it; it wins over
+  `QORY_ACCESS_KEY_SECRET` and the `access-key-secret` file.
+- `qory run --kind`, `--title`, `--subject` and `--details` say what a run is about: its
+  kind, its title, what it works on, `type=<type>,ref=<ref>` with `url=` and `title=` when
+  known, such as `type=ticket,ref=7`, and a JSON object of the caller's own, from a file
+  or from stdin. They go into `about` on `dev.qory.run.started` and no other event; the
+  run configuration request does not carry them. A subject's `title=` takes the rest of
+  the value, commas included, so a title passes as it is. A value the runner contract
+  does not take is an input error, and the run does not start.
+
 ### Changed
 
+- `qory run` records each run outside the checkout, in qory's state directory:
+  `~/.local/state/qory/runs/<checkout>-<hash>/<id>/`, under `$XDG_STATE_HOME/qory` when
+  that is set to an absolute path, with `<hash>` the first 12 hex digits of the SHA-256
+  of the checkout's full path, links resolved. The state directory, its `runs`
+  directory and the checkout's folder are mode 0700. When the run ends, qory names its
+  record, `qory run: the record is in <folder>`, once: the lines that end a run, such as
+  `claude exited 0`, name no path. `qory run resend <id>` finds the record from the
+  checkout. Behind a wall, a mount of, inside or holding the state directory, or one that
+  is or holds a link on the way to it, is refused, `mount_contains_runner_files`. For
+  the directory, qory says `the mount <path> contains <dir>, which holds qory's run
+  records; the agent could change them, so the run does not start. Mount a narrower
+  path`, and `the agent could read them` for a read-only mount. For a link, it names the
+  link: `the mount <path> contains <link>, which leads to qory's run records; the agent
+  could point it elsewhere, so the run does not start. Mount a narrower path`, without
+  `; the agent could point it elsewhere` for a read-only mount. A refusal of the checkout
+  or the working directory names it `the workspace <path>`.
+- The harness's environment is the launch's, and no file a runtime reads holds it.
+  Claude Code's `settings.json` has no `env`, and Codex's `config.toml` no
+  `shell_environment_policy.set`. `qory harness launch` sets every variable through
+  `env`, and `--json` lists them all under `env`:
+  - `QORY_HARNESS_HOME`, the home, first.
+  - Then the fixed variables, qory's own: the launch template's, and nothing else.
+  - Then the defaults, what an author wrote: `env` in `qory.yaml`, the `env` of
+    `harness.launch.<runtime>`, the `env` a settings fragment sets, Claude Code's
+    `settings.json` `env` or Codex's `shell_environment_policy.set`, and what the modules
+    export.
+
+  The variables layer: a fragment's, the modules' exports over them, `qory.yaml` over
+  both. Every runtime with a launch template gets them, Gemini CLI, OpenCode, Cursor,
+  Copilot and Amp too; `goose` and `any` have no launch and get none. Codex passes its
+  environment to every command it runs. Codex 0.76.0 or later filters no name by default;
+  an older Codex drops the names that contain `KEY`, `SECRET` or `TOKEN`, unless a
+  settings fragment sets `ignore_default_excludes = true`. The report records them per
+  runtime under `launch_env`, each with its value and where it comes from, and `fixed`
+  false, since every one is a default; `qory harness inspect` lists them as defaults with
+  their source. `qory harness compose --check` compares them with the report's, so a
+  changed export, `qory.yaml` `env` or fragment variable is stale, one row
+  `launch_env/<runtime>/<NAME>` each. `qory run` passes them to the runner as defaults,
+  the template's own variables as fixed, and the home, which the runner sets as
+  `QORY_HARNESS_HOME`. A module's export is a default like the others: the server's
+  value, `--env` and `wall.env` win over it, and the deny list leaves out one whose name
+  it holds. They reach the agent in the container and outside it alike.
+- qory builds against `github.com/qoryai/runner` at commit `cce6962` of its `main`,
+  `v0.6.1-0.20261008233030-cce6962445b5`, contract `v1` revision 1 as amended there.
+  `runner.yaml`'s `egress` narrows the `security_policy` of a server's run
+  configuration. A server's run configuration may carry variables: they reach a walled
+  run's agent, and an unwalled run gets none of them. The runner's `wall.Nest` makes
+  `/run/qory` root's with mode `0755`, so the agent's `docker` command reads its
+  configuration beneath it. An interactive Claude Code run with an API key behind the
+  wall starts through the runner's approval script, `/bin/sh` and `approve-key.sh` in the
+  run directory, which pre-approves the key's placeholder; `dev.qory.run.started`
+  records that command. `dev.qory.run.started` carries `about`.
+- `server.access_key` and `server.secret` in `runner.yaml` are refused, and so is
+  `QORY_SERVER_SECRET` when `runner.yaml` has a `server` section; the refusal says to
+  remove the two keys, or unset the variable, and then connect the machine as a node,
+  with `qory access-key enrol` or a key generated on the node's page in Qory Apiary,
+  since a server accepts no workspace access key. qory
+  removes `QORY_SERVER_SECRET` from its environment with the access key's variables,
+  whether or not a server is configured, and `wall.env` or `--env` naming it is refused.
+  A machine that reports to a server needs its own access key: `server.access_key_id`,
+  the `server.apiary_public_key` pin and the secret.
+- A run's variables follow one order, highest first: the values qory and the runtime
+  fix, such as `QORY_HARNESS_HOME` and the variables of the runtime's own launch
+  template, Codex's `CODEX_HOME` among them, which no other source overrides, `env` in
+  `qory.yaml`, a settings fragment's and a module's export included; the server's run
+  configuration; `--env`; `wall.env`; the harness's defaults, `env` in `qory.yaml`, the
+  `env` of `harness.launch.<runtime>`, which replaces the template's variables, and a
+  settings fragment's `env`; and the shell. A value that loses is left out, and the run starts. When a value of
+  `--env` loses, `qory run` says why, such as `qory run: LOG_LEVEL from --env is not
+  used: apiary.example.com sets it`, `no source may set it` or `the harness sets it`.
+  `--env` works without a wall; `--image`, `--mount` and the limits need one. A run
+  without a wall gets none of the server's variables.
+- A mount, `--mount` or `wall.mounts`, is refused before the run starts,
+  `mount_contains_runner_files`, when it is, contains or lies inside this machine's qory
+  configuration directory, which holds `runner.yaml`, the access key and the user
+  `qory.yaml`; a file qory reads from that directory and a link takes elsewhere, where
+  the last link leads; the file of a `<name>_file` setting of an integration the run
+  describes, where its path leads; or one of the runner's own program and temporary
+  files. So is a mount that is or contains any link on the way. For a mount that is or contains the
+  access key, `qory run` says `the mount <host path> contains <dir>, which holds this
+  machine's access key; the agent could read the key, so the run does not start. Mount a
+  narrower path`; for a link on the way, that the link `leads to one of the runner's
+  files; the agent could point it elsewhere`, without the part after the semicolon for
+  a read-only mount; otherwise it says the path `holds one of the runner's files; the
+  agent could change it`, or `the agent could read it` for a read-only mount.
+- A mount or the workspace reached through a link inside a writable mount or the
+  workspace, where its path resolves outside that place, is refused before the run
+  starts, `mount_through_link`: `the mount <path> is reached through the link <link>
+  inside the workspace <root>, which a walled agent can change, so the run does not
+  start. List the link's target itself`, or, when the path is the link itself, `the
+  mount <path> is a link inside the workspace <root>, which a walled agent can change,
+  so the run does not start. List the link's target itself`.
+- A key `qory access-key enrol` enrols is active as soon as the server answers, and
+  enrol says so: `the key is active: runs can start`. `key_limit` means the node already
+  holds two keys; once an owner or administrator in Qory Apiary has revoked one, the same
+  command within the code's 15 minutes succeeds. A signed 429, `rate_limited`, means the code
+  was tried too often: qory keeps the key and says `the server refused the attempt: this
+  code was tried too often; run the same command again later, within the code's 15
+  minutes`. A 401 for a code you did not use means the
+  code's issuer must revoke the key it enrolled.
 - `qory harness compose` takes a branch's current commit on every compose, without
   `--update`. A tag or a commit id stays pinned. Offline, it keeps the cached commit and
   warns.
@@ -22,6 +257,24 @@ release may change what an existing document does, and states it under Upgrading
   replaced by a previous compose, the refusal says so. For a tracked, unmodified path it
   prints the `--force` command and the `git checkout --` that restores it. For any other
   path it says why `--force` refuses it and names the changed files, five at most.
+- The verbs the wall runs inside a container, `qory run nest`, `relay` and `forward`,
+  never look for a newer release. At a terminal there, the look runs as the container's
+  root and puts a connection the agent did not make in the run's record.
+- `qory run` behind a wall with no image names the page that says how to build Qory's.
+- `qory run` computes the home itself, as compose does, and takes from the harness report
+  no path it mounts and no fixed variable. A report that names another home is refused
+  before anything starts: `the harness report <report> names the home <home>, and this
+  checkout's home is <home>; a run uses only the home qory computes, so the run does not
+  start. Run qory harness compose again`. With `--home` naming a composed home, the
+  checkout the report beside it names has to be the one that home is composed for, else
+  `the harness report <report> names the checkout <checkout>, and <home> is not that
+  checkout's home; a run uses only a checkout's own home, so the run does not start. Run
+  qory harness compose again`. Behind a wall, `harness.home` comes from the `qory.yaml`
+  in qory's configuration directory alone: another `qory.yaml`, the checkout's or one
+  in a directory above it, that moves the home is refused, `<file> sets harness.home,
+  and a walled run takes the home from <config file> alone, so the run does not start.
+  Set harness.home in <config file>, or remove it from <file>`, with `<file>` the
+  checkout's qory.yaml or the other file's path.
 
 ## [0.12.1] - 2026-09-30
 
@@ -100,10 +353,10 @@ release may change what an existing document does, and states it under Upgrading
   plain verbs in the present tense. The meaning is unchanged; the error for an
   integration that defines nothing lists the roles it plays.
 - A policy, the server's run configuration or a `--policy` file, may contain `image` and
-  `tools`, as the runner's contract allows; `runner.yaml` defines images and tools in a
-  later release, so a policy that selects one stops the run before it starts, with the
-  runner's error, and a run configuration the server sends during a run that selects one
-  is refused and leaves the policy in force.
+  `tools`, as the runner's contract allows; `runner.yaml` defines no images or tools, so
+  a policy that selects one stops the run before it starts, with the runner's error, and
+  a run configuration the server sends during a run that selects one is refused and
+  leaves the policy in force.
 - IP forwarding is off in the wall's relay container, for IPv4 and IPv6, so the relay
   connects the container's network to the ordinary one only through the proxy.
 
@@ -572,7 +825,7 @@ release may change what an existing document does, and states it under Upgrading
 - A document declaring a retired `apiVersion`, one an earlier qory wrote for the same
   format, was refused with exit 2. It is now read as the current version, in every
   document, and the compose prints a `retired` row per document naming the version it
-  declares and the line to write. A later major release stops reading it.
+  declares and the line to write.
 
 ## [0.4.0] - 2026-09-12
 

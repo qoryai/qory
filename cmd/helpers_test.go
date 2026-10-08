@@ -49,7 +49,7 @@ var twoModuleEntries = map[string]string{
 }
 
 // emptyDir makes an empty directory the working directory, in an environment that reads
-// nothing of the machine's own: HOME, the cache and configuration directories, git's
+// nothing of the machine's own: HOME, the cache, configuration and state directories, git's
 // global config and gh's config directory all point at temporary paths, git's system config is off, and colour
 // is off. Nothing there names the person, so a command that greets one prints no name.
 func emptyDir(t *testing.T) string {
@@ -58,10 +58,14 @@ func emptyDir(t *testing.T) string {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(home, ".gitconfig"))
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	t.Setenv("GH_CONFIG_DIR", filepath.Join(home, "gh"))
 	t.Setenv("NO_COLOR", "1")
+	for _, name := range []string{"QORY_ACCESS_KEY_SECRET", "QORY_ACCESS_KEY_ID", "QORY_APIARY_PUBLIC_KEY", "QORY_SERVER_SECRET"} {
+		t.Setenv(name, "")
+	}
 	dir := tempDir(t)
 	t.Chdir(dir)
 	return dir
@@ -79,6 +83,33 @@ func newCheckout(t *testing.T) string {
 	runGit(t, root, "config", "user.email", "tester@example.com")
 	runGit(t, root, "remote", "add", "origin", "https://git.example.com/acme/app.git")
 	return root
+}
+
+// runsDir is the folder in which qory run records the runs of the checkout at root:
+// under the state directory, named after the checkout and the hash of its real path.
+func runsDir(t *testing.T, root string) string {
+	t.Helper()
+	real, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(real))
+	return filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runs", filepath.Base(real)+"-"+hex.EncodeToString(sum[:])[:12])
+}
+
+// recorded is the ids of the runs recorded for the checkout at root, none when its
+// folder does not exist.
+func recorded(t *testing.T, root string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(runsDir(t, root))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, e := range entries {
+		ids = append(ids, e.Name())
+	}
+	return ids
 }
 
 // tempDir is a temporary directory with its symlinks resolved, so it reads the way git

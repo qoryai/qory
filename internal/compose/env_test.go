@@ -1,6 +1,7 @@
 package compose_test
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -98,5 +99,81 @@ func TestDescriptionsAreRead(t *testing.T) {
 	}
 	if res.Stack.Description != "Two modules" || res.Modules[0].Description != "the first" || res.Modules[1].Description != "" {
 		t.Errorf("descriptions: stack %q, modules %+v", res.Stack.Description, res.Modules)
+	}
+}
+
+// TestLaunchEnvSortsByWhereTheValueCameFrom is module a exporting HARNESS_HOME and TOOLS,
+// module b's fragment setting LOG_LEVEL, a number, QORY_HARNESS_HOME and the exported
+// HARNESS_HOME again, and the configuration setting TOOLS and PROFILE. The layering is the
+// environment's: the fragment's, the exports over them, the configuration's over all.
+// Every one is a default, the export's value too; QORY_HARNESS_HOME is none of them.
+func TestLaunchEnvSortsByWhereTheValueCameFrom(t *testing.T) {
+	res, err := composeTreeWith(t, map[string]string{
+		"qory-stack.yaml":                         twoModules,
+		"modules/a/qory-module.yaml":              "apiVersion: qory.dev/v1alpha1\nname: a\nenv:\n  HARNESS_HOME: .\n  TOOLS: scripts/tools\n",
+		"modules/b/settings/claude/settings.json": `{"env": {"LOG_LEVEL": "debug", "PORT": 8080, "QORY_HARNESS_HOME": "/elsewhere", "HARNESS_HOME": "$QORY_HARNESS_HOME/modules/a"}}`,
+	}, compose.Options{Env: map[string]string{"TOOLS": "/opt/tools", "PROFILE": "nextjs"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := res.LaunchEnv("claude", "settings.json", "env")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []compose.Var{
+		{Name: "HARNESS_HOME", Value: "$QORY_HARNESS_HOME/modules/a", From: "module a"},
+		{Name: "LOG_LEVEL", Value: "debug", From: "module b, settings/claude/settings.json"},
+		{Name: "PORT", Value: "8080", From: "module b, settings/claude/settings.json"},
+		{Name: "PROFILE", Value: "nextjs", From: "configuration"},
+		{Name: "TOOLS", Value: "/opt/tools", From: "configuration"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("launch env\n%+v\nwant\n%+v", got, want)
+	}
+	// A runtime whose settings have no place for variables gets the exports and the
+	// configuration's alone.
+	got, err = res.LaunchEnv("claude", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0].Name != "HARNESS_HOME" || got[1].Name != "PROFILE" || got[2].Name != "TOOLS" {
+		t.Errorf("launch env without a settings place: %+v", got)
+	}
+}
+
+// TestLaunchEnvReadsCodexsSet is a codex fragment setting a variable under
+// shell_environment_policy.set beside an exported one of the same name: the export is
+// over the fragment, as it always was in the file, and the fragment's other variable is
+// a default. A table as a value is refused.
+func TestLaunchEnvReadsCodexsSet(t *testing.T) {
+	files := func(fragment string) map[string]string {
+		return map[string]string{
+			"qory-stack.yaml":                      twoModules,
+			"modules/a/qory-module.yaml":           manifest("a", "TOOLS", "scripts/tools"),
+			"modules/b/settings/codex/config.toml": fragment,
+		}
+	}
+	res, err := composeTreeFor(t, files("[shell_environment_policy]\ninherit = \"all\"\n[shell_environment_policy.set]\nTOOLS = \"/usr/local/bin\"\nCI = \"1\"\n"), "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := res.LaunchEnv("codex", "config.toml", "shell_environment_policy", "set")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []compose.Var{
+		{Name: "CI", Value: "1", From: "module b, settings/codex/config.toml"},
+		{Name: "TOOLS", Value: "$QORY_HARNESS_HOME/modules/a/scripts/tools", From: "module a"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("launch env\n%+v\nwant\n%+v", got, want)
+	}
+	res, err = composeTreeFor(t, files("[shell_environment_policy.set.CI]\nvalue = \"1\"\n"), "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = res.LaunchEnv("codex", "config.toml", "shell_environment_policy", "set")
+	if want := "settings/codex/config.toml: shell_environment_policy.set.CI is not a string, a number or a boolean; a variable's value is text"; err == nil || err.Error() != want {
+		t.Errorf("error %v, want %q", err, want)
 	}
 }

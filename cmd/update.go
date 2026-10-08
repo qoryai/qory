@@ -199,6 +199,14 @@ func runTool(cmd *cobra.Command, u *ui.UI, waiting, landed, name string, args ..
 	return nil
 }
 
+// walledVerb reports whether args select a verb the wall runs inside a container, one
+// that carries [inWall]: qory run nest, relay or forward. The command tree finds it, so a
+// flag before it, such as -v, is read as the tree reads it.
+func walledVerb(args []string) bool {
+	c, _, err := Root().Find(args)
+	return err == nil && c.Annotations[inWall] != ""
+}
+
 // noticeOff is set by qory update, which reports the newest release itself and needs no
 // notice after it.
 var noticeOff bool
@@ -209,12 +217,15 @@ var noticeOff bool
 // beside the command, and the result waits for it no longer than the request's timeout.
 //
 // Nothing is looked for when QORY_NO_UPDATE_CHECK or CI is set, when w is not a terminal,
-// when the build has no version, or when the command is qory update. A pseudo-version
-// is compared like a release, so a build from main sees a notice only when a release is
-// ahead of it. A failed look is silent; the next command tries again.
-func StartUpdateCheck(w io.Writer) func() {
+// when the build has no version, when args, the command line without the program, select
+// a verb the wall starts inside a container, or when the command is qory update. Inside
+// a container the look would be a connection in the run's record that the agent did not
+// make, and qory run nest, at a terminal there, runs as the container's root. A
+// pseudo-version is compared like a release, so a build from main sees a notice only
+// when a release is ahead of it. A failed look is silent; the next command tries again.
+func StartUpdateCheck(w io.Writer, args []string) func() {
 	f, ok := w.(*os.File)
-	if os.Getenv("QORY_NO_UPDATE_CHECK") != "" || os.Getenv("CI") != "" || !ok || !term.IsTerminal(f.Fd()) {
+	if os.Getenv("QORY_NO_UPDATE_CHECK") != "" || os.Getenv("CI") != "" || !ok || !term.IsTerminal(f.Fd()) || walledVerb(args) {
 		return func() {}
 	}
 	b := build()

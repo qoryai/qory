@@ -2,7 +2,7 @@
   "version": 1,
   "name": "acme-tracker",
   "title": "Acme tracker",
-  "description": "Issues of the Acme tracker: a token for a run's project, and the issues as work.",
+  "description": "A token for a run's project on the Acme tracker.",
   "program_version": "0.2.0",
   "settings": {
     "type": "object",
@@ -16,6 +16,6 @@
   },
   "roles": {
     "credential": {"argument": "[A-Z]+", "hosts": ["tracker.acme.example"]},
-    "work_source": {"events": ["issue.opened"]}
+    "example_role": {}
   }
 }

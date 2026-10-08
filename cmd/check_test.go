@@ -96,3 +96,55 @@ func TestCheckRefusesForce(t *testing.T) {
 	}
 	wants(t, err.Error(), "--check writes nothing, so --force has nothing to replace")
 }
+
+// TestCheckSeesAChangedLaunchVariable is the launch's variables, which no file of the
+// home holds: a compose on a module exporting CORE_SCRIPTS, setting LOG_LEVEL in its
+// Claude Code fragment, and a qory.yaml setting PROFILE, then one change to each. The
+// check exits 6 with the stale message and a row for the variable, and a compose brings
+// the home up to date again.
+func TestCheckSeesAChangedLaunchVariable(t *testing.T) {
+	cases := []struct {
+		name, file, content, variable string
+	}{
+		{"a module's export", "modules/core/qory-module.yaml", "apiVersion: qory.dev/v1alpha1\nname: core\nenv:\n  CORE_SCRIPTS: tools\n", "CORE_SCRIPTS"},
+		{"qory.yaml's env", "qory.yaml", envCheckout + "env:\n  PROFILE: two\n", "PROFILE"},
+		{"a fragment's env", "modules/core/settings/claude/settings.json", `{"env": {"LOG_LEVEL": "trace"}}`, "LOG_LEVEL"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := newCheckout(t)
+			writeFile(t, filepath.Join(root, "modules", "core", "qory-module.yaml"), "apiVersion: qory.dev/v1alpha1\nname: core\nenv:\n  CORE_SCRIPTS: scripts\n")
+			writeFile(t, filepath.Join(root, "modules", "core", "scripts", "run.sh"), "#!/bin/sh\n")
+			writeFile(t, filepath.Join(root, "modules", "core", "tools", "run.sh"), "#!/bin/sh\n")
+			writeFile(t, filepath.Join(root, "modules", "core", "settings", "claude", "settings.json"), `{"env": {"LOG_LEVEL": "debug"}}`)
+			writeFile(t, filepath.Join(root, "qory.yaml"), envCheckout+"env:\n  PROFILE: one\n")
+			if out, err := run(t, "harness", "compose", "--no-links"); err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			if out, err := run(t, "harness", "compose", "--check"); err != nil {
+				t.Fatalf("check after a compose: %v\n%s", err, out)
+			}
+
+			writeFile(t, filepath.Join(root, c.file), c.content)
+			out, err := run(t, "harness", "compose", "--check")
+			if err == nil {
+				t.Fatalf("check after a change to %s: no error\n%s", c.name, out)
+			}
+			if got := cmd.ExitCode(err); got != cmd.ExitStale {
+				t.Errorf("exit %d for %v, want %d", got, err, cmd.ExitStale)
+			}
+			wants(t, err.Error(), "stale: run qory harness compose")
+			wantsRow(t, out, "launch_env/claude/"+c.variable, "changed")
+
+			if out, err := run(t, "harness", "compose", "--no-links"); err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			if out, err := run(t, "harness", "compose", "--check"); err != nil {
+				t.Fatalf("check after the second compose: %v\n%s", err, out)
+			}
+		})
+	}
+}
+
+// envCheckout is a checkout's qory.yaml composing module core for claude, without env.
+const envCheckout = "apiVersion: qory.dev/v1alpha1\nharness:\n  target:\n    runtime: claude\n  modules:\n    - name: core\n      source: {path: modules/core}\n"

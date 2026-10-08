@@ -1,0 +1,86 @@
+name: Images
+
+# The agent's images are built here, and not published. A change to them, to the check
+# and what it reads, or to the runner module whose descriptor names the version of claude,
+# builds all four and checks them with the qory of the same commit.
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - images/**
+      - internal/image/**
+      - internal/config/**
+      - cmd/image.go
+      - cmd/run.go
+      - go.mod
+      - go.sum
+      - .github/workflows/images.yml
+  pull_request:
+    paths: *paths
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Build and check the images for amd64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27"
+
+      - name: Build qory for Linux
+        # Static, as the wall mounts it into an image that may hold no loader.
+        run: CGO_ENABLED=0 go build -o "$RUNNER_TEMP/qory" .
+
+      # The engine's own builder, so each image is built FROM the one before it as this
+      # engine holds it, no builder image is pulled, and nothing is pushed.
+      - name: Build agent
+        run: docker build --platform linux/amd64 -t qory-agent images/agent
+
+      - name: Build agent-docker
+        run: docker build --platform linux/amd64 -t qory-agent-docker --build-arg BASE=qory-agent images/agent-docker
+
+      - name: Build agent-go
+        run: docker build --platform linux/amd64 -t qory-agent-go --build-arg BASE=qory-agent images/agent-go
+
+      - name: Build agent-go-docker
+        run: docker build --platform linux/amd64 -t qory-agent-go-docker --build-arg BASE=qory-agent-docker --build-arg TITLE=agent-go-docker images/agent-go
+
+      - name: Check them
+        # On Linux the probe is qory itself, and a configuration directory with no
+        # runner.yaml leaves every setting its default.
+        env:
+          XDG_CONFIG_HOME: ${{ runner.temp }}/config
+        run: '"$RUNNER_TEMP/qory" image check qory-agent qory-agent-docker qory-agent-go qory-agent-go-docker'
+
+  arm64:
+    name: Build the images for arm64
+    # Built and not run: what goes wrong for one architecture alone, a sum or a download,
+    # shows here. The downloads are checked natively; the steps that run the image's own
+    # programs run under QEMU.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-qemu-action@v4
+        with:
+          # The emulators are installed by a privileged container, so it is pinned.
+          image: docker.io/tonistiigi/binfmt:qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+          platforms: arm64
+
+      # The engine's own builder, as for amd64: no builder image to pin.
+      - name: Build agent
+        run: docker build --platform linux/arm64 -t qory-agent images/agent
+
+      - name: Build agent-docker
+        run: docker build --platform linux/arm64 -t qory-agent-docker --build-arg BASE=qory-agent images/agent-docker
+
+      - name: Build agent-go
+        run: docker build --platform linux/arm64 -t qory-agent-go --build-arg BASE=qory-agent images/agent-go
+
+      - name: Build agent-go-docker
+        run: docker build --platform linux/arm64 -t qory-agent-go-docker --build-arg BASE=qory-agent-docker --build-arg TITLE=agent-go-docker images/agent-go

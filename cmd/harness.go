@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -332,7 +333,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/harness.md`,
 	c.Flags().StringVar(&runtime, "runtime", "", "render for these runtimes instead of target.runtime, comma separated ("+strings.Join(render.Names(), ", ")+"; qory.yaml: runtime)")
 	c.Flags().StringVar(&model, "model", "", "write this model instead of target.model (qory.yaml: model)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the report and write nothing")
-	c.Flags().BoolVar(&check, "check", false, "compare the home with the stack and modules, write nothing, and exit 6 when a file or link differs; the checkout's links and the report are not compared")
+	c.Flags().BoolVar(&check, "check", false, "compare the home with the stack and modules, write nothing, and exit 6 when a file, a link or a launch variable differs; the checkout's links and the rest of the report are not compared")
 	c.Flags().BoolVar(&force, "force", false, "replace a tracked, unmodified file where a link goes; git checkout -- restores it (qory.yaml: force)")
 	c.Flags().BoolVar(&update, "update", false, "fetch every git source again, not the cached clone (qory.yaml: update)")
 	homeFlags(c, &h)
@@ -375,9 +376,11 @@ func (e *staleError) Error() string {
 // the tree a compose writes. A home that matches prints up to date and the rows a
 // compose prints; one that differs prints one row per path and returns a [*staleError].
 // A link into a clone of a git source is compared by what the clone holds, so a branch
-// that moved to a commit whose files are the same is up to date.
-// The links from the checkout into the home and the report are not compared: a missing
-// link is a foreign path or a remove, and the report changes when the home does.
+// that moved to a commit whose files are the same is up to date. The variables the
+// compose sets in each launch are compared with the report's launch_env, the one place
+// they are kept, see [envDifferences]. The links from the checkout into the home and the
+// rest of the report are not compared: a missing link is a foreign path or a remove, and
+// the rest of the report changes when the home does.
 func runCheck(out io.Writer, pr *prepared) error {
 	u := pr.u
 	if _, err := os.Stat(pr.at.home); err != nil {
@@ -388,13 +391,19 @@ func runCheck(out io.Writer, pr *prepared) error {
 		return err
 	}
 	defer os.RemoveAll(stage)
-	if err := render.BuildAt(pr.res, stage, pr.at.home, allRuntimes(pr.at.home, pr.targets)...); err != nil {
+	all := allRuntimes(pr.at.home, pr.targets)
+	if err := render.BuildAt(pr.res, stage, pr.at.home, all...); err != nil {
 		return err
 	}
 	differences, err := render.Diff(stage, pr.at.home, pr.cache)
 	if err != nil {
 		return err
 	}
+	env, err := launchEnv(pr.res, all, pr.launch)
+	if err != nil {
+		return input(err)
+	}
+	differences = append(differences, envDifferences(env, pr.previous.LaunchEnv)...)
 	rows := [][2]string{{"home", ui.Short(pr.at.home, pr.at.root)}}
 	if len(differences) == 0 {
 		u.Success("up to date")
@@ -408,6 +417,55 @@ func runCheck(out io.Writer, pr *prepared) error {
 	return &staleError{Differences: differences}
 }
 
+// envDifferences compares the variables a compose sets in each runtime's launch, want,
+// with the ones the last compose recorded in the report, have, which is the only place
+// they are kept. Each name that differs is one [render.Difference] at
+// launch_env/<runtime>/<NAME>: "changed" for another value, source or kind, "missing" for
+// one the compose sets and the report lacks, "extra" for one the compose no longer sets.
+func envDifferences(want, have map[string][]report.Var) []render.Difference {
+	var out []render.Difference
+	runtimes := map[string]bool{}
+	for rt := range want {
+		runtimes[rt] = true
+	}
+	for rt := range have {
+		runtimes[rt] = true
+	}
+	for _, rt := range slices.Sorted(maps.Keys(runtimes)) {
+		w, h := map[string]report.Var{}, map[string]report.Var{}
+		for _, v := range want[rt] {
+			w[v.Name] = v
+		}
+		for _, v := range have[rt] {
+			h[v.Name] = v
+		}
+		names := map[string]bool{}
+		for name := range w {
+			names[name] = true
+		}
+		for name := range h {
+			names[name] = true
+		}
+		for _, name := range slices.Sorted(maps.Keys(names)) {
+			wv, inWant := w[name]
+			hv, inHave := h[name]
+			what := ""
+			switch {
+			case !inHave:
+				what = "missing"
+			case !inWant:
+				what = "extra"
+			case wv != hv:
+				what = "changed"
+			default:
+				continue
+			}
+			out = append(out, render.Difference{Path: "launch_env/" + rt + "/" + name, What: what})
+		}
+	}
+	return out
+}
+
 // prepared is a compose that has been read and composed but not written: what
 // [prepare] hands to the compose, the dry run and the check.
 type prepared struct {
@@ -416,6 +474,7 @@ type prepared struct {
 	rep      report.Report
 	previous report.Report
 	targets  []render.Runtime
+	launch   map[string]config.Launch // the configuration's harness.launch, which decides whether a template's variables are its own
 	force    bool
 	cache    string      // where git sources are fetched, so a check compares a link into a clone by what it holds
 	rows     [][2]string // the rows every outcome prints after its own: skipped keys, unchecked ranges
@@ -455,10 +514,34 @@ func runCompose(out, errOut io.Writer, o composeOptions) error {
 	for _, rt := range all {
 		rep.Target.Runtimes = append(rep.Target.Runtimes, rt.Name())
 	}
+	if rep.LaunchEnv, err = launchEnv(res, all, pr.launch); err != nil {
+		return input(err)
+	}
 	if err := render.Build(res, at.home, all...); err != nil {
 		return err
 	}
 	return write(out, o, at, res, rep, previous, targets, all, force, skippedConfig, u)
+}
+
+// launchEnv is, per runtime with a launch template, the variables the harness sets when
+// its program starts, as the report records them, with launch the configuration's
+// harness.launch; nil when it sets none.
+func launchEnv(res *compose.Result, runtimes []render.Runtime, launch map[string]config.Launch) (map[string][]report.Var, error) {
+	var out map[string][]report.Var
+	for _, rt := range runtimes {
+		vars, err := render.LaunchEnv(res, rt, launchOverride(launch, rt.Name()))
+		if err != nil {
+			return nil, err
+		}
+		if len(vars) == 0 {
+			continue
+		}
+		if out == nil {
+			out = map[string][]report.Var{}
+		}
+		out[rt.Name()] = report.Vars(vars)
+	}
+	return out, nil
 }
 
 // allRuntimes is every runtime the home holds after a compose for targets: the targets
@@ -634,6 +717,9 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 		retired.add("module "+m.Name, m.RetiredAPIVersion)
 	}
 	rep := report.New(res, name, at.root, at.home)
+	if rep.LaunchEnv, err = launchEnv(res, targets, conf.Launch); err != nil {
+		return nil, input(err)
+	}
 	if !at.links {
 		rep.Links = report.NoLinks
 	}
@@ -677,7 +763,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 	if cache == "" {
 		cache, _ = source.CacheDir()
 	}
-	return &prepared{at: at, res: res, rep: rep, previous: previous, targets: targets, force: force, cache: cache, rows: skippedConfig, u: u}, nil
+	return &prepared{at: at, res: res, rep: rep, previous: previous, targets: targets, launch: conf.Launch, force: force, cache: cache, rows: skippedConfig, u: u}, nil
 }
 
 // resolvedRows prints a warning for each git source whose remote could not be reached, one
@@ -1283,7 +1369,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/harness.md#a-home-outside-th
 			if err != nil {
 				return err
 			}
-			name, launch, err := resolveLaunch(rep, conf, runtime)
+			name, launch, err := resolveLaunch(rep, conf, runtime, rep.Home)
 			if err != nil {
 				return err
 			}
@@ -1306,7 +1392,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/harness.md#a-home-outside-th
 				return err
 			}
 			if asJSON {
-				data, err := json.MarshalIndent(launchJSON{Command: launch.Command, Args: append([]string{}, launch.Args...), Env: launch.Env, Addresses: addresses}, "", "  ")
+				data, err := json.MarshalIndent(launchJSON{Command: launch.Command, Args: append([]string{}, launch.Args...), Env: envMap(launch.Env()), Addresses: addresses}, "", "  ")
 				if err != nil {
 					return err
 				}
@@ -1324,8 +1410,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/harness.md#a-home-outside-th
 	return c
 }
 
-// launchJSON is what --json prints: the arguments always an array, the variables left
-// out when there are none, and the registered names per kind, left out when the harness
+// launchJSON is what --json prints: the arguments always an array, the variables, at
+// least QORY_HARNESS_HOME, and the registered names per kind, left out when the harness
 // holds no agent, skill or command the runtime places.
 type launchJSON struct {
 	Command   string                       `json:"command"`
@@ -1334,17 +1420,24 @@ type launchJSON struct {
 	Addresses map[string]map[string]string `json:"addresses,omitempty"`
 }
 
+// envMap is NAME=value pairs as a map, for --json.
+func envMap(env []string) map[string]string {
+	out := make(map[string]string, len(env))
+	for _, kv := range env {
+		name, value, _ := strings.Cut(kv, "=")
+		out[name] = value
+	}
+	return out
+}
+
 // shellLine is a launch as one line a POSIX shell reads back as the same command: the
-// variables through env when there are any, then the program and its arguments, a word
-// of plain characters as it is and anything else in single quotes with its own single
-// quotes escaped.
+// variables through env, QORY_HARNESS_HOME, then the fixed ones, then the defaults, then
+// the program and its arguments, a word of plain characters as it is and anything else in
+// single quotes with its own single quotes escaped.
 func shellLine(l render.Launch) string {
-	var words []string
-	if len(l.Env) > 0 {
-		words = append(words, "env")
-		for _, k := range sortedKeys(l.Env) {
-			words = append(words, shellQuote(k+"="+l.Env[k]))
-		}
+	words := []string{"env"}
+	for _, kv := range l.Env() {
+		words = append(words, shellQuote(kv))
 	}
 	words = append(words, shellQuote(l.Command))
 	for _, a := range l.Args {
@@ -1550,6 +1643,11 @@ func removeRuntime(u *ui.UI, at places, rt render.Runtime) error {
 	rep.Target.Runtimes = nil
 	for _, o := range others {
 		rep.Target.Runtimes = append(rep.Target.Runtimes, o.Name())
+	}
+	for rt := range rep.LaunchEnv {
+		if !slices.Contains(rep.Target.Runtimes, rt) {
+			delete(rep.LaunchEnv, rt)
+		}
 	}
 	return report.Write(at.report, rep)
 }

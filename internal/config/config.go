@@ -42,7 +42,7 @@
 //	  timeout: 10m               # the longest one git command may run
 //	  cache: /var/cache/qory     # where git sources are fetched to
 //	env:
-//	  HARNESS_PROFILE: nextjs    # exported to every runtime with a place for it
+//	  HARNESS_PROFILE: nextjs    # set in every launch, a default
 //	exports:                     # what this repository publishes for others, by name
 //	  dir: ./harness             # where stacks/ and modules/ are; default: the root
 //	  stacks: [nextjs]           # harness/stacks/nextjs/qory-stack.yaml
@@ -58,8 +58,11 @@
 //	  deny: [gist.github.com]    # denied in either mode, whatever allow lists
 //	server:                      # the server every run reports to; absent is files only
 //	  url: https://qory.example  # a scheme and a host
-//	  access_key: ak_f1xt0re000000000
-//	  secret: ...                # or QORY_SERVER_SECRET in the environment
+//	  access_key_id: ak_f1xt0re000000000   # or QORY_ACCESS_KEY_ID; its secret is access-key-secret
+//	  apiary_public_key:         # the pin, or QORY_APIARY_PUBLIC_KEY
+//	    - {alg: ed25519, public_key: <the server's key>}
+//	instance:
+//	  name: build-01             # this instance's display name; the host name by default
 //
 // [Load] discovers and reads the files, [Config] is the result, and [Config.Rows] lists
 // where each value came from. [DiscoverStack] finds what a checkout composes, its
@@ -321,8 +324,8 @@ type Config struct {
 	Worktree Worktree
 	// Git contains the git settings.
 	Git Git
-	// Env are the variables exported to every runtime with a place for them, on top of
-	// what the modules export.
+	// Env are the variables set in every runtime's launch, on top of what the modules
+	// export.
 	Env map[string]string
 	// Exports is what the repository publishes, from the exports section of the checkout
 	// root's file; nil when it lists none. A section in any other file is read and left
@@ -458,6 +461,24 @@ func Load(root string, own bool) (Config, error) {
 		}
 	}
 	return c, nil
+}
+
+// LoadUser returns the configuration of the user's own file alone, the qory.yaml in
+// [UserDir], over the defaults: the defaults when there is none. A walled run takes
+// harness.home from it alone: a walled run never mounts that directory, which holds the
+// runner's files, while another qory.yaml may lie in a place its agent can write.
+func LoadUser() (Config, error) {
+	c := Defaults()
+	dir := UserDir()
+	if dir == "" {
+		return c, nil
+	}
+	path, err := FileIn(dir)
+	if err != nil || path == "" {
+		return c, err
+	}
+	_, err = c.apply(path, true)
+	return c, err
 }
 
 // Discover lists the configuration files for the checkout at root, in the order they
@@ -1039,7 +1060,7 @@ func launchOf(path, name string, l launchSection) (Launch, error) {
 				return out, fmt.Errorf("%s: %s.env: %s is not an environment variable name", path, key, k)
 			}
 			if k == "QORY_HARNESS_HOME" {
-				return out, fmt.Errorf("%s: %s.env.QORY_HARNESS_HOME is qory's own; the settings contain it", path, key)
+				return out, fmt.Errorf("%s: %s.env.QORY_HARNESS_HOME is qory's own; every launch sets it to the home", path, key)
 			}
 			out.Env[k] = v
 		}

@@ -102,7 +102,8 @@ More: [docs/worktrees.md](docs/worktrees.md).
 `qory run` starts the agent on its harness.
 
 - **Observed.** All traffic goes through a proxy on your machine. Each run is recorded in
-  `.qory/runs/`.
+  `~/.local/state/qory/runs/`, or under `$XDG_STATE_HOME/qory` when that is set to an
+  absolute path, outside the checkout.
 - **Fenced.** Add a **wall**: the agent runs in a container. Its only way out is the
   proxy. You decide which hosts it may reach.
 - **No tokens inside.** The agent gets a placeholder. The proxy adds the real token on

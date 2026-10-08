@@ -262,3 +262,39 @@ func TestWriteReportsAPathItCannotCreate(t *testing.T) {
 		t.Error("wrote a report under a file")
 	}
 }
+
+// TestPrintEnvSaysWhereEachVariableComesFrom is a report composed for claude and codex
+// with launch variables: the Env section lists each once, a variable both runtimes share
+// on one row, as a default and where its value comes from. A module's export is a default
+// too, and so is a variable an older report marks fixed.
+func TestPrintEnvSaysWhereEachVariableComesFrom(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	t.Setenv("HOME", t.TempDir())
+	r := want()
+	r.Target.Runtimes = []string{"claude", "codex"}
+	tools := report.Var{Name: "TOOLS", Value: "$QORY_HARNESS_HOME/modules/core/tools", From: "module core", Fixed: true}
+	r.LaunchEnv = map[string][]report.Var{
+		"claude": {{Name: "LOG_LEVEL", Value: "debug", From: "module core, settings/claude/settings.json"}, tools},
+		"codex":  {{Name: "PROFILE", Value: "nextjs", From: "configuration"}, tools},
+	}
+	var buf bytes.Buffer
+	if err := r.Print(&buf); err != nil {
+		t.Fatal(err)
+	}
+	_, env, _ := strings.Cut(buf.String(), "Env\n")
+	var rows []string
+	for _, line := range strings.Split(strings.TrimSpace(env), "\n") {
+		if strings.TrimSpace(line) == "" {
+			break
+		}
+		rows = append(rows, strings.Join(strings.Fields(line), " "))
+	}
+	wantRows := []string{
+		"LOG_LEVEL debug default, module core, settings/claude/settings.json",
+		"PROFILE nextjs default, configuration",
+		"TOOLS $QORY_HARNESS_HOME/modules/core/tools default, module core",
+	}
+	if !reflect.DeepEqual(rows, wantRows) {
+		t.Errorf("env rows %q, want %q\n%s", rows, wantRows, buf.String())
+	}
+}

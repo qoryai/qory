@@ -14,7 +14,8 @@ import (
 )
 
 // The fixtures under testdata/fixtures are contracts/integration/v1/fixtures of
-// github.com/qoryai/integrations at v0.1.0, copied with the schema.
+// github.com/qoryai/integrations at v0.1.0, copied with the schema; unknown-role.json
+// plays example_role as the role qory does not know.
 
 // program writes a program that answers describe with doc and exits 0.
 func program(t *testing.T, doc string) string {
@@ -55,7 +56,7 @@ func TestTheSchemaCopyHoldsToTheContractsFixtures(t *testing.T) {
 	}
 	doc, _ := os.ReadFile("testdata/fixtures/unknown-role.json")
 	d, err := integration.Describe(context.Background(), program(t, string(doc)))
-	if err != nil || strings.Join(d.Roles, " ") != "credential work_source" || d.Name != "acme-tracker" || d.ProgramVersion != "0.2.0" {
+	if err != nil || strings.Join(d.Roles, " ") != "credential example_role" || d.Name != "acme-tracker" || d.ProgramVersion != "0.2.0" {
 		t.Errorf("unknown-role: %+v, %v", d, err)
 	}
 }
@@ -230,8 +231,8 @@ func TestANameOfTheDescriptionIsPrintedAsATerminalTakesIt(t *testing.T) {
 }
 
 // TestADescriptionThatNamesItsDomainsIsRead describes qory-github as it describes itself,
-// with the domains it serves, and a machine's own program that names two: each reads as
-// one that names none, since a declared integration expands the same whatever its
+// with the domains it works with, and a machine's own program that names two: each reads
+// as one that names none, since a declared integration expands the same whatever its
 // domains.
 func TestADescriptionThatNamesItsDomainsIsRead(t *testing.T) {
 	for _, f := range []string{"testdata/fixtures/github.json", "testdata/fixtures/acme-chat.json"} {
@@ -243,5 +244,19 @@ func TestADescriptionThatNamesItsDomainsIsRead(t *testing.T) {
 		if err != nil || d.Credential == nil {
 			t.Errorf("%s: %+v, %v", f, d, err)
 		}
+	}
+}
+
+// TestDescribeNeverReceivesTheAccessKey runs describe with the access key's variables in
+// qory's environment: the program receives none of them.
+func TestDescribeNeverReceivesTheAccessKey(t *testing.T) {
+	for _, name := range []string{"QORY_ACCESS_KEY_SECRET", "QORY_ACCESS_KEY_ID", "QORY_APIARY_PUBLIC_KEY"} {
+		t.Setenv(name, "set")
+	}
+	t.Setenv("QORY_TEST_KEPT", "kept")
+	doc, _ := os.ReadFile("testdata/fixtures/acme-tracker.json")
+	body := "test -z \"$QORY_ACCESS_KEY_SECRET$QORY_ACCESS_KEY_ID$QORY_APIARY_PUBLIC_KEY\" || exit 7\ntest \"$QORY_TEST_KEPT\" = kept || exit 8\ncat <<'EOF'\n" + string(doc) + "\nEOF\n"
+	if _, err := integration.Describe(context.Background(), script(t, body)); err != nil {
+		t.Errorf("describe: %v", err)
 	}
 }

@@ -17,7 +17,7 @@ var example embed.FS
 
 func main() {
 	cmd.Example = example
-	notify := cmd.StartUpdateCheck(os.Stderr)
+	notify := cmd.StartUpdateCheck(os.Stderr, os.Args[1:])
 	err := cmd.Execute()
 	if err != nil && !errors.Is(err, cmd.ErrReported) {
 		u := ui.New(os.Stderr)

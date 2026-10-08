@@ -15,6 +15,7 @@
 //	qory harness remove    remove the composed harness and its links, or one runtime's
 //	qory harness launch    print the command that starts a runtime on the composed harness
 //	qory run               start a runtime on the composed harness through the session runner
+//	qory image check       check an image against what the wall needs of it
 //
 // Each harness verb has a one-letter alias under the noun, and a hidden two-letter
 // shortcut at the top level for typing at a prompt many times a day: hc, hi and hr. Both

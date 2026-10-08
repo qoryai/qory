@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"os/exec"
 	"slices"
 	"sort"
@@ -28,13 +29,15 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/qoryai/runner/accesskey"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 )
 
 // descriptionSchema is contracts/integration/v1/description.schema.json of
-// github.com/qoryai/integrations at v0.1.0, copied as it is. A new revision of the
-// contract is copied over it, with its version written here.
+// github.com/qoryai/integrations at v0.1.0, copied with the roles description cut to
+// what a reader does, and the domains description to what the field is. A new revision
+// of the contract is copied over it, with its version written here.
 //
 //go:embed description.schema.json
 var descriptionSchema []byte
@@ -109,6 +112,8 @@ func Describe(ctx context.Context, program string) (*Description, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, program, "describe")
 	cmd.Dir = "/"
+	// The access key's variables are the runner's alone: describe never receives them.
+	cmd.Env = accesskey.WithoutVariables(os.Environ())
 	stdout, stderr := &capped{}, &capped{}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	// A process left holding the output is not waited for past the limit.

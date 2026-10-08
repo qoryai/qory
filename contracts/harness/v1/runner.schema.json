@@ -42,12 +42,11 @@
       }
     },
     "server": {
-      "description": "The server every run on this machine reports to, the runner contract's server.schema.json: the runner fetches its configuration, signed, posts the events where the configuration defines and takes its run configuration as the policy. Absent, the events go to files alone.",
+      "description": "The server every run on this machine reports to, the runner contract's server.schema.json without its version: the runner signs every request with the machine's access key, verifies every answer under the pin, fetches the server's configuration, posts the events where it defines and takes its run configuration. The access key's secret is never in this file: it is QORY_ACCESS_KEY_SECRET, else the file access-key-secret beside it. Absent, the events go to files alone.",
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "url",
-        "access_key"
+        "url"
       ],
       "properties": {
         "url": {
@@ -55,15 +54,46 @@
           "type": "string",
           "pattern": "^https?://[^/?#]+$"
         },
-        "access_key": {
-          "description": "The key the server issued this machine: ak_ and 16 characters of lower-case Crockford base32.",
+        "access_key_id": {
+          "description": "The id of the machine's access key, which the server assigns when the key enrols: ak_ and 16 characters of lower-case Crockford base32. May be left out when QORY_ACCESS_KEY_ID is set in the environment; set in both, it is refused. A run without one does not start.",
           "type": "string",
           "pattern": "^ak_[0-9a-hjkmnp-tv-z]{16}$"
         },
-        "secret": {
-          "description": "At least 16 characters; may be left out when QORY_SERVER_SECRET is set in the environment. It signs every request and is never sent.",
+        "apiary_public_key": {
+          "description": "The pin: the server's Ed25519 public keys, a list so the key can rotate. Every answer of the server is verified under one of them. May be left out when QORY_APIARY_PUBLIC_KEY holds it, as JSON; set in both, it is refused. A pin that lists the runner contract's published fixture key is refused. A run without one does not start, apiary_public_key_missing.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "alg",
+              "public_key"
+            ],
+            "properties": {
+              "alg": {
+                "const": "ed25519"
+              },
+              "public_key": {
+                "description": "A raw 32-byte Ed25519 public key, base64url without padding.",
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+              }
+            }
+          }
+        }
+      }
+    },
+    "instance": {
+      "description": "This instance of the machine, as the server shows it. Its id is qory's own, kept in the file instance-id beside this file.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "The instance's display name on the server: 1 to 64 of A-Z, a-z, 0-9, dot, underscore and dash, starting with a letter or a digit. Default the host name.",
           "type": "string",
-          "minLength": 16
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
         }
       }
     },
@@ -104,10 +134,55 @@
           ]
         },
         "image": {
-          "description": "The agent's image: the runtime and the project's toolchain. qory builds none. May be left out when --image sets one.",
+          "description": "The agent's image when the run's policy selects none, the runtime and the project's toolchain: the name of one of images, or a reference. A name images defines is read as that image first. --image sets another for one run, and a policy's selection wins over both. May be left out when --image sets one, or when the run's own --policy selects an image; a machine that reports to a server sets it, because the server's run configuration may select none.",
           "type": "string",
           "minLength": 1,
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._/:@-]*$"
+        },
+        "images": {
+          "description": "The images this machine defines, by name. A run's policy selects one by its name, as it selects credentials, and names no reference; image and --image name the default by it. The runner contract's Images.",
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "ref"
+            ],
+            "properties": {
+              "ref": {
+                "description": "The image's reference, pinned by digest where the machine wants the same image every time.",
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._/:@-]*$"
+              },
+              "runtime": {
+                "description": "The container runtime the wall starts the image under, one the engine has, such as sysbox-runc. Default the engine's.",
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+              },
+              "docker": {
+                "description": "Experimental. The agent gets a Docker daemon of its own inside the container, which qory's helper starts before the agent; the image holds dockerd. Needs a runtime that runs a daemon without privileges: sysbox-runc. Any policy can select the image, so define one only where every run may get a daemon. Default false.",
+                "type": "boolean"
+              }
+            },
+            "if": {
+              "properties": {
+                "docker": {
+                  "const": true
+                }
+              },
+              "required": [
+                "docker"
+              ]
+            },
+            "then": {
+              "required": [
+                "runtime"
+              ]
+            }
+          }
         },
         "command": {
           "description": "The program the adapter runs, such as podman. Default docker.",
@@ -115,7 +190,7 @@
           "minLength": 1
         },
         "helper": {
-          "description": "The absolute path of a static Linux build of qory, mounted read-only into the container as the relay and the hook forwarder. Default this binary, which only a Linux machine can use.",
+          "description": "The absolute path of a static Linux build of qory, mounted read-only into the container as the relay, the hook forwarder and what starts the daemon of an image with docker: true. Default this binary, which only a Linux machine can use.",
           "type": "string",
           "pattern": "^/"
         },

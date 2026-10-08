@@ -15,9 +15,9 @@ builds:
     main: .
     binary: qory
     env: [CGO_ENABLED=0]
-    # The harness is linked into a checkout with relative symlinks, which Windows grants
-    # only to a privileged or developer-mode session. Until that is handled, no windows
-    # build ships.
+    # qory builds for darwin and linux. The harness is linked into a checkout with
+    # relative symlinks, which Windows grants only to a privileged or developer-mode
+    # session.
     goos: [darwin, linux]
     goarch: [amd64, arm64]
     flags: [-trimpath]
