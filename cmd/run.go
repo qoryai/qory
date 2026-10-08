@@ -712,6 +712,10 @@ func (p passed) modes(path string) (writable, readOnly, changed bool) {
 // for this run's own records. Where the runner can no longer tell how two paths stand,
 // such as a place reached through a link, the text says they overlap.
 //
+// engine_unreachable is a walled run that cannot ask the container engine whether an
+// earlier walled run is still going, with that run's id the one name; the text leaves
+// the id out.
+//
 // A place is the workspace when it is the checkout root or Dir, and a mount otherwise.
 func mountRefused(err error, p passed) error {
 	var ref *session.Refusal
@@ -799,6 +803,8 @@ func mountRefused(err error, p passed) error {
 		if info, err := os.Lstat(filepath.Join(path, ".git")); err == nil && info.Mode().IsRegular() {
 			text += "; make the worktree beside the checkout, not inside it"
 		}
+	case ref.Code == codeEngineUnreachable && len(ref.Names) == 1:
+		text = "Docker could not be asked whether an earlier walled run is still going, so the run does not start"
 	default:
 		return nil
 	}
@@ -1076,13 +1082,15 @@ func linkPlace(path string) string {
 
 // The runner's refusals of the places a walled run lists: one that is, contains or lies
 // inside one of the runner's files; one inside another of the other mode; one reached
-// through a link a walled agent can change that leads out of the place holding it; and
-// one another walled run still going could change, or that holds one of its places.
+// through a link a walled agent can change that leads out of the place holding it; one
+// another walled run still going could change, or that holds one of its places; and a
+// run that cannot ask the container engine whether an earlier walled run is still going.
 const (
 	codeMountContainsRunnerFiles = "mount_contains_runner_files"
 	codeMountModeConflict        = "mount_mode_conflict"
 	codeMountThroughLink         = "mount_through_link"
 	codeMountSharedWithRun       = "mount_shared_with_run"
+	codeEngineUnreachable        = "engine_unreachable"
 )
 
 // stateDir is qory's state directory, absolute: $XDG_STATE_HOME/qory, else

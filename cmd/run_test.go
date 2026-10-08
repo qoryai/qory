@@ -1543,3 +1543,65 @@ rules:
 		t.Errorf("the descriptor's signal did not ask it to leave: %v", exited)
 	}
 }
+
+// TestRunRefusesWhenTheEngineCannotBeAsked is an earlier walled run whose wall could not
+// be removed, so the runner keeps its entry. While the engine lists that run's
+// containers, it has none, and the next walled run of the same checkout starts. Once
+// listing them fails, the next run cannot tell whether an earlier one is still going,
+// and is refused before the wall runs anything, in qory's words, without the earlier
+// run's id.
+func TestRunRefusesWhenTheEngineCannotBeAsked(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, "claude")
+	dir := t.TempDir()
+	log := filepath.Join(dir, "docker.log")
+	docker := filepath.Join(dir, "docker")
+	// As fakeDocker, with an engine id and a context, but removing a container or a
+	// network fails, and once the file "unreachable" exists, so does listing a run's
+	// containers.
+	writeFile(t, docker, `#!/bin/sh
+echo "$*" >> `+log+`
+case "$*" in
+"ps --all "*label=dev.qory.run=*) test -e `+filepath.Join(dir, "unreachable")+` && { echo "cannot connect" >&2; exit 1; } ;;
+esac
+case "$1 $2" in
+"info --format") echo "ENGINE-0001" ;;
+"context show") echo "default" ;;
+"network inspect") echo "172.30.0.1 " ;;
+"network rm") echo "busy" >&2; exit 1 ;;
+"rm "*) echo "busy" >&2; exit 1 ;;
+"logs "*) echo "relay: listening" ;;
+"run "*) echo "inside the container"; exit 4 ;;
+esac
+`)
+	if err := os.Chmod(docker, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
+	out, err := run(t, "run", "claude")
+	if err == nil {
+		t.Fatalf("the earlier run succeeded\n%s", out)
+	}
+	wants(t, out, "inside the container")
+	if out, err := run(t, "run", "claude"); cmd.ExitCode(err) != 4 {
+		t.Fatalf("a run beside an earlier one the engine says is over: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	if ids := recorded(t, root); len(ids) != 2 {
+		t.Fatalf("earlier runs %v", ids)
+	}
+	writeFile(t, filepath.Join(dir, "unreachable"), "")
+	if err := os.Remove(log); err != nil {
+		t.Fatal(err)
+	}
+	_, err = run(t, "run", "claude")
+	want := "Docker could not be asked whether an earlier walled run is still going, so the run does not start (engine_unreachable)"
+	if err == nil || err.Error() != want {
+		t.Fatalf("a run beside an earlier one the engine cannot be asked about: %v, want %q", err, want)
+	}
+	data, _ := os.ReadFile(log)
+	lacks(t, string(data), "run ", "network create")
+	if ids := recorded(t, root); len(ids) != 2 {
+		t.Errorf("the refused run left a record: %v", ids)
+	}
+}

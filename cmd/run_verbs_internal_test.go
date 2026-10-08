@@ -698,3 +698,21 @@ func TestUserHomeNeedsAConfigurationDirectory(t *testing.T) {
 		t.Errorf("a home no file sets: %v", err)
 	}
 }
+
+// TestEngineUnreachableIsWorded is the runner's engine_unreachable, a walled run that
+// cannot ask the container engine whether an earlier walled run is still going, with
+// that run's id its one name: the text leaves the id out. Any other number of names
+// falls through to the runner's own words.
+func TestEngineUnreachableIsWorded(t *testing.T) {
+	const id = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f"
+	p := passed{spec: &session.Spec{}}
+	err := mountRefused(&session.Refusal{Code: "engine_unreachable", Names: []string{id}}, p)
+	if want := "Docker could not be asked whether an earlier walled run is still going, so the run does not start (engine_unreachable)"; err == nil || err.Error() != want {
+		t.Errorf("engine_unreachable: %v, want %q", err, want)
+	}
+	for _, names := range [][]string{nil, {id, id}} {
+		if err := mountRefused(&session.Refusal{Code: "engine_unreachable", Names: names}, p); err != nil {
+			t.Errorf("engine_unreachable with names %v: %v, want it to fall through", names, err)
+		}
+	}
+}

@@ -32,6 +32,9 @@ release may change what an existing document does, and states it under Upgrading
   wall: an unwalled run is refused, `server_needs_wall`. The marker `stored-secrets`
   beside `runner.yaml` keeps refusing unwalled runs, `--local` included, until a server's
   configuration read with the secret of `access-key-secret` lists none.
+- A walled run that cannot ask Docker whether an earlier walled run on this machine is
+  still going is refused before anything is bound, `engine_unreachable`: `Docker could
+  not be asked whether an earlier walled run is still going, so the run does not start`.
 - `wall.images` in `runner.yaml` defines the agent's images by name, each with `ref`, its
   reference, and when it needs them `runtime`, the container runtime the wall starts it
   under, and `docker`. A run's policy selects one by its name, `image: <name>`, from the
