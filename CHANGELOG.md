@@ -133,6 +133,13 @@ release may change what an existing document does, and states it under Upgrading
 - `--access-key-secret-fd <n>` on `qory run` and `qory run resend` reads the access key's
   secret from that file descriptor, 3 or above, and closes it; it wins over
   `QORY_ACCESS_KEY_SECRET` and the `access-key-secret` file.
+- `qory run --kind`, `--title`, `--subject` and `--details` say what a run is about: its
+  kind, its title, what it works on, `type=<type>,ref=<ref>` with `url=` and `title=` when
+  known, such as `type=ticket,ref=7`, and a JSON object of the caller's own, from a file
+  or from stdin. They go into `about` on `dev.qory.run.started` and no other event; the
+  run configuration request does not carry them. A subject's `title=` takes the rest of
+  the value, commas included, so a title passes as it is. A value the runner contract
+  does not take is an input error, and the run does not start.
 
 ### Changed
 
