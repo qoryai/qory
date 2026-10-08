@@ -170,8 +170,8 @@ release may change what an existing document does, and states it under Upgrading
   `QORY_HARNESS_HOME`. A module's export is a default like the others: the server's
   value, `--env` and `wall.env` win over it, and the deny list leaves out one whose name
   it holds. They reach the agent in the container and outside it alike.
-- qory builds against `github.com/qoryai/runner` at commit `c0a6c39` of its `next`,
-  `v0.6.1-0.20261008074341-c0a6c398e8cc`, contract `v1` revision 1 as amended there.
+- qory builds against `github.com/qoryai/runner` at commit `03949be` of its `next`,
+  `v0.6.1-0.20261008102156-03949be37c95`, contract `v1` revision 1 as amended there.
   `runner.yaml`'s `egress` narrows the `security_policy` of a server's run
   configuration. A server's run configuration may carry variables: they reach a walled
   run's agent, and an unwalled run gets none of them. The runner's `wall.Nest` makes
