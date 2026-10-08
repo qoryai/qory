@@ -13,11 +13,21 @@ qory writes into the server section of runner.yaml, with the server's URL and it
 public key where the section has none yet. The key is active from that answer on: runs
 can start.
 
-When access-key-secret exists, enrol refuses, so it never replaces this machine's key:
-move it aside yourself first to enrol a new key, or use --print for a key kept
+When access-key-secret exists, enrol refuses, so it never replaces this machine's key
+unasked: use --replace to move this machine to a new key, or --print for a key kept
 elsewhere. The one exception is a retry: run the same command again within the code's
 15 minutes, while access-key-secret still holds the key made for it, and it retries
 with that key.
+
+--replace moves this machine to a new key, and the old key stays in use until the new
+one is active. qory makes the new key in access-key-secret.new and enrols it, leaving
+access-key-secret and runner.yaml as they are, so an enrolment that fails leaves the
+old key working. Once the server's signed answer has come, the new secret takes the old
+one's place, runner.yaml names the new key, and the old secret is removed. The old
+key still works on the server until an owner or administrator revokes it on the node's
+page. Run the same command again within the code's 15 minutes to retry, or to finish a
+replacement that stopped. On a machine without a key, --replace enrols as the command
+does without it.
 
 The key's name is instance.name of runner.yaml, else this machine's host name.
 
@@ -38,14 +48,16 @@ qory access-key enrol <server> <code> [flags]
 
 ```
   qory access-key enrol https://apiary.example qec_F1XT-0RE0-0000-0000-0000-0000-00.uoES-kuj1vk0sq0qoGlmAg
+  qory access-key enrol --replace https://apiary.example "$code"   # move this machine to a new key
   qory access-key enrol --print https://apiary.example "$code"   # for a CI's settings
 ```
 
 ### Options
 
 ```
-  -h, --help    help for enrol
-      --print   write no key or setting; print the key's three settings for a CI
+  -h, --help      help for enrol
+      --print     write no key or setting; print the key's three settings for a CI
+      --replace   move this machine to a new key; the old key stays in use until the new one is active
 ```
 
 ### Options inherited from parent commands

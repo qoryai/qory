@@ -51,7 +51,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 
 // newAccessKeyEnrol builds the enrol verb.
 func newAccessKeyEnrol() *cobra.Command {
-	var print bool
+	var print, replace bool
 	c := &cobra.Command{
 		Use:   "enrol <server> <code>",
 		Short: "Enrol a new access key with a code from the server",
@@ -64,11 +64,21 @@ qory writes into the server section of ` + config.RunnerFileName + `, with the s
 public key where the section has none yet. The key is active from that answer on: runs
 can start.
 
-When access-key-secret exists, enrol refuses, so it never replaces this machine's key:
-move it aside yourself first to enrol a new key, or use --print for a key kept
+When access-key-secret exists, enrol refuses, so it never replaces this machine's key
+unasked: use --replace to move this machine to a new key, or --print for a key kept
 elsewhere. The one exception is a retry: run the same command again within the code's
 15 minutes, while access-key-secret still holds the key made for it, and it retries
 with that key.
+
+--replace moves this machine to a new key, and the old key stays in use until the new
+one is active. qory makes the new key in access-key-secret.new and enrols it, leaving
+access-key-secret and ` + config.RunnerFileName + ` as they are, so an enrolment that fails leaves the
+old key working. Once the server's signed answer has come, the new secret takes the old
+one's place, ` + config.RunnerFileName + ` names the new key, and the old secret is removed. The old
+key still works on the server until an owner or administrator revokes it on the node's
+page. Run the same command again within the code's 15 minutes to retry, or to finish a
+replacement that stopped. On a machine without a key, --replace enrols as the command
+does without it.
 
 The key's name is instance.name of ` + config.RunnerFileName + `, else this machine's host name.
 
@@ -81,6 +91,7 @@ apply; the code is checked against QORY_APIARY_PUBLIC_KEY when it is set.
 
 More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 		Example: `  qory access-key enrol https://apiary.example qec_F1XT-0RE0-0000-0000-0000-0000-00.uoES-kuj1vk0sq0qoGlmAg
+  qory access-key enrol --replace https://apiary.example "$code"   # move this machine to a new key
   qory access-key enrol --print https://apiary.example "$code"   # for a CI's settings`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 2 {
@@ -89,10 +100,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return enrol(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], args[1], print)
+			if replace && print {
+				return input(errors.New("--replace and --print do not go together: --print keeps nothing on this machine, so it replaces nothing"))
+			}
+			return enrol(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], args[1], print, replace)
 		},
 	}
 	c.Flags().BoolVar(&print, "print", false, "write no key or setting; print the key's three settings for a CI")
+	c.Flags().BoolVar(&replace, "replace", false, "move this machine to a new key; the old key stays in use until the new one is active")
 	return c
 }
 
@@ -226,8 +241,10 @@ func effectivePin(r *config.Runner, print bool) (accesskey.Pin, error) {
 
 // enrol is qory access-key enrol: it makes a key, or for a retry of the same code takes
 // the one made for it, posts the enrolment and acts on the signed answer. Any other
-// secret already here stops it: enrol never replaces this machine's key.
-func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string, print bool) error {
+// secret already here stops it, unless replace is set: then the new key is made in
+// access-key-secret.new, and takes the place of the secret here only once the server's
+// signed answer has come, see [replaceKey].
+func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string, print, replace bool) error {
 	server := strings.TrimSuffix(rawServer, "/")
 	if err := config.CheckServerURL(server); err != nil {
 		return input(err)
@@ -291,16 +308,20 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	now := keyClock()
 	// retry is the same code again within its 15 minutes while access-key-secret still
 	// holds the key made for it, which the retry takes. Any other secret here is this
-	// machine's key, which enrol never replaces.
+	// machine's key, which enrol replaces only with replace set: replacing.
 	var key *accesskey.Key
-	var retry bool
+	var retry, replacing bool
 	if !print {
 		if dir.HasSecret() {
 			held, err := dir.ReadSecret()
-			if err != nil || !dir.Pending(code, held.PublicKey(), now) {
-				return input(fmt.Errorf("%s already holds this machine's access key secret, and enrol does not replace it: move it aside yourself first to enrol a new key, or use --print for a key kept elsewhere", dir.Path(runnerdir.SecretFile)))
+			switch {
+			case err == nil && dir.Pending(code, held.PublicKey(), now):
+				key, retry = held, true
+			case !replace:
+				return input(fmt.Errorf("%s already holds this machine's access key secret: to move this machine to a new key, run qory access-key enrol --replace %s <code>; for a key kept elsewhere, use --print", dir.Path(runnerdir.SecretFile), server))
+			default:
+				replacing = true
 			}
-			key, retry = held, true
 		}
 		if err := dir.WriteMarker(); err != nil {
 			return fmt.Errorf("%w; no key was made", err)
@@ -313,6 +334,32 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 		}
 	case retry:
 		fmt.Fprintln(info, "this code was tried within the last 15 minutes: retrying with the key made for it")
+	case replacing:
+		// The same code again within its 15 minutes retries with the new key made for
+		// it. Any other new key here is one an earlier --replace made for another code,
+		// or longer ago, and did not put in place: it is moved aside, as a key a refused
+		// enrolment made is.
+		if staged, err := dir.ReadNewSecret(); err == nil && dir.Pending(code, staged.PublicKey(), now) {
+			key = staged
+			fmt.Fprintln(info, "this code was tried within the last 15 minutes: retrying with the key made for it")
+			break
+		}
+		if dir.HasNewSecret() {
+			moved, err := dir.MoveNewAside(now)
+			if err != nil {
+				return fmt.Errorf("%w; no key was made", err)
+			}
+			fmt.Fprintf(info, "moved the new key of an earlier --replace, made for another code or more than 15 minutes ago, aside to %s\n", moved)
+		}
+		if key, err = makeKey(); err != nil {
+			return err
+		}
+		if err := dir.WriteNewSecret(key); err != nil {
+			return err
+		}
+		if err := dir.WritePending(code, key.PublicKey(), now); err != nil {
+			return err
+		}
 	default:
 		if key, err = makeKey(); err != nil {
 			return err
@@ -358,8 +405,21 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 		e.Pin = ans.Pin
 	}
 	path := filepath.Join(string(dir), config.RunnerFileName)
+	if replacing {
+		if err := replaceKey(dir); err != nil {
+			return err
+		}
+	}
 	if err := config.WriteEnrolment(path, e); err != nil {
 		return fmt.Errorf("the key is enrolled, and %s could not be written: %w; run the same command again within 15 minutes", path, err)
+	}
+	// The secret a replacement put aside: what the old key is named by, then removed.
+	var old string
+	if dir.HasReplaced() {
+		old = oldKeyName(dir, r, ans.AccessKeyID)
+		if err := dir.RemoveReplaced(); err != nil {
+			return fmt.Errorf("the new key is in place, and %w; run the same command again within 15 minutes", err)
+		}
 	}
 	if err := dir.RemovePending(); err != nil {
 		return err
@@ -372,15 +432,67 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 		written += " and server.apiary_public_key"
 	}
 	fmt.Fprintf(info, "wrote %s to %s\n", written, path)
+	if old != "" {
+		fmt.Fprintf(info, "the old key %s still works on the server until an owner or administrator revokes it on the node's page; revoke it there\n", old)
+	}
 	return nil
 }
 
+// replaceKey puts the new key of --replace in place of access-key-secret, once the
+// server's signed answer has made it active; the caller then writes the runner file,
+// removes access-key-secret.replaced and ends the pending enrolment. Every step is
+// one rename, link or unlink, and the directory is synced after each, so a crash
+// between two leaves one of these states:
+//
+//   - before access-key-secret.replaced is made, or after it is made: access-key-secret
+//     and the runner file still hold the old key, which runs keep using; .new and the
+//     pending enrolment are there, so the same command within the code's 15 minutes
+//     retries with the new key and finishes; it removes a .replaced left over first.
+//   - after access-key-secret.new takes the place of access-key-secret, before the
+//     runner file is written: runs fail, the new secret beside the old key's id. The
+//     pending enrolment records the code with the key access-key-secret now holds, so
+//     the same command within the 15 minutes takes the retry of a plain enrolment,
+//     writes the runner file and removes .replaced, finishing the replacement.
+//   - after the runner file names the new key: runs use the new key; the same command
+//     within the 15 minutes retries, removes .replaced and ends the pending enrolment.
+//   - after .replaced is removed: only the pending enrolment is left, which the same
+//     command ends, and which a later code replaces.
+//
+// A .replaced that outlives all this goes with the next enrolment on this machine that
+// completes, or as the swap of the next --replace starts.
+func replaceKey(dir runnerdir.Dir) error {
+	if err := dir.KeepReplaced(); err != nil {
+		return fmt.Errorf("the new key is enrolled, and %w; the old key is still in place: run the same command again within 15 minutes", err)
+	}
+	if err := dir.PutNewSecret(); err != nil {
+		return fmt.Errorf("the new key is enrolled, and %w; the old key is still in place: run the same command again within 15 minutes", err)
+	}
+	return nil
+}
+
+// oldKeyName is how the success of a replacement names the old key: its id, as the
+// runner file named it before the enrolment, else the fingerprint of the secret
+// access-key-secret.replaced holds, else nothing.
+func oldKeyName(dir runnerdir.Dir, r *config.Runner, newID string) string {
+	if r != nil && r.Server != nil && r.Server.AccessKeyID != "" && r.Server.AccessKeyID != newID {
+		return r.Server.AccessKeyID
+	}
+	if k, err := dir.ReadReplaced(); err == nil {
+		return k.Fingerprint()
+	}
+	return ""
+}
+
 // discardKey ends the pending enrolment and moves the secret of key, the one made for
-// the code, aside, returning where it went. A secret access-key-secret holds of any
-// other key is this machine's key, and stays: then nothing is moved and it returns "".
+// the code, aside, returning where it went: access-key-secret.new for --replace, else
+// access-key-secret. A secret access-key-secret holds of any other key is this
+// machine's key, and stays: then nothing is moved and it returns "".
 func discardKey(dir runnerdir.Dir, key *accesskey.Key, now time.Time) (string, error) {
 	if err := dir.RemovePending(); err != nil {
 		return "", err
+	}
+	if dir.SameNewSecret(key) {
+		return dir.MoveNewAside(now)
 	}
 	if !dir.SameSecret(key) {
 		return "", nil
