@@ -397,6 +397,11 @@ and `server.url` and the pin, `server.apiary_public_key`, when the file has none
 already there is kept. The rest of the file, its comments and its order stay as they
 are.
 
+qory keeps the verified answer, with the request it answers, in `enrolment-answer`
+beside `runner.yaml`, mode `0600`, until the enrolment is finished. Should enrol stop
+after the answer came, the same command finishes the enrolment on this machine from
+that file, at any time, without asking the server again, which refuses a used code.
+
 Before it makes a key, qory checks the code against the pin `runner.yaml` has, so a code
 of another server is refused. When `runner.yaml` names another `server.url`, enrol
 refuses: enrol with that server, or change `server.url` first.
@@ -442,18 +447,18 @@ until an owner or administrator revokes it on the node's page, unless it is revo
 already.
 
 The enrolment uses the code alone, never the old key, so a key the server has revoked
-can be replaced too. The same command within the code's 15 minutes retries with the new
-key, and finishes a replacement that stopped part way. On a machine without a key,
+can be replaced too. Before the server's answer, the same command within the code's 15
+minutes retries with the new key; after it, the same command finishes the replacement
+on this machine, at any time. On a machine without a key,
 `--replace` enrols as the command does without it. `--replace` and `--print` do not go
 together.
 
-If a replacement stopped after the new secret took the place of `access-key-secret` but
-before `runner.yaml` named the new key, so runs are refused as `unauthorized`, and it
-was not finished within the code's 15 minutes or its retry was refused, the old key's
-secret is still in `access-key-secret.replaced` beside `runner.yaml`, which still names
-the old key's id: moving it back to `access-key-secret` restores the machine, unless the
-old key was revoked. Stopped anywhere else, the machine holds a key and the id that
-goes with it, the old pair or the new one.
+Should `enrolment-answer` be lost or damaged after a replacement stopped between the new
+secret taking the place of `access-key-secret` and `runner.yaml` naming the new key, the
+old key's secret is still in `access-key-secret.replaced` beside `runner.yaml`, which
+still names the old key's id: move it back to `access-key-secret` to restore the
+machine, unless the old key was revoked, and revoke the new key on the node's page,
+since it is active on the server.
 
 #### For a CI
 

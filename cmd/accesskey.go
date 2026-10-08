@@ -19,12 +19,14 @@ import (
 	"github.com/qoryai/qory/internal/runnerdir"
 )
 
-// The seams of the key commands a test replaces: the key's source, the clock, and the
-// HTTP client of the enrolment, nil for the runner's own.
+// The seams of the key commands a test replaces: the key's source, the clock, the
+// HTTP client of the enrolment, nil for the runner's own, and what stops an enrolment
+// after one of the steps that follow the server's answer, as a crash would.
 var (
 	generateKey = accesskey.Generate
 	keyClock    = time.Now
 	enrolClient *http.Client
+	afterStep   = func(step string) error { return nil }
 )
 
 // newAccessKeyCommand builds the access-key group: enrol a new key with a code.
@@ -62,7 +64,9 @@ qory makes the key, keeps its secret in access-key-secret, prints its fingerprin
 sends the server the public key. The server's signed answer gives the key its id, which
 qory writes into the server section of ` + config.RunnerFileName + `, with the server's URL and its
 public key where the section has none yet. The key is active from that answer on: runs
-can start.
+can start. qory keeps the answer in enrolment-answer until the enrolment is finished:
+should the command stop after the answer came, the same command finishes it on this
+machine, at any time, without asking the server again.
 
 When access-key-secret exists, enrol refuses, so it never replaces this machine's key
 unasked: use --replace to move this machine to a new key, or --print for a key kept
@@ -76,9 +80,10 @@ access-key-secret and ` + config.RunnerFileName + ` as they are, so an enrolment
 old key working. Once the server's signed answer has come, the new secret takes the old
 one's place, ` + config.RunnerFileName + ` names the new key, and the old secret is removed. The old
 key still works on the server until an owner or administrator revokes it on the node's
-page, unless it is revoked already. Run the same command again within the code's 15
-minutes to retry, or to finish a replacement that stopped. On a machine without a key,
---replace enrols as the command does without it.
+page, unless it is revoked already. Before the server's answer, the same command within
+the code's 15 minutes retries; after it, the same command finishes the replacement on
+this machine, at any time. On a machine without a key, --replace enrols as the command
+does without it.
 
 The key's name is instance.name of ` + config.RunnerFileName + `, else this machine's host name.
 
@@ -306,6 +311,22 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	}
 	defer lock.Release()
 	now := keyClock()
+	// An enrolment the server has answered already is finished on this machine: the
+	// server refuses a code it used and a key it enrolled, so nothing posts it again.
+	if !print {
+		k, ans, err := answerKept(dir, server, code)
+		if err != nil {
+			return err
+		}
+		if k != nil {
+			if err := dir.WriteMarker(); err != nil {
+				return err
+			}
+			fmt.Fprintf(info, "access key fingerprint %s\n", k.Fingerprint())
+			printEnrolled(info, ans)
+			return finishEnrolment(dir, info, r, server, pin, k, ans)
+		}
+	}
 	// retry is the same code again within its 15 minutes while access-key-secret still
 	// holds the key made for it, which the retry takes. Any other secret here is this
 	// machine's key, which enrol replaces only with replace set: replacing.
@@ -345,6 +366,10 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 			break
 		}
 		if dir.HasNewSecret() {
+			// A key the server answered for another code may be active: it stays.
+			if staged, err := dir.ReadNewSecret(); err == nil && answeredFor(dir, staged.PublicKey()) {
+				return fmt.Errorf("%s holds the new key of an enrolment the server answered for another code: run that command again to finish it", dir.Path(runnerdir.NewSecretFile))
+			}
 			moved, err := dir.MoveNewAside(now)
 			if err != nil {
 				return fmt.Errorf("%w; no key was made", err)
@@ -377,20 +402,15 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	if err != nil {
 		return input(err)
 	}
-	ans, err := req.Post(ctx, enrolClient, server, userAgent())
+	client, recorder := recordingClient()
+	ans, err := req.Post(ctx, client, server, userAgent())
 	if err != nil {
 		return enrolFailed(dir, err, key, print, now)
 	}
 	if ans.Pin.Fixture() {
 		return refuseFixturePin(dir, key, print, now)
 	}
-	kind := "node"
-	if ans.NodeKind == "pool" {
-		kind = "node pool"
-	}
-	fmt.Fprintf(info, "enrolled as %s in the %s %s\n", ans.AccessKeyID, kind, ans.NodeID)
-	fmt.Fprintf(info, "stored secrets: %s\n", yesNo(ans.StoredSecrets))
-	fmt.Fprintln(info, "the key is active: runs can start")
+	printEnrolled(info, ans)
 	if print {
 		pinJSON, err := json.Marshal(ans.Pin)
 		if err != nil {
@@ -400,28 +420,68 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 		fmt.Fprintf(out, "%s=%s\n%s=%s\n%s=%s\n", accesskey.EnvID, ans.AccessKeyID, accesskey.EnvSecret, key.Secret(), accesskey.EnvPin, pinJSON)
 		return nil
 	}
+	// The answer is kept before anything here changes, so the same command finishes
+	// the enrolment from it after a stop. An answer that cannot be kept stops nothing:
+	// the steps that follow then run without it.
+	if record, err := recorder.record(server, req); err == nil && keepAnswer(dir, record) == nil {
+		if err := afterStep("answer"); err != nil {
+			return err
+		}
+	}
+	return finishEnrolment(dir, info, r, server, pin, key, ans)
+}
+
+// printEnrolled prints what the server's verified 201 says.
+func printEnrolled(info io.Writer, ans *accesskey.EnrolmentAnswer) {
+	kind := "node"
+	if ans.NodeKind == "pool" {
+		kind = "node pool"
+	}
+	fmt.Fprintf(info, "enrolled as %s in the %s %s\n", ans.AccessKeyID, kind, ans.NodeID)
+	fmt.Fprintf(info, "stored secrets: %s\n", yesNo(ans.StoredSecrets))
+	fmt.Fprintln(info, "the key is active: runs can start")
+}
+
+// finishEnrolment is what follows the server's verified 201 for key on this machine,
+// the first time or from the answer enrolment-answer keeps: a new key of --replace,
+// still in access-key-secret.new, takes the place of access-key-secret, see
+// [replaceKey]; the runner file is written; access-key-secret.replaced, the pending
+// enrolment and the kept answer are removed, in that order.
+func finishEnrolment(dir runnerdir.Dir, info io.Writer, r *config.Runner, server string, pin accesskey.Pin, key *accesskey.Key, ans *accesskey.EnrolmentAnswer) error {
 	e := config.Enrolment{URL: server, AccessKeyID: ans.AccessKeyID}
 	if len(pin) == 0 {
 		e.Pin = ans.Pin
 	}
 	path := filepath.Join(string(dir), config.RunnerFileName)
-	if replacing {
+	if dir.SameNewSecret(key) {
 		if err := replaceKey(dir); err != nil {
 			return err
 		}
 	}
 	if err := config.WriteEnrolment(path, e); err != nil {
-		return fmt.Errorf("the key is enrolled, and %s could not be written: %w; run the same command again within 15 minutes", path, err)
+		return fmt.Errorf("the key is enrolled, and %s could not be written: %w; run the same command again", path, err)
+	}
+	if err := afterStep("runner"); err != nil {
+		return err
 	}
 	// The secret a replacement put aside: what the old key is named by, then removed.
 	var old string
 	if dir.HasReplaced() {
 		old = oldKeyName(dir, r, ans.AccessKeyID)
 		if err := dir.RemoveReplaced(); err != nil {
-			return fmt.Errorf("the new key is in place, and %w; run the same command again within 15 minutes", err)
+			return fmt.Errorf("the new key is in place, and %w; run the same command again", err)
+		}
+		if err := afterStep("unlinked"); err != nil {
+			return err
 		}
 	}
 	if err := dir.RemovePending(); err != nil {
+		return err
+	}
+	if err := afterStep("pending"); err != nil {
+		return err
+	}
+	if err := dir.RemoveAnswer(); err != nil {
 		return err
 	}
 	written := "server.access_key_id"
@@ -439,35 +499,39 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 }
 
 // replaceKey puts the new key of --replace in place of access-key-secret, once the
-// server's signed answer has made it active; the caller then writes the runner file,
-// removes access-key-secret.replaced and ends the pending enrolment. Every step is
-// one rename, link or unlink, and the directory is synced after each, so a crash
-// between two leaves one of these states:
+// server's signed answer has made it active and enrolment-answer keeps that answer; the
+// caller then writes the runner file and removes access-key-secret.replaced, the
+// pending enrolment and the kept answer. Every step is one rename, link or unlink, and
+// the directory is synced after each, so a crash between two leaves one of these
+// states, each of which the same command finishes from the kept answer, at any time and
+// without asking the server, which would refuse the used code:
 //
 //   - before access-key-secret.replaced is made, or after it is made: access-key-secret
-//     and the runner file still hold the old key, which runs keep using; .new and the
-//     pending enrolment are there, so the same command within the code's 15 minutes
-//     retries with the new key and finishes; it removes a .replaced left over first.
+//     and the runner file still hold the old key, which runs keep using; .new holds the
+//     key the answer names, and the finish starts with this swap, removing a .replaced
+//     left over first.
 //   - after access-key-secret.new takes the place of access-key-secret, before the
-//     runner file is written: runs fail, the new secret beside the old key's id. The
-//     pending enrolment records the code with the key access-key-secret now holds, so
-//     the same command within the 15 minutes takes the retry of a plain enrolment,
-//     writes the runner file and removes .replaced, finishing the replacement.
-//   - after the runner file names the new key: runs use the new key; the same command
-//     within the 15 minutes retries, removes .replaced and ends the pending enrolment.
-//   - after .replaced is removed: only the pending enrolment is left, which the same
-//     command ends, and which a later code replaces.
+//     runner file is written: runs fail, the new secret beside the old key's id, and
+//     .replaced holds the old secret. The finish writes the runner file and removes
+//     .replaced.
+//   - after the runner file names the new key: runs use the new key; the finish removes
+//     .replaced.
+//   - after .replaced is removed, or the pending enrolment: the finish removes what is
+//     left.
 //
 // A .replaced that outlives all this goes with the next enrolment on this machine that
 // completes, or as the swap of the next --replace starts.
 func replaceKey(dir runnerdir.Dir) error {
 	if err := dir.KeepReplaced(); err != nil {
-		return fmt.Errorf("the new key is enrolled, and %w; the old key is still in place: run the same command again within 15 minutes", err)
+		return fmt.Errorf("the new key is enrolled, and %w; the old key is still in place: run the same command again", err)
+	}
+	if err := afterStep("replaced"); err != nil {
+		return err
 	}
 	if err := dir.PutNewSecret(); err != nil {
-		return fmt.Errorf("the new key is enrolled, and %w; the old key is still in place: run the same command again within 15 minutes", err)
+		return fmt.Errorf("the new key is enrolled, and %w; the old key is still in place: run the same command again", err)
 	}
-	return nil
+	return afterStep("secret")
 }
 
 // oldKeyName is how the success of a replacement names the old key: its id, as the
@@ -488,6 +552,10 @@ func oldKeyName(dir runnerdir.Dir, r *config.Runner, newID string) string {
 // access-key-secret. A secret access-key-secret holds of any other key is this
 // machine's key, and stays: then nothing is moved and it returns "".
 func discardKey(dir runnerdir.Dir, key *accesskey.Key, now time.Time) (string, error) {
+	// A key the kept answer names may be active on the server: it stays.
+	if answeredFor(dir, key.PublicKey()) {
+		return "", nil
+	}
 	if err := dir.RemovePending(); err != nil {
 		return "", err
 	}

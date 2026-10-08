@@ -2,11 +2,15 @@ package cmd_test
 
 import (
 	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/qoryai/runner/accesskey"
 
@@ -81,7 +85,7 @@ func replaced(t *testing.T, srv *enrolServer, old *accesskey.Key) {
 	if r.Server.AccessKeyID != newID || len(r.Server.Pin) != 1 || r.Server.Pin[0].PublicKey != srv.signer.PublicKey().String() {
 		t.Errorf("the runner file reads as %+v", r.Server)
 	}
-	for _, name := range []string{runnerdir.NewSecretFile, runnerdir.ReplacedFile, runnerdir.PendingFile} {
+	for _, name := range []string{runnerdir.NewSecretFile, runnerdir.ReplacedFile, runnerdir.PendingFile, runnerdir.AnswerFile} {
 		if exists(dir.Path(name)) {
 			t.Errorf("%s is still there", name)
 		}
@@ -299,73 +303,100 @@ func TestEnrolReplaceRetriesWithTheNewKey(t *testing.T) {
 	}
 }
 
-// TestEnrolReplaceFinishesAfterAStop is the state each step of the swap leaves when the
-// command stops after it, and the same command run again: each finishes the
-// replacement, and the copy of the old secret is gone. A swap whose first step fails
+// stopAt makes the enrolments stop after step, as a crash there would, until the test
+// ends or the returned function is called.
+func stopAt(t *testing.T, step string) func() {
+	t.Helper()
+	restore := cmd.SetAfterStep(func(s string) error {
+		if s == step {
+			return errors.New("stopped after " + step)
+		}
+		return nil
+	})
+	t.Cleanup(restore)
+	return restore
+}
+
+// heldSecret is what a file of the directory holds, "" when there is none.
+func heldSecret(name string) string {
+	b, _ := os.ReadFile(configDir().Path(name))
+	return string(b)
+}
+
+// TestEnrolReplaceFinishesAfterAStop is a --replace that stops after each step that
+// follows the server's 201, and the same command run again: it finishes from the
+// answer the first run kept, with no request to the server, which would refuse the
+// used code, and the copy of the old secret is gone. Run without --replace, or once the
+// code's 15 minutes are over, it finishes all the same. A swap whose first step fails
 // leaves the old key in place, and the same command finishes once it can.
 func TestEnrolReplaceFinishesAfterAStop(t *testing.T) {
-	link := func(t *testing.T) {
-		dir := configDir()
-		if err := os.Link(dir.Path(runnerdir.SecretFile), dir.Path(runnerdir.ReplacedFile)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	rename := func(t *testing.T) {
-		dir := configDir()
-		if err := os.Rename(dir.Path(runnerdir.NewSecretFile), dir.Path(runnerdir.SecretFile)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write := func(t *testing.T, srv *enrolServer) {
-		if err := config.WriteEnrolment(runnerFile(), config.Enrolment{URL: srv.URL, AccessKeyID: newID}); err != nil {
-			t.Fatal(err)
-		}
-	}
 	for _, c := range []struct {
-		name  string
-		stop  func(t *testing.T, srv *enrolServer)
-		plain bool
-		// last is the line the output ends with; "" is the runner file's line.
+		step string
+		// newSecret says access-key-secret holds the new key at the stop.
+		newSecret bool
+		plain     bool
+		expired   bool
+		// last is the line the output ends with.
 		last func(old *accesskey.Key) string
 	}{
-		{"after the old secret is linked", func(t *testing.T, _ *enrolServer) { link(t) }, false,
-			func(*accesskey.Key) string { return oldLine(oldID) }},
-		{"after the new secret takes its place", func(t *testing.T, _ *enrolServer) { link(t); rename(t) }, false,
-			func(*accesskey.Key) string { return oldLine(oldID) }},
-		{"after the new secret takes its place, run without --replace", func(t *testing.T, _ *enrolServer) { link(t); rename(t) }, true,
-			func(*accesskey.Key) string { return oldLine(oldID) }},
-		{"after the runner file names the new key", func(t *testing.T, srv *enrolServer) { link(t); rename(t); write(t, srv) }, false,
-			func(old *accesskey.Key) string { return oldLine(old.Fingerprint()) }},
-		{"after the old secret is removed", func(t *testing.T, srv *enrolServer) {
-			link(t)
-			rename(t)
-			write(t, srv)
-			if err := os.Remove(configDir().Path(runnerdir.ReplacedFile)); err != nil {
-				t.Fatal(err)
-			}
-		}, false, func(*accesskey.Key) string { return "" }},
+		{"answer", false, false, false, func(*accesskey.Key) string { return oldLine(oldID) }},
+		{"answer", false, true, true, func(*accesskey.Key) string { return oldLine(oldID) }},
+		{"replaced", false, false, false, func(*accesskey.Key) string { return oldLine(oldID) }},
+		{"secret", true, false, false, func(*accesskey.Key) string { return oldLine(oldID) }},
+		{"secret", true, true, true, func(*accesskey.Key) string { return oldLine(oldID) }},
+		{"runner", true, false, false, func(old *accesskey.Key) string { return oldLine(old.Fingerprint()) }},
+		{"unlinked", true, false, false, func(*accesskey.Key) string { return "wrote server.access_key_id to " + runnerFile() + "\n" }},
+		{"pending", true, false, true, func(*accesskey.Key) string { return "wrote server.access_key_id to " + runnerFile() + "\n" }},
 	} {
+		name := fmt.Sprintf("a stop after %s, run again (without --replace %v, after 15 minutes %v)", c.step, c.plain, c.expired)
 		emptyDir(t)
 		srv := newEnrolServer(t)
 		old := newKey(t)
+		file := enrolled(t, srv, old)
 		code := srv.code(1, false)
-		failOnce(t, srv, old, code)
-		c.stop(t, srv)
+		restore := stopAt(t, c.step)
+		if _, err := run(t, "access-key", "enrol", "--replace", srv.URL, code); err == nil || err.Error() != "stopped after "+c.step {
+			t.Fatalf("%s: %v", name, err)
+		}
+		restore()
+		dir := configDir()
+		if m := mode(t, dir.Path(runnerdir.AnswerFile)); m != 0o600 {
+			t.Errorf("%s: the kept answer is mode %v", name, m)
+		}
+		if (heldSecret(runnerdir.SecretFile) == old.Secret()+"\n") == c.newSecret {
+			t.Errorf("%s: access-key-secret holds the new key %v at the stop", name, !c.newSecret)
+		}
+		if !c.newSecret && readRunnerFile(t) != file {
+			t.Errorf("%s: the runner file changed before the new key was in place", name)
+		}
+		if c.expired {
+			normal, err := accesskey.NormaliseCode(code)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pub, err := accesskey.ParsePublicKey(srv.sent()[0].PublicKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := dir.WritePending(normal, pub, time.Now().Add(-runnerdir.PendingFor-time.Minute)); err != nil {
+				t.Fatal(err)
+			}
+		}
 		args := []string{"access-key", "enrol", "--replace", srv.URL, code}
 		if c.plain {
 			args = []string{"access-key", "enrol", srv.URL, code}
 		}
 		out, err := run(t, args...)
 		if err != nil {
-			t.Errorf("%s: %v\n%s", c.name, err, out)
+			t.Errorf("%s: %v\n%s", name, err, out)
 			continue
 		}
-		last := c.last(old)
-		if last == "" {
-			last = "wrote server.access_key_id to " + runnerFile() + "\n"
+		if n := len(srv.sent()); n != 1 {
+			t.Errorf("%s: %d requests reached the server", name, n)
 		}
-		if !strings.HasSuffix(out, last) {
-			t.Errorf("%s: the output ends\n%s\nwant %q", c.name, out, last)
+		lacks(t, out, "retrying")
+		if last := c.last(old); !strings.HasSuffix(out, last) {
+			t.Errorf("%s: the output ends\n%s\nwant %q", name, out, last)
 		}
 		replaced(t, srv, old)
 	}
@@ -375,24 +406,27 @@ func TestEnrolReplaceFinishesAfterAStop(t *testing.T) {
 	srv := newEnrolServer(t)
 	old := newKey(t)
 	code := srv.code(1, false)
-	file := failOnce(t, srv, old, code)
+	file := enrolled(t, srv, old)
 	dir := configDir()
 	writeFile(t, filepath.Join(dir.Path(runnerdir.ReplacedFile), "x"), "")
 	_, err := run(t, "access-key", "enrol", "--replace", srv.URL, code)
-	if err == nil || !strings.HasPrefix(err.Error(), "the new key is enrolled, and remove "+dir.Path(runnerdir.ReplacedFile)+": ") || !strings.HasSuffix(err.Error(), "; the old key is still in place: run the same command again within 15 minutes") {
+	if err == nil || !strings.HasPrefix(err.Error(), "the new key is enrolled, and remove "+dir.Path(runnerdir.ReplacedFile)+": ") || !strings.HasSuffix(err.Error(), "; the old key is still in place: run the same command again") {
 		t.Errorf("a step that fails: %v", err)
 	}
-	if b, err := os.ReadFile(dir.Path(runnerdir.SecretFile)); err != nil || string(b) != old.Secret()+"\n" || readRunnerFile(t) != file {
+	if heldSecret(runnerdir.SecretFile) != old.Secret()+"\n" || readRunnerFile(t) != file {
 		t.Error("a step that fails changed the old key")
 	}
-	if !exists(dir.Path(runnerdir.NewSecretFile)) || !exists(dir.Path(runnerdir.PendingFile)) {
-		t.Error("a step that fails dropped the new key")
+	if !exists(dir.Path(runnerdir.NewSecretFile)) || !exists(dir.Path(runnerdir.AnswerFile)) {
+		t.Error("a step that fails dropped the new key or its answer")
 	}
 	if err := os.RemoveAll(dir.Path(runnerdir.ReplacedFile)); err != nil {
 		t.Fatal(err)
 	}
 	if out, err := run(t, "access-key", "enrol", "--replace", srv.URL, code); err != nil {
 		t.Fatalf("%v\n%s", err, out)
+	}
+	if n := len(srv.sent()); n != 1 {
+		t.Errorf("%d requests reached the server", n)
 	}
 	replaced(t, srv, old)
 
@@ -408,6 +442,125 @@ func TestEnrolReplaceFinishesAfterAStop(t *testing.T) {
 	replaced(t, srv, before)
 }
 
+// TestEnrolFinishesFromTheKeptAnswer is a plain enrolment whose runner file cannot be
+// written after the server's 201: the message says to run the same command again,
+// which finishes from the kept answer with no request to the server; a stop before the
+// runner file is written finishes the same way.
+func TestEnrolFinishesFromTheKeptAnswer(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes a read-only directory")
+	}
+	emptyDir(t)
+	srv := newEnrolServer(t)
+	elsewhere := filepath.Join(tempDir(t), "conf")
+	writeFile(t, filepath.Join(elsewhere, "runner.yaml"), "instance:\n  name: build-01\n")
+	if err := os.MkdirAll(string(configDir()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(elsewhere, "runner.yaml"), runnerFile()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(elsewhere, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(elsewhere, 0o700) })
+	code := srv.code(1, false)
+	_, err := run(t, "access-key", "enrol", srv.URL, code)
+	if err == nil || !strings.HasPrefix(err.Error(), "the key is enrolled, and "+runnerFile()+" could not be written: ") || !strings.HasSuffix(err.Error(), "; run the same command again") {
+		t.Fatalf("a runner file that cannot be written: %v", err)
+	}
+	if err := os.Chmod(elsewhere, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, "access-key", "enrol", srv.URL, code)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if n := len(srv.sent()); n != 1 {
+		t.Errorf("%d requests reached the server", n)
+	}
+	wants(t, out, "enrolled as "+newID, "wrote server.url, server.access_key_id and server.apiary_public_key to "+runnerFile()+"\n")
+	if key := heldKey(t); key.PublicKey().String() != srv.sent()[0].PublicKey {
+		t.Error("access-key-secret holds another key")
+	}
+	for _, name := range []string{runnerdir.PendingFile, runnerdir.AnswerFile} {
+		if exists(configDir().Path(name)) {
+			t.Errorf("%s is still there", name)
+		}
+	}
+
+	// A stop after the answer is kept, before the runner file is written.
+	emptyDir(t)
+	srv = newEnrolServer(t)
+	writeFile(t, runnerFile(), "instance:\n  name: build-01\n")
+	restore := stopAt(t, "answer")
+	if _, err := run(t, "access-key", "enrol", srv.URL, srv.code(1, false)); err == nil {
+		t.Fatal("did not stop")
+	}
+	restore()
+	if out, err := run(t, "access-key", "enrol", srv.URL, srv.code(1, false)); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if n := len(srv.sent()); n != 1 {
+		t.Errorf("%d requests reached the server", n)
+	}
+	wants(t, readRunnerFile(t), "access_key_id: "+newID)
+}
+
+// TestEnrolRefusesATamperedAnswer is a kept answer changed after the stop: the same
+// command refuses it, sends nothing and moves nothing aside, and the old key stays. A
+// --replace with another code leaves the new key the kept answer names where it is.
+func TestEnrolRefusesATamperedAnswer(t *testing.T) {
+	emptyDir(t)
+	srv := newEnrolServer(t)
+	old := newKey(t)
+	file := enrolled(t, srv, old)
+	code := srv.code(1, false)
+	restore := stopAt(t, "answer")
+	if _, err := run(t, "access-key", "enrol", "--replace", srv.URL, code); err == nil {
+		t.Fatal("did not stop")
+	}
+	restore()
+	dir := configDir()
+	path := dir.Path(runnerdir.AnswerFile)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kept map[string]any
+	if err := json.Unmarshal(b, &kept); err != nil {
+		t.Fatal(err)
+	}
+	body, err := base64.StdEncoding.DecodeString(kept["body"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept["body"] = base64.StdEncoding.EncodeToString([]byte(strings.Replace(string(body), newID, "ak_0123456789abcdee", 1)))
+	b, _ = json.Marshal(kept)
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	staged := heldSecret(runnerdir.NewSecretFile)
+	for _, args := range [][]string{{"--replace", srv.URL, code}, {srv.URL, code}} {
+		_, err := run(t, append([]string{"access-key", "enrol"}, args...)...)
+		if err == nil || !strings.HasPrefix(err.Error(), path+" holds no answer of the server that verifies (") || !strings.HasSuffix(err.Error(), "), so the enrolment cannot be finished from it; nothing was changed: see https://github.com/qoryai/qory/blob/main/docs/run.md#replace-the-machines-key") {
+			t.Errorf("%v: %v", args, err)
+		}
+		oldStays(t, "a tampered answer", old, file)
+		if heldSecret(runnerdir.NewSecretFile) != staged || movedAside(t) != 0 || len(srv.sent()) != 1 {
+			t.Errorf("%v: the new key moved, %d moved aside, %d sent", args, movedAside(t), len(srv.sent()))
+		}
+	}
+	// Another code: the kept answer is for another enrolment, whose key stays.
+	_, err = run(t, "access-key", "enrol", "--replace", srv.URL, srv.code(2, false))
+	if want := dir.Path(runnerdir.NewSecretFile) + " holds the new key of an enrolment the server answered for another code: run that command again to finish it"; err == nil || err.Error() != want {
+		t.Errorf("another code: %v, want %q", err, want)
+	}
+	if heldSecret(runnerdir.NewSecretFile) != staged || movedAside(t) != 0 || len(srv.sent()) != 1 {
+		t.Error("another code moved the answered key")
+	}
+}
+
 // TestEnrolReplaceNeedsNoOldKeyOnTheServer is --replace on a machine whose key the
 // server has revoked: the enrolment carries the code and the new key alone, so it
 // succeeds.
@@ -416,7 +569,7 @@ func TestEnrolReplaceNeedsNoOldKeyOnTheServer(t *testing.T) {
 	srv := newEnrolServer(t)
 	old := newKey(t)
 	enrolled(t, srv, old)
-	srv.revoked = map[string]bool{old.PublicKey().String(): true}
+	srv.enrolled[old.PublicKey().String()] = true
 	out, err := run(t, "access-key", "enrol", "--replace", srv.URL, srv.code(1, false))
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)

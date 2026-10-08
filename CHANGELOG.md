@@ -91,7 +91,10 @@ release may change what an existing document does, and states it under Upgrading
   `server.access_key_id`, and `server.url` and `server.apiary_public_key` where the
   section has none, into `runner.yaml`, keeping its comments, its order and every other
   key; the pin is the server's keys the code carries. The same command within the code's
-  15 minutes retries with the same key. A used or expired code and a refused key move the
+  15 minutes retries with the same key. Enrol keeps the server's verified 201, with the
+  request it answers, in `enrolment-answer`, mode `0600`, until `runner.yaml` is
+  written, and after a stop the same command finishes the enrolment from it, at any
+  time, without asking the server again. A used or expired code and a refused key move the
   secret made for the code aside and say a new code is needed; a node that already holds
   two keys keeps it, and the same command succeeds once an owner or administrator has
   revoked one; an answer that does not verify changes nothing.
@@ -112,8 +115,9 @@ release may change what an existing document does, and states it under Upgrading
   fails leaves the old key working. Then the new secret takes the old one's place,
   `runner.yaml` names the new key, and the old secret is removed; enrol ends with
   `revoke the old key <id> on the node's page, unless it is revoked already: until then
-  it still works on the server`. The same command within the code's 15 minutes
-  retries with the new key and finishes a replacement that stopped part way. The
+  it still works on the server`. Before the server's answer, the same command within the
+  code's 15 minutes retries with the new key; after it, the same command finishes the
+  replacement from the kept answer, at any time. The
   enrolment never uses the old key, so a revoked one is replaced too. On a machine
   without a key, `--replace` enrols as the command does without it; with `--print` it is
   refused.

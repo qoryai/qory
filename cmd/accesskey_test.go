@@ -22,7 +22,9 @@ import (
 
 // enrolServer stands in for a server's enrolment endpoint: it checks each request's
 // proof and answers with the status and body it is set to, signed under its signing
-// key, or under another key, or not at all. It keeps the requests it verified and the
+// key, or under another key, or not at all. As the contract says, a code it enrolled a
+// key with is used, answered 401, and a key it enrolled, a revoked one included, is
+// answered a signed 409 key_invalid. It keeps the requests it verified and the
 // User-Agent of each.
 type enrolServer struct {
 	*httptest.Server
@@ -36,16 +38,16 @@ type enrolServer struct {
 	// signBy signs the answer, nil for an unsigned one.
 	signBy *accesskey.Key
 	rotate bool
-	// revoked are the public keys of keys the server has revoked: a request that
-	// carries one is answered 401.
-	revoked  map[string]bool
-	requests []accesskey.EnrolmentRequest
-	agents   []string
+	// used are the codes the server enrolled a key with, and enrolled the public keys
+	// of the keys it holds or has revoked.
+	used, enrolled map[string]bool
+	requests       []accesskey.EnrolmentRequest
+	agents         []string
 }
 
 func newEnrolServer(t *testing.T) *enrolServer {
 	t.Helper()
-	s := &enrolServer{signer: newKey(t), next: newKey(t), status: http.StatusCreated}
+	s := &enrolServer{signer: newKey(t), next: newKey(t), status: http.StatusCreated, used: map[string]bool{}, enrolled: map[string]bool{}}
 	s.signBy = s.signer
 	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
@@ -58,19 +60,27 @@ func newEnrolServer(t *testing.T) *enrolServer {
 		}
 		s.requests = append(s.requests, req)
 		s.agents = append(s.agents, r.Header.Get("User-Agent"))
-		if s.revoked[req.PublicKey] {
+		if s.used[req.Code] {
 			w.WriteHeader(http.StatusUnauthorized)
 			w.Write([]byte(`{"error":"unauthorized"}`))
 			return
 		}
-		body := s.body
+		status, body, signBy := s.status, s.body, s.signBy
+		if s.enrolled[req.PublicKey] {
+			status, body, signBy = http.StatusConflict, []byte(`{"error":"key_invalid","apiary_public_key":`+s.keys()+`}`), s.signer
+		}
 		if body == nil {
 			body = s.answer(true)
 		}
-		if s.signBy != nil && s.status != http.StatusUnauthorized {
-			w.Header().Set(accesskey.HeaderSignature, s.signBy.SignAnswer(accesskey.Answer{Enrolment: true, Status: s.status, RequestSignature: req.Proof, Body: body}))
+		if signBy != nil && status != http.StatusUnauthorized {
+			w.Header().Set(accesskey.HeaderSignature, signBy.SignAnswer(accesskey.Answer{Enrolment: true, Status: status, RequestSignature: req.Proof, Body: body}))
 		}
-		w.WriteHeader(s.status)
+		// Only the server's own signed 201 enrols: an unsigned one, or one under
+		// another key, stands for an answer that did not come from it.
+		if status == http.StatusCreated && signBy == s.signer {
+			s.used[req.Code], s.enrolled[req.PublicKey] = true, true
+		}
+		w.WriteHeader(status)
 		w.Write(body)
 	}))
 	t.Cleanup(s.Close)

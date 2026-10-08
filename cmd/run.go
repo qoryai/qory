@@ -1386,7 +1386,8 @@ func samePath(a, b string) bool {
 // qory.yaml in [config.UserDir] alone. The checkout's file, or an ancestor directory's,
 // may be one a walled agent can write, through the workspace or a writable mount. A
 // value in another file that leaves the home where the configuration directory's file
-// alone puts it is harmless and passes.
+// alone puts it is harmless and passes. With no configuration directory, any other file
+// that sets harness.home is refused, as the run records are with no state directory.
 func userHome(at places, conf config.Config) error {
 	origin := conf.Origin("harness.home")
 	yours := ""
@@ -1402,6 +1403,9 @@ func userHome(at places, conf config.Config) error {
 	}
 	if origin == config.Default || origin == yours {
 		return nil
+	}
+	if yours == "" {
+		return fmt.Errorf("no configuration directory: set HOME or XDG_CONFIG_HOME")
 	}
 	own, err := config.LoadUser()
 	if err != nil {

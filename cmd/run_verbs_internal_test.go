@@ -671,3 +671,30 @@ func TestConfigLinksGuardsTheLinksOnTheWay(t *testing.T) {
 		}
 	}
 }
+
+// TestUserHomeNeedsAConfigurationDirectory is a walled run whose harness.home a
+// checkout's qory.yaml sets, on a machine with neither HOME nor XDG_CONFIG_HOME: there
+// is no configuration directory whose file could say where the home goes, so the run is
+// refused as the run records are with no state directory. A home no file sets passes.
+func TestUserHomeNeedsAConfigurationDirectory(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, config.FileName), []byte("apiVersion: qory.dev/v1alpha1\nharness:\n  home: "+t.TempDir()+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "")
+	if config.UserDir() != "" {
+		t.Skip("this system has a home directory without HOME")
+	}
+	conf, err := config.Load(root, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = userHome(places{root: root}, conf)
+	if want := "no configuration directory: set HOME or XDG_CONFIG_HOME"; err == nil || err.Error() != want || ExitCode(err) != ExitCode(errors.New("")) {
+		t.Errorf("no configuration directory: %v (exit %d), want %q", err, ExitCode(err), want)
+	}
+	if err := userHome(places{root: root}, config.Defaults()); err != nil {
+		t.Errorf("a home no file sets: %v", err)
+	}
+}

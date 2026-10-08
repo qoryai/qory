@@ -1,9 +1,9 @@
 // Package runnerdir is the runner file's directory, everything qory keeps on this
 // machine for its server beside runner.yaml: the access key's secret, the moved-aside
 // secrets, the new and the replaced secret of a key being replaced, the instance id, the
-// stored-secrets marker, the pending enrolment and the lock files. The directory is
-// the user's configuration directory, $XDG_CONFIG_HOME/qory or ~/.config/qory, mode
-// 0700.
+// stored-secrets marker, the pending enrolment and its answer, and the lock files. The
+// directory is the user's configuration directory, $XDG_CONFIG_HOME/qory or
+// ~/.config/qory, mode 0700.
 //
 // Every file is created with O_CREAT|O_EXCL|O_NOFOLLOW and an exact mode, and the secret
 // is read only from a regular file the effective user owns that grants nothing to the
@@ -46,6 +46,9 @@ const (
 	// PendingFile records an enrolment that has not been answered yet: the SHA-256 of
 	// its code, the fingerprint of the public key made for it and the time.
 	PendingFile = "enrolment-pending"
+	// AnswerFile keeps the server's verified 201 to the pending enrolment as it came,
+	// with the request it answers, until the enrolment is finished on this machine.
+	AnswerFile = "enrolment-answer"
 	// InstanceFile holds this machine's instance id and the hash of its identity.
 	InstanceFile = "instance-id"
 	// LocksDir holds the key lock and one lock file per run.
@@ -367,6 +370,50 @@ func (d Dir) Pending(code string, key accesskey.PublicKey, now time.Time) bool {
 // RemovePending removes enrolment-pending.
 func (d Dir) RemovePending() error {
 	if err := os.Remove(d.Path(PendingFile)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// maxAnswerFile is the most of enrolment-answer that is read: the server's answer, at
+// most 64 KiB, base64 in JSON, with the request it answers.
+const maxAnswerFile = 128 << 10
+
+// ErrNoAnswer is the error of a directory that holds no enrolment-answer.
+var ErrNoAnswer = errors.New("no " + AnswerFile)
+
+// WriteAnswer replaces enrolment-answer with b, mode 0600, in one rename.
+func (d Dir) WriteAnswer(b []byte) error {
+	tmp := d.Path(AnswerFile + ".tmp")
+	if err := os.Remove(tmp); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if err := create(tmp, 0o600, b); err != nil {
+		return fmt.Errorf("write %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, d.Path(AnswerFile)); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return d.sync()
+}
+
+// ReadAnswer reads enrolment-answer by the rules of [Dir.ReadSecret]. A directory with
+// no such file is [ErrNoAnswer].
+func (d Dir) ReadAnswer() ([]byte, error) {
+	path := d.Path(AnswerFile)
+	if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
+		return nil, ErrNoAnswer
+	}
+	if err := d.Check(); err != nil {
+		return nil, err
+	}
+	return readPrivate(path, maxAnswerFile)
+}
+
+// RemoveAnswer removes enrolment-answer.
+func (d Dir) RemoveAnswer() error {
+	if err := os.Remove(d.Path(AnswerFile)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
 	return nil

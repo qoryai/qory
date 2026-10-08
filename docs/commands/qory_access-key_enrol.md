@@ -11,7 +11,9 @@ qory makes the key, keeps its secret in access-key-secret, prints its fingerprin
 sends the server the public key. The server's signed answer gives the key its id, which
 qory writes into the server section of runner.yaml, with the server's URL and its
 public key where the section has none yet. The key is active from that answer on: runs
-can start.
+can start. qory keeps the answer in enrolment-answer until the enrolment is finished:
+should the command stop after the answer came, the same command finishes it on this
+machine, at any time, without asking the server again.
 
 When access-key-secret exists, enrol refuses, so it never replaces this machine's key
 unasked: use --replace to move this machine to a new key, or --print for a key kept
@@ -25,9 +27,10 @@ access-key-secret and runner.yaml as they are, so an enrolment that fails leaves
 old key working. Once the server's signed answer has come, the new secret takes the old
 one's place, runner.yaml names the new key, and the old secret is removed. The old
 key still works on the server until an owner or administrator revokes it on the node's
-page, unless it is revoked already. Run the same command again within the code's 15
-minutes to retry, or to finish a replacement that stopped. On a machine without a key,
---replace enrols as the command does without it.
+page, unless it is revoked already. Before the server's answer, the same command within
+the code's 15 minutes retries; after it, the same command finishes the replacement on
+this machine, at any time. On a machine without a key, --replace enrols as the command
+does without it.
 
 The key's name is instance.name of runner.yaml, else this machine's host name.
 
