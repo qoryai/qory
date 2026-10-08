@@ -373,7 +373,7 @@ refusal means and what to do, then the runner's words and the code:
 
 | Code | What it means |
 | --- | --- |
-| `unauthorized` | the server refused the request: it does not know the access key, has revoked it, or this machine's clock is more than five minutes off; check the clock, else move this machine to a new key with `qory access-key enrol --replace` |
+| `unauthorized` | the server refused the request: it does not know the access key, has revoked it, or this machine's clock is more than five minutes off; check the clock, else move this machine to a new key with `qory access-key enrol --replace`; for a key from `QORY_ACCESS_KEY_SECRET` or `--access-key-secret-fd`, enrol a new key |
 | `answer_unsigned` | an answer does not verify under the pin |
 | `instance_limit` | the node's live instances are at its limit |
 | `run_closed` | the server closed the run before it started; the exit status is 1 |
