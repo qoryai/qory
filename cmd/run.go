@@ -51,6 +51,8 @@ func newRun() *cobra.Command {
 	var o wallOptions
 	var policyFile, runID string
 	var labels []string
+	var kind, title, details string
+	var subjects []string
 	var timeout, grace time.Duration
 	var stopSignal string
 	var secretFD int
@@ -87,7 +89,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
   qory run --wall docker --image agent:1            # in a container
   qory run --image go-docker                        # in an image runner.yaml defines
   qory run --policy ~/policy.yaml -- -p "$prompt"   # with this run's own policy
-  qory run --timeout 5h30m -- -p "$prompt"          # stop it after five and a half hours`,
+  qory run --timeout 5h30m -- -p "$prompt"          # stop it after five and a half hours
+  qory run --subject type=ticket,ref=7              # say which ticket the run works on`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			dash := cmd.ArgsLenAtDash()
 			if dash < 0 {
@@ -160,6 +163,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if err := session.CheckLabels(named); err != nil {
 				return input(err)
 			}
+			about, err := aboutFrom(kind, title, subjects, details, cmd.InOrStdin(), isTerminal(cmd.InOrStdin()))
+			if err != nil {
+				return err
+			}
 			if runID != "" {
 				if err := session.CheckRunID(runID); err != nil {
 					return input(fmt.Errorf("--run-id: %w", err))
@@ -222,6 +229,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				RunnerVersion: build().title(),
 				RunID:         runID,
 				Labels:        named,
+				About:         about,
 				Timeout:       timeout,
 				StopSignal:    stopSignal,
 				StopGrace:     grace,
@@ -346,6 +354,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	c.Flags().StringVar(&policyFile, "policy", "", "this run's own policy file, kept outside the checkout; it narrows the egress of "+config.RunnerFileName+", never widens it (with a server: needs --local)")
 	c.Flags().StringVar(&runID, "run-id", "", "the run's id, a UUID in lower case (default a new one)")
 	c.Flags().StringArrayVar(&labels, "label", nil, "a key=value name for the run, reported in its events; repeatable (forge and repository come from the origin remote)")
+	c.Flags().StringVar(&kind, "kind", "", "what kind of run it is, such as review or fix, reported in its events")
+	c.Flags().StringVar(&title, "title", "", "the run's title, for a person to read, reported in its events")
+	c.Flags().StringArrayVar(&subjects, "subject", nil, "what the run works on, type=<type>,ref=<ref>[,url=<url>][,title=<title>], such as type=ticket,ref=7; title takes the rest of the value, commas too; repeatable")
+	c.Flags().StringVar(&details, "details", "", "a JSON object of the run's own details, read from this file, or - for stdin when stdin is not a terminal; at most 8192 bytes compacted, 4 levels deep")
 	c.Flags().DurationVar(&timeout, "timeout", 0, "stop the agent after this long, such as 5h30m, and exit "+fmt.Sprint(exitTimeout)+" (default no limit; "+config.RunnerFileName+": run.timeout)")
 	c.Flags().StringVar(&stopSignal, "stop-signal", "", "the signal that stops the agent: SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2 (default SIGTERM; "+config.RunnerFileName+": run.stop_signal)")
 	c.Flags().DurationVar(&grace, "stop-grace", 0, "the time between the stop signal and SIGKILL (default 10s; "+config.RunnerFileName+": run.stop_grace)")

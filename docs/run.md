@@ -537,8 +537,8 @@ the new key may receive stored secrets. It is removed as above.
 
 ## Runs started by another system
 
-A system that starts runs of its own sets their id and labels. It passes each run its
-policy:
+A system that starts runs of its own sets their id and labels, and says what each is
+about. It passes each run its policy:
 
 ```sh
 qory run --run-id "$uuid" --label run_key=1234 --label issue=77 \
@@ -557,6 +557,67 @@ Two labels come from the checkout's origin remote, unless `--label` sets them:
 | `repository` | the remote's path, without the leading slash and `.git`  | `acme/shop`                        |
 
 A checkout with no remote, or with a remote on this machine, has neither label.
+
+### What a run is about
+
+Labels identify a run to a system. Four flags describe it to the people who read its
+record:
+
+```sh
+qory run --kind review --title "Review the parser change" \
+  --subject type=ticket,ref=7,url=https://tickets.example.com/7 \
+  --subject "type=ticket,ref=8,title=Parser drops the last line, sometimes" \
+  --details details.json -- -p "$prompt"
+```
+
+| Flag        | What it is                                               | At most                             |
+| ----------- | -------------------------------------------------------- | ----------------------------------- |
+| `--kind`    | what kind of run it is, a word of yours such as `review` | 64 bytes                            |
+| `--title`   | the run's title                                          | 256 bytes                           |
+| `--subject` | what the run works on; repeatable                        | 16 subjects                         |
+| `--details` | a JSON object of your own, from a file or stdin          | 8192 bytes compacted, 4 levels deep |
+
+Each is optional. An empty `--kind`, `--title` or `--details` is none. They go into
+`about` on `dev.qory.run.started`, and no other event repeats them. The run configuration
+request does not carry them, so a server does not choose the run's policy by them. qory
+reads none of them from the checkout or the environment: the run carries what the flags
+say.
+
+A subject is `type=<type>,ref=<ref>`, then `url=<url>` and `title=<title>` when you have
+them:
+
+- `type`: a word or words of yours, such as `ticket` or `pull request`: `a-z` and `0-9`,
+  each word joined to the next by one space, `_`, `.` or `-`, at most 64 bytes. Quote a
+  type with a space: `--subject "type=pull request,ref=42"`.
+- `ref`: what the subject is called where it lives, such as `7`. 1 to 256 bytes.
+- `url`: an absolute `http` or `https` URL without a user name or password, at most 2048
+  bytes. Write a comma in it as `%2C`.
+- `title`: at most 256 bytes. It takes the rest of the value, commas and `=` included, so
+  it comes last, and a script passes a title as it is:
+  `--subject "type=ticket,ref=$number,title=$title"`.
+
+No two subjects have the same type and ref.
+
+`--details` reads the file it names, relative to the working directory, or stdin for `-`.
+It holds one JSON object: at most 8192 bytes once compacted, where `<`, `>` and `&` count
+six bytes each, keys of 1 to 64 bytes, and at most 4 levels deep, the object itself the
+first; an array is a level too. `{}` is no details. With `-`, qory reads stdin to its end
+before the agent starts, so the agent's stdin is empty; at a terminal, `-` is refused.
+
+Text in all four is UTF-8 without control characters. A value outside these limits is an
+input error, exit status 2, and the run does not start. The run above starts with:
+
+```json
+"about": {
+  "kind": "review",
+  "title": "Review the parser change",
+  "subjects": [
+    {"type": "ticket", "ref": "7", "url": "https://tickets.example.com/7"},
+    {"type": "ticket", "ref": "8", "title": "Parser drops the last line, sometimes"}
+  ],
+  "details": {"queue": "nightly", "attempt": 2}
+}
+```
 
 ### A run's own policy
 
