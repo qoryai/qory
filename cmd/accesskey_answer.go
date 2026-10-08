@@ -59,6 +59,9 @@ type answerRecorder struct {
 	header http.Header
 }
 
+// RoundTrip sends req over the base transport and records the answer: its status, its
+// headers and its body, at most one byte more than the enrolment reads, which it then
+// hands on unchanged.
 func (a *answerRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
 	base := a.base
 	if base == nil {
