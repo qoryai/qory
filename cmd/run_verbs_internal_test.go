@@ -342,7 +342,7 @@ func TestMountRefusedNamesTheRunStillGoing(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(worktree, ".git"), []byte("gitdir: "+filepath.Join(checkout, ".git", "worktrees", "wt-feature")+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	tail := ", which the run " + other + ", still going on this machine, also uses: one agent could read or change what the other uses, so the run does not start. Wait for " + other + " to end, or work in a checkout of its own"
+	tail := ", which the run " + other + " also uses: it is still going on this machine, or its containers were left behind. One agent could read or change what the other uses, so the run does not start. Wait for " + other + " to end; if it has ended, remove its containers, which docker ps --all --filter label=dev.qory.run=" + other + " lists; or work in a checkout of its own"
 	hint := "; make the worktree beside the checkout, not inside it"
 	for _, c := range []struct {
 		root, path, otherPath, want string
@@ -378,7 +378,7 @@ func TestMountRefusedNamesTheRunStillGoing(t *testing.T) {
 		if c.how == "overlap" && session.Overlap(runs, c.otherPath) != "" {
 			t.Fatalf("Overlap relates %s and %s", runs, c.otherPath)
 		}
-		want := "this run's records " + runs + " " + c.how + " " + c.otherPath + ", which the run " + other + ", still going on this machine, also uses: its agent could read or change them, so the run does not start. Wait for " + other + " to end, or keep qory's state directory out of its mounts (mount_shared_with_run)"
+		want := "this run's records " + runs + " " + c.how + " " + c.otherPath + ", which the run " + other + " also uses: it is still going on this machine, or its containers were left behind. Its agent could read or change them, so the run does not start. Wait for " + other + " to end; if it has ended, remove its containers, which docker ps --all --filter label=dev.qory.run=" + other + " lists; or keep qory's state directory out of its mounts (mount_shared_with_run)"
 		if err := mountRefused(&session.Refusal{Code: "mount_shared_with_run", Names: []string{runs, other, c.otherPath}}, p); err == nil || err.Error() != want {
 			t.Errorf("the runs directory %s %s: %v, want %q", c.how, c.otherPath, err, want)
 		}
@@ -701,8 +701,9 @@ func TestUserHomeNeedsAConfigurationDirectory(t *testing.T) {
 
 // TestEngineUnreachableIsWorded is the runner's engine_unreachable, a walled run that
 // cannot ask the container engine whether an earlier walled run is still going, with
-// that run's id its one name: the text leaves the id out. Any other number of names
-// falls through to the runner's own words.
+// that run's id its one name: the text leaves the id out. With the path of that run's
+// registry entry as a second name, the text says to delete it when no walled run is
+// going. Any other number of names falls through to the runner's own words.
 func TestEngineUnreachableIsWorded(t *testing.T) {
 	const id = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f"
 	p := passed{spec: &session.Spec{}}
@@ -710,7 +711,12 @@ func TestEngineUnreachableIsWorded(t *testing.T) {
 	if want := "Docker could not be asked whether an earlier walled run is still going, so the run does not start (engine_unreachable)"; err == nil || err.Error() != want {
 		t.Errorf("engine_unreachable: %v, want %q", err, want)
 	}
-	for _, names := range [][]string{nil, {id, id}} {
+	entry := "/var/state/qory/walled/" + id + ".json"
+	err = mountRefused(&session.Refusal{Code: "engine_unreachable", Names: []string{id, entry}}, p)
+	if want := "Docker could not be asked whether an earlier walled run is still going, so the run does not start. If no walled run is going on this machine, delete " + entry + " (engine_unreachable)"; err == nil || err.Error() != want {
+		t.Errorf("engine_unreachable with the entry: %v, want %q", err, want)
+	}
+	for _, names := range [][]string{nil, {id, entry, entry}} {
 		if err := mountRefused(&session.Refusal{Code: "engine_unreachable", Names: names}, p); err != nil {
 			t.Errorf("engine_unreachable with names %v: %v, want it to fall through", names, err)
 		}

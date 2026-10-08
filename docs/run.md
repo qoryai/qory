@@ -1350,10 +1350,12 @@ What to know:
   When the path is the checkout or the working directory, it says `the workspace <path>`
   instead of `the mount <path>`.
 - **Two walled runs at once.** Two walled runs can share a checkout, or a mount of the
-  same path. While another walled run is going, the runner refuses a place that lies
-  inside, or is reached through, a writable place of that run's, and a writable place
-  that holds one of that run's, `mount_shared_with_run`; a place that is the same path
-  as one of that run's is not refused. While both are going, each agent sees what the
+  same path. While another walled run is going, or its containers were left behind, the
+  runner refuses a place that lies inside, or is reached through, a writable place of
+  that run's, and a writable place that holds one of that run's,
+  `mount_shared_with_run`; a place that is the same path as one of that run's is not
+  refused. The refusal names the other run: once it has ended, remove the containers
+  `docker ps --all --filter label=dev.qory.run=<id>` lists, and it no longer counts. While both are going, each agent sees what the
   other writes there, and changes it where its own place is writable: the two can clash
   on data, but neither gets a way out of its wall. A read-only mount of a path another
   run has writable is accepted too, so what it shows can change during the run.

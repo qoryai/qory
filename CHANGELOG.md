@@ -37,6 +37,8 @@ release may change what an existing document does, and states it under Upgrading
 - A walled run that cannot ask Docker whether an earlier walled run on this machine is
   still going is refused before anything is bound, `engine_unreachable`: `Docker could
   not be asked whether an earlier walled run is still going, so the run does not start`.
+  When the runner names that run's registry entry, the refusal adds `If no walled run is
+  going on this machine, delete <entry>`.
 - `wall.images` in `runner.yaml` defines the agent's images by name, each with `ref`, its
   reference, and when it needs them `runtime`, the container runtime the wall starts it
   under, and `docker`. A run's policy selects one by its name, `image: <name>`, from the

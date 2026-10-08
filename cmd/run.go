@@ -706,15 +706,18 @@ func (p passed) modes(path string) (writable, readOnly, changed bool) {
 // named as a link inside that place.
 //
 // mount_shared_with_run is a place that is, holds or lies inside one another walled run
-// still going also uses, its mounts or its run directory: one agent could read or
-// change what the other uses. A git worktree inside the other run's checkout is the
-// common case, and the text says where to make one. The runner names the runs directory
-// for this run's own records. Where the runner can no longer tell how two paths stand,
-// such as a place reached through a link, the text says they overlap.
+// also uses, its mounts or its run directory, while that run is still going or its
+// containers are left: one agent could read or change what the other uses. The text
+// says how to find and remove containers left behind, by the label dev.qory.run=<id>
+// the wall gives them. A git worktree inside the other run's checkout is the common
+// case, and the text says where to make one. The runner names the runs directory for
+// this run's own records. Where the runner can no longer tell how two paths stand, such
+// as a place reached through a link, the text says they overlap.
 //
 // engine_unreachable is a walled run that cannot ask the container engine whether an
-// earlier walled run is still going, with that run's id the one name; the text leaves
-// the id out.
+// earlier walled run is still going, with that run's id the first name and, when the
+// runner gives it, the path of that run's registry entry the second; the text leaves
+// the id out, and names the entry as the file to delete when no walled run is going.
 //
 // A place is the workspace when it is the checkout root or Dir, and a mount otherwise.
 func mountRefused(err error, p passed) error {
@@ -796,15 +799,17 @@ func mountRefused(err error, p passed) error {
 		if how == "" {
 			how = "overlap"
 		}
-		text = fmt.Sprintf("this run's records %s %s %s, which the run %s, still going on this machine, also uses: its agent could read or change them, so the run does not start. Wait for %s to end, or keep qory's state directory out of its mounts", runs, how, otherPath, other, other)
+		text = fmt.Sprintf("this run's records %s %s %s, which the run %s also uses: it is still going on this machine, or its containers were left behind. Its agent could read or change them, so the run does not start. Wait for %s to end; if it has ended, remove its containers, which docker ps --all --filter label=dev.qory.run=%s lists; or keep qory's state directory out of its mounts", runs, how, otherPath, other, other, other)
 	case ref.Code == codeMountSharedWithRun && len(ref.Names) == 3:
 		path, other, otherPath := ref.Names[0], ref.Names[1], ref.Names[2]
-		text = fmt.Sprintf("%s %s %s, which the run %s, still going on this machine, also uses: one agent could read or change what the other uses, so the run does not start. Wait for %s to end, or work in a checkout of its own", p.place(path), overlap(path, otherPath), otherPath, other, other)
+		text = fmt.Sprintf("%s %s %s, which the run %s also uses: it is still going on this machine, or its containers were left behind. One agent could read or change what the other uses, so the run does not start. Wait for %s to end; if it has ended, remove its containers, which docker ps --all --filter label=dev.qory.run=%s lists; or work in a checkout of its own", p.place(path), overlap(path, otherPath), otherPath, other, other, other)
 		if info, err := os.Lstat(filepath.Join(path, ".git")); err == nil && info.Mode().IsRegular() {
 			text += "; make the worktree beside the checkout, not inside it"
 		}
 	case ref.Code == codeEngineUnreachable && len(ref.Names) == 1:
 		text = "Docker could not be asked whether an earlier walled run is still going, so the run does not start"
+	case ref.Code == codeEngineUnreachable && len(ref.Names) == 2:
+		text = "Docker could not be asked whether an earlier walled run is still going, so the run does not start. If no walled run is going on this machine, delete " + ref.Names[1]
 	default:
 		return nil
 	}
@@ -1083,8 +1088,9 @@ func linkPlace(path string) string {
 // The runner's refusals of the places a walled run lists: one that is, contains or lies
 // inside one of the runner's files; one inside another of the other mode; one reached
 // through a link a walled agent can change that leads out of the place holding it; one
-// another walled run still going could change, or that holds one of its places; and a
-// run that cannot ask the container engine whether an earlier walled run is still going.
+// another walled run, still going or with its containers left, could change, or that
+// holds one of its places; and a run that cannot ask the container engine whether an
+// earlier walled run is still going.
 const (
 	codeMountContainsRunnerFiles = "mount_contains_runner_files"
 	codeMountModeConflict        = "mount_mode_conflict"
