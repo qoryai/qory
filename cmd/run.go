@@ -1381,16 +1381,29 @@ func samePath(a, b string) bool {
 	return errA == nil && errB == nil && ra == rb
 }
 
-// userHome refuses a walled run whose home the checkout's own qory.yaml moves: behind a
-// wall the home is a mount, so harness.home comes from the user's files alone, the one in
-// the configuration directory and those of the ancestor directories the user owns. A
-// value in the checkout's file that leaves the home where the user's files put it is
-// harmless and passes.
+// userHome refuses a walled run whose home a qory.yaml other than the configuration
+// directory's moves: behind a wall the home is a mount, so harness.home comes from the
+// qory.yaml in [config.UserDir] alone. The checkout's file, or an ancestor directory's,
+// may be one a walled agent can write, through the workspace or a writable mount. A
+// value in another file that leaves the home where the configuration directory's file
+// alone puts it is harmless and passes.
 func userHome(at places, conf config.Config) error {
-	if filepath.Dir(conf.Origin("harness.home")) != at.root {
+	origin := conf.Origin("harness.home")
+	yours := ""
+	if dir := config.UserDir(); dir != "" {
+		f, err := config.FileIn(dir)
+		if err != nil {
+			return input(err)
+		}
+		yours = f
+		if yours == "" {
+			yours = filepath.Join(dir, config.FileName)
+		}
+	}
+	if origin == config.Default || origin == yours {
 		return nil
 	}
-	own, err := config.Load(at.root, false)
+	own, err := config.LoadUser()
 	if err != nil {
 		return input(err)
 	}
@@ -1399,12 +1412,11 @@ func userHome(at places, conf config.Config) error {
 	if want, err := placesFor(at.root, mine, homeOptions{}); err == nil && samePath(want.home, at.home) {
 		return nil
 	}
-	file := filepath.Base(conf.Origin("harness.home"))
-	yours, _ := config.FileIn(config.UserDir())
-	if yours == "" {
-		yours = filepath.Join(config.UserDir(), config.Names[0])
+	file := ui.Short(origin, "")
+	if filepath.Dir(origin) == at.root {
+		file = "the checkout's " + filepath.Base(origin)
 	}
-	return input(fmt.Errorf("the checkout's %s sets harness.home, and a walled run takes the home from your own %s alone, so the run does not start. Set harness.home in %s, or remove it from the checkout's %s", file, config.FileName, ui.Short(yours, ""), file))
+	return input(fmt.Errorf("%s sets harness.home, and a walled run takes the home from %s alone, so the run does not start. Set harness.home in %s, or remove it from %s", file, ui.Short(yours, ""), ui.Short(yours, ""), file))
 }
 
 // resolveLaunch is what qory harness launch and qory run share: the runtime, named or

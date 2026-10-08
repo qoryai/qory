@@ -187,9 +187,10 @@ func TestRunRefusesAReportNamingAnotherHome(t *testing.T) {
 // TestWalledRunTakesTheHomeFromYourOwnFile is a checkout whose own qory.yaml sets
 // harness.home outside it: the compose puts the home there, a run without a wall starts
 // on it, and a walled run refuses before the wall runs anything, since behind a wall the
-// home is a mount and comes from your own qory.yaml alone. The same value in your file
-// starts it, and so does a checkout whose harness.home leaves the home where your files
-// put it.
+// home is a mount and comes from the qory.yaml in qory's configuration directory alone.
+// A qory.yaml you own in the directory above the checkout that sets it is refused the
+// same way. The same value in the configuration directory's file starts the walled run,
+// the other file still setting it.
 func TestWalledRunTakesTheHomeFromYourOwnFile(t *testing.T) {
 	root := newCheckout(t)
 	homes := tempDir(t)
@@ -211,16 +212,29 @@ func TestWalledRunTakesTheHomeFromYourOwnFile(t *testing.T) {
 	}
 	log := walledRunner(t)
 	_, err := run(t, "run", "claude")
-	want := "the checkout's qory.yaml sets harness.home, and a walled run takes the home from your own qory.yaml alone, so the run does not start. Set harness.home in ~/.config/qory/qory.yaml, or remove it from the checkout's qory.yaml"
+	want := "the checkout's qory.yaml sets harness.home, and a walled run takes the home from ~/.config/qory/qory.yaml alone, so the run does not start. Set harness.home in ~/.config/qory/qory.yaml, or remove it from the checkout's qory.yaml"
 	if cmd.ExitCode(err) != cmd.ExitInput || err.Error() != want {
 		t.Errorf("a walled run with the checkout's harness.home: %v (exit %d), want %q", err, cmd.ExitCode(err), want)
+	}
+	startedNothing(t, root, log)
+
+	ancestor := filepath.Join(filepath.Dir(root), "qory.yaml")
+	writeFile(t, ancestor, "apiVersion: qory.dev/v1alpha1\nharness:\n  home: "+homes+"\n")
+	writeFile(t, filepath.Join(root, "qory.yaml"), stack)
+	if out, err := run(t, "harness", "compose"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	_, err = run(t, "run", "claude")
+	want = ancestor + " sets harness.home, and a walled run takes the home from ~/.config/qory/qory.yaml alone, so the run does not start. Set harness.home in ~/.config/qory/qory.yaml, or remove it from " + ancestor
+	if cmd.ExitCode(err) != cmd.ExitInput || err.Error() != want {
+		t.Errorf("a walled run with an ancestor's harness.home: %v (exit %d), want %q", err, cmd.ExitCode(err), want)
 	}
 	startedNothing(t, root, log)
 
 	writeFile(t, user, strings.Replace(launch, "harness:\n", "harness:\n  home: "+homes+"\n", 1))
 	out, err := run(t, "run", "claude")
 	if cmd.ExitCode(err) != 4 {
-		t.Fatalf("a walled run with harness.home in your file too: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+		t.Fatalf("a walled run with harness.home in the configuration directory's file too: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
 	data, err := os.ReadFile(log)
 	if err != nil {

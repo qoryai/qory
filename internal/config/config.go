@@ -463,6 +463,24 @@ func Load(root string, own bool) (Config, error) {
 	return c, nil
 }
 
+// LoadUser returns the configuration of the user's own file alone, the qory.yaml in
+// [UserDir], over the defaults: the defaults when there is none. A walled run takes
+// harness.home from it alone: a walled run never mounts that directory, which holds the
+// runner's files, while another qory.yaml may lie in a place its agent can write.
+func LoadUser() (Config, error) {
+	c := Defaults()
+	dir := UserDir()
+	if dir == "" {
+		return c, nil
+	}
+	path, err := FileIn(dir)
+	if err != nil || path == "" {
+		return c, err
+	}
+	_, err = c.apply(path, true)
+	return c, err
+}
+
 // Discover lists the configuration files for the checkout at root, in the order they
 // apply: the user's file under [UserDir], the files of the ancestor directories the
 // current user owns, farthest first, and the file in root, each under either of [Names].
