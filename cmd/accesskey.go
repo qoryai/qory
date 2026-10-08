@@ -58,7 +58,7 @@ func newAccessKeyEnrol() *cobra.Command {
 		Use:   "enrol <server> <code>",
 		Short: "Enrol a new access key with a code from the server",
 		Long: `Enrol a new access key for this machine with an enrolment code an owner or
-administrator of the server created. The code is valid for 15 minutes and used once.
+administrator in Qory Apiary created. The code is valid for 15 minutes and used once.
 
 qory makes the key, keeps its secret in access-key-secret.new, prints its fingerprint
 and sends the server the public key. The server's signed answer gives the key its id:
@@ -81,7 +81,7 @@ one is active. qory makes the new key in access-key-secret.new and enrols it, le
 access-key-secret and ` + config.RunnerFileName + ` as they are, so an enrolment that fails leaves the
 old key working. Once the server's signed answer has come, the new secret takes the old
 one's place, ` + config.RunnerFileName + ` names the new key, and the old secret is removed. The old
-key still works on the server until an owner or administrator revokes it on the node's
+key still works on Qory Apiary until an owner or administrator revokes it on the node's
 page, unless it is revoked already. Before the server's answer, the same command within
 the code's 15 minutes retries; after it, the same command finishes the replacement on
 this machine, at any time. On a machine without a key, --replace enrols as the command
@@ -486,7 +486,7 @@ func finishEnrolment(dir runnerdir.Dir, info io.Writer, r *config.Runner, server
 	}
 	fmt.Fprintf(info, "wrote %s to %s\n", written, path)
 	if old != "" {
-		fmt.Fprintf(info, "revoke the old key %s on the node's page, unless it is revoked already: until then it still works on the server\n", old)
+		fmt.Fprintf(info, "revoke the old key %s on the node's page, unless it is revoked already: until then it still works on Qory Apiary\n", old)
 	}
 	return nil
 }
@@ -621,7 +621,7 @@ func enrolFailed(dir runnerdir.Dir, err error, key *accesskey.Key, print bool, n
 		}
 		text = "the server refused the key" + names + ". Enrolling needs a new code" + discard()
 	case accesskey.CodeKeyLimit:
-		text = "the node already holds two keys: once an owner or administrator has revoked one, the same command, run within the code's 15 minutes, succeeds"
+		text = "the node already holds two keys: once an owner or administrator in Qory Apiary has revoked one, the same command, run within the code's 15 minutes, succeeds"
 	case accesskey.CodeRateLimited:
 		const text = "the server refused the attempt: this code was tried too often; run the same command again later, within the code's 15 minutes"
 		return &refusedError{text: text, err: &accesskey.Refusal{Code: ref.Code}}

@@ -249,7 +249,7 @@ func TestRunSaysWhatARefusalMeans(t *testing.T) {
 	os.Unsetenv("QORY_ACCESS_KEY_SECRET")
 
 	srv.full = true
-	refusal("full", "the node's live instances have reached its limit, so the instance i_", "does not start: wait for a run of another instance to end, or have an owner or administrator clear that instance (", "instance_limit (status 409)")
+	refusal("full", "the node's live instances have reached its limit, so the instance i_", "does not start: wait for a run of another instance to end, or have an owner or administrator in Qory Apiary clear that instance (", "instance_limit (status 409)")
 	srv.full = false
 
 	serverFile(t, srv, "")

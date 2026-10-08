@@ -8,6 +8,8 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- Messages and docs name Qory Apiary where they mean the Qory Apiary server: the node's
+  page, its owners and administrators, and where a key is revoked.
 - Every request to the server is signed with the machine's Ed25519 access key, and every
   answer is verified under the server's keys the machine pins. `runner.yaml`'s `server`
   section is `url`, `access_key_id` and `apiary_public_key`; `QORY_ACCESS_KEY_ID` and
@@ -85,7 +87,7 @@ release may change what an existing document does, and states it under Upgrading
   `gh` run. It reports whether `dockerd` is in a system directory, with what it runs. The
   exit status is 1 when a check fails.
 - `qory access-key enrol <server> <code>` enrols a new access key with a code an owner or
-  administrator of the server created. It checks the code against the pin the machine has
+  administrator in Qory Apiary created. It checks the code against the pin the machine has
   before it makes a key, takes the key lock, refuses while a run without a wall is live,
   refuses, naming `--replace`, when `access-key-secret` exists unless it holds the key
   made for the same code, retried within its 15 minutes, writes the `stored-secrets`
@@ -100,8 +102,8 @@ release may change what an existing document does, and states it under Upgrading
   time, without asking the server again. A used or expired code and a refused key move the
   secret made for the code aside from `access-key-secret.new` and say a new code is
   needed; a refused enrolment never moves or changes `access-key-secret`; a node that already holds
-  two keys keeps it, and the same command succeeds once an owner or administrator has
-  revoked one; an answer that does not verify changes nothing.
+  two keys keeps it, and the same command succeeds once an owner or administrator in
+  Qory Apiary has revoked one; an answer that does not verify changes nothing.
   With `--print` enrol writes no key or setting and prints `QORY_ACCESS_KEY_ID`,
   `QORY_ACCESS_KEY_SECRET` and `QORY_APIARY_PUBLIC_KEY` for a CI's settings. The key is
   for another machine, so enrol `--print` reads only `instance.name` from `runner.yaml`:
@@ -119,7 +121,7 @@ release may change what an existing document does, and states it under Upgrading
   fails leaves the old key working. Then the new secret takes the old one's place,
   `runner.yaml` names the new key, and the old secret is removed; enrol ends with
   `revoke the old key <id> on the node's page, unless it is revoked already: until then
-  it still works on the server`. Before the server's answer, the same command within the
+  it still works on Qory Apiary`. Before the server's answer, the same command within the
   code's 15 minutes retries with the new key; after it, the same command finishes the
   replacement from the kept answer, at any time. The
   enrolment never uses the old key, so a revoked one is replaced too. On a machine
@@ -186,7 +188,7 @@ release may change what an existing document does, and states it under Upgrading
 - `server.access_key` and `server.secret` in `runner.yaml` are refused, and so is
   `QORY_SERVER_SECRET` when `runner.yaml` has a `server` section; the refusal says to
   remove the two keys, or unset the variable, and then connect the machine as a node,
-  with `qory access-key enrol` or a key generated on the node's page in the server,
+  with `qory access-key enrol` or a key generated on the node's page in Qory Apiary,
   since a server accepts no workspace access key. qory
   removes `QORY_SERVER_SECRET` from its environment with the access key's variables,
   whether or not a server is configured, and `wall.env` or `--env` naming it is refused.
@@ -225,8 +227,8 @@ release may change what an existing document does, and states it under Upgrading
   so the run does not start. List the link's target itself`.
 - A key `qory access-key enrol` enrols is active as soon as the server answers, and
   enrol says so: `the key is active: runs can start`. `key_limit` means the node already
-  holds two keys; once an owner or administrator has revoked one, the same command
-  within the code's 15 minutes succeeds. A signed 429, `rate_limited`, means the code
+  holds two keys; once an owner or administrator in Qory Apiary has revoked one, the same
+  command within the code's 15 minutes succeeds. A signed 429, `rate_limited`, means the code
   was tried too often: qory keeps the key and says `the server refused the attempt: this
   code was tried too often; run the same command again later, within the code's 15
   minutes`. A 401 for a code you did not use means the

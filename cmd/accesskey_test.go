@@ -607,7 +607,7 @@ func TestEnrolActsOnTheRefusalsCode(t *testing.T) {
 		{"key_invalid", func() { srv.refusal("key_invalid", "public_key") }, false, []string{
 			"the server refused the key (public_key). Enrolling needs a new code; the secret made for it was moved aside to "}},
 		{"key_limit", func() { srv.refusal("key_limit") }, true, []string{
-			"the node already holds two keys: once an owner or administrator has revoked one, the same command, run within the code's 15 minutes, succeeds"}},
+			"the node already holds two keys: once an owner or administrator in Qory Apiary has revoked one, the same command, run within the code's 15 minutes, succeeds"}},
 	} {
 		os.RemoveAll(string(dir))
 		writeFile(t, runnerFile(), "instance:\n  name: build-01\n")

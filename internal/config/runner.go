@@ -474,7 +474,7 @@ func RunnersOwn(name string) bool {
 }
 
 // enrolAsNode ends the refusal of a workspace access key: what to do instead.
-const enrolAsNode = "connect this machine as a node: run qory access-key enrol <server> <code>, or generate a key on the node's page in the server and set the QORY_ variables it shows; see https://github.com/qoryai/qory/blob/main/docs/run.md#the-access-key-and-the-instance"
+const enrolAsNode = "connect this machine as a node: run qory access-key enrol <server> <code>, or generate a key on the node's page in Qory Apiary and set the QORY_ variables it shows; see https://github.com/qoryai/qory/blob/main/docs/run.md#the-access-key-and-the-instance"
 
 // removeThenEnrol ends the refusal of a workspace access key in the runner file: the
 // keys go first, since qory access-key enrol reads the file and would refuse them too.

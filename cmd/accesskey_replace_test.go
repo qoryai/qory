@@ -100,7 +100,7 @@ func replaced(t *testing.T, srv *enrolServer, old *accesskey.Key) {
 
 // oldLine is the line a replacement ends with, naming the old key by name.
 func oldLine(name string) string {
-	return "revoke the old key " + name + " on the node's page, unless it is revoked already: until then it still works on the server\n"
+	return "revoke the old key " + name + " on the node's page, unless it is revoked already: until then it still works on Qory Apiary\n"
 }
 
 // TestEnrolReplaceMovesTheMachineToANewKey is --replace on a machine that holds a key:
@@ -181,7 +181,7 @@ func TestEnrolReplaceKeepsTheOldKeyOnAFailure(t *testing.T) {
 		{"an unsigned 201", func(srv *enrolServer) { srv.signBy = nil }, nil, nil, kept,
 			"the server did not enrol the key (HTTP 201, unsigned); try again later (enrolment: answer_unsigned (status 201))"},
 		{"key_limit", func(srv *enrolServer) { srv.refusal("key_limit") }, nil, nil, kept,
-			"the node already holds two keys: once an owner or administrator has revoked one, the same command, run within the code's 15 minutes, succeeds"},
+			"the node already holds two keys: once an owner or administrator in Qory Apiary has revoked one, the same command, run within the code's 15 minutes, succeeds"},
 		{"rate_limited", func(srv *enrolServer) {
 			srv.status, srv.body = http.StatusTooManyRequests, []byte(`{"error":"rate_limited","apiary_public_key":`+srv.keys()+`}`)
 		}, nil, nil, kept,

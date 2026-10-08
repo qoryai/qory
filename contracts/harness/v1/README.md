@@ -992,7 +992,7 @@ longer accept: the two keys are refused, and so is `QORY_SERVER_SECRET` when the
 has a `server` section. The two keys are removed from the file and `QORY_SERVER_SECRET`
 is unset first, since `qory access-key enrol` reads the file and refuses them too; then
 the machine connects as a node: `qory access-key enrol <server> <code>`, or a key
-generated on the node's page in the server.
+generated on the node's page in Qory Apiary.
 
 A run's policy also selects credentials, `credentials: [{name: product, argument:
 acme/shop}]`, may restrict a host to paths, `egress.paths`, and may select an image among
