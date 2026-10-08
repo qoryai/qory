@@ -577,10 +577,11 @@ qory run --kind review --title "Review the parser change" \
 | `--subject` | what the run works on; repeatable                        | 16 subjects                         |
 | `--details` | a JSON object of your own, from a file or stdin          | 8192 bytes compacted, 4 levels deep |
 
-Each is optional, and an empty value is none. They go into `about` on
-`dev.qory.run.started`, and no other event repeats them. The run configuration request
-does not carry them, so a server does not choose the run's policy by them. qory reads none
-of them from the checkout or the environment: the run carries what the flags say.
+Each is optional. An empty `--kind`, `--title` or `--details` is none. They go into
+`about` on `dev.qory.run.started`, and no other event repeats them. The run configuration
+request does not carry them, so a server does not choose the run's policy by them. qory
+reads none of them from the checkout or the environment: the run carries what the flags
+say.
 
 A subject is `type=<type>,ref=<ref>`, then `url=<url>` and `title=<title>` when you have
 them:
@@ -589,8 +590,8 @@ them:
   each word joined to the next by one space, `_`, `.` or `-`, at most 64 bytes. Quote a
   type with a space: `--subject "type=pull request,ref=42"`.
 - `ref`: what the subject is called where it lives, such as `7`. 1 to 256 bytes.
-- `url`: an absolute `http` or `https` URL, at most 2048 bytes. Write a comma in it as
-  `%2C`.
+- `url`: an absolute `http` or `https` URL without a user name or password, at most 2048
+  bytes. Write a comma in it as `%2C`.
 - `title`: at most 256 bytes. It takes the rest of the value, commas and `=` included, so
   it comes last, and a script passes a title as it is:
   `--subject "type=ticket,ref=$number,title=$title"`.
@@ -598,10 +599,10 @@ them:
 No two subjects have the same type and ref.
 
 `--details` reads the file it names, relative to the working directory, or stdin for `-`.
-It holds one JSON object: at most 8192 bytes once compacted, keys of 1 to 64 bytes, and at
-most 4 levels deep, the object itself the first; an array is a level too. `{}` is no
-details. With `-`, qory reads stdin to its end before the agent starts, so the agent's
-stdin is empty; at a terminal, `-` is refused.
+It holds one JSON object: at most 8192 bytes once compacted, where `<`, `>` and `&` count
+six bytes each, keys of 1 to 64 bytes, and at most 4 levels deep, the object itself the
+first; an array is a level too. `{}` is no details. With `-`, qory reads stdin to its end
+before the agent starts, so the agent's stdin is empty; at a terminal, `-` is refused.
 
 Text in all four is UTF-8 without control characters. A value outside these limits is an
 input error, exit status 2, and the run does not start. The run above starts with:
