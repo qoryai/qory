@@ -647,18 +647,25 @@ func (p passed) place(path string) string {
 }
 
 // modes is how the run passed path: writable, read-only, or both, from the entries of
-// Mounts with that path, and Dir, writable. last is the mode of the last of them, Dir
-// counting after every mount, as the runner counts it.
-func (p passed) modes(path string) (writable, readOnly, last bool) {
+// Mounts with that path, and Dir, writable. changed is, for a path passed with both,
+// the mode of the first entry whose mode differs from an earlier one's, in the order
+// the runner checks them, Mounts in order and then Dir: the entry it refuses.
+func (p passed) modes(path string) (writable, readOnly, changed bool) {
+	add := func(w bool) {
+		if writable != readOnly && w != writable {
+			changed = w
+		}
+		writable, readOnly = writable || w, readOnly || !w
+	}
 	for _, m := range p.spec.Mounts {
 		if m.Path == path {
-			writable, readOnly, last = writable || !m.ReadOnly, readOnly || m.ReadOnly, !m.ReadOnly
+			add(!m.ReadOnly)
 		}
 	}
 	if path == p.spec.Dir {
-		writable, last = true, true
+		add(true)
 	}
-	return writable, readOnly, last
+	return writable, readOnly, changed
 }
 
 // mountRefused words the runner's refusals of the run's places behind a wall for the
@@ -667,16 +674,20 @@ func (p passed) modes(path string) (writable, readOnly, last bool) {
 // mount_contains_runner_files is a place that is, contains or lies inside one of the
 // runner's files. A refusal of the configuration directory says the agent could read
 // the access key when access-key-secret is there and the place is or contains it; one
-// of the runs directory, of qory's state directory or of a link on the way to them,
-// that it could read the run records through a read-only mount and change them through
-// any other; one of any other path, or of the directory without the key, that it could
-// change one of the runner's files. A link's place is named as the link.
+// of the runs directory or of qory's state directory, that it could read the run
+// records through a read-only mount and change them through any other; one of any other
+// path, or of the directory without the key, that it could change one of the runner's
+// files. A link's place, on the way to the records or to the configuration, is named as
+// the link, which leads to them: the agent could point it elsewhere through a writable
+// mount, and reads nothing through it, since inside the wall it leads to a path nothing
+// binds.
 //
 // mount_mode_conflict is a place inside another of the other mode, with the modes
 // qory passed. The runner refuses only two places of different modes: the inner's is
-// the one it was passed with, and the outer's the other one. An inner passed with both
-// modes is the later entry when the two names are one path, Dir counting last; for two
-// paths, the outer's one mode decides, else the inner's last entry.
+// the one it was passed with, and the outer's the other one. For an inner passed with
+// both modes, when the two names are one path the inner is the entry the runner
+// refuses, the first whose mode differs from an earlier one's, Mounts in order and then
+// Dir; for two paths, the outer's one mode decides, else that same entry.
 //
 // mount_shared_with_run is a place another walled run still going also mounts: one
 // agent could change what the other mounts. A git worktree inside the other run's
@@ -694,20 +705,29 @@ func mountRefused(err error, p passed) error {
 	case ref.Code == codeMountContainsRunnerFiles && len(ref.Names) == 2:
 		mount, path := ref.Names[0], ref.Names[1]
 		how := overlap(mount, path)
-		shown := path
-		if l, ok := p.own.links[path]; ok {
-			shown = l
-		}
+		// A place the run passed with no mode is a mount it no longer knows: the agent
+		// may be able to write it.
+		writable, readOnly, _ := p.modes(mount)
+		readOnly = readOnly && !writable
+		link, isLink := p.own.links[path]
 		switch {
+		case isLink:
+			// The link's place: inside the wall the link leads to a path nothing binds,
+			// so the agent reads nothing through it, and could only point it elsewhere.
+			what := "one of the runner's files"
+			if p.own.records[path] {
+				what = "qory's run records"
+			}
+			text = fmt.Sprintf("%s %s %s, which leads to %s; the agent could point it elsewhere, so the run does not start. Mount a narrower path", p.place(mount), how, link, what)
+			if readOnly {
+				text = fmt.Sprintf("%s %s %s, which leads to %s, so the run does not start. Mount a narrower path", p.place(mount), how, link, what)
+			}
 		case path == p.spec.RunsDir || path == p.stateDir || p.own.records[path]:
-			// A place the run passed with no mode is a mount it no longer knows: the
-			// agent may be able to write it.
-			writable, readOnly, _ := p.modes(mount)
 			what := "change"
-			if readOnly && !writable {
+			if readOnly {
 				what = "read"
 			}
-			text = fmt.Sprintf("%s %s %s, which holds qory's run records; the agent could %s them, so the run does not start. Mount a narrower path", p.place(mount), how, shown, what)
+			text = fmt.Sprintf("%s %s %s, which holds qory's run records; the agent could %s them, so the run does not start. Mount a narrower path", p.place(mount), how, path, what)
 		default:
 			// The key is at stake only for a place that is or contains the key's own file.
 			key := p.runnerDir != "" && path == p.runnerDir
@@ -715,25 +735,25 @@ func mountRefused(err error, p passed) error {
 				at := session.Overlap(mount, runnerdir.Dir(p.runnerDir).Path(runnerdir.SecretFile))
 				key = at == "is" || at == "contains"
 			}
-			text = fmt.Sprintf("%s %s %s, which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path", p.place(mount), how, shown)
+			text = fmt.Sprintf("%s %s %s, which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path", p.place(mount), how, path)
 			if key && runnerdir.Dir(p.runnerDir).HasSecret() {
-				text = fmt.Sprintf("%s %s %s, which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path", p.place(mount), how, shown)
+				text = fmt.Sprintf("%s %s %s, which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path", p.place(mount), how, path)
 			}
 		}
 	case ref.Code == codeMountModeConflict && len(ref.Names) == 2:
 		inner, outer := ref.Names[0], ref.Names[1]
-		inW, inR, inLast := p.modes(inner)
+		inW, inR, inChanged := p.modes(inner)
 		outW, outR, _ := p.modes(outer)
 		var innerWritable bool
 		switch {
 		case inW != inR:
 			innerWritable = inW
 		case inW && inner == outer:
-			innerWritable = inLast
+			innerWritable = inChanged
 		case outW != outR:
 			innerWritable = !outW
 		case inW:
-			innerWritable = inLast
+			innerWritable = inChanged
 		default:
 			return nil
 		}

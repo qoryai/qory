@@ -1261,13 +1261,25 @@ What to know:
   qory run: the mount <host path> contains <path>, which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path
   ```
 
-  For the state directory, or a link on the way to it, it says:
+  For the state directory, it says:
 
   ```
   qory run: the mount <host path> contains <dir>, which holds qory's run records; the agent could change them, so the run does not start. Mount a narrower path
   ```
 
-  For a read-only mount, it says `the agent could read them` instead.
+  For a read-only mount of the state directory, it says `the agent could read them`
+  instead.
+
+  For a link on the way to the state directory or to a file of the configuration
+  directory, it names the link, which leads to them:
+
+  ```
+  qory run: the mount <host path> contains <link>, which leads to qory's run records; the agent could point it elsewhere, so the run does not start. Mount a narrower path
+  qory run: the mount <host path> contains <link>, which leads to one of the runner's files; the agent could point it elsewhere, so the run does not start. Mount a narrower path
+  ```
+
+  For a read-only mount, it leaves out `; the agent could point it elsewhere`: inside the
+  wall the link leads to a path nothing binds.
 
   When the path is the checkout or the working directory, it says `the workspace <path>`
   instead of `the mount <path>`.

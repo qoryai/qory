@@ -82,9 +82,10 @@ func TestUnusedEnvSaysWhy(t *testing.T) {
 // worded with Overlap's relation: a mount that is or contains the runner's directory
 // reads the access key when access-key-secret is there; one that lies inside it, beside
 // the key, could change one of the runner's files, with the key there or not, as could
-// a mount of another of the runner's files, or of a link qory passed as its place, which
-// is named as the link even when the link is the runner's directory; and any other
-// error is left to the rest. The checkout root and the working directory are the
+// a mount of another of the runner's files; a mount of a link qory passed as its place
+// names the link, even when the link is the runner's directory, as leading to one of
+// the runner's files, which a writable mount could point elsewhere; and any other error
+// is left to the rest. The checkout root and the working directory are the
 // workspace.
 func TestMountRefusedSaysHowTheMountStands(t *testing.T) {
 	dir := t.TempDir()
@@ -111,10 +112,20 @@ func TestMountRefusedSaysHowTheMountStands(t *testing.T) {
 		}
 	}
 	// A link's place that shows as the runner's directory itself: the mount holds the
-	// link, not the key, which the agent cannot reach through it.
+	// link, not the key, which the agent cannot reach through it; it could point a link
+	// it can write elsewhere, and does nothing with one it cannot.
 	place := linkPlace(dir)
-	if got, want := mountRefused(refusal(parent, place), passed{runnerDir: dir, spec: &session.Spec{}, own: ownFiles{links: map[string]string{place: dir}}}).Error(), "the mount "+parent+" contains "+dir+", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"; got != want {
-		t.Errorf("a link's place: %q, want %q", got, want)
+	for _, c := range []struct {
+		readOnly bool
+		want     string
+	}{
+		{false, "the mount " + parent + " contains " + dir + ", which leads to one of the runner's files; the agent could point it elsewhere, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
+		{true, "the mount " + parent + " contains " + dir + ", which leads to one of the runner's files, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
+	} {
+		p := passed{runnerDir: dir, spec: &session.Spec{Mounts: []wall.Mount{{Path: parent, ReadOnly: c.readOnly}}}, own: ownFiles{links: map[string]string{place: dir}}}
+		if got := mountRefused(refusal(parent, place), p).Error(); got != c.want {
+			t.Errorf("a link's place, read-only %v: %q, want %q", c.readOnly, got, c.want)
+		}
 	}
 	other := filepath.Join(dir, "wall-files")
 	if got, want := mountRefused(refusal(dir, other), at(filepath.Join(dir, "elsewhere"))).Error(), "the mount "+dir+" contains "+other+", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"; got != want {
@@ -158,7 +169,7 @@ func TestMountRefusedSaysHowTheMountStands(t *testing.T) {
 // directory, of qory's state directory and of a link on the way to them, for a mount and
 // for the workspace: the agent could read the run records through a read-only mount,
 // and change them through a writable one, the workspace, or a mount the run did not
-// pass. The link is named as itself.
+// pass. A link on the way is named as itself, leading to the records.
 func TestMountRefusedNamesTheRunRecords(t *testing.T) {
 	home := t.TempDir()
 	state := filepath.Join(home, ".local", "state", "qory")
@@ -175,13 +186,24 @@ func TestMountRefusedNamesTheRunRecords(t *testing.T) {
 		{filepath.Join(runs, "x"), runs, "the mount " + filepath.Join(runs, "x") + " lies inside " + runs, "change"},
 		{root, state, "the workspace " + root + " overlaps " + state, "change"},
 		{root, runs, "the workspace " + root + " overlaps " + runs, "change"},
-		{filepath.Dir(link), place, "the mount " + filepath.Dir(link) + " contains " + link, "read"},
-		{filepath.Join(home, "elsewhere"), place, "the mount " + filepath.Join(home, "elsewhere") + " overlaps " + link, "change"},
 	} {
 		err := mountRefused(&session.Refusal{Code: "mount_contains_runner_files", Names: []string{c.mount, c.path}}, p)
 		want := c.want + ", which holds qory's run records; the agent could " + c.what + " them, so the run does not start. Mount a narrower path (mount_contains_runner_files)"
 		if err == nil || err.Error() != want {
 			t.Errorf("%s and %s: %v, want %q", c.mount, c.path, err, want)
+		}
+	}
+	// A link on the way leads to the records: a writable mount, the workspace or one the
+	// run did not pass could point it elsewhere, and a read-only one does nothing with it.
+	for _, c := range []struct{ mount, want string }{
+		{filepath.Dir(link), "the mount " + filepath.Dir(link) + " contains " + link + ", which leads to qory's run records, so the run does not start."},
+		{filepath.Join(home, "elsewhere"), "the mount " + filepath.Join(home, "elsewhere") + " overlaps " + link + ", which leads to qory's run records; the agent could point it elsewhere, so the run does not start."},
+		{root, "the workspace " + root + " overlaps " + link + ", which leads to qory's run records; the agent could point it elsewhere, so the run does not start."},
+	} {
+		err := mountRefused(&session.Refusal{Code: "mount_contains_runner_files", Names: []string{c.mount, place}}, p)
+		want := c.want + " Mount a narrower path (mount_contains_runner_files)"
+		if err == nil || err.Error() != want {
+			t.Errorf("%s and the link: %v, want %q", c.mount, err, want)
 		}
 	}
 	// A runs directory inside the workspace, as XDG_STATE_HOME in the checkout makes it.
@@ -194,8 +216,9 @@ func TestMountRefusedNamesTheRunRecords(t *testing.T) {
 
 // TestMountRefusedSaysTheModes is mount_mode_conflict with the modes qory passed: a
 // read-only mount inside a writable one, a writable one inside a read-only one, the
-// workspace, writable, inside a read-only mount, one path passed with both modes, and a
-// mount of one mode inside a path passed with both.
+// workspace, writable, inside a read-only mount, one path passed with both modes, the
+// root the run starts at passed read-only too, and a mount of one mode inside a path
+// passed with both.
 func TestMountRefusedSaysTheModes(t *testing.T) {
 	root, sibling := t.TempDir(), t.TempDir()
 	sub, docs := filepath.Join(root, "vendor"), filepath.Join(sibling, "docs")
@@ -218,6 +241,13 @@ func TestMountRefusedSaysTheModes(t *testing.T) {
 	want := "the mount " + sub + " (writable) lies inside " + sub + ", which is read-only: a part of a mount can't have another mode, so the run does not start. Give both the same mode, or leave " + sub + " out (mount_mode_conflict)"
 	if err := mountRefused(&session.Refusal{Code: "mount_mode_conflict", Names: []string{sub, sub}}, ro); err == nil || err.Error() != want {
 		t.Errorf("the workspace as a read-only mount: %v, want %q", err, want)
+	}
+	// The run started at the root, which the person passed read-only too: the runner
+	// refuses the read-only entry, the first of the other mode.
+	rootRO := passed{root: root, spec: &session.Spec{Dir: root, Mounts: []wall.Mount{{Path: root}, {Path: root, ReadOnly: true}}}}
+	want = "the mount " + root + " (read-only) lies inside " + root + ", which is writable: a part of a mount can't have another mode, so the run does not start. Give both the same mode, or leave " + root + " out (mount_mode_conflict)"
+	if err := mountRefused(&session.Refusal{Code: "mount_mode_conflict", Names: []string{root, root}}, rootRO); err == nil || err.Error() != want {
+		t.Errorf("the root passed read-only too: %v, want %q", err, want)
 	}
 	// A writable mount inside a checkout passed read-only too: the inner's one mode
 	// decides, and the outer is the other one.

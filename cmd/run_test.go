@@ -872,8 +872,8 @@ func TestRunRefusesAMountOfTheRunnersFiles(t *testing.T) {
 // TestRunRefusesAMountOfALinkOnTheWayToTheRecords is a walled run whose state home is
 // a link, and one whose state home lies under a link: a mount of the directory that
 // holds the link is refused before anything starts, since the agent could point it at
-// a directory of its own, and qory names the link as holding the run records, which a
-// writable mount could change and a read-only one read.
+// a directory of its own, and qory names the link as leading to the run records, which
+// a writable mount could point elsewhere.
 func TestRunRefusesAMountOfALinkOnTheWayToTheRecords(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -891,13 +891,13 @@ func TestRunRefusesAMountOfALinkOnTheWayToTheRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range []struct{ state, mount, link, what string }{
-		{home, links, home, "change"},
-		{home, links + ":ro", home, "read"},
-		{filepath.Join(user, ".local", "state"), above, user, "change"},
+		{home, links, home, "; the agent could point it elsewhere"},
+		{home, links + ":ro", home, ""},
+		{filepath.Join(user, ".local", "state"), above, user, "; the agent could point it elsewhere"},
 	} {
 		t.Setenv("XDG_STATE_HOME", c.state)
 		mount, _, _ := strings.Cut(c.mount, ":")
-		want := "the mount " + mount + " contains " + c.link + ", which holds qory's run records; the agent could " + c.what + " them, so the run does not start. Mount a narrower path (mount_contains_runner_files)"
+		want := "the mount " + mount + " contains " + c.link + ", which leads to qory's run records" + c.what + ", so the run does not start. Mount a narrower path (mount_contains_runner_files)"
 		out, err := run(t, "run", "claude", "--mount", c.mount)
 		if err == nil || cmd.ExitCode(err) != 1 || err.Error() != want {
 			t.Errorf("XDG_STATE_HOME=%s, --mount %s: %v (exit %d), want %q\n%s", c.state, c.mount, err, cmd.ExitCode(err), want, out)
@@ -980,7 +980,8 @@ func TestRunRefusesAMountOfWhereAConfigLinkLeads(t *testing.T) {
 // a link into a directory that is itself a link, and a descriptor in runtimes/ the first
 // of two links: a mount of the directory that holds either link on the way is refused
 // before anything starts, as one of where they lead is, since the agent could point the
-// link elsewhere, and qory names the link.
+// link elsewhere, and qory names the link as leading to one of the runner's files, which
+// a read-only mount could not point elsewhere.
 func TestRunRefusesAMountOfALinkOnTheWayToAConfigFile(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -1006,13 +1007,15 @@ func TestRunRefusesAMountOfALinkOnTheWayToAConfigFile(t *testing.T) {
 	if err := os.Symlink(filepath.Join(hop, "goose.yaml"), filepath.Join(configDir, "runtimes", "goose.yaml")); err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range []struct{ mount, path string }{
-		{hop, filepath.Join(hop, "goose.yaml")},
-		{last, filepath.Join(last, "goose.yaml")},
-		{linked, filepath.Join(linked, "dotfiles")},
-		{real, filepath.Join(real, "runner.yaml")},
+	for _, c := range []struct{ mount, path, what string }{
+		{hop, filepath.Join(hop, "goose.yaml"), "leads to one of the runner's files; the agent could point it elsewhere"},
+		{hop + ":ro", filepath.Join(hop, "goose.yaml"), "leads to one of the runner's files"},
+		{last, filepath.Join(last, "goose.yaml"), "holds one of the runner's files; the agent could change it"},
+		{linked, filepath.Join(linked, "dotfiles"), "leads to one of the runner's files; the agent could point it elsewhere"},
+		{real, filepath.Join(real, "runner.yaml"), "holds one of the runner's files; the agent could change it"},
 	} {
-		want := "the mount " + c.mount + " contains " + c.path + ", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"
+		mount, _, _ := strings.Cut(c.mount, ":")
+		want := "the mount " + mount + " contains " + c.path + ", which " + c.what + ", so the run does not start. Mount a narrower path (mount_contains_runner_files)"
 		out, err := run(t, "run", "claude", "--mount", c.mount)
 		if err == nil || cmd.ExitCode(err) != 1 || err.Error() != want {
 			t.Errorf("--mount %s: %v (exit %d), want %q\n%s", c.mount, err, cmd.ExitCode(err), want, out)
@@ -1029,8 +1032,9 @@ func TestRunRefusesAMountOfALinkOnTheWayToAConfigFile(t *testing.T) {
 // TestRunRefusesAMountOfALinkToTheConfigDir is a walled run whose qory configuration
 // directory is a link to one elsewhere: a mount of the directory that holds the link is
 // refused before anything starts, since the agent could point it at a directory of its
-// own, and qory names the link, which does not hold the access key itself; a mount of
-// the directory where it leads is refused as one that holds the key.
+// own, and qory names the link as leading to one of the runner's files, writable or
+// read-only, not as holding the access key; a mount of the directory where it leads is
+// refused as one that holds the key.
 func TestRunRefusesAMountOfALinkToTheConfigDir(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -1057,7 +1061,8 @@ func TestRunRefusesAMountOfALinkToTheConfigDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range []struct{ mount, want string }{
-		{configHome, "the mount " + configHome + " contains " + filepath.Join(physical, "qory") + ", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
+		{configHome, "the mount " + configHome + " contains " + filepath.Join(physical, "qory") + ", which leads to one of the runner's files; the agent could point it elsewhere, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
+		{configHome + ":ro", "the mount " + configHome + " contains " + filepath.Join(physical, "qory") + ", which leads to one of the runner's files, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
 		{elsewhere, "the mount " + elsewhere + " contains " + configDir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
 	} {
 		out, err := run(t, "run", "claude", "--mount", c.mount)
