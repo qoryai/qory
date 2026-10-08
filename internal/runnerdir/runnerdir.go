@@ -1,8 +1,9 @@
 // Package runnerdir is the runner file's directory, everything qory keeps on this
 // machine for its server beside runner.yaml: the access key's secret, the moved-aside
-// secrets, the instance id, the stored-secrets marker, the pending enrolment and the
-// lock files. The directory is the user's configuration directory, $XDG_CONFIG_HOME/qory
-// or ~/.config/qory, mode 0700.
+// secrets, the new and the replaced secret of a key being replaced, the instance id, the
+// stored-secrets marker, the pending enrolment and the lock files. The directory is
+// the user's configuration directory, $XDG_CONFIG_HOME/qory or ~/.config/qory, mode
+// 0700.
 //
 // Every file is created with O_CREAT|O_EXCL|O_NOFOLLOW and an exact mode, and the secret
 // is read only from a regular file the effective user owns that grants nothing to the
@@ -34,6 +35,12 @@ const (
 	SecretFile = "access-key-secret"
 	// OldPrefix starts the name of a secret moved aside, followed by the Unix time.
 	OldPrefix = SecretFile + ".old."
+	// NewSecretFile holds the secret of the key qory access-key enrol --replace makes,
+	// mode 0600, until the server's signed answer puts it in place of access-key-secret.
+	NewSecretFile = SecretFile + ".new"
+	// ReplacedFile is a second name of the secret --replace replaces, made just before
+	// the new one takes its place and removed once the runner file names the new key.
+	ReplacedFile = SecretFile + ".replaced"
 	// MarkerFile is the stored-secrets marker: while it exists, every run needs a wall.
 	MarkerFile = "stored-secrets"
 	// PendingFile records an enrolment that has not been answered yet: the SHA-256 of
@@ -114,24 +121,7 @@ var ErrNoSecret = errors.New("no " + SecretFile)
 // user owns and that grants nothing to the group or to others, in a directory [Dir.Check]
 // passes, holding one secret and at most one line ending after it. The published
 // fixture key is refused. A directory with no such file is [ErrNoSecret].
-func (d Dir) ReadSecret() (*accesskey.Key, error) {
-	path := d.Path(SecretFile)
-	if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
-		return nil, ErrNoSecret
-	}
-	if err := d.Check(); err != nil {
-		return nil, err
-	}
-	b, err := readPrivate(path, maxSecretFile)
-	if err != nil {
-		return nil, err
-	}
-	k, err := ParseSecret(b)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	return k, nil
-}
+func (d Dir) ReadSecret() (*accesskey.Key, error) { return d.readKeyFile(SecretFile) }
 
 // ParseSecret reads an access key secret as a file, a variable or a file descriptor
 // holds it: the secret, and at most one line ending after it. The published fixture key
@@ -235,7 +225,18 @@ func (d Dir) HasSecret() bool {
 // name no existing file has, and returns the new name. A directory with no secret
 // moves nothing and returns "".
 func (d Dir) MoveAside(now time.Time) (string, error) {
-	src := d.Path(SecretFile)
+	return d.moveAside(SecretFile, now)
+}
+
+// MoveNewAside renames access-key-secret.new as [Dir.MoveAside] renames the secret.
+func (d Dir) MoveNewAside(now time.Time) (string, error) {
+	return d.moveAside(NewSecretFile, now)
+}
+
+// moveAside renames the file name to access-key-secret.old.<Unix time>, under a name
+// no existing file has, and returns the new name, or "" when there is no such file.
+func (d Dir) moveAside(name string, now time.Time) (string, error) {
+	src := d.Path(name)
 	if _, err := os.Lstat(src); errors.Is(err, fs.ErrNotExist) {
 		return "", nil
 	}
@@ -375,6 +376,105 @@ func (d Dir) RemovePending() error {
 func (d Dir) SameSecret(k *accesskey.Key) bool {
 	held, err := d.ReadSecret()
 	return err == nil && held.PublicKey() == k.PublicKey()
+}
+
+// readKeyFile reads a secret file of the directory by the rules of [Dir.ReadSecret]. A
+// directory with no such file is [ErrNoSecret].
+func (d Dir) readKeyFile(name string) (*accesskey.Key, error) {
+	path := d.Path(name)
+	if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
+		return nil, ErrNoSecret
+	}
+	if err := d.Check(); err != nil {
+		return nil, err
+	}
+	b, err := readPrivate(path, maxSecretFile)
+	if err != nil {
+		return nil, err
+	}
+	k, err := ParseSecret(b)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return k, nil
+}
+
+// WriteNewSecret writes a new access-key-secret.new, mode 0600, which must not exist.
+func (d Dir) WriteNewSecret(k *accesskey.Key) error {
+	if err := create(d.Path(NewSecretFile), 0o600, []byte(k.Secret()+"\n")); err != nil {
+		return fmt.Errorf("write %s: %w", d.Path(NewSecretFile), err)
+	}
+	return nil
+}
+
+// HasNewSecret reports whether access-key-secret.new exists, as a file or as anything
+// else.
+func (d Dir) HasNewSecret() bool {
+	_, err := os.Lstat(d.Path(NewSecretFile))
+	return err == nil
+}
+
+// ReadNewSecret reads access-key-secret.new by the rules of [Dir.ReadSecret].
+func (d Dir) ReadNewSecret() (*accesskey.Key, error) { return d.readKeyFile(NewSecretFile) }
+
+// SameNewSecret reports whether access-key-secret.new holds the secret of k.
+func (d Dir) SameNewSecret(k *accesskey.Key) bool {
+	held, err := d.ReadNewSecret()
+	return err == nil && held.PublicKey() == k.PublicKey()
+}
+
+// KeepReplaced gives access-key-secret a second name, access-key-secret.replaced, so
+// the secret it holds outlives the rename that puts the new one in its place. One left
+// by a swap that stopped is removed first.
+func (d Dir) KeepReplaced() error {
+	dst := d.Path(ReplacedFile)
+	if err := os.Remove(dst); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if err := os.Link(d.Path(SecretFile), dst); err != nil {
+		return err
+	}
+	return d.sync()
+}
+
+// PutNewSecret renames access-key-secret.new over access-key-secret, in one step.
+func (d Dir) PutNewSecret() error {
+	if err := os.Rename(d.Path(NewSecretFile), d.Path(SecretFile)); err != nil {
+		return err
+	}
+	return d.sync()
+}
+
+// HasReplaced reports whether access-key-secret.replaced exists.
+func (d Dir) HasReplaced() bool {
+	_, err := os.Lstat(d.Path(ReplacedFile))
+	return err == nil
+}
+
+// ReadReplaced reads access-key-secret.replaced by the rules of [Dir.ReadSecret].
+func (d Dir) ReadReplaced() (*accesskey.Key, error) { return d.readKeyFile(ReplacedFile) }
+
+// RemoveReplaced unlinks access-key-secret.replaced and syncs the directory. Its bytes
+// are not overwritten first.
+func (d Dir) RemoveReplaced() error {
+	if err := os.Remove(d.Path(ReplacedFile)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return d.sync()
+}
+
+// sync flushes the directory's entries, so a rename or an unlink in it outlasts a
+// crash.
+func (d Dir) sync() error {
+	f, err := os.Open(string(d))
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("sync %s: %w", d, err)
+	}
+	return nil
 }
 
 // readOnly reports whether err says the directory cannot be written: a read-only file

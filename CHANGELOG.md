@@ -85,7 +85,7 @@ release may change what an existing document does, and states it under Upgrading
   administrator of the server created. It checks the code against the pin the machine has
   before it makes a key, takes the key lock, refuses while a run without a wall is live,
   refuses when `access-key-secret` exists unless it holds the key made for the same code,
-  retried within its 15 minutes, so it never replaces the machine's key, writes the
+  retried within its 15 minutes, and then names `--replace`, writes the
   `stored-secrets` marker, keeps the new secret in `access-key-secret`, mode `0600`,
   prints its fingerprint and posts the enrolment. The server's signed answer writes
   `server.access_key_id`, and `server.url` and `server.apiary_public_key` where the
@@ -105,6 +105,18 @@ release may change what an existing document does, and states it under Upgrading
   refuses a server over http to another host than `localhost`, `127.0.0.1` or `[::1]`
   before it makes a key. It refuses a key or a pin of the runner contract's published
   fixtures.
+- `qory access-key enrol --replace <server> <code>` moves a machine that holds a key to a
+  new one, and the old key stays in use until the new one is active. The new key's
+  secret waits in `access-key-secret.new`, mode `0600`, and `access-key-secret` and
+  `runner.yaml` stay as they are until the server's signed answer, so an enrolment that
+  fails leaves the old key working. Then the new secret takes the old one's place,
+  `runner.yaml` names the new key, and the old secret is removed; enrol ends with `the
+  old key <id> still works on the server until an owner or administrator revokes it on
+  the node's page; revoke it there`. The same command within the code's 15 minutes
+  retries with the new key and finishes a replacement that stopped part way. The
+  enrolment never uses the old key, so a revoked one is replaced too. On a machine
+  without a key, `--replace` enrols as the command does without it; with `--print` it is
+  refused.
 - `--access-key-secret-fd <n>` on `qory run` and `qory run resend` reads the access key's
   secret from that file descriptor, 3 or above, and closes it; it wins over
   `QORY_ACCESS_KEY_SECRET` and the `access-key-secret` file.

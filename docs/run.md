@@ -401,9 +401,9 @@ Before it makes a key, qory checks the code against the pin `runner.yaml` has, s
 of another server is refused. When `runner.yaml` names another `server.url`, enrol
 refuses: enrol with that server, or change `server.url` first.
 
-When `access-key-secret` exists, enrol refuses, so it never replaces this machine's key:
-move it aside yourself first to enrol a new key, or use `--print` for a key kept
-elsewhere. The one exception is a retry: the same command, with the same code, within
+When `access-key-secret` exists, enrol refuses, so it never replaces this machine's key
+unasked: use `--replace`, below, to move the machine to a new key, or `--print` for a
+key kept elsewhere. The one exception is a retry: the same command, with the same code, within
 the 15 minutes, while `access-key-secret` still holds the key made for it, retries with
 that key.
 
@@ -424,6 +424,27 @@ Enrol refuses while `QORY_ACCESS_KEY_ID`, `QORY_ACCESS_KEY_SECRET` or
 `QORY_APIARY_PUBLIC_KEY` is set: the key it keeps in this machine's files would
 contradict the variable. Unset it, or use `--print`. It also refuses while a run without
 a wall is running on this machine: it must end before a key is made.
+
+#### Replace the machine's key
+
+```sh
+qory access-key enrol --replace https://apiary.example qec_…
+```
+
+`--replace` moves a machine that holds a key to a new one, with a new code. The old key
+stays in use until the new one is active. qory makes the new key in
+`access-key-secret.new`, mode `0600`, and enrols it; `access-key-secret` and
+`runner.yaml` stay as they are until the server's signed answer, so an enrolment that
+does not complete leaves the old key working, and the table above says what to do. Then
+the new secret takes the place of `access-key-secret`, `runner.yaml` names the new key,
+and the old secret is removed. qory names the old key: it still works on the server
+until an owner or administrator revokes it on the node's page.
+
+The enrolment uses the code alone, never the old key, so a key the server has revoked
+can be replaced too. The same command within the code's 15 minutes retries with the new
+key, and finishes a replacement that stopped part way. On a machine without a key,
+`--replace` enrols as the command does without it. `--replace` and `--print` do not go
+together.
 
 #### For a CI
 

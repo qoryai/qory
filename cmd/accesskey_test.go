@@ -34,8 +34,11 @@ type enrolServer struct {
 	status int
 	body   []byte
 	// signBy signs the answer, nil for an unsigned one.
-	signBy   *accesskey.Key
-	rotate   bool
+	signBy *accesskey.Key
+	rotate bool
+	// revoked are the public keys of keys the server has revoked: a request that
+	// carries one is answered 401.
+	revoked  map[string]bool
 	requests []accesskey.EnrolmentRequest
 	agents   []string
 }
@@ -55,6 +58,11 @@ func newEnrolServer(t *testing.T) *enrolServer {
 		}
 		s.requests = append(s.requests, req)
 		s.agents = append(s.agents, r.Header.Get("User-Agent"))
+		if s.revoked[req.PublicKey] {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error":"unauthorized"}`))
+			return
+		}
 		body := s.body
 		if body == nil {
 			body = s.answer(true)
@@ -413,7 +421,7 @@ func TestEnrolRetriesWithTheSameKey(t *testing.T) {
 	if heldKey(t).PublicKey().String() != sent[0].PublicKey {
 		t.Error("access-key-secret holds another key")
 	}
-	if _, err := run(t, "access-key", "enrol", srv.URL, srv.code(4, false)); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), keyHere) {
+	if _, err := run(t, "access-key", "enrol", srv.URL, srv.code(4, false)); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), keyHere(srv.URL)) {
 		t.Errorf("another code: %v", err)
 	}
 	if len(srv.sent()) != len(sent) || heldKey(t).PublicKey().String() != sent[0].PublicKey || movedAside(t) != 0 {
@@ -421,9 +429,11 @@ func TestEnrolRetriesWithTheSameKey(t *testing.T) {
 	}
 }
 
-// keyHere is the refusal of an enrolment on a machine that holds a key, after the path
-// of access-key-secret.
-const keyHere = " already holds this machine's access key secret, and enrol does not replace it: move it aside yourself first to enrol a new key, or use --print for a key kept elsewhere"
+// keyHere is the refusal of an enrolment with server on a machine that holds a key,
+// after the path of access-key-secret.
+func keyHere(server string) string {
+	return " already holds this machine's access key secret: to move this machine to a new key, run qory access-key enrol --replace " + server + " <code>; for a key kept elsewhere, use --print"
+}
 
 // TestEnrolNeverReplacesTheKey is a successful enrolment, then the same command again,
 // another code, and the same code once its 15 minutes are over: each is refused before
@@ -461,7 +471,7 @@ func TestEnrolNeverReplacesTheKey(t *testing.T) {
 		c.setup()
 		before := snapshot(t, string(dir))
 		_, err := run(t, "access-key", "enrol", srv.URL, c.code)
-		if cmd.ExitCode(err) != cmd.ExitInput || err.Error() != dir.Path(runnerdir.SecretFile)+keyHere {
+		if cmd.ExitCode(err) != cmd.ExitInput || err.Error() != dir.Path(runnerdir.SecretFile)+keyHere(srv.URL) {
 			t.Errorf("%s: %v", c.name, err)
 		}
 		after := snapshot(t, string(dir))
@@ -554,7 +564,7 @@ func TestEnrolRetriesOnlyWithTheKeyMadeForTheCode(t *testing.T) {
 	mine := heldKey(t)
 	srv.status, srv.body = http.StatusUnauthorized, []byte(`{"error":"unauthorized"}`)
 	out, err := run(t, "access-key", "enrol", srv.URL, code)
-	if cmd.ExitCode(err) != cmd.ExitInput || err.Error() != dir.Path(runnerdir.SecretFile)+keyHere {
+	if cmd.ExitCode(err) != cmd.ExitInput || err.Error() != dir.Path(runnerdir.SecretFile)+keyHere(srv.URL) {
 		t.Errorf("the same code over another key: %v", err)
 	}
 	lacks(t, out, "retrying")
