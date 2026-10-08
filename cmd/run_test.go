@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1549,7 +1550,7 @@ rules:
 // containers, it has none, and the next walled run of the same checkout starts. Once
 // listing them fails, the next run cannot tell whether an earlier one is still going,
 // and is refused before the wall runs anything, in qory's words, without the earlier
-// run's id.
+// run's id, naming the registry entry to delete when no walled run is going.
 func TestRunRefusesWhenTheEngineCannotBeAsked(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -1595,7 +1596,17 @@ esac
 		t.Fatal(err)
 	}
 	_, err = run(t, "run", "claude")
-	want := "Docker could not be asked whether an earlier walled run is still going, so the run does not start (engine_unreachable)"
+	// The runner names the one entry left in its registry under the state directory:
+	// the second run's, whose wall was left too. The first run's went once the engine
+	// said it held none of its containers.
+	walled := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory-runner", "walled")
+	ids := recorded(t, root)
+	slices.Sort(ids)
+	entry := filepath.Join(walled, ids[len(ids)-1])
+	if _, statErr := os.Stat(entry); statErr != nil {
+		t.Fatalf("no registry entry for the second run: %v", statErr)
+	}
+	want := "Docker could not be asked whether an earlier walled run is still going, so the run does not start. If no walled run is going on this machine, delete " + entry + " (engine_unreachable)"
 	if err == nil || err.Error() != want {
 		t.Fatalf("a run beside an earlier one the engine cannot be asked about: %v, want %q", err, want)
 	}
