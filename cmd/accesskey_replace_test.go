@@ -96,7 +96,7 @@ func replaced(t *testing.T, srv *enrolServer, old *accesskey.Key) {
 
 // oldLine is the line a replacement ends with, naming the old key by name.
 func oldLine(name string) string {
-	return "the old key " + name + " still works on the server until an owner or administrator revokes it on the node's page; revoke it there\n"
+	return "revoke the old key " + name + " on the node's page, unless it is revoked already: until then it still works on the server\n"
 }
 
 // TestEnrolReplaceMovesTheMachineToANewKey is --replace on a machine that holds a key:

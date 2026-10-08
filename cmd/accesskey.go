@@ -76,9 +76,9 @@ access-key-secret and ` + config.RunnerFileName + ` as they are, so an enrolment
 old key working. Once the server's signed answer has come, the new secret takes the old
 one's place, ` + config.RunnerFileName + ` names the new key, and the old secret is removed. The old
 key still works on the server until an owner or administrator revokes it on the node's
-page. Run the same command again within the code's 15 minutes to retry, or to finish a
-replacement that stopped. On a machine without a key, --replace enrols as the command
-does without it.
+page, unless it is revoked already. Run the same command again within the code's 15
+minutes to retry, or to finish a replacement that stopped. On a machine without a key,
+--replace enrols as the command does without it.
 
 The key's name is instance.name of ` + config.RunnerFileName + `, else this machine's host name.
 
@@ -433,7 +433,7 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	}
 	fmt.Fprintf(info, "wrote %s to %s\n", written, path)
 	if old != "" {
-		fmt.Fprintf(info, "the old key %s still works on the server until an owner or administrator revokes it on the node's page; revoke it there\n", old)
+		fmt.Fprintf(info, "revoke the old key %s on the node's page, unless it is revoked already: until then it still works on the server\n", old)
 	}
 	return nil
 }

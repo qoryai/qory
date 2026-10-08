@@ -438,13 +438,22 @@ stays in use until the new one is active. qory makes the new key in
 does not complete leaves the old key working, and the table above says what to do. Then
 the new secret takes the place of `access-key-secret`, `runner.yaml` names the new key,
 and the old secret is removed. qory names the old key: it still works on the server
-until an owner or administrator revokes it on the node's page.
+until an owner or administrator revokes it on the node's page, unless it is revoked
+already.
 
 The enrolment uses the code alone, never the old key, so a key the server has revoked
 can be replaced too. The same command within the code's 15 minutes retries with the new
 key, and finishes a replacement that stopped part way. On a machine without a key,
 `--replace` enrols as the command does without it. `--replace` and `--print` do not go
 together.
+
+If a replacement stopped after the new secret took the place of `access-key-secret` but
+before `runner.yaml` named the new key, so runs are refused as `unauthorized`, and it
+was not finished within the code's 15 minutes or its retry was refused, the old key's
+secret is still in `access-key-secret.replaced` beside `runner.yaml`, which still names
+the old key's id: moving it back to `access-key-secret` restores the machine, unless the
+old key was revoked. Stopped anywhere else, the machine holds a key and the id that
+goes with it, the old pair or the new one.
 
 #### For a CI
 

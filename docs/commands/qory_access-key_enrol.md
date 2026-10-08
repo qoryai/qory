@@ -25,9 +25,9 @@ access-key-secret and runner.yaml as they are, so an enrolment that fails leaves
 old key working. Once the server's signed answer has come, the new secret takes the old
 one's place, runner.yaml names the new key, and the old secret is removed. The old
 key still works on the server until an owner or administrator revokes it on the node's
-page. Run the same command again within the code's 15 minutes to retry, or to finish a
-replacement that stopped. On a machine without a key, --replace enrols as the command
-does without it.
+page, unless it is revoked already. Run the same command again within the code's 15
+minutes to retry, or to finish a replacement that stopped. On a machine without a key,
+--replace enrols as the command does without it.
 
 The key's name is instance.name of runner.yaml, else this machine's host name.
 
