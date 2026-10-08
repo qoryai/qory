@@ -913,8 +913,10 @@ func TestRunRefusesAMountOfALinkOnTheWayToTheRecords(t *testing.T) {
 
 // TestRunRefusesAMountOfAnotherModeInside is a walled run with a read-only mount inside
 // the checkout, which the container sees writable, and one with a read-only mount
-// reached through a link inside the checkout, which the agent could repoint: the runner
-// refuses each before anything starts, and qory gives both modes, or names the link.
+// reached through a link inside the checkout that leads out of it, which the agent could
+// repoint: the runner refuses each before anything starts, and qory gives both modes, or
+// names the link. A mount reached through a link that leads back into the checkout is
+// reached through the checkout, and that run starts.
 func TestRunRefusesAMountOfAnotherModeInside(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -948,6 +950,17 @@ func TestRunRefusesAMountOfAnotherModeInside(t *testing.T) {
 		if strings.Contains(string(data), " run ") {
 			t.Errorf("a container was started:\n%s", data)
 		}
+	}
+	if err := os.MkdirAll(filepath.Join(root, "real", "x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "real"), filepath.Join(root, "inlink")); err != nil {
+		t.Fatal(err)
+	}
+	inside := filepath.Join(root, "inlink", "x")
+	out, err := run(t, "run", "claude", "--mount", inside)
+	if cmd.ExitCode(err) != 4 || !strings.Contains(out, "inside the container") {
+		t.Errorf("--mount %s, through a link that leads into the checkout: %v (exit %d)\n%s", inside, err, cmd.ExitCode(err), out)
 	}
 }
 

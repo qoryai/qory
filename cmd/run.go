@@ -689,9 +689,10 @@ func (p passed) modes(path string) (writable, readOnly, changed bool) {
 // Dir; for two paths, the outer's one mode decides, else that same entry.
 //
 // mount_through_link is a place, writable or read-only, reached through a link inside a
-// writable mount or the workspace: the agent could repoint the link. The text names
-// the place, the link and the place that holds it; a place that is the link itself, its
-// absolute, cleaned form equal to the link, is named as a link inside that place.
+// writable mount or the workspace, where its path resolves outside that place: the agent
+// could repoint the link. The text names the place, the link and the place that holds
+// it; a place that is the link itself, its absolute, cleaned form equal to the link, is
+// named as a link inside that place.
 //
 // mount_shared_with_run is a place that is, holds or lies inside one another walled run
 // still going also uses, its mounts or its run directory: one agent could read or
@@ -1011,8 +1012,8 @@ func linkPlace(path string) string {
 
 // The runner's refusals of the places a walled run lists: one that is, contains or lies
 // inside one of the runner's files; one inside another of the other mode; one reached
-// through a link a walled agent can change; and one another walled run still going
-// could change, or that holds one of its places.
+// through a link a walled agent can change that leads out of the place holding it; and
+// one another walled run still going could change, or that holds one of its places.
 const (
 	codeMountContainsRunnerFiles = "mount_contains_runner_files"
 	codeMountModeConflict        = "mount_mode_conflict"
