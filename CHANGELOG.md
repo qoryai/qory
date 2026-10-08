@@ -152,8 +152,8 @@ release may change what an existing document does, and states it under Upgrading
   each. `qory run` passes them to the runner, the fixed ones as fixed and the defaults
   as defaults, and the home, which the runner sets as `QORY_HARNESS_HOME`. They reach
   the agent in the container and outside it alike.
-- qory builds against `github.com/qoryai/runner` at commit `2c54049` of its `next`,
-  `v0.6.1-0.20261007220831-2c54049be6a9`, contract `v1` revision 1 as amended there.
+- qory builds against `github.com/qoryai/runner` at commit `c0a6c39` of its `next`,
+  `v0.6.1-0.20261008074341-c0a6c398e8cc`, contract `v1` revision 1 as amended there.
   `runner.yaml`'s `egress` narrows the `security_policy` of a server's run
   configuration. A server's run configuration may carry variables: they reach a walled
   run's agent, and an unwalled run gets none of them. The runner's `wall.Nest` makes
