@@ -445,7 +445,7 @@ func enrolFailed(dir runnerdir.Dir, err error, key *accesskey.Key, print bool, n
 		text = "the server refused the key" + names + ". Enrolling needs a new code" + discard()
 	case accesskey.CodeKeyLimit:
 		text = "the node already holds two keys: once an owner or administrator has revoked one, the same command, run within the code's 15 minutes, succeeds"
-	case codeRateLimited:
+	case accesskey.CodeRateLimited:
 		const text = "the server refused the attempt: this code was tried too often; run the same command again later, within the code's 15 minutes"
 		return &refusedError{text: text, err: &accesskey.Refusal{Code: ref.Code}}
 	case accesskey.CodeAnswerUnsigned:
@@ -458,10 +458,6 @@ func enrolFailed(dir runnerdir.Dir, err error, key *accesskey.Key, print bool, n
 	}
 	return &refusedError{text: text, err: err}
 }
-
-// codeRateLimited is the server's signed 429 at enrolment: too many attempts with one
-// code.
-const codeRateLimited = "rate_limited"
 
 // yesNo is a flag as a person reads it.
 func yesNo(b bool) string {

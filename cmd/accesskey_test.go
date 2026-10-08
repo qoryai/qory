@@ -608,8 +608,7 @@ func TestEnrolActsOnTheRefusalsCode(t *testing.T) {
 // TestEnrolRateLimitedKeepsTheKey is the server's signed 429, rate_limited: the same
 // command later retries, so the secret and the pending enrolment stay, and the runner
 // file is not changed; with --print the text is the same. An unsigned 429 is an answer
-// that does not verify, as any other. A runner that does not verify a signed 429 reads it
-// as unsigned, and the test is skipped.
+// that does not verify, as any other.
 func TestEnrolRateLimitedKeepsTheKey(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
@@ -625,9 +624,6 @@ func TestEnrolRateLimitedKeepsTheKey(t *testing.T) {
 	}
 	srv.status, srv.body, srv.signBy = http.StatusTooManyRequests, []byte(`{"error":"rate_limited","apiary_public_key":`+srv.keys()+`}`), srv.signer
 	_, err = run(t, "access-key", "enrol", srv.URL, srv.code(1, false))
-	if err != nil && strings.Contains(err.Error(), "(HTTP 429, unsigned)") {
-		t.Skip("needs the runner pin with rate_limited")
-	}
 	const want = "the server refused the attempt: this code was tried too often; run the same command again later, within the code's 15 minutes (rate_limited)"
 	if err == nil || cmd.ExitCode(err) == cmd.ExitInput || err.Error() != want {
 		t.Errorf("a signed 429: %v, want %q", err, want)

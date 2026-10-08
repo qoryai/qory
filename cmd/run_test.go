@@ -912,26 +912,42 @@ func TestRunRefusesAMountOfALinkOnTheWayToTheRecords(t *testing.T) {
 }
 
 // TestRunRefusesAMountOfAnotherModeInside is a walled run with a read-only mount inside
-// the checkout, which the container sees writable: the runner refuses it before
-// anything starts, and qory gives both modes. A runner that binds such a mount starts
-// the run, and the test is skipped.
+// the checkout, which the container sees writable, and one with a read-only mount
+// reached through a link inside the checkout, which the agent could repoint: the runner
+// refuses each before anything starts, and qory gives both modes, or names the link.
 func TestRunRefusesAMountOfAnotherModeInside(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, "claude")
-	docker, _ := fakeDocker(t)
+	docker, log := fakeDocker(t)
 	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
 	vendor := filepath.Join(root, "vendor")
 	if err := os.MkdirAll(vendor, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	out, err := run(t, "run", "claude", "--mount", vendor+":ro")
-	if strings.Contains(out, "inside the container") {
-		t.Skip("needs the runner pin with mount_mode_conflict")
+	elsewhere := tempDir(t)
+	if err := os.MkdirAll(filepath.Join(elsewhere, "lib"), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	want := "the mount " + vendor + " (read-only) lies inside " + root + ", which is writable: a part of a mount can't have another mode, so the run does not start. Give both the same mode, or leave " + vendor + " out (mount_mode_conflict)"
-	if err == nil || cmd.ExitCode(err) != 1 || err.Error() != want {
-		t.Errorf("%v (exit %d), want %q\n%s", err, cmd.ExitCode(err), want, out)
+	link := filepath.Join(root, "third_party")
+	if err := os.Symlink(elsewhere, link); err != nil {
+		t.Fatal(err)
+	}
+	lib := filepath.Join(link, "lib")
+	for _, c := range []struct{ mount, want string }{
+		{vendor, "the mount " + vendor + " (read-only) lies inside " + root + ", which is writable: a part of a mount can't have another mode, so the run does not start. Give both the same mode, or leave " + vendor + " out (mount_mode_conflict)"},
+		{lib, "the mount " + lib + " is reached through the link " + link + " inside the workspace " + root + ", which a walled agent can change: list the link's target itself, so the run does not start (mount_through_link)"},
+	} {
+		out, err := run(t, "run", "claude", "--mount", c.mount+":ro")
+		if err == nil || cmd.ExitCode(err) != 1 || err.Error() != c.want {
+			t.Errorf("--mount %s:ro: %v (exit %d), want %q\n%s", c.mount, err, cmd.ExitCode(err), c.want, out)
+		}
+	}
+	if _, err := os.Stat(log); err == nil {
+		data, _ := os.ReadFile(log)
+		if strings.Contains(string(data), " run ") {
+			t.Errorf("a container was started:\n%s", data)
+		}
 	}
 }
 

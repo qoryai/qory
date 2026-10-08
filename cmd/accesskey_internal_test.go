@@ -136,7 +136,7 @@ func TestEnrolmentKnownAnswers(t *testing.T) {
 			if !tamper {
 				want = map[bool]string{true: accesskey.CodeKeyLimit, false: accesskey.CodeKeyInvalid}[strings.Contains(a.Body, "key-limit")]
 				if status == http.StatusTooManyRequests {
-					want = codeRateLimited
+					want = accesskey.CodeRateLimited
 				}
 			}
 			if ref.Code != want {
