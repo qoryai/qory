@@ -295,12 +295,14 @@ contacted.
 
 ### The access key and the instance
 
-The server knows this machine by its access key, an Ed25519 key. Its secret stays on
-the machine, and the server keeps only its public key. A machine gets its key in one of
-two ways: a key generated on the node's page in the server, set on the machine as the
-`QORY_` variables the page shows, or a key the machine enrols with a code, with
-`qory access-key enrol`. See [Enrol with a code](#enrol-with-a-code). A key is never
-rotated: a new one is enrolled, and the old one revoked.
+The server knows this machine by its access key, an Ed25519 key. A machine gets its key
+in one of two ways: a key generated on the node's page in the server, set on the machine
+as the `QORY_` variables the page shows, or a key the machine enrols with a code, with
+`qory access-key enrol`. See [Enrol with a code](#enrol-with-a-code). The server keeps
+only its public key: a key enrolled with a code is made on the machine, and a key
+generated on the node's page is made in the browser, which shows its secret once, for
+you to put on the machine or in a CI's secret store. A key is never rotated: a new one
+is enrolled or generated, and the old one revoked.
 
 `runner.yaml`'s `server` section holds two values of the key:
 
@@ -340,9 +342,10 @@ that names one is refused.
 key, which servers no longer accept. The two keys are refused, and so is
 `QORY_SERVER_SECRET` when `runner.yaml` has a `server` section. Remove the two keys from
 `runner.yaml` and unset `QORY_SERVER_SECRET` first, since `qory access-key enrol` reads
-the file and refuses them too, then enrol the machine as a node. qory removes
-`QORY_SERVER_SECRET` from its environment with the three variables, server or not, and
-a `wall.env` or `--env` that names it is refused.
+the file and refuses them too, then connect the machine as a node, with
+`qory access-key enrol` or a key generated on the node's page in the server. qory
+removes `QORY_SERVER_SECRET` from its environment with the three variables, server or
+not, and a `wall.env` or `--env` that names it is refused.
 
 Each machine that runs qory is an **instance** of its node. qory names it on every
 request:

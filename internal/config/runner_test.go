@@ -182,7 +182,8 @@ func TestRunnerFileRefusesTheIDAndThePinTwice(t *testing.T) {
 
 // TestRunnerFileRefusesTheWorkspaceSecretVariable is QORY_SERVER_SECRET, which held a
 // workspace access key's secret: with a server section it is refused, the variable named
-// and its value never quoted, and the message says to enrol the machine as a node.
+// and its value never quoted, and the message says to connect the machine as a node,
+// with qory access-key enrol or a key generated on the node's page in the server.
 func TestRunnerFileRefusesTheWorkspaceSecretVariable(t *testing.T) {
 	hermetic(t)
 	runnerFile(t, "server:\n  url: https://qory.example\n")
