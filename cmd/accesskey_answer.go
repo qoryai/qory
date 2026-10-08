@@ -60,8 +60,8 @@ type answerRecorder struct {
 }
 
 // RoundTrip sends req over the base transport and records the answer: its status, its
-// headers and its body, at most one byte more than the enrolment reads, which it then
-// hands on unchanged.
+// headers and its body, up to as much as the enrolment reads (MaxAnswer+1 bytes), which
+// it then hands on unchanged.
 func (a *answerRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
 	base := a.base
 	if base == nil {
@@ -133,7 +133,7 @@ func answerKept(dir runnerdir.Dir, server, code string) (*accesskey.Key, *access
 	}
 	path := dir.Path(runnerdir.AnswerFile)
 	refused := func(err error) error {
-		return fmt.Errorf("%s holds no answer of the server that verifies (%v), so the enrolment cannot be finished from it; nothing was changed: see https://github.com/qoryai/qory/blob/main/docs/run.md#replace-the-machines-key", path, err)
+		return fmt.Errorf("%s holds no answer of the server that verifies (%v), so the enrolment cannot be finished from it; nothing was changed: see https://github.com/qoryai/qory/blob/main/docs/run.md#when-enrolment-answer-is-refused", path, err)
 	}
 	if err != nil {
 		return nil, nil, refused(err)

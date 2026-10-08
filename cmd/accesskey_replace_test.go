@@ -543,7 +543,7 @@ func TestEnrolRefusesATamperedAnswer(t *testing.T) {
 	staged := heldSecret(runnerdir.NewSecretFile)
 	for _, args := range [][]string{{"--replace", srv.URL, code}, {srv.URL, code}} {
 		_, err := run(t, append([]string{"access-key", "enrol"}, args...)...)
-		if err == nil || !strings.HasPrefix(err.Error(), path+" holds no answer of the server that verifies (") || !strings.HasSuffix(err.Error(), "), so the enrolment cannot be finished from it; nothing was changed: see https://github.com/qoryai/qory/blob/main/docs/run.md#replace-the-machines-key") {
+		if err == nil || !strings.HasPrefix(err.Error(), path+" holds no answer of the server that verifies (") || !strings.HasSuffix(err.Error(), "), so the enrolment cannot be finished from it; nothing was changed: see https://github.com/qoryai/qory/blob/main/docs/run.md#when-enrolment-answer-is-refused") {
 			t.Errorf("%v: %v", args, err)
 		}
 		oldStays(t, "a tampered answer", old, file)

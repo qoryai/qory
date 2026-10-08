@@ -463,6 +463,29 @@ still names the old key's id: move it back to `access-key-secret` to restore the
 machine, unless the old key was revoked, and revoke the new key on the node's page,
 since it is active on the server.
 
+#### When `enrolment-answer` is refused
+
+`enrolment-answer` holds no secret: the enrolment request, with the new key's public
+key, and the server's signed answer to it. qory refuses one that does not verify for the
+command's server, code and key, and one that is not an answer at all stops every enrol
+without `--print`. Removing it is safe: it loses no secret, only the way to finish the
+enrolment without the server, which refuses the code it used. Once it is removed, what
+to do depends on what the directory holds:
+
+- `access-key-secret.new` is still there: the server enrolled the new key, and nothing
+  was put in place, so the machine still holds its old key, if it had one. Revoke the
+  new key, the one enrol named in `enrolled as …`, on the node's page, then enrol with a
+  new code, with `--replace` when the machine holds a key; enrol moves the unused new key
+  aside.
+- `access-key-secret.new` is gone, and `runner.yaml` does not name the new key: the new
+  key is in `access-key-secret`, beside another key's id or none. Revoke the new key on
+  the node's page. After a replacement, move `access-key-secret.replaced` back as the
+  paragraph above says; otherwise enrol again with a new code and `--replace`.
+- `runner.yaml` names the new key: the enrolment is done, and nothing needs running.
+  After a replacement, revoke the old key on the node's page, unless it is revoked
+  already, and delete `access-key-secret.replaced` if it is still there: it holds the
+  old key's secret.
+
 #### For a CI
 
 With `--print`, enrol writes no key and no setting on this machine. It prints
