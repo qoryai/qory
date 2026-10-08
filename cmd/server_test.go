@@ -223,8 +223,9 @@ func TestRunTakesTheSecretFromTheEnvironment(t *testing.T) {
 
 // TestRunSaysWhatARefusalMeans is each refusal of the server and of the runner at the
 // start, said with what to do, its code and exit status 1, and nothing run: an access
-// key the server does not know, an instance beyond the node's limit, an answer that
-// does not verify under the pin, no pin, and a run the server closes.
+// key the server does not know, from access-key-secret, which enrol --replace moves
+// from, or from QORY_ACCESS_KEY_SECRET, an instance beyond the node's limit, an answer
+// that does not verify under the pin, no pin, and a run the server closes.
 func TestRunSaysWhatARefusalMeans(t *testing.T) {
 	root, srv := serverRun(t, "", "")
 	refusal := func(name string, want ...string) {
@@ -241,8 +242,11 @@ func TestRunSaysWhatARefusalMeans(t *testing.T) {
 		}
 	}
 	writeSecret(t, newKey(t))
-	refusal("unknown", "the server refused a request signed with the access key ", ": it does not know the key, has revoked it, or this machine's clock is more than five minutes off; check the clock, else enrol a new key with qory access-key enrol (", "unauthorized (status 401)")
+	refusal("unknown", "the server refused a request signed with the access key ", ": it does not know the key, has revoked it, or this machine's clock is more than five minutes off; check the clock, else move this machine to a new key: qory access-key enrol --replace "+srv.URL+" <code> (", "unauthorized (status 401)")
 	writeSecret(t, srv.key)
+	t.Setenv("QORY_ACCESS_KEY_SECRET", newKey(t).Secret())
+	refusal("unknown, from the environment", "the server refused a request signed with the access key ", ": it does not know the key, has revoked it, or this machine's clock is more than five minutes off; check the clock, else enrol a new key with qory access-key enrol (", "unauthorized (status 401)")
+	os.Unsetenv("QORY_ACCESS_KEY_SECRET")
 
 	srv.full = true
 	refusal("full", "the node's live instances have reached its limit, so the instance i_", "does not start: wait for a run of another instance to end, or have an owner or administrator clear that instance (", "instance_limit (status 409)")
@@ -254,8 +258,8 @@ func TestRunSaysWhatARefusalMeans(t *testing.T) {
 
 	writeFile(t, filepath.Join(string(configDir()), "runner.yaml"), "server:\n  url: "+srv.URL+"\n  access_key_id: "+testAccessKey+"\n")
 	refusal("no pin", "the server has no pinned apiary_public_key, so no answer of it could be verified: qory access-key enrol writes it, or set server.apiary_public_key in runner.yaml or QORY_APIARY_PUBLIC_KEY (", "apiary_public_key_missing")
-	if srv.refused != 1 {
-		t.Errorf("the server refused %d requests, want the unknown key's one", srv.refused)
+	if srv.refused != 2 {
+		t.Errorf("the server refused %d requests, want the unknown keys' two", srv.refused)
 	}
 }
 

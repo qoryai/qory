@@ -107,11 +107,12 @@ func readSecretFD(n int) (*accesskey.Key, error) {
 }
 
 // serverIdentity is what a request to the server is signed and named with: the access
-// key, the instance id and the instance's display name.
+// key, the instance id and the instance's display name, and the server's URL.
 type serverIdentity struct {
 	key          *accessKey
 	instanceID   string
 	instanceName string
+	server       string
 }
 
 // identify reads what a command that talks to the runner file's server signs with: the
@@ -131,7 +132,7 @@ func identify(r *config.Runner, report io.Writer, verb string, fd *accesskey.Key
 	if key == nil {
 		return nil, input(fmt.Errorf("no access key secret for the server %s: qory access-key enrol makes one, or set %s", r.Server.URL, accesskey.EnvSecret))
 	}
-	id := &serverIdentity{key: key, instanceName: r.InstanceNameOrDefault()}
+	id := &serverIdentity{key: key, instanceName: r.InstanceNameOrDefault(), server: r.Server.URL}
 	instance, kept, err := dir.InstanceID(runnerdir.MachineID())
 	if err != nil {
 		return nil, fmt.Errorf("the instance id: %w", err)
@@ -177,6 +178,14 @@ func explain(err error, id *serverIdentity) error {
 		text = fmt.Sprintf("the server has no pinned apiary_public_key, so no answer of it could be verified: qory access-key enrol writes it, or set server.apiary_public_key in %s or %s", config.RunnerFileName, accesskey.EnvPin)
 	case accesskey.CodeUnauthorized:
 		text = fmt.Sprintf("the server refused a request signed with the access key %s: it does not know the key, has revoked it, or this machine's clock is more than five minutes off; check the clock, else enrol a new key with qory access-key enrol", fingerprint)
+		// A key of this machine's access-key-secret is one enrol --replace moves from.
+		if id != nil && id.key.source == fromFile {
+			server := id.server
+			if server == "" {
+				server = "<server>"
+			}
+			text = fmt.Sprintf("the server refused a request signed with the access key %s: it does not know the key, has revoked it, or this machine's clock is more than five minutes off; check the clock, else move this machine to a new key: qory access-key enrol --replace %s <code>", fingerprint, server)
+		}
 	case accesskey.CodeAnswerUnsigned:
 		text = "an answer of the server does not verify under the pinned apiary_public_key, so the run does not start: check server.url and the pin"
 	case accesskey.CodeInstanceLimit:
