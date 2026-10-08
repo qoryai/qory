@@ -265,7 +265,7 @@ func TestMountRefusedSaysTheModes(t *testing.T) {
 // the workspace, each way the paths stand: a git worktree, whose .git is a file, is
 // told where to make one; a checkout of its own, whose .git is a directory, is not. A
 // refusal of this run's own records names them, each way they stand to the other run's
-// path.
+// path. Paths Overlap does not relate overlap.
 func TestMountRefusedNamesTheRunStillGoing(t *testing.T) {
 	const other = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f"
 	checkout := t.TempDir()
@@ -280,7 +280,7 @@ func TestMountRefusedNamesTheRunStillGoing(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(worktree, ".git"), []byte("gitdir: "+filepath.Join(checkout, ".git", "worktrees", "wt-feature")+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	tail := ", which the run " + other + ", still going on this machine, also mounts: one agent could change what the other mounts, so the run does not start. Wait for " + other + " to end, or work in a checkout of its own"
+	tail := ", which the run " + other + ", still going on this machine, also uses: one agent could read or change what the other uses, so the run does not start. Wait for " + other + " to end, or work in a checkout of its own"
 	hint := "; make the worktree beside the checkout, not inside it"
 	for _, c := range []struct {
 		root, path, otherPath, want string
@@ -291,6 +291,8 @@ func TestMountRefusedNamesTheRunStillGoing(t *testing.T) {
 		{"/srv/app", plain, checkout, "the mount " + plain + " lies inside " + checkout + tail},
 		{checkout, checkout, plain, "the workspace " + checkout + " contains " + plain + tail},
 		{"/srv/app", checkout, plain, "the mount " + checkout + " contains " + plain + tail},
+		// Paths Overlap no longer relates.
+		{"/srv/app", plain, "/elsewhere/app", "the mount " + plain + " overlaps /elsewhere/app" + tail},
 	} {
 		p := passed{root: c.root, spec: &session.Spec{Mounts: []wall.Mount{{Path: c.root}, {Path: c.path}}, Dir: c.root}}
 		err := mountRefused(&session.Refusal{Code: "mount_shared_with_run", Names: []string{c.path, other, c.otherPath}}, p)
@@ -309,8 +311,12 @@ func TestMountRefusedNamesTheRunStillGoing(t *testing.T) {
 		{filepath.Dir(runs), "lie inside"},
 		{runs, "is"},
 		{filepath.Join(runs, "x"), "contain"},
+		{"/elsewhere/app", "overlap"},
 	} {
-		want := "this run's records " + runs + " " + c.how + " " + c.otherPath + ", which the run " + other + ", still going on this machine, can write: its agent could change them, so the run does not start. Wait for " + other + " to end, or keep qory's state directory out of its mounts (mount_shared_with_run)"
+		if c.how == "overlap" && session.Overlap(runs, c.otherPath) != "" {
+			t.Fatalf("Overlap relates %s and %s", runs, c.otherPath)
+		}
+		want := "this run's records " + runs + " " + c.how + " " + c.otherPath + ", which the run " + other + ", still going on this machine, also uses: its agent could read or change them, so the run does not start. Wait for " + other + " to end, or keep qory's state directory out of its mounts (mount_shared_with_run)"
 		if err := mountRefused(&session.Refusal{Code: "mount_shared_with_run", Names: []string{runs, other, c.otherPath}}, p); err == nil || err.Error() != want {
 			t.Errorf("the runs directory %s %s: %v, want %q", c.how, c.otherPath, err, want)
 		}
