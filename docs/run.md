@@ -23,6 +23,11 @@ The runtime is the one the harness is composed for. When it is composed for seve
 first argument selects one. Arguments after `--` go to the runtime, after the launch
 template's own.
 
+qory computes the home itself, as compose does, and refuses a run whose harness report
+names another: run `qory harness compose` again. The report fixes no variable and adds no
+mount. Behind a wall, `harness.home` comes from your own `qory.yaml`: a checkout's
+`qory.yaml` that moves the home refuses a walled run.
+
 The exit status is the runtime's.
 
 ### At a terminal, or on pipes
@@ -240,19 +245,22 @@ every run on the machine.
 Several sources may set a variable of the agent's process. For each name, the run takes
 the value of the highest source that sets it:
 
-1. The values qory and the runtime fix: the runner's own names, `QORY_HARNESS_HOME`, the
-   variables of the runtime's own launch template, such as Codex's `CODEX_HOME`, and the
-   harness's fixed variables. No other source overrides them, `env` in `qory.yaml`, a
-   settings fragment's and a module's export included. The `env` of
-   `harness.launch.<runtime>` replaces the template's variables, and its values are
-   defaults.
+1. The values qory and the runtime fix: the runner's own names, `QORY_HARNESS_HOME`, and
+   the variables of the runtime's own launch template, such as Codex's `CODEX_HOME`. No
+   other source overrides them, `env` in `qory.yaml`, a settings fragment's and a
+   module's export included. The `env` of `harness.launch.<runtime>` replaces the
+   template's variables, and its values are defaults.
 2. The server's run configuration. See [The server](#the-server).
 3. `--env`, the run's own.
 4. `wall.env`, the machine's.
 5. The harness's defaults: `env` in `qory.yaml`, the `env` of
-   `harness.launch.<runtime>`, and the `env` a settings fragment sets.
+   `harness.launch.<runtime>`, the `env` a settings fragment sets, and what the modules
+   export.
 6. The shell `qory run` starts in. A walled run takes none of it but the names
    `wall.env` and `--env` list.
+
+The runner's deny list, names such as `PATH` and `DOCKER_HOST`, leaves out a value of
+sources 2 to 5, a module's export included.
 
 `--env` and `wall.env` name variables of `qory run`'s environment. `--env` needs no
 wall; `--image`, `--mount` and the limits do. A run without a wall gets none of the

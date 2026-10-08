@@ -582,9 +582,9 @@ func TestLaunchPrintsTheRegisteredNames(t *testing.T) {
 
 // TestLaunchCarriesTheHarnessEnv is codex composed on a module exporting CORE_SCRIPTS and
 // a qory.yaml setting SERVICE_TOKEN over a module export of the same name: the launch line
-// and --json carry QORY_HARNESS_HOME, then the fixed CODEX_HOME and CORE_SCRIPTS, then the
-// default SERVICE_TOKEN, config.toml holds none of them, and the report records each with
-// where it comes from.
+// and --json carry QORY_HARNESS_HOME, then the template's CODEX_HOME, fixed, then the
+// defaults, the export CORE_SCRIPTS and SERVICE_TOKEN, config.toml holds none of them, and
+// the report records each with where it comes from, a default.
 func TestLaunchCarriesTheHarnessEnv(t *testing.T) {
 	root := newCheckout(t)
 	writeFile(t, filepath.Join(root, "modules", "core", "qory-module.yaml"), "apiVersion: qory.dev/v1alpha1\nname: core\nenv:\n  CORE_SCRIPTS: scripts\n  SERVICE_TOKEN: .\n")
@@ -626,7 +626,7 @@ func TestLaunchCarriesTheHarnessEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantVars := []report.Var{
-		{Name: "CORE_SCRIPTS", Value: "$QORY_HARNESS_HOME/modules/core/scripts", From: "module core", Fixed: true},
+		{Name: "CORE_SCRIPTS", Value: "$QORY_HARNESS_HOME/modules/core/scripts", From: "module core"},
 		{Name: "SERVICE_TOKEN", Value: "example-token", From: "configuration"},
 	}
 	if !reflect.DeepEqual(rep.LaunchEnv["codex"], wantVars) {
@@ -642,7 +642,7 @@ func TestLaunchCarriesTheHarnessEnv(t *testing.T) {
 			rows[f[0]] = strings.Join(f[1:], " ")
 		}
 	}
-	if rows["CORE_SCRIPTS"] != "$QORY_HARNESS_HOME/modules/core/scripts fixed, module core" || rows["SERVICE_TOKEN"] != "example-token default, configuration" {
+	if rows["CORE_SCRIPTS"] != "$QORY_HARNESS_HOME/modules/core/scripts default, module core" || rows["SERVICE_TOKEN"] != "example-token default, configuration" {
 		t.Errorf("inspect's env rows:\n%s", out)
 	}
 }

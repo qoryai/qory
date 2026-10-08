@@ -351,20 +351,18 @@ type Var struct {
 	// From is where the value comes from: "module <name>" for a variable the module's
 	// manifest exports, "module <name>, settings/<runtime>/<file>" for one a settings
 	// fragment of the module sets, and "configuration" for the configuration's env.
+	// Every one of them is a default, a value an author wrote: a module's export too.
 	From string
-	// Fixed says the value is qory's own computation, a path a module's export names in
-	// the home. Every other value is one an author wrote, a default.
-	Fixed bool
 }
 
 // LaunchEnv is the variables the harness sets when the runtime's program starts, sorted
 // by name. They layer the way the environment always has: the variables the runtime's
 // settings fragments set under the key path in file, then what the modules export over
 // them, then the configuration's env over both. A runtime whose settings have no place for
-// variables passes file as "". Each variable is then fixed or a default by where its value
-// came from: a module's export is fixed, a fragment's or the configuration's value is a
-// default. QORY_HARNESS_HOME is qory's own and never one of them. A fragment's value that
-// is not a string, a number or a boolean is an error, since a variable holds text.
+// variables passes file as "". Every variable is a default, a module's export included:
+// only the runtime's own launch template and QORY_HARNESS_HOME are fixed, and neither is
+// one of them. A fragment's value that is not a string, a number or a boolean is an
+// error, since a variable holds text.
 func (r *Result) LaunchEnv(runtime, file string, path ...string) ([]Var, error) {
 	vars := map[string]Var{}
 	if file != "" {
@@ -390,7 +388,7 @@ func (r *Result) LaunchEnv(runtime, file string, path ...string) ([]Var, error) 
 	for name, value := range r.Env {
 		v := Var{Name: name, Value: value, From: "configuration"}
 		if module, ok := r.Exported[name]; ok {
-			v.From, v.Fixed = "module "+module, true
+			v.From = "module " + module
 		}
 		vars[name] = v
 	}

@@ -132,26 +132,27 @@ release may change what an existing document does, and states it under Upgrading
   `shell_environment_policy.set`. `qory harness launch` sets every variable through
   `env`, and `--json` lists them all under `env`:
   - `QORY_HARNESS_HOME`, the home, first.
-  - Then the fixed variables, qory's own: the launch template's, and what the modules
-    export.
+  - Then the fixed variables, qory's own: the launch template's, and nothing else.
   - Then the defaults, what an author wrote: `env` in `qory.yaml`, the `env` of
-    `harness.launch.<runtime>`, and the `env` a settings fragment sets, Claude Code's
-    `settings.json` `env` or Codex's `shell_environment_policy.set`.
+    `harness.launch.<runtime>`, the `env` a settings fragment sets, Claude Code's
+    `settings.json` `env` or Codex's `shell_environment_policy.set`, and what the modules
+    export.
 
   The variables layer: a fragment's, the modules' exports over them, `qory.yaml` over
-  both. A variable `qory.yaml` sets over a module's export is a default. Every
-  runtime with a launch template gets them, Gemini CLI, OpenCode, Cursor, Copilot and Amp
-  too; `goose` and `any` have no launch and get none. Codex passes its environment to
-  every command it runs. Codex 0.76.0 or later filters no name by default; an older
-  Codex drops the names that contain `KEY`, `SECRET` or `TOKEN`, unless a settings
-  fragment sets `ignore_default_excludes = true`. The report records them per runtime
-  under `launch_env`, each with its value, where it comes from and whether it is fixed,
-  and `qory harness inspect` lists them with fixed or default and their source.
-  `qory harness compose --check` compares them with the report's, so a changed export,
-  `qory.yaml` `env` or fragment variable is stale, one row `launch_env/<runtime>/<NAME>`
-  each. `qory run` passes them to the runner, the fixed ones as fixed and the defaults
-  as defaults, and the home, which the runner sets as `QORY_HARNESS_HOME`. They reach
-  the agent in the container and outside it alike.
+  both. Every runtime with a launch template gets them, Gemini CLI, OpenCode, Cursor,
+  Copilot and Amp too; `goose` and `any` have no launch and get none. Codex passes its
+  environment to every command it runs. Codex 0.76.0 or later filters no name by default;
+  an older Codex drops the names that contain `KEY`, `SECRET` or `TOKEN`, unless a
+  settings fragment sets `ignore_default_excludes = true`. The report records them per
+  runtime under `launch_env`, each with its value and where it comes from, and `fixed`
+  false, since every one is a default; `qory harness inspect` lists them as defaults with
+  their source. `qory harness compose --check` compares them with the report's, so a
+  changed export, `qory.yaml` `env` or fragment variable is stale, one row
+  `launch_env/<runtime>/<NAME>` each. `qory run` passes them to the runner as defaults,
+  the template's own variables as fixed, and the home, which the runner sets as
+  `QORY_HARNESS_HOME`. A module's export is a default like the others: the server's
+  value, `--env` and `wall.env` win over it, and the deny list leaves out one whose name
+  it holds. They reach the agent in the container and outside it alike.
 - qory builds against `github.com/qoryai/runner` at commit `c0a6c39` of its `next`,
   `v0.6.1-0.20261008074341-c0a6c398e8cc`, contract `v1` revision 1 as amended there.
   `runner.yaml`'s `egress` narrows the `security_policy` of a server's run
@@ -246,6 +247,19 @@ release may change what an existing document does, and states it under Upgrading
   credential. A server's run configuration may carry a
   `security_policy`, which the node's policy, `runner.yaml`'s `egress` and `--policy`,
   narrows, and connections and variables.
+- `qory run` computes the home itself, as compose does, and takes from the harness report
+  no path it mounts and no fixed variable. A report that names another home is refused
+  before anything starts: `the harness report <report> names the home <home>, and this
+  checkout's home is <home>; a run uses only the home qory computes, so the run does not
+  start. Run qory harness compose again`. With `--home` naming a composed home, the
+  checkout the report beside it names has to be the one that home is composed for, else
+  `the harness report <report> names the checkout <checkout>, and <home> is not that
+  checkout's home; a run uses only a checkout's own home, so the run does not start. Run
+  qory harness compose again`. Behind a wall, `harness.home` comes from your own
+  `qory.yaml` alone: a checkout's `qory.yaml` that moves the home is refused, `the
+  checkout's qory.yaml sets harness.home, and a walled run takes the home from your own
+  qory.yaml alone, so the run does not start. Set harness.home in <your qory.yaml>, or
+  remove it from the checkout's qory.yaml`.
 
 ## [0.12.1] - 2026-09-30
 

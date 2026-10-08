@@ -118,7 +118,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if err != nil {
 				return err
 			}
-			name, launch, err := resolveLaunch(rep, conf, runtime)
+			if err := ownHome(at, rep); err != nil {
+				return err
+			}
+			name, launch, err := resolveLaunch(rep, conf, runtime, at.home)
 			if err != nil {
 				return err
 			}
@@ -233,8 +236,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if pol != nil {
 				selected = pol.Image
 			}
-			if err := enclose(&spec, conf.Runner, o, selected, server != nil && !local, exe, at.root, rep.Home); err != nil {
+			if err := enclose(&spec, conf.Runner, o, selected, server != nil && !local, exe, at.root, at.home); err != nil {
 				return err
+			}
+			if spec.Wall != nil && h.home == "" {
+				if err := userHome(at, conf); err != nil {
+					return err
+				}
 			}
 			if policyFile != "" {
 				for _, m := range spec.Mounts {
@@ -477,7 +485,8 @@ const wallOff = "none"
 // the forwarder is the helper's path inside the container. The launch's variables, its
 // fixed ones, its defaults and its home, go to the runner behind a wall or not: the
 // checkout, the composed home, which is all a launch template's paths point into, and
-// the mounts keep their paths inside the container.
+// the mounts keep their paths inside the container. home is the one qory computes for
+// the checkout, see [ownHome], never one a report names.
 //
 // The images wall.images defines go to the runner, which reads the default, --image or
 // wall.image, as the name of one of them first and as a reference otherwise, and
@@ -1332,10 +1341,77 @@ func newForward() *cobra.Command {
 	}
 }
 
+// ownHome refuses a run whose report names a home other than the one qory computes for
+// the checkout: the home is a mount of a walled run, and the report can be one a
+// repository committed or a walled agent wrote, so it supplies no path the run mounts.
+// The home in at is [placesFor]'s, or --home's when that names a composed home; then the
+// checkout comes from the report beside it, and has to be the one the home is composed
+// for: a home inside it is its .qory/harness, and one outside is named by its
+// [checkout.Key]. Two paths to one directory are one home.
+func ownHome(at places, rep report.Report) error {
+	if !composedFor(at.root, at.home) {
+		return input(fmt.Errorf("the harness report %s names the checkout %s, and %s is not that checkout's home; a run uses only a checkout's own home, so the run does not start. Run qory harness compose again", ui.Short(at.report, at.root), at.root, at.home))
+	}
+	if !samePath(rep.Home, at.home) {
+		return input(fmt.Errorf("the harness report %s names the home %s, and this checkout's home is %s; a run uses only the home qory computes, so the run does not start. Run qory harness compose again", ui.Short(at.report, at.root), rep.Home, at.home))
+	}
+	return nil
+}
+
+// composedFor reports whether home is where a compose puts the home of the checkout at
+// root: its .qory/harness inside it, or a directory named by its [checkout.Key] outside.
+func composedFor(root, home string) bool {
+	if within(root, home) {
+		return home == filepath.Join(root, config.DefaultHome)
+	}
+	if real, err := filepath.EvalSymlinks(home); err == nil {
+		home = real
+	}
+	return filepath.Base(home) == checkout.Key(root)
+}
+
+// samePath reports whether two absolute paths name one place: the same path, or the
+// same once their links are resolved.
+func samePath(a, b string) bool {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	ra, errA := filepath.EvalSymlinks(a)
+	rb, errB := filepath.EvalSymlinks(b)
+	return errA == nil && errB == nil && ra == rb
+}
+
+// userHome refuses a walled run whose home the checkout's own qory.yaml moves: behind a
+// wall the home is a mount, so harness.home comes from the user's files alone, the one in
+// the configuration directory and those of the ancestor directories the user owns. A
+// value in the checkout's file that leaves the home where the user's files put it is
+// harmless and passes.
+func userHome(at places, conf config.Config) error {
+	if filepath.Dir(conf.Origin("harness.home")) != at.root {
+		return nil
+	}
+	own, err := config.Load(at.root, false)
+	if err != nil {
+		return input(err)
+	}
+	mine := conf
+	mine.Home = own.Home
+	if want, err := placesFor(at.root, mine, homeOptions{}); err == nil && samePath(want.home, at.home) {
+		return nil
+	}
+	file := filepath.Base(conf.Origin("harness.home"))
+	yours, _ := config.FileIn(config.UserDir())
+	if yours == "" {
+		yours = filepath.Join(config.UserDir(), config.Names[0])
+	}
+	return input(fmt.Errorf("the checkout's %s sets harness.home, and a walled run takes the home from your own %s alone, so the run does not start. Set harness.home in %s, or remove it from the checkout's %s", file, config.FileName, ui.Short(yours, ""), file))
+}
+
 // resolveLaunch is what qory harness launch and qory run share: the runtime, named or
 // the one the harness is composed for, and its launch spec from the runtime's template
-// with harness.launch over it, resolved against the home.
-func resolveLaunch(rep report.Report, conf config.Config, runtime string) (string, render.Launch, error) {
+// with harness.launch over it, resolved against home. The report supplies the runtimes
+// composed and the harness's variables, each a default.
+func resolveLaunch(rep report.Report, conf config.Config, runtime, home string) (string, render.Launch, error) {
 	name := runtime
 	if name == "" {
 		if len(rep.Target.Runtimes) != 1 {
@@ -1350,7 +1426,7 @@ func resolveLaunch(rep report.Report, conf config.Config, runtime string) (strin
 	if err != nil {
 		return "", render.Launch{}, input(err)
 	}
-	launch, err := render.LaunchFor(rt, rep.Home, launchOverride(conf.Launch, name), report.ComposeVars(rep.LaunchEnv[name]))
+	launch, err := render.LaunchFor(rt, home, launchOverride(conf.Launch, name), report.ComposeVars(rep.LaunchEnv[name]))
 	if err != nil {
 		return "", render.Launch{}, input(err)
 	}

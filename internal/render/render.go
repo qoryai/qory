@@ -232,11 +232,12 @@ type Launch struct {
 	// HarnessHome is the home, which the program gets as QORY_HARNESS_HOME.
 	HarnessHome string
 	// Fixed are the variables whose values are qory's own computations, NAME=value sorted
-	// by name: the runtime's own template's, and what the modules export.
+	// by name: the runtime's own template's, and nothing else.
 	Fixed []string
 	// Defaults are the variables whose values an author wrote, NAME=value sorted by name:
-	// the configuration's env, the env of harness.launch, and what a settings fragment
-	// sets. A placeholder in one is replaced and leaves it a default.
+	// the configuration's env, the env of harness.launch, what a settings fragment sets,
+	// and what the modules export. A placeholder in one is replaced and leaves it a
+	// default.
 	Defaults []string
 }
 
@@ -253,7 +254,8 @@ func (l Launch) Env() []string {
 // variables, harness, beside the template's. The runtime's own template variables are
 // fixed, and a harness variable of the same name does not replace one. When the
 // override's env replaced the runtime's, its variables are defaults and the harness's
-// layer over them. A harness variable is fixed or a default as [compose.Var.Fixed] says.
+// layer over them. Every harness variable is a default, a module's export included: what
+// a report records of them fixes nothing.
 // A runtime without a template is an error stating that its program reads the harness
 // from the checkout alone, through the links a compose writes there.
 func LaunchFor(p Runtime, home string, override *Template, harness []compose.Var) (Launch, error) {
@@ -296,7 +298,7 @@ func LaunchFor(p Runtime, home string, override *Template, harness []compose.Var
 		if _, ok := t.Env[v.Name]; own && ok {
 			continue
 		}
-		values[v.Name], fixed[v.Name] = compose.ForHome(v.Value, home).(string), v.Fixed
+		values[v.Name], fixed[v.Name] = compose.ForHome(v.Value, home).(string), false
 	}
 	for _, name := range sortedKeys(values) {
 		if fixed[name] {

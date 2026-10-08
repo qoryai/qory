@@ -220,8 +220,9 @@ type Var struct {
 	// "module <name>, settings/<runtime>/<file>" for a settings fragment's variable, and
 	// "configuration" for the configuration's env.
 	From string `json:"from"`
-	// Fixed is true for a value that is qory's own computation, a module's export, and
-	// false for a default, a value an author wrote.
+	// Fixed is false: every variable of the harness is a default, a value an author
+	// wrote, a module's export included. The field stays for a reader of version 1, and
+	// a run reads nothing from it: true in a stored report fixes nothing.
 	Fixed bool `json:"fixed"`
 }
 
@@ -229,16 +230,17 @@ type Var struct {
 func Vars(vars []compose.Var) []Var {
 	out := make([]Var, 0, len(vars))
 	for _, v := range vars {
-		out = append(out, Var{Name: v.Name, Value: v.Value, From: v.From, Fixed: v.Fixed})
+		out = append(out, Var{Name: v.Name, Value: v.Value, From: v.From})
 	}
 	return out
 }
 
-// ComposeVars is the report's variables in a compose's shape, for a launch.
+// ComposeVars is the report's variables in a compose's shape, for a launch: each a
+// default, whatever its fixed field says.
 func ComposeVars(vars []Var) []compose.Var {
 	out := make([]compose.Var, 0, len(vars))
 	for _, v := range vars {
-		out = append(out, compose.Var{Name: v.Name, Value: v.Value, From: v.From, Fixed: v.Fixed})
+		out = append(out, compose.Var{Name: v.Name, Value: v.Value, From: v.From})
 	}
 	return out
 }
@@ -480,9 +482,9 @@ func (r Report) PrintBody(w io.Writer) error {
 }
 
 // envRows are the Env table's rows: every variable a launch sets, once for all the
-// runtimes it is the same for, with whether it is fixed or a default and where it comes
-// from. A report without launch variables, for a runtime with no launch template, lists
-// the exported variables as they are.
+// runtimes it is the same for, as a default, which every one of them is, and where it
+// comes from. A report without launch variables, for a runtime with no launch template,
+// lists the exported variables as they are.
 func (r Report) envRows() [][]string {
 	var rows [][]string
 	if len(r.LaunchEnv) == 0 {
@@ -503,11 +505,7 @@ func (r Report) envRows() [][]string {
 	}
 	sort.SliceStable(vars, func(i, j int) bool { return vars[i].Name < vars[j].Name })
 	for _, v := range vars {
-		kind := "default"
-		if v.Fixed {
-			kind = "fixed"
-		}
-		rows = append(rows, []string{v.Name, v.Value, kind + ", " + v.From})
+		rows = append(rows, []string{v.Name, v.Value, "default, " + v.From})
 	}
 	return rows
 }

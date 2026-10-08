@@ -265,7 +265,8 @@ func TestWriteReportsAPathItCannotCreate(t *testing.T) {
 
 // TestPrintEnvSaysWhereEachVariableComesFrom is a report composed for claude and codex
 // with launch variables: the Env section lists each once, a variable both runtimes share
-// on one row, with fixed or default and where its value comes from.
+// on one row, as a default and where its value comes from. A module's export is a default
+// too, and so is a variable an older report marks fixed.
 func TestPrintEnvSaysWhereEachVariableComesFrom(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	t.Setenv("HOME", t.TempDir())
@@ -291,7 +292,7 @@ func TestPrintEnvSaysWhereEachVariableComesFrom(t *testing.T) {
 	wantRows := []string{
 		"LOG_LEVEL debug default, module core, settings/claude/settings.json",
 		"PROFILE nextjs default, configuration",
-		"TOOLS $QORY_HARNESS_HOME/modules/core/tools fixed, module core",
+		"TOOLS $QORY_HARNESS_HOME/modules/core/tools default, module core",
 	}
 	if !reflect.DeepEqual(rows, wantRows) {
 		t.Errorf("env rows %q, want %q\n%s", rows, wantRows, buf.String())
