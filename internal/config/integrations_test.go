@@ -442,14 +442,14 @@ func TestOnlyTheSelectedIntegrationsAreDescribed(t *testing.T) {
 func TestAnUnknownRoleIsLeftAlone(t *testing.T) {
 	hermetic(t)
 	dir := onPath(t)
-	fakeIntegration(t, dir, "qory-tracker", strings.Replace(fixture(t, "acme-tracker.json"), `"roles": {`, `"roles": {"work_source": {"events": ["issue.opened"]},`, 1))
+	fakeIntegration(t, dir, "qory-tracker", strings.Replace(fixture(t, "acme-tracker.json"), `"roles": {`, `"roles": {"example_role": {},`, 1))
 	runnerFile(t, "integrations:\n  tracker: {}\n")
 	if r, err := expand(t); err != nil || len(r.Credentials) != 1 || r.Credentials[0].Name != "tracker" {
 		t.Errorf("a role beside the credential: %+v, %v", r, err)
 	}
-	fakeIntegration(t, dir, "qory-queue", `{"version": 1, "name": "queue", "title": "Queue", "program_version": "1", "settings": {"type": "object"}, "roles": {"work_source": {}, "output": {}}}`)
+	fakeIntegration(t, dir, "qory-queue", `{"version": 1, "name": "queue", "title": "Queue", "program_version": "1", "settings": {"type": "object"}, "roles": {"example_role": {}, "another_role": {}}}`)
 	path := runnerFile(t, "integrations:\n  queue:\n")
-	if _, err := expand(t); err == nil || err.Error() != path+": integrations.queue: qory-queue plays the roles output and work_source, none of which qory expands, and defines nothing" {
+	if _, err := expand(t); err == nil || err.Error() != path+": integrations.queue: qory-queue plays the roles another_role and example_role, none of which qory expands, and defines nothing" {
 		t.Errorf("no known role: %v", err)
 	}
 }

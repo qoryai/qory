@@ -35,8 +35,9 @@ import (
 )
 
 // descriptionSchema is contracts/integration/v1/description.schema.json of
-// github.com/qoryai/integrations at v0.1.0, copied as it is. A new revision of the
-// contract is copied over it, with its version written here.
+// github.com/qoryai/integrations at v0.1.0, copied with the roles description cut to
+// what a reader does. A new revision of the contract is copied over it, with its
+// version written here.
 //
 //go:embed description.schema.json
 var descriptionSchema []byte

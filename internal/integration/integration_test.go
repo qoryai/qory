@@ -14,7 +14,8 @@ import (
 )
 
 // The fixtures under testdata/fixtures are contracts/integration/v1/fixtures of
-// github.com/qoryai/integrations at v0.1.0, copied with the schema.
+// github.com/qoryai/integrations at v0.1.0, copied with the schema; unknown-role.json
+// plays example_role as the role qory does not know.
 
 // program writes a program that answers describe with doc and exits 0.
 func program(t *testing.T, doc string) string {
@@ -55,7 +56,7 @@ func TestTheSchemaCopyHoldsToTheContractsFixtures(t *testing.T) {
 	}
 	doc, _ := os.ReadFile("testdata/fixtures/unknown-role.json")
 	d, err := integration.Describe(context.Background(), program(t, string(doc)))
-	if err != nil || strings.Join(d.Roles, " ") != "credential work_source" || d.Name != "acme-tracker" || d.ProgramVersion != "0.2.0" {
+	if err != nil || strings.Join(d.Roles, " ") != "credential example_role" || d.Name != "acme-tracker" || d.ProgramVersion != "0.2.0" {
 		t.Errorf("unknown-role: %+v, %v", d, err)
 	}
 }

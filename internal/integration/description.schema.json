@@ -31,7 +31,7 @@
       ]
     },
     "roles": {
-      "description": "The roles the program plays, by name. A reader expands the roles it knows and leaves the others as they are. tool, work_source and output are reserved, each for a contract of its own.",
+      "description": "The roles the program plays, by name. A reader expands the roles it knows and leaves the others as they are.",
       "type": "object",
       "minProperties": 1,
       "propertyNames": {"pattern": "^[a-z][a-z_]{0,63}$"},
