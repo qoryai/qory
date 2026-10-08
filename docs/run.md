@@ -1278,8 +1278,7 @@ What to know:
   qory run: the mount <host path> contains <link>, which leads to one of the runner's files; the agent could point it elsewhere, so the run does not start. Mount a narrower path
   ```
 
-  For a read-only mount, it leaves out `; the agent could point it elsewhere`: inside the
-  wall the link leads to a path nothing binds.
+  For a read-only mount, it leaves out `; the agent could point it elsewhere`.
 
   When the path is the checkout or the working directory, it says `the workspace <path>`
   instead of `the mount <path>`.

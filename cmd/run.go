@@ -678,9 +678,8 @@ func (p passed) modes(path string) (writable, readOnly, changed bool) {
 // records through a read-only mount and change them through any other; one of any other
 // path, or of the directory without the key, that it could change one of the runner's
 // files. A link's place, on the way to the records or to the configuration, is named as
-// the link, which leads to them: the agent could point it elsewhere through a writable
-// mount, and reads nothing through it, since inside the wall it leads to a path nothing
-// binds.
+// the link, which leads to them; for a place that is not read-only, the text adds that
+// the agent could point it elsewhere.
 //
 // mount_mode_conflict is a place inside another of the other mode, with the modes
 // qory passed. The runner refuses only two places of different modes: the inner's is
@@ -712,8 +711,8 @@ func mountRefused(err error, p passed) error {
 		link, isLink := p.own.links[path]
 		switch {
 		case isLink:
-			// The link's place: inside the wall the link leads to a path nothing binds,
-			// so the agent reads nothing through it, and could only point it elsewhere.
+			// The link's place: named as the link, which leads to the records or to one
+			// of the runner's files.
 			what := "one of the runner's files"
 			if p.own.records[path] {
 				what = "qory's run records"
