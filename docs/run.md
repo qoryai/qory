@@ -300,8 +300,9 @@ configuration. The runner fetches the run configuration with the run's labels, t
 checkout's forge and repository among them. It reloads it when the server reports it
 changed. It may hold:
 
-- `security_policy`, the server's policy. The node's policy narrows it: see [A run's own
-  policy](#a-runs-own-policy). Without it, the node's policy is the run's.
+- `security_policy`, the server's policy. `runner.yaml`'s `egress` narrows it: see [A
+  run's own policy](#a-runs-own-policy). Without it, `runner.yaml`'s `egress` is the
+  run's policy.
 - `variables`, which reach the agent's process. A value of the server wins over every
   source but the values qory and the runtime fix, and a run without a wall gets none of
   them. See [A run's variables](#a-runs-variables).
@@ -517,7 +518,7 @@ this machine's `runner.yaml` aside: it checks the code against `QORY_APIARY_PUBL
 when that is set. The key's name is still this machine's, and the key is active as soon
 as the server answers. It keeps nothing, so an enrolment whose answer is lost or does
 not verify cannot be retried: get a new code, and have the owner or administrator in
-Qory Apiary revoke the key qory printed the fingerprint of, should the server show it.
+Qory Apiary revoke the key qory printed the fingerprint of, should Qory Apiary show it.
 
 #### Stored secrets need a wall
 
@@ -771,7 +772,9 @@ owner, separated by commas:
    "properties": {
      "app_id": {"title": "App id", "type": ["integer", "string"]},
      "private_key": {"title": "Private key", "type": "string", "writeOnly": true},
-     "private_key_file": {"title": "Private key file", "type": "string"}}},
+     "private_key_file": {"title": "Private key file", "type": "string"},
+     "permissions": {"title": "Permissions", "type": "object",
+                     "additionalProperties": {"enum": ["read", "write"]}}}},
  "roles": {"credential": {"argument": "[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}(,[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100})*",
                           "hosts": ["github.com", "api.github.com"]}}}
 ```
@@ -888,7 +891,7 @@ standard input. It starts the role as:
 
 - `<program>` is the program's absolute path, its links resolved.
 - `<json>` is the integration's `settings` in `runner.yaml`, whole, as compact JSON in
-  the file's order, every `$` written `$`. It is `{}` when there are none.
+  the file's order, every `$` written `\u0024`. It is `{}` when there are none.
 - `--` is always there, with exactly one argument after it: the argument the run's
   policy gives the credential, the empty string when it gives none.
 - Standard input is empty. The environment is the one `qory` runs in, without the
@@ -911,7 +914,12 @@ names the setting and the rule, never a value.
 
 A name the `credentials` section defines itself belongs to that section. Then:
 
-- `qory run` and `qory config` print this, on a line of their own,
+- `qory run` and `qory config` print a line of their own that says so, such as:
+
+  ```
+  qory run: runner.yaml: credentials.github defines the credential github, and integrations.github defines none
+  ```
+
 - `qory config` describes the integration and lists it as shadowed,
 - a run leaves it undescribed.
 

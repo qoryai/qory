@@ -16,7 +16,7 @@
     "title": {"description": "A human name, for a form or a listing.", "type": "string", "minLength": 1},
     "description": {"description": "A sentence or two on what the integration does, for a form or a listing.", "type": "string"},
     "domains": {
-      "description": "The domains the integration works with, each a domain name, such as software. The field is absent, never an empty list.",
+      "description": "The domains the integration works with, each a domain name, such as software. When the integration names no domain, the field is absent, never an empty list.",
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
