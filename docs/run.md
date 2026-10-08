@@ -895,8 +895,12 @@ settings must be `{}`, else `integration_settings_not_allowed`.
 
 - outside the checkout, and
 - outside every mount the wall makes. A mount that is, contains or lies inside the
-  program's directory stops the run, `mount_contains_runner_files`. So does one that
-  holds a `<name>_file` setting's file.
+  program's directory stops the run, `mount_contains_runner_files`.
+
+A mount that is or contains the file of a `<name>_file` setting, or a link on the way
+to it, stops the run the same way, `mount_contains_runner_files`, for each integration
+the run describes: the ones its policy selects, every one when a server supplies the
+policy.
 
 `qory` judges a program by where its links lead: a `path` that is a link is judged by
 where it resolves.
@@ -1012,26 +1016,29 @@ receives the raw value, and where it sends it is the program's.
 
 #### Settings and secrets
 
-The runner hands each role its settings on standard input, never on a command line or in
-the environment. It starts the credential role as:
+The runner hands the credential role its settings on its command line, and nothing on
+standard input. It starts the role as:
 
 ```sh
-<program> credential -- <argument>
+<program> credential --settings <json> -- <argument>
 ```
 
-`--` is always there, with exactly one argument after it. It is the empty string when the
-role has no `argument` pattern, or the connection gives no argument.
-Standard input is one JSON document:
+- `<program>` is the program's absolute path, its links resolved.
+- `<json>` is the integration's `settings` in `runner.yaml`, whole, as compact JSON in
+  the file's order, every `$` written `\u0024`. It is `{}` when there are none.
+- `--` is always there, with exactly one argument after it: the argument the run's
+  policy gives the credential, the empty string when it gives none.
+- Standard input is empty. The environment is the one `qory` runs in, without the
+  access key's variables.
 
-- the settings that role lists, and nothing else, a secret as `<name>` or `<name>_file`;
-- `{}` when the role lists none;
-- 64 KiB (65536 bytes) at most, else `integration_settings_too_large`, before the program
-  starts.
+A command line is no place for a secret, so `qory` refuses a secret's value in the
+settings before the run starts, and names the `<name>_file` to set in its place: the
+path of a file that holds the secret, which the program reads itself.
 
-The credential role of `github` above reads:
+The credential role of `github` above starts as:
 
-```json
-{"app_id": "123456", "private_key": "-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----\n"}
+```sh
+/usr/local/bin/qory-github credential --settings '{"app_id":"123456","private_key_file":"/home/dev/.config/qory/github-app.pem"}' -- acme/shop
 ```
 
 The runner checks each role's document, in order:
@@ -1231,6 +1238,8 @@ What to know:
     link leads, and, for a mount that is or contains it, every link on the way;
   - qory's state directory, which holds the run records, and, for a mount that is or
     contains it, every link on the way to it;
+  - the file of a `<name>_file` setting of an integration the run describes, where its
+    path leads, and, for a mount that is or contains it, every link on the way to it;
   - one of the runner's own program and temporary files, such as a program it starts
     outside the wall.
 
@@ -1246,6 +1255,8 @@ What to know:
   qory run: the mount <host path> contains <path>, which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path
   ```
 
+  For a read-only mount, it says `the agent could read it` instead.
+
   For the state directory, it says:
 
   ```
@@ -1255,8 +1266,9 @@ What to know:
   For a read-only mount of the state directory, it says `the agent could read them`
   instead.
 
-  For a link on the way to the state directory or to a file of the configuration
-  directory, it names the link, which leads to them:
+  For a link on the way to the state directory, to a file of the configuration
+  directory or to a `<name>_file` setting's file, it names the link, which leads to
+  them:
 
   ```
   qory run: the mount <host path> contains <link>, which leads to qory's run records; the agent could point it elsewhere, so the run does not start. Mount a narrower path
