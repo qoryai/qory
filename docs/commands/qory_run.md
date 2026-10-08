@@ -57,7 +57,7 @@ qory run [runtime] [-- argument...] [flags]
   -h, --help                       help for run
       --home string                where the harness is composed: a directory outside the checkout, one home per checkout under it, or .qory/harness (qory.yaml: harness.home)
       --image string               the container's image unless the run's policy selects one: a name of wall.images, or a reference (runner.yaml: wall.image)
-      --kind string                what kind of run it is, such as review or fix, reported in its events
+      --kind string                what kind of run it is, such as review or fix, reported when the run starts
       --label stringArray          a key=value name for the run, reported in its events; repeatable (forge and repository come from the origin remote)
       --local                      run without the server: record to files, under the machine's policy
       --memory string              the most memory the container gets, such as 8g (runner.yaml: wall.memory)
@@ -70,7 +70,7 @@ qory run [runtime] [-- argument...] [flags]
       --stop-signal string         the signal that stops the agent: SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2 (default SIGTERM; runner.yaml: run.stop_signal)
       --subject stringArray        what the run works on, type=<type>,ref=<ref>[,url=<url>][,title=<title>], such as type=ticket,ref=7; title takes the rest of the value, commas too; repeatable
       --timeout duration           stop the agent after this long, such as 5h30m, and exit 124 (default no limit; runner.yaml: run.timeout)
-      --title string               the run's title, for a person to read, reported in its events
+      --title string               the run's title, for a person to read, reported when the run starts
       --wall string                run the agent in a container whose one way out is the proxy: docker, or none (runner.yaml: wall.adapter)
 ```
 
