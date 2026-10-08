@@ -113,14 +113,20 @@ release may change what an existing document does, and states it under Upgrading
 
 - `qory run` records each run outside the checkout, in qory's state directory:
   `~/.local/state/qory/runs/<checkout>-<hash>/<id>/`, under `$XDG_STATE_HOME/qory` when
-  that is set, with `<hash>` the first 12 hex digits of the SHA-256 of the checkout's full
-  path, links resolved. The directories are mode 0700. A run's last line names its
-  record, `qory run: the record is in <folder>`, and `qory run resend <id>` finds it from
-  the checkout. Behind a wall, a mount of the state directory, or one that holds it, is
-  refused, `mount_contains_runner_files`: `the mount <path> contains <dir>, which holds
-  qory's run records; the agent could change them, so the run does not start. Mount a
-  narrower path`. A refusal of the checkout or the working directory names it `the
-  workspace <path>`.
+  that is set to an absolute path, with `<hash>` the first 12 hex digits of the SHA-256
+  of the checkout's full path, links resolved. The state directory, its `runs`
+  directory and the checkout's folder are mode 0700. When the run ends, qory names its
+  record, `qory run: the record is in <folder>`, once: the lines that end a run, such as
+  `claude exited 0`, name no path. `qory run resend <id>` finds the record from the
+  checkout. Behind a wall, a mount of, inside or holding the state directory, or one that
+  is or holds a link on the way to it, is refused, `mount_contains_runner_files`. For
+  the directory, qory says `the mount <path> contains <dir>, which holds qory's run
+  records; the agent could change them, so the run does not start. Mount a narrower
+  path`, and `the agent could read them` for a read-only mount. For a link, it names the
+  link: `the mount <path> contains <link>, which leads to qory's run records; the agent
+  could point it elsewhere, so the run does not start. Mount a narrower path`, without
+  `; the agent could point it elsewhere` for a read-only mount. A refusal of the checkout
+  or the working directory names it `the workspace <path>`.
 - The harness's environment is the launch's, and no file a runtime reads holds it.
   Claude Code's `settings.json` has no `env`, and Codex's `config.toml` no
   `shell_environment_policy.set`. `qory harness launch` sets every variable through
@@ -184,7 +190,9 @@ release may change what an existing document does, and states it under Upgrading
   mount that is or contains any link on the way. For a mount that is or contains the
   access key, `qory run` says `the mount <host path> contains <dir>, which holds this
   machine's access key; the agent could read the key, so the run does not start. Mount a
-  narrower path`; otherwise it says the path `holds one of the runner's files; the
+  narrower path`; for a link on the way, that the link `leads to one of the runner's
+  files; the agent could point it elsewhere`, without the part after the semicolon for
+  a read-only mount; otherwise it says the path `holds one of the runner's files; the
   agent could change it`.
 - A key `qory access-key enrol` enrols is active as soon as the server answers, and
   enrol says so: `the key is active: runs can start`. `key_limit` means the node already
