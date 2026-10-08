@@ -688,6 +688,11 @@ func (p passed) modes(path string) (writable, readOnly, changed bool) {
 // refuses, the first whose mode differs from an earlier one's, Mounts in order and then
 // Dir; for two paths, the outer's one mode decides, else that same entry.
 //
+// mount_through_link is a place, writable or read-only, reached through a link inside a
+// writable mount or the workspace: the agent could repoint the link. The text names
+// the place, the link and the place that holds it; a place that is the link itself, its
+// absolute, cleaned form equal to the link, is named as a link inside that place.
+//
 // mount_shared_with_run is a place that is, holds or lies inside one another walled run
 // still going also uses, its mounts or its run directory: one agent could read or
 // change what the other uses. A git worktree inside the other run's checkout is the
@@ -759,6 +764,12 @@ func mountRefused(err error, p passed) error {
 			return nil
 		}
 		text = fmt.Sprintf("the mount %s (%s) lies inside %s, which is %s: a part of a mount can't have another mode, so the run does not start. Give both the same mode, or leave %s out", inner, mode(innerWritable), outer, mode(!innerWritable), inner)
+	case ref.Code == codeMountThroughLink && len(ref.Names) == 3:
+		place, link, outer := ref.Names[0], ref.Names[1], ref.Names[2]
+		text = fmt.Sprintf("%s is reached through the link %s inside %s, which a walled agent can change: list the link's target itself, so the run does not start", p.place(place), link, p.place(outer))
+		if abs, err := filepath.Abs(place); err == nil && abs == link {
+			text = fmt.Sprintf("%s is a link inside %s, which a walled agent can change: list the link's target itself, so the run does not start", p.place(place), p.place(outer))
+		}
 	case ref.Code == codeMountSharedWithRun && len(ref.Names) == 3 && ref.Names[0] == p.spec.RunsDir:
 		runs, other, otherPath := ref.Names[0], ref.Names[1], ref.Names[2]
 		how := map[string]string{"is": "is", "lies inside": "lie inside", "contains": "contain"}[session.Overlap(runs, otherPath)]
@@ -999,11 +1010,13 @@ func linkPlace(path string) string {
 }
 
 // The runner's refusals of the places a walled run lists: one that is, contains or lies
-// inside one of the runner's files; one inside another of the other mode; and one
-// another walled run still going could change, or that holds one of its places.
+// inside one of the runner's files; one inside another of the other mode; one reached
+// through a link a walled agent can change; and one another walled run still going
+// could change, or that holds one of its places.
 const (
 	codeMountContainsRunnerFiles = "mount_contains_runner_files"
 	codeMountModeConflict        = "mount_mode_conflict"
+	codeMountThroughLink         = "mount_through_link"
 	codeMountSharedWithRun       = "mount_shared_with_run"
 )
 

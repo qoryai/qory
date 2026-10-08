@@ -261,6 +261,54 @@ func TestMountRefusedSaysTheModes(t *testing.T) {
 	}
 }
 
+// TestMountRefusedNamesTheLinkOnTheWay is mount_through_link: a mount inside the
+// workspace, the workspace inside a mount and a read-only place, each named with the
+// link and the place that holds it; a place that is the link itself, passed clean or
+// not, named as a link inside that place. Names of another length are left to the rest.
+func TestMountRefusedNamesTheLinkOnTheWay(t *testing.T) {
+	root := t.TempDir()
+	vendor, shared := filepath.Join(root, "vendor"), filepath.Join(t.TempDir(), "shared")
+	work := filepath.Join(shared, "app")
+	tail := ", which a walled agent can change: list the link's target itself, so the run does not start (mount_through_link)"
+	for _, c := range []struct {
+		name               string
+		spec               *session.Spec
+		place, link, outer string
+		want               string
+	}{
+		{"a mount inside the workspace", &session.Spec{Dir: root, Mounts: []wall.Mount{{Path: root}, {Path: vendor + "/lib"}}},
+			vendor + "/lib", vendor, root,
+			"the mount " + vendor + "/lib is reached through the link " + vendor + " inside the workspace " + root + tail},
+		{"the workspace inside a mount", &session.Spec{Dir: work, Mounts: []wall.Mount{{Path: root}, {Path: shared}}},
+			work, filepath.Join(shared, "current"), shared,
+			"the workspace " + work + " is reached through the link " + filepath.Join(shared, "current") + " inside the mount " + shared + tail},
+		{"a read-only place", &session.Spec{Dir: root, Mounts: []wall.Mount{{Path: root}, {Path: vendor, ReadOnly: true}}},
+			vendor, filepath.Join(root, "third_party"), root,
+			"the mount " + vendor + " is reached through the link " + filepath.Join(root, "third_party") + " inside the workspace " + root + tail},
+		{"the place is the link", &session.Spec{Dir: root, Mounts: []wall.Mount{{Path: root}, {Path: vendor}}},
+			vendor, vendor, root,
+			"the mount " + vendor + " is a link inside the workspace " + root + tail},
+		{"the place is the link, passed unclean", &session.Spec{Dir: root, Mounts: []wall.Mount{{Path: root}, {Path: root + "//vendor/"}}},
+			root + "//vendor/", vendor, root,
+			"the mount " + root + "//vendor/ is a link inside the workspace " + root + tail},
+		{"the workspace is the link", &session.Spec{Dir: work, Mounts: []wall.Mount{{Path: root}, {Path: shared}}},
+			work, work, shared,
+			"the workspace " + work + " is a link inside the mount " + shared + tail},
+	} {
+		p := passed{root: root, spec: c.spec}
+		err := mountRefused(&session.Refusal{Code: "mount_through_link", Names: []string{c.place, c.link, c.outer}}, p)
+		if err == nil || err.Error() != c.want {
+			t.Errorf("%s: %v, want %q", c.name, err, c.want)
+		}
+	}
+	p := passed{root: root, spec: &session.Spec{Dir: root, Mounts: []wall.Mount{{Path: root}}}}
+	for _, names := range [][]string{{vendor, root}, {vendor, vendor, root, root}} {
+		if err := mountRefused(&session.Refusal{Code: "mount_through_link", Names: names}, p); err != nil {
+			t.Errorf("%d names: %v", len(names), err)
+		}
+	}
+}
+
 // TestMountRefusedNamesTheRunStillGoing is mount_shared_with_run, for a mount and for
 // the workspace, each way the paths stand: a git worktree, whose .git is a file, is
 // told where to make one; a checkout of its own, whose .git is a directory, is not. A
