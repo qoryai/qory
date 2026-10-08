@@ -198,10 +198,10 @@ release may change what an existing document does, and states it under Upgrading
 - A mount or the workspace reached through a link inside a writable mount or the
   workspace, where its path resolves outside that place, is refused before the run
   starts, `mount_through_link`: `the mount <path> is reached through the link <link>
-  inside the workspace <root>, which a walled agent can change: list the link's target
-  itself, so the run does not start`, or, when the path is the link itself, `the mount
-  <path> is a link inside the workspace <root>, which a walled agent can change: list
-  the link's target itself, so the run does not start`.
+  inside the workspace <root>, which a walled agent can change, so the run does not
+  start. List the link's target itself`, or, when the path is the link itself, `the
+  mount <path> is a link inside the workspace <root>, which a walled agent can change,
+  so the run does not start. List the link's target itself`.
 - A key `qory access-key enrol` enrols is active as soon as the server answers, and
   enrol says so: `the key is active: runs can start`. `key_limit` means the node already
   holds two keys; once an owner or administrator has revoked one, the same command

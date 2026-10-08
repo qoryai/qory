@@ -283,7 +283,7 @@ func TestMountRefusedNamesTheLinkOnTheWay(t *testing.T) {
 	root := t.TempDir()
 	vendor, shared := filepath.Join(root, "vendor"), filepath.Join(t.TempDir(), "shared")
 	work := filepath.Join(shared, "app")
-	tail := ", which a walled agent can change: list the link's target itself, so the run does not start (mount_through_link)"
+	tail := ", which a walled agent can change, so the run does not start. List the link's target itself (mount_through_link)"
 	for _, c := range []struct {
 		name               string
 		spec               *session.Spec

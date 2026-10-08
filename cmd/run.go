@@ -773,9 +773,9 @@ func mountRefused(err error, p passed) error {
 		text = fmt.Sprintf("the mount %s (%s) lies inside %s, which is %s: a part of a mount can't have another mode, so the run does not start. Give both the same mode, or leave %s out", inner, mode(innerWritable), outer, mode(!innerWritable), inner)
 	case ref.Code == codeMountThroughLink && len(ref.Names) == 3:
 		place, link, outer := ref.Names[0], ref.Names[1], ref.Names[2]
-		text = fmt.Sprintf("%s is reached through the link %s inside %s, which a walled agent can change: list the link's target itself, so the run does not start", p.place(place), link, p.place(outer))
+		text = fmt.Sprintf("%s is reached through the link %s inside %s, which a walled agent can change, so the run does not start. List the link's target itself", p.place(place), link, p.place(outer))
 		if abs, err := filepath.Abs(place); err == nil && abs == link {
-			text = fmt.Sprintf("%s is a link inside %s, which a walled agent can change: list the link's target itself, so the run does not start", p.place(place), p.place(outer))
+			text = fmt.Sprintf("%s is a link inside %s, which a walled agent can change, so the run does not start. List the link's target itself", p.place(place), p.place(outer))
 		}
 	case ref.Code == codeMountSharedWithRun && len(ref.Names) == 3 && ref.Names[0] == p.spec.RunsDir:
 		runs, other, otherPath := ref.Names[0], ref.Names[1], ref.Names[2]

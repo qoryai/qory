@@ -993,7 +993,7 @@ func TestRunRefusesAMountOfAnotherModeInside(t *testing.T) {
 	lib := filepath.Join(link, "lib")
 	for _, c := range []struct{ mount, want string }{
 		{vendor, "the mount " + vendor + " (read-only) lies inside " + root + ", which is writable: a part of a mount can't have another mode, so the run does not start. Give both the same mode, or leave " + vendor + " out (mount_mode_conflict)"},
-		{lib, "the mount " + lib + " is reached through the link " + link + " inside the workspace " + root + ", which a walled agent can change: list the link's target itself, so the run does not start (mount_through_link)"},
+		{lib, "the mount " + lib + " is reached through the link " + link + " inside the workspace " + root + ", which a walled agent can change, so the run does not start. List the link's target itself (mount_through_link)"},
 	} {
 		out, err := run(t, "run", "claude", "--mount", c.mount+":ro")
 		if err == nil || cmd.ExitCode(err) != 1 || err.Error() != c.want {
