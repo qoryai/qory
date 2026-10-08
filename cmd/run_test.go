@@ -809,13 +809,66 @@ harness:
 	}
 }
 
+// TestRunRefusesAMountOfAnIntegrationsSettingFile is a walled run whose policy selects
+// an integration with a <name>_file setting: a mount that is or contains that file is
+// refused by the runner before anything starts, as one that holds one of the runner's
+// files, in either mode, and so is one that holds a link on the way to it, named as the
+// link. A refused run starts no container.
+func TestRunRefusesAMountOfAnIntegrationsSettingFile(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, "claude")
+	docker, log := fakeDocker(t)
+	program := filepath.Join(tempDir(t), "bin", "acme-tracker")
+	writeFile(t, program, "#!/bin/sh\ntest \"$1\" = describe || exit 64\necho '{\"version\": 1, \"name\": \"tracker\", \"title\": \"Tracker\", \"program_version\": \"0.3.0\", \"settings\": {\"type\": \"object\"}, \"roles\": {\"credential\": {\"argument\": \"[A-Z]+\", \"hosts\": [\"tracker.acme.example\"]}}}'\n")
+	if err := os.Chmod(program, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	keys := tempDir(t)
+	token := filepath.Join(keys, "tracker-token")
+	writeFile(t, token, "not read\n")
+	// The setting's path goes through a link in a directory of its own.
+	links := tempDir(t)
+	link := filepath.Join(links, "tracker-token")
+	if err := os.Symlink(token, link); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml")
+	wallSection := "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: " + docker + "\n  helper: " + staticELF(t) + "\n  user: \"1000:1000\"\n"
+	policy := filepath.Join(tempDir(t), "policy.yaml")
+	writeFile(t, policy, "version: 1\negress:\n  mode: observe\ncredentials:\n  - {name: tracker, argument: SHOP}\n")
+	for _, c := range []struct{ setting, mount, want string }{
+		{token, keys, "the mount " + keys + " contains " + token + ", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
+		{token, keys + ":ro", "the mount " + keys + " contains " + token + ", which holds one of the runner's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
+		{token, token + ":ro", "the mount " + token + " is " + token + ", which holds one of the runner's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
+		{link, links, "the mount " + links + " contains " + link + ", which leads to one of the runner's files; the agent could point it elsewhere, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
+		{link, keys + ":ro", "the mount " + keys + " contains " + token + ", which holds one of the runner's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
+	} {
+		writeFile(t, file, "apiVersion: qory.dev/v1alpha1\n"+wallSection+"integrations:\n  tracker: {program: "+program+", settings: {project: SHOP, token_file: "+c.setting+"}}\n")
+		out, err := run(t, "run", "claude", "--policy", policy, "--mount", c.mount)
+		if err == nil || cmd.ExitCode(err) != 1 || err.Error() != c.want {
+			t.Errorf("token_file %s, --mount %s: %v (exit %d), want %q\n%s", c.setting, c.mount, err, cmd.ExitCode(err), c.want, out)
+		}
+		lacks(t, out, "the record is in")
+	}
+	if ids := recorded(t, root); len(ids) != 0 {
+		t.Errorf("a refused run left a record: %v", ids)
+	}
+	if _, err := os.Stat(log); err == nil {
+		data, _ := os.ReadFile(log)
+		if strings.Contains(string(data), " run ") {
+			t.Errorf("a container was started:\n%s", data)
+		}
+	}
+}
+
 // TestRunRefusesAMountOfTheRunnersFiles is a walled run with a mount of the home,
 // which contains qory's configuration directory, and one of that directory itself: the
 // runner refuses both before anything starts, and qory says the agent could read the
 // access key, with how the mount and the directory stand to each other. Without
 // access-key-secret in the directory, it says the agent could change one of the
-// runner's files. A mount of a directory the runner keeps its own files in, the tools'
-// sockets, says so, and one of qory's state directory says the agent could change the
+// runner's files, or read it through a read-only mount. A mount of a directory the runner keeps its own files in, the tools'
+// sockets, says so, in either mode, and one of qory's state directory says the agent could change the
 // run records, or read them through a read-only mount, as does the workspace when the
 // state directory lies in the checkout. A run refused so has no record, and no line
 // names one.
@@ -838,9 +891,11 @@ func TestRunRefusesAMountOfTheRunnersFiles(t *testing.T) {
 		mount, want, ending string
 	}{
 		{false, home, "the mount " + home + " contains " + configDir + ", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)", ""},
+		{false, home + ":ro", "the mount " + home + " contains " + configDir + ", which holds one of the runner's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_runner_files)", ""},
 		{true, home, "the mount " + home + " contains " + configDir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)", ""},
 		{true, configDir + ":ro", "the mount " + configDir + " is " + configDir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)", ""},
 		{true, tmp, "the mount " + tmp + " contains " + filepath.Join(tmp, "qory-tool-"), ", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
+		{true, tmp + ":ro", "the mount " + tmp + " contains " + filepath.Join(tmp, "qory-tool-"), ", which holds one of the runner's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
 		{true, stateHome, "the mount " + stateHome + " contains " + filepath.Join(stateHome, "qory") + ", which holds qory's run records; the agent could change them, so the run does not start. Mount a narrower path (mount_contains_runner_files)", ""},
 		{true, filepath.Join(stateHome, "qory", "runs") + ":ro", "the mount " + filepath.Join(stateHome, "qory", "runs") + " lies inside " + filepath.Join(stateHome, "qory") + ", which holds qory's run records; the agent could read them, so the run does not start. Mount a narrower path (mount_contains_runner_files)", ""},
 	} {

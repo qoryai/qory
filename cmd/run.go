@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -251,8 +252,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if err := makeRunsDir(state, spec.RunsDir); err != nil {
 				return err
 			}
-			own := runnerFiles(runnerDir, state, spec.RunsDir)
-			spec.RunnerFiles = own.files
 			walled := spec.Wall != nil
 			spec.LaunchFixed, spec.LaunchDefaults, spec.HarnessHome = launch.Fixed, launch.Defaults, launch.HarnessHome
 			runLock, err := startRun(machineDir(), spec.RunID, walled, id == nil)
@@ -288,6 +287,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					spec.Credentials = append(spec.Credentials, def)
 				}
 			}
+			// The files the settings name are known once the integrations are described.
+			own := runnerFiles(runnerDir, state, spec.RunsDir, settingFiles(conf.Runner))
+			spec.RunnerFiles = own.files
 			record := filepath.Join(spec.RunsDir, spec.RunID)
 			u := ui.New(stderr)
 			res, err := session.Run(ctx, spec)
@@ -676,8 +678,8 @@ func (p passed) modes(path string) (writable, readOnly, changed bool) {
 // the access key when access-key-secret is there and the place is or contains it; one
 // of the runs directory or of qory's state directory, that it could read the run
 // records through a read-only mount and change them through any other; one of any other
-// path, or of the directory without the key, that it could change one of the runner's
-// files. A link's place, on the way to the records or to the configuration, is named as
+// path, or of the directory without the key, that it could read one of the runner's
+// files through a read-only mount and change it through any other. A link's place, on the way to the records or to the configuration, is named as
 // the link, which leads to them; for a place that is not read-only, the text adds that
 // the agent could point it elsewhere.
 //
@@ -742,7 +744,11 @@ func mountRefused(err error, p passed) error {
 				at := session.Overlap(mount, runnerdir.Dir(p.runnerDir).Path(runnerdir.SecretFile))
 				key = at == "is" || at == "contains"
 			}
-			text = fmt.Sprintf("%s %s %s, which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path", p.place(mount), how, path)
+			what := "change"
+			if readOnly {
+				what = "read"
+			}
+			text = fmt.Sprintf("%s %s %s, which holds one of the runner's files; the agent could %s it, so the run does not start. Mount a narrower path", p.place(mount), how, path, what)
 			if key && runnerdir.Dir(p.runnerDir).HasSecret() {
 				text = fmt.Sprintf("%s %s %s, which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path", p.place(mount), how, path)
 			}
@@ -819,8 +825,11 @@ type ownFiles struct {
 // runnerFiles is what qory passes the runner as its files: the configuration directory
 // runnerDir, absolute, when there is one; then qory's state directory, which holds the
 // run records, and what [recordLinks] adds for it and the runs directory runs; then
-// what [configLinks] adds.
-func runnerFiles(runnerDir, state, runs string) ownFiles {
+// what [configLinks] adds; then each file of settings, the paths [settingFiles] returns,
+// as [configLinks] passes its files: every link on the way as its place, [linkPlace],
+// since the agent could point a link at a file of its own, and where the path leads, or
+// the path as it is when a part of it does not exist yet, loops or cannot be read.
+func runnerFiles(runnerDir, state, runs string, settings []string) ownFiles {
 	own := ownFiles{links: map[string]string{}, records: map[string]bool{}}
 	if runnerDir != "" {
 		own.files = append(own.files, runnerDir)
@@ -840,8 +849,54 @@ func runnerFiles(runnerDir, state, runs string) ownFiles {
 		}
 		maps.Copy(shown, links)
 	}
+	add := func(p string) {
+		if !slices.Contains(own.files, p) {
+			own.files = append(own.files, p)
+		}
+	}
+	for _, f := range settings {
+		links, target, err := followLinks(f)
+		for _, l := range links {
+			place := linkPlace(l)
+			shown[place] = l
+			add(place)
+		}
+		if err != nil || target == "" {
+			target = f
+		}
+		add(target)
+	}
 	own.links = shown
 	return own
+}
+
+// settingFiles are the files the settings of the integrations r describes for the run
+// name: the value of each setting <name>_file, a string, absolute, from the working
+// directory when it is relative, as the program reads it.
+func settingFiles(r *config.Runner) []string {
+	var out []string
+	if r == nil {
+		return nil
+	}
+	for _, in := range r.Integrations {
+		if in.Path == "" {
+			continue
+		}
+		var settings map[string]any
+		if json.Unmarshal(in.Settings, &settings) != nil {
+			continue
+		}
+		for _, name := range slices.Sorted(maps.Keys(settings)) {
+			v, ok := settings[name].(string)
+			if before, file := strings.CutSuffix(name, "_file"); !file || before == "" || !ok || v == "" {
+				continue
+			}
+			if abs, err := filepath.Abs(v); err == nil && !slices.Contains(out, abs) {
+				out = append(out, abs)
+			}
+		}
+	}
+	return out
 }
 
 // recordLinks is what qory passes the runner for the run records when a link is on the

@@ -186,14 +186,15 @@ release may change what an existing document does, and states it under Upgrading
   `mount_contains_runner_files`, when it is, contains or lies inside this machine's qory
   configuration directory, which holds `runner.yaml`, the access key and the user
   `qory.yaml`; a file qory reads from that directory and a link takes elsewhere, where
-  the last link leads; or one of the runner's own program and temporary files. So is a
-  mount that is or contains any link on the way. For a mount that is or contains the
+  the last link leads; the file of a `<name>_file` setting of an integration the run
+  describes, where its path leads; or one of the runner's own program and temporary
+  files. So is a mount that is or contains any link on the way. For a mount that is or contains the
   access key, `qory run` says `the mount <host path> contains <dir>, which holds this
   machine's access key; the agent could read the key, so the run does not start. Mount a
   narrower path`; for a link on the way, that the link `leads to one of the runner's
   files; the agent could point it elsewhere`, without the part after the semicolon for
   a read-only mount; otherwise it says the path `holds one of the runner's files; the
-  agent could change it`.
+  agent could change it`, or `the agent could read it` for a read-only mount.
 - A mount or the workspace reached through a link inside a writable mount or the
   workspace, where its path resolves outside that place, is refused before the run
   starts, `mount_through_link`: `the mount <path> is reached through the link <link>

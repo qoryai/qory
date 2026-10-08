@@ -15,6 +15,7 @@ import (
 	"github.com/qoryai/runner/wall"
 	"github.com/spf13/cobra"
 
+	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/render"
 )
 
@@ -82,7 +83,7 @@ func TestUnusedEnvSaysWhy(t *testing.T) {
 // worded with Overlap's relation: a mount that is or contains the runner's directory
 // reads the access key when access-key-secret is there; one that lies inside it, beside
 // the key, could change one of the runner's files, with the key there or not, as could
-// a mount of another of the runner's files; a mount of a link qory passed as its place
+// a mount of another of the runner's files, and read it through a read-only mount; a mount of a link qory passed as its place
 // names the link, even when the link is the runner's directory, as leading to one of
 // the runner's files, which a writable mount could point elsewhere; and any other error
 // is left to the rest. The checkout root and the working directory are the
@@ -130,6 +131,19 @@ func TestMountRefusedSaysHowTheMountStands(t *testing.T) {
 	other := filepath.Join(dir, "wall-files")
 	if got, want := mountRefused(refusal(dir, other), at(filepath.Join(dir, "elsewhere"))).Error(), "the mount "+dir+" contains "+other+", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"; got != want {
 		t.Errorf("another file: %q, want %q", got, want)
+	}
+	// Through a read-only mount, the agent could read one of the runner's files, beside
+	// the key or elsewhere, and the key itself where the mount is or contains it.
+	for _, c := range []struct{ mount, path, want string }{
+		{dir, other, "the mount " + dir + " contains " + other + ", which holds one of the runner's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
+		{inner, dir, "the mount " + inner + " lies inside " + dir + ", which holds one of the runner's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
+		{dir, dir, "the mount " + dir + " is " + dir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
+		{parent, dir, "the mount " + parent + " contains " + dir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
+	} {
+		p := passed{runnerDir: dir, spec: &session.Spec{Mounts: []wall.Mount{{Path: c.mount, ReadOnly: true}}}}
+		if got := mountRefused(refusal(c.mount, c.path), p).Error(); got != c.want {
+			t.Errorf("read-only %s of %s: %q, want %q", c.mount, c.path, got, c.want)
+		}
 	}
 	// The same refusals of the workspace: the checkout root as Mounts holds it, and the
 	// working directory.
@@ -417,6 +431,35 @@ func TestRunsDirIsTheCheckoutsFolder(t *testing.T) {
 	}
 }
 
+// TestSettingFilesAreTheFileSettingsOfTheDescribedIntegrations is the files the
+// settings name: each <name>_file string of an integration described for the run,
+// absolute from the working directory, once; a setting of another name, a value that is
+// no string, and an integration the run did not describe add none. runnerFiles passes
+// each after the rest, as where it leads.
+func TestSettingFilesAreTheFileSettingsOfTheDescribedIntegrations(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &config.Runner{Integrations: []config.RunnerIntegration{
+		{Key: "tracker", Path: "/opt/acme/tracker", Settings: []byte(`{"project":"SHOP","token_file":"/keys/tracker-token","file":"/keys/plain","_file":"/keys/bare","count_file":3,"cert_file":"certs/tracker.pem"}`)},
+		{Key: "chat", Settings: []byte(`{"token_file":"/keys/chat-token"}`)},
+		{Key: "board", Path: "/opt/acme/board", Settings: []byte(`{"token_file":"/keys/tracker-token"}`)},
+	}}
+	want := []string{filepath.Join(cwd, "certs", "tracker.pem"), "/keys/tracker-token"}
+	if got := settingFiles(r); !slices.Equal(got, want) {
+		t.Errorf("settingFiles %q, want %q", got, want)
+	}
+	if got := settingFiles(nil); got != nil {
+		t.Errorf("no runner file: %q", got)
+	}
+	state := "/state/qory"
+	own := runnerFiles("", state, filepath.Join(state, "runs", "app-0123456789ab"), want)
+	if !slices.Equal(own.files, append([]string{state}, want...)) {
+		t.Errorf("files %q", own.files)
+	}
+}
+
 // TestRunnerFilesPutsTheStateDirAfterTheConfigDir is the runner's files qory passes:
 // the configuration directory, qory's state directory right after it, the links on the
 // way to the run records, then where the configuration's links lead; with no
@@ -440,10 +483,10 @@ func TestRunnerFilesPutsTheStateDirAfterTheConfigDir(t *testing.T) {
 	}
 	state := "/state/qory"
 	runs := filepath.Join(state, "runs", "app-0123456789ab")
-	if own := runnerFiles(dir, state, runs); !slices.Equal(own.files, []string{dir, state, target}) || len(own.records) != 0 {
+	if own := runnerFiles(dir, state, runs, nil); !slices.Equal(own.files, []string{dir, state, target}) || len(own.records) != 0 {
 		t.Errorf("files %q, records %v", own.files, own.records)
 	}
-	if own := runnerFiles("", state, runs); !slices.Equal(own.files, []string{state}) || len(own.links) != 0 {
+	if own := runnerFiles("", state, runs, nil); !slices.Equal(own.files, []string{state}) || len(own.links) != 0 {
 		t.Errorf("no configuration directory: %q, %v", own.files, own.links)
 	}
 	base, real := resolve(t.TempDir()), resolve(t.TempDir())
@@ -457,7 +500,7 @@ func TestRunnerFilesPutsTheStateDirAfterTheConfigDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	place := linkPlace(link)
-	own := runnerFiles(dir, state, runs)
+	own := runnerFiles(dir, state, runs, nil)
 	if !slices.Equal(own.files, []string{dir, state, place, target}) || !own.records[place] || own.records[target] || own.links[place] != link {
 		t.Errorf("a linked state directory: files %q, records %v, links %v", own.files, own.records, own.links)
 	}
