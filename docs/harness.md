@@ -280,13 +280,13 @@ cd <checkout> && eval "$(qory harness launch --runtime claude)"
   tool's directory in the home.
 - The line also sets the harness's variables, through `env`. No settings file holds them:
   - `QORY_HARNESS_HOME`, the home, comes first.
-  - Then the fixed ones: qory's own. These are the template's variables and what the
-    modules export, each a path in the home.
+  - Then the fixed ones: qory's own. These are the template's variables.
   - Then the defaults: what an author wrote. These are `env` in `qory.yaml`, the `env` of
-    `harness.launch.<runtime>`, and the `env` a settings fragment sets: Claude Code's
-    `settings.json` `env` and Codex's `shell_environment_policy.set`.
+    `harness.launch.<runtime>`, the `env` a settings fragment sets, Claude Code's
+    `settings.json` `env` and Codex's `shell_environment_policy.set`, and what the modules
+    export, each a path in the home.
 
-  `env` in `qory.yaml` over a module's export makes that variable a default.
+  `env` in `qory.yaml` over a module's export replaces its value.
   `qory harness inspect` lists each variable with where it comes from.
 - A tool's flags may move. Then `harness.launch.<runtime>` in your `qory.yaml` changes
   the command, the arguments or the variables.

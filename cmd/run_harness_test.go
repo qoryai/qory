@@ -1,0 +1,109 @@
+package cmd_test
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/qoryai/qory/cmd"
+	"github.com/qoryai/qory/internal/report"
+)
+
+// exportingCheckout is a checkout whose stack composes module core for codex, core
+// exporting CORE_SCRIPTS, LOG_DIR and DOCKER_HOST, a name the deny list holds, with
+// command the program codex's launch starts through harness.launch in the user's file,
+// which leaves the template's own CODEX_HOME in place. It returns the composed home.
+func exportingCheckout(t *testing.T, command string) (root, home string) {
+	t.Helper()
+	root = newCheckout(t)
+	writeFile(t, filepath.Join(root, "modules", "core", "qory-module.yaml"), "apiVersion: qory.dev/v1alpha1\nname: core\nenv:\n  CORE_SCRIPTS: scripts\n  LOG_DIR: logs\n  DOCKER_HOST: sockets\n")
+	writeFile(t, filepath.Join(root, "modules", "core", "scripts", "run.sh"), "#!/bin/sh\n")
+	writeFile(t, filepath.Join(root, "modules", "core", "logs", ".keep"), "")
+	writeFile(t, filepath.Join(root, "modules", "core", "sockets", ".keep"), "")
+	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.dev/v1alpha1\nharness:\n  target:\n    runtime: codex\n  modules:\n    - name: core\n      source: {path: modules/core}\n")
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "qory.yaml"), "apiVersion: qory.dev/v1alpha1\nharness:\n  launch:\n    codex:\n      command: "+command+"\n")
+	if out, err := run(t, "harness", "compose", "--no-links"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	return root, filepath.Join(root, ".qory", "harness")
+}
+
+// TestRunTakesAModuleExportAsADefault is a walled run whose server sets LOG_DIR, a name
+// module core exports, and whose --env sets CORE_SCRIPTS, another: an export is a written
+// default, so the server's value and the run's win over it, the deny list leaves out the
+// export DOCKER_HOST, and the template's CODEX_HOME stays fixed over --env. The report
+// records every export as a default.
+func TestRunTakesAModuleExportAsADefault(t *testing.T) {
+	root, home := exportingCheckout(t, "codex")
+	rep, err := report.Read(filepath.Join(root, ".qory", "harness-report.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range rep.LaunchEnv["codex"] {
+		if v.Fixed {
+			t.Errorf("the report records %s as fixed", v.Name)
+		}
+	}
+	docker, log := fakeDocker(t)
+	srv := newFakeServer(t, `{"version":1,"egress":{"mode":"observe"}}`)
+	srv.variables = `{"LOG_DIR":{"value":"from-server"}}`
+	serverFile(t, srv, "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
+	t.Setenv("CORE_SCRIPTS", "/elsewhere")
+	t.Setenv("CODEX_HOME", "/not-the-template")
+	out, err := run(t, "run", "codex", "--env", "CORE_SCRIPTS", "--env", "CODEX_HOME")
+	if cmd.ExitCode(err) != 4 {
+		t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	wants(t, out, "qory run: CODEX_HOME from --env is not used: the harness sets it\n")
+	lacks(t, out, "CORE_SCRIPTS from --env")
+	data, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants(t, string(data), "env: CORE_SCRIPTS=/elsewhere\n", "env: LOG_DIR=from-server\n", "env: CODEX_HOME="+home+"/codex\n")
+	lacks(t, string(data), "DOCKER_HOST=", "/not-the-template", "LOG_DIR="+home)
+	_, evs := events(t, root)
+	got, _ := json.Marshal(evs["dev.qory.run.policy_applied"][0]["variables"])
+	if want := `[{"from":"fixed","lost":[{"from":"run","why":"fixed"}],"name":"CODEX_HOME"},{"from":"run","lost":[{"from":"harness","why":"overridden"}],"name":"CORE_SCRIPTS"},{"lost":[{"from":"harness","why":"denied"}],"name":"DOCKER_HOST"},{"from":"apiary","lost":[{"from":"harness","why":"overridden"}],"name":"LOG_DIR"}]`; string(got) != want {
+		t.Errorf("run.policy_applied variables %s, want %s", got, want)
+	}
+}
+
+// TestRunFixesNoNameTheReportMarks is a report in the checkout that marks two variables
+// fixed: TOOL_PRELOAD, a name no template sets, and CODEX_HOME, the template's own, with a
+// value of its own. Neither mark fixes anything: --env sets TOOL_PRELOAD over the
+// report's value, and CODEX_HOME is the template's, which --env does not replace.
+func TestRunFixesNoNameTheReportMarks(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "fake-runtime")
+	writeFile(t, script, "#!/bin/sh\necho \"TOOL_PRELOAD=$TOOL_PRELOAD CODEX_HOME=$CODEX_HOME\"\n")
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	root, home := exportingCheckout(t, script)
+	path := filepath.Join(root, ".qory", "harness-report.json")
+	rep, err := report.Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep.LaunchEnv["codex"] = append(rep.LaunchEnv["codex"],
+		report.Var{Name: "TOOL_PRELOAD", Value: "$QORY_HARNESS_HOME/modules/core/scripts/run.sh", From: "module core", Fixed: true},
+		report.Var{Name: "CODEX_HOME", Value: "/forged", From: "module core", Fixed: true})
+	if err := report.Write(path, rep); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TOOL_PRELOAD", "from-env")
+	t.Setenv("CODEX_HOME", "/not-the-template")
+	out, err := run(t, "run", "codex", "--env", "TOOL_PRELOAD", "--env", "CODEX_HOME")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "TOOL_PRELOAD=from-env CODEX_HOME="+home+"/codex\n", "qory run: CODEX_HOME from --env is not used: the harness sets it\n")
+	lacks(t, out, "TOOL_PRELOAD from --env", "/forged")
+	_, evs := events(t, root)
+	got, _ := json.Marshal(evs["dev.qory.run.policy_applied"][0]["variables"])
+	if !strings.Contains(string(got), `{"from":"run","lost":[{"from":"harness","why":"overridden"},{"from":"shell","why":"overridden"}],"name":"TOOL_PRELOAD"}`) {
+		t.Errorf("run.policy_applied variables %s: TOOL_PRELOAD is not the run's over the report's default", got)
+	}
+}

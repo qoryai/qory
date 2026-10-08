@@ -337,8 +337,9 @@ contains the module at `modules/<name>`, and the report and every message use it
 directory the module is stored under is not consulted. `env` lists the variables the module exports, each the path of a file or directory inside
 the module, `.` for its root. The compose writes each as
 `$QORY_HARNESS_HOME/modules/<name>/<path>` and every launch sets it as the module's
-absolute path in the home, a fixed variable (§Launching), so a script the module ships
-reads its own location from the same variable wherever the home is. Two modules exporting one name with different values
+absolute path in the home, a default (§Launching), so a script the module ships reads its
+own location from the same variable wherever the home is; a value a run sets for the name
+over the defaults wins. Two modules exporting one name with different values
 fail the compose unless the configuration's `env` sets it; `QORY_HARNESS_HOME` is qory's own.
 `requires`, optional, is one item per entry of the module that needs other entries
 composed beside it: the entry by its singular kind, `skill`, `agent`, `command`,
@@ -742,19 +743,19 @@ what follows it to the end of the word is the file, so `@${dir}/mcp.json` refers
 The line sets the launch's environment through `env`, in three parts with no name in two:
 
 1. `QORY_HARNESS_HOME`, the home's absolute path.
-2. The fixed variables, qory's own: the variables of the runtime's own template, and what
-   the modules export, each the module's path in the home.
+2. The fixed variables, qory's own: the variables of the runtime's own template, and
+   nothing else.
 3. The defaults, what an author wrote: the configuration's `env`, the `env` of
    `harness.launch.<runtime>`, which stands in for the template's whole and is a default
-   with its placeholders replaced, and the variables a settings fragment sets (§Runtimes).
+   with its placeholders replaced, the variables a settings fragment sets (§Runtimes), and
+   what the modules export, each the module's path in the home.
 
 The variables of the runtime's own template are fixed: a variable of the harness with the
 same name, the configuration's, a fragment's or a module's export, does not replace one,
 and the report leaves it out. When the `env` of `harness.launch.<runtime>` replaces the
 template's, its variables are defaults, and the harness's layer over them. The harness's
 variables layer over each other: a fragment's, then the modules' over them, then the
-configuration's over both. Each is then fixed or a default by where its value came from,
-so a variable the configuration sets over a module's export is a default.
+configuration's over both. Every one of them is a default, a module's export included.
 `qory run` passes the same environment to the runner. The report keeps these variables
 under `launch_env` (§The report), and `qory harness compose --check` compares them with
 what the compose sets, so a changed export, a changed `env` in the configuration or a
@@ -789,7 +790,8 @@ checkout, `version` 1: the stack name and file, the target, the checkout, the ho
 paths a `--force` compose replaced, the `env` the harness exports with
 `$QORY_HARNESS_HOME` in place of the home, `launch_env`, per runtime with a launch, every
 variable the harness sets in it, `{name, value, from, fixed}`, `from` being `module
-<name>`, `module <name>, settings/<runtime>/<file>` or `configuration`, and the stack's `extensions` as written. The
+<name>`, `module <name>, settings/<runtime>/<file>` or `configuration` and `fixed` false,
+since every one is a default, and the stack's `extensions` as written. The
 target's `runtime` is always an array: the runtimes the home contains after the compose,
 the targeted ones first. A module has its `name`, its `source` as the stack writes it,
 its `pin`, `dirty` when git saw uncommitted changes under a path source, the `variant`

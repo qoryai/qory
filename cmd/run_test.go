@@ -1108,9 +1108,9 @@ func TestRunRefusesAMountOfALinkToTheConfigDir(t *testing.T) {
 }
 
 // TestRunTakesEnvWithoutAWall is --env on a run without a wall: a value no other
-// source sets reaches the agent and is recorded as the run's, and qory says, a line
-// each, that a value of a name the harness computes, a module's export, and of one no
-// source may set, PATH, are not used.
+// source sets reaches the agent and is recorded as the run's, a value of a name a module
+// exports wins over the export, a default, and qory says that a value of a name no source
+// may set, PATH, is not used.
 func TestRunTakesEnvWithoutAWall(t *testing.T) {
 	root := newCheckout(t)
 	writeFile(t, filepath.Join(root, "modules", "core", "qory-module.yaml"), "apiVersion: qory.dev/v1alpha1\nname: core\nenv:\n  CORE_SCRIPTS: scripts\n")
@@ -1129,13 +1129,12 @@ func TestRunTakesEnvWithoutAWall(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	wants(t, out,
-		"qory run: CORE_SCRIPTS from --env is not used: the harness sets it\n",
 		"qory run: PATH from --env is not used: no source may set it\n",
-		"FLAG_NAMED=goes in CORE_SCRIPTS="+filepath.Join(root, ".qory", "harness", "modules", "core", "scripts")+"\n")
-	lacks(t, out, "FLAG_NAMED from --env")
+		"FLAG_NAMED=goes in CORE_SCRIPTS=/elsewhere\n")
+	lacks(t, out, "FLAG_NAMED from --env", "CORE_SCRIPTS from --env")
 	_, evs := events(t, root)
 	got, _ := json.Marshal(evs["dev.qory.run.policy_applied"][0]["variables"])
-	if want := `[{"from":"fixed","lost":[{"from":"run","why":"fixed"},{"from":"shell","why":"fixed"}],"name":"CORE_SCRIPTS"},{"from":"run","lost":[{"from":"shell","why":"overridden"}],"name":"FLAG_NAMED"},{"from":"shell","lost":[{"from":"run","why":"denied"}],"name":"PATH"}]`; string(got) != want {
+	if want := `[{"from":"run","lost":[{"from":"harness","why":"overridden"},{"from":"shell","why":"overridden"}],"name":"CORE_SCRIPTS"},{"from":"run","lost":[{"from":"shell","why":"overridden"}],"name":"FLAG_NAMED"},{"from":"shell","lost":[{"from":"run","why":"denied"}],"name":"PATH"}]`; string(got) != want {
 		t.Errorf("run.policy_applied variables %s, want %s", got, want)
 	}
 }

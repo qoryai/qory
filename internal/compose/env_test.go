@@ -105,9 +105,8 @@ func TestDescriptionsAreRead(t *testing.T) {
 // TestLaunchEnvSortsByWhereTheValueCameFrom is module a exporting HARNESS_HOME and TOOLS,
 // module b's fragment setting LOG_LEVEL, a number, QORY_HARNESS_HOME and the exported
 // HARNESS_HOME again, and the configuration setting TOOLS and PROFILE. The layering is the
-// environment's: the fragment's, the exports over them, the configuration's over all. An
-// export's value is fixed; the configuration's TOOLS over the export, the fragment's own
-// variables and PROFILE are defaults; QORY_HARNESS_HOME is none of them.
+// environment's: the fragment's, the exports over them, the configuration's over all.
+// Every one is a default, the export's value too; QORY_HARNESS_HOME is none of them.
 func TestLaunchEnvSortsByWhereTheValueCameFrom(t *testing.T) {
 	res, err := composeTreeWith(t, map[string]string{
 		"qory-stack.yaml":                         twoModules,
@@ -122,7 +121,7 @@ func TestLaunchEnvSortsByWhereTheValueCameFrom(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []compose.Var{
-		{Name: "HARNESS_HOME", Value: "$QORY_HARNESS_HOME/modules/a", From: "module a", Fixed: true},
+		{Name: "HARNESS_HOME", Value: "$QORY_HARNESS_HOME/modules/a", From: "module a"},
 		{Name: "LOG_LEVEL", Value: "debug", From: "module b, settings/claude/settings.json"},
 		{Name: "PORT", Value: "8080", From: "module b, settings/claude/settings.json"},
 		{Name: "PROFILE", Value: "nextjs", From: "configuration"},
@@ -164,7 +163,7 @@ func TestLaunchEnvReadsCodexsSet(t *testing.T) {
 	}
 	want := []compose.Var{
 		{Name: "CI", Value: "1", From: "module b, settings/codex/config.toml"},
-		{Name: "TOOLS", Value: "$QORY_HARNESS_HOME/modules/a/scripts/tools", From: "module a", Fixed: true},
+		{Name: "TOOLS", Value: "$QORY_HARNESS_HOME/modules/a/scripts/tools", From: "module a"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("launch env\n%+v\nwant\n%+v", got, want)
