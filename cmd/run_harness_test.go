@@ -107,3 +107,124 @@ func TestRunFixesNoNameTheReportMarks(t *testing.T) {
 		t.Errorf("run.policy_applied variables %s: TOOL_PRELOAD is not the run's over the report's default", got)
 	}
 }
+
+// walledRunner writes a runner file whose wall is a program standing in for docker, and
+// returns that program's log, which stays absent until the wall runs a command.
+func walledRunner(t *testing.T) string {
+	t.Helper()
+	docker, log := fakeDocker(t)
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
+	return log
+}
+
+// startedNothing fails the test when the wall ran a command or a run left a record.
+func startedNothing(t *testing.T, root, log string) {
+	t.Helper()
+	if _, err := os.Stat(log); !os.IsNotExist(err) {
+		data, _ := os.ReadFile(log)
+		t.Errorf("the wall ran a command:\n%s", data)
+	}
+	if ids := recorded(t, root); len(ids) != 0 {
+		t.Errorf("a refused run left a record: %v", ids)
+	}
+}
+
+// TestRunRefusesAReportNamingAnotherHome is a report in the checkout that names another
+// home, as a repository could commit or a walled agent write: the run computes the home
+// itself, refuses before the wall runs anything, and says to compose again. --home that
+// names the composed home, with a report naming another checkout, is refused too. A
+// compose writes the report again, and the run then mounts the home it computes.
+func TestRunRefusesAReportNamingAnotherHome(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, "claude")
+	log := walledRunner(t)
+	home := filepath.Join(root, ".qory", "harness")
+	path := filepath.Join(root, ".qory", "harness-report.json")
+	rep, err := report.Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forged := filepath.Join(os.Getenv("HOME"), ".ssh")
+	rep.Home = forged
+	if err := report.Write(path, rep); err != nil {
+		t.Fatal(err)
+	}
+	_, err = run(t, "run", "claude")
+	want := "the harness report .qory/harness-report.json names the home " + forged + ", and this checkout's home is " + home + "; a run uses only the home qory computes, so the run does not start. Run qory harness compose again"
+	if cmd.ExitCode(err) != cmd.ExitInput || err.Error() != want {
+		t.Errorf("a report naming another home: %v (exit %d), want %q", err, cmd.ExitCode(err), want)
+	}
+	startedNothing(t, root, log)
+
+	rep.Home, rep.Checkout = home, os.Getenv("HOME")
+	if err := report.Write(path, rep); err != nil {
+		t.Fatal(err)
+	}
+	_, err = run(t, "run", "claude", "--home", home)
+	want = "the harness report " + path + " names the checkout " + os.Getenv("HOME") + ", and " + home + " is not that checkout's home; a run uses only a checkout's own home, so the run does not start. Run qory harness compose again"
+	if cmd.ExitCode(err) != cmd.ExitInput || err.Error() != want {
+		t.Errorf("--home with a report naming another checkout: %v (exit %d), want %q", err, cmd.ExitCode(err), want)
+	}
+	startedNothing(t, root, log)
+
+	composedForFake(t, root, "claude")
+	out, err := run(t, "run", "claude")
+	if cmd.ExitCode(err) != 4 {
+		t.Fatalf("run after a compose: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	data, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants(t, string(data), "--mount type=bind,src="+root+",dst="+root+" ")
+	lacks(t, string(data), forged)
+	if out, err := run(t, "run", "claude", "--home", home); cmd.ExitCode(err) != 4 {
+		t.Fatalf("--home naming the composed home: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+}
+
+// TestWalledRunTakesTheHomeFromYourOwnFile is a checkout whose own qory.yaml sets
+// harness.home outside it: the compose puts the home there, a run without a wall starts
+// on it, and a walled run refuses before the wall runs anything, since behind a wall the
+// home is a mount and comes from your own qory.yaml alone. The same value in your file
+// starts it, and so does a checkout whose harness.home leaves the home where your files
+// put it.
+func TestWalledRunTakesTheHomeFromYourOwnFile(t *testing.T) {
+	root := newCheckout(t)
+	homes := tempDir(t)
+	script := fakeRuntime(t)
+	stack := "apiVersion: qory.dev/v1alpha1\nharness:\n  target:\n    runtime: claude\n  modules:\n    - name: core\n      source: {path: modules/core}\n"
+	writeFile(t, filepath.Join(root, "modules", "core", "qory-module.yaml"), "apiVersion: qory.dev/v1alpha1\nname: core\n")
+	writeFile(t, filepath.Join(root, "qory.yaml"), stack+"  home: "+homes+"\n")
+	user := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "qory.yaml")
+	launch := "apiVersion: qory.dev/v1alpha1\nharness:\n  launch:\n    claude:\n      command: " + script + "\n"
+	writeFile(t, user, launch)
+	if out, err := run(t, "harness", "compose"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if out, err := run(t, "run", "claude"); cmd.ExitCode(err) != 3 {
+		t.Fatalf("a run without a wall: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	if err := os.RemoveAll(runsDir(t, root)); err != nil {
+		t.Fatal(err)
+	}
+	log := walledRunner(t)
+	_, err := run(t, "run", "claude")
+	want := "the checkout's qory.yaml sets harness.home, and a walled run takes the home from your own qory.yaml alone, so the run does not start. Set harness.home in ~/.config/qory/qory.yaml, or remove it from the checkout's qory.yaml"
+	if cmd.ExitCode(err) != cmd.ExitInput || err.Error() != want {
+		t.Errorf("a walled run with the checkout's harness.home: %v (exit %d), want %q", err, cmd.ExitCode(err), want)
+	}
+	startedNothing(t, root, log)
+
+	writeFile(t, user, strings.Replace(launch, "harness:\n", "harness:\n  home: "+homes+"\n", 1))
+	out, err := run(t, "run", "claude")
+	if cmd.ExitCode(err) != 4 {
+		t.Fatalf("a walled run with harness.home in your file too: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	data, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants(t, string(data), "--mount type=bind,src="+homes+string(filepath.Separator))
+}

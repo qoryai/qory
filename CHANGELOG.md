@@ -246,6 +246,19 @@ release may change what an existing document does, and states it under Upgrading
   credential. A server's run configuration may carry a
   `security_policy`, which the node's policy, `runner.yaml`'s `egress` and `--policy`,
   narrows, and connections and variables.
+- `qory run` computes the home itself, as compose does, and takes from the harness report
+  no path it mounts and no fixed variable. A report that names another home is refused
+  before anything starts: `the harness report <report> names the home <home>, and this
+  checkout's home is <home>; a run uses only the home qory computes, so the run does not
+  start. Run qory harness compose again`. With `--home` naming a composed home, the
+  checkout the report beside it names has to be the one that home is composed for, else
+  `the harness report <report> names the checkout <checkout>, and <home> is not that
+  checkout's home; a run uses only a checkout's own home, so the run does not start. Run
+  qory harness compose again`. Behind a wall, `harness.home` comes from your own
+  `qory.yaml` alone: a checkout's `qory.yaml` that moves the home is refused, `the
+  checkout's qory.yaml sets harness.home, and a walled run takes the home from your own
+  qory.yaml alone, so the run does not start. Set harness.home in <your qory.yaml>, or
+  remove it from the checkout's qory.yaml`.
 
 ## [0.12.1] - 2026-09-30
 

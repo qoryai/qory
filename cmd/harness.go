@@ -1369,7 +1369,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/harness.md#a-home-outside-th
 			if err != nil {
 				return err
 			}
-			name, launch, err := resolveLaunch(rep, conf, runtime)
+			name, launch, err := resolveLaunch(rep, conf, runtime, rep.Home)
 			if err != nil {
 				return err
 			}

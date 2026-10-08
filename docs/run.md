@@ -23,6 +23,11 @@ The runtime is the one the harness is composed for. When it is composed for seve
 first argument selects one. Arguments after `--` go to the runtime, after the launch
 template's own.
 
+qory computes the home itself, as compose does, and refuses a run whose harness report
+names another: run `qory harness compose` again. The report fixes no variable and adds no
+mount. Behind a wall, `harness.home` comes from your own `qory.yaml`: a checkout's
+`qory.yaml` that moves the home refuses a walled run.
+
 The exit status is the runtime's.
 
 ### At a terminal, or on pipes
