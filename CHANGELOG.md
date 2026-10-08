@@ -254,11 +254,12 @@ release may change what an existing document does, and states it under Upgrading
   checkout the report beside it names has to be the one that home is composed for, else
   `the harness report <report> names the checkout <checkout>, and <home> is not that
   checkout's home; a run uses only a checkout's own home, so the run does not start. Run
-  qory harness compose again`. Behind a wall, `harness.home` comes from your own
-  `qory.yaml` alone: a checkout's `qory.yaml` that moves the home is refused, `the
-  checkout's qory.yaml sets harness.home, and a walled run takes the home from your own
-  qory.yaml alone, so the run does not start. Set harness.home in <your qory.yaml>, or
-  remove it from the checkout's qory.yaml`.
+  qory harness compose again`. Behind a wall, `harness.home` comes from the `qory.yaml`
+  in qory's configuration directory alone: another `qory.yaml`, the checkout's or one
+  in a directory above it, that moves the home is refused, `<file> sets harness.home,
+  and a walled run takes the home from <config file> alone, so the run does not start.
+  Set harness.home in <config file>, or remove it from <file>`, with `<file>` the
+  checkout's qory.yaml or the other file's path.
 
 ## [0.12.1] - 2026-09-30
 

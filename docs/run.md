@@ -25,8 +25,8 @@ template's own.
 
 qory computes the home itself, as compose does, and refuses a run whose harness report
 names another: run `qory harness compose` again. The report fixes no variable and adds no
-mount. Behind a wall, `harness.home` comes from your own `qory.yaml`: a checkout's
-`qory.yaml` that moves the home refuses a walled run.
+mount. Behind a wall, `harness.home` comes from the `qory.yaml` in qory's configuration
+directory alone: another `qory.yaml` that moves the home refuses a walled run.
 
 The exit status is the runtime's.
 
