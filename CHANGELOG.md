@@ -253,24 +253,6 @@ release may change what an existing document does, and states it under Upgrading
   never look for a newer release. At a terminal there, the look runs as the container's
   root and puts a connection the agent did not make in the run's record.
 - `qory run` behind a wall with no image names the page that says how to build Qory's.
-- `docs/run.md` has one section, Integrations, on using an integration: what it
-  describes; `qory integration install <source>`, from a public release on
-  `github.com/<owner>/<repo>`, `gitlab.com/<group>/<project>` or
-  `codeberg.org/<owner>/<repo>`, or from the URL of a release's `description.json`, the
-  latest release or the one `--version` names, with `--replace` for another source; what
-  it downloads and checks, and the `integrations:` entry it writes, `path`, `source` and
-  `description_sha256`, with the machine's bounds `ways`, `arguments`, `settings` and
-  `paths`; a connection's `ways`, argument, settings and secrets, from a server or from
-  `runner.yaml`'s `connections:` and `secrets.local`; the credential role's settings on
-  standard input; the checks at a run's start with their codes; the credential role;
-  upgrading; and `qory config`. Its bounds apply to the connections a server sends
-  alone.
-- `docs/run.md` describes every credential as a connection: the model credential as a
-  `runtime` connection with a `secrets.local` value, a static key as a `service`
-  connection, and the hello example's walled run with them. A policy selects no
-  credential. A server's run configuration may carry a
-  `security_policy`, which the node's policy, `runner.yaml`'s `egress` and `--policy`,
-  narrows, and connections and variables.
 - `qory run` computes the home itself, as compose does, and takes from the harness report
   no path it mounts and no fixed variable. A report that names another home is refused
   before anything starts: `the harness report <report> names the home <home>, and this
@@ -363,10 +345,10 @@ release may change what an existing document does, and states it under Upgrading
   plain verbs in the present tense. The meaning is unchanged; the error for an
   integration that defines nothing lists the roles it plays.
 - A policy, the server's run configuration or a `--policy` file, may contain `image` and
-  `tools`, as the runner's contract allows; `runner.yaml` defines images and tools in a
-  later release, so a policy that selects one stops the run before it starts, with the
-  runner's error, and a run configuration the server sends during a run that selects one
-  is refused and leaves the policy in force.
+  `tools`, as the runner's contract allows; `runner.yaml` defines no images or tools, so
+  a policy that selects one stops the run before it starts, with the runner's error, and
+  a run configuration the server sends during a run that selects one is refused and
+  leaves the policy in force.
 - IP forwarding is off in the wall's relay container, for IPv4 and IPv6, so the relay
   connects the container's network to the ordinary one only through the proxy.
 
@@ -835,7 +817,7 @@ release may change what an existing document does, and states it under Upgrading
 - A document declaring a retired `apiVersion`, one an earlier qory wrote for the same
   format, was refused with exit 2. It is now read as the current version, in every
   document, and the compose prints a `retired` row per document naming the version it
-  declares and the line to write. A later major release stops reading it.
+  declares and the line to write.
 
 ## [0.4.0] - 2026-09-12
 
