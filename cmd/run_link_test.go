@@ -85,9 +85,9 @@ func TestRunBehindAWallKeepsTheLinkSecretInMemory(t *testing.T) {
 	composedForFake(t, root, "claude")
 	docker, log := fakeDocker(t)
 	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
-	out, err := run(t, "run", "claude", "--", "-p", "hi")
-	if cmd.ExitCode(err) != 4 {
-		t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	out, runErr := run(t, "run", "claude", "--", "-p", "hi")
+	if cmd.ExitCode(runErr) != 4 {
+		t.Fatalf("run returned %v (exit %d)\n%s", runErr, cmd.ExitCode(runErr), out)
 	}
 	if *secret == "" {
 		t.Fatal("the run handed its session no link secret")
@@ -99,9 +99,7 @@ func TestRunBehindAWallKeepsTheLinkSecretInMemory(t *testing.T) {
 	wants(t, string(data), "env: ")
 	lacks(t, string(data), *secret)
 	lacks(t, out, *secret)
-	if err != nil {
-		lacks(t, err.Error(), *secret)
-	}
+	lacks(t, runErr.Error(), *secret)
 	noSecretUnder(t, runsDir(t, root), *secret)
 	noSecretUnder(t, filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory"), *secret)
 }
