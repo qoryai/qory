@@ -2,6 +2,7 @@ package cmd_test
 
 import (
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -438,6 +439,48 @@ func TestResendWithoutTheRunSecretSaysSo(t *testing.T) {
 		if held != 2 {
 			t.Errorf("%s: undelivered/ holds %d events, want 2", c.name, held)
 		}
+	}
+}
+
+// TestResendWithoutTheRunSecretSaysSoOfAnExpiredRunCredential is the gateway's 401
+// run_credential_refused to a resend whose run credential has expired: a record whose
+// run directory has no run-secret says that, before the expiry, since the gateway
+// answers a batch without the run's secret so whatever the credential; a record that
+// has one says the run credential expired. Each is exit 1.
+func TestResendWithoutTheRunSecretSaysSoOfAnExpiredRunCredential(t *testing.T) {
+	root := newCheckout(t)
+	link := newFakeLink(t)
+	writeFile(t, foragerFile(), sessionGateway(strings.TrimPrefix(link.URL, "https://"), link.ca, ""))
+	exp := time.Now().Add(-time.Hour).Unix()
+	enc := base64.RawURLEncoding
+	credential := enc.EncodeToString([]byte(`{"alg":"EdDSA","typ":"JWT"}`)) + "." +
+		enc.EncodeToString([]byte(fmt.Sprintf(`{"sub":"queue/expired-%d","exp":%d}`, time.Now().UnixNano(), exp))) + "." +
+		enc.EncodeToString([]byte("unsigned"))
+	for i, c := range []struct {
+		name   string
+		secret bool
+		want   func(shown string) string
+	}{
+		{name: "no run-secret", want: func(s string) string { return fmt.Sprintf(resendNoSecret, s) }},
+		{name: "a run-secret", secret: true, want: func(s string) string {
+			return fmt.Sprintf(resendExpired, time.Unix(exp, 0).UTC().Format(time.RFC3339), s)
+		}},
+	} {
+		id := fmt.Sprintf("0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5ed%d", i)
+		dir := gatewayRecord(t, root, id)
+		if !c.secret {
+			if err := os.Remove(filepath.Join(dir, "run-secret")); err != nil {
+				t.Fatal(err)
+			}
+		}
+		link.answer(http.StatusUnauthorized, `{"error":"run_credential_refused","from":"gateway","message":"the gateway refused this run credential"}`)
+		t.Setenv("QORY_RUN_CREDENTIAL_SECRET", credential)
+		out, err := run(t, "run", "resend", id)
+		want := c.want(ui.Short(dir, root))
+		if cmd.ExitCode(err) != 1 || err == nil || err.Error() != want {
+			t.Errorf("%s: %v (exit %d), want %q, exit 1\n%s", c.name, err, cmd.ExitCode(err), want, out)
+		}
+		lacks(t, failed(out, err), credential)
 	}
 }
 
