@@ -112,6 +112,10 @@ func TestRunBehindAGatewaySaysTheIssuersFailures(t *testing.T) {
 		if got := strings.Contains(out, "runtime started"); got != c.started {
 			t.Errorf("%s: the runtime started: %v, want %v\n%s", c.name, got, c.started, out)
 		}
-		link.wantSecret(t, c.name, runSecret)
+		if c.started {
+			link.wantSecret(t, c.name, runSecret)
+		} else {
+			link.wantNoBatch(t, c.name)
+		}
 	}
 }

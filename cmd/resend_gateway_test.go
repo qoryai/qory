@@ -198,16 +198,29 @@ func (f *fakeLink) answer(status int, body string) {
 	f.status, f.body, f.batches, f.secrets = status, body, 0, nil
 }
 
-// wantSecret fails the test unless every batch the fake got since its last answer
-// carried the run secret want, once.
+// wantSecret fails the test unless the fake got a batch since its last answer, and
+// every one carried the run secret want, once.
 func (f *fakeLink) wantSecret(t *testing.T, name, want string) {
 	t.Helper()
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if len(f.secrets) == 0 {
+		t.Errorf("%s: no batch reached the gateway", name)
+	}
 	for i, s := range f.secrets {
 		if s != want {
 			t.Errorf("%s: batch %d did not carry the run's secret, once", name, i+1)
 		}
+	}
+}
+
+// wantNoBatch fails the test when the fake got a batch since its last answer.
+func (f *fakeLink) wantNoBatch(t *testing.T, name string) {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.secrets) != 0 {
+		t.Errorf("%s: %d batches reached the gateway, want none", name, len(f.secrets))
 	}
 }
 
@@ -350,7 +363,11 @@ func TestResendThroughAGatewaySaysWhatItAnswered(t *testing.T) {
 			t.Errorf("%s: no batch reached the gateway", c.name)
 		}
 		link.mu.Unlock()
-		link.wantSecret(t, c.name, recordedSecret)
+		if c.discovery == 0 {
+			link.wantSecret(t, c.name, recordedSecret)
+		} else {
+			link.wantNoBatch(t, c.name)
+		}
 		if c.code != 0 {
 			if b, err := os.ReadFile(filepath.Join(dir, "session.jsonl")); err != nil || strings.Count(string(b), "\n") != 2 {
 				t.Errorf("%s: the run directory lost its events: %v", c.name, err)
