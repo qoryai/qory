@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -515,6 +516,40 @@ func TestConfigRowsOfRunCredentialsAreOfTheListAsRead(t *testing.T) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%q: rows\n%v\nwant, as of the list written out,\n%v", c.body, got, want)
 		}
+	}
+}
+
+// TestRunCredentialsAliasesExpandWithinABound writes a value of 1 MiB anchored in
+// another section and aliased under gateway.run_credentials: three aliases are read,
+// and 2000, which would make 2 GiB of JSON, are refused at once, without the JSON
+// being made, in qory's words, which name no value.
+func TestRunCredentialsAliasesExpandWithinABound(t *testing.T) {
+	hermetic(t)
+	value := strings.Repeat(marker, (1<<20)/len(marker))
+	body := func(n int) string {
+		return "gateway:\n  integrations: {i: {program: /opt/acme/bin/acme-tracker, settings: {s: &v " + value + "}}}\n  run_credentials:\n" +
+			"    - {issuer: \"https://issuer.example\", audience: box, algorithms: [RS256], keys: [{kid: k1, alg: RS256, public_key_file: f.pem}], labels: {forge: {value: x}, repository: {claims: [" + repeated("*v", n) + "], join: /}, run_key: {claim: sub}}}\n"
+	}
+	foragerFile(t, body(3))
+	if _, err := config.LoadForager(); err != nil {
+		t.Errorf("three aliases of 1 MiB: %v, want them read", err)
+	}
+	path := foragerFile(t, body(2000))
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	start := time.Now()
+	_, err := config.LoadForager()
+	took := time.Since(start)
+	runtime.ReadMemStats(&after)
+	if want := path + ": gateway.run_credentials: its aliases expand to more values than qory reads"; err == nil || err.Error() != want {
+		t.Errorf("2000 aliases of 1 MiB: %v, want %q", err, want)
+	}
+	if took > 2*time.Second {
+		t.Errorf("2000 aliases of 1 MiB took %v", took)
+	}
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 512<<20 {
+		t.Errorf("2000 aliases of 1 MiB allocated %d MiB", allocated>>20)
 	}
 }
 

@@ -22,6 +22,10 @@ import (
 // JSON.
 const runCredentialsDoc = "run_credentials.json"
 
+// runCredentialsBudget is the most JSON, in bytes, gateway.run_credentials written with
+// aliases may make with each alias written out: far more than a list of issuers takes.
+const runCredentialsBudget = 4 << 20
+
 // Heartbeat is the heartbeat interval of every gateway qory starts, qory run's own and
 // qory gateway, Forager's default; it is also how long an introspection answer holds
 // when an issuer sets no cache.
@@ -63,11 +67,21 @@ func readRunCredentials(path string, node *yaml.Node) (runcredential.Issuers, []
 	if f := keys.fault(node, schema); f != nil {
 		return nil, nil, f.error(path)
 	}
+	// The decoder holds an alias's value once, however often the alias stands, and the
+	// JSON of it once for each time: a list whose aliases would make more JSON than
+	// runCredentialsBudget is refused before its JSON is made.
+	aliased := holdsAlias(node)
+	if aliased && jsonOver(list, runCredentialsBudget) {
+		return nil, nil, fmt.Errorf("%s: gateway.run_credentials: %s", path, tooManyAliases)
+	}
 	// Forager reads a YAML list as the JSON of what the decoder makes of it, which is
 	// the JSON it is handed here.
 	b, err := json.Marshal(list)
 	if err != nil {
 		return nil, nil, notIssuers
+	}
+	if aliased && len(b) > runCredentialsBudget {
+		return nil, nil, fmt.Errorf("%s: gateway.run_credentials: %s", path, tooManyAliases)
 	}
 	issuers, err := runcredential.Parse(runCredentialsDoc, b)
 	if err != nil {
@@ -190,6 +204,60 @@ func mergedKeys(m *yaml.Node, taken map[string]bool) []keyValue {
 		}
 	}
 	return out
+}
+
+// holdsAlias reports whether n, or anything under it as the file writes it, is an
+// alias.
+func holdsAlias(n *yaml.Node) bool {
+	if n.Kind == yaml.AliasNode {
+		return true
+	}
+	for _, c := range n.Content {
+		if holdsAlias(c) {
+			return true
+		}
+	}
+	return false
+}
+
+// jsonOver reports whether the JSON of v, a value the decoder made, takes more than
+// limit bytes. It counts the fewest bytes each value takes in JSON, and stops as soon as
+// the count is over limit, so a string the decoder shares among many aliases is never
+// read through.
+func jsonOver(v any, limit int) bool {
+	n := 0
+	var over func(v any) bool
+	over = func(v any) bool {
+		switch v := v.(type) {
+		case string:
+			n += len(v) + 2
+		case []any:
+			n += 2
+			for _, e := range v {
+				if over(e) {
+					return true
+				}
+			}
+		case map[string]any:
+			n += 2
+			for k, e := range v {
+				if n += len(k) + 3; over(e) {
+					return true
+				}
+			}
+		case map[any]any:
+			n += 2
+			for _, e := range v {
+				if n += 3; over(e) {
+					return true
+				}
+			}
+		default:
+			n++
+		}
+		return n > limit
+	}
+	return over(v)
 }
 
 // written is a value as the file writes it, on one line: a scalar as it is, anything
