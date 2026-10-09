@@ -689,6 +689,33 @@ A run the gateway ends because the credential's issuer reports that the run has 
 says `qory run: the gateway ended the run: the run credential's issuer reports that the
 run has ended`. Either end fails the run, exit 1.
 
+### Resending through the gateway
+
+`qory run resend <run-id>` sends the gateway what it did not accept of the run's record:
+after a session that died, or a gateway that was out of reach. It reaches the gateway as
+`qory run` did, with a run credential of the run, from `--run-credential-fd`, else
+`QORY_RUN_CREDENTIAL_SECRET`, else the file, and refuses before anything is sent what
+`qory run` refuses. The run directory records what the gateway accepted, and only the rest
+is sent. It doesn't close the record: the gateway ends a run whose session it lost. It
+removes the containers and networks the run's wall left, as without a gateway.
+
+- `<n> events were accepted; nothing is left to send to the gateway`: exit 0.
+- `<n> events were accepted and <m> were not; <dir>/undelivered contains them`: the
+  gateway didn't accept them within `--wait`.
+- `the run credential expired at <time>, so the gateway takes no more of this run's
+  events; they stay in <dir>`.
+- `the gateway refused this run credential`, and `the gateway refused this run
+  credential: it differs from the one the run started with`.
+- `the run credential's issuer reports that the run has ended, so the gateway takes no
+  more of this run's events; they stay in <dir>`; `the gateway ended the run with the
+  reason <reason>, so it takes no more of this run's events; they stay in <dir>`; `the
+  server closed the run, so the gateway takes no more of this run's events; they stay in
+  <dir>`.
+
+Each but the first is exit 1, and the events stay in the run directory. A run that ran
+with a gateway of its own on this machine is refused: its record goes to the server, so
+resend it with a `forager.yaml` that defines the server and no `session.gateway`.
+
 ## Runs started by another system
 
 A system that starts runs of its own sets their id and labels, and says what each is
@@ -1245,7 +1272,8 @@ A run's record shows what each credential did:
 
 `qory run resend <run-id>` sends a run's record to the server `forager.yaml` defines. It
 is for a run whose Forager process died, or whose server was away. End a job with it, whatever
-happened before it.
+happened before it. Behind a gateway, it sends the record to that gateway: see [Resending
+through the gateway](#resending-through-the-gateway).
 
 The run is selected by its id: its folder in this checkout's run records, as [The
 record](#the-record) names it. The

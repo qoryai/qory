@@ -13,6 +13,7 @@ import (
 	"math"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -22,6 +23,7 @@ import (
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/refusal"
 	"github.com/qoryai/forager/session"
+	"github.com/qoryai/forager/sink"
 
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/foragerdir"
@@ -391,7 +393,7 @@ func (c *runCredential) expired() string {
 	if exp.IsZero() {
 		return ""
 	}
-	at := exp.UTC().Format(time.RFC3339)
+	at := expiryTime(exp)
 	switch {
 	case c.fd != nil:
 		return fmt.Sprintf("the run credential expired at %s, and the descriptor gave no fresh one", at)
@@ -399,6 +401,24 @@ func (c *runCredential) expired() string {
 		return fmt.Sprintf("the run credential expired at %s, and its file holds no fresh one", at)
 	}
 	return fmt.Sprintf("the run credential expired at %s; %s is read once, so a run longer than its credential needs session.gateway.run_credential_file or --%s", at, config.EnvRunCredential, runCredentialFDFlag)
+}
+
+// expiredAt is the expiry of the last run credential c handed out, as qory's texts say
+// it, when it has passed at now; ok is false when it has not, or when no credential qory
+// handed out had an exp it could read.
+func (c *runCredential) expiredAt(now time.Time) (at string, ok bool) {
+	c.mu.Lock()
+	exp := c.exp
+	c.mu.Unlock()
+	if exp.IsZero() || exp.After(now) {
+		return "", false
+	}
+	return expiryTime(exp), true
+}
+
+// expiryTime is a run credential's exp as qory's texts say it.
+func expiryTime(exp time.Time) string {
+	return exp.UTC().Format(time.RFC3339)
 }
 
 // gatewayEnded says why a separate gateway ended a run, by the code it closed it with:
@@ -545,4 +565,91 @@ func credentialRefused(err error, labels map[string]string, detailsFlag string, 
 		return &saidError{text: strings.Join(said, "; "), err: err}
 	}
 	return nil
+}
+
+// resendThroughGateway sends the gateway r's session.gateway names what the session of
+// the run runID did not deliver to it, from dir, the run's directory, through the
+// gateway the run spoke to, [remoteGateway], with the run credential c, within wait of
+// sig. It says what came of it on w: what the gateway accepted, what it did not, a run
+// it has ended, and its refusals of the run credential, each worded for the person
+// ([gatewayRefusedResend], [gatewayEndedResend]). A record its session still holds, a
+// run that is not recorded, and a record a gateway of the run's own made, which goes to
+// the server, are refused as input. root is the checkout's, against which dir is shown.
+func resendThroughGateway(sig context.Context, wait time.Duration, w io.Writer, r *config.Forager, c *runCredential, runID, dir, root string, report func(string)) error {
+	ctx, cancel := context.WithTimeout(sig, wait)
+	defer cancel()
+	res, err := session.Resend(ctx, session.ResendSpec{
+		Gateway:        remoteGateway(r, c),
+		Dir:            dir,
+		ForagerVersion: build().title(),
+		Report:         report,
+	})
+	shown := ui.Short(dir, root)
+	var pe *fs.PathError
+	switch {
+	case errors.Is(err, session.ErrRunning):
+		return input(fmt.Errorf("the run %s is running", runID))
+	case errors.As(err, &pe) && errors.Is(err, fs.ErrNotExist) && pe.Path == filepath.Join(dir, sink.SessionFile):
+		return input(fmt.Errorf("no run %s is recorded in this checkout", runID))
+	case errors.As(err, &pe) && errors.Is(err, fs.ErrExist) && pe.Path == filepath.Join(dir, sink.EventsFile):
+		return input(&saidError{text: fmt.Sprintf("the run %s ran with a gateway of its own on this machine, so its record goes to the server, not through session.gateway: resend it with a %s that defines the server and no session.gateway", runID, config.ForagerFileName), err: err})
+	case err != nil:
+		if refused := gatewayRefusedResend(err, c, shown, time.Now()); refused != nil {
+			return refused
+		}
+		return explain(err, nil)
+	}
+	reaped := reapWall(sig, r, runID, report)
+	u := ui.New(w)
+	if reaped > 0 {
+		u.Success("removed %d containers and networks the run left", reaped)
+	}
+	switch {
+	case res.RunClosed:
+		u.Fail(gatewayEndedResend(res, shown))
+		return reported(&exitError{code: 1})
+	case res.Undelivered > 0:
+		u.Fail(fmt.Errorf("%d events were accepted and %d were not; %s/undelivered contains them", res.Sent, res.Undelivered, shown))
+		return reported(&exitError{code: 1})
+	}
+	u.Success("%d events were accepted; nothing is left to send to the gateway", res.Sent)
+	return nil
+}
+
+// gatewayRefusedResend words the gateway's refusals of a resend's run credential for
+// the person: the 401 run_credential_refused, said as the credential's expiry when its
+// exp has passed at now, and otherwise as qory run says it; and the 403 of a run
+// credential that differs from the one the run started with,
+// target_differs_from_credential or differs_from_credential. shown is the run
+// directory, where the expiry says the events stay. nil for any other error. It unwraps
+// to the refusal.
+func gatewayRefusedResend(err error, c *runCredential, shown string, now time.Time) error {
+	var ref *session.Refusal
+	if !errors.As(err, &ref) {
+		return nil
+	}
+	switch ref.Code {
+	case refusal.RunCredentialRefused:
+		if at, ok := c.expiredAt(now); ok {
+			return &saidError{text: fmt.Sprintf("the run credential expired at %s, so the gateway takes no more of this run's events; they stay in %s", at, shown), err: err}
+		}
+		return &saidError{text: "the gateway refused this run credential", err: err}
+	case refusal.TargetDiffersFromCredential, refusal.DiffersFromCredential:
+		return &saidError{text: "the gateway refused this run credential: it differs from the one the run started with", err: err}
+	}
+	return nil
+}
+
+// gatewayEndedResend says that the run had ended when its events were sent again, by
+// who ended it and with what code: the gateway, at the credential's issuer's report,
+// run_ended_at_issuer, or for another reason, which it names; or the server. The events
+// stay in the run directory, shown.
+func gatewayEndedResend(res session.ResendResult, shown string) error {
+	switch {
+	case res.ClosedBy == accesskey.FromApiary:
+		return fmt.Errorf("the server closed the run, so the gateway takes no more of this run's events; they stay in %s", shown)
+	case res.Reason == event.ReasonRunEndedAtIssuer:
+		return fmt.Errorf("the run credential's issuer reports that the run has ended, so the gateway takes no more of this run's events; they stay in %s", shown)
+	}
+	return fmt.Errorf("the gateway ended the run with the reason %s, so it takes no more of this run's events; they stay in %s", res.Reason, shown)
 }

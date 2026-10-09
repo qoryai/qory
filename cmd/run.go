@@ -1354,10 +1354,11 @@ func wallHelper(section config.ForagerWall, exe string) (string, error) {
 }
 
 // newResend builds the resend verb: the last step of a job that started a run, whatever
-// happened before it.
+// happened before it. Behind a gateway, session.gateway, the record goes to that gateway
+// with the run's run credential ([resendThroughGateway]); otherwise to the server.
 func newResend() *cobra.Command {
 	var wait time.Duration
-	var secretFD int
+	var secretFD, credentialFD int
 	c := &cobra.Command{
 		Use:   "resend <run-id>",
 		Short: "Send a finished run's record to the server again",
@@ -1370,6 +1371,12 @@ running is refused.
 
 The exit status is 0 when the server has everything, and 1 when events remain.
 
+Behind a gateway, when session.gateway in ` + config.ForagerFileName + ` names one, the record goes to that
+gateway instead, with the run's run credential: from --run-credential-fd, else
+QORY_RUN_CREDENTIAL_SECRET, else session.gateway.run_credential_file. The exit status
+is 0 when nothing is left to send, and 1 when events remain or the gateway takes no
+more of them.
+
 --verbose adds nothing here.
 
 More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-record`,
@@ -1377,6 +1384,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
   qory run resend "$run_id" --wait 10m  # keep trying for ten minutes`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// As qory run reads them: the access key's descriptor first and closed, the run
+			// credential's close-on-exec from here and read until the resend ends.
 			var fdKey *accesskey.Key
 			if cmd.Flags().Changed(secretFDFlag) {
 				k, err := readSecretFD(secretFD)
@@ -1385,9 +1394,27 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 				}
 				fdKey = k
 			}
+			var fdCredential *credentialStream
+			if cmd.Flags().Changed(runCredentialFDFlag) {
+				s, err := readCredentialFD(credentialFD)
+				if err != nil {
+					return err
+				}
+				defer s.stop()
+				fdCredential = s
+			}
 			at, conf, err := locate(homeOptions{})
 			if err != nil {
 				return err
+			}
+			r := conf.Forager
+			// Behind a gateway, the refusals of qory run's, before anything is read or sent.
+			var credential *runCredential
+			remote := r != nil && r.SessionGateway != nil
+			if remote {
+				if credential, err = behindGateway(r, false, false, fdKey != nil, fdCredential); err != nil {
+					return err
+				}
 			}
 			if err := session.CheckRunID(args[0]); err != nil {
 				return input(err)
@@ -1400,11 +1427,17 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 			if err != nil {
 				return err
 			}
-			r := conf.Forager
+			stderr := cmd.ErrOrStderr()
+			report := func(line string) { fmt.Fprintln(stderr, "qory run resend:", line) }
+			if remote {
+				sig, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+				defer stop()
+				return resendThroughGateway(sig, wait, stderr, r, credential, args[0], filepath.Join(runs, args[0]), at.root, report)
+			}
 			if r == nil || r.Server == nil {
 				return input(fmt.Errorf("%s defines no server to send the record to", config.ForagerFileName))
 			}
-			id, err := identify(r, cmd.ErrOrStderr(), "run resend", fdKey)
+			id, err := identify(r, stderr, "run resend", fdKey)
 			if err != nil {
 				return err
 			}
@@ -1414,7 +1447,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 				Dir:     filepath.Join(runs, args[0]),
 				Server:  server,
 				Version: build().title(),
-				Report:  func(line string) { fmt.Fprintln(cmd.ErrOrStderr(), "qory run resend:", line) },
+				Report:  report,
 			}
 			sig, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
@@ -1429,16 +1462,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 			case err != nil:
 				return explain(err, id)
 			}
-			// The record is no longer held, so the run's containers are no one's: the wall
-			// removes what it left, within the wait the signals allow, not the one the
-			// delivery may have used up.
-			reaped := 0
-			if r.Wall != nil {
-				if reaped, err = (&wall.Docker{Command: r.Wall.Command}).Reap(sig, args[0]); err != nil {
-					spec.Report("removing what the wall left: " + err.Error())
-				}
-			}
-			u := ui.New(cmd.ErrOrStderr())
+			reaped := reapWall(sig, r, args[0], report)
+			u := ui.New(stderr)
 			if res.Completed {
 				u.Success("the record had no exit and was closed with the reason gateway_lost")
 			}
@@ -1455,7 +1480,23 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 	}
 	c.Flags().DurationVar(&wait, "wait", 2*time.Minute, "how long to keep trying a server that does not accept")
 	c.Flags().IntVar(&secretFD, secretFDFlag, 0, secretFDUsage)
+	c.Flags().IntVar(&credentialFD, runCredentialFDFlag, 0, runCredentialFDUsage)
 	return c
+}
+
+// reapWall removes what the run's wall left once its record is no longer held, when r
+// has a wall, within ctx: the wait the signals allow, not the one a delivery may have
+// used up. It returns how many containers and networks it removed; a failure is
+// reported.
+func reapWall(ctx context.Context, r *config.Forager, runID string, report func(string)) int {
+	if r.Wall == nil {
+		return 0
+	}
+	reaped, err := (&wall.Docker{Command: r.Wall.Command}).Reap(ctx, runID)
+	if err != nil {
+		report("removing what the wall left: " + err.Error())
+	}
+	return reaped
 }
 
 // reallyWithin is [within] by where both paths really are: a temporary directory and a

@@ -195,6 +195,15 @@ release may change what an existing document does, and states it under Upgrading
   credential decides, and a run the gateway ends at the credential's expiry or at its
   issuer. `qory config` lists `session.gateway`, and `forager.schema.json` defines it.
   See `docs/run.md`.
+- `qory run resend` sends a run's record through the gateway `session.gateway` names,
+  with the run's run credential from `--run-credential-fd`, else
+  `QORY_RUN_CREDENTIAL_SECRET`, else `session.gateway.run_credential_file`, and refuses
+  before anything is sent what `qory run` refuses behind a gateway. It says how many
+  events the gateway accepted, exit 0 when nothing is left to send. It says events the
+  gateway did not accept, a run credential that expired, that it refused or that differs
+  from the one the run started with, and a run the gateway, the credential's issuer or
+  the server ended, each exit 1, the events kept in the run directory. A record a gateway
+  of the run's own made is refused: it goes to the server. See `docs/run.md`.
 - qory takes `QORY_RUN_CREDENTIAL_SECRET` out of its environment when a command starts, as
   it does the access key's variables, so no program it starts receives it; `wall.env` or
   `--env` naming it is refused.
