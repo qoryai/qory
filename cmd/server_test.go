@@ -299,7 +299,12 @@ func TestA410MidRunLeavesTheRuntimeRunning(t *testing.T) {
 	srv := newFakeServer(t, "")
 	serverFile(t, srv, "")
 	srv.stopRun = true
-	srv.onStop = func() { writeFile(t, stopped, "") }
+	// onStop runs on the server's goroutine, where t.Fatal would not end the test.
+	srv.onStop = func() {
+		if err := os.WriteFile(stopped, nil, 0o644); err != nil {
+			t.Errorf("writing %s: %v", stopped, err)
+		}
+	}
 	out, err := run(t, "run")
 	if err != nil {
 		t.Fatalf("a 410 mid-run: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
