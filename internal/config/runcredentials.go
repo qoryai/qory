@@ -4,11 +4,16 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/qoryai/forager/contracts"
 	"github.com/qoryai/forager/runcredential"
 	"github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 	"gopkg.in/yaml.v3"
 )
 
@@ -34,6 +39,16 @@ func readRunCredentials(path string, node *yaml.Node) (runcredential.Issuers, []
 		return nil, nil, f.error(path)
 	}
 	notIssuers := fmt.Errorf("%s: gateway.run_credentials is not a list of issuers as run-credentials.schema.json defines them", path)
+	// A key written as an alias is checked on the list as written, while it is still
+	// an alias: the schema's report would name it by its anchor's value.
+	schema, err := runCredentialsSchema()
+	if err != nil {
+		return nil, nil, notIssuers
+	}
+	keys := newAliasKeys()
+	if f := keys.fault(node, schema); f != nil {
+		return nil, nil, f.error(path)
+	}
 	b, err := yaml.Marshal(node)
 	if err != nil {
 		return nil, nil, notIssuers
@@ -55,6 +70,9 @@ func readRunCredentials(path string, node *yaml.Node) (runcredential.Issuers, []
 			if text, ok := aliasRefusal(err); ok && text != unknownAnchor {
 				return nil, nil, fmt.Errorf("%s: gateway.run_credentials: %s", path, text)
 			}
+			return nil, nil, notIssuers
+		}
+		if keys.reportNamesAlias(node, ve) {
 			return nil, nil, notIssuers
 		}
 		valueFree(ve)
@@ -124,4 +142,334 @@ func flowCopy(n *yaml.Node) *yaml.Node {
 		c.Content = append(c.Content, flowCopy(child))
 	}
 	return &c
+}
+
+// runCredentialsSchema is Forager's run-credentials.schema.json, compiled once: the
+// names [aliasKeys] reads the keys of gateway.run_credentials by.
+var runCredentialsSchema = sync.OnceValues(func() (*jsonschema.Schema, error) {
+	return contracts.Compile("run-credentials.schema.json")
+})
+
+// aliasKeys is the check of the keys of gateway.run_credentials written as aliases,
+// made on the list as written, where an alias is still one. The schema's report names a
+// key by the name it decodes into, which for an alias key is a value written elsewhere
+// in the file: a key whose name the schema allows nowhere where it stands is refused by
+// its alias, as forager.yaml's other sections refuse it, and no report is said that
+// names an alias key by a name the schema does not itself list there.
+type aliasKeys struct {
+	// seen are the values walked, each as a schema it is read by.
+	seen map[aliasKeysVisit]bool
+	// listed are the alias keys walked: true when every schema the key was read by lists
+	// its name as one of its properties, false when one allows it among any names.
+	listed map[*yaml.Node]bool
+	// names are the keys of each mapping by their names, its merges' keys among them.
+	names map[*yaml.Node]map[string][]keyValue
+}
+
+// aliasKeysVisit is a value as a schema it is read by.
+type aliasKeysVisit struct {
+	n *yaml.Node
+	s *jsonschema.Schema
+}
+
+// keyValue is a key of a mapping and its value.
+type keyValue struct{ k, v *yaml.Node }
+
+// newAliasKeys is an aliasKeys of nothing walked yet.
+func newAliasKeys() *aliasKeys {
+	return &aliasKeys{seen: map[aliasKeysVisit]bool{}, listed: map[*yaml.Node]bool{}, names: map[*yaml.Node]map[string][]keyValue{}}
+}
+
+// fault is the first key under n, read by the schema s, that is written as an alias of
+// a name s does not allow where the key stands; nil when there is none. Each value is
+// walked once for each schema it is read by, so the walk ends whatever the aliases
+// expand to.
+func (a *aliasKeys) fault(n *yaml.Node, s *jsonschema.Schema) *fault {
+	n = followAliases(n)
+	visit := aliasKeysVisit{n, s}
+	if a.seen[visit] {
+		return nil
+	}
+	a.seen[visit] = true
+	switch n.Kind {
+	case yaml.SequenceNode:
+		for i, item := range n.Content {
+			for _, is := range itemSchemas(s, i, map[*jsonschema.Schema]bool{}) {
+				if f := a.fault(item, is); f != nil {
+					return f
+				}
+			}
+		}
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			k, v := n.Content[i], n.Content[i+1]
+			if isMergeKey(k) {
+				// A merged mapping's keys stand where the mapping that merges it stands.
+				for _, m := range mergedMappings(v) {
+					if f := a.fault(m, s); f != nil {
+						return f
+					}
+				}
+				continue
+			}
+			name, ok := keyString(k)
+			if !ok {
+				continue
+			}
+			if k.Kind == yaml.AliasNode {
+				listed, allowed := keyAllowed(s, name, map[*jsonschema.Schema]bool{})
+				if !allowed {
+					return &fault{k.Line, fmt.Sprintf("key *%s is an alias of a key %s does not read", k.Value, ForagerFileName)}
+				}
+				if was, ok := a.listed[k]; !ok || was {
+					a.listed[k] = listed
+				}
+			}
+			for _, ps := range propertySchemas(s, name, map[*jsonschema.Schema]bool{}) {
+				if f := a.fault(v, ps); f != nil {
+					return f
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// reportNamesAlias reports whether the schema's report e, of the list n, names a key
+// written as an alias by a name that is not one the schema lists where the key stands:
+// in the place it names, or as a key it quotes.
+func (a *aliasKeys) reportNamesAlias(n *yaml.Node, e *jsonschema.ValidationError) bool {
+	if a.aliasOnPath(n, e.InstanceLocation) {
+		return true
+	}
+	var quoted []string
+	switch k := e.ErrorKind.(type) {
+	case *kind.AdditionalProperties:
+		quoted = k.Properties
+	case *kind.PropertyNames:
+		quoted = []string{k.Property}
+	}
+	for _, q := range quoted {
+		if a.aliasOnPath(n, append(slices.Clip(e.InstanceLocation), q)) {
+			return true
+		}
+	}
+	for _, c := range e.Causes {
+		if a.reportNamesAlias(n, c) {
+			return true
+		}
+	}
+	return false
+}
+
+// aliasOnPath reports whether the place loc under n, as the schema's report names it,
+// goes through a key written as an alias whose name the schema does not list there, or
+// one the check did not walk. Every value the place may stand for is looked at.
+func (a *aliasKeys) aliasOnPath(n *yaml.Node, loc []string) bool {
+	at := []*yaml.Node{followAliases(n)}
+	for _, step := range loc {
+		var next []*yaml.Node
+		added := map[*yaml.Node]bool{}
+		add := func(v *yaml.Node) {
+			if v = followAliases(v); !added[v] {
+				added[v] = true
+				next = append(next, v)
+			}
+		}
+		for _, c := range at {
+			switch c.Kind {
+			case yaml.SequenceNode:
+				if i, err := strconv.Atoi(step); err == nil && i >= 0 && i < len(c.Content) {
+					add(c.Content[i])
+				}
+			case yaml.MappingNode:
+				for _, kv := range a.keysOf(c)[step] {
+					if kv.k.Kind == yaml.AliasNode && !a.listed[kv.k] {
+						return true
+					}
+					add(kv.v)
+				}
+			}
+		}
+		at = next
+	}
+	return false
+}
+
+// keysOf is the keys of the mapping n by the names they decode into, the keys of the
+// mappings it merges among them, as the decoder may take any of them for the name.
+func (a *aliasKeys) keysOf(n *yaml.Node) map[string][]keyValue {
+	if names, ok := a.names[n]; ok {
+		return names
+	}
+	names := map[string][]keyValue{}
+	walked := map[*yaml.Node]bool{}
+	var collect func(m *yaml.Node)
+	collect = func(m *yaml.Node) {
+		if walked[m] {
+			return
+		}
+		walked[m] = true
+		for i := 0; i+1 < len(m.Content); i += 2 {
+			k, v := m.Content[i], m.Content[i+1]
+			if isMergeKey(k) {
+				for _, merged := range mergedMappings(v) {
+					collect(merged)
+				}
+				continue
+			}
+			if name, ok := keyString(k); ok {
+				names[name] = append(names[name], keyValue{k, v})
+			}
+		}
+	}
+	collect(n)
+	a.names[n] = names
+	return names
+}
+
+// isMergeKey reports whether k is the merge key, <<.
+func isMergeKey(k *yaml.Node) bool {
+	return k.Kind == yaml.ScalarNode && k.ShortTag() == "!!merge"
+}
+
+// mergedMappings are the mappings the value of a merge key merges: a mapping, or each
+// mapping of a list, each followed through its alias.
+func mergedMappings(v *yaml.Node) []*yaml.Node {
+	v = followAliases(v)
+	each := []*yaml.Node{v}
+	if v.Kind == yaml.SequenceNode {
+		each = v.Content
+	}
+	var out []*yaml.Node
+	for _, m := range each {
+		if m = followAliases(m); m.Kind == yaml.MappingNode {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// keyString is the name the key k decodes into, followed through its alias; false when
+// it decodes into no string.
+func keyString(k *yaml.Node) (string, bool) {
+	var name string
+	if k = followAliases(k); k.Kind != yaml.ScalarNode || k.Decode(&name) != nil {
+		return "", false
+	}
+	return name, true
+}
+
+// keyAllowed reports whether the schema s allows a key named name in a mapping it
+// reads, and whether it lists the name as one of its properties: every schema s holds
+// by $ref and allOf allows it, and one of each oneOf and anyOf does. seen are the
+// schemas being read, so a schema that refers to itself is read once.
+func keyAllowed(s *jsonschema.Schema, name string, seen map[*jsonschema.Schema]bool) (listed, allowed bool) {
+	if s == nil || seen[s] {
+		return false, true
+	}
+	seen[s] = true
+	defer delete(seen, s)
+	if s.Bool != nil {
+		return false, *s.Bool
+	}
+	_, listed = s.Properties[name]
+	allowed = listed
+	for re := range s.PatternProperties {
+		allowed = allowed || re.MatchString(name)
+	}
+	if b, ok := s.AdditionalProperties.(bool); !allowed && (!ok || b) {
+		allowed = true
+	}
+	if s.PropertyNames != nil && s.PropertyNames.Validate(name) != nil {
+		allowed = false
+	}
+	all := append([]*jsonschema.Schema{s.Ref}, s.AllOf...)
+	for _, c := range all {
+		l, ok := keyAllowed(c, name, seen)
+		listed, allowed = listed || l, allowed && ok
+	}
+	for _, group := range [][]*jsonschema.Schema{s.OneOf, s.AnyOf} {
+		if len(group) == 0 {
+			continue
+		}
+		one := false
+		for _, c := range group {
+			if l, ok := keyAllowed(c, name, seen); ok {
+				listed, one = listed || l, true
+			}
+		}
+		allowed = allowed && one
+	}
+	return listed, allowed
+}
+
+// propertySchemas are the schemas under s that read the value of a key named name: the
+// property's, those of the patterns it matches, or else additionalProperties, of s and
+// of every schema s holds by $ref, allOf, oneOf and anyOf.
+func propertySchemas(s *jsonschema.Schema, name string, seen map[*jsonschema.Schema]bool) []*jsonschema.Schema {
+	if s == nil || seen[s] || s.Bool != nil {
+		return nil
+	}
+	seen[s] = true
+	defer delete(seen, s)
+	var out []*jsonschema.Schema
+	p, matched := s.Properties[name]
+	if matched {
+		out = append(out, p)
+	}
+	for re, p := range s.PatternProperties {
+		if re.MatchString(name) {
+			out, matched = append(out, p), true
+		}
+	}
+	if as, ok := s.AdditionalProperties.(*jsonschema.Schema); ok && !matched {
+		out = append(out, as)
+	}
+	for _, c := range composed(s) {
+		out = append(out, propertySchemas(c, name, seen)...)
+	}
+	return out
+}
+
+// itemSchemas are the schemas under s that read the item i of a list, of s and of
+// every schema s holds by $ref, allOf, oneOf and anyOf.
+func itemSchemas(s *jsonschema.Schema, i int, seen map[*jsonschema.Schema]bool) []*jsonschema.Schema {
+	if s == nil || seen[s] || s.Bool != nil {
+		return nil
+	}
+	seen[s] = true
+	defer delete(seen, s)
+	var out []*jsonschema.Schema
+	switch {
+	case i < len(s.PrefixItems):
+		out = append(out, s.PrefixItems[i])
+	case s.Items2020 != nil:
+		out = append(out, s.Items2020)
+	}
+	switch items := s.Items.(type) {
+	case *jsonschema.Schema:
+		out = append(out, items)
+	case []*jsonschema.Schema:
+		if i < len(items) {
+			out = append(out, items[i])
+		} else if more, ok := s.AdditionalItems.(*jsonschema.Schema); ok {
+			out = append(out, more)
+		}
+	}
+	for _, c := range composed(s) {
+		out = append(out, itemSchemas(c, i, seen)...)
+	}
+	return out
+}
+
+// composed are the schemas s holds by $ref, allOf, oneOf and anyOf.
+func composed(s *jsonschema.Schema) []*jsonschema.Schema {
+	var out []*jsonschema.Schema
+	if s.Ref != nil {
+		out = append(out, s.Ref)
+	}
+	out = append(out, s.AllOf...)
+	out = append(out, s.OneOf...)
+	return append(out, s.AnyOf...)
 }

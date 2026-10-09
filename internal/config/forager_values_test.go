@@ -448,6 +448,49 @@ func TestNoForagerRefusalPrintsAKeyWrittenAsAnAlias(t *testing.T) {
 	}
 }
 
+// TestNoRunCredentialsReportPrintsAnAliasKeysValue writes, under
+// gateway.run_credentials, keys that are aliases of a value: one whose value is no name
+// the schema allows where the key stands is refused by its alias, as the other
+// sections refuse it, in a mapping, a merged one, a list's item and a oneOf; one the
+// schema allows among any names, under details, is never named in the schema's report.
+// No refusal holds the value.
+func TestNoRunCredentialsReportPrintsAnAliasKeysValue(t *testing.T) {
+	hermetic(t)
+	const (
+		head      = "gateway:\n  run_credentials:\n    - "
+		rest      = `algorithms: [RS256], keys: [{kid: k1, alg: RS256, public_key_file: f.pem}], labels: {forge: {value: x}, repository: {claim: repo}, run_key: {claim: sub}}`
+		notIssuer = ": gateway.run_credentials is not a list of issuers as run-credentials.schema.json defines them"
+	)
+	for _, c := range []struct{ body, want string }{
+		{head + "{issuer: &s " + marker + ", *s: 1, audience: a}\n", ": line 3: key *s is an alias of a key forager.yaml does not read"},
+		{head + "{issuer: \"https://issuer.example\", audience: &u " + marker + ", " + rest + ", <<: {*u : 1}}\n", ": line 3: key *u is an alias of a key forager.yaml does not read"},
+		{head + "{issuer: \"https://issuer.example\", audience: &u " + marker + ", algorithms: [RS256], keys: [{kid: k1, alg: RS256, public_key_file: f.pem, *u : 1}], labels: {forge: {value: x}, repository: {claim: repo}, run_key: {claim: sub}}}\n", ": line 3: key *u is an alias of a key forager.yaml does not read"},
+		{head + "{issuer: \"https://issuer.example\", audience: &u " + marker + ", algorithms: [RS256], keys: [{kid: k1, alg: RS256, public_key_file: f.pem}], labels: {forge: {*u : x}, repository: {claim: repo}, run_key: {claim: sub}}}\n", ": line 3: key *u is an alias of a key forager.yaml does not read"},
+		{head + "{issuer: \"https://issuer.example\", audience: &d \"" + marker + "=1\", " + rest + ", details: {*d : {claim: ref}}}\n", ": line 3: key *d is an alias of a key forager.yaml does not read"},
+		{head + "{issuer: \"https://issuer.example\", audience: &d " + marker + ", " + rest + ", details: {*d : {claim: \"\"}}}\n", notIssuer},
+	} {
+		path := foragerFile(t, c.body)
+		_, err := config.LoadForager()
+		if err == nil || err.Error() != path+c.want {
+			t.Errorf("%q: %v, want %q", c.body, err, path+c.want)
+		}
+		if err != nil && strings.Contains(err.Error(), marker) {
+			t.Errorf("%q: the refusal holds the value an alias key stands for: %v", c.body, err)
+		}
+	}
+	// An alias key of a name the schema lists is read, as is one of a name details
+	// allows.
+	for _, body := range []string{
+		head + "{issuer: \"https://a.example\", audience: &k audience, " + rest + "}\n    - {issuer: \"https://b.example\", *k : box, " + rest + "}\n",
+		head + "{issuer: \"https://issuer.example\", audience: &d branch, " + rest + ", details: {*d : {claim: ref}}}\n",
+	} {
+		foragerFile(t, body)
+		if _, err := config.LoadForager(); err != nil {
+			t.Errorf("%q: %v, want it read", body, err)
+		}
+	}
+}
+
 // TestForagerRefusesAKeyThatIsNotANameBesideAMerge is a mapping that merges and has a
 // key that is a list or a mapping, which the YAML decoder fails on with a panic: it is
 // refused before it is decoded, at once and without the value, by both readers, and
