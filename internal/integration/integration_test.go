@@ -247,15 +247,15 @@ func TestADescriptionThatNamesItsDomainsIsRead(t *testing.T) {
 	}
 }
 
-// TestDescribeNeverReceivesTheAccessKey runs describe with the access key's variables in
-// qory's environment: the program receives none of them.
+// TestDescribeNeverReceivesTheAccessKey runs describe with the access key's variables and
+// the run credential's in qory's environment: the program receives none of them.
 func TestDescribeNeverReceivesTheAccessKey(t *testing.T) {
-	for _, name := range []string{"QORY_ACCESS_KEY_SECRET", "QORY_ACCESS_KEY_ID", "QORY_APIARY_PUBLIC_KEY"} {
+	for _, name := range []string{"QORY_ACCESS_KEY_SECRET", "QORY_ACCESS_KEY_ID", "QORY_APIARY_PUBLIC_KEY", "QORY_RUN_CREDENTIAL_SECRET"} {
 		t.Setenv(name, "set")
 	}
 	t.Setenv("QORY_TEST_KEPT", "kept")
 	doc, _ := os.ReadFile("testdata/fixtures/acme-tracker.json")
-	body := "test -z \"$QORY_ACCESS_KEY_SECRET$QORY_ACCESS_KEY_ID$QORY_APIARY_PUBLIC_KEY\" || exit 7\ntest \"$QORY_TEST_KEPT\" = kept || exit 8\ncat <<'EOF'\n" + string(doc) + "\nEOF\n"
+	body := "test -z \"$QORY_ACCESS_KEY_SECRET$QORY_ACCESS_KEY_ID$QORY_APIARY_PUBLIC_KEY$QORY_RUN_CREDENTIAL_SECRET\" || exit 7\ntest \"$QORY_TEST_KEPT\" = kept || exit 8\ncat <<'EOF'\n" + string(doc) + "\nEOF\n"
 	if _, err := integration.Describe(context.Background(), script(t, body)); err != nil {
 		t.Errorf("describe: %v", err)
 	}
