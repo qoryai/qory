@@ -548,10 +548,12 @@ about. It passes each run its policy:
 
 ```sh
 qory run --run-id "$uuid" --label run_key=1234 --label issue=77 \
-  --policy /etc/factory/shop-policy.yaml --timeout 5h30m --stop-grace 30s -- -p "$prompt"
+  --policy /etc/qory/policy.yaml --timeout 5h30m --stop-grace 30s -- -p "$prompt"
 ```
 
-- `--run-id` is the id the caller already has. It is a UUID in lower case.
+- `--run-id` is a new UUID, in lower case, for each attempt, a retry included. A caller
+  that has only a key of its own for the work, such as `run_key` here, passes it as a
+  label, never as the run id.
 - The labels go into `dev.qory.run.started`, and onto the run configuration request.
   There, a server ties the run to its own records and chooses its policy.
 
