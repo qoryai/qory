@@ -363,6 +363,24 @@ release may change what an existing document does, and states it under Upgrading
   `the run id <id> is already used by another run; leave out --run-id, or give a new
   one`, in place of the error opening that run's `events.jsonl`, and names no record:
   the folder of that id is the other run's.
+- A refusal of `forager.yaml` never prints a value of it: it names the file, the key as
+  a dotted path, such as `gateway.egress.allow[1]`, with its line when the YAML decoder
+  reports one, and what is wrong, such as `<file>: line <line>: session.gateway.url is
+  tagged !!int, and its value is not of that type` or `<file>: wall.helper is not an
+  absolute path`. This replaces the YAML decoder's text, which quoted the value and a Go
+  type, and the refusals that quoted the value. The report of `gateway.run_credentials`
+  against its schema leaves the value out of a pattern or a format it fails.
+- A `forager.yaml` that holds a second YAML document, an empty one after a trailing
+  `---` included, is refused: `<file>: holds more than one YAML document; forager.yaml
+  is one document, and qory would read only the first`. qory read the first document
+  alone and ignored the rest without a word.
+- A refusal of `gateway.server.url`, in `forager.yaml` or as the server of `qory
+  access-key enrol`, shows at most its `scheme://host[:port]` and names the part that is
+  wrong, such as `gateway.server.url for https://qory.example has a path: an https URL
+  of a host and an optional port, or an http one to this machine, with nothing after`.
+  An access key secret is caught percent-encoded and in the host too, and a URL still
+  percent-encoded after 8 rounds is refused as `gateway.server.url is percent-encoded
+  more than 8 times`, with the same ending.
 
 ## [0.12.1] - 2026-09-30
 
