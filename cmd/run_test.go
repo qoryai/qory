@@ -1217,6 +1217,7 @@ func TestRunRefusesAWallItCannotBuild(t *testing.T) {
 		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_ACCESS_KEY_ID"}, "Forager's own"},
 		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_APIARY_PUBLIC_KEY"}, "Forager's own"},
 		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_SERVER_SECRET"}, "--env QORY_SERVER_SECRET: the variable is Forager's own and never the agent's"},
+		{[]string{"run", "--env", "QORY_RUN_CREDENTIAL_SECRET"}, "--env QORY_RUN_CREDENTIAL_SECRET: the variable is Forager's own and never the agent's"},
 		{[]string{"run", "--label", "issue"}, "not key=value"},
 		{[]string{"run", "--label", "Issue=1"}, "label key"},
 		{[]string{"run", "--run-id", "../x"}, "not a UUID"},

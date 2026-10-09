@@ -60,7 +60,7 @@ func newRun() *cobra.Command {
 	var subjects []string
 	var timeout, grace time.Duration
 	var stopSignal string
-	var secretFD int
+	var secretFD, credentialFD int
 	c := &cobra.Command{
 		Use:   "run [runtime] [-- argument...]",
 		Short: "Run the agent on its harness, observed and recorded",
@@ -117,10 +117,31 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				fdKey = k
 			}
+			var fdCredential *string
+			if cmd.Flags().Changed(runCredentialFDFlag) {
+				v, err := readCredentialFD(credentialFD)
+				if err != nil {
+					return err
+				}
+				fdCredential = &v
+			}
 			runtime, extra := splitAtDash(cmd, args)
 			at, conf, err := locate(h)
 			if err != nil {
 				return err
+			}
+			// A machine whose runs go through a gateway on another machine, or a service on
+			// this one, starts none of its own and holds no access key: each run sends the
+			// run credential its issuer signed.
+			var credential *runCredential
+			remote := conf.Forager != nil && conf.Forager.SessionGateway != nil
+			if remote {
+				if credential, err = behindGateway(conf.Forager, local, len(labels) > 0, fdKey != nil, fdCredential); err != nil {
+					return err
+				}
+				if policyFile != "" {
+					return input(fmt.Errorf("--policy is the run's own policy for a gateway the run starts itself, and this machine's runs go through the gateway session.gateway.url names"))
+				}
 			}
 			rep, err := readReport(at)
 			if err != nil {
@@ -250,7 +271,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if pol != nil {
 				selected = pol.Image
 			}
-			if err := enclose(&spec, conf.Forager, o, selected, server != nil && !local, exe, at.root, at.home); err != nil {
+			if err := enclose(&spec, conf.Forager, o, selected, remote || server != nil && !local, exe, at.root, at.home); err != nil {
 				return err
 			}
 			if spec.Wall != nil && h.home == "" {
@@ -294,28 +315,46 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return err
 				}
 			}
-			// The files the settings name are known once the integrations are described.
-			own := foragerFiles(foragerDir, state, spec.RunsDir, settingFiles(conf.Forager))
+			// The files the settings name are known once the integrations are described. The
+			// run credential's file is one of them: a walled agent must not read it.
+			settings := settingFiles(conf.Forager)
+			if credential != nil && credential.file != "" {
+				if abs, err := filepath.Abs(credential.file); err == nil && !slices.Contains(settings, abs) {
+					settings = append(settings, abs)
+				}
+			}
+			own := foragerFiles(foragerDir, state, spec.RunsDir, settings)
 			spec.ForagerFiles = own.files
 			record := filepath.Join(spec.RunsDir, spec.RunID)
 			u := ui.New(stderr)
-			// One gateway for the run, on this machine: the session speaks to it over its
-			// local link, whose secret stays in this process's memory.
-			gw.Report = func(line string) { fmt.Fprintln(stderr, "qory run:", line) }
-			g, err := gateway.Start(ctx, gw)
-			if err != nil {
-				return explain(err, id)
-			}
-			defer g.Close(ctx)
-			l := g.LocalLink()
-			linkHanded(l)
-			spec.Gateway = session.LocalGateway(l)
-			res, err := session.Run(ctx, spec)
-			// The gateway delivers the run's last events before qory says how the run
-			// ended, and before qory exits.
-			delivery, closeErr := g.Close(ctx)
-			if closeErr != nil {
-				gw.Report(closeErr.Error())
+			var res *session.Result
+			var delivery gateway.Delivery
+			if remote {
+				// The gateway session.gateway names: the session reaches it over TLS and
+				// sends the run credential on every request.
+				spec.Gateway = remoteGateway(conf.Forager, credential)
+				fmt.Fprintf(stderr, "qory run: through the gateway %s, run %s\n", gatewayHost(conf.Forager.SessionGateway.URL), spec.RunID)
+				res, err = session.Run(ctx, spec)
+			} else {
+				// One gateway for the run, on this machine: the session speaks to it over
+				// its local link, whose secret stays in this process's memory.
+				gw.Report = func(line string) { fmt.Fprintln(stderr, "qory run:", line) }
+				g, startErr := gateway.Start(ctx, gw)
+				if startErr != nil {
+					return explain(startErr, id)
+				}
+				defer g.Close(ctx)
+				l := g.LocalLink()
+				linkHanded(l)
+				spec.Gateway = session.LocalGateway(l)
+				res, err = session.Run(ctx, spec)
+				// The gateway delivers the run's last events before qory says how the run
+				// ended, and before qory exits.
+				var closeErr error
+				delivery, closeErr = g.Close(ctx)
+				if closeErr != nil {
+					gw.Report(closeErr.Error())
+				}
 			}
 			if err != nil {
 				// A run id another run of this checkout has: refused before this run made
@@ -325,6 +364,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				if m := mountRefused(err, passed{foragerDir: foragerDir, stateDir: state, spec: &spec, root: at.root, own: own}); m != nil {
 					err = m
+				} else if refused := credentialRefused(err, named, details, about); remote && refused != nil {
+					err = refused
 				} else if used := runIDUsed(err, spec.RunID); used != nil {
 					err = used
 				} else {
@@ -347,6 +388,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				u.Fail(fmt.Errorf("%d events did not reach the server; %s/undelivered contains them", delivery.Undelivered, ui.Short(res.Dir, at.root)))
 			}
 			switch {
+			case remote && res.RunClosed && res.ClosedBy == accesskey.FromGateway && gatewayEnded(u, stderr, res.ClosedReason, credential):
+				return reported(&exitError{code: 1})
 			case res.RunClosed && res.ClosedBy == accesskey.FromGateway:
 				return gatewayClosed(u, res.ClosedReason, name)
 			case res.RunClosed:
@@ -386,6 +429,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	c.Flags().StringVar(&o.limits.Memory, "memory", "", "the most memory the container gets, such as 8g ("+config.ForagerFileName+": wall.memory)")
 	c.Flags().IntVar(&o.limits.PIDs, "pids-limit", 0, "the most processes and threads in the container ("+config.ForagerFileName+": wall.pids_limit)")
 	c.Flags().IntVar(&secretFD, secretFDFlag, 0, secretFDUsage)
+	c.Flags().IntVar(&credentialFD, runCredentialFDFlag, 0, runCredentialFDUsage)
 	c.Flags().StringVar(&o.limits.ShmSize, "shm-size", "", "the size of /dev/shm in the container, such as 2g ("+config.ForagerFileName+": wall.shm_size)")
 	homeFlags(c, &h)
 	c.AddCommand(newResend(), newForward(), newRelay(), newNest())
