@@ -448,6 +448,76 @@ func TestRunCredentialsReadAnAnchorElsewhereInTheFile(t *testing.T) {
 	}
 }
 
+// runCredentialRows are qory config's rows of gateway.run_credentials of the file body.
+func runCredentialRows(t *testing.T, body string) []config.Row {
+	t.Helper()
+	foragerFile(t, body)
+	f, err := config.LoadForager()
+	if err != nil {
+		t.Fatalf("%q: %v, want it read", body, err)
+	}
+	var rows []config.Row
+	for _, r := range f.Rows() {
+		if strings.HasPrefix(r.Key, "gateway.run_credentials") {
+			rows = append(rows, r)
+		}
+	}
+	return rows
+}
+
+// TestConfigRowsOfRunCredentialsAreOfTheListAsRead writes gateway.run_credentials with
+// aliases and merges: the list as an alias of an anchor in another section, an issuer as
+// one, an issuer that merges another, a merge of several mappings, a key written as an
+// alias, and an alias and an anchor inside the section. qory config lists the same rows
+// as of the list written out in full.
+func TestConfigRowsOfRunCredentialsAreOfTheListAsRead(t *testing.T) {
+	hermetic(t)
+	const (
+		rest          = `algorithms: [RS256], keys: [{kid: k1, alg: RS256, public_key_file: f.pem}], labels: {forge: {value: x}, repository: {claim: repo}, run_key: {claim: sub}}`
+		issuer        = `{issuer: "https://issuer.example", audience: box, ` + rest + `}`
+		introspection = `introspection: {url: "https://issuer.example/introspect", client_id: example-gateway, client_secret_file: issuer-secret}`
+		program       = "program: /opt/acme/bin/acme-tracker"
+	)
+	inspecting := strings.TrimSuffix(issuer, "}") + ", " + introspection + "}"
+	for _, c := range []struct{ body, written string }{
+		{
+			"gateway: {integrations: {i: {" + program + ", settings: {s: &rc [" + issuer + "]}}}, run_credentials: *rc}\n",
+			"gateway: {integrations: {i: {" + program + ", settings: {s: [" + issuer + "]}}}, run_credentials: [" + issuer + "]}\n",
+		},
+		{
+			"gateway: {integrations: {i: {" + program + ", settings: {s: &it " + inspecting + "}}}, run_credentials: [*it]}\n",
+			"gateway: {integrations: {i: {" + program + ", settings: {s: " + inspecting + "}}}, run_credentials: [" + inspecting + "]}\n",
+		},
+		{
+			"gateway:\n  run_credentials:\n    - &i " + issuer + "\n    - {<<: *i, issuer: \"https://other.example\"}\n",
+			"gateway:\n  run_credentials:\n    - " + issuer + "\n    - " + strings.Replace(issuer, "issuer.example", "other.example", 1) + "\n",
+		},
+		{
+			"gateway:\n  integrations:\n    i: {" + program + ", settings: {l: &l {run_key: {claim: sub}, repository: {claim: other}}}}\n  run_credentials:\n" +
+				"    - {issuer: \"https://issuer.example\", audience: box, algorithms: [RS256], keys: [{kid: k1, alg: RS256, public_key_file: f.pem}], labels: &own {forge: {value: x}, repository: {claim: repo}, run_key: {claim: sub}}}\n" +
+				"    - {issuer: \"https://other.example\", audience: box, algorithms: [RS256], keys: [{kid: k1, alg: RS256, public_key_file: f.pem}], labels: {<<: [*l, *own], forge: {value: y}}}\n",
+			"gateway:\n  integrations:\n    i: {" + program + ", settings: {l: {run_key: {claim: sub}, repository: {claim: other}}}}\n  run_credentials:\n" +
+				"    - {issuer: \"https://issuer.example\", audience: box, algorithms: [RS256], keys: [{kid: k1, alg: RS256, public_key_file: f.pem}], labels: {forge: {value: x}, repository: {claim: repo}, run_key: {claim: sub}}}\n" +
+				"    - {issuer: \"https://other.example\", audience: box, algorithms: [RS256], keys: [{kid: k1, alg: RS256, public_key_file: f.pem}], labels: {run_key: {claim: sub}, repository: {claim: other}, forge: {value: y}}}\n",
+		},
+		{
+			"session: {instance: {name: &k audience}}\ngateway:\n  run_credentials:\n    - {issuer: \"https://issuer.example\", *k : box, " + rest + "}\n",
+			"session: {instance: {name: audience}}\ngateway:\n  run_credentials:\n    - " + issuer + "\n",
+		},
+		{
+			"gateway:\n  run_credentials:\n    - {issuer: \"https://issuer.example\", audience: &a box, algorithms: [RS256], keys: &k [{kid: k1, alg: RS256, public_key_file: f.pem}], labels: {forge: {value: x}, repository: {claim: repo}, run_key: {claim: sub}}}\n" +
+				"    - {issuer: \"https://other.example\", audience: *a, algorithms: [RS256], keys: *k, labels: {forge: {value: x}, repository: {claim: repo}, run_key: {claim: sub}}}\n",
+			"gateway:\n  run_credentials:\n    - " + issuer + "\n    - " + strings.Replace(issuer, "issuer.example", "other.example", 1) + "\n",
+		},
+	} {
+		want := runCredentialRows(t, c.written)
+		got := runCredentialRows(t, c.body)
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%q: rows\n%v\nwant, as of the list written out,\n%v", c.body, got, want)
+		}
+	}
+}
+
 // TestNoForagerRefusalPrintsAKeyWrittenAsAnAlias writes a value, then a key that is an
 // alias of it, in every section: a refusal names such a key by its alias, never by the
 // value it stands for, in both readers.

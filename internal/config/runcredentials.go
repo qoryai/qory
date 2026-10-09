@@ -78,8 +78,10 @@ func readRunCredentials(path string, node *yaml.Node) (runcredential.Issuers, []
 		valueFree(ve)
 		return nil, nil, fmt.Errorf("%s: gateway.run_credentials: %s", path, ve.Error())
 	}
+	// The rows are of the list as qory read it: each alias followed and each merge
+	// applied, the same rows as of the list written out in full.
 	var rows []Row
-	for i, item := range node.Content {
+	for i, item := range resolved(node).Content {
 		key := fmt.Sprintf("gateway.run_credentials[%d].", i)
 		members := map[string]*yaml.Node{}
 		for k := 0; k+1 < len(item.Content); k += 2 {
@@ -114,6 +116,80 @@ func readRunCredentials(path string, node *yaml.Node) (runcredential.Issuers, []
 		}
 	}
 	return issuers, rows, nil
+}
+
+// resolved is a copy of n, and of everything under it, as the decoder reads it: each
+// alias is a copy of its anchor's value, without the anchor, and each mapping holds the
+// keys it merges where its << stands, without those the mapping sets itself or an
+// earlier merge sets. It is n as the file would write it out in full.
+func resolved(n *yaml.Node) *yaml.Node {
+	n = followAliases(n)
+	c := *n
+	c.Anchor, c.Content = "", nil
+	switch n.Kind {
+	case yaml.SequenceNode:
+		for _, item := range n.Content {
+			c.Content = append(c.Content, resolved(item))
+		}
+	case yaml.MappingNode:
+		for _, kv := range mergedKeys(n, nil) {
+			c.Content = append(c.Content, resolved(kv.k), resolved(kv.v))
+		}
+	}
+	return &c
+}
+
+// mergedKeys are the keys of the mapping m and their values as the decoder takes them,
+// in the order the file writes them, the keys of the mappings its << merges where the
+// << stands. taken are the names an earlier key of the mapping that merges m has set,
+// nil for a mapping that is merged into none: a merged mapping sets a name no earlier
+// key has set, its own keys before those it merges in turn; in a mapping merged into
+// none, a key it sets itself wins over every merged one, and of two keys of one name,
+// the later.
+func mergedKeys(m *yaml.Node, taken map[string]bool) []keyValue {
+	own := taken == nil
+	last := map[string]int{}
+	if own {
+		taken = map[string]bool{}
+	}
+	merge := -1
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		k := m.Content[i]
+		if isMergeKey(k) {
+			merge = i
+			continue
+		}
+		name, ok := keyString(k)
+		switch {
+		case !ok:
+		case own:
+			last[name] = i
+			taken[name] = true
+		case !taken[name]:
+			last[name] = i
+			taken[name] = true
+		}
+	}
+	var merged []keyValue
+	if merge >= 0 {
+		for _, mm := range mergedMappings(m.Content[merge+1]) {
+			merged = append(merged, mergedKeys(mm, taken)...)
+		}
+	}
+	var out []keyValue
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if i == merge {
+			out = append(out, merged...)
+			continue
+		}
+		if name, ok := keyString(m.Content[i]); ok && !isMergeKey(m.Content[i]) {
+			if j, ok := last[name]; !ok || j != i {
+				continue
+			}
+			out = append(out, keyValue{m.Content[i], m.Content[i+1]})
+		}
+	}
+	return out
 }
 
 // written is a value as the file writes it, on one line: a scalar as it is, anything
