@@ -592,10 +592,20 @@ relative to the directory of `forager.yaml` unless it is absolute.
   credential its issuer signed. qory takes it out of its environment when it starts; no
   program qory starts receives it. `--env` and `wall.env` refuse it, as they refuse the
   access key's variables.
-- The file is read again before each request. A file whose mode grants the group or
-  others read or write is refused before the run starts, and again at each read. A
-  walled run whose mounts hold it is refused before it starts, as a mount of Forager's
-  own files is.
+- The file is read again before each request. `--run-credential-fd` and
+  `QORY_RUN_CREDENTIAL_SECRET` are read once, when `qory run` starts, so a credential from
+  either can't be renewed during the run; a run longer than its credential needs
+  `session.gateway.run_credential_file`. A file whose mode grants the group or others
+  read or write is refused before the run starts, and again at each read. A walled run
+  whose mounts hold it is refused before it starts, as a mount of Forager's own files is.
+
+An unwalled run's agent runs as you. It can read what qory started with, its environment
+and your files included: the run credential's file, and `QORY_RUN_CREDENTIAL_SECRET`,
+which qory takes out of the environment the programs it starts receive, but not out of
+the one it started with. `--run-credential-fd` is the source such an agent can't read:
+qory reads the descriptor to its end and closes it before it starts anything, and keeps
+no copy in its environment or its open files. Give it a pipe, not a file the agent could
+open.
 
 The run credential never appears in qory's output or in the run's record. qory reads its
 `exp` only to say when it expired.

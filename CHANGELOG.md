@@ -194,6 +194,11 @@ release may change what an existing document does, and states it under Upgrading
 - qory takes `QORY_RUN_CREDENTIAL_SECRET` out of its environment when a command starts, as
   it does the access key's variables, so no program it starts receives it; `wall.env` or
   `--env` naming it is refused.
+- `docs/run.md` says that an unwalled run's agent runs as you and can read what qory
+  started with, its environment and your files included, and that `--run-credential-fd`
+  is the source such an agent can't read; and that `--run-credential-fd` and
+  `QORY_RUN_CREDENTIAL_SECRET` are read once, so a run longer than its credential needs
+  `session.gateway.run_credential_file`.
 - `qory gateway`'s help and `docs/gateway.md` say how a machine behind the gateway names
   it.
 
