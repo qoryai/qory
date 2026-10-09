@@ -56,7 +56,7 @@ The gateway section of ` + config.ForagerFileName + ` in ~/.config/qory sets it:
   egress        the hosts a run may reach; it narrows Qory Apiary's policy
   credentials   secrets the gateway sets on requests; the agents never have them
   integrations  programs that supply such secrets
-  run_credentials    the issuers whose signed run credentials open runs of clients with no session
+  run_credentials    the run starters whose signed run credentials open runs of clients with no session
 
 A machine whose runs go through this gateway names it in session.gateway of its own
 ` + config.ForagerFileName + ` and holds no access key: each run brings the run credential its issuer
