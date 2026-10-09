@@ -1487,6 +1487,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 				u.Fail(fmt.Errorf("the server answered 410 and wants no more events of the run %s; %d were accepted and %d were not sent; they stay in %s", args[0], res.Sent, res.Undelivered, ui.Short(spec.Dir, at.root)))
 				return reported(&exitError{code: 1})
 			}
+			if res.Stopped && res.Sent == 0 && res.Undelivered == 0 {
+				// The server stopped the run during the run, so nothing is sent: Forager's
+				// own line says so, and the resend fails.
+				return reported(&exitError{code: 1})
+			}
 			if res.Undelivered > 0 {
 				u.Fail(fmt.Errorf("%d events were accepted and %d were not; %s/undelivered contains them", res.Sent, res.Undelivered, ui.Short(spec.Dir, at.root)))
 				return reported(&exitError{code: 1})

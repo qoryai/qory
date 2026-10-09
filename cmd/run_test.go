@@ -1598,7 +1598,7 @@ func TestResendSendsNothingOfARunTheServerNeverOpened(t *testing.T) {
 	tear(t, file, before)
 	writeFile(t, filepath.Join(dir, "delivered.log"), "stopped\n")
 	out, err = run(t, "run", "resend", stopID)
-	if err != nil {
+	if cmd.ExitCode(err) != 1 {
 		t.Fatalf("a run the server stopped: %v\n%s", err, out)
 	}
 	wants(t, out, "qory run resend: "+fmt.Sprintf(gateway.ResendTorn, 1, file)+"\n"+resendStopped+"\n")
@@ -1621,8 +1621,9 @@ const (
 // session.gateway, of a record that owes the server more events than one batch holds. A
 // server that answers a signed 410 during the resend is sent nothing more: qory says what
 // it accepted before and what was not sent, which stays in the run directory, none of it
-// under undelivered/, exit 1. A server that stopped the run during the run, and one that
-// accepts nothing within --wait, are said as before.
+// under undelivered/, exit 1. A server that stopped the run during the run is sent
+// nothing, and Forager's line says so alone, exit 1. One that accepts nothing within
+// --wait is said as before.
 func TestResendSaysTheServerWantsNoMoreEvents(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -1715,15 +1716,15 @@ func TestResendSaysTheServerWantsNoMoreEvents(t *testing.T) {
 	}
 	stays(t, "a 410 to the first batch", dir, file, before)
 
-	// A server that stopped the run during the run is sent nothing, and said as before
-	// the 410 during a resend was: decision 209 is pending.
+	// A server that stopped the run during the run is sent nothing: Forager's line alone
+	// says so, and the resend fails.
 	srv.stopPing = false
 	const duringID = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5ec2"
 	dir, file, before, _ = record(t, duringID)
 	writeFile(t, filepath.Join(dir, "delivered.log"), "stopped\n")
 	out, err = run(t, "run", "resend", duringID)
-	want = resendStopped + "\n✓ 0 events were accepted; the server has the whole record\n"
-	if err != nil || out != want || len(srv.events) != sent {
+	want = resendStopped + "\n"
+	if cmd.ExitCode(err) != 1 || out != want || len(srv.events) != sent {
 		t.Errorf("a stop during the run: %v (exit %d)\n%q\nwant\n%q", err, cmd.ExitCode(err), out, want)
 	}
 	stays(t, "a stop during the run", dir, file, before)
