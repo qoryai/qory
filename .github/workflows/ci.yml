@@ -13,9 +13,11 @@ concurrency:
 
 jobs:
   test:
-    name: Go tests
     # A pull request from this repository's next is skipped: each push to next runs
-    # these steps already. One from a fork's branch named next runs.
+    # these steps already. One from a fork's branch named next runs. The skipped job
+    # has a name of its own, so the required "Go tests" can only come from next's
+    # push run: a skipped job reports success.
+    name: ${{ github.event_name == 'pull_request' && github.head_ref == 'next' && github.event.pull_request.head.repo.full_name == github.repository && 'Go tests · checked by the push run' || 'Go tests' }}
     if: github.event_name != 'pull_request' || github.head_ref != 'next' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     container:
