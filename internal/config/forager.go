@@ -119,21 +119,67 @@ func CertificatePin(v string) bool {
 	return err == nil && len(b) == sha256.Size
 }
 
-// urlHoldsSecret reports whether a URL holds an access key secret as written, once its
-// percent-encoding is undone, or in its host as Go decodes it, an IPv6 zone included:
-// a refusal names the host, so a secret there must be caught before anything prints it.
+// urlHoldsSecret reports whether a URL holds an access key secret as written, or in
+// its host as Go decodes it, an IPv6 zone included, either form with its
+// percent-encoding undone again and again until nothing changes: a refusal names the
+// host, so a secret there must be caught before anything prints it, however many times
+// it is encoded. A form still encoded after [urlUnescapeLimit] rounds counts as holding
+// one.
 func urlHoldsSecret(raw string) bool {
-	if accesskey.ContainsSecret(raw) {
-		return true
+	forms := []string{raw}
+	if u, err := url.Parse(raw); err == nil {
+		forms = append(forms, u.Host)
 	}
-	if dec, err := url.PathUnescape(raw); err == nil && accesskey.ContainsSecret(dec) {
-		return true
+	for _, v := range forms {
+		for n := 0; ; n++ {
+			if accesskey.ContainsSecret(v) {
+				return true
+			}
+			dec := unescapeEvery(v)
+			if dec == v {
+				break
+			}
+			if n == urlUnescapeLimit {
+				return true
+			}
+			v = dec
+		}
 	}
-	if dec, err := url.QueryUnescape(raw); err == nil && accesskey.ContainsSecret(dec) {
-		return true
+	return false
+}
+
+// urlUnescapeLimit is how many rounds [urlHoldsSecret] undoes a URL's encoding.
+const urlUnescapeLimit = 8
+
+// unescapeEvery is v with each %XX of it undone, a % that starts none left as it is:
+// unlike [url.PathUnescape], it undoes a round that holds a stray %, as Go's decoded
+// IPv6 zone does.
+func unescapeEvery(v string) string {
+	var b strings.Builder
+	for i := 0; i < len(v); i++ {
+		if v[i] == '%' && i+2 < len(v) {
+			if hi, lo := unhex(v[i+1]), unhex(v[i+2]); hi >= 0 && lo >= 0 {
+				b.WriteByte(byte(hi<<4 | lo))
+				i += 2
+				continue
+			}
+		}
+		b.WriteByte(v[i])
 	}
-	u, err := url.Parse(raw)
-	return err == nil && accesskey.ContainsSecret(u.Host)
+	return b.String()
+}
+
+// unhex is the value of the hexadecimal digit c, or -1.
+func unhex(c byte) int {
+	switch {
+	case '0' <= c && c <= '9':
+		return int(c - '0')
+	case 'a' <= c && c <= 'f':
+		return int(c-'a') + 10
+	case 'A' <= c && c <= 'F':
+		return int(c-'A') + 10
+	}
+	return -1
 }
 
 // gatewayURLWrong says what is wrong with v as a gateway's URL, as Forager's session

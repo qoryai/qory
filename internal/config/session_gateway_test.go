@@ -218,6 +218,11 @@ func TestASessionGatewayURLRefusalPrintsNoSecret(t *testing.T) {
 		{"https://[fe80::1%25%71ak_SECRETZONE]", "session.gateway.url: the document contains an access key secret"},
 		{"http://[fe80::1%25%71ak_SECRETZONE]", "session.gateway.url: the document contains an access key secret"},
 		{"https://[fe80::1%25%71ak_SECRETZONE]:8443/", "session.gateway.url: the document contains an access key secret"},
+		{"https://[fe80::1%25%2571ak_SECRETZONE]", "session.gateway.url: the document contains an access key secret"},
+		{"http://[fe80::1%25%2571ak_SECRETZONE]", "session.gateway.url: the document contains an access key secret"},
+		{"https://[fe80::1%25%252571ak_SECRETZONE]", "session.gateway.url: the document contains an access key secret"},
+		{"http://[fe80::1%25%252571ak_SECRETZONE]", "session.gateway.url: the document contains an access key secret"},
+		{"https://[fe80::1%25%" + strings.Repeat("25", 9) + "71ak_SECRETZONE]", "session.gateway.url: the document contains an access key secret"},
 	} {
 		foragerFile(t, "apiVersion: qory.dev/v1alpha1\nsession:\n  gateway:\n    url: \""+c.url+"\"\n")
 		_, err := config.Load(t.TempDir(), true)
