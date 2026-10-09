@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -8,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -100,6 +103,29 @@ type ForagerSessionGateway struct {
 	CAFile            string
 	CertificateSHA256 string
 	RunCredentialFile string
+}
+
+// certificatePin is session.gateway.certificate_sha256's shape: 32 bytes in standard
+// base64 with padding, as Forager's session takes it.
+var certificatePin = regexp.MustCompile(`^[A-Za-z0-9+/]{43}=$`)
+
+// CertificatePin reports whether v is a certificate pin as Forager's session takes it:
+// the SHA-256 of a public key, 32 bytes, in standard base64 with padding.
+func CertificatePin(v string) bool {
+	if !certificatePin.MatchString(v) {
+		return false
+	}
+	b, err := base64.StdEncoding.Strict().DecodeString(v)
+	return err == nil && len(b) == sha256.Size
+}
+
+// GatewayURL reports whether v is a gateway's URL as Forager's session takes it: https,
+// a host and an optional port, and no user information, path other than "/", query or
+// fragment.
+func GatewayURL(v string) bool {
+	u, err := url.Parse(v)
+	return err == nil && u.Scheme == "https" && u.Host != "" && u.Hostname() != "" && u.Opaque == "" && u.User == nil &&
+		(u.Path == "" || u.Path == "/") && u.RawQuery == "" && !u.ForceQuery && u.Fragment == ""
 }
 
 // Path is a path a setting of the file names, resolved: an absolute one as it is, a
@@ -391,14 +417,26 @@ func LoadForager() (*Forager, error) {
 		if sg.URL == nil || *sg.URL == "" {
 			return nil, fmt.Errorf("%s: session.gateway.url is required", path)
 		}
+		if !GatewayURL(*sg.URL) {
+			return nil, fmt.Errorf("%s: session.gateway.url %q is not an https URL of a host and an optional port, with nothing after", path, *sg.URL)
+		}
 		r.SessionGateway = &ForagerSessionGateway{URL: *sg.URL}
 		for _, v := range []struct {
+			key string
 			in  *string
 			out *string
-		}{{sg.CAFile, &r.SessionGateway.CAFile}, {sg.CertificateSHA256, &r.SessionGateway.CertificateSHA256}, {sg.RunCredentialFile, &r.SessionGateway.RunCredentialFile}} {
-			if v.in != nil {
-				*v.out = *v.in
+		}{{"ca_file", sg.CAFile, &r.SessionGateway.CAFile}, {"certificate_sha256", sg.CertificateSHA256, &r.SessionGateway.CertificateSHA256}, {"run_credential_file", sg.RunCredentialFile, &r.SessionGateway.RunCredentialFile}} {
+			if v.in == nil {
+				continue
 			}
+			// A key that is present holds a value: an empty pin would turn the pin off.
+			if *v.in == "" {
+				return nil, fmt.Errorf("%s: session.gateway.%s is empty", path, v.key)
+			}
+			*v.out = *v.in
+		}
+		if p := r.SessionGateway.CertificateSHA256; p != "" && !CertificatePin(p) {
+			return nil, fmt.Errorf("%s: session.gateway.certificate_sha256 %q is not the SHA-256 of a public key in standard base64 with padding, 44 characters ending in =", path, p)
 		}
 	}
 	if in := ses.Instance; in != nil && in.Name != nil {
