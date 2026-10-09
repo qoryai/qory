@@ -153,6 +153,15 @@ type fakeLink struct {
 	body      string
 	bearers   []string
 	batches   int
+	// interval is the heartbeat interval its discovery announces, in seconds: 30 when 0.
+	interval int
+	// runStatus and runBody, when runStatus is not 0, answer the run request, the
+	// request's run id in place of {run_id}; without them it is not found.
+	runStatus int
+	runBody   string
+	// after, when set, is a file: until it exists every batch is accepted, and status
+	// and body answer it once it does.
+	after string
 }
 
 // newFakeLink starts a fake link that accepts every batch; it stops when the test ends.
@@ -187,14 +196,35 @@ func (f *fakeLink) serve(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte(`{"error":"run_credential_refused","from":"gateway","message":"the gateway refused this run credential"}`))
 			return
 		}
+		interval := f.interval
+		if interval == 0 {
+			interval = 30
+		}
 		json.NewEncoder(w).Encode(map[string]any{
 			"version": 1,
-			"events":  map[string]any{"url": f.URL + "/events", "types": []string{"*"}, "interval_seconds": 30},
+			"events":  map[string]any{"url": f.URL + "/events", "types": []string{"*"}, "interval_seconds": interval},
 			"run":     map[string]any{"url": f.URL + "/run"},
 			"proxy":   map[string]any{"address": strings.TrimPrefix(f.URL, "https://")},
 		})
+	case "/run":
+		if f.runStatus == 0 || r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		var req struct {
+			RunID string `json:"run_id"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		w.WriteHeader(f.runStatus)
+		w.Write([]byte(strings.ReplaceAll(f.runBody, "{run_id}", req.RunID)))
 	case "/events":
 		f.batches++
+		if f.after != "" {
+			if _, err := os.Stat(f.after); err != nil {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+		}
 		w.WriteHeader(f.status)
 		w.Write([]byte(f.body))
 	default:
@@ -219,7 +249,8 @@ func gatewayRecord(t *testing.T, root, id string) string {
 
 // TestResendThroughAGatewaySaysWhatItAnswered is each answer of a separate gateway to a
 // resend that qory words: the run ended at the credential's issuer, or by the gateway
-// for another reason, named, its own run_closed among them; a batch it refuses, which
+// for another reason, named, its own run_closed, issuer_unreachable and
+// issuer_answer_invalid among them; a batch it refuses, which
 // ends the run; no answer that accepts within --wait; every batch accepted; and the
 // discovery's 401 to a run credential with no exp qory can read. Each run ended or
 // refused is exit 1, the events kept; what is accepted is exit 0. The run credential
@@ -249,6 +280,10 @@ func TestResendThroughAGatewaySaysWhatItAnswered(t *testing.T) {
 			want: func(s string) string { return fmt.Sprintf(resendEnded, "batch_refused", s) }, code: 1},
 		{name: "run_closed", status: http.StatusGone, body: `{"error":"run_closed","from":"gateway"}`,
 			want: func(s string) string { return fmt.Sprintf(resendEnded, "run_closed", s) }, code: 1},
+		{name: "issuer_unreachable", status: http.StatusGone, body: `{"error":"issuer_unreachable","from":"gateway"}`,
+			want: func(s string) string { return fmt.Sprintf(resendEnded, "issuer_unreachable", s) }, code: 1},
+		{name: "issuer_answer_invalid", status: http.StatusGone, body: `{"error":"issuer_answer_invalid","from":"gateway"}`,
+			want: func(s string) string { return fmt.Sprintf(resendEnded, "issuer_answer_invalid", s) }, code: 1},
 		{name: "no answer that accepts", status: http.StatusServiceUnavailable, args: []string{"--wait", "2s"},
 			want: func(s string) string { return fmt.Sprintf(resendNotSent, 0, 2, s) }, code: 1},
 		{name: "accepted", status: http.StatusOK,

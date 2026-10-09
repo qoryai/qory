@@ -78,10 +78,21 @@ func (i issuer) credential(t *testing.T, more map[string]any) string {
 // output and the server. The gateway stops when the test ends.
 func separateGateway(t *testing.T) (addr, ca string, iss issuer, out *syncBuffer, srv *fakeServer) {
 	t.Helper()
+	return separateGatewayWith(t, gatewayCredentials, nil)
+}
+
+// separateGatewayWith is [separateGateway] with credentials as its
+// gateway.run_credentials, and files, when not nil, called with the gateway's
+// configuration directory to write the files they name beside forager.yaml.
+func separateGatewayWith(t *testing.T, credentials string, files func(dir string)) (addr, ca string, iss issuer, out *syncBuffer, srv *fakeServer) {
+	t.Helper()
 	session := os.Getenv("XDG_CONFIG_HOME")
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "gateway-config"))
 	srv = newFakeServer(t, "")
-	serverFile(t, srv, "  tls: {certificate: gateway.pem, key: gateway-key.pem}\n"+gatewayCredentials)
+	serverFile(t, srv, "  tls: {certificate: gateway.pem, key: gateway-key.pem}\n"+credentials)
+	if files != nil {
+		files(string(configDir()))
+	}
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)

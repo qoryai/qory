@@ -277,7 +277,8 @@ func TestTheRunCredentialsExpiryIsWordedBySource(t *testing.T) {
 
 // TestASeparateGatewaysEndIsSaid is a run a separate gateway ended: at the run
 // credential's expiry, a failure in the words of its source; at its issuer's end, the
-// line of decision 131; any other close is the caller's to say.
+// line of decision 131; when its issuer's introspection endpoint could not be reached,
+// or gave no valid answer, a line of its own; any other close is the caller's to say.
 func TestASeparateGatewaysEndIsSaid(t *testing.T) {
 	c := &runCredential{variable: unsignedCredential(`{"exp":1791549000}`)}
 	c.get(context.Background())
@@ -289,6 +290,15 @@ func TestASeparateGatewaysEndIsSaid(t *testing.T) {
 	if !gatewayEnded(ui.New(&out), &out, event.ReasonCredentialExpired, c) || !strings.HasSuffix(out.String(), " the run credential expired at "+time.Unix(1791549000, 0).UTC().Format(time.RFC3339)+"; QORY_RUN_CREDENTIAL_SECRET is read once, so a run longer than its credential needs session.gateway.run_credential_file or --run-credential-fd\n") {
 		t.Errorf("the expiry: %q", out.String())
 	}
+	for reason, want := range map[string]string{
+		event.ReasonIssuerUnreachable:   "qory run: the gateway ended the run: it could not reach the run credential's issuer\n",
+		event.ReasonIssuerAnswerInvalid: "qory run: the gateway ended the run: the run credential's issuer gave the gateway no valid answer\n",
+	} {
+		out.Reset()
+		if !gatewayEnded(ui.New(&out), &out, reason, c) || out.String() != want {
+			t.Errorf("%s: %q, want %q", reason, out.String(), want)
+		}
+	}
 	out.Reset()
 	for _, reason := range []string{event.ReasonSessionLost, event.ReasonBatchRefused} {
 		if gatewayEnded(ui.New(&out), &out, reason, c) || out.Len() != 0 {
@@ -297,6 +307,34 @@ func TestASeparateGatewaysEndIsSaid(t *testing.T) {
 	}
 	if gatewayEnded(ui.New(&out), &out, event.ReasonCredentialExpired, &runCredential{variable: "no-exp"}) || out.Len() != 0 {
 		t.Errorf("an expiry qory cannot read: said %q", out.String())
+	}
+}
+
+// TestASeparateGatewaysOpenFailureAtTheIssuerIsSaid is a run a separate gateway could
+// not open because of the run credential's issuer: its 503 issuer_unreachable and its
+// 502 issuer_answer_invalid, each a line of its own. The same codes with another
+// status, a 410 before the runtime started say, or from Qory Apiary, and any other
+// error, are left to the caller.
+func TestASeparateGatewaysOpenFailureAtTheIssuerIsSaid(t *testing.T) {
+	ref := func(code string, status int, from string) error {
+		return fmt.Errorf("the run request: %w", &accesskey.Refusal{Code: code, Status: status, From: from, Text: "the gateway's own message"})
+	}
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{ref(event.ReasonIssuerUnreachable, 503, accesskey.FromGateway), "qory run: the gateway could not open the run: it could not reach the run credential's issuer; try again"},
+		{ref(event.ReasonIssuerAnswerInvalid, 502, accesskey.FromGateway), "qory run: the gateway could not open the run: the run credential's issuer gave the gateway no valid answer"},
+		{ref(event.ReasonIssuerUnreachable, 410, accesskey.FromGateway), ""},
+		{ref(event.ReasonIssuerAnswerInvalid, 410, accesskey.FromGateway), ""},
+		{ref(event.ReasonIssuerUnreachable, 503, accesskey.FromApiary), ""},
+		{ref(event.ReasonIssuerAnswerInvalid, 503, accesskey.FromGateway), ""},
+		{ref(refusal.RunCredentialRefused, 401, accesskey.FromGateway), ""},
+		{errors.New("the gateway could not open the run; try again"), ""},
+	} {
+		if got := gatewayNotOpened(c.err); got != c.want {
+			t.Errorf("%v: %q, want %q", c.err, got, c.want)
+		}
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"io"
 	"io/fs"
 	"math"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -468,9 +469,11 @@ func expiryTime(exp time.Time) string {
 }
 
 // gatewayEnded says why a separate gateway ended a run, by the code it closed it with:
-// the run credential expired, credential_expired, or its issuer reports that the run has
-// ended, run_ended_at_issuer. It reports whether it said anything: for any other code,
-// and for an expiry qory cannot read, the caller says what it says of a gateway's close.
+// the run credential expired, credential_expired; its issuer reports that the run has
+// ended, run_ended_at_issuer; or the issuer's introspection endpoint could not be
+// reached, issuer_unreachable, or gave no valid answer, issuer_answer_invalid. It
+// reports whether it said anything: for any other code, and for an expiry qory cannot
+// read, the caller says what it says of a gateway's close.
 func gatewayEnded(u *ui.UI, report io.Writer, reason string, c *runCredential) bool {
 	switch reason {
 	case event.ReasonCredentialExpired:
@@ -481,8 +484,33 @@ func gatewayEnded(u *ui.UI, report io.Writer, reason string, c *runCredential) b
 	case event.ReasonRunEndedAtIssuer:
 		fmt.Fprintln(report, "qory run: the gateway ended the run: the run credential's issuer reports that the run has ended")
 		return true
+	case event.ReasonIssuerUnreachable:
+		fmt.Fprintln(report, "qory run: the gateway ended the run: it could not reach the run credential's issuer")
+		return true
+	case event.ReasonIssuerAnswerInvalid:
+		fmt.Fprintln(report, "qory run: the gateway ended the run: the run credential's issuer gave the gateway no valid answer")
+		return true
 	}
 	return false
+}
+
+// gatewayNotOpened is the line qory says of a run a separate gateway could not open
+// because of the run credential's issuer, as it says the gateway's end of a run: the
+// issuer's introspection endpoint could not be reached, the gateway's 503
+// issuer_unreachable, or gave no valid answer, its 502 issuer_answer_invalid. "" for
+// any other error.
+func gatewayNotOpened(err error) string {
+	var ref *session.Refusal
+	if !errors.As(err, &ref) || ref.From != accesskey.FromGateway {
+		return ""
+	}
+	switch {
+	case ref.Code == event.ReasonIssuerUnreachable && ref.Status == http.StatusServiceUnavailable:
+		return "qory run: the gateway could not open the run: it could not reach the run credential's issuer; try again"
+	case ref.Code == event.ReasonIssuerAnswerInvalid && ref.Status == http.StatusBadGateway:
+		return "qory run: the gateway could not open the run: the run credential's issuer gave the gateway no valid answer"
+	}
+	return ""
 }
 
 // behindGateway is a run's check, before anything starts, on a machine whose runs go

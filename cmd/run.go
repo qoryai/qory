@@ -365,6 +365,16 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if reused := runIDReused(err, record, spec.RunID); reused != nil {
 					return reused
 				}
+				// A separate gateway that could not open the run for the run credential's
+				// issuer: qory says so in a line of its own, as it says the gateway's end of
+				// a run, and names the record after it.
+				if line := gatewayNotOpened(err); remote && line != "" {
+					fmt.Fprintln(stderr, line)
+					if _, statErr := os.Stat(record); statErr == nil {
+						fmt.Fprintln(stderr, "qory run: the record is in", record)
+					}
+					return reported(&saidError{text: strings.TrimPrefix(line, "qory run: "), err: err})
+				}
 				if m := mountRefused(err, passed{foragerDir: foragerDir, stateDir: state, spec: &spec, root: at.root, own: own}); m != nil {
 					err = m
 				} else if refused := credentialRefused(err, named, details, about); remote && refused != nil {
