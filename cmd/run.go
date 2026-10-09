@@ -238,8 +238,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				spec.RunID = newRunID()
 			}
 			// The gateway is the node toward the server: it signs every request with the
-			// access key. --local runs with the files alone.
-			gw := gateway.Config{Policy: pol, Version: build().title(), RunDir: func(id string) string { return filepath.Join(spec.RunsDir, id) }}
+			// access key. --local runs with the files alone. Its link is served in memory
+			// alone, to the session in this process: no socket, which another process could
+			// reach.
+			gw := gateway.Config{Policy: pol, Version: build().title(), RunDir: func(id string) string { return filepath.Join(spec.RunsDir, id) }, NoLinkSocket: true}
 			if id != nil {
 				gw.Server = server
 				gw.Server.AccessKey, gw.Server.InstanceID, gw.Server.InstanceName = id.key.key, id.instanceID, id.instanceName
