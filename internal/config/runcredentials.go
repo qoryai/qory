@@ -135,7 +135,9 @@ func readRunCredentials(path string, node *yaml.Node) (runcredential.Issuers, []
 // resolved is a copy of n, and of everything under it, as the decoder reads it: each
 // alias is a copy of its anchor's value, without the anchor, and each mapping holds the
 // keys it merges where its << stands, without those the mapping sets itself or an
-// earlier merge sets. It is n as the file would write it out in full.
+// earlier merge sets. A key tagged !!merge that the decoder takes as no merge, such as
+// !!merge name or an alias of <<, is the name it decodes into. It is n as the file
+// would write it out in full.
 func resolved(n *yaml.Node) *yaml.Node {
 	n = followAliases(n)
 	c := *n
@@ -147,10 +149,28 @@ func resolved(n *yaml.Node) *yaml.Node {
 		}
 	case yaml.MappingNode:
 		for _, kv := range mergedKeys(n, nil) {
-			c.Content = append(c.Content, resolved(kv.k), resolved(kv.v))
+			c.Content = append(c.Content, resolvedKey(kv.k), resolved(kv.v))
 		}
 	}
 	return &c
+}
+
+// resolvedKey is [resolved] of k, a key that is no merge key. A key tagged !!merge is
+// the string it decodes into, untagged: written out as it stands, it would be a merge
+// where it is a <<, and a name with a tag the decoder drops where it is another. A <<
+// is quoted, which the YAML encoder does not do of its own.
+func resolvedKey(k *yaml.Node) *yaml.Node {
+	c := resolved(k)
+	if c.Kind != yaml.ScalarNode || !mergeTagged(c) {
+		return c
+	}
+	if name, ok := keyString(k); ok {
+		c.Tag, c.Value, c.Style = "!!str", name, 0
+		if name == "<<" {
+			c.Style = yaml.DoubleQuotedStyle
+		}
+	}
+	return c
 }
 
 // mergedKeys are the keys of the mapping m and their values as the decoder takes them,
@@ -472,9 +492,16 @@ func (a *aliasKeys) keysOf(n *yaml.Node) map[string][]keyValue {
 	return names
 }
 
-// isMergeKey reports whether k is the merge key, <<.
+// isMergeKey reports whether k is a merge key as the decoder takes one: a scalar <<,
+// untagged, tagged ! or tagged !!merge. An alias of one is no merge key, nor is a key
+// tagged !!merge whose value is not <<.
 func isMergeKey(k *yaml.Node) bool {
-	return k.Kind == yaml.ScalarNode && k.ShortTag() == "!!merge"
+	return k.Kind == yaml.ScalarNode && k.Value == "<<" && (k.Tag == "" || k.Tag == "!" || mergeTagged(k))
+}
+
+// mergeTagged reports whether n is tagged !!merge, in its short form or its long one.
+func mergeTagged(n *yaml.Node) bool {
+	return n.Tag == "!!merge" || n.Tag == "tag:yaml.org,2002:merge"
 }
 
 // mergedMappings are the mappings the value of a merge key merges: a mapping, or each

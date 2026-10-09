@@ -8,8 +8,10 @@ import (
 )
 
 // TestResolvedIsWhatTheDecoderReads is resolved of lists with aliases, alias keys and
-// merges, merges of merges and keys a mapping sets beside its merge among them: it holds
-// no alias and no merge, and the decoder reads it as it reads the list.
+// merges, merges of merges and keys a mapping sets beside its merge among them, and
+// keys the decoder takes as a merge or as none: << tagged ! or !!merge, a quoted "<<",
+// !!merge on another name, and an alias of <<. It holds no alias and no merge, and the
+// decoder reads it as it reads the list.
 func TestResolvedIsWhatTheDecoderReads(t *testing.T) {
 	for _, body := range []string{
 		"x: &a {k: 1}\nl: [*a, *a]\n",
@@ -18,6 +20,12 @@ func TestResolvedIsWhatTheDecoderReads(t *testing.T) {
 		"x: &a {k: 1, <<: {j: 2, k: 9}}\ny: &b {<<: *a, m: 4}\nl: [{<<: [*b, {j: 7, n: 8}], m: 5}]\n",
 		"x: &k j\nl: [{j: 1, *k : 2}, {<<: {j: 1, *k : 2}}]\n",
 		"x: &a [1, {k: &v v}]\nl: [*a, {k: *v, <<: {k: w, z: [*a]}}]\n",
+		"l: [{!!merge team: {k: 1}, a: 1}]\n",
+		"l: [{\"<<\": {k: 1}, a: 1}]\n",
+		"l: [{! <<: {k: 1}, a: 1}]\n",
+		"l: [{!!merge <<: {k: 1}, a: 1}]\n",
+		"l: [{!!merge \"<<\": {k: 1}, a: 1}]\n",
+		"x: &m <<\nl: [{*m : {k: 1}, a: 1}]\n",
 	} {
 		var doc yaml.Node
 		if err := yaml.Unmarshal([]byte(body), &doc); err != nil {

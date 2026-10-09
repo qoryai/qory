@@ -469,8 +469,9 @@ func runCredentialRows(t *testing.T, body string) []config.Row {
 // TestConfigRowsOfRunCredentialsAreOfTheListAsRead writes gateway.run_credentials with
 // aliases and merges: the list as an alias of an anchor in another section, an issuer as
 // one, an issuer that merges another, a merge of several mappings, a key written as an
-// alias, and an alias and an anchor inside the section. qory config lists the same rows
-// as of the list written out in full.
+// alias, and an alias and an anchor inside the section; and keys the decoder takes as a
+// merge or as none: !!merge on a name, a quoted "<<", << tagged ! or !!merge, and an
+// alias of <<. qory config lists the same rows as of the list written out in full.
 func TestConfigRowsOfRunCredentialsAreOfTheListAsRead(t *testing.T) {
 	hermetic(t)
 	const (
@@ -480,6 +481,9 @@ func TestConfigRowsOfRunCredentialsAreOfTheListAsRead(t *testing.T) {
 		program       = "program: /opt/acme/bin/acme-tracker"
 	)
 	inspecting := strings.TrimSuffix(issuer, "}") + ", " + introspection + "}"
+	details := func(d string) string {
+		return "gateway:\n  run_credentials:\n    - " + strings.TrimSuffix(issuer, "}") + ", details: " + d + "}\n"
+	}
 	for _, c := range []struct{ body, written string }{
 		{
 			"gateway: {integrations: {i: {" + program + ", settings: {s: &rc [" + issuer + "]}}}, run_credentials: *rc}\n",
@@ -509,6 +513,16 @@ func TestConfigRowsOfRunCredentialsAreOfTheListAsRead(t *testing.T) {
 			"gateway:\n  run_credentials:\n    - {issuer: \"https://issuer.example\", audience: &a box, algorithms: [RS256], keys: &k [{kid: k1, alg: RS256, public_key_file: f.pem}], labels: {forge: {value: x}, repository: {claim: repo}, run_key: {claim: sub}}}\n" +
 				"    - {issuer: \"https://other.example\", audience: *a, algorithms: [RS256], keys: *k, labels: {forge: {value: x}, repository: {claim: repo}, run_key: {claim: sub}}}\n",
 			"gateway:\n  run_credentials:\n    - " + issuer + "\n    - " + strings.Replace(issuer, "issuer.example", "other.example", 1) + "\n",
+		},
+		{details("{!!merge team: {claim: org}}"), details("{team: {claim: org}}")},
+		{details(`{"<<": {claim: org}}`), details(`{"<<": {claim: org}}`)},
+		{details("{! <<: {team: {claim: org}}}"), details("{team: {claim: org}}")},
+		{details("{!!merge <<: {team: {claim: org}}}"), details("{team: {claim: org}}")},
+		{details(`{!!merge "<<": {team: {claim: org}}}`), details("{team: {claim: org}}")},
+		{details("{a: {claim: &m <<}, *m : {claim: org}}"), details(`{a: {claim: <<}, "<<": {claim: org}}`)},
+		{
+			"gateway:\n  run_credentials:\n    - {issuer: \"https://issuer.example\", !!merge audience: box, " + rest + "}\n",
+			"gateway:\n  run_credentials:\n    - " + issuer + "\n",
 		},
 	} {
 		want := runCredentialRows(t, c.written)
