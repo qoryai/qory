@@ -214,8 +214,8 @@ release may change what an existing document does, and states it under Upgrading
   `QORY_HARNESS_HOME`. A module's export is a default like the others: the server's
   value, `--env` and `wall.env` win over it, and the deny list leaves out one whose name
   it holds. They reach the agent in the container and outside it alike.
-- qory builds against `github.com/qoryai/forager` at commit `a08473d` of its `next`,
-  `v0.6.1-0.20261009004720-a08473db1797`, contract `v1` revision 1 as amended there.
+- qory builds against `github.com/qoryai/forager` at commit `505a86d` of its `next`,
+  `v0.6.1-0.20261009022306-505a86db16b8`, contract `v1` revision 1 as amended there.
   `forager.yaml`'s `gateway.egress` narrows the `security_policy` of a server's run
   configuration. A server's run configuration may carry variables: they reach a walled
   run's agent, and an unwalled run gets none of them. Forager's `wall.Nest` makes
@@ -223,7 +223,11 @@ release may change what an existing document does, and states it under Upgrading
   configuration beneath it. An interactive Claude Code run with an API key behind the
   wall starts through the session's approval script, `/bin/sh` and `approve-key.sh` in the
   run directory, which pre-approves the key's placeholder; `dev.qory.run.started`
-  records that command. `dev.qory.run.started` carries `about`.
+  records that command. `dev.qory.run.started` carries `about`, and `opened_by`, which is
+  `session` on every run qory starts. `dev.qory.run.exited` gives `timeout` or `run_closed`
+  as its reason when the session ended the run, and `gateway_lost` when `qory run resend`
+  closes the record of a run whose Forager process died; the contract's other reasons are
+  a gateway's.
 - `gateway.server.access_key` and `gateway.server.secret` in `forager.yaml` are refused,
   and so is `QORY_SERVER_SECRET` when `forager.yaml` has a `gateway.server` section; the refusal says to
   remove the two keys, or unset the variable, and then connect the machine as a node,
