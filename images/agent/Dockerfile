@@ -1,6 +1,6 @@
 # agent: the image the wall runs the agent in, the base every other agent image of
 # Qory's is built FROM. It holds what qory's harness launches and what an agent needs to
-# deliver its work: Claude Code at the version the runner's descriptor for it is written
+# deliver its work: Claude Code at the version Forager's descriptor for it is written
 # against, git, the GitHub command, and the system's authorities where the wall reads
 # them. It runs as any user the machine gives it, with HOME a directory every user may
 # write, and holds no setuid or setgid program. It sets no entry point: the wall starts
@@ -24,8 +24,8 @@ ARG DEBIAN_SNAPSHOT=20260918T000000Z
 ARG GH_VERSION=2.101.0
 ARG GH_SHA256_AMD64=9bca2d1c16825f109907a23307628a2f0698fbf99662b73a5cf0b020293072b8
 ARG GH_SHA256_ARM64=b57e8063f18862647c9d22727c32e9da1b963f8bf9db648fe123a6975695640f
-# Claude Code: the version contracts/runner/v1/runtimes/claude/descriptor.yaml names in
-# the runner module qory's go.mod requires, which qory image check compares. The sums are
+# Claude Code: the version contracts/forager/v1/runtimes/claude/descriptor.yaml names in
+# the Forager module qory's go.mod requires, which qory image check compares. The sums are
 # npm's dist.integrity, sha512 in hex, of @anthropic-ai/claude-code and of its native
 # build for each platform, @anthropic-ai/claude-code-linux-x64 and -linux-arm64.
 ARG CLAUDE_CODE_VERSION=2.1.273

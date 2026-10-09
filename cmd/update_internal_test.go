@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qoryai/runner/session"
-	"github.com/qoryai/runner/wall"
+	"github.com/qoryai/forager/session"
+	"github.com/qoryai/forager/wall"
 
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/ui"
@@ -54,7 +54,7 @@ func TestStartUpdateCheckIsSilentOffATerminal(t *testing.T) {
 // is a verb the wall runs inside, with -v before it too, and no verb a person runs is.
 func TestNoUpdateCheckInsideTheWall(t *testing.T) {
 	var spec session.Spec
-	r := &config.Runner{Wall: &config.RunnerWall{Adapter: config.WallDocker, Image: "example.com/agent:1", Helper: "/opt/qory/qory-linux"}}
+	r := &config.Forager{Wall: &config.ForagerWall{Adapter: config.WallDocker, Image: "example.com/agent:1", Helper: "/opt/qory/qory-linux"}}
 	if err := enclose(&spec, r, wallOptions{}, "", false, "/usr/local/bin/qory", t.TempDir(), t.TempDir()); err != nil {
 		t.Fatal(err)
 	}

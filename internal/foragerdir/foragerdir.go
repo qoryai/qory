@@ -1,5 +1,5 @@
-// Package runnerdir is the runner file's directory, everything qory keeps on this
-// machine for its server beside runner.yaml: the access key's secret, the moved-aside
+// Package foragerdir is the directory of forager.yaml, everything qory keeps on this
+// machine for its server beside forager.yaml: the access key's secret, the moved-aside
 // secrets, the new secret of a key being enrolled, the replaced secret of a key being
 // replaced, the instance id, the stored-secrets marker, the pending enrolment and its
 // answer, and the lock files. The directory is the user's configuration directory,
@@ -10,7 +10,7 @@
 // group or to others, in a directory the effective user owns that grants nothing to
 // them either: the owner and the mode are compared before a byte is read. No error of
 // this package contains a secret.
-package runnerdir
+package foragerdir
 
 import (
 	"crypto/sha256"
@@ -26,7 +26,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/qoryai/runner/accesskey"
+	"github.com/qoryai/forager/accesskey"
 )
 
 // The files of the directory.
@@ -39,7 +39,7 @@ const (
 	// until the server's signed answer puts it in place of access-key-secret.
 	NewSecretFile = SecretFile + ".new"
 	// ReplacedFile is a second name of the secret --replace replaces, made just before
-	// the new one takes its place and removed once the runner file names the new key.
+	// the new one takes its place and removed once forager.yaml names the new key.
 	ReplacedFile = SecretFile + ".replaced"
 	// MarkerFile is the stored-secrets marker: while it exists, every run needs a wall.
 	MarkerFile = "stored-secrets"
@@ -66,7 +66,7 @@ const PendingFor = 15 * time.Minute
 // 47 characters.
 const maxSecretFile = 4 << 10
 
-// Dir is the runner file's directory.
+// Dir is the directory of forager.yaml.
 type Dir string
 
 // Path returns the path of a file of the directory.
@@ -87,7 +87,7 @@ func (d Dir) Ensure() (changed bool, err error) {
 		return false, fmt.Errorf("%s is not a directory", d)
 	}
 	if !ownedByMe(info) {
-		return false, fmt.Errorf("%s belongs to another user; the runner file's directory is yours alone", d)
+		return false, fmt.Errorf("%s belongs to another user; the directory of forager.yaml is yours alone", d)
 	}
 	if info.Mode().Perm() != 0o700 {
 		if err := os.Chmod(string(d), 0o700); err != nil {
@@ -109,7 +109,7 @@ func (d Dir) Check() error {
 		return fmt.Errorf("%s is not a directory", d)
 	}
 	if !ownedByMe(info) {
-		return fmt.Errorf("%s belongs to another user; the runner file's directory is yours alone", d)
+		return fmt.Errorf("%s belongs to another user; the directory of forager.yaml is yours alone", d)
 	}
 	if info.Mode().Perm()&0o077 != 0 {
 		return fmt.Errorf("%s is mode %04o, which grants access to the group or others; it holds the access key's secret: chmod 700 %s", d, info.Mode().Perm(), d)
@@ -139,7 +139,7 @@ func ParseSecret(b []byte) (*accesskey.Key, error) {
 		return nil, errors.New("not an access key secret: one line, " + accesskey.SecretPrefix + " and 43 characters of base64url")
 	}
 	if k.PublicKey().Fixture() {
-		return nil, errors.New("it holds the runner contract's published fixture key, whose secret anyone can read; generate a key of your own with qory access-key enrol, or on the node's page in Qory Apiary")
+		return nil, errors.New("it holds the Forager contract's published fixture key, whose secret anyone can read; generate a key of your own with qory access-key enrol, or on the node's page in Qory Apiary")
 	}
 	return k, nil
 }

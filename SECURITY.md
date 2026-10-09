@@ -20,7 +20,7 @@ earlier one.
 ## What is a vulnerability here
 
 - A repository decides what only the machine may: anything in a checkout, its
-  `qory.yaml`, a module, a composed harness, changes what `~/.config/qory/runner.yaml`
+  `qory.yaml`, a module, a composed harness, changes what `~/.config/qory/forager.yaml`
   defines for egress, the server, credentials, integrations or the wall, or a run's
   `--policy` widens the machine's.
 - `qory run` passes a session something it must not receive: the server's secret, a
@@ -29,8 +29,8 @@ earlier one.
 - `qory update` installs an archive that does not match the release's checksums.
 
 The wall, the proxy, credentials kept outside the enclosure and the signed delivery are
-the [runner](https://github.com/qoryai/runner)'s, and so is their
-[security policy](https://github.com/qoryai/runner/blob/main/SECURITY.md): what they
+[Forager](https://github.com/qoryai/forager)'s, and so is their
+[security policy](https://github.com/qoryai/forager/blob/main/SECURITY.md): what they
 guarantee, and the limits that are how they work and not a flaw. Reports about them
 come to the same address.
 

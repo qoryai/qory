@@ -1,7 +1,7 @@
 name: Images
 
 # The agent's images are built here, and not published. A change to them, to the check
-# and what it reads, or to the runner module whose descriptor names the version of claude,
+# and what it reads, or to the Forager module whose descriptor names the version of claude,
 # builds all four and checks them with the qory of the same commit.
 on:
   push:
@@ -52,7 +52,7 @@ jobs:
 
       - name: Check them
         # On Linux the probe is qory itself, and a configuration directory with no
-        # runner.yaml leaves every setting its default.
+        # forager.yaml leaves every setting its default.
         env:
           XDG_CONFIG_HOME: ${{ runner.temp }}/config
         run: '"$RUNNER_TEMP/qory" image check qory-agent qory-agent-docker qory-agent-go qory-agent-go-docker'

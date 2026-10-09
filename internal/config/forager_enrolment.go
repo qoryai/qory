@@ -10,14 +10,14 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/qoryai/runner/accesskey"
+	"github.com/qoryai/forager/accesskey"
 	"gopkg.in/yaml.v3"
 
 	"github.com/qoryai/qory/internal/stack"
 )
 
-// Enrolment is what qory access-key enrol writes into the runner file's server
-// section: the server's URL where the section has none, the access key's id, and the
+// Enrolment is what qory access-key enrol writes into forager.yaml's gateway.server:
+// the server's URL where the section has none, the access key's id, and the
 // pin where the section has none. A nil Pin leaves apiary_public_key as it is.
 type Enrolment struct {
 	URL         string
@@ -25,10 +25,11 @@ type Enrolment struct {
 	Pin         accesskey.Pin
 }
 
-// WriteEnrolment writes an enrolment into the runner file at path, editing its YAML
-// tree so its comments, its order and every other key stay as they are: server.url
-// when the section has none, server.access_key_id, and server.apiary_public_key when
-// e.Pin is set and the section has none. A file that does not exist is created with
+// WriteEnrolment writes an enrolment into forager.yaml at path, editing its YAML
+// tree so its comments, its order and every other key stay as they are:
+// gateway.server.url when the section has none, gateway.server.access_key_id, and
+// gateway.server.apiary_public_key when e.Pin is set and the section has none. The
+// gateway section is added at the end of the file when it has none. A file that does not exist is created with
 // mode 0600 and the apiVersion line; the directory is the caller's to create. The new
 // content replaces the file in one rename, in the directory of the file a link names,
 // with the mode the file had.
@@ -56,7 +57,7 @@ func WriteEnrolment(path string, e Enrolment) error {
 	return replaceFile(target, out, mode)
 }
 
-// editEnrolment returns the runner file's content with the enrolment written into it.
+// editEnrolment returns forager.yaml's content with the enrolment written into it.
 func editEnrolment(data []byte, e Enrolment) ([]byte, error) {
 	var doc yaml.Node
 	if len(bytes.TrimSpace(data)) > 0 {
@@ -82,9 +83,13 @@ func editEnrolment(data []byte, e Enrolment) ([]byte, error) {
 	if root.Kind != yaml.MappingNode {
 		return nil, errors.New("the file is not a mapping of sections")
 	}
-	server := mappingValue(root, "server")
+	gateway := mappingValue(root, "gateway")
+	if gateway == nil {
+		return nil, errors.New("gateway is not a mapping")
+	}
+	server := mappingValue(gateway, "server")
 	if server == nil {
-		return nil, errors.New("server is not a mapping")
+		return nil, errors.New("gateway.server is not a mapping")
 	}
 	if valueOf(server, "url") == nil {
 		setScalar(server, "url", e.URL)
@@ -153,7 +158,7 @@ func setScalar(m *yaml.Node, key, value string) {
 	set(m, key, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value})
 }
 
-// pinNode is a pin as the runner file writes it: one flow mapping per key.
+// pinNode is a pin as forager.yaml writes it: one flow mapping per key.
 func pinNode(p accesskey.Pin) *yaml.Node {
 	seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
 	for _, k := range p {

@@ -1,11 +1,11 @@
-package runnerdir
+package foragerdir
 
 import (
 	"errors"
 	"io/fs"
 	"os"
 
-	"github.com/qoryai/runner/accesskey"
+	"github.com/qoryai/forager/accesskey"
 )
 
 // maxInstanceFile is the most of instance-id that is read: two short lines.

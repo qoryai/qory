@@ -79,7 +79,7 @@ func want() report.Report {
 	}
 }
 
-// TestEgressTellsNoDeclarationFromAnEmptyOne is the difference a runner reads: a
+// TestEgressTellsNoDeclarationFromAnEmptyOne is the difference Forager reads: a
 // result whose modules declare nothing has no egress key and nil hosts, one whose
 // module declares an empty list has an empty egress array and empty hosts, and a
 // runtime added to a declaration joins the union under its name, in host order.

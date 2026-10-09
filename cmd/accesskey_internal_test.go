@@ -15,13 +15,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/qoryai/runner/accesskey"
-	"github.com/qoryai/runner/contracts"
+	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/forager/contracts"
 
-	"github.com/qoryai/qory/internal/runnerdir"
+	"github.com/qoryai/qory/internal/foragerdir"
 )
 
-// contractFile reads one file of the runner contract, by its path under runner/v1.
+// contractFile reads one file of the Forager contract, by its path under forager/v1.
 func contractFile(t *testing.T, name string) []byte {
 	t.Helper()
 	b, err := fs.ReadFile(contracts.FS, name)
@@ -142,7 +142,7 @@ func TestEnrolmentKnownAnswers(t *testing.T) {
 			if ref.Code != want {
 				t.Errorf("%s, tampered %v: %s, want %s", a.Note, tamper, ref.Code, want)
 			}
-			dir := runnerdir.Dir(t.TempDir())
+			dir := foragerdir.Dir(t.TempDir())
 			if _, err := dir.Ensure(); err != nil {
 				t.Fatal(err)
 			}
@@ -202,7 +202,7 @@ func TestKeyCommandsRefuseAFixtureKey(t *testing.T) {
 	if err := os.MkdirAll(string(dir), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(dir.Path("runner.yaml"), []byte("instance:\n  name: build-01\n"), 0o600); err != nil {
+	if err := os.WriteFile(dir.Path("forager.yaml"), []byte("session:\n  instance:\n    name: build-01\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"enrol", srv.URL, code}, {"enrol", "--print", srv.URL, code}} {
@@ -212,7 +212,7 @@ func TestKeyCommandsRefuseAFixtureKey(t *testing.T) {
 		root.SetOut(&out)
 		root.SetErr(&out)
 		err := root.Execute()
-		if err == nil || !strings.Contains(err.Error(), "the new key is one of the runner contract's published fixture keys, whose secret anyone can read; no key was kept") {
+		if err == nil || !strings.Contains(err.Error(), "the new key is one of the Forager contract's published fixture keys, whose secret anyone can read; no key was kept") {
 			t.Errorf("%v: %v", args, err)
 		}
 		if strings.Contains(out.String(), fixture.Secret()) || strings.Contains(out.String(), fixture.Fingerprint()) {
@@ -235,19 +235,19 @@ func TestARefusalMovesAsideOnlyTheKeyMadeForTheCode(t *testing.T) {
 	}
 	for _, c := range []struct {
 		name string
-		act  func(runnerdir.Dir, time.Time) error
+		act  func(foragerdir.Dir, time.Time) error
 	}{
-		{"unauthorized", func(dir runnerdir.Dir, now time.Time) error {
+		{"unauthorized", func(dir foragerdir.Dir, now time.Time) error {
 			return enrolFailed(dir, &accesskey.Refusal{Code: accesskey.CodeUnauthorized, Status: http.StatusUnauthorized}, sent, false, now)
 		}},
-		{"key_invalid", func(dir runnerdir.Dir, now time.Time) error {
+		{"key_invalid", func(dir foragerdir.Dir, now time.Time) error {
 			return enrolFailed(dir, &accesskey.Refusal{Code: accesskey.CodeKeyInvalid, Status: http.StatusConflict}, sent, false, now)
 		}},
-		{"a fixture pin", func(dir runnerdir.Dir, now time.Time) error {
+		{"a fixture pin", func(dir foragerdir.Dir, now time.Time) error {
 			return refuseFixturePin(dir, sent, false, now)
 		}},
 	} {
-		dir := runnerdir.Dir(t.TempDir())
+		dir := foragerdir.Dir(t.TempDir())
 		if _, err := dir.Ensure(); err != nil {
 			t.Fatal(err)
 		}
@@ -269,7 +269,7 @@ func TestARefusalMovesAsideOnlyTheKeyMadeForTheCode(t *testing.T) {
 		if old, _ := dir.OldSecrets(); !dir.SameSecret(mine) || len(old) != 0 {
 			t.Errorf("%s: this machine's key was moved aside", c.name)
 		}
-		if _, err := os.Lstat(dir.Path(runnerdir.PendingFile)); !errors.Is(err, fs.ErrNotExist) {
+		if _, err := os.Lstat(dir.Path(foragerdir.PendingFile)); !errors.Is(err, fs.ErrNotExist) {
 			t.Errorf("%s: the pending enrolment stayed: %v", c.name, err)
 		}
 	}

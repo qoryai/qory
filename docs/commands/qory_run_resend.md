@@ -4,10 +4,10 @@ Send a finished run's record to the server again
 
 ### Synopsis
 
-Send a finished run's record to the server in runner.yaml again: after a runner that
+Send a finished run's record to the server in forager.yaml again: after a Forager process that
 died, or a server that was away. A job runs it last, whatever happened before.
 
-Only what the server has not accepted is sent. A record the runner left open is closed
+Only what the server has not accepted is sent. A record Forager left open is closed
 first, and the containers and networks its wall left are removed. A run that is still
 running is refused.
 

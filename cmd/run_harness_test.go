@@ -108,12 +108,12 @@ func TestRunFixesNoNameTheReportMarks(t *testing.T) {
 	}
 }
 
-// walledRunner writes a runner file whose wall is a program standing in for docker, and
+// walledForager writes a forager.yaml whose wall is a program standing in for docker, and
 // returns that program's log, which stays absent until the wall runs a command.
-func walledRunner(t *testing.T) string {
+func walledForager(t *testing.T) string {
 	t.Helper()
 	docker, log := fakeDocker(t)
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
 	return log
 }
 
@@ -138,7 +138,7 @@ func TestRunRefusesAReportNamingAnotherHome(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, "claude")
-	log := walledRunner(t)
+	log := walledForager(t)
 	home := filepath.Join(root, ".qory", "harness")
 	path := filepath.Join(root, ".qory", "harness-report.json")
 	rep, err := report.Read(path)
@@ -210,7 +210,7 @@ func TestWalledRunTakesTheHomeFromYourOwnFile(t *testing.T) {
 	if err := os.RemoveAll(runsDir(t, root)); err != nil {
 		t.Fatal(err)
 	}
-	log := walledRunner(t)
+	log := walledForager(t)
 	_, err := run(t, "run", "claude")
 	want := "the checkout's qory.yaml sets harness.home, and a walled run takes the home from ~/.config/qory/qory.yaml alone, so the run does not start. Set harness.home in ~/.config/qory/qory.yaml, or remove it from the checkout's qory.yaml"
 	if cmd.ExitCode(err) != cmd.ExitInput || err.Error() != want {

@@ -48,21 +48,23 @@
 //	  stacks: [nextjs]           # harness/stacks/nextjs/qory-stack.yaml
 //	  modules: [core, nextjs]    # harness/modules/<name>/qory-module.yaml
 //
-// The machine's runner file, runner.yaml beside the user's qory.yaml and nowhere else,
-// defines what qory run does on this machine; [LoadRunner] reads it and [Load] returns it:
+// The machine's forager.yaml, beside the user's qory.yaml and nowhere else,
+// defines what qory run does on this machine; [LoadForager] reads it and [Load] returns it:
 //
 //	apiVersion: qory.dev/v1alpha1
-//	egress:                      # the run policy: absent is observe everything
-//	  mode: enforce              # or observe: record every connection, deny only what deny lists
-//	  allow: [api.anthropic.com, "*.github.com"]
-//	  deny: [gist.github.com]    # denied in either mode, whatever allow lists
-//	server:                      # the server every run reports to; absent is files only
-//	  url: https://qory.example  # a scheme and a host
-//	  access_key_id: ak_f1xt0re000000000   # or QORY_ACCESS_KEY_ID; its secret is access-key-secret
-//	  apiary_public_key:         # the pin, or QORY_APIARY_PUBLIC_KEY
-//	    - {alg: ed25519, public_key: <the server's key>}
-//	instance:
-//	  name: build-01             # this instance's display name; the host name by default
+//	gateway:
+//	  egress:                      # the run policy: absent is observe everything
+//	    mode: enforce              # or observe: record every connection, deny only what deny lists
+//	    allow: [api.anthropic.com, "*.github.com"]
+//	    deny: [gist.github.com]    # denied in either mode, whatever allow lists
+//	  server:                      # the server every run reports to; absent is files only
+//	    url: https://qory.example  # a scheme and a host
+//	    access_key_id: ak_f1xt0re000000000   # or QORY_ACCESS_KEY_ID; its secret is access-key-secret
+//	    apiary_public_key:         # the pin, or QORY_APIARY_PUBLIC_KEY
+//	      - {alg: ed25519, public_key: <the server's key>}
+//	session:
+//	  instance:
+//	    name: build-01             # this instance's display name; the host name by default
 //
 // [Load] discovers and reads the files, [Config] is the result, and [Config.Rows] lists
 // where each value came from. [DiscoverStack] finds what a checkout composes, its
@@ -331,9 +333,9 @@ type Config struct {
 	// root's file; nil when it lists none. A section in any other file is read and left
 	// out, since an export is a repository's.
 	Exports *exports.Exports
-	// Runner is the machine's runner file, [RunnerFileName] under [UserDir]; nil when
+	// Forager is the machine's forager.yaml, [ForagerFileName] under [UserDir]; nil when
 	// there is none.
-	Runner *Runner
+	Forager *Forager
 	// Files are the files read, in the order they were applied.
 	Files []string
 	// Ignored are the keys the checkout root's file sets that a compose under extends
@@ -445,7 +447,7 @@ func Load(root string, own bool) (Config, error) {
 	if err != nil {
 		return c, err
 	}
-	if c.Runner, err = LoadRunner(); err != nil {
+	if c.Forager, err = LoadForager(); err != nil {
 		return c, err
 	}
 	for _, path := range files {
@@ -465,8 +467,8 @@ func Load(root string, own bool) (Config, error) {
 
 // LoadUser returns the configuration of the user's own file alone, the qory.yaml in
 // [UserDir], over the defaults: the defaults when there is none. A walled run takes
-// harness.home from it alone: a walled run never mounts that directory, which holds the
-// runner's files, while another qory.yaml may lie in a place its agent can write.
+// harness.home from it alone: a walled run never mounts that directory, which holds
+// Forager's files, while another qory.yaml may lie in a place its agent can write.
 func LoadUser() (Config, error) {
 	c := Defaults()
 	dir := UserDir()
@@ -1211,7 +1213,7 @@ func (c Config) Rows() []Row {
 	for _, name := range names {
 		rows = append(rows, Row{"env." + name, c.Env[name], c.origins["env."+name]})
 	}
-	rows = append(rows, c.Runner.Rows()...)
+	rows = append(rows, c.Forager.Rows()...)
 	if e := c.Exports; e != nil {
 		rows = append(rows,
 			Row{"exports.dir.stacks", e.Dir.Stacks, e.File},

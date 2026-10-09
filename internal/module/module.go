@@ -60,13 +60,13 @@ type Manifest struct {
 	Requires map[string][]string
 	// Egress are the hosts the module's skills, hooks and servers reach, sorted, each
 	// once: a lower-case host name, or "*." followed by a name for every host below it,
-	// in the grammar the runner contract defines for a policy's allow list. Nil when the
+	// in the grammar the Forager contract defines for a policy's allow list. Nil when the
 	// manifest has no egress key; empty, and not nil, when it declares an empty list,
-	// which states that the module reaches nothing. The runner distinguishes the two.
+	// which states that the module reaches nothing. Forager distinguishes the two.
 	Egress []string
 }
 
-// EgressHost is the grammar of a declared host, copied from the runner contract's
+// EgressHost is the grammar of a declared host, copied from the Forager contract's
 // policy.schema.json, egress.allow items, which defines it once for both contracts.
 var EgressHost = regexp.MustCompile(`^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 

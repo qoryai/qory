@@ -14,14 +14,14 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/qoryai/runner/session"
+	"github.com/qoryai/forager/gateway"
 	"gopkg.in/yaml.v3"
 
 	"github.com/qoryai/qory/internal/integration"
 )
 
 // integrationKey is the grammar of an integration's key, the integration contract's
-// name: the runner's credential name without the dot, which a program's name, qory-<key>,
+// name: Forager's credential name without the dot, which a program's name, qory-<key>,
 // would read as an extension.
 var integrationKey = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
@@ -29,9 +29,9 @@ var integrationKey = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 // the entry sets none: qory-github for github, looked up on the PATH.
 const ProgramPrefix = "qory-"
 
-// RunnerIntegration is one entry of the integrations section: a program that speaks
+// ForagerIntegration is one entry of the integrations section: a program that speaks
 // the integration contract, and the settings every role of it is started with.
-type RunnerIntegration struct {
+type ForagerIntegration struct {
 	// Key is the name the machine declares the integration under, and the name of what
 	// it defines: the credential of its credential role.
 	Key string
@@ -42,59 +42,59 @@ type RunnerIntegration struct {
 	// {} when the entry has none.
 	Settings []byte
 	// Path and Version are the program found and the version its description contains,
-	// set by [Runner.Expand].
+	// set by [Forager.Expand].
 	Path, Version string
 }
 
 // readIntegrations reads the integrations section, a mapping from a key to an entry,
 // in the file's order. The settings are written out as JSON here, and read against the
-// program's description by [Runner.Expand], which runs the program.
-func readIntegrations(path string, node *yaml.Node) ([]RunnerIntegration, error) {
+// program's description by [Forager.Expand], which runs the program.
+func readIntegrations(path string, node *yaml.Node) ([]ForagerIntegration, error) {
 	if node.Kind != yaml.MappingNode {
-		return nil, fmt.Errorf("%s: integrations is a mapping from a name to an integration", path)
+		return nil, fmt.Errorf("%s: gateway.integrations is a mapping from a name to an integration", path)
 	}
-	var out []RunnerIntegration
+	var out []ForagerIntegration
 	seen := map[string]bool{}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := node.Content[i].Value
 		if !integrationKey.MatchString(key) {
-			return nil, fmt.Errorf("%s: integrations: %q is not 1 to 64 of a-z, 0-9, underscore and dash, starting with a letter or a digit", path, key)
+			return nil, fmt.Errorf("%s: gateway.integrations: %q is not 1 to 64 of a-z, 0-9, underscore and dash, starting with a letter or a digit", path, key)
 		}
 		if seen[key] {
-			return nil, fmt.Errorf("%s: integrations.%s is declared twice", path, key)
+			return nil, fmt.Errorf("%s: gateway.integrations.%s is declared twice", path, key)
 		}
 		seen[key] = true
-		in := RunnerIntegration{Key: key, Program: ProgramPrefix + key, Settings: []byte("{}")}
+		in := ForagerIntegration{Key: key, Program: ProgramPrefix + key, Settings: []byte("{}")}
 		entry := node.Content[i+1]
 		if entry.ShortTag() == "!!null" {
 			out = append(out, in)
 			continue
 		}
 		if entry.Kind != yaml.MappingNode {
-			return nil, fmt.Errorf("%s: integrations.%s is a mapping: program and settings", path, key)
+			return nil, fmt.Errorf("%s: gateway.integrations.%s is a mapping: program and settings", path, key)
 		}
 		for k := 0; k+1 < len(entry.Content); k += 2 {
 			value := entry.Content[k+1]
 			switch name := entry.Content[k].Value; name {
 			case "program":
 				if value.Kind != yaml.ScalarNode || value.ShortTag() != "!!str" || value.Value == "" {
-					return nil, fmt.Errorf("%s: integrations.%s.program is a path or a name on the PATH", path, key)
+					return nil, fmt.Errorf("%s: gateway.integrations.%s.program is a path or a name on the PATH", path, key)
 				}
 				if strings.ContainsRune(value.Value, '/') && !filepath.IsAbs(value.Value) {
-					return nil, fmt.Errorf("%s: integrations.%s.program %q is not an absolute path; set program to an absolute path or a name on the PATH", path, key, value.Value)
+					return nil, fmt.Errorf("%s: gateway.integrations.%s.program %q is not an absolute path; set program to an absolute path or a name on the PATH", path, key, value.Value)
 				}
 				in.Program = value.Value
 			case "settings":
 				if value.Kind != yaml.MappingNode {
-					return nil, fmt.Errorf("%s: integrations.%s.settings is a mapping, the settings document", path, key)
+					return nil, fmt.Errorf("%s: gateway.integrations.%s.settings is a mapping, the settings document", path, key)
 				}
 				var b bytes.Buffer
 				if err := writeJSON(&b, value, "settings"); err != nil {
-					return nil, fmt.Errorf("%s: integrations.%s.%w", path, key, err)
+					return nil, fmt.Errorf("%s: gateway.integrations.%s.%w", path, key, err)
 				}
 				in.Settings = b.Bytes()
 			default:
-				return nil, fmt.Errorf("%s: integrations.%s: key %q is not one", path, key, name)
+				return nil, fmt.Errorf("%s: gateway.integrations.%s: key %q is not one", path, key, name)
 			}
 		}
 		out = append(out, in)
@@ -181,7 +181,7 @@ func writeString(b *bytes.Buffer, s string) {
 	b.Write(out)
 }
 
-// Expansion selects which integrations [Runner.Expand] describes, and where their
+// Expansion selects which integrations [Forager.Expand] describes, and where their
 // programs may not be.
 type Expansion struct {
 	// Workspace are the files and directories a run may write: its checkout, and the
@@ -204,11 +204,11 @@ type Expansion struct {
 // integration that plays no role qory expands are errors that contain the file and the
 // key. The credential role defines the credential whose name is the key, with the
 // adapter [integration.CredentialAdapter] returns, unless the file's credentials section
-// defines that name itself: then the file's definition stands, [Runner.Shadowed] lists
+// defines that name itself: then the file's definition stands, [Forager.Shadowed] lists
 // the key, and the integration's credential is not defined. Roles qory does not expand are
 // left as they are. Once Expand succeeds, each further call does nothing; after an error, the
 // next call describes again.
-func (r *Runner) Expand(ctx context.Context, e Expansion) error {
+func (r *Forager) Expand(ctx context.Context, e Expansion) error {
 	if r == nil || r.expanded {
 		return nil
 	}
@@ -216,14 +216,14 @@ func (r *Runner) Expand(ctx context.Context, e Expansion) error {
 	for _, c := range r.Credentials {
 		own[c.Name] = true
 	}
-	var defined []RunnerCredential
+	var defined []ForagerCredential
 	for i := range r.Integrations {
 		in := &r.Integrations[i]
 		if e.Only != nil && !e.Only(in.Key) {
 			continue
 		}
 		fail := func(format string, a ...any) error {
-			return fmt.Errorf("%s: integrations.%s: %s", r.File, in.Key, fmt.Sprintf(format, a...))
+			return fmt.Errorf("%s: gateway.integrations.%s: %s", r.File, in.Key, fmt.Sprintf(format, a...))
 		}
 		found, err := program(in.Program, e.Workspace)
 		if err != nil {
@@ -244,8 +244,8 @@ func (r *Runner) Expand(ctx context.Context, e Expansion) error {
 		if own[in.Key] {
 			continue
 		}
-		c := RunnerCredential{Name: in.Key, Adapter: integration.CredentialAdapter(found, in.Settings), Argument: d.Credential.Argument, Hosts: d.Credential.Hosts, Integration: in.Key}
-		if err := (session.Credential{Name: c.Name, Adapter: c.Adapter, Argument: c.Argument, Hosts: c.Hosts}).Check(); err != nil {
+		c := ForagerCredential{Name: in.Key, Adapter: integration.CredentialAdapter(found, in.Settings), Argument: d.Credential.Argument, Hosts: d.Credential.Hosts, Integration: in.Key}
+		if err := (gateway.Credential{Name: c.Name, Adapter: c.Adapter, Argument: c.Argument, Hosts: c.Hosts}).Check(); err != nil {
 			return fail("%v", err)
 		}
 		defined = append(defined, c)
@@ -258,7 +258,7 @@ func (r *Runner) Expand(ctx context.Context, e Expansion) error {
 // Shadowed are the keys of the integrations whose name the file's credentials section
 // defines itself, in the section's order: the section's definition is the one a run
 // receives.
-func (r *Runner) Shadowed() []string {
+func (r *Forager) Shadowed() []string {
 	if r == nil {
 		return nil
 	}

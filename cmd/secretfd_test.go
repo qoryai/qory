@@ -29,7 +29,7 @@ func TestRunTakesTheSecretFromADescriptor(t *testing.T) {
 	for _, c := range []struct{ fd, want string }{
 		{"1", "--access-key-secret-fd 1: the standard input, output and error carry no secret; name a descriptor of 3 or above"},
 		{"0", "--access-key-secret-fd 0: the standard input"},
-		{descriptor(t, fixtureSecret), "it holds the runner contract's published fixture key"},
+		{descriptor(t, fixtureSecret), "it holds the Forager contract's published fixture key"},
 		{descriptor(t, "qak_short"), "not an access key secret"},
 		{descriptor(t, strings.Repeat("x", 5000)), "more than an access key secret"},
 		{"1000", "--access-key-secret-fd 1000:"},

@@ -16,7 +16,7 @@
       "additionalProperties": {"type": "string", "minLength": 1}
     },
     "egress": {
-      "description": "The hosts the module's skills, hooks and servers reach: a lower-case host name, or a *. suffix matching every host below it. No ports, no paths, no schemes. The grammar is the runner contract's policy egress.allow, https://qory.dev/contracts/runner/v1/policy.schema.json, copied here. An empty list declares that the module reaches nothing.",
+      "description": "The hosts the module's skills, hooks and servers reach: a lower-case host name, or a *. suffix matching every host below it. No ports, no paths, no schemes. The grammar is the Forager contract's policy egress.allow, https://qory.dev/contracts/forager/v1/policy.schema.json, copied here. An empty list declares that the module reaches nothing.",
       "type": "array",
       "uniqueItems": true,
       "items": {

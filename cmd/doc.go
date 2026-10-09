@@ -14,7 +14,7 @@
 //	qory harness inspect   print the report of the composed harness
 //	qory harness remove    remove the composed harness and its links, or one runtime's
 //	qory harness launch    print the command that starts a runtime on the composed harness
-//	qory run               start a runtime on the composed harness through the session runner
+//	qory run               start a runtime on the composed harness through Forager's session
 //	qory image check       check an image against what the wall needs of it
 //
 // Each harness verb has a one-letter alias under the noun, and a hidden two-letter
@@ -25,9 +25,9 @@
 // with locate, it calls the packages that do the work, it prints through the ui package,
 // and it returns an error. It contains no knowledge of modules, entries or runtimes; that
 // lives in the stack, compose and render packages. Nor of how a session is observed:
-// qory run passes a launch spec to the session package of the runner module,
-// github.com/qoryai/runner, and exits with what comes back, and qory run forward, hidden,
-// is the hook command the runner installs. The set of runtimes a build can
+// qory run passes a launch spec to the session package of the Forager module,
+// github.com/qoryai/forager, and exits with what comes back, and qory run forward, hidden,
+// is the hook command Forager installs. The set of runtimes a build can
 // render for is decided here, by the blank imports at the top of harness.go: a runtime
 // package registers itself in its own init, so importing it is what makes its name valid
 // for target.runtime and for the --runtime flag.

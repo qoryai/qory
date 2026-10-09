@@ -76,5 +76,5 @@ RUN dockerd --version \
  && test -x /usr/sbin/iptables && dpkg-query -W iptables
 
 LABEL org.opencontainers.image.title="agent-docker" \
-      org.opencontainers.image.description="Qory's agent image with a Docker daemon of the agent's own, started by the runner under a nested runtime." \
+      org.opencontainers.image.description="Qory's agent image with a Docker daemon of the agent's own, started by the wall under a nested runtime." \
       org.opencontainers.image.base.name="${BASE}"

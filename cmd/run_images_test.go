@@ -45,7 +45,7 @@ func TestRunStartsTheImageTheMachineDefines(t *testing.T) {
 	composedForFake(t, root, "claude")
 	docker, log := fakeDocker(t)
 	helper := staticELF(t)
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), imagesSection(docker, helper))
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), imagesSection(docker, helper))
 	nested := []string{
 		"--runtime sysbox-runc --user 0:0 --security-opt no-new-privileges --init --mount type=volume,dst=/var/lib/docker ",
 		"src=" + helper + ",dst=/qory/qory,readonly",
@@ -121,28 +121,28 @@ func TestRunStartsTheImageTheMachineDefines(t *testing.T) {
 
 // TestRunRefusesAnImageSelectionItCannotStart pins the refusals of an image before
 // anything starts, each an input error that leaves no record: a policy that selects an
-// image the machine does not define, or names a reference, which the runner's policy
+// image the machine does not define, or names a reference, which Forager's policy
 // format refuses, or selects one for a run without a wall, a Docker of its own without a
 // runtime, and a wall with no image at all. A run whose own policy selects an image
 // needs no default; a run whose policy the server supplies does, since the server's run
 // configuration arrives once the run starts and may select none, and the refusal says
 // so. A run configuration from the server that selects an image the machine does not
-// define is the runner's to refuse, in its words.
+// define is Forager's to refuse, in its words.
 func TestRunRefusesAnImageSelectionItCannotStart(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, "claude")
 	docker, _ := fakeDocker(t)
 	helper := staticELF(t)
-	file := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml")
+	file := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml")
 	writeFile(t, file, imagesSection(docker, helper))
 	for _, c := range []struct {
 		args []string
 		want string
 	}{
-		{[]string{"run", "--policy", imagePolicy(t, "media")}, "the policy selects the image media, which wall.images in runner.yaml does not define"},
+		{[]string{"run", "--policy", imagePolicy(t, "media")}, "the policy selects the image media, which wall.images in forager.yaml does not define"},
 		{[]string{"run", "--policy", imagePolicy(t, "example.com/agent-go:1")}, "policy.yaml: jsonschema validation failed"},
-		{[]string{"run", "--wall", "none", "--policy", imagePolicy(t, "go")}, "the policy selects the image go, which needs a wall: wall in runner.yaml, or --wall docker"},
+		{[]string{"run", "--wall", "none", "--policy", imagePolicy(t, "go")}, "the policy selects the image go, which needs a wall: wall in forager.yaml, or --wall docker"},
 	} {
 		out, err := run(t, c.args...)
 		if cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), c.want) {
@@ -150,18 +150,18 @@ func TestRunRefusesAnImageSelectionItCannotStart(t *testing.T) {
 		}
 	}
 	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\n")
-	if _, err := run(t, "run", "--wall", "docker", "--policy", imagePolicy(t, "go")); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "the policy selects the image go, which wall.images in runner.yaml does not define") {
+	if _, err := run(t, "run", "--wall", "docker", "--policy", imagePolicy(t, "go")); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "the policy selects the image go, which wall.images in forager.yaml does not define") {
 		t.Errorf("--wall docker with no wall section, under a policy that selects an image: %v", err)
 	}
 	writeFile(t, file, strings.Replace(imagesSection(docker, helper), "runtime: sysbox-runc, ", "", 1))
-	want := "runner.yaml: wall.images.go-docker: docker needs a runtime that runs a daemon without privileges, such as runtime: sysbox-runc"
+	want := "forager.yaml: wall.images.go-docker: docker needs a runtime that runs a daemon without privileges, such as runtime: sysbox-runc"
 	for _, args := range [][]string{{"run"}, {"config"}} {
 		if _, err := run(t, args...); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), want) {
 			t.Errorf("%v with a Docker of its own and no runtime: %v", args, err)
 		}
 	}
 	writeFile(t, file, strings.Replace(imagesSection(docker, helper), "  image: go\n", "", 1))
-	if _, err := run(t, "run"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "a wall needs the container's image: --image, or wall.image in runner.yaml, a name of wall.images or a reference") {
+	if _, err := run(t, "run"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "a wall needs the container's image: --image, or wall.image in forager.yaml, a name of wall.images or a reference") {
 		t.Errorf("a wall with no image: %v", err)
 	}
 	if ids := recorded(t, root); len(ids) != 0 {
@@ -199,26 +199,26 @@ func TestRunRefusesAnImageSelectionItCannotStart(t *testing.T) {
 // its reference, its runtime and its daemon.
 func TestConfigListsTheImages(t *testing.T) {
 	emptyDir(t)
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), imagesSection("docker", "/opt/qory/qory-linux"))
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), imagesSection("docker", "/opt/qory/qory-linux"))
 	out, err := run(t, "config")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	rows := fieldRows(out)
 	for key, want := range map[string]string{
-		"runner.wall.image":            "go (wall.images.go)",
-		"runner.wall.images.go":        "example.com/agent-go:1",
-		"runner.wall.images.go-docker": "example.com/agent-go-docker:1, runtime sysbox-runc, docker (experimental)",
+		"wall.image":            "go (wall.images.go)",
+		"wall.images.go":        "example.com/agent-go:1",
+		"wall.images.go-docker": "example.com/agent-go-docker:1, runtime sysbox-runc, docker (experimental)",
 	} {
-		if got := rows[key]; len(got) != 1 || !strings.HasPrefix(got[0], want+"  ") || !strings.HasSuffix(got[0], "  ~/.config/qory/runner.yaml") {
-			t.Errorf("row %s = %q, want %q from runner.yaml", key, got, want)
+		if got := rows[key]; len(got) != 1 || !strings.HasPrefix(got[0], want+"  ") || !strings.HasSuffix(got[0], "  ~/.config/qory/forager.yaml") {
+			t.Errorf("row %s = %q, want %q from forager.yaml", key, got, want)
 		}
 	}
 }
 
 // TestNestIsHiddenAndTakesItsArgumentsAsTheyAre pins the helper's nest mode, what the
 // wall starts in a container with a Docker of its own: it is not in the help, and its
-// arguments, --user and -- among them, reach the runner's nest unparsed. The root user
+// arguments, --user and -- among them, reach Forager's nest unparsed. The root user
 // is refused wherever it runs, so nothing is started.
 func TestNestIsHiddenAndTakesItsArgumentsAsTheyAre(t *testing.T) {
 	emptyDir(t)

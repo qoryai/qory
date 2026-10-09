@@ -1,4 +1,4 @@
-package runnerdir
+package foragerdir
 
 import (
 	"errors"
@@ -45,7 +45,7 @@ func openLock(path string) (*os.File, error) {
 
 // ErrReadOnly is a directory in which no lock file can be created: a read-only file
 // system, or one the user may not write. No key command can write there either.
-var ErrReadOnly = errors.New("the runner file's directory cannot be written")
+var ErrReadOnly = errors.New("the directory of forager.yaml cannot be written")
 
 // LockKey takes locks/key.lock, exclusively for a command that generates a key, shared
 // for a run that starts, waiting while another process holds it the other way. A

@@ -8,18 +8,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/qoryai/runner/accesskey"
+	"github.com/qoryai/forager/accesskey"
 
 	"github.com/qoryai/qory/cmd"
-	"github.com/qoryai/qory/internal/runnerdir"
+	"github.com/qoryai/qory/internal/foragerdir"
 )
 
-// fixtureSecret is the runner contract's published fixture access key secret, which
+// fixtureSecret is the Forager contract's published fixture access key secret, which
 // qory refuses as a machine's own.
 const fixtureSecret = "qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA"
 
 // serverRun is a checkout composed for the fake runtime, which exits 0, with a fake
-// server in the runner file and the machine's access key beside it.
+// server in forager.yaml and the machine's access key beside it.
 func serverRun(t *testing.T, policy, more string) (string, *fakeServer) {
 	t.Helper()
 	root := newCheckout(t)
@@ -31,9 +31,9 @@ func serverRun(t *testing.T, policy, more string) (string, *fakeServer) {
 	return root, srv
 }
 
-// configDir is the runner file's directory of the test's environment.
-func configDir() runnerdir.Dir {
-	return runnerdir.Dir(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory"))
+// configDir is the directory of forager.yaml of the test's environment.
+func configDir() foragerdir.Dir {
+	return foragerdir.Dir(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory"))
 }
 
 // clearRuns removes the checkout's run records, so the next run is the one recorded.
@@ -48,16 +48,16 @@ var instanceShape = regexp.MustCompile(`^i_[A-Za-z0-9_-]{22}$`)
 
 // TestRunSignsWithTheAccessKeyAndNamesTheInstance is a run against a server: every
 // request is signed under the machine's access key, carries the instance id qory keeps
-// in instance-id, mode 0600, and the display name, instance.name or the host name; qory
+// in instance-id, mode 0600, and the display name, session.instance.name or the host name; qory
 // prints the node discovery lists. The next run keeps the id.
 func TestRunSignsWithTheAccessKeyAndNamesTheInstance(t *testing.T) {
-	root, srv := serverRun(t, "", "instance:\n  name: build-01\n")
+	root, srv := serverRun(t, "", "session:\n  instance:\n    name: build-01\n")
 	out, err := run(t, "run")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	dir := configDir()
-	b, err := os.ReadFile(dir.Path(runnerdir.InstanceFile))
+	b, err := os.ReadFile(dir.Path(foragerdir.InstanceFile))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestRunSignsWithTheAccessKeyAndNamesTheInstance(t *testing.T) {
 	if !instanceShape.MatchString(id) {
 		t.Fatalf("instance-id holds %q", b)
 	}
-	if info, _ := os.Stat(dir.Path(runnerdir.InstanceFile)); info.Mode().Perm() != 0o600 {
+	if info, _ := os.Stat(dir.Path(foragerdir.InstanceFile)); info.Mode().Perm() != 0o600 {
 		t.Errorf("instance-id is mode %v", info.Mode())
 	}
 	wants(t, out, "qory run: node "+testNode+", instance "+id, "claude exited 0")
@@ -85,7 +85,7 @@ func TestRunSignsWithTheAccessKeyAndNamesTheInstance(t *testing.T) {
 	}
 	host, _ := os.Hostname()
 	if want := accesskey.DefaultName(host); srv.instances[0] != [2]string{id, want} {
-		t.Errorf("without instance.name the request named %v, want %q", srv.instances[0], want)
+		t.Errorf("without session.instance.name the request named %v, want %q", srv.instances[0], want)
 	}
 }
 
@@ -96,11 +96,11 @@ func TestRunSignsWithTheAccessKeyAndNamesTheInstance(t *testing.T) {
 func TestRunRegeneratesAnInstanceIDThatIsNotThisMachines(t *testing.T) {
 	root, srv := serverRun(t, "", "")
 	dir := configDir()
-	path := dir.Path(runnerdir.InstanceFile)
+	path := dir.Path(foragerdir.InstanceFile)
 	elsewhere := filepath.Join(t.TempDir(), "elsewhere")
-	writeFile(t, elsewhere, string(accesskey.InstanceFile("i_fromElsewhere", runnerdir.MachineID())))
+	writeFile(t, elsewhere, string(accesskey.InstanceFile("i_fromElsewhere", foragerdir.MachineID())))
 	for name, write := range map[string]func(){
-		"a bad id": func() { writeFile(t, path, "../x\n"+accesskey.MachineHash(runnerdir.MachineID())+"\n") },
+		"a bad id": func() { writeFile(t, path, "../x\n"+accesskey.MachineHash(foragerdir.MachineID())+"\n") },
 		"another machine's": func() {
 			writeFile(t, path, string(accesskey.InstanceFile("i_copiedWithTheHome", []byte("another-machine"))))
 		},
@@ -115,7 +115,7 @@ func TestRunRegeneratesAnInstanceIDThatIsNotThisMachines(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v\n%s", name, err, out)
 		}
-		id, ok := dir.ReadInstanceID(runnerdir.MachineID())
+		id, ok := dir.ReadInstanceID(foragerdir.MachineID())
 		if !ok || !instanceShape.MatchString(id) || srv.instances[0][0] != id {
 			t.Errorf("%s: the file holds %q, the server saw %v", name, id, srv.instances)
 		}
@@ -156,7 +156,7 @@ func TestRunRegeneratesAnInstanceIDThatIsNotThisMachines(t *testing.T) {
 func TestRunRefusesAnAccessKeySecretTheRulesRefuse(t *testing.T) {
 	root, srv := serverRun(t, "", "")
 	dir := configDir()
-	path := dir.Path(runnerdir.SecretFile)
+	path := dir.Path(foragerdir.SecretFile)
 	elsewhere := filepath.Join(t.TempDir(), "secret")
 	writeFile(t, elsewhere, srv.key.Secret()+"\n")
 	if err := os.Chmod(elsewhere, 0o600); err != nil {
@@ -170,7 +170,7 @@ func TestRunRefusesAnAccessKeySecretTheRulesRefuse(t *testing.T) {
 		{"group-readable", func() { os.Chmod(path, 0o640) }, path + " is mode 0640, which grants access to the group or others: chmod 600 " + path},
 		{"world-readable", func() { os.Chmod(path, 0o604) }, "is mode 0604"},
 		{"a link", func() { os.Remove(path); os.Symlink(elsewhere, path) }, path + " is a symbolic link; it must be the file itself"},
-		{"the fixture", func() { os.Remove(path); writeFile(t, path, fixtureSecret+"\n"); os.Chmod(path, 0o600) }, path + ": it holds the runner contract's published fixture key, whose secret anyone can read"},
+		{"the fixture", func() { os.Remove(path); writeFile(t, path, fixtureSecret+"\n"); os.Chmod(path, 0o600) }, path + ": it holds the Forager contract's published fixture key, whose secret anyone can read"},
 		{"no secret", func() { os.Remove(path); writeFile(t, path, "ak_f1xt0re000000000\n"); os.Chmod(path, 0o600) }, path + ": not an access key secret: one line, qak_ and 43 characters of base64url"},
 		{"two lines", func() { os.Remove(path); writeFile(t, path, srv.key.Secret()+"\n\n"); os.Chmod(path, 0o600) }, "not an access key secret"},
 		{"the directory", func() { os.Chmod(string(dir), 0o755) }, string(dir) + " is mode 0755, which grants access to the group or others; it holds the access key's secret: chmod 700 " + string(dir)},
@@ -192,8 +192,8 @@ func TestRunRefusesAnAccessKeySecretTheRulesRefuse(t *testing.T) {
 		t.Errorf("a refused run sent %d requests", len(srv.instances))
 	}
 	writeSecret(t, srv.key)
-	writeFile(t, filepath.Join(string(dir), "runner.yaml"), "server:\n  url: "+srv.URL+"\n  apiary_public_key: "+pinLine(srv.signer)+"\n")
-	if _, err := run(t, "run"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "runner.yaml: the server has no access_key_id: qory access-key enrol writes it, or set server.access_key_id or QORY_ACCESS_KEY_ID") {
+	writeFile(t, filepath.Join(string(dir), "forager.yaml"), "gateway:\n  server:\n    url: "+srv.URL+"\n    apiary_public_key: "+pinLine(srv.signer)+"\n")
+	if _, err := run(t, "run"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "forager.yaml: the server has no access_key_id: qory access-key enrol writes it, or set gateway.server.access_key_id or QORY_ACCESS_KEY_ID") {
 		t.Errorf("no access key id: %v", err)
 	}
 }
@@ -221,7 +221,7 @@ func TestRunTakesTheSecretFromTheEnvironment(t *testing.T) {
 	}
 }
 
-// TestRunSaysWhatARefusalMeans is each refusal of the server and of the runner at the
+// TestRunSaysWhatARefusalMeans is each refusal of the server and of Forager at the
 // start, said with what to do, its code and exit status 1, and nothing run: an access
 // key the server does not know, from access-key-secret, which enrol --replace moves
 // from, or from QORY_ACCESS_KEY_SECRET, an instance beyond the node's limit, an answer
@@ -253,11 +253,11 @@ func TestRunSaysWhatARefusalMeans(t *testing.T) {
 	srv.full = false
 
 	serverFile(t, srv, "")
-	writeFile(t, filepath.Join(string(configDir()), "runner.yaml"), "server:\n  url: "+srv.URL+"\n  access_key_id: "+testAccessKey+"\n  apiary_public_key: "+pinLine(newKey(t))+"\n")
-	refusal("another pin", "an answer of the server does not verify under the pinned apiary_public_key, so the run does not start: check server.url and the pin (", "answer_unsigned")
+	writeFile(t, filepath.Join(string(configDir()), "forager.yaml"), "gateway:\n  server:\n    url: "+srv.URL+"\n    access_key_id: "+testAccessKey+"\n    apiary_public_key: "+pinLine(newKey(t))+"\n")
+	refusal("another pin", "an answer of the server does not verify under the pinned apiary_public_key, so the run does not start: check gateway.server.url and the pin (", "answer_unsigned")
 
-	writeFile(t, filepath.Join(string(configDir()), "runner.yaml"), "server:\n  url: "+srv.URL+"\n  access_key_id: "+testAccessKey+"\n")
-	refusal("no pin", "the server has no pinned apiary_public_key, so no answer of it could be verified: qory access-key enrol writes it, or set server.apiary_public_key in runner.yaml or QORY_APIARY_PUBLIC_KEY (", "apiary_public_key_missing")
+	writeFile(t, filepath.Join(string(configDir()), "forager.yaml"), "gateway:\n  server:\n    url: "+srv.URL+"\n    access_key_id: "+testAccessKey+"\n")
+	refusal("no pin", "the server has no pinned apiary_public_key, so no answer of it could be verified: qory access-key enrol writes it, or set gateway.server.apiary_public_key in forager.yaml or QORY_APIARY_PUBLIC_KEY (", "apiary_public_key_missing")
 	if srv.refused != 2 {
 		t.Errorf("the server refused %d requests, want the unknown keys' two", srv.refused)
 	}
@@ -295,8 +295,8 @@ func TestTheMarkerKeepsEveryUnwalledRunOut(t *testing.T) {
 	if err := dir.WriteMarker(); err != nil {
 		t.Fatal(err)
 	}
-	marker := dir.Path(runnerdir.MarkerFile)
-	want := "the stored-secrets marker " + marker + " exists: this machine's access key may receive stored secrets, so every run needs a wall: --wall docker, or wall in runner.yaml (server_needs_wall)"
+	marker := dir.Path(foragerdir.MarkerFile)
+	want := "the stored-secrets marker " + marker + " exists: this machine's access key may receive stored secrets, so every run needs a wall: --wall docker, or wall in forager.yaml (server_needs_wall)"
 	for _, c := range []struct {
 		name, secret string
 		args         []string
@@ -321,10 +321,10 @@ func TestTheMarkerKeepsEveryUnwalledRunOut(t *testing.T) {
 		t.Errorf("a refused run pinged: %v", got)
 	}
 	t.Setenv("QORY_ACCESS_KEY_SECRET", "")
-	writeFile(t, filepath.Join(string(dir), "runner.yaml"), "apiVersion: qory.dev/v1alpha1\n")
+	writeFile(t, filepath.Join(string(dir), "forager.yaml"), "apiVersion: qory.dev/v1alpha1\n")
 	clearRuns(t, root)
 	if _, err := run(t, "run"); cmd.ExitCode(err) != 1 || !strings.Contains(err.Error(), "server_needs_wall") {
-		t.Errorf("a runner file without a server: %v", err)
+		t.Errorf("a forager.yaml without a server: %v", err)
 	}
 
 	dir.RemoveMarker()
@@ -333,7 +333,7 @@ func TestTheMarkerKeepsEveryUnwalledRunOut(t *testing.T) {
 		t.Fatalf("without the marker: %v\n%s", err, out)
 	}
 	entries, _ := os.ReadDir(runsDir(t, root))
-	b, err := os.ReadFile(filepath.Join(dir.Path(runnerdir.LocksDir), entries[0].Name()+".lock"))
+	b, err := os.ReadFile(filepath.Join(dir.Path(foragerdir.LocksDir), entries[0].Name()+".lock"))
 	if err != nil || string(b) != "unwalled\n" {
 		t.Errorf("the run's lock file: %q, %v", b, err)
 	}
@@ -354,7 +354,7 @@ func TestDiscoverySettlesTheMarker(t *testing.T) {
 		t.Error("discovery with secrets wrote no marker")
 	}
 	srv.secrets = false
-	old := dir.Path(runnerdir.OldPrefix + "1700000000")
+	old := dir.Path(foragerdir.OldPrefix + "1700000000")
 	writeFile(t, old, newKey(t).Secret()+"\n")
 	srv.revoked = true
 	clearRuns(t, root)

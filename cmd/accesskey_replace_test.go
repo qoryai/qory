@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/qoryai/runner/accesskey"
+	"github.com/qoryai/forager/accesskey"
 
 	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/config"
-	"github.com/qoryai/qory/internal/runnerdir"
+	"github.com/qoryai/qory/internal/foragerdir"
 )
 
 // oldID is the id of the key a machine holds before it is moved to a new one.
@@ -25,30 +25,30 @@ const oldID = "ak_01d0000000000000"
 // newID is the id the enrolment server gives every key it enrols.
 const newID = "ak_0123456789abcdef"
 
-// enrolled is a machine that holds the key old for srv, its runner file naming the
-// server, oldID and the server's key, and returns the runner file's content.
+// enrolled is a machine that holds the key old for srv, its forager.yaml naming the
+// server, oldID and the server's key, and returns forager.yaml's content.
 func enrolled(t *testing.T, srv *enrolServer, old *accesskey.Key) string {
 	t.Helper()
-	file := "server:\n  url: " + srv.URL + "\n  access_key_id: " + oldID + "\n  apiary_public_key: " + pinLine(srv.signer) + "\ninstance:\n  name: build-01\n"
-	writeFile(t, runnerFile(), file)
+	file := "gateway:\n  server:\n    url: " + srv.URL + "\n    access_key_id: " + oldID + "\n    apiary_public_key: " + pinLine(srv.signer) + "\nsession:\n  instance:\n    name: build-01\n"
+	writeFile(t, foragerFile(), file)
 	writeSecret(t, old)
 	return file
 }
 
-// oldStays checks that access-key-secret still holds old and the runner file reads
+// oldStays checks that access-key-secret still holds old and forager.yaml reads
 // file, byte for byte, and that no secret was put aside for a replacement.
 func oldStays(t *testing.T, name string, old *accesskey.Key, file string) {
 	t.Helper()
 	dir := configDir()
-	b, err := os.ReadFile(dir.Path(runnerdir.SecretFile))
+	b, err := os.ReadFile(dir.Path(foragerdir.SecretFile))
 	if err != nil || string(b) != old.Secret()+"\n" {
 		t.Errorf("%s: access-key-secret changed (%v)", name, err)
 	}
-	if got := readRunnerFile(t); got != file {
-		t.Errorf("%s: the runner file changed:\n%s", name, got)
+	if got := readForagerFile(t); got != file {
+		t.Errorf("%s: forager.yaml changed:\n%s", name, got)
 	}
-	if exists(dir.Path(runnerdir.ReplacedFile)) {
-		t.Errorf("%s: %s exists", name, runnerdir.ReplacedFile)
+	if exists(dir.Path(foragerdir.ReplacedFile)) {
+		t.Errorf("%s: %s exists", name, foragerdir.ReplacedFile)
 	}
 }
 
@@ -65,7 +65,7 @@ func noneHolds(t *testing.T, k *accesskey.Key) bool {
 }
 
 // replaced checks the end of a replacement: access-key-secret holds the key srv's
-// last request carried, mode 0600, the runner file names newID and keeps the pin,
+// last request carried, mode 0600, forager.yaml names newID and keeps the pin,
 // and neither the new secret's file, the replaced one's, the pending enrolment nor
 // the old secret is left.
 func replaced(t *testing.T, srv *enrolServer, old *accesskey.Key) {
@@ -75,17 +75,17 @@ func replaced(t *testing.T, srv *enrolServer, old *accesskey.Key) {
 	if key := heldKey(t); key.PublicKey().String() != sent[len(sent)-1].PublicKey {
 		t.Error("access-key-secret does not hold the key enrolled")
 	}
-	if m := mode(t, dir.Path(runnerdir.SecretFile)); m != 0o600 {
+	if m := mode(t, dir.Path(foragerdir.SecretFile)); m != 0o600 {
 		t.Errorf("access-key-secret is mode %v", m)
 	}
-	r, err := config.LoadRunner()
+	r, err := config.LoadForager()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if r.Server.AccessKeyID != newID || len(r.Server.Pin) != 1 || r.Server.Pin[0].PublicKey != srv.signer.PublicKey().String() {
-		t.Errorf("the runner file reads as %+v", r.Server)
+		t.Errorf("forager.yaml reads as %+v", r.Server)
 	}
-	for _, name := range []string{runnerdir.NewSecretFile, runnerdir.ReplacedFile, runnerdir.PendingFile, runnerdir.AnswerFile} {
+	for _, name := range []string{foragerdir.NewSecretFile, foragerdir.ReplacedFile, foragerdir.PendingFile, foragerdir.AnswerFile} {
 		if exists(dir.Path(name)) {
 			t.Errorf("%s is still there", name)
 		}
@@ -104,9 +104,9 @@ func oldLine(name string) string {
 }
 
 // TestEnrolReplaceMovesTheMachineToANewKey is --replace on a machine that holds a key:
-// the new key's secret takes the old one's place, the runner file names the new key's
+// the new key's secret takes the old one's place, forager.yaml names the new key's
 // id and keeps the rest, the old secret is gone, and the output ends with the line
-// naming the old key by its id, or by its fingerprint when the runner file names no id.
+// naming the old key by its id, or by its fingerprint when forager.yaml names no id.
 func TestEnrolReplaceMovesTheMachineToANewKey(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
@@ -124,17 +124,17 @@ func TestEnrolReplaceMovesTheMachineToANewKey(t *testing.T) {
 		"enrolled as " + newID + " in the node nd_0123456789abcdef\n" +
 		"stored secrets: no\n" +
 		"the key is active: runs can start\n" +
-		"wrote server.access_key_id to " + runnerFile() + "\n" +
+		"wrote gateway.server.access_key_id to " + foragerFile() + "\n" +
 		oldLine(oldID); errOut != want {
 		t.Errorf("stderr\n%s\nwant\n%s", errOut, want)
 	}
 	replaced(t, srv, old)
 
-	// A runner file with no access_key_id: the old key is named by its fingerprint.
+	// A forager.yaml with no access_key_id: the old key is named by its fingerprint.
 	emptyDir(t)
 	srv = newEnrolServer(t)
 	old = newKey(t)
-	writeFile(t, runnerFile(), "server:\n  url: "+srv.URL+"\n  apiary_public_key: "+pinLine(srv.signer)+"\ninstance:\n  name: build-01\n")
+	writeFile(t, foragerFile(), "gateway:\n  server:\n    url: "+srv.URL+"\n    apiary_public_key: "+pinLine(srv.signer)+"\nsession:\n  instance:\n    name: build-01\n")
 	writeSecret(t, old)
 	out, err = run(t, "access-key", "enrol", "--replace", srv.URL, srv.code(1, false))
 	if err != nil {
@@ -147,7 +147,7 @@ func TestEnrolReplaceMovesTheMachineToANewKey(t *testing.T) {
 }
 
 // TestEnrolReplaceKeepsTheOldKeyOnAFailure is each way --replace fails before the
-// server's signed 201: access-key-secret and the runner file stay byte for byte, so
+// server's signed 201: access-key-secret and forager.yaml stay byte for byte, so
 // the old key keeps working. A lost or unsigned answer, key_limit and rate_limited
 // keep the new key's secret and the pending enrolment for a retry; a used code, a
 // refused key and an answer that pins a fixture key move the new key's secret aside,
@@ -171,7 +171,7 @@ func TestEnrolReplaceKeepsTheOldKeyOnAFailure(t *testing.T) {
 		setup func(srv *enrolServer)
 		// code is the code to enrol with, srv's own when nil.
 		code func(srv *enrolServer) string
-		// file is the runner file, enrolled's when empty.
+		// file is forager.yaml, enrolled's when empty.
 		file  func(srv *enrolServer) string
 		state int
 		want  string
@@ -194,9 +194,9 @@ func TestEnrolReplaceKeepsTheOldKeyOnAFailure(t *testing.T) {
 			"the server refused the key (public_key). Enrolling needs a new code; the secret made for it was moved aside to "},
 		{"a fixture pin", func(srv *enrolServer) { srv.signer, srv.signBy = fixture, fixture }, nil,
 			func(srv *enrolServer) string {
-				return "server:\n  url: " + srv.URL + "\n  access_key_id: " + oldID + "\ninstance:\n  name: build-01\n"
+				return "gateway:\n  server:\n    url: " + srv.URL + "\n    access_key_id: " + oldID + "\nsession:\n  instance:\n    name: build-01\n"
 			}, discarded,
-			"the server's answer lists the runner contract's published fixture key, whose secret anyone can read: it is no server to pin; runner.yaml was not changed; the secret made for it was moved aside to "},
+			"the server's answer lists the Forager contract's published fixture key, whose secret anyone can read: it is no server to pin; forager.yaml was not changed; the secret made for it was moved aside to "},
 		{"another server's code", nil, func(srv *enrolServer) string {
 			return "qec_F1XT-0RE0-0000-0000-0000-0000-01." + newKey(t).Fingerprint()
 		}, nil, none,
@@ -208,7 +208,7 @@ func TestEnrolReplaceKeepsTheOldKeyOnAFailure(t *testing.T) {
 		file := enrolled(t, srv, old)
 		if c.file != nil {
 			file = c.file(srv)
-			writeFile(t, runnerFile(), file)
+			writeFile(t, foragerFile(), file)
 		}
 		if c.setup != nil {
 			c.setup(srv)
@@ -223,14 +223,14 @@ func TestEnrolReplaceKeepsTheOldKeyOnAFailure(t *testing.T) {
 		}
 		oldStays(t, c.name, old, file)
 		dir := configDir()
-		staged, pending := exists(dir.Path(runnerdir.NewSecretFile)), exists(dir.Path(runnerdir.PendingFile))
+		staged, pending := exists(dir.Path(foragerdir.NewSecretFile)), exists(dir.Path(foragerdir.PendingFile))
 		switch c.state {
 		case kept:
 			if !staged || !pending || movedAside(t) != 0 {
 				t.Errorf("%s: new secret %v, pending %v, moved aside %d", c.name, staged, pending, movedAside(t))
 			}
 			if staged {
-				if m := mode(t, dir.Path(runnerdir.NewSecretFile)); m != 0o600 {
+				if m := mode(t, dir.Path(foragerdir.NewSecretFile)); m != 0o600 {
 					t.Errorf("%s: the new secret is mode %v", c.name, m)
 				}
 			}
@@ -257,7 +257,7 @@ func failOnce(t *testing.T, srv *enrolServer, old *accesskey.Key, code string) s
 		t.Fatal("an unsigned 201 enrolled")
 	}
 	srv.signBy = srv.signer
-	if !exists(configDir().Path(runnerdir.NewSecretFile)) {
+	if !exists(configDir().Path(foragerdir.NewSecretFile)) {
 		t.Fatal("no new secret was kept")
 	}
 	return file
@@ -292,7 +292,7 @@ func TestEnrolReplaceRetriesWithTheNewKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "moved the new key of an earlier enrolment, made for another code or more than 15 minutes ago, aside to "+dir.Path(runnerdir.OldPrefix), oldLine(oldID))
+	wants(t, out, "moved the new key of an earlier enrolment, made for another code or more than 15 minutes ago, aside to "+dir.Path(foragerdir.OldPrefix), oldLine(oldID))
 	lacks(t, out, "retrying")
 	sent = srv.sent()
 	if len(sent) != 2 || sent[0].PublicKey == sent[1].PublicKey {
@@ -344,9 +344,9 @@ func TestEnrolReplaceFinishesAfterAStop(t *testing.T) {
 		{"replaced", false, false, false, func(*accesskey.Key) string { return oldLine(oldID) }},
 		{"secret", true, false, false, func(*accesskey.Key) string { return oldLine(oldID) }},
 		{"secret", true, true, true, func(*accesskey.Key) string { return oldLine(oldID) }},
-		{"runner", true, false, false, func(old *accesskey.Key) string { return oldLine(old.Fingerprint()) }},
-		{"unlinked", true, false, false, func(*accesskey.Key) string { return "wrote server.access_key_id to " + runnerFile() + "\n" }},
-		{"pending", true, false, true, func(*accesskey.Key) string { return "wrote server.access_key_id to " + runnerFile() + "\n" }},
+		{"forager", true, false, false, func(old *accesskey.Key) string { return oldLine(old.Fingerprint()) }},
+		{"unlinked", true, false, false, func(*accesskey.Key) string { return "wrote gateway.server.access_key_id to " + foragerFile() + "\n" }},
+		{"pending", true, false, true, func(*accesskey.Key) string { return "wrote gateway.server.access_key_id to " + foragerFile() + "\n" }},
 	} {
 		name := fmt.Sprintf("a stop after %s, run again (without --replace %v, after 15 minutes %v)", c.step, c.plain, c.expired)
 		emptyDir(t)
@@ -360,14 +360,14 @@ func TestEnrolReplaceFinishesAfterAStop(t *testing.T) {
 		}
 		restore()
 		dir := configDir()
-		if m := mode(t, dir.Path(runnerdir.AnswerFile)); m != 0o600 {
+		if m := mode(t, dir.Path(foragerdir.AnswerFile)); m != 0o600 {
 			t.Errorf("%s: the kept answer is mode %v", name, m)
 		}
-		if (heldSecret(runnerdir.SecretFile) == old.Secret()+"\n") == c.newSecret {
+		if (heldSecret(foragerdir.SecretFile) == old.Secret()+"\n") == c.newSecret {
 			t.Errorf("%s: access-key-secret holds the new key %v at the stop", name, !c.newSecret)
 		}
-		if !c.newSecret && readRunnerFile(t) != file {
-			t.Errorf("%s: the runner file changed before the new key was in place", name)
+		if !c.newSecret && readForagerFile(t) != file {
+			t.Errorf("%s: forager.yaml changed before the new key was in place", name)
 		}
 		if c.expired {
 			normal, err := accesskey.NormaliseCode(code)
@@ -378,7 +378,7 @@ func TestEnrolReplaceFinishesAfterAStop(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := dir.WritePending(normal, pub, time.Now().Add(-runnerdir.PendingFor-time.Minute)); err != nil {
+			if err := dir.WritePending(normal, pub, time.Now().Add(-foragerdir.PendingFor-time.Minute)); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -408,18 +408,18 @@ func TestEnrolReplaceFinishesAfterAStop(t *testing.T) {
 	code := srv.code(1, false)
 	file := enrolled(t, srv, old)
 	dir := configDir()
-	writeFile(t, filepath.Join(dir.Path(runnerdir.ReplacedFile), "x"), "")
+	writeFile(t, filepath.Join(dir.Path(foragerdir.ReplacedFile), "x"), "")
 	_, err := run(t, "access-key", "enrol", "--replace", srv.URL, code)
-	if err == nil || !strings.HasPrefix(err.Error(), "the new key is enrolled, and remove "+dir.Path(runnerdir.ReplacedFile)+": ") || !strings.HasSuffix(err.Error(), "; the old key is still in place: run the same command again") {
+	if err == nil || !strings.HasPrefix(err.Error(), "the new key is enrolled, and remove "+dir.Path(foragerdir.ReplacedFile)+": ") || !strings.HasSuffix(err.Error(), "; the old key is still in place: run the same command again") {
 		t.Errorf("a step that fails: %v", err)
 	}
-	if heldSecret(runnerdir.SecretFile) != old.Secret()+"\n" || readRunnerFile(t) != file {
+	if heldSecret(foragerdir.SecretFile) != old.Secret()+"\n" || readForagerFile(t) != file {
 		t.Error("a step that fails changed the old key")
 	}
-	if !exists(dir.Path(runnerdir.NewSecretFile)) || !exists(dir.Path(runnerdir.AnswerFile)) {
+	if !exists(dir.Path(foragerdir.NewSecretFile)) || !exists(dir.Path(foragerdir.AnswerFile)) {
 		t.Error("a step that fails dropped the new key or its answer")
 	}
-	if err := os.RemoveAll(dir.Path(runnerdir.ReplacedFile)); err != nil {
+	if err := os.RemoveAll(dir.Path(foragerdir.ReplacedFile)); err != nil {
 		t.Fatal(err)
 	}
 	if out, err := run(t, "access-key", "enrol", "--replace", srv.URL, code); err != nil {
@@ -431,8 +431,8 @@ func TestEnrolReplaceFinishesAfterAStop(t *testing.T) {
 	replaced(t, srv, old)
 
 	// A copy of an old secret a swap left goes when the next --replace swaps.
-	writeFile(t, dir.Path(runnerdir.ReplacedFile), newKey(t).Secret()+"\n")
-	if err := os.Chmod(dir.Path(runnerdir.ReplacedFile), 0o600); err != nil {
+	writeFile(t, dir.Path(foragerdir.ReplacedFile), newKey(t).Secret()+"\n")
+	if err := os.Chmod(dir.Path(foragerdir.ReplacedFile), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	before := heldKey(t)
@@ -442,10 +442,10 @@ func TestEnrolReplaceFinishesAfterAStop(t *testing.T) {
 	replaced(t, srv, before)
 }
 
-// TestEnrolFinishesFromTheKeptAnswer is a plain enrolment whose runner file cannot be
+// TestEnrolFinishesFromTheKeptAnswer is a plain enrolment whose forager.yaml cannot be
 // written after the server's 201: the message says to run the same command again,
 // which finishes from the kept answer with no request to the server; a stop before the
-// runner file is written finishes the same way.
+// forager.yaml is written finishes the same way.
 func TestEnrolFinishesFromTheKeptAnswer(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root writes a read-only directory")
@@ -453,11 +453,11 @@ func TestEnrolFinishesFromTheKeptAnswer(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
 	elsewhere := filepath.Join(tempDir(t), "conf")
-	writeFile(t, filepath.Join(elsewhere, "runner.yaml"), "instance:\n  name: build-01\n")
+	writeFile(t, filepath.Join(elsewhere, "forager.yaml"), "session:\n  instance:\n    name: build-01\n")
 	if err := os.MkdirAll(string(configDir()), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(elsewhere, "runner.yaml"), runnerFile()); err != nil {
+	if err := os.Symlink(filepath.Join(elsewhere, "forager.yaml"), foragerFile()); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chmod(elsewhere, 0o500); err != nil {
@@ -466,8 +466,8 @@ func TestEnrolFinishesFromTheKeptAnswer(t *testing.T) {
 	t.Cleanup(func() { os.Chmod(elsewhere, 0o700) })
 	code := srv.code(1, false)
 	_, err := run(t, "access-key", "enrol", srv.URL, code)
-	if err == nil || !strings.HasPrefix(err.Error(), "the key is enrolled, and "+runnerFile()+" could not be written: ") || !strings.HasSuffix(err.Error(), "; run the same command again") {
-		t.Fatalf("a runner file that cannot be written: %v", err)
+	if err == nil || !strings.HasPrefix(err.Error(), "the key is enrolled, and "+foragerFile()+" could not be written: ") || !strings.HasSuffix(err.Error(), "; run the same command again") {
+		t.Fatalf("a forager.yaml that cannot be written: %v", err)
 	}
 	if err := os.Chmod(elsewhere, 0o700); err != nil {
 		t.Fatal(err)
@@ -479,20 +479,20 @@ func TestEnrolFinishesFromTheKeptAnswer(t *testing.T) {
 	if n := len(srv.sent()); n != 1 {
 		t.Errorf("%d requests reached the server", n)
 	}
-	wants(t, out, "enrolled as "+newID, "wrote server.url, server.access_key_id and server.apiary_public_key to "+runnerFile()+"\n")
+	wants(t, out, "enrolled as "+newID, "wrote gateway.server.url, gateway.server.access_key_id and gateway.server.apiary_public_key to "+foragerFile()+"\n")
 	if key := heldKey(t); key.PublicKey().String() != srv.sent()[0].PublicKey {
 		t.Error("access-key-secret holds another key")
 	}
-	for _, name := range []string{runnerdir.PendingFile, runnerdir.AnswerFile} {
+	for _, name := range []string{foragerdir.PendingFile, foragerdir.AnswerFile} {
 		if exists(configDir().Path(name)) {
 			t.Errorf("%s is still there", name)
 		}
 	}
 
-	// A stop after the answer is kept, before the runner file is written.
+	// A stop after the answer is kept, before forager.yaml is written.
 	emptyDir(t)
 	srv = newEnrolServer(t)
-	writeFile(t, runnerFile(), "instance:\n  name: build-01\n")
+	writeFile(t, foragerFile(), "session:\n  instance:\n    name: build-01\n")
 	restore := stopAt(t, "answer")
 	if _, err := run(t, "access-key", "enrol", srv.URL, srv.code(1, false)); err == nil {
 		t.Fatal("did not stop")
@@ -504,7 +504,7 @@ func TestEnrolFinishesFromTheKeptAnswer(t *testing.T) {
 	if n := len(srv.sent()); n != 1 {
 		t.Errorf("%d requests reached the server", n)
 	}
-	wants(t, readRunnerFile(t), "access_key_id: "+newID)
+	wants(t, readForagerFile(t), "access_key_id: "+newID)
 }
 
 // TestEnrolRefusesATamperedAnswer is a kept answer changed after the stop: the same
@@ -522,7 +522,7 @@ func TestEnrolRefusesATamperedAnswer(t *testing.T) {
 	}
 	restore()
 	dir := configDir()
-	path := dir.Path(runnerdir.AnswerFile)
+	path := dir.Path(foragerdir.AnswerFile)
 	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -540,23 +540,23 @@ func TestEnrolRefusesATamperedAnswer(t *testing.T) {
 	if err := os.WriteFile(path, b, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	staged := heldSecret(runnerdir.NewSecretFile)
+	staged := heldSecret(foragerdir.NewSecretFile)
 	for _, args := range [][]string{{"--replace", srv.URL, code}, {srv.URL, code}} {
 		_, err := run(t, append([]string{"access-key", "enrol"}, args...)...)
 		if err == nil || !strings.HasPrefix(err.Error(), path+" holds no answer of the server that verifies (") || !strings.HasSuffix(err.Error(), "), so the enrolment cannot be finished from it; nothing was changed: see https://github.com/qoryai/qory/blob/main/docs/run.md#when-enrolment-answer-is-refused") {
 			t.Errorf("%v: %v", args, err)
 		}
 		oldStays(t, "a tampered answer", old, file)
-		if heldSecret(runnerdir.NewSecretFile) != staged || movedAside(t) != 0 || len(srv.sent()) != 1 {
+		if heldSecret(foragerdir.NewSecretFile) != staged || movedAside(t) != 0 || len(srv.sent()) != 1 {
 			t.Errorf("%v: the new key moved, %d moved aside, %d sent", args, movedAside(t), len(srv.sent()))
 		}
 	}
 	// Another code: the kept answer is for another enrolment, whose key stays.
 	_, err = run(t, "access-key", "enrol", "--replace", srv.URL, srv.code(2, false))
-	if want := dir.Path(runnerdir.NewSecretFile) + " holds the new key of an enrolment the server answered for another code: run that command again to finish it"; err == nil || err.Error() != want {
+	if want := dir.Path(foragerdir.NewSecretFile) + " holds the new key of an enrolment the server answered for another code: run that command again to finish it"; err == nil || err.Error() != want {
 		t.Errorf("another code: %v, want %q", err, want)
 	}
-	if heldSecret(runnerdir.NewSecretFile) != staged || movedAside(t) != 0 || len(srv.sent()) != 1 {
+	if heldSecret(foragerdir.NewSecretFile) != staged || movedAside(t) != 0 || len(srv.sent()) != 1 {
 		t.Error("another code moved the answered key")
 	}
 }
@@ -605,7 +605,7 @@ func TestEnrolReplaceRefusesPrint(t *testing.T) {
 func TestEnrolReplaceWithNoKeyEnrols(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
-	writeFile(t, runnerFile(), "instance:\n  name: build-01\n")
+	writeFile(t, foragerFile(), "session:\n  instance:\n    name: build-01\n")
 	out, errOut, err := runSplit(t, "", "access-key", "enrol", "--replace", srv.URL, srv.code(1, false))
 	if err != nil {
 		t.Fatalf("%v\n%s%s", err, out, errOut)
@@ -616,18 +616,18 @@ func TestEnrolReplaceWithNoKeyEnrols(t *testing.T) {
 		"enrolled as " + newID + " in the node nd_0123456789abcdef\n" +
 		"stored secrets: no\n" +
 		"the key is active: runs can start\n" +
-		"wrote server.url, server.access_key_id and server.apiary_public_key to " + runnerFile() + "\n"; errOut != want {
+		"wrote gateway.server.url, gateway.server.access_key_id and gateway.server.apiary_public_key to " + foragerFile() + "\n"; errOut != want {
 		t.Errorf("stderr\n%s\nwant\n%s", errOut, want)
 	}
 	dir := configDir()
-	for _, name := range []string{runnerdir.NewSecretFile, runnerdir.ReplacedFile, runnerdir.PendingFile} {
+	for _, name := range []string{foragerdir.NewSecretFile, foragerdir.ReplacedFile, foragerdir.PendingFile} {
 		if exists(dir.Path(name)) {
 			t.Errorf("%s is there", name)
 		}
 	}
 }
 
-// fixtureSigner is the runner contract's published fixture signing key.
+// fixtureSigner is the Forager contract's published fixture signing key.
 func fixtureSigner(t *testing.T) *accesskey.Key {
 	t.Helper()
 	seed, err := base64.RawURLEncoding.DecodeString("QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2A")
@@ -652,7 +652,7 @@ func TestARefusalNeverTouchesTheActiveKey(t *testing.T) {
 	says := map[string]string{
 		"unauthorized": "this code was used or has expired",
 		"key_invalid":  "the server refused the key",
-		"fixture":      "the server's answer lists the runner contract's published fixture key",
+		"fixture":      "the server's answer lists the Forager contract's published fixture key",
 	}
 	for _, refusal := range []string{"unauthorized", "key_invalid", "fixture"} {
 		// A finished enrolment, then --replace, which stages a new key.
@@ -661,7 +661,7 @@ func TestARefusalNeverTouchesTheActiveKey(t *testing.T) {
 		if refusal == "fixture" {
 			srv.signer, srv.signBy = fixtureSigner(t), fixtureSigner(t)
 			writeSecret(t, newKey(t))
-			writeFile(t, runnerFile(), "instance:\n  name: build-01\n")
+			writeFile(t, foragerFile(), "session:\n  instance:\n    name: build-01\n")
 		} else {
 			enrolled(t, srv, newKey(t))
 		}
@@ -672,15 +672,15 @@ func TestARefusalNeverTouchesTheActiveKey(t *testing.T) {
 		case "key_invalid":
 			srv.refusal("key_invalid", "public_key")
 		}
-		active := heldSecret(runnerdir.SecretFile)
+		active := heldSecret(foragerdir.SecretFile)
 		_, err := run(t, "access-key", "enrol", "--replace", srv.URL, code)
 		if err == nil || !strings.Contains(err.Error(), says[refusal]) {
 			t.Fatalf("%s after a finished enrolment: %v", refusal, err)
 		}
-		if heldSecret(runnerdir.SecretFile) != active {
+		if heldSecret(foragerdir.SecretFile) != active {
 			t.Errorf("%s after a finished enrolment: access-key-secret changed", refusal)
 		}
-		if exists(configDir().Path(runnerdir.NewSecretFile)) || movedAside(t) != 1 {
+		if exists(configDir().Path(foragerdir.NewSecretFile)) || movedAside(t) != 1 {
 			t.Errorf("%s after a finished enrolment: the staged key was not moved aside (%d moved)", refusal, movedAside(t))
 		}
 
@@ -699,7 +699,7 @@ func TestARefusalNeverTouchesTheActiveKey(t *testing.T) {
 				// made by hand.
 				key := newKey(t)
 				writeSecret(t, key)
-				writeFile(t, runnerFile(), "instance:\n  name: build-01\n")
+				writeFile(t, foragerFile(), "session:\n  instance:\n    name: build-01\n")
 				if err := configDir().WritePending(mustNormalise(t, code), key.PublicKey(), time.Now()); err != nil {
 					t.Fatal(err)
 				}
@@ -710,7 +710,7 @@ func TestARefusalNeverTouchesTheActiveKey(t *testing.T) {
 					t.Fatal("did not stop")
 				}
 				restore()
-				if err := os.Remove(configDir().Path(runnerdir.AnswerFile)); err != nil {
+				if err := os.Remove(configDir().Path(foragerdir.AnswerFile)); err != nil {
 					t.Fatal(err)
 				}
 				if refusal == "key_invalid" {
@@ -718,7 +718,7 @@ func TestARefusalNeverTouchesTheActiveKey(t *testing.T) {
 					srv.used = map[string]bool{}
 				}
 			}
-			active := heldSecret(runnerdir.SecretFile)
+			active := heldSecret(foragerdir.SecretFile)
 			args := []string{"--replace", srv.URL, code}
 			if plain {
 				args = args[1:]
@@ -729,7 +729,7 @@ func TestARefusalNeverTouchesTheActiveKey(t *testing.T) {
 			}
 			wants(t, out, "retrying with the key made for it")
 			lacks(t, err.Error(), "moved aside")
-			if heldSecret(runnerdir.SecretFile) != active || movedAside(t) != 0 {
+			if heldSecret(foragerdir.SecretFile) != active || movedAside(t) != 0 {
 				t.Errorf("%s after a swap that lost its answer, %v: access-key-secret changed, %d moved aside", refusal, args, movedAside(t))
 			}
 		}
@@ -760,12 +760,12 @@ func TestALostAnswerKeepsTheActiveKey(t *testing.T) {
 			if replace {
 				enrolled(t, srv, newKey(t))
 			} else {
-				writeFile(t, runnerFile(), "instance:\n  name: build-01\n")
+				writeFile(t, foragerFile(), "session:\n  instance:\n    name: build-01\n")
 			}
 			dir := configDir()
 			if lost == "not kept" {
 				// A non-empty directory where the answer is first written.
-				writeFile(t, filepath.Join(dir.Path(runnerdir.AnswerFile+".tmp"), "x"), "")
+				writeFile(t, filepath.Join(dir.Path(foragerdir.AnswerFile+".tmp"), "x"), "")
 			}
 			args := []string{"access-key", "enrol", srv.URL, srv.code(1, false)}
 			if replace {
@@ -777,22 +777,22 @@ func TestALostAnswerKeepsTheActiveKey(t *testing.T) {
 			}
 			restore()
 			if lost == "deleted" {
-				if err := os.Remove(dir.Path(runnerdir.AnswerFile)); err != nil {
+				if err := os.Remove(dir.Path(foragerdir.AnswerFile)); err != nil {
 					t.Fatal(err)
 				}
-			} else if exists(dir.Path(runnerdir.AnswerFile)) {
+			} else if exists(dir.Path(foragerdir.AnswerFile)) {
 				t.Fatalf("%s: the answer was kept", name)
 			}
 			k, err := dir.ReadSecret()
 			if err != nil || k.PublicKey().String() != srv.sent()[0].PublicKey {
 				t.Fatalf("%s: access-key-secret does not hold the enrolled key: %v", name, err)
 			}
-			active := heldSecret(runnerdir.SecretFile)
+			active := heldSecret(foragerdir.SecretFile)
 			_, err = run(t, args...)
 			if err == nil || !strings.Contains(err.Error(), "this code was used or has expired") {
 				t.Errorf("%s: %v", name, err)
 			}
-			if heldSecret(runnerdir.SecretFile) != active || movedAside(t) != 0 {
+			if heldSecret(foragerdir.SecretFile) != active || movedAside(t) != 0 {
 				t.Errorf("%s: access-key-secret changed, %d moved aside", name, movedAside(t))
 			}
 			if n := len(srv.sent()); n != 2 {

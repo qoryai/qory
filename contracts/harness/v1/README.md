@@ -206,7 +206,7 @@ checkout appends:
   repository's and is read.
 - The base's `extending` block defines what an appended module may ship: `kinds`, from
   `skills`, `agents`, `commands` and `output-styles`, never `hooks` or `mcp`, since the
-  runner executes those without the agent; `instructions: true` for its `AGENTS.md`,
+  runtime executes those without the agent; `instructions: true` for its `AGENTS.md`,
   appended after the base's; `settings`, the dotted key paths a fragment may set, such as
   `permissions.allow`; `files`, the `<runtime>/<path>` prefixes its files may sit under,
   such as `claude/rules/`, matched by path segment, so `claude/rules` covers
@@ -238,7 +238,7 @@ What the kinds list removes is the code that runs without the agent's involvemen
 script inside an appended skill runs when the agent runs it, under the base's hooks and
 rules. A wide `files` prefix, such as `claude/`, is safe for the same reason: the paths a
 runtime reads as settings are reserved for every module (§Rendering), so a file cannot
-reach them. Keeping a copy of the harness from leaving the machine is the runner's egress
+reach them. Keeping a copy of the harness from leaving the machine is the gateway's egress
 control, not the format's.
 
 ## Sources
@@ -351,18 +351,18 @@ that is neither, an empty list, an entry listed twice, and an entry the module d
 ship are refused (§Composition rules).
 `egress`, optional, declares the hosts the module's skills, hooks and servers reach: a
 lower-case host name, or `*.` followed by a name for every host below it and not the name
-itself. No ports, no paths, no schemes. The grammar is the runner contract's, the
+itself. No ports, no paths, no schemes. The grammar is the Forager contract's, the
 `egress.allow` entry of a run policy at
-`https://qory.dev/contracts/runner/v1/policy.schema.json`, copied into the module schema and
+`https://qory.dev/contracts/forager/v1/policy.schema.json`, copied into the module schema and
 kept identical by a test; a host outside the grammar is refused, with the host in the
 message. The
 declarations of every composed module are unioned into the report's `egress` (§The
-report), and `qory run` passes the union to the runner, which reports it as `harness_hosts` in
+report), and `qory run` passes the union to Forager, which reports it as `harness_hosts` in
 `dev.qory.run.policy_applied` beside the policy's own list, for a receiver to compare the
 two: the declaration decides nothing, the policy alone defines what the run reaches. An
 `exclude` or an `only` does not touch the declaration; a module composed at all declares.
 A module with no `egress` key declares nothing, and a harness in which no module declares
-passes the runner no list. `egress: []` is a declaration that the module reaches nothing
+passes Forager no list. `egress: []` is a declaration that the module reaches nothing
 of its own.
 
 A module's tree contains these entry kinds:
@@ -756,7 +756,7 @@ and the report leaves it out. When the `env` of `harness.launch.<runtime>` repla
 template's, its variables are defaults, and the harness's layer over them. The harness's
 variables layer over each other: a fragment's, then the modules' over them, then the
 configuration's over both. Every one of them is a default, a module's export included.
-`qory run` passes the same environment to the runner. The report keeps these variables
+`qory run` passes the same environment to Forager. The report keeps these variables
 under `launch_env` (§The report), and `qory harness compose --check` compares them with
 what the compose sets, so a changed export, a changed `env` in the configuration or a
 changed fragment variable is stale, a row `launch_env/<runtime>/<NAME>` each.
@@ -805,7 +805,7 @@ declared (§The module manifest), sorted by host, each with the `modules` that d
 in stack order, and absent when no module declares; when one does, the target runtime's
 own hosts, the model endpoint for `claude`, join under the runtime's name, so a stack
 declares what its modules reach and not what the program needs. A harness whose modules
-declare and list no host writes `egress: []`. `qory run` passes the hosts to the runner
+declare and list no host writes `egress: []`. `qory run` passes the hosts to Forager
 (§Launching).
 `worktree.base` is the repository's base branch, the configuration's `worktree.base`
 resolved against the refs already fetched when the compose ran, so a program beside
@@ -906,30 +906,34 @@ value and the file it came from. Under `extends` the machine's keys of the check
 own file, `harness.runtime`, `harness.model` and the rest, `git` and `env` are not read;
 the document under `harness` is (§Extending a stack).
 
-**The runner file.** What `qory run` does on this machine is a second file,
-`runner.yaml`, beside the user's `qory.yaml` under the configuration directory and
+**forager.yaml.** What `qory run` does on this machine is a second file,
+`forager.yaml`, beside the user's `qory.yaml` under the configuration directory and
 nowhere else: it has no counterpart in a repository or an ancestor directory, so a
 checkout cannot set the policy the agent runs under, which server the run reports to or
-what the agent is enclosed in. `egress` and `server` are the runner contract's objects,
-`https://qory.dev/contracts/runner/v1/`, in the runner contract's grammar; `qory run`
-passes them to the runner as they are, `server` with the access key's id and the pin
-from the environment when the file holds none. `wall` chooses that contract's wall and
-defines what `qory run` passes to it.
+what the agent is enclosed in. Its sections follow Forager's parts: `gateway` holds
+`egress`, `server`, `credentials` and `integrations`; `session` holds `instance` and
+`run`; `wall` is the wall. `gateway.egress` and `gateway.server` are the Forager
+contract's objects, `https://qory.dev/contracts/forager/v1/`, in that contract's
+grammar; `qory run` passes them to Forager as they are, `gateway.server` with the access
+key's id and the pin from the environment when the file holds none. `wall` chooses that
+contract's wall and defines what `qory run` passes to it.
 
 ```yaml
-# ~/.config/qory/runner.yaml
+# ~/.config/qory/forager.yaml
 apiVersion: qory.dev/v1alpha1
-egress:                          # the run policy; absent: observe everything, nothing to deny by
-  mode: enforce                  # or observe: record every connection, deny only what deny lists
-  allow: [api.anthropic.com, "*.github.com"]
-  deny: [gist.github.com]        # denied in either mode, whatever allow lists
-server:                          # the server every run reports to; absent: files only
-  url: https://apiary.example    # a scheme and a host; https, or http to this machine
-  access_key_id: ak_0123456789abcdef # the machine's access key; or QORY_ACCESS_KEY_ID
-  apiary_public_key:             # the pin, the server's keys; or QORY_APIARY_PUBLIC_KEY
-    - {alg: ed25519, public_key: mptNqtgGKgLhLZxmOGfpBQkdeBNH7QN3Qs9ETNumy8Q}
-instance:                        # this machine as the server shows it
-  name: build-01                 # this instance's name on the server; absent: the host name
+gateway:
+  egress:                        # the run policy; absent: observe everything, nothing to deny by
+    mode: enforce                # or observe: record every connection, deny only what deny lists
+    allow: [api.anthropic.com, "*.github.com"]
+    deny: [gist.github.com]      # denied in either mode, whatever allow lists
+  server:                        # the server every run reports to; absent: files only
+    url: https://apiary.example  # a scheme and a host; https, or http to this machine
+    access_key_id: ak_0123456789abcdef # the machine's access key; or QORY_ACCESS_KEY_ID
+    apiary_public_key:           # the pin, the server's keys; or QORY_APIARY_PUBLIC_KEY
+      - {alg: ed25519, public_key: mptNqtgGKgLhLZxmOGfpBQkdeBNH7QN3Qs9ETNumy8Q}
+session:
+  instance:                      # this machine as the server shows it
+    name: build-01               # this instance's name on the server; absent: the host name
 wall:                            # the container the runtime starts in; absent: a process of this machine
   adapter: docker
   image: go                      # the default: a name of images, or a reference; or --image
@@ -946,31 +950,31 @@ wall:                            # the container the runtime starts in; absent: 
 
 | Key | Default | Meaning |
 |---|---|---|
-| `egress.mode` | `observe` | `observe` records every connection and denies only what `deny` lists; `enforce` denies a connection to a host outside `allow` as well, and records the denial |
-| `egress.allow` | none | the hosts the runtime may reach: a lower-case name, or `*.` and a name for every host below it, the grammar of a module's `egress` (§The module manifest). The hosts the harness declares are reported beside it as `harness_hosts` and narrow nothing |
-| `egress.deny` | none | the hosts the runtime may not reach, in `allow`'s grammar, in either mode: the runner decides them before the mode and the allow list, so a host an entry covers is denied under `observe` as under `enforce`, whatever `allow` lists, with the entry as the rule recorded |
-| `server.url` | none | the server the run reports to: `https`, or `http` to this machine, a scheme and a host with nothing after. With it set, `qory run` fetches the server's configuration, signed, and does not start unless the server answers; the events go where it defines, and its run configuration, when it defines one, is the run's policy. `--local` runs with the files alone and the server is not contacted |
-| `server.access_key_id` | `QORY_ACCESS_KEY_ID` | the id of the machine's access key, an Ed25519 key: `ak_` and 16 characters, which the server assigns when the key enrols; `qory access-key enrol` writes it. Set in the file and in the environment, it is refused. A run without one does not start |
-| `server.apiary_public_key` | `QORY_APIARY_PUBLIC_KEY`, as JSON | the pin: the server's Ed25519 public keys, each `{alg: ed25519, public_key: <base64url>}`, a list so the key can rotate. Every answer of the server is verified under one of them. `qory access-key enrol` writes it when there is none. Set in the file and in the environment, it is refused; a pin that lists the runner contract's published fixture key is refused. A run without one does not start, `apiary_public_key_missing` |
-| `instance.name` | the host name, or its first label when the whole does not fit | this instance's display name on the server, and the name an enrolled key gets: 1 to 64 of `A-Z`, `a-z`, `0-9`, dot, underscore and dash, starting with a letter or a digit. The instance's id is qory's own, kept in the file `instance-id` beside `runner.yaml` |
-| `wall.adapter` | none | `docker`, the one there is. With it set, every `qory run` starts the runtime in a container with no route out except to the runner's proxy; `--wall none` runs once without it, `--wall docker` once with it |
+| `gateway.egress.mode` | `observe` | `observe` records every connection and denies only what `deny` lists; `enforce` denies a connection to a host outside `allow` as well, and records the denial |
+| `gateway.egress.allow` | none | the hosts the runtime may reach: a lower-case name, or `*.` and a name for every host below it, the grammar of a module's `egress` (§The module manifest). The hosts the harness declares are reported beside it as `harness_hosts` and narrow nothing |
+| `gateway.egress.deny` | none | the hosts the runtime may not reach, in `allow`'s grammar, in either mode: the gateway decides them before the mode and the allow list, so a host an entry covers is denied under `observe` as under `enforce`, whatever `allow` lists, with the entry as the rule recorded |
+| `gateway.server.url` | none | the server the run reports to: `https`, or `http` to this machine, a scheme and a host with nothing after. With it set, `qory run` fetches the server's configuration, signed, and does not start unless the server answers; the events go where it defines, and its run configuration, when it defines one, is the run's policy. `--local` runs with the files alone and the server is not contacted |
+| `gateway.server.access_key_id` | `QORY_ACCESS_KEY_ID` | the id of the machine's access key, an Ed25519 key: `ak_` and 16 characters, which the server assigns when the key enrols; `qory access-key enrol` writes it. Set in the file and in the environment, it is refused. A run without one does not start |
+| `gateway.server.apiary_public_key` | `QORY_APIARY_PUBLIC_KEY`, as JSON | the pin: the server's Ed25519 public keys, each `{alg: ed25519, public_key: <base64url>}`, a list so the key can rotate. Every answer of the server is verified under one of them. `qory access-key enrol` writes it when there is none. Set in the file and in the environment, it is refused; a pin that lists the Forager contract's published fixture key is refused. A run without one does not start, `apiary_public_key_missing` |
+| `session.instance.name` | the host name, or its first label when the whole does not fit | this instance's display name on the server, and the name an enrolled key gets: 1 to 64 of `A-Z`, `a-z`, `0-9`, dot, underscore and dash, starting with a letter or a digit. The instance's id is qory's own, kept in the file `instance-id` beside `forager.yaml` |
+| `wall.adapter` | none | `docker`, the one there is. With it set, every `qory run` starts the runtime in a container with no route out except to the gateway's proxy; `--wall none` runs once without it, `--wall docker` once with it |
 | `wall.image` | none | the container's image when the run's policy selects none, which contains the runtime and the project's toolchain: the name of one of `wall.images`, or a reference. A name `wall.images` defines is read as that image first; `--image` sets another for one run, read the same way, and a policy's selection wins over both. qory builds none, and a wall without an image is refused unless the run's own `--policy` selects one; a machine that reports to a server sets it, because the server's run configuration arrives once the run starts and may select none |
-| `wall.images.<name>` | none | an image this machine defines, which a run's policy selects by its name, `image: <name>`, the runner contract's §Images. The name is in a credential's grammar. `ref`, required, is the reference, pinned by digest where the machine wants the same image every time; `runtime` is the container runtime the wall starts it under, one the engine has, such as `sysbox-runc`, the engine's default when absent; `docker: true`, experimental, gives the agent a Docker daemon of its own inside the container, which the helper starts before the agent, and needs a `runtime` that runs one without privileges. A `--policy` that selects a name the section does not define, or selects one for a run without a wall, is refused before the run; every command that reads the file refuses `docker: true` without a `runtime`. `qory config` shows whether `wall.image` is a name of this section or a reference. Define an image with `docker: true` only where every run may get one: any policy can select it |
+| `wall.images.<name>` | none | an image this machine defines, which a run's policy selects by its name, `image: <name>`, the Forager contract's §Images. The name is in a credential's grammar. `ref`, required, is the reference, pinned by digest where the machine wants the same image every time; `runtime` is the container runtime the wall starts it under, one the engine has, such as `sysbox-runc`, the engine's default when absent; `docker: true`, experimental, gives the agent a Docker daemon of its own inside the container, which the helper starts before the agent, and needs a `runtime` that runs one without privileges. A `--policy` that selects a name the section does not define, or selects one for a run without a wall, is refused before the run; every command that reads the file refuses `docker: true` without a `runtime`. `qory config` shows whether `wall.image` is a name of this section or a reference. Define an image with `docker: true` only where every run may get one: any policy can select it |
 | `wall.env` | none | names of variables of `qory run`'s environment that go into the container, such as the model credential, with `--env` adding to them. The launch's variables go in, `QORY_HARNESS_HOME` among them; nothing else of the environment does. A name with no value here is left out |
-| `wall.command` | `docker` | the program the adapter runs, such as `podman`, supported where the runner's conformance suite passes |
+| `wall.command` | `docker` | the program the adapter runs, such as `podman`, supported where the wall's conformance suite passes |
 | `wall.user` | `qory run`'s own | the `uid:gid` the container runs as. Root is refused, so a machine where qory runs as root sets another, one that can write the checkout |
 | `wall.mounts` | none | what the container sees of the machine beside the checkout and the composed home, each at its own path: an absolute path, with `:ro` after it for one the container cannot change; `--mount` adds to them. A socket, or a directory containing a container runtime's, is refused |
 | `wall.cpus`, `wall.memory`, `wall.pids_limit`, `wall.shm_size` | the engine's | what the container may use, as `docker run`'s flags of those names read them: `3.5`, `14g`, `4096`, `2g`. A flag of the same name sets another for one run |
-| `run.timeout` | none | how long a runtime may run, a duration such as `5h30m`. At the limit the runner stops it, `dev.qory.run.exited` contains `reason: timeout`, and `qory run` exits 124. `--timeout` sets another for one run, and `--timeout 0` none |
-| `run.stop_signal` | the runtime's descriptor's, else `SIGTERM` | the signal that requests a runtime to stop when the runner stops it, at the limit or on a signal to `qory run`: `SIGTERM`, `SIGINT`, `SIGHUP`, `SIGQUIT`, `SIGUSR1` or `SIGUSR2`. Runtimes differ in what a signal means, one closes its session on SIGINT and drops it on SIGTERM, so the runtime's descriptor defines which and the machine may set another; `--stop-signal` sets another for one run |
-| `run.stop_grace` | the runtime's descriptor's, else `10s` | how long a runtime gets between the stop signal and SIGKILL; `--stop-grace` sets another |
+| `session.run.timeout` | none | how long a runtime may run, a duration such as `5h30m`. At the limit Forager stops it, `dev.qory.run.exited` contains `reason: timeout`, and `qory run` exits 124. `--timeout` sets another for one run, and `--timeout 0` none |
+| `session.run.stop_signal` | the runtime's descriptor's, else `SIGTERM` | the signal that requests a runtime to stop when Forager stops it, at the limit or on a signal to `qory run`: `SIGTERM`, `SIGINT`, `SIGHUP`, `SIGQUIT`, `SIGUSR1` or `SIGUSR2`. Runtimes differ in what a signal means, one closes its session on SIGINT and drops it on SIGTERM, so the runtime's descriptor defines which and the machine may set another; `--stop-signal` sets another for one run |
+| `session.run.stop_grace` | the runtime's descriptor's, else `10s` | how long a runtime gets between the stop signal and SIGKILL; `--stop-grace` sets another |
 | `wall.ca_env` | `SSL_CERT_FILE`, `GIT_SSL_CAINFO`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `AWS_CA_BUNDLE` | the variables that point a program in the container at the authorities it trusts, the image's own and the run's, when a run has a credential or path rules |
-| `credentials.<name>` | none | a credential this machine has for its runs. Exactly one of `env`, a variable of `qory run`'s environment, `file`, an absolute path read whenever the token is used, and `adapter`, a program by its absolute path with its arguments, defines where the token comes from. An adapter prints the token with the hosts, the scheme and the paths it is for, the runner contract's `credential.schema.json`, and takes the policy's argument as `${argument}` when `argument`, a regular expression, matches it whole; its `hosts` and `paths` here are the most it may claim. With `env` and `file`, `hosts`, `auth` (`scheme: bearer`, `basic` with `username`, or `header` with `header`) and `paths` define how the token is used. `placeholders` lists variables the container gets with a value that is no credential |
-| `integrations.<key>` | none | an integration this machine declares: a program that speaks the [integration contract](https://github.com/qoryai/integrations/tree/main/contracts/integration/v1), `program`, an absolute path or a name on the `PATH`, `qory-<key>` when absent, with `settings`, its settings document, `{}` when absent. The key is 1 to 64 of `a-z`, `0-9`, `_` and `-`, starting with a letter or a digit. The program is outside the checkout and outside every mount the wall makes read-write in the container, judged by where its links lead: a link on a `PATH` entry the checkout controls that resolves outside the checkout is judged by where it resolves. The rule applies to each run as it starts, so a program written into a directory while that directory was mounted read-write is judged by where it is at the start of each run; keep a program's directory out of the read-write mounts. The resolved program, every directory above it up to `/`, and every directory above each link on the way belong to root or the user running qory, and so does each link; other users may write none of them; a group may write one when it is root's, gid 0, `wheel`, `admin`, or the owner's primary group when its name is the owner's; a directory root owns with the sticky bit set keeps the rule. On a machine whose `PATH` is not its owner's alone, set `program` to its absolute path. `<program> describe` runs in `/`, in a process group of its own, for 10 seconds at most; its settings schema is draft 2020-12 and marks a secret `writeOnly` on a property of the settings themselves, `properties.<name>`. qory checks the settings against the description; a value of a `writeOnly` setting is refused, since the settings go on a command line, and the setting's `<name>_file` defines the path of the file that contains it. The `credential` role defines the credential `<key>`: `adapter: [<program>, credential, --settings, <json>, --, "${argument}"]`, the settings as compact JSON with `<`, `>`, `&`, U+2028 and U+2029 escaped and every `$` written `\u0024`, and the role's `argument` and `hosts`. `qory run` describes the integrations a policy on this machine selects, and every one when the server supplies the policy; `qory config` describes every one. A name `credentials` defines itself is that section's: the integration defines no credential under it, `qory run` and `qory config` print a line that states it, and `qory config` alone describes it. A role qory does not expand is left alone, and an integration that plays none it expands is refused |
+| `gateway.credentials.<name>` | none | a credential this machine has for its runs. Exactly one of `env`, a variable of `qory run`'s environment, `file`, an absolute path read whenever the token is used, and `adapter`, a program by its absolute path with its arguments, defines where the token comes from. An adapter prints the token with the hosts, the scheme and the paths it is for, the Forager contract's `credential.schema.json`, and takes the policy's argument as `${argument}` when `argument`, a regular expression, matches it whole; its `hosts` and `paths` here are the most it may claim. With `env` and `file`, `hosts`, `auth` (`scheme: bearer`, `basic` with `username`, or `header` with `header`) and `paths` define how the token is used. `placeholders` lists variables the container gets with a value that is no credential |
+| `gateway.integrations.<key>` | none | an integration this machine declares: a program that speaks the [integration contract](https://github.com/qoryai/integrations/tree/main/contracts/integration/v1), `program`, an absolute path or a name on the `PATH`, `qory-<key>` when absent, with `settings`, its settings document, `{}` when absent. The key is 1 to 64 of `a-z`, `0-9`, `_` and `-`, starting with a letter or a digit. The program is outside the checkout and outside every mount the wall makes read-write in the container, judged by where its links lead: a link on a `PATH` entry the checkout controls that resolves outside the checkout is judged by where it resolves. The rule applies to each run as it starts, so a program written into a directory while that directory was mounted read-write is judged by where it is at the start of each run; keep a program's directory out of the read-write mounts. The resolved program, every directory above it up to `/`, and every directory above each link on the way belong to root or the user running qory, and so does each link; other users may write none of them; a group may write one when it is root's, gid 0, `wheel`, `admin`, or the owner's primary group when its name is the owner's; a directory root owns with the sticky bit set keeps the rule. On a machine whose `PATH` is not its owner's alone, set `program` to its absolute path. `<program> describe` runs in `/`, in a process group of its own, for 10 seconds at most; its settings schema is draft 2020-12 and marks a secret `writeOnly` on a property of the settings themselves, `properties.<name>`. qory checks the settings against the description; a value of a `writeOnly` setting is refused, since the settings go on a command line, and the setting's `<name>_file` defines the path of the file that contains it. The `credential` role defines the credential `<key>`: `adapter: [<program>, credential, --settings, <json>, --, "${argument}"]`, the settings as compact JSON with `<`, `>`, `&`, U+2028 and U+2029 escaped and every `$` written `\u0024`, and the role's `argument` and `hosts`. `qory run` describes the integrations a policy on this machine selects, and every one when the server supplies the policy; `qory config` describes every one. A name `gateway.credentials` defines itself is that section's: the integration defines no credential under it, `qory run` and `qory config` print a line that states it, and `qory config` alone describes it. A role qory does not expand is left alone, and an integration that plays none it expands is refused |
 | `wall.helper` | this binary, on Linux | the absolute path of a static Linux build of qory for the engine's architecture, mounted read-only into the container as the relay, the hook forwarder, and what starts the daemon of an image with `docker: true`. Required where qory itself is not a Linux build |
 
-The egress section is the machine's policy. One run may bring its own, `qory run
---policy <file>`, a document of the runner contract's policy format kept outside the
+`gateway.egress` is the machine's policy. One run may bring its own, `qory run
+--policy <file>`, a document of the Forager contract's policy format kept outside the
 checkout and outside everything the container may write. It narrows only: under a
 section in mode `enforce` the run reaches the file's hosts the section covers, and with
 no section, or one in mode `observe`, the file stands as it is; the `deny` lists of
@@ -980,16 +984,16 @@ keeps the run to the files.
 
 The access key's secret is never in the file. `qory run` and `qory run resend` read it
 from the descriptor `--access-key-secret-fd` names, else from `QORY_ACCESS_KEY_SECRET`,
-else from the file `access-key-secret` beside `runner.yaml`: one line, `qak_` and 43
+else from the file `access-key-secret` beside `forager.yaml`: one line, `qak_` and 43
 characters, read only from a regular file the user owns that grants nothing to the group
-or to others, in a directory that is the user's alone. The runner contract's published
+or to others, in a directory that is the user's alone. The Forager contract's published
 fixture key is refused. `QORY_ACCESS_KEY_ID`, `QORY_ACCESS_KEY_SECRET`,
-`QORY_APIARY_PUBLIC_KEY` and `QORY_SERVER_SECRET` are the runner's own: qory takes them
+`QORY_APIARY_PUBLIC_KEY` and `QORY_SERVER_SECRET` are Forager's own: qory takes them
 from its environment when a command starts, so they never enter a session's
-environment, and `wall.env` and `--env` refuse their names. `server.access_key`,
-`server.secret` and `QORY_SERVER_SECRET` held a workspace access key, which servers no
-longer accept: the two keys are refused, and so is `QORY_SERVER_SECRET` when the file
-has a `server` section. The two keys are removed from the file and `QORY_SERVER_SECRET`
+environment, and `wall.env` and `--env` refuse their names. `gateway.server.access_key`,
+`gateway.server.secret` and `QORY_SERVER_SECRET` held a workspace access key, which
+servers no longer accept: the two keys are refused, and so is `QORY_SERVER_SECRET` when
+the file has a `gateway.server` section. The two keys are removed from the file and `QORY_SERVER_SECRET`
 is unset first, since `qory access-key enrol` reads the file and refuses them too; then
 the machine connects as a node: `qory access-key enrol <server> <code>`, or a key
 generated on the node's page in Qory Apiary.
@@ -997,16 +1001,16 @@ generated on the node's page in Qory Apiary.
 A run's policy also selects credentials, `credentials: [{name: product, argument:
 acme/shop}]`, may restrict a host to paths, `egress.paths`, and may select an image among
 the ones `wall.images` defines, `image: go`. All three need the wall. The
-runner keeps a selected credential outside the container, and its proxy sets it on the
+gateway keeps a selected credential outside the container, and its proxy sets it on the
 requests to the hosts it is for, ending the container's TLS for those hosts alone with
 an authority made for the run. The proxy sets a credential on the paths it lists alone,
 and under `enforce` the run reaches a host with paths on those and no other. A policy
-defines no credential: it chooses among the ones this file has, its `credentials` and
-the ones its `integrations` define, alike.
+defines no credential: it chooses among the ones this file has, its `gateway.credentials` and
+the ones its `gateway.integrations` define, alike.
 
-`qory config` lists the file's values under `runner.`; a file that does not read stops
-every command, the way a `qory.yaml` that does not read does. The schema is
-`runner.schema.json`. The schema of `qory.yaml` is
+`qory config` lists the file's values under their sections, `gateway.`, `session.` and
+`wall.`; a file that does not read stops every command, the way a `qory.yaml` that does
+not read does. The schema is [forager.schema.json](forager.schema.json). The schema of `qory.yaml` is
 [config.schema.json](config.schema.json).
 
 ## Exit status

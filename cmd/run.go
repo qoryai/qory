@@ -21,17 +21,21 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/term"
-	"github.com/qoryai/runner/accesskey"
-	"github.com/qoryai/runner/runtimes/catalog"
-	"github.com/qoryai/runner/session"
-	"github.com/qoryai/runner/wall"
+	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/forager/gateway"
+	"github.com/qoryai/forager/link"
+	"github.com/qoryai/forager/refusal"
+	"github.com/qoryai/forager/session"
+	"github.com/qoryai/forager/session/runtimes/catalog"
+	"github.com/qoryai/forager/sink"
+	"github.com/qoryai/forager/wall"
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/foragerdir"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
-	"github.com/qoryai/qory/internal/runnerdir"
 	"github.com/qoryai/qory/internal/ui"
 )
 
@@ -40,10 +44,10 @@ import (
 const DescriptorsDir = "runtimes"
 
 // newRun builds the run verb, which starts a runtime on the composed harness through
-// the session runner: the launch spec is what qory harness launch prints, the policy
-// and the server are the runner file in the user's configuration directory or named
-// by flag, and the runner records the session in qory's state directory, in a folder of
-// the checkout's. The verb is thin: it resolves the spec, hands it to the runner and
+// Forager's session: the launch spec is what qory harness launch prints, the policy
+// and the server are forager.yaml in the user's configuration directory or named
+// by flag, and Forager records the session in qory's state directory, in a folder of
+// the checkout's. The verb is thin: it resolves the spec, hands it to Forager and
 // exits with the runtime's status.
 func newRun() *cobra.Command {
 	var h homeOptions
@@ -59,7 +63,7 @@ func newRun() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "run [runtime] [-- argument...]",
 		Short: "Run the agent on its harness, observed and recorded",
-		Long: `Run the agent on the composed harness, inside the session runner.
+		Long: `Run the agent on the composed harness, inside Forager's session.
 
 Every connection goes through a proxy on this machine and is recorded. The record,
 events.jsonl and output.log, goes to a folder of the checkout's under
@@ -71,15 +75,15 @@ for several. Arguments after -- go to the agent. At a terminal the agent runs wi
 own interface; --headless, no terminal, or a headless argument such as -p runs it on
 pipes.
 
-` + config.RunnerFileName + ` in ~/.config/qory sets what the runner does on this machine. A repository
+` + config.ForagerFileName + ` in ~/.config/qory sets what Forager does on this machine. A repository
 cannot set it:
 
-  egress        the hosts the agent may reach: enforce or observe, allow and deny
-  wall          run the agent in a container whose one way out is the proxy
-  credentials   tokens the proxy sets on requests; behind a wall the agent never has them
-  integrations  programs that supply such tokens, such as qory-github
-  server        the server every run reports to; --local skips it
-  run           a time limit, and how the agent is stopped
+  gateway.egress        the hosts the agent may reach: enforce or observe, allow and deny
+  wall                  run the agent in a container whose one way out is the proxy
+  gateway.credentials   tokens the proxy sets on requests; behind a wall the agent never has them
+  gateway.integrations  programs that supply such tokens, such as qory-github
+  gateway.server        the server every run reports to; --local skips it
+  session.run           a time limit, and how the agent is stopped
 
 --verbose adds nothing here.
 
@@ -87,7 +91,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 		Example: `  qory run                                          # the agent, at your terminal
   qory run claude -- -p "Reply pong"                # one headless turn
   qory run --wall docker --image agent:1            # in a container
-  qory run --image go-docker                        # in an image runner.yaml defines
+  qory run --image go-docker                        # in an image forager.yaml defines
   qory run --policy ~/policy.yaml -- -p "$prompt"   # with this run's own policy
   qory run --timeout 5h30m -- -p "$prompt"          # stop it after five and a half hours
   qory run --subject type=ticket,ref=7              # say which ticket the run works on`,
@@ -137,14 +141,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return err
 			}
 			user := config.UserDir()
-			var pol *session.Policy
-			var server *session.Server
-			if r := conf.Runner; r != nil {
+			var pol *gateway.Policy
+			var server *gateway.Server
+			if r := conf.Forager; r != nil {
 				if r.Egress != nil {
-					pol = &session.Policy{Version: 1, Egress: session.PolicyEgress{Mode: r.Egress.Mode, Allow: r.Egress.Allow, Deny: r.Egress.Deny}}
+					pol = &gateway.Policy{Version: 1, Egress: gateway.PolicyEgress{Mode: r.Egress.Mode, Allow: r.Egress.Allow, Deny: r.Egress.Deny}}
 				}
 				if r.Server != nil {
-					server = sessionServer(r.Server)
+					server = gatewayServer(r.Server)
 				}
 			}
 			if policyFile != "" {
@@ -175,7 +179,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if timeout < 0 || grace < 0 {
 				return input(fmt.Errorf("--timeout and --stop-grace are not negative"))
 			}
-			if r := conf.Runner; r != nil {
+			if r := conf.Forager; r != nil {
 				if !cmd.Flags().Changed("timeout") {
 					timeout = r.Timeout
 				}
@@ -204,47 +208,50 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			stderr := cmd.ErrOrStderr()
 			var id *serverIdentity
 			if server != nil && !local {
-				if id, err = identify(conf.Runner, stderr, "run", fdKey); err != nil {
+				if id, err = identify(conf.Forager, stderr, "run", fdKey); err != nil {
 					return err
 				}
 			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			spec := session.Spec{
-				Runtime:       rt,
-				Command:       launch.Command,
-				Args:          append(append([]string{}, launch.Args...), extra...),
-				Env:           os.Environ(),
-				Dir:           cwd,
-				Interactive:   !headless && isTerminal(cmd.InOrStdin()) && isTerminal(cmd.OutOrStdout()),
-				Stdin:         cmd.InOrStdin(),
-				Stdout:        cmd.OutOrStdout(),
-				Stderr:        stderr,
-				Policy:        pol,
-				Server:        server,
-				Local:         local,
-				Declared:      rep.Hosts(),
-				RunsDir:       runs,
-				Forwarder:     append([]string{exe}, forwardArgs...),
-				RunnerVersion: build().title(),
-				RunID:         runID,
-				Labels:        named,
-				About:         about,
-				Timeout:       timeout,
-				StopSignal:    stopSignal,
-				StopGrace:     grace,
+				Runtime:        rt,
+				Command:        launch.Command,
+				Args:           append(append([]string{}, launch.Args...), extra...),
+				Env:            os.Environ(),
+				Dir:            cwd,
+				Interactive:    !headless && isTerminal(cmd.InOrStdin()) && isTerminal(cmd.OutOrStdout()),
+				Stdin:          cmd.InOrStdin(),
+				Stdout:         cmd.OutOrStdout(),
+				Stderr:         stderr,
+				Declared:       rep.Hosts(),
+				RunsDir:        runs,
+				Forwarder:      append([]string{exe}, forwardArgs...),
+				ForagerVersion: build().title(),
+				RunID:          runID,
+				Labels:         named,
+				About:          about,
+				Timeout:        timeout,
+				StopSignal:     stopSignal,
+				StopGrace:      grace,
 			}
 			if spec.RunID == "" {
 				spec.RunID = newRunID()
 			}
+			// The gateway is the node toward the server: it signs every request with the
+			// access key. --local runs with the files alone. Its link is served in memory
+			// alone, to the session in this process: no socket, which another process could
+			// reach.
+			gw := gateway.Config{Policy: pol, Version: build().title(), RunDir: func(id string) string { return filepath.Join(spec.RunsDir, id) }, NoLinkSocket: true}
 			if id != nil {
-				spec.AccessKey, spec.InstanceID, spec.InstanceName = id.key.key, id.instanceID, id.instanceName
+				gw.Server = server
+				gw.Server.AccessKey, gw.Server.InstanceID, gw.Server.InstanceName = id.key.key, id.instanceID, id.instanceName
 			}
 			selected := ""
 			if pol != nil {
 				selected = pol.Image
 			}
-			if err := enclose(&spec, conf.Runner, o, selected, server != nil && !local, exe, at.root, at.home); err != nil {
+			if err := enclose(&spec, conf.Forager, o, selected, server != nil && !local, exe, at.root, at.home); err != nil {
 				return err
 			}
 			if spec.Wall != nil && h.home == "" {
@@ -259,9 +266,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					}
 				}
 			}
-			runnerDir := ""
+			foragerDir := ""
 			if d := config.UserDir(); d != "" {
-				if runnerDir, err = filepath.Abs(d); err != nil {
+				if foragerDir, err = filepath.Abs(d); err != nil {
 					return err
 				}
 			}
@@ -276,14 +283,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			defer runLock.Release()
 			if id != nil {
-				spec.Discovered = discovered(machineDir(), id, walled, stderr)
+				gw.Discovered = discovered(machineDir(), id, walled, stderr)
 			}
 			apiary := ""
 			if server != nil {
 				apiary = server.URL
 			}
 			spec.OnVariables = unusedEnv(stderr, apiary)
-			if r := conf.Runner; r != nil {
+			if r := conf.Forager; r != nil {
 				for _, key := range r.Shadowed() {
 					fmt.Fprintln(stderr, "qory run:", shadowed(key))
 				}
@@ -296,22 +303,46 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					}
 				}
 				for _, c := range r.Credentials {
-					def := session.Credential{Name: c.Name, Env: c.Env, File: c.File, Adapter: c.Adapter, Argument: c.Argument, Hosts: c.Hosts, Scheme: c.Scheme, Username: c.Username, Header: c.Header, Paths: c.Paths, Placeholders: c.Placeholders}
+					def := gateway.Credential{Name: c.Name, Env: c.Env, File: c.File, Adapter: c.Adapter, Argument: c.Argument, Hosts: c.Hosts, Scheme: c.Scheme, Username: c.Username, Header: c.Header, Paths: c.Paths, Placeholders: c.Placeholders}
 					if err := def.Check(); err != nil {
-						return input(fmt.Errorf("%s: %w", config.RunnerFileName, err))
+						return input(fmt.Errorf("%s: %w", config.ForagerFileName, err))
 					}
-					spec.Credentials = append(spec.Credentials, def)
+					gw.Credentials = append(gw.Credentials, def)
 				}
 			}
 			// The files the settings name are known once the integrations are described.
-			own := runnerFiles(runnerDir, state, spec.RunsDir, settingFiles(conf.Runner))
-			spec.RunnerFiles = own.files
+			own := foragerFiles(foragerDir, state, spec.RunsDir, settingFiles(conf.Forager))
+			spec.ForagerFiles = own.files
 			record := filepath.Join(spec.RunsDir, spec.RunID)
 			u := ui.New(stderr)
-			res, err := session.Run(ctx, spec)
+			// One gateway for the run, on this machine: the session speaks to it over its
+			// local link, whose secret stays in this process's memory.
+			gw.Report = func(line string) { fmt.Fprintln(stderr, "qory run:", line) }
+			g, err := gateway.Start(ctx, gw)
 			if err != nil {
-				if m := mountRefused(err, passed{runnerDir: runnerDir, stateDir: state, spec: &spec, root: at.root, own: own}); m != nil {
+				return explain(err, id)
+			}
+			defer g.Close(ctx)
+			l := g.LocalLink()
+			linkHanded(l)
+			spec.Gateway = session.LocalGateway(l)
+			res, err := session.Run(ctx, spec)
+			// The gateway delivers the run's last events before qory says how the run
+			// ended, and before qory exits.
+			delivery, closeErr := g.Close(ctx)
+			if closeErr != nil {
+				gw.Report(closeErr.Error())
+			}
+			if err != nil {
+				// A run id another run of this checkout has: refused before this run made
+				// anything, so the folder of that id is the other run's, and goes unnamed.
+				if reused := runIDReused(err, record, spec.RunID); reused != nil {
+					return reused
+				}
+				if m := mountRefused(err, passed{foragerDir: foragerDir, stateDir: state, spec: &spec, root: at.root, own: own}); m != nil {
 					err = m
+				} else if used := runIDUsed(err, spec.RunID); used != nil {
+					err = used
 				} else {
 					err = explain(err, id)
 				}
@@ -328,10 +359,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return reported(err)
 			}
 			defer fmt.Fprintln(stderr, "qory run: the record is in", record)
-			if res.Undelivered > 0 {
-				u.Fail(fmt.Errorf("%d events did not reach the server; %s/undelivered contains them", res.Undelivered, ui.Short(res.Dir, at.root)))
+			if delivery.Undelivered > 0 {
+				u.Fail(fmt.Errorf("%d events did not reach the server; %s/undelivered contains them", delivery.Undelivered, ui.Short(res.Dir, at.root)))
 			}
 			switch {
+			case res.RunClosed && res.ClosedBy == accesskey.FromGateway:
+				return closedByGateway()
 			case res.RunClosed:
 				u.Fail(fmt.Errorf("the server closed the run, and %s was stopped", name))
 				return reported(&exitError{code: 1})
@@ -351,39 +384,82 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	}
 	c.Flags().BoolVar(&local, "local", false, "run without the server: record to files, under the machine's policy")
 	c.Flags().BoolVar(&headless, "headless", false, "run on pipes even at a terminal; -p for claude implies it")
-	c.Flags().StringVar(&policyFile, "policy", "", "this run's own policy file, kept outside the checkout; it narrows the egress of "+config.RunnerFileName+", never widens it (with a server: needs --local)")
+	c.Flags().StringVar(&policyFile, "policy", "", "this run's own policy file, kept outside the checkout; it narrows gateway.egress of "+config.ForagerFileName+", never widens it (with a server: needs --local)")
 	c.Flags().StringVar(&runID, "run-id", "", "the run's id, a UUID in lower case (default a new one)")
 	c.Flags().StringArrayVar(&labels, "label", nil, "a key=value name for the run, reported in its events; repeatable (forge and repository come from the origin remote)")
 	c.Flags().StringVar(&kind, "kind", "", "what kind of run it is, such as review or fix, reported when the run starts")
 	c.Flags().StringVar(&title, "title", "", "the run's title, for a person to read, reported when the run starts")
 	c.Flags().StringArrayVar(&subjects, "subject", nil, "what the run works on, type=<type>,ref=<ref>[,url=<url>][,title=<title>], such as type=ticket,ref=7; title takes the rest of the value, commas too; repeatable")
 	c.Flags().StringVar(&details, "details", "", "a JSON object of the run's own details, read from this file, or - for stdin when stdin is not a terminal; at most 8192 bytes compacted, 4 levels deep")
-	c.Flags().DurationVar(&timeout, "timeout", 0, "stop the agent after this long, such as 5h30m, and exit "+fmt.Sprint(exitTimeout)+" (default no limit; "+config.RunnerFileName+": run.timeout)")
-	c.Flags().StringVar(&stopSignal, "stop-signal", "", "the signal that stops the agent: SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2 (default SIGTERM; "+config.RunnerFileName+": run.stop_signal)")
-	c.Flags().DurationVar(&grace, "stop-grace", 0, "the time between the stop signal and SIGKILL (default 10s; "+config.RunnerFileName+": run.stop_grace)")
-	c.Flags().StringVar(&o.name, "wall", "", "run the agent in a container whose one way out is the proxy: "+config.WallDocker+", or none ("+config.RunnerFileName+": wall.adapter)")
-	c.Flags().StringVar(&o.image, "image", "", "the container's image unless the run's policy selects one: a name of wall.images, or a reference ("+config.RunnerFileName+": wall.image)")
-	c.Flags().StringArrayVar(&o.env, "env", nil, "a variable of this shell to pass to the agent, by name, with a wall or without; it wins over wall.env of "+config.RunnerFileName+"; repeatable")
-	c.Flags().StringArrayVar(&o.mounts, "mount", nil, "a path of this machine the container sees too, :ro for read-only; repeatable ("+config.RunnerFileName+": wall.mounts)")
-	c.Flags().StringVar(&o.limits.CPUs, "cpus", "", "how many CPUs the container gets, such as 1.5 ("+config.RunnerFileName+": wall.cpus)")
-	c.Flags().StringVar(&o.limits.Memory, "memory", "", "the most memory the container gets, such as 8g ("+config.RunnerFileName+": wall.memory)")
-	c.Flags().IntVar(&o.limits.PIDs, "pids-limit", 0, "the most processes and threads in the container ("+config.RunnerFileName+": wall.pids_limit)")
+	c.Flags().DurationVar(&timeout, "timeout", 0, "stop the agent after this long, such as 5h30m, and exit "+fmt.Sprint(exitTimeout)+" (default no limit; "+config.ForagerFileName+": session.run.timeout)")
+	c.Flags().StringVar(&stopSignal, "stop-signal", "", "the signal that stops the agent: SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2 (default SIGTERM; "+config.ForagerFileName+": session.run.stop_signal)")
+	c.Flags().DurationVar(&grace, "stop-grace", 0, "the time between the stop signal and SIGKILL (default 10s; "+config.ForagerFileName+": session.run.stop_grace)")
+	c.Flags().StringVar(&o.name, "wall", "", "run the agent in a container whose one way out is the proxy: "+config.WallDocker+", or none ("+config.ForagerFileName+": wall.adapter)")
+	c.Flags().StringVar(&o.image, "image", "", "the container's image unless the run's policy selects one: a name of wall.images, or a reference ("+config.ForagerFileName+": wall.image)")
+	c.Flags().StringArrayVar(&o.env, "env", nil, "a variable of this shell to pass to the agent, by name, with a wall or without; it wins over wall.env of "+config.ForagerFileName+"; repeatable")
+	c.Flags().StringArrayVar(&o.mounts, "mount", nil, "a path of this machine the container sees too, :ro for read-only; repeatable ("+config.ForagerFileName+": wall.mounts)")
+	c.Flags().StringVar(&o.limits.CPUs, "cpus", "", "how many CPUs the container gets, such as 1.5 ("+config.ForagerFileName+": wall.cpus)")
+	c.Flags().StringVar(&o.limits.Memory, "memory", "", "the most memory the container gets, such as 8g ("+config.ForagerFileName+": wall.memory)")
+	c.Flags().IntVar(&o.limits.PIDs, "pids-limit", 0, "the most processes and threads in the container ("+config.ForagerFileName+": wall.pids_limit)")
 	c.Flags().IntVar(&secretFD, secretFDFlag, 0, secretFDUsage)
-	c.Flags().StringVar(&o.limits.ShmSize, "shm-size", "", "the size of /dev/shm in the container, such as 2g ("+config.RunnerFileName+": wall.shm_size)")
+	c.Flags().StringVar(&o.limits.ShmSize, "shm-size", "", "the size of /dev/shm in the container, such as 2g ("+config.ForagerFileName+": wall.shm_size)")
 	homeFlags(c, &h)
 	c.AddCommand(newResend(), newForward(), newRelay(), newNest())
 	return c
 }
 
-// expansion is what a run describes of the integrations the runner file declares. A
+// runIDUsed is the gateway's refusal of a run whose id a run on this machine has
+// already used, a --run-id given again, said for the person; nil for any other error.
+// It unwraps to the refusal.
+func runIDUsed(err error, runID string) error {
+	var ref *session.Refusal
+	if !errors.As(err, &ref) || ref.Code != refusal.RunIDUsed {
+		return nil
+	}
+	return &saidError{text: runIDUsedText(runID), err: err}
+}
+
+// runIDReused is the session's refusal of a run whose record, record, holds the
+// events of another run already: the open of record/events.jsonl that exists, said as
+// the gateway's run_id_used is; nil for any other error. It unwraps to the session's
+// error.
+func runIDReused(err error, record, runID string) error {
+	var pe *fs.PathError
+	if !errors.As(err, &pe) || !errors.Is(err, fs.ErrExist) || pe.Path != filepath.Join(record, sink.EventsFile) {
+		return nil
+	}
+	return &saidError{text: runIDUsedText(runID), err: err}
+}
+
+// runIDUsedText says a run id is another run's, and how to go on.
+func runIDUsedText(runID string) string {
+	return fmt.Sprintf("the run id %s is already used by another run; leave out --run-id, or give a new one", runID)
+}
+
+// saidError is an error qory words itself in full, and that unwraps to the one it
+// replaces.
+type saidError struct {
+	text string
+	err  error
+}
+
+func (e *saidError) Error() string { return e.text }
+
+func (e *saidError) Unwrap() error { return e.err }
+
+// linkHanded is told the gateway's local link as qory hands it to the session: a test
+// learns its secret this way, to look for it where it must never be. It keeps nothing.
+var linkHanded = func(link.Local) {}
+
+// expansion is what a run describes of the integrations forager.yaml declares. A
 // policy this process has lists the credentials the run selects, so the integrations it
-// selects are the ones described; a policy the server supplies arrives once the
-// runner starts, so every declared integration is described before it does. An
+// selects are the ones described; a policy the server supplies arrives once
+// Forager starts, so every declared integration is described before it does. An
 // integration whose key the credentials section defines itself defines nothing for the
 // run and is not described. A program the run may write is refused: one in the
 // checkout, in the working directory when that is inside the checkout, or in a
 // read-write mount of the wall's container.
-func expansion(r *config.Runner, pol *session.Policy, fromServer bool, root, cwd string, mounts []wall.Mount) config.Expansion {
+func expansion(r *config.Forager, pol *gateway.Policy, fromServer bool, root, cwd string, mounts []wall.Mount) config.Expansion {
 	e := config.Expansion{Workspace: []string{root}}
 	if cwd != root && reallyWithin(root, cwd) {
 		e.Workspace = append(e.Workspace, cwd)
@@ -409,7 +485,7 @@ func expansion(r *config.Runner, pol *session.Policy, fromServer bool, root, cwd
 // shadowed is the line that reports that the credentials section defines the credential
 // an integration of the same key defines otherwise.
 func shadowed(key string) string {
-	return fmt.Sprintf("%s: credentials.%s defines the credential %s, and integrations.%s defines none", config.RunnerFileName, key, key, key)
+	return fmt.Sprintf("%s: gateway.credentials.%s defines the credential %s, and gateway.integrations.%s defines none", config.ForagerFileName, key, key, key)
 }
 
 // wallOptions are the run verb's wall flags.
@@ -431,9 +507,9 @@ func (o wallOptions) walled() bool {
 const exitTimeout = 124
 
 // runPolicy reads one run's own policy and puts it under the machine's. The file is
-// kept outside the checkout, as the runner file is: inside, the agent it constrains
+// kept outside the checkout, as forager.yaml is: inside, the agent it constrains
 // could write it.
-func runPolicy(file, root string, machine *session.Policy) (*session.Policy, error) {
+func runPolicy(file, root string, machine *gateway.Policy) (*gateway.Policy, error) {
 	abs, err := filepath.Abs(file)
 	if err != nil {
 		return nil, input(err)
@@ -445,14 +521,14 @@ func runPolicy(file, root string, machine *session.Policy) (*session.Policy, err
 	if err != nil {
 		return nil, input(err)
 	}
-	p, err := session.ReadPolicy(filepath.Base(abs), b)
+	p, err := gateway.ReadPolicy(filepath.Base(abs), b)
 	if err != nil {
 		return nil, input(err)
 	}
 	return p.Under(machine), nil
 }
 
-// parseLabels reads --label key=value; the runner checks what a key and a value may be.
+// parseLabels reads --label key=value; Forager checks what a key and a value may be.
 func parseLabels(labels []string) (map[string]string, error) {
 	if len(labels) == 0 {
 		return nil, nil
@@ -487,29 +563,29 @@ func withOrigin(labels map[string]string, root string) map[string]string {
 	return out
 }
 
-// wallOff is the --wall value that runs without the wall the runner file sets.
+// wallOff is the --wall value that runs without the wall forager.yaml sets.
 const wallOff = "none"
 
-// enclose puts the spec behind a wall when a flag or the runner file sets one, and sets
+// enclose puts the spec behind a wall when a flag or forager.yaml sets one, and sets
 // the run's own variables, --env, with a wall or without. The runtime then runs in a
 // container, so what refers to this machine changes: it inherits nothing of the
 // process's environment, the machine's variables, wall.env, go in beside the run's, and
 // the forwarder is the helper's path inside the container. The launch's variables, its
-// fixed ones, its defaults and its home, go to the runner behind a wall or not: the
+// fixed ones, its defaults and its home, go to Forager behind a wall or not: the
 // checkout, the composed home, which is all a launch template's paths point into, and
 // the mounts keep their paths inside the container. home is the one qory computes for
 // the checkout, see [ownHome], never one a report names.
 //
-// The images wall.images defines go to the runner, which reads the default, --image or
+// The images wall.images defines go to Forager, which reads the default, --image or
 // wall.image, as the name of one of them first and as a reference otherwise, and
 // starts the one the policy selects instead. selected is the image the policy this
-// process holds selects, empty when it selects none: qory refuses a selection the runner
+// process holds selects, empty when it selects none: qory refuses a selection Forager
 // would refuse before the run, so it is an input error, and a run whose policy selects
 // an image needs no default. fromServer says the server's run configuration is the
 // policy; it arrives once the run starts, and may select no image, so such a run needs a
 // default.
-func enclose(spec *session.Spec, r *config.Runner, o wallOptions, selected string, fromServer bool, exe, root, home string) error {
-	var section config.RunnerWall
+func enclose(spec *session.Spec, r *config.Forager, o wallOptions, selected string, fromServer bool, exe, root, home string) error {
+	var section config.ForagerWall
 	if r != nil && r.Wall != nil {
 		section = *r.Wall
 	}
@@ -527,7 +603,7 @@ func enclose(spec *session.Spec, r *config.Runner, o wallOptions, selected strin
 			return input(fmt.Errorf("--image, --mount and the limits are for a run behind a wall; --wall %s starts one", config.WallDocker))
 		}
 		if selected != "" {
-			return input(fmt.Errorf("the policy selects the image %s, which needs a wall: wall in %s, or --wall %s", selected, config.RunnerFileName, config.WallDocker))
+			return input(fmt.Errorf("the policy selects the image %s, which needs a wall: wall in %s, or --wall %s", selected, config.ForagerFileName, config.WallDocker))
 		}
 		return nil
 	}
@@ -535,14 +611,14 @@ func enclose(spec *session.Spec, r *config.Runner, o wallOptions, selected strin
 		return input(fmt.Errorf("--wall %s: the walls are %s, and %s for a run without one", name, config.WallDocker, wallOff))
 	}
 	if selected != "" && !section.Defines(selected) {
-		return input(fmt.Errorf("the policy selects the image %s, which wall.images in %s does not define", selected, config.RunnerFileName))
+		return input(fmt.Errorf("the policy selects the image %s, which wall.images in %s does not define", selected, config.ForagerFileName))
 	}
 	spec.Image = o.image
 	if spec.Image == "" {
 		spec.Image = section.Image
 	}
 	if spec.Image == "" && selected == "" {
-		err := fmt.Errorf("a wall needs the container's image: --image, or wall.image in %s, a name of wall.images or a reference", config.RunnerFileName)
+		err := fmt.Errorf("a wall needs the container's image: --image, or wall.image in %s, a name of wall.images or a reference", config.ForagerFileName)
 		if fromServer {
 			err = fmt.Errorf("%w; with a server, set one even when its run configuration selects an image: that arrives once the run starts, and may select none", err)
 		}
@@ -599,7 +675,7 @@ func enclose(spec *session.Spec, r *config.Runner, o wallOptions, selected strin
 	return nil
 }
 
-// unusedEnv is what a run does once the runner has resolved its variables: it prints a
+// unusedEnv is what a run does once Forager has resolved its variables: it prints a
 // line for each --env value that another source's value or a rule left out, saying
 // which. serverURL is the server's, which names the host whose value won, empty for
 // none.
@@ -620,7 +696,7 @@ func unusedEnv(report io.Writer, serverURL string) func(session.Applied) {
 	}
 }
 
-// whyUnused says why a value of --env was left out: why is the runner's reason, and from
+// whyUnused says why a value of --env was left out: why is Forager's reason, and from
 // the source whose value the run applies instead, host naming the server's.
 func whyUnused(from, why, host string) string {
 	switch why {
@@ -637,19 +713,19 @@ func whyUnused(from, why, host string) string {
 		}
 		return "the " + from + " value wins"
 	}
-	return "the runner left it out (" + why + ")"
+	return "Forager left it out (" + why + ")"
 }
 
-// passed is what qory passed the runner that its refusal of a mount names: runnerDir,
+// passed is what qory passed Forager that its refusal of a mount names: foragerDir,
 // the configuration directory, absolute, "" for none; stateDir, qory's state directory;
 // the spec, whose RunsDir, Mounts and Dir the refusal may name; root, the checkout,
-// which is the workspace's root in Mounts behind a wall; and own, the runner's files
+// which is the workspace's root in Mounts behind a wall; and own, Forager's files
 // qory passed, with the links among them.
 type passed struct {
-	runnerDir, stateDir string
-	spec                *session.Spec
-	root                string
-	own                 ownFiles
+	foragerDir, stateDir string
+	spec                 *session.Spec
+	root                 string
+	own                  ownFiles
 }
 
 // workspace reports whether path is the workspace: the checkout root as Mounts holds
@@ -672,7 +748,7 @@ func (p passed) place(path string) string {
 // modes is how the run passed path: writable, read-only, or both, from the entries of
 // Mounts with that path, and Dir, writable. changed is, for a path passed with both,
 // the mode of the first entry whose mode differs from an earlier one's, in the order
-// the runner checks them, Mounts in order and then Dir: the entry it refuses.
+// Forager checks them, Mounts in order and then Dir: the entry it refuses.
 func (p passed) modes(path string) (writable, readOnly, changed bool) {
 	add := func(w bool) {
 		if writable != readOnly && w != writable {
@@ -691,23 +767,23 @@ func (p passed) modes(path string) (writable, readOnly, changed bool) {
 	return writable, readOnly, changed
 }
 
-// mountRefused words the runner's refusals of the run's places behind a wall for the
+// mountRefused words Forager's refusals of the run's places behind a wall for the
 // person, each before the run starts. Any other error is nil here.
 //
-// mount_contains_runner_files is a place that is, contains or lies inside one of the
-// runner's files. A refusal of the configuration directory says the agent could read
+// mount_contains_forager_files is a place that is, contains or lies inside one of
+// Forager's files. A refusal of the configuration directory says the agent could read
 // the access key when access-key-secret is there and the place is or contains it; one
 // of the runs directory or of qory's state directory, that it could read the run
 // records through a read-only mount and change them through any other; one of any other
-// path, or of the directory without the key, that it could read one of the runner's
+// path, or of the directory without the key, that it could read one of Forager's
 // files through a read-only mount and change it through any other. A link's place, on the way to the records or to the configuration, is named as
 // the link, which leads to them; for a place that is not read-only, the text adds that
 // the agent could point it elsewhere.
 //
 // mount_mode_conflict is a place inside another of the other mode, with the modes
-// qory passed. The runner refuses only two places of different modes: the inner's is
+// qory passed. Forager refuses only two places of different modes: the inner's is
 // the one it was passed with, and the outer's the other one. For an inner passed with
-// both modes, when the two names are one path the inner is the entry the runner
+// both modes, when the two names are one path the inner is the entry Forager
 // refuses, the first whose mode differs from an earlier one's, Mounts in order and then
 // Dir; for two paths, the outer's one mode decides, else that same entry.
 //
@@ -722,15 +798,15 @@ func (p passed) modes(path string) (writable, readOnly, changed bool) {
 // containers are left: one agent could read or change what the other uses. The text
 // says how to find and remove containers left behind, by the label dev.qory.run=<id>
 // the wall gives them. A git worktree inside the other run's checkout is the common
-// case, and the text says where to make one. The runner names the runs directory for
-// this run's own records. Where the runner can no longer tell how two paths stand, such
+// case, and the text says where to make one. Forager names the runs directory for
+// this run's own records. Where Forager can no longer tell how two paths stand, such
 // as a place reached through a link, the text says they overlap.
 //
 // engine_unreachable is a walled run that cannot ask the container engine whether an
-// earlier walled run is still going, with that run's id the first name and, when the
-// runner gives it, the path of that run's registry entry the second. With both, the
+// earlier walled run is still going, with that run's id the first name and, when
+// Forager gives it, the path of that run's registry entry the second. With both, the
 // text gives the docker ps command that lists that run's containers, by the id, which
-// the runner checks as a run id, and names the entry as the file to delete when it lists
+// Forager checks as a run id, and names the entry as the file to delete when it lists
 // none or that Docker is gone for good; with the id alone, it leaves the id out.
 //
 // A place is the workspace when it is the checkout root or Dir, and a mount otherwise.
@@ -741,7 +817,7 @@ func mountRefused(err error, p passed) error {
 	}
 	var text string
 	switch {
-	case ref.Code == codeMountContainsRunnerFiles && len(ref.Names) == 2:
+	case ref.Code == codeMountContainsForagerFiles && len(ref.Names) == 2:
 		mount, path := ref.Names[0], ref.Names[1]
 		how := overlap(mount, path)
 		// A place the run passed with no mode is a mount it no longer knows: the agent
@@ -752,8 +828,8 @@ func mountRefused(err error, p passed) error {
 		switch {
 		case isLink:
 			// The link's place: named as the link, which leads to the records or to one
-			// of the runner's files.
-			what := "one of the runner's files"
+			// of Forager's files.
+			what := "one of Forager's files"
 			if p.own.records[path] {
 				what = "qory's run records"
 			}
@@ -769,17 +845,17 @@ func mountRefused(err error, p passed) error {
 			text = fmt.Sprintf("%s %s %s, which holds qory's run records; the agent could %s them, so the run does not start. Mount a narrower path", p.place(mount), how, path, what)
 		default:
 			// The key is at stake only for a place that is or contains the key's own file.
-			key := p.runnerDir != "" && path == p.runnerDir
+			key := p.foragerDir != "" && path == p.foragerDir
 			if key {
-				at := session.Overlap(mount, runnerdir.Dir(p.runnerDir).Path(runnerdir.SecretFile))
+				at := session.Overlap(mount, foragerdir.Dir(p.foragerDir).Path(foragerdir.SecretFile))
 				key = at == "is" || at == "contains"
 			}
 			what := "change"
 			if readOnly {
 				what = "read"
 			}
-			text = fmt.Sprintf("%s %s %s, which holds one of the runner's files; the agent could %s it, so the run does not start. Mount a narrower path", p.place(mount), how, path, what)
-			if key && runnerdir.Dir(p.runnerDir).HasSecret() {
+			text = fmt.Sprintf("%s %s %s, which holds one of Forager's files; the agent could %s it, so the run does not start. Mount a narrower path", p.place(mount), how, path, what)
+			if key && foragerdir.Dir(p.foragerDir).HasSecret() {
 				text = fmt.Sprintf("%s %s %s, which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path", p.place(mount), how, path)
 			}
 		}
@@ -830,7 +906,7 @@ func mountRefused(err error, p passed) error {
 	return &refusedError{text: text, err: &session.Refusal{Code: ref.Code}}
 }
 
-// overlap is how a place and a path stand to each other, as the runner judges it, and
+// overlap is how a place and a path stand to each other, as Forager judges it, and
 // "overlaps" when it no longer can.
 func overlap(place, path string) string {
 	if how := session.Overlap(place, path); how != "" {
@@ -847,7 +923,7 @@ func mode(writable bool) string {
 	return "read-only"
 }
 
-// ownFiles is what qory passes the runner as its files: files, in order; links, which
+// ownFiles is what qory passes Forager as its files: files, in order; links, which
 // maps a link's place to the link, for the person; and records, the ones that guard the
 // run records.
 type ownFiles struct {
@@ -856,17 +932,17 @@ type ownFiles struct {
 	records map[string]bool
 }
 
-// runnerFiles is what qory passes the runner as its files: the configuration directory
-// runnerDir, absolute, when there is one; then qory's state directory, which holds the
+// foragerFiles is what qory passes Forager as its files: the configuration directory
+// foragerDir, absolute, when there is one; then qory's state directory, which holds the
 // run records, and what [recordLinks] adds for it and the runs directory runs; then
 // what [configLinks] adds; then each file of settings, the paths [settingFiles] returns,
 // as [configLinks] passes its files: every link on the way as its place, [linkPlace],
 // since the agent could point a link at a file of its own, and where the path leads, or
 // the path as it is when a part of it does not exist yet, loops or cannot be read.
-func runnerFiles(runnerDir, state, runs string, settings []string) ownFiles {
+func foragerFiles(foragerDir, state, runs string, settings []string) ownFiles {
 	own := ownFiles{links: map[string]string{}, records: map[string]bool{}}
-	if runnerDir != "" {
-		own.files = append(own.files, runnerDir)
+	if foragerDir != "" {
+		own.files = append(own.files, foragerDir)
 	}
 	own.files = append(own.files, state)
 	files, shown := recordLinks(state, runs)
@@ -874,8 +950,8 @@ func runnerFiles(runnerDir, state, runs string, settings []string) ownFiles {
 		own.records[f] = true
 	}
 	own.files = append(own.files, files...)
-	if runnerDir != "" {
-		more, links := configLinks(runnerDir)
+	if foragerDir != "" {
+		more, links := configLinks(foragerDir)
 		for _, f := range more {
 			if !slices.Contains(own.files, f) {
 				own.files = append(own.files, f)
@@ -907,7 +983,7 @@ func runnerFiles(runnerDir, state, runs string, settings []string) ownFiles {
 // settingFiles are the files the settings of the integrations r describes for the run
 // name: the value of each setting <name>_file, a string, absolute, from the working
 // directory when it is relative, as the program reads it.
-func settingFiles(r *config.Runner) []string {
+func settingFiles(r *config.Forager) []string {
 	var out []string
 	if r == nil {
 		return nil
@@ -933,13 +1009,13 @@ func settingFiles(r *config.Runner) []string {
 	return out
 }
 
-// recordLinks is what qory passes the runner for the run records when a link is on the
+// recordLinks is what qory passes Forager for the run records when a link is on the
 // way to them: the path of the runs directory runs, absolute, under the state directory
 // state, is followed one link at a time, as [configLinks] follows its files, and every
 // link on the way outside state goes as its place, [linkPlace], since the agent could
 // point it at a directory of its own; shown maps the place back to the link. Where the
 // path leads goes too when a link takes it out of state, and the path as it is when it
-// loops or cannot be read, which the runner then refuses.
+// loops or cannot be read, which Forager then refuses.
 func recordLinks(state, runs string) (files []string, shown map[string]string) {
 	resolved, err := filepath.EvalSymlinks(state)
 	exists := err == nil
@@ -962,27 +1038,27 @@ func recordLinks(state, runs string) (files []string, shown map[string]string) {
 	return files, shown
 }
 
-// configLinks is what qory passes the runner for the files it reads from its
+// configLinks is what qory passes Forager for the files it reads from its
 // configuration directory dir, absolute, when a link takes one out of it: dir itself,
-// runner.yaml, qory.yaml or qory.yml, runtimes/ and the descriptors in it,
+// forager.yaml, qory.yaml or qory.yml, runtimes/ and the descriptors in it,
 // runtimes/*.yaml in any case, as a disk that ignores case opens them. Each is followed
 // from dir as given, one link at a time, each part of its path that is a link included,
-// dir's own, and every link on the way and where it leads is one of the runner's files,
+// dir's own, and every link on the way and where it leads is one of Forager's files,
 // since a mount of either would let the agent change what the next run reads. dir is
 // followed even when it, or a part of it, does not exist yet: a link on the way could
-// still be pointed at a directory of the agent's. The runner resolves its files through
+// still be pointed at a directory of the agent's. Forager resolves its files through
 // links, so a link goes as its place, [linkPlace], and shown maps that back to the link
-// for the person. What lies in the resolved dir is left out: dir is one of the runner's
+// for the person. What lies in the resolved dir is left out: dir is one of Forager's
 // files itself. A file whose chain ends at a part that does not exist yet is passed as
-// it is, and the runner follows it to where the target will be; one whose chain loops
-// or cannot be read is passed as it is too, and the runner, unable to resolve it,
+// it is, and Forager follows it to where the target will be; one whose chain loops
+// or cannot be read is passed as it is too, and Forager, unable to resolve it,
 // refuses the run.
 func configLinks(dir string) (files []string, shown map[string]string) {
 	// Without dir, nothing lies in it yet.
 	resolved, err := filepath.EvalSymlinks(dir)
 	exists := err == nil
 	inside := func(p string) bool { return exists && within(resolved, p) }
-	names := append([]string{".", config.RunnerFileName, DescriptorsDir}, config.Names...)
+	names := append([]string{".", config.ForagerFileName, DescriptorsDir}, config.Names...)
 	if entries, err := os.ReadDir(filepath.Join(dir, DescriptorsDir)); err == nil {
 		for _, e := range entries {
 			if strings.EqualFold(filepath.Ext(e.Name()), ".yaml") {
@@ -1011,7 +1087,7 @@ func configLinks(dir string) (files []string, shown map[string]string) {
 		}
 		switch {
 		case name == ".":
-			// dir is passed itself, and the runner follows it.
+			// dir is passed itself, and Forager follows it.
 		case err != nil || target == "":
 			add(path)
 		case !inside(target):
@@ -1070,10 +1146,10 @@ func followLinks(path string) (links []string, target string, err error) {
 	return links, done, nil
 }
 
-// linkPlace is the link at path as the runner can compare it: its directory, and its
-// name as a pattern that matches that one name. The runner resolves each of its files
+// linkPlace is the link at path as Forager can compare it: its directory, and its
+// name as a pattern that matches that one name. Forager resolves each of its files
 // through links, and the link's own path to where it leads, which leaves the link
-// unguarded. The pattern names no file, so the runner compares it by name: a mount of
+// unguarded. The pattern names no file, so Forager compares it by name: a mount of
 // the link's directory, or of one above it, contains it, and one beside the link in that
 // directory does not.
 func linkPlace(path string) string {
@@ -1099,18 +1175,18 @@ func linkPlace(path string) string {
 	return dir + b.String()
 }
 
-// The runner's refusals of the places a walled run lists: one that is, contains or lies
-// inside one of the runner's files; one inside another of the other mode; one reached
+// Forager's refusals of the places a walled run lists: one that is, contains or lies
+// inside one of Forager's files; one inside another of the other mode; one reached
 // through a link a walled agent can change that leads out of the place holding it; one
 // another walled run, still going or with its containers left, could change, or that
 // holds one of its places; and a run that cannot ask the container engine whether an
 // earlier walled run is still going.
 const (
-	codeMountContainsRunnerFiles = "mount_contains_runner_files"
-	codeMountModeConflict        = "mount_mode_conflict"
-	codeMountThroughLink         = "mount_through_link"
-	codeMountSharedWithRun       = "mount_shared_with_run"
-	codeEngineUnreachable        = "engine_unreachable"
+	codeMountContainsForagerFiles = refusal.MountContainsForagerFiles
+	codeMountModeConflict         = "mount_mode_conflict"
+	codeMountThroughLink          = "mount_through_link"
+	codeMountSharedWithRun        = "mount_shared_with_run"
+	codeEngineUnreachable         = "engine_unreachable"
 )
 
 // stateDir is qory's state directory, absolute: $XDG_STATE_HOME/qory, else
@@ -1158,12 +1234,12 @@ func makeRunsDir(state, runs string) error {
 
 // passedVariables is the variables named, by name, with their values in this process's
 // environment, NAME=value; a name the environment does not set passes nothing. A name
-// of the runner's own is refused.
+// of Forager's own is refused.
 func passedVariables(names []string) ([]string, error) {
 	var out []string
 	for _, n := range names {
-		if config.RunnersOwn(n) {
-			return nil, input(fmt.Errorf("--env %s: the variable is the runner's own and never the session's", n))
+		if config.ForagersOwn(n) {
+			return nil, input(fmt.Errorf("--env %s: the variable is Forager's own and never the agent's", n))
 		}
 		if v, ok := os.LookupEnv(n); ok {
 			out = withEnv(out, map[string]string{n: v})
@@ -1176,12 +1252,12 @@ func passedVariables(names []string) ([]string, error) {
 // the relay and the hook forwarder, and qory image check runs as the probe:
 // wall.helper, else on Linux exe, the binary running. Elsewhere this binary cannot run in
 // a container, and a section without wall.helper is an input error.
-func wallHelper(section config.RunnerWall, exe string) (string, error) {
+func wallHelper(section config.ForagerWall, exe string) (string, error) {
 	if section.Helper != "" {
 		return section.Helper, nil
 	}
 	if runtime.GOOS != "linux" {
-		return "", input(fmt.Errorf("the container runs qory's Linux build as its relay, its hook forwarder and what starts an image's own Docker, and this is the %s build; set wall.helper in %s to the Linux one", runtime.GOOS, config.RunnerFileName))
+		return "", input(fmt.Errorf("the container runs qory's Linux build as its relay, its hook forwarder and what starts an image's own Docker, and this is the %s build; set wall.helper in %s to the Linux one", runtime.GOOS, config.ForagerFileName))
 	}
 	return exe, nil
 }
@@ -1194,10 +1270,10 @@ func newResend() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "resend <run-id>",
 		Short: "Send a finished run's record to the server again",
-		Long: `Send a finished run's record to the server in ` + config.RunnerFileName + ` again: after a runner that
+		Long: `Send a finished run's record to the server in ` + config.ForagerFileName + ` again: after a Forager process that
 died, or a server that was away. A job runs it last, whatever happened before.
 
-Only what the server has not accepted is sent. A record the runner left open is closed
+Only what the server has not accepted is sent. A record Forager left open is closed
 first, and the containers and networks its wall left are removed. A run that is still
 running is refused.
 
@@ -1233,45 +1309,50 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 			if err != nil {
 				return err
 			}
-			r := conf.Runner
+			r := conf.Forager
 			if r == nil || r.Server == nil {
-				return input(fmt.Errorf("%s defines no server to send the record to", config.RunnerFileName))
+				return input(fmt.Errorf("%s defines no server to send the record to", config.ForagerFileName))
 			}
 			id, err := identify(r, cmd.ErrOrStderr(), "run resend", fdKey)
 			if err != nil {
 				return err
 			}
-			spec := session.ResendSpec{
-				Dir:           filepath.Join(runs, args[0]),
-				Server:        sessionServer(r.Server),
-				AccessKey:     id.key.key,
-				InstanceID:    id.instanceID,
-				InstanceName:  id.instanceName,
-				RunnerVersion: build().title(),
-				Report:        func(line string) { fmt.Fprintln(cmd.ErrOrStderr(), "qory run resend:", line) },
+			server := gatewayServer(r.Server)
+			server.AccessKey, server.InstanceID, server.InstanceName = id.key.key, id.instanceID, id.instanceName
+			spec := gateway.ResendConfig{
+				Dir:     filepath.Join(runs, args[0]),
+				Server:  server,
+				Version: build().title(),
+				Report:  func(line string) { fmt.Fprintln(cmd.ErrOrStderr(), "qory run resend:", line) },
 			}
-			if r.Wall != nil {
-				spec.Wall = &wall.Docker{Command: r.Wall.Command}
-			}
-			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			sig, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			ctx, cancel := context.WithTimeout(ctx, wait)
+			ctx, cancel := context.WithTimeout(sig, wait)
 			defer cancel()
-			res, err := session.Resend(ctx, spec)
+			res, err := gateway.Resend(ctx, spec)
 			switch {
-			case errors.Is(err, session.ErrRunning):
+			case errors.Is(err, gateway.ErrRunning):
 				return input(fmt.Errorf("the run %s is running", args[0]))
 			case errors.Is(err, os.ErrNotExist):
 				return input(fmt.Errorf("no run %s is recorded in this checkout", args[0]))
 			case err != nil:
 				return explain(err, id)
 			}
-			u := ui.New(cmd.ErrOrStderr())
-			if res.Closed {
-				u.Success("the record had no exit and was closed with the reason runner_lost")
+			// The record is no longer held, so the run's containers are no one's: the wall
+			// removes what it left, within the wait the signals allow, not the one the
+			// delivery may have used up.
+			reaped := 0
+			if r.Wall != nil {
+				if reaped, err = (&wall.Docker{Command: r.Wall.Command}).Reap(sig, args[0]); err != nil {
+					spec.Report("removing what the wall left: " + err.Error())
+				}
 			}
-			if res.Reaped > 0 {
-				u.Success("removed %d containers and networks the run left", res.Reaped)
+			u := ui.New(cmd.ErrOrStderr())
+			if res.Completed {
+				u.Success("the record had no exit and was closed with the reason gateway_lost")
+			}
+			if reaped > 0 {
+				u.Success("removed %d containers and networks the run left", reaped)
 			}
 			if res.Undelivered > 0 {
 				u.Fail(fmt.Errorf("%d events were accepted and %d were not; %s/undelivered contains them", res.Sent, res.Undelivered, ui.Short(spec.Dir, at.root)))
@@ -1313,7 +1394,7 @@ const inWall = "qory.dev/in-wall"
 
 // newRelay builds the hidden relay verb, what the wall starts in the relay's container
 // from qory's own binary: it listens on a port for each forward, port=host:port, and
-// copies every connection to that address, the runner's proxy. It is the one peer the
+// copies every connection to that address, the gateway's proxy. It is the one peer the
 // runtime's container reaches.
 func newRelay() *cobra.Command {
 	return &cobra.Command{

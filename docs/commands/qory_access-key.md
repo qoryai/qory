@@ -7,7 +7,7 @@ Make this machine's access key for its server
 Make the access key every run signs its requests to the server with.
 
 The key is an Ed25519 key. Its secret stays on this machine, in access-key-secret beside
-runner.yaml in ~/.config/qory, and the server keeps only its public key. A key is
+forager.yaml in ~/.config/qory, and the server keeps only its public key. A key is
 never rotated: a new one is enrolled, and the old one revoked.
 
   enrol   enrol a new key with a code from the server

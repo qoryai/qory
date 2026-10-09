@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qoryai/runner/contracts"
+	"github.com/qoryai/forager/contracts"
 )
 
 // TestReadManifestReadsEgress reads the egress key: the hosts sorted and each once, an
@@ -52,10 +52,10 @@ func TestReadManifestRefusesEgress(t *testing.T) {
 	}
 }
 
-// TestEgressGrammarIsTheRunnersOnce keeps the one definition: the pattern the module
-// schema gives a declared host, and the one this package matches, are the runner
+// TestEgressGrammarIsTheForagersOnce keeps the one definition: the pattern the module
+// schema gives a declared host, and the one this package matches, are the Forager
 // contract's pattern for a policy's allow entry, byte for byte.
-func TestEgressGrammarIsTheRunnersOnce(t *testing.T) {
+func TestEgressGrammarIsTheForagersOnce(t *testing.T) {
 	policy, err := contracts.Document("policy.schema.json")
 	if err != nil {
 		t.Fatal(err)
@@ -71,9 +71,9 @@ func TestEgressGrammarIsTheRunnersOnce(t *testing.T) {
 	}
 	got := schema["properties"].(map[string]any)["egress"].(map[string]any)["items"].(map[string]any)["pattern"].(string)
 	if got != want {
-		t.Errorf("module.schema.json egress pattern\n%s\nrunner policy allow pattern\n%s", got, want)
+		t.Errorf("module.schema.json egress pattern\n%s\nForager policy allow pattern\n%s", got, want)
 	}
 	if EgressHost.String() != want {
-		t.Errorf("EgressHost\n%s\nrunner policy allow pattern\n%s", EgressHost.String(), want)
+		t.Errorf("EgressHost\n%s\nForager policy allow pattern\n%s", EgressHost.String(), want)
 	}
 }

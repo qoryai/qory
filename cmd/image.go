@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/qoryai/runner/runtimes/catalog"
+	"github.com/qoryai/forager/session/runtimes/catalog"
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/config"
@@ -47,7 +47,7 @@ func newImageCheck() *cobra.Command {
 		Use:   "check [image...]",
 		Short: "Check that an image has what the wall needs of it",
 		Long: `Check that an image has what the wall needs of it. With no image, check wall.image
-of ` + config.RunnerFileName + `. A name of wall.images is read as that image's ref first, as
+of ` + config.ForagerFileName + `. A name of wall.images is read as that image's ref first, as
 qory run reads --image.
 
 From outside, it reads the image the engine holds: its platform, HOME in its
@@ -58,8 +58,8 @@ network, and qory's Linux build checks from inside:
 
   - HOME is a directory that user writes in
   - the system's authorities are where the wall reads them
-  - /bin/sh is there, for the runtime's hooks and the runner's API-key approval
-  - claude is the version the runner's descriptor is written against
+  - /bin/sh is there, for the runtime's hooks and the session's API-key approval
+  - claude is the version Forager's descriptor is written against
   - git and gh run
   - dockerd, for a Docker of the agent's own, and what it runs
 
@@ -71,25 +71,25 @@ The exit status is 0 when every image passes, and 1 when one fails.
 --verbose adds nothing here.
 
 More: https://github.com/qoryai/qory/blob/main/docs/run.md#qorys-images`,
-		Example: `  qory image check                                # wall.image of ` + config.RunnerFileName + `
+		Example: `  qory image check                                # wall.image of ` + config.ForagerFileName + `
   qory image check qory-agent
   qory image check go-docker                      # an image wall.images defines
   qory image check my-agent:1 my-agent-docker:1`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			stop := buzzing(cmd)
 			defer stop()
-			r, err := config.LoadRunner()
+			r, err := config.LoadForager()
 			if err != nil {
 				return input(err)
 			}
-			var section config.RunnerWall
+			var section config.ForagerWall
 			if r != nil && r.Wall != nil {
 				section = *r.Wall
 			}
 			names := args
 			if len(names) == 0 {
 				if section.Image == "" {
-					return input(fmt.Errorf("name an image to check, or set wall.image in %s", config.RunnerFileName))
+					return input(fmt.Errorf("name an image to check, or set wall.image in %s", config.ForagerFileName))
 				}
 				names = []string{section.Image}
 			}
@@ -128,9 +128,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#qorys-images`,
 
 			u := ui.New(cmd.OutOrStdout())
 			u.Title("qory image check", "engine "+platform)
-			claude := rt.Version() + ", the runner's descriptor's"
+			claude := rt.Version() + ", Forager's descriptor's"
 			if rt.Version() == "" {
-				claude = "any version; the runner's descriptor names none"
+				claude = "any version; Forager's descriptor names none"
 			}
 			u.Fields([][2]string{{"probe", ui.Short(helper, "") + ", " + arch}, {"claude", claude}})
 			var failed []string
@@ -180,7 +180,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#qorys-images`,
 
 // imageRef is the reference qory image check reads name as: the ref of the image
 // wall.images defines by that name, as qory run reads --image and wall.image, else name.
-func imageRef(section config.RunnerWall, name string) string {
+func imageRef(section config.ForagerWall, name string) string {
 	for _, i := range section.Images {
 		if i.Name == name {
 			return i.Ref

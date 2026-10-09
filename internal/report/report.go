@@ -271,7 +271,7 @@ func (r *Report) AddEgress(name string, hosts []string) {
 	}
 }
 
-// Hosts are the declared hosts alone, sorted, for a runner: nil when the report has
+// Hosts are the declared hosts alone, sorted, for Forager: nil when the report has
 // no declaration, empty when it declares nothing.
 func (r Report) Hosts() []string {
 	if r.Egress == nil {
