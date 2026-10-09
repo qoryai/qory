@@ -334,7 +334,8 @@ func stopGateway(t *testing.T, done <-chan error) error {
 // says it stops, says it stopped, and exits 0.
 func TestGatewayServesLoopbackUntilSIGTERM(t *testing.T) {
 	emptyDir(t)
-	serverFile(t, newFakeServer(t, ""), "  listen: 0.0.0.0:8443\n"+runCredentials)
+	srv := newFakeServer(t, "")
+	serverFile(t, srv, "  listen: 0.0.0.0:8443\n"+runCredentials)
 	writeIssuerFiles(t)
 	addr, out, done := startGateway(t, "--listen", "127.0.0.1:0")
 	if host, port, _ := net.SplitHostPort(addr); host != "127.0.0.1" || port == "0" || port == "8443" {
@@ -357,6 +358,7 @@ func TestGatewayServesLoopbackUntilSIGTERM(t *testing.T) {
 	if i, j := strings.Index(text, "qory gateway: stopping"), strings.Index(text, "the gateway stopped"); i < 0 || j < i {
 		t.Errorf("the stopping lines are out of order:\n%s", text)
 	}
+	lacks(t, text, issuerSecret, srv.key.Secret()[4:])
 	if _, err := os.Stat(filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "gateway", "authority", "ca.pem")); err != nil {
 		t.Errorf("the gateway's certificate authority is not in qory's state directory: %v", err)
 	}
@@ -368,9 +370,10 @@ func TestGatewayServesLoopbackUntilSIGTERM(t *testing.T) {
 // certificate tool keeps one: it speaks TLS 1.3 with that certificate.
 func TestGatewayServesTLSOffLoopback(t *testing.T) {
 	emptyDir(t)
-	serverFile(t, newFakeServer(t, ""), "  listen: 0.0.0.0:0\n  tls:\n    certificate: gateway.pem\n    key: gateway-key.pem\n"+runCredentials)
+	srv := newFakeServer(t, "")
+	serverFile(t, srv, "  listen: 0.0.0.0:0\n  tls:\n    certificate: gateway.pem\n    key: gateway-key.pem\n"+runCredentials)
 	writeIssuerFiles(t)
-	writeCertificate(t)
+	key := writeCertificate(t)
 	dir := string(configDir())
 	archive := filepath.Join(dir, "archive")
 	if err := os.Mkdir(archive, 0o700); err != nil {
@@ -403,6 +406,7 @@ func TestGatewayServesTLSOffLoopback(t *testing.T) {
 	if err := stopGateway(t, done); err != nil {
 		t.Fatalf("qory gateway ended with %v\n%s", err, out)
 	}
+	lacks(t, out.String(), issuerSecret, strings.Split(key, "\n")[1], srv.key.Secret()[4:])
 }
 
 // TestConfigListsTheGatewaysSettings is qory config with the gateway's address, its TLS
