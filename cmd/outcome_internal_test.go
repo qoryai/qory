@@ -163,8 +163,9 @@ func TestRunEndedSaysTheExpiryBySource(t *testing.T) {
 
 // TestGatewayEndedResendSaysTheOutcome is qory run resend's one line of a run that had
 // ended at the gateway: its outcome, and its reason in the words of qory run, or the
-// starter's with spaces; a run whose end nothing says keeps the line that names the
-// gateway's code.
+// starter's with spaces; a run whose end nothing records ends as the code of the
+// gateway's 410 says, run_closed for a code Forager does not end a run with. No line
+// says the gateway ended the run.
 func TestGatewayEndedResendSaysTheOutcome(t *testing.T) {
 	const tail = ", so no more of its events are taken; they stay in runs/x"
 	for _, c := range []struct {
@@ -184,10 +185,20 @@ func TestGatewayEndedResendSaysTheOutcome(t *testing.T) {
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "failed", Reason: event.ReasonRunClosed}, "the run has ended (failed: the gateway stopped during the run)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "failed", Reason: "run_ended_at_issuer"}, "the run has ended (cancelled)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "failed", Reason: "issuer_unreachable"}, "the run has ended (failed: its run credential could not be checked)" + tail},
-		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonRunClosed}, "the gateway ended the run with the reason run_closed, so it takes no more of this run's events; they stay in runs/x"},
+		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonRunClosed}, "the run has ended (failed: the gateway stopped during the run)" + tail},
+		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonStopped}, "the run has ended (cancelled)" + tail},
+		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonCredentialExpired}, "the run has ended (cancelled: the run credential expired)" + tail},
+		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonSessionLost}, "the run has ended (lost: it lost contact with the gateway for 1m30s)" + tail},
+		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonBatchRefused}, "the run has ended (failed: its events could not be recorded)" + tail},
+		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonCredentialCheckInvalid}, "the run has ended (failed: its run credential could not be checked)" + tail},
+		{session.ResendResult{RunClosed: true, ClosedReason: "another_code"}, "the run has ended (failed: the gateway stopped during the run)" + tail},
 	} {
-		if got := gatewayEndedResend(c.res, "runs/x").Error(); got != c.want {
+		got := gatewayEndedResend(c.res, "runs/x").Error()
+		if got != c.want {
 			t.Errorf("%+v: %q, want %q", c.res, got, c.want)
+		}
+		if strings.Contains(got, "the gateway ended the run") || strings.Contains(got, "issuer") {
+			t.Errorf("%+v: %q", c.res, got)
 		}
 	}
 }

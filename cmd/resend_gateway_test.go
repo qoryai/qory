@@ -25,7 +25,6 @@ import (
 const (
 	resendExpired  = "the run credential expired at %s, so no more of this run's events are taken; they stay in %s"
 	resendHasEnded = "the run has ended (%s), so no more of its events are taken; they stay in %s"
-	resendEnded    = "the gateway ended the run with the reason %s, so it takes no more of this run's events; they stay in %s"
 	resendRefused  = "the gateway refused this run credential"
 	resendNoSecret = "this run's record has no run-secret file, which the gateway needs to accept its events; they stay in %s"
 	resendDiffers  = "the gateway refused this run credential: it differs from the one the run started with"
@@ -312,7 +311,7 @@ func gatewayRecord(t *testing.T, root, id string) string {
 // reason, the starter's with no outcome given, with an outcome and a reason, a silent
 // session, an expiry, a batch the gateway refuses, which ends the run, and a run
 // credential that could not be checked; a run_closed of a record whose end nothing
-// says, by its code; no answer that accepts within --wait; every batch accepted; and the
+// records, as qory run says run_closed; no answer that accepts within --wait; every batch accepted; and the
 // discovery's 401 to a run credential with no exp qory can read. Each run ended or
 // refused is exit 1, the events kept; what is accepted is exit 0. The run credential
 // goes to the gateway on every request, and nowhere else. No line says "issuer".
@@ -349,7 +348,7 @@ func TestResendThroughAGatewaySaysWhatItAnswered(t *testing.T) {
 		{name: "a batch refused", status: http.StatusBadRequest, body: `{"error":"invalid_request","from":"gateway"}`,
 			want: ended("failed: its events could not be recorded"), code: 1},
 		{name: "run_closed", status: http.StatusGone, body: `{"error":"run_closed","from":"gateway"}`,
-			want: func(s string) string { return fmt.Sprintf(resendEnded, "run_closed", s) }, code: 1},
+			want: ended("failed: the gateway stopped during the run"), code: 1},
 		{name: "credential_check_unreachable", status: http.StatusGone, body: `{"error":"credential_check_unreachable","from":"gateway"}`,
 			want: ended("failed: its run credential could not be checked"), code: 1},
 		{name: "credential_check_invalid", status: http.StatusGone, body: `{"error":"credential_check_invalid","from":"gateway","state":"failed","reason":"credential_check_invalid"}`,
@@ -373,7 +372,7 @@ func TestResendThroughAGatewaySaysWhatItAnswered(t *testing.T) {
 		if cmd.ExitCode(err) != c.code || !strings.Contains(failed(out, err), want) {
 			t.Errorf("%s: %v (exit %d), want %q, exit %d\n%s", c.name, err, cmd.ExitCode(err), want, c.code, out)
 		}
-		lacks(t, failed(out, err), credential, "issuer")
+		lacks(t, failed(out, err), credential, "issuer", "the gateway ended the run")
 		link.mu.Lock()
 		if len(link.bearers) == 0 {
 			t.Errorf("%s: no request reached the gateway", c.name)

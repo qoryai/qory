@@ -709,12 +709,16 @@ const runSecretFile = "run-secret"
 
 // gatewayEndedResend says that the run had ended when its events were sent again, and
 // how it ended, by the state and the reason of its end ([outcomeOf]). The events stay in
-// the run directory, shown. A run whose end nothing says, a 410 run_closed of a record
-// with no exit, is said by its code.
+// the run directory, shown. A run whose end nothing records, a 410 of a record with no
+// exit, ends as the code of the gateway's 410 says, qory run's outcome and words for it;
+// a 410 with a code Forager does not end a run with is run_closed, as Forager reads it.
 func gatewayEndedResend(res session.ResendResult, shown string) error {
 	o := outcomeOf(res.State, res.Reason)
 	if !o.known {
-		return fmt.Errorf("the gateway ended the run with the reason %s, so it takes no more of this run's events; they stay in %s", res.ClosedReason, shown)
+		o = outcomeOf("", res.ClosedReason)
+	}
+	if !o.known {
+		o = outcomeOf("", event.ReasonRunClosed)
 	}
 	ended := o.word()
 	if o.reason != "" && !o.noOutcome {
