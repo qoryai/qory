@@ -22,6 +22,7 @@ import (
 
 	"github.com/charmbracelet/x/term"
 	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/forager/gateway"
 	"github.com/qoryai/forager/refusal"
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/session/runtimes/catalog"
@@ -138,14 +139,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return err
 			}
 			user := config.UserDir()
-			var pol *session.Policy
-			var server *session.Server
+			var pol *gateway.Policy
+			var server *gateway.Server
 			if r := conf.Forager; r != nil {
 				if r.Egress != nil {
-					pol = &session.Policy{Version: 1, Egress: session.PolicyEgress{Mode: r.Egress.Mode, Allow: r.Egress.Allow, Deny: r.Egress.Deny}}
+					pol = &gateway.Policy{Version: 1, Egress: gateway.PolicyEgress{Mode: r.Egress.Mode, Allow: r.Egress.Allow, Deny: r.Egress.Deny}}
 				}
 				if r.Server != nil {
-					server = sessionServer(r.Server)
+					server = gatewayServer(r.Server)
 				}
 			}
 			if policyFile != "" {
@@ -221,9 +222,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				Stdin:          cmd.InOrStdin(),
 				Stdout:         cmd.OutOrStdout(),
 				Stderr:         stderr,
-				Policy:         pol,
-				Server:         server,
-				Local:          local,
 				Declared:       rep.Hosts(),
 				RunsDir:        runs,
 				Forwarder:      append([]string{exe}, forwardArgs...),
@@ -238,8 +236,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if spec.RunID == "" {
 				spec.RunID = newRunID()
 			}
+			// The gateway is the node toward the server: it signs every request with the
+			// access key. --local runs with the files alone.
+			gw := gateway.Config{Policy: pol, Version: build().title(), RunDir: func(id string) string { return filepath.Join(spec.RunsDir, id) }}
 			if id != nil {
-				spec.AccessKey, spec.InstanceID, spec.InstanceName = id.key.key, id.instanceID, id.instanceName
+				gw.Server = server
+				gw.Server.AccessKey, gw.Server.InstanceID, gw.Server.InstanceName = id.key.key, id.instanceID, id.instanceName
 			}
 			selected := ""
 			if pol != nil {
@@ -277,7 +279,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			defer runLock.Release()
 			if id != nil {
-				spec.Discovered = discovered(machineDir(), id, walled, stderr)
+				gw.Discovered = discovered(machineDir(), id, walled, stderr)
 			}
 			apiary := ""
 			if server != nil {
@@ -297,11 +299,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					}
 				}
 				for _, c := range r.Credentials {
-					def := session.Credential{Name: c.Name, Env: c.Env, File: c.File, Adapter: c.Adapter, Argument: c.Argument, Hosts: c.Hosts, Scheme: c.Scheme, Username: c.Username, Header: c.Header, Paths: c.Paths, Placeholders: c.Placeholders}
+					def := gateway.Credential{Name: c.Name, Env: c.Env, File: c.File, Adapter: c.Adapter, Argument: c.Argument, Hosts: c.Hosts, Scheme: c.Scheme, Username: c.Username, Header: c.Header, Paths: c.Paths, Placeholders: c.Placeholders}
 					if err := def.Check(); err != nil {
 						return input(fmt.Errorf("%s: %w", config.ForagerFileName, err))
 					}
-					spec.Credentials = append(spec.Credentials, def)
+					gw.Credentials = append(gw.Credentials, def)
 				}
 			}
 			// The files the settings name are known once the integrations are described.
@@ -309,7 +311,22 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			spec.ForagerFiles = own.files
 			record := filepath.Join(spec.RunsDir, spec.RunID)
 			u := ui.New(stderr)
+			// One gateway for the run, on this machine: the session speaks to it over its
+			// local link, whose secret stays in this process's memory.
+			gw.Report = func(line string) { fmt.Fprintln(stderr, "qory run:", line) }
+			g, err := gateway.Start(ctx, gw)
+			if err != nil {
+				return explain(err, id)
+			}
+			defer g.Close(ctx)
+			spec.Gateway = session.LocalGateway(g.LocalLink())
 			res, err := session.Run(ctx, spec)
+			// The gateway delivers the run's last events before qory says how the run
+			// ended, and before qory exits.
+			delivery, closeErr := g.Close(ctx)
+			if closeErr != nil {
+				gw.Report(closeErr.Error())
+			}
 			if err != nil {
 				if m := mountRefused(err, passed{foragerDir: foragerDir, stateDir: state, spec: &spec, root: at.root, own: own}); m != nil {
 					err = m
@@ -329,10 +346,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return reported(err)
 			}
 			defer fmt.Fprintln(stderr, "qory run: the record is in", record)
-			if res.Undelivered > 0 {
-				u.Fail(fmt.Errorf("%d events did not reach the server; %s/undelivered contains them", res.Undelivered, ui.Short(res.Dir, at.root)))
+			if delivery.Undelivered > 0 {
+				u.Fail(fmt.Errorf("%d events did not reach the server; %s/undelivered contains them", delivery.Undelivered, ui.Short(res.Dir, at.root)))
 			}
 			switch {
+			case res.RunClosed && res.ClosedBy == accesskey.FromGateway:
+				return closedByGateway()
 			case res.RunClosed:
 				u.Fail(fmt.Errorf("the server closed the run, and %s was stopped", name))
 				return reported(&exitError{code: 1})
@@ -384,7 +403,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 // run and is not described. A program the run may write is refused: one in the
 // checkout, in the working directory when that is inside the checkout, or in a
 // read-write mount of the wall's container.
-func expansion(r *config.Forager, pol *session.Policy, fromServer bool, root, cwd string, mounts []wall.Mount) config.Expansion {
+func expansion(r *config.Forager, pol *gateway.Policy, fromServer bool, root, cwd string, mounts []wall.Mount) config.Expansion {
 	e := config.Expansion{Workspace: []string{root}}
 	if cwd != root && reallyWithin(root, cwd) {
 		e.Workspace = append(e.Workspace, cwd)
@@ -434,7 +453,7 @@ const exitTimeout = 124
 // runPolicy reads one run's own policy and puts it under the machine's. The file is
 // kept outside the checkout, as forager.yaml is: inside, the agent it constrains
 // could write it.
-func runPolicy(file, root string, machine *session.Policy) (*session.Policy, error) {
+func runPolicy(file, root string, machine *gateway.Policy) (*gateway.Policy, error) {
 	abs, err := filepath.Abs(file)
 	if err != nil {
 		return nil, input(err)
@@ -446,7 +465,7 @@ func runPolicy(file, root string, machine *session.Policy) (*session.Policy, err
 	if err != nil {
 		return nil, input(err)
 	}
-	p, err := session.ReadPolicy(filepath.Base(abs), b)
+	p, err := gateway.ReadPolicy(filepath.Base(abs), b)
 	if err != nil {
 		return nil, input(err)
 	}
@@ -1242,37 +1261,42 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 			if err != nil {
 				return err
 			}
-			spec := session.ResendSpec{
-				Dir:            filepath.Join(runs, args[0]),
-				Server:         sessionServer(r.Server),
-				AccessKey:      id.key.key,
-				InstanceID:     id.instanceID,
-				InstanceName:   id.instanceName,
-				ForagerVersion: build().title(),
-				Report:         func(line string) { fmt.Fprintln(cmd.ErrOrStderr(), "qory run resend:", line) },
+			server := gatewayServer(r.Server)
+			server.AccessKey, server.InstanceID, server.InstanceName = id.key.key, id.instanceID, id.instanceName
+			spec := gateway.ResendConfig{
+				Dir:     filepath.Join(runs, args[0]),
+				Server:  server,
+				Version: build().title(),
+				Report:  func(line string) { fmt.Fprintln(cmd.ErrOrStderr(), "qory run resend:", line) },
 			}
-			if r.Wall != nil {
-				spec.Wall = &wall.Docker{Command: r.Wall.Command}
-			}
-			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			sig, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			ctx, cancel := context.WithTimeout(ctx, wait)
+			ctx, cancel := context.WithTimeout(sig, wait)
 			defer cancel()
-			res, err := session.Resend(ctx, spec)
+			res, err := gateway.Resend(ctx, spec)
 			switch {
-			case errors.Is(err, session.ErrRunning):
+			case errors.Is(err, gateway.ErrRunning):
 				return input(fmt.Errorf("the run %s is running", args[0]))
 			case errors.Is(err, os.ErrNotExist):
 				return input(fmt.Errorf("no run %s is recorded in this checkout", args[0]))
 			case err != nil:
 				return explain(err, id)
 			}
+			// The record is no longer held, so the run's containers are no one's: the wall
+			// removes what it left, within the wait the signals allow, not the one the
+			// delivery may have used up.
+			reaped := 0
+			if r.Wall != nil {
+				if reaped, err = (&wall.Docker{Command: r.Wall.Command}).Reap(sig, args[0]); err != nil {
+					spec.Report("removing what the wall left: " + err.Error())
+				}
+			}
 			u := ui.New(cmd.ErrOrStderr())
-			if res.Closed {
+			if res.Completed {
 				u.Success("the record had no exit and was closed with the reason gateway_lost")
 			}
-			if res.Reaped > 0 {
-				u.Success("removed %d containers and networks the run left", res.Reaped)
+			if reaped > 0 {
+				u.Success("removed %d containers and networks the run left", reaped)
 			}
 			if res.Undelivered > 0 {
 				u.Fail(fmt.Errorf("%d events were accepted and %d were not; %s/undelivered contains them", res.Sent, res.Undelivered, ui.Short(spec.Dir, at.root)))

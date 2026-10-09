@@ -123,6 +123,21 @@ func tempDir(t *testing.T) string {
 	return dir
 }
 
+// shortTempDir is a temporary directory, removed after the test, whose path leaves room
+// for a Unix socket's below it: t.TempDir's can be too long on macOS.
+func shortTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "q")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	if dir, err = filepath.EvalSymlinks(dir); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	c := exec.Command("git", args...)

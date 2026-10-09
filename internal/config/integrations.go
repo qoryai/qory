@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/qoryai/forager/session"
+	"github.com/qoryai/forager/gateway"
 	"gopkg.in/yaml.v3"
 
 	"github.com/qoryai/qory/internal/integration"
@@ -245,7 +245,7 @@ func (r *Forager) Expand(ctx context.Context, e Expansion) error {
 			continue
 		}
 		c := ForagerCredential{Name: in.Key, Adapter: integration.CredentialAdapter(found, in.Settings), Argument: d.Credential.Argument, Hosts: d.Credential.Hosts, Integration: in.Key}
-		if err := (session.Credential{Name: c.Name, Adapter: c.Adapter, Argument: c.Argument, Hosts: c.Hosts}).Check(); err != nil {
+		if err := (gateway.Credential{Name: c.Name, Adapter: c.Adapter, Argument: c.Argument, Hosts: c.Hosts}).Check(); err != nil {
 			return fail("%v", err)
 		}
 		defined = append(defined, c)
