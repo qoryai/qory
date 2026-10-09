@@ -182,6 +182,10 @@ func unhex(c byte) int {
 	return -1
 }
 
+// urlOrigin is u's scheme, host and port, as Forager's RemoteGateway.String names a
+// gateway: never its user information, path, query or fragment.
+func urlOrigin(u *url.URL) string { return u.Scheme + "://" + u.Host }
+
 // gatewayURLWrong says what is wrong with v as a gateway's URL, as Forager's session
 // takes it: https, a host and an optional port, and no user information, path other
 // than "/", query or fragment; empty when nothing is. What it says never holds more of
@@ -195,7 +199,7 @@ func gatewayURLWrong(v string) string {
 	if u.Hostname() == "" {
 		return "has no host"
 	}
-	origin := u.Scheme + "://" + u.Host
+	origin := urlOrigin(u)
 	switch {
 	case u.Scheme != "https":
 		return "for " + origin + " is not https"
@@ -814,9 +818,6 @@ func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *y
 	if rawURL == nil || *rawURL == "" {
 		return nil, fmt.Errorf("%s: gateway.server.url is required", path)
 	}
-	if accesskey.ContainsSecret(*rawURL) {
-		return nil, fmt.Errorf("%s: gateway.server.url: %w", path, accesskey.ErrSecretInDocument)
-	}
 	if err := CheckServerURL(*rawURL); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
@@ -878,23 +879,37 @@ func checkPin(p accesskey.Pin) error {
 	return nil
 }
 
+// serverURLShape ends a refusal of gateway.server.url: what it takes.
+const serverURLShape = "an https URL of a host and an optional port, or an http one to this machine, with nothing after"
+
 // CheckServerURL refuses a server URL that is not https, or http to this machine, with
-// a scheme and a host alone.
+// a scheme and a host alone. An access key secret in it, as written, percent-encoded or
+// in its host, is refused first; any other refusal names the part that is wrong and
+// holds no more of the URL than its scheme, its host and its port.
 func CheckServerURL(raw string) error {
-	if accesskey.ContainsSecret(raw) {
+	if urlHoldsSecret(raw) {
 		return fmt.Errorf("gateway.server.url: %w", accesskey.ErrSecretInDocument)
 	}
 	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" || u.Opaque != "" || (u.Scheme != "https" && u.Scheme != "http") {
-		return fmt.Errorf("gateway.server.url %q is not an https URL, or an http URL to this machine", raw)
+	if err != nil || u.Scheme == "" || u.Host == "" || u.Opaque != "" {
+		return fmt.Errorf("gateway.server.url is not a URL: %s", serverURLShape)
 	}
-	if u.Scheme == "http" && !loopback(u.Hostname()) {
-		return fmt.Errorf("gateway.server.url %q is http to a host that is not this machine; a server elsewhere is reached over https", raw)
+	var wrong string
+	switch {
+	case u.Scheme != "https" && u.Scheme != "http":
+		wrong = "is not https or http"
+	case u.Scheme == "http" && !loopback(u.Hostname()):
+		wrong = "is http to a host that is not this machine"
+	case u.User != nil:
+		wrong = "holds user information"
+	case u.Path != "":
+		wrong = "has a path"
+	case u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.HasSuffix(raw, "#"):
+		wrong = "has a query or a fragment"
+	default:
+		return nil
 	}
-	if u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.User != nil || strings.HasSuffix(raw, "#") {
-		return fmt.Errorf("gateway.server.url %q is more than a scheme and a host; the server defines its own paths", raw)
-	}
-	return nil
+	return fmt.Errorf("gateway.server.url for %s %s: %s", urlOrigin(u), wrong, serverURLShape)
 }
 
 // credentialFile is one entry of the credentials section as written.
