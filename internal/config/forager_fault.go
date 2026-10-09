@@ -220,7 +220,7 @@ func (w *walk) fault(n *yaml.Node, t reflect.Type, key string) *fault {
 		if n.Kind != yaml.MappingNode {
 			return keyFault(line, key, "is not a mapping")
 		}
-		return w.structFault(n, t, key)
+		return w.structFault(n, t, key, nil)
 	case reflect.Slice:
 		if null(n) {
 			return nil
@@ -254,10 +254,12 @@ func (w *walk) fault(n *yaml.Node, t reflect.Type, key string) *fault {
 	return nil
 }
 
-// structFault is [findFault] of a mapping read into the struct t: a key written twice,
-// as the decoder refuses it before it reads the mapping, then each key by its field, a
-// merge by the mappings it merges.
-func (w *walk) structFault(n *yaml.Node, t reflect.Type, key string) *fault {
+// structFault is [findFault] of a mapping read into the struct t, as the decoder reads
+// it: a key written twice, which it refuses before it reads the mapping; then each key
+// by its field; then the mappings a merge merges, after the mapping's own keys, whose
+// keys the mapping writes itself are left as the decoder leaves them. merged are the
+// keys the mappings that merge this one write, nil when none does.
+func (w *walk) structFault(n *yaml.Node, t reflect.Type, key string, merged map[string]bool) *fault {
 	if f := w.step(); f != nil {
 		return f
 	}
@@ -275,23 +277,21 @@ func (w *walk) structFault(n *yaml.Node, t reflect.Type, key string) *fault {
 	// decoder tells apart, such as an alias of a name and the name, is refused as one
 	// written twice.
 	written := map[string]int{}
+	var merge *yaml.Node
 	for i := 0; i+1 < len(n.Content); i += 2 {
+		if raw := n.Content[i]; raw.Kind == yaml.ScalarNode && raw.ShortTag() == "!!merge" {
+			merge = n.Content[i+1]
+			continue
+		}
 		k, v := followAliases(n.Content[i]), n.Content[i+1]
 		if k.Kind != yaml.ScalarNode {
 			return keyNotAName(n.Content[i].Line, key)
 		}
-		if k.ShortTag() == "!!merge" {
-			m := followAliases(v)
-			merged := []*yaml.Node{v}
-			if m.Kind == yaml.SequenceNode {
-				merged = m.Content
+		if merged != nil {
+			if merged[k.Value] {
+				continue
 			}
-			for _, each := range merged {
-				if f := w.mergeFault(each, t, key); f != nil {
-					return f
-				}
-			}
-			continue
+			merged[k.Value] = true
 		}
 		field, ok := fieldOf(t, k.Value)
 		if !ok {
@@ -305,6 +305,26 @@ func (w *walk) structFault(n *yaml.Node, t reflect.Type, key string) *fault {
 		}
 		written[k.Value] = n.Content[i].Line
 		if f := w.fault(v, field, join(key, k.Value)); f != nil {
+			return f
+		}
+	}
+	if merge == nil {
+		return nil
+	}
+	if merged == nil {
+		merged = map[string]bool{}
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			if k := followAliases(n.Content[i]); k.Kind == yaml.ScalarNode {
+				merged[k.Value] = true
+			}
+		}
+	}
+	each := []*yaml.Node{merge}
+	if merge.Kind == yaml.SequenceNode {
+		each = merge.Content
+	}
+	for _, m := range each {
+		if f := w.mergeFault(m, t, key, merged); f != nil {
 			return f
 		}
 	}
@@ -326,9 +346,10 @@ func keyNotAName(line int, key string) *fault {
 	return &fault{line, key + " has a key that is not a name"}
 }
 
-// mergeFault is [structFault] of a mapping that a mapping at key merges, as t. A
-// mapping that merges itself is a fault, as the decoder refuses it.
-func (w *walk) mergeFault(n *yaml.Node, t reflect.Type, key string) *fault {
+// mergeFault is [structFault] of a mapping that a mapping at key merges, as t, merged
+// the keys written before it. A mapping that merges itself is a fault, as the decoder
+// refuses it.
+func (w *walk) mergeFault(n *yaml.Node, t reflect.Type, key string, merged map[string]bool) *fault {
 	line := n.Line
 	w.aliased++
 	defer func() { w.aliased-- }()
@@ -341,7 +362,7 @@ func (w *walk) mergeFault(n *yaml.Node, t reflect.Type, key string) *fault {
 	}
 	w.merging[k] = true
 	defer delete(w.merging, k)
-	return w.structFault(n, t, key)
+	return w.structFault(n, t, key, merged)
 }
 
 // anyFault is [findFault] of a value read as any and then written as JSON: every value
