@@ -340,12 +340,17 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			spec.Report = lines.line
 			var res *session.Result
 			var delivery gateway.Delivery
+			// signalled is the signal qory run got before session.Run returned, "" for
+			// none: one that comes later, as the gateway delivers the run's last events,
+			// came after the runtime exited, and did not end the run.
+			var signalled string
 			if remote {
 				// The gateway session.gateway names: the session reaches it over TLS and
 				// sends the run credential on every request.
 				spec.Gateway = remoteGateway(conf.Forager, credential)
 				fmt.Fprintf(stderr, "qory run: through the gateway %s, run %s\n", gatewayHost(conf.Forager.SessionGateway.URL), spec.RunID)
 				res, err = session.Run(ctx, spec)
+				signalled = got()
 			} else {
 				// One gateway for the run, on this machine: the session speaks to it over
 				// its local link, whose secret stays in this process's memory.
@@ -360,6 +365,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				linkHanded(l)
 				spec.Gateway = session.LocalGateway(l)
 				res, err = session.Run(ctx, spec)
+				signalled = got()
 				// The gateway delivers the run's last events before qory says how the run
 				// ended, and before qory exits.
 				var closeErr error
@@ -421,7 +427,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if delivery.Undelivered > 0 {
 				u.Fail(fmt.Errorf("%d events did not reach the server; %s/undelivered contains them", delivery.Undelivered, ui.Short(res.Dir, at.root)))
 			}
-			return runEnded(u, res, runEnd{runtime: name, timeout: timeout, got: got(), credential: credential})
+			return runEnded(u, res, runEnd{runtime: name, timeout: timeout, got: signalled, credential: credential})
 		},
 	}
 	c.Flags().BoolVar(&local, "local", false, "run without the server: record to files, under the machine's policy")
@@ -498,8 +504,8 @@ const runHeartbeat = config.Heartbeat
 const runQuiet = 3 * runHeartbeat
 
 // runEnd is what qory knows of a run besides its result: its runtime's name, its time
-// limit, the signal qory run got, "" for none, and the run credential behind a separate
-// gateway, nil with a gateway of the run's own.
+// limit, the signal qory run got before session.Run returned, "" for none, and the run
+// credential behind a separate gateway, nil with a gateway of the run's own.
 type runEnd struct {
 	runtime    string
 	timeout    time.Duration

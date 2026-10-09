@@ -68,6 +68,9 @@ type fakeServer struct {
 	onStop func()
 	// unavailable answers every delivery an unsigned 503, which is no answer.
 	unavailable bool
+	// onExited, when set, is called once the server keeps a dev.qory.run.exited,
+	// before the delivery that carries it is answered.
+	onExited func()
 }
 
 // newFakeServer starts a server whose run configuration carries policy, the JSON of a
@@ -185,8 +188,12 @@ func (f *fakeServer) Append(_ string, line []byte) error {
 		return err
 	}
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.events = append(f.events, ev)
+	onExited := f.onExited
+	f.mu.Unlock()
+	if onExited != nil && ev["type"] == "dev.qory.run.exited" {
+		onExited()
+	}
 	return nil
 }
 

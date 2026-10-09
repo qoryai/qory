@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -250,5 +252,39 @@ func TestRunBehindAGatewaySaysTheStartersOutcomeAtTheExit(t *testing.T) {
 		if state, reason, exit := exitedOf(t, root); state != c.state || reason != c.reason || exit != float64(c.exit) {
 			t.Errorf("%s: the record's run.exited is %s, %q, exit %v; want %s, %q, exit %d", c.name, state, reason, exit, c.state, c.reason, c.exit)
 		}
+	}
+}
+
+// TestRunSaysTheExitOfARuntimeThatExitedBeforeASignal is a runtime that exits 0 by
+// itself, with a gateway of the run's own, and SIGINT to qory run once the server has the
+// run's dev.qory.run.exited: after the runtime exited, while the gateway delivers the
+// run's last events. The signal did not end the run: qory says the runtime's exit, exit
+// 0, and not that the run was cancelled.
+func TestRunSaysTheExitOfARuntimeThatExitedBeforeASignal(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, fakeRuntime(t))
+	srv := newFakeServer(t, "")
+	serverFile(t, srv, "")
+	var once sync.Once
+	srv.mu.Lock()
+	srv.onExited = func() {
+		once.Do(func() {
+			// session.Run has returned well before this: the session's record is
+			// closed once its gateway has the event, and the server has it after.
+			time.Sleep(time.Second)
+			syscall.Kill(os.Getpid(), syscall.SIGINT)
+			time.Sleep(300 * time.Millisecond)
+		})
+	}
+	srv.mu.Unlock()
+	t.Setenv("QORY_TEST_EXIT", "0")
+	out, err := run(t, "run")
+	if err != nil || !strings.Contains(out, "✓ claude exited 0\n") {
+		t.Errorf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	lacks(t, out, "cancelled", "qory run got")
+	if state, _, exit := exitedOf(t, root); state != "succeeded" || exit != 0 {
+		t.Errorf("the record's run.exited is %s, exit %v", state, exit)
 	}
 }
