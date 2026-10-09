@@ -118,8 +118,6 @@ type Private struct {
 	// FollowLinks checks the file a link leads to, and that file's directory, in place
 	// of refusing the link.
 	FollowLinks bool
-	// RootOwned accepts a file root owns, beside one the user owns.
-	RootOwned bool
 }
 
 // accessKeySecret is how access-key-secret and the secrets beside it are checked.
@@ -176,7 +174,7 @@ func (p Private) checkFile(path string, info os.FileInfo) error {
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("%s is not a regular file", path)
 	}
-	if !ownedByMe(info) && !(p.RootOwned && ownedByRoot(info)) {
+	if !ownedByMe(info) {
 		return fmt.Errorf("%s belongs to another user; %s is yours alone", path, p.Holds)
 	}
 	if info.Mode().Perm()&0o077 != 0 {

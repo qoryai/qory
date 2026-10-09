@@ -216,14 +216,14 @@ func issuersAt(r *config.Forager) runcredential.Issuers {
 
 // checkServiceSecrets checks the secret files gateway.tls and gateway.run_credentials
 // name, before Forager reads them, by the rules of access-key-secret: the TLS key, which
-// may be a link, such as a certificate tool keeps, to the file it checks, and may be
-// root's as well; and each introspection client's secret. It returns the TLS key's file
+// may be a link, such as a certificate tool keeps, to the file it checks; and each
+// introspection client's secret. It returns the TLS key's file
 // it checked, empty without gateway.tls.
 func checkServiceSecrets(r *config.Forager) (string, error) {
 	var tlsKey string
 	if r.TLS != nil {
 		const setting = "gateway.tls.key"
-		p := foragerdir.Private{Holds: setting, Replace: "the key", DirOf: setting, FollowLinks: true, RootOwned: true}
+		p := foragerdir.Private{Holds: setting, Replace: "the key", DirOf: setting, FollowLinks: true}
 		var err error
 		if tlsKey, err = p.Check(r.Path(r.TLS.Key)); err != nil {
 			return "", err

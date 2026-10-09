@@ -629,3 +629,29 @@ func TestGatewayRefusesAnotherUsersDirectory(t *testing.T) {
 		})
 	}
 }
+
+// TestGatewayRefusesAKeyAnotherUserOwns is gateway.tls.key a file another user owns,
+// root's included when qory gateway is not root: it is refused as another user's
+// access-key-secret is. Only root can give a file to another user, so the test needs
+// root.
+func TestGatewayRefusesAKeyAnotherUserOwns(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("only root can give a file to another user")
+	}
+	emptyDir(t)
+	serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n  tls:\n    certificate: gateway.pem\n    key: gateway-key.pem\n"+runCredentials)
+	writeIssuerFiles(t)
+	writeCertificate(t)
+	key, err := filepath.EvalSymlinks(filepath.Join(string(configDir()), "gateway-key.pem"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(key, 65534, 65534); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, "gateway")
+	if want := key + " belongs to another user; gateway.tls.key is yours alone"; err == nil || err.Error() != want {
+		t.Errorf("error\n got %v\nwant %q", err, want)
+	}
+	lacks(t, out, "listening on")
+}
