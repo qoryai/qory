@@ -296,12 +296,13 @@ whose value applies, and each value that lost, with its source and why.
 
 ## The server
 
-With a server configured, Forager starts by fetching the server's configuration. It
-signs every request with the access key's secret, and checks every answer against the
-server's key it pins, `apiary_public_key`. It does not start unless the server answers.
+`qory run` starts Forager's gateway on this machine for the run. With a server
+configured, the gateway starts by fetching the server's configuration. It signs every
+request with the access key's secret, and checks every answer against the server's key
+it pins, `apiary_public_key`. The run does not start unless the server answers.
 
-The configuration defines where the events go, and whether the server has a run
-configuration. Forager fetches the run configuration with the run's labels, the
+The configuration defines where the gateway sends the run's events, and whether the
+server has a run configuration. The gateway fetches the run configuration with the run's labels, the
 checkout's forge and repository among them. It reloads it when the server reports it
 changed. It may hold:
 
