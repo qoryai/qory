@@ -333,6 +333,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if err != nil {
 				if m := mountRefused(err, passed{foragerDir: foragerDir, stateDir: state, spec: &spec, root: at.root, own: own}); m != nil {
 					err = m
+				} else if used := runIDUsed(err, spec.RunID); used != nil {
+					err = used
 				} else {
 					err = explain(err, id)
 				}
@@ -397,6 +399,28 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	c.AddCommand(newResend(), newForward(), newRelay(), newNest())
 	return c
 }
+
+// runIDUsed is the gateway's refusal of a run whose id a run on this machine has
+// already used, a --run-id given again, said for the person; nil for any other error.
+// It unwraps to the refusal.
+func runIDUsed(err error, runID string) error {
+	var ref *session.Refusal
+	if !errors.As(err, &ref) || ref.Code != refusal.RunIDUsed {
+		return nil
+	}
+	return &saidError{text: fmt.Sprintf("the run id %s is already used by another run; leave out --run-id, or give a new one", runID), err: err}
+}
+
+// saidError is an error qory words itself in full, and that unwraps to the one it
+// replaces.
+type saidError struct {
+	text string
+	err  error
+}
+
+func (e *saidError) Error() string { return e.text }
+
+func (e *saidError) Unwrap() error { return e.err }
 
 // linkHanded is told the gateway's local link as qory hands it to the session: a test
 // learns its secret this way, to look for it where it must never be. It keeps nothing.

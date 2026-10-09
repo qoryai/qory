@@ -197,8 +197,6 @@ func explain(err error, id *serverIdentity) error {
 			return closedByGatewayBefore(err)
 		}
 		text = "the server closed the run before it started"
-	case codeRunIDUsed:
-		return runIDUsed(err)
 	default:
 		return err
 	}
