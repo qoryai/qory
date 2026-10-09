@@ -31,6 +31,9 @@ func unsignedCredential(claims string) string {
 	return enc.EncodeToString([]byte(`{"alg":"EdDSA","kid":"k1","typ":"JWT"}`)) + "." + enc.EncodeToString([]byte(claims)) + "." + enc.EncodeToString([]byte("signature"))
 }
 
+// foragerAt is forager.yaml as the run credential file's refusals name it.
+const foragerAt = "/etc/qory/forager.yaml"
+
 // streamOf is a run credential stream whose descriptor gave v and has ended.
 func streamOf(v string) *credentialStream {
 	s := &credentialStream{v: v, done: make(chan struct{})}
@@ -102,7 +105,7 @@ func TestTheRunCredentialFileGrantsTheGroupAndOthersNoReadOrWrite(t *testing.T) 
 		if err := os.Chmod(file, m); err != nil {
 			t.Fatal(err)
 		}
-		if err := c.checkMode(); err != nil {
+		if err := c.checkFile(foragerAt); err != nil {
 			t.Errorf("%04o before anything starts: %v", m, err)
 		}
 		if got, err := c.get(context.Background()); err != nil || got != v {
@@ -114,7 +117,7 @@ func TestTheRunCredentialFileGrantsTheGroupAndOthersNoReadOrWrite(t *testing.T) 
 			t.Fatal(err)
 		}
 		want := fmt.Sprintf("%s is mode %04o, which grants access to the group or others: chmod 600 %s", file, m, file)
-		if err := c.checkMode(); err == nil || err.Error() != want || strings.Contains(err.Error(), v) {
+		if err := c.checkFile(foragerAt); err == nil || err.Error() != want || strings.Contains(err.Error(), v) {
 			t.Errorf("%04o before anything starts: %v, want %q", m, err, want)
 		}
 		got, err := c.get(context.Background())
@@ -131,15 +134,69 @@ func TestTheRunCredentialFileGrantsTheGroupAndOthersNoReadOrWrite(t *testing.T) 
 	if got, err := c.get(context.Background()); got != "" || err == nil || err.Error() != file+" is mode 0644, which grants access to the group or others: chmod 600 "+file {
 		t.Errorf("a change to 0644 between requests: read %d bytes, %v", len(got), err)
 	}
-	// A file that is not there yet is left to the read before the first request.
-	if err := (&runCredential{file: filepath.Join(t.TempDir(), "none")}).checkMode(); err != nil {
-		t.Errorf("a file that is not there: %v", err)
-	}
-	if err := (&runCredential{variable: v}).checkMode(); err != nil {
+	if err := (&runCredential{variable: v}).checkFile(foragerAt); err != nil {
 		t.Errorf("a credential from the variable: %v", err)
 	}
-	if err := (&runCredential{fd: streamOf(v)}).checkMode(); err != nil {
+	if err := (&runCredential{fd: streamOf(v)}).checkFile(foragerAt); err != nil {
 		t.Errorf("a credential from the descriptor: %v", err)
+	}
+}
+
+// TestTheRunCredentialFileIsThereBeforeAnythingStarts is the run credential's file, when
+// it is the source in use, checked before anything starts: one that is not there, a
+// directory, and one qory cannot open are refused in the words of session.gateway.ca_file's
+// refusals, and none holds what the file holds. A credential from the descriptor or the
+// variable leaves the file unchecked. A file that goes after the start is, as before,
+// the read's error at the next request.
+func TestTheRunCredentialFileIsThereBeforeAnythingStarts(t *testing.T) {
+	dir := t.TempDir()
+	none := filepath.Join(dir, "none")
+	if err := (&runCredential{file: none}).checkFile(foragerAt); err == nil || err.Error() != foragerAt+": session.gateway.run_credential_file "+none+": no such file or directory" {
+		t.Errorf("a file that is not there: %v", err)
+	}
+	if err := (&runCredential{file: dir}).checkFile(foragerAt); err == nil || err.Error() != foragerAt+": session.gateway.run_credential_file "+dir+" is a directory" {
+		t.Errorf("a directory: %v", err)
+	}
+	if err := (&runCredential{variable: "header.claims.signature"}).checkFile(foragerAt); err != nil {
+		t.Errorf("the variable, the file not there: %v", err)
+	}
+	if err := (&runCredential{fd: streamOf("header.claims.signature")}).checkFile(foragerAt); err != nil {
+		t.Errorf("the descriptor, the file not there: %v", err)
+	}
+	const v = "header.claims.signature"
+	file := filepath.Join(dir, "run-credential")
+	if err := os.WriteFile(file, []byte(v+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := &runCredential{file: file}
+	if err := c.checkFile(foragerAt); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(file)
+	if _, err := c.get(context.Background()); err == nil || !strings.Contains(err.Error(), file) {
+		t.Errorf("a file gone after the start: %v", err)
+	}
+	if os.Geteuid() == 0 {
+		return // root opens a file of mode 0000
+	}
+	if err := os.WriteFile(file, []byte(v+"\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.checkFile(foragerAt); err == nil || err.Error() != foragerAt+": session.gateway.run_credential_file "+file+": permission denied" {
+		t.Errorf("a file qory cannot open: %v", err)
+	}
+	locked := filepath.Join(dir, "locked")
+	if err := os.Mkdir(locked, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	inner := filepath.Join(locked, "run-credential")
+	if err := os.WriteFile(inner, []byte(v+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	os.Chmod(locked, 0o000)
+	t.Cleanup(func() { os.Chmod(locked, 0o700) })
+	if err := (&runCredential{file: inner}).checkFile(foragerAt); err == nil || err.Error() != foragerAt+": session.gateway.run_credential_file "+inner+": permission denied" {
+		t.Errorf("a file qory cannot stat: %v", err)
 	}
 }
 
@@ -155,7 +212,7 @@ func TestTheRunCredentialFileModeIsTheLinksTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := &runCredential{file: link}
-	if err := c.checkMode(); err != nil {
+	if err := c.checkFile(foragerAt); err != nil {
 		t.Errorf("a link to a file of mode 0600: %v", err)
 	}
 	if _, err := c.get(context.Background()); err != nil {
@@ -163,7 +220,7 @@ func TestTheRunCredentialFileModeIsTheLinksTarget(t *testing.T) {
 	}
 	os.Chmod(target, 0o644)
 	want := link + " is mode 0644, which grants access to the group or others: chmod 600 " + link
-	if err := c.checkMode(); err == nil || err.Error() != want {
+	if err := c.checkFile(foragerAt); err == nil || err.Error() != want {
 		t.Errorf("a link to a file of mode 0644 before anything starts: %v, want %q", err, want)
 	}
 	if _, err := c.get(context.Background()); err == nil || err.Error() != want {

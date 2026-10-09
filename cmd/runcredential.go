@@ -308,19 +308,43 @@ func readCredentialFile(path string) ([]byte, error) {
 	return io.ReadAll(f)
 }
 
-// checkMode refuses, before anything starts, a run credential file whose mode grants
-// the group or others read or write ([credentialFileMode]), by the file a link leads to,
-// which is the one read. A file qory cannot stat is left, as before, to the read before
-// the first request; a run credential from the descriptor or the variable has no file.
-func (c *runCredential) checkMode() error {
+// checkFile refuses, before anything starts, a run credential file that is the source in
+// use and that qory cannot read: one that is not there, a directory, or one qory cannot
+// open, worded as session.gateway.ca_file's refusals are, after forager, the file that
+// names it; and one whose mode grants the group or others read or write
+// ([credentialFileMode]). It goes by the file a link leads to, which is the one read,
+// and reads nothing of it. A run credential from the descriptor or the variable has no
+// file, and the file is then not checked. The read before each request is not changed.
+func (c *runCredential) checkFile(forager string) error {
 	if c.file == "" {
 		return nil
 	}
+	refuse := func(err error) error {
+		var pe *fs.PathError
+		if errors.As(err, &pe) {
+			err = pe.Err
+		}
+		return fmt.Errorf("%s: session.gateway.run_credential_file %s: %w", forager, c.file, err)
+	}
 	info, err := os.Stat(c.file)
 	if err != nil {
-		return nil
+		return refuse(err)
 	}
-	return credentialFileMode(c.file, info)
+	if info.IsDir() {
+		return fmt.Errorf("%s: session.gateway.run_credential_file %s is a directory", forager, c.file)
+	}
+	if err := credentialFileMode(c.file, info); err != nil {
+		return err
+	}
+	// Opening a named pipe would wait for its writer: only a regular file is opened.
+	if info.Mode().IsRegular() {
+		f, err := os.Open(c.file)
+		if err != nil {
+			return refuse(err)
+		}
+		f.Close()
+	}
+	return nil
 }
 
 // credentialFileMode refuses the run credential's file at path when info, its mode,
@@ -399,9 +423,10 @@ func gatewayEnded(u *ui.UI, report io.Writer, reason string, c *runCredential) b
 // through the gateway r's session.gateway names, and the run credential it then sends:
 // such a machine holds no access key, in a file, a variable or a descriptor; --local and
 // --label are for a gateway of the run's own; the CA file must hold a certificate; and
-// the run needs a run credential, whose file, when it comes from one, grants the group
-// and others no read or write. keyFD says --access-key-secret-fd was given, and
-// credentialFD is the stream of --run-credential-fd, nil when it was not given.
+// the run needs a run credential, whose file, when it comes from one, is there, can be
+// read, and grants the group and others no read or write. keyFD says
+// --access-key-secret-fd was given, and credentialFD is the stream of
+// --run-credential-fd, nil when it was not given.
 func behindGateway(r *config.Forager, local, labels, keyFD bool, credentialFD *credentialStream) (*runCredential, error) {
 	const through = "this machine's runs go through the gateway session.gateway.url names"
 	if local {
@@ -442,7 +467,7 @@ func behindGateway(r *config.Forager, local, labels, keyFD bool, credentialFD *c
 	if c == nil {
 		return nil, input(fmt.Errorf("%s, and there is no run credential: set session.gateway.run_credential_file, --%s or %s", through, runCredentialFDFlag, config.EnvRunCredential))
 	}
-	if err := c.checkMode(); err != nil {
+	if err := c.checkFile(r.File); err != nil {
 		return nil, input(err)
 	}
 	return c, nil

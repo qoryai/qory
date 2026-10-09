@@ -282,6 +282,36 @@ func TestRunThroughASeparateGatewayWithTheDescriptorOpen(t *testing.T) {
 	clearRuns(t, root)
 }
 
+// TestRunThroughASeparateGatewayWithoutItsFile is a machine whose forager.yaml names a
+// run credential file that is not there, and a run whose credential comes from
+// QORY_RUN_CREDENTIAL_SECRET or --run-credential-fd: the file is not the source in use,
+// so it is not read, and the run goes on.
+func TestRunThroughASeparateGatewayWithoutItsFile(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, credentialRuntime(t, filepath.Join(t.TempDir(), "forbidden")))
+	addr, ca, iss, gwOut, _ := separateGateway(t)
+	missing := filepath.Join(t.TempDir(), "run-credential")
+	writeFile(t, filepath.Join(string(configDir()), "forager.yaml"), sessionGateway(addr, ca, "    run_credential_file: "+missing+"\n"))
+	for _, from := range []string{"the variable", "the descriptor"} {
+		good := iss.credential(t, nil)
+		args := []string{"run"}
+		if from == "the variable" {
+			t.Setenv("QORY_RUN_CREDENTIAL_SECRET", good)
+		} else {
+			t.Setenv("QORY_RUN_CREDENTIAL_SECRET", "")
+			args = append(args, "--run-credential-fd", descriptor(t, good))
+		}
+		out, err := run(t, args...)
+		if err != nil {
+			t.Fatalf("%s: %v\n%s\n%s", from, err, out, gwOut)
+		}
+		wants(t, out, "qory run: through the gateway "+addr+", run ", "claude exited 0")
+		lacks(t, out, good)
+		clearRuns(t, root)
+	}
+}
+
 // TestRunThroughASeparateGatewayIsRefusedByIt is each refusal of the gateway's that qory
 // words: a run credential it does not take; a checkout that is not the credential's
 // target; a key of --details that the credential decides otherwise. Each is the run's
@@ -319,8 +349,9 @@ func TestRunThroughASeparateGatewayIsRefusedByIt(t *testing.T) {
 // machine whose runs go through a gateway, before anything starts, each in its exact
 // words and an input error that leaves no record: an access key in a file, a variable or
 // a descriptor; --local, --label and --policy, which are for a gateway of the run's own;
-// a CA file that cannot be read or holds no certificate; a run credential file whose
-// mode grants the group or others read or write; and no run credential.
+// a CA file that cannot be read or holds no certificate; a run credential file that is
+// not there, is a directory, or whose mode grants the group or others read or write; and
+// no run credential.
 func TestRunBehindAGatewayRefusesBeforeAnythingStarts(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -382,6 +413,14 @@ func TestRunBehindAGatewayRefusesBeforeAnythingStarts(t *testing.T) {
 			t.Cleanup(func() { os.Chmod(credential, 0o600) })
 			return []string{"run"}
 		}, credential + " is mode 0644, which grants access to the group or others: chmod 600 " + credential},
+		{"a run credential file that is not there", func(t *testing.T) []string {
+			writeFile(t, file, sessionGateway("gateway.example:8443", "gateway.pem", "    run_credential_file: "+filepath.Join(dir, "missing-credential")+"\n"))
+			return []string{"run"}
+		}, file + ": session.gateway.run_credential_file " + filepath.Join(dir, "missing-credential") + ": no such file or directory"},
+		{"a run credential file that is a directory", func(t *testing.T) []string {
+			writeFile(t, file, sessionGateway("gateway.example:8443", "gateway.pem", "    run_credential_file: "+dir+"\n"))
+			return []string{"run"}
+		}, file + ": session.gateway.run_credential_file " + dir + " is a directory"},
 		{"no run credential", func(t *testing.T) []string {
 			writeFile(t, file, sessionGateway("gateway.example:8443", "gateway.pem", ""))
 			return []string{"run"}

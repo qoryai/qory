@@ -187,9 +187,10 @@ release may change what an existing document does, and states it under Upgrading
   `QORY_RUN_CREDENTIAL_SECRET` is read once. Before anything starts it refuses a
   `gateway` section beside `session.gateway`, an `access-key-secret` file, the access
   key's variables, `--access-key-secret-fd`, `--local`, `--label`, `--policy`, a
-  `ca_file` it cannot read or that holds no certificate, and no run credential. It refuses a run credential file
-  whose mode grants the group or others read or write, before anything starts and at
-  each read. A walled run whose mounts hold the run credential's file is refused. It says the gateway's refusal of the run credential,
+  `ca_file` it cannot read or that holds no certificate, and no run credential. When the
+  credential comes from the file, it refuses a file that is not there or that it cannot
+  read before anything starts. It refuses a run credential file whose mode grants the
+  group or others read or write, before anything starts and at each read. A walled run whose mounts hold the run credential's file is refused. It says the gateway's refusal of the run credential,
   of a checkout that is not the credential's target and of a `--details` key the
   credential decides, and a run the gateway ends at the credential's expiry or at its
   issuer. `qory config` lists `session.gateway`, and `forager.schema.json` defines it.
