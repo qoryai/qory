@@ -82,7 +82,7 @@ declares, then fetches Qory Apiary's signed configuration. It prints:
 ```text
 qory gateway: integration github: /usr/local/bin/qory-github 1.2.0
 qory gateway: node nd_0123456789abcdef, instance i_…
-qory gateway: listening on 0.0.0.0:8443
+qory gateway: listening on [::]:8443
 ```
 
 SIGINT or SIGTERM stops it: it takes no new run, sends what it holds, and exits 0.
