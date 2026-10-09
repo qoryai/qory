@@ -20,11 +20,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/qoryai/runner/accesskey"
-	"github.com/qoryai/runner/receiver"
+	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/forager/receiver"
 
 	"github.com/qoryai/qory/cmd"
-	"github.com/qoryai/qory/internal/runnerdir"
+	"github.com/qoryai/qory/internal/foragerdir"
 )
 
 // testAccessKey is the access key id of every test's server.
@@ -205,11 +205,11 @@ func serverFile(t *testing.T, srv *fakeServer, more string) {
 // runner file's directory made mode 0700.
 func writeSecret(t *testing.T, k *accesskey.Key) {
 	t.Helper()
-	dir := runnerdir.Dir(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory"))
+	dir := foragerdir.Dir(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory"))
 	if _, err := dir.Ensure(); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(dir.Path(runnerdir.SecretFile)); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(dir.Path(foragerdir.SecretFile)); err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
 	if err := dir.WriteSecret(k); err != nil {
@@ -698,8 +698,8 @@ func TestRunBehindAWall(t *testing.T) {
 	composedForFake(t, root, "claude")
 	docker, log := fakeDocker(t)
 	helper := staticELF(t)
-	runnerFile := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml")
-	writeFile(t, runnerFile, "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+helper+"\n  env: [MODEL_KEY, NOT_SET_HERE]\n  user: \"1000:1000\"\n  cpus: \"2\"\n  memory: 4g\n  pids_limit: 4096\n")
+	foragerFile := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml")
+	writeFile(t, foragerFile, "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+helper+"\n  env: [MODEL_KEY, NOT_SET_HERE]\n  user: \"1000:1000\"\n  cpus: \"2\"\n  memory: 4g\n  pids_limit: 4096\n")
 	t.Setenv("MODEL_KEY", "not-a-real-key")
 	t.Setenv("HOST_ONLY", "stays outside")
 	t.Setenv("FLAG_NAMED", "goes in")
@@ -839,11 +839,11 @@ func TestRunRefusesAMountOfAnIntegrationsSettingFile(t *testing.T) {
 	policy := filepath.Join(tempDir(t), "policy.yaml")
 	writeFile(t, policy, "version: 1\negress:\n  mode: observe\ncredentials:\n  - {name: tracker, argument: SHOP}\n")
 	for _, c := range []struct{ setting, mount, want string }{
-		{token, keys, "the mount " + keys + " contains " + token + ", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
-		{token, keys + ":ro", "the mount " + keys + " contains " + token + ", which holds one of the runner's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
-		{token, token + ":ro", "the mount " + token + " is " + token + ", which holds one of the runner's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
-		{link, links, "the mount " + links + " contains " + link + ", which leads to one of the runner's files; the agent could point it elsewhere, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
-		{link, keys + ":ro", "the mount " + keys + " contains " + token + ", which holds one of the runner's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
+		{token, keys, "the mount " + keys + " contains " + token + ", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
+		{token, keys + ":ro", "the mount " + keys + " contains " + token + ", which holds one of the runner's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
+		{token, token + ":ro", "the mount " + token + " is " + token + ", which holds one of the runner's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
+		{link, links, "the mount " + links + " contains " + link + ", which leads to one of the runner's files; the agent could point it elsewhere, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
+		{link, keys + ":ro", "the mount " + keys + " contains " + token + ", which holds one of the runner's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
 	} {
 		writeFile(t, file, "apiVersion: qory.dev/v1alpha1\n"+wallSection+"integrations:\n  tracker: {program: "+program+", settings: {project: SHOP, token_file: "+c.setting+"}}\n")
 		out, err := run(t, "run", "claude", "--policy", policy, "--mount", c.mount)
@@ -863,7 +863,7 @@ func TestRunRefusesAMountOfAnIntegrationsSettingFile(t *testing.T) {
 	}
 }
 
-// TestRunRefusesAMountOfTheRunnersFiles is a walled run with a mount of the home,
+// TestRunRefusesAMountOfTheForagersFiles is a walled run with a mount of the home,
 // which contains qory's configuration directory, and one of that directory itself: the
 // runner refuses both before anything starts, and qory says the agent could read the
 // access key, with how the mount and the directory stand to each other. Without
@@ -873,7 +873,7 @@ func TestRunRefusesAMountOfAnIntegrationsSettingFile(t *testing.T) {
 // run records, or read them through a read-only mount, as does the workspace when the
 // state directory lies in the checkout. A run refused so has no record, and no line
 // names one.
-func TestRunRefusesAMountOfTheRunnersFiles(t *testing.T) {
+func TestRunRefusesAMountOfTheForagersFiles(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, "claude")
@@ -891,14 +891,14 @@ func TestRunRefusesAMountOfTheRunnersFiles(t *testing.T) {
 		secret              bool
 		mount, want, ending string
 	}{
-		{false, home, "the mount " + home + " contains " + configDir + ", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)", ""},
-		{false, home + ":ro", "the mount " + home + " contains " + configDir + ", which holds one of the runner's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_runner_files)", ""},
-		{true, home, "the mount " + home + " contains " + configDir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)", ""},
-		{true, configDir + ":ro", "the mount " + configDir + " is " + configDir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)", ""},
-		{true, tmp, "the mount " + tmp + " contains " + filepath.Join(tmp, "qory-tool-"), ", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
-		{true, tmp + ":ro", "the mount " + tmp + " contains " + filepath.Join(tmp, "qory-tool-"), ", which holds one of the runner's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
-		{true, stateHome, "the mount " + stateHome + " contains " + filepath.Join(stateHome, "qory") + ", which holds qory's run records; the agent could change them, so the run does not start. Mount a narrower path (mount_contains_runner_files)", ""},
-		{true, filepath.Join(stateHome, "qory", "runs") + ":ro", "the mount " + filepath.Join(stateHome, "qory", "runs") + " lies inside " + filepath.Join(stateHome, "qory") + ", which holds qory's run records; the agent could read them, so the run does not start. Mount a narrower path (mount_contains_runner_files)", ""},
+		{false, home, "the mount " + home + " contains " + configDir + ", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_forager_files)", ""},
+		{false, home + ":ro", "the mount " + home + " contains " + configDir + ", which holds one of the runner's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_forager_files)", ""},
+		{true, home, "the mount " + home + " contains " + configDir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_forager_files)", ""},
+		{true, configDir + ":ro", "the mount " + configDir + " is " + configDir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_forager_files)", ""},
+		{true, tmp, "the mount " + tmp + " contains " + filepath.Join(tmp, "qory-tool-"), ", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
+		{true, tmp + ":ro", "the mount " + tmp + " contains " + filepath.Join(tmp, "qory-tool-"), ", which holds one of the runner's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
+		{true, stateHome, "the mount " + stateHome + " contains " + filepath.Join(stateHome, "qory") + ", which holds qory's run records; the agent could change them, so the run does not start. Mount a narrower path (mount_contains_forager_files)", ""},
+		{true, filepath.Join(stateHome, "qory", "runs") + ":ro", "the mount " + filepath.Join(stateHome, "qory", "runs") + " lies inside " + filepath.Join(stateHome, "qory") + ", which holds qory's run records; the agent could read them, so the run does not start. Mount a narrower path (mount_contains_forager_files)", ""},
 	} {
 		if c.secret {
 			writeFile(t, secret, "not read\n")
@@ -910,7 +910,7 @@ func TestRunRefusesAMountOfTheRunnersFiles(t *testing.T) {
 		lacks(t, out, "inside the container", "the record is in")
 	}
 	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
-	want := "the workspace " + root + " contains " + filepath.Join(root, "state", "qory") + ", which holds qory's run records; the agent could change them, so the run does not start. Mount a narrower path (mount_contains_runner_files)"
+	want := "the workspace " + root + " contains " + filepath.Join(root, "state", "qory") + ", which holds qory's run records; the agent could change them, so the run does not start. Mount a narrower path (mount_contains_forager_files)"
 	if out, err := run(t, "run", "claude"); err == nil || err.Error() != want {
 		t.Errorf("the state directory in the checkout: %v, want %q\n%s", err, want, out)
 	}
@@ -953,7 +953,7 @@ func TestRunRefusesAMountOfALinkOnTheWayToTheRecords(t *testing.T) {
 	} {
 		t.Setenv("XDG_STATE_HOME", c.state)
 		mount, _, _ := strings.Cut(c.mount, ":")
-		want := "the mount " + mount + " contains " + c.link + ", which leads to qory's run records" + c.what + ", so the run does not start. Mount a narrower path (mount_contains_runner_files)"
+		want := "the mount " + mount + " contains " + c.link + ", which leads to qory's run records" + c.what + ", so the run does not start. Mount a narrower path (mount_contains_forager_files)"
 		out, err := run(t, "run", "claude", "--mount", c.mount)
 		if err == nil || cmd.ExitCode(err) != 1 || err.Error() != want {
 			t.Errorf("XDG_STATE_HOME=%s, --mount %s: %v (exit %d), want %q\n%s", c.state, c.mount, err, cmd.ExitCode(err), want, out)
@@ -1045,8 +1045,8 @@ func TestRunRefusesAMountOfWhereAConfigLinkLeads(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range []struct{ mount, want string }{
-		{dotfiles, "the mount " + dotfiles + " contains " + target + ", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
-		{later, "the mount " + later + " contains " + filepath.Join(configDir, "runtimes", "goose.yaml") + ", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
+		{dotfiles, "the mount " + dotfiles + " contains " + target + ", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
+		{later, "the mount " + later + " contains " + filepath.Join(configDir, "runtimes", "goose.yaml") + ", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
 	} {
 		out, err := run(t, "run", "claude", "--mount", c.mount)
 		if err == nil || cmd.ExitCode(err) != 1 || err.Error() != c.want {
@@ -1100,7 +1100,7 @@ func TestRunRefusesAMountOfALinkOnTheWayToAConfigFile(t *testing.T) {
 		{real, filepath.Join(real, "runner.yaml"), "holds one of the runner's files; the agent could change it"},
 	} {
 		mount, _, _ := strings.Cut(c.mount, ":")
-		want := "the mount " + mount + " contains " + c.path + ", which " + c.what + ", so the run does not start. Mount a narrower path (mount_contains_runner_files)"
+		want := "the mount " + mount + " contains " + c.path + ", which " + c.what + ", so the run does not start. Mount a narrower path (mount_contains_forager_files)"
 		out, err := run(t, "run", "claude", "--mount", c.mount)
 		if err == nil || cmd.ExitCode(err) != 1 || err.Error() != want {
 			t.Errorf("--mount %s: %v (exit %d), want %q\n%s", c.mount, err, cmd.ExitCode(err), want, out)
@@ -1146,9 +1146,9 @@ func TestRunRefusesAMountOfALinkToTheConfigDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range []struct{ mount, want string }{
-		{configHome, "the mount " + configHome + " contains " + filepath.Join(physical, "qory") + ", which leads to one of the runner's files; the agent could point it elsewhere, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
-		{configHome + ":ro", "the mount " + configHome + " contains " + filepath.Join(physical, "qory") + ", which leads to one of the runner's files, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
-		{elsewhere, "the mount " + elsewhere + " contains " + configDir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
+		{configHome, "the mount " + configHome + " contains " + filepath.Join(physical, "qory") + ", which leads to one of the runner's files; the agent could point it elsewhere, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
+		{configHome + ":ro", "the mount " + configHome + " contains " + filepath.Join(physical, "qory") + ", which leads to one of the runner's files, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
+		{elsewhere, "the mount " + elsewhere + " contains " + configDir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
 	} {
 		out, err := run(t, "run", "claude", "--mount", c.mount)
 		if err == nil || cmd.ExitCode(err) != 1 || err.Error() != c.want {
@@ -1419,12 +1419,12 @@ func TestRunReportsToTheServer(t *testing.T) {
 	}
 }
 
-// TestResendClosesAndDeliversARunItsRunnerLeft is a job's last step: the record of a
+// TestResendClosesAndDeliversARunItsForagerLeft is a job's last step: the record of a
 // run nobody received, cut short the way a runner that died leaves it, is closed with
 // the reason and sent whole, once, to the server's events endpoint after its
 // configuration was fetched; a run that is not there is the user's mistake. The record
 // is found from the checkout, reached through a link too.
-func TestResendClosesAndDeliversARunItsRunnerLeft(t *testing.T) {
+func TestResendClosesAndDeliversARunItsForagerLeft(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, fakeRuntime(t))
@@ -1446,9 +1446,9 @@ func TestResendClosesAndDeliversARunItsRunnerLeft(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "runner_lost", fmt.Sprintf("%d events were accepted", len(lines)))
+	wants(t, out, "gateway_lost", fmt.Sprintf("%d events were accepted", len(lines)))
 	got := srv.events
-	if last := got[len(got)-1]; len(got) != len(lines) || last["type"] != "dev.qory.run.exited" || last["data"].(map[string]any)["reason"] != "runner_lost" {
+	if last := got[len(got)-1]; len(got) != len(lines) || last["type"] != "dev.qory.run.exited" || last["data"].(map[string]any)["reason"] != "gateway_lost" {
 		t.Errorf("the server got %d events, the last %v", len(got), last)
 	}
 	if out, err := run(t, "run", "resend", id); err != nil || !strings.Contains(out, "0 events were accepted") || len(srv.events) != len(lines) {
@@ -1468,11 +1468,11 @@ func TestResendClosesAndDeliversARunItsRunnerLeft(t *testing.T) {
 	}
 }
 
-// TestRunRunsARuntimeTheRunnerShipsNothingFor pins that qory run is not Claude Code's:
+// TestRunRunsARuntimeTheForagerShipsNothingFor pins that qory run is not Claude Code's:
 // a runtime with no descriptor runs bare, the run recorded and the session not, with no
 // settings written for it; and a descriptor of the machine's makes its output events
 // and says which signal asks it to leave.
-func TestRunRunsARuntimeTheRunnerShipsNothingFor(t *testing.T) {
+func TestRunRunsARuntimeTheForagerShipsNothingFor(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	script := filepath.Join(t.TempDir(), "fake-codex")
@@ -1599,7 +1599,7 @@ esac
 	// The runner names the one entry left in its registry under the state directory:
 	// the second run's, whose wall was left too. The first run's went once the engine
 	// said it held none of its containers.
-	walled := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory-runner", "walled")
+	walled := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory-forager", "walled")
 	ids := recorded(t, root)
 	slices.Sort(ids)
 	entry := filepath.Join(walled, ids[len(ids)-1])

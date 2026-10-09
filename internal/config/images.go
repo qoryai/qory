@@ -6,15 +6,15 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/qoryai/runner/session"
+	"github.com/qoryai/forager/session"
 	"gopkg.in/yaml.v3"
 )
 
-// RunnerImage is one entry of wall.images: an image this machine defines by name. A
+// ForagerImage is one entry of wall.images: an image this machine defines by name. A
 // run's policy selects one by that name and names no reference, so a repository never
 // chooses what it runs under; wall.image and --image name the default by it, or by a
 // reference.
-type RunnerImage struct {
+type ForagerImage struct {
 	// Name is what a policy, wall.image and --image select the image by, in a
 	// credential's grammar.
 	Name string
@@ -31,7 +31,7 @@ type RunnerImage struct {
 }
 
 // Session is the definition as the runner takes it.
-func (i RunnerImage) Session() session.Image {
+func (i ForagerImage) Session() session.Image {
 	return session.Image{Name: i.Name, Ref: i.Ref, Runtime: i.Runtime, Docker: i.Docker}
 }
 
@@ -54,11 +54,11 @@ var imageKeys = []string{"ref", "runtime", "docker"}
 // order. It refuses what the runner would refuse before a run, a name defined twice and a
 // daemon without a runtime among them, so qory config shows it too; which runtimes the
 // engine has is the engine's to say when a run starts.
-func readImages(path string, node *yaml.Node) ([]RunnerImage, error) {
+func readImages(path string, node *yaml.Node) ([]ForagerImage, error) {
 	if node.Kind != yaml.MappingNode {
 		return nil, fmt.Errorf("%s: wall.images is a mapping from a name to an image", path)
 	}
-	var out []RunnerImage
+	var out []ForagerImage
 	seen := map[string]bool{}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		name := node.Content[i].Value
@@ -76,7 +76,7 @@ func readImages(path string, node *yaml.Node) ([]RunnerImage, error) {
 		if entry.Kind != yaml.MappingNode {
 			return nil, fail(" is a mapping: ref, and runtime and docker when it needs them")
 		}
-		img := RunnerImage{Name: name}
+		img := ForagerImage{Name: name}
 		var hasRef bool
 		keys := map[string]bool{}
 		for k := 0; k+1 < len(entry.Content); k += 2 {
@@ -121,14 +121,14 @@ func readImages(path string, node *yaml.Node) ([]RunnerImage, error) {
 
 // Defines reports whether the wall section defines an image of that name: one a policy
 // may select, and one wall.image and --image read as that image before a reference.
-func (w *RunnerWall) Defines(name string) bool {
-	return w != nil && slices.ContainsFunc(w.Images, func(i RunnerImage) bool { return i.Name == name })
+func (w *ForagerWall) Defines(name string) bool {
+	return w != nil && slices.ContainsFunc(w.Images, func(i ForagerImage) bool { return i.Name == name })
 }
 
 // defaultRow is wall.image's value in the rows: the value and what it is read as, the
 // image of wall.images it names or a reference, so a name mistyped shows as a
 // reference.
-func defaultRow(w *RunnerWall) string {
+func defaultRow(w *ForagerWall) string {
 	switch {
 	case w.Image == "":
 		return "(none)"
@@ -140,7 +140,7 @@ func defaultRow(w *RunnerWall) string {
 
 // imageRow is an image's value in the rows: its reference, then its runtime and its
 // daemon when it has them.
-func imageRow(i RunnerImage) string {
+func imageRow(i ForagerImage) string {
 	v := i.Ref
 	if i.Runtime != "" {
 		v += ", runtime " + i.Runtime

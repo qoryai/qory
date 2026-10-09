@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qoryai/runner/session"
+	"github.com/qoryai/forager/session"
 )
 
 // TestParseSubjectsTakesTheTitleLast holds a subject's title to the rest of the value:

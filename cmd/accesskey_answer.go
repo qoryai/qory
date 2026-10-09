@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/qoryai/runner/accesskey"
+	"github.com/qoryai/forager/accesskey"
 
-	"github.com/qoryai/qory/internal/runnerdir"
+	"github.com/qoryai/qory/internal/foragerdir"
 )
 
 // storedAnswer is enrolment-answer: the server's verified 201 to an enrolment as it came,
@@ -111,7 +111,7 @@ func (a *answerRecorder) record(server string, req *accesskey.EnrolmentRequest) 
 }
 
 // keepAnswer writes the record into enrolment-answer.
-func keepAnswer(dir runnerdir.Dir, s *storedAnswer) error {
+func keepAnswer(dir foragerdir.Dir, s *storedAnswer) error {
 	b, err := json.Marshal(s)
 	if err != nil {
 		return err
@@ -126,12 +126,12 @@ func keepAnswer(dir runnerdir.Dir, s *storedAnswer) error {
 // is none. A file that does not read as an answer, or an answer for this enrolment
 // that does not verify, is an error: nothing may then post the enrolment again, since
 // the server refuses a code it used and a key it enrolled.
-func answerKept(dir runnerdir.Dir, server, code string) (*accesskey.Key, *accesskey.EnrolmentAnswer, error) {
+func answerKept(dir foragerdir.Dir, server, code string) (*accesskey.Key, *accesskey.EnrolmentAnswer, error) {
 	b, err := dir.ReadAnswer()
-	if errors.Is(err, runnerdir.ErrNoAnswer) {
+	if errors.Is(err, foragerdir.ErrNoAnswer) {
 		return nil, nil, nil
 	}
-	path := dir.Path(runnerdir.AnswerFile)
+	path := dir.Path(foragerdir.AnswerFile)
 	refused := func(err error) error {
 		return fmt.Errorf("%s holds no answer of the server that verifies (%v), so the enrolment cannot be finished from it; nothing was changed: see https://github.com/qoryai/qory/blob/main/docs/run.md#when-enrolment-answer-is-refused", path, err)
 	}
@@ -165,7 +165,7 @@ func answerKept(dir runnerdir.Dir, server, code string) (*accesskey.Key, *access
 // answeredFor reports whether enrolment-answer keeps an answer for the key whose public
 // key is pub, verified or not: a key the server may hold active, which nothing moves
 // aside.
-func answeredFor(dir runnerdir.Dir, pub accesskey.PublicKey) bool {
+func answeredFor(dir foragerdir.Dir, pub accesskey.PublicKey) bool {
 	b, err := dir.ReadAnswer()
 	if err != nil {
 		return false

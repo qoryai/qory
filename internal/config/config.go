@@ -49,7 +49,7 @@
 //	  modules: [core, nextjs]    # harness/modules/<name>/qory-module.yaml
 //
 // The machine's runner file, runner.yaml beside the user's qory.yaml and nowhere else,
-// defines what qory run does on this machine; [LoadRunner] reads it and [Load] returns it:
+// defines what qory run does on this machine; [LoadForager] reads it and [Load] returns it:
 //
 //	apiVersion: qory.dev/v1alpha1
 //	egress:                      # the run policy: absent is observe everything
@@ -331,9 +331,9 @@ type Config struct {
 	// root's file; nil when it lists none. A section in any other file is read and left
 	// out, since an export is a repository's.
 	Exports *exports.Exports
-	// Runner is the machine's runner file, [RunnerFileName] under [UserDir]; nil when
+	// Forager is the machine's runner file, [ForagerFileName] under [UserDir]; nil when
 	// there is none.
-	Runner *Runner
+	Forager *Forager
 	// Files are the files read, in the order they were applied.
 	Files []string
 	// Ignored are the keys the checkout root's file sets that a compose under extends
@@ -445,7 +445,7 @@ func Load(root string, own bool) (Config, error) {
 	if err != nil {
 		return c, err
 	}
-	if c.Runner, err = LoadRunner(); err != nil {
+	if c.Forager, err = LoadForager(); err != nil {
 		return c, err
 	}
 	for _, path := range files {
@@ -1211,7 +1211,7 @@ func (c Config) Rows() []Row {
 	for _, name := range names {
 		rows = append(rows, Row{"env." + name, c.Env[name], c.origins["env."+name]})
 	}
-	rows = append(rows, c.Runner.Rows()...)
+	rows = append(rows, c.Forager.Rows()...)
 	if e := c.Exports; e != nil {
 		rows = append(rows,
 			Row{"exports.dir.stacks", e.Dir.Stacks, e.File},

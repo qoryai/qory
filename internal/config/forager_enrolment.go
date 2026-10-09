@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/qoryai/runner/accesskey"
+	"github.com/qoryai/forager/accesskey"
 	"gopkg.in/yaml.v3"
 
 	"github.com/qoryai/qory/internal/stack"

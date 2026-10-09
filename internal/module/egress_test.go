@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qoryai/runner/contracts"
+	"github.com/qoryai/forager/contracts"
 )
 
 // TestReadManifestReadsEgress reads the egress key: the hosts sorted and each once, an
@@ -52,10 +52,10 @@ func TestReadManifestRefusesEgress(t *testing.T) {
 	}
 }
 
-// TestEgressGrammarIsTheRunnersOnce keeps the one definition: the pattern the module
+// TestEgressGrammarIsTheForagersOnce keeps the one definition: the pattern the module
 // schema gives a declared host, and the one this package matches, are the runner
 // contract's pattern for a policy's allow entry, byte for byte.
-func TestEgressGrammarIsTheRunnersOnce(t *testing.T) {
+func TestEgressGrammarIsTheForagersOnce(t *testing.T) {
 	policy, err := contracts.Document("policy.schema.json")
 	if err != nil {
 		t.Fatal(err)

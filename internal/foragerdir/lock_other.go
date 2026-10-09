@@ -1,6 +1,6 @@
 //go:build !unix
 
-package runnerdir
+package foragerdir
 
 import (
 	"errors"

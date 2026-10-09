@@ -31,7 +31,7 @@ before it:
 
 A compose flag overrides every file.
 
-The machine's ` + config.RunnerFileName + ` is listed under runner. Each integration it declares is
+The machine's ` + config.ForagerFileName + ` is listed under runner. Each integration it declares is
 described as before a run; one that does not describe is an error. An integration whose
 name the credentials section defines too is listed as shadowed.
 
@@ -50,7 +50,7 @@ name the credentials section defines too is listed as shadowed.
 			if err != nil {
 				return input(err)
 			}
-			for _, key := range conf.Runner.Shadowed() {
+			for _, key := range conf.Forager.Shadowed() {
 				fmt.Fprintln(cmd.ErrOrStderr(), "qory config:", shadowed(key))
 			}
 			// A directory outside a git working tree is no checkout. The wall's read-write
@@ -59,14 +59,14 @@ name the credentials section defines too is listed as shadowed.
 			if checkout.ExcludeFile(root) != "" {
 				workspace = []string{root}
 			}
-			if r := conf.Runner; r != nil && r.Wall != nil {
+			if r := conf.Forager; r != nil && r.Wall != nil {
 				for _, m := range r.Wall.Mounts {
 					if !m.ReadOnly {
 						workspace = append(workspace, m.Path)
 					}
 				}
 			}
-			if err := conf.Runner.Expand(cmd.Context(), config.Expansion{Workspace: workspace}); err != nil {
+			if err := conf.Forager.Expand(cmd.Context(), config.Expansion{Workspace: workspace}); err != nil {
 				return input(err)
 			}
 			u := ui.New(cmd.OutOrStdout())

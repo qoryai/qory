@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/qoryai/runner/accesskey"
-	"github.com/qoryai/runner/session"
+	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/forager/session"
 	"gopkg.in/yaml.v3"
 
 	"github.com/qoryai/qory/internal/exports"
@@ -22,27 +22,27 @@ import (
 	"github.com/qoryai/qory/internal/stack"
 )
 
-// RunnerFileName is the machine's runner file, under [UserDir] alone: what qory run
+// ForagerFileName is the machine's runner file, under [UserDir] alone: what qory run
 // does on this machine. It has no counterpart in a repository, so a checkout cannot set
 // the policy the agent runs under or where the run's events go.
-const RunnerFileName = "runner.yaml"
+const ForagerFileName = "runner.yaml"
 
-// Runner is the machine's runner file, read.
-type Runner struct {
+// Forager is the machine's runner file, read.
+type Forager struct {
 	// File is the path read.
 	File string
 	// Egress is the run policy's egress section, nil when the file has none: observe
 	// everything, with no list to deny by.
-	Egress *RunnerEgress
+	Egress *ForagerEgress
 	// Server is the server every run reports to, nil when the file sets none: the
 	// events go to files alone.
-	Server *RunnerServer
+	Server *ForagerServer
 	// InstanceName is instance.name, this instance's display name on the server, empty
 	// when the file sets none: the host name, or its first label.
 	InstanceName string
 	// Wall is what the runtime is enclosed in, nil when the file sets none: the runtime
 	// is a process of this machine.
-	Wall *RunnerWall
+	Wall *ForagerWall
 	// Timeout is how long a runtime may run on this machine, zero for no limit, and
 	// StopSignal the signal that requests it to stop when the runner stops it and
 	// StopGrace how long it has between that and SIGKILL, empty and zero for the runner's
@@ -53,20 +53,20 @@ type Runner struct {
 	// Credentials are the credentials this machine defines, in the file's order. A
 	// run's policy selects among them by name; the runner keeps each outside the
 	// container and its proxy sets it on the requests to the hosts it is for. The ones
-	// an integration defines are added by [Runner.Expand].
-	Credentials []RunnerCredential
+	// an integration defines are added by [Forager.Expand].
+	Credentials []ForagerCredential
 	// Integrations are the integrations this machine declares, in the file's order:
-	// programs that speak the integration contract, which [Runner.Expand] describes and
+	// programs that speak the integration contract, which [Forager.Expand] describes and
 	// expands into the definitions they return.
-	Integrations []RunnerIntegration
+	Integrations []ForagerIntegration
 
 	expanded bool
 }
 
-// RunnerCredential is one entry of the credentials section. Exactly one of Env, File
+// ForagerCredential is one entry of the credentials section. Exactly one of Env, File
 // and Adapter defines where the token comes from; an adapter defines how its token is
 // used, and for the other two Hosts, Scheme, Username, Header and Paths do.
-type RunnerCredential struct {
+type ForagerCredential struct {
 	Name                     string
 	Env, File                string
 	Adapter                  []string
@@ -83,9 +83,9 @@ type RunnerCredential struct {
 // WallDocker is the one wall adapter there is.
 const WallDocker = "docker"
 
-// RunnerWall is the wall section: the container every run on this machine starts the
+// ForagerWall is the wall section: the container every run on this machine starts the
 // runtime in, with no route out except to the runner's proxy.
-type RunnerWall struct {
+type ForagerWall struct {
 	// Adapter selects what builds the wall: docker.
 	Adapter string
 	// Image is the agent's image when the run's policy selects none, the runtime and the
@@ -95,7 +95,7 @@ type RunnerWall struct {
 	Image string
 	// Images are the images this machine defines, in the file's order; a run's policy
 	// selects among them by name.
-	Images []RunnerImage
+	Images []ForagerImage
 	// Command is the program the adapter runs, such as podman; empty means docker.
 	Command string
 	// Helper is the path of a static Linux build of qory, mounted into the container as
@@ -111,7 +111,7 @@ type RunnerWall struct {
 	User string
 	// Mounts are what the container sees of this machine beside the checkout and the
 	// composed home, each at its own path; --mount adds to them.
-	Mounts []RunnerMount
+	Mounts []ForagerMount
 	// CPUs, Memory, PIDs and ShmSize limit what the container uses, as docker run's
 	// --cpus, --memory, --pids-limit and --shm-size do; empty or zero is the engine's
 	// default, and a flag of the same name sets another for one run.
@@ -124,19 +124,19 @@ type RunnerWall struct {
 	CAEnv []string
 }
 
-// RunnerMount is one file or directory of this machine a walled run sees, at the same
+// ForagerMount is one file or directory of this machine a walled run sees, at the same
 // path.
-type RunnerMount struct {
+type ForagerMount struct {
 	Path     string
 	ReadOnly bool
 }
 
 // ParseMount reads a mount as wall.mounts and --mount write it: an absolute path, and
 // :ro after it for one the container cannot change. :rw sets the default explicitly.
-func ParseMount(v string) (RunnerMount, error) {
-	m := RunnerMount{Path: v}
+func ParseMount(v string) (ForagerMount, error) {
+	m := ForagerMount{Path: v}
 	if p, ok := strings.CutSuffix(v, ":ro"); ok {
-		m = RunnerMount{Path: p, ReadOnly: true}
+		m = ForagerMount{Path: p, ReadOnly: true}
 	} else if p, ok := strings.CutSuffix(v, ":rw"); ok {
 		m.Path = p
 	}
@@ -147,9 +147,9 @@ func ParseMount(v string) (RunnerMount, error) {
 	return m, nil
 }
 
-// RunnerEgress is the egress section: the policy the runner pins for every run on this
+// ForagerEgress is the egress section: the policy the runner pins for every run on this
 // machine, in the runner contract's grammar.
-type RunnerEgress struct {
+type ForagerEgress struct {
 	// Mode is observe or enforce.
 	Mode string
 	// Allow are the hosts the runtime may reach, each a lower-case name or a *. suffix.
@@ -160,11 +160,11 @@ type RunnerEgress struct {
 	Deny []string
 }
 
-// RunnerServer is the server section: the runner contract's server document, where a
+// ForagerServer is the server section: the runner contract's server document, where a
 // run discovers what to post its events to and where its configuration comes from. The
 // access key's secret is never in it: it is the file access-key-secret beside the
 // runner file, or QORY_ACCESS_KEY_SECRET.
-type RunnerServer struct {
+type ForagerServer struct {
 	// URL is the server: https, or http to a loopback address, a scheme and a host
 	// alone.
 	URL string
@@ -188,8 +188,8 @@ type pinEntry struct {
 	PublicKey *string `yaml:"public_key"`
 }
 
-// runnerFile is runner.yaml as written.
-type runnerFile struct {
+// foragerFile is runner.yaml as written.
+type foragerFile struct {
 	APIVersion string `yaml:"apiVersion"`
 	Egress     *struct {
 		Mode  *string   `yaml:"mode"`
@@ -234,15 +234,15 @@ type runnerFile struct {
 	} `yaml:"wall,omitempty"`
 }
 
-// LoadRunner reads the machine's runner file under [UserDir]. No file is no runner
+// LoadForager reads the machine's runner file under [UserDir]. No file is no runner
 // configuration and returns nil; a file that does not read is an error that contains its
 // path.
-func LoadRunner() (*Runner, error) {
-	path, data, err := readRunnerFile()
+func LoadForager() (*Forager, error) {
+	path, data, err := readForagerFile()
 	if data == nil || err != nil {
 		return nil, err
 	}
-	var f runnerFile
+	var f foragerFile
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
 	dec.KnownFields(true)
 	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
@@ -254,7 +254,7 @@ func LoadRunner() (*Runner, error) {
 	if _, err := exports.ResolveAPIVersion(f.APIVersion); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	r := &Runner{File: path}
+	r := &Forager{File: path}
 	if e := f.Egress; e != nil {
 		if e.Mode == nil {
 			return nil, fmt.Errorf("%s: egress.mode is required: observe or enforce", path)
@@ -262,7 +262,7 @@ func LoadRunner() (*Runner, error) {
 		if *e.Mode != "observe" && *e.Mode != "enforce" {
 			return nil, fmt.Errorf("%s: egress.mode %q is not observe or enforce", path, *e.Mode)
 		}
-		r.Egress = &RunnerEgress{Mode: *e.Mode}
+		r.Egress = &ForagerEgress{Mode: *e.Mode}
 		if e.Allow != nil {
 			for _, host := range *e.Allow {
 				if !module.EgressHost.MatchString(host) {
@@ -333,7 +333,7 @@ func LoadRunner() (*Runner, error) {
 		if w.Adapter == nil || *w.Adapter != WallDocker {
 			return nil, fmt.Errorf("%s: wall.adapter is required, and %s is the one there is", path, WallDocker)
 		}
-		r.Wall = &RunnerWall{Adapter: *w.Adapter}
+		r.Wall = &ForagerWall{Adapter: *w.Adapter}
 		if w.Image != nil {
 			r.Wall.Image = *w.Image
 		}
@@ -388,7 +388,7 @@ func LoadRunner() (*Runner, error) {
 		}
 		if w.Env != nil {
 			for _, name := range *w.Env {
-				if RunnersOwn(name) {
+				if ForagersOwn(name) {
 					return nil, fmt.Errorf("%s: wall.env: %s is the runner's own and never the session's", path, name)
 				}
 				if !envName.MatchString(name) {
@@ -401,14 +401,14 @@ func LoadRunner() (*Runner, error) {
 	return r, nil
 }
 
-// readRunnerFile reads the machine's runner file under [UserDir]: its path and its
+// readForagerFile reads the machine's runner file under [UserDir]: its path and its
 // content, which is nil when there is no file.
-func readRunnerFile() (string, []byte, error) {
+func readForagerFile() (string, []byte, error) {
 	dir := UserDir()
 	if dir == "" {
 		return "", nil, nil
 	}
-	path := filepath.Join(dir, RunnerFileName)
+	path := filepath.Join(dir, ForagerFileName)
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return path, nil, nil
@@ -422,12 +422,12 @@ func readRunnerFile() (string, []byte, error) {
 	return path, data, nil
 }
 
-// LoadRunnerInstance reads instance.name alone from the machine's runner file under
+// LoadForagerInstance reads instance.name alone from the machine's runner file under
 // [UserDir], for a key made for another machine, whose server section does not apply:
-// it is the [Runner] with File and InstanceName set, and nil when there is no file. The
+// it is the [Forager] with File and InstanceName set, and nil when there is no file. The
 // file must still be YAML, and instance.name a name; every other key is left unread.
-func LoadRunnerInstance() (*Runner, error) {
-	path, data, err := readRunnerFile()
+func LoadForagerInstance() (*Forager, error) {
+	path, data, err := readForagerFile()
 	if data == nil || err != nil {
 		return nil, err
 	}
@@ -439,7 +439,7 @@ func LoadRunnerInstance() (*Runner, error) {
 	if err := yaml.Unmarshal(data, &f); err != nil {
 		return nil, decodeError(path, err)
 	}
-	r := &Runner{File: path}
+	r := &Forager{File: path}
 	if in := f.Instance; in != nil && in.Name != nil {
 		if err := accesskey.CheckName(*in.Name); err != nil {
 			return nil, fmt.Errorf("%s: instance.name: %w", path, err)
@@ -459,17 +459,17 @@ func DefaultInstanceName() string {
 
 // InstanceNameOrDefault is the instance's display name: instance.name, else
 // [DefaultInstanceName].
-func (r *Runner) InstanceNameOrDefault() string {
+func (r *Forager) InstanceNameOrDefault() string {
 	if r != nil && r.InstanceName != "" {
 		return r.InstanceName
 	}
 	return DefaultInstanceName()
 }
 
-// RunnersOwn reports whether a variable is the runner's own, never the session's: the
+// ForagersOwn reports whether a variable is the runner's own, never the session's: the
 // access key's secret, its id and the pin, and QORY_SERVER_SECRET, which held a
 // workspace access key's secret.
-func RunnersOwn(name string) bool {
+func ForagersOwn(name string) bool {
 	return slices.Contains(serverVariableNames, name)
 }
 
@@ -478,7 +478,7 @@ const enrolAsNode = "connect this machine as a node: run qory access-key enrol <
 
 // removeThenEnrol ends the refusal of a workspace access key in the runner file: the
 // keys go first, since qory access-key enrol reads the file and would refuse them too.
-const removeThenEnrol = "remove server.access_key and server.secret from " + RunnerFileName + ", then " + enrolAsNode
+const removeThenEnrol = "remove server.access_key and server.secret from " + ForagerFileName + ", then " + enrolAsNode
 
 // readServer reads the server section. The access key's id and the pin come from the
 // file, else from QORY_ACCESS_KEY_ID and QORY_APIARY_PUBLIC_KEY as qory took them when
@@ -487,7 +487,7 @@ const removeThenEnrol = "remove server.access_key and server.secret from " + Run
 // refused when it starts. A value that contains an access key secret is refused without
 // being quoted. server.access_key, server.secret and QORY_SERVER_SECRET, a workspace
 // access key's, are refused with what to do instead.
-func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *yaml.Node) (*RunnerServer, error) {
+func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *yaml.Node) (*ForagerServer, error) {
 	if key.Kind != 0 {
 		return nil, fmt.Errorf("%s: server.access_key is a workspace access key, which servers no longer accept; %s", path, removeThenEnrol)
 	}
@@ -507,7 +507,7 @@ func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *y
 	if err := CheckServerURL(*rawURL); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	s := &RunnerServer{URL: *rawURL}
+	s := &ForagerServer{URL: *rawURL}
 	envID, envPin := env.AccessKeyID, env.ApiaryPublicKey
 	switch {
 	case id != nil && envID != "":
@@ -603,13 +603,13 @@ type credentialFile struct {
 // readCredentials reads the credentials section, a mapping from name to entry, in the
 // file's order. What an entry may hold together is the runner's to say, and qory run
 // asks it before a run.
-func readCredentials(path string, node *yaml.Node) ([]RunnerCredential, error) {
+func readCredentials(path string, node *yaml.Node) ([]ForagerCredential, error) {
 	if node.Kind != yaml.MappingNode {
 		return nil, fmt.Errorf("%s: credentials is a mapping from a name to a credential", path)
 	}
-	var out []RunnerCredential
+	var out []ForagerCredential
 	for i := 0; i+1 < len(node.Content); i += 2 {
-		c := RunnerCredential{Name: node.Content[i].Value}
+		c := ForagerCredential{Name: node.Content[i].Value}
 		var f credentialFile
 		// A node decodes loosely, so a key that is not one is refused here as the rest
 		// of the file refuses it.
@@ -679,7 +679,7 @@ func loopback(host string) bool {
 
 // Rows lists the runner file's effective values with the file as origin, and the
 // defaults with [Default] when there is no file or a section is absent.
-func (r *Runner) Rows() []Row {
+func (r *Forager) Rows() []Row {
 	origin := Default
 	if r != nil {
 		origin = r.File

@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/qoryai/runner/session"
+	"github.com/qoryai/forager/session"
 )
 
 // maxSubjects is how many --subject a run carries, the runner contract's bound.

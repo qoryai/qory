@@ -4,7 +4,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/qoryai/runner/accesskey"
+	"github.com/qoryai/forager/accesskey"
 )
 
 // ServerVariables are the variables qory takes for the server from its environment: the

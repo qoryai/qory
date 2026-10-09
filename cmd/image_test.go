@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qoryai/runner/runtimes/catalog"
+	"github.com/qoryai/forager/session/runtimes/catalog"
 
 	"github.com/qoryai/qory/cmd"
 )
@@ -59,9 +59,9 @@ esac
 	return log
 }
 
-// imageRunner writes the machine's runner file with a wall whose helper is helper, and
+// imageForager writes the machine's runner file with a wall whose helper is helper, and
 // image as wall.image when it is not empty.
-func imageRunner(t *testing.T, helper, image string) {
+func imageForager(t *testing.T, helper, image string) {
 	t.Helper()
 	wall := "wall:\n  adapter: docker\n  helper: " + helper + "\n"
 	if image != "" {
@@ -78,7 +78,7 @@ func TestImageCheckChecksTheMachinesImage(t *testing.T) {
 	emptyDir(t)
 	log := fakeImageDocker(t)
 	helper := staticELF(t)
-	imageRunner(t, helper, "example.com/agent:1")
+	imageForager(t, helper, "example.com/agent:1")
 	out, err := run(t, "image", "check")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -111,7 +111,7 @@ func TestImageCheckChecksTheMachinesImage(t *testing.T) {
 func TestImageCheckFailsWhenOneImageFails(t *testing.T) {
 	emptyDir(t)
 	fakeImageDocker(t)
-	imageRunner(t, staticELF(t), "")
+	imageForager(t, staticELF(t), "")
 	out, err := run(t, "image", "check", "example.com/agent:1", "example.com/missing:1", "example.com/broken:1")
 	if cmd.ExitCode(err) != 1 {
 		t.Fatalf("exit %d, %v\n%s", cmd.ExitCode(err), err, out)
@@ -129,7 +129,7 @@ func TestImageCheckFailsWhenOneImageFails(t *testing.T) {
 func TestImageCheckRefusesWhatItCannotCheck(t *testing.T) {
 	emptyDir(t)
 	log := fakeImageDocker(t)
-	imageRunner(t, staticELF(t), "")
+	imageForager(t, staticELF(t), "")
 	for _, c := range []struct {
 		args []string
 		want string
@@ -143,7 +143,7 @@ func TestImageCheckRefusesWhatItCannotCheck(t *testing.T) {
 	}
 	script := filepath.Join(t.TempDir(), "qory")
 	writeFile(t, script, "#!/bin/sh\n")
-	imageRunner(t, script, "example.com/agent:1")
+	imageForager(t, script, "example.com/agent:1")
 	if _, err := run(t, "image", "check"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "not a Linux executable") {
 		t.Errorf("a helper that is a script: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestImageCheckRefusesABuildForAnotherEngine(t *testing.T) {
 	if err := os.WriteFile(helper, data, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	imageRunner(t, helper, "example.com/agent:1")
+	imageForager(t, helper, "example.com/agent:1")
 	out, err := run(t, "image", "check")
 	if cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "is for arm64, and the engine runs linux/amd64; set wall.helper to the Linux build for amd64") {
 		t.Fatalf("exit %d, %v\n%s", cmd.ExitCode(err), err, out)

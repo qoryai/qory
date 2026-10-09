@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qoryai/runner/accesskey"
+	"github.com/qoryai/forager/accesskey"
 
 	"github.com/qoryai/qory/internal/config"
 )

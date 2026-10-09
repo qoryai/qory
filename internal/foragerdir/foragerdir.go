@@ -1,4 +1,4 @@
-// Package runnerdir is the runner file's directory, everything qory keeps on this
+// Package foragerdir is the runner file's directory, everything qory keeps on this
 // machine for its server beside runner.yaml: the access key's secret, the moved-aside
 // secrets, the new secret of a key being enrolled, the replaced secret of a key being
 // replaced, the instance id, the stored-secrets marker, the pending enrolment and its
@@ -10,7 +10,7 @@
 // group or to others, in a directory the effective user owns that grants nothing to
 // them either: the owner and the mode are compared before a byte is read. No error of
 // this package contains a secret.
-package runnerdir
+package foragerdir
 
 import (
 	"crypto/sha256"
@@ -26,7 +26,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/qoryai/runner/accesskey"
+	"github.com/qoryai/forager/accesskey"
 )
 
 // The files of the directory.

@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/qoryai/runner/wall"
+	"github.com/qoryai/forager/wall"
 )
 
 // ProbeUser is the user the probe's container runs as: a uid and a gid no image names,

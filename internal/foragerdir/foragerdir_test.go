@@ -1,4 +1,4 @@
-package runnerdir_test
+package foragerdir_test
 
 import (
 	"os"
@@ -9,18 +9,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/qoryai/runner/accesskey"
+	"github.com/qoryai/forager/accesskey"
 
-	"github.com/qoryai/qory/internal/runnerdir"
+	"github.com/qoryai/qory/internal/foragerdir"
 )
 
 // fixtureSecret is the runner contract's published fixture access key secret.
 const fixtureSecret = "qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA"
 
 // newDir is a runner file's directory of the test's own, mode 0700.
-func newDir(t *testing.T) runnerdir.Dir {
+func newDir(t *testing.T) foragerdir.Dir {
 	t.Helper()
-	d := runnerdir.Dir(filepath.Join(t.TempDir(), "qory"))
+	d := foragerdir.Dir(filepath.Join(t.TempDir(), "qory"))
 	if _, err := d.Ensure(); err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func mode(t *testing.T, path string) os.FileMode {
 // TestEnsureMakesTheDirectoryPrivate is a new directory created 0700 and an existing
 // one made 0700.
 func TestEnsureMakesTheDirectoryPrivate(t *testing.T) {
-	d := runnerdir.Dir(filepath.Join(t.TempDir(), "a", "qory"))
+	d := foragerdir.Dir(filepath.Join(t.TempDir(), "a", "qory"))
 	if changed, err := d.Ensure(); err != nil || changed || mode(t, string(d)) != 0o700 {
 		t.Fatalf("a new directory: %v, %v, %v", changed, err, mode(t, string(d)))
 	}
@@ -65,14 +65,14 @@ func TestEnsureMakesTheDirectoryPrivate(t *testing.T) {
 // back; a second write refused; and every file the rules refuse.
 func TestTheSecretIsWrittenAndReadByTheRules(t *testing.T) {
 	d := newDir(t)
-	if _, err := d.ReadSecret(); err != runnerdir.ErrNoSecret {
+	if _, err := d.ReadSecret(); err != foragerdir.ErrNoSecret {
 		t.Fatalf("no file: %v", err)
 	}
 	k := newKey(t)
 	if err := d.WriteSecret(k); err != nil {
 		t.Fatal(err)
 	}
-	path := d.Path(runnerdir.SecretFile)
+	path := d.Path(foragerdir.SecretFile)
 	if mode(t, path) != 0o600 {
 		t.Errorf("mode %v", mode(t, path))
 	}
@@ -184,7 +184,7 @@ func TestASecretMovedAsideGetsANameNoFileHas(t *testing.T) {
 	if len(old) != 3 {
 		t.Errorf("old secrets %v", old)
 	}
-	if b, _ := os.ReadFile(d.Path(runnerdir.SecretFile)); string(b) != mine.Secret()+"\n" {
+	if b, _ := os.ReadFile(d.Path(foragerdir.SecretFile)); string(b) != mine.Secret()+"\n" {
 		t.Error("access-key-secret changed")
 	}
 	if err := d.DeleteOldSecrets(); err != nil {
@@ -210,7 +210,7 @@ func TestTheMarkerAndThePendingEnrolment(t *testing.T) {
 	if err := d.WriteMarker(); err != nil {
 		t.Errorf("a second marker: %v", err)
 	}
-	if has, _ := d.HasMarker(); !has || mode(t, d.Path(runnerdir.MarkerFile)) != 0o600 {
+	if has, _ := d.HasMarker(); !has || mode(t, d.Path(foragerdir.MarkerFile)) != 0o600 {
 		t.Error("the marker")
 	}
 	d.RemoveMarker()
@@ -228,8 +228,8 @@ func TestTheMarkerAndThePendingEnrolment(t *testing.T) {
 	if err := d.WritePending(code, key, now); err != nil {
 		t.Fatal(err)
 	}
-	b, _ := os.ReadFile(d.Path(runnerdir.PendingFile))
-	if strings.Contains(string(b), "F1XT0RE") || strings.Contains(string(b), k.Secret()) || !strings.Contains(string(b), "\n"+k.Fingerprint()+"\n") || mode(t, d.Path(runnerdir.PendingFile)) != 0o600 {
+	b, _ := os.ReadFile(d.Path(foragerdir.PendingFile))
+	if strings.Contains(string(b), "F1XT0RE") || strings.Contains(string(b), k.Secret()) || !strings.Contains(string(b), "\n"+k.Fingerprint()+"\n") || mode(t, d.Path(foragerdir.PendingFile)) != 0o600 {
 		t.Errorf("enrolment-pending holds %d bytes: no code and no secret, the key's fingerprint", len(b))
 	}
 	for _, c := range []struct {
@@ -262,7 +262,7 @@ func TestTheMarkerAndThePendingEnrolment(t *testing.T) {
 	}
 	// A record of the code and the time alone, with no key's fingerprint, matches no key.
 	lines := strings.SplitN(string(b), "\n", 3)
-	if err := os.WriteFile(d.Path(runnerdir.PendingFile), []byte(lines[0]+"\n"+strconv.FormatInt(now.Unix(), 10)+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(d.Path(foragerdir.PendingFile), []byte(lines[0]+"\n"+strconv.FormatInt(now.Unix(), 10)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if d.Pending(code, key, now) {
@@ -281,7 +281,7 @@ func TestTheInstanceIDIsKeptForThisMachine(t *testing.T) {
 	if err != nil || !kept || accesskey.CheckInstanceID(id) != nil || !strings.HasPrefix(id, "i_") || len(id) != 24 {
 		t.Fatalf("a new id: %q, %v, %v", id, kept, err)
 	}
-	if mode(t, d.Path(runnerdir.InstanceFile)) != 0o600 {
+	if mode(t, d.Path(foragerdir.InstanceFile)) != 0o600 {
 		t.Error("instance-id mode")
 	}
 	if again, kept, _ := d.InstanceID(machine); again != id || !kept {
@@ -293,7 +293,7 @@ func TestTheInstanceIDIsKeptForThisMachine(t *testing.T) {
 	if got, ok := d.ReadInstanceID([]byte("machine-b")); !ok || got == id {
 		t.Errorf("the file was not rewritten for machine b: %q", got)
 	}
-	os.WriteFile(d.Path(runnerdir.InstanceFile), accesskey.InstanceFile("i_written-by-another", machine), 0o600)
+	os.WriteFile(d.Path(foragerdir.InstanceFile), accesskey.InstanceFile("i_written-by-another", machine), 0o600)
 	if got, kept, _ := d.InstanceID(machine); got != "i_written-by-another" || !kept {
 		t.Errorf("another process's file: %q", got)
 	}
@@ -326,7 +326,7 @@ func TestLocksKeepKeyCommandsAndRunsApart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mode(t, d.Path(runnerdir.LocksDir)) != 0o700 || mode(t, filepath.Join(d.Path(runnerdir.LocksDir), runnerdir.KeyLock)) != 0o600 {
+	if mode(t, d.Path(foragerdir.LocksDir)) != 0o700 || mode(t, filepath.Join(d.Path(foragerdir.LocksDir), foragerdir.KeyLock)) != 0o600 {
 		t.Error("the locks' modes")
 	}
 	got := make(chan struct{})
@@ -370,7 +370,7 @@ func TestLocksKeepKeyCommandsAndRunsApart(t *testing.T) {
 	if err != nil || !slices.Equal(live, []string{"0191f2a4-3c5e-7b8d-9e0f-000000000002"}) {
 		t.Errorf("sweep: %v, %v", live, err)
 	}
-	entries, _ := os.ReadDir(d.Path(runnerdir.LocksDir))
+	entries, _ := os.ReadDir(d.Path(foragerdir.LocksDir))
 	var names []string
 	for _, e := range entries {
 		names = append(names, e.Name())
@@ -383,7 +383,7 @@ func TestLocksKeepKeyCommandsAndRunsApart(t *testing.T) {
 	if live, _ := d.Sweep(); len(live) != 0 {
 		t.Errorf("after the runs ended: %v", live)
 	}
-	if entries, _ := os.ReadDir(d.Path(runnerdir.LocksDir)); len(entries) != 1 {
+	if entries, _ := os.ReadDir(d.Path(foragerdir.LocksDir)); len(entries) != 1 {
 		t.Errorf("%d lock files after the runs ended", len(entries))
 	}
 
@@ -391,10 +391,10 @@ func TestLocksKeepKeyCommandsAndRunsApart(t *testing.T) {
 		if os.Getuid() == 0 {
 			t.Skip("root writes a directory whatever its mode")
 		}
-		ro := runnerdir.Dir(filepath.Join(t.TempDir(), "ro"))
+		ro := foragerdir.Dir(filepath.Join(t.TempDir(), "ro"))
 		os.Mkdir(string(ro), 0o500)
 		t.Cleanup(func() { os.Chmod(string(ro), 0o700) })
-		if _, err := ro.LockKey(false); err != runnerdir.ErrReadOnly {
+		if _, err := ro.LockKey(false); err != foragerdir.ErrReadOnly {
 			t.Errorf("%v", err)
 		}
 	})

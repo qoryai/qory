@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qoryai/runner/accesskey"
+	"github.com/qoryai/forager/accesskey"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"gopkg.in/yaml.v3"
 
@@ -24,10 +24,10 @@ func serverKey(t *testing.T) (*accesskey.Key, string) {
 	return k, "[{alg: ed25519, public_key: " + k.PublicKey().String() + "}]"
 }
 
-// runnerFile writes the machine's runner file under the configuration directory.
-func runnerFile(t *testing.T, body string) string {
+// foragerFile writes the machine's runner file under the configuration directory.
+func foragerFile(t *testing.T, body string) string {
 	t.Helper()
-	path := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", config.RunnerFileName)
+	path := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", config.ForagerFileName)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -37,18 +37,18 @@ func runnerFile(t *testing.T, body string) string {
 	return path
 }
 
-// TestRunnerFileReadsBothSections reads egress, server and instance, lists them with
+// TestForagerFileReadsBothSections reads egress, server and instance, lists them with
 // the file as origin and the pin by its fingerprint, and carries them on the
 // configuration a checkout loads.
-func TestRunnerFileReadsBothSections(t *testing.T) {
+func TestForagerFileReadsBothSections(t *testing.T) {
 	hermetic(t)
 	signer, pin := serverKey(t)
-	path := runnerFile(t, "apiVersion: qory.dev/v1alpha1\negress:\n  mode: enforce\n  allow: [api.anthropic.com, \"*.github.com\"]\n  deny: [gist.github.com, \"*.ads.example\"]\nserver:\n  url: https://qory.example\n  access_key_id: ak_f1xt0re000000000\n  apiary_public_key: "+pin+"\ninstance:\n  name: build-01\n")
+	path := foragerFile(t, "apiVersion: qory.dev/v1alpha1\negress:\n  mode: enforce\n  allow: [api.anthropic.com, \"*.github.com\"]\n  deny: [gist.github.com, \"*.ads.example\"]\nserver:\n  url: https://qory.example\n  access_key_id: ak_f1xt0re000000000\n  apiary_public_key: "+pin+"\ninstance:\n  name: build-01\n")
 	c, err := config.Load(t.TempDir(), true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := c.Runner
+	r := c.Forager
 	if r == nil || r.File != path || r.Egress == nil || r.Egress.Mode != "enforce" || strings.Join(r.Egress.Allow, " ") != "api.anthropic.com *.github.com" || strings.Join(r.Egress.Deny, " ") != "gist.github.com *.ads.example" {
 		t.Fatalf("egress read as %+v", r)
 	}
@@ -67,16 +67,16 @@ func TestRunnerFileReadsBothSections(t *testing.T) {
 	}
 }
 
-// TestRunnerFileReadsTheWall reads the wall section, lists it, and lists no wall as the
+// TestForagerFileReadsTheWall reads the wall section, lists it, and lists no wall as the
 // default when the file names none.
-func TestRunnerFileReadsTheWall(t *testing.T) {
+func TestForagerFileReadsTheWall(t *testing.T) {
 	hermetic(t)
-	path := runnerFile(t, "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: podman\n  helper: /opt/qory/qory-linux\n  env: [ANTHROPIC_API_KEY, GH_TOKEN]\n  user: \"1000:1000\"\n  mounts: [/srv/data:ro, /srv/cache]\n  cpus: \"3.5\"\n  memory: 14g\n  pids_limit: 4096\n  shm_size: 2g\n  ca_env: [SSL_CERT_FILE, MY_TOOLS_CA]\nrun:\n  timeout: 5h30m\n  stop_signal: SIGINT\n  stop_grace: 30s\ncredentials:\n  product:\n    adapter: [/opt/adapters/git-host, --repo, \"${argument}\"]\n    argument: \"[a-z0-9-]+/[a-z0-9-]+\"\n    hosts: [\"*.example.com\"]\n    placeholders: [GIT_HOST_TOKEN]\n  model:\n    env: MODEL_TOKEN\n    hosts: [api.model.example]\n    auth: {scheme: header, header: X-Api-Key}\n")
+	path := foragerFile(t, "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: podman\n  helper: /opt/qory/qory-linux\n  env: [ANTHROPIC_API_KEY, GH_TOKEN]\n  user: \"1000:1000\"\n  mounts: [/srv/data:ro, /srv/cache]\n  cpus: \"3.5\"\n  memory: 14g\n  pids_limit: 4096\n  shm_size: 2g\n  ca_env: [SSL_CERT_FILE, MY_TOOLS_CA]\nrun:\n  timeout: 5h30m\n  stop_signal: SIGINT\n  stop_grace: 30s\ncredentials:\n  product:\n    adapter: [/opt/adapters/git-host, --repo, \"${argument}\"]\n    argument: \"[a-z0-9-]+/[a-z0-9-]+\"\n    hosts: [\"*.example.com\"]\n    placeholders: [GIT_HOST_TOKEN]\n  model:\n    env: MODEL_TOKEN\n    hosts: [api.model.example]\n    auth: {scheme: header, header: X-Api-Key}\n")
 	c, err := config.Load(t.TempDir(), true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := c.Runner.Wall
+	w := c.Forager.Wall
 	if w == nil || w.Adapter != config.WallDocker || w.Image != "example.com/agent:1" || w.Command != "podman" || w.Helper != "/opt/qory/qory-linux" || w.User != "1000:1000" || strings.Join(w.Env, " ") != "ANTHROPIC_API_KEY GH_TOKEN" {
 		t.Fatalf("wall read as %+v", w)
 	}
@@ -92,10 +92,10 @@ func TestRunnerFileReadsTheWall(t *testing.T) {
 			t.Errorf("%s: %+v, want %q from %s", key, rows[key], want, path)
 		}
 	}
-	runnerFile(t, "egress: {mode: observe}\n")
+	foragerFile(t, "egress: {mode: observe}\n")
 	c, err = config.Load(t.TempDir(), true)
-	if err != nil || c.Runner.Wall != nil {
-		t.Fatalf("no wall section: %+v, %v", c.Runner, err)
+	if err != nil || c.Forager.Wall != nil {
+		t.Fatalf("no wall section: %+v, %v", c.Forager, err)
 	}
 	for _, row := range c.Rows() {
 		if row.Key == "runner.wall.adapter" && (row.Value != "(none)" || row.Origin != config.Default) {
@@ -104,14 +104,14 @@ func TestRunnerFileReadsTheWall(t *testing.T) {
 	}
 }
 
-// TestRunnerFileDefaults is no file, an empty file and a file with one section: what is
+// TestForagerFileDefaults is no file, an empty file and a file with one section: what is
 // absent is observe everything and files only, listed as defaults, and the secret may
 // come from the environment.
-func TestRunnerFileDefaults(t *testing.T) {
+func TestForagerFileDefaults(t *testing.T) {
 	hermetic(t)
 	c, err := config.Load(t.TempDir(), true)
-	if err != nil || c.Runner != nil {
-		t.Fatalf("no file: %+v, %v", c.Runner, err)
+	if err != nil || c.Forager != nil {
+		t.Fatalf("no file: %+v, %v", c.Forager, err)
 	}
 	rows := map[string]config.Row{}
 	for _, row := range c.Rows() {
@@ -120,16 +120,16 @@ func TestRunnerFileDefaults(t *testing.T) {
 	if rows["runner.egress.mode"].Value != "observe" || rows["runner.egress.mode"].Origin != config.Default || rows["runner.egress.deny"].Value != "(none)" || rows["runner.server.url"].Value != "(none)" {
 		t.Errorf("default rows %+v", rows)
 	}
-	runnerFile(t, "apiVersion: qory.dev/v1alpha1\n")
-	if c, err = config.Load(t.TempDir(), true); err != nil || c.Runner == nil || c.Runner.Egress != nil || c.Runner.Server != nil {
-		t.Errorf("empty file: %+v, %v", c.Runner, err)
+	foragerFile(t, "apiVersion: qory.dev/v1alpha1\n")
+	if c, err = config.Load(t.TempDir(), true); err != nil || c.Forager == nil || c.Forager.Egress != nil || c.Forager.Server != nil {
+		t.Errorf("empty file: %+v, %v", c.Forager, err)
 	}
 	signer, _ := serverKey(t)
 	serverVariables(t, config.ServerVariables{AccessKeyID: "ak_0123456789abcdef", ApiaryPublicKey: `[{"alg":"ed25519","public_key":"` + signer.PublicKey().String() + `"}]`})
-	runnerFile(t, "server:\n  url: http://127.0.0.1:8787\n")
+	foragerFile(t, "server:\n  url: http://127.0.0.1:8787\n")
 	c, err = config.Load(t.TempDir(), true)
-	if err != nil || c.Runner.Server == nil || c.Runner.Server.AccessKeyID != "ak_0123456789abcdef" || c.Runner.Server.AccessKeyIDFrom != "$QORY_ACCESS_KEY_ID" || len(c.Runner.Server.Pin) != 1 || c.Runner.Server.PinFrom != "$QORY_APIARY_PUBLIC_KEY" || c.Runner.Egress != nil {
-		t.Fatalf("the id and the pin from the environment: %+v, %v", c.Runner, err)
+	if err != nil || c.Forager.Server == nil || c.Forager.Server.AccessKeyID != "ak_0123456789abcdef" || c.Forager.Server.AccessKeyIDFrom != "$QORY_ACCESS_KEY_ID" || len(c.Forager.Server.Pin) != 1 || c.Forager.Server.PinFrom != "$QORY_APIARY_PUBLIC_KEY" || c.Forager.Egress != nil {
+		t.Fatalf("the id and the pin from the environment: %+v, %v", c.Forager, err)
 	}
 	rows = map[string]config.Row{}
 	for _, row := range c.Rows() {
@@ -142,19 +142,19 @@ func TestRunnerFileDefaults(t *testing.T) {
 	// Neither is required in the file, since enrolment writes them; both are required
 	// of a run.
 	serverVariables(t, config.ServerVariables{})
-	if c, err = config.Load(t.TempDir(), true); err != nil || c.Runner.Server.AccessKeyID != "" || c.Runner.Server.Pin != nil {
-		t.Fatalf("a server section with a url alone: %+v, %v", c.Runner.Server, err)
+	if c, err = config.Load(t.TempDir(), true); err != nil || c.Forager.Server.AccessKeyID != "" || c.Forager.Server.Pin != nil {
+		t.Fatalf("a server section with a url alone: %+v, %v", c.Forager.Server, err)
 	}
 }
 
-// TestRunnerFileRefusesTheIDAndThePinTwice is a runner file that sets the access key's
+// TestForagerFileRefusesTheIDAndThePinTwice is a runner file that sets the access key's
 // id or the pin while the environment sets it too, and values in the environment that
 // are not one: each is refused, the variable named and no secret quoted.
-func TestRunnerFileRefusesTheIDAndThePinTwice(t *testing.T) {
+func TestForagerFileRefusesTheIDAndThePinTwice(t *testing.T) {
 	hermetic(t)
 	signer, pin := serverKey(t)
 	envPin := `[{"alg":"ed25519","public_key":"` + signer.PublicKey().String() + `"}]`
-	path := runnerFile(t, "server:\n  url: https://qory.example\n  access_key_id: ak_f1xt0re000000000\n  apiary_public_key: "+pin+"\n")
+	path := foragerFile(t, "server:\n  url: https://qory.example\n  access_key_id: ak_f1xt0re000000000\n  apiary_public_key: "+pin+"\n")
 	serverVariables(t, config.ServerVariables{AccessKeyID: "ak_0123456789abcdef"})
 	if _, err := config.Load(t.TempDir(), true); err == nil || err.Error() != path+": server.access_key_id is set, and so is QORY_ACCESS_KEY_ID; set one of them" {
 		t.Errorf("the id twice: %v", err)
@@ -163,7 +163,7 @@ func TestRunnerFileRefusesTheIDAndThePinTwice(t *testing.T) {
 	if _, err := config.Load(t.TempDir(), true); err == nil || err.Error() != path+": server.apiary_public_key is set, and so is QORY_APIARY_PUBLIC_KEY; set one of them" {
 		t.Errorf("the pin twice: %v", err)
 	}
-	runnerFile(t, "server:\n  url: https://qory.example\n")
+	foragerFile(t, "server:\n  url: https://qory.example\n")
 	const secret = "qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA"
 	for _, c := range []struct{ id, pin, want string }{
 		{"AK_F1XT0RE000000000", "", `QORY_ACCESS_KEY_ID: the access key id "AK_F1XT0RE000000000" is not ak_`},
@@ -180,13 +180,13 @@ func TestRunnerFileRefusesTheIDAndThePinTwice(t *testing.T) {
 	}
 }
 
-// TestRunnerFileRefusesTheWorkspaceSecretVariable is QORY_SERVER_SECRET, which held a
+// TestForagerFileRefusesTheWorkspaceSecretVariable is QORY_SERVER_SECRET, which held a
 // workspace access key's secret: with a server section it is refused, the variable named
 // and its value never quoted, and the message says to connect the machine as a node,
 // with qory access-key enrol or a key generated on the node's page in Qory Apiary.
-func TestRunnerFileRefusesTheWorkspaceSecretVariable(t *testing.T) {
+func TestForagerFileRefusesTheWorkspaceSecretVariable(t *testing.T) {
 	hermetic(t)
-	runnerFile(t, "server:\n  url: https://qory.example\n")
+	foragerFile(t, "server:\n  url: https://qory.example\n")
 	serverVariables(t, config.ServerVariables{WorkspaceSecret: "sixteen-characters-at-least"})
 	_, err := config.Load(t.TempDir(), true)
 	want := "QORY_SERVER_SECRET holds a workspace access key's secret, which servers no longer accept; unset it, and connect this machine as a node: run qory access-key enrol <server> <code>, or generate a key on the node's page in Qory Apiary and set the QORY_ variables it shows; see https://github.com/qoryai/qory/blob/main/docs/run.md#the-access-key-and-the-instance"
@@ -195,8 +195,8 @@ func TestRunnerFileRefusesTheWorkspaceSecretVariable(t *testing.T) {
 	}
 }
 
-// TestRunnerFileRefusesAMistake is every refusal, each naming the file and the key.
-func TestRunnerFileRefusesAMistake(t *testing.T) {
+// TestForagerFileRefusesAMistake is every refusal, each naming the file and the key.
+func TestForagerFileRefusesAMistake(t *testing.T) {
 	hermetic(t)
 	for _, c := range []struct{ body, want string }{
 		{"egres: {mode: observe}\n", `key "egres" is not one runner.yaml reads`},
@@ -243,7 +243,7 @@ func TestRunnerFileRefusesAMistake(t *testing.T) {
 		{"run: {stop_signal: SIGKILL}\n", `run.stop_signal: the stop signal "SIGKILL" is not one of`},
 		{"apiVersion: qory.dev/v9\n", "qory.dev/v9"},
 	} {
-		path := runnerFile(t, c.body)
+		path := foragerFile(t, c.body)
 		_, err := config.Load(t.TempDir(), true)
 		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.HasPrefix(err.Error(), path) {
 			t.Errorf("%q: error %v, want one naming the file and %q", c.body, err, c.want)
@@ -251,11 +251,11 @@ func TestRunnerFileRefusesAMistake(t *testing.T) {
 	}
 }
 
-// TestTheRunnerSchemaTakesTheServerSection holds runner.schema.json to what the reader
+// TestTheForagerSchemaTakesTheServerSection holds runner.schema.json to what the reader
 // takes of server and instance: url, access_key_id and the pin, each of the last two
 // optional since the environment may hold it, and instance.name; the workspace access
 // key's keys and a server with no url fail it.
-func TestTheRunnerSchemaTakesTheServerSection(t *testing.T) {
+func TestTheForagerSchemaTakesTheServerSection(t *testing.T) {
 	schema, err := jsonschema.NewCompiler().Compile(filepath.Join("..", "..", "contracts", "harness", "v1", "runner.schema.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -314,12 +314,12 @@ func TestTheDocsExampleServerReads(t *testing.T) {
 	if len(section) == 0 {
 		t.Fatal("the runner.yaml of docs/run.md has no server section")
 	}
-	runnerFile(t, "apiVersion: qory.dev/v1alpha1\n"+strings.Join(section, ""))
+	foragerFile(t, "apiVersion: qory.dev/v1alpha1\n"+strings.Join(section, ""))
 	c, err := config.Load(t.TempDir(), true)
 	if err != nil {
 		t.Fatalf("the docs' server section: %v\n%s", err, strings.Join(section, ""))
 	}
-	s := c.Runner.Server
+	s := c.Forager.Server
 	if s == nil || accesskey.CheckID(s.AccessKeyID) != nil || len(s.Pin) == 0 || s.Pin.Check() != nil || s.Pin.Fixture() {
 		t.Errorf("the docs' server section: %+v", s)
 	}

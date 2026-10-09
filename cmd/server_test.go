@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/qoryai/runner/accesskey"
+	"github.com/qoryai/forager/accesskey"
 
 	"github.com/qoryai/qory/cmd"
-	"github.com/qoryai/qory/internal/runnerdir"
+	"github.com/qoryai/qory/internal/foragerdir"
 )
 
 // fixtureSecret is the runner contract's published fixture access key secret, which
@@ -32,8 +32,8 @@ func serverRun(t *testing.T, policy, more string) (string, *fakeServer) {
 }
 
 // configDir is the runner file's directory of the test's environment.
-func configDir() runnerdir.Dir {
-	return runnerdir.Dir(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory"))
+func configDir() foragerdir.Dir {
+	return foragerdir.Dir(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory"))
 }
 
 // clearRuns removes the checkout's run records, so the next run is the one recorded.
@@ -57,7 +57,7 @@ func TestRunSignsWithTheAccessKeyAndNamesTheInstance(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	dir := configDir()
-	b, err := os.ReadFile(dir.Path(runnerdir.InstanceFile))
+	b, err := os.ReadFile(dir.Path(foragerdir.InstanceFile))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestRunSignsWithTheAccessKeyAndNamesTheInstance(t *testing.T) {
 	if !instanceShape.MatchString(id) {
 		t.Fatalf("instance-id holds %q", b)
 	}
-	if info, _ := os.Stat(dir.Path(runnerdir.InstanceFile)); info.Mode().Perm() != 0o600 {
+	if info, _ := os.Stat(dir.Path(foragerdir.InstanceFile)); info.Mode().Perm() != 0o600 {
 		t.Errorf("instance-id is mode %v", info.Mode())
 	}
 	wants(t, out, "qory run: node "+testNode+", instance "+id, "claude exited 0")
@@ -96,11 +96,11 @@ func TestRunSignsWithTheAccessKeyAndNamesTheInstance(t *testing.T) {
 func TestRunRegeneratesAnInstanceIDThatIsNotThisMachines(t *testing.T) {
 	root, srv := serverRun(t, "", "")
 	dir := configDir()
-	path := dir.Path(runnerdir.InstanceFile)
+	path := dir.Path(foragerdir.InstanceFile)
 	elsewhere := filepath.Join(t.TempDir(), "elsewhere")
-	writeFile(t, elsewhere, string(accesskey.InstanceFile("i_fromElsewhere", runnerdir.MachineID())))
+	writeFile(t, elsewhere, string(accesskey.InstanceFile("i_fromElsewhere", foragerdir.MachineID())))
 	for name, write := range map[string]func(){
-		"a bad id": func() { writeFile(t, path, "../x\n"+accesskey.MachineHash(runnerdir.MachineID())+"\n") },
+		"a bad id": func() { writeFile(t, path, "../x\n"+accesskey.MachineHash(foragerdir.MachineID())+"\n") },
 		"another machine's": func() {
 			writeFile(t, path, string(accesskey.InstanceFile("i_copiedWithTheHome", []byte("another-machine"))))
 		},
@@ -115,7 +115,7 @@ func TestRunRegeneratesAnInstanceIDThatIsNotThisMachines(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v\n%s", name, err, out)
 		}
-		id, ok := dir.ReadInstanceID(runnerdir.MachineID())
+		id, ok := dir.ReadInstanceID(foragerdir.MachineID())
 		if !ok || !instanceShape.MatchString(id) || srv.instances[0][0] != id {
 			t.Errorf("%s: the file holds %q, the server saw %v", name, id, srv.instances)
 		}
@@ -156,7 +156,7 @@ func TestRunRegeneratesAnInstanceIDThatIsNotThisMachines(t *testing.T) {
 func TestRunRefusesAnAccessKeySecretTheRulesRefuse(t *testing.T) {
 	root, srv := serverRun(t, "", "")
 	dir := configDir()
-	path := dir.Path(runnerdir.SecretFile)
+	path := dir.Path(foragerdir.SecretFile)
 	elsewhere := filepath.Join(t.TempDir(), "secret")
 	writeFile(t, elsewhere, srv.key.Secret()+"\n")
 	if err := os.Chmod(elsewhere, 0o600); err != nil {
@@ -295,7 +295,7 @@ func TestTheMarkerKeepsEveryUnwalledRunOut(t *testing.T) {
 	if err := dir.WriteMarker(); err != nil {
 		t.Fatal(err)
 	}
-	marker := dir.Path(runnerdir.MarkerFile)
+	marker := dir.Path(foragerdir.MarkerFile)
 	want := "the stored-secrets marker " + marker + " exists: this machine's access key may receive stored secrets, so every run needs a wall: --wall docker, or wall in runner.yaml (server_needs_wall)"
 	for _, c := range []struct {
 		name, secret string
@@ -333,7 +333,7 @@ func TestTheMarkerKeepsEveryUnwalledRunOut(t *testing.T) {
 		t.Fatalf("without the marker: %v\n%s", err, out)
 	}
 	entries, _ := os.ReadDir(runsDir(t, root))
-	b, err := os.ReadFile(filepath.Join(dir.Path(runnerdir.LocksDir), entries[0].Name()+".lock"))
+	b, err := os.ReadFile(filepath.Join(dir.Path(foragerdir.LocksDir), entries[0].Name()+".lock"))
 	if err != nil || string(b) != "unwalled\n" {
 		t.Errorf("the run's lock file: %q, %v", b, err)
 	}
@@ -354,7 +354,7 @@ func TestDiscoverySettlesTheMarker(t *testing.T) {
 		t.Error("discovery with secrets wrote no marker")
 	}
 	srv.secrets = false
-	old := dir.Path(runnerdir.OldPrefix + "1700000000")
+	old := dir.Path(foragerdir.OldPrefix + "1700000000")
 	writeFile(t, old, newKey(t).Secret()+"\n")
 	srv.revoked = true
 	clearRuns(t, root)

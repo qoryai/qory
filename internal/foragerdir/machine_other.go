@@ -1,6 +1,6 @@
 //go:build !linux && !darwin
 
-package runnerdir
+package foragerdir
 
 // platformIdentity is none on a system other than Linux and macOS: the host name stands
 // in for it.

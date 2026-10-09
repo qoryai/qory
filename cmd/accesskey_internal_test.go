@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/qoryai/runner/accesskey"
-	"github.com/qoryai/runner/contracts"
+	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/forager/contracts"
 
-	"github.com/qoryai/qory/internal/runnerdir"
+	"github.com/qoryai/qory/internal/foragerdir"
 )
 
 // contractFile reads one file of the runner contract, by its path under runner/v1.
@@ -142,7 +142,7 @@ func TestEnrolmentKnownAnswers(t *testing.T) {
 			if ref.Code != want {
 				t.Errorf("%s, tampered %v: %s, want %s", a.Note, tamper, ref.Code, want)
 			}
-			dir := runnerdir.Dir(t.TempDir())
+			dir := foragerdir.Dir(t.TempDir())
 			if _, err := dir.Ensure(); err != nil {
 				t.Fatal(err)
 			}
@@ -235,19 +235,19 @@ func TestARefusalMovesAsideOnlyTheKeyMadeForTheCode(t *testing.T) {
 	}
 	for _, c := range []struct {
 		name string
-		act  func(runnerdir.Dir, time.Time) error
+		act  func(foragerdir.Dir, time.Time) error
 	}{
-		{"unauthorized", func(dir runnerdir.Dir, now time.Time) error {
+		{"unauthorized", func(dir foragerdir.Dir, now time.Time) error {
 			return enrolFailed(dir, &accesskey.Refusal{Code: accesskey.CodeUnauthorized, Status: http.StatusUnauthorized}, sent, false, now)
 		}},
-		{"key_invalid", func(dir runnerdir.Dir, now time.Time) error {
+		{"key_invalid", func(dir foragerdir.Dir, now time.Time) error {
 			return enrolFailed(dir, &accesskey.Refusal{Code: accesskey.CodeKeyInvalid, Status: http.StatusConflict}, sent, false, now)
 		}},
-		{"a fixture pin", func(dir runnerdir.Dir, now time.Time) error {
+		{"a fixture pin", func(dir foragerdir.Dir, now time.Time) error {
 			return refuseFixturePin(dir, sent, false, now)
 		}},
 	} {
-		dir := runnerdir.Dir(t.TempDir())
+		dir := foragerdir.Dir(t.TempDir())
 		if _, err := dir.Ensure(); err != nil {
 			t.Fatal(err)
 		}
@@ -269,7 +269,7 @@ func TestARefusalMovesAsideOnlyTheKeyMadeForTheCode(t *testing.T) {
 		if old, _ := dir.OldSecrets(); !dir.SameSecret(mine) || len(old) != 0 {
 			t.Errorf("%s: this machine's key was moved aside", c.name)
 		}
-		if _, err := os.Lstat(dir.Path(runnerdir.PendingFile)); !errors.Is(err, fs.ErrNotExist) {
+		if _, err := os.Lstat(dir.Path(foragerdir.PendingFile)); !errors.Is(err, fs.ErrNotExist) {
 			t.Errorf("%s: the pending enrolment stayed: %v", c.name, err)
 		}
 	}

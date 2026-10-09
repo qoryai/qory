@@ -1,4 +1,4 @@
-package runnerdir
+package foragerdir
 
 import (
 	"context"

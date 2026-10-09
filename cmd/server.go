@@ -10,15 +10,15 @@ import (
 	"os"
 	"time"
 
-	"github.com/qoryai/runner/accesskey"
-	"github.com/qoryai/runner/session"
+	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/forager/session"
 
 	"github.com/qoryai/qory/internal/config"
-	"github.com/qoryai/qory/internal/runnerdir"
+	"github.com/qoryai/qory/internal/foragerdir"
 )
 
 // machineDir is the runner file's directory: everything qory keeps for its server.
-func machineDir() runnerdir.Dir { return runnerdir.Dir(config.UserDir()) }
+func machineDir() foragerdir.Dir { return foragerdir.Dir(config.UserDir()) }
 
 // keySource says where a run's access key secret came from.
 type keySource int
@@ -44,12 +44,12 @@ type accessKey struct {
 // took it when it started, else the file access-key-secret in the runner file's
 // directory. A secret that is not one, a file the rules refuse and the published fixture
 // key are errors that never contain the value. No secret anywhere is (nil, nil).
-func readAccessKey(dir runnerdir.Dir, fd *accesskey.Key) (*accessKey, error) {
+func readAccessKey(dir foragerdir.Dir, fd *accesskey.Key) (*accessKey, error) {
 	if fd != nil {
 		return &accessKey{key: fd, source: fromFD}, nil
 	}
 	if v := config.TakenServerVariables().AccessKeySecret; v != "" {
-		k, err := runnerdir.ParseSecret([]byte(v))
+		k, err := foragerdir.ParseSecret([]byte(v))
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", accesskey.EnvSecret, err)
 		}
@@ -59,7 +59,7 @@ func readAccessKey(dir runnerdir.Dir, fd *accesskey.Key) (*accessKey, error) {
 		return nil, nil
 	}
 	k, err := dir.ReadSecret()
-	if errors.Is(err, runnerdir.ErrNoSecret) {
+	if errors.Is(err, foragerdir.ErrNoSecret) {
 		return nil, nil
 	}
 	if err != nil {
@@ -99,7 +99,7 @@ func readSecretFD(n int) (*accesskey.Key, error) {
 	if len(b) > maxSecretFD {
 		return nil, input(fmt.Errorf("--%s %d: more than an access key secret", secretFDFlag, n))
 	}
-	k, err := runnerdir.ParseSecret(b)
+	k, err := foragerdir.ParseSecret(b)
 	if err != nil {
 		return nil, input(fmt.Errorf("--%s %d: %w", secretFDFlag, n, err))
 	}
@@ -120,32 +120,32 @@ type serverIdentity struct {
 // the one read from --access-key-secret-fd when fd is not nil, and this instance's id
 // and name. It prints a line when the instance id cannot be kept in the directory and
 // lives for this process alone.
-func identify(r *config.Runner, report io.Writer, verb string, fd *accesskey.Key) (*serverIdentity, error) {
+func identify(r *config.Forager, report io.Writer, verb string, fd *accesskey.Key) (*serverIdentity, error) {
 	dir := machineDir()
 	key, err := readAccessKey(dir, fd)
 	if err != nil {
 		return nil, input(err)
 	}
 	if r.Server.AccessKeyID == "" {
-		return nil, input(fmt.Errorf("%s: the server has no access_key_id: qory access-key enrol writes it, or set server.access_key_id or %s", config.RunnerFileName, accesskey.EnvID))
+		return nil, input(fmt.Errorf("%s: the server has no access_key_id: qory access-key enrol writes it, or set server.access_key_id or %s", config.ForagerFileName, accesskey.EnvID))
 	}
 	if key == nil {
 		return nil, input(fmt.Errorf("no access key secret for the server %s: qory access-key enrol makes one, or set %s", r.Server.URL, accesskey.EnvSecret))
 	}
 	id := &serverIdentity{key: key, instanceName: r.InstanceNameOrDefault(), server: r.Server.URL}
-	instance, kept, err := dir.InstanceID(runnerdir.MachineID())
+	instance, kept, err := dir.InstanceID(foragerdir.MachineID())
 	if err != nil {
 		return nil, fmt.Errorf("the instance id: %w", err)
 	}
 	if !kept {
-		fmt.Fprintf(report, "qory %s: instance %s, this process's own: %s cannot be written\n", verb, instance, dir.Path(runnerdir.InstanceFile))
+		fmt.Fprintf(report, "qory %s: instance %s, this process's own: %s cannot be written\n", verb, instance, dir.Path(foragerdir.InstanceFile))
 	}
 	id.instanceID = instance
 	return id, nil
 }
 
 // sessionServer is the server document the runner takes.
-func sessionServer(s *config.RunnerServer) *session.Server {
+func sessionServer(s *config.ForagerServer) *session.Server {
 	return &session.Server{Version: 1, URL: s.URL, AccessKeyID: s.AccessKeyID, ApiaryPublicKey: s.Pin}
 }
 
@@ -175,7 +175,7 @@ func explain(err error, id *serverIdentity) error {
 	var text string
 	switch ref.Code {
 	case accesskey.CodeApiaryPublicKeyMissing:
-		text = fmt.Sprintf("the server has no pinned apiary_public_key, so no answer of it could be verified: qory access-key enrol writes it, or set server.apiary_public_key in %s or %s", config.RunnerFileName, accesskey.EnvPin)
+		text = fmt.Sprintf("the server has no pinned apiary_public_key, so no answer of it could be verified: qory access-key enrol writes it, or set server.apiary_public_key in %s or %s", config.ForagerFileName, accesskey.EnvPin)
 	case accesskey.CodeUnauthorized:
 		text = fmt.Sprintf("the server refused a request signed with the access key %s: it does not know the key, has revoked it, or this machine's clock is more than five minutes off; check the clock, else enrol a new key with qory access-key enrol", fingerprint)
 		// A key of this machine's access-key-secret is one enrol --replace moves from.
@@ -203,13 +203,13 @@ func explain(err error, id *serverIdentity) error {
 const codeServerNeedsWall = "server_needs_wall"
 
 // needsWall is the server_needs_wall refusal, saying why.
-func needsWall(dir runnerdir.Dir, listed bool) error {
-	why := "the stored-secrets marker " + dir.Path(runnerdir.MarkerFile) + " exists: this machine's access key may receive stored secrets"
+func needsWall(dir foragerdir.Dir, listed bool) error {
+	why := "the stored-secrets marker " + dir.Path(foragerdir.MarkerFile) + " exists: this machine's access key may receive stored secrets"
 	if listed {
 		why = "the server lists stored secrets for this machine's access key"
 	}
 	return &refusedError{
-		text: fmt.Sprintf("%s, so every run needs a wall: --wall %s, or wall in %s", why, config.WallDocker, config.RunnerFileName),
+		text: fmt.Sprintf("%s, so every run needs a wall: --wall %s, or wall in %s", why, config.WallDocker, config.ForagerFileName),
 		err:  &session.Refusal{Code: codeServerNeedsWall},
 	}
 }
@@ -220,12 +220,12 @@ func needsWall(dir runnerdir.Dir, listed bool) error {
 // whether it is walled, and drops the key lock. A key command, which holds the key lock
 // exclusively, so waits for starting runs, and they for it. In a directory that cannot
 // be written no key command can work either, and the run goes on without the locks.
-func startRun(dir runnerdir.Dir, runID string, walled, noServer bool) (*runnerdir.Lock, error) {
+func startRun(dir foragerdir.Dir, runID string, walled, noServer bool) (*foragerdir.Lock, error) {
 	if dir == "" {
 		return nil, nil
 	}
 	key, err := dir.LockKey(false)
-	if err != nil && !errors.Is(err, runnerdir.ErrReadOnly) {
+	if err != nil && !errors.Is(err, foragerdir.ErrReadOnly) {
 		return nil, fmt.Errorf("the key lock: %w", err)
 	}
 	defer key.Release()
@@ -248,7 +248,7 @@ func startRun(dir runnerdir.Dir, runID string, walled, noServer bool) (*runnerdi
 // run; and removes it when discovery lists none and that secret is the directory's only
 // one. An unwalled run is refused, server_needs_wall, when discovery lists secrets or
 // the marker still exists.
-func discovered(dir runnerdir.Dir, id *serverIdentity, walled bool, report io.Writer) func(session.Discovery) error {
+func discovered(dir foragerdir.Dir, id *serverIdentity, walled bool, report io.Writer) func(session.Discovery) error {
 	return func(d session.Discovery) error {
 		fmt.Fprintf(report, "qory run: node %s, instance %s\n", d.NodeID, id.instanceID)
 		if id.key.source == fromFile {
@@ -271,9 +271,9 @@ func discovered(dir runnerdir.Dir, id *serverIdentity, walled bool, report io.Wr
 
 // settleMarker is the marker rule of a signed discovery under the secret of
 // access-key-secret, under the key lock held exclusively.
-func settleMarker(dir runnerdir.Dir, key *accesskey.Key, secrets bool) error {
+func settleMarker(dir foragerdir.Dir, key *accesskey.Key, secrets bool) error {
 	lock, err := dir.LockKey(true)
-	if errors.Is(err, runnerdir.ErrReadOnly) {
+	if errors.Is(err, foragerdir.ErrReadOnly) {
 		if secrets {
 			if err := dir.WriteMarker(); err != nil {
 				return err

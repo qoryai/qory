@@ -30,19 +30,19 @@ wall:
       docker: false
 `
 
-// TestRunnerFileReadsTheImages reads wall.images in the file's order, keeps wall.image as
+// TestForagerFileReadsTheImages reads wall.images in the file's order, keeps wall.image as
 // written, and lists each image with its reference, its runtime and its daemon, and the
 // default with what it is read as: a name of wall.images, or a reference, which a name
 // mistyped is.
-func TestRunnerFileReadsTheImages(t *testing.T) {
+func TestForagerFileReadsTheImages(t *testing.T) {
 	hermetic(t)
-	path := runnerFile(t, imagesFile)
+	path := foragerFile(t, imagesFile)
 	c, err := config.Load(t.TempDir(), true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := c.Runner.Wall
-	want := []config.RunnerImage{
+	w := c.Forager.Wall
+	want := []config.ForagerImage{
 		{Name: "go", Ref: "ghcr.io/qoryai/agent-go@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
 		{Name: "go-docker", Ref: "ghcr.io/qoryai/agent-go-docker:1", Runtime: "sysbox-runc", Docker: true},
 		{Name: "plain.v2", Ref: "example.com/agent:2", Runtime: "runc"},
@@ -55,7 +55,7 @@ func TestRunnerFileReadsTheImages(t *testing.T) {
 			t.Errorf("image %d read as %+v, want %+v", i, w.Images[i], want[i])
 		}
 	}
-	if !w.Defines("go-docker") || w.Defines("example.com/agent:2") || (*config.RunnerWall)(nil).Defines("go") {
+	if !w.Defines("go-docker") || w.Defines("example.com/agent:2") || (*config.ForagerWall)(nil).Defines("go") {
 		t.Error("Defines does not answer by name alone")
 	}
 	var keys []string
@@ -79,7 +79,7 @@ func TestRunnerFileReadsTheImages(t *testing.T) {
 			t.Errorf("%s: %+v, want %q from %s", key, rows[key], want, path)
 		}
 	}
-	runnerFile(t, strings.Replace(imagesFile, "image: go\n", "image: go-dokcer\n", 1))
+	foragerFile(t, strings.Replace(imagesFile, "image: go\n", "image: go-dokcer\n", 1))
 	if c, err = config.Load(t.TempDir(), true); err != nil {
 		t.Fatal(err)
 	}
@@ -91,10 +91,10 @@ func TestRunnerFileReadsTheImages(t *testing.T) {
 
 }
 
-// TestRunnerFileRefusesAnImageItCannotRun is every refusal of wall.images, each naming
+// TestForagerFileRefusesAnImageItCannotRun is every refusal of wall.images, each naming
 // the file and the key: what the runner would refuse before a run is refused when the
 // file is read, so qory config says it as well.
-func TestRunnerFileRefusesAnImageItCannotRun(t *testing.T) {
+func TestForagerFileRefusesAnImageItCannotRun(t *testing.T) {
 	hermetic(t)
 	wall := "wall:\n  adapter: docker\n  images:"
 	for _, c := range []struct{ body, want string }{
@@ -117,7 +117,7 @@ func TestRunnerFileRefusesAnImageItCannotRun(t *testing.T) {
 		{wall + " {go: {ref: a, mounts: [/var/run/docker.sock]}}\n", `wall.images.go: key "mounts" is not one`},
 		{wall + " {go: {ref: a, ref: b}}\n", "wall.images.go.ref appears twice"},
 	} {
-		path := runnerFile(t, c.body)
+		path := foragerFile(t, c.body)
 		_, err := config.Load(t.TempDir(), true)
 		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.HasPrefix(err.Error(), path) {
 			t.Errorf("%q: error %v, want one naming the file and %q", c.body, err, c.want)
@@ -125,10 +125,10 @@ func TestRunnerFileRefusesAnImageItCannotRun(t *testing.T) {
 	}
 }
 
-// TestTheRunnerSchemaTakesTheImages holds runner.schema.json to what the reader takes
+// TestTheForagerSchemaTakesTheImages holds runner.schema.json to what the reader takes
 // of wall.images: the definitions of the docs pass it, and each shape the reader refuses
 // fails it. A name defined twice is YAML's to refuse, not the schema's.
-func TestTheRunnerSchemaTakesTheImages(t *testing.T) {
+func TestTheForagerSchemaTakesTheImages(t *testing.T) {
 	schema, err := jsonschema.NewCompiler().Compile(filepath.Join("..", "..", "contracts", "harness", "v1", "runner.schema.json"))
 	if err != nil {
 		t.Fatal(err)

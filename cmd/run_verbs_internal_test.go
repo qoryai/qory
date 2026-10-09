@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qoryai/runner/session"
-	"github.com/qoryai/runner/wall"
+	"github.com/qoryai/forager/session"
+	"github.com/qoryai/forager/wall"
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/config"
@@ -79,7 +79,7 @@ func TestUnusedEnvSaysWhy(t *testing.T) {
 	}
 }
 
-// TestMountRefusedSaysHowTheMountStands is the runner's mount_contains_runner_files
+// TestMountRefusedSaysHowTheMountStands is the runner's mount_contains_forager_files
 // worded with Overlap's relation: a mount that is or contains the runner's directory
 // reads the access key when access-key-secret is there; one that lies inside it, beside
 // the key, could change one of the runner's files, with the key there or not, as could
@@ -92,23 +92,23 @@ func TestMountRefusedSaysHowTheMountStands(t *testing.T) {
 	dir := t.TempDir()
 	inner := filepath.Join(dir, "locks")
 	refusal := func(mount, path string) error {
-		return fmt.Errorf("wrapped: %w", &session.Refusal{Code: "mount_contains_runner_files", Names: []string{mount, path}})
+		return fmt.Errorf("wrapped: %w", &session.Refusal{Code: "mount_contains_forager_files", Names: []string{mount, path}})
 	}
-	at := func(runnerDir string) passed { return passed{runnerDir: runnerDir, spec: &session.Spec{}} }
-	if got, want := mountRefused(refusal(inner, dir), at(dir)).Error(), "the mount "+inner+" lies inside "+dir+", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"; got != want {
+	at := func(foragerDir string) passed { return passed{foragerDir: foragerDir, spec: &session.Spec{}} }
+	if got, want := mountRefused(refusal(inner, dir), at(dir)).Error(), "the mount "+inner+" lies inside "+dir+", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"; got != want {
 		t.Errorf("lies inside, no access key: %q, want %q", got, want)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "access-key-secret"), []byte("secret\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for _, beside := range []string{inner, filepath.Join(dir, "runtimes")} {
-		if got, want := mountRefused(refusal(beside, dir), at(dir)).Error(), "the mount "+beside+" lies inside "+dir+", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"; got != want {
+		if got, want := mountRefused(refusal(beside, dir), at(dir)).Error(), "the mount "+beside+" lies inside "+dir+", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"; got != want {
 			t.Errorf("lies inside, beside the key: %q, want %q", got, want)
 		}
 	}
 	parent := filepath.Dir(dir)
 	for _, c := range []struct{ mount, how string }{{dir, "is"}, {parent, "contains"}} {
-		if got, want := mountRefused(refusal(c.mount, dir), at(dir)).Error(), "the mount "+c.mount+" "+c.how+" "+dir+", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)"; got != want {
+		if got, want := mountRefused(refusal(c.mount, dir), at(dir)).Error(), "the mount "+c.mount+" "+c.how+" "+dir+", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_forager_files)"; got != want {
 			t.Errorf("%s: %q, want %q", c.how, got, want)
 		}
 	}
@@ -120,27 +120,27 @@ func TestMountRefusedSaysHowTheMountStands(t *testing.T) {
 		readOnly bool
 		want     string
 	}{
-		{false, "the mount " + parent + " contains " + dir + ", which leads to one of the runner's files; the agent could point it elsewhere, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
-		{true, "the mount " + parent + " contains " + dir + ", which leads to one of the runner's files, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
+		{false, "the mount " + parent + " contains " + dir + ", which leads to one of the runner's files; the agent could point it elsewhere, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
+		{true, "the mount " + parent + " contains " + dir + ", which leads to one of the runner's files, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
 	} {
-		p := passed{runnerDir: dir, spec: &session.Spec{Mounts: []wall.Mount{{Path: parent, ReadOnly: c.readOnly}}}, own: ownFiles{links: map[string]string{place: dir}}}
+		p := passed{foragerDir: dir, spec: &session.Spec{Mounts: []wall.Mount{{Path: parent, ReadOnly: c.readOnly}}}, own: ownFiles{links: map[string]string{place: dir}}}
 		if got := mountRefused(refusal(parent, place), p).Error(); got != c.want {
 			t.Errorf("a link's place, read-only %v: %q, want %q", c.readOnly, got, c.want)
 		}
 	}
 	other := filepath.Join(dir, "wall-files")
-	if got, want := mountRefused(refusal(dir, other), at(filepath.Join(dir, "elsewhere"))).Error(), "the mount "+dir+" contains "+other+", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"; got != want {
+	if got, want := mountRefused(refusal(dir, other), at(filepath.Join(dir, "elsewhere"))).Error(), "the mount "+dir+" contains "+other+", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"; got != want {
 		t.Errorf("another file: %q, want %q", got, want)
 	}
 	// Through a read-only mount, the agent could read one of the runner's files, beside
 	// the key or elsewhere, and the key itself where the mount is or contains it.
 	for _, c := range []struct{ mount, path, want string }{
-		{dir, other, "the mount " + dir + " contains " + other + ", which holds one of the runner's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
-		{inner, dir, "the mount " + inner + " lies inside " + dir + ", which holds one of the runner's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
-		{dir, dir, "the mount " + dir + " is " + dir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
-		{parent, dir, "the mount " + parent + " contains " + dir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)"},
+		{dir, other, "the mount " + dir + " contains " + other + ", which holds one of the runner's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
+		{inner, dir, "the mount " + inner + " lies inside " + dir + ", which holds one of the runner's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
+		{dir, dir, "the mount " + dir + " is " + dir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
+		{parent, dir, "the mount " + parent + " contains " + dir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
 	} {
-		p := passed{runnerDir: dir, spec: &session.Spec{Mounts: []wall.Mount{{Path: c.mount, ReadOnly: true}}}}
+		p := passed{foragerDir: dir, spec: &session.Spec{Mounts: []wall.Mount{{Path: c.mount, ReadOnly: true}}}}
 		if got := mountRefused(refusal(c.mount, c.path), p).Error(); got != c.want {
 			t.Errorf("read-only %s of %s: %q, want %q", c.mount, c.path, got, c.want)
 		}
@@ -148,28 +148,28 @@ func TestMountRefusedSaysHowTheMountStands(t *testing.T) {
 	// The same refusals of the workspace: the checkout root as Mounts holds it, and the
 	// working directory.
 	root := filepath.Dir(dir)
-	ws := passed{runnerDir: dir, root: root, spec: &session.Spec{Mounts: []wall.Mount{{Path: root}}, Dir: inner}}
-	if got, want := mountRefused(refusal(root, dir), ws).Error(), "the workspace "+root+" contains "+dir+", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_runner_files)"; got != want {
+	ws := passed{foragerDir: dir, root: root, spec: &session.Spec{Mounts: []wall.Mount{{Path: root}}, Dir: inner}}
+	if got, want := mountRefused(refusal(root, dir), ws).Error(), "the workspace "+root+" contains "+dir+", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_forager_files)"; got != want {
 		t.Errorf("the workspace's root: %q, want %q", got, want)
 	}
-	if got, want := mountRefused(refusal(inner, dir), ws).Error(), "the workspace "+inner+" lies inside "+dir+", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"; got != want {
+	if got, want := mountRefused(refusal(inner, dir), ws).Error(), "the workspace "+inner+" lies inside "+dir+", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"; got != want {
 		t.Errorf("the working directory: %q, want %q", got, want)
 	}
-	if got, want := mountRefused(refusal(dir, other), ws).Error(), "the mount "+dir+" contains "+other+", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_runner_files)"; got != want {
+	if got, want := mountRefused(refusal(dir, other), ws).Error(), "the mount "+dir+" contains "+other+", which holds one of the runner's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"; got != want {
 		t.Errorf("another mount beside the workspace: %q, want %q", got, want)
 	}
 	// The root is the workspace only as Mounts holds it.
-	if got := mountRefused(refusal(root, dir), passed{runnerDir: dir, root: root, spec: &session.Spec{}}).Error(); !strings.HasPrefix(got, "the mount "+root+" ") {
+	if got := mountRefused(refusal(root, dir), passed{foragerDir: dir, root: root, spec: &session.Spec{}}).Error(); !strings.HasPrefix(got, "the mount "+root+" ") {
 		t.Errorf("a root Mounts does not hold: %q", got)
 	}
 	var ref *session.Refusal
-	if err := mountRefused(refusal(dir, dir), at(dir)); !errors.As(err, &ref) || ref.Code != "mount_contains_runner_files" {
+	if err := mountRefused(refusal(dir, dir), at(dir)); !errors.As(err, &ref) || ref.Code != "mount_contains_forager_files" {
 		t.Errorf("the refusal does not unwrap: %v", err)
 	}
 	for _, err := range []error{
 		errors.New("cannot resolve the mount"),
 		&session.Refusal{Code: "variable_reserved", Names: []string{"A", "B"}},
-		&session.Refusal{Code: "mount_contains_runner_files", Names: []string{dir}},
+		&session.Refusal{Code: "mount_contains_forager_files", Names: []string{dir}},
 		&session.Refusal{Code: "mount_mode_conflict", Names: []string{dir, dir, dir}},
 		&session.Refusal{Code: "mount_shared_with_run", Names: []string{dir, "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f"}},
 	} {
@@ -179,7 +179,7 @@ func TestMountRefusedSaysHowTheMountStands(t *testing.T) {
 	}
 }
 
-// TestMountRefusedNamesTheRunRecords is mount_contains_runner_files of the runs
+// TestMountRefusedNamesTheRunRecords is mount_contains_forager_files of the runs
 // directory, of qory's state directory and of a link on the way to them, for a mount and
 // for the workspace: the agent could read the run records through a read-only mount,
 // and change them through a writable one, the workspace, or a mount the run did not
@@ -201,8 +201,8 @@ func TestMountRefusedNamesTheRunRecords(t *testing.T) {
 		{root, state, "the workspace " + root + " overlaps " + state, "change"},
 		{root, runs, "the workspace " + root + " overlaps " + runs, "change"},
 	} {
-		err := mountRefused(&session.Refusal{Code: "mount_contains_runner_files", Names: []string{c.mount, c.path}}, p)
-		want := c.want + ", which holds qory's run records; the agent could " + c.what + " them, so the run does not start. Mount a narrower path (mount_contains_runner_files)"
+		err := mountRefused(&session.Refusal{Code: "mount_contains_forager_files", Names: []string{c.mount, c.path}}, p)
+		want := c.want + ", which holds qory's run records; the agent could " + c.what + " them, so the run does not start. Mount a narrower path (mount_contains_forager_files)"
 		if err == nil || err.Error() != want {
 			t.Errorf("%s and %s: %v, want %q", c.mount, c.path, err, want)
 		}
@@ -214,16 +214,16 @@ func TestMountRefusedNamesTheRunRecords(t *testing.T) {
 		{filepath.Join(home, "elsewhere"), "the mount " + filepath.Join(home, "elsewhere") + " overlaps " + link + ", which leads to qory's run records; the agent could point it elsewhere, so the run does not start."},
 		{root, "the workspace " + root + " overlaps " + link + ", which leads to qory's run records; the agent could point it elsewhere, so the run does not start."},
 	} {
-		err := mountRefused(&session.Refusal{Code: "mount_contains_runner_files", Names: []string{c.mount, place}}, p)
-		want := c.want + " Mount a narrower path (mount_contains_runner_files)"
+		err := mountRefused(&session.Refusal{Code: "mount_contains_forager_files", Names: []string{c.mount, place}}, p)
+		want := c.want + " Mount a narrower path (mount_contains_forager_files)"
 		if err == nil || err.Error() != want {
 			t.Errorf("%s and the link: %v, want %q", c.mount, err, want)
 		}
 	}
 	// A runs directory inside the workspace, as XDG_STATE_HOME in the checkout makes it.
 	inside := passed{stateDir: filepath.Join(root, "state", "qory"), root: root, spec: &session.Spec{RunsDir: filepath.Join(root, "state", "qory", "runs", "app-0123456789ab"), Mounts: []wall.Mount{{Path: root}}, Dir: root}}
-	want := "the workspace " + root + " contains " + inside.stateDir + ", which holds qory's run records; the agent could change them, so the run does not start. Mount a narrower path (mount_contains_runner_files)"
-	if err := mountRefused(&session.Refusal{Code: "mount_contains_runner_files", Names: []string{root, inside.stateDir}}, inside); err == nil || err.Error() != want {
+	want := "the workspace " + root + " contains " + inside.stateDir + ", which holds qory's run records; the agent could change them, so the run does not start. Mount a narrower path (mount_contains_forager_files)"
+	if err := mountRefused(&session.Refusal{Code: "mount_contains_forager_files", Names: []string{root, inside.stateDir}}, inside); err == nil || err.Error() != want {
 		t.Errorf("the state directory in the workspace: %v, want %q", err, want)
 	}
 }
@@ -434,14 +434,14 @@ func TestRunsDirIsTheCheckoutsFolder(t *testing.T) {
 // TestSettingFilesAreTheFileSettingsOfTheDescribedIntegrations is the files the
 // settings name: each <name>_file string of an integration described for the run,
 // absolute from the working directory, once; a setting of another name, a value that is
-// no string, and an integration the run did not describe add none. runnerFiles passes
+// no string, and an integration the run did not describe add none. foragerFiles passes
 // each after the rest, as where it leads.
 func TestSettingFilesAreTheFileSettingsOfTheDescribedIntegrations(t *testing.T) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &config.Runner{Integrations: []config.RunnerIntegration{
+	r := &config.Forager{Integrations: []config.ForagerIntegration{
 		{Key: "tracker", Path: "/opt/acme/tracker", Settings: []byte(`{"project":"SHOP","token_file":"/keys/tracker-token","file":"/keys/plain","_file":"/keys/bare","count_file":3,"cert_file":"certs/tracker.pem"}`)},
 		{Key: "chat", Settings: []byte(`{"token_file":"/keys/chat-token"}`)},
 		{Key: "board", Path: "/opt/acme/board", Settings: []byte(`{"token_file":"/keys/tracker-token"}`)},
@@ -454,18 +454,18 @@ func TestSettingFilesAreTheFileSettingsOfTheDescribedIntegrations(t *testing.T) 
 		t.Errorf("no runner file: %q", got)
 	}
 	state := "/state/qory"
-	own := runnerFiles("", state, filepath.Join(state, "runs", "app-0123456789ab"), want)
+	own := foragerFiles("", state, filepath.Join(state, "runs", "app-0123456789ab"), want)
 	if !slices.Equal(own.files, append([]string{state}, want...)) {
 		t.Errorf("files %q", own.files)
 	}
 }
 
-// TestRunnerFilesPutsTheStateDirAfterTheConfigDir is the runner's files qory passes:
+// TestForagerFilesPutsTheStateDirAfterTheConfigDir is the runner's files qory passes:
 // the configuration directory, qory's state directory right after it, the links on the
 // way to the run records, then where the configuration's links lead; with no
 // configuration directory, the state directory and its links. The links on the way to
 // the records are marked as the records', and each place shows as its link.
-func TestRunnerFilesPutsTheStateDirAfterTheConfigDir(t *testing.T) {
+func TestForagerFilesPutsTheStateDirAfterTheConfigDir(t *testing.T) {
 	resolve := func(p string) string {
 		r, err := filepath.EvalSymlinks(p)
 		if err != nil {
@@ -483,10 +483,10 @@ func TestRunnerFilesPutsTheStateDirAfterTheConfigDir(t *testing.T) {
 	}
 	state := "/state/qory"
 	runs := filepath.Join(state, "runs", "app-0123456789ab")
-	if own := runnerFiles(dir, state, runs, nil); !slices.Equal(own.files, []string{dir, state, target}) || len(own.records) != 0 {
+	if own := foragerFiles(dir, state, runs, nil); !slices.Equal(own.files, []string{dir, state, target}) || len(own.records) != 0 {
 		t.Errorf("files %q, records %v", own.files, own.records)
 	}
-	if own := runnerFiles("", state, runs, nil); !slices.Equal(own.files, []string{state}) || len(own.links) != 0 {
+	if own := foragerFiles("", state, runs, nil); !slices.Equal(own.files, []string{state}) || len(own.links) != 0 {
 		t.Errorf("no configuration directory: %q, %v", own.files, own.links)
 	}
 	base, real := resolve(t.TempDir()), resolve(t.TempDir())
@@ -500,7 +500,7 @@ func TestRunnerFilesPutsTheStateDirAfterTheConfigDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	place := linkPlace(link)
-	own := runnerFiles(dir, state, runs, nil)
+	own := foragerFiles(dir, state, runs, nil)
 	if !slices.Equal(own.files, []string{dir, state, place, target}) || !own.records[place] || own.records[target] || own.links[place] != link {
 		t.Errorf("a linked state directory: files %q, records %v, links %v", own.files, own.records, own.links)
 	}

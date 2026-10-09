@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/qoryai/runner/accesskey"
+	"github.com/qoryai/forager/accesskey"
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/config"
-	"github.com/qoryai/qory/internal/runnerdir"
+	"github.com/qoryai/qory/internal/foragerdir"
 )
 
 // The seams of the key commands a test replaces: the key's source, the clock, the
@@ -37,7 +37,7 @@ func newAccessKeyCommand() *cobra.Command {
 		Long: `Make the access key every run signs its requests to the server with.
 
 The key is an Ed25519 key. Its secret stays on this machine, in access-key-secret beside
-` + config.RunnerFileName + ` in ~/.config/qory, and the server keeps only its public key. A key is
+` + config.ForagerFileName + ` in ~/.config/qory, and the server keeps only its public key. A key is
 never rotated: a new one is enrolled, and the old one revoked.
 
   enrol   enrol a new key with a code from the server
@@ -63,7 +63,7 @@ administrator in Qory Apiary created. The code is valid for 15 minutes and used 
 qory makes the key, keeps its secret in access-key-secret.new, prints its fingerprint
 and sends the server the public key. The server's signed answer gives the key its id:
 qory moves the secret to access-key-secret and writes the id into the server section of
-` + config.RunnerFileName + `, with the server's URL and its public key where the section has none yet.
+` + config.ForagerFileName + `, with the server's URL and its public key where the section has none yet.
 The key is active from that answer on: runs can start. qory keeps the answer in
 enrolment-answer until the enrolment is finished: should the command stop after the
 answer came, the same command finishes it on this machine, at any time, without asking
@@ -78,20 +78,20 @@ with that key.
 
 --replace moves this machine to a new key, and the old key stays in use until the new
 one is active. qory makes the new key in access-key-secret.new and enrols it, leaving
-access-key-secret and ` + config.RunnerFileName + ` as they are, so an enrolment that fails leaves the
+access-key-secret and ` + config.ForagerFileName + ` as they are, so an enrolment that fails leaves the
 old key working. Once the server's signed answer has come, the new secret takes the old
-one's place, ` + config.RunnerFileName + ` names the new key, and the old secret is removed. The old
+one's place, ` + config.ForagerFileName + ` names the new key, and the old secret is removed. The old
 key still works on Qory Apiary until an owner or administrator revokes it on the node's
 page, unless it is revoked already. Before the server's answer, the same command within
 the code's 15 minutes retries; after it, the same command finishes the replacement on
 this machine, at any time. On a machine without a key, --replace enrols as the command
 does without it.
 
-The key's name is instance.name of ` + config.RunnerFileName + `, else this machine's host name.
+The key's name is instance.name of ` + config.ForagerFileName + `, else this machine's host name.
 
 --print writes no key or setting and prints QORY_ACCESS_KEY_ID, QORY_ACCESS_KEY_SECRET
 and QORY_APIARY_PUBLIC_KEY for a CI's settings. Only the secret belongs in its secret
-store. The key is for another machine, so the server and the pin of ` + config.RunnerFileName + ` do not
+store. The key is for another machine, so the server and the pin of ` + config.ForagerFileName + ` do not
 apply; the code is checked against QORY_APIARY_PUBLIC_KEY when it is set.
 
 --verbose adds nothing here.
@@ -135,7 +135,7 @@ func keyEnv(name string) string {
 }
 
 // userAgent is the User-Agent of every request to the server, the enrolment's included.
-func userAgent() string { return "qory-runner/" + build().title() }
+func userAgent() string { return accesskey.UserAgent(build().title()) }
 
 // makeKey generates a new access key, refusing one of the contract's published fixture
 // keys.
@@ -188,9 +188,9 @@ func checkOrigin(server string) error {
 // keyLock takes the key lock exclusively and refuses while a run without a wall is
 // live. A directory that cannot be written is no key for a command that writes, and
 // for --print no lock: no run can hold a lock file there either.
-func keyLock(dir runnerdir.Dir, print bool) (*runnerdir.Lock, error) {
+func keyLock(dir foragerdir.Dir, print bool) (*foragerdir.Lock, error) {
 	lock, err := dir.LockKey(true)
-	if errors.Is(err, runnerdir.ErrReadOnly) {
+	if errors.Is(err, foragerdir.ErrReadOnly) {
 		if print {
 			return nil, nil
 		}
@@ -213,7 +213,7 @@ func keyLock(dir runnerdir.Dir, print bool) (*runnerdir.Lock, error) {
 
 // prepareDir makes the runner file's directory mode 0700, saying so when it changes
 // it, and writes the stored-secrets marker: a marker that cannot be written is no key.
-func prepareDir(dir runnerdir.Dir, out io.Writer) error {
+func prepareDir(dir foragerdir.Dir, out io.Writer) error {
 	changed, err := dir.Ensure()
 	if err != nil {
 		return err
@@ -228,7 +228,7 @@ func prepareDir(dir runnerdir.Dir, out io.Writer) error {
 // runner file's, else QORY_APIARY_PUBLIC_KEY. With --print the key is for another
 // machine, so the runner file's is not, and the variable's alone is. A pin that lists a
 // published fixture key is refused.
-func effectivePin(r *config.Runner, print bool) (accesskey.Pin, error) {
+func effectivePin(r *config.Forager, print bool) (accesskey.Pin, error) {
 	if !print && r != nil && r.Server != nil && len(r.Server.Pin) > 0 {
 		return r.Server.Pin, nil
 	}
@@ -270,16 +270,16 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	}
 	// With --print the key is for another machine: its server section does not apply,
 	// so neither stops the command, and instance.name alone is read.
-	load := config.LoadRunner
+	load := config.LoadForager
 	if print {
-		load = config.LoadRunnerInstance
+		load = config.LoadForagerInstance
 	}
 	r, err := load()
 	if err != nil {
 		return input(err)
 	}
 	if !print && r != nil && r.Server != nil && r.Server.URL != server {
-		return input(fmt.Errorf("%s names the server %s, and this command %s: enrol with the server %s names, or change its server.url first", r.File, r.Server.URL, server, config.RunnerFileName))
+		return input(fmt.Errorf("%s names the server %s, and this command %s: enrol with the server %s names, or change its server.url first", r.File, r.Server.URL, server, config.ForagerFileName))
 	}
 	pin, err := effectivePin(r, print)
 	if err != nil {
@@ -290,7 +290,7 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	}
 	name := r.InstanceNameOrDefault()
 	if name == "" {
-		return input(fmt.Errorf("this machine's host name does not fit an access key's name: set instance.name in %s", config.RunnerFileName))
+		return input(fmt.Errorf("this machine's host name does not fit an access key's name: set instance.name in %s", config.ForagerFileName))
 	}
 	if err := accesskey.CheckName(name); err != nil {
 		return input(fmt.Errorf("instance.name: %w", err))
@@ -342,7 +342,7 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 			case err == nil && dir.Pending(code, held.PublicKey(), now):
 				key, retry = held, true
 			case !replace:
-				return input(fmt.Errorf("%s already holds this machine's access key secret: to move this machine to a new key, run qory access-key enrol --replace %s <code>; for a key kept elsewhere, use --print", dir.Path(runnerdir.SecretFile), server))
+				return input(fmt.Errorf("%s already holds this machine's access key secret: to move this machine to a new key, run qory access-key enrol --replace %s <code>; for a key kept elsewhere, use --print", dir.Path(foragerdir.SecretFile), server))
 			}
 		}
 		if err := dir.WriteMarker(); err != nil {
@@ -371,7 +371,7 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 		if dir.HasNewSecret() {
 			// A key the server answered for another code may be active: it stays.
 			if staged, err := dir.ReadNewSecret(); err == nil && answeredFor(dir, staged.PublicKey()) {
-				return fmt.Errorf("%s holds the new key of an enrolment the server answered for another code: run that command again to finish it", dir.Path(runnerdir.NewSecretFile))
+				return fmt.Errorf("%s holds the new key of an enrolment the server answered for another code: run that command again to finish it", dir.Path(foragerdir.NewSecretFile))
 			}
 			moved, err := dir.MoveNewAside(now)
 			if err != nil {
@@ -440,12 +440,12 @@ func printEnrolled(info io.Writer, ans *accesskey.EnrolmentAnswer) {
 // access-key-secret.new, takes the place of access-key-secret, see [placeKey]; the
 // runner file is written; access-key-secret.replaced, the pending enrolment and the
 // kept answer are removed, in that order.
-func finishEnrolment(dir runnerdir.Dir, info io.Writer, r *config.Runner, server string, pin accesskey.Pin, key *accesskey.Key, ans *accesskey.EnrolmentAnswer) error {
+func finishEnrolment(dir foragerdir.Dir, info io.Writer, r *config.Forager, server string, pin accesskey.Pin, key *accesskey.Key, ans *accesskey.EnrolmentAnswer) error {
 	e := config.Enrolment{URL: server, AccessKeyID: ans.AccessKeyID}
 	if len(pin) == 0 {
 		e.Pin = ans.Pin
 	}
-	path := filepath.Join(string(dir), config.RunnerFileName)
+	path := filepath.Join(string(dir), config.ForagerFileName)
 	if dir.SameNewSecret(key) {
 		if err := placeKey(dir); err != nil {
 			return err
@@ -514,7 +514,7 @@ func finishEnrolment(dir runnerdir.Dir, info io.Writer, r *config.Runner, server
 //
 // A .replaced that outlives all this goes with the next enrolment on this machine that
 // completes, or as the swap of the next --replace starts.
-func placeKey(dir runnerdir.Dir) error {
+func placeKey(dir foragerdir.Dir) error {
 	if !dir.HasSecret() {
 		if err := dir.PutNewSecret(); err != nil {
 			return fmt.Errorf("the key is enrolled, and %w; run the same command again", err)
@@ -536,7 +536,7 @@ func placeKey(dir runnerdir.Dir) error {
 // oldKeyName is how the success of a replacement names the old key: its id, as the
 // runner file named it before the enrolment, else the fingerprint of the secret
 // access-key-secret.replaced holds, else nothing.
-func oldKeyName(dir runnerdir.Dir, r *config.Runner, newID string) string {
+func oldKeyName(dir foragerdir.Dir, r *config.Forager, newID string) string {
 	if r != nil && r.Server != nil && r.Server.AccessKeyID != "" && r.Server.AccessKeyID != newID {
 		return r.Server.AccessKeyID
 	}
@@ -549,10 +549,10 @@ func oldKeyName(dir runnerdir.Dir, r *config.Runner, newID string) string {
 // discardKey ends the pending enrolment of key, the one made for the code, and moves
 // its secret aside when access-key-secret.new holds it, returning where it went, else
 // "". A refused enrolment never touches access-key-secret: a key there stays, whatever
-// the pending enrolment says, and [runnerdir.Dir.MoveNewAside] is the one way a secret
+// the pending enrolment says, and [foragerdir.Dir.MoveNewAside] is the one way a secret
 // is moved aside. A key the kept answer names may be active on the server: it stays
 // too, with its pending enrolment.
-func discardKey(dir runnerdir.Dir, key *accesskey.Key, now time.Time) (string, error) {
+func discardKey(dir foragerdir.Dir, key *accesskey.Key, now time.Time) (string, error) {
 	if answeredFor(dir, key.PublicKey()) {
 		return "", nil
 	}
@@ -569,12 +569,12 @@ func discardKey(dir runnerdir.Dir, key *accesskey.Key, now time.Time) (string, e
 // fixture key. --print wrote nothing; otherwise the runner file is left as it is, the
 // secret made for the code is moved aside from access-key-secret.new and the pending
 // enrolment ends, and the message names where that secret went.
-func refuseFixturePin(dir runnerdir.Dir, key *accesskey.Key, print bool, now time.Time) error {
+func refuseFixturePin(dir foragerdir.Dir, key *accesskey.Key, print bool, now time.Time) error {
 	const text = "the server's answer lists the runner contract's published fixture key, whose secret anyone can read: it is no server to pin; "
 	if print {
 		return errors.New(text + "nothing was written")
 	}
-	msg := text + config.RunnerFileName + " was not changed"
+	msg := text + config.ForagerFileName + " was not changed"
 	moved, err := discardKey(dir, key, now)
 	if err != nil {
 		return fmt.Errorf("%s; %w", msg, err)
@@ -590,7 +590,7 @@ func refuseFixturePin(dir runnerdir.Dir, key *accesskey.Key, print bool, now tim
 // aside from access-key-secret.new, see [discardKey], and end the pending enrolment; key_limit, rate_limited, an unsigned answer and
 // an answer that never came keep both, so the same command within 15 minutes retries
 // with the same key. --print kept nothing, so a lost answer cannot be retried.
-func enrolFailed(dir runnerdir.Dir, err error, key *accesskey.Key, print bool, now time.Time) error {
+func enrolFailed(dir foragerdir.Dir, err error, key *accesskey.Key, print bool, now time.Time) error {
 	fingerprint := key.Fingerprint()
 	var ref *accesskey.Refusal
 	if !errors.As(err, &ref) {
