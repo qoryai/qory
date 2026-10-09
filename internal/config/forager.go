@@ -119,13 +119,31 @@ func CertificatePin(v string) bool {
 	return err == nil && len(b) == sha256.Size
 }
 
-// GatewayURL reports whether v is a gateway's URL as Forager's session takes it: https,
-// a host and an optional port, and no user information, path other than "/", query or
-// fragment.
-func GatewayURL(v string) bool {
+// gatewayURLWrong says what is wrong with v as a gateway's URL, as Forager's session
+// takes it: https, a host and an optional port, and no user information, path other
+// than "/", query or fragment; empty when nothing is. What it says never holds more of
+// v than its scheme, its host and its port, so user information or a query that holds a
+// credential is never printed.
+func gatewayURLWrong(v string) string {
 	u, err := url.Parse(v)
-	return err == nil && u.Scheme == "https" && u.Host != "" && u.Hostname() != "" && u.Opaque == "" && u.User == nil &&
-		(u.Path == "" || u.Path == "/") && u.RawQuery == "" && !u.ForceQuery && u.Fragment == ""
+	if err != nil || u.Scheme == "" || u.Host == "" || u.Opaque != "" {
+		return "is not a URL"
+	}
+	if u.Hostname() == "" {
+		return "has no host"
+	}
+	origin := u.Scheme + "://" + u.Host
+	switch {
+	case u.Scheme != "https":
+		return "for " + origin + " is not https"
+	case u.User != nil:
+		return "for " + origin + " holds user information"
+	case u.Path != "" && u.Path != "/":
+		return "for " + origin + " has a path"
+	case u.RawQuery != "" || u.ForceQuery || u.Fragment != "":
+		return "for " + origin + " has a query or a fragment"
+	}
+	return ""
 }
 
 // Path is a path a setting of the file names, resolved: an absolute one as it is, a
@@ -417,8 +435,11 @@ func LoadForager() (*Forager, error) {
 		if sg.URL == nil || *sg.URL == "" {
 			return nil, fmt.Errorf("%s: session.gateway.url is required", path)
 		}
-		if !GatewayURL(*sg.URL) {
-			return nil, fmt.Errorf("%s: session.gateway.url %q is not an https URL of a host and an optional port, with nothing after", path, *sg.URL)
+		if accesskey.ContainsSecret(*sg.URL) {
+			return nil, fmt.Errorf("%s: session.gateway.url: %w", path, accesskey.ErrSecretInDocument)
+		}
+		if wrong := gatewayURLWrong(*sg.URL); wrong != "" {
+			return nil, fmt.Errorf("%s: session.gateway.url %s: an https URL of a host and an optional port, with nothing after", path, wrong)
 		}
 		r.SessionGateway = &ForagerSessionGateway{URL: *sg.URL}
 		for _, v := range []struct {

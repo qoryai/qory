@@ -117,13 +117,17 @@ func TestASessionGatewayRefusesAGatewaySection(t *testing.T) {
 		{"session: {gateway: {url: \"https://gateway.example\"}}\ngateway: {egress: {mode: observe}}\n", ": gateway: this machine's runs go through the gateway session.gateway.url names, so it runs no gateway, and its file holds none: Qory Apiary's access key and the credentials' secrets belong on the gateway's machine. Remove the gateway section, or remove session.gateway to run the gateway here", true},
 		{"session: {gateway: {url: \"https://gateway.example\"}}\ngateway: {server: {url: \"https://qory.example\"}}\n", ": gateway: this machine's runs go through the gateway session.gateway.url names, so it runs no gateway, and its file holds none: Qory Apiary's access key and the credentials' secrets belong on the gateway's machine. Remove the gateway section, or remove session.gateway to run the gateway here", true},
 		{"session: {gateway: {ca_file: ca.pem}}\n", ": session.gateway.url is required", true},
-		{"session: {gateway: {url: \"http://127.0.0.1:8443\"}}\n", `: session.gateway.url "http://127.0.0.1:8443" is not an https URL of a host and an optional port, with nothing after`, true},
-		{"session: {gateway: {url: \"https://gateway.example/v1\"}}\n", `: session.gateway.url "https://gateway.example/v1" is not an https URL of a host and an optional port, with nothing after`, true},
-		{"session: {gateway: {url: \"https://user@gateway.example\"}}\n", `: session.gateway.url "https://user@gateway.example" is not an https URL of a host and an optional port, with nothing after`, true},
-		{"session: {gateway: {url: \"https://gateway.example?x=1\"}}\n", `: session.gateway.url "https://gateway.example?x=1" is not an https URL of a host and an optional port, with nothing after`, true},
-		{"session: {gateway: {url: \"https://gateway.example#top\"}}\n", `: session.gateway.url "https://gateway.example#top" is not an https URL of a host and an optional port, with nothing after`, true},
-		{"session: {gateway: {url: \"https://:8443\"}}\n", `: session.gateway.url "https://:8443" is not an https URL of a host and an optional port, with nothing after`, true},
-		{"session: {gateway: {url: \"gateway.example:8443\"}}\n", `: session.gateway.url "gateway.example:8443" is not an https URL of a host and an optional port, with nothing after`, true},
+		{"session: {gateway: {url: \"http://127.0.0.1:8443\"}}\n", ": session.gateway.url for http://127.0.0.1:8443 is not https: an https URL of a host and an optional port, with nothing after", true},
+		{"session: {gateway: {url: \"https://gateway.example/v1\"}}\n", ": session.gateway.url for https://gateway.example has a path: an https URL of a host and an optional port, with nothing after", true},
+		{"session: {gateway: {url: \"https://user@gateway.example\"}}\n", ": session.gateway.url for https://gateway.example holds user information: an https URL of a host and an optional port, with nothing after", true},
+		{"session: {gateway: {url: \"https://gateway.example?x=1\"}}\n", ": session.gateway.url for https://gateway.example has a query or a fragment: an https URL of a host and an optional port, with nothing after", true},
+		{"session: {gateway: {url: \"https://gateway.example:8443/?\"}}\n", ": session.gateway.url for https://gateway.example:8443 has a query or a fragment: an https URL of a host and an optional port, with nothing after", true},
+		{"session: {gateway: {url: \"https://gateway.example#top\"}}\n", ": session.gateway.url for https://gateway.example has a query or a fragment: an https URL of a host and an optional port, with nothing after", true},
+		{"session: {gateway: {url: \"https://:8443\"}}\n", ": session.gateway.url has no host: an https URL of a host and an optional port, with nothing after", true},
+		{"session: {gateway: {url: \"gateway.example:8443\"}}\n", ": session.gateway.url is not a URL: an https URL of a host and an optional port, with nothing after", true},
+		{"session: {gateway: {url: \"https://gateway example\"}}\n", ": session.gateway.url is not a URL: an https URL of a host and an optional port, with nothing after", true},
+		{"session: {gateway: {url: \"/gateway\"}}\n", ": session.gateway.url is not a URL: an https URL of a host and an optional port, with nothing after", true},
+		{"session: {gateway: {url: \"https://qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA@gateway.example\"}}\n", ": session.gateway.url: the document contains an access key secret, which belongs in access-key-secret or QORY_ACCESS_KEY_SECRET and nowhere else", true},
 		{"session: {gateway: {url: \"https://gateway.example\", certificate_sha256: \"\"}}\n", ": session.gateway.certificate_sha256 is empty", true},
 		{"session: {gateway: {url: \"https://gateway.example\", certificate_sha256: abc}}\n", `: session.gateway.certificate_sha256 "abc" is not the SHA-256 of a public key in standard base64 with padding, 44 characters ending in =`, true},
 		{"session: {gateway: {url: \"https://gateway.example\", certificate_sha256: \"47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFV=\"}}\n", `: session.gateway.certificate_sha256 "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFV=" is not the SHA-256 of a public key in standard base64 with padding, 44 characters ending in =`, true},
@@ -174,6 +178,30 @@ func TestTheForagerSchemaTakesTheSessionGateway(t *testing.T) {
 		}
 		if err := schema.Validate(doc); (err == nil) != c.valid {
 			t.Errorf("%q: %v, want valid %v", c.body, err, c.valid)
+		}
+	}
+}
+
+// TestASessionGatewayURLRefusalPrintsNoSecret is a session.gateway.url that holds a
+// credential in its user information or its query: the refusal names the part that is
+// wrong and the gateway's scheme, host and port, and holds no part of the credential.
+func TestASessionGatewayURLRefusalPrintsNoSecret(t *testing.T) {
+	hermetic(t)
+	for _, c := range []struct{ url, want string }{
+		{"https://TOKEN@gateway.example", "session.gateway.url for https://gateway.example holds user information"},
+		{"https://u:p@gateway.example:8443", "session.gateway.url for https://gateway.example:8443 holds user information"},
+		{"https://gateway.example/?token=x", "session.gateway.url for https://gateway.example has a query or a fragment"},
+	} {
+		foragerFile(t, "apiVersion: qory.dev/v1alpha1\nsession:\n  gateway:\n    url: \""+c.url+"\"\n")
+		_, err := config.Load(t.TempDir(), true)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v, want %q", c.url, err, c.want)
+			continue
+		}
+		for _, secret := range []string{"TOKEN", "u:p", ":p@", "token=x", "token", c.url} {
+			if strings.Contains(err.Error(), secret) {
+				t.Errorf("%s: the refusal holds %q: %v", c.url, secret, err)
+			}
 		}
 	}
 }
