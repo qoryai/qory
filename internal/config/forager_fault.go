@@ -254,15 +254,33 @@ func (w *walk) fault(n *yaml.Node, t reflect.Type, key string) *fault {
 	return nil
 }
 
-// structFault is [findFault] of a mapping read into the struct t: each key by its
-// field, a merge by the mappings it merges.
+// structFault is [findFault] of a mapping read into the struct t: a key written twice,
+// as the decoder refuses it before it reads the mapping, then each key by its field, a
+// merge by the mappings it merges.
 func (w *walk) structFault(n *yaml.Node, t reflect.Type, key string) *fault {
 	if f := w.step(); f != nil {
 		return f
 	}
 	for i := 0; i+1 < len(n.Content); i += 2 {
+		for j := i + 2; j+1 < len(n.Content); j += 2 {
+			if a, b := n.Content[i], n.Content[j]; a.Kind == b.Kind && a.Value == b.Value {
+				if k := followAliases(a); k.Kind != yaml.ScalarNode {
+					return keyNotAName(a.Line, key)
+				}
+				return writtenTwice(key, followAliases(a).Value, a.Line, b.Line)
+			}
+		}
+	}
+	// A key decodes into a name, and a field the mapping writes twice under keys the
+	// decoder tells apart, such as an alias of a name and the name, is refused as one
+	// written twice.
+	written := map[string]int{}
+	for i := 0; i+1 < len(n.Content); i += 2 {
 		k, v := followAliases(n.Content[i]), n.Content[i+1]
-		if k.Kind == yaml.ScalarNode && k.ShortTag() == "!!merge" {
+		if k.Kind != yaml.ScalarNode {
+			return keyNotAName(n.Content[i].Line, key)
+		}
+		if k.ShortTag() == "!!merge" {
 			m := followAliases(v)
 			merged := []*yaml.Node{v}
 			if m.Kind == yaml.SequenceNode {
@@ -282,11 +300,30 @@ func (w *walk) structFault(n *yaml.Node, t reflect.Type, key string) *fault {
 			}
 			continue
 		}
+		if first, ok := written[k.Value]; ok {
+			return writtenTwice(key, k.Value, first, n.Content[i].Line)
+		}
+		written[k.Value] = n.Content[i].Line
 		if f := w.fault(v, field, join(key, k.Value)); f != nil {
 			return f
 		}
 	}
 	return nil
+}
+
+// writtenTwice is the fault of name, a key of the mapping at key, written at the line
+// first and again at the line again.
+func writtenTwice(key, name string, first, again int) *fault {
+	return &fault{again, fmt.Sprintf("%s is written twice; it was first written at line %d", join(key, name), first)}
+}
+
+// keyNotAName is the fault of a key at line, of the mapping at key, that is a list or a
+// mapping and not a name.
+func keyNotAName(line int, key string) *fault {
+	if key == "" {
+		return &fault{line, "the file has a key that is not a name"}
+	}
+	return &fault{line, key + " has a key that is not a name"}
 }
 
 // mergeFault is [structFault] of a mapping that a mapping at key merges, as t. A

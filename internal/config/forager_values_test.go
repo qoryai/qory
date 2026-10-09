@@ -157,6 +157,14 @@ func TestForagerRefusalsSayWhatIsWrongWithoutTheValue(t *testing.T) {
 		{"wall: {adapter: docker, images: {go: {ref: \"--" + marker + "\"}}}\n", ": wall.images.go.ref is not an image reference, such as ghcr.io/acme/agent@sha256:…"},
 		{"wall: {adapter: docker, images: {go: {ref: a, runtime: \"--" + marker + "\"}}}\n", ": wall.images.go.runtime is not a container runtime's name, such as sysbox-runc"},
 		{"apiVersion: " + marker + "\n", ": apiVersion is not one this qory reads; versions: qory.dev/v1alpha1"},
+		{"session:\n  gateway:\n    url: https://gateway.example\n    url: " + secret + "\n", ": line 4: session.gateway.url is written twice; it was first written at line 3"},
+		{"wall:\n  adapter: docker\n  adapter: " + secret + "\n", ": line 3: wall.adapter is written twice; it was first written at line 2"},
+		{"session:\n  instance:\n    name: a\n    name: " + secret + "\n", ": line 4: session.instance.name is written twice; it was first written at line 3"},
+		{"session: {gateway: {url: \"https://gateway.example\", certificate_sha256: x, certificate_sha256: " + secret + "}}\n", ": line 1: session.gateway.certificate_sha256 is written twice; it was first written at line 1"},
+		{"wall:\n  adapter: &k adapter\n  *k: " + secret + "\n", ": line 3: wall.adapter is written twice; it was first written at line 2"},
+		{"session: {? [" + secret + "] : y}\n", ": line 1: session has a key that is not a name"},
+		{"? {k: " + secret + "}\n: y\n", ": line 1: the file has a key that is not a name"},
+		{"session: {\"\": " + secret + "}\n", ": line 1: key \"\" is not one forager.yaml reads"},
 	} {
 		path := foragerFile(t, c.body)
 		_, err := config.LoadForager()
@@ -178,6 +186,9 @@ func TestTheInstanceAloneRefusesWithoutTheValue(t *testing.T) {
 		{"session: {instance: {name: !!int " + secret + "}}\n", ": line 1: session.instance.name is tagged !!int, and its value is not of that type"},
 		{"session:\n  instance:\n    name: [" + secret + "]\n", ": line 3: session.instance.name is not a string"},
 		{"session: {instance: {name: \"-" + marker + "\"}}\n", ": session.instance.name is not 1 to 64 of A-Z, a-z, 0-9, dot, underscore and dash, starting with a letter or digit"},
+		{"session:\n  instance:\n    name: a\n    name: " + secret + "\n", ": line 4: session.instance.name is written twice; it was first written at line 3"},
+		{"session:\n  run: &k name\n  instance: {name: a, *k: " + secret + "}\n", ": line 3: session.instance.name is written twice; it was first written at line 3"},
+		{"session: {? [" + secret + "] : y}\n", ": line 1: session has a key that is not a name"},
 	} {
 		path := foragerFile(t, c.body)
 		_, err := config.LoadForagerInstance()
