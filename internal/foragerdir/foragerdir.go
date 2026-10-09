@@ -125,25 +125,30 @@ type Private struct {
 // accessKeySecret is how access-key-secret and the secrets beside it are checked.
 var accessKeySecret = Private{Holds: "the access key's secret", Replace: "the key", DirOf: "forager.yaml"}
 
-// Check checks the file at path, and its directory, by p's rules, without reading it.
-func (p Private) Check(path string) error {
+// Check checks the file at path, and its directory, by p's rules, without reading it,
+// and returns the path it checked: with [Private.FollowLinks], the file a link leads to,
+// which is the one to read, so a link repointed after the check changes nothing.
+func (p Private) Check(path string) (string, error) {
 	if p.FollowLinks {
 		resolved, err := filepath.EvalSymlinks(path)
 		if err != nil {
-			return err
+			return "", err
 		}
 		path = resolved
 	} else if isLink(path) {
-		return fmt.Errorf("%s is a symbolic link; it must be the file itself", path)
+		return "", fmt.Errorf("%s is a symbolic link; it must be the file itself", path)
 	}
 	if err := p.checkDir(filepath.Dir(path)); err != nil {
-		return err
+		return "", err
 	}
 	info, err := os.Lstat(path)
 	if err != nil {
-		return err
+		return "", err
 	}
-	return p.checkFile(path, info)
+	if err := p.checkFile(path, info); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // checkDir refuses a directory another user owns, or one that grants anything to the

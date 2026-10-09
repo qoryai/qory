@@ -418,3 +418,31 @@ func TestMakePrivateDirRefusesAnotherUsersDirectory(t *testing.T) {
 		}
 	}
 }
+
+// TestPrivateCheckReturnsTheFileItChecked is a link with FollowLinks: Check returns the
+// file the link leads to, the one it checked, and the path itself for a file.
+func TestPrivateCheckReturnsTheFileItChecked(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dir, "key.pem")
+	if err := os.WriteFile(target, []byte("key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "key.pem")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := foragerdir.Private{Holds: "gateway.tls.key", Replace: "the key", DirOf: "gateway.tls.key", FollowLinks: true}
+	if got, err := p.Check(link); err != nil || got != want {
+		t.Errorf("Check(link) = %q, %v; want %q", got, err, want)
+	}
+	if got, err := p.Check(want); err != nil || got != want {
+		t.Errorf("Check(file) = %q, %v; want %q", got, err, want)
+	}
+}

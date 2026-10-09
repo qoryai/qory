@@ -101,7 +101,8 @@ More: ` + gatewayDocs,
 			if len(r.RunCredentials) == 0 {
 				return input(fmt.Errorf("%s: gateway.run_credentials is required to serve other machines: their runs bring run credentials, and the gateway verifies each one; see %s", r.File, gatewayDocs))
 			}
-			if err := checkServiceSecrets(r); err != nil {
+			tlsKey, err := checkServiceSecrets(r)
+			if err != nil {
 				return input(err)
 			}
 			stderr := cmd.ErrOrStderr()
@@ -132,7 +133,8 @@ More: ` + gatewayDocs,
 			}
 			gw.Server.AccessKey, gw.Server.InstanceID, gw.Server.InstanceName = id.key.key, id.instanceID, id.instanceName
 			if r.TLS != nil {
-				gw.TLS = &gateway.TLS{CertFile: r.Path(r.TLS.Certificate), KeyFile: r.Path(r.TLS.Key)}
+				// The key file checked, where a link led then: Forager reads that file.
+				gw.TLS = &gateway.TLS{CertFile: r.Path(r.TLS.Certificate), KeyFile: tlsKey}
 			}
 			// The gateway runs no agent on this machine, so no run of its is refused for
 			// want of a wall here.
@@ -215,13 +217,16 @@ func issuersAt(r *config.Forager) runcredential.Issuers {
 // checkServiceSecrets checks the secret files gateway.tls and gateway.run_credentials
 // name, before Forager reads them, by the rules of access-key-secret: the TLS key, which
 // may be a link, such as a certificate tool keeps, to the file it checks, and may be
-// root's as well; and each introspection client's secret.
-func checkServiceSecrets(r *config.Forager) error {
+// root's as well; and each introspection client's secret. It returns the TLS key's file
+// it checked, empty without gateway.tls.
+func checkServiceSecrets(r *config.Forager) (string, error) {
+	var tlsKey string
 	if r.TLS != nil {
 		const setting = "gateway.tls.key"
 		p := foragerdir.Private{Holds: setting, Replace: "the key", DirOf: setting, FollowLinks: true, RootOwned: true}
-		if err := p.Check(r.Path(r.TLS.Key)); err != nil {
-			return err
+		var err error
+		if tlsKey, err = p.Check(r.Path(r.TLS.Key)); err != nil {
+			return "", err
 		}
 	}
 	for i, is := range r.RunCredentials {
@@ -230,11 +235,11 @@ func checkServiceSecrets(r *config.Forager) error {
 		}
 		setting := fmt.Sprintf("gateway.run_credentials[%d].introspection.client_secret_file", i)
 		p := foragerdir.Private{Holds: setting, Replace: "the secret", DirOf: setting}
-		if err := p.Check(r.Path(is.Introspection.ClientSecretFile)); err != nil {
-			return err
+		if _, err := p.Check(r.Path(is.Introspection.ClientSecretFile)); err != nil {
+			return "", err
 		}
 	}
-	return nil
+	return tlsKey, nil
 }
 
 // makePrivateDir makes dir under state, both mode 0700, refusing either when it is a
