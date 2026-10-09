@@ -247,9 +247,9 @@
           "required": ["url"],
           "properties": {
             "url": {
-              "description": "The gateway: an https URL, a scheme, a host and a port alone.",
+              "description": "The gateway: an https URL of a host and an optional port, with nothing after.",
               "type": "string",
-              "pattern": "^https://[^/?#@\\s]+/?$"
+              "pattern": "^https://[^/?#@\\s:][^/?#@\\s]*/?$"
             },
             "ca_file": {
               "description": "A PEM file of the certificate authority that signed the gateway's certificate, when the system's roots do not hold it. qory reads it relative to forager.yaml's directory, and it takes the place of the system's roots for this link.",
