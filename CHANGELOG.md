@@ -191,8 +191,9 @@ release may change what an existing document does, and states it under Upgrading
   there or cannot be reached, a directory, and a regular file it cannot open. It refuses a run credential file whose mode grants the
   group or others read or write, before anything starts and at each read. A walled run whose mounts hold the run credential's file is refused. It says the gateway's refusal of the run credential,
   of a checkout that is not the credential's target and of a `--details` key the
-  credential decides, and a run the gateway ends at the credential's expiry or at its
-  issuer. `qory config` lists `session.gateway`, and `forager.schema.json` defines it.
+  credential decides, a run the gateway ends at the credential's expiry or at its
+  issuer, and a run it could not open or ended because it could not reach the issuer or
+  got no valid answer from it. `qory config` lists `session.gateway`, and `forager.schema.json` defines it.
   See `docs/run.md`.
 - `qory run resend` sends a run's record through the gateway `session.gateway` names,
   with the run's run credential from `--run-credential-fd`, else

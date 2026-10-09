@@ -675,7 +675,11 @@ The gateway refuses a run, and qory says:
 - `this checkout is <forge>/<repository>, and the run credential is for
   <forge>/<repository>`;
 - `--details <f> sets requester to "a", and the run credential says "b": the credential
-  decides; remove the key`, for each such key.
+  decides; remove the key`, for each such key;
+- `qory run: the gateway could not open the run: it could not reach the run credential's
+  issuer; try again`;
+- `qory run: the gateway could not open the run: the run credential's issuer gave the
+  gateway no valid answer`.
 
 A run the gateway ends because its run credential expired says when, by where the
 credential came from:
@@ -689,7 +693,10 @@ credential came from:
 
 A run the gateway ends because the credential's issuer reports that the run has ended
 says `qory run: the gateway ended the run: the run credential's issuer reports that the
-run has ended`. Either end fails the run, exit 1.
+run has ended`. One it ends because it could not reach the issuer says `qory run: the
+gateway ended the run: it could not reach the run credential's issuer`, and one whose
+issuer gave it no valid answer `qory run: the gateway ended the run: the run credential's
+issuer gave the gateway no valid answer`. Either end fails the run, exit 1.
 
 ### Resending through the gateway
 
