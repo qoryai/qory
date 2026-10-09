@@ -76,6 +76,8 @@ func TestResendThroughASeparateGateway(t *testing.T) {
 	if spooled, _ := os.ReadDir(filepath.Join(dir, "undelivered")); len(spooled) == 0 {
 		t.Fatalf("the run left nothing under undelivered/\n%s", gwOut)
 	}
+	// The gateway's run secret, which the run directory keeps while events are owed.
+	secret := keptSecret(t, dir)
 	shown := ui.Short(dir, root)
 
 	exp := time.Now().Add(-time.Hour).Unix()
@@ -103,6 +105,7 @@ func TestResendThroughASeparateGateway(t *testing.T) {
 			t.Errorf("%s: %v (exit %d), want %q\n%s", c.name, err, cmd.ExitCode(err), c.want, out)
 		}
 		lacks(t, failed(out, err), sent...)
+		noSecretIn(t, c.name+": the output", failed(out, err), secret)
 		if spooled, _ := os.ReadDir(filepath.Join(dir, "undelivered")); len(spooled) == 0 {
 			t.Errorf("%s: the events are no longer under undelivered/", c.name)
 		}
@@ -115,11 +118,15 @@ func TestResendThroughASeparateGateway(t *testing.T) {
 		t.Fatalf("%v\n%s\n%s", err, out, gwOut)
 	}
 	lacks(t, out, sent...)
+	noSecretIn(t, "the resend's output", out, secret)
 	if !strings.Contains(out, " events were accepted; nothing is left to send to the gateway") || strings.Contains(out, " 0 events were accepted") {
 		t.Errorf("the run's own run credential:\n%s", out)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "undelivered")); err == nil {
 		t.Error("undelivered/ is left after the gateway took everything")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "run-secret")); err == nil {
+		t.Error("run-secret is left after the gateway took everything")
 	}
 	if out, err := run(t, "run", "resend", id); err != nil || !strings.Contains(out, fmt.Sprintf(resendSent, 0)) {
 		t.Errorf("a resend with nothing left to send: %v\n%s", err, out)
@@ -134,7 +141,9 @@ func TestResendThroughASeparateGateway(t *testing.T) {
 		t.Errorf("the server has the run.exited %v\n%s", exited, gwOut)
 	}
 	lacks(t, gwOut.String(), sent...)
+	noSecretIn(t, "the gateway's output", gwOut.String(), secret)
 	noCredentialUnder(t, os.Getenv("XDG_STATE_HOME"), good)
+	noRunSecretUnder(t, os.Getenv("XDG_STATE_HOME"), secret)
 }
 
 // fakeLink is a separate gateway's link as qory reaches it, over TLS 1.3 on loopback: its
