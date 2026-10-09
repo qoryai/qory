@@ -400,6 +400,8 @@ release may change what an existing document does, and states it under Upgrading
   defined before it`. A key written twice is refused as `<file>: line
   <line>: <key> is written twice; it was first written at line <line>`, and a key that is
   a list or a mapping as `<file>: line <line>: <section> has a key that is not a name`.
+  A key written as an alias is named by the alias, never by the value it stands for:
+  `<file>: line <line>: key *<anchor> is an alias of a key forager.yaml does not read`.
 - A `forager.yaml` that holds a second YAML document, an empty one after a trailing
   `---` included, is refused: `<file>: holds more than one YAML document; forager.yaml
   is one document, and qory would read only the first`. qory read the first document

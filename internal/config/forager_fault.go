@@ -103,6 +103,11 @@ func foragerDecodeError(path string, n *yaml.Node, t reflect.Type, key string, k
 	if errors.As(err, &te) {
 		for _, e := range te.Errors {
 			if m := unknownKey.FindStringSubmatch(e); m != nil && m[0] == e {
+				// The decoder names a key by what it decodes into, which for a key
+				// written as an alias is a value written elsewhere in the file.
+				if a := aliasKeyAt(n, m[1], m[2]); a != nil {
+					return fmt.Errorf("%s: %skey *%s is an alias of a key %s does not read", path, m[1], a.Value, ForagerFileName)
+				}
 				return fmt.Errorf("%s: %skey %q is not one %s reads", path, m[1], m[2], ForagerFileName)
 			}
 		}
@@ -127,6 +132,35 @@ func foragerDecodeError(path string, n *yaml.Node, t reflect.Type, key string, k
 		return fmt.Errorf("%s: %s holds a value that is not of the type its key takes", path, key)
 	}
 	return fmt.Errorf("%s: %w", path, err)
+}
+
+// aliasKeyAt is a key under n written as an alias of name, on the line the decoder's
+// "line <n>: " prefix names, or on any line when there is none; nil when no key is.
+func aliasKeyAt(n *yaml.Node, line, name string) *yaml.Node {
+	stack := []*yaml.Node{n}
+	for len(stack) > 0 {
+		n, stack = stack[len(stack)-1], stack[:len(stack)-1]
+		if n.Kind == yaml.MappingNode {
+			for i := 0; i+1 < len(n.Content); i += 2 {
+				k := n.Content[i]
+				if k.Kind == yaml.AliasNode && followAliases(k).Value == name && (line == "" || line == fmt.Sprintf("line %d: ", k.Line)) {
+					return k
+				}
+			}
+		}
+		stack = append(stack, n.Content...)
+	}
+	return nil
+}
+
+// keyName is a key as a refusal names it: a name as it is written, and a key written as
+// an alias by the alias, *anchor, since what the alias stands for is a value written
+// elsewhere in the file.
+func keyName(k *yaml.Node) string {
+	if k.Kind == yaml.AliasNode {
+		return "*" + k.Value
+	}
+	return k.Value
 }
 
 // nodeType is a section read as written.
@@ -281,7 +315,7 @@ func (w *walk) structFault(n *yaml.Node, t reflect.Type, key string, merged map[
 				if k := followAliases(a); k.Kind != yaml.ScalarNode {
 					return keyNotAName(a.Line, key)
 				}
-				return writtenTwice(key, followAliases(a).Value, a.Line, b.Line)
+				return writtenTwice(key, keyName(a), a.Line, b.Line)
 			}
 		}
 	}
@@ -308,6 +342,9 @@ func (w *walk) structFault(n *yaml.Node, t reflect.Type, key string, merged map[
 		field, ok := fieldOf(t, k.Value)
 		if !ok {
 			if w.known {
+				if raw := n.Content[i]; raw.Kind == yaml.AliasNode {
+					return &fault{raw.Line, fmt.Sprintf("key *%s is an alias of a key %s does not read", raw.Value, ForagerFileName)}
+				}
 				return &fault{k.Line, fmt.Sprintf("key %q is not one %s reads", k.Value, ForagerFileName)}
 			}
 			continue
@@ -387,7 +424,7 @@ func (w *walk) anyFault(n *yaml.Node, line int, key string) *fault {
 			if f := tagFault(k, n.Content[i].Line, key); f != nil {
 				return f
 			}
-			if f := w.fault(n.Content[i+1], reflect.TypeFor[any](), join(key, k.Value)); f != nil {
+			if f := w.fault(n.Content[i+1], reflect.TypeFor[any](), join(key, keyName(n.Content[i]))); f != nil {
 				return f
 			}
 		}

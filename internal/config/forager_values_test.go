@@ -276,3 +276,46 @@ func TestForagerRefusesAnchorsItCannotReadAtOnce(t *testing.T) {
 		}
 	}
 }
+
+// TestNoForagerRefusalPrintsAKeyWrittenAsAnAlias writes a value, then a key that is an
+// alias of it, in every section: a refusal names such a key by its alias, never by the
+// value it stands for, in both readers.
+func TestNoForagerRefusalPrintsAKeyWrittenAsAnAlias(t *testing.T) {
+	hermetic(t)
+	const value = "session:\n  instance:\n    name: &u " + marker + "\n"
+	issuer := "{issuer: \"https://issuer.example\", audience: a, algorithms: [RS256], keys: [{kid: k1, alg: RS256, public_key_file: f.pem}], labels: {forge: {value: x}}}"
+	for _, c := range []struct{ body, whole, instance string }{
+		{value + "*u : x\n", ": line 4: key *u is an alias of a key forager.yaml does not read", ""},
+		{value + "  *u : x\n", ": line 4: key *u is an alias of a key forager.yaml does not read", ""},
+		{"session:\n  instance:\n    name: &u " + marker + "\n    *u : x\n", ": line 4: key *u is an alias of a key forager.yaml does not read", ""},
+		{value + "  gateway:\n    url: https://gateway.example\n    *u : x\n", ": line 6: key *u is an alias of a key forager.yaml does not read", ""},
+		{value + "  run:\n    *u : x\n", ": line 5: key *u is an alias of a key forager.yaml does not read", ""},
+		{value + "wall:\n  adapter: docker\n  *u : [x]\n", ": line 6: key *u is an alias of a key forager.yaml does not read", ""},
+		{value + "wall:\n  adapter: docker\n  <<: {*u : x}\n", ": line 6: key *u is an alias of a key forager.yaml does not read", ""},
+		{value + "gateway:\n  server:\n    url: https://qory.example\n    apiary_public_key:\n      - alg: ed25519\n        *u : x\n", ": line 9: key *u is an alias of a key forager.yaml does not read", ""},
+		{value + "wall:\n  adapter: docker\n  *u : x\n  *u : y\n", ": line 7: wall.*u is written twice; it was first written at line 6", ""},
+		{"session:\n  run: {timeout: &u " + marker + "}\n  instance:\n    *u : x\n    *u : y\n", ": line 5: session.instance.*u is written twice; it was first written at line 4", ": line 5: session.instance.*u is written twice; it was first written at line 4"},
+		{"session:\n  run: {timeout: 1h}\ngateway:\n  run_credentials:\n    - " + issuer + "\n    - issuer: &u " + marker + "\n      labels:\n        *u : !!int x\n", ": line 8: gateway.run_credentials[1].labels.*u is tagged !!int, and its value is not of that type", ""},
+		{value + "gateway:\n  credentials:\n    *u : {env: X, hosts: x}\n", ": line 6: gateway.credentials.u.hosts is not a list of strings", ""},
+		{value + "gateway:\n  credentials:\n    c:\n      env: X\n      *u : x\n", ": gateway.credentials.c: key \"u\" is not one", ""},
+		{value + "gateway:\n  integrations:\n    i:\n      program: /x\n      *u : x\n", ": gateway.integrations.i: key \"u\" is not one", ""},
+		{value + "wall:\n  adapter: docker\n  images:\n    go:\n      ref: a\n      *u : x\n", ": wall.images.go: key \"u\" is not one; an image has ref, runtime, docker", ""},
+	} {
+		path := foragerFile(t, c.body)
+		for _, r := range []struct {
+			load func() (*config.Forager, error)
+			want string
+		}{{config.LoadForager, c.whole}, {config.LoadForagerInstance, c.instance}} {
+			_, err := r.load()
+			switch {
+			case r.want == "" && err != nil:
+				t.Errorf("%q: %v, want it read: this reader reads session.instance alone", c.body, err)
+			case r.want != "" && (err == nil || err.Error() != path+r.want):
+				t.Errorf("%q: %v, want %q", c.body, err, path+r.want)
+			}
+			if err != nil && strings.Contains(err.Error(), marker) {
+				t.Errorf("%q: the refusal holds the value an alias key stands for: %v", c.body, err)
+			}
+		}
+	}
+}
