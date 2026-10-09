@@ -91,12 +91,12 @@ func readImages(path string, node *yaml.Node) ([]ForagerImage, error) {
 			switch key {
 			case "ref":
 				if value.Kind != yaml.ScalarNode || value.ShortTag() != "!!str" || !imageRef.MatchString(value.Value) {
-					return nil, fail(".ref %q is not an image reference, such as ghcr.io/acme/agent@sha256:…", value.Value)
+					return nil, fail(".ref is not an image reference, such as ghcr.io/acme/agent@sha256:…")
 				}
 				img.Ref, hasRef = value.Value, true
 			case "runtime":
 				if value.Kind != yaml.ScalarNode || value.ShortTag() != "!!str" || !runtimeName.MatchString(value.Value) {
-					return nil, fail(".runtime %q is not a container runtime's name, such as sysbox-runc", value.Value)
+					return nil, fail(".runtime is not a container runtime's name, such as sysbox-runc")
 				}
 				img.Runtime = value.Value
 			case "docker":

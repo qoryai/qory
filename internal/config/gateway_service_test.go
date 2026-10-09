@@ -73,8 +73,8 @@ func TestTheGatewayServiceReads(t *testing.T) {
 		t.Errorf("run credentials %+v", r.RunCredentials)
 	}
 	for _, c := range []struct{ body, want string }{
-		{"gateway: {listen: gateway.example}\n", `gateway.listen "gateway.example" is not host:port, such as 0.0.0.0:8443`},
-		{"gateway: {listen: \"0.0.0.0:99999\"}\n", `gateway.listen "0.0.0.0:99999" is not host:port, such as 0.0.0.0:8443`},
+		{"gateway: {listen: gateway.example}\n", `gateway.listen is not host:port, such as 0.0.0.0:8443`},
+		{"gateway: {listen: \"0.0.0.0:99999\"}\n", `gateway.listen is not host:port, such as 0.0.0.0:8443`},
 		{"gateway: {tls: {certificate: gateway.pem}}\n", "gateway.tls needs both certificate and key"},
 		{"gateway: {run_credentials: [" + strings.Replace(issuerSection, "[RS256]", "[HS256]", 1) + "]}\n", "gateway.run_credentials: "},
 	} {

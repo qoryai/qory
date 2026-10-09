@@ -172,7 +172,7 @@ func TestGatewayRefusesWhatItCannotServe(t *testing.T) {
 				return []string{"gateway"}
 			},
 			want: func() string {
-				return file() + `: gateway.listen "gateway.example" is not host:port, such as 0.0.0.0:8443`
+				return file() + `: gateway.listen is not host:port, such as 0.0.0.0:8443`
 			},
 		},
 		{

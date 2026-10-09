@@ -81,7 +81,7 @@ func readIntegrations(path string, node *yaml.Node) ([]ForagerIntegration, error
 					return nil, fmt.Errorf("%s: gateway.integrations.%s.program is a path or a name on the PATH", path, key)
 				}
 				if strings.ContainsRune(value.Value, '/') && !filepath.IsAbs(value.Value) {
-					return nil, fmt.Errorf("%s: gateway.integrations.%s.program %q is not an absolute path; set program to an absolute path or a name on the PATH", path, key, value.Value)
+					return nil, fmt.Errorf("%s: gateway.integrations.%s.program is not an absolute path; set program to an absolute path or a name on the PATH", path, key)
 				}
 				in.Program = value.Value
 			case "settings":

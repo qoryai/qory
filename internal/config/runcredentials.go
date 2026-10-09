@@ -1,11 +1,14 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
 	"github.com/qoryai/forager/runcredential"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,13 +26,25 @@ const Heartbeat = 30 * time.Second
 // value as the file writes it. It reads no file the list names: qory gateway hands the
 // list to Forager, which checks the keys and the secrets' files before it listens.
 func readRunCredentials(path string, node *yaml.Node) (runcredential.Issuers, []Row, error) {
+	// Forager reads the list as JSON, and its messages quote what it cannot read: a
+	// value whose tag it does not fit, or a number JSON cannot represent, is refused
+	// here first, by its key, and the schema's report has its values left out.
+	if f := findFault(node, reflect.TypeFor[any](), "gateway.run_credentials", false); f != nil {
+		return nil, nil, f.error(path)
+	}
+	notIssuers := fmt.Errorf("%s: gateway.run_credentials is not a list of issuers as run-credentials.schema.json defines them", path)
 	b, err := yaml.Marshal(node)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%s: gateway.run_credentials: %w", path, err)
+		return nil, nil, notIssuers
 	}
 	issuers, err := runcredential.Parse(runCredentialsDoc, b)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%s: gateway.run_credentials: %s", path, strings.TrimPrefix(err.Error(), "run credentials "+runCredentialsDoc+": "))
+		var ve *jsonschema.ValidationError
+		if !errors.As(err, &ve) {
+			return nil, nil, notIssuers
+		}
+		valueFree(ve)
+		return nil, nil, fmt.Errorf("%s: gateway.run_credentials: %s", path, ve.Error())
 	}
 	var rows []Row
 	for i, item := range node.Content {

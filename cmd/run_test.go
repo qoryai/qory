@@ -399,7 +399,7 @@ func TestRunRefusesWhatItCannotStart(t *testing.T) {
 		t.Errorf("two runtimes: %v", err)
 	}
 	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\ngateway:\n  egress:\n    mode: log\n")
-	if _, err := run(t, "run"); err == nil || !strings.Contains(err.Error(), `forager.yaml: gateway.egress.mode "log" is not observe or enforce`) {
+	if _, err := run(t, "run"); err == nil || !strings.Contains(err.Error(), `forager.yaml: gateway.egress.mode is not observe or enforce`) {
 		t.Errorf("unreadable forager.yaml: %v", err)
 	}
 	if ids := recorded(t, root); len(ids) != 0 {

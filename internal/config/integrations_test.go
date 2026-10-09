@@ -505,7 +505,7 @@ func TestIntegrationsSectionRefusesAMistake(t *testing.T) {
 		{"gateway:\n  integrations:\n    github: {}\n    github: {}\n", "gateway.integrations.github is declared twice"},
 		{"gateway: {integrations: {github: qory-github}}\n", "gateway.integrations.github is a mapping: program and settings"},
 		{"gateway: {integrations: {github: {command: /x}}}\n", `gateway.integrations.github: key "command" is not one`},
-		{"gateway: {integrations: {github: {program: bin/qory-github}}}\n", `gateway.integrations.github.program "bin/qory-github" is not an absolute path`},
+		{"gateway: {integrations: {github: {program: bin/qory-github}}}\n", `gateway.integrations.github.program is not an absolute path; set program to an absolute path or a name on the PATH`},
 		{"gateway: {integrations: {github: {program: 7}}}\n", "gateway.integrations.github.program is a path or a name on the PATH"},
 		{"gateway: {integrations: {github: {settings: [a]}}}\n", "gateway.integrations.github.settings is a mapping, the settings document"},
 		{"gateway: {integrations: {github: {settings: {a: 1, a: 2}}}}\n", "gateway.integrations.github.settings.a appears twice"},
