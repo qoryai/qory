@@ -1575,6 +1575,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 					return err == nil && res.NotOpened && res.Undelivered == 0
 				case heldUndelivered:
 					return err == nil && res.Undelivered > 0
+				case heldServerStop:
+					return err == nil && res.Stopped && res.Undelivered > 0
 				}
 				return false
 			})
@@ -1589,7 +1591,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 			reaped := reapWall(sig, r, args[0], report)
 			u := ui.New(stderr)
 			if res.Completed {
-				u.Success("the record had no end, and now ends as lost: its end was never recorded")
+				// The end the resend recorded, as the gateway gives it: gateway_lost.
+				o := outcomeOf(res.State, res.Reason)
+				if !o.known {
+					o = outcomeOf("", event.ReasonGatewayLost)
+				}
+				u.Success("the record had no end, and now ends as %s: %s", o.word(), o.reason)
 			}
 			if reaped > 0 {
 				u.Success("removed %d containers and networks the run left", reaped)
@@ -1629,12 +1636,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 // The kinds of Forager's report lines qory holds back until it knows whether its own
 // line says the same: a run that never opened, gateway.ResendNotOpened and
 // gateway.ResendNoServer; events the server did not accept; the session stopped at the
-// time limit; and the run's gateway ending the run, in a run with a gateway of its own.
+// time limit; the run's gateway ending the run, in a run with a gateway of its own; and
+// the server's stop, in a resend.
 const (
 	heldNotOpened = iota + 1
 	heldUndelivered
 	heldLimit
 	heldRunEnds
+	heldServerStop
 )
 
 // foragerUndelivered is Forager's report line of events the server did not accept,
@@ -1643,6 +1652,10 @@ var foragerUndelivered = regexp.MustCompile(`^[0-9]+ events were not accepted by
 
 // foragerLimit begins the session's report line of a runtime stopped at the time limit.
 const foragerLimit = "the runtime was stopped at the limit of "
+
+// foragerServerStop is Forager's report line of the server's signed 410, which wants no
+// more events of the run.
+const foragerServerStop = "the server wants no more events of this run; the run goes on"
 
 // heldLines passes Forager's report lines on to report as they come, but holds back the
 // ones kind gives a kind, which repeat what qory may say itself, until done. done is
@@ -1662,8 +1675,8 @@ type heldLine struct {
 }
 
 // resendLines are the lines of a resend, to the server or behind a gateway: Forager's
-// lines that the run never opened, and that the server did not accept events, are held
-// back.
+// lines that the run never opened, that the server did not accept events, and that the
+// server wants no more events of the run, are held back.
 func resendLines(report func(string)) *heldLines {
 	return &heldLines{report: report, kind: func(l string) int {
 		switch {
@@ -1671,6 +1684,8 @@ func resendLines(report func(string)) *heldLines {
 			return heldNotOpened
 		case foragerUndelivered.MatchString(l):
 			return heldUndelivered
+		case l == foragerServerStop:
+			return heldServerStop
 		}
 		return 0
 	}}

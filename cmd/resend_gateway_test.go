@@ -333,17 +333,17 @@ func TestResendThroughAGatewaySaysWhatItAnswered(t *testing.T) {
 		want      func(shown string) string
 		code      int
 	}{
-		{name: "stopped, no outcome", status: http.StatusGone, body: `{"error":"stopped","from":"gateway","state":"cancelled","reason":"stopped"}`,
+		{name: "stopped, no outcome", status: http.StatusGone, body: `{"error":"stopped","from":"gateway","message":"the run has ended: cancelled, no outcome given","state":"cancelled","reason":"stopped"}`,
 			want: ended("cancelled"), code: 1},
 		{name: "stopped, no state", status: http.StatusGone, body: `{"error":"stopped","from":"gateway"}`,
 			want: ended("cancelled"), code: 1},
-		{name: "the starter's success", status: http.StatusGone, body: `{"error":"stopped","from":"gateway","state":"succeeded","reason":"all_checks_passed"}`,
+		{name: "the starter's success", status: http.StatusGone, body: `{"error":"stopped","from":"gateway","message":"the run has ended: succeeded, all checks passed","state":"succeeded","reason":"all_checks_passed"}`,
 			want: ended("completed: all checks passed"), code: 1},
 		{name: "the starter's failure, no reason", status: http.StatusGone, body: `{"error":"stopped","from":"gateway","state":"failed"}`,
 			want: ended("failed"), code: 1},
 		{name: "session_lost", status: http.StatusGone, body: `{"error":"session_lost","from":"gateway"}`,
 			want: ended("lost: it lost contact with the gateway for 1m30s"), code: 1},
-		{name: "credential_expired", status: http.StatusGone, body: `{"error":"credential_expired","from":"gateway","state":"cancelled","reason":"credential_expired"}`,
+		{name: "credential_expired", status: http.StatusGone, body: `{"error":"credential_expired","from":"gateway","message":"the run has ended: cancelled, permission to run expired","state":"cancelled","reason":"credential_expired"}`,
 			want: ended("cancelled: the run credential expired"), code: 1},
 		{name: "a batch refused", status: http.StatusBadRequest, body: `{"error":"invalid_request","from":"gateway"}`,
 			want: ended("failed: its events could not be recorded"), code: 1},
@@ -372,7 +372,7 @@ func TestResendThroughAGatewaySaysWhatItAnswered(t *testing.T) {
 		if cmd.ExitCode(err) != c.code || !strings.Contains(failed(out, err), want) {
 			t.Errorf("%s: %v (exit %d), want %q, exit %d\n%s", c.name, err, cmd.ExitCode(err), want, c.code, out)
 		}
-		lacks(t, failed(out, err), credential, "issuer", "the gateway ended the run")
+		lacks(t, failed(out, err), credential, "issuer", "the gateway ended the run", "the run has ended:", "succeeded", "permission to run")
 		link.mu.Lock()
 		if len(link.bearers) == 0 {
 			t.Errorf("%s: no request reached the gateway", c.name)

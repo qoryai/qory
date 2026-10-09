@@ -294,8 +294,8 @@ release may change what an existing document does, and states it under Upgrading
   `QORY_HARNESS_HOME`. A module's export is a default like the others: the server's
   value, `--env` and `wall.env` win over it, and the deny list leaves out one whose name
   it holds. They reach the agent in the container and outside it alike.
-- qory builds against `github.com/qoryai/forager` at commit `ee2c3ec` of its `next`,
-  `v0.6.1-0.20261009193421-ee2c3ecff4d7`, contract `v1` revision 1 as amended there.
+- qory builds against `github.com/qoryai/forager` at commit `86e45b4` of its `next`,
+  `v0.6.1-0.20261009204551-86e45b427cfb`, contract `v1` revision 1 as amended there.
   `qory run` starts Forager's gateway on this machine for each run: it holds the proxy,
   the policy, the credentials and the access key, and sends the run's events to the
   server; the session speaks to it alone, and records its own events in the run's
@@ -354,7 +354,8 @@ release may change what an existing document does, and states it under Upgrading
   server says `✓ the record had no end, and now ends as lost: its end was never recorded`
   where it said `the record had no exit and was closed with the reason gateway_lost`, and
   `✗ the server wants no more events of the run <id>; …` without the status. Forager's
-  line of events the server did not accept is no longer printed beside qory's.
+  lines of events the server did not accept, and that the server wants no more events
+  of the run, are no longer printed beside qory's.
 - `qory gateway`'s help says `run_credentials    the run starters whose signed run
   credentials open runs of clients with no session`.
 - `gateway.server.access_key` and `gateway.server.secret` in `forager.yaml` are refused,

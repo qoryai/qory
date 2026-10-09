@@ -78,7 +78,8 @@ const runSecret = "example-run-secret-0000000000000000000001"
 // runs, its 410 with the run's outcome and reason, the runtime stopped: a run credential
 // that could not be checked, failed; the starter's end with no outcome, cancelled; and
 // the starter's outcome with its reason as given, with spaces, exit 0 when it completed.
-// No line says "issuer", the gateway's own message, the code or the status.
+// No line says "issuer", the code or the status, nor the gateway's own message of the
+// run's end, "the run has ended: <state>[, <reason words>]", which qory's line says.
 func TestRunBehindAGatewaySaysHowTheRunEnded(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -106,24 +107,24 @@ func TestRunBehindAGatewaySaysHowTheRunEnded(t *testing.T) {
 		{name: "no valid answer at the open", runStatus: http.StatusBadGateway, want: openInvalid, code: 1,
 			runBody: `{"error":"credential_check_invalid","from":"gateway","message":"the gateway could not open the run: the introspection endpoint gave no valid answer"}`},
 		{name: "ended before it started", runStatus: http.StatusGone, want: "✗ the run did not start: it has ended already\n", code: 1,
-			runBody: `{"error":"stopped","from":"gateway","state":"cancelled","reason":"stopped"}`},
+			runBody: `{"error":"stopped","from":"gateway","message":"the run has ended: cancelled, no outcome given","state":"cancelled","reason":"stopped"}`},
 		{name: "unreachable while live", runStatus: http.StatusOK, runBody: answer, started: true, code: 1,
-			end:  `{"error":"credential_check_unreachable","from":"gateway"}`,
+			end:  `{"error":"credential_check_unreachable","from":"gateway","message":"the run has ended"}`,
 			want: "✗ the run failed: its run credential could not be checked, " + stopped},
 		{name: "no valid answer while live", runStatus: http.StatusOK, runBody: answer, started: true, code: 1,
-			end:  `{"error":"credential_check_invalid","from":"gateway","state":"failed","reason":"credential_check_invalid"}`,
+			end:  `{"error":"credential_check_invalid","from":"gateway","message":"the run has ended: failed, couldn't check whether the run may go on: unreadable answer","state":"failed","reason":"credential_check_invalid"}`,
 			want: "✗ the run failed: its run credential could not be checked, " + stopped},
 		{name: "stopped with no outcome", runStatus: http.StatusOK, runBody: answer, started: true, code: 1,
-			end:  `{"error":"stopped","from":"gateway","state":"cancelled","reason":"stopped"}`,
+			end:  `{"error":"stopped","from":"gateway","message":"the run has ended: cancelled, no outcome given","state":"cancelled","reason":"stopped"}`,
 			want: "✗ the run was cancelled, with no outcome given, " + stopped},
 		{name: "the starter's success", runStatus: http.StatusOK, runBody: answer, started: true, code: 0,
-			end:  `{"error":"stopped","from":"gateway","state":"succeeded","reason":"all_checks_passed"}`,
+			end:  `{"error":"stopped","from":"gateway","message":"the run has ended: succeeded, all checks passed","state":"succeeded","reason":"all_checks_passed"}`,
 			want: "✓ the run completed: all checks passed, " + stopped},
 		{name: "the starter's failure", runStatus: http.StatusOK, runBody: answer, started: true, code: 1,
-			end:  `{"error":"stopped","from":"gateway","state":"failed","reason":"checks_failed"}`,
+			end:  `{"error":"stopped","from":"gateway","message":"the run has ended: failed, checks failed","state":"failed","reason":"checks_failed"}`,
 			want: "✗ the run failed: checks failed, " + stopped},
 		{name: "the starter's cancel", runStatus: http.StatusOK, runBody: answer, started: true, code: 1,
-			end:  `{"error":"stopped","from":"gateway","state":"cancelled","reason":"no_longer_needed"}`,
+			end:  `{"error":"stopped","from":"gateway","message":"the run has ended: cancelled, no longer needed","state":"cancelled","reason":"no_longer_needed"}`,
 			want: "✗ the run was cancelled: no longer needed, " + stopped},
 	} {
 		clearRuns(t, root)
@@ -141,7 +142,7 @@ func TestRunBehindAGatewaySaysHowTheRunEnded(t *testing.T) {
 		if n := strings.Count(out, strings.TrimSuffix(c.want, "\n")); n != 1 {
 			t.Errorf("%s: the line is said %d times, want once\n%s", c.name, n, out)
 		}
-		lacks(t, out, "issuer", "introspection endpoint", "credential_check", "all_checks_passed", "checks_failed", "no_longer_needed", "(status", "ended by", "closed the run", credential)
+		lacks(t, out, "issuer", "introspection endpoint", "credential_check", "all_checks_passed", "checks_failed", "no_longer_needed", "(status", "ended by", "closed the run", "the run has ended", "succeeded", credential)
 		if !c.started {
 			lacks(t, out, "✓")
 			if c.runStatus != http.StatusGone {

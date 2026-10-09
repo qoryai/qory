@@ -1620,8 +1620,9 @@ const (
 	// resendStoppedNow is the server's signed 410 during the resend, a format of the run
 	// id, what it accepted, what was not sent and the run directory.
 	resendStoppedNow = "✗ the server wants no more events of the run %s; %d were accepted and %d were not sent; they stay in %s"
-	// resendAnswered410 is Forager's line of a 410 with no code.
-	resendAnswered410 = "qory run resend: the server answered 410; no further batch is sent for this run, which goes on"
+	// resendServerStop is Forager's line of the server's 410, which qory's own line says
+	// in a resend, so it is left out.
+	resendServerStop = "the server wants no more events of this run"
 	// resendNotAccepted is a server that did not accept within --wait, a format of what
 	// it accepted, what it did not and the run directory.
 	resendNotAccepted = "✗ %d events were accepted and %d were not; %s/undelivered contains them"
@@ -1708,11 +1709,11 @@ func TestResendSaysTheServerWantsNoMoreEvents(t *testing.T) {
 	dir, file, before, owed := record(t, laterID)
 	out, err := run(t, "run", "resend", laterID)
 	sent := len(srv.events)
-	want := resendAnswered410 + "\n" + fmt.Sprintf(resendStoppedNow, laterID, sent, owed-sent, ui.Short(dir, root)) + "\n"
+	want := fmt.Sprintf(resendStoppedNow, laterID, sent, owed-sent, ui.Short(dir, root)) + "\n"
 	if cmd.ExitCode(err) != 1 || out != want || sent == 0 || sent == owed {
 		t.Errorf("a 410 after a batch: %v (exit %d), %d of %d sent\n%q\nwant\n%q", err, cmd.ExitCode(err), sent, owed, out, want)
 	}
-	lacks(t, out, "undelivered")
+	lacks(t, out, "undelivered", resendServerStop, "the run goes on")
 	stays(t, "a 410 after a batch", dir, file, before)
 
 	// A 410 to the first batch: nothing was accepted.
@@ -1720,7 +1721,7 @@ func TestResendSaysTheServerWantsNoMoreEvents(t *testing.T) {
 	const firstID = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5ec1"
 	dir, file, before, owed = record(t, firstID)
 	out, err = run(t, "run", "resend", firstID)
-	want = resendAnswered410 + "\n" + fmt.Sprintf(resendStoppedNow, firstID, 0, owed, ui.Short(dir, root)) + "\n"
+	want = fmt.Sprintf(resendStoppedNow, firstID, 0, owed, ui.Short(dir, root)) + "\n"
 	if cmd.ExitCode(err) != 1 || out != want || len(srv.events) != sent {
 		t.Errorf("a 410 to the first batch: %v (exit %d)\n%q\nwant\n%q", err, cmd.ExitCode(err), out, want)
 	}

@@ -11,13 +11,14 @@ import (
 // TestResendLinesLeaveOutForagersRepeats pins what both resends, to the server and
 // behind a gateway, pass on of Forager's report lines: when qory says itself that the run
 // never opened, Forager's gateway.ResendNotOpened and gateway.ResendNoServer are left
-// out, and when qory says itself that events were not accepted, so is Forager's line of
-// them; every other line, the torn lines' and the server's stop among them, is passed
+// out, and when qory says itself that events were not accepted, or that the server wants
+// no more events of the run, so is Forager's line of them; every other line, the torn lines' and the server's stop among them, is passed
 // on in order. What qory does not say is passed on.
 func TestResendLinesLeaveOutForagersRepeats(t *testing.T) {
 	torn := fmt.Sprintf(gateway.ResendTorn, 2, "/run/events.jsonl")
 	const stop = "the server said stop during the run; nothing is sent"
 	const undelivered = "2 events were not accepted by the server; see /run/undelivered"
+	const serverStop = "the server wants no more events of this run; the run goes on"
 	for _, c := range []struct {
 		name     string
 		reported []string
@@ -31,6 +32,8 @@ func TestResendLinesLeaveOutForagersRepeats(t *testing.T) {
 		{"stop kept", []string{stop, gateway.ResendNotOpened}, []int{heldNotOpened}, []string{stop}},
 		{"undelivered said", []string{undelivered, stop}, []int{heldUndelivered}, []string{stop}},
 		{"undelivered not said", []string{undelivered}, nil, []string{undelivered}},
+		{"the server's stop said", []string{serverStop, torn}, []int{heldServerStop}, []string{torn}},
+		{"the server's stop not said", []string{serverStop}, nil, []string{serverStop}},
 		{"opened: never opened kept", []string{gateway.ResendNotOpened}, nil, []string{gateway.ResendNotOpened}},
 		{"opened: no server kept", []string{gateway.ResendNoServer}, nil, []string{gateway.ResendNoServer}},
 		{"opened: all kept", []string{torn, stop}, nil, []string{torn, stop}},

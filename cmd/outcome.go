@@ -7,14 +7,6 @@ import (
 	"github.com/qoryai/forager/event"
 )
 
-// The states of dev.qory.run.exited, the run's outcome, as session.Result.State and
-// session.ResendResult.State have them.
-const (
-	stateSucceeded = "succeeded"
-	stateFailed    = "failed"
-	stateCancelled = "cancelled"
-)
-
 // The reasons Forager wrote before the run's starter could give an outcome, which a
 // record written then may still hold: they read as the codes that took their place.
 const (
@@ -62,11 +54,11 @@ func outcomeOf(state, reason string) outcome {
 		o.cancelled = true
 	default:
 		switch state {
-		case stateSucceeded:
+		case event.StateSucceeded:
 			o.completed = true
-		case stateFailed:
+		case event.StateFailed:
 			o.failed = true
-		case stateCancelled:
+		case event.StateCancelled:
 			o.cancelled = true
 		default:
 			o.known = false
