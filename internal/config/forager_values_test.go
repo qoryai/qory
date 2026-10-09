@@ -319,3 +319,50 @@ func TestNoForagerRefusalPrintsAKeyWrittenAsAnAlias(t *testing.T) {
 		}
 	}
 }
+
+// TestForagerRefusesAKeyThatIsNotANameBesideAMerge is a mapping that merges and has a
+// key that is a list or a mapping, which the YAML decoder fails on with a panic: it is
+// refused before it is decoded, at once and without the value, by both readers, and
+// under gateway.credentials and gateway.run_credentials too.
+func TestForagerRefusesAKeyThatIsNotANameBesideAMerge(t *testing.T) {
+	hermetic(t)
+	for _, c := range []struct{ body, whole, instance string }{
+		{"wall:\n  ? [" + secret + "]\n  : y\n  <<: {adapter: docker}\n", ": line 2: wall has a key that is not a name", ""},
+		{"wall:\n  <<: {adapter: docker}\n  ? {k: " + secret + "}\n  : y\n", ": line 3: wall has a key that is not a name", ""},
+		{"session:\n  instance:\n    ? [" + secret + "]\n    : y\n    <<: {name: a}\n", ": line 3: session.instance has a key that is not a name", ": line 3: session.instance has a key that is not a name"},
+		{"session:\n  <<: {run: {timeout: 1h}}\n  ? {k: " + secret + "}\n  : y\n", ": line 3: session has a key that is not a name", ": line 3: session has a key that is not a name"},
+		{"? [" + secret + "]\n: y\n<<: {wall: {adapter: docker}}\n", ": line 1: the file has a key that is not a name", ": line 1: the file has a key that is not a name"},
+		{"session: {gateway: {url: \"https://gateway.example\", ? [" + secret + "] : y, <<: {}}}\n", ": line 1: session.gateway has a key that is not a name", ""},
+		{"gateway: {egress: {mode: observe, ? [" + secret + "] : y, <<: {}}}\n", ": line 1: gateway.egress has a key that is not a name", ""},
+		{"gateway: {credentials: {c: {env: X, auth: {? [" + secret + "] : y, <<: {scheme: basic}}}}}\n", ": line 1: gateway.credentials.c.auth has a key that is not a name", ""},
+		{"gateway: {run_credentials: [{1: a, <<: {? [" + secret + "] : y}}]}\n", ": line 1: gateway.run_credentials[0].<< has a key that is not a name", ""},
+		{"gateway: {run_credentials: [{issuer: x, labels: {1: a, <<: [{a: 1}, {? [" + secret + "] : y}]}}]}\n", ": line 1: gateway.run_credentials[0].labels.<<[1] has a key that is not a name", ""},
+	} {
+		path := foragerFile(t, c.body)
+		for _, r := range []struct {
+			load func() (*config.Forager, error)
+			want string
+		}{{config.LoadForager, c.whole}, {config.LoadForagerInstance, c.instance}} {
+			done := make(chan error, 1)
+			go func() {
+				_, err := r.load()
+				done <- err
+			}()
+			var err error
+			select {
+			case err = <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatalf("%q: no answer in 2s", c.body)
+			}
+			switch {
+			case r.want == "" && err != nil:
+				t.Errorf("%q: %v, want it read: this reader reads session.instance alone", c.body, err)
+			case r.want != "" && (err == nil || err.Error() != path+r.want):
+				t.Errorf("%q: %v, want %q", c.body, err, path+r.want)
+			}
+			if err != nil && (strings.Contains(err.Error(), marker) || strings.Contains(err.Error(), "qak_")) {
+				t.Errorf("%q: the refusal holds the value: %v", c.body, err)
+			}
+		}
+	}
+}

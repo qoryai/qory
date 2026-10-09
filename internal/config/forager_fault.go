@@ -176,6 +176,9 @@ const walkLimit = 100_000
 // walked each time a mapping merges it, the steps under aliases and merges counted.
 type walk struct {
 	known bool
+	// keys is a walk for [mergeKeyFault]: it finds a key that is not a name in a
+	// mapping that merges, and no other fault.
+	keys bool
 	// state is where the walk of a value as a type stands: walking or walked.
 	state map[walkKey]walkState
 	// merging are the mappings being walked as a merge.
@@ -208,6 +211,34 @@ func findFault(n *yaml.Node, t reflect.Type, key string, known bool) *fault {
 	return w.fault(n, t, key)
 }
 
+// mergeKeyFault is the first mapping under n, read as t as the decoder reads it, that
+// merges and has a key that is not a name, which the decoder refuses, and which yaml.v3
+// fails on with a panic rather than an error; nil when there is none. It is for a
+// check before n is decoded.
+func mergeKeyFault(n *yaml.Node, t reflect.Type, key string, known bool) *fault {
+	w := &walk{known: known, keys: true, state: map[walkKey]walkState{}, merging: map[walkKey]bool{}}
+	// A walk that reaches its limit leaves the file to the decoder, which refuses it.
+	if f := w.fault(n, t, key); f != nil && f.line != 0 {
+		return f
+	}
+	return nil
+}
+
+// errDecoderFailed is a panic of the YAML decoder said in words of qory's own, without
+// what the panic holds, which may quote a value.
+var errDecoderFailed = errors.New("the YAML decoder failed reading the file")
+
+// safeDecode is decode, a decode of forager.yaml, with a panic of the decoder as
+// [errDecoderFailed].
+func safeDecode(decode func() error) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = errDecoderFailed
+		}
+	}()
+	return decode()
+}
+
 // step counts a step under an alias or a merge, and is the fault of a walk that has
 // taken too many.
 func (w *walk) step() *fault {
@@ -234,6 +265,9 @@ func (w *walk) fault(n *yaml.Node, t reflect.Type, key string) *fault {
 	k := walkKey{n, t}
 	switch w.state[k] {
 	case walking:
+		if w.keys {
+			return nil
+		}
 		return keyFault(line, key, "is an alias of a value that holds it")
 	case walked:
 		return nil
@@ -249,7 +283,7 @@ func (w *walk) fault(n *yaml.Node, t reflect.Type, key string) *fault {
 	if n.Kind == 0 || t == nodeType {
 		return nil
 	}
-	if f := tagFault(n, line, key); f != nil {
+	if f := tagFault(n, line, key); f != nil && !w.keys {
 		return f
 	}
 	for t.Kind() == reflect.Pointer {
@@ -264,6 +298,9 @@ func (w *walk) fault(n *yaml.Node, t reflect.Type, key string) *fault {
 			return nil
 		}
 		if n.Kind != yaml.MappingNode {
+			if w.keys {
+				return nil
+			}
 			return keyFault(line, key, "is not a mapping")
 		}
 		return w.structFault(n, t, key, nil)
@@ -272,6 +309,9 @@ func (w *walk) fault(n *yaml.Node, t reflect.Type, key string) *fault {
 			return nil
 		}
 		if n.Kind != yaml.SequenceNode {
+			if w.keys {
+				return nil
+			}
 			if t.Elem().Kind() == reflect.String {
 				return keyFault(line, key, "is not a list of strings")
 			}
@@ -284,7 +324,13 @@ func (w *walk) fault(n *yaml.Node, t reflect.Type, key string) *fault {
 		}
 		return nil
 	case reflect.Interface:
+		if w.keys {
+			return nil
+		}
 		return w.anyFault(n, line, key)
+	}
+	if w.keys {
+		return nil
 	}
 	if err := n.Decode(reflect.New(t).Interface()); err != nil {
 		switch t.Kind() {
@@ -312,6 +358,10 @@ func (w *walk) structFault(n *yaml.Node, t reflect.Type, key string, merged map[
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		for j := i + 2; j+1 < len(n.Content); j += 2 {
 			if a, b := n.Content[i], n.Content[j]; a.Kind == b.Kind && a.Value == b.Value {
+				// The decoder reads no further into a mapping that writes a key twice.
+				if w.keys {
+					return nil
+				}
 				if k := followAliases(a); k.Kind != yaml.ScalarNode {
 					return keyNotAName(a.Line, key)
 				}
@@ -324,6 +374,10 @@ func (w *walk) structFault(n *yaml.Node, t reflect.Type, key string, merged map[
 	// written twice.
 	written := map[string]int{}
 	var merge *yaml.Node
+	// The decoder's merge holds the keys of the mapping that merges first, and a key that
+	// is a list or a mapping is no key it can hold: it fails, and is refused before it
+	// decodes. A key that is not a name anywhere else is refused by the decoder.
+	merges := slices.ContainsFunc(n.Content, func(k *yaml.Node) bool { return k.Kind == yaml.ScalarNode && k.ShortTag() == "!!merge" })
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		if raw := n.Content[i]; raw.Kind == yaml.ScalarNode && raw.ShortTag() == "!!merge" {
 			merge = n.Content[i+1]
@@ -331,6 +385,9 @@ func (w *walk) structFault(n *yaml.Node, t reflect.Type, key string, merged map[
 		}
 		k, v := followAliases(n.Content[i]), n.Content[i+1]
 		if k.Kind != yaml.ScalarNode {
+			if w.keys && (merged != nil || !merges) {
+				continue
+			}
 			return keyNotAName(n.Content[i].Line, key)
 		}
 		if merged != nil {
@@ -341,7 +398,7 @@ func (w *walk) structFault(n *yaml.Node, t reflect.Type, key string, merged map[
 		}
 		field, ok := fieldOf(t, k.Value)
 		if !ok {
-			if w.known {
+			if w.known && !w.keys {
 				if raw := n.Content[i]; raw.Kind == yaml.AliasNode {
 					return &fault{raw.Line, fmt.Sprintf("key *%s is an alias of a key %s does not read", raw.Value, ForagerFileName)}
 				}
@@ -350,6 +407,9 @@ func (w *walk) structFault(n *yaml.Node, t reflect.Type, key string, merged map[
 			continue
 		}
 		if first, ok := written[k.Value]; ok {
+			if w.keys {
+				continue
+			}
 			return writtenTwice(key, k.Value, first, n.Content[i].Line)
 		}
 		written[k.Value] = n.Content[i].Line
@@ -407,6 +467,9 @@ func (w *walk) mergeFault(n *yaml.Node, t reflect.Type, key string, merged map[s
 	}
 	k := walkKey{n, t}
 	if w.merging[k] || w.state[k] == walking {
+		if w.keys {
+			return nil
+		}
 		return keyFault(line, key, "merges a mapping that holds the merge")
 	}
 	w.merging[k] = true
@@ -421,6 +484,11 @@ func (w *walk) anyFault(n *yaml.Node, line int, key string) *fault {
 	case yaml.MappingNode:
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			k := followAliases(n.Content[i])
+			// Forager decodes the list into maps, which take no list or mapping as a
+			// key: it refuses one, or fails on one a merge holds.
+			if k.Kind != yaml.ScalarNode {
+				return keyNotAName(n.Content[i].Line, key)
+			}
 			if f := tagFault(k, n.Content[i].Line, key); f != nil {
 				return f
 			}

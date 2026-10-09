@@ -402,6 +402,10 @@ release may change what an existing document does, and states it under Upgrading
   a list or a mapping as `<file>: line <line>: <section> has a key that is not a name`.
   A key written as an alias is named by the alias, never by the value it stands for:
   `<file>: line <line>: key *<anchor> is an alias of a key forager.yaml does not read`.
+  A mapping that merges and has a key that is a list or a mapping crashed qory in the
+  YAML decoder; it is refused before it is decoded, with the same `has a key that is not
+  a name`, and a crash of the decoder is refused as `<file>: the YAML decoder failed
+  reading the file`.
 - A `forager.yaml` that holds a second YAML document, an empty one after a trailing
   `---` included, is refused: `<file>: holds more than one YAML document; forager.yaml
   is one document, and qory would read only the first`. qory read the first document

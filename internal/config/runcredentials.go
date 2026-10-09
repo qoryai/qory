@@ -37,10 +37,17 @@ func readRunCredentials(path string, node *yaml.Node) (runcredential.Issuers, []
 	if err != nil {
 		return nil, nil, notIssuers
 	}
-	issuers, err := runcredential.Parse(runCredentialsDoc, b)
+	var issuers runcredential.Issuers
+	err = safeDecode(func() (err error) {
+		issuers, err = runcredential.Parse(runCredentialsDoc, b)
+		return err
+	})
 	if err != nil {
 		var ve *jsonschema.ValidationError
 		if !errors.As(err, &ve) {
+			if errors.Is(err, errDecoderFailed) {
+				return nil, nil, fmt.Errorf("%s: gateway.run_credentials: %w", path, err)
+			}
 			if text, ok := aliasRefusal(err); ok {
 				return nil, nil, fmt.Errorf("%s: gateway.run_credentials: %s", path, text)
 			}

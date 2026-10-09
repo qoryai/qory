@@ -455,12 +455,18 @@ func LoadForager() (*Forager, error) {
 	if err := oneDocument(data); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	var doc yaml.Node
+	docErr := yaml.Unmarshal(data, &doc)
+	if docErr == nil {
+		if f := mergeKeyFault(&doc, reflect.TypeFor[foragerFile](), "", true); f != nil {
+			return nil, f.error(path)
+		}
+	}
 	var f foragerFile
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
 	dec.KnownFields(true)
-	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
-		var doc yaml.Node
-		if yaml.Unmarshal(data, &doc) != nil {
+	if err := safeDecode(func() error { return dec.Decode(&f) }); err != nil && !errors.Is(err, io.EOF) {
+		if docErr != nil {
 			return nil, foragerSyntaxError(path, err)
 		}
 		return nil, foragerDecodeError(path, &doc, reflect.TypeFor[foragerFile](), "", true, err)
@@ -703,7 +709,7 @@ func sessionGatewayNull(path string, data []byte) error {
 			Gateway yaml.Node `yaml:"gateway"`
 		} `yaml:"session"`
 	}
-	if err := yaml.Unmarshal(data, &f); err != nil || f.Session == nil {
+	if err := safeDecode(func() error { return yaml.Unmarshal(data, &f) }); err != nil || f.Session == nil {
 		return nil
 	}
 	if g := followAliases(&f.Session.Gateway); g.Kind != 0 && g.ShortTag() == "!!null" {
@@ -725,7 +731,7 @@ func gatewayKey(n *yaml.Node) (*string, error) {
 	if n.ShortTag() == "!!null" {
 		return &s, nil
 	}
-	if err := n.Decode(&s); err != nil {
+	if err := safeDecode(func() error { return n.Decode(&s) }); err != nil {
 		return nil, err
 	}
 	return &s, nil
@@ -797,9 +803,15 @@ func LoadForagerInstance() (*Forager, error) {
 			Instance *instanceSection `yaml:"instance,omitempty"`
 		} `yaml:"session,omitempty"`
 	}
-	if err := yaml.Unmarshal(data, &f); err != nil {
-		var doc yaml.Node
-		if yaml.Unmarshal(data, &doc) != nil {
+	var doc yaml.Node
+	docErr := yaml.Unmarshal(data, &doc)
+	if docErr == nil {
+		if fault := mergeKeyFault(&doc, reflect.TypeOf(f), "", false); fault != nil {
+			return nil, fault.error(path)
+		}
+	}
+	if err := safeDecode(func() error { return yaml.Unmarshal(data, &f) }); err != nil {
+		if docErr != nil {
 			return nil, foragerSyntaxError(path, err)
 		}
 		return nil, foragerDecodeError(path, &doc, reflect.TypeOf(f), "", false, err)
@@ -1027,7 +1039,10 @@ func readCredentials(path string, node *yaml.Node) ([]ForagerCredential, error) 
 				}
 			}
 		}
-		if err := node.Content[i+1].Decode(&f); err != nil {
+		if fault := mergeKeyFault(node.Content[i+1], reflect.TypeOf(f), "gateway.credentials."+c.Name, false); fault != nil {
+			return nil, fault.error(path)
+		}
+		if err := safeDecode(func() error { return node.Content[i+1].Decode(&f) }); err != nil {
 			return nil, foragerDecodeError(path, node.Content[i+1], reflect.TypeOf(f), "gateway.credentials."+c.Name, false, err)
 		}
 		if f.Env != nil {
