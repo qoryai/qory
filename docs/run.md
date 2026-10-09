@@ -28,7 +28,7 @@ names another: run `qory harness compose` again. The report fixes no variable an
 mount. Behind a wall, `harness.home` comes from the `qory.yaml` in qory's configuration
 directory alone: another `qory.yaml` that moves the home refuses a walled run.
 
-When the run ends, qory says how in one line, and its exit status goes with it:
+When the run ends, qory says how, and its exit status goes with it:
 
 - `✓ <runtime> exited 0` or `✗ <runtime> exited <n>`: the runtime exited by itself, and
   the exit status is the runtime's.
@@ -697,8 +697,8 @@ The gateway refuses a run, and qory says:
   again`, when the gateway got no answer from the check;
 - `qory run: the run did not start: its run credential could not be checked`, when the
   check's answer was not valid;
-- `the run did not start: it has ended already`, for a run that ended before its runtime
-  started.
+- `✗ the run did not start: it has ended already`, for a run that ended before its
+  runtime started.
 
 ### How a run ends there
 
