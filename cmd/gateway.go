@@ -241,10 +241,8 @@ func checkServiceSecrets(r *config.Forager) error {
 // link or another user's before anything is written there: what is in them is this
 // user's alone.
 func makePrivateDir(state, dir string) error {
-	for _, d := range []string{state, dir} {
-		if err := foragerdir.MakePrivateDir(d, "qory gateway"); err != nil {
-			return err
-		}
+	if err := foragerdir.MakePrivateDir(state, "qory's state directory"); err != nil {
+		return err
 	}
-	return nil
+	return foragerdir.MakePrivateDir(dir, "the directory of qory gateway")
 }

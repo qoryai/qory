@@ -399,3 +399,22 @@ func TestLocksKeepKeyCommandsAndRunsApart(t *testing.T) {
 		}
 	})
 }
+
+// TestMakePrivateDirRefusesAnotherUsersDirectory is a directory another user owns: it
+// is refused with the words its caller gives for whose it is, and keeps its mode.
+func TestMakePrivateDirRefusesAnotherUsersDirectory(t *testing.T) {
+	defer foragerdir.SetDirOwnedByMe(func(os.FileInfo) bool { return false })()
+	for _, whose := range []string{"qory's state directory", "the directory of qory gateway"} {
+		path := filepath.Join(t.TempDir(), "dir")
+		if err := os.Mkdir(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		err := foragerdir.MakePrivateDir(path, whose)
+		if want := path + " belongs to another user; " + whose + " is yours alone"; err == nil || err.Error() != want {
+			t.Errorf("error\n got %v\nwant %q", err, want)
+		}
+		if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o755 {
+			t.Errorf("the refused directory changed: %v %v", info.Mode(), err)
+		}
+	}
+}

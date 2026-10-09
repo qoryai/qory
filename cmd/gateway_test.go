@@ -598,3 +598,34 @@ func TestGatewayRefusesALinkForItsDirectory(t *testing.T) {
 		})
 	}
 }
+
+// TestGatewayRefusesAnotherUsersDirectory is qory's state directory, or the gateway's
+// directory in it, another user's: each is refused, naming which it is. Only root can
+// give a directory to another user, so the test needs root.
+func TestGatewayRefusesAnotherUsersDirectory(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("only root can give a directory to another user")
+	}
+	for _, c := range []struct{ name, whose string }{
+		{"qory", "qory's state directory"},
+		{filepath.Join("qory", "gateway"), "the directory of qory gateway"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			emptyDir(t)
+			serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n"+runCredentials)
+			writeIssuerFiles(t)
+			path := filepath.Join(os.Getenv("XDG_STATE_HOME"), c.name)
+			if err := os.MkdirAll(path, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chown(path, 65534, 65534); err != nil {
+				t.Fatal(err)
+			}
+			out, err := run(t, "gateway")
+			if want := path + " belongs to another user; " + c.whose + " is yours alone"; err == nil || err.Error() != want {
+				t.Errorf("error\n got %v\nwant %q", err, want)
+			}
+			lacks(t, out, "listening on")
+		})
+	}
+}

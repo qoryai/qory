@@ -238,9 +238,10 @@ func readPrivate(path string, limit int64) ([]byte, error) {
 
 // MakePrivateDir makes the directory path mode 0700 when it is not there, and leaves an
 // existing one mode 0700. It refuses, before anything is written there, a link, a path
-// that is not a directory and a directory another user owns: of names whose directory it
-// is in the refusal. The directories above it are made when they are not there.
-func MakePrivateDir(path, of string) error {
+// that is not a directory and a directory another user owns: whose names the directory
+// in that refusal, "<path> belongs to another user; <whose> is yours alone". The
+// directories above it are made when they are not there.
+func MakePrivateDir(path, whose string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
@@ -257,11 +258,15 @@ func MakePrivateDir(path, of string) error {
 		return fmt.Errorf("%s is a symbolic link; it must be the directory itself", path)
 	case !info.IsDir():
 		return fmt.Errorf("%s is not a directory", path)
-	case !ownedByMe(info):
-		return fmt.Errorf("%s belongs to another user; the directory of %s is yours alone", path, of)
+	case !dirOwnedByMe(info):
+		return fmt.Errorf("%s belongs to another user; %s is yours alone", path, whose)
 	}
 	return os.Chmod(path, 0o700)
 }
+
+// dirOwnedByMe is [ownedByMe] for [MakePrivateDir]; a test replaces it, since only root
+// can give a directory to another user.
+var dirOwnedByMe = ownedByMe
 
 // isLink reports whether path is a symbolic link.
 func isLink(path string) bool {
