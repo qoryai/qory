@@ -205,6 +205,11 @@ release may change what an existing document does, and states it under Upgrading
   from the one the run started with, and a run the gateway, the credential's issuer or
   the server ended, each exit 1, the events kept in the run directory. A record a gateway
   of the run's own made is refused: it goes to the server. See `docs/run.md`.
+- `qory run resend` to the server sends nothing of a run the server never opened, whose
+  ping it never accepted, or of a run that had no server, such as a `--local` run's, and
+  leaves its record as it is: it says `the server never opened run <id>, so there is
+  nothing to send; its record stays in <dir>`, exit 0. Until now the record of a run
+  with no server was closed and sent.
 - qory takes `QORY_RUN_CREDENTIAL_SECRET` out of its environment when a command starts, as
   it does the access key's variables, so no program it starts receives it; `wall.env` or
   `--env` naming it is refused.

@@ -1474,6 +1474,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 				u.Fail(fmt.Errorf("%d events were accepted and %d were not; %s/undelivered contains them", res.Sent, res.Undelivered, ui.Short(spec.Dir, at.root)))
 				return reported(&exitError{code: 1})
 			}
+			if res.NotOpened {
+				// The server never accepted the run's ping, or the run had no server: as
+				// behind a gateway, nothing failed now, and the resend succeeds.
+				u.Success("the server never opened run %s, so there is nothing to send; its record stays in %s", args[0], ui.Short(spec.Dir, at.root))
+				return nil
+			}
 			u.Success("%d events were accepted; the server has the whole record", res.Sent)
 			return nil
 		},

@@ -26,6 +26,7 @@ import (
 
 	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/foragerdir"
+	"github.com/qoryai/qory/internal/ui"
 )
 
 // testAccessKey is the access key id of every test's server.
@@ -1444,6 +1445,9 @@ func TestResendClosesAndDeliversARunItsForagerLeft(t *testing.T) {
 	}
 	lines := strings.SplitAfter(strings.TrimSuffix(string(data), "\n"), "\n")
 	writeFile(t, file, strings.Join(lines[:len(lines)-1], ""))
+	// A delivered.log, as a run that opened at its server leaves: without it the run
+	// had no server, and nothing of it is sent.
+	writeFile(t, filepath.Join(runsDir(t, root), id, "delivered.log"), "")
 
 	out, err := run(t, "run", "resend", id)
 	if err != nil {
@@ -1468,6 +1472,63 @@ func TestResendClosesAndDeliversARunItsForagerLeft(t *testing.T) {
 	t.Chdir(link)
 	if out, err := run(t, "run", "resend", id); err != nil || !strings.Contains(out, "0 events were accepted") {
 		t.Errorf("a resend through a link: %v\n%s", err, out)
+	}
+}
+
+// Forager's report lines of a resend that sends nothing of a run the server never
+// opened, which qory passes through: pinned, so a change of their wording is seen.
+const (
+	resendNoPing   = "qory run resend: the server never accepted the run's ping; nothing is sent"
+	resendNoServer = "qory run resend: the run had no server; nothing is sent"
+	resendNotOpen  = "✓ the server never opened run %s, so there is nothing to send; its record stays in %s"
+)
+
+// TestResendSendsNothingOfARunTheServerNeverOpened is a record of a run that never
+// opened at the server: one whose ping it never accepted, and one of a run with no
+// server, --local. Each is sent nothing and left as it is; Forager says why, qory says
+// that the server never opened the run, and the resend is exit 0.
+func TestResendSendsNothingOfARunTheServerNeverOpened(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, fakeRuntime(t))
+	srv := newFakeServer(t, "")
+	serverFile(t, srv, "")
+	for _, c := range []struct {
+		name, id, forager string
+		args              []string
+	}{
+		{"a ping the server never accepted", "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5eb0", resendNoPing, nil},
+		{"a run with no server", "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5eb1", resendNoServer, []string{"--local"}},
+	} {
+		if out, err := run(t, append([]string{"run", "--run-id", c.id}, c.args...)...); cmd.ExitCode(err) != 3 {
+			t.Fatalf("%s: %v\n%s", c.name, err, out)
+		}
+		dir := filepath.Join(runsDir(t, root), c.id)
+		// What a run whose ping the server never accepted leaves: no delivered.log.
+		for _, name := range []string{"delivered.log", "undelivered"} {
+			if err := os.RemoveAll(filepath.Join(dir, name)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		before, err := os.ReadFile(filepath.Join(dir, "events.jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		sent := len(srv.events)
+		out, err := run(t, "run", "resend", c.id)
+		want := c.forager + "\n" + fmt.Sprintf(resendNotOpen, c.id, ui.Short(dir, root)) + "\n"
+		if err != nil || out != want {
+			t.Errorf("%s: %v (exit %d)\n%q\nwant\n%q", c.name, err, cmd.ExitCode(err), out, want)
+		}
+		if len(srv.events) != sent {
+			t.Errorf("%s: the server got %d events", c.name, len(srv.events)-sent)
+		}
+		if after, err := os.ReadFile(filepath.Join(dir, "events.jsonl")); err != nil || string(after) != string(before) {
+			t.Errorf("%s: the record changed: %v", c.name, err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "delivered.log")); err == nil {
+			t.Errorf("%s: the resend wrote a delivered.log", c.name)
+		}
 	}
 }
 
