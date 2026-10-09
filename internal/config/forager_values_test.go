@@ -568,6 +568,45 @@ func TestRunCredentialsAliasesExpandWithinABound(t *testing.T) {
 	}
 }
 
+// TestRunCredentialsMergeChainIsReadAtOnce writes an issuer whose details merge the
+// last of a chain of 64000 mappings, each merging the one before it, anchored in a merge
+// the issuer itself makes, beside 6400 claims: it is read, and qory config lists every
+// detail of the chain, in under 2s. A walk that copied the keys of the chain at each of
+// its mappings took several seconds.
+func TestRunCredentialsMergeChainIsReadAtOnce(t *testing.T) {
+	if raceDetector {
+		t.Skip("the race detector makes the read many times slower than its bound")
+	}
+	hermetic(t)
+	const n = 64000
+	var b strings.Builder
+	b.WriteString("gateway:\n  run_credentials:\n    - {<<: {issuer: [&m0 {d0: {claim: c}}")
+	for i := 1; i <= n; i++ {
+		fmt.Fprintf(&b, ", &m%d {d%d: {claim: c}, <<: *m%d}", i, i, i-1)
+	}
+	b.WriteString("]}, issuer: \"https://issuer.example\", audience: box, algorithms: [RS256], keys: [{kid: k1, alg: RS256, public_key_file: f.pem}], ")
+	fmt.Fprintf(&b, "labels: {forge: {value: x}, repository: {claims: [%s], join: /}, run_key: {claim: sub}}, details: {<<: *m%d}}\n", repeated("c", n/10), n)
+	foragerFile(t, b.String())
+	start := time.Now()
+	f, err := config.LoadForager()
+	took := time.Since(start)
+	if err != nil {
+		t.Fatalf("a chain of %d merges: %v, want it read", n, err)
+	}
+	if took > 2*time.Second {
+		t.Errorf("a chain of %d merges took %v", n, took)
+	}
+	var details string
+	for _, r := range f.Rows() {
+		if r.Key == "gateway.run_credentials[0].details" {
+			details = r.Value
+		}
+	}
+	if got := strings.Count(details, ": {claim: c}"); got != n+1 {
+		t.Errorf("a chain of %d merges: details lists %d details, want %d", n, got, n+1)
+	}
+}
+
 // TestNoForagerRefusalPrintsAKeyWrittenAsAnAlias writes a value, then a key that is an
 // alias of it, in every section: a refusal names such a key by its alias, never by the
 // value it stands for, in both readers.

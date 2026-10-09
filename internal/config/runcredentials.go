@@ -148,7 +148,7 @@ func resolved(n *yaml.Node) *yaml.Node {
 			c.Content = append(c.Content, resolved(item))
 		}
 	case yaml.MappingNode:
-		for _, kv := range mergedKeys(n, nil) {
+		for _, kv := range mergedKeys(n) {
 			c.Content = append(c.Content, resolvedKey(kv.k), resolved(kv.v))
 		}
 	}
@@ -175,17 +175,21 @@ func resolvedKey(k *yaml.Node) *yaml.Node {
 
 // mergedKeys are the keys of the mapping m and their values as the decoder takes them,
 // in the order the file writes them, the keys of the mappings its << merges where the
-// << stands. taken are the names an earlier key of the mapping that merges m has set,
-// nil for a mapping that is merged into none: a merged mapping sets a name no earlier
-// key has set, its own keys before those it merges in turn; in a mapping merged into
-// none, a key it sets itself wins over every merged one, and of two keys of one name,
-// the later.
-func mergedKeys(m *yaml.Node, taken map[string]bool) []keyValue {
-	own := taken == nil
-	last := map[string]int{}
-	if own {
-		taken = map[string]bool{}
-	}
+// << stands: a key m sets itself wins over every merged one, and of two keys of one
+// name, the later. A merged mapping sets a name no key outside it has set, its own keys
+// before those it merges in turn, and of two mappings a << lists, the first wins.
+func mergedKeys(m *yaml.Node) []keyValue {
+	return appendMergedKeys(nil, m, map[string]bool{}, true)
+}
+
+// appendMergedKeys appends the keys of the mapping m to out, as [mergedKeys] takes them,
+// and returns out: each mapping is walked once for each time it is merged, and each key
+// appended once, into the one list. taken are the names a key has set, m's own among
+// them before any mapping m merges is walked. own is set for the mapping merged into
+// none, where the later of two keys of one name wins; in a merged mapping, the first,
+// and a name taken before is left to the key that took it.
+func appendMergedKeys(out []keyValue, m *yaml.Node, taken map[string]bool, own bool) []keyValue {
+	at := map[string]int{}
 	merge := -1
 	for i := 0; i+1 < len(m.Content); i += 2 {
 		k := m.Content[i]
@@ -194,33 +198,27 @@ func mergedKeys(m *yaml.Node, taken map[string]bool) []keyValue {
 			continue
 		}
 		name, ok := keyString(k)
-		switch {
-		case !ok:
-		case own:
-			last[name] = i
-			taken[name] = true
-		case !taken[name]:
-			last[name] = i
-			taken[name] = true
-		}
-	}
-	var merged []keyValue
-	if merge >= 0 {
-		for _, mm := range mergedMappings(m.Content[merge+1]) {
-			merged = append(merged, mergedKeys(mm, taken)...)
-		}
-	}
-	var out []keyValue
-	for i := 0; i+1 < len(m.Content); i += 2 {
-		if i == merge {
-			out = append(out, merged...)
+		if !ok || !own && taken[name] {
 			continue
 		}
-		if name, ok := keyString(m.Content[i]); ok && !isMergeKey(m.Content[i]) {
-			if j, ok := last[name]; !ok || j != i {
-				continue
+		at[name] = i
+		taken[name] = true
+	}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		k := m.Content[i]
+		if i == merge {
+			for _, mm := range mergedMappings(m.Content[i+1]) {
+				out = appendMergedKeys(out, mm, taken, false)
 			}
-			out = append(out, keyValue{m.Content[i], m.Content[i+1]})
+			continue
+		}
+		if isMergeKey(k) {
+			continue
+		}
+		if name, ok := keyString(k); ok {
+			if j, ok := at[name]; ok && j == i {
+				out = append(out, keyValue{k, m.Content[i+1]})
+			}
 		}
 	}
 	return out
