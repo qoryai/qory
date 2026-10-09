@@ -13,9 +13,10 @@ import (
 // YAML.
 const runCredentialsDoc = "run_credentials.yaml"
 
-// defaultCache is how long an introspection answer holds when an issuer sets no cache:
-// the run's heartbeat interval, which qory gateway leaves at Forager's default.
-const defaultCache = 30 * time.Second
+// Heartbeat is the heartbeat interval of every gateway qory starts, qory run's own and
+// qory gateway, Forager's default; it is also how long an introspection answer holds
+// when an issuer sets no cache.
+const Heartbeat = 30 * time.Second
 
 // readRunCredentials reads gateway.run_credentials, the list of issuers, against
 // Forager's run-credentials.schema.json, and the rows qory config lists of it, each
@@ -61,7 +62,7 @@ func readRunCredentials(path string, node *yaml.Node) (runcredential.Issuers, []
 			if v, ok := fields[name]; ok {
 				rows = append(rows, Row{key + "introspection." + name, written(v), path})
 			} else if name == "cache" {
-				rows = append(rows, Row{key + "introspection." + name, fmt.Sprintf("%.0fs", defaultCache.Seconds()), Default})
+				rows = append(rows, Row{key + "introspection." + name, fmt.Sprintf("%.0fs", Heartbeat.Seconds()), Default})
 			}
 		}
 	}

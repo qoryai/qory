@@ -130,6 +130,8 @@ More: ` + gatewayDocs,
 				Report:         func(line string) { fmt.Fprintln(stderr, "qory gateway:", line) },
 				// Nothing on this machine uses the local link: no socket for it.
 				NoLinkSocket: true,
+				// The interval qory config shows as the introspection cache's default.
+				Heartbeat: runHeartbeat,
 			}
 			gw.Server.AccessKey, gw.Server.InstanceID, gw.Server.InstanceName = id.key.key, id.instanceID, id.instanceName
 			if r.TLS != nil {

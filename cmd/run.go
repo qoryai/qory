@@ -430,8 +430,9 @@ func machineCredentials(ctx context.Context, r *config.Forager, e config.Expansi
 
 // runHeartbeat is the heartbeat interval of a run's gateway, Forager's default: the
 // session sends one every interval, and the gateway ends a run whose session sends
-// nothing for three (gateway.Config.Heartbeat).
-const runHeartbeat = 30 * time.Second
+// nothing for three (gateway.Config.Heartbeat). It is [config.Heartbeat], which qory
+// gateway and qory config's default introspection cache use too.
+const runHeartbeat = config.Heartbeat
 
 // runQuiet is how long a run's session may send its gateway nothing before the gateway
 // ends the run, session_lost.
