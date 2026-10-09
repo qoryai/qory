@@ -5,18 +5,18 @@ on:
     branches: [main, next]
   pull_request:
 
-# Runs of one ref take turns. On a pull request a newer push cancels the run in
-# progress. On main and next a run that has started is never cancelled, and a run
-# that waits gives way to a newer one.
+# A newer push to a pull request cancels the pull request's run in progress or
+# waiting. Every push to main or next runs on its own, and is never cancelled.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
     name: Go tests
-    # A pull request from next is skipped: each push to next runs these steps already.
-    if: github.event_name != 'pull_request' || github.head_ref != 'next'
+    # A pull request from this repository's next is skipped: each push to next runs
+    # these steps already. One from a fork's branch named next runs.
+    if: github.event_name != 'pull_request' || github.head_ref != 'next' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     container:
       image: docker.io/golang:1.27
@@ -56,8 +56,10 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ steps.gocache.outputs.dir }}
-          key: gocache-${{ runner.os }}-${{ hashFiles('go.sum', '.github/workflows/ci.yml') }}
+          # Each run saves its own, and restores the newest of the same go.sum first.
+          key: gocache-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
           restore-keys: |
+            gocache-${{ runner.os }}-${{ hashFiles('go.sum') }}-
             gocache-${{ runner.os }}-
 
       - name: Check formatting
