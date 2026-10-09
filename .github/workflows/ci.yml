@@ -8,6 +8,8 @@ on:
 jobs:
   test:
     name: Go tests
+    # A pull request from next is skipped: each push to next runs these steps already.
+    if: github.event_name != 'pull_request' || github.head_ref != 'next'
     runs-on: ubuntu-latest
     container:
       image: docker.io/golang:1.27
