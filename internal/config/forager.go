@@ -126,8 +126,16 @@ func CertificatePin(v string) bool {
 // percent-encoding undone again and again until nothing changes: a refusal names the
 // host, so a secret there must be caught before anything prints it, however many times
 // it is encoded. A form still encoded after [urlUnescapeLimit] rounds counts as holding
-// one.
+// one; [scanURL] tells the two apart.
 func urlHoldsSecret(raw string) bool {
+	secret, tooDeep := scanURL(raw)
+	return secret || tooDeep
+}
+
+// scanURL is what [urlHoldsSecret] finds in a URL: whether a form of it holds an access
+// key secret within [urlUnescapeLimit] rounds of undoing its encoding, and whether a form
+// is still encoded after them, so whatever it holds is not known.
+func scanURL(raw string) (secret, tooDeep bool) {
 	forms := []string{raw}
 	if u, err := url.Parse(raw); err == nil {
 		forms = append(forms, u.Host)
@@ -135,22 +143,23 @@ func urlHoldsSecret(raw string) bool {
 	for _, v := range forms {
 		for n := 0; ; n++ {
 			if accesskey.ContainsSecret(v) {
-				return true
+				return true, false
 			}
 			dec := unescapeEvery(v)
 			if dec == v {
 				break
 			}
 			if n == urlUnescapeLimit {
-				return true
+				tooDeep = true
+				break
 			}
 			v = dec
 		}
 	}
-	return false
+	return false, tooDeep
 }
 
-// urlUnescapeLimit is how many rounds [urlHoldsSecret] undoes a URL's encoding.
+// urlUnescapeLimit is how many rounds [scanURL] undoes a URL's encoding.
 const urlUnescapeLimit = 8
 
 // unescapeEvery is v with each %XX of it undone, a % that starts none left as it is:
@@ -525,8 +534,13 @@ func LoadForager() (*Forager, error) {
 		if url == nil || *url == "" {
 			return nil, fmt.Errorf("%s: session.gateway.url is required", path)
 		}
-		if urlHoldsSecret(*url) {
+		// A URL encoded too many times to tell what it holds is refused for that, and
+		// the refusal holds no part of it.
+		switch secret, tooDeep := scanURL(*url); {
+		case secret:
 			return nil, fmt.Errorf("%s: session.gateway.url: %w", path, accesskey.ErrSecretInDocument)
+		case tooDeep:
+			return nil, fmt.Errorf("%s: session.gateway.url is percent-encoded more than %d times: an https URL of a host and an optional port, with nothing after", path, urlUnescapeLimit)
 		}
 		if wrong := gatewayURLWrong(*url); wrong != "" {
 			return nil, fmt.Errorf("%s: session.gateway.url %s: an https URL of a host and an optional port, with nothing after", path, wrong)

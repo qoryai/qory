@@ -222,7 +222,8 @@ func TestASessionGatewayURLRefusalPrintsNoSecret(t *testing.T) {
 		{"http://[fe80::1%25%2571ak_SECRETZONE]", "session.gateway.url: the document contains an access key secret"},
 		{"https://[fe80::1%25%252571ak_SECRETZONE]", "session.gateway.url: the document contains an access key secret"},
 		{"http://[fe80::1%25%252571ak_SECRETZONE]", "session.gateway.url: the document contains an access key secret"},
-		{"https://[fe80::1%25%" + strings.Repeat("25", 9) + "71ak_SECRETZONE]", "session.gateway.url: the document contains an access key secret"},
+		{"https://[fe80::1%25%" + strings.Repeat("25", 7) + "71ak_SECRETZONE]", "session.gateway.url: the document contains an access key secret"},
+		{"https://[fe80::1%25%" + strings.Repeat("25", 9) + "71ak_SECRETZONE]", "session.gateway.url is percent-encoded more than 8 times"},
 	} {
 		foragerFile(t, "apiVersion: qory.dev/v1alpha1\nsession:\n  gateway:\n    url: \""+c.url+"\"\n")
 		_, err := config.Load(t.TempDir(), true)
@@ -233,6 +234,33 @@ func TestASessionGatewayURLRefusalPrintsNoSecret(t *testing.T) {
 		for _, secret := range []string{"TOKEN", "u:p", ":p@", "token=x", "token", "SECRETZONE", "fe80", c.url} {
 			if strings.Contains(err.Error(), secret) {
 				t.Errorf("%s: the refusal holds %q: %v", c.url, secret, err)
+			}
+		}
+	}
+}
+
+// TestASessionGatewayURLEncodedTooOftenIsRefusedForThat is a session.gateway.url still
+// percent-encoded after the 8 rounds the reader undoes, with no secret in it: it is
+// refused for what it is, with no part of the URL, and not as one that holds a secret.
+// One encoded 8 times is read to its end, and refused for its path.
+func TestASessionGatewayURLEncodedTooOftenIsRefusedForThat(t *testing.T) {
+	hermetic(t)
+	for _, c := range []struct{ url, want string }{
+		{"https://gateway.example/%" + strings.Repeat("25", 8) + "41", ": session.gateway.url is percent-encoded more than 8 times: an https URL of a host and an optional port, with nothing after"},
+		{"https://gateway.example:8443?%" + strings.Repeat("25", 12) + "41", ": session.gateway.url is percent-encoded more than 8 times: an https URL of a host and an optional port, with nothing after"},
+		{"https://gateway.example/%" + strings.Repeat("25", 7) + "41", ": session.gateway.url for https://gateway.example has a path: an https URL of a host and an optional port, with nothing after"},
+	} {
+		path := foragerFile(t, "apiVersion: qory.dev/v1alpha1\nsession:\n  gateway:\n    url: \""+c.url+"\"\n")
+		_, err := config.Load(t.TempDir(), true)
+		if err == nil || err.Error() != path+c.want {
+			t.Errorf("%s: %v, want %q", c.url, err, path+c.want)
+			continue
+		}
+		if strings.Contains(c.want, "more than") {
+			for _, part := range []string{"gateway.example", "8443", "%25", "%41", "?", "/", c.url} {
+				if strings.Contains(strings.TrimPrefix(err.Error(), path), part) {
+					t.Errorf("%s: the refusal holds %q: %v", c.url, part, err)
+				}
 			}
 		}
 	}
