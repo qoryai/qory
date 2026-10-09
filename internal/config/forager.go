@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/forager/runcredential"
 	"github.com/qoryai/forager/session"
 	"gopkg.in/yaml.v3"
 
@@ -59,8 +60,51 @@ type Forager struct {
 	// programs that speak the integration contract, which [Forager.Expand] describes and
 	// expands into the definitions they return.
 	Integrations []ForagerIntegration
+	// Gateway reports whether the file has a gateway section: qory gateway runs none
+	// without one.
+	Gateway bool
+	// Listen is gateway.listen, the address qory gateway listens on for the runs of
+	// other machines, host:port; empty when the file sets none. qory run never reads it.
+	Listen string
+	// TLS is gateway.tls, the certificate and key qory gateway serves Listen with; nil
+	// when the file sets none.
+	TLS *ForagerTLS
+	// RunCredentials is gateway.run_credentials, the issuers whose run credentials open
+	// runs at qory gateway, in Forager's run-credentials.schema.json shape, with every
+	// path as the file writes it; [Forager.Path] resolves one.
+	RunCredentials runcredential.Issuers
 
-	expanded bool
+	// runCredentialRows are the rows of gateway.run_credentials, each value as the file
+	// writes it.
+	runCredentialRows []Row
+	expanded          bool
+}
+
+// ForagerTLS is gateway.tls: the files of the certificate and its key, as the file
+// writes them; [Forager.Path] resolves one. qory never prints the key file's contents.
+type ForagerTLS struct {
+	Certificate string
+	Key         string
+}
+
+// Path is a path a setting of the file names, resolved: an absolute one as it is, a
+// relative one under the file's directory.
+func (r *Forager) Path(p string) string {
+	if p == "" || filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(filepath.Dir(r.File), p)
+}
+
+// HostPort reports whether v is host:port, such as 0.0.0.0:8443: a port of 0 to 65535,
+// and a host that may be empty, for every address of the machine.
+func HostPort(v string) bool {
+	_, port, err := net.SplitHostPort(v)
+	if err != nil {
+		return false
+	}
+	n, err := strconv.Atoi(port)
+	return err == nil && n >= 0 && n <= 65535
 }
 
 // ForagerCredential is one entry of the credentials section. Exactly one of Env, File
@@ -232,6 +276,12 @@ type gatewaySection struct {
 	} `yaml:"server,omitempty"`
 	Credentials  yaml.Node `yaml:"credentials,omitempty"`
 	Integrations yaml.Node `yaml:"integrations,omitempty"`
+	Listen       *string   `yaml:"listen"`
+	TLS          *struct {
+		Certificate *string `yaml:"certificate"`
+		Key         *string `yaml:"key"`
+	} `yaml:"tls,omitempty"`
+	RunCredentials yaml.Node `yaml:"run_credentials,omitempty"`
 }
 
 // sessionSection is the session section as written: the instance and the run.
@@ -269,7 +319,7 @@ func LoadForager() (*Forager, error) {
 	if _, err := exports.ResolveAPIVersion(f.APIVersion); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	r := &Forager{File: path}
+	r := &Forager{File: path, Gateway: f.Gateway != nil}
 	g, ses := f.Gateway, f.Session
 	if g == nil {
 		g = &gatewaySection{}
@@ -348,6 +398,23 @@ func LoadForager() (*Forager, error) {
 	}
 	if g.Integrations.Kind != 0 {
 		if r.Integrations, err = readIntegrations(path, &g.Integrations); err != nil {
+			return nil, err
+		}
+	}
+	if g.Listen != nil {
+		if !HostPort(*g.Listen) {
+			return nil, fmt.Errorf("%s: gateway.listen %q is not host:port, such as 0.0.0.0:8443", path, *g.Listen)
+		}
+		r.Listen = *g.Listen
+	}
+	if t := g.TLS; t != nil {
+		if t.Certificate == nil || *t.Certificate == "" || t.Key == nil || *t.Key == "" {
+			return nil, fmt.Errorf("%s: gateway.tls needs both certificate and key", path)
+		}
+		r.TLS = &ForagerTLS{Certificate: *t.Certificate, Key: *t.Key}
+	}
+	if g.RunCredentials.Kind != 0 {
+		if r.RunCredentials, r.runCredentialRows, err = readRunCredentials(path, &g.RunCredentials); err != nil {
 			return nil, err
 		}
 	}
@@ -733,6 +800,22 @@ func (r *Forager) Rows() []Row {
 		}
 	} else {
 		rows = append(rows, Row{"gateway.server.url", "(none)", Default})
+	}
+	if r != nil && r.Listen != "" {
+		rows = append(rows, Row{"gateway.listen", r.Listen, origin})
+	} else {
+		rows = append(rows, Row{"gateway.listen", "(none)", Default})
+	}
+	// The paths as the file writes them; what the key file holds is never read here.
+	if r != nil && r.TLS != nil {
+		rows = append(rows, Row{"gateway.tls.certificate", r.TLS.Certificate, origin}, Row{"gateway.tls.key", r.TLS.Key, origin})
+	} else {
+		rows = append(rows, Row{"gateway.tls.certificate", "(none)", Default}, Row{"gateway.tls.key", "(none)", Default})
+	}
+	if r != nil && len(r.runCredentialRows) > 0 {
+		rows = append(rows, r.runCredentialRows...)
+	} else {
+		rows = append(rows, Row{"gateway.run_credentials", "(none)", Default})
 	}
 	if r != nil && r.InstanceName != "" {
 		rows = append(rows, Row{"session.instance.name", r.InstanceName, origin})
