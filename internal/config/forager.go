@@ -426,6 +426,9 @@ func LoadForager() (*Forager, error) {
 			return nil, err
 		}
 	}
+	if err := sessionGatewayNulls(path, data); err != nil {
+		return nil, err
+	}
 	if sg := ses.Gateway; sg != nil {
 		// A machine whose runs go through a gateway runs none: what a gateway section
 		// holds belongs on the gateway's machine.
@@ -588,6 +591,50 @@ func LoadForager() (*Forager, error) {
 		}
 	}
 	return r, nil
+}
+
+// sessionGatewayNulls refuses a session.gateway, or a key of it, that the file writes
+// with a null value: decoded, such a key reads as absent, so a null certificate_sha256
+// would turn the pin off without a word, and a null session.gateway would run a gateway
+// of the machine's own. Each is refused as its empty form is.
+func sessionGatewayNulls(path string, data []byte) error {
+	var f struct {
+		Session *struct {
+			Gateway yaml.Node `yaml:"gateway"`
+		} `yaml:"session"`
+	}
+	if err := yaml.Unmarshal(data, &f); err != nil || f.Session == nil {
+		return nil
+	}
+	g := &f.Session.Gateway
+	for g.Kind == yaml.AliasNode && g.Alias != nil {
+		g = g.Alias
+	}
+	if g.Kind == 0 {
+		return nil
+	}
+	if g.ShortTag() == "!!null" {
+		return fmt.Errorf("%s: session.gateway is empty", path)
+	}
+	if g.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(g.Content); i += 2 {
+		v := g.Content[i+1]
+		for v.Kind == yaml.AliasNode && v.Alias != nil {
+			v = v.Alias
+		}
+		if v.ShortTag() != "!!null" {
+			continue
+		}
+		switch key := g.Content[i].Value; key {
+		case "url":
+			return fmt.Errorf("%s: session.gateway.url is required", path)
+		case "ca_file", "certificate_sha256", "run_credential_file":
+			return fmt.Errorf("%s: session.gateway.%s is empty", path, key)
+		}
+	}
+	return nil
 }
 
 // readForagerFile reads the machine's forager.yaml under [UserDir]: its path and its
