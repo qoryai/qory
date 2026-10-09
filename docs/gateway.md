@@ -69,7 +69,7 @@ schema, `gateway.run_credentials` included, is
 ## The machines behind it
 
 A machine whose runs go through this gateway names it in `session.gateway` of its own
-`forager.yaml` and holds no access key: each run brings the run credential its issuer
+`forager.yaml` and holds no access key: each run brings the run credential its starter
 signed, and the gateway verifies it. Of the machines in a run, only the gateway's holds an
 access key. Such a machine's `qory run` reaches the gateway over https alone, so a
 gateway that serves them has `gateway.tls`. See

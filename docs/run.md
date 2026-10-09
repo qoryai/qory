@@ -568,7 +568,7 @@ A machine whose runs go through a gateway on another machine, or a service on th
 (see [the gateway as a service](gateway.md)), names it in `session.gateway` of its own
 `forager.yaml`. `qory run` then starts no gateway of its own and holds no access key. The
 session reaches the gateway over TLS 1.3, and every request carries the run credential
-its issuer signed, which the gateway verifies. The proxy, the policy, the credentials and
+its starter signed, which the gateway verifies. The proxy, the policy, the credentials and
 the access key are the gateway's, on its machine, and the gateway reports the run to Qory
 Apiary. Without `session.gateway`, nothing changes: `qory run` starts a gateway of its own
 for each run.
@@ -581,7 +581,7 @@ session:
     url: https://gateway.example:8443
     ca_file: gateway-ca.pem                          # optional
     certificate_sha256: 47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=   # optional
-    run_credential_file: /run/issuer/run-credential  # or --run-credential-fd, or QORY_RUN_CREDENTIAL_SECRET
+    run_credential_file: /run/starter/run-credential  # or --run-credential-fd, or QORY_RUN_CREDENTIAL_SECRET
 ```
 
 | Key | What it is |
@@ -590,7 +590,7 @@ session:
 | `session.gateway.url` | The gateway: an https URL of a host and an optional port, with nothing after. |
 | `session.gateway.ca_file` | A PEM file of the certificate authority that signed the gateway's certificate, when the system's roots do not hold it. qory reads it relative to forager.yaml's directory, and it takes the place of the system's roots for this link. |
 | `session.gateway.certificate_sha256` | Optional: the SHA-256 of the gateway certificate's public key, base64. With it, qory accepts only a certificate with that key, and still checks its chain. |
-| `session.gateway.run_credential_file` | The file that holds this run's run credential, which its issuer signed. qory reads it again before each request, so an issuer that refreshes it keeps the run going. A file whose mode grants the group or others read or write is refused. Instead: --run-credential-fd, or QORY_RUN_CREDENTIAL_SECRET. A flag never holds the credential itself. |
+| `session.gateway.run_credential_file` | The file that holds this run's run credential, which its starter signed. qory reads it again before each request, so a starter that refreshes it keeps the run going. A file whose mode grants the group or others read or write is refused. Instead: --run-credential-fd, or QORY_RUN_CREDENTIAL_SECRET. A flag never holds the credential itself. |
 
 `qory config` lists each value; with no gateway named it shows
 `session.gateway.url  (none: qory run starts a gateway for each run)  default`.
@@ -606,7 +606,7 @@ relative to the directory of `forager.yaml` unless it is absolute.
   session.gateway.run_credential_file). qory reads it until the run ends, and no program
   qory starts inherits it.
 - `QORY_RUN_CREDENTIAL_SECRET`: on a machine whose runs go through a gateway, the run
-  credential its issuer signed. qory takes it out of its environment when it starts; no
+  credential its starter signed. qory takes it out of its environment when it starts; no
   program qory starts receives it. `--env` and `wall.env` refuse it, as they refuse the
   access key's variables.
 - The file is read again before each request. `--run-credential-fd` is a stream: whoever

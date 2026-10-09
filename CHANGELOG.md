@@ -181,7 +181,7 @@ release may change what an existing document does, and states it under Upgrading
   one, when `forager.yaml` names it in `session.gateway`: `url`, `ca_file`,
   `certificate_sha256` and `run_credential_file`. It then starts no gateway of its own
   and holds no access key, prints `qory run: through the gateway <host>, run <run-id>`,
-  and sends the run credential its issuer signed on every request, from
+  and sends the run credential its starter signed on every request, from
   `--run-credential-fd`, else `QORY_RUN_CREDENTIAL_SECRET`, else the file, which it reads
   again before each request. `--run-credential-fd` is a stream: the writer keeps it open
   and writes each fresh run credential as a new line, qory uses the latest complete line

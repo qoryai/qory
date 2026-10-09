@@ -22,7 +22,7 @@ The gateway section of forager.yaml in ~/.config/qory sets it:
   run_credentials    the run starters whose signed run credentials open runs of clients with no session
 
 A machine whose runs go through this gateway names it in session.gateway of its own
-forager.yaml and holds no access key: each run brings the run credential its issuer
+forager.yaml and holds no access key: each run brings the run credential its starter
 signed, and the gateway verifies it. Of the machines in a run, only the gateway's holds an
 access key.
 
