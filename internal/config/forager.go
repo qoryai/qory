@@ -956,11 +956,16 @@ const serverURLShape = "an https URL of a host and an optional port, or an http 
 
 // CheckServerURL refuses a server URL that is not https, or http to this machine, with
 // a scheme and a host alone. An access key secret in it, as written, percent-encoded or
-// in its host, is refused first; any other refusal names the part that is wrong and
-// holds no more of the URL than its scheme, its host and its port.
+// in its host, is refused first, and then a URL still encoded after [urlUnescapeLimit]
+// rounds, whose secret, if any, is not known, with no part of it; any other refusal
+// names the part that is wrong and holds no more of the URL than its scheme, its host
+// and its port.
 func CheckServerURL(raw string) error {
-	if urlHoldsSecret(raw) {
+	switch secret, tooDeep := scanURL(raw); {
+	case secret:
 		return fmt.Errorf("gateway.server.url: %w", accesskey.ErrSecretInDocument)
+	case tooDeep:
+		return fmt.Errorf("gateway.server.url is percent-encoded more than %d times: %s", urlUnescapeLimit, serverURLShape)
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme == "" || u.Host == "" || u.Opaque != "" {
