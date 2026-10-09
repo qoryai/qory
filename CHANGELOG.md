@@ -478,6 +478,9 @@ release may change what an existing document does, and states it under Upgrading
   An access key secret is caught percent-encoded and in the host too, and a URL still
   percent-encoded after 8 rounds is refused as `gateway.server.url is percent-encoded
   more than 8 times`, with the same ending.
+- The agent images' Debian and Node bases come from `public.ecr.aws/docker/library`,
+  Docker Hub's official images under the same tags and digests, which needs no login and
+  is out of reach of Docker Hub's pull limit for anonymous users.
 
 ## [0.12.1] - 2026-09-30
 
