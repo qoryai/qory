@@ -472,7 +472,8 @@ func runCredentialRows(t *testing.T, body string) []config.Row {
 // one, an issuer that merges another, a merge of several mappings, a key written as an
 // alias, and an alias and an anchor inside the section; and keys the decoder takes as a
 // merge or as none: !!merge on a name, a quoted "<<", << tagged ! or !!merge, and an
-// alias of <<. qory config lists the same rows as of the list written out in full.
+// alias of <<; and a merged key named << or null, which the decoder drops. qory config
+// lists the same rows as of the list written out in full.
 func TestConfigRowsOfRunCredentialsAreOfTheListAsRead(t *testing.T) {
 	hermetic(t)
 	const (
@@ -521,6 +522,8 @@ func TestConfigRowsOfRunCredentialsAreOfTheListAsRead(t *testing.T) {
 		{details("{!!merge <<: {team: {claim: org}}}"), details("{team: {claim: org}}")},
 		{details(`{!!merge "<<": {team: {claim: org}}}`), details("{team: {claim: org}}")},
 		{details("{a: {claim: &m <<}, *m : {claim: org}}"), details(`{a: {claim: <<}, "<<": {claim: org}}`)},
+		{details(`{<<: {"<<": {claim: org}, team: {claim: t}}}`), details("{team: {claim: t}}")},
+		{details("{<<: {~: {claim: org}, team: {claim: t}}}"), details("{team: {claim: t}}")},
 		{
 			"gateway:\n  run_credentials:\n    - {issuer: \"https://issuer.example\", !!merge audience: box, " + rest + "}\n",
 			"gateway:\n  run_credentials:\n    - " + issuer + "\n",

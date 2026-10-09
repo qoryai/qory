@@ -179,7 +179,9 @@ func resolvedKey(k *yaml.Node) *yaml.Node {
 // in the order the file writes them, the keys of the mappings its << merges where the
 // << stands: a key m sets itself wins over every merged one, and of two keys of one
 // name, the later. A merged mapping sets a name no key outside it has set, its own keys
-// before those it merges in turn, and of two mappings a << lists, the first wins.
+// before those it merges in turn, and of two mappings a << lists, the first wins. The
+// decoder counts m's << among the names m sets, so a merged key named << is dropped, as
+// is a merged null key, which a mapping of names takes as no key.
 func mergedKeys(m *yaml.Node) []keyValue {
 	return appendMergedKeys(nil, m, map[string]bool{}, true)
 }
@@ -188,8 +190,9 @@ func mergedKeys(m *yaml.Node) []keyValue {
 // and returns out: each mapping is walked once for each time it is merged, and each key
 // appended once, into the one list. taken are the names a key has set, m's own among
 // them before any mapping m merges is walked. own is set for the mapping merged into
-// none, where the later of two keys of one name wins; in a merged mapping, the first,
-// and a name taken before is left to the key that took it.
+// none, where the later of two keys of one name wins, and whose << is taken when it
+// merges; in a merged mapping, the first, a name taken before is left to the key that
+// took it, and a null key is no key.
 func appendMergedKeys(out []keyValue, m *yaml.Node, taken map[string]bool, own bool) []keyValue {
 	at := map[string]int{}
 	merge := -1
@@ -199,12 +202,18 @@ func appendMergedKeys(out []keyValue, m *yaml.Node, taken map[string]bool, own b
 			merge = i
 			continue
 		}
+		if !own && followAliases(k).ShortTag() == "!!null" {
+			continue
+		}
 		name, ok := keyString(k)
 		if !ok || !own && taken[name] {
 			continue
 		}
 		at[name] = i
 		taken[name] = true
+	}
+	if own && merge >= 0 {
+		taken["<<"] = true
 	}
 	for i := 0; i+1 < len(m.Content); i += 2 {
 		k := m.Content[i]
