@@ -15,10 +15,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/creack/pty"
 	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/refusal"
 	"github.com/qoryai/forager/session"
+	"golang.org/x/sys/unix"
 
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/ui"
@@ -551,5 +553,162 @@ func TestTheRunCredentialDescriptorsErrorsHoldNoCredential(t *testing.T) {
 	go w.WriteString(secret + strings.Repeat("s", maxCredentialFD) + "\n")
 	if _, err := readCredentialFD(fd); err == nil || strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "sss") {
 		t.Errorf("a line too long: %v", err)
+	}
+}
+
+// nonblocking says whether the open file description of descriptor n has O_NONBLOCK set.
+func nonblocking(t *testing.T, n int) bool {
+	t.Helper()
+	flags, err := unix.FcntlInt(uintptr(n), unix.F_GETFL, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return flags&unix.O_NONBLOCK != 0
+}
+
+// sharing is a duplicate of descriptor n, which shares its open file description, as
+// whoever started qory does: it shows the description's flags after qory closed n.
+func sharing(t *testing.T, n int) int {
+	t.Helper()
+	d, err := unix.Dup(n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { unix.Close(d) })
+	return d
+}
+
+// TestTheRunCredentialDescriptorIsLeftAsItWasFound is O_NONBLOCK on the descriptor's
+// open file description, which whoever started qory shares: qory reads the descriptor
+// non-blocking, and puts the flag back as it found it when it stops reading it, at the
+// run's end, while a read waits on it, at the descriptor's end, and when it refuses what
+// the descriptor gave. A description non-blocking already stays so.
+func TestTheRunCredentialDescriptorIsLeftAsItWasFound(t *testing.T) {
+	t.Run("stopped while a read waits", func(t *testing.T) {
+		fd, w := credentialPipe(t)
+		shared := sharing(t, fd)
+		if nonblocking(t, shared) {
+			t.Fatal("the pipe is non-blocking before qory reads it")
+		}
+		writeLine(t, w, "first.credential\n")
+		s, err := readCredentialFD(fd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !nonblocking(t, shared) {
+			t.Error("while it is read: the description is blocking")
+		}
+		stopped := make(chan struct{})
+		go func() { s.stop(); close(stopped) }()
+		select {
+		case <-stopped:
+		case <-time.After(5 * time.Second):
+			t.Fatal("stop did not end the read that waits on the descriptor")
+		}
+		if nonblocking(t, shared) {
+			t.Error("after stop: the description is still non-blocking")
+		}
+		if got := s.latest(); got != "first.credential" {
+			t.Errorf("after stop: %d bytes", len(got))
+		}
+	})
+	t.Run("ended by its writer", func(t *testing.T) {
+		fd, w := credentialPipe(t)
+		shared := sharing(t, fd)
+		writeLine(t, w, "first.credential\n")
+		s, err := readCredentialFD(fd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.Close()
+		ended(t, s)
+		if nonblocking(t, shared) {
+			t.Error("after the descriptor's end: the description is still non-blocking")
+		}
+		s.stop()
+	})
+	t.Run("ended before the run", func(t *testing.T) {
+		fd, w := credentialPipe(t)
+		shared := sharing(t, fd)
+		writeLine(t, w, "only.credential")
+		w.Close()
+		s, err := readCredentialFD(fd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if nonblocking(t, shared) {
+			t.Error("a descriptor that ended before the run: the description is still non-blocking")
+		}
+		s.stop()
+	})
+	t.Run("refused", func(t *testing.T) {
+		fd, w := credentialPipe(t)
+		shared := sharing(t, fd)
+		go w.WriteString(strings.Repeat("x", maxCredentialFD+1) + "\n")
+		if _, err := readCredentialFD(fd); err == nil {
+			t.Fatal("a line too long was not refused")
+		}
+		if nonblocking(t, shared) {
+			t.Error("after the refusal: the description is still non-blocking")
+		}
+	})
+	t.Run("non-blocking already", func(t *testing.T) {
+		fd, w := credentialPipe(t)
+		shared := sharing(t, fd)
+		if err := unix.SetNonblock(shared, true); err != nil {
+			t.Fatal(err)
+		}
+		writeLine(t, w, "first.credential\n")
+		s, err := readCredentialFD(fd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.stop()
+		if !nonblocking(t, shared) {
+			t.Error("a description non-blocking before qory read it is blocking after")
+		}
+	})
+}
+
+// TestTheRunCredentialTerminalIsLeftBlocking is the descriptor as a terminal gives it,
+// 3<&0 from an interactive shell: when qory stops reading it, the terminal the shell
+// shares is blocking again.
+func TestTheRunCredentialTerminalIsLeftBlocking(t *testing.T) {
+	ptmx, tty, err := pty.Open()
+	if err != nil {
+		t.Skipf("no pseudo-terminal: %v", err)
+	}
+	t.Cleanup(func() { ptmx.Close(); tty.Close() })
+	shell := int(tty.Fd())
+	if nonblocking(t, shell) {
+		t.Fatal("the terminal is non-blocking before qory reads it")
+	}
+	fd, err := unix.Dup(shell)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ptmx.WriteString("first.credential\n"); err != nil {
+		t.Fatal(err)
+	}
+	s, err := readCredentialFD(fd)
+	if err != nil {
+		unix.Close(fd)
+		t.Fatal(err)
+	}
+	if got := s.latest(); got != "first.credential" {
+		t.Errorf("from the terminal: %d bytes", len(got))
+	}
+	if !nonblocking(t, shell) {
+		t.Error("while it is read: the terminal is blocking")
+	}
+	stopped := make(chan struct{})
+	go func() { s.stop(); close(stopped) }()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stop did not end the read that waits on the terminal")
+	}
+	if nonblocking(t, shell) {
+		t.Error("after stop: the terminal is still non-blocking")
 	}
 }

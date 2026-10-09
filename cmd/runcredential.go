@@ -24,6 +24,7 @@ import (
 	"github.com/qoryai/forager/refusal"
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/sink"
+	"golang.org/x/sys/unix"
 
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/foragerdir"
@@ -47,8 +48,12 @@ const maxCredentialFD = 64 << 10
 type credentialStream struct {
 	// f is the descriptor while it is read; nil when it ended before the run started.
 	f *os.File
-	// done is closed when the descriptor is no longer read.
+	// done is closed when the descriptor is no longer read, and its O_NONBLOCK is as
+	// qory found it.
 	done chan struct{}
+	// restore puts the descriptor's O_NONBLOCK back as qory found it, once the
+	// descriptor is closed and no longer read.
+	restore func()
 
 	mu sync.Mutex
 	// v is the latest complete line.
@@ -62,8 +67,8 @@ func (s *credentialStream) latest() string {
 	return s.v
 }
 
-// stop closes the descriptor and waits for its reader to end. The run credential read
-// last stays.
+// stop closes the descriptor and waits for its reader to end, which puts the
+// descriptor's O_NONBLOCK back as qory found it. The run credential read last stays.
 func (s *credentialStream) stop() {
 	if s.f != nil {
 		s.f.Close()
@@ -80,6 +85,11 @@ func (s *credentialStream) stop() {
 // end of the descriptor is dropped. The standard input, output and error are refused,
 // and so is a first line longer than a run credential; a later one is skipped. No error
 // contains the value. Surrounding white space is not part of the credential.
+//
+// The descriptor is read non-blocking. O_NONBLOCK belongs to the open file description,
+// which whoever started qory shares, a terminal's included, so qory puts the flag back
+// as it found it once the descriptor is no longer read: when it ends, when qory refuses
+// what it gave, and at [credentialStream.stop].
 func readCredentialFD(n int) (*credentialStream, error) {
 	if n < 3 {
 		return nil, input(fmt.Errorf("--%s %d: the standard input, output and error carry no run credential; name a descriptor of 3 or above", runCredentialFDFlag, n))
@@ -88,11 +98,12 @@ func readCredentialFD(n int) (*credentialStream, error) {
 	// the programs it starts. Non-blocking, the descriptor is the poller's, so closing it
 	// ends a read that waits on it. A descriptor that is not open fails here.
 	syscall.CloseOnExec(n)
-	if err := syscall.SetNonblock(n, true); err != nil {
+	restore, err := setNonblock(n)
+	if err != nil {
 		return nil, input(fmt.Errorf("--%s %d: %w", runCredentialFDFlag, n, err))
 	}
 	f := os.NewFile(uintptr(n), "--"+runCredentialFDFlag)
-	s := &credentialStream{done: make(chan struct{})}
+	s := &credentialStream{done: make(chan struct{}), restore: restore}
 	l := newCredentialLines(f)
 	line, long, err := l.next()
 	if err == io.EOF {
@@ -114,6 +125,7 @@ func readCredentialFD(n int) (*credentialStream, error) {
 	}
 	f.Close()
 	l.clear()
+	restore()
 	close(s.done)
 	if err != nil {
 		return nil, err
@@ -126,7 +138,10 @@ func readCredentialFD(n int) (*credentialStream, error) {
 // follow reads the descriptor's lines after the first until it ends or is closed: each
 // complete one that is not empty and not longer than a run credential replaces it.
 func (s *credentialStream) follow(l *credentialLines) {
+	// In this order: the descriptor is closed, which ends a read that waits on it, and
+	// its flag is put back once nothing reads it, so no read waits on it blocking.
 	defer close(s.done)
+	defer s.restore()
 	defer l.clear()
 	defer s.f.Close()
 	for {
@@ -142,6 +157,34 @@ func (s *credentialStream) follow(l *credentialLines) {
 		s.mu.Unlock()
 		clear(line)
 	}
+}
+
+// setNonblock sets O_NONBLOCK on descriptor n, and returns what puts the flag back as
+// it was. Set already, the flag is left, and restore does nothing. Otherwise restore
+// clears it through a duplicate of n, made close-on-exec here, which shares n's open file
+// description and outlives n: qory closes n to end a read that waits on it, and only
+// then clears the flag, so that no read waits on the descriptor blocking. restore closes
+// the duplicate, and is called once. Nothing is changed when err is not nil.
+func setNonblock(n int) (restore func(), err error) {
+	flags, err := unix.FcntlInt(uintptr(n), unix.F_GETFL, 0)
+	if err != nil {
+		return nil, err
+	}
+	if flags&unix.O_NONBLOCK != 0 {
+		return func() {}, nil
+	}
+	keep, err := unix.FcntlInt(uintptr(n), unix.F_DUPFD_CLOEXEC, 3)
+	if err != nil {
+		return nil, err
+	}
+	if err := unix.SetNonblock(n, true); err != nil {
+		unix.Close(keep)
+		return nil, err
+	}
+	return func() {
+		unix.SetNonblock(keep, false)
+		unix.Close(keep)
+	}, nil
 }
 
 // credentialLines splits what a reader gives into lines, keeping no more of a line
