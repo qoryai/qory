@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -27,8 +28,12 @@ type fault struct {
 	text string
 }
 
-// error is the fault as a refusal of the file at path.
+// error is the fault as a refusal of the file at path; a fault of no line is one of the
+// file as a whole.
 func (f *fault) error(path string) error {
+	if f.line == 0 {
+		return fmt.Errorf("%s: %s", path, f.text)
+	}
 	return fmt.Errorf("%s: line %d: %s", path, f.line, f.text)
 }
 
@@ -40,10 +45,46 @@ func keyFault(line int, key, wrong string) *fault {
 	return &fault{line, key + " " + wrong}
 }
 
+// The decoder's refusals of the file's anchors, aliases and merges, which say nothing of
+// where in the file: each is said in words of qory's own, which name no anchor and no
+// value.
+const (
+	tooManyAliases = "its aliases expand to more values than qory reads"
+	anchorInItself = "an anchor's value holds an alias of that anchor"
+	mergeNotMaps   = "a merge, <<, holds a value that is not a mapping or a list of mappings"
+)
+
+// aliasRefusals are the decoder's messages of the file's anchors, aliases and merges, and
+// what qory says of each.
+var aliasRefusals = []struct {
+	decoder *regexp.Regexp
+	text    string
+}{
+	{regexp.MustCompile(`yaml: document contains excessive aliasing`), tooManyAliases},
+	{regexp.MustCompile(`yaml: anchor '.*' value contains itself`), anchorInItself},
+	{regexp.MustCompile(`yaml: map merge requires map or sequence of maps as the value`), mergeNotMaps},
+}
+
+// aliasRefusal is what qory says of err when it is the decoder's refusal of the file's
+// anchors, aliases or merges.
+func aliasRefusal(err error) (string, bool) {
+	for _, r := range aliasRefusals {
+		if r.decoder.MatchString(err.Error()) {
+			return r.text, true
+		}
+	}
+	return "", false
+}
+
+// tagRefusal matches the decoder's refusal of a scalar whose tag its value does not fit,
+// which quotes the value; [findFault] names its place instead.
+var tagRefusal = regexp.MustCompile("^yaml: (cannot decode !!\\S+ `|!!binary value contains invalid base64 data$)")
+
 // foragerDecodeError is an error decoding n, which stands at key, into t, said without a
-// value: an unknown key as [decodeError] says it, and any other by the first place under
-// n the decoder cannot take, which [findFault] names. known says whether the decode
-// refused keys t has no field for.
+// value: an unknown key as [decodeError] says it; a refusal of the file's anchors,
+// aliases or merges in words of qory's own, without a walk of n, which they could make
+// endless; and any other by the first place under n the decoder cannot take, which
+// [findFault] names. known says whether the decode refused keys t has no field for.
 func foragerDecodeError(path string, n *yaml.Node, t reflect.Type, key string, known bool, err error) error {
 	var te *yaml.TypeError
 	if errors.As(err, &te) {
@@ -53,8 +94,16 @@ func foragerDecodeError(path string, n *yaml.Node, t reflect.Type, key string, k
 			}
 		}
 	}
-	if f := findFault(n, t, key, known); f != nil {
-		return f.error(path)
+	if text, ok := aliasRefusal(err); ok {
+		if key != "" {
+			return fmt.Errorf("%s: %s: %s", path, key, text)
+		}
+		return fmt.Errorf("%s: %s", path, text)
+	}
+	if te != nil || tagRefusal.MatchString(err.Error()) {
+		if f := findFault(n, t, key, known); f != nil {
+			return f.error(path)
+		}
 	}
 	// The decoder's messages that quote a value are a TypeError's and those that quote
 	// it in backquotes or quotes; any other is the decoder's own words.
@@ -70,19 +119,86 @@ func foragerDecodeError(path string, n *yaml.Node, t reflect.Type, key string, k
 // nodeType is a section read as written.
 var nodeType = reflect.TypeFor[yaml.Node]()
 
-// findFault is the first place under n, in the file's order, that the decoder cannot
-// take into t: a value of the wrong kind, a scalar whose tag its value does not fit, and,
-// when known is set, a key t has no field for. key is where n stands, as a dotted path;
-// nil when there is none. A yaml.Node takes anything, and an interface every value JSON
-// can represent.
+// walkLimit is how many steps a walk takes through aliases and merges before it stops:
+// the decoder refuses a file whose aliases expand too far, and a walk stops sooner than
+// the decoder would, with the same refusal.
+const walkLimit = 100_000
+
+// walk is one walk of [findFault]. It walks each value once for each type it is read
+// as, so an alias read again is not walked again, and an alias inside the value it
+// names, which the decoder refuses, is a fault and not a walk without end. A merge is
+// walked each time a mapping merges it, the steps under aliases and merges counted.
+type walk struct {
+	known bool
+	// state is where the walk of a value as a type stands: walking or walked.
+	state map[walkKey]walkState
+	// merging are the mappings being walked as a merge.
+	merging map[walkKey]bool
+	// aliased is how many aliases and merges deep the walk is; steps, how many steps it
+	// has taken under one.
+	aliased, steps int
+}
+
+// walkKey is a value as a type.
+type walkKey struct {
+	n *yaml.Node
+	t reflect.Type
+}
+
+// walkState is where a walk of a value as a type stands.
+type walkState uint8
+
+const (
+	walking walkState = iota + 1
+	walked
+)
+
+// findFault is the first place under n that the decoder cannot take into t: a value of
+// the wrong kind, a scalar whose tag its value does not fit, and, when known is set, a
+// key t has no field for. key is where n stands, as a dotted path; nil when there is
+// none. A yaml.Node takes anything, and an interface every value JSON can represent.
 func findFault(n *yaml.Node, t reflect.Type, key string, known bool) *fault {
+	w := &walk{known: known, state: map[walkKey]walkState{}, merging: map[walkKey]bool{}}
+	return w.fault(n, t, key)
+}
+
+// step counts a step under an alias or a merge, and is the fault of a walk that has
+// taken too many.
+func (w *walk) step() *fault {
+	if w.aliased == 0 {
+		return nil
+	}
+	if w.steps++; w.steps > walkLimit {
+		return &fault{0, tooManyAliases}
+	}
+	return nil
+}
+
+// fault is [findFault] of n, which stands at key, read as t.
+func (w *walk) fault(n *yaml.Node, t reflect.Type, key string) *fault {
 	line := n.Line
+	if n.Kind == yaml.AliasNode {
+		w.aliased++
+		defer func() { w.aliased-- }()
+	}
+	if f := w.step(); f != nil {
+		return f
+	}
 	n = followAliases(n)
+	k := walkKey{n, t}
+	switch w.state[k] {
+	case walking:
+		return keyFault(line, key, "is an alias of a value that holds it")
+	case walked:
+		return nil
+	}
+	w.state[k] = walking
+	defer func() { w.state[k] = walked }()
 	if n.Kind == yaml.DocumentNode {
 		if len(n.Content) == 0 {
 			return nil
 		}
-		return findFault(n.Content[0], t, key, known)
+		return w.fault(n.Content[0], t, key)
 	}
 	if n.Kind == 0 || t == nodeType {
 		return nil
@@ -104,7 +220,7 @@ func findFault(n *yaml.Node, t reflect.Type, key string, known bool) *fault {
 		if n.Kind != yaml.MappingNode {
 			return keyFault(line, key, "is not a mapping")
 		}
-		return structFault(n, t, key, known)
+		return w.structFault(n, t, key)
 	case reflect.Slice:
 		if null(n) {
 			return nil
@@ -116,13 +232,13 @@ func findFault(n *yaml.Node, t reflect.Type, key string, known bool) *fault {
 			return keyFault(line, key, "is not a list")
 		}
 		for i, c := range n.Content {
-			if f := findFault(c, t.Elem(), fmt.Sprintf("%s[%d]", key, i), known); f != nil {
+			if f := w.fault(c, t.Elem(), fmt.Sprintf("%s[%d]", key, i)); f != nil {
 				return f
 			}
 		}
 		return nil
 	case reflect.Interface:
-		return anyFault(n, line, key)
+		return w.anyFault(n, line, key)
 	}
 	if err := n.Decode(reflect.New(t).Interface()); err != nil {
 		switch t.Kind() {
@@ -140,41 +256,60 @@ func findFault(n *yaml.Node, t reflect.Type, key string, known bool) *fault {
 
 // structFault is [findFault] of a mapping read into the struct t: each key by its
 // field, a merge by the mappings it merges.
-func structFault(n *yaml.Node, t reflect.Type, key string, known bool) *fault {
+func (w *walk) structFault(n *yaml.Node, t reflect.Type, key string) *fault {
+	if f := w.step(); f != nil {
+		return f
+	}
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		k, v := followAliases(n.Content[i]), n.Content[i+1]
 		if k.Kind == yaml.ScalarNode && k.ShortTag() == "!!merge" {
 			m := followAliases(v)
-			merged := []*yaml.Node{m}
+			merged := []*yaml.Node{v}
 			if m.Kind == yaml.SequenceNode {
 				merged = m.Content
 			}
 			for _, each := range merged {
-				if each = followAliases(each); each.Kind == yaml.MappingNode {
-					if f := structFault(each, t, key, known); f != nil {
-						return f
-					}
+				if f := w.mergeFault(each, t, key); f != nil {
+					return f
 				}
 			}
 			continue
 		}
 		field, ok := fieldOf(t, k.Value)
 		if !ok {
-			if known {
+			if w.known {
 				return &fault{k.Line, fmt.Sprintf("key %q is not one %s reads", k.Value, ForagerFileName)}
 			}
 			continue
 		}
-		if f := findFault(v, field, join(key, k.Value), known); f != nil {
+		if f := w.fault(v, field, join(key, k.Value)); f != nil {
 			return f
 		}
 	}
 	return nil
 }
 
+// mergeFault is [structFault] of a mapping that a mapping at key merges, as t. A
+// mapping that merges itself is a fault, as the decoder refuses it.
+func (w *walk) mergeFault(n *yaml.Node, t reflect.Type, key string) *fault {
+	line := n.Line
+	w.aliased++
+	defer func() { w.aliased-- }()
+	if n = followAliases(n); n.Kind != yaml.MappingNode {
+		return nil
+	}
+	k := walkKey{n, t}
+	if w.merging[k] || w.state[k] == walking {
+		return keyFault(line, key, "merges a mapping that holds the merge")
+	}
+	w.merging[k] = true
+	defer delete(w.merging, k)
+	return w.structFault(n, t, key)
+}
+
 // anyFault is [findFault] of a value read as any and then written as JSON: every value
 // under n, a number JSON cannot represent among the faults.
-func anyFault(n *yaml.Node, line int, key string) *fault {
+func (w *walk) anyFault(n *yaml.Node, line int, key string) *fault {
 	switch n.Kind {
 	case yaml.MappingNode:
 		for i := 0; i+1 < len(n.Content); i += 2 {
@@ -182,13 +317,13 @@ func anyFault(n *yaml.Node, line int, key string) *fault {
 			if f := tagFault(k, n.Content[i].Line, key); f != nil {
 				return f
 			}
-			if f := findFault(n.Content[i+1], reflect.TypeFor[any](), join(key, k.Value), false); f != nil {
+			if f := w.fault(n.Content[i+1], reflect.TypeFor[any](), join(key, k.Value)); f != nil {
 				return f
 			}
 		}
 	case yaml.SequenceNode:
 		for i, c := range n.Content {
-			if f := findFault(c, reflect.TypeFor[any](), fmt.Sprintf("%s[%d]", key, i), false); f != nil {
+			if f := w.fault(c, reflect.TypeFor[any](), fmt.Sprintf("%s[%d]", key, i)); f != nil {
 				return f
 			}
 		}

@@ -392,7 +392,11 @@ release may change what an existing document does, and states it under Upgrading
   tagged !!int, and its value is not of that type` or `<file>: wall.helper is not an
   absolute path`. This replaces the YAML decoder's text, which quoted the value and a Go
   type, and the refusals that quoted the value. The report of `gateway.run_credentials`
-  against its schema leaves the value out of a pattern or a format it fails.
+  against its schema leaves the value out of a pattern or a format it fails. Anchors,
+  aliases and merges the decoder cannot read are refused in qory's words, which name no
+  anchor: `<file>: an anchor's value holds an alias of that anchor`, `<file>: its aliases
+  expand to more values than qory reads`, and `<file>: a merge, <<, holds a value that is
+  not a mapping or a list of mappings`.
 - A `forager.yaml` that holds a second YAML document, an empty one after a trailing
   `---` included, is refused: `<file>: holds more than one YAML document; forager.yaml
   is one document, and qory would read only the first`. qory read the first document

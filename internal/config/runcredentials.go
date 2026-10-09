@@ -41,6 +41,9 @@ func readRunCredentials(path string, node *yaml.Node) (runcredential.Issuers, []
 	if err != nil {
 		var ve *jsonschema.ValidationError
 		if !errors.As(err, &ve) {
+			if text, ok := aliasRefusal(err); ok {
+				return nil, nil, fmt.Errorf("%s: gateway.run_credentials: %s", path, text)
+			}
 			return nil, nil, notIssuers
 		}
 		valueFree(ve)

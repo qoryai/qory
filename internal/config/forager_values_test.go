@@ -1,8 +1,10 @@
 package config_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/qoryai/qory/internal/config"
 )
@@ -181,6 +183,79 @@ func TestTheInstanceAloneRefusesWithoutTheValue(t *testing.T) {
 		_, err := config.LoadForagerInstance()
 		if err == nil || err.Error() != path+c.want {
 			t.Errorf("%q: %v, want %q", c.body, err, path+c.want)
+		}
+	}
+}
+
+// aliasBomb is a list of n levels of anchors under gateway.run_credentials, each level
+// ten aliases of the one before, and the first ten values.
+func aliasBomb(levels int) string {
+	b := "gateway:\n  run_credentials:\n    - &a0 [" + strings.Repeat(secret+", ", 9) + secret + "]\n"
+	for i := 1; i < levels; i++ {
+		b += fmt.Sprintf("    - &a%d [%s*a%d]\n", i, strings.Repeat(fmt.Sprintf("*a%d, ", i-1), 9), i-1)
+	}
+	return b
+}
+
+// mergeBomb is n levels of anchors under gateway.credentials, each level a mapping that
+// merges the one before ten times, and the first ten keys, merged into session.instance.
+func mergeBomb(levels int) string {
+	b := "gateway:\n  credentials:\n    c0: &m0 {"
+	for j := range 10 {
+		if j > 0 {
+			b += ", "
+		}
+		b += fmt.Sprintf("k%d: %s", j, secret)
+	}
+	b += "}\n"
+	for i := 1; i < levels; i++ {
+		b += fmt.Sprintf("    c%d: &m%d {<<: [%s*m%d]}\n", i, i, strings.Repeat(fmt.Sprintf("*m%d, ", i-1), 9), i-1)
+	}
+	return b + fmt.Sprintf("session:\n  instance: {<<: *m%d}\n", levels-1)
+}
+
+// TestForagerRefusesAnchorsItCannotReadAtOnce is a file whose anchors hold an alias of
+// themselves, or whose aliases or merges expand without end: each is refused at once,
+// by both readers, in words that name no anchor and no value, and is never walked
+// without end.
+func TestForagerRefusesAnchorsItCannotReadAtOnce(t *testing.T) {
+	hermetic(t)
+	for _, c := range []struct{ body, whole, instance string }{
+		{"session: &" + marker + " {<<: *" + marker + "}\n", ": an anchor's value holds an alias of that anchor", ": an anchor's value holds an alias of that anchor"},
+		{"session:\n  instance: &" + marker + " {<<: *" + marker + "}\n", ": an anchor's value holds an alias of that anchor", ": an anchor's value holds an alias of that anchor"},
+		{"session:\n  instance: &i {name: " + secret + ", <<: *i}\n", ": an anchor's value holds an alias of that anchor", ": an anchor's value holds an alias of that anchor"},
+		{"gateway: {credentials: {c: {auth: &a {scheme: " + secret + ", <<: *a}}}}\n", ": gateway.credentials.c: an anchor's value holds an alias of that anchor", ""},
+		{"gateway: {run_credentials: &r [*r, " + secret + "]}\n", ": line 1: gateway.run_credentials[0][0] is an alias of a value that holds it", ""},
+		{"gateway: {run_credentials: &r [{issuer: " + secret + ", labels: *r}]}\n", ": line 1: gateway.run_credentials[0].labels[0] is an alias of a value that holds it", ""},
+		{aliasBomb(9), ": gateway.run_credentials: its aliases expand to more values than qory reads", ""},
+		{mergeBomb(9), ": its aliases expand to more values than qory reads", ": its aliases expand to more values than qory reads"},
+		{"session: {instance: {<<: " + secret + "}}\n", ": a merge, <<, holds a value that is not a mapping or a list of mappings", ": a merge, <<, holds a value that is not a mapping or a list of mappings"},
+	} {
+		path := foragerFile(t, c.body)
+		for _, r := range []struct {
+			load func() (*config.Forager, error)
+			want string
+		}{{config.LoadForager, c.whole}, {config.LoadForagerInstance, c.instance}} {
+			done := make(chan error, 1)
+			go func() {
+				_, err := r.load()
+				done <- err
+			}()
+			var err error
+			select {
+			case err = <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatalf("%q: no answer in 2s", c.body)
+			}
+			switch {
+			case r.want == "" && err != nil:
+				t.Errorf("%q: %v, want it read: this reader reads session.instance alone", c.body, err)
+			case r.want != "" && (err == nil || err.Error() != path+r.want):
+				t.Errorf("%q: %v, want %q", c.body, err, path+r.want)
+			}
+			if err != nil && (strings.Contains(err.Error(), marker) || strings.Contains(err.Error(), "qak_")) {
+				t.Errorf("%q: the refusal holds the value or the anchor: %v", c.body, err)
+			}
 		}
 	}
 }
