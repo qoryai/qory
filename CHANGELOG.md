@@ -210,6 +210,10 @@ release may change what an existing document does, and states it under Upgrading
   leaves its record as it is: it says `the server never opened run <id>, so there is
   nothing to send; its record stays in <dir>`, exit 0. Until now the record of a run
   with no server was closed and sent.
+- `qory run resend` of a run the server stopped during the run sends nothing and exits 1.
+  One the server stops during the resend says how many events it accepted and how many
+  were not sent, and that those stay in the run directory; it no longer points at
+  `undelivered`, which holds none of them.
 - qory takes `QORY_RUN_CREDENTIAL_SECRET` out of its environment when a command starts, as
   it does the access key's variables, so no program it starts receives it; `wall.env` or
   `--env` naming it is refused.

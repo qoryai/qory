@@ -12,7 +12,7 @@ left open is closed first, unless the server never opened the run. The container
 networks its wall left are removed. A run that is still running is refused.
 
 The exit status is 0 when the server has everything, or never opened the run, and 1 when
-events remain.
+events remain, or the server said stop.
 
 Behind a gateway, when session.gateway in forager.yaml names one, the record goes to that
 gateway instead, with the run's run credential: from --run-credential-fd, else

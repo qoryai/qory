@@ -1302,8 +1302,9 @@ server's configuration is fetched first, signed. It defines where the events go.
   minutes unless set.
 
 The exit status is 0 when the server has everything, or never opened the run. It is 1
-when events remain. Those
-stay under the run directory's `undelivered`.
+when events remain, or when the server said stop. Events the server did not accept within
+`--wait` stay under the run directory's `undelivered`; after the server's stop, they stay
+in the run directory.
 
 The formats are in the
 [Forager contract](https://github.com/qoryai/forager/tree/main/contracts/forager/v1).
