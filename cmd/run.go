@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -1443,17 +1444,19 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 			}
 			server := gatewayServer(r.Server)
 			server.AccessKey, server.InstanceID, server.InstanceName = id.key.key, id.instanceID, id.instanceName
+			lines := &resendLines{report: report}
 			spec := gateway.ResendConfig{
 				Dir:     filepath.Join(runs, args[0]),
 				Server:  server,
 				Version: build().title(),
-				Report:  report,
+				Report:  lines.line,
 			}
 			sig, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			ctx, cancel := context.WithTimeout(sig, wait)
 			defer cancel()
 			res, err := gateway.Resend(ctx, spec)
+			lines.done(err == nil && res.NotOpened && res.Undelivered == 0)
 			switch {
 			case errors.Is(err, gateway.ErrRunning):
 				return input(fmt.Errorf("the run %s is running", args[0]))
@@ -1476,7 +1479,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 			}
 			if res.NotOpened {
 				// The server never accepted the run's ping, or the run had no server: as
-				// behind a gateway, nothing failed now, and the resend succeeds.
+				// behind a gateway, nothing failed now, and the resend succeeds. Forager's
+				// own line that says so is left out ([resendLines]).
 				u.Success("the server never opened run %s, so there is nothing to send; its record stays in %s", args[0], ui.Short(spec.Dir, at.root))
 				return nil
 			}
@@ -1488,6 +1492,43 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 	c.Flags().IntVar(&secretFD, secretFDFlag, 0, secretFDUsage)
 	c.Flags().IntVar(&credentialFD, runCredentialFDFlag, 0, runCredentialFDUsage)
 	return c
+}
+
+// resendLines passes Forager's report lines of a resend on to report as they come,
+// but holds back the two that say a run never opened, gateway.ResendNotOpened and
+// gateway.ResendNoServer, until the resend has ended. done says whether qory says
+// itself that the run never opened: then they are left out, and otherwise passed on.
+// Every other line, the torn lines' and the server's stop among them, is passed on.
+type resendLines struct {
+	report func(string)
+	mu     sync.Mutex
+	held   []string
+}
+
+// line is the Report of the resend's configuration.
+func (r *resendLines) line(l string) {
+	if l == gateway.ResendNotOpened || l == gateway.ResendNoServer {
+		r.mu.Lock()
+		r.held = append(r.held, l)
+		r.mu.Unlock()
+		return
+	}
+	r.report(l)
+}
+
+// done ends the resend's lines: the held ones are left out when notOpened, the resend
+// NotOpened and qory saying so, and passed on otherwise.
+func (r *resendLines) done(notOpened bool) {
+	r.mu.Lock()
+	held := r.held
+	r.held = nil
+	r.mu.Unlock()
+	if notOpened {
+		return
+	}
+	for _, l := range held {
+		r.report(l)
+	}
 }
 
 // reapWall removes what the run's wall left once its record is no longer held, when r

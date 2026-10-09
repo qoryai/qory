@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/forager/gateway"
 	"github.com/qoryai/forager/receiver"
 
 	"github.com/qoryai/qory/cmd"
@@ -1475,61 +1476,114 @@ func TestResendClosesAndDeliversARunItsForagerLeft(t *testing.T) {
 	}
 }
 
-// Forager's report lines of a resend that sends nothing of a run the server never
-// opened, which qory passes through: pinned, so a change of their wording is seen.
+// The lines qory run resend says of a resend that sends nothing of a run the server
+// never opened: Forager's own line that says so is left out.
 const (
-	resendNoPing   = "qory run resend: the server never accepted the run's ping; nothing is sent"
-	resendNoServer = "qory run resend: the run had no server; nothing is sent"
-	resendNotOpen  = "✓ the server never opened run %s, so there is nothing to send; its record stays in %s"
+	resendNotOpen = "✓ the server never opened run %s, so there is nothing to send; its record stays in %s"
+	resendStopped = "qory run resend: the server said stop during the run; nothing is sent"
 )
 
 // TestResendSendsNothingOfARunTheServerNeverOpened is a record of a run that never
 // opened at the server: one whose ping it never accepted, and one of a run with no
-// server, --local. Each is sent nothing and left as it is; Forager says why, qory says
-// that the server never opened the run, and the resend is exit 0.
+// server, --local. Each is sent nothing and left as it is; qory says that the server
+// never opened the run, Forager's own line that says why is left out, and the resend is
+// exit 0. A record's torn lines are still said, and so is every line of a run that did
+// open: the torn lines' and the server's stop.
 func TestResendSendsNothingOfARunTheServerNeverOpened(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, fakeRuntime(t))
 	srv := newFakeServer(t, "")
 	serverFile(t, srv, "")
-	for _, c := range []struct {
-		name, id, forager string
-		args              []string
-	}{
-		{"a ping the server never accepted", "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5eb0", resendNoPing, nil},
-		{"a run with no server", "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5eb1", resendNoServer, []string{"--local"}},
-	} {
-		if out, err := run(t, append([]string{"run", "--run-id", c.id}, c.args...)...); cmd.ExitCode(err) != 3 {
-			t.Fatalf("%s: %v\n%s", c.name, err, out)
+	// record runs a run with args and returns its directory, its events.jsonl and what
+	// that held.
+	record := func(t *testing.T, id string, args ...string) (string, string, []byte) {
+		t.Helper()
+		if out, err := run(t, append([]string{"run", "--run-id", id}, args...)...); cmd.ExitCode(err) != 3 {
+			t.Fatalf("%v\n%s", err, out)
 		}
-		dir := filepath.Join(runsDir(t, root), c.id)
-		// What a run whose ping the server never accepted leaves: no delivered.log.
+		dir := filepath.Join(runsDir(t, root), id)
+		file := filepath.Join(dir, "events.jsonl")
+		before, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return dir, file, before
+	}
+	// unopen leaves dir as a run whose ping the server never accepted does: no
+	// delivered.log.
+	unopen := func(t *testing.T, dir string) {
+		t.Helper()
 		for _, name := range []string{"delivered.log", "undelivered"} {
 			if err := os.RemoveAll(filepath.Join(dir, name)); err != nil {
 				t.Fatal(err)
 			}
 		}
-		before, err := os.ReadFile(filepath.Join(dir, "events.jsonl"))
-		if err != nil {
-			t.Fatal(err)
+	}
+	// tear puts a line that is no whole event after the first one of file.
+	tear := func(t *testing.T, file string, before []byte) []byte {
+		t.Helper()
+		first, rest, _ := strings.Cut(string(before), "\n")
+		torn := []byte(first + "\nnot an event\n" + rest)
+		writeFile(t, file, string(torn))
+		return torn
+	}
+	unchanged := func(t *testing.T, name, dir, file string, before []byte, sent int) {
+		t.Helper()
+		if len(srv.events) != sent {
+			t.Errorf("%s: the server got %d events", name, len(srv.events)-sent)
 		}
+		if after, err := os.ReadFile(file); err != nil || string(after) != string(before) {
+			t.Errorf("%s: the record changed: %v", name, err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "delivered.log")); err == nil {
+			t.Errorf("%s: the resend wrote a delivered.log", name)
+		}
+	}
+
+	for _, c := range []struct {
+		name, id, forager string
+		args              []string
+	}{
+		{"a ping the server never accepted", "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5eb0", gateway.ResendNotOpened, nil},
+		{"a run with no server", "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5eb1", gateway.ResendNoServer, []string{"--local"}},
+	} {
+		dir, file, before := record(t, c.id, c.args...)
+		unopen(t, dir)
 		sent := len(srv.events)
 		out, err := run(t, "run", "resend", c.id)
-		want := c.forager + "\n" + fmt.Sprintf(resendNotOpen, c.id, ui.Short(dir, root)) + "\n"
+		want := fmt.Sprintf(resendNotOpen, c.id, ui.Short(dir, root)) + "\n"
 		if err != nil || out != want {
 			t.Errorf("%s: %v (exit %d)\n%q\nwant\n%q", c.name, err, cmd.ExitCode(err), out, want)
 		}
-		if len(srv.events) != sent {
-			t.Errorf("%s: the server got %d events", c.name, len(srv.events)-sent)
-		}
-		if after, err := os.ReadFile(filepath.Join(dir, "events.jsonl")); err != nil || string(after) != string(before) {
-			t.Errorf("%s: the record changed: %v", c.name, err)
-		}
-		if _, err := os.Stat(filepath.Join(dir, "delivered.log")); err == nil {
-			t.Errorf("%s: the resend wrote a delivered.log", c.name)
-		}
+		lacks(t, out, c.forager)
+		unchanged(t, c.name, dir, file, before, sent)
 	}
+
+	// A torn line of a record the server never opened is still said, before qory's line.
+	const tornID = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5eb2"
+	dir, file, before := record(t, tornID)
+	unopen(t, dir)
+	before = tear(t, file, before)
+	sent := len(srv.events)
+	out, err := run(t, "run", "resend", tornID)
+	want := "qory run resend: " + fmt.Sprintf(gateway.ResendTorn, 1, file) + "\n" + fmt.Sprintf(resendNotOpen, tornID, ui.Short(dir, root)) + "\n"
+	if err != nil || out != want {
+		t.Errorf("torn lines of a run never opened: %v (exit %d)\n%q\nwant\n%q", err, cmd.ExitCode(err), out, want)
+	}
+	unchanged(t, "torn lines of a run never opened", dir, file, before, sent)
+
+	// A run that opened: nothing is left out, the torn lines' line nor the server's stop.
+	const stopID = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5eb3"
+	dir, file, before = record(t, stopID)
+	tear(t, file, before)
+	writeFile(t, filepath.Join(dir, "delivered.log"), "stopped\n")
+	out, err = run(t, "run", "resend", stopID)
+	if err != nil {
+		t.Fatalf("a run the server stopped: %v\n%s", err, out)
+	}
+	wants(t, out, "qory run resend: "+fmt.Sprintf(gateway.ResendTorn, 1, file)+"\n"+resendStopped+"\n")
+	lacks(t, out, "never opened")
 }
 
 // TestRunRunsARuntimeTheForagerShipsNothingFor pins that qory run is not Claude Code's:

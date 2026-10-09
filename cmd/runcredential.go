@@ -626,12 +626,14 @@ func credentialRefused(err error, labels map[string]string, detailsFlag string, 
 func resendThroughGateway(sig context.Context, wait time.Duration, w io.Writer, r *config.Forager, c *runCredential, runID, dir, root string, report func(string)) error {
 	ctx, cancel := context.WithTimeout(sig, wait)
 	defer cancel()
+	lines := &resendLines{report: report}
 	res, err := session.Resend(ctx, session.ResendSpec{
 		Gateway:        remoteGateway(r, c),
 		Dir:            dir,
 		ForagerVersion: build().title(),
-		Report:         report,
+		Report:         lines.line,
 	})
+	lines.done(err == nil && res.NotOpened && !res.RunClosed && res.Undelivered == 0)
 	shown := ui.Short(dir, root)
 	var pe *fs.PathError
 	switch {
