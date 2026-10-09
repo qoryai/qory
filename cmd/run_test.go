@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -1615,5 +1616,31 @@ esac
 	lacks(t, string(data), "run ", "network create")
 	if ids := recorded(t, root); len(ids) != 2 {
 		t.Errorf("the refused run left a record: %v", ids)
+	}
+}
+
+// TestRunRefusesARunIDUsedBefore gives --run-id a run of this checkout already used: the
+// session refuses it before the run makes anything, qory says so and how to go on, names
+// no record, since the folder of that id is the other run's, and leaves that folder as
+// it was.
+func TestRunRefusesARunIDUsedBefore(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, fakeRuntime(t))
+	t.Setenv("QORY_TEST_EXIT", "0")
+	const id = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f"
+	if out, err := run(t, "run", "--run-id", id); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	folder := filepath.Join(runsDir(t, root), id)
+	before := snapshot(t, folder)
+	out, err := run(t, "run", "--run-id", id)
+	want := "the run id " + id + " is already used by another run; leave out --run-id, or give a new one"
+	if cmd.ExitCode(err) != 1 || err == nil || err.Error() != want {
+		t.Fatalf("a run id used before: %v (exit %d), want %q\n%s", err, cmd.ExitCode(err), want, out)
+	}
+	lacks(t, out, "the record is in", "the server closed the run", "hello from")
+	if after := snapshot(t, folder); !maps.Equal(before, after) {
+		t.Errorf("the refused run changed the first run's folder:\nbefore %v\nafter  %v", before, after)
 	}
 }

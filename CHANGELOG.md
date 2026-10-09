@@ -312,6 +312,10 @@ release may change what an existing document does, and states it under Upgrading
   and a walled run takes the home from <config file> alone, so the run does not start.
   Set harness.home in <config file>, or remove it from <file>`, with `<file>` the
   checkout's qory.yaml or the other file's path.
+- `qory run --run-id` with the id of a run this checkout already has is refused as
+  `the run id <id> is already used by another run; leave out --run-id, or give a new
+  one`, in place of the error opening that run's `events.jsonl`, and names no record:
+  the folder of that id is the other run's.
 
 ## [0.12.1] - 2026-09-30
 

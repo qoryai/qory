@@ -27,6 +27,7 @@ import (
 	"github.com/qoryai/forager/refusal"
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/session/runtimes/catalog"
+	"github.com/qoryai/forager/sink"
 	"github.com/qoryai/forager/wall"
 	"github.com/spf13/cobra"
 
@@ -333,6 +334,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				gw.Report(closeErr.Error())
 			}
 			if err != nil {
+				// A run id another run of this checkout has: refused before this run made
+				// anything, so the folder of that id is the other run's, and goes unnamed.
+				if reused := runIDReused(err, record, spec.RunID); reused != nil {
+					return reused
+				}
 				if m := mountRefused(err, passed{foragerDir: foragerDir, stateDir: state, spec: &spec, root: at.root, own: own}); m != nil {
 					err = m
 				} else if used := runIDUsed(err, spec.RunID); used != nil {
@@ -410,7 +416,24 @@ func runIDUsed(err error, runID string) error {
 	if !errors.As(err, &ref) || ref.Code != refusal.RunIDUsed {
 		return nil
 	}
-	return &saidError{text: fmt.Sprintf("the run id %s is already used by another run; leave out --run-id, or give a new one", runID), err: err}
+	return &saidError{text: runIDUsedText(runID), err: err}
+}
+
+// runIDReused is the session's refusal of a run whose record, record, holds the
+// events of another run already: the open of record/events.jsonl that exists, said as
+// the gateway's run_id_used is; nil for any other error. It unwraps to the session's
+// error.
+func runIDReused(err error, record, runID string) error {
+	var pe *fs.PathError
+	if !errors.As(err, &pe) || !errors.Is(err, fs.ErrExist) || pe.Path != filepath.Join(record, sink.EventsFile) {
+		return nil
+	}
+	return &saidError{text: runIDUsedText(runID), err: err}
+}
+
+// runIDUsedText says a run id is another run's, and how to go on.
+func runIDUsedText(runID string) string {
+	return fmt.Sprintf("the run id %s is already used by another run; leave out --run-id, or give a new one", runID)
 }
 
 // saidError is an error qory words itself in full, and that unwraps to the one it
