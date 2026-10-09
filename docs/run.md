@@ -577,7 +577,7 @@ session:
 | `session.gateway.run_credential_file` | The file that holds this run's run credential, which its issuer signed. qory reads it again before each request, so an issuer that refreshes it keeps the run going. Instead: --run-credential-fd, or QORY_RUN_CREDENTIAL_SECRET. A flag never holds the credential itself. |
 
 `qory config` lists each value; with no gateway named it shows
-`session.gateway.url | (none: qory run starts a gateway for each run) | (default)`.
+`session.gateway.url  (none: qory run starts a gateway for each run)  default`.
 
 ### The run credential
 
