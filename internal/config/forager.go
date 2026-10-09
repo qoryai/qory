@@ -64,7 +64,7 @@ type Forager struct {
 	// without one.
 	Gateway bool
 	// Listen is gateway.listen, the address qory gateway listens on for the runs of
-	// other machines, host:port; empty when the file sets none. qory run never reads it.
+	// other machines, host:port; empty when the file sets none. qory run does not use it.
 	Listen string
 	// TLS is gateway.tls, the certificate and key qory gateway serves Listen with; nil
 	// when the file sets none.

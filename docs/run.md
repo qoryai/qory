@@ -154,7 +154,7 @@ One optional file defines what Forager does on this machine:
 repository cannot set it. It has three sections beside `apiVersion`: `gateway`, the
 proxy's policy, the server, the credentials and the integrations; `session`, this
 instance and what applies to every run; and `wall`, the container. `gateway.listen`,
-`gateway.tls` and `gateway.run_credentials` are `qory gateway`'s: qory run never reads
+`gateway.tls` and `gateway.run_credentials` are `qory gateway`'s: `qory run` does not use
 them. See [the gateway as a service](gateway.md).
 
 ```yaml

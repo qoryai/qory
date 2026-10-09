@@ -171,8 +171,8 @@ release may change what an existing document does, and states it under Upgrading
   `gateway.tls.key`, both or neither; and `gateway.run_credentials`, the issuers of run
   credentials as Forager's `run-credentials.schema.json` defines them, with
   `introspection` of `url`, `client_id`, `client_secret_file` and `cache`. A path in them
-  is relative to the directory of `forager.yaml` unless it is absolute. `qory run` never
-  reads them. `qory config` lists them, `gateway.run_credentials[<n>].<member>` and
+  is relative to the directory of `forager.yaml` unless it is absolute. `qory run` does
+  not use them. `qory config` lists them, `gateway.run_credentials[<n>].<member>` and
   `gateway.run_credentials[<n>].introspection.<member>` each, the paths as written and
   never what a key or secret file holds, and `forager.schema.json` defines them.
 
