@@ -94,11 +94,12 @@ func credentialSource(r *config.Forager, fd *string) *runCredential {
 }
 
 // get is the run credential now: the file's content, read again, or the one read once.
-// Its error never holds the credential.
+// The file is refused, unread, when its mode grants the group or others read or write
+// ([credentialFileMode]). Its error never holds the credential.
 func (c *runCredential) get(context.Context) (string, error) {
 	v := c.once
 	if c.file != "" {
-		b, err := os.ReadFile(c.file)
+		b, err := readCredentialFile(c.file)
 		if err != nil {
 			return "", err
 		}
@@ -111,6 +112,50 @@ func (c *runCredential) get(context.Context) (string, error) {
 		c.mu.Unlock()
 	}
 	return v, nil
+}
+
+// readCredentialFile reads the run credential's file at path, after
+// [credentialFileMode] passes the mode of the file it opened: the file a link leads to,
+// as the read follows it.
+func readCredentialFile(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if err := credentialFileMode(path, info); err != nil {
+		return nil, err
+	}
+	return io.ReadAll(f)
+}
+
+// checkMode refuses, before anything starts, a run credential file whose mode grants
+// the group or others read or write ([credentialFileMode]), by the file a link leads to,
+// which is the one read. A file qory cannot stat is left, as before, to the read before
+// the first request; a run credential read once has no file.
+func (c *runCredential) checkMode() error {
+	if c.file == "" {
+		return nil
+	}
+	info, err := os.Stat(c.file)
+	if err != nil {
+		return nil
+	}
+	return credentialFileMode(c.file, info)
+}
+
+// credentialFileMode refuses the run credential's file at path when info, its mode,
+// grants the group or others read or write. Execute alone grants nothing to read, and
+// the owner is not checked.
+func credentialFileMode(path string, info fs.FileInfo) error {
+	if perm := info.Mode().Perm(); perm&0o066 != 0 {
+		return fmt.Errorf("%s is mode %04o, which grants access to the group or others: chmod 600 %s", path, perm, path)
+	}
+	return nil
 }
 
 // credentialExpiry is the exp claim of a run credential, a JWT, read without verifying
@@ -176,7 +221,8 @@ func gatewayEnded(u *ui.UI, report io.Writer, reason string, c *runCredential) b
 // through the gateway r's session.gateway names, and the run credential it then sends:
 // such a machine holds no access key, in a file, a variable or a descriptor; --local and
 // --label are for a gateway of the run's own; the CA file must hold a certificate; and
-// the run needs a run credential. keyFD says --access-key-secret-fd was given, and
+// the run needs a run credential, whose file, when it comes from one, grants the group
+// and others no read or write. keyFD says --access-key-secret-fd was given, and
 // credentialFD is the credential read from --run-credential-fd, nil when it was not
 // given.
 func behindGateway(r *config.Forager, local, labels, keyFD bool, credentialFD *string) (*runCredential, error) {
@@ -218,6 +264,9 @@ func behindGateway(r *config.Forager, local, labels, keyFD bool, credentialFD *s
 	c := credentialSource(r, credentialFD)
 	if c == nil {
 		return nil, input(fmt.Errorf("%s, and there is no run credential: set session.gateway.run_credential_file, --%s or %s", through, runCredentialFDFlag, config.EnvRunCredential))
+	}
+	if err := c.checkMode(); err != nil {
+		return nil, input(err)
 	}
 	return c, nil
 }

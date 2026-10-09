@@ -126,6 +126,15 @@ exit 0
 	return script
 }
 
+// writeRunCredential writes a run credential's file, mode 0600, as qory reads it.
+func writeRunCredential(t *testing.T, path, content string) {
+	t.Helper()
+	writeFile(t, path, content)
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // noCredentialUnder fails the test when a file under dir holds the run credential.
 func noCredentialUnder(t *testing.T, dir, credential string) {
 	t.Helper()
@@ -174,7 +183,7 @@ func TestRunThroughASeparateGateway(t *testing.T) {
 				*v = good
 			}
 		}
-		writeFile(t, file, c.file+"\n")
+		writeRunCredential(t, file, c.file+"\n")
 		t.Setenv("QORY_RUN_CREDENTIAL_SECRET", c.env)
 		args := []string{"run"}
 		if c.fd != "" {
@@ -251,7 +260,8 @@ func TestRunThroughASeparateGatewayIsRefusedByIt(t *testing.T) {
 // machine whose runs go through a gateway, before anything starts, each in its exact
 // words and an input error that leaves no record: an access key in a file, a variable or
 // a descriptor; --local, --label and --policy, which are for a gateway of the run's own;
-// a CA file that cannot be read or holds no certificate; and no run credential.
+// a CA file that cannot be read or holds no certificate; a run credential file whose
+// mode grants the group or others read or write; and no run credential.
 func TestRunBehindAGatewayRefusesBeforeAnythingStarts(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -261,7 +271,7 @@ func TestRunBehindAGatewayRefusesBeforeAnythingStarts(t *testing.T) {
 	ca := filepath.Join(dir, "gateway-ca.pem")
 	writeFile(t, ca, "not a certificate\n")
 	credential := filepath.Join(t.TempDir(), "run-credential")
-	writeFile(t, credential, "header.claims.signature\n")
+	writeRunCredential(t, credential, "header.claims.signature\n")
 	writeCertificate(t)
 	with := sessionGateway("gateway.example:8443", "gateway.pem", "    run_credential_file: "+credential+"\n")
 	const through = "this machine's runs go through the gateway session.gateway.url names"
@@ -303,6 +313,16 @@ func TestRunBehindAGatewayRefusesBeforeAnythingStarts(t *testing.T) {
 			writeFile(t, file, sessionGateway("gateway.example:8443", "missing-ca.pem", "    run_credential_file: "+credential+"\n"))
 			return []string{"run"}
 		}, file + ": session.gateway.ca_file " + filepath.Join(dir, "missing-ca.pem") + ": no such file or directory"},
+		{"a run credential file the group may read", func(t *testing.T) []string {
+			os.Chmod(credential, 0o640)
+			t.Cleanup(func() { os.Chmod(credential, 0o600) })
+			return []string{"run"}
+		}, credential + " is mode 0640, which grants access to the group or others: chmod 600 " + credential},
+		{"a run credential file others may read", func(t *testing.T) []string {
+			os.Chmod(credential, 0o644)
+			t.Cleanup(func() { os.Chmod(credential, 0o600) })
+			return []string{"run"}
+		}, credential + " is mode 0644, which grants access to the group or others: chmod 600 " + credential},
 		{"no run credential", func(t *testing.T) []string {
 			writeFile(t, file, sessionGateway("gateway.example:8443", "gateway.pem", ""))
 			return []string{"run"}
@@ -352,7 +372,7 @@ func TestRunBehindAGatewayKeepsTheCredentialFileFromTheWall(t *testing.T) {
 	docker, log := fakeDocker(t)
 	keys := tempDir(t)
 	credential := filepath.Join(keys, "run-credential")
-	writeFile(t, credential, "header.claims.signature\n")
+	writeRunCredential(t, credential, "header.claims.signature\n")
 	writeCertificate(t)
 	wallSection := "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: " + docker + "\n  helper: " + staticELF(t) + "\n  user: \"1000:1000\"\n"
 	writeFile(t, foragerFile(), sessionGateway("127.0.0.1:1", "gateway.pem", "    run_credential_file: "+credential+"\n")+wallSection)

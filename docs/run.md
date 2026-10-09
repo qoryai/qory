@@ -574,7 +574,7 @@ session:
 | `session.gateway.url` | The gateway: an https URL of a host and an optional port, with nothing after. |
 | `session.gateway.ca_file` | A PEM file of the certificate authority that signed the gateway's certificate, when the system's roots do not hold it. qory reads it relative to forager.yaml's directory, and it takes the place of the system's roots for this link. |
 | `session.gateway.certificate_sha256` | Optional: the SHA-256 of the gateway certificate's public key, base64. With it, qory accepts only a certificate with that key, and still checks its chain. |
-| `session.gateway.run_credential_file` | The file that holds this run's run credential, which its issuer signed. qory reads it again before each request, so an issuer that refreshes it keeps the run going. Instead: --run-credential-fd, or QORY_RUN_CREDENTIAL_SECRET. A flag never holds the credential itself. |
+| `session.gateway.run_credential_file` | The file that holds this run's run credential, which its issuer signed. qory reads it again before each request, so an issuer that refreshes it keeps the run going. A file whose mode grants the group or others read or write is refused. Instead: --run-credential-fd, or QORY_RUN_CREDENTIAL_SECRET. A flag never holds the credential itself. |
 
 `qory config` lists each value; with no gateway named it shows
 `session.gateway.url  (none: qory run starts a gateway for each run)  default`.
@@ -592,8 +592,10 @@ relative to the directory of `forager.yaml` unless it is absolute.
   credential its issuer signed. qory takes it out of its environment when it starts; no
   program qory starts receives it. `--env` and `wall.env` refuse it, as they refuse the
   access key's variables.
-- The file is read again before each request. A walled run whose mounts hold it is
-  refused before it starts, as a mount of Forager's own files is.
+- The file is read again before each request. A file whose mode grants the group or
+  others read or write is refused before the run starts, and again at each read. A
+  walled run whose mounts hold it is refused before it starts, as a mount of Forager's
+  own files is.
 
 The run credential never appears in qory's output or in the run's record. qory reads its
 `exp` only to say when it expired.
@@ -636,6 +638,8 @@ Before anything starts, `qory run` refuses:
 - `this machine's runs go through the gateway session.gateway.url names, and there is no
   run credential: set session.gateway.run_credential_file, --run-credential-fd or
   QORY_RUN_CREDENTIAL_SECRET`
+- `<path> is mode <mode>, which grants access to the group or others: chmod 600 <path>`,
+  for the run credential's file whose mode grants the group or others read or write.
 
 The gateway refuses a run, and qory says:
 

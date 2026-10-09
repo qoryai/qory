@@ -262,7 +262,7 @@
               "pattern": "^[A-Za-z0-9+/]{43}=$"
             },
             "run_credential_file": {
-              "description": "The file that holds this run's run credential, which its issuer signed. qory reads it again before each request, so an issuer that refreshes it keeps the run going. Instead: --run-credential-fd, or QORY_RUN_CREDENTIAL_SECRET. A flag never holds the credential itself.",
+              "description": "The file that holds this run's run credential, which its issuer signed. qory reads it again before each request, so an issuer that refreshes it keeps the run going. A file whose mode grants the group or others read or write is refused. Instead: --run-credential-fd, or QORY_RUN_CREDENTIAL_SECRET. A flag never holds the credential itself.",
               "type": "string",
               "minLength": 1
             }

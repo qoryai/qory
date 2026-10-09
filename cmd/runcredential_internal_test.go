@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -73,6 +74,88 @@ func TestTheRunCredentialFileIsReadBeforeEachRequest(t *testing.T) {
 	os.Remove(file)
 	if _, err := c.get(context.Background()); err == nil || !strings.Contains(err.Error(), file) || strings.Contains(err.Error(), "second") {
 		t.Errorf("a file that is gone: %v", err)
+	}
+}
+
+// TestTheRunCredentialFileGrantsTheGroupAndOthersNoReadOrWrite is the mode of the run
+// credential's file, checked before anything starts and on each read before a request:
+// one that grants the group or others read or write is refused in the words of decision
+// 159, unread; execute alone, and the owner's own bits, pass. A change to 0644 between
+// two requests is caught at the second. No error holds the credential.
+func TestTheRunCredentialFileGrantsTheGroupAndOthersNoReadOrWrite(t *testing.T) {
+	const v = "header.claims.signature"
+	file := filepath.Join(t.TempDir(), "run-credential")
+	if err := os.WriteFile(file, []byte(v+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := &runCredential{file: file}
+	for _, m := range []os.FileMode{0o600, 0o400, 0o700, 0o611} {
+		if err := os.Chmod(file, m); err != nil {
+			t.Fatal(err)
+		}
+		if err := c.checkMode(); err != nil {
+			t.Errorf("%04o before anything starts: %v", m, err)
+		}
+		if got, err := c.get(context.Background()); err != nil || got != v {
+			t.Errorf("%04o: read %d bytes, %v", m, len(got), err)
+		}
+	}
+	for _, m := range []os.FileMode{0o640, 0o604, 0o660, 0o606, 0o644} {
+		if err := os.Chmod(file, m); err != nil {
+			t.Fatal(err)
+		}
+		want := fmt.Sprintf("%s is mode %04o, which grants access to the group or others: chmod 600 %s", file, m, file)
+		if err := c.checkMode(); err == nil || err.Error() != want || strings.Contains(err.Error(), v) {
+			t.Errorf("%04o before anything starts: %v, want %q", m, err, want)
+		}
+		got, err := c.get(context.Background())
+		if got != "" || err == nil || err.Error() != want || strings.Contains(err.Error(), v) {
+			t.Errorf("%04o: read %d bytes, %v, want %q", m, len(got), err, want)
+		}
+	}
+	// Between two requests.
+	os.Chmod(file, 0o600)
+	if _, err := c.get(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	os.Chmod(file, 0o644)
+	if got, err := c.get(context.Background()); got != "" || err == nil || err.Error() != file+" is mode 0644, which grants access to the group or others: chmod 600 "+file {
+		t.Errorf("a change to 0644 between requests: read %d bytes, %v", len(got), err)
+	}
+	// A file that is not there yet is left to the read before the first request.
+	if err := (&runCredential{file: filepath.Join(t.TempDir(), "none")}).checkMode(); err != nil {
+		t.Errorf("a file that is not there: %v", err)
+	}
+	if err := (&runCredential{once: v}).checkMode(); err != nil {
+		t.Errorf("a credential read once: %v", err)
+	}
+}
+
+// TestTheRunCredentialFileModeIsTheLinksTarget is a run credential file that is a link:
+// the mode checked is that of the file the link leads to, the one read.
+func TestTheRunCredentialFileModeIsTheLinksTarget(t *testing.T) {
+	dir := t.TempDir()
+	target, link := filepath.Join(dir, "target"), filepath.Join(dir, "run-credential")
+	if err := os.WriteFile(target, []byte("header.claims.signature\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	c := &runCredential{file: link}
+	if err := c.checkMode(); err != nil {
+		t.Errorf("a link to a file of mode 0600: %v", err)
+	}
+	if _, err := c.get(context.Background()); err != nil {
+		t.Errorf("a link to a file of mode 0600: %v", err)
+	}
+	os.Chmod(target, 0o644)
+	want := link + " is mode 0644, which grants access to the group or others: chmod 600 " + link
+	if err := c.checkMode(); err == nil || err.Error() != want {
+		t.Errorf("a link to a file of mode 0644 before anything starts: %v, want %q", err, want)
+	}
+	if _, err := c.get(context.Background()); err == nil || err.Error() != want {
+		t.Errorf("a link to a file of mode 0644: %v, want %q", err, want)
 	}
 }
 
