@@ -45,10 +45,8 @@ func readCredentialFD(n int) (string, error) {
 	if n < 3 {
 		return "", input(fmt.Errorf("--%s %d: the standard input, output and error carry no run credential; name a descriptor of 3 or above", runCredentialFDFlag, n))
 	}
+	// A descriptor that is not open shows as the read's error.
 	f := os.NewFile(uintptr(n), "--"+runCredentialFDFlag)
-	if f == nil {
-		return "", input(fmt.Errorf("--%s %d is not an open descriptor", runCredentialFDFlag, n))
-	}
 	defer f.Close()
 	b, err := io.ReadAll(io.LimitReader(f, maxCredentialFD+1))
 	if err != nil {

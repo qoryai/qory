@@ -103,14 +103,20 @@ func separateGateway(t *testing.T) (addr, ca string, iss issuer, out *syncBuffer
 }
 
 // credentialRuntime writes a program that stands in for a runtime and fails, exit 7,
-// when its environment or its arguments hold QORY_RUN_CREDENTIAL_SECRET or the access
-// key's variables.
-func credentialRuntime(t *testing.T) string {
+// when its environment holds QORY_RUN_CREDENTIAL_SECRET or the access key's variables,
+// or when its environment or its arguments hold any line of the file forbidden, under
+// any name: the test writes there the run credentials the runtime must never have.
+func credentialRuntime(t *testing.T, forbidden string) string {
 	t.Helper()
+	writeFile(t, forbidden, "")
 	script := filepath.Join(t.TempDir(), "fake-runtime")
 	writeFile(t, script, `#!/bin/sh
 test -z "$QORY_RUN_CREDENTIAL_SECRET$QORY_ACCESS_KEY_SECRET$QORY_ACCESS_KEY_ID$QORY_APIARY_PUBLIC_KEY" || exit 7
 env | grep -q QORY_RUN_CREDENTIAL && exit 7
+if [ -s `+forbidden+` ]; then
+	env | grep -qF -f `+forbidden+` && exit 7
+	printf '%s\n' "$@" | grep -qF -f `+forbidden+` && exit 7
+fi
 echo "runtime with $*"
 exit 0
 `)
@@ -139,11 +145,13 @@ func noCredentialUnder(t *testing.T, dir, credential string) {
 // its own and holds no access key, names the gateway and the run, and sends the run
 // credential from its file, from QORY_RUN_CREDENTIAL_SECRET or from
 // --run-credential-fd, the descriptor first and the file last. The runtime never has the
-// credential, nor does the record or qory's output.
+// credential, under any name, in its environment or its arguments, nor does the record or
+// qory's output.
 func TestRunThroughASeparateGateway(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
-	composedForFake(t, root, credentialRuntime(t))
+	forbidden := filepath.Join(t.TempDir(), "forbidden")
+	composedForFake(t, root, credentialRuntime(t, forbidden))
 	addr, ca, iss, gwOut, srv := separateGateway(t)
 	bad := iss.credential(t, map[string]any{"aud": "another-service"})
 	file := filepath.Join(t.TempDir(), "run-credential")
@@ -160,6 +168,7 @@ func TestRunThroughASeparateGateway(t *testing.T) {
 		runKey := "queue/" + strconv.Itoa(1234+i)
 		good := iss.credential(t, map[string]any{"sub": runKey})
 		sent = append(sent, good)
+		writeFile(t, forbidden, strings.Join(sent, "\n")+"\n")
 		for _, v := range []*string{&c.file, &c.env, &c.fd} {
 			if *v == "good" {
 				*v = good
@@ -212,7 +221,7 @@ func TestRunThroughASeparateGateway(t *testing.T) {
 func TestRunThroughASeparateGatewayIsRefusedByIt(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
-	composedForFake(t, root, credentialRuntime(t))
+	composedForFake(t, root, credentialRuntime(t, filepath.Join(t.TempDir(), "forbidden")))
 	addr, ca, iss, _, _ := separateGateway(t)
 	writeFile(t, filepath.Join(string(configDir()), "forager.yaml"), sessionGateway(addr, ca, ""))
 	details := filepath.Join(t.TempDir(), "details.json")
@@ -246,7 +255,7 @@ func TestRunThroughASeparateGatewayIsRefusedByIt(t *testing.T) {
 func TestRunBehindAGatewayRefusesBeforeAnythingStarts(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
-	composedForFake(t, root, credentialRuntime(t))
+	composedForFake(t, root, credentialRuntime(t, filepath.Join(t.TempDir(), "forbidden")))
 	file := foragerFile()
 	dir := string(configDir())
 	ca := filepath.Join(dir, "gateway-ca.pem")
@@ -312,13 +321,18 @@ func TestRunBehindAGatewayRefusesBeforeAnythingStarts(t *testing.T) {
 				t.Fatal(err)
 			}
 			return []string{"run", "--run-credential-fd", strconv.Itoa(fd)}
-		}, "--run-credential-fd"},
+		}, "--run-credential-fd * more than a run credential"},
+		{"a --run-credential-fd that is not open", func(*testing.T) []string { return []string{"run", "--run-credential-fd", "1000"} },
+			"--run-credential-fd 1000: *"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			writeFile(t, file, with)
 			args := c.setup(t)
 			out, err := run(t, args...)
-			if cmd.ExitCode(err) != cmd.ExitInput || err.Error() != c.want && !(c.want == "--run-credential-fd" && strings.HasPrefix(err.Error(), c.want) && strings.HasSuffix(err.Error(), ": more than a run credential")) {
+			// A * in want stands for any text: the descriptor's number, or the system's error.
+			before, after, wild := strings.Cut(c.want, "*")
+			matches := err != nil && (err.Error() == c.want || wild && strings.HasPrefix(err.Error(), before) && strings.HasSuffix(err.Error(), after))
+			if cmd.ExitCode(err) != cmd.ExitInput || !matches {
 				t.Errorf("%v (exit %d), want %q\n%s", err, cmd.ExitCode(err), c.want, out)
 			}
 			if ids := recorded(t, root); len(ids) != 0 {
