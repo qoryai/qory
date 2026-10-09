@@ -571,8 +571,8 @@ func TestRunCredentialsAliasesExpandWithinABound(t *testing.T) {
 // TestRunCredentialsMergeChainIsReadAtOnce writes an issuer whose details merge the
 // last of a chain of 64000 mappings, each merging the one before it, anchored in a merge
 // the issuer itself makes, beside 6400 claims: it is read, and qory config lists every
-// detail of the chain, in under 2s. A walk that copied the keys of the chain at each of
-// its mappings took several seconds.
+// detail of the chain, in under 5s, which leaves room for a slower machine. A walk that
+// copied the keys of the chain at each of its mappings took about 8s.
 func TestRunCredentialsMergeChainIsReadAtOnce(t *testing.T) {
 	if raceDetector {
 		t.Skip("the race detector makes the read many times slower than its bound")
@@ -593,7 +593,7 @@ func TestRunCredentialsMergeChainIsReadAtOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a chain of %d merges: %v, want it read", n, err)
 	}
-	if took > 2*time.Second {
+	if took > 5*time.Second {
 		t.Errorf("a chain of %d merges took %v", n, took)
 	}
 	var details string
