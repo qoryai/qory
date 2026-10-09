@@ -565,3 +565,32 @@ func TestGatewayMakesNoLinkSocket(t *testing.T) {
 		t.Fatalf("qory gateway ended with %v\n%s", err, out)
 	}
 }
+
+// TestGatewayRefusesALinkForItsDirectory is qory's state directory, or the gateway's
+// directory in it, a link: the gateway refuses it before it writes anything there, so
+// nothing of it lands where the link leads.
+func TestGatewayRefusesALinkForItsDirectory(t *testing.T) {
+	for _, name := range []string{"qory", filepath.Join("qory", "gateway")} {
+		t.Run(name, func(t *testing.T) {
+			emptyDir(t)
+			serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n"+runCredentials)
+			writeIssuerFiles(t)
+			link := filepath.Join(os.Getenv("XDG_STATE_HOME"), name)
+			elsewhere := t.TempDir()
+			if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(elsewhere, link); err != nil {
+				t.Fatal(err)
+			}
+			out, err := run(t, "gateway")
+			if want := link + " is a symbolic link; it must be the directory itself"; err == nil || err.Error() != want {
+				t.Errorf("error\n got %v\nwant %q", err, want)
+			}
+			lacks(t, out, "listening on")
+			if entries, err := os.ReadDir(elsewhere); err != nil || len(entries) > 0 {
+				t.Errorf("the gateway wrote where the link leads: %v %v", entries, err)
+			}
+		})
+	}
+}

@@ -237,14 +237,12 @@ func checkServiceSecrets(r *config.Forager) error {
 	return nil
 }
 
-// makePrivateDir makes dir under state and leaves both mode 0700: what is in them is
-// this user's alone.
+// makePrivateDir makes dir under state, both mode 0700, refusing either when it is a
+// link or another user's before anything is written there: what is in them is this
+// user's alone.
 func makePrivateDir(state, dir string) error {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
 	for _, d := range []string{state, dir} {
-		if err := os.Chmod(d, 0o700); err != nil {
+		if err := foragerdir.MakePrivateDir(d, "qory gateway"); err != nil {
 			return err
 		}
 	}
