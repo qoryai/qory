@@ -235,8 +235,8 @@ release may change what an existing document does, and states it under Upgrading
   `QORY_HARNESS_HOME`. A module's export is a default like the others: the server's
   value, `--env` and `wall.env` win over it, and the deny list leaves out one whose name
   it holds. They reach the agent in the container and outside it alike.
-- qory builds against `github.com/qoryai/forager` at commit `82fc1d9` of its `next`,
-  `v0.6.1-0.20261009093807-82fc1d9fd811`, contract `v1` revision 1 as amended there.
+- qory builds against `github.com/qoryai/forager` at commit `877f0a5` of its `next`,
+  `v0.6.1-0.20261009100052-877f0a55c022`, contract `v1` revision 1 as amended there.
   `qory run` starts Forager's gateway on this machine for each run: it holds the proxy,
   the policy, the credentials and the access key, and sends the run's events to the
   server; the session speaks to it alone, and records its own events in the run's
@@ -251,7 +251,13 @@ release may change what an existing document does, and states it under Upgrading
   records that command. `dev.qory.run.started` carries `about`, and `opened_by`, which is
   `session` on every run qory starts. `dev.qory.run.exited` gives `timeout` or `run_closed`
   as its reason when the session ended the run, and `gateway_lost` when `qory run resend`
-  closes the record of a run whose Forager process died; a run qory starts gets no other
+  closes the record of a run whose Forager process died. When the run's gateway ends the
+  run itself, its record gives `session_lost`, and the session's own record,
+  `session.jsonl`, gives `batch_refused` when the gateway refused a batch of its events
+  and `session_lost` when the session sent it nothing for 1m30s; `qory run` then says
+  `the gateway closed the run: it could not take an event the session sent, and
+  <runtime> was stopped` or `the gateway closed the run: the session sent nothing for
+  1m30s, and <runtime> was stopped`, and exits 1. A run qory starts gets no other
   reason.
 - `gateway.server.access_key` and `gateway.server.secret` in `forager.yaml` are refused,
   and so is `QORY_SERVER_SECRET` when `forager.yaml` has a `gateway.server` section; the refusal says to

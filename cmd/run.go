@@ -22,6 +22,7 @@ import (
 
 	"github.com/charmbracelet/x/term"
 	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/gateway"
 	"github.com/qoryai/forager/link"
 	"github.com/qoryai/forager/refusal"
@@ -240,7 +241,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// access key. --local runs with the files alone. Its link is served in memory
 			// alone, to the session in this process: no socket, which another process could
 			// reach.
-			gw := gateway.Config{Policy: pol, Version: build().title(), RunDir: func(id string) string { return filepath.Join(spec.RunsDir, id) }, NoLinkSocket: true}
+			gw := gateway.Config{Policy: pol, Version: build().title(), RunDir: func(id string) string { return filepath.Join(spec.RunsDir, id) }, NoLinkSocket: true, Heartbeat: runHeartbeat}
 			if id != nil {
 				gw.Server = server
 				gw.Server.AccessKey, gw.Server.InstanceID, gw.Server.InstanceName = id.key.key, id.instanceID, id.instanceName
@@ -347,7 +348,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			switch {
 			case res.RunClosed && res.ClosedBy == accesskey.FromGateway:
-				return closedByGateway()
+				return gatewayClosed(u, res.ClosedReason, name)
 			case res.RunClosed:
 				u.Fail(fmt.Errorf("the server closed the run, and %s was stopped", name))
 				return reported(&exitError{code: 1})
@@ -425,6 +426,30 @@ func machineCredentials(ctx context.Context, r *config.Forager, e config.Expansi
 		out = append(out, def)
 	}
 	return out, nil
+}
+
+// runHeartbeat is the heartbeat interval of a run's gateway, Forager's default: the
+// session sends one every interval, and the gateway ends a run whose session sends
+// nothing for three (gateway.Config.Heartbeat).
+const runHeartbeat = 30 * time.Second
+
+// runQuiet is how long a run's session may send its gateway nothing before the gateway
+// ends the run, session_lost.
+const runQuiet = 3 * runHeartbeat
+
+// gatewayClosed is the end of a run the gateway closed while it ran, by the code it
+// closed it with: it could not take a batch of the session's events, batch_refused, or
+// the session sent it nothing for runQuiet, session_lost. Any other close of the
+// gateway's has the gateway's report line alone to say why. "The server closed the
+// run" is the server's alone. The run fails, as a run the server closes does.
+func gatewayClosed(u *ui.UI, reason, runtime string) error {
+	switch reason {
+	case event.ReasonBatchRefused:
+		u.Fail(fmt.Errorf("the gateway closed the run: it could not take an event the session sent, and %s was stopped", runtime))
+	case event.ReasonSessionLost:
+		u.Fail(fmt.Errorf("the gateway closed the run: the session sent nothing for %s, and %s was stopped", runQuiet, runtime))
+	}
+	return reported(&exitError{code: 1})
 }
 
 // runIDUsed is the gateway's refusal of a run whose id a run on this machine has

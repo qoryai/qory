@@ -193,8 +193,10 @@ func explain(err error, id *serverIdentity) error {
 	case accesskey.CodeInstanceLimit:
 		text = fmt.Sprintf("the node's live instances have reached its limit, so the instance %s does not start: wait for a run of another instance to end, or have an owner or administrator in Qory Apiary clear that instance", instance)
 	case accesskey.CodeRunClosed:
+		// A run the gateway closed before it started is Forager's refusal, as its Error
+		// says it: "the server closed the run" is the server's alone.
 		if ref.From == accesskey.FromGateway {
-			return closedByGatewayBefore(err)
+			return err
 		}
 		text = "the server closed the run before it started"
 	default:
