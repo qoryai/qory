@@ -695,15 +695,11 @@ func gatewayRefusedResend(err error, c *runCredential, shown string, now time.Ti
 	return nil
 }
 
-// gatewayEndedResend says that the run had ended when its events were sent again, by
-// who ended it and with what code: the gateway, at the credential's issuer's report,
-// run_ended_at_issuer, or for another reason, which it names; or the server. The events
-// stay in the run directory, shown.
+// gatewayEndedResend says that the gateway had ended the run when its events were sent
+// again, and with what code: at the credential's issuer's report, run_ended_at_issuer,
+// or for another reason, which it names. The events stay in the run directory, shown.
 func gatewayEndedResend(res session.ResendResult, shown string) error {
-	switch {
-	case res.ClosedBy == accesskey.FromApiary:
-		return fmt.Errorf("the server closed the run, so the gateway takes no more of this run's events; they stay in %s", shown)
-	case res.Reason == event.ReasonRunEndedAtIssuer:
+	if res.Reason == event.ReasonRunEndedAtIssuer {
 		return fmt.Errorf("the run credential's issuer reports that the run has ended, so the gateway takes no more of this run's events; they stay in %s", shown)
 	}
 	return fmt.Errorf("the gateway ended the run with the reason %s, so it takes no more of this run's events; they stay in %s", res.Reason, shown)

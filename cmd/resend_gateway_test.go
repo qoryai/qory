@@ -25,7 +25,6 @@ const (
 	resendExpired  = "the run credential expired at %s, so the gateway takes no more of this run's events; they stay in %s"
 	resendIssuer   = "the run credential's issuer reports that the run has ended, so the gateway takes no more of this run's events; they stay in %s"
 	resendEnded    = "the gateway ended the run with the reason %s, so it takes no more of this run's events; they stay in %s"
-	resendServer   = "the server closed the run, so the gateway takes no more of this run's events; they stay in %s"
 	resendRefused  = "the gateway refused this run credential"
 	resendDiffers  = "the gateway refused this run credential: it differs from the one the run started with"
 	resendSent     = "%d events were accepted; nothing is left to send to the gateway"
@@ -219,12 +218,12 @@ func gatewayRecord(t *testing.T, root, id string) string {
 }
 
 // TestResendThroughAGatewaySaysWhatItAnswered is each answer of a separate gateway to a
-// resend that qory words: the run ended at the credential's issuer, by the gateway for
-// another reason, named, or by the server; a batch it refuses, which ends the run; no
-// answer that accepts within --wait; every batch accepted; and the discovery's 401 to a
-// run credential with no exp qory can read. Each run ended or refused is exit 1, the
-// events kept; what is accepted is exit 0. The run credential goes to the gateway on
-// every request, and nowhere else.
+// resend that qory words: the run ended at the credential's issuer, or by the gateway
+// for another reason, named, its own run_closed among them; a batch it refuses, which
+// ends the run; no answer that accepts within --wait; every batch accepted; and the
+// discovery's 401 to a run credential with no exp qory can read. Each run ended or
+// refused is exit 1, the events kept; what is accepted is exit 0. The run credential
+// goes to the gateway on every request, and nowhere else.
 func TestResendThroughAGatewaySaysWhatItAnswered(t *testing.T) {
 	root := newCheckout(t)
 	link := newFakeLink(t)
@@ -248,8 +247,8 @@ func TestResendThroughAGatewaySaysWhatItAnswered(t *testing.T) {
 			want: func(s string) string { return fmt.Sprintf(resendEnded, "credential_expired", s) }, code: 1},
 		{name: "a batch refused", status: http.StatusBadRequest, body: `{"error":"invalid_request","from":"gateway"}`,
 			want: func(s string) string { return fmt.Sprintf(resendEnded, "batch_refused", s) }, code: 1},
-		{name: "closed by the server", status: http.StatusGone, body: `{"error":"run_closed","from":"apiary"}`,
-			want: func(s string) string { return fmt.Sprintf(resendServer, s) }, code: 1},
+		{name: "run_closed", status: http.StatusGone, body: `{"error":"run_closed","from":"gateway"}`,
+			want: func(s string) string { return fmt.Sprintf(resendEnded, "run_closed", s) }, code: 1},
 		{name: "no answer that accepts", status: http.StatusServiceUnavailable, args: []string{"--wait", "2s"},
 			want: func(s string) string { return fmt.Sprintf(resendNotSent, 0, 2, s) }, code: 1},
 		{name: "accepted", status: http.StatusOK,

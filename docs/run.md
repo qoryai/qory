@@ -394,7 +394,6 @@ refusal means and what to do, then Forager's words and the code:
 | `unauthorized` | the server refused the request: it does not know the access key, has revoked it, or this machine's clock is more than five minutes off; check the clock, else move this machine to a new key with `qory access-key enrol --replace`; for a key from `QORY_ACCESS_KEY_SECRET` or `--access-key-secret-fd`, enrol a new key |
 | `answer_unsigned` | an answer does not verify under the pin |
 | `instance_limit` | the node's live instances are at its limit |
-| `run_closed` | the server closed the run before it started; the exit status is 1 |
 
 #### Enrol with a code
 
@@ -713,9 +712,7 @@ removes the containers and networks the run's wall left, as without a gateway.
   credential: it differs from the one the run started with`.
 - `the run credential's issuer reports that the run has ended, so the gateway takes no
   more of this run's events; they stay in <dir>`; `the gateway ended the run with the
-  reason <reason>, so it takes no more of this run's events; they stay in <dir>`; `the
-  server closed the run, so the gateway takes no more of this run's events; they stay in
-  <dir>`.
+  reason <reason>, so it takes no more of this run's events; they stay in <dir>`.
 
 Each but the first two is exit 1, and the events stay in the run directory. A run that ran
 with a gateway of its own on this machine is refused: its record goes to the server, so

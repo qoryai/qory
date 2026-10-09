@@ -225,7 +225,7 @@ func TestRunTakesTheSecretFromTheEnvironment(t *testing.T) {
 // start, said with what to do, its code and exit status 1, and nothing run: an access
 // key the server does not know, from access-key-secret, which enrol --replace moves
 // from, or from QORY_ACCESS_KEY_SECRET, an instance beyond the node's limit, an answer
-// that does not verify under the pin, no pin, and a run the server closes.
+// that does not verify under the pin, and no pin.
 func TestRunSaysWhatARefusalMeans(t *testing.T) {
 	root, srv := serverRun(t, "", "")
 	refusal := func(name string, want ...string) {

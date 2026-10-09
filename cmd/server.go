@@ -192,13 +192,6 @@ func explain(err error, id *serverIdentity) error {
 		text = "an answer of the server does not verify under the pinned apiary_public_key, so the run does not start: check gateway.server.url and the pin"
 	case accesskey.CodeInstanceLimit:
 		text = fmt.Sprintf("the node's live instances have reached its limit, so the instance %s does not start: wait for a run of another instance to end, or have an owner or administrator in Qory Apiary clear that instance", instance)
-	case accesskey.CodeRunClosed:
-		// A run the gateway closed before it started is Forager's refusal, as its Error
-		// says it: "the server closed the run" is the server's alone.
-		if ref.From == accesskey.FromGateway {
-			return err
-		}
-		text = "the server closed the run before it started"
 	default:
 		return err
 	}

@@ -42,8 +42,7 @@ release may change what an existing document does, and states it under Upgrading
   node and the instance, and `qory config` lists `gateway.server.access_key_id`,
   `gateway.server.apiary_public_key` by fingerprint and `session.instance.name`.
 - `qory run` and `qory run resend` say what a refusal of the server means and what to do:
-  `unauthorized`, `answer_unsigned`, `instance_limit`, `apiary_public_key_missing` and
-  `run_closed`. A run the server closes before it starts exits 1.
+  `unauthorized`, `answer_unsigned`, `instance_limit` and `apiary_public_key_missing`.
 - When the server lists stored secrets for the machine's access key, every run needs a
   wall: an unwalled run is refused, `server_needs_wall`. The marker `stored-secrets`
   beside `forager.yaml` keeps refusing unwalled runs, `--local` included, until a server's
@@ -202,8 +201,8 @@ release may change what an existing document does, and states it under Upgrading
   events the gateway accepted, exit 0 when nothing is left to send, and a run the gateway
   never opened, whose record has nothing to send and stays, exit 0. It says events the
   gateway did not accept, a run credential that expired, that it refused or that differs
-  from the one the run started with, and a run the gateway, the credential's issuer or
-  the server ended, each exit 1, the events kept in the run directory. A record a gateway
+  from the one the run started with, and a run the gateway or the credential's issuer
+  ended, each exit 1, the events kept in the run directory. A record a gateway
   of the run's own made is refused: it goes to the server. See `docs/run.md`.
 - `qory run resend` to the server sends nothing of a run the server never opened, whose
   ping it never accepted, or of a run that had no server, such as a `--local` run's, and

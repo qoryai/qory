@@ -391,13 +391,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				u.Fail(fmt.Errorf("%d events did not reach the server; %s/undelivered contains them", delivery.Undelivered, ui.Short(res.Dir, at.root)))
 			}
 			switch {
-			case remote && res.RunClosed && res.ClosedBy == accesskey.FromGateway && gatewayEnded(u, stderr, res.ClosedReason, credential):
+			case remote && res.RunClosed && gatewayEnded(u, stderr, res.ClosedReason, credential):
 				return reported(&exitError{code: 1})
-			case res.RunClosed && res.ClosedBy == accesskey.FromGateway:
-				return gatewayClosed(u, res.ClosedReason, name)
 			case res.RunClosed:
-				u.Fail(fmt.Errorf("the server closed the run, and %s was stopped", name))
-				return reported(&exitError{code: 1})
+				// Only the gateway closes a run: a server's 410 stops its deliveries alone.
+				return gatewayClosed(u, res.ClosedReason, name)
 			case res.TimedOut:
 				u.Fail(fmt.Errorf("%s was stopped at the limit of %s", name, timeout))
 				return reported(&exitError{code: exitTimeout})
@@ -488,8 +486,7 @@ const runQuiet = 3 * runHeartbeat
 // gatewayClosed is the end of a run the gateway closed while it ran, by the code it
 // closed it with: it could not take a batch of the session's events, batch_refused, or
 // the session sent it nothing for runQuiet, session_lost. Any other close of the
-// gateway's has the gateway's report line alone to say why. "The server closed the
-// run" is the server's alone. The run fails, as a run the server closes does.
+// gateway's has the gateway's report line alone to say why. The run fails, exit 1.
 func gatewayClosed(u *ui.UI, reason, runtime string) error {
 	switch reason {
 	case event.ReasonBatchRefused:
