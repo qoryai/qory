@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -221,6 +222,64 @@ func TestRunThroughASeparateGateway(t *testing.T) {
 	if exists(filepath.Join(string(configDir()), "access-key-secret")) {
 		t.Error("the machine behind the gateway holds an access key")
 	}
+}
+
+// TestRunThroughASeparateGatewayWithTheDescriptorOpen is --run-credential-fd as a
+// stream: the writer keeps the descriptor open for the whole run, and qory runs with the
+// first line, without waiting for the descriptor's end; the runtime does not have the
+// descriptor, and when the run ends qory has closed it.
+func TestRunThroughASeparateGatewayWithTheDescriptorOpen(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	forbidden := filepath.Join(t.TempDir(), "forbidden")
+	inner := credentialRuntime(t, forbidden)
+	// A descriptor number high enough that the shell running the runtime opens nothing
+	// there itself.
+	const n = 200
+	runtime := filepath.Join(t.TempDir(), "fd-runtime")
+	writeFile(t, runtime, "#!/bin/sh\ntest -e /dev/fd/"+strconv.Itoa(n)+" && exit 9\nexec "+inner+" \"$@\"\n")
+	if err := os.Chmod(runtime, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	composedForFake(t, root, runtime)
+	addr, ca, iss, gwOut, _ := separateGateway(t)
+	writeFile(t, filepath.Join(string(configDir()), "forager.yaml"), sessionGateway(addr, ca, ""))
+	good := iss.credential(t, nil)
+	writeFile(t, forbidden, good+"\n")
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	// The read end as qory inherits it: without close-on-exec, at n.
+	if _, _, e := syscall.Syscall(syscall.SYS_FCNTL, r.Fd(), syscall.F_DUPFD, n); e != 0 {
+		t.Fatal(e)
+	}
+	r.Close()
+	if _, err := w.WriteString(good + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	// Were qory to wait for the descriptor's end, it would come only after this.
+	const wait = 20 * time.Second
+	closed := make(chan time.Time, 1)
+	timer := time.AfterFunc(wait, func() { closed <- time.Now(); w.Close() })
+	defer timer.Stop()
+	out, err := run(t, "run", "--run-credential-fd", strconv.Itoa(n))
+	select {
+	case <-closed:
+		t.Fatalf("qory run waited %s for the descriptor's end", wait)
+	default:
+	}
+	if err != nil {
+		t.Fatalf("%v\n%s\n%s", err, out, gwOut)
+	}
+	wants(t, out, "qory run: through the gateway "+addr+", run ", "claude exited 0")
+	lacks(t, out, good)
+	if _, err := w.WriteString("after.the.run\n"); !errors.Is(err, syscall.EPIPE) {
+		t.Errorf("a write after the run: %v, want a broken pipe: qory and what it started hold no read end", err)
+	}
+	noCredentialUnder(t, os.Getenv("XDG_STATE_HOME"), good)
+	clearRuns(t, root)
 }
 
 // TestRunThroughASeparateGatewayIsRefusedByIt is each refusal of the gateway's that qory

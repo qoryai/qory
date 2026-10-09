@@ -15,6 +15,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/qoryai/forager/accesskey"
@@ -34,58 +35,228 @@ const runCredentialFDFlag = "run-credential-fd"
 // runCredentialFDUsage is the help of --run-credential-fd.
 const runCredentialFDUsage = "read the run credential from this open file descriptor, for a machine whose runs go through a gateway (" + config.ForagerFileName + ": session.gateway.run_credential_file)"
 
-// maxCredentialFD is the most read from the run credential's descriptor.
+// maxCredentialFD is the longest line read from the run credential's descriptor, its
+// line end, \n or \r\n, aside.
 const maxCredentialFD = 64 << 10
 
-// readCredentialFD reads the run credential from file descriptor n, to its end, and
-// closes the descriptor, so nothing qory starts inherits it. The standard input, output
-// and error are refused. No error contains the value. Surrounding white space is not
-// part of the credential.
-func readCredentialFD(n int) (string, error) {
+// credentialStream is the run credential --run-credential-fd streams: whoever starts
+// qory run keeps the descriptor open and writes each fresh run credential to it as a
+// new line, and the latest complete line read is the credential.
+type credentialStream struct {
+	// f is the descriptor while it is read; nil when it ended before the run started.
+	f *os.File
+	// done is closed when the descriptor is no longer read.
+	done chan struct{}
+
+	mu sync.Mutex
+	// v is the latest complete line.
+	v string
+}
+
+// latest is the latest complete line the descriptor gave.
+func (s *credentialStream) latest() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.v
+}
+
+// stop closes the descriptor and waits for its reader to end. The run credential read
+// last stays.
+func (s *credentialStream) stop() {
+	if s.f != nil {
+		s.f.Close()
+	}
+	<-s.done
+}
+
+// readCredentialFD reads the run credential from file descriptor n: its first line that
+// is not empty, read before qory starts anything, or, when the writer closes it before
+// any line end, all it wrote, so one credential written without a newline still works.
+// The descriptor is close-on-exec from the start, so nothing qory starts inherits it,
+// and is then read until the run ends ([credentialStream.stop]): each further complete
+// line replaces the credential, an empty one is skipped, and a line cut short by the
+// end of the descriptor is dropped. The standard input, output and error are refused,
+// and so is a first line longer than a run credential; a later one is skipped. No error
+// contains the value. Surrounding white space is not part of the credential.
+func readCredentialFD(n int) (*credentialStream, error) {
 	if n < 3 {
-		return "", input(fmt.Errorf("--%s %d: the standard input, output and error carry no run credential; name a descriptor of 3 or above", runCredentialFDFlag, n))
+		return nil, input(fmt.Errorf("--%s %d: the standard input, output and error carry no run credential; name a descriptor of 3 or above", runCredentialFDFlag, n))
 	}
-	// A descriptor that is not open shows as the read's error.
+	// An inherited descriptor may lack close-on-exec, and os/exec closes nothing else in
+	// the programs it starts. Non-blocking, the descriptor is the poller's, so closing it
+	// ends a read that waits on it. A descriptor that is not open fails here.
+	syscall.CloseOnExec(n)
+	if err := syscall.SetNonblock(n, true); err != nil {
+		return nil, input(fmt.Errorf("--%s %d: %w", runCredentialFDFlag, n, err))
+	}
 	f := os.NewFile(uintptr(n), "--"+runCredentialFDFlag)
-	defer f.Close()
-	b, err := io.ReadAll(io.LimitReader(f, maxCredentialFD+1))
+	s := &credentialStream{done: make(chan struct{})}
+	l := newCredentialLines(f)
+	line, long, err := l.next()
+	if err == io.EOF {
+		line, long = l.rest()
+	}
+	switch {
+	case long:
+		err = input(fmt.Errorf("--%s %d: more than a run credential", runCredentialFDFlag, n))
+	case err == io.EOF:
+		err = nil
+	case err != nil:
+		err = input(fmt.Errorf("--%s %d: %w", runCredentialFDFlag, n, err))
+	default:
+		s.v = string(line)
+		clear(line)
+		s.f = f
+		go s.follow(l)
+		return s, nil
+	}
+	f.Close()
+	l.clear()
+	close(s.done)
 	if err != nil {
-		return "", input(fmt.Errorf("--%s %d: %w", runCredentialFDFlag, n, err))
+		return nil, err
 	}
-	defer clear(b)
-	if len(b) > maxCredentialFD {
-		return "", input(fmt.Errorf("--%s %d: more than a run credential", runCredentialFDFlag, n))
+	s.v = string(line)
+	clear(line)
+	return s, nil
+}
+
+// follow reads the descriptor's lines after the first until it ends or is closed: each
+// complete one that is not empty and not longer than a run credential replaces it.
+func (s *credentialStream) follow(l *credentialLines) {
+	defer close(s.done)
+	defer l.clear()
+	defer s.f.Close()
+	for {
+		line, long, err := l.next()
+		if err != nil {
+			return
+		}
+		if long {
+			continue
+		}
+		s.mu.Lock()
+		s.v = string(line)
+		s.mu.Unlock()
+		clear(line)
 	}
-	return strings.TrimSpace(string(b)), nil
+}
+
+// credentialLines splits what a reader gives into lines, keeping no more of a line
+// than a run credential: a longer one is dropped as it comes, up to its line end, and
+// reported once.
+type credentialLines struct {
+	r     io.Reader
+	chunk []byte
+	// buf is what was read after the last line end.
+	buf []byte
+	// long says buf's line passed maxCredentialFD, was reported, and its start was
+	// dropped.
+	long bool
+	// err is the reader's error, returned once buf holds no line end.
+	err error
+}
+
+func newCredentialLines(r io.Reader) *credentialLines {
+	const chunk = 4 << 10
+	// buf never grows past its capacity, so clear reaches every byte it held.
+	return &credentialLines{r: r, chunk: make([]byte, chunk), buf: make([]byte, 0, maxCredentialFD+2+chunk)}
+}
+
+// next is the next complete line that is not empty, trimmed of its line end and
+// surrounding white space, or, with long, that a line longer than a run credential is
+// being dropped, as soon as it is known, before its line end. err is the reader's error,
+// io.EOF at its end, once no complete line is left. The caller clears the line.
+func (l *credentialLines) next() (line []byte, long bool, err error) {
+	for {
+		if i := bytes.IndexByte(l.buf, '\n'); i >= 0 {
+			raw := bytes.TrimSuffix(l.buf[:i], []byte("\r"))
+			v := bytes.TrimSpace(raw)
+			// A line already reported as too long ends here, and is gone.
+			dropped := l.long
+			long := !dropped && len(raw) > maxCredentialFD
+			var out []byte
+			if !dropped && !long && len(v) > 0 {
+				out = bytes.Clone(v)
+			}
+			rest := copy(l.buf, l.buf[i+1:])
+			clear(l.buf[rest:])
+			l.buf, l.long = l.buf[:rest], false
+			switch {
+			case long:
+				return nil, true, nil
+			case out != nil:
+				return out, false, nil
+			}
+			continue
+		}
+		// More than a run credential and a \r with no line end yet: drop it.
+		if len(l.buf) > maxCredentialFD+1 {
+			clear(l.buf)
+			l.buf = l.buf[:0]
+			if !l.long {
+				l.long = true
+				return nil, true, nil
+			}
+		}
+		if l.err != nil {
+			return nil, false, l.err
+		}
+		n, err := l.r.Read(l.chunk)
+		l.buf = append(l.buf, l.chunk[:n]...)
+		clear(l.chunk[:n])
+		l.err = err
+	}
+}
+
+// rest is what came after the last line end, trimmed, once the reader has ended; long
+// says it is longer than a run credential, and then it is nil. The caller clears it.
+func (l *credentialLines) rest() (line []byte, long bool) {
+	v := bytes.TrimSpace(l.buf)
+	if l.long || len(bytes.TrimSuffix(l.buf, []byte("\r"))) > maxCredentialFD {
+		return nil, true
+	}
+	return bytes.Clone(v), false
+}
+
+// clear wipes what was read and not handed out.
+func (l *credentialLines) clear() {
+	clear(l.buf[:cap(l.buf)])
+	l.buf = l.buf[:0]
 }
 
 // runCredential is where a run behind a separate gateway takes its run credential from:
-// once, from --run-credential-fd or QORY_RUN_CREDENTIAL_SECRET, or from the file
-// session.gateway.run_credential_file names, read again before each request. It keeps
-// the expiry of the last run credential it handed out, to word the run's end at it.
+// the latest line --run-credential-fd gave, QORY_RUN_CREDENTIAL_SECRET, read once, or the
+// file session.gateway.run_credential_file names, read again before each request. It
+// keeps the expiry of the last run credential it handed out, to word the run's end at
+// it.
 type runCredential struct {
-	// file is the file's path, resolved; empty when the credential was read once.
+	// fd is the descriptor's stream; nil unless the credential comes from it.
+	fd *credentialStream
+	// file is the file's path, resolved; empty unless the credential comes from it.
 	file string
-	// once is the credential read once; empty when it comes from file.
-	once string
+	// variable is the credential QORY_RUN_CREDENTIAL_SECRET held; empty unless it comes
+	// from it.
+	variable string
 
 	mu  sync.Mutex
 	exp time.Time
 }
 
 // credentialSource is the run credential of a machine whose runs go through the gateway
-// r's session.gateway names: the one read from --run-credential-fd when fd is not nil,
-// else QORY_RUN_CREDENTIAL_SECRET, as qory took it when it started, else the file
-// session.gateway.run_credential_file names. nil is none.
-func credentialSource(r *config.Forager, fd *string) *runCredential {
+// r's session.gateway names: the stream of --run-credential-fd when fd is not nil, else
+// QORY_RUN_CREDENTIAL_SECRET, as qory took it when it started, else the file
+// session.gateway.run_credential_file names. nil is none, a descriptor that gave no
+// credential included.
+func credentialSource(r *config.Forager, fd *credentialStream) *runCredential {
 	if fd != nil {
-		if *fd == "" {
+		if fd.latest() == "" {
 			return nil
 		}
-		return &runCredential{once: *fd}
+		return &runCredential{fd: fd}
 	}
 	if v := strings.TrimSpace(config.TakenServerVariables().RunCredentialSecret); v != "" {
-		return &runCredential{once: v}
+		return &runCredential{variable: v}
 	}
 	if f := r.SessionGateway.RunCredentialFile; f != "" {
 		return &runCredential{file: r.Path(f)}
@@ -93,12 +264,16 @@ func credentialSource(r *config.Forager, fd *string) *runCredential {
 	return nil
 }
 
-// get is the run credential now: the file's content, read again, or the one read once.
-// The file is refused, unread, when its mode grants the group or others read or write
-// ([credentialFileMode]). Its error never holds the credential.
+// get is the run credential now: the latest line the descriptor gave, the file's
+// content, read again, or the variable's. The file is refused, unread, when its mode
+// grants the group or others read or write ([credentialFileMode]). Its error never holds
+// the credential.
 func (c *runCredential) get(context.Context) (string, error) {
-	v := c.once
-	if c.file != "" {
+	v := c.variable
+	switch {
+	case c.fd != nil:
+		v = c.fd.latest()
+	case c.file != "":
 		b, err := readCredentialFile(c.file)
 		if err != nil {
 			return "", err
@@ -136,7 +311,7 @@ func readCredentialFile(path string) ([]byte, error) {
 // checkMode refuses, before anything starts, a run credential file whose mode grants
 // the group or others read or write ([credentialFileMode]), by the file a link leads to,
 // which is the one read. A file qory cannot stat is left, as before, to the read before
-// the first request; a run credential read once has no file.
+// the first request; a run credential from the descriptor or the variable has no file.
 func (c *runCredential) checkMode() error {
 	if c.file == "" {
 		return nil
@@ -193,10 +368,13 @@ func (c *runCredential) expired() string {
 		return ""
 	}
 	at := exp.UTC().Format(time.RFC3339)
-	if c.file != "" {
+	switch {
+	case c.fd != nil:
+		return fmt.Sprintf("the run credential expired at %s, and the descriptor gave no fresh one", at)
+	case c.file != "":
 		return fmt.Sprintf("the run credential expired at %s, and its file holds no fresh one", at)
 	}
-	return fmt.Sprintf("the run credential expired at %s; --%s and %s are read once, so a run longer than its credential needs session.gateway.run_credential_file", at, runCredentialFDFlag, config.EnvRunCredential)
+	return fmt.Sprintf("the run credential expired at %s; %s is read once, so a run longer than its credential needs session.gateway.run_credential_file or --%s", at, config.EnvRunCredential, runCredentialFDFlag)
 }
 
 // gatewayEnded says why a separate gateway ended a run, by the code it closed it with:
@@ -223,9 +401,8 @@ func gatewayEnded(u *ui.UI, report io.Writer, reason string, c *runCredential) b
 // --label are for a gateway of the run's own; the CA file must hold a certificate; and
 // the run needs a run credential, whose file, when it comes from one, grants the group
 // and others no read or write. keyFD says --access-key-secret-fd was given, and
-// credentialFD is the credential read from --run-credential-fd, nil when it was not
-// given.
-func behindGateway(r *config.Forager, local, labels, keyFD bool, credentialFD *string) (*runCredential, error) {
+// credentialFD is the stream of --run-credential-fd, nil when it was not given.
+func behindGateway(r *config.Forager, local, labels, keyFD bool, credentialFD *credentialStream) (*runCredential, error) {
 	const through = "this machine's runs go through the gateway session.gateway.url names"
 	if local {
 		return nil, input(errors.New("--local runs with a gateway of this run's own and no server, and this machine has no gateway section: its runs go through the gateway session.gateway.url names"))

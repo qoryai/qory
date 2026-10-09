@@ -587,25 +587,33 @@ relative to the directory of `forager.yaml` unless it is absolute.
 
 - `--run-credential-fd`: read the run credential from this open file descriptor, for a
   machine whose runs go through a gateway (forager.yaml:
-  session.gateway.run_credential_file). qory reads it once, to its end, and closes it.
+  session.gateway.run_credential_file). qory reads it until the run ends, and no program
+  qory starts inherits it.
 - `QORY_RUN_CREDENTIAL_SECRET`: on a machine whose runs go through a gateway, the run
   credential its issuer signed. qory takes it out of its environment when it starts; no
   program qory starts receives it. `--env` and `wall.env` refuse it, as they refuse the
   access key's variables.
-- The file is read again before each request. `--run-credential-fd` and
-  `QORY_RUN_CREDENTIAL_SECRET` are read once, when `qory run` starts, so a credential from
-  either can't be renewed during the run; a run longer than its credential needs
-  `session.gateway.run_credential_file`. A file whose mode grants the group or others
-  read or write is refused before the run starts, and again at each read. A walled run
-  whose mounts hold it is refused before it starts, as a mount of Forager's own files is.
+- The file is read again before each request. `--run-credential-fd` is a stream: whoever
+  starts `qory run` keeps the descriptor open and writes each fresh run credential to it
+  as a new line, and qory uses the latest complete line it has read; a partial line waits
+  for its newline. A writer that closes the descriptor after a single credential needs no
+  newline. `QORY_RUN_CREDENTIAL_SECRET` is read once, when `qory run` starts, so a
+  credential from it can't be renewed during the run; a run longer than its credential
+  needs `session.gateway.run_credential_file` or `--run-credential-fd`. A file whose mode
+  grants the group or others read or write is refused before the run starts, and again
+  at each read. A walled run whose mounts hold it is refused before it starts, as a mount
+  of Forager's own files is.
 
 An unwalled run's agent runs as you. It can read what qory started with, its environment
 and your files included: the run credential's file, and `QORY_RUN_CREDENTIAL_SECRET`,
 which qory takes out of the environment the programs it starts receive, but not out of
-the one it started with. `--run-credential-fd` is the source such an agent can't read:
-qory reads the descriptor to its end and closes it before it starts anything, and keeps
-no copy in its environment or its open files. Give it a pipe, not a file the agent could
-open.
+the one it started with. No program qory starts inherits `--run-credential-fd`, but on
+Linux a program running as you can open another's descriptors through `/proc`: such an
+agent can open qory's, or the writer's when the writer runs as you, and read the run
+credentials written to it, which qory then doesn't get. On Linux, then, no source of the
+run credential is out of an unwalled agent's reach; only a wall, or running the agent as
+another user, keeps it out. On macOS, a program can't open another's descriptors that
+way. Give the descriptor a pipe, not a file the agent could open.
 
 The run credential never appears in qory's output or in the run's record. qory reads its
 `exp` only to say when it expired.
@@ -663,9 +671,11 @@ A run the gateway ends because its run credential expired says when, by where th
 credential came from:
 
 - from its file: `the run credential expired at <time>, and its file holds no fresh one`;
-- from `--run-credential-fd` or `QORY_RUN_CREDENTIAL_SECRET`: `the run credential expired
-  at <time>; --run-credential-fd and QORY_RUN_CREDENTIAL_SECRET are read once, so a run
-  longer than its credential needs session.gateway.run_credential_file`.
+- from `--run-credential-fd`: `the run credential expired at <time>, and the descriptor
+  gave no fresh one`;
+- from `QORY_RUN_CREDENTIAL_SECRET`: `the run credential expired at <time>;
+  QORY_RUN_CREDENTIAL_SECRET is read once, so a run longer than its credential needs
+  session.gateway.run_credential_file or --run-credential-fd`.
 
 A run the gateway ends because the credential's issuer reports that the run has ended
 says `qory run: the gateway ended the run: the run credential's issuer reports that the

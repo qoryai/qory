@@ -181,10 +181,13 @@ release may change what an existing document does, and states it under Upgrading
   and holds no access key, prints `qory run: through the gateway <host>, run <run-id>`,
   and sends the run credential its issuer signed on every request, from
   `--run-credential-fd`, else `QORY_RUN_CREDENTIAL_SECRET`, else the file, which it reads
-  again before each request. Before anything starts it refuses a `gateway` section beside
-  `session.gateway`, an `access-key-secret` file, the access key's variables,
-  `--access-key-secret-fd`, `--local`, `--label`, `--policy`, a `ca_file` it cannot read
-  or that holds no certificate, and no run credential. It refuses a run credential file
+  again before each request. `--run-credential-fd` is a stream: the writer keeps it open
+  and writes each fresh run credential as a new line, qory uses the latest complete line
+  it has read, and no program qory starts inherits the descriptor.
+  `QORY_RUN_CREDENTIAL_SECRET` is read once. Before anything starts it refuses a
+  `gateway` section beside `session.gateway`, an `access-key-secret` file, the access
+  key's variables, `--access-key-secret-fd`, `--local`, `--label`, `--policy`, a
+  `ca_file` it cannot read or that holds no certificate, and no run credential. It refuses a run credential file
   whose mode grants the group or others read or write, before anything starts and at
   each read. A walled run whose mounts hold the run credential's file is refused. It says the gateway's refusal of the run credential,
   of a checkout that is not the credential's target and of a `--details` key the
@@ -195,10 +198,12 @@ release may change what an existing document does, and states it under Upgrading
   it does the access key's variables, so no program it starts receives it; `wall.env` or
   `--env` naming it is refused.
 - `docs/run.md` says that an unwalled run's agent runs as you and can read what qory
-  started with, its environment and your files included, and that `--run-credential-fd`
-  is the source such an agent can't read; and that `--run-credential-fd` and
-  `QORY_RUN_CREDENTIAL_SECRET` are read once, so a run longer than its credential needs
-  `session.gateway.run_credential_file`.
+  started with, its environment and your files included; that on Linux it can also open
+  qory's descriptors through `/proc`, `--run-credential-fd` included, so no source of the
+  run credential is out of its reach there, and only a wall, or running the agent as
+  another user, keeps it out; and that `QORY_RUN_CREDENTIAL_SECRET` is read once, so a
+  run longer than its credential needs `session.gateway.run_credential_file` or
+  `--run-credential-fd`.
 - `qory gateway`'s help and `docs/gateway.md` say how a machine behind the gateway names
   it.
 

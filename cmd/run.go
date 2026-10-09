@@ -107,8 +107,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// The descriptor is read and closed first, whatever comes next, so nothing
-			// qory starts inherits it.
+			// The access key's descriptor is read and closed first, whatever comes next, so
+			// nothing qory starts inherits it. The run credential's is close-on-exec from
+			// here, and read until the run ends.
 			var fdKey *accesskey.Key
 			if cmd.Flags().Changed(secretFDFlag) {
 				k, err := readSecretFD(secretFD)
@@ -117,13 +118,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				fdKey = k
 			}
-			var fdCredential *string
+			var fdCredential *credentialStream
 			if cmd.Flags().Changed(runCredentialFDFlag) {
-				v, err := readCredentialFD(credentialFD)
+				s, err := readCredentialFD(credentialFD)
 				if err != nil {
 					return err
 				}
-				fdCredential = &v
+				defer s.stop()
+				fdCredential = s
 			}
 			runtime, extra := splitAtDash(cmd, args)
 			at, conf, err := locate(h)

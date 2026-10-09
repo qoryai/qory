@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -29,6 +31,13 @@ func unsignedCredential(claims string) string {
 	return enc.EncodeToString([]byte(`{"alg":"EdDSA","kid":"k1","typ":"JWT"}`)) + "." + enc.EncodeToString([]byte(claims)) + "." + enc.EncodeToString([]byte("signature"))
 }
 
+// streamOf is a run credential stream whose descriptor gave v and has ended.
+func streamOf(v string) *credentialStream {
+	s := &credentialStream{v: v, done: make(chan struct{})}
+	close(s.done)
+	return s
+}
+
 // TestTheRunCredentialComesFromOneSourceInOrder is the run credential's sources:
 // --run-credential-fd wins over QORY_RUN_CREDENTIAL_SECRET, which wins over
 // session.gateway.run_credential_file, resolved under forager.yaml's directory; an empty
@@ -36,19 +45,19 @@ func unsignedCredential(claims string) string {
 func TestTheRunCredentialComesFromOneSourceInOrder(t *testing.T) {
 	t.Cleanup(func() { config.SetServerVariables(config.ServerVariables{}) })
 	r := &config.Forager{File: "/etc/qory/forager.yaml", SessionGateway: &config.ForagerSessionGateway{URL: "https://gateway.example", RunCredentialFile: "run-credential"}}
-	fd, empty := "from-the-descriptor", ""
+	fd := streamOf("from-the-descriptor")
 	config.SetServerVariables(config.ServerVariables{RunCredentialSecret: " from-the-variable\n"})
-	if c := credentialSource(r, &fd); c == nil || c.once != fd || c.file != "" {
+	if c := credentialSource(r, fd); c == nil || c.fd != fd || c.variable != "" || c.file != "" {
 		t.Errorf("the descriptor and the rest: %+v", c)
 	}
-	if c := credentialSource(r, &empty); c != nil {
+	if c := credentialSource(r, streamOf("")); c != nil {
 		t.Errorf("an empty descriptor: %+v", c)
 	}
-	if c := credentialSource(r, nil); c == nil || c.once != "from-the-variable" || c.file != "" {
+	if c := credentialSource(r, nil); c == nil || c.fd != nil || c.variable != "from-the-variable" || c.file != "" {
 		t.Errorf("the variable and the file: %+v", c)
 	}
 	config.SetServerVariables(config.ServerVariables{})
-	if c := credentialSource(r, nil); c == nil || c.once != "" || c.file != "/etc/qory/run-credential" {
+	if c := credentialSource(r, nil); c == nil || c.fd != nil || c.variable != "" || c.file != "/etc/qory/run-credential" {
 		t.Errorf("the file alone: %+v", c)
 	}
 	r.SessionGateway.RunCredentialFile = ""
@@ -126,8 +135,11 @@ func TestTheRunCredentialFileGrantsTheGroupAndOthersNoReadOrWrite(t *testing.T) 
 	if err := (&runCredential{file: filepath.Join(t.TempDir(), "none")}).checkMode(); err != nil {
 		t.Errorf("a file that is not there: %v", err)
 	}
-	if err := (&runCredential{once: v}).checkMode(); err != nil {
-		t.Errorf("a credential read once: %v", err)
+	if err := (&runCredential{variable: v}).checkMode(); err != nil {
+		t.Errorf("a credential from the variable: %v", err)
+	}
+	if err := (&runCredential{fd: streamOf(v)}).checkMode(); err != nil {
+		t.Errorf("a credential from the descriptor: %v", err)
 	}
 }
 
@@ -160,8 +172,8 @@ func TestTheRunCredentialFileModeIsTheLinksTarget(t *testing.T) {
 }
 
 // TestTheRunCredentialsExpiryIsWordedBySource is the run's end at the run credential's
-// exp, in the words of where it came from: its file, or a source read once. A credential
-// whose exp qory cannot read leaves it unsaid.
+// exp, in the words of where it came from: its file, the descriptor, or the variable,
+// read once. A credential whose exp qory cannot read leaves it unsaid.
 func TestTheRunCredentialsExpiryIsWordedBySource(t *testing.T) {
 	exp := time.Date(2026, 10, 9, 12, 30, 0, 0, time.UTC)
 	cred := unsignedCredential(`{"sub":"run-1","exp":` + strconv.FormatInt(exp.Unix(), 10) + `}`)
@@ -170,8 +182,9 @@ func TestTheRunCredentialsExpiryIsWordedBySource(t *testing.T) {
 		t.Fatal(err)
 	}
 	fromFile := &runCredential{file: file}
-	once := &runCredential{once: cred}
-	for _, c := range []*runCredential{fromFile, once} {
+	fromFD := &runCredential{fd: streamOf(cred)}
+	fromVariable := &runCredential{variable: cred}
+	for _, c := range []*runCredential{fromFile, fromFD, fromVariable} {
 		if _, err := c.get(context.Background()); err != nil {
 			t.Fatal(err)
 		}
@@ -179,14 +192,18 @@ func TestTheRunCredentialsExpiryIsWordedBySource(t *testing.T) {
 	if got, want := fromFile.expired(), "the run credential expired at 2026-10-09T12:30:00Z, and its file holds no fresh one"; got != want {
 		t.Errorf("from its file: %q, want %q", got, want)
 	}
-	if got, want := once.expired(), "the run credential expired at 2026-10-09T12:30:00Z; --run-credential-fd and QORY_RUN_CREDENTIAL_SECRET are read once, so a run longer than its credential needs session.gateway.run_credential_file"; got != want {
-		t.Errorf("read once: %q, want %q", got, want)
+	if got, want := fromFD.expired(), "the run credential expired at 2026-10-09T12:30:00Z, and the descriptor gave no fresh one"; got != want {
+		t.Errorf("from the descriptor: %q, want %q", got, want)
+	}
+	if got, want := fromVariable.expired(), "the run credential expired at 2026-10-09T12:30:00Z; QORY_RUN_CREDENTIAL_SECRET is read once, so a run longer than its credential needs session.gateway.run_credential_file or --run-credential-fd"; got != want {
+		t.Errorf("from the variable: %q, want %q", got, want)
 	}
 	for _, v := range []string{"not-a-jwt", unsignedCredential(`{"sub":"run-1"}`), unsignedCredential(`{"exp":"soon"}`)} {
-		c := &runCredential{once: v}
-		c.get(context.Background())
-		if got := c.expired(); got != "" {
-			t.Errorf("%s: %q, want nothing", v, got)
+		for _, c := range []*runCredential{{variable: v}, {fd: streamOf(v)}} {
+			c.get(context.Background())
+			if got := c.expired(); got != "" {
+				t.Errorf("%s: %q, want nothing", v, got)
+			}
 		}
 	}
 }
@@ -195,14 +212,14 @@ func TestTheRunCredentialsExpiryIsWordedBySource(t *testing.T) {
 // credential's expiry, a failure in the words of its source; at its issuer's end, the
 // line of decision 131; any other close is the caller's to say.
 func TestASeparateGatewaysEndIsSaid(t *testing.T) {
-	c := &runCredential{once: unsignedCredential(`{"exp":1791549000}`)}
+	c := &runCredential{variable: unsignedCredential(`{"exp":1791549000}`)}
 	c.get(context.Background())
 	var out bytes.Buffer
 	if !gatewayEnded(ui.New(&out), &out, event.ReasonRunEndedAtIssuer, c) || out.String() != "qory run: the gateway ended the run: the run credential's issuer reports that the run has ended\n" {
 		t.Errorf("the issuer's end: %q", out.String())
 	}
 	out.Reset()
-	if !gatewayEnded(ui.New(&out), &out, event.ReasonCredentialExpired, c) || !strings.HasSuffix(out.String(), " the run credential expired at "+time.Unix(1791549000, 0).UTC().Format(time.RFC3339)+"; --run-credential-fd and QORY_RUN_CREDENTIAL_SECRET are read once, so a run longer than its credential needs session.gateway.run_credential_file\n") {
+	if !gatewayEnded(ui.New(&out), &out, event.ReasonCredentialExpired, c) || !strings.HasSuffix(out.String(), " the run credential expired at "+time.Unix(1791549000, 0).UTC().Format(time.RFC3339)+"; QORY_RUN_CREDENTIAL_SECRET is read once, so a run longer than its credential needs session.gateway.run_credential_file or --run-credential-fd\n") {
 		t.Errorf("the expiry: %q", out.String())
 	}
 	out.Reset()
@@ -211,7 +228,7 @@ func TestASeparateGatewaysEndIsSaid(t *testing.T) {
 			t.Errorf("%s: said %q", reason, out.String())
 		}
 	}
-	if gatewayEnded(ui.New(&out), &out, event.ReasonCredentialExpired, &runCredential{once: "no-exp"}) || out.Len() != 0 {
+	if gatewayEnded(ui.New(&out), &out, event.ReasonCredentialExpired, &runCredential{variable: "no-exp"}) || out.Len() != 0 {
 		t.Errorf("an expiry qory cannot read: said %q", out.String())
 	}
 }
@@ -250,5 +267,232 @@ func TestASeparateGatewaysRefusalsAreWorded(t *testing.T) {
 		case got != nil && !errors.Is(got, c.err):
 			t.Errorf("%v: does not unwrap to the refusal", c.err)
 		}
+	}
+}
+
+// credentialPipe is a pipe whose read end is a raw descriptor without close-on-exec, as
+// one qory run inherits, and its write end, closed when the test ends.
+func credentialPipe(t *testing.T) (int, *os.File) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fd, err := syscall.Dup(int(r.Fd()))
+	r.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { w.Close() })
+	return fd, w
+}
+
+// writeLine writes s to w, failing the test on an error.
+func writeLine(t *testing.T, w *os.File, s string) {
+	t.Helper()
+	if _, err := w.WriteString(s); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// becomes waits for the stream's run credential to be want, and fails the test, without
+// the values, when it is not within a few seconds.
+func becomes(t *testing.T, s *credentialStream, want string) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+		if s.latest() == want {
+			return
+		}
+	}
+	t.Fatalf("the run credential is not the %d-byte line written last", len(want))
+}
+
+// stays checks that the stream's run credential is still want a moment later.
+func stays(t *testing.T, s *credentialStream, want string) {
+	t.Helper()
+	time.Sleep(100 * time.Millisecond)
+	if s.latest() != want {
+		t.Fatalf("the run credential changed to a line it should not take (%d bytes)", len(s.latest()))
+	}
+}
+
+// ended waits for the stream's reader to end.
+func ended(t *testing.T, s *credentialStream) {
+	t.Helper()
+	select {
+	case <-s.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the descriptor is still read")
+	}
+}
+
+// TestTheRunCredentialDescriptorIsAStream is --run-credential-fd as a stream: qory starts
+// with the first complete line that is not empty, and each later complete line replaces
+// it. A partial line waits for its newline; empty lines, a line end of \r\n and
+// surrounding white space are not credentials; the descriptor's end keeps the latest,
+// and drops a line it cut short.
+func TestTheRunCredentialDescriptorIsAStream(t *testing.T) {
+	fd, w := credentialPipe(t)
+	writeLine(t, w, "\n \r\nfirst.credential.one\r\n")
+	s, err := readCredentialFD(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.stop()
+	if got := s.latest(); got != "first.credential.one" {
+		t.Fatalf("started with %d bytes, want the first line", len(got))
+	}
+	writeLine(t, w, "second.credential.two\nthird.credential.three\n")
+	becomes(t, s, "third.credential.three")
+	writeLine(t, w, "fourth.cred")
+	stays(t, s, "third.credential.three")
+	writeLine(t, w, "ential.four\n")
+	becomes(t, s, "fourth.credential.four")
+	writeLine(t, w, "\n\r\n   \n")
+	stays(t, s, "fourth.credential.four")
+	writeLine(t, w, "  fifth.credential.five \n")
+	becomes(t, s, "fifth.credential.five")
+	writeLine(t, w, "cut.short")
+	w.Close()
+	ended(t, s)
+	if got := s.latest(); got != "fifth.credential.five" {
+		t.Errorf("after the descriptor's end: %d bytes, want the latest complete line", len(got))
+	}
+}
+
+// TestTheRunCredentialDescriptorStartsWithWhatItHolds is a descriptor its writer closed
+// before qory read it: one credential without a newline is the credential, as before;
+// several lines are read through to the latest; nothing, or empty lines alone, is no
+// credential, which qory refuses as it refuses none.
+func TestTheRunCredentialDescriptorStartsWithWhatItHolds(t *testing.T) {
+	for _, c := range []struct{ name, wrote, want string }{
+		{"one credential without a newline", "only.credential.value", "only.credential.value"},
+		{"one credential with surrounding white space", "  only.credential.value \r\n", "only.credential.value"},
+		{"several lines", "first.credential\nsecond.credential\nlatest.credential\n", "latest.credential"},
+		{"a partial last line", "first.credential\ncut.short", "first.credential"},
+		{"nothing", "", ""},
+		{"empty lines", "\n\r\n \n", ""},
+	} {
+		fd, w := credentialPipe(t)
+		writeLine(t, w, c.wrote)
+		w.Close()
+		s, err := readCredentialFD(fd)
+		if err != nil {
+			t.Errorf("%s: %v", c.name, err)
+			continue
+		}
+		ended(t, s)
+		s.stop()
+		if got := s.latest(); got != c.want {
+			t.Errorf("%s: %d bytes, want %d", c.name, len(got), len(c.want))
+		}
+		r := &config.Forager{File: "/etc/qory/forager.yaml", SessionGateway: &config.ForagerSessionGateway{URL: "https://gateway.example"}}
+		if got := credentialSource(r, s); (got == nil) != (c.want == "") {
+			t.Errorf("%s: a source %v, want one: %v", c.name, got != nil, c.want != "")
+		}
+	}
+}
+
+// TestTheRunCredentialDescriptorLimitsEachLine is the limit of a run credential, on each
+// line, its line end aside: a first line longer than it is refused, at once, before its
+// line end, and the refusal holds nothing of it; a later one is skipped, and the line
+// after it is taken. A line of the limit itself is a credential.
+func TestTheRunCredentialDescriptorLimitsEachLine(t *testing.T) {
+	long := strings.Repeat("x", maxCredentialFD+1)
+	exact := strings.Repeat("y", maxCredentialFD)
+	for _, c := range []struct{ name, wrote string }{
+		{"a first line over the limit", long + "\n"},
+		{"a first line over the limit, its line end not written yet", long + "x"},
+		{"a first line over the limit, with \\r\\n", long + "\r\n"},
+	} {
+		fd, w := credentialPipe(t)
+		// More than a pipe holds: written as qory reads it, and the writer kept open.
+		go w.WriteString(c.wrote)
+		_, err := readCredentialFD(fd)
+		want := fmt.Sprintf("--run-credential-fd %d: more than a run credential", fd)
+		if err == nil || err.Error() != want || ExitCode(err) != ExitInput {
+			t.Errorf("%s: %v, want %q", c.name, err, want)
+		}
+		w.Close()
+	}
+	fd, w := credentialPipe(t)
+	go w.WriteString(exact + "\r\n")
+	s, err := readCredentialFD(fd)
+	if err != nil {
+		t.Fatalf("a line of the limit: %v", err)
+	}
+	defer s.stop()
+	if s.latest() != exact {
+		t.Fatalf("a line of the limit: %d bytes", len(s.latest()))
+	}
+	writeLine(t, w, "next.credential\n")
+	becomes(t, s, "next.credential")
+	go func() {
+		w.WriteString(long + "\n")
+		w.WriteString("after.the.long.line\n")
+	}()
+	becomes(t, s, "after.the.long.line")
+	go func() {
+		w.WriteString(long + long)
+		w.WriteString("\n")
+		w.WriteString("after.two.limits\n")
+	}()
+	becomes(t, s, "after.two.limits")
+}
+
+// TestTheRunCredentialDescriptorIsNotInherited is the descriptor while it is read: a
+// program qory starts, through os/exec, does not have it, though it had the descriptor
+// as qory inherited it. When the run ends, qory closes the descriptor, and no one holds
+// it.
+func TestTheRunCredentialDescriptorIsNotInherited(t *testing.T) {
+	fd, w := credentialPipe(t)
+	has := func() string {
+		t.Helper()
+		out, err := exec.Command("/bin/sh", "-c", "if test -e /dev/fd/"+strconv.Itoa(fd)+"; then echo inherited; else echo not inherited; fi").Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	if got := has(); got != "inherited" {
+		t.Fatalf("the descriptor as qory inherits it: %s", got)
+	}
+	writeLine(t, w, "first.credential\n")
+	s, err := readCredentialFD(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := has(); got != "not inherited" {
+		t.Errorf("while it is read: %s", got)
+	}
+	s.stop()
+	ended(t, s)
+	// No one holds the read end any more: qory closed it, and nothing it started has it.
+	if _, err := w.WriteString("after.the.run\n"); !errors.Is(err, syscall.EPIPE) {
+		t.Errorf("a write after the run ended: %v, want a broken pipe", err)
+	}
+	if got := s.latest(); got != "first.credential" {
+		t.Errorf("after the run ended: %d bytes", len(got))
+	}
+}
+
+// TestTheRunCredentialDescriptorsErrorsHoldNoCredential is each refusal of
+// --run-credential-fd: the standard descriptors, one that is not open, and a line too
+// long; none holds what the descriptor gave.
+func TestTheRunCredentialDescriptorsErrorsHoldNoCredential(t *testing.T) {
+	for _, n := range []int{0, 1, 2} {
+		want := fmt.Sprintf("--run-credential-fd %d: the standard input, output and error carry no run credential; name a descriptor of 3 or above", n)
+		if _, err := readCredentialFD(n); err == nil || err.Error() != want {
+			t.Errorf("%d: %v, want %q", n, err, want)
+		}
+	}
+	if _, err := readCredentialFD(1000); err == nil || !strings.HasPrefix(err.Error(), "--run-credential-fd 1000: ") {
+		t.Errorf("a descriptor that is not open: %v", err)
+	}
+	const secret = "header.claims.signature"
+	fd, w := credentialPipe(t)
+	go w.WriteString(secret + strings.Repeat("s", maxCredentialFD) + "\n")
+	if _, err := readCredentialFD(fd); err == nil || strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "sss") {
+		t.Errorf("a line too long: %v", err)
 	}
 }
