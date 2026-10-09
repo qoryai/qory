@@ -55,9 +55,13 @@ type fakeServer struct {
 	refused   int
 	// instances are the X-Qory-Instance-Id and X-Qory-Instance-Name of every request.
 	instances [][2]string
-	// revoked, secrets, full and closed make the server know no access key, list
-	// secrets in discovery, answer the ping with instance_limit, and close every run.
-	revoked, secrets, full, closed bool
+	// revoked, secrets and full make the server know no access key, list secrets in
+	// discovery, and answer the ping with instance_limit. stopPing and stopRun make it
+	// want nothing more of a run, a signed 410 without a code: to every delivery, the
+	// ping's included, and to every delivery once it holds an event, after the ping.
+	revoked, secrets, full, stopPing, stopRun bool
+	// onStop, when set, is called each time the server answers a delivery with its 410.
+	onStop func()
 }
 
 // newFakeServer starts a server whose run configuration carries policy, the JSON of a
@@ -101,10 +105,14 @@ func newFakeServer(t *testing.T, policy string) *fakeServer {
 			defer f.mu.Unlock()
 			return !f.full
 		},
-		Closed: func(string) bool {
+		Stop: func(string) bool {
 			f.mu.Lock()
 			defer f.mu.Unlock()
-			return f.closed
+			stop := f.stopPing || f.stopRun && len(f.events) > 0
+			if stop && f.onStop != nil {
+				f.onStop()
+			}
+			return stop
 		},
 	}
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

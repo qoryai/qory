@@ -263,23 +263,66 @@ func TestRunSaysWhatARefusalMeans(t *testing.T) {
 	}
 }
 
-// TestRunEndsWhenTheServerClosesIt is a server that closes the run: the runtime is
-// stopped, or never starts, and qory exits 1 saying so.
-func TestRunEndsWhenTheServerClosesIt(t *testing.T) {
+// TestA410ToThePingIsNoRun is a server that answers the ping with a signed 410: it
+// wants nothing of the run, so the run does not start. That is no refusal, and no
+// server closes a run: qory prints the gateway's error, which names the events URL and
+// the status, then the record, and exits 1. The runtime never runs.
+func TestA410ToThePingIsNoRun(t *testing.T) {
+	_, srv := serverRun(t, "", "")
+	srv.stopPing = true
+	out, err := run(t, "run")
+	want := "ping " + srv.URL + "/v1/events: status 410: the server did not accept the ping"
+	if cmd.ExitCode(err) != 1 || err == nil || err.Error() != want {
+		t.Errorf("a 410 to the ping: %v (exit %d), want %q, exit 1\n%s", err, cmd.ExitCode(err), want, out)
+	}
+	wants(t, out, "✗ "+want+"\n", "qory run: the record is in ")
+	lacks(t, out, "hello from", "closed the run")
+	if got := srv.byType(); len(got) != 0 {
+		t.Errorf("the server stored events of a run it did not accept: %v", got)
+	}
+}
+
+// TestA410MidRunLeavesTheRuntimeRunning is a server that answers a signed 410 once it
+// holds the run's ping: the gateway sends it nothing more and says so once, and the
+// runtime runs on, here until the 410 has come and after, to its own exit, which is the
+// run's. The run's record keeps every event, and delivered.log says stopped.
+func TestA410MidRunLeavesTheRuntimeRunning(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
-	script := filepath.Join(t.TempDir(), "slow-runtime")
-	writeFile(t, script, "#!/bin/sh\nexec sleep 30\n")
+	stopped := filepath.Join(t.TempDir(), "stopped")
+	script := filepath.Join(t.TempDir(), "patient-runtime")
+	writeFile(t, script, "#!/bin/sh\nfor i in $(seq 300); do\n  if [ -e '"+stopped+"' ]; then echo 'hello from after the 410'; exit 0; fi\n  sleep 0.1\ndone\nexit 7\n")
 	if err := os.Chmod(script, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	composedForFake(t, root, script)
 	srv := newFakeServer(t, "")
 	serverFile(t, srv, "")
-	srv.closed = true
+	srv.stopRun = true
+	srv.onStop = func() { writeFile(t, stopped, "") }
 	out, err := run(t, "run")
-	if cmd.ExitCode(err) != 1 || !strings.Contains(out+err.Error(), "the server closed the run") {
-		t.Errorf("a closed run: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	if err != nil {
+		t.Fatalf("a 410 mid-run: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	wants(t, out, "qory run: the server answered 410; no further batch is sent for this run, which goes on\n", "hello from after the 410\n", "✓ claude exited 0\n")
+	lacks(t, out, "closed the run", "was stopped", "did not reach the server")
+	if n := strings.Count(out, "the server answered 410"); n != 1 {
+		t.Errorf("the 410 is said %d times, want once\n%s", n, out)
+	}
+	if got := srv.byType(); len(got) != 1 || len(got["dev.qory.ping"]) != 1 {
+		t.Errorf("the server stored more than the ping: %v", got)
+	}
+	dir, byType := events(t, root)
+	for _, typ := range []string{"dev.qory.run.started", "dev.qory.run.exited"} {
+		if len(byType[typ]) != 1 {
+			t.Errorf("the record holds %d %s, want 1", len(byType[typ]), typ)
+		}
+	}
+	if ex := byType["dev.qory.run.exited"]; len(ex) == 1 && (ex[0]["exit_code"] != float64(0) || ex[0]["reason"] != nil) {
+		t.Errorf("run.exited: %v, want exit_code 0 and no reason", ex[0])
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "delivered.log")); err != nil || !strings.HasSuffix(string(b), "\nstopped\n") {
+		t.Errorf("delivered.log: %q, %v; want it to end stopped", b, err)
 	}
 }
 
