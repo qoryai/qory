@@ -1363,7 +1363,9 @@ func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
 	if cmd.ExitCode(err) != 124 {
 		t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
-	wants(t, out, "stopped at the limit of 300ms")
+	// The time limit is said once, in qory's line: the session's own line is left out.
+	wants(t, out, "✗ the run was cancelled: it reached the time limit of 300ms, and claude was stopped\n")
+	lacks(t, out, "stopped at the limit")
 	dir, evs := events(t, root)
 	if filepath.Base(dir) != id {
 		t.Errorf("the run is recorded in %s", dir)
@@ -1375,7 +1377,7 @@ func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
 	if allow, _ := applied["allow"].([]any); applied["mode"] != "enforce" || len(allow) != 1 || allow[0] != "api.github.com" {
 		t.Errorf("run.policy_applied %v", applied)
 	}
-	if exited := evs["dev.qory.run.exited"][0]; exited["reason"] != "timeout" || exited["state"] != "failed" {
+	if exited := evs["dev.qory.run.exited"][0]; exited["reason"] != "timeout" || exited["state"] != "cancelled" {
 		t.Errorf("run.exited %v", exited)
 	}
 }
@@ -1473,7 +1475,8 @@ func TestResendClosesAndDeliversARunItsForagerLeft(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "gateway_lost", fmt.Sprintf("%d events were accepted", len(lines)))
+	wants(t, out, "✓ the record had no end, and now ends as lost: its end was never recorded\n", fmt.Sprintf("%d events were accepted", len(lines)))
+	lacks(t, out, "gateway_lost", "closed with the reason")
 	got := srv.events
 	if last := got[len(got)-1]; len(got) != len(lines) || last["type"] != "dev.qory.run.exited" || last["data"].(map[string]any)["reason"] != "gateway_lost" {
 		t.Errorf("the server got %d events, the last %v", len(got), last)
@@ -1609,7 +1612,7 @@ func TestResendSendsNothingOfARunTheServerNeverOpened(t *testing.T) {
 const (
 	// resendStoppedNow is the server's signed 410 during the resend, a format of the run
 	// id, what it accepted, what was not sent and the run directory.
-	resendStoppedNow = "✗ the server answered 410 and wants no more events of the run %s; %d were accepted and %d were not sent; they stay in %s"
+	resendStoppedNow = "✗ the server wants no more events of the run %s; %d were accepted and %d were not sent; they stay in %s"
 	// resendAnswered410 is Forager's line of a 410 with no code.
 	resendAnswered410 = "qory run resend: the server answered 410; no further batch is sent for this run, which goes on"
 	// resendNotAccepted is a server that did not accept within --wait, a format of what
@@ -1729,14 +1732,14 @@ func TestResendSaysTheServerWantsNoMoreEvents(t *testing.T) {
 	}
 	stays(t, "a stop during the run", dir, file, before)
 
-	// A server that accepts nothing within --wait: what was not accepted is spooled,
-	// after Forager's line that says so.
+	// A server that accepts nothing within --wait: what was not accepted is spooled, and
+	// qory's line alone says so: Forager's line of it is left out.
 	srv.unavailable = true
 	const awayID = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5ec3"
 	dir, _, _, owed = record(t, awayID)
 	out, err = run(t, "run", "resend", awayID, "--wait", "2s")
 	want = fmt.Sprintf(resendNotAccepted, 0, owed, ui.Short(dir, root)) + "\n"
-	if cmd.ExitCode(err) != 1 || !strings.HasSuffix(out, "\n"+want) {
+	if cmd.ExitCode(err) != 1 || out != want {
 		t.Errorf("a server away: %v (exit %d)\n%q\nwant\n%q", err, cmd.ExitCode(err), out, want)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "undelivered")); err != nil {

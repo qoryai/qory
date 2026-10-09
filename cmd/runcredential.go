@@ -468,47 +468,20 @@ func expiryTime(exp time.Time) string {
 	return exp.UTC().Format(time.RFC3339)
 }
 
-// gatewayEnded says why a separate gateway ended a run, by the code it closed it with:
-// the run credential expired, credential_expired; its issuer reports that the run has
-// ended, run_ended_at_issuer; or the issuer's introspection endpoint could not be
-// reached, issuer_unreachable, or gave no valid answer, issuer_answer_invalid. It
-// reports whether it said anything: for any other code, and for an expiry qory cannot
-// read, the caller says what it says of a gateway's close.
-func gatewayEnded(u *ui.UI, report io.Writer, reason string, c *runCredential) bool {
-	switch reason {
-	case event.ReasonCredentialExpired:
-		if text := c.expired(); text != "" {
-			u.Fail(errors.New(text))
-			return true
-		}
-	case event.ReasonRunEndedAtIssuer:
-		fmt.Fprintln(report, "qory run: the gateway ended the run: the run credential's issuer reports that the run has ended")
-		return true
-	case event.ReasonIssuerUnreachable:
-		fmt.Fprintln(report, "qory run: the gateway ended the run: it could not reach the run credential's issuer")
-		return true
-	case event.ReasonIssuerAnswerInvalid:
-		fmt.Fprintln(report, "qory run: the gateway ended the run: the run credential's issuer gave the gateway no valid answer")
-		return true
-	}
-	return false
-}
-
 // gatewayNotOpened is the line qory says of a run a separate gateway could not open
-// because of the run credential's issuer, as it says the gateway's end of a run: the
-// issuer's introspection endpoint could not be reached, the gateway's 503
-// issuer_unreachable, or gave no valid answer, its 502 issuer_answer_invalid. "" for
-// any other error.
+// because its run credential could not be checked: the introspection endpoint could
+// not be reached, the gateway's 503 credential_check_unreachable, or gave no valid
+// answer, its 502 credential_check_invalid. "" for any other error.
 func gatewayNotOpened(err error) string {
 	var ref *session.Refusal
 	if !errors.As(err, &ref) || ref.From != accesskey.FromGateway {
 		return ""
 	}
 	switch {
-	case ref.Code == event.ReasonIssuerUnreachable && ref.Status == http.StatusServiceUnavailable:
-		return "qory run: the gateway could not open the run: it could not reach the run credential's issuer; try again"
-	case ref.Code == event.ReasonIssuerAnswerInvalid && ref.Status == http.StatusBadGateway:
-		return "qory run: the gateway could not open the run: the run credential's issuer gave the gateway no valid answer"
+	case ref.Code == event.ReasonCredentialCheckUnreachable && ref.Status == http.StatusServiceUnavailable:
+		return "qory run: the run did not start: its run credential could not be checked; try again"
+	case ref.Code == event.ReasonCredentialCheckInvalid && ref.Status == http.StatusBadGateway:
+		return "qory run: the run did not start: its run credential could not be checked"
 	}
 	return ""
 }
@@ -654,14 +627,16 @@ func credentialRefused(err error, labels map[string]string, detailsFlag string, 
 func resendThroughGateway(sig context.Context, wait time.Duration, w io.Writer, r *config.Forager, c *runCredential, runID, dir, root string, report func(string)) error {
 	ctx, cancel := context.WithTimeout(sig, wait)
 	defer cancel()
-	lines := &resendLines{report: report}
+	lines := resendLines(report)
 	res, err := session.Resend(ctx, session.ResendSpec{
 		Gateway:        remoteGateway(r, c),
 		Dir:            dir,
 		ForagerVersion: build().title(),
 		Report:         lines.line,
 	})
-	lines.done(err == nil && res.NotOpened && !res.RunClosed && res.Undelivered == 0)
+	lines.done(func(kind int) bool {
+		return kind == heldNotOpened && err == nil && res.NotOpened && !res.RunClosed && res.Undelivered == 0
+	})
 	shown := ui.Short(dir, root)
 	var pe *fs.PathError
 	switch {
@@ -719,7 +694,7 @@ func gatewayRefusedResend(err error, c *runCredential, dir, shown string, now ti
 			return &saidError{text: fmt.Sprintf("this run's record has no run-secret file, which the gateway needs to accept its events; they stay in %s", shown), err: err}
 		}
 		if at, ok := c.expiredAt(now); ok {
-			return &saidError{text: fmt.Sprintf("the run credential expired at %s, so the gateway takes no more of this run's events; they stay in %s", at, shown), err: err}
+			return &saidError{text: fmt.Sprintf("the run credential expired at %s, so no more of this run's events are taken; they stay in %s", at, shown), err: err}
 		}
 		return &saidError{text: "the gateway refused this run credential", err: err}
 	case refusal.TargetDiffersFromCredential, refusal.DiffersFromCredential:
@@ -732,12 +707,18 @@ func gatewayRefusedResend(err error, c *runCredential, dir, shown string, now ti
 // run's secret, which every batch of a resend carries; Forager writes and removes it.
 const runSecretFile = "run-secret"
 
-// gatewayEndedResend says that the gateway had ended the run when its events were sent
-// again, and with what code: at the credential's issuer's report, run_ended_at_issuer,
-// or for another reason, which it names. The events stay in the run directory, shown.
+// gatewayEndedResend says that the run had ended when its events were sent again, and
+// how it ended, by the state and the reason of its end ([outcomeOf]). The events stay in
+// the run directory, shown. A run whose end nothing says, a 410 run_closed of a record
+// with no exit, is said by its code.
 func gatewayEndedResend(res session.ResendResult, shown string) error {
-	if res.Reason == event.ReasonRunEndedAtIssuer {
-		return fmt.Errorf("the run credential's issuer reports that the run has ended, so the gateway takes no more of this run's events; they stay in %s", shown)
+	o := outcomeOf(res.State, res.Reason)
+	if !o.known {
+		return fmt.Errorf("the gateway ended the run with the reason %s, so it takes no more of this run's events; they stay in %s", res.ClosedReason, shown)
 	}
-	return fmt.Errorf("the gateway ended the run with the reason %s, so it takes no more of this run's events; they stay in %s", res.Reason, shown)
+	ended := o.word()
+	if o.reason != "" && !o.noOutcome {
+		ended += ": " + o.reason
+	}
+	return fmt.Errorf("the run has ended (%s), so no more of its events are taken; they stay in %s", ended, shown)
 }
