@@ -45,7 +45,7 @@ func (s *storedAnswer) verify() (*accesskey.EnrolmentAnswer, error) {
 		return nil, err
 	}
 	if ans.Pin.Fixture() {
-		return nil, errors.New("the answer lists the runner contract's published fixture key")
+		return nil, errors.New("the answer lists the Forager contract's published fixture key")
 	}
 	return ans, nil
 }
@@ -81,7 +81,7 @@ func (a *answerRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-// recordingClient is the enrolment's HTTP client, enrolClient or one with the runner's
+// recordingClient is the enrolment's HTTP client, enrolClient or one with Forager's
 // ten-second timeout, with a transport that keeps the answer.
 func recordingClient() (*http.Client, *answerRecorder) {
 	c := http.Client{Timeout: 10 * time.Second}

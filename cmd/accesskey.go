@@ -20,7 +20,7 @@ import (
 )
 
 // The seams of the key commands a test replaces: the key's source, the clock, the
-// HTTP client of the enrolment, nil for the runner's own, and what stops an enrolment
+// HTTP client of the enrolment, nil for Forager's own, and what stops an enrolment
 // after one of the steps that follow the server's answer, as a crash would.
 var (
 	generateKey = accesskey.Generate
@@ -62,8 +62,9 @@ administrator in Qory Apiary created. The code is valid for 15 minutes and used 
 
 qory makes the key, keeps its secret in access-key-secret.new, prints its fingerprint
 and sends the server the public key. The server's signed answer gives the key its id:
-qory moves the secret to access-key-secret and writes the id into the server section of
-` + config.ForagerFileName + `, with the server's URL and its public key where the section has none yet.
+qory moves the secret to access-key-secret and writes the id into gateway.server of
+` + config.ForagerFileName + `, with the server's URL and its public key where gateway.server has
+none yet.
 The key is active from that answer on: runs can start. qory keeps the answer in
 enrolment-answer until the enrolment is finished: should the command stop after the
 answer came, the same command finishes it on this machine, at any time, without asking
@@ -87,7 +88,7 @@ the code's 15 minutes retries; after it, the same command finishes the replaceme
 this machine, at any time. On a machine without a key, --replace enrols as the command
 does without it.
 
-The key's name is instance.name of ` + config.ForagerFileName + `, else this machine's host name.
+The key's name is session.instance.name of ` + config.ForagerFileName + `, else this machine's host name.
 
 --print writes no key or setting and prints QORY_ACCESS_KEY_ID, QORY_ACCESS_KEY_SECRET
 and QORY_APIARY_PUBLIC_KEY for a CI's settings. Only the secret belongs in its secret
@@ -145,14 +146,14 @@ func makeKey() (*accesskey.Key, error) {
 		return nil, err
 	}
 	if k.PublicKey().Fixture() {
-		return nil, errors.New("the new key is one of the runner contract's published fixture keys, whose secret anyone can read; no key was kept")
+		return nil, errors.New("the new key is one of the Forager contract's published fixture keys, whose secret anyone can read; no key was kept")
 	}
 	return k, nil
 }
 
 // refuseKeyEnv refuses an enrolment that keeps its key on this machine while the
 // environment sets the access key's id, its secret or the pin: the id and the pin in
-// runner.yaml too would stop every run on a value set in both, and a secret in the
+// forager.yaml too would stop every run on a value set in both, and a secret in the
 // environment would win over the one the command keeps.
 func refuseKeyEnv() error {
 	var set []string
@@ -172,7 +173,7 @@ func refuseKeyEnv() error {
 	return input(fmt.Errorf("%s %s set, and qory access-key enrol keeps the key in this machine's files, which %s would contradict: unset %s, or use --print", names, is, they, them))
 }
 
-// checkOrigin refuses a server the enrolment cannot reach, before a key is made: runner's
+// checkOrigin refuses a server the enrolment cannot reach, before a key is made: Forager's
 // enrolment posts over https, or over http to localhost, 127.0.0.1 or [::1] alone.
 func checkOrigin(server string) error {
 	u, err := url.Parse(server)
@@ -211,7 +212,7 @@ func keyLock(dir foragerdir.Dir, print bool) (*foragerdir.Lock, error) {
 	return lock, nil
 }
 
-// prepareDir makes the runner file's directory mode 0700, saying so when it changes
+// prepareDir makes the directory of forager.yaml mode 0700, saying so when it changes
 // it, and writes the stored-secrets marker: a marker that cannot be written is no key.
 func prepareDir(dir foragerdir.Dir, out io.Writer) error {
 	changed, err := dir.Ensure()
@@ -225,8 +226,8 @@ func prepareDir(dir foragerdir.Dir, out io.Writer) error {
 }
 
 // effectivePin is the pin a code is checked against, nil when there is none: the
-// runner file's, else QORY_APIARY_PUBLIC_KEY. With --print the key is for another
-// machine, so the runner file's is not, and the variable's alone is. A pin that lists a
+// pin of forager.yaml, else QORY_APIARY_PUBLIC_KEY. With --print the key is for another
+// machine, so forager.yaml's is not, and the variable's alone is. A pin that lists a
 // published fixture key is refused.
 func effectivePin(r *config.Forager, print bool) (accesskey.Pin, error) {
 	if !print && r != nil && r.Server != nil && len(r.Server.Pin) > 0 {
@@ -238,7 +239,7 @@ func effectivePin(r *config.Forager, print bool) (accesskey.Pin, error) {
 	}
 	p, err := accesskey.ParsePin([]byte(v))
 	if err == nil && p.Fixture() {
-		err = errors.New("it lists the runner contract's published fixture key, whose secret anyone can read; pin your server's own key")
+		err = errors.New("it lists the Forager contract's published fixture key, whose secret anyone can read; pin your server's own key")
 	}
 	if err != nil {
 		return nil, input(fmt.Errorf("%s: %w", accesskey.EnvPin, err))
@@ -269,7 +270,7 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 		}
 	}
 	// With --print the key is for another machine: its server section does not apply,
-	// so neither stops the command, and instance.name alone is read.
+	// so neither stops the command, and session.instance.name alone is read.
 	load := config.LoadForager
 	if print {
 		load = config.LoadForagerInstance
@@ -279,7 +280,7 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 		return input(err)
 	}
 	if !print && r != nil && r.Server != nil && r.Server.URL != server {
-		return input(fmt.Errorf("%s names the server %s, and this command %s: enrol with the server %s names, or change its server.url first", r.File, r.Server.URL, server, config.ForagerFileName))
+		return input(fmt.Errorf("%s names the server %s, and this command %s: enrol with the server %s names, or change its gateway.server.url first", r.File, r.Server.URL, server, config.ForagerFileName))
 	}
 	pin, err := effectivePin(r, print)
 	if err != nil {
@@ -290,10 +291,10 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	}
 	name := r.InstanceNameOrDefault()
 	if name == "" {
-		return input(fmt.Errorf("this machine's host name does not fit an access key's name: set instance.name in %s", config.ForagerFileName))
+		return input(fmt.Errorf("this machine's host name does not fit an access key's name: set session.instance.name in %s", config.ForagerFileName))
 	}
 	if err := accesskey.CheckName(name); err != nil {
-		return input(fmt.Errorf("instance.name: %w", err))
+		return input(fmt.Errorf("session.instance.name: %w", err))
 	}
 	dir := machineDir()
 	if dir == "" {
@@ -437,8 +438,8 @@ func printEnrolled(info io.Writer, ans *accesskey.EnrolmentAnswer) {
 
 // finishEnrolment is what follows the server's verified 201 for key on this machine,
 // the first time or from the answer enrolment-answer keeps: the new key, still in
-// access-key-secret.new, takes the place of access-key-secret, see [placeKey]; the
-// runner file is written; access-key-secret.replaced, the pending enrolment and the
+// access-key-secret.new, takes the place of access-key-secret, see [placeKey]; then
+// forager.yaml is written; access-key-secret.replaced, the pending enrolment and the
 // kept answer are removed, in that order.
 func finishEnrolment(dir foragerdir.Dir, info io.Writer, r *config.Forager, server string, pin accesskey.Pin, key *accesskey.Key, ans *accesskey.EnrolmentAnswer) error {
 	e := config.Enrolment{URL: server, AccessKeyID: ans.AccessKeyID}
@@ -454,7 +455,7 @@ func finishEnrolment(dir foragerdir.Dir, info io.Writer, r *config.Forager, serv
 	if err := config.WriteEnrolment(path, e); err != nil {
 		return fmt.Errorf("the key is enrolled, and %s could not be written: %w; run the same command again", path, err)
 	}
-	if err := afterStep("runner"); err != nil {
+	if err := afterStep("forager"); err != nil {
 		return err
 	}
 	// The secret a replacement put aside: what the old key is named by, then removed.
@@ -477,12 +478,12 @@ func finishEnrolment(dir foragerdir.Dir, info io.Writer, r *config.Forager, serv
 	if err := dir.RemoveAnswer(); err != nil {
 		return err
 	}
-	written := "server.access_key_id"
+	written := "gateway.server.access_key_id"
 	if r == nil || r.Server == nil {
-		written = "server.url, " + written
+		written = "gateway.server.url, " + written
 	}
 	if e.Pin != nil {
-		written += " and server.apiary_public_key"
+		written += " and gateway.server.apiary_public_key"
 	}
 	fmt.Fprintf(info, "wrote %s to %s\n", written, path)
 	if old != "" {
@@ -493,21 +494,21 @@ func finishEnrolment(dir foragerdir.Dir, info io.Writer, r *config.Forager, serv
 
 // placeKey puts the new key in access-key-secret.new in place of access-key-secret,
 // once the server's signed answer has made it active and enrolment-answer keeps that
-// answer; the caller then writes the runner file and removes access-key-secret.replaced,
+// answer; the caller then writes forager.yaml and removes access-key-secret.replaced,
 // the pending enrolment and the kept answer. Every step is one rename, link or unlink,
 // and the directory is synced after each, so a crash between two leaves one of these
 // states, each of which the same command finishes from the kept answer, at any time and
 // without asking the server, which would refuse the used code:
 //
 //   - before access-key-secret.replaced is made, or after it is made: access-key-secret
-//     and the runner file still hold the old key, if there is one, which runs keep
+//     and forager.yaml still hold the old key, if there is one, which runs keep
 //     using; .new holds the key the answer names, and the finish starts with this
 //     step, removing a .replaced left over first.
-//   - after access-key-secret.new takes the place of access-key-secret, before the
-//     runner file is written: runs fail, the new secret beside the old key's id, and
-//     .replaced holds the old secret, if there was one. The finish writes the runner
+//   - after access-key-secret.new takes the place of access-key-secret, before
+//     forager.yaml is written: runs fail, the new secret beside the old key's id, and
+//     .replaced holds the old secret, if there was one. The finish writes Forager
 //     file and removes .replaced.
-//   - after the runner file names the new key: runs use the new key; the finish removes
+//   - after forager.yaml names the new key: runs use the new key; the finish removes
 //     .replaced.
 //   - after .replaced is removed, or the pending enrolment: the finish removes what is
 //     left.
@@ -533,8 +534,8 @@ func placeKey(dir foragerdir.Dir) error {
 	return afterStep("secret")
 }
 
-// oldKeyName is how the success of a replacement names the old key: its id, as the
-// runner file named it before the enrolment, else the fingerprint of the secret
+// oldKeyName is how the success of a replacement names the old key: its id, as
+// forager.yaml named it before the enrolment, else the fingerprint of the secret
 // access-key-secret.replaced holds, else nothing.
 func oldKeyName(dir foragerdir.Dir, r *config.Forager, newID string) string {
 	if r != nil && r.Server != nil && r.Server.AccessKeyID != "" && r.Server.AccessKeyID != newID {
@@ -565,12 +566,12 @@ func discardKey(dir foragerdir.Dir, key *accesskey.Key, now time.Time) (string, 
 	return dir.MoveNewAside(now)
 }
 
-// refuseFixturePin refuses a 201 whose pin lists the runner contract's published
-// fixture key. --print wrote nothing; otherwise the runner file is left as it is, the
+// refuseFixturePin refuses a 201 whose pin lists the Forager contract's published
+// fixture key. --print wrote nothing; otherwise forager.yaml is left as it is, the
 // secret made for the code is moved aside from access-key-secret.new and the pending
 // enrolment ends, and the message names where that secret went.
 func refuseFixturePin(dir foragerdir.Dir, key *accesskey.Key, print bool, now time.Time) error {
-	const text = "the server's answer lists the runner contract's published fixture key, whose secret anyone can read: it is no server to pin; "
+	const text = "the server's answer lists the Forager contract's published fixture key, whose secret anyone can read: it is no server to pin; "
 	if print {
 		return errors.New(text + "nothing was written")
 	}

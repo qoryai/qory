@@ -1,5 +1,5 @@
-// Package image checks an agent's image against what the runner's contract says an image
-// provides, contracts/runner/v1/README.md §Images of github.com/qoryai/runner: it runs as
+// Package image checks an agent's image against what Forager's contract says an image
+// provides, contracts/forager/v1/README.md §Images of github.com/qoryai/forager: it runs as
 // any user the machine gives it, with HOME a place that user may write; it keeps its
 // authorities in a bundle where the wall reads them; it holds the runtime and the programs
 // an agent delivers its work with; and it needs no setuid program and no capability. An

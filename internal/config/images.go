@@ -26,11 +26,11 @@ type ForagerImage struct {
 	Runtime string
 	// Docker gives the agent a Docker daemon of its own inside the container, which
 	// qory's helper starts before the agent. It needs a Runtime that runs a daemon
-	// without privileges. Experimental: the runner contract's §The wall says why.
+	// without privileges. Experimental: the Forager contract's §The wall says why.
 	Docker bool
 }
 
-// Session is the definition as the runner takes it.
+// Session is the definition as Forager takes it.
 func (i ForagerImage) Session() session.Image {
 	return session.Image{Name: i.Name, Ref: i.Ref, Runtime: i.Runtime, Docker: i.Docker}
 }
@@ -51,7 +51,7 @@ var (
 var imageKeys = []string{"ref", "runtime", "docker"}
 
 // readImages reads wall.images, a mapping from a name to a definition, in the file's
-// order. It refuses what the runner would refuse before a run, a name defined twice and a
+// order. It refuses what Forager would refuse before a run, a name defined twice and a
 // daemon without a runtime among them, so qory config shows it too; which runtimes the
 // engine has is the engine's to say when a run starts.
 func readImages(path string, node *yaml.Node) ([]ForagerImage, error) {

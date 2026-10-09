@@ -9,7 +9,7 @@
   "properties": {
     "version": {"description": "The contract's version.", "const": 1},
     "name": {
-      "description": "The integration's name: the key a machine's configuration declares it under, unless the machine chooses another, and so the name of what it defines there. The key is the name of the runner's credential and of the program qory-<key> of this repository's, so the name is the credential's grammar without the dot.",
+      "description": "The integration's name: the key a machine's configuration declares it under, unless the machine chooses another, and so the name of what it defines there. The key is the name of the gateway's credential and of the program qory-<key> of this repository's, so the name is the credential's grammar without the dot.",
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
     },
@@ -37,7 +37,7 @@
       "propertyNames": {"pattern": "^[a-z][a-z_]{0,63}$"},
       "properties": {
         "credential": {
-          "description": "The runner's credential adapter. The program is started as <program> credential --settings <json> -- <argument> and prints the runner's credential document.",
+          "description": "The gateway's credential adapter. The program is started as <program> credential --settings <json> -- <argument> and prints the gateway's credential document.",
           "type": "object",
           "additionalProperties": false,
           "required": ["argument", "hosts"],

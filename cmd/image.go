@@ -58,8 +58,8 @@ network, and qory's Linux build checks from inside:
 
   - HOME is a directory that user writes in
   - the system's authorities are where the wall reads them
-  - /bin/sh is there, for the runtime's hooks and the runner's API-key approval
-  - claude is the version the runner's descriptor is written against
+  - /bin/sh is there, for the runtime's hooks and the session's API-key approval
+  - claude is the version Forager's descriptor is written against
   - git and gh run
   - dockerd, for a Docker of the agent's own, and what it runs
 
@@ -128,9 +128,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#qorys-images`,
 
 			u := ui.New(cmd.OutOrStdout())
 			u.Title("qory image check", "engine "+platform)
-			claude := rt.Version() + ", the runner's descriptor's"
+			claude := rt.Version() + ", Forager's descriptor's"
 			if rt.Version() == "" {
-				claude = "any version; the runner's descriptor names none"
+				claude = "any version; Forager's descriptor names none"
 			}
 			u.Fields([][2]string{{"probe", ui.Short(helper, "") + ", " + arch}, {"claude", claude}})
 			var failed []string

@@ -17,14 +17,14 @@ import (
 	"github.com/qoryai/qory/internal/foragerdir"
 )
 
-// machineDir is the runner file's directory: everything qory keeps for its server.
+// machineDir is the directory of forager.yaml: everything qory keeps for its server.
 func machineDir() foragerdir.Dir { return foragerdir.Dir(config.UserDir()) }
 
 // keySource says where a run's access key secret came from.
 type keySource int
 
 const (
-	// fromFile is access-key-secret in the runner file's directory.
+	// fromFile is access-key-secret in the directory of forager.yaml.
 	fromFile keySource = iota + 1
 	// fromEnv is QORY_ACCESS_KEY_SECRET.
 	fromEnv
@@ -41,7 +41,7 @@ type accessKey struct {
 
 // readAccessKey reads the access key's secret: the one read from the descriptor
 // --access-key-secret-fd names, when fd is not nil, else QORY_ACCESS_KEY_SECRET, as qory
-// took it when it started, else the file access-key-secret in the runner file's
+// took it when it started, else the file access-key-secret in forager.yaml's
 // directory. A secret that is not one, a file the rules refuse and the published fixture
 // key are errors that never contain the value. No secret anywhere is (nil, nil).
 func readAccessKey(dir foragerdir.Dir, fd *accesskey.Key) (*accessKey, error) {
@@ -115,7 +115,7 @@ type serverIdentity struct {
 	server       string
 }
 
-// identify reads what a command that talks to the runner file's server signs with: the
+// identify reads what a command that talks to forager.yaml's server signs with: the
 // access key's id, which the server section or QORY_ACCESS_KEY_ID holds, its secret,
 // the one read from --access-key-secret-fd when fd is not nil, and this instance's id
 // and name. It prints a line when the instance id cannot be kept in the directory and
@@ -127,7 +127,7 @@ func identify(r *config.Forager, report io.Writer, verb string, fd *accesskey.Ke
 		return nil, input(err)
 	}
 	if r.Server.AccessKeyID == "" {
-		return nil, input(fmt.Errorf("%s: the server has no access_key_id: qory access-key enrol writes it, or set server.access_key_id or %s", config.ForagerFileName, accesskey.EnvID))
+		return nil, input(fmt.Errorf("%s: the server has no access_key_id: qory access-key enrol writes it, or set gateway.server.access_key_id or %s", config.ForagerFileName, accesskey.EnvID))
 	}
 	if key == nil {
 		return nil, input(fmt.Errorf("no access key secret for the server %s: qory access-key enrol makes one, or set %s", r.Server.URL, accesskey.EnvSecret))
@@ -144,13 +144,13 @@ func identify(r *config.Forager, report io.Writer, verb string, fd *accesskey.Ke
 	return id, nil
 }
 
-// sessionServer is the server document the runner takes.
+// sessionServer is the server document Forager takes.
 func sessionServer(s *config.ForagerServer) *session.Server {
 	return &session.Server{Version: 1, URL: s.URL, AccessKeyID: s.AccessKeyID, ApiaryPublicKey: s.Pin}
 }
 
-// refusedError is a refusal of the runner's, said for the person: what it means and what
-// to do, then the runner's own words with the code. It unwraps to the refusal.
+// refusedError is a refusal of Forager's, said for the person: what it means and what
+// to do, then Forager's own words with the code. It unwraps to the refusal.
 type refusedError struct {
 	text string
 	err  error
@@ -160,7 +160,7 @@ func (e *refusedError) Error() string { return e.text + " (" + e.err.Error() + "
 
 func (e *refusedError) Unwrap() error { return e.err }
 
-// explain words a refusal of the server's or the runner's for the person, with the
+// explain words a refusal of the server's or Forager's for the person, with the
 // access key's fingerprint and the instance id where they help. An error that is no
 // refusal is returned as it is.
 func explain(err error, id *serverIdentity) error {
@@ -175,7 +175,7 @@ func explain(err error, id *serverIdentity) error {
 	var text string
 	switch ref.Code {
 	case accesskey.CodeApiaryPublicKeyMissing:
-		text = fmt.Sprintf("the server has no pinned apiary_public_key, so no answer of it could be verified: qory access-key enrol writes it, or set server.apiary_public_key in %s or %s", config.ForagerFileName, accesskey.EnvPin)
+		text = fmt.Sprintf("the server has no pinned apiary_public_key, so no answer of it could be verified: qory access-key enrol writes it, or set gateway.server.apiary_public_key in %s or %s", config.ForagerFileName, accesskey.EnvPin)
 	case accesskey.CodeUnauthorized:
 		text = fmt.Sprintf("the server refused a request signed with the access key %s: it does not know the key, has revoked it, or this machine's clock is more than five minutes off; check the clock, else enrol a new key with qory access-key enrol", fingerprint)
 		// A key of this machine's access-key-secret is one enrol --replace moves from.
@@ -187,7 +187,7 @@ func explain(err error, id *serverIdentity) error {
 			text = fmt.Sprintf("the server refused a request signed with the access key %s: it does not know the key, has revoked it, or this machine's clock is more than five minutes off; check the clock, else move this machine to a new key: qory access-key enrol --replace %s <code>", fingerprint, server)
 		}
 	case accesskey.CodeAnswerUnsigned:
-		text = "an answer of the server does not verify under the pinned apiary_public_key, so the run does not start: check server.url and the pin"
+		text = "an answer of the server does not verify under the pinned apiary_public_key, so the run does not start: check gateway.server.url and the pin"
 	case accesskey.CodeInstanceLimit:
 		text = fmt.Sprintf("the node's live instances have reached its limit, so the instance %s does not start: wait for a run of another instance to end, or have an owner or administrator in Qory Apiary clear that instance", instance)
 	case accesskey.CodeRunClosed:
@@ -301,7 +301,7 @@ func settleMarker(dir foragerdir.Dir, key *accesskey.Key, secrets bool) error {
 }
 
 // newRunID returns a new run id, a UUID version 7 in the canonical lower-case form, so
-// the run's lock file is named before the runner starts.
+// the run's lock file is named before Forager starts.
 func newRunID() string {
 	var b [16]byte
 	binary.BigEndian.PutUint64(b[:8], uint64(time.Now().UnixMilli())<<16)

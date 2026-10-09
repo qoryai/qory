@@ -59,7 +59,7 @@ esac
 	return log
 }
 
-// imageForager writes the machine's runner file with a wall whose helper is helper, and
+// imageForager writes the machine's forager.yaml with a wall whose helper is helper, and
 // image as wall.image when it is not empty.
 func imageForager(t *testing.T, helper, image string) {
 	t.Helper()
@@ -67,13 +67,13 @@ func imageForager(t *testing.T, helper, image string) {
 	if image != "" {
 		wall += "  image: " + image + "\n"
 	}
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "apiVersion: qory.dev/v1alpha1\n"+wall)
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\n"+wall)
 }
 
-// TestImageCheckChecksTheMachinesImage checks wall.image of the runner file with no
+// TestImageCheckChecksTheMachinesImage checks wall.image of forager.yaml with no
 // argument: the lines from outside and from the probe print, the fact that neither
 // passes nor fails prints as a field, and the probe runs as the wall runs an agent, with
-// the version the runner's descriptor for claude names.
+// the version Forager's descriptor for claude names.
 func TestImageCheckChecksTheMachinesImage(t *testing.T) {
 	emptyDir(t)
 	log := fakeImageDocker(t)
@@ -183,7 +183,7 @@ func TestImageCheckReadsANameOfWallImages(t *testing.T) {
 	emptyDir(t)
 	log := fakeImageDocker(t)
 	helper := staticELF(t)
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), `apiVersion: qory.dev/v1alpha1
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), `apiVersion: qory.dev/v1alpha1
 wall:
   adapter: docker
   helper: `+helper+`

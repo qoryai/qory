@@ -11,7 +11,7 @@ import (
 
 // TestDeclaredEgressReachesTheRun checks declared egress end to end: the modules'
 // declarations are unioned in the report with the runtime's own host under the runtime's
-// name, the inspect shows them, and qory run passes the hosts to the runner, which records
+// name, the inspect shows them, and qory run passes the hosts to Forager, which records
 // them as harness_hosts beside the policy's own list and leaves that list as it is.
 func TestDeclaredEgressReachesTheRun(t *testing.T) {
 	root := newCheckout(t)
@@ -35,7 +35,7 @@ func TestDeclaredEgressReachesTheRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	wants(t, out, "Egress", "api.example.com", "core, web", "api.anthropic.com", "claude")
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "apiVersion: qory.dev/v1alpha1\negress:\n  mode: enforce\n  allow: [api.anthropic.com, \"*.example.com\", other.example.org]\n")
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\ngateway:\n  egress:\n    mode: enforce\n    allow: [api.anthropic.com, \"*.example.com\", other.example.org]\n")
 	t.Setenv("QORY_TEST_EXIT", "0")
 	if out, err := run(t, "run"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -71,7 +71,7 @@ func TestAnEmptyDeclarationStillHasTheRuntime(t *testing.T) {
 	wants(t, string(data), `"egress": [`, `"host": "api.anthropic.com"`, `"modules": [
         "claude"
       ]`)
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "apiVersion: qory.dev/v1alpha1\negress:\n  mode: enforce\n  allow: [api.anthropic.com, \"*.example.com\"]\n")
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\ngateway:\n  egress:\n    mode: enforce\n    allow: [api.anthropic.com, \"*.example.com\"]\n")
 	t.Setenv("QORY_TEST_EXIT", "0")
 	if out, err := run(t, "run"); err != nil {
 		t.Fatalf("%v\n%s", err, out)

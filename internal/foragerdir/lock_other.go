@@ -11,7 +11,7 @@ import (
 func ownedByMe(os.FileInfo) bool { return true }
 
 // errNoLocks is the error of a system without flock.
-var errNoLocks = errors.New("this system has no file locks, which the runner file's directory needs")
+var errNoLocks = errors.New("this system has no file locks, which the directory of forager.yaml needs")
 
 func flock(*os.File, bool, bool) error { return errNoLocks }
 

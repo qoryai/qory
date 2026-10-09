@@ -9,8 +9,9 @@ administrator in Qory Apiary created. The code is valid for 15 minutes and used 
 
 qory makes the key, keeps its secret in access-key-secret.new, prints its fingerprint
 and sends the server the public key. The server's signed answer gives the key its id:
-qory moves the secret to access-key-secret and writes the id into the server section of
-runner.yaml, with the server's URL and its public key where the section has none yet.
+qory moves the secret to access-key-secret and writes the id into gateway.server of
+forager.yaml, with the server's URL and its public key where gateway.server has
+none yet.
 The key is active from that answer on: runs can start. qory keeps the answer in
 enrolment-answer until the enrolment is finished: should the command stop after the
 answer came, the same command finishes it on this machine, at any time, without asking
@@ -25,20 +26,20 @@ with that key.
 
 --replace moves this machine to a new key, and the old key stays in use until the new
 one is active. qory makes the new key in access-key-secret.new and enrols it, leaving
-access-key-secret and runner.yaml as they are, so an enrolment that fails leaves the
+access-key-secret and forager.yaml as they are, so an enrolment that fails leaves the
 old key working. Once the server's signed answer has come, the new secret takes the old
-one's place, runner.yaml names the new key, and the old secret is removed. The old
+one's place, forager.yaml names the new key, and the old secret is removed. The old
 key still works on Qory Apiary until an owner or administrator revokes it on the node's
 page, unless it is revoked already. Before the server's answer, the same command within
 the code's 15 minutes retries; after it, the same command finishes the replacement on
 this machine, at any time. On a machine without a key, --replace enrols as the command
 does without it.
 
-The key's name is instance.name of runner.yaml, else this machine's host name.
+The key's name is session.instance.name of forager.yaml, else this machine's host name.
 
 --print writes no key or setting and prints QORY_ACCESS_KEY_ID, QORY_ACCESS_KEY_SECRET
 and QORY_APIARY_PUBLIC_KEY for a CI's settings. Only the secret belongs in its secret
-store. The key is for another machine, so the server and the pin of runner.yaml do not
+store. The key is for another machine, so the server and the pin of forager.yaml do not
 apply; the code is checked against QORY_APIARY_PUBLIC_KEY when it is set.
 
 --verbose adds nothing here.

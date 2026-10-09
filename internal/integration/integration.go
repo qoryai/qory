@@ -4,7 +4,7 @@
 // started as <program> <role> --settings <json> -- [the role's own arguments].
 // [Describe] runs the program and reads its answer, [Description.CheckSettings] checks
 // a settings document against it, and [CredentialAdapter] is the credential role's
-// adapter, a runner definition's adapter word for word. The package contains no table of
+// adapter, a gateway credential definition's adapter word for word. The package contains no table of
 // integrations: what one takes and does is defined by its description, so Qory's own
 // qory-<name> programs and a machine's own are read the same way.
 //
@@ -34,10 +34,9 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 )
 
-// descriptionSchema is contracts/integration/v1/description.schema.json of
-// github.com/qoryai/integrations at v0.1.0, copied with the roles description cut to
-// what a reader does, and the domains description to what the field is. A new revision
-// of the contract is copied over it, with its version written here.
+// descriptionSchema is a copy of contracts/integration/v1/description.schema.json of
+// github.com/qoryai/integrations, byte for byte. A new revision of the contract is
+// copied over it.
 //
 //go:embed description.schema.json
 var descriptionSchema []byte
@@ -78,7 +77,7 @@ type Description struct {
 	secrets  []string // the settings' writeOnly properties, sorted
 }
 
-// Credential is the credential role of a description: what the runner definition it
+// Credential is the credential role of a description: what Forager definition it
 // expands to contains beside its adapter.
 type Credential struct {
 	// Argument is a regular expression, RE2, the policy's argument matches whole.
@@ -101,7 +100,7 @@ var contract = sync.OnceValues(func() (*jsonschema.Schema, error) {
 	return c.Compile(descriptionURL)
 })
 
-// Describe runs program describe, as the runner starts an adapter: with this process's
+// Describe runs program describe, as Forager starts an adapter: with this process's
 // environment, no standard input, and / as its working directory. program is a path.
 // The program runs in a process group of its own, and the whole group is stopped when
 // describe returns, so no process of its group outlives it. Describe refuses a program
@@ -112,7 +111,7 @@ func Describe(ctx context.Context, program string) (*Description, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, program, "describe")
 	cmd.Dir = "/"
-	// The access key's variables are the runner's alone: describe never receives them.
+	// The access key's variables are Forager's alone: describe never receives them.
 	cmd.Env = accesskey.WithoutVariables(os.Environ())
 	stdout, stderr := &capped{}, &capped{}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
@@ -255,9 +254,9 @@ func (d *Description) CheckSettings(settings []byte) error {
 	return nil
 }
 
-// CredentialAdapter is the adapter of the runner definition the credential role
+// CredentialAdapter is the adapter of Forager definition the credential role
 // expands to: <program> credential --settings <json> -- ${argument}, with every $ of
-// the settings written as [DollarEscape], JSON's escape for it, since the runner
+// the settings written as [DollarEscape], JSON's escape for it, since Forager
 // replaces ${argument} wherever it stands in an argument and a setting reaches the
 // program as it was written.
 func CredentialAdapter(program string, settings []byte) []string {
@@ -265,7 +264,7 @@ func CredentialAdapter(program string, settings []byte) []string {
 }
 
 // DollarEscape is JSON's escape for $, the six characters backslash, u, 0, 0, 2 and 4,
-// which a JSON reader reads as $ and the runner's ${argument} never matches.
+// which a JSON reader reads as $ and Forager's ${argument} never matches.
 const DollarEscape = `\` + "u0024"
 
 // draft2020 is the one JSON Schema draft a settings schema is written in, the one its

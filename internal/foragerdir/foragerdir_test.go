@@ -14,10 +14,10 @@ import (
 	"github.com/qoryai/qory/internal/foragerdir"
 )
 
-// fixtureSecret is the runner contract's published fixture access key secret.
+// fixtureSecret is the Forager contract's published fixture access key secret.
 const fixtureSecret = "qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA"
 
-// newDir is a runner file's directory of the test's own, mode 0700.
+// newDir is a forager.yaml directory of the test's own, mode 0700.
 func newDir(t *testing.T) foragerdir.Dir {
 	t.Helper()
 	d := foragerdir.Dir(filepath.Join(t.TempDir(), "qory"))

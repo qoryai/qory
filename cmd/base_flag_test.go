@@ -164,7 +164,7 @@ func TestHarnessYamlIsTheDocumentsOtherName(t *testing.T) {
 }
 
 // TestWorktreeAddTakesTheBaseFromTheFlag is the runner adding a worktree of a fleet
-// checkout: -f names the base the worktree's document composes on, the runner's own
+// checkout: -f names the base the worktree's document composes on, Forager's own
 // qory.yaml names the runtime, and the worktree comes out composed. Without the flag
 // the document is found and refused for lacking a base, with the worktree kept; -f
 // beside --no-compose is an input error.

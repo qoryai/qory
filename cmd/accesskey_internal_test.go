@@ -21,7 +21,7 @@ import (
 	"github.com/qoryai/qory/internal/foragerdir"
 )
 
-// contractFile reads one file of the runner contract, by its path under runner/v1.
+// contractFile reads one file of the Forager contract, by its path under forager/v1.
 func contractFile(t *testing.T, name string) []byte {
 	t.Helper()
 	b, err := fs.ReadFile(contracts.FS, name)
@@ -202,7 +202,7 @@ func TestKeyCommandsRefuseAFixtureKey(t *testing.T) {
 	if err := os.MkdirAll(string(dir), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(dir.Path("runner.yaml"), []byte("instance:\n  name: build-01\n"), 0o600); err != nil {
+	if err := os.WriteFile(dir.Path("forager.yaml"), []byte("session:\n  instance:\n    name: build-01\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"enrol", srv.URL, code}, {"enrol", "--print", srv.URL, code}} {
@@ -212,7 +212,7 @@ func TestKeyCommandsRefuseAFixtureKey(t *testing.T) {
 		root.SetOut(&out)
 		root.SetErr(&out)
 		err := root.Execute()
-		if err == nil || !strings.Contains(err.Error(), "the new key is one of the runner contract's published fixture keys, whose secret anyone can read; no key was kept") {
+		if err == nil || !strings.Contains(err.Error(), "the new key is one of the Forager contract's published fixture keys, whose secret anyone can read; no key was kept") {
 			t.Errorf("%v: %v", args, err)
 		}
 		if strings.Contains(out.String(), fixture.Secret()) || strings.Contains(out.String(), fixture.Fingerprint()) {

@@ -21,7 +21,7 @@ import (
 )
 
 // integrationKey is the grammar of an integration's key, the integration contract's
-// name: the runner's credential name without the dot, which a program's name, qory-<key>,
+// name: Forager's credential name without the dot, which a program's name, qory-<key>,
 // would read as an extension.
 var integrationKey = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
@@ -51,17 +51,17 @@ type ForagerIntegration struct {
 // program's description by [Forager.Expand], which runs the program.
 func readIntegrations(path string, node *yaml.Node) ([]ForagerIntegration, error) {
 	if node.Kind != yaml.MappingNode {
-		return nil, fmt.Errorf("%s: integrations is a mapping from a name to an integration", path)
+		return nil, fmt.Errorf("%s: gateway.integrations is a mapping from a name to an integration", path)
 	}
 	var out []ForagerIntegration
 	seen := map[string]bool{}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := node.Content[i].Value
 		if !integrationKey.MatchString(key) {
-			return nil, fmt.Errorf("%s: integrations: %q is not 1 to 64 of a-z, 0-9, underscore and dash, starting with a letter or a digit", path, key)
+			return nil, fmt.Errorf("%s: gateway.integrations: %q is not 1 to 64 of a-z, 0-9, underscore and dash, starting with a letter or a digit", path, key)
 		}
 		if seen[key] {
-			return nil, fmt.Errorf("%s: integrations.%s is declared twice", path, key)
+			return nil, fmt.Errorf("%s: gateway.integrations.%s is declared twice", path, key)
 		}
 		seen[key] = true
 		in := ForagerIntegration{Key: key, Program: ProgramPrefix + key, Settings: []byte("{}")}
@@ -71,30 +71,30 @@ func readIntegrations(path string, node *yaml.Node) ([]ForagerIntegration, error
 			continue
 		}
 		if entry.Kind != yaml.MappingNode {
-			return nil, fmt.Errorf("%s: integrations.%s is a mapping: program and settings", path, key)
+			return nil, fmt.Errorf("%s: gateway.integrations.%s is a mapping: program and settings", path, key)
 		}
 		for k := 0; k+1 < len(entry.Content); k += 2 {
 			value := entry.Content[k+1]
 			switch name := entry.Content[k].Value; name {
 			case "program":
 				if value.Kind != yaml.ScalarNode || value.ShortTag() != "!!str" || value.Value == "" {
-					return nil, fmt.Errorf("%s: integrations.%s.program is a path or a name on the PATH", path, key)
+					return nil, fmt.Errorf("%s: gateway.integrations.%s.program is a path or a name on the PATH", path, key)
 				}
 				if strings.ContainsRune(value.Value, '/') && !filepath.IsAbs(value.Value) {
-					return nil, fmt.Errorf("%s: integrations.%s.program %q is not an absolute path; set program to an absolute path or a name on the PATH", path, key, value.Value)
+					return nil, fmt.Errorf("%s: gateway.integrations.%s.program %q is not an absolute path; set program to an absolute path or a name on the PATH", path, key, value.Value)
 				}
 				in.Program = value.Value
 			case "settings":
 				if value.Kind != yaml.MappingNode {
-					return nil, fmt.Errorf("%s: integrations.%s.settings is a mapping, the settings document", path, key)
+					return nil, fmt.Errorf("%s: gateway.integrations.%s.settings is a mapping, the settings document", path, key)
 				}
 				var b bytes.Buffer
 				if err := writeJSON(&b, value, "settings"); err != nil {
-					return nil, fmt.Errorf("%s: integrations.%s.%w", path, key, err)
+					return nil, fmt.Errorf("%s: gateway.integrations.%s.%w", path, key, err)
 				}
 				in.Settings = b.Bytes()
 			default:
-				return nil, fmt.Errorf("%s: integrations.%s: key %q is not one", path, key, name)
+				return nil, fmt.Errorf("%s: gateway.integrations.%s: key %q is not one", path, key, name)
 			}
 		}
 		out = append(out, in)
@@ -223,7 +223,7 @@ func (r *Forager) Expand(ctx context.Context, e Expansion) error {
 			continue
 		}
 		fail := func(format string, a ...any) error {
-			return fmt.Errorf("%s: integrations.%s: %s", r.File, in.Key, fmt.Sprintf(format, a...))
+			return fmt.Errorf("%s: gateway.integrations.%s: %s", r.File, in.Key, fmt.Sprintf(format, a...))
 		}
 		found, err := program(in.Program, e.Workspace)
 		if err != nil {

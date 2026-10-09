@@ -65,11 +65,11 @@ var ProbeChecks = []string{"home", "authorities", "shell", "claude", "git", "gh"
 
 // Bundles are where the wall reads an image's authorities, the first that holds a
 // certificate: Debian and Alpine, Red Hat, OpenSUSE, and OpenSSL's default. The wall's own
-// list is unexported; this is a copy of the runner's at the version go.mod requires.
+// list is unexported; this is a copy of Forager's at the version go.mod requires.
 var Bundles = []string{"/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt", "/etc/ssl/ca-bundle.pem", "/etc/ssl/cert.pem"}
 
-// SystemDirs are the directories the runner looks for dockerd in, and gives the daemon as
-// its PATH, never the run's. A copy of the runner's list.
+// SystemDirs are the directories Forager looks for dockerd in, and gives the daemon as
+// its PATH, never the run's. A copy of Forager's list.
 var SystemDirs = []string{"/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin"}
 
 // daemonRuns are the programs the daemon runs, which it finds in [SystemDirs]: containerd
@@ -91,7 +91,7 @@ type Probe struct {
 	// Exec runs a program of the image, by its path under Root, and returns what it
 	// printed on both streams. Nil runs it with [ProgramWait] as its limit.
 	Exec func(ctx context.Context, program string, args ...string) ([]byte, error)
-	// Claude is the version claude --version must report, the runner's descriptor's
+	// Claude is the version claude --version must report, Forager's descriptor's
 	// runtime_version; empty takes any.
 	Claude string
 	// User is the user the probe runs as, uid:gid, as the lines name it.
@@ -165,12 +165,12 @@ func (p Probe) authorities() Check {
 }
 
 // shell checks for /bin/sh, which a runtime's hooks run under, as sh -c, and the
-// runner's approval of an API key's placeholder for an interactive Claude Code, as
+// session's approval of an API key's placeholder for an interactive Claude Code, as
 // /bin/sh and the script it writes into the run directory.
 func (p Probe) shell() Check {
 	info, err := os.Stat(p.host("/bin/sh"))
 	if err != nil || !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
-		return Check{"shell", Fail, "no /bin/sh; the runtime's hooks and the runner's API-key approval run under sh"}
+		return Check{"shell", Fail, "no /bin/sh; the runtime's hooks and the session's API-key approval run under sh"}
 	}
 	return Check{"shell", Pass, "/bin/sh runs the runtime's hooks and the API-key approval"}
 }
@@ -180,7 +180,7 @@ func (p Probe) shell() Check {
 var version = regexp.MustCompile(`\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?`)
 
 // claude checks that claude is on the image's PATH, where the wall's launch finds it,
-// and reports the version the runner's descriptor is written against.
+// and reports the version Forager's descriptor is written against.
 func (p Probe) claude(ctx context.Context) Check {
 	out, where, err := p.run(ctx, "claude", "--version")
 	if err != nil {
@@ -191,12 +191,12 @@ func (p Probe) claude(ctx context.Context) Check {
 		if got == "" {
 			got = strconv.Quote(out)
 		}
-		return Check{"claude", Fail, fmt.Sprintf("claude at %s is %s, and the runner's descriptor is written against %s; install @anthropic-ai/claude-code@%s", where, got, p.Claude, p.Claude)}
+		return Check{"claude", Fail, fmt.Sprintf("claude at %s is %s, and Forager's descriptor is written against %s; install @anthropic-ai/claude-code@%s", where, got, p.Claude, p.Claude)}
 	}
 	if p.Claude == "" {
 		return Check{"claude", Pass, fmt.Sprintf("claude at %s is %s", where, got)}
 	}
-	return Check{"claude", Pass, fmt.Sprintf("claude at %s is %s, the version the runner's descriptor is written against", where, got)}
+	return Check{"claude", Pass, fmt.Sprintf("claude at %s is %s, the version Forager's descriptor is written against", where, got)}
 }
 
 // program checks that a program is on the image's PATH and answers --version.
@@ -254,7 +254,7 @@ func (p Probe) lookPath(name string, dirs []string) string {
 }
 
 // docker reports whether the image can carry a Docker of the agent's own: dockerd and
-// every program it runs in [SystemDirs], where the runner looks for the daemon and which
+// every program it runs in [SystemDirs], where Forager looks for the daemon and which
 // it gives the daemon as its PATH, and the docker command on the image's PATH, where
 // the agent finds it.
 func (p Probe) docker() Check {

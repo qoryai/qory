@@ -108,12 +108,12 @@ func TestRunFixesNoNameTheReportMarks(t *testing.T) {
 	}
 }
 
-// walledForager writes a runner file whose wall is a program standing in for docker, and
+// walledForager writes a forager.yaml whose wall is a program standing in for docker, and
 // returns that program's log, which stays absent until the wall runs a command.
 func walledForager(t *testing.T) string {
 	t.Helper()
 	docker, log := fakeDocker(t)
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "runner.yaml"), "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
 	return log
 }
 

@@ -133,10 +133,10 @@ func (s *enrolServer) sent() []accesskey.EnrolmentRequest {
 	return append([]accesskey.EnrolmentRequest(nil), s.requests...)
 }
 
-// foragerFile is the path of the test environment's runner file.
+// foragerFile is the path of the test environment's forager.yaml.
 func foragerFile() string { return filepath.Join(string(configDir()), config.ForagerFileName) }
 
-// readForagerFile reads the runner file.
+// readForagerFile reads forager.yaml.
 func readForagerFile(t *testing.T) string {
 	t.Helper()
 	b, err := os.ReadFile(foragerFile())
@@ -182,23 +182,26 @@ func movedAside(t *testing.T) int {
 	return len(old)
 }
 
-// commentedForager is a runner file with comments and sections enrol leaves alone.
-const commentedForager = `# This machine's runner file.
+// commentedForager is a forager.yaml with comments and sections enrol leaves alone.
+// Its gateway section comes last, so a test can add to it.
+const commentedForager = `# This machine's forager.yaml.
 apiVersion: qory.dev/v1alpha1
-egress:
-  mode: observe  # everything, for now
-# The name the server shows.
-instance:
-  name: build-01
-run:
-  timeout: 5h
+session:
+  # The name the server shows.
+  instance:
+    name: build-01
+  run:
+    timeout: 5h
+gateway:
+  egress:
+    mode: observe  # everything, for now
 `
 
 // TestEnrolWritesTheServerSectionAndKeepsTheRest is an enrolment with a code typed in
 // groups: qory writes the marker and the secret, mode 0600, in the directory made
 // mode 0700, prints the fingerprint before it posts, sends the normalised code, the
-// name instance.name sets and the User-Agent of the runner's requests, then writes the
-// server's URL, the key's id and the pin into the runner file, keeping its comments and
+// name session.instance.name sets and the User-Agent of Forager's requests, then writes the
+// server's URL, the key's id and the pin into forager.yaml, keeping its comments and
 // every other key, and removes the pending enrolment.
 func TestEnrolWritesTheServerSectionAndKeepsTheRest(t *testing.T) {
 	emptyDir(t)
@@ -218,7 +221,7 @@ func TestEnrolWritesTheServerSectionAndKeepsTheRest(t *testing.T) {
 		"enrolled as ak_0123456789abcdef in the node nd_0123456789abcdef\n" +
 		"stored secrets: no\n" +
 		"the key is active: runs can start\n" +
-		"wrote server.url, server.access_key_id and server.apiary_public_key to " + foragerFile() + "\n"; errOut != want {
+		"wrote gateway.server.url, gateway.server.access_key_id and gateway.server.apiary_public_key to " + foragerFile() + "\n"; errOut != want {
 		t.Errorf("stderr\n%s\nwant\n%s", errOut, want)
 	}
 	if strings.Contains(out+errOut, key.Secret()) {
@@ -244,9 +247,9 @@ func TestEnrolWritesTheServerSectionAndKeepsTheRest(t *testing.T) {
 		t.Error("enrolment-pending is still there")
 	}
 	got := readForagerFile(t)
-	wants(t, got, "# This machine's runner file.", "mode: observe # everything, for now", "# The name the server shows.", "name: build-01", "timeout: 5h",
-		"server:\n  url: "+srv.URL+"\n  access_key_id: ak_0123456789abcdef\n  apiary_public_key:\n    - {alg: ed25519, public_key: "+srv.signer.PublicKey().String()+"}\n")
-	if strings.Index(got, "egress:") > strings.Index(got, "instance:") || strings.Index(got, "instance:") > strings.Index(got, "run:") {
+	wants(t, got, "# This machine's forager.yaml.", "mode: observe # everything, for now", "# The name the server shows.", "name: build-01", "timeout: 5h",
+		"gateway:\n  egress:\n    mode: observe # everything, for now\n  server:\n    url: "+srv.URL+"\n    access_key_id: ak_0123456789abcdef\n    apiary_public_key:\n      - {alg: ed25519, public_key: "+srv.signer.PublicKey().String()+"}\n")
+	if strings.Index(got, "instance:") > strings.Index(got, "run:") || strings.Index(got, "run:") > strings.Index(got, "gateway:") {
 		t.Errorf("the sections moved:\n%s", got)
 	}
 	r, err := config.LoadForager()
@@ -254,12 +257,59 @@ func TestEnrolWritesTheServerSectionAndKeepsTheRest(t *testing.T) {
 		t.Fatal(err)
 	}
 	if r.Server.URL != srv.URL || r.Server.AccessKeyID != "ak_0123456789abcdef" || len(r.Server.Pin) != 1 || r.InstanceName != "build-01" || r.Timeout.Hours() != 5 {
-		t.Errorf("the runner file reads as %+v, %+v", r, r.Server)
+		t.Errorf("forager.yaml reads as %+v, %+v", r, r.Server)
+	}
+}
+
+// TestEnrolWritesTheServerUnderTheGatewaySection is an enrolment into a forager.yaml
+// without a gateway section, which gains one at its end holding server, and into one
+// whose gateway section holds egress and credentials with their comments, which keeps
+// them and gains server after them, before the session section.
+func TestEnrolWritesTheServerUnderTheGatewaySection(t *testing.T) {
+	emptyDir(t)
+	srv := newEnrolServer(t)
+	server := "  server:\n    url: " + srv.URL + "\n    access_key_id: ak_0123456789abcdef\n    apiary_public_key:\n      - {alg: ed25519, public_key: " + srv.signer.PublicKey().String() + "}\n"
+	withGateway := "apiVersion: qory.dev/v1alpha1\n" +
+		"gateway:\n" +
+		"  # The hosts the agent reaches.\n" +
+		"  egress:\n" +
+		"    mode: enforce\n" +
+		"    allow: [api.example.com]\n" +
+		"  credentials:\n" +
+		"    tracker: # the tracker's token\n" +
+		"      env: TRACKER_TOKEN\n" +
+		"      hosts: [tracker.example.com]\n" +
+		"      auth: {scheme: bearer}\n" +
+		"session:\n" +
+		"  instance:\n" +
+		"    name: build-01\n"
+	for i, c := range []struct{ name, file, want string }{
+		{"no gateway section", "session:\n  instance:\n    name: build-01\n", "session:\n  instance:\n    name: build-01\ngateway:\n" + server},
+		{"a gateway section with egress and credentials", withGateway, strings.Replace(withGateway, "session:\n", server+"session:\n", 1)},
+	} {
+		os.RemoveAll(string(configDir()))
+		writeFile(t, foragerFile(), c.file)
+		if out, err := run(t, "access-key", "enrol", srv.URL, srv.code(byte(i+1), false)); err != nil {
+			t.Fatalf("%s: %v\n%s", c.name, err, out)
+		}
+		if got := readForagerFile(t); got != c.want {
+			t.Errorf("%s: forager.yaml\n%s\nwant\n%s", c.name, got, c.want)
+		}
+		r, err := config.LoadForager()
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if r.Server == nil || r.Server.URL != srv.URL || r.Server.AccessKeyID != "ak_0123456789abcdef" || len(r.Server.Pin) != 1 || r.InstanceName != "build-01" {
+			t.Errorf("%s: forager.yaml reads as %+v", c.name, r)
+		}
+		if i == 1 && (r.Egress == nil || r.Egress.Mode != "enforce" || len(r.Credentials) != 1 || r.Credentials[0].Name != "tracker") {
+			t.Errorf("%s: the gateway's other keys read as %+v and %+v", c.name, r.Egress, r.Credentials)
+		}
 	}
 }
 
 // TestEnrolCreatesTheForagerFileAndPinsOnlyTheCodesKeys is an enrolment on a machine
-// with no runner file during a rotation of the server's key: the answer lists both of
+// with no forager.yaml during a rotation of the server's key: the answer lists both of
 // the server's keys, and the code carries the current key's fingerprint alone, so the
 // new file, mode 0600, pins that key alone. A node pool is said as such.
 func TestEnrolCreatesTheForagerFileAndPinsOnlyTheCodesKeys(t *testing.T) {
@@ -273,11 +323,11 @@ func TestEnrolCreatesTheForagerFileAndPinsOnlyTheCodesKeys(t *testing.T) {
 	}
 	wants(t, out, "in the node pool np_0123456789abcdef", "the key is active: runs can start")
 	if m := mode(t, foragerFile()); m != 0o600 {
-		t.Errorf("the runner file is mode %v", m)
+		t.Errorf("forager.yaml is mode %v", m)
 	}
 	got := readForagerFile(t)
-	if !strings.HasPrefix(got, "apiVersion: qory.dev/v1alpha1\nserver:\n") || strings.Contains(got, srv.next.PublicKey().String()) {
-		t.Errorf("the runner file:\n%s", got)
+	if !strings.HasPrefix(got, "apiVersion: qory.dev/v1alpha1\ngateway:\n  server:\n") || strings.Contains(got, srv.next.PublicKey().String()) {
+		t.Errorf("forager.yaml:\n%s", got)
 	}
 	r, err := config.LoadForager()
 	if err != nil {
@@ -295,21 +345,21 @@ func TestEnrolKeepsThePinThereIs(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
 	srv.rotate = true
-	before := "server:\n  url: " + srv.URL + "  # the server\n  apiary_public_key: " + pinLine(srv.signer) + "  # pinned by hand\n  access_key_id: ak_0000000000000000\ninstance:\n  name: build-01\n"
+	before := "gateway:\n  server:\n    url: " + srv.URL + "  # the server\n    apiary_public_key: " + pinLine(srv.signer) + "  # pinned by hand\n    access_key_id: ak_0000000000000000\nsession:\n  instance:\n    name: build-01\n"
 	writeFile(t, foragerFile(), before)
 	out, err := run(t, "access-key", "enrol", srv.URL, srv.code(2, true))
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "wrote server.access_key_id to "+foragerFile())
+	wants(t, out, "wrote gateway.server.access_key_id to "+foragerFile())
 	got := readForagerFile(t)
 	if strings.Contains(got, srv.next.PublicKey().String()) || !strings.Contains(got, "# pinned by hand") || !strings.Contains(got, "access_key_id: ak_0123456789abcdef") || strings.Contains(got, "ak_0000000000000000") {
-		t.Errorf("the runner file:\n%s", got)
+		t.Errorf("forager.yaml:\n%s", got)
 	}
 }
 
 // TestEnrolRefusesBeforeItMakesAKey is each refusal that comes before a key is made: a
-// code for a server the pin does not name, another server than the runner file's, a
+// code for a server the pin does not name, another server than forager.yaml's, a
 // code that is not one, a server that is not https, the access key's id or the pin in
 // the environment, and a run without a wall that is live. Nothing is written and
 // nothing is sent.
@@ -317,7 +367,7 @@ func TestEnrolRefusesBeforeItMakesAKey(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
 	other := newKey(t)
-	pinned := "server:\n  url: " + srv.URL + "\n  apiary_public_key: " + pinLine(other) + "\ninstance:\n  name: build-01\n"
+	pinned := "gateway:\n  server:\n    url: " + srv.URL + "\n    apiary_public_key: " + pinLine(other) + "\nsession:\n  instance:\n    name: build-01\n"
 	for _, c := range []struct {
 		name, file string
 		env        map[string]string
@@ -325,10 +375,10 @@ func TestEnrolRefusesBeforeItMakesAKey(t *testing.T) {
 		want       string
 	}{
 		{"another server's code", pinned, nil, []string{srv.URL, srv.code(1, false)}, "the enrolment code is for a server whose key this machine does not pin: the code is from another server, or the pin is out of date"},
-		{"another server's code, the pin from the environment", "instance:\n  name: build-01\n", map[string]string{"QORY_APIARY_PUBLIC_KEY": `[{"alg":"ed25519","public_key":"` + other.PublicKey().String() + `"}]`}, []string{"--print", srv.URL, srv.code(1, false)}, "the enrolment code is for a server whose key this machine does not pin"},
-		{"another server", "server:\n  url: https://apiary.example\n", nil, []string{srv.URL, srv.code(1, false)}, foragerFile() + " names the server https://apiary.example, and this command " + srv.URL + ": enrol with the server runner.yaml names, or change its server.url first"},
+		{"another server's code, the pin from the environment", "session:\n  instance:\n    name: build-01\n", map[string]string{"QORY_APIARY_PUBLIC_KEY": `[{"alg":"ed25519","public_key":"` + other.PublicKey().String() + `"}]`}, []string{"--print", srv.URL, srv.code(1, false)}, "the enrolment code is for a server whose key this machine does not pin"},
+		{"another server", "gateway:\n  server:\n    url: https://apiary.example\n", nil, []string{srv.URL, srv.code(1, false)}, foragerFile() + " names the server https://apiary.example, and this command " + srv.URL + ": enrol with the server forager.yaml names, or change its gateway.server.url first"},
 		{"not a code", "", nil, []string{srv.URL, "qec_F1XT0RE000000000000000000U." + srv.signer.Fingerprint()}, "which is not a character of Crockford's base32"},
-		{"plain http elsewhere", "", nil, []string{"http://apiary.example", srv.code(1, false)}, `server.url "http://apiary.example" is http to a host that is not this machine`},
+		{"plain http elsewhere", "", nil, []string{"http://apiary.example", srv.code(1, false)}, `gateway.server.url "http://apiary.example" is http to a host that is not this machine`},
 		{"a path", "", nil, []string{"https://apiary.example/x", srv.code(1, false)}, "is more than a scheme and a host"},
 		{"http to another loopback address", "", nil, []string{"http://127.0.0.2:8080", srv.code(1, false)}, "the server http://127.0.0.2:8080 is http to a host other than localhost, 127.0.0.1 or [::1], which enrolment does not reach; use https"},
 		{"the id in the environment", "", map[string]string{"QORY_ACCESS_KEY_ID": "ak_0123456789abcdef"}, []string{srv.URL, srv.code(1, false)}, "QORY_ACCESS_KEY_ID is set, and qory access-key enrol keeps the key in this machine's files, which it would contradict: unset it, or use --print"},
@@ -363,7 +413,7 @@ func TestEnrolRefusesBeforeItMakesAKey(t *testing.T) {
 
 	// A run without a wall that is live: its lock is held.
 	os.RemoveAll(string(configDir()))
-	writeFile(t, foragerFile(), "instance:\n  name: build-01\n")
+	writeFile(t, foragerFile(), "session:\n  instance:\n    name: build-01\n")
 	lock, err := configDir().LockRun("0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f", false)
 	if err != nil {
 		t.Fatal(err)
@@ -383,12 +433,12 @@ func TestEnrolRefusesBeforeItMakesAKey(t *testing.T) {
 // TestEnrolRetriesWithTheSameKey is an answer that does not verify, an unsigned 429
 // and a signed 201 under another key, and then the same code again: each keeps the new
 // secret in access-key-secret.new and the pending enrolment, writes no access-key-secret
-// and nothing into the runner file, and the retry sends the same public key. Another code then is refused and keeps the enrolled
+// and nothing into forager.yaml, and the retry sends the same public key. Another code then is refused and keeps the enrolled
 // key.
 func TestEnrolRetriesWithTheSameKey(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
-	writeFile(t, foragerFile(), "instance:\n  name: build-01\n")
+	writeFile(t, foragerFile(), "session:\n  instance:\n    name: build-01\n")
 	code := srv.code(3, false)
 	dir := configDir()
 	for _, c := range []struct {
@@ -411,8 +461,8 @@ func TestEnrolRetriesWithTheSameKey(t *testing.T) {
 		if exists(dir.Path(foragerdir.SecretFile)) || !exists(dir.Path(foragerdir.NewSecretFile)) || !exists(dir.Path(foragerdir.PendingFile)) || movedAside(t) != 0 {
 			t.Errorf("%s: the new secret or the pending enrolment is gone, or access-key-secret was written", c.name)
 		}
-		if got := readForagerFile(t); got != "instance:\n  name: build-01\n" {
-			t.Errorf("%s: the runner file changed:\n%s", c.name, got)
+		if got := readForagerFile(t); got != "session:\n  instance:\n    name: build-01\n" {
+			t.Errorf("%s: forager.yaml changed:\n%s", c.name, got)
 		}
 	}
 	srv.status, srv.body, srv.signBy = http.StatusCreated, nil, srv.signer
@@ -447,12 +497,12 @@ func keyHere(server string) string {
 
 // TestEnrolNeverReplacesTheKey is a successful enrolment, then the same command again,
 // another code, and the same code once its 15 minutes are over: each is refused before
-// it makes a key or sends anything, and names access-key-secret; the secret, the runner
+// it makes a key or sends anything, and names access-key-secret; the secret, Forager
 // file and the rest of the directory stay as they are, and nothing is moved aside.
 func TestEnrolNeverReplacesTheKey(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
-	writeFile(t, foragerFile(), "instance:\n  name: build-01\n")
+	writeFile(t, foragerFile(), "session:\n  instance:\n    name: build-01\n")
 	code := srv.code(1, false)
 	out, err := run(t, "access-key", "enrol", srv.URL, code)
 	if err != nil {
@@ -510,7 +560,7 @@ func TestEnrolNeverReplacesTheKey(t *testing.T) {
 func TestEnrolAfterARefusal(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
-	writeFile(t, foragerFile(), "instance:\n  name: build-01\n")
+	writeFile(t, foragerFile(), "session:\n  instance:\n    name: build-01\n")
 	srv.refusal("key_limit")
 	if _, err := run(t, "access-key", "enrol", srv.URL, srv.code(1, false)); err == nil || !strings.Contains(err.Error(), "the node already holds two keys") {
 		t.Fatalf("key_limit: %v", err)
@@ -527,7 +577,7 @@ func TestEnrolAfterARefusal(t *testing.T) {
 	}
 
 	emptyDir(t)
-	writeFile(t, foragerFile(), "instance:\n  name: build-01\n")
+	writeFile(t, foragerFile(), "session:\n  instance:\n    name: build-01\n")
 	srv.status, srv.body = http.StatusUnauthorized, []byte(`{"error":"unauthorized"}`)
 	if _, err := run(t, "access-key", "enrol", srv.URL, srv.code(2, false)); err == nil || !strings.Contains(err.Error(), "this code was used or has expired") {
 		t.Fatalf("unauthorized: %v", err)
@@ -556,7 +606,7 @@ func TestEnrolAfterARefusal(t *testing.T) {
 func TestEnrolRetriesOnlyWithTheKeyMadeForTheCode(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
-	writeFile(t, foragerFile(), "instance:\n  name: build-01\n")
+	writeFile(t, foragerFile(), "session:\n  instance:\n    name: build-01\n")
 	dir := configDir()
 	code := srv.code(1, false)
 	srv.refusal("key_limit")
@@ -590,7 +640,7 @@ func TestEnrolRetriesOnlyWithTheKeyMadeForTheCode(t *testing.T) {
 // TestEnrolActsOnTheRefusalsCode is each refusal of the server: unauthorized and a
 // signed key_invalid move the secret aside, end the pending enrolment and say a new
 // code is needed; a signed key_limit keeps both and says the same command succeeds once
-// a key is revoked. The runner file stays as it is.
+// a key is revoked. forager.yaml stays as it is.
 func TestEnrolActsOnTheRefusalsCode(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
@@ -610,7 +660,7 @@ func TestEnrolActsOnTheRefusalsCode(t *testing.T) {
 			"the node already holds two keys: once an owner or administrator in Qory Apiary has revoked one, the same command, run within the code's 15 minutes, succeeds"}},
 	} {
 		os.RemoveAll(string(dir))
-		writeFile(t, foragerFile(), "instance:\n  name: build-01\n")
+		writeFile(t, foragerFile(), "session:\n  instance:\n    name: build-01\n")
 		c.setup()
 		_, err := run(t, "access-key", "enrol", srv.URL, srv.code(byte(i), false))
 		if err == nil || cmd.ExitCode(err) == cmd.ExitInput {
@@ -620,21 +670,21 @@ func TestEnrolActsOnTheRefusalsCode(t *testing.T) {
 		if exists(dir.Path(foragerdir.SecretFile)) || exists(dir.Path(foragerdir.NewSecretFile)) != c.keep || exists(dir.Path(foragerdir.PendingFile)) != c.keep || (movedAside(t) == 1) == c.keep {
 			t.Errorf("%s: secret %v, new secret %v, pending %v, moved aside %d", c.name, exists(dir.Path(foragerdir.SecretFile)), exists(dir.Path(foragerdir.NewSecretFile)), exists(dir.Path(foragerdir.PendingFile)), movedAside(t))
 		}
-		if got := readForagerFile(t); got != "instance:\n  name: build-01\n" {
-			t.Errorf("%s: the runner file changed:\n%s", c.name, got)
+		if got := readForagerFile(t); got != "session:\n  instance:\n    name: build-01\n" {
+			t.Errorf("%s: forager.yaml changed:\n%s", c.name, got)
 		}
 	}
 }
 
 // TestEnrolRateLimitedKeepsTheKey is the server's signed 429, rate_limited: the same
-// command later retries, so the secret and the pending enrolment stay, and the runner
+// command later retries, so the secret and the pending enrolment stay, and Forager
 // file is not changed; with --print the text is the same. An unsigned 429 is an answer
 // that does not verify, as any other.
 func TestEnrolRateLimitedKeepsTheKey(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
 	dir := configDir()
-	writeFile(t, foragerFile(), "instance:\n  name: build-01\n")
+	writeFile(t, foragerFile(), "session:\n  instance:\n    name: build-01\n")
 	srv.status, srv.body, srv.signBy = http.StatusTooManyRequests, []byte(`{"error":"rate_limited"}`), nil
 	_, err := run(t, "access-key", "enrol", srv.URL, srv.code(1, false))
 	if want := "the server did not enrol the key (HTTP 429, unsigned); try again later (enrolment: answer_unsigned (status 429))"; err == nil || err.Error() != want {
@@ -652,15 +702,15 @@ func TestEnrolRateLimitedKeepsTheKey(t *testing.T) {
 	if !exists(dir.Path(foragerdir.NewSecretFile)) || !exists(dir.Path(foragerdir.PendingFile)) || movedAside(t) != 0 {
 		t.Error("a signed 429: the secret or the pending enrolment is gone")
 	}
-	if got := readForagerFile(t); got != "instance:\n  name: build-01\n" {
-		t.Errorf("the runner file changed:\n%s", got)
+	if got := readForagerFile(t); got != "session:\n  instance:\n    name: build-01\n" {
+		t.Errorf("forager.yaml changed:\n%s", got)
 	}
 	if _, _, err := runSplit(t, "", "access-key", "enrol", "--print", srv.URL, srv.code(2, false)); err == nil || err.Error() != want {
 		t.Errorf("a signed 429 with --print: %v, want %q", err, want)
 	}
 }
 
-// TestEnrolAfterTheWorkspaceKeysAreRemoved is a runner file that still holds a
+// TestEnrolAfterTheWorkspaceKeysAreRemoved is a forager.yaml that still holds a
 // workspace access key: enrol refuses it, and the refusal says to remove the keys
 // first, since enrol reads the file too. Once they are removed and the server section
 // keeps only its URL, the same command enrols.
@@ -668,11 +718,11 @@ func TestEnrolAfterTheWorkspaceKeysAreRemoved(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
 	for i, c := range []struct{ keys, want string }{
-		{"  access_key: ak_f1xt0re000000000\n  secret: qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\n", "server.access_key is a workspace access key, which servers no longer accept; remove server.access_key and server.secret from runner.yaml, then connect this machine as a node: run qory access-key enrol <server> <code>"},
-		{"  secret: qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\n", "server.secret is a workspace access key's secret, which servers no longer accept; remove server.access_key and server.secret from runner.yaml, then connect this machine as a node: run qory access-key enrol <server> <code>"},
+		{"    access_key: ak_f1xt0re000000000\n    secret: qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\n", "gateway.server.access_key is a workspace access key, which servers no longer accept; remove gateway.server.access_key and gateway.server.secret from forager.yaml, then connect this machine as a node: run qory access-key enrol <server> <code>"},
+		{"    secret: qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\n", "gateway.server.secret is a workspace access key's secret, which servers no longer accept; remove gateway.server.access_key and gateway.server.secret from forager.yaml, then connect this machine as a node: run qory access-key enrol <server> <code>"},
 	} {
 		os.RemoveAll(string(configDir()))
-		writeFile(t, foragerFile(), "server:\n  url: "+srv.URL+"\n"+c.keys+"instance:\n  name: build-01\n")
+		writeFile(t, foragerFile(), "gateway:\n  server:\n    url: "+srv.URL+"\n"+c.keys+"session:\n  instance:\n    name: build-01\n")
 		_, err := run(t, "access-key", "enrol", srv.URL, srv.code(byte(i), false))
 		if err == nil || cmd.ExitCode(err) != cmd.ExitInput {
 			t.Fatalf("%d: %v", i, err)
@@ -685,21 +735,21 @@ func TestEnrolAfterTheWorkspaceKeysAreRemoved(t *testing.T) {
 	if len(srv.sent()) != 0 {
 		t.Fatalf("sent %+v", srv.sent())
 	}
-	writeFile(t, foragerFile(), "server:\n  url: "+srv.URL+"\ninstance:\n  name: build-01\n")
+	writeFile(t, foragerFile(), "gateway:\n  server:\n    url: "+srv.URL+"\nsession:\n  instance:\n    name: build-01\n")
 	out, err := run(t, "access-key", "enrol", srv.URL, srv.code(3, false))
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "enrolled as ak_0123456789abcdef", "wrote server.access_key_id and server.apiary_public_key to "+foragerFile())
+	wants(t, out, "enrolled as ak_0123456789abcdef", "wrote gateway.server.access_key_id and gateway.server.apiary_public_key to "+foragerFile())
 	if len(srv.sent()) != 1 {
 		t.Errorf("sent %d requests", len(srv.sent()))
 	}
 }
 
-// TestEnrolRefusesAFixturePin is a server that signs with the runner contract's
+// TestEnrolRefusesAFixturePin is a server that signs with the Forager contract's
 // published fixture signing key: its answer verifies, and qory refuses to pin it.
 // --print, on a machine with a key of its own, says nothing was written, and no file of
-// the directory changes. Without it, once that key is moved aside by hand, the runner
+// the directory changes. Without it, once that key is moved aside by hand, Forager
 // file is left as it is, the secret made for the code is moved aside, the pending
 // enrolment ends, and the message names the secret's new path.
 func TestEnrolRefusesAFixturePin(t *testing.T) {
@@ -714,11 +764,11 @@ func TestEnrolRefusesAFixturePin(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv.signer, srv.signBy = fixture, fixture
-	writeFile(t, foragerFile(), "instance:\n  name: build-01\n")
+	writeFile(t, foragerFile(), "session:\n  instance:\n    name: build-01\n")
 	own := newKey(t)
 	writeSecret(t, own)
 	dir := configDir()
-	const refused = "the server's answer lists the runner contract's published fixture key, whose secret anyone can read: it is no server to pin; "
+	const refused = "the server's answer lists the Forager contract's published fixture key, whose secret anyone can read: it is no server to pin; "
 
 	// --print writes nothing.
 	before := snapshot(t, string(dir))
@@ -743,7 +793,7 @@ func TestEnrolRefusesAFixturePin(t *testing.T) {
 		t.Errorf("--print: files before %v, after %v", before, after)
 	}
 
-	// Without --print, once the machine's own key is moved aside by hand, the runner
+	// Without --print, once the machine's own key is moved aside by hand, Forager
 	// file stays and the secret made for the code is moved aside.
 	if err := os.Rename(dir.Path(foragerdir.SecretFile), dir.Path("own-secret")); err != nil {
 		t.Fatal(err)
@@ -771,20 +821,20 @@ func TestEnrolRefusesAFixturePin(t *testing.T) {
 	if k.PublicKey().String() != sent[len(sent)-1].PublicKey {
 		t.Fatal("the secret moved aside is not the one made for the code")
 	}
-	want := refused + "runner.yaml was not changed; the secret made for it was moved aside to " + dir.Path(old[0])
+	want := refused + "forager.yaml was not changed; the secret made for it was moved aside to " + dir.Path(old[0])
 	if enrolErr.Error() != want {
 		t.Errorf("the refusal\n%v\nwant\n%s", enrolErr, want)
 	}
 	if exists(dir.Path(foragerdir.SecretFile)) || exists(dir.Path(foragerdir.NewSecretFile)) || exists(dir.Path(foragerdir.PendingFile)) {
 		t.Errorf("secret %v, new secret %v, pending %v", exists(dir.Path(foragerdir.SecretFile)), exists(dir.Path(foragerdir.NewSecretFile)), exists(dir.Path(foragerdir.PendingFile)))
 	}
-	if got := readForagerFile(t); got != "instance:\n  name: build-01\n" {
-		t.Errorf("the runner file changed:\n%s", got)
+	if got := readForagerFile(t); got != "session:\n  instance:\n    name: build-01\n" {
+		t.Errorf("forager.yaml changed:\n%s", got)
 	}
 }
 
 // TestEnrolPrintWritesNothing is --print on a machine with a key of its own and a
-// runner file naming another server and pinning another key, which --print leaves
+// forager.yaml naming another server and pinning another key, which --print leaves
 // aside: stdout is exactly the three settings, unquoted, the pin compact JSON of
 // the keys the code carries; stderr says the rest; no file of the directory changes,
 // and the machine's own key stays.
@@ -793,7 +843,7 @@ func TestEnrolPrintWritesNothing(t *testing.T) {
 	srv := newEnrolServer(t)
 	srv.rotate = true
 	// The machine's own server and pin are another's: the key is for another machine.
-	writeFile(t, foragerFile(), commentedForager+"server:\n  url: https://apiary.example\n  access_key_id: ak_0000000000000000\n  apiary_public_key: "+pinLine(newKey(t))+"\n")
+	writeFile(t, foragerFile(), commentedForager+"  server:\n    url: https://apiary.example\n    access_key_id: ak_0000000000000000\n    apiary_public_key: "+pinLine(newKey(t))+"\n")
 	own := newKey(t)
 	writeSecret(t, own)
 	dir := configDir()
@@ -849,7 +899,7 @@ func TestEnrolPrintWritesNothing(t *testing.T) {
 		t.Errorf("a lost answer: %v", err)
 	}
 
-	// The variables are a CI's own business with --print, on a machine whose runner file
+	// The variables are a CI's own business with --print, on a machine whose forager.yaml
 	// sets no server.
 	srv.status, srv.body, srv.signBy = http.StatusCreated, nil, srv.signer
 	writeFile(t, foragerFile(), commentedForager)
@@ -859,15 +909,15 @@ func TestEnrolPrintWritesNothing(t *testing.T) {
 	}
 }
 
-// TestEnrolPrintLeavesTheServerSectionUnread is --print on a machine whose runner file
-// sets server.access_key_id and the pin while QORY_ACCESS_KEY_ID and
+// TestEnrolPrintLeavesTheServerSectionUnread is --print on a machine whose forager.yaml
+// sets gateway.server.access_key_id and the pin while QORY_ACCESS_KEY_ID and
 // QORY_APIARY_PUBLIC_KEY are set too, which stops a run on a value set in both: the
 // key is for another machine, so the server section is not read, and the enrolment
-// succeeds under instance.name. A file that is not YAML still stops it.
+// succeeds under session.instance.name. A file that is not YAML still stops it.
 func TestEnrolPrintLeavesTheServerSectionUnread(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
-	writeFile(t, foragerFile(), commentedForager+"server:\n  url: https://apiary.example\n  access_key_id: ak_0000000000000000\n  apiary_public_key: "+pinLine(newKey(t))+"\n")
+	writeFile(t, foragerFile(), commentedForager+"  server:\n    url: https://apiary.example\n    access_key_id: ak_0000000000000000\n    apiary_public_key: "+pinLine(newKey(t))+"\n")
 	t.Setenv("QORY_ACCESS_KEY_ID", "ak_0123456789abcdef")
 	t.Setenv("QORY_APIARY_PUBLIC_KEY", `[{"alg":"ed25519","public_key":"`+srv.signer.PublicKey().String()+`"}]`)
 	out, errOut, err := runSplit(t, "", "access-key", "enrol", "--print", srv.URL, srv.code(1, false))
@@ -881,10 +931,10 @@ func TestEnrolPrintLeavesTheServerSectionUnread(t *testing.T) {
 		t.Errorf("the enrolment sent %+v; want the name build-01", sent)
 	}
 
-	writeFile(t, foragerFile(), "instance: [build-01\n")
+	writeFile(t, foragerFile(), "session:\n  instance: [build-01\n")
 	_, _, err = runSplit(t, "", "access-key", "enrol", "--print", srv.URL, srv.code(2, false))
 	if cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), foragerFile()+": ") {
-		t.Errorf("--print with a runner file that is not YAML: %v", err)
+		t.Errorf("--print with a forager.yaml that is not YAML: %v", err)
 	}
 	if n := len(srv.sent()); n != 1 {
 		t.Errorf("%d enrolments sent; a file that is not YAML sends none", n)

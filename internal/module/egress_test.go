@@ -53,7 +53,7 @@ func TestReadManifestRefusesEgress(t *testing.T) {
 }
 
 // TestEgressGrammarIsTheForagersOnce keeps the one definition: the pattern the module
-// schema gives a declared host, and the one this package matches, are the runner
+// schema gives a declared host, and the one this package matches, are the Forager
 // contract's pattern for a policy's allow entry, byte for byte.
 func TestEgressGrammarIsTheForagersOnce(t *testing.T) {
 	policy, err := contracts.Document("policy.schema.json")
@@ -71,9 +71,9 @@ func TestEgressGrammarIsTheForagersOnce(t *testing.T) {
 	}
 	got := schema["properties"].(map[string]any)["egress"].(map[string]any)["items"].(map[string]any)["pattern"].(string)
 	if got != want {
-		t.Errorf("module.schema.json egress pattern\n%s\nrunner policy allow pattern\n%s", got, want)
+		t.Errorf("module.schema.json egress pattern\n%s\nForager policy allow pattern\n%s", got, want)
 	}
 	if EgressHost.String() != want {
-		t.Errorf("EgressHost\n%s\nrunner policy allow pattern\n%s", EgressHost.String(), want)
+		t.Errorf("EgressHost\n%s\nForager policy allow pattern\n%s", EgressHost.String(), want)
 	}
 }

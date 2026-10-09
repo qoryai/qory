@@ -13,7 +13,7 @@ import (
 
 // newConfig builds the config verb, which prints every effective setting with its value
 // and the file it came from, for the checkout the process stands in. It reads the
-// configuration files, and runs describe of each integration the runner file declares,
+// configuration files, and runs describe of each integration forager.yaml declares,
 // and needs no git working tree, so a person can check what a compose or a run would
 // read before there is anything to compose.
 func newConfig() *cobra.Command {
@@ -31,9 +31,9 @@ before it:
 
 A compose flag overrides every file.
 
-The machine's ` + config.ForagerFileName + ` is listed under runner. Each integration it declares is
-described as before a run; one that does not describe is an error. An integration whose
-name the credentials section defines too is listed as shadowed.
+The machine's ` + config.ForagerFileName + ` is listed under its sections, gateway, session and wall.
+Each integration it declares is described as before a run; one that does not describe is
+an error. An integration whose name gateway.credentials defines too is listed as shadowed.
 
 --verbose adds nothing here.`,
 		Args: noArgs,

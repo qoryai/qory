@@ -5,7 +5,7 @@ Check that an image has what the wall needs of it
 ### Synopsis
 
 Check that an image has what the wall needs of it. With no image, check wall.image
-of runner.yaml. A name of wall.images is read as that image's ref first, as
+of forager.yaml. A name of wall.images is read as that image's ref first, as
 qory run reads --image.
 
 From outside, it reads the image the engine holds: its platform, HOME in its
@@ -16,8 +16,8 @@ network, and qory's Linux build checks from inside:
 
   - HOME is a directory that user writes in
   - the system's authorities are where the wall reads them
-  - /bin/sh is there, for the runtime's hooks and the runner's API-key approval
-  - claude is the version the runner's descriptor is written against
+  - /bin/sh is there, for the runtime's hooks and the session's API-key approval
+  - claude is the version Forager's descriptor is written against
   - git and gh run
   - dockerd, for a Docker of the agent's own, and what it runs
 
@@ -37,7 +37,7 @@ qory image check [image...] [flags]
 ### Examples
 
 ```
-  qory image check                                # wall.image of runner.yaml
+  qory image check                                # wall.image of forager.yaml
   qory image check qory-agent
   qory image check go-docker                      # an image wall.images defines
   qory image check my-agent:1 my-agent-docker:1

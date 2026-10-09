@@ -62,18 +62,18 @@ func TestForagerFileReadsTheImages(t *testing.T) {
 	rows := map[string]config.Row{}
 	for _, row := range c.Rows() {
 		rows[row.Key] = row
-		if strings.HasPrefix(row.Key, "runner.wall.image") {
+		if strings.HasPrefix(row.Key, "wall.image") {
 			keys = append(keys, row.Key)
 		}
 	}
-	if strings.Join(keys, " ") != "runner.wall.image runner.wall.images.go runner.wall.images.go-docker runner.wall.images.plain.v2" {
+	if strings.Join(keys, " ") != "wall.image wall.images.go wall.images.go-docker wall.images.plain.v2" {
 		t.Errorf("the image rows are %v", keys)
 	}
 	for key, want := range map[string]string{
-		"runner.wall.image":            "go (wall.images.go)",
-		"runner.wall.images.go":        want[0].Ref,
-		"runner.wall.images.go-docker": "ghcr.io/qoryai/agent-go-docker:1, runtime sysbox-runc, docker (experimental)",
-		"runner.wall.images.plain.v2":  "example.com/agent:2, runtime runc",
+		"wall.image":            "go (wall.images.go)",
+		"wall.images.go":        want[0].Ref,
+		"wall.images.go-docker": "ghcr.io/qoryai/agent-go-docker:1, runtime sysbox-runc, docker (experimental)",
+		"wall.images.plain.v2":  "example.com/agent:2, runtime runc",
 	} {
 		if rows[key].Value != want || rows[key].Origin != path {
 			t.Errorf("%s: %+v, want %q from %s", key, rows[key], want, path)
@@ -84,7 +84,7 @@ func TestForagerFileReadsTheImages(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, row := range c.Rows() {
-		if row.Key == "runner.wall.image" && row.Value != "go-dokcer (a reference)" {
+		if row.Key == "wall.image" && row.Value != "go-dokcer (a reference)" {
 			t.Errorf("a name mistyped is listed as %+v", row)
 		}
 	}
@@ -92,7 +92,7 @@ func TestForagerFileReadsTheImages(t *testing.T) {
 }
 
 // TestForagerFileRefusesAnImageItCannotRun is every refusal of wall.images, each naming
-// the file and the key: what the runner would refuse before a run is refused when the
+// the file and the key: what Forager would refuse before a run is refused when the
 // file is read, so qory config says it as well.
 func TestForagerFileRefusesAnImageItCannotRun(t *testing.T) {
 	hermetic(t)
@@ -125,11 +125,11 @@ func TestForagerFileRefusesAnImageItCannotRun(t *testing.T) {
 	}
 }
 
-// TestTheForagerSchemaTakesTheImages holds runner.schema.json to what the reader takes
+// TestTheForagerSchemaTakesTheImages holds forager.schema.json to what the reader takes
 // of wall.images: the definitions of the docs pass it, and each shape the reader refuses
 // fails it. A name defined twice is YAML's to refuse, not the schema's.
 func TestTheForagerSchemaTakesTheImages(t *testing.T) {
-	schema, err := jsonschema.NewCompiler().Compile(filepath.Join("..", "..", "contracts", "harness", "v1", "runner.schema.json"))
+	schema, err := jsonschema.NewCompiler().Compile(filepath.Join("..", "..", "contracts", "harness", "v1", "forager.schema.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

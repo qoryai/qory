@@ -1,0 +1,377 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qory.dev/contracts/harness/v1/forager.schema.json",
+  "title": "forager.yaml",
+  "description": "The machine's forager.yaml, under the user's configuration directory alone: what qory run does on this machine. gateway holds the run policy's egress section, the server document, the credentials and the integrations; session holds the instance and what applies to every run; wall is the container the runtime is started in. egress and server follow the Forager contract's grammar, https://qory.dev/contracts/forager/v1/, and wall is that contract's wall.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "qory.dev/v1alpha1"
+    },
+    "gateway": {
+      "description": "The gateway's sections: the egress policy, the server, the credentials and the integrations.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "egress": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "observe",
+                "enforce"
+              ]
+            },
+            "allow": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+              }
+            },
+            "deny": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+              }
+            }
+          }
+        },
+        "server": {
+          "description": "The server every run on this machine reports to, the Forager contract's server.schema.json without its version: Forager signs every request with the machine's access key, verifies every answer under the pin, fetches the server's configuration, posts the events where it defines and takes its run configuration. The access key's secret is never in this file: it is QORY_ACCESS_KEY_SECRET, else the file access-key-secret beside it. Absent, the events go to files alone.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "url"
+          ],
+          "properties": {
+            "url": {
+              "description": "https, or http to this machine; a scheme and a host with nothing after.",
+              "type": "string",
+              "pattern": "^https?://[^/?#]+$"
+            },
+            "access_key_id": {
+              "description": "The id of the machine's access key, which the server assigns when the key enrols: ak_ and 16 characters of lower-case Crockford base32. May be left out when QORY_ACCESS_KEY_ID is set in the environment; set in both, it is refused. A run without one does not start.",
+              "type": "string",
+              "pattern": "^ak_[0-9a-hjkmnp-tv-z]{16}$"
+            },
+            "apiary_public_key": {
+              "description": "The pin: the server's Ed25519 public keys, a list so the key can rotate. Every answer of the server is verified under one of them. May be left out when QORY_APIARY_PUBLIC_KEY holds it, as JSON; set in both, it is refused. A pin that lists the Forager contract's published fixture key is refused. A run without one does not start, apiary_public_key_missing.",
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "alg",
+                  "public_key"
+                ],
+                "properties": {
+                  "alg": {
+                    "const": "ed25519"
+                  },
+                  "public_key": {
+                    "description": "A raw 32-byte Ed25519 public key, base64url without padding.",
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "credentials": {
+          "description": "The credentials this machine has for its runs, by name. A run's policy selects among them and defines none. Behind a wall the gateway keeps each outside the container and sets it on the requests to the hosts it is for, ending the container's TLS for those hosts alone. Exactly one of env, file and adapter defines where the token comes from.",
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "env": {
+                "description": "A variable of qory run's environment that contains the token.",
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+              },
+              "file": {
+                "description": "The absolute path of a file that contains the token, read again whenever it is used.",
+                "type": "string",
+                "pattern": "^/"
+              },
+              "adapter": {
+                "description": "A program of yours, by its absolute path, and its arguments: it is written for one kind of host, such as a source code host, runs outside the container, and prints one JSON document, the Forager contract's credential.schema.json: the token, when it expires, and the hosts, the scheme and the paths it is for. ${argument} in an argument is replaced by the argument the run's policy defines. The gateway runs the adapter again before the token expires and when a host refuses it.",
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string"
+                }
+              },
+              "argument": {
+                "description": "A regular expression the policy's argument must match whole, with an adapter. Absent, a policy passes none.",
+                "type": "string"
+              },
+              "hosts": {
+                "description": "With env or file, the hosts the token is for. With an adapter, the most it may claim.",
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+                }
+              },
+              "paths": {
+                "description": "With env or file, the paths of the hosts the token goes to, and under enforce the only ones the run may request: a path matched whole or up to a final * as a prefix; absent is every path. With an adapter, the most it may claim.",
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^/[^*?#\\s]*\\*?$"
+                }
+              },
+              "auth": {
+                "description": "With env or file, how the token is set: bearer, basic with a username, or header with a header's name.",
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "scheme"
+                ],
+                "properties": {
+                  "scheme": {
+                    "type": "string",
+                    "enum": [
+                      "bearer",
+                      "basic",
+                      "header"
+                    ]
+                  },
+                  "username": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "header": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9-]+$"
+                  }
+                }
+              },
+              "placeholders": {
+                "description": "Variables the container gets with a value that is no credential, for a program that does not start without one set; the proxy replaces what the program sends.",
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                }
+              }
+            }
+          }
+        },
+        "integrations": {
+          "description": "The integrations this machine declares, by key: programs that speak the integration contract, https://qory.dev/contracts/integration/v1/. qory runs <program> describe, checks the settings against the description, and expands each role it supports; the credential role defines the credential whose name is the key, unless gateway.credentials defines that name itself. An integration that plays no role qory expands is refused.",
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+          },
+          "additionalProperties": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "properties": {
+              "program": {
+                "description": "The program: an absolute path, or a name looked up on the PATH. Default qory-<key>. qory runs it from outside the checkout and outside every read-write mount of the wall's container, judged by where its links lead. The resolved program, every directory above it up to /, and every directory above each link on the way belong to root or the user running qory, and so does each link; other users may write none of them, except a directory root owns with the sticky bit set, which keeps the rule; a group may write one when it is root's (gid 0), wheel, admin, or the owner's primary group when its name is the owner's.",
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(/|[^/]*$)"
+              },
+              "settings": {
+                "description": "The settings document, which the description's settings schema checks; absent is {}. It goes on the command line of every role, so it contains no value of a writeOnly setting: a secret is set through <setting>_file, the path of the file that contains it.",
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "session": {
+      "description": "The session's sections: the instance and what applies to every run.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "instance": {
+          "description": "This instance of the machine, as the server shows it. Its id is qory's own, kept in the file instance-id beside this file.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "description": "The instance's display name on the server: 1 to 64 of A-Z, a-z, 0-9, dot, underscore and dash, starting with a letter or a digit. Default the host name.",
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+            }
+          }
+        },
+        "run": {
+          "description": "What applies to every run on this machine unless a flag of qory run overrides it.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "timeout": {
+              "description": "How long a runtime may run, as a duration: 5h30m. At the limit Forager stops it and dev.qory.run.exited reports the limit as the reason. Default no limit. --timeout sets another for one run.",
+              "type": "string",
+              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"
+            },
+            "stop_signal": {
+              "description": "The signal that requests a runtime to stop when Forager stops it, at the limit or on a signal to qory run. Runtimes differ in what a signal means, so the runtime's descriptor defines which, and this key sets another for every run on the machine. Default the descriptor's, and SIGTERM when it defines none. --stop-signal sets another for one run.",
+              "enum": ["SIGTERM", "SIGINT", "SIGHUP", "SIGQUIT", "SIGUSR1", "SIGUSR2"]
+            },
+            "stop_grace": {
+              "description": "How long a runtime gets between the stop signal and SIGKILL when Forager stops it, at the limit or on a signal to qory run: the time a session needs to close what it has open. Default the runtime's descriptor's, and 10s when it defines none. --stop-grace sets another for one run.",
+              "type": "string",
+              "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"
+            }
+          }
+        }
+      }
+    },
+    "wall": {
+      "description": "The wall every run on this machine starts the runtime behind: a container with no route out except to the gateway's proxy. Absent, the runtime is a process of this machine.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "adapter"
+      ],
+      "properties": {
+        "adapter": {
+          "description": "What builds the wall.",
+          "type": "string",
+          "enum": [
+            "docker"
+          ]
+        },
+        "image": {
+          "description": "The agent's image when the run's policy selects none, the runtime and the project's toolchain: the name of one of images, or a reference. A name images defines is read as that image first. --image sets another for one run, and a policy's selection wins over both. May be left out when --image sets one, or when the run's own --policy selects an image; a machine that reports to a server sets it, because the server's run configuration may select none.",
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/:@-]*$"
+        },
+        "images": {
+          "description": "The images this machine defines, by name. A run's policy selects one by its name, as it selects credentials, and names no reference; image and --image name the default by it. The Forager contract's Images.",
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "ref"
+            ],
+            "properties": {
+              "ref": {
+                "description": "The image's reference, pinned by digest where the machine wants the same image every time.",
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._/:@-]*$"
+              },
+              "runtime": {
+                "description": "The container runtime the wall starts the image under, one the engine has, such as sysbox-runc. Default the engine's.",
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+              },
+              "docker": {
+                "description": "Experimental. The agent gets a Docker daemon of its own inside the container, which qory's helper starts before the agent; the image holds dockerd. Needs a runtime that runs a daemon without privileges: sysbox-runc. Any policy can select the image, so define one only where every run may get a daemon. Default false.",
+                "type": "boolean"
+              }
+            },
+            "if": {
+              "properties": {
+                "docker": {
+                  "const": true
+                }
+              },
+              "required": [
+                "docker"
+              ]
+            },
+            "then": {
+              "required": [
+                "runtime"
+              ]
+            }
+          }
+        },
+        "command": {
+          "description": "The program the adapter runs, such as podman. Default docker.",
+          "type": "string",
+          "minLength": 1
+        },
+        "helper": {
+          "description": "The absolute path of a static Linux build of qory, mounted read-only into the container as the relay, the hook forwarder and what starts the daemon of an image with docker: true. Default this binary, which only a Linux machine can use.",
+          "type": "string",
+          "pattern": "^/"
+        },
+        "env": {
+          "description": "Names of variables of qory run's environment that go into the container, such as the model credential. Values are never written here. Nothing else of the environment goes in.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          }
+        },
+        "user": {
+          "description": "The uid:gid the container runs as. Default qory run's own, so the checkout's files keep their owner. Root is refused; a machine where qory runs as root sets another.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*(:[A-Za-z0-9_][A-Za-z0-9_.-]*)?$"
+        },
+        "mounts": {
+          "description": "What the container sees of this machine beside the checkout and the composed home, each at its own path: an absolute path, with :ro after it for one the container cannot change. --mount adds to them. A socket, or a directory containing a container runtime's, is refused.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^/"
+          }
+        },
+        "cpus": {
+          "description": "How many processors' worth of time the container gets, a decimal number. Default the engine's.",
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?$"
+        },
+        "memory": {
+          "description": "The most memory the container gets: a number of bytes with an optional unit of b, k, m or g. Default the engine's.",
+          "type": "string",
+          "pattern": "^[0-9]+[bkmgBKMG]?$"
+        },
+        "pids_limit": {
+          "description": "The most processes and threads in the container. Default the engine's.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "shm_size": {
+          "description": "The size of /dev/shm in the container, written as memory is. A browser needs more than an engine's default.",
+          "type": "string",
+          "pattern": "^[0-9]+[bkmgBKMG]?$"
+        },
+        "ca_env": {
+          "description": "The variables that point a program in the container at the bundle of authorities it trusts, the image's own and the run's, when a run has an authority of its own. Default SSL_CERT_FILE, GIT_SSL_CAINFO, NODE_EXTRA_CA_CERTS, REQUESTS_CA_BUNDLE, CURL_CA_BUNDLE, AWS_CA_BUNDLE.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          }
+        }
+      }
+    }
+  }
+}

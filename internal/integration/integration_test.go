@@ -98,7 +98,7 @@ func TestSettingsAreCheckedWithoutTheirValues(t *testing.T) {
 // TestTheCredentialAdapterIsTheContracts is the credential role's adapter: the program,
 // credential, --settings and the settings as one word, -- and ${argument}, with every $
 // of the settings written as JSON's six-character escape for it, which still reads as
-// the same JSON and leaves no $ in the word for the runner to replace.
+// the same JSON and leaves no $ in the word for the gateway to replace.
 func TestTheCredentialAdapterIsTheContracts(t *testing.T) {
 	escape := string([]byte{'\\', 'u', '0', '0', '2', '4'})
 	if integration.DollarEscape != escape {

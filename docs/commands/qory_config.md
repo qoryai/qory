@@ -15,9 +15,9 @@ before it:
 
 A compose flag overrides every file.
 
-The machine's runner.yaml is listed under runner. Each integration it declares is
-described as before a run; one that does not describe is an error. An integration whose
-name the credentials section defines too is listed as shadowed.
+The machine's forager.yaml is listed under its sections, gateway, session and wall.
+Each integration it declares is described as before a run; one that does not describe is
+an error. An integration whose name gateway.credentials defines too is listed as shadowed.
 
 --verbose adds nothing here.
 

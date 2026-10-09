@@ -48,7 +48,7 @@
 //	  stacks: [nextjs]           # harness/stacks/nextjs/qory-stack.yaml
 //	  modules: [core, nextjs]    # harness/modules/<name>/qory-module.yaml
 //
-// The machine's runner file, runner.yaml beside the user's qory.yaml and nowhere else,
+// The machine's forager.yaml, forager.yaml beside the user's qory.yaml and nowhere else,
 // defines what qory run does on this machine; [LoadForager] reads it and [Load] returns it:
 //
 //	apiVersion: qory.dev/v1alpha1
@@ -331,7 +331,7 @@ type Config struct {
 	// root's file; nil when it lists none. A section in any other file is read and left
 	// out, since an export is a repository's.
 	Exports *exports.Exports
-	// Forager is the machine's runner file, [ForagerFileName] under [UserDir]; nil when
+	// Forager is the machine's forager.yaml, [ForagerFileName] under [UserDir]; nil when
 	// there is none.
 	Forager *Forager
 	// Files are the files read, in the order they were applied.
@@ -465,8 +465,8 @@ func Load(root string, own bool) (Config, error) {
 
 // LoadUser returns the configuration of the user's own file alone, the qory.yaml in
 // [UserDir], over the defaults: the defaults when there is none. A walled run takes
-// harness.home from it alone: a walled run never mounts that directory, which holds the
-// runner's files, while another qory.yaml may lie in a place its agent can write.
+// harness.home from it alone: a walled run never mounts that directory, which holds
+// Forager's files, while another qory.yaml may lie in a place its agent can write.
 func LoadUser() (Config, error) {
 	c := Defaults()
 	dir := UserDir()

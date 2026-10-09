@@ -148,7 +148,7 @@ func TestProbeNamesWhatAnImageLacks(t *testing.T) {
 	checks := byName(p.Report(context.Background()))
 	want(t, checks, "home", image.Fail, "HOME is not set", "ENV HOME=")
 	want(t, checks, "authorities", image.Fail, "no bundle of authorities", "ca-certificates")
-	want(t, checks, "shell", image.Fail, "no /bin/sh; the runtime's hooks and the runner's API-key approval run under sh")
+	want(t, checks, "shell", image.Fail, "no /bin/sh; the runtime's hooks and the session's API-key approval run under sh")
 	want(t, checks, "claude", image.Fail, "no claude on the image's PATH, /usr/bin")
 	want(t, checks, "git", image.Fail, "/usr/bin/git --version failed: exit status 139: segmentation fault")
 	want(t, checks, "gh", image.Fail, "no gh on the image's PATH")
@@ -176,7 +176,7 @@ func TestProbeRefusesAnotherClaude(t *testing.T) {
 
 // TestProbeSaysWhetherTheImageCarriesADocker puts dockerd in a system directory, with
 // and without what it runs there, with and without the docker command on the PATH, and
-// in a directory of the PATH that is not a system one, where the runner never looks.
+// in a directory of the PATH that is not a system one, where the wall never looks.
 func TestProbeSaysWhetherTheImageCarriesADocker(t *testing.T) {
 	files := agentFiles()
 	for _, name := range []string{"dockerd", "docker", "containerd", "containerd-shim-runc-v2", "runc", "docker-init", "docker-proxy"} {

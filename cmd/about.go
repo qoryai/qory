@@ -14,7 +14,7 @@ import (
 	"github.com/qoryai/forager/session"
 )
 
-// maxSubjects is how many --subject a run carries, the runner contract's bound.
+// maxSubjects is how many --subject a run carries, the Forager contract's bound.
 const maxSubjects = 16
 
 // maxDetailsRead is the most --details reads, a file or stdin. The details are at most
@@ -22,7 +22,7 @@ const maxSubjects = 16
 const maxDetailsRead = 1 << 20
 
 // aboutFrom is what the run is about, from --kind, --title, --subject and --details,
-// held to the runner's rules: nil when every one is empty, so the run started event
+// held to Forager's rules: nil when every one is empty, so the run started event
 // carries no about. detailsIn is stdin, read for --details -, and terminal says whether
 // it is a terminal. Every error is an input error that names the flag.
 func aboutFrom(kind, title string, subjects []string, details string, detailsIn io.Reader, terminal bool) (*session.About, error) {
@@ -48,7 +48,7 @@ func aboutFrom(kind, title string, subjects []string, details string, detailsIn 
 // in the order given. The title takes the rest of the value, commas, = and quotes
 // included, from the first ,title= on, or the whole value after a leading title=; the
 // rest is split at commas into type, ref and url, each once, type and ref required. An
-// empty url or title is none. The runner checks what each may hold; qory checks the
+// empty url or title is none. Forager checks what each may hold; qory checks the
 // count and that no two have the same type and ref, which it names by the values given.
 func parseSubjects(values []string) ([]session.Subject, error) {
 	if len(values) > maxSubjects {
@@ -122,7 +122,7 @@ func parseSubject(v string) (session.Subject, error) {
 
 // readDetails reads --details: none for "", stdin to its end for -, which a terminal
 // cannot be, and otherwise the file it names, relative to the working directory. It
-// checks the input is one JSON value of at most maxDetailsRead bytes; the runner checks
+// checks the input is one JSON value of at most maxDetailsRead bytes; Forager checks
 // that it is an object, its size compacted, its depth and its keys.
 func readDetails(name string, stdin io.Reader, terminal bool) (json.RawMessage, error) {
 	var r io.Reader
@@ -174,7 +174,7 @@ func unwrapPath(err error) error {
 // and, when the error is about one member, the member.
 var subjectField = regexp.MustCompile(`^about\.subjects\[(\d+)\](?:\.(type|ref|url|title))?$`)
 
-// aboutInput is the runner's refusal of an About as the input error of the flag that
+// aboutInput is Forager's refusal of an About as the input error of the flag that
 // gave the field: --kind, --title, --details with its argument, or --subject with its
 // value as given and the member. Any other error passes as it is.
 func aboutInput(err error, subjects []string, details string) error {

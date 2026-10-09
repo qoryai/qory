@@ -198,7 +198,7 @@ func (r Runtimes) First() string {
 type Extending struct {
 	// Kinds are the entry kinds an appended module may ship, from [Kinds] without files,
 	// which Files governs by path. Hooks and MCP servers are never allowed, since the
-	// runner executes them without the agent.
+	// runtime executes them without the agent.
 	Kinds []string `yaml:"kinds,omitempty"`
 	// Instructions allows an appended module's AGENTS.md, appended after the base's.
 	Instructions bool `yaml:"instructions,omitempty"`
@@ -537,7 +537,7 @@ func (p *Stack) validate(compose bool) error {
 				return fmt.Errorf("extending.kinds lists kind %q; kinds: %s", k, strings.Join(Kinds, ", "))
 			}
 			if k == "hooks" || k == "mcp" {
-				return fmt.Errorf("extending.kinds lists %s, which an extending module may never ship; the runner executes those without the agent", k)
+				return fmt.Errorf("extending.kinds lists %s, which an extending module may never ship; the runtime executes those without the agent", k)
 			}
 			if k == "files" {
 				return errors.New("extending.kinds lists files; the paths an extending module's files may sit under go in extending.files")

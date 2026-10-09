@@ -33,23 +33,25 @@ func fixture(t *testing.T, name string) string {
 var dollar = string([]byte{'\\', 'u', '0', '0', '2', '4'})
 
 // declared and expanded are the example of step 4 of "Declaring an integration" in
-// contracts/integration/v1/README.md of qoryai/integrations at v0.1.0: a declaration of
-// qory-github and of a machine's own program, and the runner's definitions it expands
+// contracts/integration/v1/README.md of qoryai/integrations: a declaration of
+// qory-github and of a machine's own program, and the gateway's definitions it expands
 // to.
 const (
-	declared = `integrations:
-  github: {settings: {app_id: 123456, private_key_file: /etc/qory/github-app.pem}}
-  tracker: {program: /opt/acme/bin/acme-tracker, settings: {project: "it's $X"}}
+	declared = `gateway:
+  integrations:
+    github: {settings: {app_id: 123456, private_key_file: /etc/qory/github-app.pem}}
+    tracker: {program: /opt/acme/bin/acme-tracker, settings: {project: "it's $X"}}
 `
-	expanded = `credentials:
-  github:
-    adapter: [qory-github, credential, --settings, '{"app_id":123456,"private_key_file":"/etc/qory/github-app.pem"}', --, "${argument}"]
-    argument: '[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}(,[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100})*'
-    hosts: [github.com, api.github.com]
-  tracker:
-    adapter: [/opt/acme/bin/acme-tracker, credential, --settings, '{"project":"it''s \u0024X"}', --, "${argument}"]
-    argument: '[A-Z]+'
-    hosts: [tracker.acme.example]
+	expanded = `gateway:
+  credentials:
+    github:
+      adapter: [qory-github, credential, --settings, '{"app_id":123456,"private_key_file":"/etc/qory/github-app.pem"}', --, "${argument}"]
+      argument: '[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}(,[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100})*'
+      hosts: [github.com, api.github.com]
+    tracker:
+      adapter: [/opt/acme/bin/acme-tracker, credential, --settings, '{"project":"it''s \u0024X"}', --, "${argument}"]
+      argument: '[A-Z]+'
+      hosts: [tracker.acme.example]
 `
 )
 
@@ -93,7 +95,7 @@ func onPath(t *testing.T) string {
 	return dir
 }
 
-// expand loads the runner file and expands its integrations.
+// expand loads forager.yaml and expands its integrations.
 func expand(t *testing.T) (*config.Forager, error) {
 	t.Helper()
 	c, err := config.Load(t.TempDir(), true)
@@ -117,10 +119,12 @@ func TestADeclarationExpandsAsTheIntegrationContractDefines(t *testing.T) {
 		t.Fatal(err)
 	}
 	var want struct {
-		Credentials map[string]struct {
-			Adapter  []string
-			Argument string
-			Hosts    []string
+		Gateway struct {
+			Credentials map[string]struct {
+				Adapter  []string
+				Argument string
+				Hosts    []string
+			}
 		}
 	}
 	if err := yaml.Unmarshal([]byte(expanded), &want); err != nil {
@@ -130,7 +134,7 @@ func TestADeclarationExpandsAsTheIntegrationContractDefines(t *testing.T) {
 		t.Fatalf("credentials %+v", r.Credentials)
 	}
 	for i, key := range []string{"github", "tracker"} {
-		w := want.Credentials[key]
+		w := want.Gateway.Credentials[key]
 		w.Adapter[0] = map[string]string{"github": program, "tracker": tracker}[key]
 		got := r.Credentials[i]
 		if got.Name != key || strings.Join(got.Adapter, "\n") != strings.Join(w.Adapter, "\n") || got.Argument != w.Argument || strings.Join(got.Hosts, " ") != strings.Join(w.Hosts, " ") || got.Integration != key {
@@ -145,7 +149,7 @@ func TestADeclarationExpandsAsTheIntegrationContractDefines(t *testing.T) {
 	for _, row := range c.Rows() {
 		rows[row.Key] = row
 	}
-	for key, want := range map[string]string{"runner.credentials.github": "integration github", "runner.integrations.github": program + " dev"} {
+	for key, want := range map[string]string{"gateway.credentials.github": "integration github", "gateway.integrations.github": program + " dev"} {
 		if rows[key].Value != want || rows[key].Origin != path {
 			t.Errorf("%s: %+v, want %q from %s", key, rows[key], want, path)
 		}
@@ -158,7 +162,7 @@ func TestADeclarationExpandsAsTheIntegrationContractDefines(t *testing.T) {
 func TestAnIntegrationOfYourOwnIsNamedByItsPath(t *testing.T) {
 	hermetic(t)
 	program := fakeIntegration(t, t.TempDir(), "acme-tracker", fixture(t, "acme-tracker.json"))
-	foragerFile(t, "integrations:\n  tracker:\n    program: "+program+"\n  board:\n    program: "+program+"\n    settings:\n      url: https://tracker.acme.example/$team\n      depth: 2\n      labels: [a, b]\n      nested: {on: true, none: null, ratio: 1.5}\n")
+	foragerFile(t, "gateway:\n  integrations:\n    tracker:\n      program: "+program+"\n    board:\n      program: "+program+"\n      settings:\n        url: https://tracker.acme.example/$team\n        depth: 2\n        labels: [a, b]\n        nested: {on: true, none: null, ratio: 1.5}\n")
 	r, err := expand(t)
 	if err != nil {
 		t.Fatal(err)
@@ -188,7 +192,7 @@ func TestAnIntegrationOfYourOwnIsNamedByItsPath(t *testing.T) {
 func TestTheFilesOwnCredentialWins(t *testing.T) {
 	hermetic(t)
 	program := fakeIntegration(t, onPath(t), "qory-github", fixture(t, "github.json"))
-	foragerFile(t, "credentials:\n  github:\n    env: GH_TOKEN\n    hosts: [api.github.com]\n    auth: {scheme: bearer}\nintegrations:\n  github: {settings: {app_id: 1, private_key_file: /k.pem}}\n")
+	foragerFile(t, "gateway:\n  credentials:\n    github:\n      env: GH_TOKEN\n      hosts: [api.github.com]\n      auth: {scheme: bearer}\n  integrations:\n    github: {settings: {app_id: 1, private_key_file: /k.pem}}\n")
 	r, err := expand(t)
 	if err != nil {
 		t.Fatal(err)
@@ -200,15 +204,15 @@ func TestTheFilesOwnCredentialWins(t *testing.T) {
 		t.Errorf("shadowed %v", got)
 	}
 	for _, row := range r.Rows() {
-		if row.Key == "runner.integrations.github" && row.Value != program+" dev, shadowed by credentials.github" {
+		if row.Key == "gateway.integrations.github" && row.Value != program+" dev, shadowed by gateway.credentials.github" {
 			t.Errorf("row %+v", row)
 		}
 	}
-	foragerFile(t, "credentials:\n  github:\n    env: GH_TOKEN\n    hosts: [api.github.com]\n    auth: {scheme: bearer}\nintegrations:\n  github: {settings: {app_id: 1}}\n")
+	foragerFile(t, "gateway:\n  credentials:\n    github:\n      env: GH_TOKEN\n      hosts: [api.github.com]\n      auth: {scheme: bearer}\n  integrations:\n    github: {settings: {app_id: 1}}\n")
 	if _, err := expand(t); err == nil || !strings.Contains(err.Error(), "settings.private_key_file is required") {
 		t.Errorf("settings of a shadowed integration: %v", err)
 	}
-	foragerFile(t, "integrations:\n  github: {settings: {app_id: 1, private_key_file: /k.pem}}\n")
+	foragerFile(t, "gateway:\n  integrations:\n    github: {settings: {app_id: 1, private_key_file: /k.pem}}\n")
 	if r, err := expand(t); err != nil || len(r.Shadowed()) != 0 {
 		t.Errorf("an integration alone is shadowed: %v, %v", r.Shadowed(), err)
 	}
@@ -222,7 +226,7 @@ func TestTheSettingsWordIsCompactJSONWithEveryDollarEscaped(t *testing.T) {
 	hermetic(t)
 	fakeIntegration(t, onPath(t), "qory-github", fixture(t, "github.json"))
 	key := "/k/a&b<c>$d" + string(rune(0x2028)) + string(rune(0x2029)) + ".pem"
-	foragerFile(t, "integrations:\n  github:\n    settings: {app_id: 123456, private_key_file: \"/k/a&b<c>$d\\L\\P.pem\"}\n")
+	foragerFile(t, "gateway:\n  integrations:\n    github:\n      settings: {app_id: 123456, private_key_file: \"/k/a&b<c>$d\\L\\P.pem\"}\n")
 	r, err := expand(t)
 	if err != nil {
 		t.Fatal(err)
@@ -272,11 +276,11 @@ func TestAProgramIsFoundWhereOnlyItsOwnerCanChangeIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range []struct{ body, ws, want string }{
-		{"integrations: {tracker: {program: " + filepath.Join(workspace, "bin", "acme-tracker") + "}}\n", workspace, inside + ", inside " + workspace + ", which a run may write"},
-		{"integrations: {tracker: {program: " + filepath.Join(workspace, "bin", "acme-tracker") + "}}\n", realWorkspace, "inside " + realWorkspace + ", which a run may write"},
-		{"integrations: {linked: {}}\n", workspace, "qory-linked is " + inside + ", inside " + workspace + ", which a run may write"},
-		{"integrations: {tracker: {program: " + filepath.Join(writable, "acme-tracker") + "}}\n", workspace, resolved(t, writable) + " may be written by every user"},
-		{"integrations: {everyone: {}}\n", workspace, "qory-everyone is " + everyone + ", and " + everyone + " may be written by every user"},
+		{"gateway: {integrations: {tracker: {program: " + filepath.Join(workspace, "bin", "acme-tracker") + "}}}\n", workspace, inside + ", inside " + workspace + ", which a run may write"},
+		{"gateway: {integrations: {tracker: {program: " + filepath.Join(workspace, "bin", "acme-tracker") + "}}}\n", realWorkspace, "inside " + realWorkspace + ", which a run may write"},
+		{"gateway: {integrations: {linked: {}}}\n", workspace, "qory-linked is " + inside + ", inside " + workspace + ", which a run may write"},
+		{"gateway: {integrations: {tracker: {program: " + filepath.Join(writable, "acme-tracker") + "}}}\n", workspace, resolved(t, writable) + " may be written by every user"},
+		{"gateway: {integrations: {everyone: {}}}\n", workspace, "qory-everyone is " + everyone + ", and " + everyone + " may be written by every user"},
 	} {
 		foragerFile(t, c.body)
 		conf, err := config.Load(t.TempDir(), true)
@@ -296,7 +300,7 @@ func TestAProgramIsFoundWhereOnlyItsOwnerCanChangeIt(t *testing.T) {
 		"rel": `qory-rel is found as rel/qory-rel through the PATH entry "rel", which is relative`,
 		"dot": `qory-dot is found as ./qory-dot through the PATH entry ".", which is relative`,
 	} {
-		foragerFile(t, "integrations: {"+key+": {}}\n")
+		foragerFile(t, "gateway: {integrations: {"+key+": {}}}\n")
 		if _, err := expand(t); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("a relative entry of the PATH: %v, want %q", err, want)
 		}
@@ -309,13 +313,13 @@ func TestTheProgramsVersionIsPrintable(t *testing.T) {
 	hermetic(t)
 	escape := string([]byte{0x5c}) + "u001b"
 	program := fakeIntegration(t, onPath(t), "qory-tracker", strings.Replace(fixture(t, "acme-tracker.json"), `"0.1.0"`, `"0.1.0`+escape+`[2J"`, 1))
-	foragerFile(t, "integrations: {tracker: {}}\n")
+	foragerFile(t, "gateway: {integrations: {tracker: {}}}\n")
 	r, err := expand(t)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, row := range r.Rows() {
-		if row.Key == "runner.integrations.tracker" && row.Value != program+" 0.1.0?[2J" {
+		if row.Key == "gateway.integrations.tracker" && row.Value != program+" 0.1.0?[2J" {
 			t.Errorf("row %q", row.Value)
 		}
 	}
@@ -342,7 +346,7 @@ func TestARelativeLinkIsFollowedFromWhereItStands(t *testing.T) {
 		}
 	}
 	t.Setenv("PATH", filepath.Join(base, "pbin")+string(os.PathListSeparator)+os.Getenv("PATH"))
-	foragerFile(t, "integrations: {rel: {}}\n")
+	foragerFile(t, "gateway: {integrations: {rel: {}}}\n")
 	if r, err := expand(t); err != nil || r.Integrations[0].Path != program {
 		t.Fatalf("found %+v, %v; want %s", r, err, program)
 	}
@@ -364,22 +368,22 @@ func TestARelativeLinkIsFollowedFromWhereItStands(t *testing.T) {
 			t.Fatal(err)
 		}
 		next = link
-		foragerFile(t, "integrations: {far: {program: "+next+"}}\n")
+		foragerFile(t, "gateway: {integrations: {far: {program: "+next+"}}}\n")
 		_, err := expand(t)
 		switch links := i + 1; {
 		case links <= 3 && err != nil:
 			t.Errorf("%d links, the most followed: %v", links, err)
-		case links > 3 && (err == nil || !strings.HasSuffix(err.Error(), "integrations.far: "+next+" leads through more than 3 links")):
+		case links > 3 && (err == nil || !strings.HasSuffix(err.Error(), "gateway.integrations.far: "+next+" leads through more than 3 links")):
 			t.Errorf("%d links, more than the most: %v", links, err)
 		}
 	}
 	// A program that is itself a file a run may write is named once, by what it is.
-	foragerFile(t, "integrations: {rel: {program: "+program+"}}\n")
+	foragerFile(t, "gateway: {integrations: {rel: {program: "+program+"}}}\n")
 	conf, err := config.Load(t.TempDir(), true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := conf.Forager.Expand(context.Background(), config.Expansion{Workspace: []string{program}}); err == nil || !strings.HasSuffix(err.Error(), "integrations.rel: "+program+", which a run may write; qory runs an integration from outside the checkout and the container's read-write mounts") {
+	if err := conf.Forager.Expand(context.Background(), config.Expansion{Workspace: []string{program}}); err == nil || !strings.HasSuffix(err.Error(), "gateway.integrations.rel: "+program+", which a run may write; qory runs an integration from outside the checkout and the container's read-write mounts") {
 		t.Errorf("a program that is a mounted file: %v", err)
 	}
 }
@@ -392,7 +396,7 @@ func TestAFailedExpandRunsAgain(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "qory-tracker"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	foragerFile(t, "integrations: {tracker: {}}\n")
+	foragerFile(t, "gateway: {integrations: {tracker: {}}}\n")
 	c, err := config.Load(t.TempDir(), true)
 	if err != nil {
 		t.Fatal(err)
@@ -416,7 +420,7 @@ func TestOnlyTheSelectedIntegrationsAreDescribed(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "qory-broken"), []byte("#!/bin/sh\necho 'the settings file is missing' >&2\nexit 1\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	foragerFile(t, "integrations: {tracker: {}, broken: {}}\n")
+	foragerFile(t, "gateway: {integrations: {tracker: {}, broken: {}}}\n")
 	for _, c := range []struct {
 		only    string
 		ok      bool
@@ -443,13 +447,13 @@ func TestAnUnknownRoleIsLeftAlone(t *testing.T) {
 	hermetic(t)
 	dir := onPath(t)
 	fakeIntegration(t, dir, "qory-tracker", strings.Replace(fixture(t, "acme-tracker.json"), `"roles": {`, `"roles": {"example_role": {},`, 1))
-	foragerFile(t, "integrations:\n  tracker: {}\n")
+	foragerFile(t, "gateway:\n  integrations:\n    tracker: {}\n")
 	if r, err := expand(t); err != nil || len(r.Credentials) != 1 || r.Credentials[0].Name != "tracker" {
 		t.Errorf("a role beside the credential: %+v, %v", r, err)
 	}
 	fakeIntegration(t, dir, "qory-queue", `{"version": 1, "name": "queue", "title": "Queue", "program_version": "1", "settings": {"type": "object"}, "roles": {"example_role": {}, "another_role": {}}}`)
-	path := foragerFile(t, "integrations:\n  queue:\n")
-	if _, err := expand(t); err == nil || err.Error() != path+": integrations.queue: qory-queue plays the roles another_role and example_role, none of which qory expands, and defines nothing" {
+	path := foragerFile(t, "gateway:\n  integrations:\n    queue:\n")
+	if _, err := expand(t); err == nil || err.Error() != path+": gateway.integrations.queue: qory-queue plays the roles another_role and example_role, none of which qory expands, and defines nothing" {
 		t.Errorf("no known role: %v", err)
 	}
 }
@@ -469,14 +473,14 @@ func TestExpandRefusesWhatDoesNotDescribe(t *testing.T) {
 	fakeIntegration(t, dir, "qory-v2", strings.Replace(fixture(t, "acme-tracker.json"), `"version": 1,`, `"version": 2,`, 1))
 	fakeIntegration(t, dir, "qory-github", fixture(t, "github.json"))
 	for _, c := range []struct{ body, want string }{
-		{"integrations:\n  absent: {}\n", "integrations.absent: qory-absent is not on the PATH; install it there, or set program to its path"},
-		{"integrations:\n  x: {program: /nonexistent/acme-x}\n", "integrations.x: /nonexistent/acme-x is not a program this user may run"},
-		{"integrations:\n  failing: {}\n", "integrations.failing: " + resolved(t, failing) + " describe: exit status 3: the key file /k.pem is readable by others"},
-		{"integrations:\n  garbled: {}\n", "describe did not print one JSON document"},
-		{"integrations:\n  v2: {}\n", "describe printed a description the integration contract refuses: at '/version': value must be 1"},
-		{"integrations:\n  github: {settings: {app_id: 1, private_key_file: /k.pem, private_key: NOT-A-REAL-KEY}}\n", "integrations.github: settings.private_key is a secret, and the settings go on a command line; set private_key_file, the path of a file that contains it, in its place"},
-		{"integrations:\n  github: {settings: {app_id: NOT A VALID ID, private_key_file: /k.pem}}\n", "integrations.github: the settings are not what github takes: settings.app_id breaks the schema's pattern"},
-		{"integrations:\n  github: {settings: {app_id: 1, private_key_file: /k.pem, permissions: {contents: NOT-A-LEVEL}}}\n", "settings.permissions.contents breaks the schema's enum"},
+		{"gateway:\n  integrations:\n    absent: {}\n", "gateway.integrations.absent: qory-absent is not on the PATH; install it there, or set program to its path"},
+		{"gateway:\n  integrations:\n    x: {program: /nonexistent/acme-x}\n", "gateway.integrations.x: /nonexistent/acme-x is not a program this user may run"},
+		{"gateway:\n  integrations:\n    failing: {}\n", "gateway.integrations.failing: " + resolved(t, failing) + " describe: exit status 3: the key file /k.pem is readable by others"},
+		{"gateway:\n  integrations:\n    garbled: {}\n", "describe did not print one JSON document"},
+		{"gateway:\n  integrations:\n    v2: {}\n", "describe printed a description the integration contract refuses: at '/version': value must be 1"},
+		{"gateway:\n  integrations:\n    github: {settings: {app_id: 1, private_key_file: /k.pem, private_key: NOT-A-REAL-KEY}}\n", "gateway.integrations.github: settings.private_key is a secret, and the settings go on a command line; set private_key_file, the path of a file that contains it, in its place"},
+		{"gateway:\n  integrations:\n    github: {settings: {app_id: NOT A VALID ID, private_key_file: /k.pem}}\n", "gateway.integrations.github: the settings are not what github takes: settings.app_id breaks the schema's pattern"},
+		{"gateway:\n  integrations:\n    github: {settings: {app_id: 1, private_key_file: /k.pem, permissions: {contents: NOT-A-LEVEL}}}\n", "settings.permissions.contents breaks the schema's enum"},
 	} {
 		path := foragerFile(t, c.body)
 		_, err := expand(t)
@@ -495,20 +499,20 @@ func TestExpandRefusesWhatDoesNotDescribe(t *testing.T) {
 func TestIntegrationsSectionRefusesAMistake(t *testing.T) {
 	hermetic(t)
 	for _, c := range []struct{ body, want string }{
-		{"integrations: [github]\n", "integrations is a mapping from a name to an integration"},
-		{"integrations: {acme.tracker: {}}\n", `integrations: "acme.tracker" is not 1 to 64 of a-z, 0-9, underscore and dash`},
-		{"integrations: {GitHub: {}}\n", `integrations: "GitHub" is not 1 to 64`},
-		{"integrations:\n  github: {}\n  github: {}\n", "integrations.github is declared twice"},
-		{"integrations: {github: qory-github}\n", "integrations.github is a mapping: program and settings"},
-		{"integrations: {github: {command: /x}}\n", `integrations.github: key "command" is not one`},
-		{"integrations: {github: {program: bin/qory-github}}\n", `integrations.github.program "bin/qory-github" is not an absolute path`},
-		{"integrations: {github: {program: 7}}\n", "integrations.github.program is a path or a name on the PATH"},
-		{"integrations: {github: {settings: [a]}}\n", "integrations.github.settings is a mapping, the settings document"},
-		{"integrations: {github: {settings: {a: 1, a: 2}}}\n", "integrations.github.settings.a appears twice"},
-		{"integrations: {github: {settings: {1: x}}}\n", "integrations.github.settings: line 1: a key that is not a string"},
-		{"integrations: {github: {settings: {ratio: .nan}}}\n", "integrations.github.settings.ratio is not a number that JSON can represent"},
-		{"integrations: {github: {settings: {a: &b {x: 1}, c: *b}}}\n", "integrations.github.settings.c: line 1: *b is a YAML alias"},
-		{"integrations: {github: {settings: {<<: {app_id: 1}}}}\n", "a YAML alias or merge, which the settings may not contain"},
+		{"gateway: {integrations: [github]}\n", "gateway.integrations is a mapping from a name to an integration"},
+		{"gateway: {integrations: {acme.tracker: {}}}\n", `gateway.integrations: "acme.tracker" is not 1 to 64 of a-z, 0-9, underscore and dash`},
+		{"gateway: {integrations: {GitHub: {}}}\n", `gateway.integrations: "GitHub" is not 1 to 64`},
+		{"gateway:\n  integrations:\n    github: {}\n    github: {}\n", "gateway.integrations.github is declared twice"},
+		{"gateway: {integrations: {github: qory-github}}\n", "gateway.integrations.github is a mapping: program and settings"},
+		{"gateway: {integrations: {github: {command: /x}}}\n", `gateway.integrations.github: key "command" is not one`},
+		{"gateway: {integrations: {github: {program: bin/qory-github}}}\n", `gateway.integrations.github.program "bin/qory-github" is not an absolute path`},
+		{"gateway: {integrations: {github: {program: 7}}}\n", "gateway.integrations.github.program is a path or a name on the PATH"},
+		{"gateway: {integrations: {github: {settings: [a]}}}\n", "gateway.integrations.github.settings is a mapping, the settings document"},
+		{"gateway: {integrations: {github: {settings: {a: 1, a: 2}}}}\n", "gateway.integrations.github.settings.a appears twice"},
+		{"gateway: {integrations: {github: {settings: {1: x}}}}\n", "gateway.integrations.github.settings: line 1: a key that is not a string"},
+		{"gateway: {integrations: {github: {settings: {ratio: .nan}}}}\n", "gateway.integrations.github.settings.ratio is not a number that JSON can represent"},
+		{"gateway: {integrations: {github: {settings: {a: &b {x: 1}, c: *b}}}}\n", "gateway.integrations.github.settings.c: line 1: *b is a YAML alias"},
+		{"gateway: {integrations: {github: {settings: {<<: {app_id: 1}}}}}\n", "a YAML alias or merge, which the settings may not contain"},
 	} {
 		path := foragerFile(t, c.body)
 		_, err := config.Load(t.TempDir(), true)
@@ -518,11 +522,11 @@ func TestIntegrationsSectionRefusesAMistake(t *testing.T) {
 	}
 }
 
-// TestTheForagerSchemaTakesTheIntegrationsSection holds runner.schema.json to what the
+// TestTheForagerSchemaTakesTheIntegrationsSection holds forager.schema.json to what the
 // reader takes: the declarations of the docs pass it, and a key or an entry the reader
 // refuses fails it.
 func TestTheForagerSchemaTakesTheIntegrationsSection(t *testing.T) {
-	schema, err := jsonschema.NewCompiler().Compile(filepath.Join("..", "..", "contracts", "harness", "v1", "runner.schema.json"))
+	schema, err := jsonschema.NewCompiler().Compile(filepath.Join("..", "..", "contracts", "harness", "v1", "forager.schema.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -530,12 +534,12 @@ func TestTheForagerSchemaTakesTheIntegrationsSection(t *testing.T) {
 		body  string
 		valid bool
 	}{
-		{"integrations:\n  github:\n    settings: {app_id: 123456, private_key_file: /etc/qory/github-app.pem, permissions: {contents: write}}\n  tracker:\n    program: /opt/acme/bin/acme-tracker\n  board:\n", true},
-		{"integrations: {tracker: {program: acme-tracker, settings: {}}}\n", true},
-		{"integrations: {acme.tracker: {}}\n", false},
-		{"integrations: {github: {command: /x}}\n", false},
-		{"integrations: {github: {program: bin/qory-github}}\n", false},
-		{"integrations: {github: {settings: [a]}}\n", false},
+		{"gateway:\n  integrations:\n    github:\n      settings: {app_id: 123456, private_key_file: /etc/qory/github-app.pem, permissions: {contents: write}}\n    tracker:\n      program: /opt/acme/bin/acme-tracker\n    board:\n", true},
+		{"gateway: {integrations: {tracker: {program: acme-tracker, settings: {}}}}\n", true},
+		{"gateway: {integrations: {acme.tracker: {}}}\n", false},
+		{"gateway: {integrations: {github: {command: /x}}}\n", false},
+		{"gateway: {integrations: {github: {program: bin/qory-github}}}\n", false},
+		{"gateway: {integrations: {github: {settings: [a]}}}\n", false},
 	} {
 		var doc any
 		if err := yaml.Unmarshal([]byte(c.body), &doc); err != nil {

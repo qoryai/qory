@@ -53,7 +53,7 @@ func TestParseSubjectsTakesTheTitleLast(t *testing.T) {
 	}
 }
 
-// TestAboutInputNamesTheFlag maps every field the runner names to the flag that gave it,
+// TestAboutInputNamesTheFlag maps every field Forager names to the flag that gave it,
 // a subject by its value as given, and passes any other error as it is.
 func TestAboutInputNamesTheFlag(t *testing.T) {
 	subjects := []string{"type=ticket,ref=7", "type=Ticket,ref=8,title=Crash, again"}

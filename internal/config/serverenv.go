@@ -19,8 +19,8 @@ type ServerVariables struct {
 }
 
 // envWorkspaceSecret is the variable that held a workspace access key's secret, before
-// a machine signed with an access key of its own. It is refused, as server.access_key
-// and server.secret are.
+// a machine signed with an access key of its own. It is refused, as gateway.server.access_key
+// and gateway.server.secret are.
 const envWorkspaceSecret = "QORY_SERVER_SECRET"
 
 // serverVariableNames are the names of [ServerVariables].
@@ -57,8 +57,8 @@ func TakenServerVariables() ServerVariables {
 	return taken
 }
 
-// SetServerVariables replaces what [TakeServerVariables] took, so a test reads the
-// runner file with the values it chooses.
+// SetServerVariables replaces what [TakeServerVariables] took, so a test reads
+// forager.yaml with the values it chooses.
 func SetServerVariables(v ServerVariables) {
 	takenMu.Lock()
 	defer takenMu.Unlock()

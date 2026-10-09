@@ -15,11 +15,11 @@ const enrolPinKey = "rcFAEfgtHFbZVqpPnXPYhYNhpgYEhSXg0Ixjjcdd2Mc"
 
 var enrolment = config.Enrolment{URL: "https://apiary.example", AccessKeyID: "ak_0123456789abcdef", Pin: accesskey.Pin{{Alg: "ed25519", PublicKey: enrolPinKey}}}
 
-// writeEnrolment writes content to a runner file, mode m, applies the enrolment and
+// writeEnrolment writes content to a forager.yaml, mode m, applies the enrolment and
 // returns what the file holds then.
 func writeEnrolment(t *testing.T, content string, m os.FileMode, e config.Enrolment) (string, error) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "runner.yaml")
+	path := filepath.Join(t.TempDir(), "forager.yaml")
 	if content != "-" {
 		if err := os.WriteFile(path, []byte(content), m); err != nil {
 			t.Fatal(err)
@@ -43,12 +43,14 @@ func writeEnrolment(t *testing.T, content string, m os.FileMode, e config.Enrolm
 	return string(b), nil
 }
 
-// TestWriteEnrolmentKeepsTheFile is the server section written into runner files of
-// every shape: the comments, the order and every other key stay; a url there stays, an
-// access_key_id there is replaced, a pin there stays; a file that does not exist is
-// created mode 0600 with the apiVersion line; a file of comments alone keeps them; an
-// existing file keeps its mode.
+// TestWriteEnrolmentKeepsTheFile is gateway.server written into forager.yaml files of
+// every shape: the comments, the order and every other key stay; a gateway section
+// there gains server after its other keys, and a file without one gains it at the end;
+// a url there stays, an access_key_id there is replaced, a pin there stays; a file that
+// does not exist is created mode 0600 with the apiVersion line; a file of comments
+// alone keeps them; an existing file keeps its mode.
 func TestWriteEnrolmentKeepsTheFile(t *testing.T) {
+	pinLines := "    apiary_public_key:\n      - {alg: ed25519, public_key: " + enrolPinKey + "}\n"
 	for _, c := range []struct {
 		name, in string
 		mode     os.FileMode
@@ -56,19 +58,23 @@ func TestWriteEnrolmentKeepsTheFile(t *testing.T) {
 		want     string
 	}{
 		{"no file", "-", 0, enrolment,
-			"apiVersion: qory.dev/v1alpha1\nserver:\n  url: https://apiary.example\n  access_key_id: ak_0123456789abcdef\n  apiary_public_key:\n    - {alg: ed25519, public_key: " + enrolPinKey + "}\n"},
+			"apiVersion: qory.dev/v1alpha1\ngateway:\n  server:\n    url: https://apiary.example\n    access_key_id: ak_0123456789abcdef\n" + pinLines},
 		{"empty", "", 0o600, enrolment,
-			"apiVersion: qory.dev/v1alpha1\nserver:\n  url: https://apiary.example\n"},
+			"apiVersion: qory.dev/v1alpha1\ngateway:\n  server:\n    url: https://apiary.example\n"},
 		{"comments alone", "# Mine.\n\n", 0o644, enrolment,
-			"# Mine.\napiVersion: qory.dev/v1alpha1\nserver:\n"},
-		{"sections and comments", "# Mine.\napiVersion: qory.dev/v1alpha1\negress:\n  mode: observe # for now\n# Shown.\ninstance:\n  name: build-01\n", 0o640, enrolment,
-			"# Mine.\napiVersion: qory.dev/v1alpha1\negress:\n  mode: observe # for now\n# Shown.\ninstance:\n  name: build-01\nserver:\n  url: https://apiary.example\n  access_key_id: ak_0123456789abcdef\n  apiary_public_key:\n    - {alg: ed25519, public_key: " + enrolPinKey + "}\n"},
-		{"a server section", "server: # the server\n  url: http://127.0.0.1:8080\n  access_key_id: ak_0000000000000000\n  apiary_public_key: [{alg: ed25519, public_key: kept}] # by hand\nrun:\n  timeout: 1h\n", 0o600, enrolment,
-			"server: # the server\n  url: http://127.0.0.1:8080\n  access_key_id: ak_0123456789abcdef\n  apiary_public_key: [{alg: ed25519, public_key: kept}] # by hand\nrun:\n  timeout: 1h\n"},
-		{"no pin given", "server:\n  url: https://apiary.example\n", 0o600, config.Enrolment{URL: "https://apiary.example", AccessKeyID: "ak_0123456789abcdef"},
-			"server:\n  url: https://apiary.example\n  access_key_id: ak_0123456789abcdef\n"},
-		{"server null", "server:\n", 0o600, config.Enrolment{URL: "https://apiary.example", AccessKeyID: "ak_0123456789abcdef"},
-			"server:\n  url: https://apiary.example\n  access_key_id: ak_0123456789abcdef\n"},
+			"# Mine.\napiVersion: qory.dev/v1alpha1\ngateway:\n  server:\n"},
+		{"sections and comments", "# Mine.\napiVersion: qory.dev/v1alpha1\ngateway:\n  egress:\n    mode: observe # for now\n  # Mine too.\n  credentials:\n    model: {env: MODEL_TOKEN, hosts: [api.example.com]}\n# Shown.\nsession:\n  instance:\n    name: build-01\n", 0o640, enrolment,
+			"# Mine.\napiVersion: qory.dev/v1alpha1\ngateway:\n  egress:\n    mode: observe # for now\n  # Mine too.\n  credentials:\n    model: {env: MODEL_TOKEN, hosts: [api.example.com]}\n  server:\n    url: https://apiary.example\n    access_key_id: ak_0123456789abcdef\n" + pinLines + "# Shown.\nsession:\n  instance:\n    name: build-01\n"},
+		{"no gateway section", "apiVersion: qory.dev/v1alpha1\n# Shown.\nsession:\n  instance:\n    name: build-01\nwall:\n  adapter: docker # walled\n", 0o600, enrolment,
+			"apiVersion: qory.dev/v1alpha1\n# Shown.\nsession:\n  instance:\n    name: build-01\nwall:\n  adapter: docker # walled\ngateway:\n  server:\n    url: https://apiary.example\n    access_key_id: ak_0123456789abcdef\n" + pinLines},
+		{"a server section", "gateway:\n  server: # the server\n    url: http://127.0.0.1:8080\n    access_key_id: ak_0000000000000000\n    apiary_public_key: [{alg: ed25519, public_key: kept}] # by hand\nsession:\n  run:\n    timeout: 1h\n", 0o600, enrolment,
+			"gateway:\n  server: # the server\n    url: http://127.0.0.1:8080\n    access_key_id: ak_0123456789abcdef\n    apiary_public_key: [{alg: ed25519, public_key: kept}] # by hand\nsession:\n  run:\n    timeout: 1h\n"},
+		{"no pin given", "gateway:\n  server:\n    url: https://apiary.example\n", 0o600, config.Enrolment{URL: "https://apiary.example", AccessKeyID: "ak_0123456789abcdef"},
+			"gateway:\n  server:\n    url: https://apiary.example\n    access_key_id: ak_0123456789abcdef\n"},
+		{"server null", "gateway:\n  server:\n", 0o600, config.Enrolment{URL: "https://apiary.example", AccessKeyID: "ak_0123456789abcdef"},
+			"gateway:\n  server:\n    url: https://apiary.example\n    access_key_id: ak_0123456789abcdef\n"},
+		{"gateway null", "gateway:\n", 0o600, config.Enrolment{URL: "https://apiary.example", AccessKeyID: "ak_0123456789abcdef"},
+			"gateway:\n  server:\n    url: https://apiary.example\n    access_key_id: ak_0123456789abcdef\n"},
 	} {
 		got, err := writeEnrolment(t, c.in, c.mode, c.e)
 		if err != nil {
@@ -82,23 +88,23 @@ func TestWriteEnrolmentKeepsTheFile(t *testing.T) {
 			t.Errorf("%s: access_key_id twice:\n%s", c.name, got)
 		}
 	}
-	for _, in := range []string{"server: https://apiary.example\n", "- a\n- b\n", "a: [\n"} {
+	for _, in := range []string{"gateway: {server: https://apiary.example}\n", "gateway: https://apiary.example\n", "- a\n- b\n", "a: [\n"} {
 		if _, err := writeEnrolment(t, in, 0o600, enrolment); err == nil {
 			t.Errorf("%q: accepted", in)
 		}
 	}
 }
 
-// TestWriteEnrolmentFollowsALink is a runner file that is a link, kept in a dotfiles
+// TestWriteEnrolmentFollowsALink is a forager.yaml that is a link, kept in a dotfiles
 // checkout say: the file it names is written, and the link stays.
 func TestWriteEnrolmentFollowsALink(t *testing.T) {
 	dir := t.TempDir()
-	target := filepath.Join(dir, "dotfiles", "runner.yaml")
+	target := filepath.Join(dir, "dotfiles", "forager.yaml")
 	os.MkdirAll(filepath.Dir(target), 0o700)
-	if err := os.WriteFile(target, []byte("instance:\n  name: build-01\n"), 0o600); err != nil {
+	if err := os.WriteFile(target, []byte("session:\n  instance:\n    name: build-01\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	link := filepath.Join(dir, "runner.yaml")
+	link := filepath.Join(dir, "forager.yaml")
 	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
 	}
