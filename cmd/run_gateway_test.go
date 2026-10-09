@@ -349,9 +349,9 @@ func TestRunThroughASeparateGatewayIsRefusedByIt(t *testing.T) {
 // machine whose runs go through a gateway, before anything starts, each in its exact
 // words and an input error that leaves no record: an access key in a file, a variable or
 // a descriptor; --local, --label and --policy, which are for a gateway of the run's own;
-// a CA file that cannot be read or holds no certificate; a run credential file that is
-// not there, is a directory, or whose mode grants the group or others read or write; and
-// no run credential.
+// a CA file that cannot be read, a directory included, or holds no certificate; a run
+// credential file that is not there, is a directory, worded as the CA file's is, or whose
+// mode grants the group or others read or write; and no run credential.
 func TestRunBehindAGatewayRefusesBeforeAnythingStarts(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -403,6 +403,10 @@ func TestRunBehindAGatewayRefusesBeforeAnythingStarts(t *testing.T) {
 			writeFile(t, file, sessionGateway("gateway.example:8443", "missing-ca.pem", "    run_credential_file: "+credential+"\n"))
 			return []string{"run"}
 		}, file + ": session.gateway.ca_file " + filepath.Join(dir, "missing-ca.pem") + ": no such file or directory"},
+		{"a CA file that is a directory", func(t *testing.T) []string {
+			writeFile(t, file, sessionGateway("gateway.example:8443", dir, "    run_credential_file: "+credential+"\n"))
+			return []string{"run"}
+		}, file + ": session.gateway.ca_file " + dir + ": is a directory"},
 		{"a run credential file the group may read", func(t *testing.T) []string {
 			os.Chmod(credential, 0o640)
 			t.Cleanup(func() { os.Chmod(credential, 0o600) })
@@ -420,7 +424,7 @@ func TestRunBehindAGatewayRefusesBeforeAnythingStarts(t *testing.T) {
 		{"a run credential file that is a directory", func(t *testing.T) []string {
 			writeFile(t, file, sessionGateway("gateway.example:8443", "gateway.pem", "    run_credential_file: "+dir+"\n"))
 			return []string{"run"}
-		}, file + ": session.gateway.run_credential_file " + dir + " is a directory"},
+		}, file + ": session.gateway.run_credential_file " + dir + ": is a directory"},
 		{"no run credential", func(t *testing.T) []string {
 			writeFile(t, file, sessionGateway("gateway.example:8443", "gateway.pem", ""))
 			return []string{"run"}

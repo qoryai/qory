@@ -600,8 +600,10 @@ relative to the directory of `forager.yaml` unless it is absolute.
   newline. `QORY_RUN_CREDENTIAL_SECRET` is read once, when `qory run` starts, so a
   credential from it can't be renewed during the run; a run longer than its credential
   needs `session.gateway.run_credential_file` or `--run-credential-fd`. When the
-  credential comes from the file, a file that isn't there or can't be read is refused
-  before the run starts. A file whose mode grants the group or others read or write is
+  credential comes from the file, a file that isn't there or can't be reached, a
+  directory, and a regular file qory can't open are refused before the run starts; a
+  named pipe or another special file isn't opened before the first request. A file
+  whose mode grants the group or others read or write is
   refused before the run starts, and again at each read. A walled run whose mounts hold
   it is refused before it starts, as a mount of Forager's own files is.
 
@@ -661,9 +663,10 @@ Before anything starts, `qory run` refuses:
 - `this machine's runs go through the gateway session.gateway.url names, and there is no
   run credential: set session.gateway.run_credential_file, --run-credential-fd or
   QORY_RUN_CREDENTIAL_SECRET`
-- `<file>: session.gateway.run_credential_file <path>: <err>`, and `<file>:
-  session.gateway.run_credential_file <path> is a directory`, for the run credential's
-  file when the credential comes from it and it isn't there or can't be read.
+- `<file>: session.gateway.run_credential_file <path>: <err>`, for the run credential's
+  file when the credential comes from it and it isn't there or can't be reached, is a
+  directory (`<err>` is then `is a directory`, as for `ca_file`), or is a regular file
+  qory can't open.
 - `<path> is mode <mode>, which grants access to the group or others: chmod 600 <path>`,
   for the run credential's file whose mode grants the group or others read or write.
 

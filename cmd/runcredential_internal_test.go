@@ -146,18 +146,26 @@ func TestTheRunCredentialFileGrantsTheGroupAndOthersNoReadOrWrite(t *testing.T) 
 
 // TestTheRunCredentialFileIsThereBeforeAnythingStarts is the run credential's file, when
 // it is the source in use, checked before anything starts: one that is not there, a
-// directory, and one qory cannot open are refused in the words of session.gateway.ca_file's
-// refusals, and none holds what the file holds. A credential from the descriptor or the
-// variable leaves the file unchecked. A file that goes after the start is, as before,
-// the read's error at the next request.
+// directory, and a regular file qory cannot open are refused in the words of
+// session.gateway.ca_file's refusals, and none holds what the file holds. A named pipe is
+// not opened, so it passes. A credential from the descriptor or the variable leaves the
+// file unchecked. A file that goes after the start is, as before, the read's error at the
+// next request.
 func TestTheRunCredentialFileIsThereBeforeAnythingStarts(t *testing.T) {
 	dir := t.TempDir()
 	none := filepath.Join(dir, "none")
 	if err := (&runCredential{file: none}).checkFile(foragerAt); err == nil || err.Error() != foragerAt+": session.gateway.run_credential_file "+none+": no such file or directory" {
 		t.Errorf("a file that is not there: %v", err)
 	}
-	if err := (&runCredential{file: dir}).checkFile(foragerAt); err == nil || err.Error() != foragerAt+": session.gateway.run_credential_file "+dir+" is a directory" {
+	if err := (&runCredential{file: dir}).checkFile(foragerAt); err == nil || err.Error() != foragerAt+": session.gateway.run_credential_file "+dir+": is a directory" {
 		t.Errorf("a directory: %v", err)
+	}
+	fifo := filepath.Join(dir, "fifo")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&runCredential{file: fifo}).checkFile(foragerAt); err != nil {
+		t.Errorf("a named pipe: %v", err)
 	}
 	if err := (&runCredential{variable: "header.claims.signature"}).checkFile(foragerAt); err != nil {
 		t.Errorf("the variable, the file not there: %v", err)

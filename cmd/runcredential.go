@@ -354,12 +354,14 @@ func readCredentialFile(path string) ([]byte, error) {
 }
 
 // checkFile refuses, before anything starts, a run credential file that is the source in
-// use and that qory cannot read: one that is not there, a directory, or one qory cannot
-// open, worded as session.gateway.ca_file's refusals are, after forager, the file that
-// names it; and one whose mode grants the group or others read or write
-// ([credentialFileMode]). It goes by the file a link leads to, which is the one read,
-// and reads nothing of it. A run credential from the descriptor or the variable has no
-// file, and the file is then not checked. The read before each request is not changed.
+// use and that qory cannot stat, as one that is not there, a directory, or a regular file
+// qory cannot open, worded as session.gateway.ca_file's refusals are, after forager, the
+// file that names it; and one whose mode grants the group or others read or write
+// ([credentialFileMode]). A named pipe or another special file is not opened, since
+// opening it may wait for its writer: the read before the first request is the first to
+// open it. It goes by the file a link leads to, which is the one read, and reads nothing
+// of it. A run credential from the descriptor or the variable has no file, and the file
+// is then not checked. The read before each request is not changed.
 func (c *runCredential) checkFile(forager string) error {
 	if c.file == "" {
 		return nil
@@ -376,7 +378,8 @@ func (c *runCredential) checkFile(forager string) error {
 		return refuse(err)
 	}
 	if info.IsDir() {
-		return fmt.Errorf("%s: session.gateway.run_credential_file %s is a directory", forager, c.file)
+		// As session.gateway.ca_file's read of a directory words it.
+		return refuse(syscall.EISDIR)
 	}
 	if err := credentialFileMode(c.file, info); err != nil {
 		return err
@@ -486,8 +489,9 @@ func gatewayEnded(u *ui.UI, report io.Writer, reason string, c *runCredential) b
 // through the gateway r's session.gateway names, and the run credential it then sends:
 // such a machine holds no access key, in a file, a variable or a descriptor; --local and
 // --label are for a gateway of the run's own; the CA file must hold a certificate; and
-// the run needs a run credential, whose file, when it comes from one, is there, can be
-// read, and grants the group and others no read or write. keyFD says
+// the run needs a run credential, whose file, when it comes from one, is there, is not a
+// directory, opens when it is a regular file, and grants the group and others no read or
+// write. keyFD says
 // --access-key-secret-fd was given, and credentialFD is the stream of
 // --run-credential-fd, nil when it was not given.
 func behindGateway(r *config.Forager, local, labels, keyFD bool, credentialFD *credentialStream) (*runCredential, error) {
