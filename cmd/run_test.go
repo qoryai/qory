@@ -219,7 +219,7 @@ func writeSecret(t *testing.T, k *accesskey.Key) {
 }
 
 // fakeRuntime writes a program that stands in for a runtime: it prints its run id and
-// its arguments, checks that the gateway's proxy and socket are in its environment, and
+// its arguments, checks that the proxy and the run's socket are in its environment, and
 // exits with the status QORY_TEST_EXIT names, 3 when unset.
 func fakeRuntime(t *testing.T) string {
 	t.Helper()
@@ -883,10 +883,8 @@ func TestRunRefusesAMountOfForagersFiles(t *testing.T) {
 	writeFile(t, filepath.Join(configDir, "forager.yaml"), "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
 	home := os.Getenv("HOME")
 	// The tools' sockets are made in the system's temporary directory: one apart from
-	// the home, so a mount of it holds Forager's files and not the access key. The
-	// gateway's link socket is made there before the mounts are checked, so the
-	// directory's path is short enough for a socket's.
-	tmp := shortTempDir(t)
+	// the home, so a mount of it holds Forager's files and not the access key.
+	tmp := tempDir(t)
 	t.Setenv("TMPDIR", tmp)
 	secret := filepath.Join(configDir, "access-key-secret")
 	stateHome := os.Getenv("XDG_STATE_HOME")
