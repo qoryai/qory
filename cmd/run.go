@@ -144,9 +144,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			var pol *gateway.Policy
 			var server *gateway.Server
 			if r := conf.Forager; r != nil {
-				if r.Egress != nil {
-					pol = &gateway.Policy{Version: 1, Egress: gateway.PolicyEgress{Mode: r.Egress.Mode, Allow: r.Egress.Allow, Deny: r.Egress.Deny}}
-				}
+				pol = machinePolicy(r)
 				if r.Server != nil {
 					server = gatewayServer(r.Server)
 				}
@@ -283,7 +281,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			defer runLock.Release()
 			if id != nil {
-				gw.Discovered = discovered(machineDir(), id, walled, stderr)
+				gw.Discovered = discovered(machineDir(), id, "run", walled, stderr)
 			}
 			apiary := ""
 			if server != nil {
@@ -291,23 +289,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			spec.OnVariables = unusedEnv(stderr, apiary)
 			if r := conf.Forager; r != nil {
-				for _, key := range r.Shadowed() {
-					fmt.Fprintln(stderr, "qory run:", shadowed(key))
-				}
-				if err := r.Expand(ctx, expansion(r, pol, server != nil && !local, at.root, cwd, spec.Mounts)); err != nil {
-					return input(err)
-				}
-				for _, in := range r.Integrations {
-					if in.Path != "" {
-						fmt.Fprintf(stderr, "qory run: integration %s: %s %s\n", in.Key, in.Path, in.Version)
-					}
-				}
-				for _, c := range r.Credentials {
-					def := gateway.Credential{Name: c.Name, Env: c.Env, File: c.File, Adapter: c.Adapter, Argument: c.Argument, Hosts: c.Hosts, Scheme: c.Scheme, Username: c.Username, Header: c.Header, Paths: c.Paths, Placeholders: c.Placeholders}
-					if err := def.Check(); err != nil {
-						return input(fmt.Errorf("%s: %w", config.ForagerFileName, err))
-					}
-					gw.Credentials = append(gw.Credentials, def)
+				if gw.Credentials, err = machineCredentials(ctx, r, expansion(r, pol, server != nil && !local, at.root, cwd, spec.Mounts), "run", stderr); err != nil {
+					return err
 				}
 			}
 			// The files the settings name are known once the integrations are described.
@@ -406,6 +389,42 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	homeFlags(c, &h)
 	c.AddCommand(newResend(), newForward(), newRelay(), newNest())
 	return c
+}
+
+// machinePolicy is the policy forager.yaml's gateway.egress sets for every run of the
+// machine's gateway, nil when it has none.
+func machinePolicy(r *config.Forager) *gateway.Policy {
+	if r.Egress == nil {
+		return nil
+	}
+	return &gateway.Policy{Version: 1, Egress: gateway.PolicyEgress{Mode: r.Egress.Mode, Allow: r.Egress.Allow, Deny: r.Egress.Deny}}
+}
+
+// machineCredentials describes the integrations forager.yaml declares as e selects, and
+// returns the credentials the machine's gateway holds: the file's own and the ones the
+// integrations define. It prints, after "qory <verb>:", a line for each credential
+// gateway.credentials shadows and for each integration described.
+func machineCredentials(ctx context.Context, r *config.Forager, e config.Expansion, verb string, report io.Writer) ([]gateway.Credential, error) {
+	for _, key := range r.Shadowed() {
+		fmt.Fprintf(report, "qory %s: %s\n", verb, shadowed(key))
+	}
+	if err := r.Expand(ctx, e); err != nil {
+		return nil, input(err)
+	}
+	for _, in := range r.Integrations {
+		if in.Path != "" {
+			fmt.Fprintf(report, "qory %s: integration %s: %s %s\n", verb, in.Key, in.Path, in.Version)
+		}
+	}
+	var out []gateway.Credential
+	for _, c := range r.Credentials {
+		def := gateway.Credential{Name: c.Name, Env: c.Env, File: c.File, Adapter: c.Adapter, Argument: c.Argument, Hosts: c.Hosts, Scheme: c.Scheme, Username: c.Username, Header: c.Header, Paths: c.Paths, Placeholders: c.Placeholders}
+		if err := def.Check(); err != nil {
+			return nil, input(fmt.Errorf("%s: %w", config.ForagerFileName, err))
+		}
+		out = append(out, def)
+	}
+	return out, nil
 }
 
 // runIDUsed is the gateway's refusal of a run whose id a run on this machine has
