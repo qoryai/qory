@@ -703,6 +703,8 @@ is sent. It doesn't close the record: the gateway ends a run whose session it lo
 removes the containers and networks the run's wall left, as without a gateway.
 
 - `<n> events were accepted; nothing is left to send to the gateway`: exit 0.
+- `the gateway never opened run <id>, so there is nothing to send; its record stays in
+  <dir>`: exit 0, for a run the gateway never opened, one it refused at its start, say.
 - `<n> events were accepted and <m> were not; <dir>/undelivered contains them`: the
   gateway didn't accept them within `--wait`.
 - `the run credential expired at <time>, so the gateway takes no more of this run's
@@ -715,7 +717,7 @@ removes the containers and networks the run's wall left, as without a gateway.
   server closed the run, so the gateway takes no more of this run's events; they stay in
   <dir>`.
 
-Each but the first is exit 1, and the events stay in the run directory. A run that ran
+Each but the first two is exit 1, and the events stay in the run directory. A run that ran
 with a gateway of its own on this machine is refused: its record goes to the server, so
 resend it with a `forager.yaml` that defines the server and no `session.gateway`.
 

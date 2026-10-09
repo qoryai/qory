@@ -29,6 +29,7 @@ const (
 	resendRefused  = "the gateway refused this run credential"
 	resendDiffers  = "the gateway refused this run credential: it differs from the one the run started with"
 	resendSent     = "%d events were accepted; nothing is left to send to the gateway"
+	resendUnopened = "the gateway never opened run %s, so there is nothing to send; its record stays in %s"
 	resendNotSent  = "%d events were accepted and %d were not; %s/undelivered contains them"
 	resendOwnLocal = "the run %s ran with a gateway of its own on this machine, so its record goes to the server, not through session.gateway: resend it with a forager.yaml that defines the server and no session.gateway"
 )
@@ -289,6 +290,62 @@ func TestResendThroughAGatewaySaysWhatItAnswered(t *testing.T) {
 		}
 	}
 	noCredentialUnder(t, os.Getenv("XDG_STATE_HOME"), credential)
+}
+
+// TestResendOfARunTheGatewayNeverOpened is a record with no delivered.log, of a run the
+// gateway never opened: the resend says so, sends nothing, with no request, leaves the
+// record as it is, and is exit 0. A record that owes nothing still says that nothing is
+// left to send.
+func TestResendOfARunTheGatewayNeverOpened(t *testing.T) {
+	root := newCheckout(t)
+	link := newFakeLink(t)
+	writeFile(t, foragerFile(), sessionGateway(strings.TrimPrefix(link.URL, "https://"), link.ca, ""))
+	credential := "opaque-run-credential-" + fmt.Sprint(time.Now().UnixNano())
+	t.Setenv("QORY_RUN_CREDENTIAL_SECRET", credential)
+
+	const id = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5ea0"
+	dir := gatewayRecord(t, root, id)
+	if err := os.Remove(filepath.Join(dir, "delivered.log")); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(filepath.Join(dir, "session.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, "run", "resend", id)
+	want := fmt.Sprintf(resendUnopened, id, ui.Short(dir, root))
+	if err != nil || !strings.HasSuffix(out, " "+want+"\n") || strings.Count(out, "\n") != 1 {
+		t.Errorf("a run the gateway never opened: %v (exit %d), want %q, exit 0\n%s", err, cmd.ExitCode(err), want, out)
+	}
+	lacks(t, failed(out, err), credential)
+	link.mu.Lock()
+	if len(link.bearers) != 0 {
+		t.Errorf("a run the gateway never opened: %d requests reached the gateway", len(link.bearers))
+	}
+	link.mu.Unlock()
+	if after, err := os.ReadFile(filepath.Join(dir, "session.jsonl")); err != nil || string(after) != string(before) {
+		t.Errorf("the record changed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "delivered.log")); err == nil {
+		t.Error("the resend wrote a delivered.log")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "undelivered")); err == nil {
+		t.Error("the resend wrote undelivered/")
+	}
+
+	const complete = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5ea1"
+	gatewayRecord(t, root, complete)
+	// qory takes the variable out of its environment each time a command starts.
+	t.Setenv("QORY_RUN_CREDENTIAL_SECRET", credential)
+	if out, err := run(t, "run", "resend", complete); err != nil || !strings.Contains(out, fmt.Sprintf(resendSent, 2)) {
+		t.Fatalf("the first resend: %v\n%s", err, out)
+	}
+	t.Setenv("QORY_RUN_CREDENTIAL_SECRET", credential)
+	out, err = run(t, "run", "resend", complete)
+	if err != nil || !strings.HasSuffix(out, " "+fmt.Sprintf(resendSent, 0)+"\n") || strings.Contains(out, "never opened") {
+		t.Errorf("a record that owes nothing: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	lacks(t, failed(out, err), credential)
 }
 
 // TestResendBehindAGatewayRefusesBeforeAnythingIsSent is every refusal of qory run

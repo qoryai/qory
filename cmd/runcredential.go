@@ -618,7 +618,8 @@ func credentialRefused(err error, labels map[string]string, detailsFlag string, 
 // the run runID did not deliver to it, from dir, the run's directory, through the
 // gateway the run spoke to, [remoteGateway], with the run credential c, within wait of
 // sig. It says what came of it on w: what the gateway accepted, what it did not, a run
-// it has ended, and its refusals of the run credential, each worded for the person
+// it has ended, a run it never opened, whose record has nothing to send and stays, exit
+// 0, and its refusals of the run credential, each worded for the person
 // ([gatewayRefusedResend], [gatewayEndedResend]). A record its session still holds, a
 // run that is not recorded, and a record a gateway of the run's own made, which goes to
 // the server, are refused as input. root is the checkout's, against which dir is shown.
@@ -658,6 +659,11 @@ func resendThroughGateway(sig context.Context, wait time.Duration, w io.Writer, 
 	case res.Undelivered > 0:
 		u.Fail(fmt.Errorf("%d events were accepted and %d were not; %s/undelivered contains them", res.Sent, res.Undelivered, shown))
 		return reported(&exitError{code: 1})
+	case res.NotOpened:
+		// A run refused at its run request, say: nothing failed now, and nothing would
+		// come of sending again, so the resend succeeds, as one with nothing left does.
+		u.Success("the gateway never opened run %s, so there is nothing to send; its record stays in %s", runID, shown)
+		return nil
 	}
 	u.Success("%d events were accepted; nothing is left to send to the gateway", res.Sent)
 	return nil

@@ -199,7 +199,8 @@ release may change what an existing document does, and states it under Upgrading
   with the run's run credential from `--run-credential-fd`, else
   `QORY_RUN_CREDENTIAL_SECRET`, else `session.gateway.run_credential_file`, and refuses
   before anything is sent what `qory run` refuses behind a gateway. It says how many
-  events the gateway accepted, exit 0 when nothing is left to send. It says events the
+  events the gateway accepted, exit 0 when nothing is left to send, and a run the gateway
+  never opened, whose record has nothing to send and stays, exit 0. It says events the
   gateway did not accept, a run credential that expired, that it refused or that differs
   from the one the run started with, and a run the gateway, the credential's issuer or
   the server ended, each exit 1, the events kept in the run directory. A record a gateway
