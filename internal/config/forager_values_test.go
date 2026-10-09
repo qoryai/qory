@@ -3,6 +3,7 @@ package config_test
 import (
 	"encoding/base64"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -355,9 +356,8 @@ func repeated(item string, n int) string {
 // TestForagerReadsAtOnceWhatItCannotSayWithoutAValue writes files the decoder's own
 // words, or a walk of them, would print a value of or take too long over: a mapping of
 // many keys merged again and again, an alias key whose anchor's value is tagged
-// !!binary, a key that is a list or a mapping that only the decoder reaches, and an
-// alias in gateway.run_credentials of an anchor elsewhere in the file. Each answers at
-// once, and in qory's words, which name no value.
+// !!binary, and a key that is a list or a mapping that only the decoder reaches. Each
+// answers at once, and in qory's words, which name no value.
 func TestForagerReadsAtOnceWhatItCannotSayWithoutAValue(t *testing.T) {
 	hermetic(t)
 	const number = "987654321"
@@ -370,7 +370,6 @@ func TestForagerReadsAtOnceWhatItCannotSayWithoutAValue(t *testing.T) {
 		{"session:\n  instance:\n    name: &a !!binary " + binary + "\n  *a : 1\n", ": line 4: key *a is an alias of a key forager.yaml does not read", ": session.instance.name is not 1 to 64 of A-Z, a-z, 0-9, dot, underscore and dash, starting with a letter or digit"},
 		{env + "gateway: {<<: {listen: \"a:1\"}, ? {a: {[*p]: 1}} : x}\n", ": line 2: gateway has a key that is not a name", ""},
 		{env + "webhook: &g {<<: {listen: \"a:1\"}, ? {a: {[*p]: 1}} : x}\ngateway: *g\n", ": a value is not of the type its key takes", ""},
-		{"gateway: {listen: &l 127.0.0.1:8443, run_credentials: [{issuer: *l}]}\n", ": gateway.run_credentials is not a list of issuers as run-credentials.schema.json defines them", ""},
 	} {
 		path := foragerFile(t, c.body)
 		for _, r := range []struct {
@@ -401,6 +400,50 @@ func TestForagerReadsAtOnceWhatItCannotSayWithoutAValue(t *testing.T) {
 			if err != nil && (strings.Contains(err.Error(), marker) || strings.Contains(err.Error(), number)) {
 				t.Errorf("%.80q: the refusal holds a value: %v", c.body, err)
 			}
+		}
+	}
+}
+
+// TestRunCredentialsReadAnAnchorElsewhereInTheFile writes aliases under
+// gateway.run_credentials of anchors in other sections: the list is read as the file
+// means it, the same as with each value written out, and one the schema refuses is
+// refused by its report, which names no value. An alias of an anchor the file does not
+// define before it is refused as the decoder refuses it.
+func TestRunCredentialsReadAnAnchorElsewhereInTheFile(t *testing.T) {
+	hermetic(t)
+	const rest = `algorithms: [RS256], keys: [{kid: k1, alg: RS256, public_key_file: f.pem}], labels: {forge: {value: x}, repository: {claim: repo}, run_key: {claim: sub}}`
+	foragerFile(t, "gateway:\n  run_credentials:\n    - {issuer: \"https://issuer.example\", audience: box, "+rest+"}\n")
+	want, err := config.LoadForager()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{
+		"session: {instance: {name: &aud box}}\ngateway:\n  run_credentials:\n    - {issuer: \"https://issuer.example\", audience: *aud, " + rest + "}\n",
+		"session: {instance: {name: &k audience}}\ngateway:\n  run_credentials:\n    - {issuer: \"https://issuer.example\", *k : box, " + rest + "}\n",
+	} {
+		foragerFile(t, body)
+		got, err := config.LoadForager()
+		if err != nil {
+			t.Errorf("%q: %v, want it read", body, err)
+			continue
+		}
+		if !reflect.DeepEqual(got.RunCredentials, want.RunCredentials) {
+			t.Errorf("%q: read as %+v, want %+v", body, got.RunCredentials, want.RunCredentials)
+		}
+	}
+	for _, c := range []struct{ body, want string }{
+		{"gateway: {listen: &l 127.0.0.1:8443, run_credentials: [{issuer: *l}]}\n", ": gateway.run_credentials: jsonschema validation failed with 'https://qory.dev/contracts/forager/v1/run-credentials.schema.json#'\n- at '/0': validation failed\n  - at '/0': missing properties 'audience', 'algorithms', 'keys', 'labels'\n  - at '/0/issuer': value is not valid uri"},
+		{"wall: {adapter: docker, image: &d " + marker + "}\ngateway:\n  run_credentials:\n    - {issuer: \"https://issuer.example\", audience: box, algorithms: [*d], keys: [{kid: k1, alg: RS256, public_key_file: f.pem}], labels: {forge: {value: x}, repository: {claim: repo}, run_key: {claim: sub}}}\n", ": gateway.run_credentials: jsonschema validation failed with 'https://qory.dev/contracts/forager/v1/run-credentials.schema.json#'\n- at '/0/algorithms/0': value must be one of 'RS256', 'ES256', 'EdDSA'"},
+		{"gateway:\n  run_credentials:\n    - {issuer: \"https://issuer.example\", audience: *" + marker + "}\n", ": an alias names an anchor that is not defined before it"},
+		{"gateway:\n  run_credentials:\n    - {issuer: \"https://issuer.example\", audience: *" + marker + "}\nsession: {instance: {name: &" + marker + " box}}\n", ": an alias names an anchor that is not defined before it"},
+	} {
+		path := foragerFile(t, c.body)
+		_, err := config.LoadForager()
+		if err == nil || err.Error() != path+c.want {
+			t.Errorf("%q: %v, want %q", c.body, err, path+c.want)
+		}
+		if err != nil && (strings.Contains(err.Error(), marker) || strings.Contains(err.Error(), "8443")) {
+			t.Errorf("%q: the refusal holds a value: %v", c.body, err)
 		}
 	}
 }

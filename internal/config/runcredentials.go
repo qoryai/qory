@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -18,8 +19,8 @@ import (
 )
 
 // runCredentialsDoc is the name gateway.run_credentials is parsed under, which selects
-// YAML.
-const runCredentialsDoc = "run_credentials.yaml"
+// JSON.
+const runCredentialsDoc = "run_credentials.json"
 
 // Heartbeat is the heartbeat interval of every gateway qory starts, qory run's own and
 // qory gateway, Forager's default; it is also how long an introspection answer holds
@@ -34,11 +35,24 @@ func readRunCredentials(path string, node *yaml.Node) (runcredential.Issuers, []
 	// Forager reads the list as JSON, and its messages quote what it cannot read: a
 	// value whose tag it does not fit, or a number JSON cannot represent, is refused
 	// here first, by its key, and the schema's report has its values left out. A walk
-	// that reached its limit leaves the list to Forager's decoder, under safeDecode.
+	// that reached its limit leaves the list to the decoder, under safeDecode.
 	if f := findFault(node, reflect.TypeFor[any](), "gateway.run_credentials", false); f != nil && f != walkLimited {
 		return nil, nil, f.error(path)
 	}
 	notIssuers := fmt.Errorf("%s: gateway.run_credentials is not a list of issuers as run-credentials.schema.json defines them", path)
+	// The list is decoded where it stands in the file, so an alias in it of an anchor
+	// elsewhere in the file is the value the anchor holds, as Forager would read it in
+	// the file as a whole; the decoder's limits of aliases hold.
+	var list any
+	if err := safeDecode(func() error { return node.Decode(&list) }); err != nil {
+		if errors.Is(err, errDecoderFailed) {
+			return nil, nil, fmt.Errorf("%s: gateway.run_credentials: %w", path, err)
+		}
+		if text, ok := aliasRefusal(err); ok {
+			return nil, nil, fmt.Errorf("%s: gateway.run_credentials: %s", path, text)
+		}
+		return nil, nil, notIssuers
+	}
 	// A key written as an alias is checked on the list as written, while it is still
 	// an alias: the schema's report would name it by its anchor's value.
 	schema, err := runCredentialsSchema()
@@ -49,30 +63,16 @@ func readRunCredentials(path string, node *yaml.Node) (runcredential.Issuers, []
 	if f := keys.fault(node, schema); f != nil {
 		return nil, nil, f.error(path)
 	}
-	b, err := yaml.Marshal(node)
+	// Forager reads a YAML list as the JSON of what the decoder makes of it, which is
+	// the JSON it is handed here.
+	b, err := json.Marshal(list)
 	if err != nil {
 		return nil, nil, notIssuers
 	}
-	var issuers runcredential.Issuers
-	err = safeDecode(func() (err error) {
-		issuers, err = runcredential.Parse(runCredentialsDoc, b)
-		return err
-	})
+	issuers, err := runcredential.Parse(runCredentialsDoc, b)
 	if err != nil {
 		var ve *jsonschema.ValidationError
-		if !errors.As(err, &ve) {
-			if errors.Is(err, errDecoderFailed) {
-				return nil, nil, fmt.Errorf("%s: gateway.run_credentials: %w", path, err)
-			}
-			// The list is written out on its own, and an alias in it of an anchor
-			// elsewhere in the file is written without the anchor, which Forager's
-			// decoder then does not know: that is no fault of the file's anchors.
-			if text, ok := aliasRefusal(err); ok && text != unknownAnchor {
-				return nil, nil, fmt.Errorf("%s: gateway.run_credentials: %s", path, text)
-			}
-			return nil, nil, notIssuers
-		}
-		if keys.reportNamesAlias(node, ve) {
+		if !errors.As(err, &ve) || keys.reportNamesAlias(node, ve) {
 			return nil, nil, notIssuers
 		}
 		valueFree(ve)
