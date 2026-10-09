@@ -26,6 +26,7 @@ const (
 	resendIssuer   = "the run credential's issuer reports that the run has ended, so the gateway takes no more of this run's events; they stay in %s"
 	resendEnded    = "the gateway ended the run with the reason %s, so it takes no more of this run's events; they stay in %s"
 	resendRefused  = "the gateway refused this run credential"
+	resendNoSecret = "this run's record has no run-secret file, which the gateway needs to accept its events; they stay in %s"
 	resendDiffers  = "the gateway refused this run credential: it differs from the one the run started with"
 	resendSent     = "%d events were accepted; nothing is left to send to the gateway"
 	resendUnopened = "the gateway never opened run %s, so there is nothing to send; its record stays in %s"
@@ -357,6 +358,70 @@ func TestResendThroughAGatewaySaysWhatItAnswered(t *testing.T) {
 		}
 	}
 	noCredentialUnder(t, os.Getenv("XDG_STATE_HOME"), credential)
+}
+
+// TestResendWithoutTheRunSecretSaysSo is the gateway's 401 run_credential_refused to a
+// resend's batches, which it answers a batch without the run's secret with: a record
+// whose run directory has no run-secret says that, a record that has one says the run
+// credential was refused, as before, each exit 1. Either way the record and what the
+// gateway accepted of it are as they were, no events.jsonl is written, the run-secret
+// is neither made nor removed, and undelivered/ holds both events.
+func TestResendWithoutTheRunSecretSaysSo(t *testing.T) {
+	root := newCheckout(t)
+	link := newFakeLink(t)
+	writeFile(t, foragerFile(), sessionGateway(strings.TrimPrefix(link.URL, "https://"), link.ca, ""))
+	credential := "opaque-run-credential-" + fmt.Sprint(time.Now().UnixNano())
+	for i, c := range []struct {
+		name   string
+		secret bool
+		want   func(shown string) string
+	}{
+		{name: "no run-secret", want: func(s string) string { return fmt.Sprintf(resendNoSecret, s) }},
+		{name: "a run-secret", secret: true, want: func(string) string { return resendRefused }},
+	} {
+		id := fmt.Sprintf("0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5ec%d", i)
+		dir := gatewayRecord(t, root, id)
+		if !c.secret {
+			if err := os.Remove(filepath.Join(dir, "run-secret")); err != nil {
+				t.Fatal(err)
+			}
+		}
+		record, _ := os.ReadFile(filepath.Join(dir, "session.jsonl"))
+		link.answer(http.StatusUnauthorized, `{"error":"run_credential_refused","from":"gateway","message":"the gateway refused this run credential"}`)
+		t.Setenv("QORY_RUN_CREDENTIAL_SECRET", credential)
+		out, err := run(t, "run", "resend", id)
+		want := c.want(ui.Short(dir, root))
+		if cmd.ExitCode(err) != 1 || err == nil || err.Error() != want {
+			t.Errorf("%s: %v (exit %d), want %q, exit 1\n%s", c.name, err, cmd.ExitCode(err), want, out)
+		}
+		link.mu.Lock()
+		batches := link.batches
+		link.mu.Unlock()
+		if batches == 0 {
+			t.Errorf("%s: no batch reached the gateway", c.name)
+		}
+		if after, err := os.ReadFile(filepath.Join(dir, "session.jsonl")); err != nil || string(after) != string(record) {
+			t.Errorf("%s: session.jsonl changed: %v", c.name, err)
+		}
+		if after, err := os.ReadFile(filepath.Join(dir, "delivered.log")); err != nil || len(after) != 0 {
+			t.Errorf("%s: delivered.log changed: %v", c.name, err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "events.jsonl")); err == nil {
+			t.Errorf("%s: the resend wrote events.jsonl", c.name)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "run-secret")); (err == nil) != c.secret {
+			t.Errorf("%s: run-secret is there: %v, want %v", c.name, err == nil, c.secret)
+		}
+		spooled, _ := filepath.Glob(filepath.Join(dir, "undelivered", "*.json"))
+		var held int
+		for _, f := range spooled {
+			data, _ := os.ReadFile(f)
+			held += strings.Count(string(data), `"dev.qory.run.heartbeat"`)
+		}
+		if held != 2 {
+			t.Errorf("%s: undelivered/ holds %d events, want 2", c.name, held)
+		}
+	}
 }
 
 // TestResendOfARunTheGatewayNeverOpened is a record with no delivered.log, of a run the

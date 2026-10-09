@@ -717,6 +717,9 @@ removes the containers and networks the run's wall left, as without a gateway.
   events; they stay in <dir>`.
 - `the gateway refused this run credential`, and `the gateway refused this run
   credential: it differs from the one the run started with`.
+- `this run's record has no run-secret file, which the gateway needs to accept its
+  events; they stay in <dir>`: the gateway refused the run credential, and the run
+  directory has no `run-secret`.
 - `the run credential's issuer reports that the run has ended, so the gateway takes no
   more of this run's events; they stay in <dir>`; `the gateway ended the run with the
   reason <reason>, so it takes no more of this run's events; they stay in <dir>`.

@@ -672,7 +672,7 @@ func resendThroughGateway(sig context.Context, wait time.Duration, w io.Writer, 
 	case errors.As(err, &pe) && errors.Is(err, fs.ErrExist) && pe.Path == filepath.Join(dir, sink.EventsFile):
 		return input(&saidError{text: fmt.Sprintf("the run %s ran with a gateway of its own on this machine, so its record goes to the server, not through session.gateway: resend it with a %s that defines the server and no session.gateway", runID, config.ForagerFileName), err: err})
 	case err != nil:
-		if refused := gatewayRefusedResend(err, c, shown, time.Now()); refused != nil {
+		if refused := gatewayRefusedResend(err, c, dir, shown, time.Now()); refused != nil {
 			return refused
 		}
 		return explain(err, nil)
@@ -700,19 +700,24 @@ func resendThroughGateway(sig context.Context, wait time.Duration, w io.Writer, 
 }
 
 // gatewayRefusedResend words the gateway's refusals of a resend's run credential for
-// the person: the 401 run_credential_refused, said as the credential's expiry when its
-// exp has passed at now, and otherwise as qory run says it; and the 403 of a run
-// credential that differs from the one the run started with,
-// target_differs_from_credential or differs_from_credential. shown is the run
-// directory, where the expiry says the events stay. nil for any other error. It unwraps
-// to the refusal.
-func gatewayRefusedResend(err error, c *runCredential, shown string, now time.Time) error {
+// the person: the 401 run_credential_refused, said as the run directory's missing
+// run-secret when dir has none, since the gateway answers a batch without the run's
+// secret so too, as the credential's expiry when its exp has passed at now, and
+// otherwise as qory run says it; and the 403 of a run credential that differs from the
+// one the run started with, target_differs_from_credential or differs_from_credential.
+// dir is the run directory and shown the same as the person reads it, where the events
+// stay. nil for any other error. It unwraps to the refusal.
+func gatewayRefusedResend(err error, c *runCredential, dir, shown string, now time.Time) error {
 	var ref *session.Refusal
 	if !errors.As(err, &ref) {
 		return nil
 	}
 	switch ref.Code {
 	case refusal.RunCredentialRefused:
+		// Only whether the file is there: the run's secret is never read here.
+		if _, serr := os.Stat(filepath.Join(dir, runSecretFile)); errors.Is(serr, fs.ErrNotExist) {
+			return &saidError{text: fmt.Sprintf("this run's record has no run-secret file, which the gateway needs to accept its events; they stay in %s", shown), err: err}
+		}
 		if at, ok := c.expiredAt(now); ok {
 			return &saidError{text: fmt.Sprintf("the run credential expired at %s, so the gateway takes no more of this run's events; they stay in %s", at, shown), err: err}
 		}
@@ -722,6 +727,10 @@ func gatewayRefusedResend(err error, c *runCredential, shown string, now time.Ti
 	}
 	return nil
 }
+
+// runSecretFile is the file of a run directory behind a separate gateway that keeps the
+// run's secret, which every batch of a resend carries; Forager writes and removes it.
+const runSecretFile = "run-secret"
 
 // gatewayEndedResend says that the gateway had ended the run when its events were sent
 // again, and with what code: at the credential's issuer's report, run_ended_at_issuer,
