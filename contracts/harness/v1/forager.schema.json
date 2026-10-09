@@ -632,7 +632,7 @@
           }
         },
         "introspection": {
-          "description": "The issuer's OAuth 2.0 token introspection endpoint (RFC 7662), optional. The gateway posts the run credential to it, over TLS and authenticated with HTTP Basic as the client, before it opens a run, and again at most every cache while the run has connections. {\"active\": true} lets the run go on, {\"active\": false} ends it, and any other answer, or a failure to ask, counts as not active.",
+          "description": "The issuer's introspection endpoint (RFC 7662), optional. The gateway posts the run credential to it, over TLS and authenticated with HTTP Basic as the client, before it opens a run, and again at most every cache while the run has connections. {\"active\": true} lets the run go on, {\"active\": false} ends it, and any other answer, or a failure to ask, counts as not active.",
           "type": "object",
           "additionalProperties": false,
           "required": [

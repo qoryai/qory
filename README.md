@@ -119,22 +119,23 @@ More: [docs/run.md](docs/run.md).
 
 ## Commands
 
-| Command                | What it does                                             |
-| ---------------------- | -------------------------------------------------------- |
-| `qory setup repo`      | Write the repository's `qory.yaml`                       |
-| `qory setup example`   | Write the hello example into this folder                 |
-| `qory setup machine`   | Write your own `qory.yaml`: how `qory` runs here         |
-| `qory setup shell`     | Completions, and a shell that follows worktrees          |
-| `qory harness compose` | Build the harness (`qory hc`)                            |
-| `qory harness inspect` | Show where each entry came from (`qory hi`)              |
-| `qory harness remove`  | Remove the harness (`qory hr`)                           |
-| `qory harness launch`  | Print the command that starts an agent on it (`qory hl`) |
-| `qory worktree add`    | Add a worktree, ready to work (`qory wa`)                |
-| `qory worktree remove` | Remove a worktree and its branch (`qory wr`)             |
-| `qory worktree list`   | List every worktree and its branch (`qory wl`)           |
-| `qory run`             | Run the agent, observed and recorded                     |
-| `qory config`          | Show every setting and where it comes from               |
-| `qory update`          | Install the newest release                               |
+| Command                | What it does                                              |
+| ---------------------- | --------------------------------------------------------- |
+| `qory setup repo`      | Write the repository's `qory.yaml`                        |
+| `qory setup example`   | Write the hello example into this folder                  |
+| `qory setup machine`   | Write your own `qory.yaml`: how `qory` runs here          |
+| `qory setup shell`     | Completions, and a shell that follows worktrees           |
+| `qory harness compose` | Build the harness (`qory hc`)                             |
+| `qory harness inspect` | Show where each entry came from (`qory hi`)               |
+| `qory harness remove`  | Remove the harness (`qory hr`)                            |
+| `qory harness launch`  | Print the command that starts an agent on it (`qory hl`)  |
+| `qory worktree add`    | Add a worktree, ready to work (`qory wa`)                 |
+| `qory worktree remove` | Remove a worktree and its branch (`qory wr`)              |
+| `qory worktree list`   | List every worktree and its branch (`qory wl`)            |
+| `qory run`             | Run the agent, observed and recorded                      |
+| `qory gateway`         | Run this machine's gateway for the runs of other machines |
+| `qory config`          | Show every setting and where it comes from                |
+| `qory update`          | Install the newest release                                |
 
 Every command: [docs/commands](docs/commands/qory.md). The file format:
 [contracts/harness/v1](contracts/harness/v1/README.md).

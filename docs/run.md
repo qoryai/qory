@@ -153,7 +153,9 @@ One optional file defines what Forager does on this machine:
 `~/.config/qory/forager.yaml`. It lives beside your `qory.yaml`, and nowhere else. So a
 repository cannot set it. It has three sections beside `apiVersion`: `gateway`, the
 proxy's policy, the server, the credentials and the integrations; `session`, this
-instance and what applies to every run; and `wall`, the container.
+instance and what applies to every run; and `wall`, the container. `gateway.listen`,
+`gateway.tls` and `gateway.run_credentials` are `qory gateway`'s: qory run never reads
+them. See [the gateway as a service](gateway.md).
 
 ```yaml
 # ~/.config/qory/forager.yaml
@@ -1003,6 +1005,7 @@ A name `gateway.credentials` defines itself belongs to that section. Then:
 - A run whose policy is on this machine describes the integrations its `credentials`
   select.
 - A run whose policy the server supplies describes every one.
+- `qory gateway` describes every one: Qory Apiary supplies every run's policy.
 - `qory config` describes every integration, and lists what each defines.
 
 ### What stops a run

@@ -154,6 +154,27 @@ release may change what an existing document does, and states it under Upgrading
   run configuration request does not carry them. A subject's `title=` takes the rest of
   the value, commas included, so a title passes as it is. A value the Forager contract
   does not take is an input error, and the run does not start.
+- `qory gateway` runs this machine's gateway as a service for the runs of other
+  machines, on `gateway.listen` of `forager.yaml`, or on `--listen`, which wins, until
+  SIGINT or SIGTERM; then it takes no new run, sends what it holds, prints
+  `qory gateway: stopping` and `the gateway stopped`, and exits 0. It is the node toward
+  Qory Apiary with this machine's access key, read as `qory run` reads it,
+  `--access-key-secret-fd` included, and prints each integration it describes,
+  `qory gateway: node <node-id>, instance <instance-id>` and
+  `qory gateway: listening on <addr>`. Before it listens it refuses a `forager.yaml`
+  without a `gateway` section, an address that is missing or not host:port, no
+  `gateway.server`, an address other than loopback without `gateway.tls`, and no
+  `gateway.run_credentials`. Forager keeps the gateway's directory in qory's state
+  directory, `gateway/`: its own certificate authority, `authority/ca.pem`, and its
+  runs' records. See `docs/gateway.md`.
+- `forager.yaml` takes `gateway.listen`, host:port; `gateway.tls.certificate` and
+  `gateway.tls.key`, both or neither; and `gateway.run_credentials`, the issuers of run
+  credentials as Forager's `run-credentials.schema.json` defines them, with
+  `introspection` of `url`, `client_id`, `client_secret_file` and `cache`. A path in them
+  is relative to the directory of `forager.yaml` unless it is absolute. `qory run` never
+  reads them. `qory config` lists them, `gateway.run_credentials[<n>].<member>` and
+  `gateway.run_credentials[<n>].introspection.<member>` each, the paths as written and
+  never what a key or secret file holds, and `forager.schema.json` defines them.
 
 ### Changed
 
