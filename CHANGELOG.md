@@ -333,8 +333,13 @@ release may change what an existing document does, and states it under Upgrading
   whose run credential expired at a time qory cannot read, say so, where they said
   nothing: `✗ the run failed: the gateway stopped during the run, and <runtime> was
   stopped` and `✗ the run was cancelled: the run credential expired, and <runtime> was
-  stopped`. The gateway's own line that it ends the run, and its line of events the
-  server did not accept, are no longer printed beside qory's.
+  stopped`. When the run's own gateway records the run's end after the runtime exited by
+  itself, a second line follows the runtime's, such as `✗ the run was lost: it lost
+  contact with the gateway for 1m30s` or `✗ the run failed: its events could not be
+  recorded`, and the exit status follows it, 0 when the run completed and 1 otherwise; an
+  end that agrees with the runtime's exit adds no line. The gateway's own line that it
+  ends the run, and its line of events the server did not accept, are no longer printed
+  beside qory's.
 - Behind a separate gateway, a run its starter ends says the starter's outcome and
   reason, `✗ the run was cancelled, with no outcome given, and <runtime> was stopped`
   when it gives none, and exits 0 when the run completed, 1 otherwise. When the runtime

@@ -44,6 +44,12 @@ When the run ends, qory says how, and its exit status goes with it:
 - `✗ the run failed: the gateway stopped during the run, and <runtime> was stopped`:
   exit 1.
 
+With a gateway of the run's own, the gateway may record the run's end after the runtime
+exited by itself. A second line then follows the runtime's, such as `✗ the run was lost:
+it lost contact with the gateway for 1m30s` or `✗ the run failed: its events could not be
+recorded`, and the exit status follows it: 0 when the run completed, 1 otherwise. An end
+that agrees with the runtime's exit adds no line.
+
 Through a separate gateway, the run's starter can end the run, or say how it went when
 the runtime exits: see [How a run ends there](#how-a-run-ends-there).
 

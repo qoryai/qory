@@ -232,3 +232,70 @@ func TestSignalContextNamesTheSignal(t *testing.T) {
 		t.Errorf("os.Interrupt is %q, want SIGINT", signalName(os.Interrupt))
 	}
 }
+
+// TestRunEndedSaysTheEndTheGatewayRecordedAfterTheExit is a run with a gateway of its
+// own that recorded the run's end after the runtime exited by itself: the runtime's line,
+// then the outcome in the words qory run gives its reason, without "was stopped", and the
+// exit status follows the outcome. An outcome that agrees with the exit adds no line, and
+// the gateway's end is said in place of the outcome the session gives, never beside it:
+// one outcome line at most. Forager's own line of the end is left out exactly when qory
+// says it.
+func TestRunEndedSaysTheEndTheGatewayRecordedAfterTheExit(t *testing.T) {
+	gw := func(state, reason string) *gatewayEnd {
+		return &gatewayEnd{state: state, reason: reason, code: reason}
+	}
+	for _, c := range []struct {
+		name    string
+		res     *session.Result
+		gateway *gatewayEnd
+		want    string
+		code    int
+	}{
+		{"silent after exit 0", &session.Result{State: "succeeded"}, gw("failed", event.ReasonSessionLost),
+			"claude exited 0\nthe run was lost: it lost contact with the gateway for 1m30s\n", 1},
+		{"silent after exit 3", &session.Result{State: "failed", ExitCode: 3}, gw("failed", event.ReasonSessionLost),
+			"claude exited 3\nthe run was lost: it lost contact with the gateway for 1m30s\n", 1},
+		{"a batch refused after exit 0", &session.Result{State: "succeeded"}, gw("failed", event.ReasonBatchRefused),
+			"claude exited 0\nthe run failed: its events could not be recorded\n", 1},
+		{"a reason with no words", &session.Result{State: "succeeded"}, gw("cancelled", event.ReasonQuiet),
+			"claude exited 0\nthe run was cancelled\n", 1},
+		{"no state: the code's outcome", &session.Result{State: "succeeded"}, &gatewayEnd{code: event.ReasonSessionLost},
+			"claude exited 0\nthe run was lost: it lost contact with the gateway for 1m30s\n", 1},
+		{"agrees: failed after exit 3", &session.Result{State: "failed", ExitCode: 3}, gw("failed", event.ReasonBatchRefused),
+			"claude exited 3\n", 3},
+		{"agrees: completed after exit 0", &session.Result{State: "succeeded"}, gw("succeeded", ""),
+			"claude exited 0\n", 0},
+		{"the gateway's end in place of the starter's", &session.Result{State: "failed", Reason: "checks_failed"}, gw("failed", event.ReasonSessionLost),
+			"claude exited 0\nthe run was lost: it lost contact with the gateway for 1m30s\n", 1},
+		{"the gateway's agreeing end in place of the starter's", &session.Result{State: "cancelled", Reason: "no_longer_needed", ExitCode: 3}, gw("failed", event.ReasonBatchRefused),
+			"claude exited 3\n", 3},
+	} {
+		e := runEnd{runtime: "claude", gateway: c.gateway}
+		said, code := endOf(c.res, e)
+		if said != c.want || code != c.code {
+			t.Errorf("%s: said %q, exit %d; want %q, exit %d", c.name, said, code, c.want, c.code)
+		}
+		if n := strings.Count(said, "the run "); n > 1 {
+			t.Errorf("%s: %d outcome lines", c.name, n)
+		}
+		if strings.Contains(said, "was stopped") {
+			t.Errorf("%s: says the runtime was stopped: %q", c.name, said)
+		}
+		if got, want := e.saysOutcome(c.res), strings.Contains(c.want, "the run "); got != want {
+			t.Errorf("%s: saysOutcome %v, want %v", c.name, got, want)
+		}
+	}
+	// A run the session saw closed, timed out, or that qory run's signal stopped says
+	// its end in its own line: no outcome line follows the runtime's.
+	for _, res := range []*session.Result{
+		{RunClosed: true, ClosedReason: event.ReasonSessionLost, State: "failed", Reason: event.ReasonSessionLost},
+		{TimedOut: true, State: "cancelled", Reason: event.ReasonTimeout},
+	} {
+		if (runEnd{gateway: gw("failed", event.ReasonSessionLost)}).saysOutcome(res) {
+			t.Errorf("%+v: says an outcome after the runtime's line", res)
+		}
+	}
+	if (runEnd{got: "SIGINT", gateway: gw("failed", event.ReasonSessionLost)}).saysOutcome(&session.Result{State: "succeeded"}) {
+		t.Error("a signal qory run got: says an outcome after the runtime's line")
+	}
+}

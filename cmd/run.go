@@ -413,6 +413,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return reported(err)
 			}
 			defer fmt.Fprintln(stderr, "qory run: the record is in", record)
+			end := runEnd{runtime: name, timeout: timeout, got: signalled, credential: credential}
+			if delivery.RunClosed && !res.RunClosed {
+				// The run's own gateway recorded the run's end after its runtime exited.
+				end.gateway = &gatewayEnd{state: delivery.State, reason: delivery.Reason, code: delivery.ClosedReason}
+			}
 			lines.done(func(kind int) bool {
 				switch kind {
 				case heldUndelivered:
@@ -420,14 +425,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				case heldLimit:
 					return res.TimedOut && !res.RunClosed
 				case heldRunEnds:
-					return res.RunClosed
+					return res.RunClosed || end.gateway != nil && end.saysOutcome(res)
 				}
 				return false
 			})
 			if delivery.Undelivered > 0 {
 				u.Fail(fmt.Errorf("%d events did not reach the server; %s/undelivered contains them", delivery.Undelivered, ui.Short(res.Dir, at.root)))
 			}
-			return runEnded(u, res, runEnd{runtime: name, timeout: timeout, got: signalled, credential: credential})
+			return runEnded(u, res, end)
 		},
 	}
 	c.Flags().BoolVar(&local, "local", false, "run without the server: record to files, under the machine's policy")
@@ -504,13 +509,48 @@ const runHeartbeat = config.Heartbeat
 const runQuiet = 3 * runHeartbeat
 
 // runEnd is what qory knows of a run besides its result: its runtime's name, its time
-// limit, the signal qory run got before session.Run returned, "" for none, and the run
-// credential behind a separate gateway, nil with a gateway of the run's own.
+// limit, the signal qory run got before session.Run returned, "" for none, the run
+// credential behind a separate gateway, nil with a gateway of the run's own, and the
+// run's end that gateway of the run's own recorded after the runtime exited by itself,
+// nil when it recorded none.
 type runEnd struct {
 	runtime    string
 	timeout    time.Duration
 	got        string
 	credential *runCredential
+	gateway    *gatewayEnd
+}
+
+// gatewayEnd is the end of a run its gateway recorded: the state and the reason of its
+// dev.qory.run.exited, and the code of the gateway's 410.
+type gatewayEnd struct {
+	state, reason, code string
+}
+
+// exitOutcome is the outcome said beside the runtime's own exit: the end the run's
+// gateway recorded after the runtime exited, when it recorded one, which is what the
+// server shows; otherwise the outcome the session gives, the one the run's starter gave
+// at the exit, or the exit's own. An end the gateway recorded with no state is the
+// outcome of its code.
+func (e runEnd) exitOutcome(res *session.Result) outcome {
+	if e.gateway == nil {
+		return outcomeOf(res.State, res.Reason)
+	}
+	o := outcomeOf(e.gateway.state, e.gateway.reason)
+	if !o.known {
+		o = outcomeOf("", e.gateway.code)
+	}
+	return o
+}
+
+// saysOutcome reports whether qory says the run's outcome in a line after the runtime's
+// own: the runtime exited by itself, and the outcome differs from what its exit says.
+func (e runEnd) saysOutcome(res *session.Result) bool {
+	if res.RunClosed || res.TimedOut || e.got != "" {
+		return false
+	}
+	o := e.exitOutcome(res)
+	return o.known && !o.agrees(res.Signal == "" && res.ExitCode == 0)
 }
 
 // runEnded says how a run that started ended, in one line, and returns qory run's exit
@@ -518,9 +558,11 @@ type runEnd struct {
 // run credential's expiry in the words of where it came from, when qory can read when;
 // 0 when it completed, else 1. A run stopped at its time limit was cancelled, exit 124;
 // one stopped because qory run got a signal was cancelled, exit 1. Otherwise the
-// runtime's own exit says it, with its status, or 1 for a signal; when the outcome the
-// run's starter gave at that exit differs from what the exit says, a second line says
-// the outcome, and the exit status follows it.
+// runtime's own exit says it, with its status, or 1 for a signal; when the outcome
+// differs from what the exit says, a second line says the outcome, and the exit status
+// follows it. That outcome is the end the run's gateway recorded after the runtime
+// exited, or else the one the run's starter gave at the exit ([runEnd.exitOutcome]):
+// one line, never both.
 func runEnded(u *ui.UI, res *session.Result, e runEnd) error {
 	say := func(o outcome, text string) {
 		if o.completed {
@@ -557,7 +599,8 @@ func runEnded(u *ui.UI, res *session.Result, e runEnd) error {
 	default:
 		u.Success("%s exited 0", e.runtime)
 	}
-	if o := outcomeOf(res.State, res.Reason); o.known && !o.agrees(res.Signal == "" && res.ExitCode == 0) {
+	if e.saysOutcome(res) {
+		o := e.exitOutcome(res)
 		say(o, o.said())
 		code = o.exitCode()
 	}
