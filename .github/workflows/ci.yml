@@ -47,6 +47,19 @@ jobs:
           restore-keys: |
             go-${{ runner.os }}-
 
+      - name: Find the build cache
+        # Asked of go, as the runner sets HOME for the container, and the cache is under it.
+        id: gocache
+        run: echo "dir=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the build cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ steps.gocache.outputs.dir }}
+          key: gocache-${{ runner.os }}-${{ hashFiles('go.sum', '.github/workflows/ci.yml') }}
+          restore-keys: |
+            gocache-${{ runner.os }}-
+
       - name: Check formatting
         run: test -z "$(gofmt -l .)"
 
@@ -54,7 +67,8 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test ./...
+        # Every test runs on every push: many run git, and go's test cache does not see it.
+        run: go test -count=1 ./...
 
       - name: Build
         run: go build ./...
