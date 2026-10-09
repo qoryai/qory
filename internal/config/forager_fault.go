@@ -52,6 +52,7 @@ const (
 	tooManyAliases = "its aliases expand to more values than qory reads"
 	anchorInItself = "an anchor's value holds an alias of that anchor"
 	mergeNotMaps   = "a merge, <<, holds a value that is not a mapping or a list of mappings"
+	unknownAnchor  = "an alias names an anchor that is not defined before it"
 )
 
 // aliasRefusals are the decoder's messages of the file's anchors, aliases and merges, and
@@ -63,6 +64,7 @@ var aliasRefusals = []struct {
 	{regexp.MustCompile(`yaml: document contains excessive aliasing`), tooManyAliases},
 	{regexp.MustCompile(`yaml: anchor '.*' value contains itself`), anchorInItself},
 	{regexp.MustCompile(`yaml: map merge requires map or sequence of maps as the value`), mergeNotMaps},
+	{regexp.MustCompile(`yaml: unknown anchor '.*' referenced`), unknownAnchor},
 }
 
 // aliasRefusal is what qory says of err when it is the decoder's refusal of the file's
@@ -74,6 +76,16 @@ func aliasRefusal(err error) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// foragerSyntaxError is err, an error reading forager.yaml as YAML at all: a refusal of
+// its anchors in qory's words, which name no anchor, and any other as [decodeError]
+// says it.
+func foragerSyntaxError(path string, err error) error {
+	if text, ok := aliasRefusal(err); ok {
+		return fmt.Errorf("%s: %s", path, text)
+	}
+	return decodeError(path, err)
 }
 
 // tagRefusal matches the decoder's refusal of a scalar whose tag its value does not fit,

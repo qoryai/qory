@@ -245,6 +245,8 @@ func TestForagerRefusesAnchorsItCannotReadAtOnce(t *testing.T) {
 		{aliasBomb(9), ": gateway.run_credentials: its aliases expand to more values than qory reads", ""},
 		{mergeBomb(9), ": its aliases expand to more values than qory reads", ": its aliases expand to more values than qory reads"},
 		{"session: {instance: {<<: " + secret + "}}\n", ": a merge, <<, holds a value that is not a mapping or a list of mappings", ": a merge, <<, holds a value that is not a mapping or a list of mappings"},
+		{"session: {instance: {name: *" + marker + "}}\n", ": an alias names an anchor that is not defined before it", ": an alias names an anchor that is not defined before it"},
+		{"session: {instance: {name: *" + marker + "}}\nwall: &" + marker + " {}\n", ": an alias names an anchor that is not defined before it", ": an alias names an anchor that is not defined before it"},
 	} {
 		path := foragerFile(t, c.body)
 		for _, r := range []struct {

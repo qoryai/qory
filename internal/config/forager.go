@@ -461,7 +461,7 @@ func LoadForager() (*Forager, error) {
 	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
 		var doc yaml.Node
 		if yaml.Unmarshal(data, &doc) != nil {
-			return nil, decodeError(path, err)
+			return nil, foragerSyntaxError(path, err)
 		}
 		return nil, foragerDecodeError(path, &doc, reflect.TypeFor[foragerFile](), "", true, err)
 	}
@@ -800,7 +800,7 @@ func LoadForagerInstance() (*Forager, error) {
 	if err := yaml.Unmarshal(data, &f); err != nil {
 		var doc yaml.Node
 		if yaml.Unmarshal(data, &doc) != nil {
-			return nil, decodeError(path, err)
+			return nil, foragerSyntaxError(path, err)
 		}
 		return nil, foragerDecodeError(path, &doc, reflect.TypeOf(f), "", false, err)
 	}

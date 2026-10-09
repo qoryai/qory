@@ -395,8 +395,9 @@ release may change what an existing document does, and states it under Upgrading
   against its schema leaves the value out of a pattern or a format it fails. Anchors,
   aliases and merges the decoder cannot read are refused in qory's words, which name no
   anchor: `<file>: an anchor's value holds an alias of that anchor`, `<file>: its aliases
-  expand to more values than qory reads`, and `<file>: a merge, <<, holds a value that is
-  not a mapping or a list of mappings`. A key written twice is refused as `<file>: line
+  expand to more values than qory reads`, `<file>: a merge, <<, holds a value that is
+  not a mapping or a list of mappings`, and `<file>: an alias names an anchor that is not
+  defined before it`. A key written twice is refused as `<file>: line
   <line>: <key> is written twice; it was first written at line <line>`, and a key that is
   a list or a mapping as `<file>: line <line>: <section> has a key that is not a name`.
 - A `forager.yaml` that holds a second YAML document, an empty one after a trailing
