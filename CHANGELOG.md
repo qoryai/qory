@@ -230,7 +230,13 @@ release may change what an existing document does, and states it under Upgrading
   records that command. `dev.qory.run.started` carries `about`, and `opened_by`, which is
   `session` on every run qory starts. `dev.qory.run.exited` gives `timeout` or `run_closed`
   as its reason when the session ended the run, and `gateway_lost` when `qory run resend`
-  closes the record of a run whose Forager process died; a run qory starts gets no other
+  closes the record of a run whose Forager process died. When the run's gateway ends the
+  run itself, its record gives `session_lost`, and the session's own record,
+  `session.jsonl`, gives `batch_refused` when the gateway refused a batch of its events
+  and `session_lost` when the session sent it nothing for 1m30s; `qory run` then says
+  `the gateway closed the run: it could not take an event the session sent, and
+  <runtime> was stopped` or `the gateway closed the run: the session sent nothing for
+  1m30s, and <runtime> was stopped`, and exits 1. A run qory starts gets no other
   reason.
 - `gateway.server.access_key` and `gateway.server.secret` in `forager.yaml` are refused,
   and so is `QORY_SERVER_SECRET` when `forager.yaml` has a `gateway.server` section; the refusal says to
