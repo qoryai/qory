@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://qory.dev/contracts/harness/v1/forager.schema.json",
   "title": "forager.yaml",
-  "description": "The machine's forager.yaml, under the user's configuration directory alone: what qory run does on this machine. gateway holds the run policy's egress section, the server document, the credentials and the integrations; session holds the instance and what applies to every run; wall is the container the runtime is started in. egress and server follow the Forager contract's grammar, https://qory.dev/contracts/forager/v1/, and wall is that contract's wall.",
+  "description": "The machine's forager.yaml, under the user's configuration directory alone: what qory run does on this machine. gateway holds the run policy's egress section, the server document, the credentials and the integrations; session holds the gateway its runs go through, the instance and what applies to every run; wall is the container the runtime is started in. egress and server follow the Forager contract's grammar, https://qory.dev/contracts/forager/v1/, and wall is that contract's wall.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -236,10 +236,38 @@
       }
     },
     "session": {
-      "description": "The session's sections: the instance and what applies to every run.",
+      "description": "The session's sections: the gateway its runs go through, the instance and what applies to every run.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "gateway": {
+          "description": "The gateway this machine's runs go through, on another machine or as a service on this one. Without it, qory run starts a gateway of its own for each run from the gateway section. With it, this machine holds no access key, and this file holds no gateway section: each run brings its run credential.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["url"],
+          "properties": {
+            "url": {
+              "description": "The gateway: an https URL, a scheme, a host and a port alone.",
+              "type": "string",
+              "pattern": "^https://[^/?#@\\s]+/?$"
+            },
+            "ca_file": {
+              "description": "A PEM file of the certificate authority that signed the gateway's certificate, when the system's roots do not hold it. qory reads it relative to forager.yaml's directory, and it takes the place of the system's roots for this link.",
+              "type": "string",
+              "minLength": 1
+            },
+            "certificate_sha256": {
+              "description": "Optional: the SHA-256 of the gateway certificate's public key, base64. With it, qory accepts only a certificate with that key, and still checks its chain.",
+              "type": "string",
+              "pattern": "^[A-Za-z0-9+/]{43}=$"
+            },
+            "run_credential_file": {
+              "description": "The file that holds this run's run credential, which its issuer signed. qory reads it again before each request, so an issuer that refreshes it keeps the run going. Instead: --run-credential-fd, or QORY_RUN_CREDENTIAL_SECRET. A flag never holds the credential itself.",
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
         "instance": {
           "description": "This instance of the machine, as the server shows it. Its id is qory's own, kept in the file instance-id beside this file.",
           "type": "object",
@@ -405,6 +433,13 @@
         }
       }
     }
+  },
+  "if": {
+    "required": ["session"],
+    "properties": {"session": {"required": ["gateway"]}}
+  },
+  "then": {
+    "not": {"required": ["gateway"]}
   },
   "$defs": {
     "duration": {

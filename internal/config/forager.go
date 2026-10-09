@@ -69,6 +69,10 @@ type Forager struct {
 	// TLS is gateway.tls, the certificate and key qory gateway serves Listen with; nil
 	// when the file sets none.
 	TLS *ForagerTLS
+	// SessionGateway is session.gateway, the gateway on another machine, or a service on
+	// this one, that this machine's runs go through; nil when the file sets none, and
+	// qory run starts a gateway of its own for each run.
+	SessionGateway *ForagerSessionGateway
 	// RunCredentials is gateway.run_credentials, the issuers whose run credentials open
 	// runs at qory gateway, in Forager's run-credentials.schema.json shape, with every
 	// path as the file writes it; [Forager.Path] resolves one.
@@ -85,6 +89,17 @@ type Forager struct {
 type ForagerTLS struct {
 	Certificate string
 	Key         string
+}
+
+// ForagerSessionGateway is session.gateway: the gateway's URL, the PEM file of the
+// authorities its certificate chains to, the pin of its certificate's public key, and the
+// file of the run's run credential, each as the file writes it; [Forager.Path] resolves a
+// path. A setting the file does not write is empty.
+type ForagerSessionGateway struct {
+	URL               string
+	CAFile            string
+	CertificateSHA256 string
+	RunCredentialFile string
 }
 
 // Path is a path a setting of the file names, resolved: an absolute one as it is, a
@@ -284,8 +299,15 @@ type gatewaySection struct {
 	RunCredentials yaml.Node `yaml:"run_credentials,omitempty"`
 }
 
-// sessionSection is the session section as written: the instance and the run.
+// sessionSection is the session section as written: the gateway, the instance and the
+// run.
 type sessionSection struct {
+	Gateway *struct {
+		URL               *string `yaml:"url"`
+		CAFile            *string `yaml:"ca_file"`
+		CertificateSHA256 *string `yaml:"certificate_sha256"`
+		RunCredentialFile *string `yaml:"run_credential_file"`
+	} `yaml:"gateway,omitempty"`
 	Instance *instanceSection `yaml:"instance,omitempty"`
 	Run      *struct {
 		Timeout    *string `yaml:"timeout"`
@@ -358,6 +380,25 @@ func LoadForager() (*Forager, error) {
 	if w := g.Server; w != nil {
 		if r.Server, err = readServer(path, w.URL, w.AccessKeyID, w.ApiaryPublicKey, &w.Secret, &w.AccessKey); err != nil {
 			return nil, err
+		}
+	}
+	if sg := ses.Gateway; sg != nil {
+		// A machine whose runs go through a gateway runs none: what a gateway section
+		// holds belongs on the gateway's machine.
+		if f.Gateway != nil {
+			return nil, fmt.Errorf("%s: gateway: this machine's runs go through the gateway session.gateway.url names, so it runs no gateway, and its file holds none: Qory Apiary's access key and the credentials' secrets belong on the gateway's machine. Remove the gateway section, or remove session.gateway to run the gateway here", path)
+		}
+		if sg.URL == nil || *sg.URL == "" {
+			return nil, fmt.Errorf("%s: session.gateway.url is required", path)
+		}
+		r.SessionGateway = &ForagerSessionGateway{URL: *sg.URL}
+		for _, v := range []struct {
+			in  *string
+			out *string
+		}{{sg.CAFile, &r.SessionGateway.CAFile}, {sg.CertificateSHA256, &r.SessionGateway.CertificateSHA256}, {sg.RunCredentialFile, &r.SessionGateway.RunCredentialFile}} {
+			if v.in != nil {
+				*v.out = *v.in
+			}
 		}
 	}
 	if in := ses.Instance; in != nil && in.Name != nil {
@@ -559,8 +600,8 @@ func (r *Forager) InstanceNameOrDefault() string {
 }
 
 // ForagersOwn reports whether a variable is Forager's own, never the session's: the
-// access key's secret, its id and the pin, and QORY_SERVER_SECRET, which held a
-// workspace access key's secret.
+// access key's secret, its id and the pin, QORY_SERVER_SECRET, which held a workspace
+// access key's secret, and QORY_RUN_CREDENTIAL_SECRET, the run credential.
 func ForagersOwn(name string) bool {
 	return slices.Contains(serverVariableNames, name)
 }
@@ -769,6 +810,14 @@ func loopback(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// sessionGateway is r's session.gateway, nil for none or for no file.
+func (r *Forager) sessionGateway() *ForagerSessionGateway {
+	if r == nil {
+		return nil
+	}
+	return r.SessionGateway
+}
+
 // Rows lists forager.yaml's effective values with the file as origin, and the
 // defaults with [Default] when there is no file or a section is absent.
 func (r *Forager) Rows() []Row {
@@ -816,6 +865,23 @@ func (r *Forager) Rows() []Row {
 		rows = append(rows, r.runCredentialRows...)
 	} else {
 		rows = append(rows, Row{"gateway.run_credentials", "(none)", Default})
+	}
+	if g := r.sessionGateway(); g != nil {
+		rows = append(rows, Row{"session.gateway.url", g.URL, origin})
+		if g.CAFile != "" {
+			rows = append(rows, Row{"session.gateway.ca_file", g.CAFile, origin})
+		} else {
+			rows = append(rows, Row{"session.gateway.ca_file", "(none: the system's roots)", Default})
+		}
+		for _, v := range [][2]string{{"session.gateway.certificate_sha256", g.CertificateSHA256}, {"session.gateway.run_credential_file", g.RunCredentialFile}} {
+			if v[1] != "" {
+				rows = append(rows, Row{v[0], v[1], origin})
+			} else {
+				rows = append(rows, Row{v[0], "(none)", Default})
+			}
+		}
+	} else {
+		rows = append(rows, Row{"session.gateway.url", "(none: qory run starts a gateway for each run)", Default})
 	}
 	if r != nil && r.InstanceName != "" {
 		rows = append(rows, Row{"session.instance.name", r.InstanceName, origin})
