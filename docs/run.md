@@ -1287,8 +1287,9 @@ server's configuration is fetched first, signed. It defines where the events go.
 - The run directory records what the server accepted. Only the rest is sent, in order.
   Nothing the server accepted is sent again.
 - A server may still see an event twice. It discards the copy by the event's id.
-- After a Forager process that died, it first closes the record: `dev.qory.run.exited`
-  with `reason: gateway_lost`. It also removes the containers and networks the run's wall left.
+- After a Forager process that died, it first closes the record, unless the server never
+  opened the run: `dev.qory.run.exited` with `reason: gateway_lost`. It also removes the
+  containers and networks the run's wall left.
 - A run the server never opened, whose ping it never accepted, or a run that had no
   server, is sent nothing, and its record stays as it is: `the server never opened run
   <id>, so there is nothing to send; its record stays in <dir>`, exit 0.
