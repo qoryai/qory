@@ -1365,9 +1365,9 @@ func newResend() *cobra.Command {
 		Long: `Send a finished run's record to the server in ` + config.ForagerFileName + ` again: after a Forager process that
 died, or a server that was away. A job runs it last, whatever happened before.
 
-Only what the server has not accepted is sent. A record Forager left open is closed
-first, and the containers and networks its wall left are removed. A run that is still
-running is refused.
+Only what the server has not accepted is sent. Without session.gateway, a record Forager
+left open is closed first. The containers and networks its wall left are removed. A run
+that is still running is refused.
 
 The exit status is 0 when the server has everything, and 1 when events remain.
 
