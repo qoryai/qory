@@ -58,6 +58,11 @@ The gateway section of ` + config.ForagerFileName + ` in ~/.config/qory sets it:
   integrations  programs that supply such secrets
   run_credentials    the issuers whose signed run credentials open runs of clients with no session
 
+A machine whose runs go through this gateway names it in session.gateway of its own
+` + config.ForagerFileName + ` and holds no access key: each run brings the run credential its issuer
+signed, and the gateway verifies it. Of the machines in a run, only the gateway's holds an
+access key.
+
 SIGINT or SIGTERM stops it: it takes no new run, sends what it holds, and exits 0.
 
 More: ` + gatewayDocs,
