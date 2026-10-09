@@ -139,7 +139,8 @@ func TestResendThroughASeparateGateway(t *testing.T) {
 
 // fakeLink is a separate gateway's link as qory reaches it, over TLS 1.3 on loopback: its
 // discovery, and its answer to every batch of events, status and body. It records the
-// run credential of each request and how many batches it got.
+// run credential of each request, the run secret of each batch and how many batches it
+// got.
 type fakeLink struct {
 	*httptest.Server
 	// ca is the file of its certificate, for session.gateway.ca_file.
@@ -153,6 +154,9 @@ type fakeLink struct {
 	body      string
 	bearers   []string
 	batches   int
+	// secrets are the X-Qory-Run-Secret values of the batches, in order, joined by a
+	// comma when one carried several, empty for none.
+	secrets []string
 	// interval is the heartbeat interval its discovery announces, in seconds: 30 when 0.
 	interval int
 	// runStatus and runBody, when runStatus is not 0, answer the run request, the
@@ -181,7 +185,20 @@ func newFakeLink(t *testing.T) *fakeLink {
 func (f *fakeLink) answer(status int, body string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.status, f.body, f.batches = status, body, 0
+	f.status, f.body, f.batches, f.secrets = status, body, 0, nil
+}
+
+// wantSecret fails the test unless every batch the fake got since its last answer
+// carried the run secret want, once.
+func (f *fakeLink) wantSecret(t *testing.T, name, want string) {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, s := range f.secrets {
+		if s != want {
+			t.Errorf("%s: batch %d did not carry the run's secret, once", name, i+1)
+		}
+	}
 }
 
 func (f *fakeLink) serve(w http.ResponseWriter, r *http.Request) {
@@ -219,6 +236,7 @@ func (f *fakeLink) serve(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(strings.ReplaceAll(f.runBody, "{run_id}", req.RunID)))
 	case "/events":
 		f.batches++
+		f.secrets = append(f.secrets, strings.Join(r.Header.Values("X-Qory-Run-Secret"), ","))
 		if f.after != "" {
 			if _, err := os.Stat(f.after); err != nil {
 				w.WriteHeader(http.StatusOK)
@@ -232,9 +250,13 @@ func (f *fakeLink) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// recordedSecret is the run secret a record gatewayRecord writes keeps.
+const recordedSecret = "example-recorded-run-secret-00000000001"
+
 // gatewayRecord writes the record a session behind a separate gateway leaves of run id:
-// two heartbeats in session.jsonl, and a delivered.log that names neither, so both are
-// owed. It returns the run directory.
+// two heartbeats in session.jsonl, a delivered.log that names neither, so both are
+// owed, and the run's secret, recordedSecret, in run-secret. It returns the run
+// directory.
 func gatewayRecord(t *testing.T, root, id string) string {
 	t.Helper()
 	dir := filepath.Join(runsDir(t, root), id)
@@ -244,6 +266,7 @@ func gatewayRecord(t *testing.T, root, id string) string {
 	}
 	writeFile(t, filepath.Join(dir, "session.jsonl"), lines.String())
 	writeFile(t, filepath.Join(dir, "delivered.log"), "")
+	writeRunCredential(t, filepath.Join(dir, "run-secret"), recordedSecret+"\n")
 	return dir
 }
 
@@ -317,6 +340,7 @@ func TestResendThroughAGatewaySaysWhatItAnswered(t *testing.T) {
 			t.Errorf("%s: no batch reached the gateway", c.name)
 		}
 		link.mu.Unlock()
+		link.wantSecret(t, c.name, recordedSecret)
 		if c.code != 0 {
 			if b, err := os.ReadFile(filepath.Join(dir, "session.jsonl")); err != nil || strings.Count(string(b), "\n") != 2 {
 				t.Errorf("%s: the run directory lost its events: %v", c.name, err)

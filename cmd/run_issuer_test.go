@@ -73,7 +73,8 @@ func TestRunBehindAGatewaySaysTheIssuersFailures(t *testing.T) {
 	link.interval = 1
 	writeFile(t, foragerFile(), sessionGateway(strings.TrimPrefix(link.URL, "https://"), link.ca, ""))
 	credential := "opaque-run-credential-" + fmt.Sprint(time.Now().UnixNano())
-	const answer = `{"version":1,"run_id":"{run_id}","credential":"issuer","labels":{"forge":"git.example.com","repository":"acme/app"},"applied":{"mode":"observe","allow":[],"source":"none"},"proxy_secret":"example-proxy-secret-000000000000000000001"}`
+	const runSecret = "example-run-secret-0000000000000000000001"
+	const answer = `{"version":1,"run_id":"{run_id}","credential":"issuer","labels":{"forge":"git.example.com","repository":"acme/app"},"applied":{"mode":"observe","allow":[],"source":"none"},"proxy_secret":"example-proxy-secret-000000000000000000001","run_secret":"` + runSecret + `"}`
 	for _, c := range []struct {
 		name      string
 		runStatus int
@@ -111,5 +112,6 @@ func TestRunBehindAGatewaySaysTheIssuersFailures(t *testing.T) {
 		if got := strings.Contains(out, "runtime started"); got != c.started {
 			t.Errorf("%s: the runtime started: %v, want %v\n%s", c.name, got, c.started, out)
 		}
+		link.wantSecret(t, c.name, runSecret)
 	}
 }
