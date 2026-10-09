@@ -510,6 +510,7 @@ func TestIntegrationsSectionRefusesAMistake(t *testing.T) {
 		{"gateway: {integrations: {github: {settings: [a]}}}\n", "gateway.integrations.github.settings is a mapping, the settings document"},
 		{"gateway: {integrations: {github: {settings: {a: 1, a: 2}}}}\n", "gateway.integrations.github.settings.a appears twice"},
 		{"gateway: {integrations: {github: {settings: {1: x}}}}\n", "gateway.integrations.github.settings: line 1: a key that is not a string"},
+		{"gateway: {integrations: {github: {settings: {!!merge team: 1}}}}\n", "gateway.integrations.github.settings: line 1: a key that is not a string"},
 		{"gateway: {integrations: {github: {settings: {ratio: .nan}}}}\n", "gateway.integrations.github.settings.ratio is not a number that JSON can represent"},
 		{"gateway: {integrations: {github: {settings: {a: &b {x: 1}, c: *b}}}}\n", "gateway.integrations.github.settings.c: line 1: *b is a YAML alias"},
 		{"gateway: {integrations: {github: {settings: {<<: {app_id: 1}}}}}\n", "a YAML alias or merge, which the settings may not contain"},

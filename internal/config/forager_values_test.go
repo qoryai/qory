@@ -172,6 +172,7 @@ func TestForagerRefusalsSayWhatIsWrongWithoutTheValue(t *testing.T) {
 		{"session: {? [" + secret + "] : y}\n", ": line 1: session has a key that is not a name"},
 		{"? {k: " + secret + "}\n: y\n", ": line 1: the file has a key that is not a name"},
 		{"session: {\"\": " + secret + "}\n", ": line 1: key \"\" is not one forager.yaml reads"},
+		{"wall: {adapter: docker, !!merge team: " + secret + "}\n", ": line 1: key \"team\" is not one forager.yaml reads"},
 	} {
 		path := foragerFile(t, c.body)
 		_, err := config.LoadForager()

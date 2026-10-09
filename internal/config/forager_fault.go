@@ -414,9 +414,9 @@ func (w *walk) structFault(n *yaml.Node, t reflect.Type, key string, merged map[
 	// The decoder's merge holds the keys of the mapping that merges first, and a key that
 	// is a list or a mapping is no key it can hold: it fails, and is refused before it
 	// decodes. A key that is not a name anywhere else is refused by the decoder.
-	merges := slices.ContainsFunc(n.Content, func(k *yaml.Node) bool { return k.Kind == yaml.ScalarNode && k.ShortTag() == "!!merge" })
+	merges := slices.ContainsFunc(n.Content, isMergeKey)
 	for i := 0; i+1 < len(n.Content); i += 2 {
-		if raw := n.Content[i]; raw.Kind == yaml.ScalarNode && raw.ShortTag() == "!!merge" {
+		if isMergeKey(n.Content[i]) {
 			merge = n.Content[i+1]
 			continue
 		}

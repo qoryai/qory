@@ -115,7 +115,7 @@ func writeJSON(b *bytes.Buffer, n *yaml.Node, at string) error {
 		seen := map[string]bool{}
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			k := n.Content[i]
-			if k.Kind == yaml.AliasNode || k.ShortTag() == "!!merge" {
+			if k.Kind == yaml.AliasNode || isMergeKey(k) {
 				return fmt.Errorf("%s: line %d: a YAML alias or merge, which the settings may not contain; write the value out in full", at, k.Line)
 			}
 			if k.Kind != yaml.ScalarNode || k.ShortTag() != "!!str" {
