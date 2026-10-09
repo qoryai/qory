@@ -1,7 +1,9 @@
 package config
 
 import (
+	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -53,5 +55,34 @@ func TestResolvedIsWhatTheDecoderReads(t *testing.T) {
 			}
 		}
 		walk(r)
+	}
+}
+
+// TestRunCredentialsJSONOverTheBoundIsRefusedAfterItIsMade writes 1000 aliases of an
+// audience of 1000 <, which JSON writes as \u003c, six bytes each. The count made before
+// the JSON, a lower bound of its length, is about 1 MB and under the bound; the JSON is
+// about 6 MB and over it, and the list is refused with the words of aliases that expand
+// too far.
+func TestRunCredentialsJSONOverTheBoundIsRefusedAfterItIsMade(t *testing.T) {
+	aliases := strings.TrimSuffix(strings.Repeat("*v, ", 1000), ", ")
+	body := "- {issuer: \"https://issuer.example\", audience: &v '" + strings.Repeat("<", 1000) + "', algorithms: [RS256], keys: [{kid: k1, alg: RS256, public_key_file: f.pem}], labels: {forge: {value: x}, repository: {claims: [" + aliases + "], join: /}, run_key: {claim: sub}}}\n"
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(body), &doc); err != nil {
+		t.Fatal(err)
+	}
+	list := doc.Content[0]
+	var v any
+	if err := list.Decode(&v); err != nil {
+		t.Fatal(err)
+	}
+	if jsonOver(v, runCredentialsBudget) {
+		t.Fatal("the count before the JSON is over the bound: the check after json.Marshal is not reached")
+	}
+	if b, err := json.Marshal(v); err != nil || len(b) <= runCredentialsBudget {
+		t.Fatalf("the JSON takes %d bytes (%v), want more than %d", len(b), err, runCredentialsBudget)
+	}
+	_, _, err := readRunCredentials("forager.yaml", list)
+	if want := "forager.yaml: gateway.run_credentials: " + tooManyAliases; err == nil || err.Error() != want {
+		t.Errorf("%v, want %q", err, want)
 	}
 }

@@ -68,8 +68,10 @@ func readRunCredentials(path string, node *yaml.Node) (runcredential.Issuers, []
 		return nil, nil, f.error(path)
 	}
 	// The decoder holds an alias's value once, however often the alias stands, and the
-	// JSON of it once for each time: a list whose aliases would make more JSON than
-	// runCredentialsBudget is refused before its JSON is made.
+	// JSON of it once for each time: a list whose aliases make more JSON than
+	// runCredentialsBudget is refused. A cheap lower bound of the JSON's length stops most
+	// such lists before their JSON is made, and the exact length after json.Marshal
+	// refuses the rest.
 	aliased := holdsAlias(node)
 	if aliased && jsonOver(list, runCredentialsBudget) {
 		return nil, nil, fmt.Errorf("%s: gateway.run_credentials: %s", path, tooManyAliases)
@@ -238,10 +240,10 @@ func holdsAlias(n *yaml.Node) bool {
 	return false
 }
 
-// jsonOver reports whether the JSON of v, a value the decoder made, takes more than
-// limit bytes. It counts the fewest bytes each value takes in JSON, and stops as soon as
-// the count is over limit, so a string the decoder shares among many aliases is never
-// read through.
+// jsonOver reports whether a lower bound of the JSON of v, a value the decoder made, is
+// over limit bytes: true means the JSON takes more, and false that it may or may not. It
+// counts the fewest bytes each value takes in JSON, and stops as soon as the count is
+// over limit, so a string the decoder shares among many aliases is never read through.
 func jsonOver(v any, limit int) bool {
 	n := 0
 	var over func(v any) bool
