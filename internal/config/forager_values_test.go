@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"testing"
@@ -334,6 +335,73 @@ func TestAWalkAtItsLimitSaysNoAliases(t *testing.T) {
 	}
 	if len(f.RunCredentials) != 1 || len(f.RunCredentials[0].LabelMapping.Repository.Claims) != 150_001 {
 		t.Errorf("gateway.run_credentials read as %d issuers", len(f.RunCredentials))
+	}
+}
+
+// numbered is n entries "<prefix><i>: 1" of a flow mapping, and repeated is n items of a
+// flow list or mapping, each item.
+func numbered(prefix string, n int) string {
+	keys := make([]string, n)
+	for i := range keys {
+		keys[i] = fmt.Sprintf("%s%d: 1", prefix, i)
+	}
+	return strings.Join(keys, ", ")
+}
+
+func repeated(item string, n int) string {
+	return strings.TrimSuffix(strings.Repeat(item+", ", n), ", ")
+}
+
+// TestForagerReadsAtOnceWhatItCannotSayWithoutAValue writes files the decoder's own
+// words, or a walk of them, would print a value of or take too long over: a mapping of
+// many keys merged again and again, an alias key whose anchor's value is tagged
+// !!binary, a key that is a list or a mapping that only the decoder reaches, and an
+// alias in gateway.run_credentials of an anchor elsewhere in the file. Each answers at
+// once, and in qory's words, which name no value.
+func TestForagerReadsAtOnceWhatItCannotSayWithoutAValue(t *testing.T) {
+	hermetic(t)
+	const number = "987654321"
+	binary := base64.StdEncoding.EncodeToString([]byte(secret))
+	env := "wall: {adapter: docker, pids_limit: &p " + number + ", env: [&n X, " + repeated("*n", 100_001) + "]}\n"
+	for _, c := range []struct{ body, whole, instance string }{
+		{"gateway: {credentials: &a {" + numbered("k", 5000) + "}, server: {url: https://apiary.example, apiary_public_key: [" + repeated("{<<: *a}", 5000) + "]}}\n", ": its aliases expand to more values than qory reads", ""},
+		{"x: &a {" + numbered("k", 2000) + "}\nsession: {instance: {<<: [" + repeated("*a", 2000) + "]}}\n", ": its aliases expand to more values than qory reads", ": its aliases expand to more values than qory reads"},
+		{"wall:\n  adapter: docker\n  image: a\n  image: b\n  adapter: docker\n", ": line 5: wall.adapter is written twice; it was first written at line 2", ""},
+		{"session:\n  instance:\n    name: &a !!binary " + binary + "\n  *a : 1\n", ": line 4: key *a is an alias of a key forager.yaml does not read", ": session.instance.name is not 1 to 64 of A-Z, a-z, 0-9, dot, underscore and dash, starting with a letter or digit"},
+		{env + "gateway: {<<: {listen: \"a:1\"}, ? {a: {[*p]: 1}} : x}\n", ": line 2: gateway has a key that is not a name", ""},
+		{env + "webhook: &g {<<: {listen: \"a:1\"}, ? {a: {[*p]: 1}} : x}\ngateway: *g\n", ": a value is not of the type its key takes", ""},
+		{"gateway: {listen: &l 127.0.0.1:8443, run_credentials: [{issuer: *l}]}\n", ": gateway.run_credentials is not a list of issuers as run-credentials.schema.json defines them", ""},
+	} {
+		path := foragerFile(t, c.body)
+		for _, r := range []struct {
+			load func() (*config.Forager, error)
+			want string
+		}{{config.LoadForager, c.whole}, {config.LoadForagerInstance, c.instance}} {
+			done := make(chan error, 1)
+			start := time.Now()
+			go func() {
+				_, err := r.load()
+				done <- err
+			}()
+			var err error
+			select {
+			case err = <-done:
+			case <-time.After(10 * time.Second):
+				t.Fatalf("%.80q: no answer in 10s", c.body)
+			}
+			if took := time.Since(start); took > 2*time.Second {
+				t.Errorf("%.80q: answered in %v", c.body, took)
+			}
+			switch {
+			case r.want == "" && err != nil:
+				t.Errorf("%.80q: %v, want it read", c.body, err)
+			case r.want != "" && (err == nil || err.Error() != path+r.want):
+				t.Errorf("%.80q: %v, want %q", c.body, err, path+r.want)
+			}
+			if err != nil && (strings.Contains(err.Error(), marker) || strings.Contains(err.Error(), number)) {
+				t.Errorf("%.80q: the refusal holds a value: %v", c.body, err)
+			}
+		}
 	}
 }
 

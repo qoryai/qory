@@ -96,8 +96,9 @@ var tagRefusal = regexp.MustCompile("^yaml: (cannot decode !!\\S+ `|!!binary val
 // value: an unknown key as [decodeError] says it; a refusal of the file's anchors,
 // aliases or merges in words of qory's own, without a walk of n, which they could make
 // endless; a value of the wrong type or tag by the first place under n the decoder
-// cannot take, which [findFault] names; and any other as the decoder says it, unless it
-// quotes a value. known says whether the decode refused keys t has no field for.
+// cannot take, which [findFault] names; a failure of the decoder as [errDecoderFailed];
+// and any other without the decoder's words, which may quote a value. known says
+// whether the decode refused keys t has no field for.
 func foragerDecodeError(path string, n *yaml.Node, t reflect.Type, key string, known bool, err error) error {
 	var te *yaml.TypeError
 	if errors.As(err, &te) {
@@ -124,35 +125,59 @@ func foragerDecodeError(path string, n *yaml.Node, t reflect.Type, key string, k
 		}
 	}
 	// A fault the walk does not place, as when it reached its limit before it reached
-	// the fault, is said without its place. The decoder's messages that quote a value
-	// are a TypeError's and those that quote it in backquotes or quotes; any other is the
-	// decoder's own words.
-	if te != nil || strings.ContainsAny(err.Error(), "`\"") {
-		if key == "" {
-			return fmt.Errorf("%s: a value is not of the type its key takes", path)
-		}
-		return fmt.Errorf("%s: %s holds a value that is not of the type its key takes", path, key)
+	// the fault, is said without its place. The decoder's own words may quote a value,
+	// such as a key that is a list or a mapping, so none of them is said: a failure of
+	// the decoder is said in qory's words, and any other as a fault without its place.
+	if errors.Is(err, errDecoderFailed) {
+		return fmt.Errorf("%s: %w", path, errDecoderFailed)
 	}
-	return fmt.Errorf("%s: %w", path, err)
+	if key == "" {
+		return fmt.Errorf("%s: a value is not of the type its key takes", path)
+	}
+	return fmt.Errorf("%s: %s holds a value that is not of the type its key takes", path, key)
 }
 
-// aliasKeyAt is a key under n written as an alias of name, on the line the decoder's
-// "line <n>: " prefix names, or on any line when there is none; nil when no key is.
+// aliasKeyAt is a key under n written as an alias, on the line the decoder's "line <n>: "
+// prefix names, or on any line when there is none, that the decoder names name; nil when
+// no such key is. The decoder names a key by the name it decodes into, which for a tag
+// such as !!binary is not the value as written, so an alias key on the line that no
+// written key there is named as is taken to be the key the decoder names.
 func aliasKeyAt(n *yaml.Node, line, name string) *yaml.Node {
+	var aliases []*yaml.Node
+	written := false
 	stack := []*yaml.Node{n}
 	for len(stack) > 0 {
 		n, stack = stack[len(stack)-1], stack[:len(stack)-1]
 		if n.Kind == yaml.MappingNode {
 			for i := 0; i+1 < len(n.Content); i += 2 {
 				k := n.Content[i]
-				if k.Kind == yaml.AliasNode && followAliases(k).Value == name && (line == "" || line == fmt.Sprintf("line %d: ", k.Line)) {
+				if line != "" && line != fmt.Sprintf("line %d: ", k.Line) {
+					continue
+				}
+				named := decodesInto(k, name)
+				switch {
+				case k.Kind == yaml.AliasNode && named:
 					return k
+				case k.Kind == yaml.AliasNode:
+					aliases = append(aliases, k)
+				case named:
+					written = true
 				}
 			}
 		}
 		stack = append(stack, n.Content...)
 	}
-	return nil
+	if written || len(aliases) == 0 {
+		return nil
+	}
+	return aliases[0]
+}
+
+// decodesInto reports whether the decoder decodes the key k into name, as it names a
+// key a struct has no field for.
+func decodesInto(k *yaml.Node, name string) bool {
+	var s string
+	return followAliases(k).Decode(&s) == nil && s == name
 }
 
 // keyName is a key as a refusal names it: a name as it is written, and a key written as
@@ -253,13 +278,13 @@ func safeDecode(decode func() error) (err error) {
 	return decode()
 }
 
-// step counts a step under an alias or a merge, and reports whether the walk takes it:
-// a walk that has taken walkLimit steps takes no more.
-func (w *walk) step() bool {
+// step counts n steps under an alias or a merge, and reports whether the walk takes
+// them: a walk that has taken walkLimit steps takes no more.
+func (w *walk) step(n int) bool {
 	if w.aliased == 0 {
 		return true
 	}
-	if w.steps++; w.steps > walkLimit {
+	if w.steps += n; w.steps > walkLimit {
 		w.limited = true
 		return false
 	}
@@ -273,7 +298,7 @@ func (w *walk) fault(n *yaml.Node, t reflect.Type, key string) *fault {
 		w.aliased++
 		defer func() { w.aliased-- }()
 	}
-	if !w.step() {
+	if !w.step(1) {
 		return nil
 	}
 	n = followAliases(n)
@@ -367,22 +392,19 @@ func (w *walk) fault(n *yaml.Node, t reflect.Type, key string) *fault {
 // keys the mapping writes itself are left as the decoder leaves them. merged are the
 // keys the mappings that merge this one write, nil when none does.
 func (w *walk) structFault(n *yaml.Node, t reflect.Type, key string, merged map[string]bool) *fault {
-	if !w.step() {
+	// Each key is a step, so a mapping merged again and again is counted by its keys.
+	if !w.step(1 + len(n.Content)/2) {
 		return nil
 	}
-	for i := 0; i+1 < len(n.Content); i += 2 {
-		for j := i + 2; j+1 < len(n.Content); j += 2 {
-			if a, b := n.Content[i], n.Content[j]; a.Kind == b.Kind && a.Value == b.Value {
-				// The decoder reads no further into a mapping that writes a key twice.
-				if w.keys {
-					return nil
-				}
-				if k := followAliases(a); k.Kind != yaml.ScalarNode {
-					return keyNotAName(a.Line, key)
-				}
-				return writtenTwice(key, keyName(a), a.Line, b.Line)
-			}
+	if a, b := writtenAgain(n); a != nil {
+		// The decoder reads no further into a mapping that writes a key twice.
+		if w.keys {
+			return nil
 		}
+		if k := followAliases(a); k.Kind != yaml.ScalarNode {
+			return keyNotAName(a.Line, key)
+		}
+		return writtenTwice(key, keyName(a), a.Line, b.Line)
 	}
 	// A key decodes into a name, and a field the mapping writes twice under keys the
 	// decoder tells apart, such as an alias of a name and the name, is refused as one
@@ -453,6 +475,39 @@ func (w *walk) structFault(n *yaml.Node, t reflect.Type, key string, merged map[
 		}
 	}
 	return nil
+}
+
+// writtenAgain is the first key of the mapping n that the mapping writes again, as the
+// decoder compares keys, by their kind and what is written, and the first key after it
+// that writes it again; nil, nil when no key is written twice.
+func writtenAgain(n *yaml.Node) (first, again *yaml.Node) {
+	type written struct {
+		kind  yaml.Kind
+		value string
+	}
+	at := map[written]int{}
+	againAt := map[int]int{}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		k := written{n.Content[i].Kind, n.Content[i].Value}
+		f, ok := at[k]
+		if !ok {
+			at[k] = i
+			continue
+		}
+		if _, ok := againAt[f]; !ok {
+			againAt[f] = i
+		}
+	}
+	firstAt := -1
+	for f := range againAt {
+		if firstAt < 0 || f < firstAt {
+			firstAt = f
+		}
+	}
+	if firstAt < 0 {
+		return nil, nil
+	}
+	return n.Content[firstAt], n.Content[againAt[firstAt]]
 }
 
 // writtenTwice is the fault of name, a key of the mapping at key, written at the line

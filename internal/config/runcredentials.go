@@ -49,7 +49,10 @@ func readRunCredentials(path string, node *yaml.Node) (runcredential.Issuers, []
 			if errors.Is(err, errDecoderFailed) {
 				return nil, nil, fmt.Errorf("%s: gateway.run_credentials: %w", path, err)
 			}
-			if text, ok := aliasRefusal(err); ok {
+			// The list is written out on its own, and an alias in it of an anchor
+			// elsewhere in the file is written without the anchor, which Forager's
+			// decoder then does not know: that is no fault of the file's anchors.
+			if text, ok := aliasRefusal(err); ok && text != unknownAnchor {
 				return nil, nil, fmt.Errorf("%s: gateway.run_credentials: %s", path, text)
 			}
 			return nil, nil, notIssuers
