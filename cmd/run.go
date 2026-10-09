@@ -23,6 +23,7 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/gateway"
+	"github.com/qoryai/forager/link"
 	"github.com/qoryai/forager/refusal"
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/session/runtimes/catalog"
@@ -319,7 +320,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return explain(err, id)
 			}
 			defer g.Close(ctx)
-			spec.Gateway = session.LocalGateway(g.LocalLink())
+			l := g.LocalLink()
+			linkHanded(l)
+			spec.Gateway = session.LocalGateway(l)
 			res, err := session.Run(ctx, spec)
 			// The gateway delivers the run's last events before qory says how the run
 			// ended, and before qory exits.
@@ -394,6 +397,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	c.AddCommand(newResend(), newForward(), newRelay(), newNest())
 	return c
 }
+
+// linkHanded is told the gateway's local link as qory hands it to the session: a test
+// learns its secret this way, to look for it where it must never be. It keeps nothing.
+var linkHanded = func(link.Local) {}
 
 // expansion is what a run describes of the integrations forager.yaml declares. A
 // policy this process has lists the credentials the run selects, so the integrations it
