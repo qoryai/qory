@@ -201,9 +201,11 @@ release may change what an existing document does, and states it under Upgrading
   started with, its environment and your files included; that on Linux it can also open
   qory's descriptors through `/proc`, `--run-credential-fd` included, so no source of the
   run credential is out of its reach there, and only a wall, or running the agent as
-  another user, keeps it out; and that `QORY_RUN_CREDENTIAL_SECRET` is read once, so a
-  run longer than its credential needs `session.gateway.run_credential_file` or
-  `--run-credential-fd`.
+  another user, keeps it out; that the run credential stays in qory's memory for the
+  whole run, where an unwalled agent running as you can read it if your programs may
+  debug one another, as on Linux with `kernel.yama.ptrace_scope` 0; and that
+  `QORY_RUN_CREDENTIAL_SECRET` is read once, so a run longer than its credential needs
+  `session.gateway.run_credential_file` or `--run-credential-fd`.
 - `qory gateway`'s help and `docs/gateway.md` say how a machine behind the gateway names
   it.
 

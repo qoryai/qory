@@ -615,6 +615,10 @@ run credential is out of an unwalled agent's reach; only a wall, or running the 
 another user, keeps it out. On macOS, a program can't open another's descriptors that
 way. Give the descriptor a pipe, not a file the agent could open.
 
+The run credential stays in qory's memory for the whole run. Where your programs may
+debug one another, as on Linux with `kernel.yama.ptrace_scope` 0, an unwalled agent
+running as you can read it there.
+
 The run credential never appears in qory's output or in the run's record. qory reads its
 `exp` only to say when it expired.
 
