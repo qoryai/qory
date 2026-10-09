@@ -119,12 +119,14 @@ func foragerDecodeError(path string, n *yaml.Node, t reflect.Type, key string, k
 		return fmt.Errorf("%s: %s", path, text)
 	}
 	if te != nil || tagRefusal.MatchString(err.Error()) {
-		if f := findFault(n, t, key, known); f != nil {
+		if f := findFault(n, t, key, known); f != nil && f != walkLimited {
 			return f.error(path)
 		}
 	}
-	// The decoder's messages that quote a value are a TypeError's and those that quote
-	// it in backquotes or quotes; any other is the decoder's own words.
+	// A fault the walk does not place, as when it reached its limit before it reached
+	// the fault, is said without its place. The decoder's messages that quote a value
+	// are a TypeError's and those that quote it in backquotes or quotes; any other is the
+	// decoder's own words.
 	if te != nil || strings.ContainsAny(err.Error(), "`\"") {
 		if key == "" {
 			return fmt.Errorf("%s: a value is not of the type its key takes", path)
@@ -166,9 +168,15 @@ func keyName(k *yaml.Node) string {
 // nodeType is a section read as written.
 var nodeType = reflect.TypeFor[yaml.Node]()
 
-// walkLimit is how many steps a walk takes under aliases and merges before it stops, with
-// the refusal the decoder gives a file whose aliases expand too far.
+// walkLimit is how many steps a walk takes under aliases and merges. A walk that reaches
+// it walks nothing more under an alias or a merge, and walks the rest of the file.
 const walkLimit = 100_000
+
+// walkLimited is what [findFault] finds when its walk reached [walkLimit] and found no
+// fault in what it walked. It is no fault of the file, which the decoder may read
+// whatever its aliases expand to, so no refusal says it; the decoder's own refusal of
+// aliases that expand too far is [tooManyAliases], said by [aliasRefusal].
+var walkLimited = &fault{0, tooManyAliases}
 
 // walk is one walk of [findFault]. It walks each value once for each type it is read
 // as, so an alias read again is not walked again, and an alias inside the value it
@@ -186,6 +194,8 @@ type walk struct {
 	// aliased is how many aliases and merges deep the walk is; steps, how many steps it
 	// has taken under one.
 	aliased, steps int
+	// limited says the walk reached walkLimit, and left what it did not walk unwalked.
+	limited bool
 }
 
 // walkKey is a value as a type.
@@ -205,10 +215,14 @@ const (
 // findFault is the first place under n that the decoder cannot take into t: a value of
 // the wrong kind, a scalar whose tag its value does not fit, and, when known is set, a
 // key t has no field for. key is where n stands, as a dotted path; nil when there is
-// none. A yaml.Node takes anything, and an interface every value JSON can represent.
+// none, and [walkLimited] when the walk reached its limit and found none in what it
+// walked. A yaml.Node takes anything, and an interface every value JSON can represent.
 func findFault(n *yaml.Node, t reflect.Type, key string, known bool) *fault {
 	w := &walk{known: known, state: map[walkKey]walkState{}, merging: map[walkKey]bool{}}
-	return w.fault(n, t, key)
+	if f := w.fault(n, t, key); f != nil || !w.limited {
+		return f
+	}
+	return walkLimited
 }
 
 // mergeKeyFault is the first mapping under n, read as t as the decoder reads it, that
@@ -217,11 +231,11 @@ func findFault(n *yaml.Node, t reflect.Type, key string, known bool) *fault {
 // check before n is decoded.
 func mergeKeyFault(n *yaml.Node, t reflect.Type, key string, known bool) *fault {
 	w := &walk{known: known, keys: true, state: map[walkKey]walkState{}, merging: map[walkKey]bool{}}
-	// A walk that reaches its limit leaves the file to the decoder, which refuses it.
-	if f := w.fault(n, t, key); f != nil && f.line != 0 {
-		return f
-	}
-	return nil
+	// A walk that reaches its limit checks no mapping under an alias or a merge after
+	// it. The decoder may read such a file, or refuse it, or fail on such a key with
+	// its panic, which [safeDecode], under which every decode of the file runs, makes a
+	// refusal.
+	return w.fault(n, t, key)
 }
 
 // errDecoderFailed is a panic of the YAML decoder said in words of qory's own, without
@@ -239,16 +253,17 @@ func safeDecode(decode func() error) (err error) {
 	return decode()
 }
 
-// step counts a step under an alias or a merge, and is the fault of a walk that has
-// taken too many.
-func (w *walk) step() *fault {
+// step counts a step under an alias or a merge, and reports whether the walk takes it:
+// a walk that has taken walkLimit steps takes no more.
+func (w *walk) step() bool {
 	if w.aliased == 0 {
-		return nil
+		return true
 	}
 	if w.steps++; w.steps > walkLimit {
-		return &fault{0, tooManyAliases}
+		w.limited = true
+		return false
 	}
-	return nil
+	return true
 }
 
 // fault is [findFault] of n, which stands at key, read as t.
@@ -258,8 +273,8 @@ func (w *walk) fault(n *yaml.Node, t reflect.Type, key string) *fault {
 		w.aliased++
 		defer func() { w.aliased-- }()
 	}
-	if f := w.step(); f != nil {
-		return f
+	if !w.step() {
+		return nil
 	}
 	n = followAliases(n)
 	k := walkKey{n, t}
@@ -352,8 +367,8 @@ func (w *walk) fault(n *yaml.Node, t reflect.Type, key string) *fault {
 // keys the mapping writes itself are left as the decoder leaves them. merged are the
 // keys the mappings that merge this one write, nil when none does.
 func (w *walk) structFault(n *yaml.Node, t reflect.Type, key string, merged map[string]bool) *fault {
-	if f := w.step(); f != nil {
-		return f
+	if !w.step() {
+		return nil
 	}
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		for j := i + 2; j+1 < len(n.Content); j += 2 {

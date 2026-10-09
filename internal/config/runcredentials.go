@@ -28,8 +28,9 @@ const Heartbeat = 30 * time.Second
 func readRunCredentials(path string, node *yaml.Node) (runcredential.Issuers, []Row, error) {
 	// Forager reads the list as JSON, and its messages quote what it cannot read: a
 	// value whose tag it does not fit, or a number JSON cannot represent, is refused
-	// here first, by its key, and the schema's report has its values left out.
-	if f := findFault(node, reflect.TypeFor[any](), "gateway.run_credentials", false); f != nil {
+	// here first, by its key, and the schema's report has its values left out. A walk
+	// that reached its limit leaves the list to Forager's decoder, under safeDecode.
+	if f := findFault(node, reflect.TypeFor[any](), "gateway.run_credentials", false); f != nil && f != walkLimited {
 		return nil, nil, f.error(path)
 	}
 	notIssuers := fmt.Errorf("%s: gateway.run_credentials is not a list of issuers as run-credentials.schema.json defines them", path)

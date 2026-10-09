@@ -277,6 +277,66 @@ func TestForagerRefusesAnchorsItCannotReadAtOnce(t *testing.T) {
 	}
 }
 
+// manyAliases is n aliases of the anchor u, as a flow list's items.
+func manyAliases(n int) string {
+	return strings.Repeat("*u, ", n-1) + "*u"
+}
+
+// TestAWalkAtItsLimitSaysNoAliases writes more aliases than qory's walk of the file
+// takes, 150,000 of one value, which the decoder reads: a refusal names a fault the walk
+// still finds, or says one without its place, never that the aliases expand too far, and
+// a file the decoder reads is read. A key that is not a name beside a merge, in a
+// mapping the walk no longer reaches, is still refused, by the decoder's failure.
+func TestAWalkAtItsLimitSaysNoAliases(t *testing.T) {
+	hermetic(t)
+	many := manyAliases(150_000)
+	env := "wall: {adapter: docker, env: [&u " + secret + ", " + many + "]}\n"
+	issuer := "{issuer: \"https://issuer.example\", audience: a, algorithms: [RS256], keys: [{kid: k1, alg: RS256, public_key_file: f.pem}], labels: {forge: {value: x}, repository: {claims: [&u " + secret + ", " + many + "], join: /}, run_key: {claim: sub}}}"
+	for _, c := range []struct{ body, whole, instance string }{
+		{env + "session: {run: {timeout: [" + secret + "]}}\n", ": line 2: session.run.timeout is not a string", ""},
+		{"wall: {adapter: docker, mounts: &m [" + secret + "], env: [&u " + secret + ", " + many + "], cpus: *m}\n", ": a value is not of the type its key takes", ""},
+		{env + "session:\n  instance:\n    ? [" + secret + "]\n    : y\n    <<: {name: box}\n", ": line 4: session.instance has a key that is not a name", ": line 4: session.instance has a key that is not a name"},
+		{"gateway: {credentials: {c: &p {env: X, hosts: [h], ? [" + secret + "] : y, <<: {file: f}}}}\n" + env + "session: {instance: *p}\n", ": the YAML decoder failed reading the file", ": line 1: session.instance has a key that is not a name"},
+		{"gateway:\n  run_credentials:\n    - " + issuer + "\n", "", ""},
+		{"gateway:\n  run_credentials:\n    - " + issuer + "\n    - {issuer: !!int " + secret + "}\n", ": line 4: gateway.run_credentials[1].issuer is tagged !!int, and its value is not of that type", ""},
+	} {
+		path := foragerFile(t, c.body)
+		for _, r := range []struct {
+			load func() (*config.Forager, error)
+			want string
+		}{{config.LoadForager, c.whole}, {config.LoadForagerInstance, c.instance}} {
+			done := make(chan error, 1)
+			go func() {
+				_, err := r.load()
+				done <- err
+			}()
+			var err error
+			select {
+			case err = <-done:
+			case <-time.After(30 * time.Second):
+				t.Fatalf("%.80q: no answer in 30s", c.body)
+			}
+			switch {
+			case r.want == "" && err != nil:
+				t.Errorf("%.80q: %v, want it read", c.body, err)
+			case r.want != "" && (err == nil || err.Error() != path+r.want):
+				t.Errorf("%.80q: %v, want %q", c.body, err, path+r.want)
+			}
+			if err != nil && (strings.Contains(err.Error(), marker) || strings.Contains(err.Error(), "aliases")) {
+				t.Errorf("%.80q: the refusal holds the value or speaks of aliases: %v", c.body, err)
+			}
+		}
+	}
+	foragerFile(t, "gateway:\n  run_credentials:\n    - "+issuer+"\n")
+	f, err := config.LoadForager()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.RunCredentials) != 1 || len(f.RunCredentials[0].LabelMapping.Repository.Claims) != 150_001 {
+		t.Errorf("gateway.run_credentials read as %d issuers", len(f.RunCredentials))
+	}
+}
+
 // TestNoForagerRefusalPrintsAKeyWrittenAsAnAlias writes a value, then a key that is an
 // alias of it, in every section: a refusal names such a key by its alias, never by the
 // value it stands for, in both readers.
