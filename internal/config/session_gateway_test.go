@@ -197,14 +197,19 @@ func TestTheForagerSchemaTakesTheSessionGateway(t *testing.T) {
 }
 
 // TestASessionGatewayURLRefusalPrintsNoSecret is a session.gateway.url that holds a
-// credential in its user information or its query: the refusal names the part that is
-// wrong and the gateway's scheme, host and port, and holds no part of the credential.
+// credential in its user information or its query, or an access key secret
+// percent-encoded in an IPv6 zone, https or http: the refusal names the part that is
+// wrong and the gateway's scheme, host and port, or the secret, and holds no part of the
+// credential or the secret.
 func TestASessionGatewayURLRefusalPrintsNoSecret(t *testing.T) {
 	hermetic(t)
 	for _, c := range []struct{ url, want string }{
 		{"https://TOKEN@gateway.example", "session.gateway.url for https://gateway.example holds user information"},
 		{"https://u:p@gateway.example:8443", "session.gateway.url for https://gateway.example:8443 holds user information"},
 		{"https://gateway.example/?token=x", "session.gateway.url for https://gateway.example has a query or a fragment"},
+		{"https://[fe80::1%25%71ak_SECRETZONE]", "session.gateway.url: the document contains an access key secret"},
+		{"http://[fe80::1%25%71ak_SECRETZONE]", "session.gateway.url: the document contains an access key secret"},
+		{"https://[fe80::1%25%71ak_SECRETZONE]:8443/", "session.gateway.url: the document contains an access key secret"},
 	} {
 		foragerFile(t, "apiVersion: qory.dev/v1alpha1\nsession:\n  gateway:\n    url: \""+c.url+"\"\n")
 		_, err := config.Load(t.TempDir(), true)
@@ -212,7 +217,7 @@ func TestASessionGatewayURLRefusalPrintsNoSecret(t *testing.T) {
 			t.Errorf("%s: %v, want %q", c.url, err, c.want)
 			continue
 		}
-		for _, secret := range []string{"TOKEN", "u:p", ":p@", "token=x", "token", c.url} {
+		for _, secret := range []string{"TOKEN", "u:p", ":p@", "token=x", "token", "SECRETZONE", "fe80", c.url} {
 			if strings.Contains(err.Error(), secret) {
 				t.Errorf("%s: the refusal holds %q: %v", c.url, secret, err)
 			}

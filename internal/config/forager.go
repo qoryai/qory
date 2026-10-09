@@ -119,6 +119,23 @@ func CertificatePin(v string) bool {
 	return err == nil && len(b) == sha256.Size
 }
 
+// urlHoldsSecret reports whether a URL holds an access key secret as written, once its
+// percent-encoding is undone, or in its host as Go decodes it, an IPv6 zone included:
+// a refusal names the host, so a secret there must be caught before anything prints it.
+func urlHoldsSecret(raw string) bool {
+	if accesskey.ContainsSecret(raw) {
+		return true
+	}
+	if dec, err := url.PathUnescape(raw); err == nil && accesskey.ContainsSecret(dec) {
+		return true
+	}
+	if dec, err := url.QueryUnescape(raw); err == nil && accesskey.ContainsSecret(dec) {
+		return true
+	}
+	u, err := url.Parse(raw)
+	return err == nil && accesskey.ContainsSecret(u.Host)
+}
+
 // gatewayURLWrong says what is wrong with v as a gateway's URL, as Forager's session
 // takes it: https, a host and an optional port, and no user information, path other
 // than "/", query or fragment; empty when nothing is. What it says never holds more of
@@ -438,7 +455,7 @@ func LoadForager() (*Forager, error) {
 		if sg.URL == nil || *sg.URL == "" {
 			return nil, fmt.Errorf("%s: session.gateway.url is required", path)
 		}
-		if accesskey.ContainsSecret(*sg.URL) {
+		if urlHoldsSecret(*sg.URL) {
 			return nil, fmt.Errorf("%s: session.gateway.url: %w", path, accesskey.ErrSecretInDocument)
 		}
 		if wrong := gatewayURLWrong(*sg.URL); wrong != "" {
