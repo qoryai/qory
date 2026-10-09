@@ -26,8 +26,8 @@ import (
 const gatewayDocs = "https://github.com/qoryai/qory/blob/main/docs/gateway.md"
 
 // gatewayDirName is the gateway's directory under qory's state directory: where
-// Forager keeps the gateway's own certificate authority, the run keys of its runs and
-// the runs' records.
+// Forager keeps the gateway's own certificate authority, the runs' records and the run
+// keys it refuses: those of runs the issuer ended, until their latest exp.
 const gatewayDirName = "gateway"
 
 // newGateway builds the gateway verb, which runs Forager's gateway on this machine as a
