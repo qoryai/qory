@@ -95,8 +95,9 @@ var tagRefusal = regexp.MustCompile("^yaml: (cannot decode !!\\S+ `|!!binary val
 // foragerDecodeError is an error decoding n, which stands at key, into t, said without a
 // value: an unknown key as [decodeError] says it; a refusal of the file's anchors,
 // aliases or merges in words of qory's own, without a walk of n, which they could make
-// endless; and any other by the first place under n the decoder cannot take, which
-// [findFault] names. known says whether the decode refused keys t has no field for.
+// endless; a value of the wrong type or tag by the first place under n the decoder
+// cannot take, which [findFault] names; and any other as the decoder says it, unless it
+// quotes a value. known says whether the decode refused keys t has no field for.
 func foragerDecodeError(path string, n *yaml.Node, t reflect.Type, key string, known bool, err error) error {
 	var te *yaml.TypeError
 	if errors.As(err, &te) {
@@ -131,9 +132,8 @@ func foragerDecodeError(path string, n *yaml.Node, t reflect.Type, key string, k
 // nodeType is a section read as written.
 var nodeType = reflect.TypeFor[yaml.Node]()
 
-// walkLimit is how many steps a walk takes through aliases and merges before it stops:
-// the decoder refuses a file whose aliases expand too far, and a walk stops sooner than
-// the decoder would, with the same refusal.
+// walkLimit is how many steps a walk takes under aliases and merges before it stops, with
+// the refusal the decoder gives a file whose aliases expand too far.
 const walkLimit = 100_000
 
 // walk is one walk of [findFault]. It walks each value once for each type it is read
