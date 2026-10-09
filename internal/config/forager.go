@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
@@ -442,6 +443,9 @@ func LoadForager() (*Forager, error) {
 	if data == nil || err != nil {
 		return nil, err
 	}
+	if err := oneDocument(data); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	var f foragerFile
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
 	dec.KnownFields(true)
@@ -721,6 +725,26 @@ func followAliases(n *yaml.Node) *yaml.Node {
 	return n
 }
 
+// errMoreThanOneDocument is the refusal of a forager.yaml that holds a second YAML
+// document.
+var errMoreThanOneDocument = errors.New("holds more than one YAML document; " + ForagerFileName + " is one document, and qory would read only the first")
+
+// oneDocument refuses forager.yaml's content when it holds more than one YAML document,
+// an empty one after a trailing --- among them: the decoder reads the first alone, and
+// what the others say, a session.gateway say, would be ignored without a word. Content
+// that does not parse is left to the reader, which says why.
+func oneDocument(data []byte) error {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	var first, second yaml.Node
+	if dec.Decode(&first) != nil {
+		return nil
+	}
+	if err := dec.Decode(&second); errors.Is(err, io.EOF) {
+		return nil
+	}
+	return errMoreThanOneDocument
+}
+
 // readForagerFile reads the machine's forager.yaml under [UserDir]: its path and its
 // content, which is nil when there is no file.
 func readForagerFile() (string, []byte, error) {
@@ -750,6 +774,9 @@ func LoadForagerInstance() (*Forager, error) {
 	path, data, err := readForagerFile()
 	if data == nil || err != nil {
 		return nil, err
+	}
+	if err := oneDocument(data); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	var f struct {
 		Session *struct {
