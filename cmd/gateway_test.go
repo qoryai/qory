@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"net"
 	"os"
@@ -64,7 +65,11 @@ func writeIssuerFiles(t *testing.T) string {
 	key := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))
 	dir := string(configDir())
 	writeFile(t, filepath.Join(dir, "issuer-k1.pem"), key)
-	writeFile(t, filepath.Join(dir, "issuer-introspection-secret"), issuerSecret+"\n")
+	secret := filepath.Join(dir, "issuer-introspection-secret")
+	writeFile(t, secret, issuerSecret+"\n")
+	if err := os.Chmod(secret, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	return key
 }
 
@@ -98,6 +103,9 @@ func writeCertificate(t *testing.T) string {
 	dir := string(configDir())
 	writeFile(t, filepath.Join(dir, "gateway.pem"), string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})))
 	writeFile(t, filepath.Join(dir, "gateway-key.pem"), key)
+	if err := os.Chmod(filepath.Join(dir, "gateway-key.pem"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	return key
 }
 
@@ -355,13 +363,25 @@ func TestGatewayServesLoopbackUntilSIGTERM(t *testing.T) {
 }
 
 // TestGatewayServesTLSOffLoopback is a gateway on every address of the machine, with
-// gateway.tls naming the certificate and key relative to forager.yaml's directory: it
-// speaks TLS 1.3 with that certificate.
+// gateway.tls naming the certificate and key relative to forager.yaml's directory, the
+// key a link to a file of the user's alone in a directory of theirs alone, as a
+// certificate tool keeps one: it speaks TLS 1.3 with that certificate.
 func TestGatewayServesTLSOffLoopback(t *testing.T) {
 	emptyDir(t)
 	serverFile(t, newFakeServer(t, ""), "  listen: 0.0.0.0:0\n  tls:\n    certificate: gateway.pem\n    key: gateway-key.pem\n"+runCredentials)
 	writeIssuerFiles(t)
 	writeCertificate(t)
+	dir := string(configDir())
+	archive := filepath.Join(dir, "archive")
+	if err := os.Mkdir(archive, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(dir, "gateway-key.pem"), filepath.Join(archive, "gateway-key.pem")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("archive", "gateway-key.pem"), filepath.Join(dir, "gateway-key.pem")); err != nil {
+		t.Fatal(err)
+	}
 	addr, out, done := startGateway(t)
 	_, port, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -450,5 +470,74 @@ func TestGatewayRefusesRunCredentialsTheSchemaRefuses(t *testing.T) {
 	}
 	if code := cmd.ExitCode(err); code != cmd.ExitInput {
 		t.Errorf("exit %d, want %d", code, cmd.ExitInput)
+	}
+}
+
+// TestGatewayRefusesSecretFilesOthersMayRead is the TLS key and an introspection
+// client's secret checked as access-key-secret is, before the gateway listens: a key
+// the group or others may read, a key in a directory others may read, and a client
+// secret that is a link, here to a file anyone may write, are each refused, and no
+// refusal holds what the file does.
+func TestGatewayRefusesSecretFilesOthersMayRead(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		setup func(t *testing.T, dir string) string
+	}{
+		{"a key others may read", func(t *testing.T, dir string) string {
+			key := filepath.Join(dir, "gateway-key.pem")
+			if err := os.Chmod(key, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			key, _ = filepath.EvalSymlinks(key)
+			return key + " is mode 0644, which grants access to the group or others: chmod 600 " + key + ", and replace the key if anyone else could read it"
+		}},
+		{"a key in a directory others may read", func(t *testing.T, dir string) string {
+			keys := filepath.Join(dir, "keys")
+			if err := os.Mkdir(keys, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(keys, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(filepath.Join(dir, "gateway-key.pem"), filepath.Join(keys, "gateway-key.pem")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(filepath.Join(keys, "gateway-key.pem"), filepath.Join(dir, "gateway-key.pem")); err != nil {
+				t.Fatal(err)
+			}
+			keys, _ = filepath.EvalSymlinks(keys)
+			return keys + " is mode 0755, which grants access to the group or others; it holds gateway.tls.key: chmod 700 " + keys
+		}},
+		{"a client secret linked to a file anyone may write", func(t *testing.T, dir string) string {
+			secret := filepath.Join(dir, "issuer-introspection-secret")
+			elsewhere := filepath.Join(t.TempDir(), "secret")
+			writeFile(t, elsewhere, issuerSecret+"\n")
+			if err := os.Chmod(elsewhere, 0o666); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(secret); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(elsewhere, secret); err != nil {
+				t.Fatal(err)
+			}
+			return secret + " is a symbolic link; it must be the file itself"
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			emptyDir(t)
+			serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n  tls:\n    certificate: gateway.pem\n    key: gateway-key.pem\n"+runCredentials)
+			writeIssuerFiles(t)
+			key := writeCertificate(t)
+			want := c.setup(t, string(configDir()))
+			out, err := run(t, "gateway")
+			if err == nil || err.Error() != want {
+				t.Errorf("error\n got %v\nwant %q", err, want)
+			}
+			if code := cmd.ExitCode(err); code != cmd.ExitInput {
+				t.Errorf("exit %d, want %d", code, cmd.ExitInput)
+			}
+			lacks(t, out+fmt.Sprint(err), "listening on", issuerSecret, strings.Split(key, "\n")[1])
+		})
 	}
 }

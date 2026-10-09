@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/foragerdir"
 	"github.com/qoryai/qory/internal/ui"
 )
 
@@ -99,6 +100,9 @@ More: ` + gatewayDocs,
 			}
 			if len(r.RunCredentials) == 0 {
 				return input(fmt.Errorf("%s: gateway.run_credentials is required to serve other machines: their runs bring run credentials, and the gateway verifies each one; see %s", r.File, gatewayDocs))
+			}
+			if err := checkServiceSecrets(r); err != nil {
+				return input(err)
 			}
 			stderr := cmd.ErrOrStderr()
 			id, err := identify(r, stderr, "gateway", fdKey)
@@ -204,6 +208,31 @@ func issuersAt(r *config.Forager) runcredential.Issuers {
 		out[i] = is
 	}
 	return out
+}
+
+// checkServiceSecrets checks the secret files gateway.tls and gateway.run_credentials
+// name, before Forager reads them, by the rules of access-key-secret: the TLS key, which
+// may be a link, such as a certificate tool keeps, to the file it checks, and may be
+// root's as well; and each introspection client's secret.
+func checkServiceSecrets(r *config.Forager) error {
+	if r.TLS != nil {
+		const setting = "gateway.tls.key"
+		p := foragerdir.Private{Holds: setting, Replace: "the key", DirOf: setting, FollowLinks: true, RootOwned: true}
+		if err := p.Check(r.Path(r.TLS.Key)); err != nil {
+			return err
+		}
+	}
+	for i, is := range r.RunCredentials {
+		if is.Introspection == nil {
+			continue
+		}
+		setting := fmt.Sprintf("gateway.run_credentials[%d].introspection.client_secret_file", i)
+		p := foragerdir.Private{Holds: setting, Replace: "the secret", DirOf: setting}
+		if err := p.Check(r.Path(is.Introspection.ClientSecretFile)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // makePrivateDir makes dir under state and leaves both mode 0700: what is in them is

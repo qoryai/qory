@@ -13,6 +13,12 @@ func ownedByMe(info os.FileInfo) bool {
 	return ok && int(st.Uid) == os.Geteuid()
 }
 
+// ownedByRoot reports whether root owns the file.
+func ownedByRoot(info os.FileInfo) bool {
+	st, ok := info.Sys().(*syscall.Stat_t)
+	return ok && st.Uid == 0
+}
+
 // flock takes the lock of an open file, shared or exclusive, waiting for it unless
 // nowait; nowait on a lock another holds is errWouldBlock.
 func flock(f *os.File, exclusive, nowait bool) error {

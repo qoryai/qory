@@ -100,19 +100,82 @@ func (d Dir) Ensure() (changed bool, err error) {
 
 // Check refuses a directory another user owns, or one that grants anything to the group
 // or to others: the secret is read only from a directory that is the user's alone.
-func (d Dir) Check() error {
-	info, err := os.Stat(string(d))
+func (d Dir) Check() error { return accessKeySecret.checkDir(string(d)) }
+
+// Private is how a file that holds a secret is checked before it is read: a regular
+// file the effective user owns that grants nothing to the group or to others, in a
+// directory that is the user's alone, the rules of access-key-secret. The words name
+// the file in a refusal.
+type Private struct {
+	// Holds is what the file holds, as a refusal names it: "the access key's secret",
+	// or a setting.
+	Holds string
+	// Replace is what to replace when anyone else could have read it: "the key".
+	Replace string
+	// DirOf is whose directory it is, as a refusal names it: "forager.yaml", or a
+	// setting.
+	DirOf string
+	// FollowLinks checks the file a link leads to, and that file's directory, in place
+	// of refusing the link.
+	FollowLinks bool
+	// RootOwned accepts a file root owns, beside one the user owns.
+	RootOwned bool
+}
+
+// accessKeySecret is how access-key-secret and the secrets beside it are checked.
+var accessKeySecret = Private{Holds: "the access key's secret", Replace: "the key", DirOf: "forager.yaml"}
+
+// Check checks the file at path, and its directory, by p's rules, without reading it.
+func (p Private) Check(path string) error {
+	if p.FollowLinks {
+		resolved, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			return err
+		}
+		path = resolved
+	} else if isLink(path) {
+		return fmt.Errorf("%s is a symbolic link; it must be the file itself", path)
+	}
+	if err := p.checkDir(filepath.Dir(path)); err != nil {
+		return err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	return p.checkFile(path, info)
+}
+
+// checkDir refuses a directory another user owns, or one that grants anything to the
+// group or to others.
+func (p Private) checkDir(dir string) error {
+	info, err := os.Stat(dir)
 	if err != nil {
 		return err
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("%s is not a directory", d)
+		return fmt.Errorf("%s is not a directory", dir)
 	}
 	if !ownedByMe(info) {
-		return fmt.Errorf("%s belongs to another user; the directory of forager.yaml is yours alone", d)
+		return fmt.Errorf("%s belongs to another user; the directory of %s is yours alone", dir, p.DirOf)
 	}
 	if info.Mode().Perm()&0o077 != 0 {
-		return fmt.Errorf("%s is mode %04o, which grants access to the group or others; it holds the access key's secret: chmod 700 %s", d, info.Mode().Perm(), d)
+		return fmt.Errorf("%s is mode %04o, which grants access to the group or others; it holds %s: chmod 700 %s", dir, info.Mode().Perm(), p.Holds, dir)
+	}
+	return nil
+}
+
+// checkFile refuses a file that is not regular, that another user owns, or that grants
+// anything to the group or to others.
+func (p Private) checkFile(path string, info os.FileInfo) error {
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file", path)
+	}
+	if !ownedByMe(info) && !(p.RootOwned && ownedByRoot(info)) {
+		return fmt.Errorf("%s belongs to another user; %s is yours alone", path, p.Holds)
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		return fmt.Errorf("%s is mode %04o, which grants access to the group or others: chmod 600 %s, and replace %s if anyone else could read it", path, info.Mode().Perm(), path, p.Replace)
 	}
 	return nil
 }
@@ -160,14 +223,8 @@ func readPrivate(path string, limit int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s is not a regular file", path)
-	}
-	if !ownedByMe(info) {
-		return nil, fmt.Errorf("%s belongs to another user; the access key's secret is yours alone", path)
-	}
-	if info.Mode().Perm()&0o077 != 0 {
-		return nil, fmt.Errorf("%s is mode %04o, which grants access to the group or others: chmod 600 %s, and replace the key if anyone else could read it", path, info.Mode().Perm(), path)
+	if err := accessKeySecret.checkFile(path, info); err != nil {
+		return nil, err
 	}
 	b, err := io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {
