@@ -399,3 +399,50 @@ func TestLocksKeepKeyCommandsAndRunsApart(t *testing.T) {
 		}
 	})
 }
+
+// TestMakePrivateDirRefusesAnotherUsersDirectory is a directory another user owns: it
+// is refused with the words its caller gives for whose it is, and keeps its mode.
+func TestMakePrivateDirRefusesAnotherUsersDirectory(t *testing.T) {
+	defer foragerdir.SetDirOwnedByMe(func(os.FileInfo) bool { return false })()
+	for _, whose := range []string{"qory's state directory", "the directory of qory gateway"} {
+		path := filepath.Join(t.TempDir(), "dir")
+		if err := os.Mkdir(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		err := foragerdir.MakePrivateDir(path, whose)
+		if want := path + " belongs to another user; " + whose + " is yours alone"; err == nil || err.Error() != want {
+			t.Errorf("error\n got %v\nwant %q", err, want)
+		}
+		if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o755 {
+			t.Errorf("the refused directory changed: %v %v", info.Mode(), err)
+		}
+	}
+}
+
+// TestPrivateCheckReturnsTheFileItChecked is a link with FollowLinks: Check returns the
+// file the link leads to, the one it checked, and the path itself for a file.
+func TestPrivateCheckReturnsTheFileItChecked(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dir, "key.pem")
+	if err := os.WriteFile(target, []byte("key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "key.pem")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := foragerdir.Private{Holds: "gateway.tls.key", Replace: "the key", DirOf: "gateway.tls.key", FollowLinks: true}
+	if got, err := p.Check(link); err != nil || got != want {
+		t.Errorf("Check(link) = %q, %v; want %q", got, err, want)
+	}
+	if got, err := p.Check(want); err != nil || got != want {
+		t.Errorf("Check(file) = %q, %v; want %q", got, err, want)
+	}
+}

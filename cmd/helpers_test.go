@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/qoryai/qory/cmd"
@@ -63,7 +64,7 @@ func emptyDir(t *testing.T) string {
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	t.Setenv("GH_CONFIG_DIR", filepath.Join(home, "gh"))
 	t.Setenv("NO_COLOR", "1")
-	for _, name := range []string{"QORY_ACCESS_KEY_SECRET", "QORY_ACCESS_KEY_ID", "QORY_APIARY_PUBLIC_KEY", "QORY_SERVER_SECRET"} {
+	for _, name := range []string{"QORY_ACCESS_KEY_SECRET", "QORY_ACCESS_KEY_ID", "QORY_APIARY_PUBLIC_KEY", "QORY_SERVER_SECRET", "QORY_RUN_CREDENTIAL_SECRET"} {
 		t.Setenv(name, "")
 	}
 	dir := tempDir(t)
@@ -233,13 +234,34 @@ func configure(t *testing.T, root string, harness, top []string) {
 // go to one writer, the way a person reads them.
 func run(t *testing.T, args ...string) (string, error) {
 	t.Helper()
-	var out strings.Builder
+	var out output
 	root := cmd.Root()
 	root.SetArgs(args)
 	root.SetOut(&out)
 	root.SetErr(&out)
 	err := root.Execute()
 	return out.String(), err
+}
+
+// output is a command's output, stdout and stderr together, which goroutines of the
+// command, such as the gateway's reports and the runtime's copied output, write at once.
+type output struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+// Write appends p to the output.
+func (o *output) Write(p []byte) (int, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.b.Write(p)
+}
+
+// String is the output written so far.
+func (o *output) String() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.b.String()
 }
 
 // wants fails the test for every string the output does not carry.

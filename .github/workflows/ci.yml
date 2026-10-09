@@ -5,9 +5,20 @@ on:
     branches: [main, next]
   pull_request:
 
+# A newer push to a pull request cancels the pull request's run in progress or
+# waiting. Every push to main or next runs on its own, and is never cancelled.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
-    name: Go tests
+    # A pull request from this repository's next is skipped: each push to next runs
+    # these steps already. One from a fork's branch named next runs. The skipped job
+    # has a name of its own, so the required "Go tests" can only come from next's
+    # push run: a skipped job reports success.
+    name: ${{ github.event_name == 'pull_request' && github.head_ref == 'next' && github.event.pull_request.head.repo.full_name == github.repository && 'Go tests · checked by the push run' || 'Go tests' }}
+    if: github.event_name != 'pull_request' || github.head_ref != 'next' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     container:
       image: docker.io/golang:1.27
@@ -38,6 +49,21 @@ jobs:
           restore-keys: |
             go-${{ runner.os }}-
 
+      - name: Find the build cache
+        # Asked of go, as the runner sets HOME for the container, and the cache is under it.
+        id: gocache
+        run: echo "dir=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the build cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ steps.gocache.outputs.dir }}
+          # Each run saves its own, and restores the newest of the same go.sum first.
+          key: gocache-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
+          restore-keys: |
+            gocache-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            gocache-${{ runner.os }}-
+
       - name: Check formatting
         run: test -z "$(gofmt -l .)"
 
@@ -45,7 +71,8 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test ./...
+        # Every test runs on every push: many run git, and go's test cache does not see it.
+        run: go test -count=1 ./...
 
       - name: Build
         run: go build ./...

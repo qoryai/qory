@@ -1,6 +1,9 @@
 package config
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -8,12 +11,15 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/forager/runcredential"
 	"github.com/qoryai/forager/session"
 	"gopkg.in/yaml.v3"
 
@@ -59,8 +65,183 @@ type Forager struct {
 	// programs that speak the integration contract, which [Forager.Expand] describes and
 	// expands into the definitions they return.
 	Integrations []ForagerIntegration
+	// Gateway reports whether the file has a gateway section: qory gateway runs none
+	// without one.
+	Gateway bool
+	// Listen is gateway.listen, the address qory gateway listens on for the runs of
+	// other machines, host:port; empty when the file sets none. qory run does not use it.
+	Listen string
+	// TLS is gateway.tls, the certificate and key qory gateway serves Listen with; nil
+	// when the file sets none.
+	TLS *ForagerTLS
+	// SessionGateway is session.gateway, the gateway on another machine, or a service on
+	// this one, that this machine's runs go through; nil when the file sets none, and
+	// qory run starts a gateway of its own for each run.
+	SessionGateway *ForagerSessionGateway
+	// RunCredentials is gateway.run_credentials, the issuers whose run credentials open
+	// runs at qory gateway, in Forager's run-credentials.schema.json shape, with every
+	// path as the file writes it; [Forager.Path] resolves one.
+	RunCredentials runcredential.Issuers
 
-	expanded bool
+	// runCredentialRows are the rows of gateway.run_credentials, each value as the file
+	// writes it.
+	runCredentialRows []Row
+	expanded          bool
+}
+
+// ForagerTLS is gateway.tls: the files of the certificate and its key, as the file
+// writes them; [Forager.Path] resolves one. qory never prints the key file's contents.
+type ForagerTLS struct {
+	Certificate string
+	Key         string
+}
+
+// ForagerSessionGateway is session.gateway: the gateway's URL, the PEM file of the
+// authorities its certificate chains to, the pin of its certificate's public key, and the
+// file of the run's run credential, each as the file writes it; [Forager.Path] resolves a
+// path. A setting the file does not write is empty.
+type ForagerSessionGateway struct {
+	URL               string
+	CAFile            string
+	CertificateSHA256 string
+	RunCredentialFile string
+}
+
+// certificatePin is session.gateway.certificate_sha256's shape: 32 bytes in standard
+// base64 with padding, as Forager's session takes it.
+var certificatePin = regexp.MustCompile(`^[A-Za-z0-9+/]{43}=$`)
+
+// CertificatePin reports whether v is a certificate pin as Forager's session takes it:
+// the SHA-256 of a public key, 32 bytes, in standard base64 with padding.
+func CertificatePin(v string) bool {
+	if !certificatePin.MatchString(v) {
+		return false
+	}
+	b, err := base64.StdEncoding.Strict().DecodeString(v)
+	return err == nil && len(b) == sha256.Size
+}
+
+// urlHoldsSecret reports whether a URL holds an access key secret as written, or in
+// its host as Go decodes it, an IPv6 zone included, either form with its
+// percent-encoding undone again and again until nothing changes: a refusal names the
+// host, so a secret there must be caught before anything prints it, however many times
+// it is encoded. A form still encoded after [urlUnescapeLimit] rounds counts as holding
+// one; [scanURL] tells the two apart.
+func urlHoldsSecret(raw string) bool {
+	secret, tooDeep := scanURL(raw)
+	return secret || tooDeep
+}
+
+// scanURL is what [urlHoldsSecret] finds in a URL: whether a form of it holds an access
+// key secret within [urlUnescapeLimit] rounds of undoing its encoding, and whether a form
+// is still encoded after them, so whatever it holds is not known.
+func scanURL(raw string) (secret, tooDeep bool) {
+	forms := []string{raw}
+	if u, err := url.Parse(raw); err == nil {
+		forms = append(forms, u.Host)
+	}
+	for _, v := range forms {
+		for n := 0; ; n++ {
+			if accesskey.ContainsSecret(v) {
+				return true, false
+			}
+			dec := unescapeEvery(v)
+			if dec == v {
+				break
+			}
+			if n == urlUnescapeLimit {
+				tooDeep = true
+				break
+			}
+			v = dec
+		}
+	}
+	return false, tooDeep
+}
+
+// urlUnescapeLimit is how many rounds [scanURL] undoes a URL's encoding.
+const urlUnescapeLimit = 8
+
+// unescapeEvery is v with each %XX of it undone, a % that starts none left as it is:
+// unlike [url.PathUnescape], it undoes a round that holds a stray %, as Go's decoded
+// IPv6 zone does.
+func unescapeEvery(v string) string {
+	var b strings.Builder
+	for i := 0; i < len(v); i++ {
+		if v[i] == '%' && i+2 < len(v) {
+			if hi, lo := unhex(v[i+1]), unhex(v[i+2]); hi >= 0 && lo >= 0 {
+				b.WriteByte(byte(hi<<4 | lo))
+				i += 2
+				continue
+			}
+		}
+		b.WriteByte(v[i])
+	}
+	return b.String()
+}
+
+// unhex is the value of the hexadecimal digit c, or -1.
+func unhex(c byte) int {
+	switch {
+	case '0' <= c && c <= '9':
+		return int(c - '0')
+	case 'a' <= c && c <= 'f':
+		return int(c-'a') + 10
+	case 'A' <= c && c <= 'F':
+		return int(c-'A') + 10
+	}
+	return -1
+}
+
+// urlOrigin is u's scheme, host and port, as Forager's RemoteGateway.String names a
+// gateway: never its user information, path, query or fragment.
+func urlOrigin(u *url.URL) string { return u.Scheme + "://" + u.Host }
+
+// gatewayURLWrong says what is wrong with v as a gateway's URL, as Forager's session
+// takes it: https, a host and an optional port, and no user information, path other
+// than "/", query or fragment; empty when nothing is. What it says never holds more of
+// v than its scheme, its host and its port, so user information or a query that holds a
+// credential is never printed.
+func gatewayURLWrong(v string) string {
+	u, err := url.Parse(v)
+	if err != nil || u.Scheme == "" || u.Host == "" || u.Opaque != "" {
+		return "is not a URL"
+	}
+	if u.Hostname() == "" {
+		return "has no host"
+	}
+	origin := urlOrigin(u)
+	switch {
+	case u.Scheme != "https":
+		return "for " + origin + " is not https"
+	case u.User != nil:
+		return "for " + origin + " holds user information"
+	case u.Path != "" && u.Path != "/":
+		return "for " + origin + " has a path"
+	case u.RawQuery != "" || u.ForceQuery || u.Fragment != "":
+		return "for " + origin + " has a query or a fragment"
+	}
+	return ""
+}
+
+// Path is a path a setting of the file names, resolved: an absolute one as it is, a
+// relative one under the file's directory.
+func (r *Forager) Path(p string) string {
+	if p == "" || filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(filepath.Dir(r.File), p)
+}
+
+// HostPort reports whether v is host:port, such as 0.0.0.0:8443: a port of 0 to 65535,
+// and a host that may be empty, for every address of the machine.
+func HostPort(v string) bool {
+	_, port, err := net.SplitHostPort(v)
+	if err != nil {
+		return false
+	}
+	n, err := strconv.Atoi(port)
+	return err == nil && n >= 0 && n <= 65535
 }
 
 // ForagerCredential is one entry of the credentials section. Exactly one of Env, File
@@ -232,10 +413,24 @@ type gatewaySection struct {
 	} `yaml:"server,omitempty"`
 	Credentials  yaml.Node `yaml:"credentials,omitempty"`
 	Integrations yaml.Node `yaml:"integrations,omitempty"`
+	Listen       *string   `yaml:"listen"`
+	TLS          *struct {
+		Certificate *string `yaml:"certificate"`
+		Key         *string `yaml:"key"`
+	} `yaml:"tls,omitempty"`
+	RunCredentials yaml.Node `yaml:"run_credentials,omitempty"`
 }
 
-// sessionSection is the session section as written: the instance and the run.
+// sessionSection is the session section as written: the gateway, the instance and the
+// run. The gateway's keys are nodes, merges and alias keys resolved by the decoder, so
+// a key written with a null value is told from an absent one.
 type sessionSection struct {
+	Gateway *struct {
+		URL               yaml.Node `yaml:"url"`
+		CAFile            yaml.Node `yaml:"ca_file"`
+		CertificateSHA256 yaml.Node `yaml:"certificate_sha256"`
+		RunCredentialFile yaml.Node `yaml:"run_credential_file"`
+	} `yaml:"gateway,omitempty"`
 	Instance *instanceSection `yaml:"instance,omitempty"`
 	Run      *struct {
 		Timeout    *string `yaml:"timeout"`
@@ -257,19 +452,32 @@ func LoadForager() (*Forager, error) {
 	if data == nil || err != nil {
 		return nil, err
 	}
+	if err := oneDocument(data); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	var doc yaml.Node
+	docErr := yaml.Unmarshal(data, &doc)
+	if docErr == nil {
+		if f := mergeKeyFault(&doc, reflect.TypeFor[foragerFile](), "", true); f != nil {
+			return nil, f.error(path)
+		}
+	}
 	var f foragerFile
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
 	dec.KnownFields(true)
-	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
-		return nil, decodeError(path, err)
+	if err := safeDecode(func() error { return dec.Decode(&f) }); err != nil && !errors.Is(err, io.EOF) {
+		if docErr != nil {
+			return nil, foragerSyntaxError(path, err)
+		}
+		return nil, foragerDecodeError(path, &doc, reflect.TypeFor[foragerFile](), "", true, err)
 	}
 	if f.APIVersion == "" {
 		f.APIVersion = stack.APIVersion
 	}
 	if _, err := exports.ResolveAPIVersion(f.APIVersion); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, fmt.Errorf("%s: apiVersion is not one this qory reads; versions: %s", path, exports.APIVersion)
 	}
-	r := &Forager{File: path}
+	r := &Forager{File: path, Gateway: f.Gateway != nil}
 	g, ses := f.Gateway, f.Session
 	if g == nil {
 		g = &gatewaySection{}
@@ -282,21 +490,21 @@ func LoadForager() (*Forager, error) {
 			return nil, fmt.Errorf("%s: gateway.egress.mode is required: observe or enforce", path)
 		}
 		if *e.Mode != "observe" && *e.Mode != "enforce" {
-			return nil, fmt.Errorf("%s: gateway.egress.mode %q is not observe or enforce", path, *e.Mode)
+			return nil, fmt.Errorf("%s: gateway.egress.mode is not observe or enforce", path)
 		}
 		r.Egress = &ForagerEgress{Mode: *e.Mode}
 		if e.Allow != nil {
-			for _, host := range *e.Allow {
+			for i, host := range *e.Allow {
 				if !module.EgressHost.MatchString(host) {
-					return nil, fmt.Errorf("%s: gateway.egress.allow: %q is not a lower-case host name or a *. suffix; no port, path or scheme", path, host)
+					return nil, fmt.Errorf("%s: gateway.egress.allow[%d] is not a lower-case host name or a *. suffix; no port, path or scheme", path, i)
 				}
 				r.Egress.Allow = append(r.Egress.Allow, host)
 			}
 		}
 		if e.Deny != nil {
-			for _, host := range *e.Deny {
+			for i, host := range *e.Deny {
 				if !module.EgressHost.MatchString(host) {
-					return nil, fmt.Errorf("%s: gateway.egress.deny: %q is not a lower-case host name or a *. suffix; no port, path or scheme", path, host)
+					return nil, fmt.Errorf("%s: gateway.egress.deny[%d] is not a lower-case host name or a *. suffix; no port, path or scheme", path, i)
 				}
 				r.Egress.Deny = append(r.Egress.Deny, host)
 			}
@@ -310,9 +518,61 @@ func LoadForager() (*Forager, error) {
 			return nil, err
 		}
 	}
+	if err := sessionGatewayNull(path, data); err != nil {
+		return nil, err
+	}
+	if sg := ses.Gateway; sg != nil {
+		var url, caFile, pin, credFile *string
+		for _, v := range []struct {
+			key string
+			in  *yaml.Node
+			out **string
+		}{{"url", &sg.URL, &url}, {"ca_file", &sg.CAFile, &caFile}, {"certificate_sha256", &sg.CertificateSHA256, &pin}, {"run_credential_file", &sg.RunCredentialFile, &credFile}} {
+			if *v.out, err = gatewayKey(v.in); err != nil {
+				return nil, foragerDecodeError(path, v.in, reflect.TypeFor[string](), "session.gateway."+v.key, false, err)
+			}
+		}
+		// A machine whose runs go through a gateway runs none: what a gateway section
+		// holds belongs on the gateway's machine.
+		if f.Gateway != nil {
+			return nil, fmt.Errorf("%s: gateway: this machine's runs go through the gateway session.gateway.url names, so it runs no gateway, and its file holds none: Qory Apiary's access key and the credentials' secrets belong on the gateway's machine. Remove the gateway section, or remove session.gateway to run the gateway here", path)
+		}
+		if url == nil || *url == "" {
+			return nil, fmt.Errorf("%s: session.gateway.url is required", path)
+		}
+		// A URL encoded too many times to tell what it holds is refused for that, and
+		// the refusal holds no part of it.
+		switch secret, tooDeep := scanURL(*url); {
+		case secret:
+			return nil, fmt.Errorf("%s: session.gateway.url: %w", path, accesskey.ErrSecretInDocument)
+		case tooDeep:
+			return nil, fmt.Errorf("%s: session.gateway.url is percent-encoded more than %d times: an https URL of a host and an optional port, with nothing after", path, urlUnescapeLimit)
+		}
+		if wrong := gatewayURLWrong(*url); wrong != "" {
+			return nil, fmt.Errorf("%s: session.gateway.url %s: an https URL of a host and an optional port, with nothing after", path, wrong)
+		}
+		r.SessionGateway = &ForagerSessionGateway{URL: *url}
+		for _, v := range []struct {
+			key string
+			in  *string
+			out *string
+		}{{"ca_file", caFile, &r.SessionGateway.CAFile}, {"certificate_sha256", pin, &r.SessionGateway.CertificateSHA256}, {"run_credential_file", credFile, &r.SessionGateway.RunCredentialFile}} {
+			if v.in == nil {
+				continue
+			}
+			// A key that is present holds a value: an empty pin would turn the pin off.
+			if *v.in == "" {
+				return nil, fmt.Errorf("%s: session.gateway.%s is empty", path, v.key)
+			}
+			*v.out = *v.in
+		}
+		if p := r.SessionGateway.CertificateSHA256; p != "" && !CertificatePin(p) {
+			return nil, fmt.Errorf("%s: session.gateway.certificate_sha256 is not the SHA-256 of a public key in standard base64 with padding, 44 characters ending in =", path)
+		}
+	}
 	if in := ses.Instance; in != nil && in.Name != nil {
-		if err := accesskey.CheckName(*in.Name); err != nil {
-			return nil, fmt.Errorf("%s: session.instance.name: %w", path, err)
+		if accesskey.CheckName(*in.Name) != nil {
+			return nil, fmt.Errorf("%s: session.instance.name %s", path, notAName)
 		}
 		r.InstanceName = *in.Name
 	}
@@ -327,7 +587,7 @@ func LoadForager() (*Forager, error) {
 			}
 			v, err := time.ParseDuration(*d.in)
 			if err != nil || v <= 0 {
-				return nil, fmt.Errorf("%s: %s %q is not a duration above zero, such as 5h30m or 30s", path, d.key, *d.in)
+				return nil, fmt.Errorf("%s: %s is not a duration above zero, such as 5h30m or 30s", path, d.key)
 			}
 			*d.out = v
 		}
@@ -335,8 +595,8 @@ func LoadForager() (*Forager, error) {
 			if *run.StopSignal == "" {
 				return nil, fmt.Errorf("%s: session.run.stop_signal is empty", path)
 			}
-			if err := session.CheckStopSignal(*run.StopSignal); err != nil {
-				return nil, fmt.Errorf("%s: session.run.stop_signal: %w", path, err)
+			if session.CheckStopSignal(*run.StopSignal) != nil {
+				return nil, fmt.Errorf("%s: session.run.stop_signal is not one of SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1, SIGUSR2", path)
 			}
 			r.StopSignal = *run.StopSignal
 		}
@@ -348,6 +608,23 @@ func LoadForager() (*Forager, error) {
 	}
 	if g.Integrations.Kind != 0 {
 		if r.Integrations, err = readIntegrations(path, &g.Integrations); err != nil {
+			return nil, err
+		}
+	}
+	if g.Listen != nil {
+		if !HostPort(*g.Listen) {
+			return nil, fmt.Errorf("%s: gateway.listen is not host:port, such as 0.0.0.0:8443", path)
+		}
+		r.Listen = *g.Listen
+	}
+	if t := g.TLS; t != nil {
+		if t.Certificate == nil || *t.Certificate == "" || t.Key == nil || *t.Key == "" {
+			return nil, fmt.Errorf("%s: gateway.tls needs both certificate and key", path)
+		}
+		r.TLS = &ForagerTLS{Certificate: *t.Certificate, Key: *t.Key}
+	}
+	if g.RunCredentials.Kind != 0 {
+		if r.RunCredentials, r.runCredentialRows, err = readRunCredentials(path, &g.RunCredentials); err != nil {
 			return nil, err
 		}
 	}
@@ -369,7 +646,7 @@ func LoadForager() (*Forager, error) {
 		}
 		if w.Helper != nil {
 			if !filepath.IsAbs(*w.Helper) {
-				return nil, fmt.Errorf("%s: wall.helper %q is not an absolute path", path, *w.Helper)
+				return nil, fmt.Errorf("%s: wall.helper is not an absolute path", path)
 			}
 			r.Wall.Helper = *w.Helper
 		}
@@ -377,10 +654,10 @@ func LoadForager() (*Forager, error) {
 			r.Wall.User = *w.User
 		}
 		if w.Mounts != nil {
-			for _, v := range *w.Mounts {
+			for i, v := range *w.Mounts {
 				m, err := ParseMount(v)
 				if err != nil {
-					return nil, fmt.Errorf("%s: wall.mounts: %w", path, err)
+					return nil, fmt.Errorf("%s: wall.mounts[%d] is not an absolute path, with :ro after it for a read-only one", path, i)
 				}
 				r.Wall.Mounts = append(r.Wall.Mounts, m)
 			}
@@ -393,7 +670,7 @@ func LoadForager() (*Forager, error) {
 		}
 		if w.PIDs != nil {
 			if *w.PIDs < 1 {
-				return nil, fmt.Errorf("%s: wall.pids_limit is %d; a limit is at least 1", path, *w.PIDs)
+				return nil, fmt.Errorf("%s: wall.pids_limit is below 1; a limit is at least 1", path)
 			}
 			r.Wall.PIDs = *w.PIDs
 		}
@@ -401,26 +678,91 @@ func LoadForager() (*Forager, error) {
 			r.Wall.ShmSize = *w.ShmSize
 		}
 		if w.CAEnv != nil {
-			for _, name := range *w.CAEnv {
+			for i, name := range *w.CAEnv {
 				if !envName.MatchString(name) {
-					return nil, fmt.Errorf("%s: wall.ca_env: %q is not a variable's name", path, name)
+					return nil, fmt.Errorf("%s: wall.ca_env[%d] is not a variable's name", path, i)
 				}
 				r.Wall.CAEnv = append(r.Wall.CAEnv, name)
 			}
 		}
 		if w.Env != nil {
-			for _, name := range *w.Env {
+			for i, name := range *w.Env {
 				if ForagersOwn(name) {
-					return nil, fmt.Errorf("%s: wall.env: %s is Forager's own and never the agent's", path, name)
+					return nil, fmt.Errorf("%s: wall.env[%d] names a variable that is Forager's own and never the agent's", path, i)
 				}
 				if !envName.MatchString(name) {
-					return nil, fmt.Errorf("%s: wall.env: %q is not a variable's name; the value comes from the environment, never from this file", path, name)
+					return nil, fmt.Errorf("%s: wall.env[%d] is not a variable's name; the value comes from the environment, never from this file", path, i)
 				}
 				r.Wall.Env = append(r.Wall.Env, name)
 			}
 		}
 	}
 	return r, nil
+}
+
+// sessionGatewayNull refuses a session.gateway the file writes with a null value:
+// decoded, it reads as absent, and the machine would run a gateway of its own. It is
+// refused as its empty form is. The decoder resolves merges and alias keys.
+func sessionGatewayNull(path string, data []byte) error {
+	var f struct {
+		Session *struct {
+			Gateway yaml.Node `yaml:"gateway"`
+		} `yaml:"session"`
+	}
+	if err := safeDecode(func() error { return yaml.Unmarshal(data, &f) }); err != nil || f.Session == nil {
+		return nil
+	}
+	if g := followAliases(&f.Session.Gateway); g.Kind != 0 && g.ShortTag() == "!!null" {
+		return fmt.Errorf("%s: session.gateway is empty", path)
+	}
+	return nil
+}
+
+// gatewayKey is a key of session.gateway as decoded: nil when the file does not write
+// it, its string otherwise, and "" when the file writes it with a null value, so a null
+// key is refused as its empty form is: a null certificate_sha256 would otherwise turn
+// the pin off without a word.
+func gatewayKey(n *yaml.Node) (*string, error) {
+	n = followAliases(n)
+	if n.Kind == 0 {
+		return nil, nil
+	}
+	var s string
+	if n.ShortTag() == "!!null" {
+		return &s, nil
+	}
+	if err := safeDecode(func() error { return n.Decode(&s) }); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// followAliases is n with its aliases followed.
+func followAliases(n *yaml.Node) *yaml.Node {
+	for n.Kind == yaml.AliasNode && n.Alias != nil {
+		n = n.Alias
+	}
+	return n
+}
+
+// errMoreThanOneDocument is the refusal of a forager.yaml that holds a second YAML
+// document.
+var errMoreThanOneDocument = errors.New("holds more than one YAML document; " + ForagerFileName + " is one document, and qory would read only the first")
+
+// oneDocument refuses forager.yaml's content when it holds more than one YAML document,
+// an empty one after a trailing --- among them: the decoder reads the first alone, and
+// what the others say, a session.gateway say, would be ignored without a word. Content
+// that does not parse is left to the reader, which says why.
+func oneDocument(data []byte) error {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	var first, second yaml.Node
+	if dec.Decode(&first) != nil {
+		return nil
+	}
+	if err := dec.Decode(&second); errors.Is(err, io.EOF) {
+		return nil
+	}
+	return errMoreThanOneDocument
 }
 
 // readForagerFile reads the machine's forager.yaml under [UserDir]: its path and its
@@ -453,21 +795,34 @@ func LoadForagerInstance() (*Forager, error) {
 	if data == nil || err != nil {
 		return nil, err
 	}
+	if err := oneDocument(data); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	var f struct {
 		Session *struct {
 			Instance *instanceSection `yaml:"instance,omitempty"`
 		} `yaml:"session,omitempty"`
 	}
-	if err := yaml.Unmarshal(data, &f); err != nil {
-		return nil, decodeError(path, err)
+	var doc yaml.Node
+	docErr := yaml.Unmarshal(data, &doc)
+	if docErr == nil {
+		if fault := mergeKeyFault(&doc, reflect.TypeOf(f), "", false); fault != nil {
+			return nil, fault.error(path)
+		}
+	}
+	if err := safeDecode(func() error { return yaml.Unmarshal(data, &f) }); err != nil {
+		if docErr != nil {
+			return nil, foragerSyntaxError(path, err)
+		}
+		return nil, foragerDecodeError(path, &doc, reflect.TypeOf(f), "", false, err)
 	}
 	r := &Forager{File: path}
 	if f.Session == nil {
 		return r, nil
 	}
 	if in := f.Session.Instance; in != nil && in.Name != nil {
-		if err := accesskey.CheckName(*in.Name); err != nil {
-			return nil, fmt.Errorf("%s: session.instance.name: %w", path, err)
+		if accesskey.CheckName(*in.Name) != nil {
+			return nil, fmt.Errorf("%s: session.instance.name %s", path, notAName)
 		}
 		r.InstanceName = *in.Name
 	}
@@ -492,11 +847,14 @@ func (r *Forager) InstanceNameOrDefault() string {
 }
 
 // ForagersOwn reports whether a variable is Forager's own, never the session's: the
-// access key's secret, its id and the pin, and QORY_SERVER_SECRET, which held a
-// workspace access key's secret.
+// access key's secret, its id and the pin, QORY_SERVER_SECRET, which held a workspace
+// access key's secret, and QORY_RUN_CREDENTIAL_SECRET, the run credential.
 func ForagersOwn(name string) bool {
 	return slices.Contains(serverVariableNames, name)
 }
+
+// notAName is what a refusal of session.instance.name says is wrong with it.
+const notAName = "is not 1 to 64 of A-Z, a-z, 0-9, dot, underscore and dash, starting with a letter or digit"
 
 // enrolAsNode ends the refusal of a workspace access key: what to do instead.
 const enrolAsNode = "connect this machine as a node: run qory access-key enrol <server> <code>, or generate a key on the node's page in Qory Apiary and set the QORY_ variables it shows; see https://github.com/qoryai/qory/blob/main/docs/run.md#the-access-key-and-the-instance"
@@ -526,9 +884,6 @@ func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *y
 	if rawURL == nil || *rawURL == "" {
 		return nil, fmt.Errorf("%s: gateway.server.url is required", path)
 	}
-	if accesskey.ContainsSecret(*rawURL) {
-		return nil, fmt.Errorf("%s: gateway.server.url: %w", path, accesskey.ErrSecretInDocument)
-	}
 	if err := CheckServerURL(*rawURL); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
@@ -538,8 +893,8 @@ func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *y
 	case id != nil && envID != "":
 		return nil, fmt.Errorf("%s: gateway.server.access_key_id is set, and so is %s; set one of them", path, accesskey.EnvID)
 	case id != nil:
-		if err := accesskey.CheckID(*id); err != nil {
-			return nil, fmt.Errorf("%s: gateway.server.access_key_id: %w", path, err)
+		if accesskey.CheckID(*id) != nil {
+			return nil, fmt.Errorf("%s: gateway.server.access_key_id is not ak_ and 16 lower-case Crockford base32 characters", path)
 		}
 		s.AccessKeyID, s.AccessKeyIDFrom = *id, path
 	case envID != "":
@@ -552,6 +907,7 @@ func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *y
 	case pin != nil && envPin != "":
 		return nil, fmt.Errorf("%s: gateway.server.apiary_public_key is set, and so is %s; set one of them", path, accesskey.EnvPin)
 	case pin != nil:
+		seen := map[accesskey.PublicKey]bool{}
 		for i, e := range *pin {
 			if e.Alg == nil || e.PublicKey == nil {
 				return nil, fmt.Errorf("%s: gateway.server.apiary_public_key[%d] needs both alg and public_key", path, i)
@@ -559,6 +915,23 @@ func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *y
 			if accesskey.ContainsSecret(*e.Alg) || accesskey.ContainsSecret(*e.PublicKey) {
 				return nil, fmt.Errorf("%s: gateway.server.apiary_public_key: %w", path, accesskey.ErrSecretInDocument)
 			}
+			// Each entry is checked here as [accesskey.Pin.Check] checks it, so the
+			// refusal names the entry and never quotes it.
+			at := fmt.Sprintf("gateway.server.apiary_public_key[%d]", i)
+			if *e.Alg != "ed25519" {
+				return nil, fmt.Errorf("%s: %s.alg is not ed25519, the one there is", path, at)
+			}
+			pub, err := accesskey.ParsePublicKey(*e.PublicKey)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %s.public_key is not 32 bytes in base64url without padding", path, at)
+			}
+			if err := pub.Check(); err != nil {
+				return nil, fmt.Errorf("%s: %s.public_key: %w", path, at, err)
+			}
+			if seen[pub] {
+				return nil, fmt.Errorf("%s: %s.public_key is listed twice", path, at)
+			}
+			seen[pub] = true
 			s.Pin = append(s.Pin, accesskey.ServerKey{Alg: *e.Alg, PublicKey: *e.PublicKey})
 		}
 		if err := checkPin(s.Pin); err != nil {
@@ -590,23 +963,42 @@ func checkPin(p accesskey.Pin) error {
 	return nil
 }
 
+// serverURLShape ends a refusal of gateway.server.url: what it takes.
+const serverURLShape = "an https URL of a host and an optional port, or an http one to this machine, with nothing after"
+
 // CheckServerURL refuses a server URL that is not https, or http to this machine, with
-// a scheme and a host alone.
+// a scheme and a host alone. An access key secret in it, as written, percent-encoded or
+// in its host, is refused first, and then a URL still encoded after [urlUnescapeLimit]
+// rounds, whose secret, if any, is not known, with no part of it; any other refusal
+// names the part that is wrong and holds no more of the URL than its scheme, its host
+// and its port.
 func CheckServerURL(raw string) error {
-	if accesskey.ContainsSecret(raw) {
+	switch secret, tooDeep := scanURL(raw); {
+	case secret:
 		return fmt.Errorf("gateway.server.url: %w", accesskey.ErrSecretInDocument)
+	case tooDeep:
+		return fmt.Errorf("gateway.server.url is percent-encoded more than %d times: %s", urlUnescapeLimit, serverURLShape)
 	}
 	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" || u.Opaque != "" || (u.Scheme != "https" && u.Scheme != "http") {
-		return fmt.Errorf("gateway.server.url %q is not an https URL, or an http URL to this machine", raw)
+	if err != nil || u.Scheme == "" || u.Host == "" || u.Opaque != "" {
+		return fmt.Errorf("gateway.server.url is not a URL: %s", serverURLShape)
 	}
-	if u.Scheme == "http" && !loopback(u.Hostname()) {
-		return fmt.Errorf("gateway.server.url %q is http to a host that is not this machine; a server elsewhere is reached over https", raw)
+	var wrong string
+	switch {
+	case u.Scheme != "https" && u.Scheme != "http":
+		wrong = "is not https or http"
+	case u.Scheme == "http" && !loopback(u.Hostname()):
+		wrong = "is http to a host that is not this machine"
+	case u.User != nil:
+		wrong = "holds user information"
+	case u.Path != "":
+		wrong = "has a path"
+	case u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.HasSuffix(raw, "#"):
+		wrong = "has a query or a fragment"
+	default:
+		return nil
 	}
-	if u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.User != nil || strings.HasSuffix(raw, "#") {
-		return fmt.Errorf("gateway.server.url %q is more than a scheme and a host; the server defines its own paths", raw)
-	}
-	return nil
+	return fmt.Errorf("gateway.server.url for %s %s: %s", urlOrigin(u), wrong, serverURLShape)
 }
 
 // credentialFile is one entry of the credentials section as written.
@@ -647,15 +1039,18 @@ func readCredentials(path string, node *yaml.Node) ([]ForagerCredential, error) 
 				}
 			}
 		}
-		if err := node.Content[i+1].Decode(&f); err != nil {
-			return nil, fmt.Errorf("%s: gateway.credentials.%s: %w", path, c.Name, err)
+		if fault := mergeKeyFault(node.Content[i+1], reflect.TypeOf(f), "gateway.credentials."+c.Name, false); fault != nil {
+			return nil, fault.error(path)
+		}
+		if err := safeDecode(func() error { return node.Content[i+1].Decode(&f) }); err != nil {
+			return nil, foragerDecodeError(path, node.Content[i+1], reflect.TypeOf(f), "gateway.credentials."+c.Name, false, err)
 		}
 		if f.Env != nil {
 			c.Env = *f.Env
 		}
 		if f.File != nil {
 			if !filepath.IsAbs(*f.File) {
-				return nil, fmt.Errorf("%s: gateway.credentials.%s.file %q is not an absolute path", path, c.Name, *f.File)
+				return nil, fmt.Errorf("%s: gateway.credentials.%s.file is not an absolute path", path, c.Name)
 			}
 			c.File = *f.File
 		}
@@ -702,6 +1097,14 @@ func loopback(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// sessionGateway is r's session.gateway, nil for none or for no file.
+func (r *Forager) sessionGateway() *ForagerSessionGateway {
+	if r == nil {
+		return nil
+	}
+	return r.SessionGateway
+}
+
 // Rows lists forager.yaml's effective values with the file as origin, and the
 // defaults with [Default] when there is no file or a section is absent.
 func (r *Forager) Rows() []Row {
@@ -733,6 +1136,39 @@ func (r *Forager) Rows() []Row {
 		}
 	} else {
 		rows = append(rows, Row{"gateway.server.url", "(none)", Default})
+	}
+	if r != nil && r.Listen != "" {
+		rows = append(rows, Row{"gateway.listen", r.Listen, origin})
+	} else {
+		rows = append(rows, Row{"gateway.listen", "(none)", Default})
+	}
+	// The paths as the file writes them; what the key file holds is never read here.
+	if r != nil && r.TLS != nil {
+		rows = append(rows, Row{"gateway.tls.certificate", r.TLS.Certificate, origin}, Row{"gateway.tls.key", r.TLS.Key, origin})
+	} else {
+		rows = append(rows, Row{"gateway.tls.certificate", "(none)", Default}, Row{"gateway.tls.key", "(none)", Default})
+	}
+	if r != nil && len(r.runCredentialRows) > 0 {
+		rows = append(rows, r.runCredentialRows...)
+	} else {
+		rows = append(rows, Row{"gateway.run_credentials", "(none)", Default})
+	}
+	if g := r.sessionGateway(); g != nil {
+		rows = append(rows, Row{"session.gateway.url", g.URL, origin})
+		if g.CAFile != "" {
+			rows = append(rows, Row{"session.gateway.ca_file", g.CAFile, origin})
+		} else {
+			rows = append(rows, Row{"session.gateway.ca_file", "(none: the system's roots)", Default})
+		}
+		for _, v := range [][2]string{{"session.gateway.certificate_sha256", g.CertificateSHA256}, {"session.gateway.run_credential_file", g.RunCredentialFile}} {
+			if v[1] != "" {
+				rows = append(rows, Row{v[0], v[1], origin})
+			} else {
+				rows = append(rows, Row{v[0], "(none)", Default})
+			}
+		}
+	} else {
+		rows = append(rows, Row{"session.gateway.url", "(none: qory run starts a gateway for each run)", Default})
 	}
 	if r != nil && r.InstanceName != "" {
 		rows = append(rows, Row{"session.instance.name", r.InstanceName, origin})

@@ -64,6 +64,7 @@ qory run [runtime] [-- argument...] [flags]
       --mount stringArray          a path of this machine the container sees too, :ro for read-only; repeatable (forager.yaml: wall.mounts)
       --pids-limit int             the most processes and threads in the container (forager.yaml: wall.pids_limit)
       --policy string              this run's own policy file, kept outside the checkout; it narrows gateway.egress of forager.yaml, never widens it (with a server: needs --local)
+      --run-credential-fd int      read the run credential from this open file descriptor, for a machine whose runs go through a gateway (forager.yaml: session.gateway.run_credential_file)
       --run-id string              the run's id, a UUID in lower case (default a new one)
       --shm-size string            the size of /dev/shm in the container, such as 2g (forager.yaml: wall.shm_size)
       --stop-grace duration        the time between the stop signal and SIGKILL (default 10s; forager.yaml: session.run.stop_grace)

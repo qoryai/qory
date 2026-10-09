@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://qory.dev/contracts/harness/v1/forager.schema.json",
   "title": "forager.yaml",
-  "description": "The machine's forager.yaml, under the user's configuration directory alone: what qory run does on this machine. gateway holds the run policy's egress section, the server document, the credentials and the integrations; session holds the instance and what applies to every run; wall is the container the runtime is started in. egress and server follow the Forager contract's grammar, https://qory.dev/contracts/forager/v1/, and wall is that contract's wall.",
+  "description": "The machine's forager.yaml, under the user's configuration directory alone: what qory run does on this machine. gateway holds the run policy's egress section, the server document, the credentials and the integrations; session holds the gateway its runs go through, the instance and what applies to every run; wall is the container the runtime is started in. egress and server follow the Forager contract's grammar, https://qory.dev/contracts/forager/v1/, and wall is that contract's wall.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -10,7 +10,7 @@
       "const": "qory.dev/v1alpha1"
     },
     "gateway": {
-      "description": "The gateway's sections: the egress policy, the server, the credentials and the integrations.",
+      "description": "The gateway's sections: the egress policy, the server, the credentials and the integrations; and for qory gateway, listen, tls and run_credentials.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -200,14 +200,74 @@
               }
             }
           }
+        },
+        "listen": {
+          "description": "The address qory gateway listens on for the runs of other machines, host:port. qory run never listens on it: it starts a gateway of its own on a loopback port for each run.",
+          "type": "string",
+          "pattern": "^[^\\s]*:[0-9]{1,5}$"
+        },
+        "tls": {
+          "description": "The certificate and key qory gateway serves the other machines with.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "certificate",
+            "key"
+          ],
+          "properties": {
+            "certificate": {
+              "type": "string",
+              "minLength": 1
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "run_credentials": {
+          "description": "The issuers of run credentials a gateway accepts: the list under gateway.run_credentials of the operator's forager.yaml. A run credential is a JWT (RFC 7519) signed as a JWS (RFC 7515) with an asymmetric key, which an issuer gives one run. The gateway verifies it under the keys pinned here, checks its claims, and makes the run's labels and about.details from its signed claims alone. Every failure is one opaque answer. Rules this schema cannot state, Forager checks: that every key's alg is among the issuer's algorithms, that every key has a kid when there is more than one, that the kids and the issuers are unique, that each public_key_file holds a public key of its algorithm and none of the contract's published fixture keys, that the leeway is at most 5m, and the byte limits of a label value and of a details key.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/issuer"
+          }
         }
       }
     },
     "session": {
-      "description": "The session's sections: the instance and what applies to every run.",
+      "description": "The session's sections: the gateway its runs go through, the instance and what applies to every run.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "gateway": {
+          "description": "The gateway this machine's runs go through, on another machine or as a service on this one. Without it, qory run starts a gateway of its own for each run from the gateway section. With it, this machine holds no access key, and this file holds no gateway section: each run brings its run credential.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["url"],
+          "properties": {
+            "url": {
+              "description": "The gateway: an https URL of a host and an optional port, with nothing after.",
+              "type": "string",
+              "pattern": "^https://[^/?#@\\s:][^/?#@\\s]*/?$"
+            },
+            "ca_file": {
+              "description": "A PEM file of the certificate authority that signed the gateway's certificate, when the system's roots do not hold it. qory reads it relative to forager.yaml's directory, and it takes the place of the system's roots for this link.",
+              "type": "string",
+              "minLength": 1
+            },
+            "certificate_sha256": {
+              "description": "Optional: the SHA-256 of the gateway certificate's public key, base64. With it, qory accepts only a certificate with that key, and still checks its chain.",
+              "type": "string",
+              "pattern": "^[A-Za-z0-9+/]{43}=$"
+            },
+            "run_credential_file": {
+              "description": "The file that holds this run's run credential, which its issuer signed. qory reads it again before each request, so an issuer that refreshes it keeps the run going. A file whose mode grants the group or others read or write is refused. Instead: --run-credential-fd, or QORY_RUN_CREDENTIAL_SECRET. A flag never holds the credential itself.",
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
         "instance": {
           "description": "This instance of the machine, as the server shows it. Its id is qory's own, kept in the file instance-id beside this file.",
           "type": "object",
@@ -372,6 +432,276 @@
           }
         }
       }
+    }
+  },
+  "if": {
+    "required": ["session"],
+    "properties": {"session": {"required": ["gateway"]}}
+  },
+  "then": {
+    "not": {"required": ["gateway"]}
+  },
+  "$defs": {
+    "duration": {
+      "description": "A duration: 30s, 10m, 1h30m.",
+      "type": "string",
+      "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"
+    },
+    "algorithm": {
+      "description": "A JWS algorithm of an asymmetric key (RFC 7518, RFC 8037): RS256, RSASSA-PKCS1-v1_5 with SHA-256 under an RSA key of at least 2048 bits; ES256, ECDSA with SHA-256 under a P-256 key; EdDSA under an Ed25519 key. none and every HMAC algorithm are never accepted: the gateway holds public keys alone.",
+      "enum": [
+        "RS256",
+        "ES256",
+        "EdDSA"
+      ]
+    },
+    "claim": {
+      "description": "The name of a claim of the run credential.",
+      "type": "string",
+      "minLength": 1
+    },
+    "label_value": {
+      "description": "A label value, at most 256 bytes of UTF-8.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "from_claim": {
+      "description": "The value of one claim, a string.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim"
+      ],
+      "properties": {
+        "claim": {
+          "$ref": "#/$defs/claim"
+        }
+      }
+    },
+    "constant": {
+      "description": "A constant value.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value"
+      ],
+      "properties": {
+        "value": {
+          "$ref": "#/$defs/label_value"
+        }
+      }
+    },
+    "https_url": {
+      "type": "string",
+      "format": "uri",
+      "maxLength": 2048,
+      "pattern": "^https://[^/?#@\\s]+(/[^?#\\s]*)?$"
+    },
+    "issuer": {
+      "description": "One issuer: who it is, the audience it mints run credentials for, its pinned keys, the claim checks and the mapping of its claims to the run's labels and about.details.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issuer",
+        "audience",
+        "algorithms",
+        "keys",
+        "labels"
+      ],
+      "properties": {
+        "issuer": {
+          "description": "The issuer: an https URL with no query and no fragment, which the iss claim equals, compared as a string.",
+          "$ref": "#/$defs/https_url"
+        },
+        "audience": {
+          "description": "The audience the issuer mints run credentials for the gateway alone: the aud claim, a string or an array of strings, contains it. Required: a run credential minted for another service never opens a run here.",
+          "type": "string",
+          "minLength": 1
+        },
+        "algorithms": {
+          "description": "The algorithms the issuer signs with. A run credential's alg is one of them and equals the alg of the key it selects.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/algorithm"
+          }
+        },
+        "keys": {
+          "description": "The issuer's public keys, pinned. A run credential that carries a kid selects the key of that kid; one without a kid is accepted only when exactly one key is pinned. A list of keys lets the issuer rotate them.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "alg",
+              "public_key_file"
+            ],
+            "properties": {
+              "kid": {
+                "description": "The key id the issuer publishes the key under, which a run credential's kid header names. Required of every key when there is more than one, and unique.",
+                "type": "string",
+                "minLength": 1
+              },
+              "alg": {
+                "$ref": "#/$defs/algorithm"
+              },
+              "public_key_file": {
+                "description": "The file of the public key: one PEM block of type PUBLIC KEY, a PKIX SubjectPublicKeyInfo, of the key type alg names. A private key or a certificate is refused.",
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "leeway": {
+          "description": "The clock skew allowed in the checks of exp, iat and nbf. Default 60s, and at most 5m: Forager refuses a longer one, which would keep an expired run credential alive.",
+          "$ref": "#/$defs/duration"
+        },
+        "max_lifetime": {
+          "description": "The longest lifetime, exp minus iat, of a run credential the gateway accepts. When it is set, a run credential without iat is refused. Unset, the lifetime is not bounded beyond exp.",
+          "$ref": "#/$defs/duration"
+        },
+        "allow": {
+          "description": "The scope: the claim named must be a string, one of the values listed.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "claim",
+            "values"
+          ],
+          "properties": {
+            "claim": {
+              "$ref": "#/$defs/claim"
+            },
+            "values": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "labels": {
+          "description": "The run's labels, made from the run credential's signed claims alone: nothing else the client sends sets a label.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "forge",
+            "repository",
+            "run_key"
+          ],
+          "properties": {
+            "forge": {
+              "description": "The label forge: a constant, or a claim.",
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/constant"
+                },
+                {
+                  "$ref": "#/$defs/from_claim"
+                }
+              ]
+            },
+            "repository": {
+              "description": "The label repository: the claims that name the run's target, joined in order with join, or one claim, or a constant. A claim value that contains join is refused, so two different targets never make one repository.",
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "claims",
+                    "join"
+                  ],
+                  "properties": {
+                    "claims": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "$ref": "#/$defs/claim"
+                      }
+                    },
+                    "join": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                {
+                  "$ref": "#/$defs/from_claim"
+                },
+                {
+                  "$ref": "#/$defs/constant"
+                }
+              ]
+            },
+            "run_key": {
+              "description": "The label run_key: always the claim sub, the run key.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "claim"
+              ],
+              "properties": {
+                "claim": {
+                  "const": "sub"
+                }
+              }
+            }
+          }
+        },
+        "details": {
+          "description": "The keys of about.details the run credential decides, each from one claim, a string. They go into about.details, never into labels. A key follows the grammar of an about.details key and holds no =: a refusal names a key as about.details.<key>=<value>, and a key with = would make that name ambiguous.",
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/about_key",
+            "pattern": "^[^=]*$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/from_claim"
+          }
+        },
+        "introspection": {
+          "description": "The issuer's introspection endpoint (RFC 7662), optional. The gateway posts the run credential to it, over TLS and authenticated with HTTP Basic as the client, before it opens a run, and again at most every cache while the run has connections. {\"active\": true} lets the run go on, {\"active\": false} ends it, and any other answer, or a failure to ask, counts as not active.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "url",
+            "client_id",
+            "client_secret_file"
+          ],
+          "properties": {
+            "url": {
+              "$ref": "#/$defs/https_url"
+            },
+            "client_id": {
+              "description": "The client id the gateway authenticates to the endpoint as.",
+              "type": "string",
+              "minLength": 1
+            },
+            "client_secret_file": {
+              "description": "The file of the client's secret. The secret itself never appears in this document.",
+              "type": "string",
+              "minLength": 1
+            },
+            "cache": {
+              "description": "How long an answer holds before the gateway asks again. Default: the run's heartbeat interval.",
+              "$ref": "#/$defs/duration"
+            }
+          }
+        }
+      }
+    },
+    "about_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[^\u0000-\u001F\u007F-\u009F\u2028\u2029]*$"
     }
   }
 }

@@ -17,11 +17,13 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/charmbracelet/x/term"
 	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/gateway"
 	"github.com/qoryai/forager/link"
 	"github.com/qoryai/forager/refusal"
@@ -59,7 +61,7 @@ func newRun() *cobra.Command {
 	var subjects []string
 	var timeout, grace time.Duration
 	var stopSignal string
-	var secretFD int
+	var secretFD, credentialFD int
 	c := &cobra.Command{
 		Use:   "run [runtime] [-- argument...]",
 		Short: "Run the agent on its harness, observed and recorded",
@@ -106,8 +108,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// The descriptor is read and closed first, whatever comes next, so nothing
-			// qory starts inherits it.
+			// The access key's descriptor is read and closed first, whatever comes next, so
+			// nothing qory starts inherits it. The run credential's is close-on-exec from
+			// here, and read until the run ends.
 			var fdKey *accesskey.Key
 			if cmd.Flags().Changed(secretFDFlag) {
 				k, err := readSecretFD(secretFD)
@@ -116,10 +119,32 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				fdKey = k
 			}
+			var fdCredential *credentialStream
+			if cmd.Flags().Changed(runCredentialFDFlag) {
+				s, err := readCredentialFD(credentialFD)
+				if err != nil {
+					return err
+				}
+				defer s.stop()
+				fdCredential = s
+			}
 			runtime, extra := splitAtDash(cmd, args)
 			at, conf, err := locate(h)
 			if err != nil {
 				return err
+			}
+			// A machine whose runs go through a gateway on another machine, or a service on
+			// this one, starts none of its own and holds no access key: each run sends the
+			// run credential its issuer signed.
+			var credential *runCredential
+			remote := conf.Forager != nil && conf.Forager.SessionGateway != nil
+			if remote {
+				if credential, err = behindGateway(conf.Forager, local, len(labels) > 0, fdKey != nil, fdCredential); err != nil {
+					return err
+				}
+				if policyFile != "" {
+					return input(fmt.Errorf("--policy is the run's own policy for a gateway the run starts itself, and this machine's runs go through the gateway session.gateway.url names"))
+				}
 			}
 			rep, err := readReport(at)
 			if err != nil {
@@ -144,9 +169,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			var pol *gateway.Policy
 			var server *gateway.Server
 			if r := conf.Forager; r != nil {
-				if r.Egress != nil {
-					pol = &gateway.Policy{Version: 1, Egress: gateway.PolicyEgress{Mode: r.Egress.Mode, Allow: r.Egress.Allow, Deny: r.Egress.Deny}}
-				}
+				pol = machinePolicy(r)
 				if r.Server != nil {
 					server = gatewayServer(r.Server)
 				}
@@ -242,7 +265,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// access key. --local runs with the files alone. Its link is served in memory
 			// alone, to the session in this process: no socket, which another process could
 			// reach.
-			gw := gateway.Config{Policy: pol, Version: build().title(), RunDir: func(id string) string { return filepath.Join(spec.RunsDir, id) }, NoLinkSocket: true}
+			gw := gateway.Config{Policy: pol, Version: build().title(), RunDir: func(id string) string { return filepath.Join(spec.RunsDir, id) }, NoLinkSocket: true, Heartbeat: runHeartbeat}
 			if id != nil {
 				gw.Server = server
 				gw.Server.AccessKey, gw.Server.InstanceID, gw.Server.InstanceName = id.key.key, id.instanceID, id.instanceName
@@ -251,7 +274,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if pol != nil {
 				selected = pol.Image
 			}
-			if err := enclose(&spec, conf.Forager, o, selected, server != nil && !local, exe, at.root, at.home); err != nil {
+			if err := enclose(&spec, conf.Forager, o, selected, remote || server != nil && !local, exe, at.root, at.home); err != nil {
 				return err
 			}
 			if spec.Wall != nil && h.home == "" {
@@ -283,7 +306,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			defer runLock.Release()
 			if id != nil {
-				gw.Discovered = discovered(machineDir(), id, walled, stderr)
+				gw.Discovered = discovered(machineDir(), id, "run", walled, stderr)
 			}
 			apiary := ""
 			if server != nil {
@@ -291,47 +314,50 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			spec.OnVariables = unusedEnv(stderr, apiary)
 			if r := conf.Forager; r != nil {
-				for _, key := range r.Shadowed() {
-					fmt.Fprintln(stderr, "qory run:", shadowed(key))
-				}
-				if err := r.Expand(ctx, expansion(r, pol, server != nil && !local, at.root, cwd, spec.Mounts)); err != nil {
-					return input(err)
-				}
-				for _, in := range r.Integrations {
-					if in.Path != "" {
-						fmt.Fprintf(stderr, "qory run: integration %s: %s %s\n", in.Key, in.Path, in.Version)
-					}
-				}
-				for _, c := range r.Credentials {
-					def := gateway.Credential{Name: c.Name, Env: c.Env, File: c.File, Adapter: c.Adapter, Argument: c.Argument, Hosts: c.Hosts, Scheme: c.Scheme, Username: c.Username, Header: c.Header, Paths: c.Paths, Placeholders: c.Placeholders}
-					if err := def.Check(); err != nil {
-						return input(fmt.Errorf("%s: %w", config.ForagerFileName, err))
-					}
-					gw.Credentials = append(gw.Credentials, def)
+				if gw.Credentials, err = machineCredentials(ctx, r, expansion(r, pol, server != nil && !local, at.root, cwd, spec.Mounts), "run", stderr); err != nil {
+					return err
 				}
 			}
-			// The files the settings name are known once the integrations are described.
-			own := foragerFiles(foragerDir, state, spec.RunsDir, settingFiles(conf.Forager))
+			// The files the settings name are known once the integrations are described. The
+			// run credential's file is one of them: a walled agent must not read it.
+			settings := settingFiles(conf.Forager)
+			if credential != nil && credential.file != "" {
+				if abs, err := filepath.Abs(credential.file); err == nil && !slices.Contains(settings, abs) {
+					settings = append(settings, abs)
+				}
+			}
+			own := foragerFiles(foragerDir, state, spec.RunsDir, settings)
 			spec.ForagerFiles = own.files
 			record := filepath.Join(spec.RunsDir, spec.RunID)
 			u := ui.New(stderr)
-			// One gateway for the run, on this machine: the session speaks to it over its
-			// local link, whose secret stays in this process's memory.
-			gw.Report = func(line string) { fmt.Fprintln(stderr, "qory run:", line) }
-			g, err := gateway.Start(ctx, gw)
-			if err != nil {
-				return explain(err, id)
-			}
-			defer g.Close(ctx)
-			l := g.LocalLink()
-			linkHanded(l)
-			spec.Gateway = session.LocalGateway(l)
-			res, err := session.Run(ctx, spec)
-			// The gateway delivers the run's last events before qory says how the run
-			// ended, and before qory exits.
-			delivery, closeErr := g.Close(ctx)
-			if closeErr != nil {
-				gw.Report(closeErr.Error())
+			var res *session.Result
+			var delivery gateway.Delivery
+			if remote {
+				// The gateway session.gateway names: the session reaches it over TLS and
+				// sends the run credential on every request.
+				spec.Gateway = remoteGateway(conf.Forager, credential)
+				fmt.Fprintf(stderr, "qory run: through the gateway %s, run %s\n", gatewayHost(conf.Forager.SessionGateway.URL), spec.RunID)
+				res, err = session.Run(ctx, spec)
+			} else {
+				// One gateway for the run, on this machine: the session speaks to it over
+				// its local link, whose secret stays in this process's memory.
+				gw.Report = func(line string) { fmt.Fprintln(stderr, "qory run:", line) }
+				g, startErr := gateway.Start(ctx, gw)
+				if startErr != nil {
+					return explain(startErr, id)
+				}
+				defer g.Close(ctx)
+				l := g.LocalLink()
+				linkHanded(l)
+				spec.Gateway = session.LocalGateway(l)
+				res, err = session.Run(ctx, spec)
+				// The gateway delivers the run's last events before qory says how the run
+				// ended, and before qory exits.
+				var closeErr error
+				delivery, closeErr = g.Close(ctx)
+				if closeErr != nil {
+					gw.Report(closeErr.Error())
+				}
 			}
 			if err != nil {
 				// A run id another run of this checkout has: refused before this run made
@@ -339,8 +365,20 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if reused := runIDReused(err, record, spec.RunID); reused != nil {
 					return reused
 				}
+				// A separate gateway that could not open the run for the run credential's
+				// issuer: qory says so in a line of its own, as it says the gateway's end of
+				// a run, and names the record after it.
+				if line := gatewayNotOpened(err); remote && line != "" {
+					fmt.Fprintln(stderr, line)
+					if _, statErr := os.Stat(record); statErr == nil {
+						fmt.Fprintln(stderr, "qory run: the record is in", record)
+					}
+					return reported(&saidError{text: strings.TrimPrefix(line, "qory run: "), err: err})
+				}
 				if m := mountRefused(err, passed{foragerDir: foragerDir, stateDir: state, spec: &spec, root: at.root, own: own}); m != nil {
 					err = m
+				} else if refused := credentialRefused(err, named, details, about); remote && refused != nil {
+					err = refused
 				} else if used := runIDUsed(err, spec.RunID); used != nil {
 					err = used
 				} else {
@@ -363,11 +401,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				u.Fail(fmt.Errorf("%d events did not reach the server; %s/undelivered contains them", delivery.Undelivered, ui.Short(res.Dir, at.root)))
 			}
 			switch {
-			case res.RunClosed && res.ClosedBy == accesskey.FromGateway:
-				return closedByGateway()
-			case res.RunClosed:
-				u.Fail(fmt.Errorf("the server closed the run, and %s was stopped", name))
+			case remote && res.RunClosed && gatewayEnded(u, stderr, res.ClosedReason, credential):
 				return reported(&exitError{code: 1})
+			case res.RunClosed:
+				// Only the gateway closes a run: a server's 410 stops its deliveries alone.
+				return gatewayClosed(u, res.ClosedReason, name)
 			case res.TimedOut:
 				u.Fail(fmt.Errorf("%s was stopped at the limit of %s", name, timeout))
 				return reported(&exitError{code: exitTimeout})
@@ -402,10 +440,71 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	c.Flags().StringVar(&o.limits.Memory, "memory", "", "the most memory the container gets, such as 8g ("+config.ForagerFileName+": wall.memory)")
 	c.Flags().IntVar(&o.limits.PIDs, "pids-limit", 0, "the most processes and threads in the container ("+config.ForagerFileName+": wall.pids_limit)")
 	c.Flags().IntVar(&secretFD, secretFDFlag, 0, secretFDUsage)
+	c.Flags().IntVar(&credentialFD, runCredentialFDFlag, 0, runCredentialFDUsage)
 	c.Flags().StringVar(&o.limits.ShmSize, "shm-size", "", "the size of /dev/shm in the container, such as 2g ("+config.ForagerFileName+": wall.shm_size)")
 	homeFlags(c, &h)
 	c.AddCommand(newResend(), newForward(), newRelay(), newNest())
 	return c
+}
+
+// machinePolicy is the policy forager.yaml's gateway.egress sets for every run of the
+// machine's gateway, nil when it has none.
+func machinePolicy(r *config.Forager) *gateway.Policy {
+	if r.Egress == nil {
+		return nil
+	}
+	return &gateway.Policy{Version: 1, Egress: gateway.PolicyEgress{Mode: r.Egress.Mode, Allow: r.Egress.Allow, Deny: r.Egress.Deny}}
+}
+
+// machineCredentials describes the integrations forager.yaml declares as e selects, and
+// returns the credentials the machine's gateway holds: the file's own and the ones the
+// integrations define. It prints, after "qory <verb>:", a line for each credential
+// gateway.credentials shadows and for each integration described.
+func machineCredentials(ctx context.Context, r *config.Forager, e config.Expansion, verb string, report io.Writer) ([]gateway.Credential, error) {
+	for _, key := range r.Shadowed() {
+		fmt.Fprintf(report, "qory %s: %s\n", verb, shadowed(key))
+	}
+	if err := r.Expand(ctx, e); err != nil {
+		return nil, input(err)
+	}
+	for _, in := range r.Integrations {
+		if in.Path != "" {
+			fmt.Fprintf(report, "qory %s: integration %s: %s %s\n", verb, in.Key, in.Path, in.Version)
+		}
+	}
+	var out []gateway.Credential
+	for _, c := range r.Credentials {
+		def := gateway.Credential{Name: c.Name, Env: c.Env, File: c.File, Adapter: c.Adapter, Argument: c.Argument, Hosts: c.Hosts, Scheme: c.Scheme, Username: c.Username, Header: c.Header, Paths: c.Paths, Placeholders: c.Placeholders}
+		if err := def.Check(); err != nil {
+			return nil, input(fmt.Errorf("%s: %w", config.ForagerFileName, err))
+		}
+		out = append(out, def)
+	}
+	return out, nil
+}
+
+// runHeartbeat is the heartbeat interval of a run's gateway, Forager's default: the
+// session sends one every interval, and the gateway ends a run whose session sends
+// nothing for three (gateway.Config.Heartbeat). It is [config.Heartbeat], which qory
+// gateway and qory config's default introspection cache use too.
+const runHeartbeat = config.Heartbeat
+
+// runQuiet is how long a run's session may send its gateway nothing before the gateway
+// ends the run, session_lost.
+const runQuiet = 3 * runHeartbeat
+
+// gatewayClosed is the end of a run the gateway closed while it ran, by the code it
+// closed it with: it could not take a batch of the session's events, batch_refused, or
+// the session sent it nothing for runQuiet, session_lost. Any other close of the
+// gateway's has the gateway's report line alone to say why. The run fails, exit 1.
+func gatewayClosed(u *ui.UI, reason, runtime string) error {
+	switch reason {
+	case event.ReasonBatchRefused:
+		u.Fail(fmt.Errorf("the gateway closed the run: it could not take an event the session sent, and %s was stopped", runtime))
+	case event.ReasonSessionLost:
+		u.Fail(fmt.Errorf("the gateway closed the run: the session sent nothing for %s, and %s was stopped", runQuiet, runtime))
+	}
+	return reported(&exitError{code: 1})
 }
 
 // runIDUsed is the gateway's refusal of a run whose id a run on this machine has
@@ -1263,21 +1362,29 @@ func wallHelper(section config.ForagerWall, exe string) (string, error) {
 }
 
 // newResend builds the resend verb: the last step of a job that started a run, whatever
-// happened before it.
+// happened before it. Behind a gateway, session.gateway, the record goes to that gateway
+// with the run's run credential ([resendThroughGateway]); otherwise to the server.
 func newResend() *cobra.Command {
 	var wait time.Duration
-	var secretFD int
+	var secretFD, credentialFD int
 	c := &cobra.Command{
 		Use:   "resend <run-id>",
 		Short: "Send a finished run's record to the server again",
 		Long: `Send a finished run's record to the server in ` + config.ForagerFileName + ` again: after a Forager process that
 died, or a server that was away. A job runs it last, whatever happened before.
 
-Only what the server has not accepted is sent. A record Forager left open is closed
-first, and the containers and networks its wall left are removed. A run that is still
-running is refused.
+Only what the server has not accepted is sent. Without session.gateway, a record Forager
+left open is closed first, unless the server never opened the run. The containers and
+networks its wall left are removed. A run that is still running is refused.
 
-The exit status is 0 when the server has everything, and 1 when events remain.
+The exit status is 0 when the server has everything, or never opened the run, and 1 when
+events remain, or the server said stop.
+
+Behind a gateway, when session.gateway in ` + config.ForagerFileName + ` names one, the record goes to that
+gateway instead, with the run's run credential: from --run-credential-fd, else
+QORY_RUN_CREDENTIAL_SECRET, else session.gateway.run_credential_file. The exit status
+is 0 when nothing is left to send, and 1 when events remain or the gateway takes no
+more of them.
 
 --verbose adds nothing here.
 
@@ -1286,6 +1393,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
   qory run resend "$run_id" --wait 10m  # keep trying for ten minutes`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// As qory run reads them: the access key's descriptor first and closed, the run
+			// credential's close-on-exec from here and read until the resend ends.
 			var fdKey *accesskey.Key
 			if cmd.Flags().Changed(secretFDFlag) {
 				k, err := readSecretFD(secretFD)
@@ -1294,9 +1403,27 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 				}
 				fdKey = k
 			}
+			var fdCredential *credentialStream
+			if cmd.Flags().Changed(runCredentialFDFlag) {
+				s, err := readCredentialFD(credentialFD)
+				if err != nil {
+					return err
+				}
+				defer s.stop()
+				fdCredential = s
+			}
 			at, conf, err := locate(homeOptions{})
 			if err != nil {
 				return err
+			}
+			r := conf.Forager
+			// Behind a gateway, the refusals of qory run's, before anything is read or sent.
+			var credential *runCredential
+			remote := r != nil && r.SessionGateway != nil
+			if remote {
+				if credential, err = behindGateway(r, false, false, fdKey != nil, fdCredential); err != nil {
+					return err
+				}
 			}
 			if err := session.CheckRunID(args[0]); err != nil {
 				return input(err)
@@ -1309,27 +1436,35 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 			if err != nil {
 				return err
 			}
-			r := conf.Forager
+			stderr := cmd.ErrOrStderr()
+			report := func(line string) { fmt.Fprintln(stderr, "qory run resend:", line) }
+			if remote {
+				sig, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+				defer stop()
+				return resendThroughGateway(sig, wait, stderr, r, credential, args[0], filepath.Join(runs, args[0]), at.root, report)
+			}
 			if r == nil || r.Server == nil {
 				return input(fmt.Errorf("%s defines no server to send the record to", config.ForagerFileName))
 			}
-			id, err := identify(r, cmd.ErrOrStderr(), "run resend", fdKey)
+			id, err := identify(r, stderr, "run resend", fdKey)
 			if err != nil {
 				return err
 			}
 			server := gatewayServer(r.Server)
 			server.AccessKey, server.InstanceID, server.InstanceName = id.key.key, id.instanceID, id.instanceName
+			lines := &resendLines{report: report}
 			spec := gateway.ResendConfig{
 				Dir:     filepath.Join(runs, args[0]),
 				Server:  server,
 				Version: build().title(),
-				Report:  func(line string) { fmt.Fprintln(cmd.ErrOrStderr(), "qory run resend:", line) },
+				Report:  lines.line,
 			}
 			sig, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			ctx, cancel := context.WithTimeout(sig, wait)
 			defer cancel()
 			res, err := gateway.Resend(ctx, spec)
+			lines.done(err == nil && res.NotOpened && res.Undelivered == 0)
 			switch {
 			case errors.Is(err, gateway.ErrRunning):
 				return input(fmt.Errorf("the run %s is running", args[0]))
@@ -1338,25 +1473,35 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 			case err != nil:
 				return explain(err, id)
 			}
-			// The record is no longer held, so the run's containers are no one's: the wall
-			// removes what it left, within the wait the signals allow, not the one the
-			// delivery may have used up.
-			reaped := 0
-			if r.Wall != nil {
-				if reaped, err = (&wall.Docker{Command: r.Wall.Command}).Reap(sig, args[0]); err != nil {
-					spec.Report("removing what the wall left: " + err.Error())
-				}
-			}
-			u := ui.New(cmd.ErrOrStderr())
+			reaped := reapWall(sig, r, args[0], report)
+			u := ui.New(stderr)
 			if res.Completed {
 				u.Success("the record had no exit and was closed with the reason gateway_lost")
 			}
 			if reaped > 0 {
 				u.Success("removed %d containers and networks the run left", reaped)
 			}
+			if res.Stopped && res.Undelivered > 0 {
+				// The server's signed 410 during this resend: nothing of what was not
+				// sent is spooled, and all of it is still in the record's events.jsonl.
+				u.Fail(fmt.Errorf("the server answered 410 and wants no more events of the run %s; %d were accepted and %d were not sent; they stay in %s", args[0], res.Sent, res.Undelivered, ui.Short(spec.Dir, at.root)))
+				return reported(&exitError{code: 1})
+			}
+			if res.Stopped && res.Sent == 0 && res.Undelivered == 0 {
+				// The server stopped the run during the run, so nothing is sent: Forager's
+				// own line says so, and the resend fails.
+				return reported(&exitError{code: 1})
+			}
 			if res.Undelivered > 0 {
 				u.Fail(fmt.Errorf("%d events were accepted and %d were not; %s/undelivered contains them", res.Sent, res.Undelivered, ui.Short(spec.Dir, at.root)))
 				return reported(&exitError{code: 1})
+			}
+			if res.NotOpened {
+				// The server never accepted the run's ping, or the run had no server: as
+				// behind a gateway, nothing failed now, and the resend succeeds. Forager's
+				// own line that says so is left out ([resendLines]).
+				u.Success("the server never opened run %s, so there is nothing to send; its record stays in %s", args[0], ui.Short(spec.Dir, at.root))
+				return nil
 			}
 			u.Success("%d events were accepted; the server has the whole record", res.Sent)
 			return nil
@@ -1364,7 +1509,60 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 	}
 	c.Flags().DurationVar(&wait, "wait", 2*time.Minute, "how long to keep trying a server that does not accept")
 	c.Flags().IntVar(&secretFD, secretFDFlag, 0, secretFDUsage)
+	c.Flags().IntVar(&credentialFD, runCredentialFDFlag, 0, runCredentialFDUsage)
 	return c
+}
+
+// resendLines passes Forager's report lines of a resend on to report as they come,
+// but holds back the two that say a run never opened, gateway.ResendNotOpened and
+// gateway.ResendNoServer, until the resend has ended. done says whether qory says
+// itself that the run never opened: then they are left out, and otherwise passed on.
+// Every other line, the torn lines' and the server's stop among them, is passed on.
+type resendLines struct {
+	report func(string)
+	mu     sync.Mutex
+	held   []string
+}
+
+// line is the Report of the resend's configuration.
+func (r *resendLines) line(l string) {
+	if l == gateway.ResendNotOpened || l == gateway.ResendNoServer {
+		r.mu.Lock()
+		r.held = append(r.held, l)
+		r.mu.Unlock()
+		return
+	}
+	r.report(l)
+}
+
+// done ends the resend's lines: the held ones are left out when notOpened, the resend
+// NotOpened and qory saying so, and passed on otherwise.
+func (r *resendLines) done(notOpened bool) {
+	r.mu.Lock()
+	held := r.held
+	r.held = nil
+	r.mu.Unlock()
+	if notOpened {
+		return
+	}
+	for _, l := range held {
+		r.report(l)
+	}
+}
+
+// reapWall removes what the run's wall left once its record is no longer held, when r
+// has a wall, within ctx: the wait the signals allow, not the one a delivery may have
+// used up. It returns how many containers and networks it removed; a failure is
+// reported.
+func reapWall(ctx context.Context, r *config.Forager, runID string, report func(string)) int {
+	if r.Wall == nil {
+		return 0
+	}
+	reaped, err := (&wall.Docker{Command: r.Wall.Command}).Reap(ctx, runID)
+	if err != nil {
+		report("removing what the wall left: " + err.Error())
+	}
+	return reaped
 }
 
 // reallyWithin is [within] by where both paths really are: a temporary directory and a

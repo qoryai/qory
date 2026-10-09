@@ -192,11 +192,6 @@ func explain(err error, id *serverIdentity) error {
 		text = "an answer of the server does not verify under the pinned apiary_public_key, so the run does not start: check gateway.server.url and the pin"
 	case accesskey.CodeInstanceLimit:
 		text = fmt.Sprintf("the node's live instances have reached its limit, so the instance %s does not start: wait for a run of another instance to end, or have an owner or administrator in Qory Apiary clear that instance", instance)
-	case accesskey.CodeRunClosed:
-		if ref.From == accesskey.FromGateway {
-			return closedByGatewayBefore(err)
-		}
-		text = "the server closed the run before it started"
 	default:
 		return err
 	}
@@ -246,16 +241,16 @@ func startRun(dir foragerdir.Dir, runID string, walled, noServer bool) (*forager
 }
 
 // discovered is what a run against the server does once the server's signed discovery
-// is read, before the ping: it prints the node. When the run's secret is the one in
+// is read, before the ping: it prints the node, after "qory <verb>:". When the run's secret is the one in
 // access-key-secret, still there, it then, under the key lock held exclusively, deletes
 // every secret moved aside, since the key's signed discovery succeeded; writes the
 // stored-secrets marker when discovery lists secrets, a marker it cannot write being no
 // run; and removes it when discovery lists none and that secret is the directory's only
 // one. An unwalled run is refused, server_needs_wall, when discovery lists secrets or
 // the marker still exists.
-func discovered(dir foragerdir.Dir, id *serverIdentity, walled bool, report io.Writer) func(gateway.Discovery) error {
+func discovered(dir foragerdir.Dir, id *serverIdentity, verb string, walled bool, report io.Writer) func(gateway.Discovery) error {
 	return func(d gateway.Discovery) error {
-		fmt.Fprintf(report, "qory run: node %s, instance %s\n", d.NodeID, id.instanceID)
+		fmt.Fprintf(report, "qory %s: node %s, instance %s\n", verb, d.NodeID, id.instanceID)
 		if id.key.source == fromFile {
 			if err := settleMarker(dir, id.key.key, d.Secrets); err != nil {
 				return err

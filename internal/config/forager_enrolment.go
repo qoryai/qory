@@ -64,6 +64,11 @@ func editEnrolment(data []byte, e Enrolment) ([]byte, error) {
 		if err := yaml.Unmarshal(data, &doc); err != nil {
 			return nil, err
 		}
+		// The encoder writes the first document alone, so a file with more would lose
+		// the others.
+		if err := oneDocument(data); err != nil {
+			return nil, err
+		}
 	}
 	// A file with no document, empty or comments alone, keeps what it has, and the new
 	// document follows it.

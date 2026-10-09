@@ -100,6 +100,22 @@ var contract = sync.OnceValues(func() (*jsonschema.Schema, error) {
 	return c.Compile(descriptionURL)
 })
 
+// envRunCredential is the variable a machine whose runs go through a gateway may hold its
+// run credential in, config.EnvRunCredential. qory takes it out of its environment when
+// it starts; describe leaves it out as well.
+const envRunCredential = "QORY_RUN_CREDENTIAL_SECRET"
+
+// withoutRunCredential is env without [envRunCredential].
+func withoutRunCredential(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if name, _, _ := strings.Cut(kv, "="); name != envRunCredential {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
 // Describe runs program describe, as Forager starts an adapter: with this process's
 // environment, no standard input, and / as its working directory. program is a path.
 // The program runs in a process group of its own, and the whole group is stopped when
@@ -111,8 +127,9 @@ func Describe(ctx context.Context, program string) (*Description, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, program, "describe")
 	cmd.Dir = "/"
-	// The access key's variables are Forager's alone: describe never receives them.
-	cmd.Env = accesskey.WithoutVariables(os.Environ())
+	// The access key's variables and the run credential are Forager's alone: describe
+	// never receives them.
+	cmd.Env = withoutRunCredential(accesskey.WithoutVariables(os.Environ()))
 	stdout, stderr := &capped{}, &capped{}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	// A process left holding the output is not waited for past the limit.

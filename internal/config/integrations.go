@@ -81,7 +81,7 @@ func readIntegrations(path string, node *yaml.Node) ([]ForagerIntegration, error
 					return nil, fmt.Errorf("%s: gateway.integrations.%s.program is a path or a name on the PATH", path, key)
 				}
 				if strings.ContainsRune(value.Value, '/') && !filepath.IsAbs(value.Value) {
-					return nil, fmt.Errorf("%s: gateway.integrations.%s.program %q is not an absolute path; set program to an absolute path or a name on the PATH", path, key, value.Value)
+					return nil, fmt.Errorf("%s: gateway.integrations.%s.program is not an absolute path; set program to an absolute path or a name on the PATH", path, key)
 				}
 				in.Program = value.Value
 			case "settings":
@@ -115,7 +115,7 @@ func writeJSON(b *bytes.Buffer, n *yaml.Node, at string) error {
 		seen := map[string]bool{}
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			k := n.Content[i]
-			if k.Kind == yaml.AliasNode || k.ShortTag() == "!!merge" {
+			if k.Kind == yaml.AliasNode || isMergeKey(k) {
 				return fmt.Errorf("%s: line %d: a YAML alias or merge, which the settings may not contain; write the value out in full", at, k.Line)
 			}
 			if k.Kind != yaml.ScalarNode || k.ShortTag() != "!!str" {
