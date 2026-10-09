@@ -174,6 +174,9 @@ release may change what an existing document does, and states it under Upgrading
   not use them. `qory config` lists them, `gateway.run_credentials[<n>].<member>` and
   `gateway.run_credentials[<n>].introspection.<member>` each, the paths as written and
   never what a key or secret file holds, and `forager.schema.json` defines them.
+- `qory config` lists a `gateway.run_credentials` written with aliases or merges as qory
+  reads it: each alias shows its value, merged keys show where the merge stands, and a
+  list aliased from another section shows its rows.
 - `qory run` runs through a separate gateway, on another machine or a service on this
   one, when `forager.yaml` names it in `session.gateway`: `url`, `ca_file`,
   `certificate_sha256` and `run_credential_file`. It then starts no gateway of its own
@@ -205,6 +208,9 @@ release may change what an existing document does, and states it under Upgrading
   from the one the run started with, and a run the gateway or the credential's issuer
   ended, each exit 1, the events kept in the run directory. A record a gateway
   of the run's own made is refused: it goes to the server. See `docs/run.md`.
+- `qory run resend` through a separate gateway, of a record that has lost its
+  `run-secret` file, says so: `this run's record has no run-secret file, which the
+  gateway needs to accept its events; they stay in <dir>`, exit 1.
 - `qory run resend` to the server sends nothing of a run the server never opened, whose
   ping it never accepted, or of a run that had no server, such as a `--local` run's, and
   leaves its record as it is: it says `the server never opened run <id>, so there is
