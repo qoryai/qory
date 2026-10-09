@@ -303,7 +303,7 @@ func LoadForager() (*Forager, error) {
 		}
 	}
 	if f.Webhook.Kind != 0 {
-		return nil, fmt.Errorf("%s: webhook: qory 0.10.0 replaced this section with server; see the docs of %s", path, ForagerFileName)
+		return nil, fmt.Errorf("%s: webhook: qory 0.10.0 replaced this section with gateway.server; see the docs of %s", path, ForagerFileName)
 	}
 	if w := g.Server; w != nil {
 		if r.Server, err = readServer(path, w.URL, w.AccessKeyID, w.ApiaryPublicKey, &w.Secret, &w.AccessKey); err != nil {

@@ -19,12 +19,12 @@ pipes.
 forager.yaml in ~/.config/qory sets what Forager does on this machine. A repository
 cannot set it:
 
-  egress        the hosts the agent may reach: enforce or observe, allow and deny
-  wall          run the agent in a container whose one way out is the proxy
-  credentials   tokens the proxy sets on requests; behind a wall the agent never has them
-  integrations  programs that supply such tokens, such as qory-github
-  server        the server every run reports to; --local skips it
-  run           a time limit, and how the agent is stopped
+  gateway.egress        the hosts the agent may reach: enforce or observe, allow and deny
+  wall                  run the agent in a container whose one way out is the proxy
+  gateway.credentials   tokens the proxy sets on requests; behind a wall the agent never has them
+  gateway.integrations  programs that supply such tokens, such as qory-github
+  gateway.server        the server every run reports to; --local skips it
+  session.run           a time limit, and how the agent is stopped
 
 --verbose adds nothing here.
 
@@ -63,7 +63,7 @@ qory run [runtime] [-- argument...] [flags]
       --memory string              the most memory the container gets, such as 8g (forager.yaml: wall.memory)
       --mount stringArray          a path of this machine the container sees too, :ro for read-only; repeatable (forager.yaml: wall.mounts)
       --pids-limit int             the most processes and threads in the container (forager.yaml: wall.pids_limit)
-      --policy string              this run's own policy file, kept outside the checkout; it narrows the egress of forager.yaml, never widens it (with a server: needs --local)
+      --policy string              this run's own policy file, kept outside the checkout; it narrows gateway.egress of forager.yaml, never widens it (with a server: needs --local)
       --run-id string              the run's id, a UUID in lower case (default a new one)
       --shm-size string            the size of /dev/shm in the container, such as 2g (forager.yaml: wall.shm_size)
       --stop-grace duration        the time between the stop signal and SIGKILL (default 10s; forager.yaml: session.run.stop_grace)

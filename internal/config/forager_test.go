@@ -299,7 +299,7 @@ func TestForagerFileRefusesAMistake(t *testing.T) {
 		{"gateway: {server: {url: \"https://qory.example\", events: [\"*\"]}}\n", `key "events" is not one`},
 		{"session: {instance: {name: \"-build\"}}\n", `session.instance.name: the name "-build" is not 1 to 64 of A-Z, a-z, 0-9, dot, underscore and dash, starting with a letter or digit`},
 		{"session: {instance: {name: build-01, id: i_x}}\n", `key "id" is not one`},
-		{"webhook: {url: \"https://example.com/e\", secret: sixteen-characters-at-least}\n", "webhook: qory 0.10.0 replaced this section with server; see the docs of forager.yaml"},
+		{"webhook: {url: \"https://example.com/e\", secret: sixteen-characters-at-least}\n", "webhook: qory 0.10.0 replaced this section with gateway.server; see the docs of forager.yaml"},
 		{"wall: {image: i}\n", "wall.adapter is required, and docker is the one there is"},
 		{"wall: {adapter: bubblewrap}\n", "wall.adapter is required, and docker is the one there is"},
 		{"wall: {adapter: docker, helper: qory-linux}\n", `wall.helper "qory-linux" is not an absolute path`},

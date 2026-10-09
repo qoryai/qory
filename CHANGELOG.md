@@ -6,6 +6,20 @@ release may change what an existing document does, and states it under Upgrading
 
 ## [Unreleased]
 
+### Upgrading
+
+- qory reads only `~/.config/qory/forager.yaml`. Move `runner.yaml` there, and put its
+  `egress`, `server`, `credentials` and `integrations` under `gateway:` and its
+  `instance` and `run` under `session:`; `wall` stays where it is. A machine that keeps
+  only `runner.yaml` runs with none of its settings: no server, no egress policy, no
+  credentials, no integrations, no wall and no time limit. The files beside it keep
+  applying, so while the `stored-secrets` marker exists a run without a wall is still
+  refused.
+- Forager keeps its registry of walled runs under `$XDG_STATE_HOME/qory-forager/walled`,
+  else `~/.local/state/qory-forager/walled`, where it was `qory-runner`. A walled run an
+  earlier qory started is not among the earlier walled runs this one checks a new run
+  against, so let such runs end before upgrading.
+
 ### Added
 
 - Messages and docs name Qory Apiary where they mean the Qory Apiary server: the node's

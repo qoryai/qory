@@ -1005,7 +1005,7 @@ gateway keeps a selected credential outside the container, and its proxy sets it
 requests to the hosts it is for, ending the container's TLS for those hosts alone with
 an authority made for the run. The proxy sets a credential on the paths it lists alone,
 and under `enforce` the run reaches a host with paths on those and no other. A policy
-defines no credential: it chooses among the ones this file has, its `credentials` and
+defines no credential: it chooses among the ones this file has, its `gateway.credentials` and
 the ones its `gateway.integrations` define, alike.
 
 `qory config` lists the file's values under their sections, `gateway.`, `session.` and

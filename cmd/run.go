@@ -75,12 +75,12 @@ pipes.
 ` + config.ForagerFileName + ` in ~/.config/qory sets what Forager does on this machine. A repository
 cannot set it:
 
-  egress        the hosts the agent may reach: enforce or observe, allow and deny
-  wall          run the agent in a container whose one way out is the proxy
-  credentials   tokens the proxy sets on requests; behind a wall the agent never has them
-  integrations  programs that supply such tokens, such as qory-github
-  server        the server every run reports to; --local skips it
-  run           a time limit, and how the agent is stopped
+  gateway.egress        the hosts the agent may reach: enforce or observe, allow and deny
+  wall                  run the agent in a container whose one way out is the proxy
+  gateway.credentials   tokens the proxy sets on requests; behind a wall the agent never has them
+  gateway.integrations  programs that supply such tokens, such as qory-github
+  gateway.server        the server every run reports to; --local skips it
+  session.run           a time limit, and how the agent is stopped
 
 --verbose adds nothing here.
 
@@ -352,7 +352,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	}
 	c.Flags().BoolVar(&local, "local", false, "run without the server: record to files, under the machine's policy")
 	c.Flags().BoolVar(&headless, "headless", false, "run on pipes even at a terminal; -p for claude implies it")
-	c.Flags().StringVar(&policyFile, "policy", "", "this run's own policy file, kept outside the checkout; it narrows the egress of "+config.ForagerFileName+", never widens it (with a server: needs --local)")
+	c.Flags().StringVar(&policyFile, "policy", "", "this run's own policy file, kept outside the checkout; it narrows gateway.egress of "+config.ForagerFileName+", never widens it (with a server: needs --local)")
 	c.Flags().StringVar(&runID, "run-id", "", "the run's id, a UUID in lower case (default a new one)")
 	c.Flags().StringArrayVar(&labels, "label", nil, "a key=value name for the run, reported in its events; repeatable (forge and repository come from the origin remote)")
 	c.Flags().StringVar(&kind, "kind", "", "what kind of run it is, such as review or fix, reported when the run starts")
