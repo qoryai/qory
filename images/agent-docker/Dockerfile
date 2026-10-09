@@ -66,9 +66,7 @@ RUN apt="-o Dir::Etc::SourceList=/tmp/snapshot.sources -o Dir::Etc::SourceParts=
 
 COPY --from=docker /out/ /usr/local/bin/
 
-# iptables is only found here, not run: its nf_tables backend opens a netfilter
-# netlink socket even for --version, and QEMU's user-mode emulation, which the arm64
-# build in CI runs under, refuses that socket.
+# iptables is only found here, by its file and its package, not run.
 RUN dockerd --version \
  && containerd --version \
  && runc --version \

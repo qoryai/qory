@@ -30,7 +30,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.27"
+          go-version-file: go.mod
 
       - name: Build qory for Linux
         # Static, as the wall mounts it into an image that may hold no loader.
@@ -59,18 +59,11 @@ jobs:
 
   arm64:
     name: Build the images for arm64
-    # Built and not run: what goes wrong for one architecture alone, a sum or a download,
-    # shows here. The downloads are checked natively; the steps that run the image's own
-    # programs run under QEMU.
-    runs-on: ubuntu-latest
+    # Built, with no qory image check: what goes wrong for one architecture alone, a sum
+    # or a download, shows here. The runner is arm64, so every build step runs natively.
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v7
-
-      - uses: docker/setup-qemu-action@v4
-        with:
-          # The emulators are installed by a privileged container, so it is pinned.
-          image: docker.io/tonistiigi/binfmt:qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
-          platforms: arm64
 
       # The engine's own builder, as for amd64: no builder image to pin.
       - name: Build agent
