@@ -157,6 +157,9 @@ instance and what applies to every run; and `wall`, the container. `gateway.list
 `gateway.tls` and `gateway.run_credentials` are `qory gateway`'s: `qory run` does not use
 them. See [the gateway as a service](gateway.md).
 
+`session.gateway` names a gateway on another machine instead, for a machine that holds no
+`gateway` section: see [Through a separate gateway](#through-a-separate-gateway).
+
 ```yaml
 # ~/.config/qory/forager.yaml
 apiVersion: qory.dev/v1alpha1
@@ -542,6 +545,117 @@ configuration that lists no stored secrets removes it. With the secret from
 
 `qory access-key enrol` writes the marker before it makes a key, unless `--print`, since
 the new key may receive stored secrets. It is removed as above.
+
+## Through a separate gateway
+
+A machine whose runs go through a gateway on another machine, or a service on this one
+(see [the gateway as a service](gateway.md)), names it in `session.gateway` of its own
+`forager.yaml`. `qory run` then starts no gateway of its own and holds no access key. The
+session reaches the gateway over TLS 1.3, and every request carries the run credential
+its issuer signed, which the gateway verifies. The proxy, the policy, the credentials and
+the access key are the gateway's, on its machine, and the gateway reports the run to Qory
+Apiary. Without `session.gateway`, nothing changes: `qory run` starts a gateway of its own
+for each run.
+
+```yaml
+# ~/.config/qory/forager.yaml, on a machine behind a gateway
+apiVersion: qory.dev/v1alpha1
+session:
+  gateway:
+    url: https://gateway.example:8443
+    ca_file: gateway-ca.pem                          # optional
+    certificate_sha256: 47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=   # optional
+    run_credential_file: /run/issuer/run-credential  # or --run-credential-fd, or QORY_RUN_CREDENTIAL_SECRET
+```
+
+| Key | What it is |
+|---|---|
+| `session.gateway` | The gateway this machine's runs go through, on another machine or as a service on this one. Without it, qory run starts a gateway of its own for each run from the gateway section. With it, this machine holds no access key, and this file holds no gateway section: each run brings its run credential. |
+| `session.gateway.url` | The gateway: an https URL, a scheme, a host and a port alone. |
+| `session.gateway.ca_file` | A PEM file of the certificate authority that signed the gateway's certificate, when the system's roots do not hold it. qory reads it relative to forager.yaml's directory, and it takes the place of the system's roots for this link. |
+| `session.gateway.certificate_sha256` | Optional: the SHA-256 of the gateway certificate's public key, base64. With it, qory accepts only a certificate with that key, and still checks its chain. |
+| `session.gateway.run_credential_file` | The file that holds this run's run credential, which its issuer signed. qory reads it again before each request, so an issuer that refreshes it keeps the run going. Instead: --run-credential-fd, or QORY_RUN_CREDENTIAL_SECRET. A flag never holds the credential itself. |
+
+`qory config` lists each value; with no gateway named it shows
+`session.gateway.url | (none: qory run starts a gateway for each run) | (default)`.
+
+### The run credential
+
+`qory run` takes the run credential from `--run-credential-fd`, else
+`QORY_RUN_CREDENTIAL_SECRET`, else the file `session.gateway.run_credential_file` names,
+relative to the directory of `forager.yaml` unless it is absolute.
+
+- `--run-credential-fd`: read the run credential from this open file descriptor, for a
+  machine whose runs go through a gateway (forager.yaml:
+  session.gateway.run_credential_file). qory reads it once, to its end, and closes it.
+- `QORY_RUN_CREDENTIAL_SECRET`: on a machine whose runs go through a gateway, the run
+  credential its issuer signed. qory takes it out of its environment when it starts; no
+  program qory starts receives it. `--env` and `wall.env` refuse it, as they refuse the
+  access key's variables.
+- The file is read again before each request. A walled run whose mounts hold it is
+  refused before it starts, as a mount of Forager's own files is.
+
+The run credential never appears in qory's output or in the run's record. qory reads its
+`exp` only to say when it expired.
+
+The run's first line names the gateway and the run:
+
+```text
+qory run: through the gateway gateway.example:8443, run 0192…
+```
+
+The run's labels are the run credential's: the gateway sets them. qory still sends the
+checkout's forge and repository, and the gateway refuses a run whose checkout is not the
+credential's target. A key of `--details` that the credential decides must hold the
+credential's value. `--title`, `--kind`, `--subject` and the other keys of `--details`
+are the run's own.
+
+### What is refused
+
+Before anything starts, `qory run` refuses:
+
+- `<file>: gateway: this machine's runs go through the gateway session.gateway.url names,
+  so it runs no gateway, and its file holds none: Qory Apiary's access key and the
+  credentials' secrets belong on the gateway's machine. Remove the gateway section, or
+  remove session.gateway to run the gateway here`
+- `<access-key-secret path> exists, and this machine's runs go through the gateway
+  session.gateway.url names: a machine behind a gateway holds no access key; remove the
+  file`
+- `<variable> is set, and this machine's runs go through the gateway session.gateway.url
+  names: a machine behind a gateway holds no access key; unset it`, for
+  `QORY_ACCESS_KEY_ID`, `QORY_ACCESS_KEY_SECRET` and `QORY_APIARY_PUBLIC_KEY`, and in the
+  same words for `--access-key-secret-fd`.
+- `--local runs with a gateway of this run's own and no server, and this machine has no
+  gateway section: its runs go through the gateway session.gateway.url names`
+- `--label works only when this machine runs its own gateway; behind a gateway the run
+  credential sets the labels`
+- `--policy is the run's own policy for a gateway the run starts itself, and this
+  machine's runs go through the gateway session.gateway.url names`
+- `<file>: session.gateway.ca_file <path>: <err>`, and `<file>: session.gateway.ca_file
+  <path> holds no PEM certificate`
+- `this machine's runs go through the gateway session.gateway.url names, and there is no
+  run credential: set session.gateway.run_credential_file, --run-credential-fd or
+  QORY_RUN_CREDENTIAL_SECRET`
+
+The gateway refuses a run, and qory says:
+
+- `the gateway refused this run credential`, whatever the gateway found wrong with it;
+- `this checkout is <forge>/<repository>, and the run credential is for
+  <forge>/<repository>`;
+- `--details <f> sets requester to "a", and the run credential says "b": the credential
+  decides; remove the key`, for each such key.
+
+A run the gateway ends because its run credential expired says when, by where the
+credential came from:
+
+- from its file: `the run credential expired at <time>, and its file holds no fresh one`;
+- from `--run-credential-fd` or `QORY_RUN_CREDENTIAL_SECRET`: `the run credential expired
+  at <time>; --run-credential-fd and QORY_RUN_CREDENTIAL_SECRET are read once, so a run
+  longer than its credential needs session.gateway.run_credential_file`.
+
+A run the gateway ends because the credential's issuer reports that the run has ended
+says `qory run: the gateway ended the run: the run credential's issuer reports that the
+run has ended`. Either end fails the run, exit 1.
 
 ## Runs started by another system
 

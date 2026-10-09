@@ -66,6 +66,15 @@ file writes them; it never prints what a key or secret file holds. `forager.yaml
 schema, `gateway.run_credentials` included, is
 [forager.schema.json](../contracts/harness/v1/forager.schema.json).
 
+## The machines behind it
+
+A machine whose runs go through this gateway names it in `session.gateway` of its own
+`forager.yaml` and holds no access key: each run brings the run credential its issuer
+signed, and the gateway verifies it. Of the machines in a run, only the gateway's holds an
+access key. Such a machine's `qory run` reaches the gateway over https alone, so a
+gateway that serves them has `gateway.tls`. See
+[Through a separate gateway](run.md#through-a-separate-gateway).
+
 ## The access key
 
 The gateway is the node toward Qory Apiary, with this machine's access key, as `qory run`'s

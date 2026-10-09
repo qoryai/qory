@@ -175,6 +175,26 @@ release may change what an existing document does, and states it under Upgrading
   not use them. `qory config` lists them, `gateway.run_credentials[<n>].<member>` and
   `gateway.run_credentials[<n>].introspection.<member>` each, the paths as written and
   never what a key or secret file holds, and `forager.schema.json` defines them.
+- `qory run` runs through a separate gateway, on another machine or a service on this
+  one, when `forager.yaml` names it in `session.gateway`: `url`, `ca_file`,
+  `certificate_sha256` and `run_credential_file`. It then starts no gateway of its own
+  and holds no access key, prints `qory run: through the gateway <host>, run <run-id>`,
+  and sends the run credential its issuer signed on every request, from
+  `--run-credential-fd`, else `QORY_RUN_CREDENTIAL_SECRET`, else the file, which it reads
+  again before each request. Before anything starts it refuses a `gateway` section beside
+  `session.gateway`, an `access-key-secret` file, the access key's variables,
+  `--access-key-secret-fd`, `--local`, `--label`, `--policy`, a `ca_file` it cannot read
+  or that holds no certificate, and no run credential. A walled run whose mounts hold the
+  run credential's file is refused. It says the gateway's refusal of the run credential,
+  of a checkout that is not the credential's target and of a `--details` key the
+  credential decides, and a run the gateway ends at the credential's expiry or at its
+  issuer. `qory config` lists `session.gateway`, and `forager.schema.json` defines it.
+  See `docs/run.md`.
+- qory takes `QORY_RUN_CREDENTIAL_SECRET` out of its environment when a command starts, as
+  it does the access key's variables, so no program it starts receives it; `wall.env` or
+  `--env` naming it is refused.
+- `qory gateway`'s help and `docs/gateway.md` say how a machine behind the gateway names
+  it.
 
 ### Changed
 
