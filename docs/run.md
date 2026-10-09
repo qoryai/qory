@@ -34,7 +34,8 @@ When the run ends, qory says how, and its exit status goes with it:
   the exit status is the runtime's.
 - `✗ <runtime> ended on the signal <signal>`, such as `SIGKILL` from elsewhere: exit 1.
 - `✗ the run was cancelled: qory run got SIGTERM, and <runtime> was stopped`, or
-  `SIGINT`: exit 1.
+  `SIGINT`, when the signal came while the runtime ran: exit 1. A signal that comes after
+  the runtime exited changes neither its line nor the exit status.
 - `✗ the run was cancelled: it reached the time limit of <d>, and <runtime> was
   stopped`: exit 124 (see [Time limits](#time-limits)).
 - `✗ the run failed: its events could not be recorded, and <runtime> was stopped`: the

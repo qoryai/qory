@@ -126,3 +126,17 @@ func (o outcome) agrees(exitedZero bool) bool {
 	}
 	return o.failed
 }
+
+// endsAs is the end a resend recorded for a record that had none, as qory run resend says
+// it: the outcome's word, and its reason after a colon when it has one. An end with no
+// known outcome is the gateway's, gateway_lost.
+func endsAs(state, reason string) string {
+	o := outcomeOf(state, reason)
+	if !o.known {
+		o = outcomeOf("", event.ReasonGatewayLost)
+	}
+	if o.reason == "" {
+		return o.word()
+	}
+	return o.word() + ": " + o.reason
+}

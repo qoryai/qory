@@ -181,6 +181,8 @@ type fakeLink struct {
 	outcome string
 	// asked is how many times the outcome was asked for.
 	asked int
+	// onAsk, when set, runs as the outcome is asked for, before the answer.
+	onAsk func()
 }
 
 // newFakeLink starts a fake link that accepts every batch; it stops when the test ends.
@@ -276,6 +278,9 @@ func (f *fakeLink) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/run/") && strings.HasSuffix(r.URL.Path, "/outcome") {
 			f.asked++
+			if f.onAsk != nil {
+				f.onAsk()
+			}
 			if f.outcome != "" {
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte(f.outcome))

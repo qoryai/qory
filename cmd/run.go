@@ -340,17 +340,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			spec.Report = lines.line
 			var res *session.Result
 			var delivery gateway.Delivery
-			// signalled is the signal qory run got before session.Run returned, "" for
-			// none: one that comes later, as the gateway delivers the run's last events,
-			// came after the runtime exited, and did not end the run.
-			var signalled string
 			if remote {
 				// The gateway session.gateway names: the session reaches it over TLS and
 				// sends the run credential on every request.
 				spec.Gateway = remoteGateway(conf.Forager, credential)
 				fmt.Fprintf(stderr, "qory run: through the gateway %s, run %s\n", gatewayHost(conf.Forager.SessionGateway.URL), spec.RunID)
 				res, err = session.Run(ctx, spec)
-				signalled = got()
 			} else {
 				// One gateway for the run, on this machine: the session speaks to it over
 				// its local link, whose secret stays in this process's memory.
@@ -365,7 +360,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				linkHanded(l)
 				spec.Gateway = session.LocalGateway(l)
 				res, err = session.Run(ctx, spec)
-				signalled = got()
 				// The gateway delivers the run's last events before qory says how the run
 				// ended, and before qory exits.
 				var closeErr error
@@ -413,7 +407,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return reported(err)
 			}
 			defer fmt.Fprintln(stderr, "qory run: the record is in", record)
-			end := runEnd{runtime: name, timeout: timeout, got: signalled, credential: credential}
+			end := runEnd{runtime: name, timeout: timeout, credential: credential}
+			if res.Cancelled {
+				// qory run's context had ended when the session saw the runtime exit: the
+				// signal qory got stopped the run, and is named. A signal that came later,
+				// as the gateway was asked for the outcome or the run's last events were
+				// delivered, did not end the run.
+				end.got = got()
+			}
 			if delivery.RunClosed && !res.RunClosed {
 				// The run's own gateway recorded the run's end after its runtime exited.
 				end.gateway = &gatewayEnd{state: delivery.State, reason: delivery.Reason, code: delivery.ClosedReason}
@@ -509,7 +510,7 @@ const runHeartbeat = config.Heartbeat
 const runQuiet = 3 * runHeartbeat
 
 // runEnd is what qory knows of a run besides its result: its runtime's name, its time
-// limit, the signal qory run got before session.Run returned, "" for none, the run
+// limit, the signal qory run got that ended the run, "" for none, the run
 // credential behind a separate gateway, nil with a gateway of the run's own, and the
 // run's end that gateway of the run's own recorded after the runtime exited by itself,
 // nil when it recorded none.
@@ -543,10 +544,17 @@ func (e runEnd) exitOutcome(res *session.Result) outcome {
 	return o
 }
 
+// cancelled reports whether the run was cancelled by a signal qory run got: the session
+// saw the runtime exit after qory run's context ended, and the signal is known. A
+// context that ended otherwise names no signal, and the runtime's own exit says the run.
+func (e runEnd) cancelled(res *session.Result) bool {
+	return res.Cancelled && e.got != ""
+}
+
 // saysOutcome reports whether qory says the run's outcome in a line after the runtime's
 // own: the runtime exited by itself, and the outcome differs from what its exit says.
 func (e runEnd) saysOutcome(res *session.Result) bool {
-	if res.RunClosed || res.TimedOut || e.got != "" {
+	if res.RunClosed || res.TimedOut || e.cancelled(res) {
 		return false
 	}
 	o := e.exitOutcome(res)
@@ -557,7 +565,8 @@ func (e runEnd) saysOutcome(res *session.Result) bool {
 // status. A run the gateway closed ends with its outcome and reason ([outcomeOf]): the
 // run credential's expiry in the words of where it came from, when qory can read when;
 // 0 when it completed, else 1. A run stopped at its time limit was cancelled, exit 124;
-// one stopped because qory run got a signal was cancelled, exit 1. Otherwise the
+// one whose context a signal of qory run's had ended when the session saw the runtime
+// exit, res.Cancelled, was cancelled, exit 1. Otherwise the
 // runtime's own exit says it, with its status, or 1 for a signal; when the outcome
 // differs from what the exit says, a second line says the outcome, and the exit status
 // follows it. That outcome is the end the run's gateway recorded after the runtime
@@ -585,7 +594,7 @@ func runEnded(u *ui.UI, res *session.Result, e runEnd) error {
 	case res.TimedOut:
 		u.Fail(fmt.Errorf("the run was cancelled: it reached the time limit of %s, and %s was stopped", e.timeout, e.runtime))
 		return reported(&exitError{code: exitTimeout})
-	case e.got != "":
+	case e.cancelled(res):
 		u.Fail(fmt.Errorf("the run was cancelled: qory run got %s, and %s was stopped", e.got, e.runtime))
 		return reported(&exitError{code: 1})
 	}
@@ -1634,12 +1643,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 			reaped := reapWall(sig, r, args[0], report)
 			u := ui.New(stderr)
 			if res.Completed {
-				// The end the resend recorded, as the gateway gives it: gateway_lost.
-				o := outcomeOf(res.State, res.Reason)
-				if !o.known {
-					o = outcomeOf("", event.ReasonGatewayLost)
-				}
-				u.Success("the record had no end, and now ends as %s: %s", o.word(), o.reason)
+				u.Success("the record had no end, and now ends as %s", endsAs(res.State, res.Reason))
 			}
 			if reaped > 0 {
 				u.Success("removed %d containers and networks the run left", reaped)

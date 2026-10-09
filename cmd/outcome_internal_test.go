@@ -77,10 +77,19 @@ func TestRunEndedSaysTheOutcome(t *testing.T) {
 			"the run was cancelled, and claude was stopped\n", 1},
 		{"the time limit", &session.Result{TimedOut: true, State: "cancelled", Reason: event.ReasonTimeout, ExitCode: -1, Signal: "SIGTERM"}, "",
 			"the run was cancelled: it reached the time limit of 5m0s, and claude was stopped\n", exitTimeout},
-		{"qory run got SIGTERM", &session.Result{State: "failed", ExitCode: -1, Signal: "SIGTERM"}, "SIGTERM",
+		{"qory run got SIGTERM", &session.Result{Cancelled: true, State: "failed", ExitCode: -1, Signal: "SIGTERM"}, "SIGTERM",
 			"the run was cancelled: qory run got SIGTERM, and claude was stopped\n", 1},
-		{"qory run got SIGINT, the runtime exited 0", &session.Result{State: "succeeded"}, "SIGINT",
+		{"qory run got SIGINT, the runtime exited 0", &session.Result{Cancelled: true, State: "succeeded"}, "SIGINT",
 			"the run was cancelled: qory run got SIGINT, and claude was stopped\n", 1},
+		// A signal that came after the session saw the runtime exit did not end the run:
+		// the runtime's own line and the outcome say it.
+		{"SIGINT after the exit 0", &session.Result{State: "succeeded"}, "SIGINT", "claude exited 0\n", 0},
+		{"SIGINT after the exit 3", &session.Result{State: "failed", ExitCode: 3}, "SIGINT", "claude exited 3\n", 3},
+		{"SIGINT after the exit 0, the starter's failure", &session.Result{State: "failed", Reason: "checks_failed"}, "SIGINT",
+			"claude exited 0\nthe run failed: checks failed\n", 1},
+		// A context that ended with no signal named: the runtime's own line.
+		{"cancelled, no signal named", &session.Result{Cancelled: true, State: "failed", ExitCode: -1, Signal: "SIGTERM"}, "",
+			"claude ended on the signal SIGTERM\n", 1},
 		{"a kill from elsewhere", &session.Result{State: "failed", ExitCode: -1, Signal: "SIGKILL"}, "",
 			"claude ended on the signal SIGKILL\n", 1},
 		{"exit 0", &session.Result{State: "succeeded"}, "", "claude exited 0\n", 0},
@@ -295,7 +304,28 @@ func TestRunEndedSaysTheEndTheGatewayRecordedAfterTheExit(t *testing.T) {
 			t.Errorf("%+v: says an outcome after the runtime's line", res)
 		}
 	}
-	if (runEnd{got: "SIGINT", gateway: gw("failed", event.ReasonSessionLost)}).saysOutcome(&session.Result{State: "succeeded"}) {
+	if (runEnd{got: "SIGINT", gateway: gw("failed", event.ReasonSessionLost)}).saysOutcome(&session.Result{Cancelled: true, State: "succeeded"}) {
 		t.Error("a signal qory run got: says an outcome after the runtime's line")
+	}
+	// A signal that came after the runtime exited leaves the gateway's end to be said.
+	if !(runEnd{got: "SIGINT", gateway: gw("failed", event.ReasonSessionLost)}).saysOutcome(&session.Result{State: "succeeded"}) {
+		t.Error("a signal after the exit: says no outcome after the runtime's line")
+	}
+}
+
+// TestEndsAsSaysTheResendsEnd is the end qory run resend says it recorded: the outcome's
+// word, and a reason only when there is one.
+func TestEndsAsSaysTheResendsEnd(t *testing.T) {
+	for _, c := range []struct{ state, reason, want string }{
+		{"failed", event.ReasonGatewayLost, "lost: its end was never recorded"},
+		{"", "", "lost: its end was never recorded"},
+		{"cancelled", "", "cancelled"},
+		{"succeeded", "", "completed"},
+		{"failed", "checks_failed", "failed: checks failed"},
+		{"cancelled", event.ReasonStopped, "cancelled"},
+	} {
+		if got := endsAs(c.state, c.reason); got != c.want {
+			t.Errorf("%q, %q: %q, want %q", c.state, c.reason, got, c.want)
+		}
 	}
 }

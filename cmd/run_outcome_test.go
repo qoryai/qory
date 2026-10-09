@@ -289,3 +289,72 @@ func TestRunSaysTheExitOfARuntimeThatExitedBeforeASignal(t *testing.T) {
 		t.Errorf("the record's run.exited is %s, exit %v", state, exit)
 	}
 }
+
+// TestRunSaysTheExitOfARuntimeThatExitedBeforeTheOutcomeAsk is a runtime that exits 0
+// by itself behind a separate gateway, and SIGINT to qory run while the session asks the
+// gateway for the outcome at that exit: after the runtime exited. The signal did not end
+// the run: qory says the runtime's exit, exit 0, and not that the run was cancelled.
+func TestRunSaysTheExitOfARuntimeThatExitedBeforeTheOutcomeAsk(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	runtime := filepath.Join(t.TempDir(), "exiting-runtime")
+	writeFile(t, runtime, "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(runtime, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	composedForFake(t, root, runtime)
+	link, answer := endingLink(t, "")
+	link.answer(http.StatusOK, "")
+	link.mu.Lock()
+	link.runStatus, link.runBody = http.StatusOK, answer
+	link.onAsk = func() {
+		syscall.Kill(os.Getpid(), syscall.SIGINT)
+		time.Sleep(300 * time.Millisecond)
+	}
+	link.mu.Unlock()
+	t.Setenv("QORY_RUN_CREDENTIAL_SECRET", "opaque-run-credential-"+fmt.Sprint(time.Now().UnixNano()))
+	out, err := run(t, "run")
+	if err != nil || !strings.Contains(out, "\n✓ claude exited 0\nqory run: the record is in ") {
+		t.Errorf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	lacks(t, out, "cancelled", "qory run got")
+	link.mu.Lock()
+	asked := link.asked
+	link.mu.Unlock()
+	if asked != 1 {
+		t.Errorf("the outcome was asked for %d times, want once", asked)
+	}
+	if state, _, exit := exitedOf(t, root); state != "succeeded" || exit != 0 {
+		t.Errorf("the record's run.exited is %s, exit %v", state, exit)
+	}
+}
+
+// TestRunSaysASignalThatStoppedTheRuntime is SIGINT to qory run while the runtime runs,
+// with a gateway of the run's own: the signal ended the run, and qory says it was
+// cancelled, names the signal, exit 1.
+func TestRunSaysASignalThatStoppedTheRuntime(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	started := filepath.Join(t.TempDir(), "started")
+	runtime := filepath.Join(t.TempDir(), "waiting-runtime")
+	writeFile(t, runtime, "#!/bin/sh\ntouch '"+started+"'\nexec sleep 30\n")
+	if err := os.Chmod(runtime, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	composedForFake(t, root, runtime)
+	srv := newFakeServer(t, "")
+	serverFile(t, srv, "")
+	go func() {
+		for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+			if _, err := os.Stat(started); err == nil {
+				syscall.Kill(os.Getpid(), syscall.SIGINT)
+				return
+			}
+		}
+	}()
+	out, err := run(t, "run")
+	if cmd.ExitCode(err) != 1 || !strings.Contains(out, "\n✗ the run was cancelled: qory run got SIGINT, and claude was stopped\n") {
+		t.Errorf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	lacks(t, out, "exited 0")
+}

@@ -294,8 +294,8 @@ release may change what an existing document does, and states it under Upgrading
   `QORY_HARNESS_HOME`. A module's export is a default like the others: the server's
   value, `--env` and `wall.env` win over it, and the deny list leaves out one whose name
   it holds. They reach the agent in the container and outside it alike.
-- qory builds against `github.com/qoryai/forager` at commit `86e45b4` of its `next`,
-  `v0.6.1-0.20261009204551-86e45b427cfb`, contract `v1` revision 1 as amended there.
+- qory builds against `github.com/qoryai/forager` at commit `46c2ff6` of its `next`,
+  `v0.6.1-0.20261009215824-46c2ff6a8418`, contract `v1` revision 1 as amended there.
   `qory run` starts Forager's gateway on this machine for each run: it holds the proxy,
   the policy, the credentials and the access key, and sends the run's events to the
   server; the session speaks to it alone, and records its own events in the run's
@@ -326,9 +326,10 @@ release may change what an existing document does, and states it under Upgrading
   as `✓ the run completed: all checks passed, and claude was stopped`. The time limit
   says `✗ the run was cancelled: it reached the time limit of <d>, and <runtime> was
   stopped`, exit 124 as before, and the session's own line of it is no longer printed. A
-  signal `qory run` gets says `✗ the run was cancelled: qory run got SIGTERM, and
-  <runtime> was stopped`, exit 1, whatever the runtime's status, and a signal from
-  elsewhere that kills the runtime `✗ <runtime> ended on the signal SIGKILL`, in place of
+  signal `qory run` gets while the runtime runs says `✗ the run was cancelled: qory run
+  got SIGTERM, and <runtime> was stopped`, exit 1, whatever the runtime's status; one that
+  comes after the runtime exited changes neither its line nor the exit status. A signal from
+  elsewhere that kills the runtime says `✗ <runtime> ended on the signal SIGKILL`, in place of
   `✗ <runtime> was ended by <signal>`. A run the gateway stopped during the run, and one
   whose run credential expired at a time qory cannot read, say so, where they said
   nothing: `✗ the run failed: the gateway stopped during the run, and <runtime> was
