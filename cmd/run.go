@@ -1481,6 +1481,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 			if reaped > 0 {
 				u.Success("removed %d containers and networks the run left", reaped)
 			}
+			if res.Stopped && res.Undelivered > 0 {
+				// The server's signed 410 during this resend: nothing of what was not
+				// sent is spooled, and all of it is still in the record's events.jsonl.
+				u.Fail(fmt.Errorf("the server answered 410 and wants no more events of the run %s; %d were accepted and %d were not sent; they stay in %s", args[0], res.Sent, res.Undelivered, ui.Short(spec.Dir, at.root)))
+				return reported(&exitError{code: 1})
+			}
 			if res.Undelivered > 0 {
 				u.Fail(fmt.Errorf("%d events were accepted and %d were not; %s/undelivered contains them", res.Sent, res.Undelivered, ui.Short(spec.Dir, at.root)))
 				return reported(&exitError{code: 1})

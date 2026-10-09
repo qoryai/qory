@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"net"
 	"net/http"
@@ -16,14 +17,17 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/gateway"
 	"github.com/qoryai/forager/receiver"
+	"github.com/qoryai/forager/sink"
 
 	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/foragerdir"
@@ -62,6 +66,8 @@ type fakeServer struct {
 	revoked, secrets, full, stopPing, stopRun bool
 	// onStop, when set, is called each time the server answers a delivery with its 410.
 	onStop func()
+	// unavailable answers every delivery an unsigned 503, which is no answer.
+	unavailable bool
 }
 
 // newFakeServer starts a server whose run configuration carries policy, the JSON of a
@@ -121,7 +127,12 @@ func newFakeServer(t *testing.T, policy string) *fakeServer {
 			f.queries = append(f.queries, r.URL.RawQuery)
 		}
 		f.instances = append(f.instances, [2]string{r.Header.Get("X-Qory-Instance-Id"), r.Header.Get("X-Qory-Instance-Name")})
+		unavailable := f.unavailable && r.URL.Path == "/v1/events"
 		f.mu.Unlock()
+		if unavailable {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		rec := &statusRecorder{ResponseWriter: w}
 		h.ServeHTTP(rec, r)
 		if rec.status == http.StatusUnauthorized {
@@ -1592,6 +1603,144 @@ func TestResendSendsNothingOfARunTheServerNeverOpened(t *testing.T) {
 	}
 	wants(t, out, "qory run resend: "+fmt.Sprintf(gateway.ResendTorn, 1, file)+"\n"+resendStopped+"\n")
 	lacks(t, out, "never opened")
+}
+
+// The lines qory run resend says of a server that wants no more events of a run.
+const (
+	// resendStoppedNow is the server's signed 410 during the resend, a format of the run
+	// id, what it accepted, what was not sent and the run directory.
+	resendStoppedNow = "✗ the server answered 410 and wants no more events of the run %s; %d were accepted and %d were not sent; they stay in %s"
+	// resendAnswered410 is Forager's line of a 410 with no code.
+	resendAnswered410 = "qory run resend: the server answered 410; no further batch is sent for this run, which goes on"
+	// resendNotAccepted is a server that did not accept within --wait, a format of what
+	// it accepted, what it did not and the run directory.
+	resendNotAccepted = "✗ %d events were accepted and %d were not; %s/undelivered contains them"
+)
+
+// TestResendSaysTheServerWantsNoMoreEvents is a resend to the server, with no
+// session.gateway, of a record that owes the server more events than one batch holds. A
+// server that answers a signed 410 during the resend is sent nothing more: qory says what
+// it accepted before and what was not sent, which stays in the run directory, none of it
+// under undelivered/, exit 1. A server that stopped the run during the run, and one that
+// accepts nothing within --wait, are said as before.
+func TestResendSaysTheServerWantsNoMoreEvents(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, fakeRuntime(t))
+	srv := newFakeServer(t, "")
+	serverFile(t, srv, "")
+	// record runs a run with no server, and makes its record that of a run that opened
+	// at its server, which accepted nothing of it, with more events than one batch
+	// holds. It returns the run directory, its events.jsonl, what that holds and how many
+	// events it owes.
+	record := func(t *testing.T, id string) (string, string, []byte, int) {
+		t.Helper()
+		if out, err := run(t, "run", "--local", "--run-id", id); cmd.ExitCode(err) != 3 {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		dir := filepath.Join(runsDir(t, root), id)
+		file := filepath.Join(dir, "events.jsonl")
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.SplitAfter(strings.TrimSuffix(string(data), "\n"), "\n")
+		decode := func(line string) map[string]any {
+			var ev map[string]any
+			if err := json.Unmarshal([]byte(line), &ev); err != nil {
+				t.Fatal(err)
+			}
+			return ev
+		}
+		exited := decode(lines[len(lines)-1])
+		seq, err := strconv.Atoi(exited["sequence"].(string))
+		if err != nil || exited["type"] != "dev.qory.run.exited" {
+			t.Fatalf("the record's last event: %v", exited)
+		}
+		// Copies of the event after run.started, each of an id and a sequence of its
+		// own, before run.exited.
+		var b strings.Builder
+		for _, l := range lines[:len(lines)-1] {
+			b.WriteString(l)
+		}
+		const more = 2 * sink.BatchEvents
+		for i := range more + 1 {
+			ev := decode(lines[1])
+			if i == more {
+				ev = exited
+			}
+			ev["id"], ev["sequence"] = event.NewID(), strconv.Itoa(seq+i)
+			line, err := json.Marshal(ev)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b.Write(append(line, '\n'))
+		}
+		writeFile(t, file, b.String())
+		writeFile(t, filepath.Join(dir, "delivered.log"), "")
+		return dir, file, []byte(b.String()), len(lines) + more
+	}
+	// stays checks that a resend left the record as it was, and spooled nothing.
+	stays := func(t *testing.T, name, dir, file string, before []byte) {
+		t.Helper()
+		if after, err := os.ReadFile(file); err != nil || string(after) != string(before) {
+			t.Errorf("%s: the record changed: %v", name, err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "undelivered")); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("%s: undelivered/ is there: %v", name, err)
+		}
+	}
+
+	// A 410 after the server accepted a batch: what it accepted and what was not sent.
+	srv.stopRun = true
+	const laterID = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5ec0"
+	dir, file, before, owed := record(t, laterID)
+	out, err := run(t, "run", "resend", laterID)
+	sent := len(srv.events)
+	want := resendAnswered410 + "\n" + fmt.Sprintf(resendStoppedNow, laterID, sent, owed-sent, ui.Short(dir, root)) + "\n"
+	if cmd.ExitCode(err) != 1 || out != want || sent == 0 || sent == owed {
+		t.Errorf("a 410 after a batch: %v (exit %d), %d of %d sent\n%q\nwant\n%q", err, cmd.ExitCode(err), sent, owed, out, want)
+	}
+	lacks(t, out, "undelivered")
+	stays(t, "a 410 after a batch", dir, file, before)
+
+	// A 410 to the first batch: nothing was accepted.
+	srv.stopRun, srv.stopPing = false, true
+	const firstID = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5ec1"
+	dir, file, before, owed = record(t, firstID)
+	out, err = run(t, "run", "resend", firstID)
+	want = resendAnswered410 + "\n" + fmt.Sprintf(resendStoppedNow, firstID, 0, owed, ui.Short(dir, root)) + "\n"
+	if cmd.ExitCode(err) != 1 || out != want || len(srv.events) != sent {
+		t.Errorf("a 410 to the first batch: %v (exit %d)\n%q\nwant\n%q", err, cmd.ExitCode(err), out, want)
+	}
+	stays(t, "a 410 to the first batch", dir, file, before)
+
+	// A server that stopped the run during the run is sent nothing, and said as before
+	// the 410 during a resend was: decision 209 is pending.
+	srv.stopPing = false
+	const duringID = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5ec2"
+	dir, file, before, _ = record(t, duringID)
+	writeFile(t, filepath.Join(dir, "delivered.log"), "stopped\n")
+	out, err = run(t, "run", "resend", duringID)
+	want = resendStopped + "\n✓ 0 events were accepted; the server has the whole record\n"
+	if err != nil || out != want || len(srv.events) != sent {
+		t.Errorf("a stop during the run: %v (exit %d)\n%q\nwant\n%q", err, cmd.ExitCode(err), out, want)
+	}
+	stays(t, "a stop during the run", dir, file, before)
+
+	// A server that accepts nothing within --wait: what was not accepted is spooled,
+	// after Forager's line that says so.
+	srv.unavailable = true
+	const awayID = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5ec3"
+	dir, _, _, owed = record(t, awayID)
+	out, err = run(t, "run", "resend", awayID, "--wait", "2s")
+	want = fmt.Sprintf(resendNotAccepted, 0, owed, ui.Short(dir, root)) + "\n"
+	if cmd.ExitCode(err) != 1 || !strings.HasSuffix(out, "\n"+want) {
+		t.Errorf("a server away: %v (exit %d)\n%q\nwant\n%q", err, cmd.ExitCode(err), out, want)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "undelivered")); err != nil {
+		t.Errorf("a server away: %v", err)
+	}
 }
 
 // TestRunRunsARuntimeTheForagerShipsNothingFor pins that qory run is not Claude Code's:
