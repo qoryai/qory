@@ -541,3 +541,27 @@ func TestGatewayRefusesSecretFilesOthersMayRead(t *testing.T) {
 		})
 	}
 }
+
+// TestGatewayMakesNoLinkSocket lists the system's temporary directory while the gateway
+// serves: nothing on this machine uses its local link, so it makes no qory-link-*
+// socket there.
+func TestGatewayMakesNoLinkSocket(t *testing.T) {
+	emptyDir(t)
+	tmp := shortTempDir(t)
+	t.Setenv("TMPDIR", tmp)
+	serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n"+runCredentials)
+	writeIssuerFiles(t)
+	_, out, done := startGateway(t)
+	entries, err := os.ReadDir(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "qory-link-") {
+			t.Errorf("the gateway made %s in %s while it serves", e.Name(), tmp)
+		}
+	}
+	if err := stopGateway(t, done); err != nil {
+		t.Fatalf("qory gateway ended with %v\n%s", err, out)
+	}
+}
