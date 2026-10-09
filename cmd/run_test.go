@@ -1272,7 +1272,7 @@ func TestRunBehindARealWall(t *testing.T) {
 	here := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "this machine") }))
 	defer here.Close()
 	name := fmt.Sprintf("qory-test-origin-%d", os.Getpid())
-	if out, err := exec.Command("docker", "run", "--detach", "--rm", "--name", name, "busybox:stable", "sh", "-c", "mkdir /w && echo from the origin > /w/index.html && httpd -f -p 8080 -h /w").CombinedOutput(); err != nil {
+	if out, err := exec.Command("docker", "run", "--detach", "--rm", "--name", name, "public.ecr.aws/docker/library/busybox:stable", "sh", "-c", "mkdir /w && echo from the origin > /w/index.html && httpd -f -p 8080 -h /w").CombinedOutput(); err != nil {
 		t.Fatalf("the origin: %v: %s", err, out)
 	}
 	t.Cleanup(func() { exec.Command("docker", "rm", "--force", name).Run() })
@@ -1306,7 +1306,7 @@ harness:
 	if out, err := run(t, "harness", "compose", "--runtime", "claude", "--no-links"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "wall:\n  adapter: docker\n  image: busybox:stable\n  helper: "+helper+"\n")
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "wall:\n  adapter: docker\n  image: public.ecr.aws/docker/library/busybox:stable\n  helper: "+helper+"\n")
 	out, err := run(t, "run", "claude", "--mount", sibling+":ro", "--shm-size", "256m", "--pids-limit", "512", "--memory", "512m")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
