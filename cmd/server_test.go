@@ -332,10 +332,13 @@ func TestTheServerSaysTheRunIDIsUsed(t *testing.T) {
 	}
 }
 
-// TestA410MidRunLeavesTheRuntimeRunning is a server that answers a signed 410 once it
-// holds an event of the run: the gateway sends it nothing more and says so once, and the
-// runtime runs on, here until the 410 has come and after, to its own exit, which is the
-// run's. The run's record keeps every event, and delivered.log says stopped.
+// TestA410MidRunLeavesTheRuntimeRunning is a server that accepted the run's
+// registration and answers a signed 410 to its first delivery, run.started's, which
+// comes as soon as the run starts: the gateway sends it nothing more and says so once,
+// and the runtime runs on, here until the 410 has come and after, to its own exit,
+// which is the run's. The server holds nothing of the run, the run's record keeps every
+// event, and delivered.log says stopped. (A 410 to a later delivery would wait for the
+// session's first heartbeat, 30 seconds on, as long as the runtime waits.)
 func TestA410MidRunLeavesTheRuntimeRunning(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -348,7 +351,7 @@ func TestA410MidRunLeavesTheRuntimeRunning(t *testing.T) {
 	composedForFake(t, root, script)
 	srv := newFakeServer(t, "")
 	serverFile(t, srv, "")
-	srv.stopRun = true
+	srv.stopRegistered = true
 	// onStop runs on the server's goroutine, where t.Fatal would not end the test.
 	srv.onStop = func() {
 		if err := os.WriteFile(stopped, nil, 0o644); err != nil {
@@ -366,9 +369,8 @@ func TestA410MidRunLeavesTheRuntimeRunning(t *testing.T) {
 	if n := strings.Count(out, "the server wants no more events"); n != 1 {
 		t.Errorf("the 410 is said %d times, want once\n%s", n, out)
 	}
-	// The server holds the first batch it took, run.started's, and nothing after its stop.
-	if got := srv.byType(); len(got["dev.qory.run.started"]) != 1 || len(got["dev.qory.run.exited"]) != 0 {
-		t.Errorf("the server stored more than the batch before its stop: %v", got)
+	if got := srv.byType(); len(got) != 0 {
+		t.Errorf("the server stored events after its stop: %v", got)
 	}
 	dir, byType := events(t, root)
 	for _, typ := range []string{"dev.qory.run.started", "dev.qory.run.exited"} {

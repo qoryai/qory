@@ -70,10 +70,12 @@ type fakeServer struct {
 	// refuse, when set, is the run endpoint's signed refusal of every registration.
 	refuse *receiver.Refusal
 	// revoked, secrets and full make the server know no access key, list secrets in
-	// discovery, and answer the registration with instance_limit. stopAll and stopRun
-	// make it want nothing more of a run, a signed 410 without a code: to the
-	// registration and every delivery, and to every delivery once it holds an event.
-	revoked, secrets, full, stopAll, stopRun bool
+	// discovery, and answer the registration with instance_limit. stopAll, stopRun and
+	// stopRegistered make it want nothing more of a run, a signed 410 without a code: to
+	// the registration and every delivery; to every delivery once it holds an event; and
+	// to every delivery of a run whose registration it accepted, from the first, which
+	// comes as soon as the run starts.
+	revoked, secrets, full, stopAll, stopRun, stopRegistered bool
 	// onStop, when set, is called each time the server answers a delivery with its 410.
 	onStop func()
 	// unavailable answers every delivery an unsigned 503, which is no answer.
@@ -138,10 +140,12 @@ func newFakeServer(t *testing.T, policy string) *fakeServer {
 			defer f.mu.Unlock()
 			return !f.full
 		},
-		Stop: func(string) bool {
+		Stop: func(runID string) bool {
 			f.mu.Lock()
 			defer f.mu.Unlock()
-			stop := f.stopAll || f.stopRun && len(f.events) > 0
+			// f.runs holds a run once its registration is answered, so a registration is
+			// never stopped by stopRegistered.
+			stop := f.stopAll || f.stopRun && len(f.events) > 0 || f.stopRegistered && f.runs[runID]
 			if stop && f.onStop != nil {
 				f.onStop()
 			}
