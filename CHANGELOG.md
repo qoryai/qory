@@ -295,8 +295,8 @@ release may change what an existing document does, and states it under Upgrading
   `QORY_HARNESS_HOME`. A module's export is a default like the others: the server's
   value, `--env` and `wall.env` win over it, and the deny list leaves out one whose name
   it holds. They reach the agent in the container and outside it alike.
-- qory builds against `github.com/qoryai/forager` at commit `85f95d5` of its `main`,
-  `v0.6.1-0.20261010135457-85f95d55c99b`, contract `v1` revision 1 as amended there.
+- qory builds against `github.com/qoryai/forager` at commit `5ddac44` of its `main`,
+  `v0.6.1-0.20261010162734-5ddac440bded`, contract `v1` revision 1 as amended there.
   `qory run` starts Forager's gateway on this machine for each run: it holds the proxy,
   the policy, the credentials and the access key, and sends the run's events to the
   server; the session speaks to it alone, and records its own events in the run's

@@ -1,6 +1,7 @@
 package cmd_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/forager/receiver"
 
 	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/foragerdir"
@@ -249,7 +251,7 @@ func TestRunSaysWhatARefusalMeans(t *testing.T) {
 	os.Unsetenv("QORY_ACCESS_KEY_SECRET")
 
 	srv.full = true
-	refusal("full", "the node's live instances have reached its limit, so the instance i_", "does not start: wait for a run of another instance to end, or have an owner or administrator in Qory Apiary clear that instance (", "instance_limit (status 409)")
+	refusal("full", "the node's live instances have reached its limit, so the instance i_", "does not start: wait for a run of another instance to end, or have an owner or administrator in Qory Apiary clear that instance (", "register "+srv.URL+"/v1/runs: instance_limit (status 409))")
 	srv.full = false
 
 	serverFile(t, srv, "")
@@ -263,17 +265,17 @@ func TestRunSaysWhatARefusalMeans(t *testing.T) {
 	}
 }
 
-// TestA410ToThePingIsNoRun is a server that answers the ping with a signed 410: it
-// wants nothing of the run, so the run does not start. That is no refusal, and no
-// server closes a run: qory prints the gateway's error, which names the events URL and
-// the status, then the record, and exits 1. The runtime never runs.
-func TestA410ToThePingIsNoRun(t *testing.T) {
+// TestA410ToTheRegistrationIsNoRun is a server that answers the run's registration
+// with a signed 410: it takes no run here, so the run does not start. That is no
+// refusal, and no server closes a run: qory prints the gateway's error, which names the
+// run endpoint and the status, then the record, and exits 1. The runtime never runs.
+func TestA410ToTheRegistrationIsNoRun(t *testing.T) {
 	_, srv := serverRun(t, "", "")
-	srv.stopPing = true
+	srv.stopAll = true
 	out, err := run(t, "run")
-	want := "ping " + srv.URL + "/v1/events: status 410: the server did not accept the ping"
+	want := "register " + srv.URL + "/v1/runs: status 410: the server did not accept the run"
 	if cmd.ExitCode(err) != 1 || err == nil || err.Error() != want {
-		t.Errorf("a 410 to the ping: %v (exit %d), want %q, exit 1\n%s", err, cmd.ExitCode(err), want, out)
+		t.Errorf("a 410 to the registration: %v (exit %d), want %q, exit 1\n%s", err, cmd.ExitCode(err), want, out)
 	}
 	wants(t, out, "✗ "+want+"\n", "qory run: the record is in ")
 	lacks(t, out, "hello from", "closed the run")
@@ -282,8 +284,56 @@ func TestA410ToThePingIsNoRun(t *testing.T) {
 	}
 }
 
+// TestTheServerRefusesARunsRegistration is the server's refusal of a run's
+// registration, its labels say, with a code of its own, a signed 409, or with
+// invalid_request, a signed 400: qory has no words of its own for it and prints
+// Forager's, which name the run endpoint, the code and the status, then the record,
+// and exits 1. The runtime never runs, and the server holds no event.
+func TestTheServerRefusesARunsRegistration(t *testing.T) {
+	root, srv := serverRun(t, "", "")
+	for _, r := range []receiver.Refusal{{Status: 409, Code: "repository_not_allowed"}, {Status: 400, Code: "invalid_request"}} {
+		srv.refuse = &r
+		clearRuns(t, root)
+		out, err := run(t, "run", "--label", "team=build")
+		want := fmt.Sprintf("register %s/v1/runs: %s (status %d)", srv.URL, r.Code, r.Status)
+		if cmd.ExitCode(err) != 1 || err == nil || err.Error() != want {
+			t.Errorf("%s: %v (exit %d), want %q, exit 1\n%s", r.Code, err, cmd.ExitCode(err), want, out)
+		}
+		wants(t, out, "✗ "+want+"\n", "qory run: the record is in ")
+		lacks(t, out, "hello from")
+	}
+	if got := srv.byType(); len(got) != 0 {
+		t.Errorf("the server stored events of runs it refused: %v", got)
+	}
+}
+
+// TestTheServerSaysTheRunIDIsUsed is a run id the server accepted a registration of
+// before, given again with --run-id once the first run's record is gone, with another
+// label: the server's signed 409 run_id_used, which qory says as it says the
+// gateway's, exit 1. (The same bytes again, within the same second, would get the same
+// answer.)
+func TestTheServerSaysTheRunIDIsUsed(t *testing.T) {
+	root, srv := serverRun(t, "", "")
+	const id = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5ed0"
+	if out, err := run(t, "run", "--run-id", id); err != nil {
+		t.Fatalf("the first run: %v\n%s", err, out)
+	}
+	clearRuns(t, root)
+	sent := len(srv.byType()["dev.qory.run.started"])
+	out, err := run(t, "run", "--run-id", id, "--label", "attempt=2")
+	want := "the run id " + id + " is already used by another run; leave out --run-id, or give a new one"
+	if cmd.ExitCode(err) != 1 || err == nil || err.Error() != want {
+		t.Errorf("the run id again: %v (exit %d), want %q, exit 1\n%s", err, cmd.ExitCode(err), want, out)
+	}
+	wants(t, out, "✗ "+want+"\n")
+	lacks(t, out, "hello from", "run_id_used")
+	if n := len(srv.byType()["dev.qory.run.started"]); n != sent {
+		t.Errorf("the server got %d more run.started", n-sent)
+	}
+}
+
 // TestA410MidRunLeavesTheRuntimeRunning is a server that answers a signed 410 once it
-// holds the run's ping: the gateway sends it nothing more and says so once, and the
+// holds an event of the run: the gateway sends it nothing more and says so once, and the
 // runtime runs on, here until the 410 has come and after, to its own exit, which is the
 // run's. The run's record keeps every event, and delivered.log says stopped.
 func TestA410MidRunLeavesTheRuntimeRunning(t *testing.T) {
@@ -316,8 +366,9 @@ func TestA410MidRunLeavesTheRuntimeRunning(t *testing.T) {
 	if n := strings.Count(out, "the server wants no more events"); n != 1 {
 		t.Errorf("the 410 is said %d times, want once\n%s", n, out)
 	}
-	if got := srv.byType(); len(got) != 1 || len(got["dev.qory.ping"]) != 1 {
-		t.Errorf("the server stored more than the ping: %v", got)
+	// The server holds the first batch it took, run.started's, and nothing after its stop.
+	if got := srv.byType(); len(got["dev.qory.run.started"]) != 1 || len(got["dev.qory.run.exited"]) != 0 {
+		t.Errorf("the server stored more than the batch before its stop: %v", got)
 	}
 	dir, byType := events(t, root)
 	for _, typ := range []string{"dev.qory.run.started", "dev.qory.run.exited"} {
@@ -367,8 +418,8 @@ func TestTheMarkerKeepsEveryUnwalledRunOut(t *testing.T) {
 			t.Errorf("%s: the marker is gone", c.name)
 		}
 	}
-	if got := srv.byType(); len(got["dev.qory.ping"]) != 0 {
-		t.Errorf("a refused run pinged: %v", got)
+	if got := srv.byType(); len(got) != 0 || len(srv.registered) != 0 {
+		t.Errorf("a refused run registered %q or posted %v", srv.registered, got)
 	}
 	t.Setenv("QORY_ACCESS_KEY_SECRET", "")
 	writeFile(t, filepath.Join(string(dir), "forager.yaml"), "apiVersion: qory.dev/v1alpha1\n")

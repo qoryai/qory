@@ -241,7 +241,7 @@ func startRun(dir foragerdir.Dir, runID string, walled, noServer bool) (*forager
 }
 
 // discovered is what a run against the server does once the server's signed discovery
-// is read, before the ping: it prints the node, after "qory <verb>:". When the run's secret is the one in
+// is read, before the run's registration: it prints the node, after "qory <verb>:". When the run's secret is the one in
 // access-key-secret, still there, it then, under the key lock held exclusively, deletes
 // every secret moved aside, since the key's signed discovery succeeded; writes the
 // stored-secrets marker when discovery lists secrets, a marker it cannot write being no

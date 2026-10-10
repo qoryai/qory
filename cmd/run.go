@@ -1664,7 +1664,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 				return reported(&exitError{code: 1})
 			}
 			if res.NotOpened {
-				// The server never accepted the run's ping, or the run had no server: as
+				// The server never accepted the run's registration, or the run had no server: as
 				// behind a gateway, nothing failed now, and the resend succeeds. Forager's
 				// own line that says so is left out ([resendLines]).
 				u.Success("the server never opened run %s, so there is nothing to send; its record stays in %s", args[0], ui.Short(spec.Dir, at.root))
