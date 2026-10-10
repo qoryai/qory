@@ -31,7 +31,8 @@ type outcome struct {
 
 // outcomeOf is how the run ended, by state and reason. Forager's own reasons have the
 // outcome they always end a run with, and are said in qory's words; the time limit's is
-// said with its limit by the caller, so here it has no words. Any other reason is the
+// said with its limit by the caller, so here it has no words, nor has a run stopped from
+// where it was started, interrupted, or a quiet one. Any other reason is the
 // run's starter's, said as it gave it with spaces for underscores, under the state.
 func outcomeOf(state, reason string) outcome {
 	o := outcome{known: true}
@@ -50,7 +51,7 @@ func outcomeOf(state, reason string) outcome {
 		o.cancelled, o.reason = true, "the run credential expired"
 	case event.ReasonStopped, oldReasonStopped:
 		o.cancelled, o.noOutcome = true, true
-	case event.ReasonTimeout, event.ReasonQuiet:
+	case event.ReasonTimeout, event.ReasonQuiet, event.ReasonInterrupted:
 		o.cancelled = true
 	default:
 		switch state {

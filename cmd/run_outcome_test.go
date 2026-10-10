@@ -357,4 +357,74 @@ func TestRunSaysASignalThatStoppedTheRuntime(t *testing.T) {
 		t.Errorf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
 	lacks(t, out, "exited 0")
+	if state, reason, _ := exitedOf(t, root); state != "cancelled" || reason != "interrupted" {
+		t.Errorf("the record's run.exited is %s, %q", state, reason)
+	}
+}
+
+// TestRunSaysTheStartersOutcomeAfterASignalInTheOutcomeAsk is a runtime that exits 0 by
+// itself behind a separate gateway whose starter says the run failed, and SIGINT to qory
+// run while the session asks for that outcome. The signal came after the exit and cuts
+// neither the ask nor the record: qory says the exit and the starter's outcome, exit 1.
+func TestRunSaysTheStartersOutcomeAfterASignalInTheOutcomeAsk(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	runtime := filepath.Join(t.TempDir(), "exiting-runtime")
+	writeFile(t, runtime, "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(runtime, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	composedForFake(t, root, runtime)
+	link, answer := endingLink(t, "")
+	link.answer(http.StatusOK, "")
+	link.mu.Lock()
+	link.runStatus, link.runBody = http.StatusOK, answer
+	link.outcome = `{"state":"failed","reason":"checks_failed"}`
+	link.onAsk = func() {
+		syscall.Kill(os.Getpid(), syscall.SIGINT)
+		time.Sleep(300 * time.Millisecond)
+	}
+	link.mu.Unlock()
+	t.Setenv("QORY_RUN_CREDENTIAL_SECRET", "opaque-run-credential-"+fmt.Sprint(time.Now().UnixNano()))
+	out, err := run(t, "run")
+	if cmd.ExitCode(err) != 1 || !strings.Contains(out, "\n✓ claude exited 0\n✗ the run failed: checks failed\nqory run: the record is in ") {
+		t.Errorf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	lacks(t, out, "cancelled", "qory run got", "checks_failed")
+	if state, reason, exit := exitedOf(t, root); state != "failed" || reason != "checks_failed" || exit != 0 {
+		t.Errorf("the record's run.exited is %s, %q, exit %v", state, reason, exit)
+	}
+}
+
+// TestRunSaysASignalThatStoppedARuntimeThatExited0 is SIGINT to qory run while the
+// runtime runs, and a runtime that exits 0 at the stop: the signal ended the run, so qory
+// says it was cancelled, exit 1, and the record says cancelled, interrupted, exit 0.
+func TestRunSaysASignalThatStoppedARuntimeThatExited0(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	started := filepath.Join(t.TempDir(), "started")
+	runtime := filepath.Join(t.TempDir(), "stopping-runtime")
+	writeFile(t, runtime, "#!/bin/sh\ntrap 'exit 0' INT TERM\ntouch '"+started+"'\nwhile :; do sleep 0.1; done\n")
+	if err := os.Chmod(runtime, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	composedForFake(t, root, runtime)
+	srv := newFakeServer(t, "")
+	serverFile(t, srv, "")
+	go func() {
+		for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+			if _, err := os.Stat(started); err == nil {
+				syscall.Kill(os.Getpid(), syscall.SIGINT)
+				return
+			}
+		}
+	}()
+	out, err := run(t, "run")
+	if cmd.ExitCode(err) != 1 || !strings.Contains(out, "\n✗ the run was cancelled: qory run got SIGINT, and claude was stopped\nqory run: the record is in ") {
+		t.Errorf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	lacks(t, out, "exited 0", "interrupted", "context canceled")
+	if state, reason, exit := exitedOf(t, root); state != "cancelled" || reason != "interrupted" || exit != 0 {
+		t.Errorf("the record's run.exited is %s, %q, exit %v", state, reason, exit)
+	}
 }

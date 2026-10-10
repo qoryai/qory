@@ -77,9 +77,9 @@ func TestRunEndedSaysTheOutcome(t *testing.T) {
 			"the run was cancelled, and claude was stopped\n", 1},
 		{"the time limit", &session.Result{TimedOut: true, State: "cancelled", Reason: event.ReasonTimeout, ExitCode: -1, Signal: "SIGTERM"}, "",
 			"the run was cancelled: it reached the time limit of 5m0s, and claude was stopped\n", exitTimeout},
-		{"qory run got SIGTERM", &session.Result{Cancelled: true, State: "failed", ExitCode: -1, Signal: "SIGTERM"}, "SIGTERM",
+		{"qory run got SIGTERM", &session.Result{Cancelled: true, State: "cancelled", Reason: event.ReasonInterrupted, ExitCode: -1, Signal: "SIGTERM"}, "SIGTERM",
 			"the run was cancelled: qory run got SIGTERM, and claude was stopped\n", 1},
-		{"qory run got SIGINT, the runtime exited 0", &session.Result{Cancelled: true, State: "succeeded"}, "SIGINT",
+		{"qory run got SIGINT, the runtime exited 0", &session.Result{Cancelled: true, State: "cancelled", Reason: event.ReasonInterrupted}, "SIGINT",
 			"the run was cancelled: qory run got SIGINT, and claude was stopped\n", 1},
 		// A signal that came after the session saw the runtime exit did not end the run:
 		// the runtime's own line and the outcome say it.
@@ -87,9 +87,12 @@ func TestRunEndedSaysTheOutcome(t *testing.T) {
 		{"SIGINT after the exit 3", &session.Result{State: "failed", ExitCode: 3}, "SIGINT", "claude exited 3\n", 3},
 		{"SIGINT after the exit 0, the starter's failure", &session.Result{State: "failed", Reason: "checks_failed"}, "SIGINT",
 			"claude exited 0\nthe run failed: checks failed\n", 1},
-		// A context that ended with no signal named: the runtime's own line.
-		{"cancelled, no signal named", &session.Result{Cancelled: true, State: "failed", ExitCode: -1, Signal: "SIGTERM"}, "",
-			"claude ended on the signal SIGTERM\n", 1},
+		// A context that ended with no signal named: the runtime's own line, and the
+		// outcome the session recorded, cancelled.
+		{"cancelled, no signal named", &session.Result{Cancelled: true, State: "cancelled", Reason: event.ReasonInterrupted, ExitCode: -1, Signal: "SIGTERM"}, "",
+			"claude ended on the signal SIGTERM\nthe run was cancelled\n", 1},
+		{"cancelled, no signal named, the runtime exited 0", &session.Result{Cancelled: true, State: "cancelled", Reason: event.ReasonInterrupted}, "",
+			"claude exited 0\nthe run was cancelled\n", 1},
 		{"a kill from elsewhere", &session.Result{State: "failed", ExitCode: -1, Signal: "SIGKILL"}, "",
 			"claude ended on the signal SIGKILL\n", 1},
 		{"exit 0", &session.Result{State: "succeeded"}, "", "claude exited 0\n", 0},
@@ -196,6 +199,7 @@ func TestGatewayEndedResendSaysTheOutcome(t *testing.T) {
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "failed", Reason: "issuer_unreachable"}, "the run has ended (failed: its run credential could not be checked)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonRunClosed}, "the run has ended (failed: the gateway stopped during the run)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonStopped}, "the run has ended (cancelled)" + tail},
+		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "cancelled", Reason: event.ReasonInterrupted}, "the run has ended (cancelled)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonCredentialExpired}, "the run has ended (cancelled: the run credential expired)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonSessionLost}, "the run has ended (lost: it lost contact with the gateway for 1m30s)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonBatchRefused}, "the run has ended (failed: its events could not be recorded)" + tail},
@@ -268,6 +272,8 @@ func TestRunEndedSaysTheEndTheGatewayRecordedAfterTheExit(t *testing.T) {
 			"claude exited 0\nthe run failed: its events could not be recorded\n", 1},
 		{"a reason with no words", &session.Result{State: "succeeded"}, gw("cancelled", event.ReasonQuiet),
 			"claude exited 0\nthe run was cancelled\n", 1},
+		{"interrupted, with no words", &session.Result{State: "succeeded"}, gw("cancelled", event.ReasonInterrupted),
+			"claude exited 0\nthe run was cancelled\n", 1},
 		{"no state: the code's outcome", &session.Result{State: "succeeded"}, &gatewayEnd{code: event.ReasonSessionLost},
 			"claude exited 0\nthe run was lost: it lost contact with the gateway for 1m30s\n", 1},
 		{"agrees: failed after exit 3", &session.Result{State: "failed", ExitCode: 3}, gw("failed", event.ReasonBatchRefused),
@@ -323,6 +329,7 @@ func TestEndsAsSaysTheResendsEnd(t *testing.T) {
 		{"succeeded", "", "completed"},
 		{"failed", "checks_failed", "failed: checks failed"},
 		{"cancelled", event.ReasonStopped, "cancelled"},
+		{"cancelled", event.ReasonInterrupted, "cancelled"},
 	} {
 		if got := endsAs(c.state, c.reason); got != c.want {
 			t.Errorf("%q, %q: %q, want %q", c.state, c.reason, got, c.want)
