@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,8 +44,9 @@ const testNode = "nd_0123456789abcdef"
 // fakeServer stands in for the server Forager reports to: Forager's own
 // receiver, which verifies every request under the machine's access key and signs
 // every answer under a key of its own, with the configuration document, the run
-// configuration with the policy it was given, and a store that keeps the events. It
-// keeps the queries it saw, and counts the requests it refused with a 401.
+// endpoint, which answers a run's registration with the run configuration of the
+// policy it was given, and a store that keeps the events. It keeps the labels of every
+// registration it saw, and counts the requests it refused with a 401.
 type fakeServer struct {
 	*httptest.Server
 	// signer is the server's signing key, which forager.yaml pins; key is the
@@ -54,16 +56,26 @@ type fakeServer struct {
 	policy      string
 	// variables is the JSON of the run configuration's variables, none when empty.
 	variables string
-	queries   []string
-	events    []map[string]any
-	refused   int
+	// registered are the labels of every run that registered, in order, each sorted and
+	// encoded as a query; runs are their ids.
+	registered []string
+	// abouts are what each run that registered is about, as its registration sent it,
+	// in the same order; empty for none.
+	abouts  []string
+	runs    map[string]bool
+	events  []map[string]any
+	refused int
 	// instances are the X-Qory-Instance-Id and X-Qory-Instance-Name of every request.
 	instances [][2]string
+	// refuse, when set, is the run endpoint's signed refusal of every registration.
+	refuse *receiver.Refusal
 	// revoked, secrets and full make the server know no access key, list secrets in
-	// discovery, and answer the ping with instance_limit. stopPing and stopRun make it
-	// want nothing more of a run, a signed 410 without a code: to every delivery, the
-	// ping's included, and to every delivery once it holds an event, after the ping.
-	revoked, secrets, full, stopPing, stopRun bool
+	// discovery, and answer the registration with instance_limit. stopAll, stopRun and
+	// stopRegistered make it want nothing more of a run, a signed 410 without a code: to
+	// the registration and every delivery; to every delivery once it holds an event; and
+	// to every delivery of a run whose registration it accepted, from the first, which
+	// comes as soon as the run starts.
+	revoked, secrets, full, stopAll, stopRun, stopRegistered bool
 	// onStop, when set, is called each time the server answers a delivery with its 410.
 	onStop func()
 	// unavailable answers every delivery an unsigned 503, which is no answer.
@@ -77,7 +89,7 @@ type fakeServer struct {
 // security_policy, or names no run section when policy is empty.
 func newFakeServer(t *testing.T, policy string) *fakeServer {
 	t.Helper()
-	f := &fakeServer{policy: policy, signer: newKey(t), key: newKey(t)}
+	f := &fakeServer{policy: policy, signer: newKey(t), key: newKey(t), runs: map[string]bool{}}
 	h := &receiver.Handler{
 		Signer: f.signer,
 		Store:  f,
@@ -89,35 +101,51 @@ func newFakeServer(t *testing.T, policy string) *fakeServer {
 		Configuration: func() ([]byte, string) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
-			doc := `{"version":1,"node_id":"` + testNode + `","events":{"url":"` + f.URL + `/v1/events","types":["*"]}`
-			if f.policy != "" {
-				doc += `,"run":{"url":"` + f.URL + `/v1/run-configuration"}`
-			}
+			doc := `{"version":1,"node_id":"` + testNode + `","events":{"url":"` + f.URL + `/v1/events","types":["*"]},"run":{"url":"` + f.URL + receiver.DefaultRunPath + `"}`
 			if f.secrets {
 				doc += `,"secrets":{"url":"` + f.URL + `/v1/secrets"}`
 			}
 			doc += `,"apiary_public_key":[{"alg":"ed25519","public_key":"` + f.signer.PublicKey().String() + `"}]}`
 			return []byte(doc), digest(doc)
 		},
-		RunConfiguration: func(map[string]string) ([]byte, string, bool) {
+		RunConfiguration: func(run receiver.Run) ([]byte, string, *receiver.Refusal) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
-			doc := `{"version":1,"security_policy":` + f.policy
+			// The hook is asked at the registration, and again at a reload and for every
+			// delivery's digest: a run's labels are kept once.
+			if !f.runs[run.ID] {
+				q := url.Values{}
+				for k, v := range run.Labels {
+					q.Set(k, v)
+				}
+				f.registered = append(f.registered, q.Encode())
+				f.abouts = append(f.abouts, string(run.About))
+				f.runs[run.ID] = true
+			}
+			if f.refuse != nil {
+				return nil, "", f.refuse
+			}
+			doc := `{"version":1`
+			if f.policy != "" {
+				doc += `,"security_policy":` + f.policy
+			}
 			if f.variables != "" {
 				doc += `,"variables":` + f.variables
 			}
 			doc += `}`
-			return []byte(doc), digest(doc), f.policy != ""
+			return []byte(doc), digest(doc), nil
 		},
 		Admit: func(string, string) bool {
 			f.mu.Lock()
 			defer f.mu.Unlock()
 			return !f.full
 		},
-		Stop: func(string) bool {
+		Stop: func(runID string) bool {
 			f.mu.Lock()
 			defer f.mu.Unlock()
-			stop := f.stopPing || f.stopRun && len(f.events) > 0
+			// f.runs holds a run once its registration is answered, so a registration is
+			// never stopped by stopRegistered.
+			stop := f.stopAll || f.stopRun && len(f.events) > 0 || f.stopRegistered && f.runs[runID]
 			if stop && f.onStop != nil {
 				f.onStop()
 			}
@@ -126,9 +154,6 @@ func newFakeServer(t *testing.T, policy string) *fakeServer {
 	}
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
-		if r.URL.Path == "/v1/run-configuration" {
-			f.queries = append(f.queries, r.URL.RawQuery)
-		}
 		f.instances = append(f.instances, [2]string{r.Header.Get("X-Qory-Instance-Id"), r.Header.Get("X-Qory-Instance-Name")})
 		unavailable := f.unavailable && r.URL.Path == "/v1/events"
 		f.mu.Unlock()
@@ -354,8 +379,8 @@ func TestRunRecordsTheSession(t *testing.T) {
 	if len(exited) != 1 || exited[0]["exit_code"] != float64(3) || exited[0]["state"] != "failed" {
 		t.Errorf("run.exited %v", exited)
 	}
-	if len(evs["dev.qory.ping"]) != 0 {
-		t.Error("a ping was sent with no server configured")
+	if len(evs[event.RunRegistered]) != 0 || len(evs["dev.qory.ping"]) != 0 {
+		t.Error("a run with no server configured was recorded as registered, or pinged")
 	}
 	log, err := os.ReadFile(filepath.Join(dir, "output.log"))
 	if err != nil || !strings.Contains(string(log), "hello from ") {
@@ -1390,10 +1415,11 @@ func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
 }
 
 // TestRunReportsToTheServer is a run with a server configured: Forager fetches the
-// server's configuration, signed with the key and the secret, pings, takes the server's
-// run configuration as the policy, asked for with every label of the run (the
-// checkout's forge and repository among them), and posts every event where the configuration says; the record says the policy was
-// fetched and from where.
+// server's configuration, signed with the key and the secret, registers the run at the
+// run endpoint with every label of the run (the checkout's forge and repository among
+// them), takes the run configuration the server answers as the policy, and posts every
+// event where the configuration says; the record says the policy was fetched and from
+// where, and begins with the accepted registration, which is never posted.
 func TestRunReportsToTheServer(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -1408,15 +1434,29 @@ func TestRunReportsToTheServer(t *testing.T) {
 	wants(t, out, "claude exited 0")
 	_, evs := events(t, root)
 	applied := evs["dev.qory.run.policy_applied"]
-	if allow, _ := applied[0]["allow"].([]any); len(applied) != 1 || applied[0]["source"] != "fetched" || applied[0]["mode"] != "enforce" || len(allow) != 1 || allow[0] != "api.example" || applied[0]["url"] != srv.URL+"/v1/run-configuration" || applied[0]["run_configuration"] != digest(`{"version":1,"security_policy":`+srv.policy+`}`) {
+	if allow, _ := applied[0]["allow"].([]any); len(applied) != 1 || applied[0]["source"] != "fetched" || applied[0]["mode"] != "enforce" || len(allow) != 1 || allow[0] != "api.example" || applied[0]["url"] != srv.URL+receiver.DefaultRunPath || applied[0]["run_configuration"] != digest(`{"version":1,"security_policy":`+srv.policy+`}`) {
 		t.Errorf("run.policy_applied %v", applied)
 	}
-	if srv.refused != 0 || strings.Join(srv.queries, " ") != "forge=git.example.com&issue=77&repository=acme%2Fapp" {
-		t.Errorf("the server refused %d requests and was asked %q", srv.refused, srv.queries)
+	if srv.refused != 0 || strings.Join(srv.registered, " ") != "forge=git.example.com&issue=77&repository=acme%2Fapp" {
+		t.Errorf("the server refused %d requests and was asked %q", srv.refused, srv.registered)
+	}
+	dir, _ := events(t, root)
+	record, err := os.ReadFile(filepath.Join(dir, "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _, _ := strings.Cut(string(record), "\n")
+	var line1 struct {
+		Type     string         `json:"type"`
+		Sequence string         `json:"sequence"`
+		Data     map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(first), &line1); err != nil || line1.Type != event.RunRegistered || line1.Sequence != "0000000001" || line1.Data["contract_version"] != float64(1) || line1.Data["interval_seconds"] == nil || line1.Data["forager_version"] == nil || line1.Data["events"] == nil {
+		t.Errorf("the record's line 1: %s (%v)", first, err)
 	}
 	got := srv.byType()
-	if ping := got["dev.qory.ping"]; len(ping) != 1 || ping[0]["contract_version"] != float64(1) {
-		t.Errorf("the ping: %v", ping)
+	if len(got[event.RunRegistered]) != 0 || len(got["dev.qory.ping"]) != 0 {
+		t.Errorf("the server was posted the registration's line or a ping: %v", got)
 	}
 	if started := got["dev.qory.run.started"]; len(started) != 1 || started[0]["labels"].(map[string]any)["issue"] != "77" || started[0]["labels"].(map[string]any)["repository"] != "acme/app" {
 		t.Errorf("the server's run.started: %v", started)
@@ -1513,22 +1553,22 @@ const (
 )
 
 // TestResendSendsNothingOfARunTheServerNeverOpened is a record of a run that never
-// opened at the server: one whose ping it never accepted, and one of a run with no
-// server, --local. Each is sent nothing and left as it is; qory says that the server
-// never opened the run, Forager's own line that says why is left out, and the resend is
-// exit 0. A record's torn lines are still said, and so is every line of a run that did
-// open: the torn lines' and the server's stop.
+// opened at the server: one whose registration it refused, which left the record
+// empty, and one of a run with no server, --local. Each is sent nothing and left as it
+// is; qory says that the server never opened the run, Forager's own line that says why
+// is left out, and the resend is exit 0. A record's torn lines are still said, and so is
+// every line of a run that did open: the torn lines' and the server's stop.
 func TestResendSendsNothingOfARunTheServerNeverOpened(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, fakeRuntime(t))
 	srv := newFakeServer(t, "")
 	serverFile(t, srv, "")
-	// record runs a run with args and returns its directory, its events.jsonl and what
-	// that held.
-	record := func(t *testing.T, id string, args ...string) (string, string, []byte) {
+	// record runs a run with args, which exits exit, and returns its directory, its
+	// events.jsonl and what that held.
+	record := func(t *testing.T, id string, exit int, args ...string) (string, string, []byte) {
 		t.Helper()
-		if out, err := run(t, append([]string{"run", "--run-id", id}, args...)...); cmd.ExitCode(err) != 3 {
+		if out, err := run(t, append([]string{"run", "--run-id", id}, args...)...); cmd.ExitCode(err) != exit {
 			t.Fatalf("%v\n%s", err, out)
 		}
 		dir := filepath.Join(runsDir(t, root), id)
@@ -1538,16 +1578,6 @@ func TestResendSendsNothingOfARunTheServerNeverOpened(t *testing.T) {
 			t.Fatal(err)
 		}
 		return dir, file, before
-	}
-	// unopen leaves dir as a run whose ping the server never accepted does: no
-	// delivered.log.
-	unopen := func(t *testing.T, dir string) {
-		t.Helper()
-		for _, name := range []string{"delivered.log", "undelivered"} {
-			if err := os.RemoveAll(filepath.Join(dir, name)); err != nil {
-				t.Fatal(err)
-			}
-		}
 	}
 	// tear puts a line that is no whole event after the first one of file.
 	tear := func(t *testing.T, file string, before []byte) []byte {
@@ -1572,13 +1602,18 @@ func TestResendSendsNothingOfARunTheServerNeverOpened(t *testing.T) {
 
 	for _, c := range []struct {
 		name, id, forager string
+		exit              int
 		args              []string
 	}{
-		{"a ping the server never accepted", "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5eb0", gateway.ResendNotOpened, nil},
-		{"a run with no server", "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5eb1", gateway.ResendNoServer, []string{"--local"}},
+		{"a registration the server refused", "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5eb0", gateway.ResendNotOpened, 1, nil},
+		{"a run with no server", "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5eb1", gateway.ResendNoServer, 3, []string{"--local"}},
 	} {
-		dir, file, before := record(t, c.id, c.args...)
-		unopen(t, dir)
+		srv.full = c.exit == 1
+		dir, file, before := record(t, c.id, c.exit, c.args...)
+		srv.full = false
+		if c.exit == 1 && len(before) != 0 {
+			t.Errorf("%s: the record holds %q", c.name, before)
+		}
 		sent := len(srv.events)
 		out, err := run(t, "run", "resend", c.id)
 		want := fmt.Sprintf(resendNotOpen, c.id, ui.Short(dir, root)) + "\n"
@@ -1591,8 +1626,7 @@ func TestResendSendsNothingOfARunTheServerNeverOpened(t *testing.T) {
 
 	// A torn line of a record the server never opened is still said, before qory's line.
 	const tornID = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5eb2"
-	dir, file, before := record(t, tornID)
-	unopen(t, dir)
+	dir, file, before := record(t, tornID, 3, "--local")
 	before = tear(t, file, before)
 	sent := len(srv.events)
 	out, err := run(t, "run", "resend", tornID)
@@ -1604,7 +1638,7 @@ func TestResendSendsNothingOfARunTheServerNeverOpened(t *testing.T) {
 
 	// A run that opened: nothing is left out, the torn lines' line nor the server's stop.
 	const stopID = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5eb3"
-	dir, file, before = record(t, stopID)
+	dir, file, before = record(t, stopID, 3)
 	tear(t, file, before)
 	writeFile(t, filepath.Join(dir, "delivered.log"), "stopped\n")
 	out, err = run(t, "run", "resend", stopID)
@@ -1717,7 +1751,7 @@ func TestResendSaysTheServerWantsNoMoreEvents(t *testing.T) {
 	stays(t, "a 410 after a batch", dir, file, before)
 
 	// A 410 to the first batch: nothing was accepted.
-	srv.stopRun, srv.stopPing = false, true
+	srv.stopRun, srv.stopAll = false, true
 	const firstID = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5ec1"
 	dir, file, before, owed = record(t, firstID)
 	out, err = run(t, "run", "resend", firstID)
@@ -1729,7 +1763,7 @@ func TestResendSaysTheServerWantsNoMoreEvents(t *testing.T) {
 
 	// A server that stopped the run during the run is sent nothing: Forager's line alone
 	// says so, and the resend fails.
-	srv.stopPing = false
+	srv.stopAll = false
 	const duringID = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5ec2"
 	dir, file, before, _ = record(t, duringID)
 	writeFile(t, filepath.Join(dir, "delivered.log"), "stopped\n")

@@ -100,10 +100,10 @@ func TestRunSaysWhatItIsAbout(t *testing.T) {
 	}
 }
 
-// TestRunAboutStaysOffTheRunConfigurationRequest is a run with a server: the run
-// configuration request is asked with the labels alone, as it is without about, and the
-// server's run.started carries about.
-func TestRunAboutStaysOffTheRunConfigurationRequest(t *testing.T) {
+// TestRunAboutGoesWithTheRegistration is a run with a server: the run's registration
+// carries its labels and what it is about, as run.started reports it, and the server's
+// run.started carries about, which no other event does.
+func TestRunAboutGoesWithTheRegistration(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, fakeRuntime(t))
@@ -114,8 +114,8 @@ func TestRunAboutStaysOffTheRunConfigurationRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if srv.refused != 0 || strings.Join(srv.queries, " ") != "forge=git.example.com&issue=77&repository=acme%2Fapp" {
-		t.Errorf("the server refused %d requests and was asked %q", srv.refused, srv.queries)
+	if srv.refused != 0 || strings.Join(srv.registered, " ") != "forge=git.example.com&issue=77&repository=acme%2Fapp" {
+		t.Errorf("the server refused %d requests and was asked %q", srv.refused, srv.registered)
 	}
 	got := srv.byType()
 	started := got["dev.qory.run.started"]
@@ -123,8 +123,16 @@ func TestRunAboutStaysOffTheRunConfigurationRequest(t *testing.T) {
 		t.Fatalf("the server's run.started: %v", started)
 	}
 	about, _ := json.Marshal(started[0]["about"])
-	if want := `{"kind":"fix","subjects":[{"ref":"7","type":"ticket"}],"title":"Fix the parser"}`; string(about) != want {
+	const want = `{"kind":"fix","subjects":[{"ref":"7","type":"ticket"}],"title":"Fix the parser"}`
+	if string(about) != want {
 		t.Errorf("the server's run.started about %s, want %s", about, want)
+	}
+	var registered any
+	if len(srv.abouts) != 1 || json.Unmarshal([]byte(srv.abouts[0]), &registered) != nil {
+		t.Fatalf("the registration's about: %q", srv.abouts)
+	}
+	if b, _ := json.Marshal(registered); string(b) != want {
+		t.Errorf("the registration's about %s, want %s", b, want)
 	}
 	for typ, evs := range got {
 		for _, ev := range evs {

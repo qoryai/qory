@@ -330,10 +330,10 @@ configured, the gateway starts by fetching the server's configuration. It signs 
 request with the access key's secret, and checks every answer against the server's key
 it pins, `apiary_public_key`. The run does not start unless the server answers.
 
-The configuration defines where the gateway sends the run's events, and whether the
-server has a run configuration. The gateway fetches the run configuration with the run's labels, the
-checkout's forge and repository among them. It reloads it when the server reports it
-changed. It may hold:
+The configuration defines where the gateway sends the run's events, and where the run
+registers. The gateway registers the run with its labels, the checkout's forge and
+repository among them, and the server answers with the run configuration. It fetches it
+again when the server reports it changed. It may hold:
 
 - `security_policy`, the server's policy. `gateway.egress` of `forager.yaml` narrows it:
   see [A run's own policy](#a-runs-own-policy). Without it, `gateway.egress` is the
@@ -790,7 +790,7 @@ qory run --run-id "$uuid" --label run_key=1234 --label issue=77 \
 - `--run-id` is a new UUID, in lower case, for each attempt, a retry included. A caller
   that has only a key of its own for the work, such as `run_key` here, passes it as a
   label, never as the run id.
-- The labels go into `dev.qory.run.started`, and onto the run configuration request.
+- The labels go into `dev.qory.run.started`, and into the run's registration.
   There, a server ties the run to its own records and chooses its policy.
 
 Two labels come from the checkout's origin remote, unless `--label` sets them:
@@ -822,8 +822,8 @@ qory run --kind review --title "Review the parser change" \
 | `--details` | a JSON object of your own, from a file or stdin          | 8192 bytes compacted, 4 levels deep |
 
 Each is optional. An empty `--kind`, `--title` or `--details` is none. They go into
-`about` on `dev.qory.run.started`, and no other event repeats them. The run configuration
-request does not carry them, so a server does not choose the run's policy by them. qory
+`about` on `dev.qory.run.started`, and no other event repeats them. The run's
+registration carries them too, but a server never chooses the run's policy by them. qory
 reads none of them from the checkout or the environment: the run carries what the flags
 say.
 
@@ -1347,9 +1347,9 @@ server's configuration is fetched first, signed. It defines where the events go.
   opened the run: `dev.qory.run.exited` with `reason: gateway_lost`, and it says `the
   record had no end, and now ends as lost: its end was never recorded`. It also removes
   the containers and networks the run's wall left.
-- A run the server never opened, whose ping it never accepted, or a run that had no
-  server, is sent nothing, and its record stays as it is: `the server never opened run
-  <id>, so there is nothing to send; its record stays in <dir>`, exit 0.
+- A run the server never opened, whose registration it never accepted, or a run that
+  had no server, is sent nothing, and its record stays as it is: `the server never
+  opened run <id>, so there is nothing to send; its record stays in <dir>`, exit 0.
 - It refuses a run that is running.
 - It keeps sending until the server accepts, or `--wait` is over. The wait is two
   minutes unless set.

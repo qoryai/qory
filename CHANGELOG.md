@@ -149,10 +149,11 @@ release may change what an existing document does, and states it under Upgrading
 - `qory run --kind`, `--title`, `--subject` and `--details` say what a run is about: its
   kind, its title, what it works on, `type=<type>,ref=<ref>` with `url=` and `title=` when
   known, such as `type=ticket,ref=7`, and a JSON object of the caller's own, from a file
-  or from stdin. They go into `about` on `dev.qory.run.started` and no other event; the
-  run configuration request does not carry them. A subject's `title=` takes the rest of
-  the value, commas included, so a title passes as it is. A value the Forager contract
-  does not take is an input error, and the run does not start.
+  or from stdin. They go into `about` on `dev.qory.run.started` and no other event, and
+  into the run's registration, where they never choose the run's policy. A subject's
+  `title=` takes the rest of the value, commas included, so a title passes as it is. A
+  value the Forager contract does not take is an input error, and the run does not
+  start.
 - `qory gateway` runs this machine's gateway as a service for the runs of other
   machines, on `gateway.listen` of `forager.yaml`, or on `--listen`, which wins, until
   SIGINT or SIGTERM; then it takes no new run, sends what it holds, prints
@@ -213,10 +214,10 @@ release may change what an existing document does, and states it under Upgrading
   `run-secret` file, says so: `this run's record has no run-secret file, which the
   gateway needs to accept its events; they stay in <dir>`, exit 1.
 - `qory run resend` to the server sends nothing of a run the server never opened, whose
-  ping it never accepted, or of a run that had no server, such as a `--local` run's, and
-  leaves its record as it is: it says `the server never opened run <id>, so there is
-  nothing to send; its record stays in <dir>`, exit 0. Until now the record of a run
-  with no server was closed and sent.
+  registration it never accepted, or of a run that had no server, such as a `--local`
+  run's, and leaves its record as it is: it says `the server never opened run <id>, so
+  there is nothing to send; its record stays in <dir>`, exit 0. Until now the record of
+  a run with no server was closed and sent.
 - `qory run resend` of a run the server stopped during the run sends nothing and exits 1.
   One the server stops during the resend says how many events it accepted and how many
   were not sent, and that those stay in the run directory; it no longer points at
@@ -250,8 +251,8 @@ release may change what an existing document does, and states it under Upgrading
   flags of `qory run` name their key by its section, such as `forager.yaml:
   session.run.timeout`, and the schema is `forager.schema.json`. A mount that holds
   Forager's files is refused with `mount_contains_forager_files`; a record `qory run
-  resend` closes without an exit gets the reason `gateway_lost`; `dev.qory.ping` and
-  `dev.qory.run.started` carry `forager_version`; and every request to the server
+  resend` closes without an exit gets the reason `gateway_lost`; `dev.qory.run.registered`
+  and `dev.qory.run.started` carry `forager_version`; and every request to the server
   carries the User-Agent `qory-forager/<version>`.
 - `qory run` records each run outside the checkout, in qory's state directory:
   `~/.local/state/qory/runs/<checkout>-<hash>/<id>/`, under `$XDG_STATE_HOME/qory` when
@@ -295,8 +296,8 @@ release may change what an existing document does, and states it under Upgrading
   `QORY_HARNESS_HOME`. A module's export is a default like the others: the server's
   value, `--env` and `wall.env` win over it, and the deny list leaves out one whose name
   it holds. They reach the agent in the container and outside it alike.
-- qory builds against `github.com/qoryai/forager` at commit `85f95d5` of its `main`,
-  `v0.6.1-0.20261010135457-85f95d55c99b`, contract `v1` revision 1 as amended there.
+- qory builds against `github.com/qoryai/forager` at commit `5ddac44` of its `main`,
+  `v0.6.1-0.20261010162734-5ddac440bded`, contract `v1` revision 1 as amended there.
   `qory run` starts Forager's gateway on this machine for each run: it holds the proxy,
   the policy, the credentials and the access key, and sends the run's events to the
   server; the session speaks to it alone, and records its own events in the run's
@@ -319,6 +320,13 @@ release may change what an existing document does, and states it under Upgrading
   1m30s; `qory run` then says `the run failed: its events could not be recorded, and
   <runtime> was stopped` or `the run was lost: it lost contact with the gateway for
   1m30s, and <runtime> was stopped`, and exits 1.
+- A run registers with the server before it starts: Forager's gateway posts it, signed,
+  to the run endpoint the server's discovery names, with the run's labels and `about`,
+  and the answer is the run configuration; `about` never chooses the run's policy. A
+  refusal names the request, such as `register <url>: instance_limit (status 409)`. The
+  record's first line is `dev.qory.run.registered`, in place of `dev.qory.ping`, and is
+  not sent to the server. `qory run resend` of a record that holds no event sends
+  nothing and says the server never opened the run, exit 0, where it failed.
 - `qory run` says how a run ended as its outcome, then its reason, and never who ended
   it: `✓ the run completed: <reason>`, `✗ the run failed: <reason>`, `✗ the run was
   cancelled: <reason>` or `✗ the run was lost: <reason>`, with `, and <runtime> was
