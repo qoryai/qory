@@ -68,6 +68,9 @@ type fakeServer struct {
 	onStop func()
 	// unavailable answers every delivery an unsigned 503, which is no answer.
 	unavailable bool
+	// onExited, when set, is called once the server keeps a dev.qory.run.exited,
+	// before the delivery that carries it is answered.
+	onExited func()
 }
 
 // newFakeServer starts a server whose run configuration carries policy, the JSON of a
@@ -185,8 +188,12 @@ func (f *fakeServer) Append(_ string, line []byte) error {
 		return err
 	}
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.events = append(f.events, ev)
+	onExited := f.onExited
+	f.mu.Unlock()
+	if onExited != nil && ev["type"] == "dev.qory.run.exited" {
+		onExited()
+	}
 	return nil
 }
 
@@ -1272,7 +1279,7 @@ func TestRunBehindARealWall(t *testing.T) {
 	here := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "this machine") }))
 	defer here.Close()
 	name := fmt.Sprintf("qory-test-origin-%d", os.Getpid())
-	if out, err := exec.Command("docker", "run", "--detach", "--rm", "--name", name, "busybox:stable", "sh", "-c", "mkdir /w && echo from the origin > /w/index.html && httpd -f -p 8080 -h /w").CombinedOutput(); err != nil {
+	if out, err := exec.Command("docker", "run", "--detach", "--rm", "--name", name, "public.ecr.aws/docker/library/busybox:stable", "sh", "-c", "mkdir /w && echo from the origin > /w/index.html && httpd -f -p 8080 -h /w").CombinedOutput(); err != nil {
 		t.Fatalf("the origin: %v: %s", err, out)
 	}
 	t.Cleanup(func() { exec.Command("docker", "rm", "--force", name).Run() })
@@ -1306,7 +1313,7 @@ harness:
 	if out, err := run(t, "harness", "compose", "--runtime", "claude", "--no-links"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "wall:\n  adapter: docker\n  image: busybox:stable\n  helper: "+helper+"\n")
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "wall:\n  adapter: docker\n  image: public.ecr.aws/docker/library/busybox:stable\n  helper: "+helper+"\n")
 	out, err := run(t, "run", "claude", "--mount", sibling+":ro", "--shm-size", "256m", "--pids-limit", "512", "--memory", "512m")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -1363,7 +1370,9 @@ func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
 	if cmd.ExitCode(err) != 124 {
 		t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
-	wants(t, out, "stopped at the limit of 300ms")
+	// The time limit is said once, in qory's line: the session's own line is left out.
+	wants(t, out, "✗ the run was cancelled: it reached the time limit of 300ms, and claude was stopped\n")
+	lacks(t, out, "stopped at the limit")
 	dir, evs := events(t, root)
 	if filepath.Base(dir) != id {
 		t.Errorf("the run is recorded in %s", dir)
@@ -1375,7 +1384,7 @@ func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
 	if allow, _ := applied["allow"].([]any); applied["mode"] != "enforce" || len(allow) != 1 || allow[0] != "api.github.com" {
 		t.Errorf("run.policy_applied %v", applied)
 	}
-	if exited := evs["dev.qory.run.exited"][0]; exited["reason"] != "timeout" || exited["state"] != "failed" {
+	if exited := evs["dev.qory.run.exited"][0]; exited["reason"] != "timeout" || exited["state"] != "cancelled" {
 		t.Errorf("run.exited %v", exited)
 	}
 }
@@ -1473,7 +1482,8 @@ func TestResendClosesAndDeliversARunItsForagerLeft(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "gateway_lost", fmt.Sprintf("%d events were accepted", len(lines)))
+	wants(t, out, "✓ the record had no end, and now ends as lost: its end was never recorded\n", fmt.Sprintf("%d events were accepted", len(lines)))
+	lacks(t, out, "gateway_lost", "closed with the reason")
 	got := srv.events
 	if last := got[len(got)-1]; len(got) != len(lines) || last["type"] != "dev.qory.run.exited" || last["data"].(map[string]any)["reason"] != "gateway_lost" {
 		t.Errorf("the server got %d events, the last %v", len(got), last)
@@ -1609,9 +1619,10 @@ func TestResendSendsNothingOfARunTheServerNeverOpened(t *testing.T) {
 const (
 	// resendStoppedNow is the server's signed 410 during the resend, a format of the run
 	// id, what it accepted, what was not sent and the run directory.
-	resendStoppedNow = "✗ the server answered 410 and wants no more events of the run %s; %d were accepted and %d were not sent; they stay in %s"
-	// resendAnswered410 is Forager's line of a 410 with no code.
-	resendAnswered410 = "qory run resend: the server answered 410; no further batch is sent for this run, which goes on"
+	resendStoppedNow = "✗ the server wants no more events of the run %s; %d were accepted and %d were not sent; they stay in %s"
+	// resendServerStop is Forager's line of the server's 410, which qory's own line says
+	// in a resend, so it is left out.
+	resendServerStop = "the server wants no more events of this run"
 	// resendNotAccepted is a server that did not accept within --wait, a format of what
 	// it accepted, what it did not and the run directory.
 	resendNotAccepted = "✗ %d events were accepted and %d were not; %s/undelivered contains them"
@@ -1698,11 +1709,11 @@ func TestResendSaysTheServerWantsNoMoreEvents(t *testing.T) {
 	dir, file, before, owed := record(t, laterID)
 	out, err := run(t, "run", "resend", laterID)
 	sent := len(srv.events)
-	want := resendAnswered410 + "\n" + fmt.Sprintf(resendStoppedNow, laterID, sent, owed-sent, ui.Short(dir, root)) + "\n"
+	want := fmt.Sprintf(resendStoppedNow, laterID, sent, owed-sent, ui.Short(dir, root)) + "\n"
 	if cmd.ExitCode(err) != 1 || out != want || sent == 0 || sent == owed {
 		t.Errorf("a 410 after a batch: %v (exit %d), %d of %d sent\n%q\nwant\n%q", err, cmd.ExitCode(err), sent, owed, out, want)
 	}
-	lacks(t, out, "undelivered")
+	lacks(t, out, "undelivered", resendServerStop, "the run goes on")
 	stays(t, "a 410 after a batch", dir, file, before)
 
 	// A 410 to the first batch: nothing was accepted.
@@ -1710,7 +1721,7 @@ func TestResendSaysTheServerWantsNoMoreEvents(t *testing.T) {
 	const firstID = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5ec1"
 	dir, file, before, owed = record(t, firstID)
 	out, err = run(t, "run", "resend", firstID)
-	want = resendAnswered410 + "\n" + fmt.Sprintf(resendStoppedNow, firstID, 0, owed, ui.Short(dir, root)) + "\n"
+	want = fmt.Sprintf(resendStoppedNow, firstID, 0, owed, ui.Short(dir, root)) + "\n"
 	if cmd.ExitCode(err) != 1 || out != want || len(srv.events) != sent {
 		t.Errorf("a 410 to the first batch: %v (exit %d)\n%q\nwant\n%q", err, cmd.ExitCode(err), out, want)
 	}
@@ -1729,14 +1740,14 @@ func TestResendSaysTheServerWantsNoMoreEvents(t *testing.T) {
 	}
 	stays(t, "a stop during the run", dir, file, before)
 
-	// A server that accepts nothing within --wait: what was not accepted is spooled,
-	// after Forager's line that says so.
+	// A server that accepts nothing within --wait: what was not accepted is spooled, and
+	// qory's line alone says so: Forager's line of it is left out.
 	srv.unavailable = true
 	const awayID = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5ec3"
 	dir, _, _, owed = record(t, awayID)
 	out, err = run(t, "run", "resend", awayID, "--wait", "2s")
 	want = fmt.Sprintf(resendNotAccepted, 0, owed, ui.Short(dir, root)) + "\n"
-	if cmd.ExitCode(err) != 1 || !strings.HasSuffix(out, "\n"+want) {
+	if cmd.ExitCode(err) != 1 || out != want {
 		t.Errorf("a server away: %v (exit %d)\n%q\nwant\n%q", err, cmd.ExitCode(err), out, want)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "undelivered")); err != nil {

@@ -21,7 +21,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.head_ref != 'next' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     container:
-      image: docker.io/golang:1.27
+      image: public.ecr.aws/docker/library/golang:1.27
     steps:
       - name: Install node for the JavaScript actions
         # checkout@v7 runs on node 24; the image has none.

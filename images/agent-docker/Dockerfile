@@ -18,7 +18,7 @@
 
 ARG BASE=qory-agent
 # The Debian the downloads are checked on, on the machine that builds.
-ARG FETCH_IMAGE=debian:trixie-20260918-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
+ARG FETCH_IMAGE=public.ecr.aws/docker/library/debian:trixie-20260918-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
 # The Debian snapshot the packages come from, agent's.
 ARG DEBIAN_SNAPSHOT=20260918T000000Z
 # Docker's static binaries. download.docker.com publishes no checksums for them, so the

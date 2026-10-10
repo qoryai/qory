@@ -78,7 +78,7 @@ func TestTheRunSecretStaysWithTheLink(t *testing.T) {
 	link := newFakeLink(t)
 	link.interval = 1
 	link.runStatus = http.StatusOK
-	link.runBody = `{"version":1,"run_id":"{run_id}","credential":"issuer","labels":{"forge":"git.example.com","repository":"acme/app"},"applied":{"mode":"observe","allow":[],"source":"none"},"proxy_secret":"example-proxy-secret-000000000000000000001","run_secret":"` + secret + `"}`
+	link.runBody = `{"version":1,"run_id":"{run_id}","credential":"starter","labels":{"forge":"git.example.com","repository":"acme/app"},"applied":{"mode":"observe","allow":[],"source":"none"},"proxy_secret":"example-proxy-secret-000000000000000000001","run_secret":"` + secret + `"}`
 	writeFile(t, foragerFile(), sessionGateway(strings.TrimPrefix(link.URL, "https://"), link.ca, "    run_credential_file: "+file+"\n"))
 	credential := "opaque-run-credential-" + fmt.Sprint(time.Now().UnixNano())
 	writeRunCredential(t, file, credential+"\n")

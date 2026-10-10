@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -70,7 +71,10 @@ func newRun() *cobra.Command {
 Every connection goes through a proxy on this machine and is recorded. The record,
 events.jsonl and output.log, goes to a folder of the checkout's under
 ~/.local/state/qory/runs ($XDG_STATE_HOME/qory/runs when that is set to an absolute
-path), and qory names it when the run ends. The exit status is the agent's.
+path), and qory names it when the run ends. The exit status is the agent's when it
+exits by itself. When the run ends in another way, or its starter says it went
+otherwise, the exit status is 0 if the run completed, 124 at the time limit, and 1
+otherwise.
 
 The agent is the runtime the harness is composed for. Name one first when it is composed
 for several. Arguments after -- go to the agent. At a terminal the agent runs with its
@@ -235,7 +239,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return err
 				}
 			}
-			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			ctx, got, stop := signalContext(cmd.Context())
 			defer stop()
 			spec := session.Spec{
 				Runtime:        rt,
@@ -330,6 +334,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			spec.ForagerFiles = own.files
 			record := filepath.Join(spec.RunsDir, spec.RunID)
 			u := ui.New(stderr)
+			// Forager's lines that say what qory's own line says of the run's end are held
+			// back until qory knows whether it says it.
+			lines := runLines(func(line string) { fmt.Fprintln(stderr, "qory run:", line) }, spec.RunID)
+			spec.Report = lines.line
 			var res *session.Result
 			var delivery gateway.Delivery
 			if remote {
@@ -341,9 +349,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			} else {
 				// One gateway for the run, on this machine: the session speaks to it over
 				// its local link, whose secret stays in this process's memory.
-				gw.Report = func(line string) { fmt.Fprintln(stderr, "qory run:", line) }
+				gw.Report = lines.line
 				g, startErr := gateway.Start(ctx, gw)
 				if startErr != nil {
+					lines.done(nil)
 					return explain(startErr, id)
 				}
 				defer g.Close(ctx)
@@ -360,14 +369,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 			}
 			if err != nil {
+				lines.done(nil)
 				// A run id another run of this checkout has: refused before this run made
 				// anything, so the folder of that id is the other run's, and goes unnamed.
 				if reused := runIDReused(err, record, spec.RunID); reused != nil {
 					return reused
 				}
-				// A separate gateway that could not open the run for the run credential's
-				// issuer: qory says so in a line of its own, as it says the gateway's end of
-				// a run, and names the record after it.
+				// A separate gateway that could not open the run because its run credential
+				// could not be checked: qory says so in a line of its own, and names the
+				// record after it.
 				if line := gatewayNotOpened(err); remote && line != "" {
 					fmt.Fprintln(stderr, line)
 					if _, statErr := os.Stat(record); statErr == nil {
@@ -397,27 +407,33 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return reported(err)
 			}
 			defer fmt.Fprintln(stderr, "qory run: the record is in", record)
+			end := runEnd{runtime: name, timeout: timeout, credential: credential}
+			if res.Cancelled {
+				// qory run's context had ended when the session saw the runtime exit: the
+				// signal qory got stopped the run, and is named. A signal that came later,
+				// as the gateway was asked for the outcome or the run's last events were
+				// delivered, did not end the run.
+				end.got = got()
+			}
+			if delivery.RunClosed && !res.RunClosed {
+				// The run's own gateway recorded the run's end after its runtime exited.
+				end.gateway = &gatewayEnd{state: delivery.State, reason: delivery.Reason, code: delivery.ClosedReason}
+			}
+			lines.done(func(kind int) bool {
+				switch kind {
+				case heldUndelivered:
+					return delivery.Undelivered > 0
+				case heldLimit:
+					return res.TimedOut && !res.RunClosed
+				case heldRunEnds:
+					return res.RunClosed || end.gateway != nil && end.saysOutcome(res)
+				}
+				return false
+			})
 			if delivery.Undelivered > 0 {
 				u.Fail(fmt.Errorf("%d events did not reach the server; %s/undelivered contains them", delivery.Undelivered, ui.Short(res.Dir, at.root)))
 			}
-			switch {
-			case remote && res.RunClosed && gatewayEnded(u, stderr, res.ClosedReason, credential):
-				return reported(&exitError{code: 1})
-			case res.RunClosed:
-				// Only the gateway closes a run: a server's 410 stops its deliveries alone.
-				return gatewayClosed(u, res.ClosedReason, name)
-			case res.TimedOut:
-				u.Fail(fmt.Errorf("%s was stopped at the limit of %s", name, timeout))
-				return reported(&exitError{code: exitTimeout})
-			case res.Signal != "":
-				u.Fail(fmt.Errorf("%s was ended by %s", name, res.Signal))
-				return reported(&exitError{code: 1})
-			case res.ExitCode != 0:
-				u.Fail(fmt.Errorf("%s exited %d", name, res.ExitCode))
-				return reported(&exitError{code: res.ExitCode})
-			}
-			u.Success("%s exited 0", name)
-			return nil
+			return runEnded(u, res, end)
 		},
 	}
 	c.Flags().BoolVar(&local, "local", false, "run without the server: record to files, under the machine's policy")
@@ -493,18 +509,159 @@ const runHeartbeat = config.Heartbeat
 // ends the run, session_lost.
 const runQuiet = 3 * runHeartbeat
 
-// gatewayClosed is the end of a run the gateway closed while it ran, by the code it
-// closed it with: it could not take a batch of the session's events, batch_refused, or
-// the session sent it nothing for runQuiet, session_lost. Any other close of the
-// gateway's has the gateway's report line alone to say why. The run fails, exit 1.
-func gatewayClosed(u *ui.UI, reason, runtime string) error {
-	switch reason {
-	case event.ReasonBatchRefused:
-		u.Fail(fmt.Errorf("the gateway closed the run: it could not take an event the session sent, and %s was stopped", runtime))
-	case event.ReasonSessionLost:
-		u.Fail(fmt.Errorf("the gateway closed the run: the session sent nothing for %s, and %s was stopped", runQuiet, runtime))
+// runEnd is what qory knows of a run besides its result: its runtime's name, its time
+// limit, the signal qory run got that ended the run, "" for none, the run
+// credential behind a separate gateway, nil with a gateway of the run's own, and the
+// run's end that gateway of the run's own recorded after the runtime exited by itself,
+// nil when it recorded none.
+type runEnd struct {
+	runtime    string
+	timeout    time.Duration
+	got        string
+	credential *runCredential
+	gateway    *gatewayEnd
+}
+
+// gatewayEnd is the end of a run its gateway recorded: the state and the reason of its
+// dev.qory.run.exited, and the code of the gateway's 410.
+type gatewayEnd struct {
+	state, reason, code string
+}
+
+// exitOutcome is the outcome said beside the runtime's own exit: the end the run's
+// gateway recorded after the runtime exited, when it recorded one, which is what the
+// server shows; otherwise the outcome the session gives, the one the run's starter gave
+// at the exit, or the exit's own. An end the gateway recorded with no state is the
+// outcome of its code.
+func (e runEnd) exitOutcome(res *session.Result) outcome {
+	if e.gateway == nil {
+		return outcomeOf(res.State, res.Reason)
 	}
-	return reported(&exitError{code: 1})
+	o := outcomeOf(e.gateway.state, e.gateway.reason)
+	if !o.known {
+		o = outcomeOf("", e.gateway.code)
+	}
+	return o
+}
+
+// cancelled reports whether the run was cancelled by a signal qory run got: the session
+// saw the runtime exit after qory run's context ended, and the signal is known. A
+// context that ended otherwise names no signal, and the runtime's own exit says the run.
+func (e runEnd) cancelled(res *session.Result) bool {
+	return res.Cancelled && e.got != ""
+}
+
+// saysOutcome reports whether qory says the run's outcome in a line after the runtime's
+// own: the runtime exited by itself, and the outcome differs from what its exit says.
+func (e runEnd) saysOutcome(res *session.Result) bool {
+	if res.RunClosed || res.TimedOut || e.cancelled(res) {
+		return false
+	}
+	o := e.exitOutcome(res)
+	return o.known && !o.agrees(res.Signal == "" && res.ExitCode == 0)
+}
+
+// runEnded says how a run that started ended, in one line, and returns qory run's exit
+// status. A run the gateway closed ends with its outcome and reason ([outcomeOf]): the
+// run credential's expiry in the words of where it came from, when qory can read when;
+// 0 when it completed, else 1. A run stopped at its time limit was cancelled, exit 124;
+// one whose context a signal of qory run's had ended when the session saw the runtime
+// exit, res.Cancelled, was cancelled, exit 1. Otherwise the
+// runtime's own exit says it, with its status, or 1 for a signal; when the outcome
+// differs from what the exit says, a second line says the outcome, and the exit status
+// follows it. That outcome is the end the run's gateway recorded after the runtime
+// exited, or else the one the run's starter gave at the exit ([runEnd.exitOutcome]):
+// one line, never both.
+func runEnded(u *ui.UI, res *session.Result, e runEnd) error {
+	say := func(o outcome, text string) {
+		if o.completed {
+			u.Success("%s", text)
+		} else {
+			u.Fail(errors.New(text))
+		}
+	}
+	switch {
+	case res.RunClosed:
+		o := outcomeOf(res.State, res.Reason)
+		text := o.said() + ", and " + e.runtime + " was stopped"
+		if res.Reason == event.ReasonCredentialExpired && e.credential != nil {
+			if expired := e.credential.expired(); expired != "" {
+				text = "the run " + o.phrase() + ": " + expired
+			}
+		}
+		say(o, text)
+		return reported(&exitError{code: o.exitCode()})
+	case res.TimedOut:
+		u.Fail(fmt.Errorf("the run was cancelled: it reached the time limit of %s, and %s was stopped", e.timeout, e.runtime))
+		return reported(&exitError{code: exitTimeout})
+	case e.cancelled(res):
+		u.Fail(fmt.Errorf("the run was cancelled: qory run got %s, and %s was stopped", e.got, e.runtime))
+		return reported(&exitError{code: 1})
+	}
+	code := res.ExitCode
+	switch {
+	case res.Signal != "":
+		u.Fail(fmt.Errorf("%s ended on the signal %s", e.runtime, res.Signal))
+		code = 1
+	case res.ExitCode != 0:
+		u.Fail(fmt.Errorf("%s exited %d", e.runtime, res.ExitCode))
+	default:
+		u.Success("%s exited 0", e.runtime)
+	}
+	if e.saysOutcome(res) {
+		o := e.exitOutcome(res)
+		say(o, o.said())
+		code = o.exitCode()
+	}
+	if code == 0 {
+		return nil
+	}
+	return reported(&exitError{code: code})
+}
+
+// signalContext is parent until qory gets SIGINT or SIGTERM; got names the signal it got,
+// "" before one. stop ends the watch, and a signal after it acts as it would without.
+func signalContext(parent context.Context) (ctx context.Context, got func() string, stop func()) {
+	ctx, cancel := context.WithCancelCause(parent)
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case s := <-signals:
+			cancel(gotSignal{name: signalName(s)})
+		case <-done:
+		}
+	}()
+	var once sync.Once
+	stop = func() {
+		once.Do(func() {
+			signal.Stop(signals)
+			close(done)
+			cancel(context.Canceled)
+		})
+	}
+	got = func() string {
+		var g gotSignal
+		if errors.As(context.Cause(ctx), &g) {
+			return g.name
+		}
+		return ""
+	}
+	return ctx, got, stop
+}
+
+// gotSignal is the cause of qory run's context ending at a signal it got.
+type gotSignal struct{ name string }
+
+func (g gotSignal) Error() string { return "qory run got " + g.name }
+
+// signalName is the name of a signal qory run watches, as qory says it.
+func signalName(s os.Signal) string {
+	if s == syscall.SIGTERM {
+		return "SIGTERM"
+	}
+	return "SIGINT"
 }
 
 // runIDUsed is the gateway's refusal of a run whose id a run on this machine has
@@ -1452,7 +1609,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 			}
 			server := gatewayServer(r.Server)
 			server.AccessKey, server.InstanceID, server.InstanceName = id.key.key, id.instanceID, id.instanceName
-			lines := &resendLines{report: report}
+			lines := resendLines(report)
 			spec := gateway.ResendConfig{
 				Dir:     filepath.Join(runs, args[0]),
 				Server:  server,
@@ -1464,7 +1621,17 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 			ctx, cancel := context.WithTimeout(sig, wait)
 			defer cancel()
 			res, err := gateway.Resend(ctx, spec)
-			lines.done(err == nil && res.NotOpened && res.Undelivered == 0)
+			lines.done(func(kind int) bool {
+				switch kind {
+				case heldNotOpened:
+					return err == nil && res.NotOpened && res.Undelivered == 0
+				case heldUndelivered:
+					return err == nil && res.Undelivered > 0
+				case heldServerStop:
+					return err == nil && res.Stopped && res.Undelivered > 0
+				}
+				return false
+			})
 			switch {
 			case errors.Is(err, gateway.ErrRunning):
 				return input(fmt.Errorf("the run %s is running", args[0]))
@@ -1476,7 +1643,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 			reaped := reapWall(sig, r, args[0], report)
 			u := ui.New(stderr)
 			if res.Completed {
-				u.Success("the record had no exit and was closed with the reason gateway_lost")
+				u.Success("the record had no end, and now ends as %s", endsAs(res.State, res.Reason))
 			}
 			if reaped > 0 {
 				u.Success("removed %d containers and networks the run left", reaped)
@@ -1484,7 +1651,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 			if res.Stopped && res.Undelivered > 0 {
 				// The server's signed 410 during this resend: nothing of what was not
 				// sent is spooled, and all of it is still in the record's events.jsonl.
-				u.Fail(fmt.Errorf("the server answered 410 and wants no more events of the run %s; %d were accepted and %d were not sent; they stay in %s", args[0], res.Sent, res.Undelivered, ui.Short(spec.Dir, at.root)))
+				u.Fail(fmt.Errorf("the server wants no more events of the run %s; %d were accepted and %d were not sent; they stay in %s", args[0], res.Sent, res.Undelivered, ui.Short(spec.Dir, at.root)))
 				return reported(&exitError{code: 1})
 			}
 			if res.Stopped && res.Sent == 0 && res.Undelivered == 0 {
@@ -1513,40 +1680,103 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 	return c
 }
 
-// resendLines passes Forager's report lines of a resend on to report as they come,
-// but holds back the two that say a run never opened, gateway.ResendNotOpened and
-// gateway.ResendNoServer, until the resend has ended. done says whether qory says
-// itself that the run never opened: then they are left out, and otherwise passed on.
-// Every other line, the torn lines' and the server's stop among them, is passed on.
-type resendLines struct {
+// The kinds of Forager's report lines qory holds back until it knows whether its own
+// line says the same: a run that never opened, gateway.ResendNotOpened and
+// gateway.ResendNoServer; events the server did not accept; the session stopped at the
+// time limit; the run's gateway ending the run, in a run with a gateway of its own; and
+// the server's stop, in a resend.
+const (
+	heldNotOpened = iota + 1
+	heldUndelivered
+	heldLimit
+	heldRunEnds
+	heldServerStop
+)
+
+// foragerUndelivered is Forager's report line of events the server did not accept,
+// "<n> events were not accepted by the server; see <dir>".
+var foragerUndelivered = regexp.MustCompile(`^[0-9]+ events were not accepted by the server; see `)
+
+// foragerLimit begins the session's report line of a runtime stopped at the time limit.
+const foragerLimit = "the runtime was stopped at the limit of "
+
+// foragerServerStop is Forager's report line of the server's signed 410, which wants no
+// more events of the run.
+const foragerServerStop = "the server wants no more events of this run; the run goes on"
+
+// heldLines passes Forager's report lines on to report as they come, but holds back the
+// ones kind gives a kind, which repeat what qory may say itself, until done. done is
+// told which kinds qory says: those lines are left out, and the others passed on, in
+// the order they came. Every line kind gives no kind, 0, is passed on at once.
+type heldLines struct {
 	report func(string)
+	kind   func(string) int
 	mu     sync.Mutex
-	held   []string
+	held   []heldLine
 }
 
-// line is the Report of the resend's configuration.
-func (r *resendLines) line(l string) {
-	if l == gateway.ResendNotOpened || l == gateway.ResendNoServer {
-		r.mu.Lock()
-		r.held = append(r.held, l)
-		r.mu.Unlock()
-		return
-	}
-	r.report(l)
+// heldLine is a line held back, and its kind.
+type heldLine struct {
+	kind int
+	line string
 }
 
-// done ends the resend's lines: the held ones are left out when notOpened, the resend
-// NotOpened and qory saying so, and passed on otherwise.
-func (r *resendLines) done(notOpened bool) {
-	r.mu.Lock()
-	held := r.held
-	r.held = nil
-	r.mu.Unlock()
-	if notOpened {
+// resendLines are the lines of a resend, to the server or behind a gateway: Forager's
+// lines that the run never opened, that the server did not accept events, and that the
+// server wants no more events of the run, are held back.
+func resendLines(report func(string)) *heldLines {
+	return &heldLines{report: report, kind: func(l string) int {
+		switch {
+		case l == gateway.ResendNotOpened || l == gateway.ResendNoServer:
+			return heldNotOpened
+		case foragerUndelivered.MatchString(l):
+			return heldUndelivered
+		case l == foragerServerStop:
+			return heldServerStop
+		}
+		return 0
+	}}
+}
+
+// runLines are the lines of qory run of the run runID: the session's at the time limit,
+// the gateway's of events the server did not accept, and the gateway's that it ends the
+// run, "run <id>: ...; the run ends...", are held back.
+func runLines(report func(string), runID string) *heldLines {
+	return &heldLines{report: report, kind: func(l string) int {
+		switch {
+		case strings.HasPrefix(l, foragerLimit):
+			return heldLimit
+		case foragerUndelivered.MatchString(l):
+			return heldUndelivered
+		case strings.HasPrefix(l, "run "+runID+": ") && strings.Contains(l, "; the run ends"):
+			return heldRunEnds
+		}
+		return 0
+	}}
+}
+
+// line is a Report of Forager's.
+func (h *heldLines) line(l string) {
+	if k := h.kind(l); k != 0 {
+		h.mu.Lock()
+		h.held = append(h.held, heldLine{kind: k, line: l})
+		h.mu.Unlock()
 		return
 	}
+	h.report(l)
+}
+
+// done ends the held lines: those of a kind said says qory says itself are left out,
+// and the others passed on.
+func (h *heldLines) done(said func(kind int) bool) {
+	h.mu.Lock()
+	held := h.held
+	h.held = nil
+	h.mu.Unlock()
 	for _, l := range held {
-		r.report(l)
+		if said == nil || !said(l.kind) {
+			h.report(l.line)
+		}
 	}
 }
 

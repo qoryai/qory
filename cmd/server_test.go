@@ -309,9 +309,11 @@ func TestA410MidRunLeavesTheRuntimeRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a 410 mid-run: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
-	wants(t, out, "qory run: the server answered 410; no further batch is sent for this run, which goes on\n", "hello from after the 410\n", "✓ claude exited 0\n")
-	lacks(t, out, "closed the run", "was stopped", "did not reach the server")
-	if n := strings.Count(out, "the server answered 410"); n != 1 {
+	// qory has no line of its own for the server's stop during a run, so Forager's
+	// says it.
+	wants(t, out, "qory run: the server wants no more events of this run; the run goes on\n", "hello from after the 410\n", "✓ claude exited 0\n")
+	lacks(t, out, "closed the run", "was stopped", "did not reach the server", "answered 410")
+	if n := strings.Count(out, "the server wants no more events"); n != 1 {
 		t.Errorf("the 410 is said %d times, want once\n%s", n, out)
 	}
 	if got := srv.byType(); len(got) != 1 || len(got["dev.qory.ping"]) != 1 {

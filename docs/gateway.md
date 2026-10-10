@@ -33,7 +33,7 @@ gateway:
   egress:                               # optional: narrows Qory Apiary's policy
     mode: enforce
     allow: [github.com, "*.github.com"]
-  run_credentials:                      # required: the issuers whose run credentials open runs
+  run_credentials:                      # required: the run starters whose run credentials open runs
     - issuer: https://issuer.example
       audience: qory-gateway
       algorithms: [RS256]
@@ -57,7 +57,7 @@ gateway:
 |---|---|
 | `gateway.listen` | The address qory gateway listens on for the runs of other machines, host:port. qory run never listens on it: it starts a gateway of its own on a loopback port for each run. |
 | `gateway.tls.certificate`, `gateway.tls.key` | The certificate and key the gateway serves the other machines with, files in PEM. The address speaks TLS 1.3 alone. Without them, `gateway.listen` must be a loopback address. |
-| `gateway.run_credentials` | The issuers whose signed run credentials open runs at the gateway. What an issuer's run credential holds, how the gateway verifies it, and how a client presents it: [Run credentials](https://github.com/qoryai/forager/blob/main/docs/gateway-run-credentials.md), Forager's page. |
+| `gateway.run_credentials` | The run starters whose signed run credentials open runs at the gateway. What a run starter's run credential holds, how the gateway verifies it, and how a client presents it: [Run credentials](https://github.com/qoryai/forager/blob/main/docs/gateway-run-credentials.md), Forager's page. |
 | `gateway.server`, `gateway.egress`, `gateway.credentials`, `gateway.integrations` | As for `qory run`: see [forager.yaml](run.md#forageryaml). |
 
 A path in `gateway.tls` and `gateway.run_credentials` is relative to the directory of
@@ -69,7 +69,7 @@ schema, `gateway.run_credentials` included, is
 ## The machines behind it
 
 A machine whose runs go through this gateway names it in `session.gateway` of its own
-`forager.yaml` and holds no access key: each run brings the run credential its issuer
+`forager.yaml` and holds no access key: each run brings the run credential its starter
 signed, and the gateway verifies it. Of the machines in a run, only the gateway's holds an
 access key. Such a machine's `qory run` reaches the gateway over https alone, so a
 gateway that serves them has `gateway.tls`. See

@@ -23,9 +23,8 @@ import (
 
 // The texts qory run resend says behind a gateway, the run directory shown as %s.
 const (
-	resendExpired  = "the run credential expired at %s, so the gateway takes no more of this run's events; they stay in %s"
-	resendIssuer   = "the run credential's issuer reports that the run has ended, so the gateway takes no more of this run's events; they stay in %s"
-	resendEnded    = "the gateway ended the run with the reason %s, so it takes no more of this run's events; they stay in %s"
+	resendExpired  = "the run credential expired at %s, so no more of this run's events are taken; they stay in %s"
+	resendHasEnded = "the run has ended (%s), so no more of its events are taken; they stay in %s"
 	resendRefused  = "the gateway refused this run credential"
 	resendNoSecret = "this run's record has no run-secret file, which the gateway needs to accept its events; they stay in %s"
 	resendDiffers  = "the gateway refused this run credential: it differs from the one the run started with"
@@ -177,6 +176,13 @@ type fakeLink struct {
 	// after, when set, is a file: until it exists every batch is accepted, and status
 	// and body answer it once it does.
 	after string
+	// outcome, when set, answers the session's ask for the run's outcome at its
+	// runtime's exit, 200; without it the ask is not found.
+	outcome string
+	// asked is how many times the outcome was asked for.
+	asked int
+	// onAsk, when set, runs as the outcome is asked for, before the answer.
+	onAsk func()
 }
 
 // newFakeLink starts a fake link that accepts every batch; it stops when the test ends.
@@ -270,6 +276,17 @@ func (f *fakeLink) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(f.status)
 		w.Write([]byte(f.body))
 	default:
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/run/") && strings.HasSuffix(r.URL.Path, "/outcome") {
+			f.asked++
+			if f.onAsk != nil {
+				f.onAsk()
+			}
+			if f.outcome != "" {
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(f.outcome))
+				return
+			}
+		}
 		http.NotFound(w, r)
 	}
 }
@@ -295,19 +312,23 @@ func gatewayRecord(t *testing.T, root, id string) string {
 }
 
 // TestResendThroughAGatewaySaysWhatItAnswered is each answer of a separate gateway to a
-// resend that qory words: the run ended at the credential's issuer, or by the gateway
-// for another reason, named, its own run_closed, issuer_unreachable and
-// issuer_answer_invalid among them; a batch it refuses, which
-// ends the run; no answer that accepts within --wait; every batch accepted; and the
+// resend that qory words: a run that had ended, in one line with its outcome and its
+// reason, the starter's with no outcome given, with an outcome and a reason, a silent
+// session, an expiry, a batch the gateway refuses, which ends the run, and a run
+// credential that could not be checked; a run_closed of a record whose end nothing
+// records, as qory run says run_closed; no answer that accepts within --wait; every batch accepted; and the
 // discovery's 401 to a run credential with no exp qory can read. Each run ended or
 // refused is exit 1, the events kept; what is accepted is exit 0. The run credential
-// goes to the gateway on every request, and nowhere else.
+// goes to the gateway on every request, and nowhere else. No line says "issuer".
 func TestResendThroughAGatewaySaysWhatItAnswered(t *testing.T) {
 	root := newCheckout(t)
 	link := newFakeLink(t)
 	writeFile(t, foragerFile(), sessionGateway(strings.TrimPrefix(link.URL, "https://"), link.ca, ""))
 	credential := "opaque-run-credential-" + fmt.Sprint(time.Now().UnixNano())
 	t.Setenv("QORY_RUN_CREDENTIAL_SECRET", credential)
+	ended := func(how string) func(string) string {
+		return func(s string) string { return fmt.Sprintf(resendHasEnded, how, s) }
+	}
 	for i, c := range []struct {
 		name      string
 		discovery int
@@ -317,20 +338,26 @@ func TestResendThroughAGatewaySaysWhatItAnswered(t *testing.T) {
 		want      func(shown string) string
 		code      int
 	}{
-		{name: "ended at the issuer", status: http.StatusGone, body: `{"error":"run_ended_at_issuer","from":"gateway"}`,
-			want: func(s string) string { return fmt.Sprintf(resendIssuer, s) }, code: 1},
+		{name: "stopped, no outcome", status: http.StatusGone, body: `{"error":"stopped","from":"gateway","message":"the run has ended: cancelled, no outcome given","state":"cancelled","reason":"stopped"}`,
+			want: ended("cancelled"), code: 1},
+		{name: "stopped, no state", status: http.StatusGone, body: `{"error":"stopped","from":"gateway"}`,
+			want: ended("cancelled"), code: 1},
+		{name: "the starter's success", status: http.StatusGone, body: `{"error":"stopped","from":"gateway","message":"the run has ended: succeeded, all checks passed","state":"succeeded","reason":"all_checks_passed"}`,
+			want: ended("completed: all checks passed"), code: 1},
+		{name: "the starter's failure, no reason", status: http.StatusGone, body: `{"error":"stopped","from":"gateway","state":"failed"}`,
+			want: ended("failed"), code: 1},
 		{name: "session_lost", status: http.StatusGone, body: `{"error":"session_lost","from":"gateway"}`,
-			want: func(s string) string { return fmt.Sprintf(resendEnded, "session_lost", s) }, code: 1},
-		{name: "credential_expired", status: http.StatusGone, body: `{"error":"credential_expired","from":"gateway"}`,
-			want: func(s string) string { return fmt.Sprintf(resendEnded, "credential_expired", s) }, code: 1},
+			want: ended("lost: it lost contact with the gateway for 1m30s"), code: 1},
+		{name: "credential_expired", status: http.StatusGone, body: `{"error":"credential_expired","from":"gateway","message":"the run has ended: cancelled, permission to run expired","state":"cancelled","reason":"credential_expired"}`,
+			want: ended("cancelled: the run credential expired"), code: 1},
 		{name: "a batch refused", status: http.StatusBadRequest, body: `{"error":"invalid_request","from":"gateway"}`,
-			want: func(s string) string { return fmt.Sprintf(resendEnded, "batch_refused", s) }, code: 1},
+			want: ended("failed: its events could not be recorded"), code: 1},
 		{name: "run_closed", status: http.StatusGone, body: `{"error":"run_closed","from":"gateway"}`,
-			want: func(s string) string { return fmt.Sprintf(resendEnded, "run_closed", s) }, code: 1},
-		{name: "issuer_unreachable", status: http.StatusGone, body: `{"error":"issuer_unreachable","from":"gateway"}`,
-			want: func(s string) string { return fmt.Sprintf(resendEnded, "issuer_unreachable", s) }, code: 1},
-		{name: "issuer_answer_invalid", status: http.StatusGone, body: `{"error":"issuer_answer_invalid","from":"gateway"}`,
-			want: func(s string) string { return fmt.Sprintf(resendEnded, "issuer_answer_invalid", s) }, code: 1},
+			want: ended("failed: the gateway stopped during the run"), code: 1},
+		{name: "credential_check_unreachable", status: http.StatusGone, body: `{"error":"credential_check_unreachable","from":"gateway"}`,
+			want: ended("failed: its run credential could not be checked"), code: 1},
+		{name: "credential_check_invalid", status: http.StatusGone, body: `{"error":"credential_check_invalid","from":"gateway","state":"failed","reason":"credential_check_invalid"}`,
+			want: ended("failed: its run credential could not be checked"), code: 1},
 		{name: "no answer that accepts", status: http.StatusServiceUnavailable, args: []string{"--wait", "2s"},
 			want: func(s string) string { return fmt.Sprintf(resendNotSent, 0, 2, s) }, code: 1},
 		{name: "accepted", status: http.StatusOK,
@@ -350,7 +377,7 @@ func TestResendThroughAGatewaySaysWhatItAnswered(t *testing.T) {
 		if cmd.ExitCode(err) != c.code || !strings.Contains(failed(out, err), want) {
 			t.Errorf("%s: %v (exit %d), want %q, exit %d\n%s", c.name, err, cmd.ExitCode(err), want, c.code, out)
 		}
-		lacks(t, failed(out, err), credential)
+		lacks(t, failed(out, err), credential, "issuer", "the gateway ended the run", "the run has ended:", "succeeded", "permission to run")
 		link.mu.Lock()
 		if len(link.bearers) == 0 {
 			t.Errorf("%s: no request reached the gateway", c.name)

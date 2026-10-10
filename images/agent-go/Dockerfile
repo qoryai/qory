@@ -16,7 +16,7 @@
 
 ARG BASE=qory-agent
 # The Debian the download is checked on, on the machine that builds.
-ARG FETCH_IMAGE=debian:trixie-20260918-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
+ARG FETCH_IMAGE=public.ecr.aws/docker/library/debian:trixie-20260918-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
 # Go's release; the sums are the ones go.dev/dl lists.
 ARG GO_VERSION=1.27.1
 ARG GO_SHA256_AMD64=63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445

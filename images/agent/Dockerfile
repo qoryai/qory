@@ -12,11 +12,14 @@
 #	docker build -t qory-agent images/agent
 #	qory image check qory-agent
 
-# node:24.21.0-trixie-slim, the index for every platform: Node 24 LTS on Debian 13.
-ARG NODE_IMAGE=node:24.21.0-trixie-slim@sha256:8ec5d7557396cfe32d21c3f9c13072355ceab22b584578ca4bb28af31120cffe
+# node:24.21.0-trixie-slim, the index for every platform: Node 24 LTS on Debian 13. Docker
+# Hub's official images, here and below, are pulled from Amazon's public copy of them,
+# the same images under the same digests, which needs no login and is out of reach of
+# Docker Hub's pull limit for anonymous users.
+ARG NODE_IMAGE=public.ecr.aws/docker/library/node:24.21.0-trixie-slim@sha256:8ec5d7557396cfe32d21c3f9c13072355ceab22b584578ca4bb28af31120cffe
 # The Debian the downloads are checked on, on the machine that builds, never under
 # emulation.
-ARG FETCH_IMAGE=debian:trixie-20260918-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
+ARG FETCH_IMAGE=public.ecr.aws/docker/library/debian:trixie-20260918-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
 # The Debian snapshot the packages come from: the one the base's Debian was built from,
 # named in its /etc/apt/sources.list.d/debian.sources. Change it with the base.
 ARG DEBIAN_SNAPSHOT=20260918T000000Z

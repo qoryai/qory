@@ -28,7 +28,31 @@ names another: run `qory harness compose` again. The report fixes no variable an
 mount. Behind a wall, `harness.home` comes from the `qory.yaml` in qory's configuration
 directory alone: another `qory.yaml` that moves the home refuses a walled run.
 
-The exit status is the runtime's.
+When the run ends, qory says how, and its exit status goes with it:
+
+- `✓ <runtime> exited 0` or `✗ <runtime> exited <n>`: the runtime exited by itself, and
+  the exit status is the runtime's.
+- `✗ <runtime> ended on the signal <signal>`, such as `SIGKILL` from elsewhere: exit 1.
+- `✗ the run was cancelled: qory run got SIGTERM, and <runtime> was stopped`, or
+  `SIGINT`, when the signal came while the runtime ran: exit 1. A signal that comes after
+  the runtime exited changes neither its line nor the exit status.
+- `✗ the run was cancelled: it reached the time limit of <d>, and <runtime> was
+  stopped`: exit 124 (see [Time limits](#time-limits)).
+- `✗ the run failed: its events could not be recorded, and <runtime> was stopped`: the
+  gateway could not take an event the session sent, exit 1.
+- `✗ the run was lost: it lost contact with the gateway for 1m30s, and <runtime> was
+  stopped`: exit 1.
+- `✗ the run failed: the gateway stopped during the run, and <runtime> was stopped`:
+  exit 1.
+
+With a gateway of the run's own, the gateway may record the run's end after the runtime
+exited by itself. A second line then follows the runtime's, such as `✗ the run was lost:
+it lost contact with the gateway for 1m30s` or `✗ the run failed: its events could not be
+recorded`, and the exit status follows it: 0 when the run completed, 1 otherwise. An end
+that agrees with the runtime's exit adds no line.
+
+Through a separate gateway, the run's starter can end the run, or say how it went when
+the runtime exits: see [How a run ends there](#how-a-run-ends-there).
 
 ### At a terminal, or on pipes
 
@@ -551,7 +575,7 @@ A machine whose runs go through a gateway on another machine, or a service on th
 (see [the gateway as a service](gateway.md)), names it in `session.gateway` of its own
 `forager.yaml`. `qory run` then starts no gateway of its own and holds no access key. The
 session reaches the gateway over TLS 1.3, and every request carries the run credential
-its issuer signed, which the gateway verifies. The proxy, the policy, the credentials and
+its starter signed, which the gateway verifies. The proxy, the policy, the credentials and
 the access key are the gateway's, on its machine, and the gateway reports the run to Qory
 Apiary. Without `session.gateway`, nothing changes: `qory run` starts a gateway of its own
 for each run.
@@ -564,7 +588,7 @@ session:
     url: https://gateway.example:8443
     ca_file: gateway-ca.pem                          # optional
     certificate_sha256: 47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=   # optional
-    run_credential_file: /run/issuer/run-credential  # or --run-credential-fd, or QORY_RUN_CREDENTIAL_SECRET
+    run_credential_file: /run/starter/run-credential  # or --run-credential-fd, or QORY_RUN_CREDENTIAL_SECRET
 ```
 
 | Key | What it is |
@@ -573,7 +597,7 @@ session:
 | `session.gateway.url` | The gateway: an https URL of a host and an optional port, with nothing after. |
 | `session.gateway.ca_file` | A PEM file of the certificate authority that signed the gateway's certificate, when the system's roots do not hold it. qory reads it relative to forager.yaml's directory, and it takes the place of the system's roots for this link. |
 | `session.gateway.certificate_sha256` | Optional: the SHA-256 of the gateway certificate's public key, base64. With it, qory accepts only a certificate with that key, and still checks its chain. |
-| `session.gateway.run_credential_file` | The file that holds this run's run credential, which its issuer signed. qory reads it again before each request, so an issuer that refreshes it keeps the run going. A file whose mode grants the group or others read or write is refused. Instead: --run-credential-fd, or QORY_RUN_CREDENTIAL_SECRET. A flag never holds the credential itself. |
+| `session.gateway.run_credential_file` | The file that holds this run's run credential, which its starter signed. qory reads it again before each request, so a starter that refreshes it keeps the run going. A file whose mode grants the group or others read or write is refused. Instead: --run-credential-fd, or QORY_RUN_CREDENTIAL_SECRET. A flag never holds the credential itself. |
 
 `qory config` lists each value; with no gateway named it shows
 `session.gateway.url  (none: qory run starts a gateway for each run)  default`.
@@ -589,7 +613,7 @@ relative to the directory of `forager.yaml` unless it is absolute.
   session.gateway.run_credential_file). qory reads it until the run ends, and no program
   qory starts inherits it.
 - `QORY_RUN_CREDENTIAL_SECRET`: on a machine whose runs go through a gateway, the run
-  credential its issuer signed. qory takes it out of its environment when it starts; no
+  credential its starter signed. qory takes it out of its environment when it starts; no
   program qory starts receives it. `--env` and `wall.env` refuse it, as they refuse the
   access key's variables.
 - The file is read again before each request. `--run-credential-fd` is a stream: whoever
@@ -676,27 +700,51 @@ The gateway refuses a run, and qory says:
   <forge>/<repository>`;
 - `--details <f> sets requester to "a", and the run credential says "b": the credential
   decides; remove the key`, for each such key;
-- `qory run: the gateway could not open the run: it could not reach the run credential's
-  issuer; try again`;
-- `qory run: the gateway could not open the run: the run credential's issuer gave the
-  gateway no valid answer`.
+- `qory run: the run did not start: its run credential could not be checked; try
+  again`, when the gateway got no answer from the check;
+- `qory run: the run did not start: its run credential could not be checked`, when the
+  check's answer was not valid;
+- `✗ the run did not start: it has ended already`, for a run that ended before its
+  runtime started.
 
-A run the gateway ends because its run credential expired says when, by where the
-credential came from:
+### How a run ends there
 
-- from its file: `the run credential expired at <time>, and its file holds no fresh one`;
-- from `--run-credential-fd`: `the run credential expired at <time>, and the descriptor
-  gave no fresh one`;
-- from `QORY_RUN_CREDENTIAL_SECRET`: `the run credential expired at <time>;
-  QORY_RUN_CREDENTIAL_SECRET is read once, so a run longer than its credential needs
-  session.gateway.run_credential_file or --run-credential-fd`.
+The run's starter can end the run while it runs, with an outcome and a reason, or with
+neither. qory says the outcome, then the reason: the starter's as it gave it, with spaces
+for underscores. The exit status is 0 when the run completed, and 1 otherwise:
 
-A run the gateway ends because the credential's issuer reports that the run has ended
-says `qory run: the gateway ended the run: the run credential's issuer reports that the
-run has ended`. One it ends because it could not reach the issuer says `qory run: the
-gateway ended the run: it could not reach the run credential's issuer`, and one whose
-issuer gave it no valid answer `qory run: the gateway ended the run: the run credential's
-issuer gave the gateway no valid answer`. Either end fails the run, exit 1.
+- `✓ the run completed: all checks passed, and <runtime> was stopped`;
+- `✗ the run failed: <reason>, and <runtime> was stopped`;
+- `✗ the run was cancelled: <reason>, and <runtime> was stopped`;
+- without a reason, `: <reason>` is left out, such as `✓ the run completed, and
+  <runtime> was stopped`;
+- without an outcome, `✗ the run was cancelled, with no outcome given, and <runtime> was
+  stopped`.
+
+When the runtime exits by itself, the session asks the gateway once how the run's
+starter says the run went, and waits up to about ten seconds for the answer. When the
+outcome differs from what the runtime's exit says, a second line follows the runtime's:
+`✗ the run failed: <reason>`, `✓ the run completed: <reason>` or `✗ the run was
+cancelled: <reason>`, `: <reason>` left out when there is none. The exit status then
+follows the outcome, 0 when the run completed and 1 otherwise, so a runtime that exits 0
+can make `qory run` exit 1. The record keeps the runtime's own exit code. With no outcome,
+or one that agrees with the exit, the runtime's line alone says it, with its status.
+
+A run whose run credential could not be checked says `✗ the run failed: its run
+credential could not be checked, and <runtime> was stopped`, exit 1.
+
+A run that ends because its run credential expired was cancelled, exit 1, and says when,
+by where the credential came from:
+
+- from its file: `✗ the run was cancelled: the run credential expired at <time>, and its
+  file holds no fresh one`;
+- from `--run-credential-fd`: `✗ the run was cancelled: the run credential expired at
+  <time>, and the descriptor gave no fresh one`;
+- from `QORY_RUN_CREDENTIAL_SECRET`: `✗ the run was cancelled: the run credential
+  expired at <time>; QORY_RUN_CREDENTIAL_SECRET is read once, so a run longer than its
+  credential needs session.gateway.run_credential_file or --run-credential-fd`;
+- when qory cannot read when it expired: `✗ the run was cancelled: the run credential
+  expired, and <runtime> was stopped`.
 
 ### Resending through the gateway
 
@@ -713,16 +761,17 @@ removes the containers and networks the run's wall left, as without a gateway.
   <dir>`: exit 0, for a run the gateway never opened, one it refused at its start, say.
 - `<n> events were accepted and <m> were not; <dir>/undelivered contains them`: the
   gateway didn't accept them within `--wait`.
-- `the run credential expired at <time>, so the gateway takes no more of this run's
-  events; they stay in <dir>`.
+- `the run credential expired at <time>, so no more of this run's events are taken; they
+  stay in <dir>`.
 - `the gateway refused this run credential`, and `the gateway refused this run
   credential: it differs from the one the run started with`.
 - `this run's record has no run-secret file, which the gateway needs to accept its
   events; they stay in <dir>`: the gateway refused the run credential, and the run
   directory has no `run-secret`.
-- `the run credential's issuer reports that the run has ended, so the gateway takes no
-  more of this run's events; they stay in <dir>`; `the gateway ended the run with the
-  reason <reason>, so it takes no more of this run's events; they stay in <dir>`.
+- `the run has ended (<outcome>[: <reason>]), so no more of its events are taken; they
+  stay in <dir>`, such as `the run has ended (completed: all checks passed), so no more
+  of its events are taken; they stay in <dir>`: the outcome is `completed`, `failed`,
+  `cancelled` or `lost`, and the reason is said as `qory run` says it.
 
 Each but the first two is exit 1, and the events stay in the run directory. A run that ran
 with a gateway of its own on this machine is refused: its record goes to the server, so
@@ -1295,8 +1344,9 @@ server's configuration is fetched first, signed. It defines where the events go.
   Nothing the server accepted is sent again.
 - A server may still see an event twice. It discards the copy by the event's id.
 - After a Forager process that died, it first closes the record, unless the server never
-  opened the run: `dev.qory.run.exited` with `reason: gateway_lost`. It also removes the
-  containers and networks the run's wall left.
+  opened the run: `dev.qory.run.exited` with `reason: gateway_lost`, and it says `the
+  record had no end, and now ends as lost: its end was never recorded`. It also removes
+  the containers and networks the run's wall left.
 - A run the server never opened, whose ping it never accepted, or a run that had no
   server, is sent nothing, and its record stays as it is: `the server never opened run
   <id>, so there is nothing to send; its record stays in <dir>`, exit 0.
