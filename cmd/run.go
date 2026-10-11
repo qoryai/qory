@@ -492,7 +492,7 @@ func machinePolicy(r *config.Forager) *gateway.Policy {
 	if r.Egress == nil {
 		return nil
 	}
-	return &gateway.Policy{Version: 1, Egress: gateway.PolicyEgress{Mode: r.Egress.Mode, Allow: r.Egress.Allow, Deny: r.Egress.Deny}}
+	return &gateway.Policy{Version: 1, Egress: gateway.PolicyEgress{Mode: r.Egress.Mode, Allow: r.Egress.Allow, Deny: r.Egress.Deny, Paths: r.Egress.Paths}}
 }
 
 // machineCredentials describes the integrations forager.yaml declares as e selects, and

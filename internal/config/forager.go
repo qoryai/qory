@@ -5,10 +5,12 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"net"
 	"net/url"
 	"os"
@@ -21,6 +23,7 @@ import (
 	"time"
 
 	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/forager/policy"
 	"github.com/qoryai/forager/session"
 	"gopkg.in/yaml.v3"
 
@@ -343,6 +346,11 @@ type ForagerEgress struct {
 	// mode: Forager decides them before the mode and the allow list. Passed to
 	// the gateway as written.
 	Deny []string
+	// Paths are the paths a run may request on a host, by host, as a policy's
+	// egress.paths, nil when the file sets none. They apply to every run on this
+	// machine, beside the path rules of the run's policy, and any make every run need a
+	// wall.
+	Paths map[string][]string
 }
 
 // ForagerServer is the server section: the Forager contract's server document, where a
@@ -409,6 +417,8 @@ type gatewaySection struct {
 		Mode  *string   `yaml:"mode"`
 		Allow *[]string `yaml:"allow"`
 		Deny  *[]string `yaml:"deny"`
+		// Paths is read as a node, so its shape is refused in qory's words.
+		Paths yaml.Node `yaml:"paths,omitempty"`
 	} `yaml:"egress,omitempty"`
 	Server *struct {
 		URL             *string     `yaml:"url"`
@@ -516,6 +526,11 @@ func LoadForager() (*Forager, error) {
 					return nil, fmt.Errorf("%s: gateway.egress.deny[%d] is not a lower-case host name or a *. suffix; no port, path or scheme", path, i)
 				}
 				r.Egress.Deny = append(r.Egress.Deny, host)
+			}
+		}
+		if e.Paths.Kind != 0 {
+			if r.Egress.Paths, err = readPaths(path, &e.Paths); err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -1169,6 +1184,69 @@ func readCredentials(path string, node *yaml.Node) ([]ForagerCredential, error) 
 	return out, nil
 }
 
+// readPaths reads gateway.egress.paths, a mapping from a host to a list of paths. What a host and a path may be is Forager's to say: the paths are read as the
+// egress.paths of a policy document, as Forager reads the path rules it keeps beside a
+// run's policy, so the two never disagree.
+func readPaths(path string, node *yaml.Node) (map[string][]string, error) {
+	node = unalias(node)
+	if node.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("%s: gateway.egress.paths is a mapping from a host to a list of paths", path)
+	}
+	out := map[string][]string{}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		host := node.Content[i].Value
+		var list []string
+		if v := unalias(node.Content[i+1]); v.Kind != yaml.SequenceNode || safeDecode(func() error { return v.Decode(&list) }) != nil {
+			return nil, fmt.Errorf("%s: gateway.egress.paths: %s is a list of paths", path, host)
+		}
+		if list == nil {
+			list = []string{}
+		}
+		out[host] = list
+	}
+	type egress struct {
+		Mode  string              `json:"mode"`
+		Paths map[string][]string `json:"paths"`
+	}
+	b, err := json.Marshal(struct {
+		Version int    `json:"version"`
+		Egress  egress `json:"egress"`
+	}{1, egress{"observe", out}})
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if _, err := policy.Read(ForagerFileName+" gateway.egress", b); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return out, nil
+}
+
+// pathsOrNone is path rules as a row shows them, by host in order: the host, then its
+// paths, "; " between hosts; a host with an empty list is no path of it. No rules is
+// "(none)".
+func pathsOrNone(paths map[string][]string) string {
+	if len(paths) == 0 {
+		return "(none)"
+	}
+	var hosts []string
+	for _, host := range slices.Sorted(maps.Keys(paths)) {
+		if len(paths[host]) == 0 {
+			hosts = append(hosts, host+" (no path)")
+			continue
+		}
+		hosts = append(hosts, host+" "+strings.Join(paths[host], ", "))
+	}
+	return strings.Join(hosts, "; ")
+}
+
+// unalias is the node an alias stands for, and any other node itself.
+func unalias(node *yaml.Node) *yaml.Node {
+	for node.Kind == yaml.AliasNode && node.Alias != nil {
+		node = node.Alias
+	}
+	return node
+}
+
 // toolFile is one entry of the tools section as written.
 type toolFile struct {
 	Command      *[]string `yaml:"command"`
@@ -1241,11 +1319,12 @@ func (r *Forager) Rows() []Row {
 	if r != nil {
 		origin = r.File
 	}
-	rows := []Row{{"gateway.egress.mode", "observe", Default}, {"gateway.egress.allow", "(none)", Default}, {"gateway.egress.deny", "(none)", Default}}
+	rows := []Row{{"gateway.egress.mode", "observe", Default}, {"gateway.egress.allow", "(none)", Default}, {"gateway.egress.deny", "(none)", Default}, {"gateway.egress.paths", "(none)", Default}}
 	if r != nil && r.Egress != nil {
 		rows[0] = Row{"gateway.egress.mode", r.Egress.Mode, origin}
 		rows[1] = Row{"gateway.egress.allow", listOrNone(r.Egress.Allow), origin}
 		rows[2] = Row{"gateway.egress.deny", listOrNone(r.Egress.Deny), origin}
+		rows[3] = Row{"gateway.egress.paths", pathsOrNone(r.Egress.Paths), origin}
 	}
 	if r != nil && r.Server != nil {
 		rows = append(rows, Row{"gateway.server.url", r.Server.URL, origin})

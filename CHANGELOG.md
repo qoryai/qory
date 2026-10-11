@@ -86,6 +86,8 @@ release may change what an existing document does, and states it under Upgrading
   the requests to the hosts it `serves`. A run's policy selects tools by name, with an
   argument, as it selects credentials, and a tool needs a wall. `qory config` lists each
   tool.
+- forager.yaml `gateway.egress.paths`: the paths a run may request on a host, for every
+  run on the machine, with or without a server. With it set, every run needs a wall.
 - Nested Docker, a Docker daemon inside the wall, separate from the machine's, experimental: an image with `docker: true` under
   `runtime: sysbox-runc` starts with `qory run nest`, a hidden verb of `qory`'s Linux
   build, as the container's entry point. It runs Forager's `wall.Nest`: `dockerd` on

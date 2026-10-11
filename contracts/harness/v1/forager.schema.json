@@ -43,6 +43,21 @@
                 "type": "string",
                 "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
               }
+            },
+            "paths": {
+              "description": "The paths a run may request on a host, by host, as a policy's egress.paths. They apply to every run on this machine: a run's policy, from --policy or the server, keeps its path rules, and a request to a host either lists must match an entry of each that lists it. The proxy reads those hosts' requests, so every run on this machine needs a wall.",
+              "type": "object",
+              "propertyNames": {
+                "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+              },
+              "additionalProperties": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^/[^*?#\\s]*\\*?$"
+                }
+              }
             }
           }
         },

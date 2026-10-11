@@ -195,8 +195,10 @@ apiVersion: qory.dev/v1alpha1
 gateway:
   egress:                  # what the runtime may reach; enforce denies the rest
     mode: enforce          # or observe: record everything, deny only what deny lists
-    allow: [api.anthropic.com, github.com, "*.github.com"]
+    allow: [api.anthropic.com, api.example.com, github.com, "*.github.com"]
     deny: [gist.github.com]                # denied in either mode, whatever allow lists
+    paths:                                 # the paths a run may request on a host; every run needs a wall
+      api.example.com: ["/v1/*"]
   server:                  # the server every run reports to; optional
     url: https://apiary.example           # a scheme and a host, nothing after
     access_key_id: ak_0123456789abcdef    # this machine's access key; its secret is not in this file
@@ -1073,6 +1075,13 @@ With a server, `--policy` is refused unless `--local` is given. `gateway.egress`
 - A host either side's `deny` covers is denied, in either mode.
 
 `--local` keeps `--policy`, and the server is not contacted.
+
+`gateway.egress.paths` lists the paths a run may request on a host, as a policy's
+`egress.paths`. They apply to every run on the machine. With no server and no `--policy`,
+they are the run's path rules. A run's policy from `--policy` or from the server keeps its
+path rules, and a request to a host either side lists must match an entry of each side
+that lists it; the run's mode decides what a miss does. Path rules need the proxy to read
+the requests, so with `gateway.egress.paths` set, every run on the machine needs a wall.
 
 The access key's secret stays Forager's: see [The access key and the
 instance](#the-access-key-and-the-instance).

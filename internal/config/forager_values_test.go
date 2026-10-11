@@ -24,6 +24,7 @@ var foragerKeys = []struct{ body, key string }{
 	{"gateway: {egress: {mode: %s}}\n", "gateway.egress.mode"},
 	{"gateway: {egress: {mode: observe, allow: %s}}\n", "gateway.egress.allow"},
 	{"gateway: {egress: {mode: observe, deny: %s}}\n", "gateway.egress.deny"},
+	{"gateway: {egress: {mode: observe, paths: %s}}\n", "gateway.egress.paths"},
 	{"gateway: {server: {url: %s}}\n", "gateway.server.url"},
 	{"gateway: {server: {url: \"https://qory.example\", access_key_id: %s}}\n", "gateway.server.access_key_id"},
 	{"gateway: {server: {url: \"https://qory.example\", apiary_public_key: %s}}\n", "gateway.server.apiary_public_key"},
