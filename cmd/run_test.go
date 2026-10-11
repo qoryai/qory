@@ -726,16 +726,25 @@ func staticELF(t *testing.T) string {
 }
 
 // fakeDocker writes a program that stands in for docker: it logs every command line,
-// answers the two the wall reads, and for run logs the environment file, prints a line
-// and exits 4, as a container's runtime would.
+// answers the two the wall reads and, as Docker Engine 28, the engine's version a run
+// with nested Docker asks for, adds an IPv6 subnet to the inside network created with
+// --ipv6, and for run logs the environment file, prints a line and exits 4, as a
+// container's runtime would.
 func fakeDocker(t *testing.T) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
 	log := filepath.Join(dir, "docker.log")
+	ipv6 := filepath.Join(dir, "ipv6")
 	script := filepath.Join(dir, "docker")
 	writeFile(t, script, `#!/bin/sh
 echo "$*" >> `+log+`
+case "$*" in
+"network create "*" --ipv6 "*) : > `+ipv6+` ;;
+"network create "*" --internal "*) rm -f `+ipv6+` ;;
+"network inspect "*.Subnet*) test -e `+ipv6+` && { echo "172.30.0.1 fd00:db8::/64 "; exit 0; } ;;
+esac
 case "$1 $2" in
+"version --format") echo "28.0.0" ;;
 "network inspect") echo "172.30.0.1 " ;;
 "logs "*) echo "relay: listening" ;;
 "run "*)
@@ -782,7 +791,7 @@ case "$1 $2" in
 	entry=
 	while [ $# -gt 0 ]; do
 		case "$1" in
-		--rm|--interactive|--tty|--init) shift ;;
+		--rm|--interactive|--tty|--init|--no-healthcheck) shift ;;
 		--env-file) envfile=$2; shift 2 ;;
 		--entrypoint) entry=$2; shift 3; break ;;
 		*) shift 2 ;;
@@ -1374,12 +1383,12 @@ func TestRunRefusesAWallItCannotBuild(t *testing.T) {
 		{[]string{"run", "--mount", "/srv"}, "behind a wall"},
 		{[]string{"run", "--shm-size", "2g"}, "behind a wall"},
 		{[]string{"run", "--wall", "docker", "--image", "i", "--mount", "srv"}, "not an absolute path"},
-		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_ACCESS_KEY_SECRET"}, "--env QORY_ACCESS_KEY_SECRET: the variable is Forager's own"},
-		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_ACCESS_KEY_ID"}, "Forager's own"},
-		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_APIARY_PUBLIC_KEY"}, "Forager's own"},
-		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_SERVER_SECRET"}, "--env QORY_SERVER_SECRET: the variable is Forager's own and never the agent's"},
-		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_RUN_KEY"}, "--env QORY_RUN_KEY: the variable is Forager's own and never the agent's"},
-		{[]string{"run", "--env", "QORY_RUN_KEY"}, "--env QORY_RUN_KEY: the variable is Forager's own and never the agent's"},
+		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_ACCESS_KEY_SECRET"}, "--env QORY_ACCESS_KEY_SECRET: the variable is Forager's and"},
+		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_ACCESS_KEY_ID"}, "Forager's and"},
+		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_APIARY_PUBLIC_KEY"}, "Forager's and"},
+		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_SERVER_SECRET"}, "--env QORY_SERVER_SECRET: the variable is Forager's and never the agent's"},
+		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_RUN_KEY"}, "--env QORY_RUN_KEY: the variable is Forager's and never the agent's"},
+		{[]string{"run", "--env", "QORY_RUN_KEY"}, "--env QORY_RUN_KEY: the variable is Forager's and never the agent's"},
 		{[]string{"run", "--label", "issue"}, "not key=value"},
 		{[]string{"run", "--label", "Issue=1"}, "label key"},
 		{[]string{"run", "--run-id", "../x"}, "not a UUID"},
@@ -1489,7 +1498,7 @@ func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
 	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), machine+"  server:\n    url: https://qory.example\n")
 	policy := filepath.Join(t.TempDir(), "run-policy.yaml")
 	writeFile(t, policy, "version: 1\negress:\n  mode: enforce\n  allow: [api.github.com, pypi.org]\n")
-	if _, err := run(t, "run", "--policy", policy); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "--policy is the run's own policy without a server; with server configured the server's run configuration is the policy") {
+	if _, err := run(t, "run", "--policy", policy); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "--policy is a run's policy file without a server; with server configured the server's run configuration is the policy") {
 		t.Errorf("--policy with a server: %v", err)
 	}
 	if ids := recorded(t, root); len(ids) != 0 {

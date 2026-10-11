@@ -59,7 +59,7 @@ const filesShown = 5
 // check is the line a scan gives.
 func (s Special) check() Check {
 	if len(s.Setuid) == 0 && len(s.Capabilities) == 0 {
-		return Check{"files", Pass, fmt.Sprintf("none of the image's %d files is setuid or setgid or has capabilities of its own", s.Files)}
+		return Check{"files", Pass, fmt.Sprintf("none of the image's %d files is setuid or setgid or has file capabilities", s.Files)}
 	}
 	var found, mend []string
 	if len(s.Setuid) > 0 {
@@ -67,7 +67,7 @@ func (s Special) check() Check {
 		mend = append(mend, "find / -xdev -type f -perm /6000 -exec chmod ug-s {} +")
 	}
 	if len(s.Capabilities) > 0 {
-		found = append(found, "capabilities of its own: "+shown(s.Capabilities))
+		found = append(found, "file capabilities: "+shown(s.Capabilities))
 		mend = append(mend, "setcap -r on each")
 	}
 	return Check{"files", Fail, strings.Join(found, "; ") + "; remove them in the image: " + strings.Join(mend, ", and ")}

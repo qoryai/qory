@@ -16,7 +16,7 @@ otherwise.
 
 The agent is the runtime the harness is composed for. Name one first when it is composed
 for several. Arguments after -- go to the agent. At a terminal the agent runs with its
-own interface; --headless, no terminal, or a headless argument such as -p runs it on
+interface; --headless, no terminal, or a headless argument such as -p runs it on
 pipes.
 
 forager.yaml in ~/.config/qory sets what Forager does on this machine. A repository
@@ -44,7 +44,7 @@ qory run [runtime] [-- argument...] [flags]
   qory run claude -- -p "Reply pong"                # one headless turn
   qory run --wall docker --image agent:1            # in a container
   qory run --image go-docker                        # in an image forager.yaml defines
-  qory run --policy ~/policy.yaml -- -p "$prompt"   # with this run's own policy
+  qory run --policy ~/policy.yaml -- -p "$prompt"   # with this run's policy file
   qory run --timeout 5h30m -- -p "$prompt"          # stop it after five and a half hours
   qory run --subject type=ticket,ref=7              # say which ticket the run works on
 ```
@@ -54,7 +54,7 @@ qory run [runtime] [-- argument...] [flags]
 ```
       --access-key-secret-fd int   read the access key's secret from this file descriptor, 3 or above; it wins over QORY_ACCESS_KEY_SECRET and the access-key-secret file
       --cpus string                how many CPUs the container gets, such as 1.5 (forager.yaml: wall.cpus)
-      --details string             a JSON object of the run's own details, read from this file, or - for stdin when stdin is not a terminal; at most 8192 bytes compacted, 4 levels deep
+      --details string             a JSON object of the run's details, read from this file, or - for stdin when stdin is not a terminal; at most 8192 bytes compacted, 4 levels deep
       --env stringArray            a variable of this shell to pass to the agent, by name, with a wall or without; it wins over wall.env of forager.yaml; repeatable
       --headless                   run on pipes even at a terminal; -p for claude implies it
   -h, --help                       help for run
@@ -66,7 +66,7 @@ qory run [runtime] [-- argument...] [flags]
       --memory string              the most memory the container gets, such as 8g (forager.yaml: wall.memory)
       --mount stringArray          a path of this machine the container sees too, :ro for read-only; repeatable (forager.yaml: wall.mounts)
       --pids-limit int             the most processes and threads in the container (forager.yaml: wall.pids_limit)
-      --policy string              this run's own policy file, kept outside the checkout; it narrows gateway.egress of forager.yaml, never widens it (with a server: needs --local)
+      --policy string              this run's policy file, kept outside the checkout; it narrows gateway.egress of forager.yaml, never widens it (with a server: needs --local)
       --run-id string              the run's id, a UUID in lower case (default a new one)
       --run-key-fd int             read the run key from this file descriptor, 0 for stdin, in place of QORY_RUN_KEY, which an unwalled agent can read
       --shm-size string            the size of /dev/shm in the container, such as 2g (forager.yaml: wall.shm_size)

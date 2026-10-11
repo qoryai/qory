@@ -101,7 +101,7 @@ func TestModuleLinkRefusesTheCheckoutsOwnPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantsRow(t, out, "replaced", "harness  (the checkout's own; git checkout -- restores it)")
+	wantsRow(t, out, "replaced", "harness  (the checkout's file or directory; git checkout -- restores it)")
 	if _, err := os.Stat(filepath.Join(root, "harness", "scripts", "db.py")); err != nil {
 		t.Errorf("the link does not reach the module: %v", err)
 	}

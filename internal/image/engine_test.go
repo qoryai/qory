@@ -160,7 +160,7 @@ func TestEngineFindsSetuidFilesAndCapabilities(t *testing.T) {
 		tarFile{name: "usr/bin/git", mode: 0o755},
 	)}
 	checks := image.Engine{Run: f.run}.Check(context.Background(), "linux/arm64", image.Target{Ref: "a:1", Helper: "/q"})
-	want := "setuid or setgid: /usr/bin/passwd, /usr/bin/chage; capabilities of its own: /usr/bin/ping; remove them in the image: find / -xdev -type f -perm /6000 -exec chmod ug-s {} +, and setcap -r on each"
+	want := "setuid or setgid: /usr/bin/passwd, /usr/bin/chage; file capabilities: /usr/bin/ping; remove them in the image: find / -xdev -type f -perm /6000 -exec chmod ug-s {} +, and setcap -r on each"
 	if c := checks[3]; c.Name != "files" || c.Result != image.Fail || c.Detail != want {
 		t.Errorf("files %+v, want %q", c, want)
 	}

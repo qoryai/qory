@@ -136,5 +136,5 @@ func dropKeptRunKey(runID string, report func(string)) {
 // gateway of its own on this machine, while gateway.server.via is set: its record goes to
 // the server, and Forager's resend to the server goes through no gateway.
 func ownGatewayViaResend(runID string) error {
-	return input(fmt.Errorf("the run %s ran with a gateway of its own on this machine, so its record goes to the server, and qory sends it there through no gateway, while gateway.server.via is set: resend it with a %s without gateway.server.via", runID, config.ForagerFileName))
+	return input(fmt.Errorf("the run %s started its gateway itself on this machine, so its record goes to the server, and qory sends it there through no gateway, while gateway.server.via is set: resend it with a %s without gateway.server.via", runID, config.ForagerFileName))
 }

@@ -21,7 +21,7 @@ qory run claude -- -p "Reply pong"    # one headless turn; arguments after -- go
 
 The runtime is the one the harness is composed for. When it is composed for several, the
 first argument selects one. Arguments after `--` go to the runtime, after the launch
-template's own.
+template's arguments.
 
 qory computes the home itself, as compose does, and refuses a run whose harness report
 names another: run `qory harness compose` again. The report fixes no variable and adds no
@@ -45,7 +45,7 @@ When the run ends, qory says how, and its exit status goes with it:
 - `✗ the run failed: the gateway stopped during the run, and <runtime> was stopped`:
   exit 1.
 
-With a gateway of the run's own, the gateway may record the run's end after the runtime
+When the run starts its gateway itself, the gateway may record the run's end after the runtime
 exited by itself. A second line then follows the runtime's, such as `✗ the run was lost:
 it lost contact with the gateway for 1m30s` or `✗ the run failed: its events could not be
 recorded`, and the exit status follows it: 0 when the run completed, 1 otherwise. An end
@@ -56,7 +56,7 @@ Through a separate gateway, the run's starter ends the run with `qory run end`: 
 
 ### At a terminal, or on pipes
 
-At a terminal, the session runs on a pseudo-terminal. The runtime's own interface works,
+At a terminal, the session runs on a pseudo-terminal. The runtime's interface works,
 and its bytes are captured as well.
 
 The session runs on pipes instead, and `qory` reads the runtime's structured output, when:
@@ -73,7 +73,7 @@ Each run is recorded on your machine, outside the checkout, in qory's state dire
 `~/.local/state/qory/runs/<checkout>-<hash>/<id>/`, or under `$XDG_STATE_HOME/qory` when
 that is set to an absolute path. `<checkout>` is the checkout's directory name, and
 `<hash>` the first 12 hex digits of the SHA-256 of its full path, with links resolved.
-Each checkout has its own folder. The state directory, its `runs` directory and the
+Each checkout has a separate folder. The state directory, its `runs` directory and the
 checkout's folder are mode 0700: only you can open them. qory names the run's folder
 when the run ends:
 
@@ -250,7 +250,7 @@ Forager ships the descriptor for Claude Code. `~/.config/qory/runtimes/<runtime>
 describes another runtime, or replaces the one shipped.
 
 A runtime that nothing describes still runs. The run, its log and its egress are
-recorded. The session's own events are not.
+recorded. The session's events are not.
 
 ## Hosts a module declares
 
@@ -296,13 +296,13 @@ on `SIGTERM`. So the signal is yours to choose: `SIGTERM`, `SIGINT`, `SIGHUP`, `
 Several sources may set a variable of the agent's process. For each name, the run takes
 the value of the highest source that sets it:
 
-1. The values qory and the runtime fix: Forager's own names, `QORY_HARNESS_HOME`, and
-   the variables of the runtime's own launch template, such as Codex's `CODEX_HOME`. No
+1. The values qory and the runtime fix: Forager's names, `QORY_HARNESS_HOME`, and the
+   variables of the runtime's launch template, such as Codex's `CODEX_HOME`. No
    other source overrides them, `env` in `qory.yaml`, a settings fragment's and a
    module's export included. The `env` of `harness.launch.<runtime>` replaces the
    template's variables, and its values are defaults.
 2. The server's run configuration. See [The server](#the-server).
-3. `--env`, the run's own.
+3. `--env`, the run's.
 4. `wall.env`, the machine's.
 5. The harness's defaults: `env` in `qory.yaml`, the `env` of
    `harness.launch.<runtime>`, the `env` a settings fragment sets, and what the modules
@@ -349,7 +349,7 @@ repository among them, and the server answers with the run configuration. It fet
 again when the server reports it changed. It may hold:
 
 - `security_policy`, the server's policy. `gateway.egress` of `forager.yaml` narrows it:
-  see [A run's own policy](#a-runs-own-policy). Without it, `gateway.egress` is the
+  see [A run's policy file](#a-runs-policy-file). Without it, `gateway.egress` is the
   run's policy.
 - `variables`, which reach the agent's process. A value of the server wins over every
   source but the values qory and the runtime fix. See [A run's
@@ -430,7 +430,7 @@ request:
 
 - Its id is kept in the file `instance-id` beside `forager.yaml`, created by the first
   run with a server. An id that was not made on this machine is replaced. When qory
-  cannot write the directory, the id is the process's own, and qory says so.
+  cannot write the directory, the id is the process's alone, and qory says so.
 - `session.instance.name` is its display name on the server. Unless set, it is the host name, or
   the host name's first label when the whole does not fit: 1 to 64 of `A-Z`, `a-z`,
   `0-9`, dot, underscore and dash, starting with a letter or a digit.
@@ -444,13 +444,13 @@ refusal means and what to do, then Forager's words and the code:
 | `unauthorized` | the server refused the request: it does not know the access key, has revoked it, or this machine's clock is more than five minutes off; check the clock, else move this machine to a new key with `qory access-key enrol --replace`; for a key from `QORY_ACCESS_KEY_SECRET` or `--access-key-secret-fd`, enrol a new key |
 | `answer_unsigned` | an answer does not verify under the pin |
 | `instance_limit` | the node's live instances are at its limit |
-| `node_uses_gateway` | the machine's node goes through a gateway, and `gateway.server.via` is not set: set it, or set the node to "Direct" in Qory Apiary. See [A machine with its own key behind a gateway](#a-machine-with-its-own-key-behind-a-gateway) |
+| `node_uses_gateway` | the machine's node goes through a gateway, and `gateway.server.via` is not set: set it, or set the node to "Direct" in Qory Apiary. See [A machine with a separate access key, behind a gateway](#a-machine-with-a-separate-access-key-behind-a-gateway) |
 
 A gateway's access key runs no sessions. When the server's configuration names a gateway's
 node, `qory run` stops before the run registers:
 
 ```text
-✗ this machine's gateway serves other machines and runs no sessions; give this machine a node of its own
+✗ this machine's gateway serves other machines and runs no sessions; give this machine a separate node
 ```
 
 #### Enrol with a code
@@ -492,7 +492,7 @@ When the enrolment does not complete:
 
 | Answer | What qory does |
 | --- | --- |
-| 401, `unauthorized` | the code was used or has expired. The secret made for it, in `access-key-secret.new`, is moved aside, and enrolling needs a new code. If you did not use the code, someone else did: tell the owner or administrator in Qory Apiary who made it. The code's issuer must revoke the key it enrolled |
+| 401, `unauthorized` | the code was used or has expired. The secret made for it, in `access-key-secret.new`, is moved aside, and enrolling needs a new code. If you did not use the code, someone else did: tell the owner or administrator in Qory Apiary who made it. They must revoke the key the code enrolled |
 | `key_invalid` | the server refused the key. The secret made for it, in `access-key-secret.new`, is moved aside, and enrolling needs a new code |
 | `key_limit` | the node already holds two keys. qory keeps the key: once an owner or administrator in Qory Apiary has revoked one of them, the same command within the 15 minutes succeeds |
 | 429, `rate_limited`, signed | this code was tried too often. `forager.yaml` is not changed. qory keeps the key, and the same command, run later within the code's 15 minutes, retries with it. An unsigned 429 is an `answer_unsigned` |
@@ -584,7 +584,7 @@ Only `QORY_ACCESS_KEY_SECRET` belongs in the starter's secret store. The id and 
 plain settings; `QORY_APIARY_PUBLIC_KEY` is the pin as JSON. The starter's `forager.yaml`
 then needs `gateway.server.url` alone, and `gateway.server.via` when it reaches Qory Apiary
 only through the gateway. Such a starter enrols through the gateway too, with `--via`: see
-[A machine with its own key behind a gateway](#a-machine-with-its-own-key-behind-a-gateway).
+[A machine with a separate access key, behind a gateway](#a-machine-with-a-separate-access-key-behind-a-gateway).
 
 For each job, the starter registers the run, and the run key goes to the job:
 
@@ -607,7 +607,7 @@ it was told are secret, so register it as masked where the CI can.
 
 Use a new run id for each attempt, a retry included; without `--run-id`, qory makes one,
 and the second line names it. `--instance-id` names the runner the run takes a place on:
-by default the run's own id, for a runner used once. `--attach-within` is how long the
+by default the run's id, for a runner used once. `--attach-within` is how long the
 runner has to start the run, in whole seconds, such as `15m`; by default the server's
 window, and never more than the server allows.
 
@@ -648,7 +648,7 @@ means and what to do, then Forager's words and the code:
 | `no_default_gateway` | the key's node is set to "Default gateway", and no default gateway serves its workspace: mark a gateway as default in Qory Apiary, or choose one for the node |
 | `gateway_not_serving` | the gateway the key's node names no longer serves the node's workspace: choose another gateway for the node in Qory Apiary |
 | `gateway_without_key` | the gateway the key's node goes through has no active access key, so no run could start there: enrol a key for the gateway, then register again |
-| `node_is_direct` | the key's node is set to "Direct": each of its machines registers its own runs, and a starter registers none. Choose a gateway for the node in Qory Apiary |
+| `node_is_direct` | the key's node is set to "Direct": each of its machines registers each run itself, and a starter registers none. Choose a gateway for the node in Qory Apiary |
 | `gateway_key` | the access key is a gateway's, and a gateway registers no runs: register with the key of the node pool the run belongs to |
 | `instance_limit` | the node's live instances have reached its limit, so the run is not registered: wait for a run to end, or have an owner or administrator in Qory Apiary clear an instance |
 | `run_id_used` | the run id is already used by another run: leave out `--run-id`, or give a new one |
@@ -709,8 +709,8 @@ is refused.
 ## Through a separate gateway
 
 A run goes through a separate gateway when it is given a run key, by `--run-key-fd` or
-`QORY_RUN_KEY`, or when `forager.yaml` sets `gateway.server.via` on a machine with its own
-key. qory then starts no gateway of its own. The run key names the gateway; no setting
+`QORY_RUN_KEY`, or when `forager.yaml` sets `gateway.server.via` on a machine with a separate
+access key. qory then starts no gateway itself. The run key names the gateway; no setting
 does.
 
 The gateway is `qory gateway` on another machine, or a service on this one: see [the
@@ -718,7 +718,7 @@ gateway as a service](gateway.md). The session reaches it over TLS 1.3, at the a
 run key names, and every request carries the run key. The proxy, the policy, the
 credentials and the access key are the gateway's, on its machine, and the gateway reports
 the run to Qory Apiary. Without a run key or `gateway.server.via`, nothing changes: `qory
-run` starts a gateway of its own for each run.
+run` starts a gateway itself for each run.
 
 The run's first line names the gateway and the run:
 
@@ -743,7 +743,7 @@ Giving it both ways is refused: `--run-key-fd and QORY_RUN_KEY both give a run k
 one way`. White space around the key is left out.
 
 An unwalled agent behind a gateway holds at most the run key. qory takes `QORY_RUN_KEY` out of
-the environment the agent gets. But on Linux, an agent running as you can read qory's own
+the environment the agent gets. But on Linux, an agent running as you can read qory's
 environment through `/proc`, and its memory where your programs may debug one another. Within
 the live run, whoever holds the run key can post events and open proxy connections as the
 session, for that run only. A wall keeps it out.
@@ -771,7 +771,7 @@ The run's labels and what it is about are its registration's, which its starter 
 qory sends no `forge` or `repository` of the checkout's either: the starter gives them as
 labels.
 
-### A machine with its own key behind a gateway
+### A machine with a separate access key, behind a gateway
 
 A machine that holds its node's access key, and reaches Qory Apiary only through a
 gateway, names that gateway in `gateway.server.via`. qory then registers each run itself,
@@ -780,7 +780,7 @@ starter registered does. Such a machine holds an access key, so it runs walled o
 unwalled run is refused, `key_needs_wall`.
 
 ```yaml
-# ~/.config/qory/forager.yaml, on a machine with its own key behind a gateway
+# ~/.config/qory/forager.yaml, on a machine with a separate access key, behind a gateway
 apiVersion: qory.dev/v1alpha1
 gateway:
   server:
@@ -833,14 +833,14 @@ reads it from there, with no `QORY_RUN_KEY`. A run key that cannot be kept stops
 `the run <id> is registered, and its run key could not be kept beside forager.yaml, so the
 run does not start: <err>`.
 
-Such a machine starts no gateway of its own, so the rest of the `gateway` section does
+Such a machine starts no gateway itself, so the rest of the `gateway` section does
 nothing there: `qory run` refuses each key of it beside `gateway.server`, such as
 `gateway.egress`, `gateway.credentials`, `gateway.integrations`, `gateway.listen` and
 `gateway.tls`, before anything starts or registers, exit 2, one line per key in
 alphabetical order: `<file>: gateway.<key> does nothing on this machine: gateway.server.via
 sends its runs through a gateway, which holds their policy, credentials and integrations;
-remove gateway.<key>, or remove gateway.server.via`. `qory run --local` runs a gateway of
-its own, which reads their policy, credentials and integrations, so it is not refused.
+remove gateway.<key>, or remove gateway.server.via`. `qory run --local` starts a gateway itself,
+which reads their policy, credentials and integrations, so it is not refused.
 
 When the server refuses the registration, qory says what the refusal means and what to do,
 then Forager's words and the code:
@@ -855,10 +855,10 @@ then Forager's words and the code:
 
 Before anything starts, `qory run` given a run key refuses:
 
-- `--local runs with a gateway of this run's own and no server, and a run key is given, by
+- `--local runs with a gateway the run starts itself and no server, and a run key is given, by
   QORY_RUN_KEY or --run-key-fd: the run goes through the gateway its run key names; give no
   run key to run --local`
-- `--policy is the run's own policy for a gateway the run starts itself, and a run key is
+- `--policy is a run's policy file for a gateway the run starts itself, and a run key is
   given, by QORY_RUN_KEY or --run-key-fd: the gateway its run key names takes the run's
   policy from the server`
 - `<file> exists, and a run key is given, by QORY_RUN_KEY or --run-key-fd: a machine whose
@@ -880,7 +880,7 @@ Before anything starts, `qory run` given a run key refuses:
   a descriptor of 3 or above`, `--run-key-fd <n>: more than a run key`, and `--run-key-fd
   <n>: <err>` for a descriptor qory cannot read
 
-A machine with its own key behind a gateway registers its own runs, so a run key given to
+A machine with a separate access key, behind a gateway, registers each run itself, so a run key given to
 it is refused by the same lines.
 
 A run that ended before its runtime started says `✗ the run did not start: it has ended
@@ -899,7 +899,7 @@ qory run end "$run_id"                                   # cancelled, with no ou
 
 `--outcome` is `completed`, `failed` or `cancelled`. `--reason` is a code of yours, such as
 `checks_failed`: a lower-case letter, then lower-case letters, digits and `_`, at most 64,
-and none of Forager's own reasons. It needs `--outcome`. The request is signed with the
+and none of Forager's reasons. It needs `--outcome`. The request is signed with the
 access key of the node pool that registered the run, read as `qory run register` reads it,
 and goes through `gateway.server.via` when that is set. The server records the outcome, and
 a run that is still running ends: its runtime is stopped. A run has one outcome: the same
@@ -957,15 +957,15 @@ removes the containers and networks the run's wall left, as without a gateway.
 
 Each but the first two is exit 1, and the events stay in the run directory. Without a run
 key, Forager says `resend <dir>: the run key is needed to send to its gateway; set
-QORY_RUN_KEY`, exit 2. A run that ran with a gateway of its own on this machine is refused
-with a run key given: `the run <id> ran with a gateway of its own on this machine, so its
+QORY_RUN_KEY`, exit 2. A run that started its gateway itself on this machine is refused with a run
+key given: `the run <id> started its gateway itself on this machine, so its
 record goes to the server, not to a gateway: resend it without a run key`. With
 `gateway.server.via` set, such a run is refused too: qory sends a record to the server
 through no gateway, so resend it with a `forager.yaml` without `gateway.server.via`.
 
 ## Runs started by another system
 
-A system that starts runs of its own sets their id and labels, and says what each is
+A system that starts runs sets their id and labels, and says what each is
 about. It passes each run its policy:
 
 ```sh
@@ -974,10 +974,10 @@ qory run --run-id "$uuid" --label job=1234 --label issue=77 \
 ```
 
 - `--run-id` is a new UUID, in lower case, for each attempt, a retry included. A caller
-  that has only a key of its own for the work, such as `job` here, passes it as a
+  that has only a key from its system for the work, such as `job` here, passes it as a
   label, never as the run id.
 - The labels go into `dev.qory.run.started`, and into the run's registration.
-  There, a server ties the run to its own records and chooses its policy.
+  There, a server ties the run to records it keeps and chooses its policy.
 
 Two labels come from the checkout's origin remote, unless `--label` sets them:
 
@@ -1005,7 +1005,7 @@ qory run --kind review --title "Review the parser change" \
 | `--kind`    | what kind of run it is, a word of yours such as `review` | 64 bytes                            |
 | `--title`   | the run's title                                          | 256 bytes                           |
 | `--subject` | what the run works on; repeatable                        | 16 subjects                         |
-| `--details` | a JSON object of your own, from a file or stdin          | 8192 bytes compacted, 4 levels deep |
+| `--details` | a JSON object of yours, from a file or stdin             | 8192 bytes compacted, 4 levels deep |
 
 Each is optional. An empty `--kind`, `--title` or `--details` is none. They go into
 `about` on `dev.qory.run.started`, and no other event repeats them. The run's
@@ -1049,9 +1049,9 @@ input error, exit status 2, and the run does not start. The run above starts wit
 }
 ```
 
-### A run's own policy
+### A run's policy file
 
-`--policy` passes one run's own policy. It is in the Forager contract's format. Keep it
+`--policy` passes one run's policy file. It is in the Forager contract's format. Keep it
 outside the checkout. It suits a machine that serves runs of different kinds.
 
 It only narrows. `gateway.egress` of the machine's `forager.yaml` decides how:
@@ -1087,7 +1087,7 @@ comes from one of three places:
 - an adapter, `adapter` (see [Adapters](#adapters)).
 
 A run's policy selects among them by name, with an argument for an adapter, such as a
-repository. A policy defines no credential of its own.
+repository. A policy defines no credential.
 
 ```yaml
 # ~/.config/qory/forager.yaml
@@ -1132,7 +1132,7 @@ host. It runs outside the container. It prints:
 - the token's expiry,
 - the hosts, the scheme and the paths the token is for.
 
-So `qory` defines no host of its own. `argument` is the pattern the policy's argument must
+So `qory` defines no host itself. `argument` is the pattern the policy's argument must
 match whole, and the gateway puts the argument where the adapter's words say
 `${argument}`. `hosts` and `paths` on an adapter's entry are the most its answer may claim.
 An [integration](#integrations) is an adapter that describes itself.
@@ -1202,7 +1202,7 @@ For the hosts of the credentials the policy selects and the hosts with path rule
 other, the proxy ends the container's TLS itself. It uses an authority made for the run.
 The authority's key never leaves the gateway.
 
-The container receives one bundle to trust: its image's own authorities, and the run's
+The container receives one bundle to trust: its image's authorities, and the run's
 certificate. The bundle goes in through these variables:
 
 - `SSL_CERT_FILE`
@@ -1226,7 +1226,7 @@ itself. It gives a run a credential through its credential role: a token minted 
 run, which the agent must not hold. The program runs on your machine, outside the wall.
 The agent never holds its secrets, or the token it mints.
 
-- Qory publishes its own, each in a repository of its own, such as
+- Qory publishes integrations, each in a separate repository, such as
   [`qory-github`](https://github.com/qoryai/qory-github). Its integration is named
   `github`.
 - A program of yours starts from the
@@ -1249,7 +1249,7 @@ no settings and reaches no network.
 |---|---|
 | `name` | the integration's name, such as `github`: the key a machine declares it under, unless the machine chooses another |
 | `title`, `description` | text for a listing or a form |
-| `program_version` | the program's own version, a string. `qory run` and `qory config` show it |
+| `program_version` | the program's version, a string. `qory run` and `qory config` show it |
 | `settings` | a JSON Schema, draft 2020-12, of the settings the program takes. A property marked `writeOnly` is a secret: `qory` refuses its value, and takes `<name>_file` in its place, the path of a file that holds it |
 | `roles` | the roles it plays, each under its role's name, such as `credential`. `qory` expands the `credential` role and leaves the others as they are. An integration that plays no role `qory` expands is refused |
 
@@ -1331,7 +1331,7 @@ A policy selects it by the key: `{name: github, argument: acme/shop}`.
 - On a machine whose `PATH` is not its owner's alone, set `program` to each program's
   absolute path.
 
-`qory run` prints the program it found, and its version, on a line of its own:
+`qory run` prints the program it found, and its version, on a separate line:
 
 ```
 qory run: integration github: /usr/local/bin/qory-github 0.1.0
@@ -1411,7 +1411,7 @@ names the setting and the rule, never a value.
 
 A name `gateway.credentials` defines itself belongs to that section. Then:
 
-- `qory run` and `qory config` print a line of their own that says so, such as:
+- `qory run` and `qory config` print a separate line that says so, such as:
 
   ```
   qory run: forager.yaml: gateway.credentials.github defines the credential github, and gateway.integrations.github defines none
@@ -1559,8 +1559,8 @@ With a wall:
 
 - The runtime starts in a container, on a network with no route out.
 - It reaches the proxy, and nothing else, through a relay.
-- The container sees the checkout and the composed home, at their own paths, and the
-  run's own record directory, read-only. It sees nothing else of your machine.
+- The container sees the checkout and the composed home, at the same paths as on
+  your machine, and the run's record directory, read-only. It sees nothing else of your machine.
 - Of your environment, the container gets the ones `wall.env` or `--env` lists, and
   nothing else. The harness's launch variables, fixed and defaults, reach the agent in
   the container as they do outside it. See [A run's variables](#a-runs-variables).
@@ -1579,11 +1579,11 @@ What to know:
   does not start, `placeholder_conflict`. A subscription login kept in a Mac's Keychain
   does not reach a container. Use an API key, or a token from `claude setup-token`.
 - **The helper on a Mac.** Inside the container, the relay, the hook forwarder and what
-  starts an image's own Docker are `qory`'s own Linux build, mounted read-only. On Linux, that is the binary you run. On a Mac, download the
+  starts nested Docker are `qory`'s Linux build, mounted read-only. On Linux, that is the binary you run. On a Mac, download the
   Linux archive of the same release, for your engine's architecture. Set `wall.helper` to
   that binary.
-- **What the container sees.** The checkout it was started in, and the run's own record
-  directory, read-only, and no other directory. `--mount <path>[:ro]` or `wall.mounts` shows it another one, at its own path, such as a
+- **What the container sees.** The checkout it was started in, and the run's record directory,
+  read-only, and no other directory. `--mount <path>[:ro]` or `wall.mounts` shows it another one, at the same path as on your machine, such as a
   sibling checkout the session reads. A socket is never mounted. A mount is refused
   before the run starts, `mount_contains_forager_files`, when it is, contains or lies
   inside one of these:
@@ -1595,7 +1595,7 @@ What to know:
     contains it, every link on the way to it;
   - the file of a `<name>_file` setting of an integration the run describes, where its
     path leads, and, for a mount that is or contains it, every link on the way to it;
-  - one of Forager's own program and temporary files, such as a program it starts
+  - one of Forager's program and temporary files, such as a program it starts
     outside the wall.
 
   For a mount that is or contains the access key, `qory run` says:
@@ -1641,7 +1641,7 @@ What to know:
   `mount_shared_with_run`; a place that is the same path as one of that run's is not
   refused. The refusal names the other run: once it has ended, remove the containers
   `docker ps --all --filter label=dev.qory.run=<id>` lists, and it no longer counts. While both are going, each agent sees what the
-  other writes there, and changes it where its own place is writable: the two can clash
+  other writes there, and changes it where its place is writable: the two can clash
   on data, but neither gets a way out of its wall. A read-only mount of a path another
   run has writable is accepted too, so what it shows can change during the run.
 - **Git in a worktree.** In a git worktree, the repository's data lives in the main
@@ -1652,7 +1652,7 @@ What to know:
   writes them: a number and `b`, `k`, `m` or `g`, in either case. So `14g` is 14 GB and
   `2g` is 2 GB; `14GB` or `14GiB` is refused. A headless browser wants `--shm-size 2g`:
   an engine's default `/dev/shm` is 64 MB.
-- **Your own machine.** Behind a wall, the proxy reaches your own machine only for a host
+- **Your machine.** Behind a wall, the proxy reaches your machine only for a host
   that the policy's `egress.allow` lists itself, in either mode. It never reaches the
   cloud metadata address. For a local model endpoint or MCP server, list your machine's host name, and
   point the harness at that name. `localhost` inside the container is the container.
@@ -1695,13 +1695,13 @@ What each of them does:
 - **Any user.** The container runs as your user, whom the image does not know. `HOME`
   is `/home/agent`, which every user may write.
 - **No setuid program.** None is needed, and none is there.
-- **Nothing on its own.** It has no entry point. Claude Code and `gh` neither update
+- **Nothing runs by itself.** It has no entry point. Claude Code and `gh` neither update
   themselves nor ask for input, and Claude Code sends no telemetry or error reports,
   which a run under `enforce` would otherwise show as denied connections.
-- **Docker.** `agent-docker` holds the daemon for a Docker of the agent's own, under a
+- **Docker.** `agent-docker` holds the daemon for nested Docker, under a
   runtime such as Sysbox. The image starts nothing: define it in `wall.images` with
   `runtime: sysbox-runc` and `docker: true`, and `qory run nest` starts the daemon. See
-  [A Docker of the agent's own](#a-docker-of-the-agents-own).
+  [Nested Docker](#nested-docker).
 - **Go.** `agent-go` has Go at the version the image pins, with `GOTOOLCHAIN=local`, so a
   `go.mod` that asks for a newer one fails instead of downloading it. `GOPATH` and the
   caches are under `HOME`. It has no C compiler, so cgo is off.
@@ -1730,7 +1730,7 @@ one fails.
 - From outside: the engine holds the image, for the platform the engine runs; the image
   sets `HOME`; the reference is pinned by digest or not, which fails nothing. Then it
   reads every file of the image, as `docker export` writes them, and fails a file that
-  is setuid or setgid or has capabilities of its own.
+  is setuid or setgid or has file capabilities.
 - From inside: it starts the image the way the wall starts the agent, as a user the image
   does not know, with no capability and no network. `qory`'s Linux build then checks
   that `HOME` takes a file from that user, the authorities are where the wall reads
@@ -1756,7 +1756,7 @@ wall:
   images:
     go:
       ref: ghcr.io/acme/agent-go@sha256:…
-    go-docker:              # experimental: a Docker of the agent's own
+    go-docker:              # experimental: nested Docker
       ref: ghcr.io/acme/agent-go-docker@sha256:…
       runtime: sysbox-runc
       docker: true
@@ -1778,7 +1778,7 @@ image: go-docker
   `wall.images`, or a reference. A name is read as that image first.
 - A policy's selection wins over the default, `--image` included. A run whose policy
   selects no image starts in the default.
-- A run whose own `--policy` selects an image needs no default. A machine that reports
+- A run whose `--policy` selects an image needs no default. A machine that reports
   to a server sets `wall.image`: the server's run configuration arrives once the run
   starts, and may select none.
 - `qory config` lists the images, and shows whether `wall.image` is a name of
@@ -1794,20 +1794,21 @@ image of `wall.images` it also has `image_name`, and `container_runtime` and
 `docker: true` when they apply. `dev.qory.run.policy_applied` records `image` when the
 policy selects one.
 
-### A Docker of the agent's own
+### Nested Docker
 
 *Experimental: it may change.*
 
-With `docker: true`, the agent gets a Docker daemon inside its container, never your
-machine's. Its tests can start a database. It can build and run images.
+With `docker: true`, the agent gets nested Docker: a Docker daemon inside the wall,
+separate from the machine's. Its tests can start a database. It can build and run images.
 
 Define an image with `docker: true` only where every run may get one: any policy can
 select it.
 
-It needs [Sysbox](https://github.com/nestybox/sysbox), registered with your engine as
-`sysbox-runc`, and `runtime: sysbox-runc` on the image. Sysbox gives the container a root
-of its own, a user of your machine that is not root. A Mac's own engine has no Sysbox:
-run these images on a Linux machine that has it.
+It needs Docker Engine 28 or later, with [Sysbox](https://github.com/nestybox/sysbox)
+registered as `sysbox-runc`, and `runtime: sysbox-runc` on the image; with an older
+engine, the run is refused before it starts. Sysbox gives the container a separate root,
+a user of your machine that is not root. A Mac's engine has no Sysbox: run these
+images on a Linux machine that has it.
 
 What the image holds:
 
@@ -1836,7 +1837,7 @@ How it works:
   the container's root: inside the container, and nowhere else.
 - The containers the agent starts are inside the wall. A plain one, one on the host's
   network and a privileged one all reach the proxy and nothing else. What they reach is
-  decided and recorded like the agent's own traffic.
+  decided and recorded like the agent's traffic.
 - The daemon pulls through the proxy, so allow the registries it pulls from. For Docker
   Hub: `registry-1.docker.io`, `auth.docker.io`, and the hosts it sends the layers from,
   such as `production.cloudfront.docker.com`. The record lists the ones it was denied.

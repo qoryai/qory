@@ -162,7 +162,7 @@ func TestRunRefusesAReportNamingAnotherHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = run(t, "run", "claude", "--home", home)
-	want = "the harness report " + path + " names the checkout " + os.Getenv("HOME") + ", and " + home + " is not that checkout's home; a run uses only a checkout's own home, so the run does not start. Run qory harness compose again"
+	want = "the harness report " + path + " names the checkout " + os.Getenv("HOME") + ", and " + home + " is not that checkout's home; a run uses only its checkout's home, so the run does not start. Run qory harness compose again"
 	if cmd.ExitCode(err) != cmd.ExitInput || err.Error() != want {
 		t.Errorf("--home with a report naming another checkout: %v (exit %d), want %q", err, cmd.ExitCode(err), want)
 	}

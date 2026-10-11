@@ -213,13 +213,13 @@ func TestARunKeyRefusesWhatItsRunCannotHave(t *testing.T) {
 		want  func() string
 	}{
 		{"--local", func(*testing.T) []string { return []string{"run", "--local"} }, func() string {
-			return "--local runs with a gateway of this run's own and no server, and a run key is given, by QORY_RUN_KEY or --run-key-fd: the run goes through the gateway its run key names; give no run key to run --local"
+			return "--local runs with a gateway the run starts itself and no server, and a run key is given, by QORY_RUN_KEY or --run-key-fd: the run goes through the gateway its run key names; give no run key to run --local"
 		}},
 		{"--policy", func(t *testing.T) []string {
 			writeFile(t, filepath.Join(root, "policy.yaml"), "egress:\n  mode: observe\n")
 			return []string{"run", "--policy", filepath.Join(root, "policy.yaml")}
 		}, func() string {
-			return "--policy is the run's own policy for a gateway the run starts itself, and a run key is given, by QORY_RUN_KEY or --run-key-fd: the gateway its run key names takes the run's policy from the server"
+			return "--policy is a run's policy file for a gateway the run starts itself, and a run key is given, by QORY_RUN_KEY or --run-key-fd: the gateway its run key names takes the run's policy from the server"
 		}},
 		{"an access key's file", func(t *testing.T) []string {
 			writeSecret(t, newKey(t))
@@ -378,7 +378,7 @@ func TestResendGoesWhereTheRunWent(t *testing.T) {
 	t.Setenv("QORY_RUN_KEY", key)
 	_, before := gw.received()
 	out, err = run(t, "run", "resend", own)
-	if want := "the run " + own + " ran with a gateway of its own on this machine, so its record goes to the server, not to a gateway: resend it without a run key"; err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
+	if want := "the run " + own + " started its gateway itself on this machine, so its record goes to the server, not to a gateway: resend it without a run key"; err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Errorf("a run with its own gateway: %v (exit %d)\nwant %q", err, cmd.ExitCode(err), want)
 	}
 	const missing = "0192f0c1-7d4e-7a2b-8c3d-222222222222"
@@ -454,7 +454,7 @@ func TestTheRunKeyIsNoAgentsVariable(t *testing.T) {
 		for _, k := range []string{"", key} {
 			t.Setenv("QORY_RUN_KEY", k)
 			out, err := run(t, "run", "--env", name)
-			if want := "--env " + name + ": the variable is Forager's own and never the agent's"; cmd.ExitCode(err) != cmd.ExitInput || err == nil || err.Error() != want {
+			if want := "--env " + name + ": the variable is Forager's and never the agent's"; cmd.ExitCode(err) != cmd.ExitInput || err == nil || err.Error() != want {
 				t.Errorf("--env %s, key %v: %v (exit %d), want %q", name, k != "", err, cmd.ExitCode(err), want)
 			}
 			lacks(t, out, key[4:40], "hello from")
@@ -466,7 +466,7 @@ func TestTheRunKeyIsNoAgentsVariable(t *testing.T) {
 		for _, k := range []string{"", key} {
 			t.Setenv("QORY_RUN_KEY", k)
 			out, err := run(t, "run")
-			if want := file + ": wall.env[0] names a variable that is Forager's own and never the agent's"; cmd.ExitCode(err) != cmd.ExitInput || err == nil || err.Error() != want {
+			if want := file + ": wall.env[0] names a variable that is Forager's and never the agent's"; cmd.ExitCode(err) != cmd.ExitInput || err == nil || err.Error() != want {
 				t.Errorf("wall.env [%s], key %v: %v (exit %d), want %q", name, k != "", err, cmd.ExitCode(err), want)
 			}
 			lacks(t, out, key[4:40], "hello from")
@@ -484,7 +484,7 @@ func TestRunRefusesAGatewaysAccessKey(t *testing.T) {
 	_, srv := serverRun(t, "", "")
 	srv.node = testGatewayNode
 	out, err := run(t, "run")
-	if want := "this machine's gateway serves other machines and runs no sessions; give this machine a node of its own"; err == nil || err.Error() != want {
+	if want := "this machine's gateway serves other machines and runs no sessions; give this machine a separate node"; err == nil || err.Error() != want {
 		t.Errorf("%v, want %q\n%s", err, want, out)
 	}
 	if cmd.ExitCode(err) == 0 {

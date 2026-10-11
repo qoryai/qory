@@ -14,7 +14,7 @@ later one.
 **"Contribution"** is any original work of authorship, including any changes or additions
 to an existing work, that you submit to the Owner for inclusion in this project. "Submit"
 means any form of electronic, verbal or written communication sent to the Owner or to the
-project, including a pull request, an issue, a patch, or a message on the project's own
+project, including a pull request, an issue, a patch, or a message on the project's
 communication channels, except communication that you mark in writing as "Not a
 Contribution".
 
@@ -50,8 +50,8 @@ on the date the litigation is filed.
   its behalf, the employer has waived such rights for your Contributions to the Project, or
   the employer has accepted this agreement for you.
 - Each of your Contributions is your original creation. Where a Contribution includes work
-  that is not your original creation, you submit it separately from any Contribution of your
-  own, you identify the complete details of its source and of any licence or other
+  that is not your original creation, you submit it separately from any Contribution that is
+  your original creation, you identify the complete details of its source and of any licence or other
   restriction, including related patents, trademarks and licence agreements, of which you
   are aware, and you mark the work as "Submitted on behalf of a third party: [name]".
 - You will notify the Owner of any facts or circumstances of which you become aware that

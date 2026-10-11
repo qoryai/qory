@@ -56,7 +56,7 @@ else access-key-secret, as for qory run. With gateway.server.via set, the regist
 through that gateway, unchanged.
 
 Use a new run id for each attempt, a retry included. --instance-id names the runner the run
-takes a place on: by default the run's own id, for a runner used once. --attach-within is
+takes a place on: by default the run's id, for a runner used once. --attach-within is
 how long the runner has to start the run; by default the server's window, and never more
 than the server allows.
 
@@ -145,12 +145,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#for-a-starter`,
 	}
 	c.Flags().StringVar(&runID, "run-id", "", "the run's id, a UUID in lower case (default a new one)")
 	c.Flags().StringVar(&instanceID, "instance-id", "", "the runner the run takes a place on, 1 to 64 of A-Z, a-z, 0-9, dot, underscore and dash (default the run id: a runner used once)")
-	c.Flags().DurationVar(&attachWithin, "attach-within", 0, "how long the runner has to start the run, in whole seconds, such as 15m (default the server's; the server allows at most its own limit)")
+	c.Flags().DurationVar(&attachWithin, "attach-within", 0, "how long the runner has to start the run, in whole seconds, such as 15m (default the server's; the server allows at most its limit)")
 	c.Flags().StringArrayVar(&labels, "label", nil, "a key=value name for the run, reported in its events; repeatable")
 	c.Flags().StringVar(&kind, "kind", "", "what kind of run it is, such as review or fix, reported when the run starts")
 	c.Flags().StringVar(&title, "title", "", "the run's title, for a person to read, reported when the run starts")
 	c.Flags().StringArrayVar(&subjects, "subject", nil, "what the run works on, type=<type>,ref=<ref>[,url=<url>][,title=<title>], such as type=ticket,ref=7; title takes the rest of the value, commas too; repeatable")
-	c.Flags().StringVar(&details, "details", "", "a JSON object of the run's own details, read from this file, or - for stdin when stdin is not a terminal; at most 8192 bytes compacted, 4 levels deep")
+	c.Flags().StringVar(&details, "details", "", "a JSON object of the run's details, read from this file, or - for stdin when stdin is not a terminal; at most 8192 bytes compacted, 4 levels deep")
 	c.Flags().IntVar(&secretFD, secretFDFlag, 0, secretFDUsage)
 	c.Flags().IntVar(&keyFD, runKeyFDFlag, 0, registerRunKeyFDUsage)
 	return c
@@ -286,7 +286,7 @@ func explainRegistration(err error, id *serverIdentity, runID string, keyed bool
 	case "gateway_without_key":
 		text = "the gateway " + node + " goes through has no active access key, so no run could start there: enrol a key for the gateway, then register again"
 	case "node_is_direct":
-		text = `this key's node is set to "Direct": each of its machines registers its own runs, and a starter registers none. Choose a gateway for the node in Qory Apiary`
+		text = `this key's node is set to "Direct": each of its machines registers each run itself, and a starter registers none. Choose a gateway for the node in Qory Apiary`
 		if keyed {
 			text = `this machine's node is set to "Direct", and gateway.server.via names a gateway: remove gateway.server.via, or choose a gateway for the node in Qory Apiary`
 		}
@@ -417,7 +417,7 @@ func endOutcome(word, reason string) (server.Outcome, error) {
 		return o, input(fmt.Errorf("--reason %s is not a code: a lower-case letter, then lower-case letters, digits and _, at most 64", reason))
 	}
 	if !event.StarterReason(reason) {
-		return o, input(fmt.Errorf("--reason %s is one of Forager's own reasons; give one of yours", reason))
+		return o, input(fmt.Errorf("--reason %s is one of Forager's reasons; give one of yours", reason))
 	}
 	o.Reason = reason
 	return o, nil

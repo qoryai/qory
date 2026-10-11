@@ -89,7 +89,7 @@
               }
             },
             "via": {
-              "description": "Optional: the gateway this machine reaches the server through, when that gateway is its only way out. Every request to the server goes to the gateway's address with its path unchanged, and the gateway passes it on and passes the answer back; url above stays the server's own. The gateway's certificate chain is always checked. Absent, the server is reached directly.",
+              "description": "Optional: the gateway this machine reaches the server through, when that gateway is its only way out. Every request to the server goes to the gateway's address with its path unchanged, and the gateway passes it on and passes the answer back; url above stays the server's. The gateway's certificate chain is always checked. Absent, the server is reached directly.",
               "type": "object",
               "additionalProperties": false,
               "required": ["url"],
@@ -225,7 +225,7 @@
           }
         },
         "listen": {
-          "description": "The address qory gateway listens on for the runs of other machines, host:port. qory run never listens on it: it starts a gateway of its own on a loopback port for each run.",
+          "description": "The address qory gateway listens on for the runs of other machines, host:port. qory run never listens on it: it starts a gateway itself on a loopback port for each run.",
           "type": "string",
           "pattern": "^[^\\s]*:[0-9]{1,5}$"
         },
@@ -256,7 +256,7 @@
       "additionalProperties": false,
       "properties": {
         "instance": {
-          "description": "This instance of the machine, as the server shows it. Its id is qory's own, kept in the file instance-id beside this file.",
+          "description": "This instance of the machine, as the server shows it. Its id is made by qory and kept in the file instance-id beside this file.",
           "type": "object",
           "additionalProperties": false,
           "properties": {
@@ -306,7 +306,7 @@
           ]
         },
         "image": {
-          "description": "The agent's image when the run's policy selects none, the runtime and the project's toolchain: the name of one of images, or a reference. A name images defines is read as that image first. --image sets another for one run, and a policy's selection wins over both. May be left out when --image sets one, or when the run's own --policy selects an image; a machine that reports to a server sets it, because the server's run configuration may select none.",
+          "description": "The agent's image when the run's policy selects none, the runtime and the project's toolchain: the name of one of images, or a reference. A name images defines is read as that image first. --image sets another for one run, and a policy's selection wins over both. May be left out when --image sets one, or when the run's --policy selects an image; a machine that reports to a server sets it, because the server's run configuration may select none.",
           "type": "string",
           "minLength": 1,
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._/:@-]*$"
@@ -335,7 +335,7 @@
                 "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
               },
               "docker": {
-                "description": "Experimental. The agent gets a Docker daemon of its own inside the container, which qory's helper starts before the agent; the image holds dockerd. Needs a runtime that runs a daemon without privileges: sysbox-runc. Any policy can select the image, so define one only where every run may get a daemon. Default false.",
+                "description": "Experimental. Nested Docker, a Docker daemon inside the wall, separate from the machine's: qory's helper starts it before the agent; the image holds dockerd. Needs Docker Engine 28 or later and a runtime that runs a daemon without privileges: sysbox-runc. Any policy can select the image, so define one only where every run may get a daemon. Default false.",
                 "type": "boolean"
               }
             },
@@ -376,12 +376,12 @@
           }
         },
         "user": {
-          "description": "The uid:gid the container runs as. Default qory run's own, so the checkout's files keep their owner. Root is refused; a machine where qory runs as root sets another.",
+          "description": "The uid:gid the container runs as. Default qory run's, so the checkout's files keep their owner. Root is refused; a machine where qory runs as root sets another.",
           "type": "string",
           "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*(:[A-Za-z0-9_][A-Za-z0-9_.-]*)?$"
         },
         "mounts": {
-          "description": "What the container sees of this machine beside the checkout and the composed home, each at its own path: an absolute path, with :ro after it for one the container cannot change. --mount adds to them. A socket, or a directory containing a container runtime's, is refused.",
+          "description": "What the container sees of this machine beside the checkout and the composed home, each at the same path as on the machine: an absolute path, with :ro after it for one the container cannot change. --mount adds to them. A socket, or a directory containing a container runtime's, is refused.",
           "type": "array",
           "uniqueItems": true,
           "items": {
@@ -410,7 +410,7 @@
           "pattern": "^[0-9]+[bkmgBKMG]?$"
         },
         "ca_env": {
-          "description": "The variables that point a program in the container at the bundle of authorities it trusts, the image's own and the run's, when a run has an authority of its own. Default SSL_CERT_FILE, GIT_SSL_CAINFO, NODE_EXTRA_CA_CERTS, REQUESTS_CA_BUNDLE, CURL_CA_BUNDLE, AWS_CA_BUNDLE.",
+          "description": "The variables that point a program in the container at the bundle of authorities it trusts, the image's and the run's, when an authority is made for the run. Default SSL_CERT_FILE, GIT_SSL_CAINFO, NODE_EXTRA_CA_CERTS, REQUESTS_CA_BUNDLE, CURL_CA_BUNDLE, AWS_CA_BUNDLE.",
           "type": "array",
           "uniqueItems": true,
           "items": {

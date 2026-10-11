@@ -1327,7 +1327,7 @@ func LinkModules(res *compose.Result, root, home string, previous []string, forc
 // qory directory.
 func moduleLinkFree(name string) error {
 	if name == checkout.Dir {
-		return fmt.Errorf("link %s is qory's own directory", name)
+		return fmt.Errorf("link %s is qory's directory", name)
 	}
 	for _, rt := range Names() {
 		for _, l := range runtimes[rt].Links(nil) {

@@ -148,7 +148,7 @@ func TestRunRegeneratesAnInstanceIDThatIsNotThisMachines(t *testing.T) {
 		if _, err := os.Lstat(path); !os.IsNotExist(err) || !instanceShape.MatchString(srv.instances[0][0]) {
 			t.Errorf("%v, the server saw %v", err, srv.instances)
 		}
-		wants(t, out, "qory run: instance "+srv.instances[0][0]+", this process's own: "+path+" cannot be written")
+		wants(t, out, "qory run: instance "+srv.instances[0][0]+", this process's alone: "+path+" cannot be written")
 	})
 }
 

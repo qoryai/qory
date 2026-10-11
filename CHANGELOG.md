@@ -72,7 +72,7 @@ release may change what an existing document does, and states it under Upgrading
   the default and `--image` another for one run, each a name of `wall.images` or a
   reference, a name read as that image first. A `--policy` that selects an image
   `wall.images` does not define, or selects one for a run without a wall, is an input
-  error before the run starts. A run whose own `--policy` selects an image needs no
+  error before the run starts. A run whose `--policy` selects an image needs no
   default; a machine that reports to a server sets `wall.image`, because the server's run
   configuration arrives once the run starts and may select none, and the refusal says
   so. A name defined twice, a key an image does not have, and `docker: true` without a
@@ -81,7 +81,7 @@ release may change what an existing document does, and states it under Upgrading
   name of `wall.images` or a reference. `dev.qory.run.started` names the image a run
   started in, with `image_name`, and `container_runtime` and `docker: true` when they
   apply; `dev.qory.run.policy_applied` records the policy's `image`.
-- A Docker of the agent's own, experimental: an image with `docker: true` under
+- Nested Docker, a Docker daemon inside the wall, separate from the machine's, experimental: an image with `docker: true` under
   `runtime: sysbox-runc` starts with `qory run nest`, a hidden verb of `qory`'s Linux
   build, as the container's entry point. It runs Forager's `wall.Nest`: `dockerd` on
   its Unix socket alone, then the agent as its user with no capabilities. The containers
@@ -91,13 +91,14 @@ release may change what an existing document does, and states it under Upgrading
   configuration beneath it the agent's alone, so the agent's `docker` command reads it
   and the containers it starts get the proxy. `dockerd`, `containerd`, `runc` and
   `iptables` come from the image's system directories, and the daemon gets none of the
-  run's environment but the proxy and the run's certificate bundle.
+  run's environment but the proxy and the run's certificate bundle. It needs Docker Engine
+  28 or later; Forager refuses the run on an older engine.
 - The images the wall runs the agent in, defined under `images/` and built by hand for
   linux/amd64 or linux/arm64; they are not published. `agent` holds Claude Code 2.1.273,
   the version Forager's descriptor is written against, git, gh 2.101.0 and Node 24 on
   Debian 13, with `HOME=/home/agent` writable by any user, no setuid or setgid file and no
-  entry point. `agent-docker` adds the daemon and command of Docker 29.8.1, for a Docker of
-  the agent's own, which `qory run nest` starts when `wall.images` defines the image with
+  entry point. `agent-docker` adds the daemon and command of Docker 29.8.1, for nested Docker,
+  which `qory run nest` starts when `wall.images` defines the image with
   `docker: true`. `agent-go` and `agent-go-docker` add Go 1.27.1 to each. Every version and
   sum is a build argument, every download is checked against its sum, and Debian's
   packages come from the snapshot the base image was built from. A workflow builds the
@@ -107,7 +108,7 @@ release may change what an existing document does, and states it under Upgrading
   `ref`, as `qory run` reads `--image`. From outside it reads the image the engine holds:
   its platform, `HOME` in its environment, whether the reference is pinned by digest, and
   every file, as `docker export` writes them, for one that is setuid or setgid or has
-  capabilities of its own. Then it starts the image as the wall starts the agent, as a user
+  file capabilities. Then it starts the image as the wall starts the agent, as a user
   the image does not know, with no capability and no network, and qory's Linux build,
   `wall.helper` or on Linux qory itself, checks from inside: `HOME` takes a file, the
   authorities are where the wall reads them, `/bin/sh` is there for the runtime's hooks
@@ -162,7 +163,7 @@ release may change what an existing document does, and states it under Upgrading
   `QORY_ACCESS_KEY_SECRET` and the `access-key-secret` file.
 - `qory run --kind`, `--title`, `--subject` and `--details` say what a run is about: its
   kind, its title, what it works on, `type=<type>,ref=<ref>` with `url=` and `title=` when
-  known, such as `type=ticket,ref=7`, and a JSON object of the caller's own, from a file
+  known, such as `type=ticket,ref=7`, and a JSON object of the caller's, from a file
   or from stdin. They go into `about` on `dev.qory.run.started` and no other event, and
   into the run's registration, where they never choose the run's policy. A subject's
   `title=` takes the rest of the value, commas included, so a title passes as it is. A
@@ -184,11 +185,11 @@ release may change what an existing document does, and states it under Upgrading
   enrol a key with a code from the gateway's page in Qory Apiary`. Enrolling a gateway's
   key says `enrolled as … in the gateway ng_…` and `the key is active: the gateway can
   serve runs`. A machine whose runs go through it names no gateway: each run brings a run
-  key that names this gateway. For a starter or a machine with its own key that reaches
+  key that names this gateway. For a starter or a machine with a separate access key that reaches
   Qory Apiary only through it, it
   passes on enrolment, the server's configuration, registrations and outcomes,
   unchanged, and nothing else. Forager keeps the gateway's directory in qory's state
-  directory, `gateway/`: its own certificate authority, `authority/ca.pem`, and its
+  directory, `gateway/`: its certificate authority, `authority/ca.pem`, and its
   runs' records. See `docs/gateway.md`.
 - `forager.yaml` takes `gateway.listen`, host:port, and `gateway.tls.certificate` and
   `gateway.tls.key`, both or neither. A path in them is relative to the directory of
@@ -210,9 +211,9 @@ release may change what an existing document does, and states it under Upgrading
   server answers with to the descriptor `--run-key-fd` names, 3 or above. stdout gets
   nothing, every other line goes to stderr, and nothing is written on the machine. It
   takes `--run-id`, `--instance-id`, the runner the run takes a place on, by default the
-  run's own id, and `--attach-within`, how long the runner has to start the run, and
+  run's id, and `--attach-within`, how long the runner has to start the run, and
   `qory run`'s `--label`, `--kind`, `--title`, `--subject` and `--details`; it adds no
-  `forge` or `repository` of its own. It prints `qory run register: node <id>, instance
+  `forge` or `repository` by itself. It prints `qory run register: node <id>, instance
   <id>` and `qory run register: run <id>, through the gateway <host>, to start by <time>`.
   It refuses a `forager.yaml` without a server, no `--run-key-fd`, one below 3 or one
   that is not open, and a gateway's access key, and says what the server's refusals
@@ -221,17 +222,17 @@ release may change what an existing document does, and states it under Upgrading
   `answer_unsigned`. A run key it cannot write once the run registered is said with `end
   the run with qory run end <run-id>`. See `docs/run.md`.
 - `qory run end <run-id>` gives the server a run's outcome as its starter: `--outcome
-  completed`, `failed` or `cancelled`, with `--reason`, a code of the starter's own;
+  completed`, `failed` or `cancelled`, with `--reason`, a code of the starter's;
   without `--outcome`, the run is cancelled, with no outcome given. A run still running
   ends, and its runtime is stopped. It signs with the node pool's access key, read as
   `qory run register` reads it, and prints `✓ the server records the run <id> as
   <outcome>[: <reason>]`. A run has one outcome: the same one again gets the same
   answer, and another is refused, `outcome_given`. It refuses `--reason` without
-  `--outcome`, a reason that is not a code or is one of Forager's own, and a gateway's
+  `--outcome`, a reason that is not a code or is one of Forager's, and a gateway's
   access key.
 - `qory run` goes through a separate gateway when it is given a run key, by
   `--run-key-fd`, 0 for stdin or a descriptor of 3 or above, or by `QORY_RUN_KEY`: it
-  starts no gateway of its own, reaches the gateway the run key names, and prints `qory
+  starts no gateway itself, reaches the gateway the run key names, and prints `qory
   run: through the gateway <host>, run <run-id>`. qory takes `QORY_RUN_KEY` out of its
   environment when a command starts, as it does the access key's variables, so no
   program it starts receives it; `wall.env` or `--env` naming it is refused. A run key
@@ -243,8 +244,8 @@ release may change what an existing document does, and states it under Upgrading
   `--subject` and `--details`, which go to `qory run register`; it sends no `forge` or
   `repository` of the checkout's. `qory run resend` takes the run key the same two ways,
   `QORY_RUN_KEY` needing no wall there, and sends a record that went through a separate
-  gateway to that gateway; with a run key given, a record a gateway of the run's own made
-  is refused, since it goes to the server. `docs/run.md` says that an unwalled agent
+  gateway to that gateway; with a run key given, a record made by a gateway the run started
+  itself is refused, since it goes to the server. `docs/run.md` says that an unwalled agent
   behind a gateway holds at most the run key, and that within the live run, whoever holds
   it can post events and open proxy connections as the session, for that run only.
 - An unwalled run with `QORY_RUN_KEY` set is refused before anything starts,
@@ -259,21 +260,21 @@ release may change what an existing document does, and states it under Upgrading
   `qory run register` and `qory run end` go through it too. `qory config` lists
   `gateway.server.via.url`, `(none: the server is reached directly)` without one, and its
   `ca_file` and `certificate_sha256` with one, and `forager.schema.json` defines it.
-- A machine with its own access key and `gateway.server.via` registers each run itself,
+- A machine with a separate access key and `gateway.server.via` registers each run itself,
   through that gateway, with its labels and what it is about, and runs it through the
   gateway the run key names. It keeps the run key in `run-keys/<run-id>` beside
   `forager.yaml`, mode 0600, until nothing of the run is left to send or the gateway has
   ended the run, and `qory run resend` reads it from there. The server's refusals of the
   registration say `this machine's node`, and `node_uses_gateway`, on a machine without
-  `gateway.server.via`, says to set it. A resend to the server, of a run that had a
-  gateway of its own, is refused while `gateway.server.via` is set.
-- On a machine with its own access key and `gateway.server.via`, `qory run` refuses each
+  `gateway.server.via`, says to set it. A resend to the server, of a run that started its
+  gateway itself, is refused while `gateway.server.via` is set.
+- On a machine with a separate access key and `gateway.server.via`, `qory run` refuses each
   key of the `gateway` section beside `gateway.server`, such as `gateway.egress`,
   `gateway.credentials` and `gateway.integrations`, before anything starts or registers,
   exit 2, one line per key: `<file>: gateway.<key> does nothing on this machine:
   gateway.server.via sends its runs through a gateway, which holds their policy,
   credentials and integrations; remove gateway.<key>, or remove gateway.server.via`.
-  `qory run --local` runs a gateway of its own, which reads their policy, credentials
+  `qory run --local` starts a gateway itself, which reads their policy, credentials
   and integrations, and is not refused.
 - `qory gateway` refuses `gateway.server.via` before it starts, exit 2: `<file>:
   gateway.server.via does nothing for qory gateway: a gateway reaches the server directly;
@@ -285,8 +286,8 @@ release may change what an existing document does, and states it under Upgrading
   unwalled `--local` run too, while a key given by `--access-key-secret-fd` alone, which
   qory reads and closes before anything starts, refuses no run that contacts no server.
   `qory run` under a gateway's access key is refused before the run registers: `this
-  machine's gateway serves other machines and runs no sessions; give this machine a node
-  of its own`.
+  machine's gateway serves other machines and runs no sessions; give this machine a separate
+  node`.
 
 ### Changed
 
@@ -326,7 +327,7 @@ release may change what an existing document does, and states it under Upgrading
   `shell_environment_policy.set`. `qory harness launch` sets every variable through
   `env`, and `--json` lists them all under `env`:
   - `QORY_HARNESS_HOME`, the home, first.
-  - Then the fixed variables, qory's own: the launch template's, and nothing else.
+  - Then the fixed variables, which qory sets: the launch template's, and nothing else.
   - Then the defaults, what an author wrote: `env` in `qory.yaml`, the `env` of
     `harness.launch.<runtime>`, the `env` a settings fragment sets, Claude Code's
     `settings.json` `env` or Codex's `shell_environment_policy.set`, and what the modules
@@ -343,15 +344,15 @@ release may change what an existing document does, and states it under Upgrading
   their source. `qory harness compose --check` compares them with the report's, so a
   changed export, `qory.yaml` `env` or fragment variable is stale, one row
   `launch_env/<runtime>/<NAME>` each. `qory run` passes them to Forager as defaults,
-  the template's own variables as fixed, and the home, which Forager sets as
+  the template's variables as fixed, and the home, which Forager sets as
   `QORY_HARNESS_HOME`. A module's export is a default like the others: the server's
   value, `--env` and `wall.env` win over it, and the deny list leaves out one whose name
   it holds. They reach the agent in the container and outside it alike.
-- qory builds against `github.com/qoryai/forager` at commit `55f2d9f` of its `next`,
-  `v0.6.1-0.20261011105629-55f2d9f4e930`, contract `v1` revision 1 as amended there.
+- qory builds against `github.com/qoryai/forager` at commit `bc2a895` of its `next`,
+  `v0.6.1-0.20261011185142-bc2a8955f125`, contract `v1` revision 1 as amended there.
   `qory run` starts Forager's gateway on this machine for each run: it holds the proxy,
   the policy, the credentials and the access key, and sends the run's events to the
-  server; the session speaks to it alone, and records its own events in the run's
+  server; the session speaks to it alone, and records its events in the run's
   folder as `session.jsonl`.
   `forager.yaml`'s `gateway.egress` narrows the `security_policy` of a server's run
   configuration. A server's run configuration may carry variables: they reach a walled
@@ -366,7 +367,7 @@ release may change what an existing document does, and states it under Upgrading
   the time limit, `run_closed` as its reason when the gateway stopped during the run, and
   `gateway_lost` when `qory run resend` closes the record of a run whose Forager process
   died. When the run's gateway ends the run itself, its record gives `session_lost`, and
-  the session's own record, `session.jsonl`, gives `batch_refused` when the gateway
+  the session's record, `session.jsonl`, gives `batch_refused` when the gateway
   refused a batch of its events and `session_lost` when the session sent it nothing for
   1m30s; `qory run` then says `the run failed: its events could not be recorded, and
   <runtime> was stopped` or `the run was lost: it lost contact with the gateway for
@@ -388,18 +389,18 @@ release may change what an existing document does, and states it under Upgrading
   qory's words, and the run's starter's as it gave it, with spaces for underscores, such
   as `✓ the run completed: all checks passed, and claude was stopped`. The time limit
   says `✗ the run was cancelled: it reached the time limit of <d>, and <runtime> was
-  stopped`, exit 124 as before, and the session's own line of it is no longer printed. A
+  stopped`, exit 124 as before, and the session's line about it is no longer printed. A
   signal `qory run` gets while the runtime runs says `✗ the run was cancelled: qory run
   got SIGTERM, and <runtime> was stopped`, exit 1, whatever the runtime's status; one that
   comes after the runtime exited changes neither its line nor the exit status. A signal from
   elsewhere that kills the runtime says `✗ <runtime> ended on the signal SIGKILL`, in place of
   `✗ <runtime> was ended by <signal>`. A run the gateway stopped during the run says so,
   where it said nothing: `✗ the run failed: the gateway stopped during the run, and
-  <runtime> was stopped`. When the run's own gateway records the run's end after the
+  <runtime> was stopped`. When the gateway the run starts itself records the run's end after the
   runtime exited by itself, a second line follows the runtime's, such as `✗ the run was lost: it lost
   contact with the gateway for 1m30s` or `✗ the run failed: its events could not be
   recorded`, and the exit status follows it, 0 when the run completed and 1 otherwise; an
-  end that agrees with the runtime's exit adds no line. The gateway's own line that it
+  end that agrees with the runtime's exit adds no line. The gateway's line that it
   ends the run, and its line of events the server did not accept, are no longer printed
   beside qory's.
 - Behind a separate gateway, a run its starter ends with `qory run end` says the
@@ -422,10 +423,10 @@ release may change what an existing document does, and states it under Upgrading
   since a server accepts no workspace access key. qory
   removes `QORY_SERVER_SECRET` from its environment with the access key's variables,
   whether or not a server is configured, and `wall.env` or `--env` naming it is refused.
-  A machine that reports to a server needs its own access key: `gateway.server.access_key_id`,
+  A machine that reports to a server needs its node's access key: `gateway.server.access_key_id`,
   the `gateway.server.apiary_public_key` pin and the secret.
 - A run's variables follow one order, highest first: the values qory and the runtime
-  fix, such as `QORY_HARNESS_HOME` and the variables of the runtime's own launch
+  fix, such as `QORY_HARNESS_HOME` and the variables of the runtime's launch
   template, Codex's `CODEX_HOME` among them, which no other source overrides, `env` in
   `qory.yaml`, a settings fragment's and a module's export included; the server's run
   configuration; `--env`; `wall.env`; the harness's defaults, `env` in `qory.yaml`, the
@@ -440,7 +441,7 @@ release may change what an existing document does, and states it under Upgrading
   configuration directory, which holds `forager.yaml`, the access key and the user
   `qory.yaml`; a file qory reads from that directory and a link takes elsewhere, where
   the last link leads; the file of a `<name>_file` setting of an integration the run
-  describes, where its path leads; or one of Forager's own program and temporary
+  describes, where its path leads; or one of Forager's program and temporary
   files. So is a mount that is or contains any link on the way. For a mount that is or contains the
   access key, `qory run` says `the mount <host path> contains <dir>, which holds this
   machine's access key; the agent could read the key, so the run does not start. Mount a
@@ -461,8 +462,8 @@ release may change what an existing document does, and states it under Upgrading
   command within the code's 15 minutes succeeds. A signed 429, `rate_limited`, means the code
   was tried too often: qory keeps the key and says `the server refused the attempt: this
   code was tried too often; run the same command again later, within the code's 15
-  minutes`. A 401 for a code you did not use means the
-  code's issuer must revoke the key it enrolled.
+  minutes`. A 401 for a code you did not use means someone else used it: the owner or
+  administrator in Qory Apiary who made the code must revoke the key it enrolled.
 - `qory harness compose` takes a branch's current commit on every compose, without
   `--update`. A tag or a commit id stays pinned. Offline, it keeps the cached commit and
   warns.
@@ -488,7 +489,7 @@ release may change what an existing document does, and states it under Upgrading
   start. Run qory harness compose again`. With `--home` naming a composed home, the
   checkout the report beside it names has to be the one that home is composed for, else
   `the harness report <report> names the checkout <checkout>, and <home> is not that
-  checkout's home; a run uses only a checkout's own home, so the run does not start. Run
+  checkout's home; a run uses only its checkout's home, so the run does not start. Run
   qory harness compose again`. Behind a wall, `harness.home` comes from the `qory.yaml`
   in qory's configuration directory alone: another `qory.yaml`, the checkout's or one
   in a directory above it, that moves the home is refused, `<file> sets harness.home,

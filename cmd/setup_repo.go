@@ -32,7 +32,7 @@ harness:
   target:
     runtime: claude            # or a list: [claude, codex]
   modules:
-    - name: %[1]s%[3]s# this repository's own, committed with it
+    - name: %[1]s%[3]s# this repository's module, committed with it
       source: {path: ./` + moduleDir + `}
 
 # What a worktree of this repository needs; qory worktree add reads it.
@@ -102,10 +102,10 @@ var notAName = regexp.MustCompile(`[^a-z0-9._-]+`)
 func newSetupRepo() *cobra.Command {
 	return &cobra.Command{
 		Use:   "repo",
-		Short: "Write the repository's qory.yaml and its own module",
+		Short: "Write the repository's qory.yaml and its module",
 		Long: `Set the repository up for qory.
 
-It writes a qory.yaml into the current directory: the repository's own stack, with one
+It writes a qory.yaml into the current directory: the repository's stack, with one
 runtime and one module, and every key a repository commits. It writes that module under
 harness/, with its manifest and AGENTS.md.
 
@@ -113,7 +113,7 @@ A stack already there, in qory.yaml or qory-stack.yaml, is kept. So is every fil
 already there.
 
 Commit this qory.yaml. It decides for everyone who clones the repository: the stack, and
-what a worktree needs. Your own settings go in the qory.yaml that setup machine writes.`,
+what a worktree needs. Your settings go in the qory.yaml that setup machine writes.`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			u := ui.New(cmd.OutOrStdout())
@@ -170,15 +170,15 @@ what a worktree needs. Your own settings go in the qory.yaml that setup machine 
 func newSetupMachine() *cobra.Command {
 	return &cobra.Command{
 		Use:   "machine",
-		Short: "Write your own qory.yaml: how qory runs on this machine",
-		Long: `Write your own qory.yaml, in ~/.config/qory ($XDG_CONFIG_HOME/qory). Every key is shown
+		Short: "Write your qory.yaml: how qory runs on this machine",
+		Long: `Write your qory.yaml, in ~/.config/qory ($XDG_CONFIG_HOME/qory). Every key is shown
 at its default. A file already there is kept.
 
 This file is yours, and never committed. It applies to every repository: the runtime and
 model, force and update, where worktrees go and what they are called, the git timeout
 and cache, and environment variables.
 
-A repository's own qory.yaml is read on top of it. qory config shows where each value
+A repository's qory.yaml is read on top of it. qory config shows where each value
 came from.`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {

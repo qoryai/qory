@@ -9,7 +9,7 @@ Check an image the wall runs the agent in.
 Four are defined under images/ in qory's repository, for linux/amd64 and linux/arm64:
 
   agent             Claude Code, git and gh
-  agent-docker      agent, and a Docker daemon of the agent's own
+  agent-docker      agent, and nested Docker: a Docker daemon inside the wall, separate from the machine's
   agent-go          agent, and Go
   agent-go-docker   agent-docker, and Go
 

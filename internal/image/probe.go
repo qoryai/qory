@@ -253,14 +253,14 @@ func (p Probe) lookPath(name string, dirs []string) string {
 	return ""
 }
 
-// docker reports whether the image can carry a Docker of the agent's own: dockerd and
+// docker reports whether the image can carry a nested Docker for the agent: dockerd and
 // every program it runs in [SystemDirs], where Forager looks for the daemon and which
 // it gives the daemon as its PATH, and the docker command on the image's PATH, where
 // the agent finds it.
 func (p Probe) docker() Check {
 	dockerd := p.lookPath("dockerd", SystemDirs)
 	if dockerd == "" {
-		return Check{"docker", Info, "no dockerd in " + strings.Join(SystemDirs, ", ") + ": the image carries no Docker of the agent's own"}
+		return Check{"docker", Info, "no dockerd in " + strings.Join(SystemDirs, ", ") + ": the image carries no nested Docker"}
 	}
 	var missing []string
 	for _, name := range daemonRuns {
@@ -274,5 +274,5 @@ func (p Probe) docker() Check {
 	if p.lookPath("docker", filepath.SplitList(p.Env("PATH"))) == "" {
 		return Check{"docker", Fail, dockerd + " is there, and the docker command is not on the image's PATH, where the agent finds it"}
 	}
-	return Check{"docker", Pass, fmt.Sprintf("%s, with %s in the system's directories and docker on the PATH: the image can carry a Docker of the agent's own", dockerd, strings.Join(daemonRuns, ", "))}
+	return Check{"docker", Pass, fmt.Sprintf("%s, with %s in the system's directories and docker on the PATH: the image can carry nested Docker", dockerd, strings.Join(daemonRuns, ", "))}
 }

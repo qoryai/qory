@@ -136,7 +136,7 @@ func identify(r *config.Forager, report io.Writer, verb string, fd *accesskey.Ke
 		return nil, fmt.Errorf("the instance id: %w", err)
 	}
 	if !kept {
-		fmt.Fprintf(report, "qory %s: instance %s, this process's own: %s cannot be written\n", verb, instance, dir.Path(foragerdir.InstanceFile))
+		fmt.Fprintf(report, "qory %s: instance %s, this process's alone: %s cannot be written\n", verb, instance, dir.Path(foragerdir.InstanceFile))
 	}
 	id.instanceID = instance
 	return id, nil
@@ -432,7 +432,7 @@ const gatewayNodePrefix = "ng_"
 
 // gatewayRunsNoSessions is the refusal of qory run under a gateway's access key, which
 // discovery tells by its node, before the run registers.
-const gatewayRunsNoSessions = "this machine's gateway serves other machines and runs no sessions; give this machine a node of its own"
+const gatewayRunsNoSessions = "this machine's gateway serves other machines and runs no sessions; give this machine a separate node"
 
 // settleMarker is the marker rule of a signed discovery under the secret of
 // access-key-secret, under the key lock held exclusively.

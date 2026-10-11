@@ -631,7 +631,7 @@ func LoadForager() (*Forager, error) {
 		if w.Env != nil {
 			for i, name := range *w.Env {
 				if ForagersOwn(name) {
-					return nil, fmt.Errorf("%s: wall.env[%d] names a variable that is Forager's own and never the agent's", path, i)
+					return nil, fmt.Errorf("%s: wall.env[%d] names a variable that is Forager's and never the agent's", path, i)
 				}
 				if !envName.MatchString(name) {
 					return nil, fmt.Errorf("%s: wall.env[%d] is not a variable's name; the value comes from the environment, never from this file", path, i)
@@ -1017,7 +1017,7 @@ func checkPin(p accesskey.Pin) error {
 		return err
 	}
 	if p.Fixture() {
-		return errors.New("it lists the Forager contract's published fixture key, whose secret anyone can read; pin your server's own key")
+		return errors.New("it lists the Forager contract's published fixture key, whose secret anyone can read; pin your server's key")
 	}
 	return nil
 }

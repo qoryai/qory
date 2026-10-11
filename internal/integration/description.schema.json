@@ -22,7 +22,7 @@
       "uniqueItems": true,
       "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"}
     },
-    "program_version": {"description": "The program's own version, as it was built.", "type": "string", "minLength": 1},
+    "program_version": {"description": "The program's version, as it was built, such as 0.1.0.", "type": "string", "minLength": 1},
     "settings": {
       "description": "A JSON Schema, draft 2020-12, of the settings document: an object. A property marked writeOnly is a secret: a form shows it as one, written and never read back, a log leaves it out, and it stays off every command line. A secret is a property of the settings object itself, never a nested one, and a secret <name> has a setting <name>_file, a file that contains it, which is passed on a command line in its place.",
       "allOf": [

@@ -190,10 +190,10 @@ const runKeyGiven = "a run key is given, by QORY_RUN_KEY or --run-key-fd"
 // given. r is nil without forager.yaml.
 func behindGateway(r *config.Forager, local, policy, keyFD bool, given []string) error {
 	if local {
-		return input(errors.New("--local runs with a gateway of this run's own and no server, and " + runKeyGiven + ": the run goes through the gateway its run key names; give no run key to run --local"))
+		return input(errors.New("--local runs with a gateway the run starts itself and no server, and " + runKeyGiven + ": the run goes through the gateway its run key names; give no run key to run --local"))
 	}
 	if policy {
-		return input(errors.New("--policy is the run's own policy for a gateway the run starts itself, and " + runKeyGiven + ": the gateway its run key names takes the run's policy from the server"))
+		return input(errors.New("--policy is a run's policy file for a gateway the run starts itself, and " + runKeyGiven + ": the gateway its run key names takes the run's policy from the server"))
 	}
 	if dir := machineDir(); dir != "" {
 		held, err := heldSecret(dir)
@@ -316,7 +316,7 @@ const runKeyNeeded = ": the run key is needed to send to its gateway; set QORY_R
 // which ran with a gateway of its own on this machine: its record goes to the server.
 // It unwraps to err.
 func ownGatewayResend(runID string, err error) error {
-	return &saidError{text: fmt.Sprintf("the run %s ran with a gateway of its own on this machine, so its record goes to the server, not to a gateway: resend it without a run key", runID), err: err}
+	return &saidError{text: fmt.Sprintf("the run %s started its gateway itself on this machine, so its record goes to the server, not to a gateway: resend it without a run key", runID), err: err}
 }
 
 // gatewayEndedResend says that the run had ended when its events were sent again, and

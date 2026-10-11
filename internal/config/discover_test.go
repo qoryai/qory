@@ -57,7 +57,7 @@ func TestDiscoverStackRefusesAClosedStackAtTheRoot(t *testing.T) {
 	file := filepath.Join(checkout, stack.FileName)
 	writeRaw(t, file, stackDoc)
 	_, err := config.DiscoverStack(checkout)
-	want := file + ": a stack at a repository root is delivered to be extended, and this one declares no extending block; a repository's own stack goes under harness in qory.yaml, which qory setup repo writes"
+	want := file + ": a stack at a repository root is delivered to be extended, and this one declares no extending block; a repository's stack goes under harness in qory.yaml, which qory setup repo writes"
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %q", err, want)
 	}
@@ -150,7 +150,7 @@ func TestLoadStackReadsTheHarnessSectionAsTheComposeDocument(t *testing.T) {
 	}
 	writeRaw(t, path, "apiVersion: qory.dev/v1alpha1\nharness:\n  modules:\n    - name: app\n")
 	_, err = config.LoadStack(path)
-	if err == nil || !strings.Contains(err.Error(), "harness sets no target.runtime and no stack to extend; the section contains this repository's own stack") {
+	if err == nil || !strings.Contains(err.Error(), "harness sets no target.runtime and no stack to extend; the section contains this repository's stack") {
 		t.Fatalf("without extends or a target: %v", err)
 	}
 	writeRaw(t, path, "apiVersion: qory.dev/v1alpha1\nharness:\n  target: {runtime: codex, model: o3}\n  modules:\n    - name: app\n")

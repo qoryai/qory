@@ -8,7 +8,7 @@ Run a gateway on this machine as a service, until it is stopped.
 
 A gateway decides every connection of the runs that go through it by the run's policy,
 records it, sets credentials on requests, and sends the runs' events to Qory Apiary. qory
-run on this machine needs no service: it starts a gateway of its own for each run.
+run on this machine needs no service: it starts a gateway itself for each run.
 
 The gateway section of forager.yaml in ~/.config/qory sets it:
 
