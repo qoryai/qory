@@ -55,17 +55,24 @@ type keptLabels struct {
 	write, before, relabel bool
 }
 
-// checkLabels compares the labels the origin remote of the checkout at root gives with
-// the ones dir keeps for it, every key but those explicit gives, before anything starts
-// or registers. Another value of a kept key is the labels_changed refusal, as input,
-// unless relabel. It returns what to keep once the server accepts the run; nil when
-// there is nothing to keep, or no directory of forager.yaml.
-func checkLabels(dir foragerdir.Dir, root string, explicit map[string]string, relabel bool) (*keptLabels, error) {
+// originLabels is what the origin remote of the checkout at root gives, forge and
+// repository, both empty when [checkout.Origin] gives none. A run reads it once, so the
+// labels it sends are the ones it checks and keeps.
+func originLabels(root string) foragerdir.Labels {
+	forge, repository, _ := checkout.Origin(root)
+	return foragerdir.Labels{"forge": forge, "repository": repository}
+}
+
+// checkLabels compares origin, the labels the origin remote of the checkout at root
+// gives as [originLabels] read them, with the ones dir keeps for the checkout, every key
+// but those explicit gives, before anything starts or registers. Another value of a kept
+// key is the labels_changed refusal, as input, unless relabel. It returns what to keep
+// once the server accepts the run; nil when there is nothing to keep, or no directory of
+// forager.yaml.
+func checkLabels(dir foragerdir.Dir, root string, explicit map[string]string, origin foragerdir.Labels, relabel bool) (*keptLabels, error) {
 	if dir == "" {
 		return nil, nil
 	}
-	forge, repository, _ := checkout.Origin(root)
-	origin := foragerdir.Labels{"forge": forge, "repository": repository}
 	derived := foragerdir.Labels{}
 	for _, k := range originKeys {
 		if _, given := explicit[k]; !given {
@@ -125,13 +132,16 @@ func labelWords(l foragerdir.Labels) string {
 	return out
 }
 
+// writeLabels keeps a checkout's labels; a test replaces it.
+var writeLabels = foragerdir.Dir.WriteLabels
+
 // keep keeps the labels, once the server accepted the run, and says so on report after
 // --relabel. A file that cannot be written is said on report, and the run goes on.
 func (k *keptLabels) keep(report func(string)) {
 	if k == nil || !k.write {
 		return
 	}
-	if err := k.dir.WriteLabels(k.root, k.labels); err != nil {
+	if err := writeLabels(k.dir, k.root, k.labels); err != nil {
 		if k.before {
 			report(fmt.Sprintf("the checkout's labels were not kept: %v; the next run checks the ones kept before", err))
 		} else {

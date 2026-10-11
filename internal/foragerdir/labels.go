@@ -47,11 +47,20 @@ func (d Dir) LabelsPath(root string) (string, error) {
 }
 
 // ReadLabels reads the labels kept for the checkout at root, from a regular file, not a
-// link. A checkout whose labels are not kept is [ErrNoLabels].
+// link, in a labels directory that is not a link: one is refused, as [Dir.WriteLabels]
+// refuses it. A checkout whose labels are not kept is [ErrNoLabels].
 func (d Dir) ReadLabels(root string) (Labels, error) {
 	path, err := d.LabelsPath(root)
 	if err != nil {
 		return nil, err
+	}
+	dir := filepath.Dir(path)
+	if info, err := os.Lstat(dir); errors.Is(err, fs.ErrNotExist) {
+		return nil, ErrNoLabels
+	} else if err != nil {
+		return nil, err
+	} else if info.Mode()&fs.ModeSymlink != 0 {
+		return nil, fmt.Errorf("%s is a symbolic link; it must be the directory itself", dir)
 	}
 	f, err := os.OpenFile(path, os.O_RDONLY|noFollow|nonBlock, 0)
 	if errors.Is(err, fs.ErrNotExist) {

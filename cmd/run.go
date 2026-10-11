@@ -206,7 +206,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if err != nil {
 					return err
 				}
-				named = withOrigin(explicit, at.root)
+				// The origin remote is read once: the labels the run sends are the ones
+				// checked against the kept labels, and kept.
+				origin := originLabels(at.root)
+				named = withOrigin(explicit, origin)
 				if err := session.CheckLabels(named); err != nil {
 					return input(err)
 				}
@@ -217,7 +220,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// labels its checkout's origin remote gave when the server first accepted
 				// one of its runs, or with --relabel.
 				if server != nil && !local {
-					if keep, err = checkLabels(machineDir(), at.root, explicit, relabel); err != nil {
+					if keep, err = checkLabels(machineDir(), at.root, explicit, origin, relabel); err != nil {
 						return err
 					}
 				}
@@ -853,16 +856,16 @@ func parseLabels(labels []string) (map[string]string, error) {
 	return out, nil
 }
 
-// withOrigin adds the labels the checkout's origin remote gives, forge and repository,
-// to the caller's, which win: a caller that names them knows better than the remote,
-// and one that names neither gets what [checkout.Origin] reads. A checkout with no
-// origin, or one on this machine, adds nothing.
-func withOrigin(labels map[string]string, root string) map[string]string {
-	forge, repository, ok := checkout.Origin(root)
-	if !ok {
+// withOrigin adds the labels the checkout's origin remote gives, origin as
+// [originLabels] read it, to the caller's, which win: a caller that names them knows
+// better than the remote, and one that names neither gets what [checkout.Origin] reads.
+// A checkout with no origin, or one on this machine, adds nothing: [checkout.Origin]
+// gives both labels or neither.
+func withOrigin(labels map[string]string, origin foragerdir.Labels) map[string]string {
+	if origin["forge"] == "" {
 		return labels
 	}
-	out := map[string]string{"forge": forge, "repository": repository}
+	out := map[string]string{"forge": origin["forge"], "repository": origin["repository"]}
 	for k, v := range labels {
 		out[k] = v
 	}
@@ -1346,7 +1349,7 @@ func recordLinks(state, runs string) (files []string, shown map[string]string) {
 
 // configLinks is what qory passes Forager for the files it reads from its
 // configuration directory dir, absolute, when a link takes one out of it: dir itself,
-// forager.yaml, qory.yaml or qory.yml, runtimes/ and the descriptors in it,
+// forager.yaml, qory.yaml or qory.yml, run-keys/, labels/, runtimes/ and the descriptors in it,
 // runtimes/*.yaml in any case, as a disk that ignores case opens them. Each is followed
 // from dir as given, one link at a time, each part of its path that is a link included,
 // dir's own, and every link on the way and where it leads is one of Forager's files,
@@ -1364,7 +1367,7 @@ func configLinks(dir string) (files []string, shown map[string]string) {
 	resolved, err := filepath.EvalSymlinks(dir)
 	exists := err == nil
 	inside := func(p string) bool { return exists && within(resolved, p) }
-	names := append([]string{".", config.ForagerFileName, DescriptorsDir, foragerdir.RunKeysDir}, config.Names...)
+	names := append([]string{".", config.ForagerFileName, DescriptorsDir, foragerdir.RunKeysDir, foragerdir.LabelsDir}, config.Names...)
 	if entries, err := os.ReadDir(filepath.Join(dir, DescriptorsDir)); err == nil {
 		for _, e := range entries {
 			if strings.EqualFold(filepath.Ext(e.Name()), ".yaml") {

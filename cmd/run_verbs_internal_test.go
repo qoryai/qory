@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/foragerdir"
 	"github.com/qoryai/qory/internal/render"
 )
 
@@ -669,6 +670,33 @@ func TestConfigLinksGuardsTheLinksOnTheWay(t *testing.T) {
 		if ok, _ := filepath.Match(pattern, name+"x"); ok {
 			t.Errorf("%q matches %q", pattern, name+"x")
 		}
+	}
+}
+
+// TestConfigLinksGuardsTheLabelsDirectory is a labels directory beside forager.yaml that
+// is a link out of the configuration directory: where it leads is one of Forager's
+// files, so no mount reaches the kept labels, as run-keys.
+func TestConfigLinksGuardsTheLabelsDirectory(t *testing.T) {
+	resolve := func(p string) string {
+		r, err := filepath.EvalSymlinks(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	dir, elsewhere := resolve(t.TempDir()), resolve(t.TempDir())
+	for _, name := range []string{foragerdir.LabelsDir, foragerdir.RunKeysDir} {
+		target := filepath.Join(elsewhere, name)
+		if err := os.Mkdir(target, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(dir, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files, _ := configLinks(dir)
+	if want := []string{filepath.Join(elsewhere, foragerdir.RunKeysDir), filepath.Join(elsewhere, foragerdir.LabelsDir)}; !slices.Equal(files, want) {
+		t.Errorf("files %q, want %q", files, want)
 	}
 }
 

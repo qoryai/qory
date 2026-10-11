@@ -181,22 +181,152 @@ func TestLabelsAreKeptOnlyAgainstTheServer(t *testing.T) {
 	wantsLabels(t, other, nil)
 }
 
-// TestLabelsThatCannotBeKeptLetTheRunGoOn is a labels beside forager.yaml that is a
-// symbolic link, where qory keeps nothing: the accepted run says in one line that the
-// labels were not kept, and runs.
+// TestLabelsThatCannotBeKeptLetTheRunGoOn is labels that cannot be written: the
+// accepted run says in one line that the labels were not kept, and runs.
 func TestLabelsThatCannotBeKeptLetTheRunGoOn(t *testing.T) {
 	serverRun(t, "", "")
-	if err := os.Symlink(t.TempDir(), configDir().Path(foragerdir.LabelsDir)); err != nil {
-		t.Fatal(err)
-	}
+	defer cmd.SetWriteLabels(func(foragerdir.Dir, string, foragerdir.Labels) error {
+		return errors.New("the disk is full")
+	})()
 	out, err := run(t, "run")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "hello from", "qory run: the checkout's labels were not kept: ", "is a symbolic link; it must be the directory itself; the next run checks none\n")
+	wants(t, out, "hello from", "qory run: the checkout's labels were not kept: the disk is full; the next run checks none\n")
 	if strings.Count(out, "labels were not kept") != 1 {
 		t.Errorf("said more than once:\n%s", out)
 	}
+}
+
+// TestUnreadableLabelsRefuseTheRun is kept labels qory cannot read: a file that is a
+// directory, one that is not JSON, and a labels directory that is a symbolic link. The
+// run is refused before it registers, and the server gets no request.
+func TestUnreadableLabelsRefuseTheRun(t *testing.T) {
+	root, srv := serverRun(t, "", "")
+	path, err := configDir().LabelsPath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Dir(path)
+	for _, c := range []struct {
+		name  string
+		setup func(t *testing.T)
+		want  string
+	}{
+		{"a directory", func(t *testing.T) {
+			if err := os.MkdirAll(path, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}, path + " is not a regular file"},
+		{"not JSON", func(t *testing.T) {
+			writeFile(t, path, "forge: git.example.com\n")
+		}, path + ": invalid character 'o' in literal false (expecting 'a')"},
+		{"a linked directory", func(t *testing.T) {
+			elsewhere := t.TempDir()
+			writeFile(t, filepath.Join(elsewhere, filepath.Base(path)), `{"forge":"git.example.com","repository":"acme/app"}`)
+			if err := os.Symlink(elsewhere, dir); err != nil {
+				t.Fatal(err)
+			}
+		}, dir + " is a symbolic link; it must be the directory itself"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if err := os.RemoveAll(dir); err != nil {
+				t.Fatal(err)
+			}
+			c.setup(t)
+			clearRuns(t, root)
+			before := len(srvTargets(srv))
+			out, err := run(t, "run")
+			if err == nil || err.Error() != c.want {
+				t.Errorf("%v\nwant %q", err, c.want)
+			}
+			lacks(t, out, "hello from")
+			if n := len(srvTargets(srv)); n != before {
+				t.Errorf("a refused run sent the server %d requests", n-before)
+			}
+		})
+	}
+}
+
+// TestTheOriginIsReadOnceForARun is a checkout whose origin remote changes while the
+// run starts, between the reads of a run that read it twice: here as the run reads
+// --details from stdin. The labels the run sends are the ones it checks, so a run whose
+// origin gives other labels than the kept ones when it is read is refused, whatever the
+// origin gives later.
+func TestTheOriginIsReadOnceForARun(t *testing.T) {
+	root, srv := serverRun(t, "", "")
+	if out, err := run(t, "run"); err != nil {
+		t.Fatalf("the first run: %v\n%s", err, out)
+	}
+	runGit(t, root, "remote", "set-url", "origin", "https://git.example.com/acme/shop.git")
+	clearRuns(t, root)
+	srv.mu.Lock()
+	registered := len(srv.registered)
+	srv.mu.Unlock()
+	in := &restoringReader{t: t, root: root, rest: strings.NewReader(`{"step":1}`)}
+	c := cmd.Root()
+	var out strings.Builder
+	c.SetArgs([]string{"run", "--details", "-"})
+	c.SetIn(in)
+	c.SetOut(&out)
+	c.SetErr(&out)
+	err := c.Execute()
+	want := labelsChangedText(root, "forge git.example.com, repository acme/app", "forge git.example.com, repository acme/shop")
+	if err == nil || err.Error() != want {
+		t.Errorf("the origin changed as the run read stdin: %v\nwant %q\n%s", err, want, out.String())
+	}
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+	if len(srv.registered) != registered {
+		t.Errorf("the server registered %v", srv.registered[registered:])
+	}
+}
+
+// restoringReader is stdin that sets the origin remote of the checkout at root back to
+// the kept one when it is first read, and then reads as rest.
+type restoringReader struct {
+	t    *testing.T
+	root string
+	rest *strings.Reader
+	done bool
+}
+
+func (r *restoringReader) Read(p []byte) (int, error) {
+	if !r.done {
+		r.done = true
+		runGit(r.t, r.root, "remote", "set-url", "origin", "https://git.example.com/acme/app.git")
+	}
+	return r.rest.Read(p)
+}
+
+// TestARunKeyNeitherChecksNorKeepsLabels is a run given a run key on a checkout whose
+// kept labels its origin remote no longer gives: its starter chose its labels, so the
+// run is not refused for them, goes to the gateway its run key names, and the kept
+// labels stay as they are.
+func TestARunKeyNeitherChecksNorKeepsLabels(t *testing.T) {
+	root := runKeyCheckout(t)
+	if _, err := configDir().Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	pinned := foragerdir.Labels{"forge": "git.example.com", "repository": "acme/app"}
+	if err := configDir().WriteLabels(root, pinned); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "remote", "set-url", "origin", "https://git.example.com/acme/shop.git")
+	gw := newKeyedGateway(t)
+	key := mintRunKey(t, keyRunID, gw.url())
+	t.Setenv("QORY_RUN_KEY", "")
+	out, err := run(t, "run", "--run-key-fd", descriptor(t, key))
+	if err != nil && strings.Contains(err.Error(), "labels_changed") {
+		t.Errorf("a run with a run key checked the labels: %v", err)
+	}
+	if first, _, _ := strings.Cut(out, "\n"); first != "qory run: through the gateway "+gw.host()+", run "+keyRunID {
+		t.Errorf("the first line is %q\n%s", first, out)
+	}
+	if _, n := gw.received(); n == 0 {
+		t.Error("the run did not reach its gateway")
+	}
+	wantsLabels(t, root, pinned)
 }
 
 // TestAMachineBehindViaKeepsItsCheckoutsLabels is a run of a machine behind

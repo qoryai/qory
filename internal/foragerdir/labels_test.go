@@ -79,7 +79,7 @@ func TestALinkedCheckoutHasTheSameLabels(t *testing.T) {
 }
 
 // TestKeptLabelsRefuseALink is a labels directory, or a file in it, that is a symbolic
-// link: writing refuses the directory, and reading refuses the file.
+// link: writing and reading refuse the directory, and reading refuses the file.
 func TestKeptLabelsRefuseALink(t *testing.T) {
 	d := newDir(t)
 	root := t.TempDir()
@@ -88,6 +88,9 @@ func TestKeptLabelsRefuseALink(t *testing.T) {
 	}
 	if err := d.WriteLabels(root, foragerdir.Labels{"forge": "x"}); err == nil || !strings.Contains(err.Error(), "is a symbolic link; it must be the directory itself") {
 		t.Errorf("a linked directory: %v", err)
+	}
+	if _, err := d.ReadLabels(root); err == nil || err.Error() != d.Path(foragerdir.LabelsDir)+" is a symbolic link; it must be the directory itself" {
+		t.Errorf("reading through a linked directory: %v", err)
 	}
 
 	e := newDir(t)
