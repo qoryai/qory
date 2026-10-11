@@ -108,7 +108,7 @@ func TestKeptLabelsRefuseALink(t *testing.T) {
 	if err := os.Symlink(other, path); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.ReadLabels(root); err == nil || !strings.Contains(err.Error(), "is a symbolic link; it must be the file itself") {
+	if _, err := e.ReadLabels(root); err == nil || err.Error() != path+" is a symbolic link; it must be the file itself; remove it to keep the labels of the next run the server accepts" {
 		t.Errorf("a linked file: %v", err)
 	}
 }
@@ -142,5 +142,22 @@ func TestKeptLabelsMakeTheirDirectoryPrivate(t *testing.T) {
 	}
 	if _, err := e.ReadLabels(root); err == nil || errors.Is(err, foragerdir.ErrNoLabels) {
 		t.Errorf("a labels that is a file reads as %v", err)
+	}
+}
+
+// TestKeptLabelsTooLargeAreRefused is a checkout's labels file larger than two labels
+// could be: it is refused, with how to clear it.
+func TestKeptLabelsTooLargeAreRefused(t *testing.T) {
+	d := newDir(t)
+	root := t.TempDir()
+	if err := d.WriteLabels(root, foragerdir.Labels{"forge": strings.Repeat("x", 8<<10)}); err != nil {
+		t.Fatal(err)
+	}
+	path, err := d.LabelsPath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.ReadLabels(root); err == nil || err.Error() != path+" is larger than a checkout's labels; remove it to keep the labels of the next run the server accepts" {
+		t.Errorf("a large file: %v", err)
 	}
 }

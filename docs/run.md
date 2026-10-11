@@ -714,6 +714,8 @@ rewriting `.git/config`. So qory keeps the two labels the origin remote gives at
 checkout's first run the server accepts, directly or through `gateway.server.via`. They
 are kept in `labels/` beside `forager.yaml`, mode 0700, one file per checkout, mode 0600,
 named by the SHA-256 of the checkout's real path. A run the server refuses keeps nothing.
+An agent without a wall runs as you and can rewrite `labels/` too, so the labels hold for
+walled runs.
 
 A later run whose origin remote gives other labels does not start. It is refused before
 anything starts or registers, `labels_changed`, exit 2, and no event is written:

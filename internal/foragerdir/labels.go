@@ -27,6 +27,10 @@ const maxLabelsFile = 4 << 10
 // empty value is a key the origin remote gave none of.
 type Labels map[string]string
 
+// removeLabels ends the refusal of a checkout's labels file qory cannot read: how to
+// clear it.
+const removeLabels = "; remove it to keep the labels of the next run the server accepts"
+
 // ErrNoLabels is the error of a checkout whose labels the directory does not keep.
 var ErrNoLabels = errors.New("no labels are kept for the checkout")
 
@@ -48,7 +52,8 @@ func (d Dir) LabelsPath(root string) (string, error) {
 
 // ReadLabels reads the labels kept for the checkout at root, from a regular file, not a
 // link, in a labels directory that is not a link: one is refused, as [Dir.WriteLabels]
-// refuses it. A checkout whose labels are not kept is [ErrNoLabels].
+// refuses it. A file that cannot be read as labels is refused with how to clear it. A
+// checkout whose labels are not kept is [ErrNoLabels].
 func (d Dir) ReadLabels(root string) (Labels, error) {
 	path, err := d.LabelsPath(root)
 	if err != nil {
@@ -68,7 +73,7 @@ func (d Dir) ReadLabels(root string) (Labels, error) {
 	}
 	if err != nil {
 		if isLink(path) {
-			return nil, fmt.Errorf("%s is a symbolic link; it must be the file itself", path)
+			return nil, fmt.Errorf("%s is a symbolic link; it must be the file itself"+removeLabels, path)
 		}
 		return nil, err
 	}
@@ -78,18 +83,18 @@ func (d Dir) ReadLabels(root string) (Labels, error) {
 		return nil, err
 	}
 	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s is not a regular file", path)
+		return nil, fmt.Errorf("%s is not a regular file"+removeLabels, path)
 	}
 	b, err := io.ReadAll(io.LimitReader(f, maxLabelsFile+1))
 	if err != nil {
 		return nil, err
 	}
 	if len(b) > maxLabelsFile {
-		return nil, fmt.Errorf("%s is larger than a checkout's labels", path)
+		return nil, fmt.Errorf("%s is larger than a checkout's labels"+removeLabels, path)
 	}
 	var l Labels
 	if err := json.Unmarshal(b, &l); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, fmt.Errorf("%s: %w"+removeLabels, path, err)
 	}
 	if l == nil {
 		l = Labels{}

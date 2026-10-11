@@ -217,10 +217,10 @@ func TestUnreadableLabelsRefuseTheRun(t *testing.T) {
 			if err := os.MkdirAll(path, 0o700); err != nil {
 				t.Fatal(err)
 			}
-		}, path + " is not a regular file"},
+		}, path + " is not a regular file; remove it to keep the labels of the next run the server accepts"},
 		{"not JSON", func(t *testing.T) {
 			writeFile(t, path, "forge: git.example.com\n")
-		}, path + ": invalid character 'o' in literal false (expecting 'a')"},
+		}, path + ": invalid character 'o' in literal false (expecting 'a'); remove it to keep the labels of the next run the server accepts"},
 		{"a linked directory", func(t *testing.T) {
 			elsewhere := t.TempDir()
 			writeFile(t, filepath.Join(elsewhere, filepath.Base(path)), `{"forge":"git.example.com","repository":"acme/app"}`)
