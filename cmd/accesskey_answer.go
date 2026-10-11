@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/forager/server"
 
 	"github.com/qoryai/qory/internal/foragerdir"
 )
@@ -82,15 +83,23 @@ func (a *answerRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 // recordingClient is the enrolment's HTTP client, enrolClient or one with Forager's
-// ten-second timeout, with a transport that keeps the answer.
-func recordingClient() (*http.Client, *answerRecorder) {
+// ten-second timeout, with a transport that keeps the answer. Through a gateway, via
+// not nil, the transport is the gateway's, with its trust ([server.Via.Transport]).
+func recordingClient(via *server.Via) (*http.Client, *answerRecorder, error) {
 	c := http.Client{Timeout: 10 * time.Second}
 	if enrolClient != nil {
 		c = *enrolClient
 	}
+	if via != nil {
+		t, err := via.Transport()
+		if err != nil {
+			return nil, nil, err
+		}
+		c.Transport = t
+	}
 	rec := &answerRecorder{base: c.Transport}
 	c.Transport = rec
-	return &c, rec
+	return &c, rec, nil
 }
 
 // record is the verified 201 the recorder kept, for req to server, checked again as it

@@ -714,6 +714,23 @@ func readVia(path string, v *viaSection) (*ForagerVia, error) {
 	return out, nil
 }
 
+// CheckViaURL refuses a gateway's URL a flag, named by flag, gives as gateway.server.via.url,
+// as [readVia] refuses one in the file: one that holds an access key secret or a run
+// key, one encoded too many times to tell, and one that is not an https URL of a host and
+// an optional port alone. No refusal quotes the value.
+func CheckViaURL(flag, v string) error {
+	switch tooDeep, secret := scanURL(v); {
+	case secret != nil:
+		return fmt.Errorf("%s: %w", flag, secret)
+	case tooDeep:
+		return fmt.Errorf("%s is percent-encoded more than %d times: %s", flag, urlUnescapeLimit, viaShape)
+	}
+	if wrong := gatewayURLWrong(v); wrong != "" {
+		return fmt.Errorf("%s %s: %s", flag, wrong, viaShape)
+	}
+	return nil
+}
+
 // CheckVia reads the file gateway.server.via.ca_file names, when it names one: it must
 // be there, open, and hold a PEM certificate. It says nothing of what the file holds.
 // Without a via there is nothing to check.

@@ -941,3 +941,73 @@ func TestEnrolPrintLeavesTheServerSectionUnread(t *testing.T) {
 		t.Errorf("%d enrolments sent; a file that is not YAML sends none", n)
 	}
 }
+
+// TestEnrolGoesThroughVia is qory access-key enrol --via: the enrolment goes to the
+// gateway, over TLS checked against --via-ca-file, with its target unchanged, and the
+// server gets it from the gateway; forager.yaml then names the gateway in
+// gateway.server.via, its CA file as an absolute path, and the line says so. A later
+// --replace goes through the gateway forager.yaml names. The flags are checked before a
+// key is made, and a gateway whose certificate the system's roots do not trust is no
+// way to the server.
+func TestEnrolGoesThroughVia(t *testing.T) {
+	dir := emptyDir(t)
+	srv := newEnrolServer(t)
+	g := newViaGateway(t, srv.URL)
+	writeFile(t, foragerFile(), "apiVersion: qory.dev/v1alpha1\nsession:\n  instance:\n    name: build-01\n")
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--via-ca-file", g.caFile}, "--via-ca-file needs --via, the gateway it is the trust of"},
+		{[]string{"--via-certificate-sha256", "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="}, "--via-certificate-sha256 needs --via, the gateway it is the trust of"},
+		{[]string{"--via", "http://gateway.example:8443"}, "--via for http://gateway.example:8443 is not https: an https URL of a host and an optional port, with nothing after"},
+		{[]string{"--via", "https://user:pass@gateway.example"}, "--via for https://gateway.example holds user information: an https URL of a host and an optional port, with nothing after"},
+		{[]string{"--via", g.URL, "--via-ca-file", filepath.Join(dir, "none.pem")}, "--via-ca-file " + filepath.Join(dir, "none.pem") + ": no such file or directory"},
+		{[]string{"--via", g.URL, "--via-ca-file", foragerFile()}, "--via-ca-file " + foragerFile() + " holds no PEM certificate"},
+		{[]string{"--via", g.URL, "--via-certificate-sha256", "pin"}, "--via-certificate-sha256 is not the SHA-256 of a public key in standard base64 with padding, 44 characters ending in ="},
+	} {
+		_, err := run(t, append(append([]string{"access-key", "enrol"}, c.args...), srv.URL, srv.code(1, false))...)
+		if err == nil || err.Error() != c.want || cmd.ExitCode(err) != cmd.ExitInput {
+			t.Errorf("%v: %v (exit %d)\nwant %q", c.args, err, cmd.ExitCode(err), c.want)
+		}
+	}
+	if exists(configDir().Path(foragerdir.NewSecretFile)) || exists(configDir().Path(foragerdir.SecretFile)) || len(srv.sent()) != 0 {
+		t.Fatal("a refused flag made a key or sent the enrolment")
+	}
+
+	_, err := run(t, "access-key", "enrol", "--via", g.URL, srv.URL, srv.code(1, false))
+	if err == nil || !strings.Contains(err.Error(), "certificate") {
+		t.Errorf("a gateway the system does not trust: %v", err)
+	}
+	if len(srv.sent()) != 0 {
+		t.Fatal("the enrolment reached the server past an untrusted gateway")
+	}
+
+	t.Chdir(filepath.Dir(g.caFile))
+	out, errOut, err := runSplit(t, "", "access-key", "enrol", "--via", g.URL, "--via-ca-file", filepath.Base(g.caFile), srv.URL, srv.code(2, false))
+	if err != nil {
+		t.Fatalf("%v\n%s%s", err, out, errOut)
+	}
+	wants(t, errOut, "wrote gateway.server.url, gateway.server.access_key_id, gateway.server.apiary_public_key and gateway.server.via.url to "+foragerFile()+"\n")
+	if relayed := g.relayed(); len(relayed) != 1 || relayed[0] != accesskey.EnrolmentPath || len(srv.sent()) != 1 {
+		t.Errorf("the gateway relayed %v, and the server verified %d", relayed, len(srv.sent()))
+	}
+	wants(t, readForagerFile(t), "    via:\n      url: "+g.URL+"\n      ca_file: "+g.caFile+"\n")
+	r, err := config.LoadForager()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Server.Via == nil || r.Server.Via.URL != g.URL || r.Server.Via.CAFile != g.caFile {
+		t.Errorf("forager.yaml reads gateway.server.via as %+v", r.Server.Via)
+	}
+
+	out, errOut, err = runSplit(t, "", "access-key", "enrol", "--replace", srv.URL, srv.code(3, false))
+	if err != nil {
+		t.Fatalf("--replace: %v\n%s%s", err, out, errOut)
+	}
+	wants(t, errOut, "wrote gateway.server.access_key_id to "+foragerFile()+"\n")
+	if relayed := g.relayed(); len(relayed) != 2 || len(srv.sent()) != 2 {
+		t.Errorf("--replace: the gateway relayed %v, and the server verified %d", relayed, len(srv.sent()))
+	}
+	wants(t, readForagerFile(t), "    via:\n      url: "+g.URL+"\n      ca_file: "+g.caFile+"\n")
+}

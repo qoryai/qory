@@ -17,18 +17,21 @@ import (
 )
 
 // Enrolment is what qory access-key enrol writes into forager.yaml's gateway.server:
-// the server's URL where the section has none, the access key's id, and the
-// pin where the section has none. A nil Pin leaves apiary_public_key as it is.
+// the server's URL where the section has none, the access key's id, the pin where the
+// section has none, and the gateway the enrolment went through. A nil Pin leaves
+// apiary_public_key as it is, and a nil Via leaves via as it is.
 type Enrolment struct {
 	URL         string
 	AccessKeyID string
 	Pin         accesskey.Pin
+	Via         *ForagerVia
 }
 
 // WriteEnrolment writes an enrolment into forager.yaml at path, editing its YAML
 // tree so its comments, its order and every other key stay as they are:
-// gateway.server.url when the section has none, gateway.server.access_key_id, and
-// gateway.server.apiary_public_key when e.Pin is set and the section has none. The
+// gateway.server.url when the section has none, gateway.server.access_key_id,
+// gateway.server.apiary_public_key when e.Pin is set and the section has none, and
+// gateway.server.via, in place of the one there, when e.Via is set. The
 // gateway section is added at the end of the file when it has none. A file that does not exist is created with
 // mode 0600 and the apiVersion line; the directory is the caller's to create. The new
 // content replaces the file in one rename, in the directory of the file a link names,
@@ -103,6 +106,9 @@ func editEnrolment(data []byte, e Enrolment) ([]byte, error) {
 	if e.Pin != nil && valueOf(server, "apiary_public_key") == nil {
 		set(server, "apiary_public_key", pinNode(e.Pin))
 	}
+	if e.Via != nil {
+		set(server, "via", viaNode(e.Via))
+	}
 	b := bytes.NewBuffer(before)
 	enc := yaml.NewEncoder(b)
 	enc.SetIndent(2)
@@ -161,6 +167,20 @@ func set(m *yaml.Node, key string, v *yaml.Node) {
 // setScalar sets key in a mapping to a string.
 func setScalar(m *yaml.Node, key, value string) {
 	set(m, key, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value})
+}
+
+// viaNode is gateway.server.via as forager.yaml writes it: its url, then its ca_file and
+// certificate_sha256 when they are set.
+func viaNode(v *ForagerVia) *yaml.Node {
+	m := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	setScalar(m, "url", v.URL)
+	if v.CAFile != "" {
+		setScalar(m, "ca_file", v.CAFile)
+	}
+	if v.CertificateSHA256 != "" {
+		setScalar(m, "certificate_sha256", v.CertificateSHA256)
+	}
+	return m
 }
 
 // pinNode is a pin as forager.yaml writes it: one flow mapping per key.

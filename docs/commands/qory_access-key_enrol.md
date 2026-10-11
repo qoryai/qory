@@ -61,9 +61,12 @@ qory access-key enrol <server> <code> [flags]
 ### Options
 
 ```
-  -h, --help      help for enrol
-      --print     write no key or setting; print the key's three settings for a starter
-      --replace   move this machine to a new key; the old key stays in use until the new one is active
+  -h, --help                            help for enrol
+      --print                           write no key or setting; print the key's three settings for a starter
+      --replace                         move this machine to a new key; the old key stays in use until the new one is active
+      --via string                      enrol through this gateway, and write it to gateway.server.via.url
+      --via-ca-file string              a PEM file of the authorities the gateway's certificate chains to, in place of the system's roots; written to gateway.server.via.ca_file
+      --via-certificate-sha256 string   the SHA-256 of the gateway certificate's public key, in standard base64; written to gateway.server.via.certificate_sha256
 ```
 
 ### Options inherited from parent commands

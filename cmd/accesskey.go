@@ -2,17 +2,21 @@ package cmd
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/forager/server"
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/config"
@@ -54,6 +58,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 // newAccessKeyEnrol builds the enrol verb.
 func newAccessKeyEnrol() *cobra.Command {
 	var print, replace bool
+	var v enrolVia
 	c := &cobra.Command{
 		Use:   "enrol <server> <code>",
 		Short: "Enrol a new access key with a code from the server",
@@ -111,12 +116,88 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if replace && print {
 				return input(errors.New("--replace and --print do not go together: --print keeps nothing on this machine, so it replaces nothing"))
 			}
-			return enrol(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], args[1], print, replace)
+			return enrol(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], args[1], print, replace, v)
 		},
 	}
 	c.Flags().BoolVar(&print, "print", false, "write no key or setting; print the key's three settings for a starter")
 	c.Flags().BoolVar(&replace, "replace", false, "move this machine to a new key; the old key stays in use until the new one is active")
+	c.Flags().StringVar(&v.url, "via", "", "enrol through this gateway, and write it to gateway.server.via.url")
+	c.Flags().StringVar(&v.caFile, "via-ca-file", "", "a PEM file of the authorities the gateway's certificate chains to, in place of the system's roots; written to gateway.server.via.ca_file")
+	c.Flags().StringVar(&v.pin, "via-certificate-sha256", "", "the SHA-256 of the gateway certificate's public key, in standard base64; written to gateway.server.via.certificate_sha256")
 	return c
+}
+
+// enrolVia is the gateway an enrolment goes through, as enrol's flags give it: its URL,
+// the CA file its certificate chains to and the pin of its public key, each empty when
+// not given.
+type enrolVia struct {
+	url, caFile, pin string
+}
+
+// check refuses the flags of a gateway Forager cannot enrol through, before a key is
+// made: --via-ca-file or --via-certificate-sha256 without --via, a URL that is not a
+// gateway's, a CA file that is not there or holds no PEM certificate, and a pin not in its
+// form. The CA file's path is made absolute, since forager.yaml's paths are relative to
+// its own directory. Each refusal is input, and none quotes the URL.
+func (v *enrolVia) check() error {
+	if v.url == "" {
+		for _, f := range []struct{ name, value string }{{"--via-ca-file", v.caFile}, {"--via-certificate-sha256", v.pin}} {
+			if f.value != "" {
+				return input(fmt.Errorf("%s needs --via, the gateway it is the trust of", f.name))
+			}
+		}
+		return nil
+	}
+	if err := config.CheckViaURL("--via", v.url); err != nil {
+		return input(err)
+	}
+	if v.caFile != "" {
+		abs, err := filepath.Abs(v.caFile)
+		if err != nil {
+			return input(fmt.Errorf("--via-ca-file %s: %w", v.caFile, err))
+		}
+		v.caFile = abs
+		b, err := os.ReadFile(abs)
+		if err != nil {
+			var pe *fs.PathError
+			if errors.As(err, &pe) {
+				err = pe.Err
+			}
+			return input(fmt.Errorf("--via-ca-file %s: %w", abs, err))
+		}
+		if !x509.NewCertPool().AppendCertsFromPEM(b) {
+			return input(fmt.Errorf("--via-ca-file %s holds no PEM certificate", abs))
+		}
+	}
+	if v.pin != "" && !config.CertificatePin(v.pin) {
+		return input(errors.New("--via-certificate-sha256 is not the SHA-256 of a public key in standard base64 with padding, 44 characters ending in ="))
+	}
+	if err := (server.Via{URL: v.url, CAFile: v.caFile, CertificateSHA256: v.pin}).Check(); err != nil {
+		return input(fmt.Errorf("--via: %w", err))
+	}
+	return nil
+}
+
+// forager is the gateway as forager.yaml writes it; nil without --via.
+func (v enrolVia) forager() *config.ForagerVia {
+	if v.url == "" {
+		return nil
+	}
+	return &config.ForagerVia{URL: v.url, CAFile: v.caFile, CertificateSHA256: v.pin}
+}
+
+// throughVia is the gateway an enrolment goes through, as Forager sends through it: the
+// one --via names, else, for a key kept on this machine, gateway.server.via of r, its CA
+// file resolved under forager.yaml's directory; nil for none, the server reached
+// directly.
+func throughVia(v enrolVia, r *config.Forager, print bool) *server.Via {
+	if v.url != "" {
+		return &server.Via{URL: v.url, CAFile: v.caFile, CertificateSHA256: v.pin}
+	}
+	if print {
+		return nil
+	}
+	return foragerVia(r)
 }
 
 // keyEnv returns one of the access key's variables, QORY_ACCESS_KEY_ID,
@@ -252,7 +333,7 @@ func effectivePin(r *config.Forager, print bool) (accesskey.Pin, error) {
 // secret already here stops it, unless replace is set: then the new key is made in
 // access-key-secret.new, and takes the place of the secret here only once the server's
 // signed answer has come, see [replaceKey].
-func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string, print, replace bool) error {
+func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string, print, replace bool, flagVia enrolVia) error {
 	server := strings.TrimSuffix(rawServer, "/")
 	if err := config.CheckServerURL(server); err != nil {
 		return input(err)
@@ -263,6 +344,9 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	code, err := accesskey.NormaliseCode(rawCode)
 	if err != nil {
 		return input(err)
+	}
+	if err := flagVia.check(); err != nil {
+		return err
 	}
 	if !print {
 		if err := refuseKeyEnv(); err != nil {
@@ -286,6 +370,14 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	if err != nil {
 		return err
 	}
+	// The gateway the enrolment goes through: --via, else forager.yaml's.
+	via := throughVia(flagVia, r, print)
+	if via != nil && flagVia.url == "" {
+		if err := checkVia(r); err != nil {
+			return err
+		}
+	}
+	written := flagVia.forager()
 	if err := pin.CheckCode(code); err != nil {
 		return input(err)
 	}
@@ -327,7 +419,7 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 			}
 			fmt.Fprintf(info, "access key fingerprint %s\n", k.Fingerprint())
 			printEnrolled(info, ans)
-			return finishEnrolment(dir, info, r, server, pin, k, ans)
+			return finishEnrolment(dir, info, r, server, pin, written, k, ans)
 		}
 	}
 	// retry is the same code again within its 15 minutes while access-key-secret holds
@@ -396,8 +488,16 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	if err != nil {
 		return input(err)
 	}
-	client, recorder := recordingClient()
-	ans, err := req.Post(ctx, client, server, userAgent())
+	client, recorder, err := recordingClient(via)
+	if err != nil {
+		return input(err)
+	}
+	var ans *accesskey.EnrolmentAnswer
+	if via != nil {
+		ans, err = req.PostVia(ctx, client, server, via.URL, userAgent())
+	} else {
+		ans, err = req.Post(ctx, client, server, userAgent())
+	}
 	if err != nil {
 		return enrolFailed(dir, err, key, print, now)
 	}
@@ -422,7 +522,7 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 			return err
 		}
 	}
-	return finishEnrolment(dir, info, r, server, pin, key, ans)
+	return finishEnrolment(dir, info, r, server, pin, written, key, ans)
 }
 
 // printEnrolled prints what the server's verified 201 says.
@@ -439,10 +539,11 @@ func printEnrolled(info io.Writer, ans *accesskey.EnrolmentAnswer) {
 // finishEnrolment is what follows the server's verified 201 for key on this machine,
 // the first time or from the answer enrolment-answer keeps: the new key, still in
 // access-key-secret.new, takes the place of access-key-secret, see [placeKey]; then
-// forager.yaml is written; access-key-secret.replaced, the pending enrolment and the
-// kept answer are removed, in that order.
-func finishEnrolment(dir foragerdir.Dir, info io.Writer, r *config.Forager, server string, pin accesskey.Pin, key *accesskey.Key, ans *accesskey.EnrolmentAnswer) error {
-	e := config.Enrolment{URL: server, AccessKeyID: ans.AccessKeyID}
+// forager.yaml is written, with via, the gateway --via named, when not nil;
+// access-key-secret.replaced, the pending enrolment and the kept answer are removed, in
+// that order.
+func finishEnrolment(dir foragerdir.Dir, info io.Writer, r *config.Forager, server string, pin accesskey.Pin, via *config.ForagerVia, key *accesskey.Key, ans *accesskey.EnrolmentAnswer) error {
+	e := config.Enrolment{URL: server, AccessKeyID: ans.AccessKeyID, Via: via}
 	if len(pin) == 0 {
 		e.Pin = ans.Pin
 	}
@@ -478,18 +579,30 @@ func finishEnrolment(dir foragerdir.Dir, info io.Writer, r *config.Forager, serv
 	if err := dir.RemoveAnswer(); err != nil {
 		return err
 	}
-	written := "gateway.server.access_key_id"
+	var written []string
 	if r == nil || r.Server == nil {
-		written = "gateway.server.url, " + written
+		written = append(written, "gateway.server.url")
 	}
+	written = append(written, "gateway.server.access_key_id")
 	if e.Pin != nil {
-		written += " and gateway.server.apiary_public_key"
+		written = append(written, "gateway.server.apiary_public_key")
 	}
-	fmt.Fprintf(info, "wrote %s to %s\n", written, path)
+	if e.Via != nil {
+		written = append(written, "gateway.server.via.url")
+	}
+	fmt.Fprintf(info, "wrote %s to %s\n", joinAnd(written), path)
 	if old != "" {
 		fmt.Fprintf(info, "revoke the old key %s on the node's page, unless it is revoked already: until then it still works on Qory Apiary\n", old)
 	}
 	return nil
+}
+
+// joinAnd joins names as a sentence lists them: commas, and "and" before the last.
+func joinAnd(names []string) string {
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
 // placeKey puts the new key in access-key-secret.new in place of access-key-secret,
