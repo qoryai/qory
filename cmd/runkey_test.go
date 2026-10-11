@@ -460,3 +460,25 @@ func TestTheRunKeyIsNoAgentsVariable(t *testing.T) {
 		t.Error("a refused run left a record")
 	}
 }
+
+// TestRunRefusesAGatewaysAccessKey is qory run under an access key whose node,
+// discovery says, is a gateway's: it is refused in qory's words, after the node line and
+// before the run registers, and the agent never starts.
+func TestRunRefusesAGatewaysAccessKey(t *testing.T) {
+	_, srv := serverRun(t, "", "")
+	srv.node = testGatewayNode
+	out, err := run(t, "run")
+	if want := "this machine's gateway serves other machines and runs no sessions; give this machine a node of its own"; err == nil || err.Error() != want {
+		t.Errorf("%v, want %q\n%s", err, want, out)
+	}
+	if cmd.ExitCode(err) == 0 {
+		t.Error("exit 0")
+	}
+	wants(t, out, "qory run: node "+testGatewayNode+", instance i_")
+	lacks(t, out, "hello from")
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+	if len(srv.registered) != 0 {
+		t.Errorf("the run registered: %v", srv.registered)
+	}
+}

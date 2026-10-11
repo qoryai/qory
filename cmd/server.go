@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/qoryai/forager/accesskey"
@@ -320,7 +321,8 @@ func startRun(dir foragerdir.Dir, runID string, walled bool, id *serverIdentity)
 }
 
 // discovered is what a run against the server does once the server's signed discovery
-// is read, before the run's registration: it prints the node, after "qory <verb>:". When the run's secret is the one in
+// is read, before the run's registration: it prints the node, after "qory <verb>:", and
+// refuses qory run under a gateway's access key, whose node is a gateway's. When the run's secret is the one in
 // access-key-secret, still there, it then, under the key lock held exclusively, deletes
 // every secret moved aside, since the key's signed discovery succeeded; writes the
 // stored-secrets marker when discovery lists secrets, a marker it cannot write being no
@@ -330,6 +332,9 @@ func startRun(dir foragerdir.Dir, runID string, walled bool, id *serverIdentity)
 func discovered(dir foragerdir.Dir, id *serverIdentity, verb string, walled bool, report io.Writer) func(gateway.Discovery) error {
 	return func(d gateway.Discovery) error {
 		fmt.Fprintf(report, "qory %s: node %s, instance %s\n", verb, d.NodeID, id.instanceID)
+		if verb == "run" && strings.HasPrefix(d.NodeID, gatewayNodePrefix) {
+			return &saidError{text: gatewayRunsNoSessions}
+		}
 		if id.key.source == fromFile {
 			if err := settleMarker(dir, id.key.key, d.Secrets); err != nil {
 				return err
@@ -347,6 +352,14 @@ func discovered(dir foragerdir.Dir, id *serverIdentity, verb string, walled bool
 		return nil
 	}
 }
+
+// gatewayNodePrefix is the prefix of a gateway's node id: discovery naming one says the
+// access key is a gateway's.
+const gatewayNodePrefix = "ng_"
+
+// gatewayRunsNoSessions is the refusal of qory run under a gateway's access key, which
+// discovery tells by its node, before the run registers.
+const gatewayRunsNoSessions = "this machine's gateway serves other machines and runs no sessions; give this machine a node of its own"
 
 // settleMarker is the marker rule of a signed discovery under the secret of
 // access-key-secret, under the key lock held exclusively.
