@@ -612,7 +612,7 @@ runner has to start the run, in whole seconds, such as `15m`; by default the ser
 window, and never more than the server allows.
 
 The labels and what the run is about go to `qory run register`: `--label`, `--kind`,
-`--title`, `--subject` and `--details`. Behind a gateway, `qory run` refuses them, and adds
+`--title`, `--subject` and `--details`. With a run key, `qory run` refuses them, and adds
 no `forge` or `repository` of the checkout's: give them as labels.
 
 On the runner, `qory run` given the run key goes through the gateway the run key names. The
@@ -622,6 +622,9 @@ hands qory the run key on a descriptor, here stdin:
 ```sh
 printf %s "$run_key" | qory run --run-key-fd 0 -- -p "$prompt"
 ```
+
+Keep the run key in a shell variable, as here, rather than export `QORY_RUN_KEY`:
+`--run-key-fd` together with an exported `QORY_RUN_KEY` is refused.
 
 A job step that holds the run key in its environment exposes it to an unwalled agent: the
 agent runs as you, and can read that environment, whatever the variable is called. Behind a
@@ -679,9 +682,10 @@ the new key may receive stored secrets. It is removed as above.
 
 On a machine that holds an access key, every run needs a wall. An unwalled run is refused before
 it starts, `key_needs_wall`, whether the key comes from `access-key-secret` or a key file beside
-it, from `QORY_ACCESS_KEY_SECRET` or from `--access-key-secret-fd`. `--local` and a
-`forager.yaml` without a server are included. To run agents without a wall, keep the key with a
-starter and run the machine behind a gateway: see [For a starter](#for-a-starter).
+it, from `QORY_ACCESS_KEY_SECRET`, and, against the server, from `--access-key-secret-fd` too.
+`--local` and a `forager.yaml` without a server are included, except for a key given by
+`--access-key-secret-fd` alone. To run agents without a wall, keep the key with a starter and
+run the machine behind a gateway: see [For a starter](#for-a-starter).
 
 The refusal says where the key is:
 
@@ -812,8 +816,11 @@ qory access-key enrol --via https://gateway.example:8443 https://apiary.example 
 The enrolment goes through the gateway, and enrol writes `gateway.server.via` beside the key:
 `wrote gateway.server.url, gateway.server.access_key_id, gateway.server.apiary_public_key
 and gateway.server.via.url to <path>`. `--via-ca-file` and `--via-certificate-sha256` write
-`ca_file`, as an absolute path, and `certificate_sha256`. Without `--via`, enrol, `--replace`
-included, goes through the gateway `gateway.server.via` names, when the file names one.
+`ca_file`, as an absolute path, and `certificate_sha256`, and the line names each one written,
+such as `wrote gateway.server.url, gateway.server.access_key_id,
+gateway.server.apiary_public_key, gateway.server.via.url and gateway.server.via.ca_file to
+<path>`. Without `--via`, enrol, `--replace` included, goes through the gateway
+`gateway.server.via` names, when the file names one.
 
 Each run reads the server's configuration through the gateway, prints `qory run: node <id>,
 instance <id>`, and registers with its labels, the checkout's forge and repository among
@@ -825,6 +832,15 @@ send, or once the gateway says the run has ended; until then, `qory run resend <
 reads it from there, with no `QORY_RUN_KEY`. A run key that cannot be kept stops the run:
 `the run <id> is registered, and its run key could not be kept beside forager.yaml, so the
 run does not start: <err>`.
+
+Such a machine starts no gateway of its own, so the rest of the `gateway` section does
+nothing there: `qory run` refuses each key of it beside `gateway.server`, such as
+`gateway.egress`, `gateway.credentials`, `gateway.integrations`, `gateway.listen` and
+`gateway.tls`, before anything starts or registers, exit 2, one line per key in
+alphabetical order: `<file>: gateway.<key> does nothing on this machine: gateway.server.via
+sends its runs through a gateway, which holds their policy, credentials and integrations;
+remove gateway.<key>, or remove gateway.server.via`. `qory run --local` runs a gateway of
+its own, which reads them, so it is not refused.
 
 When the server refuses the registration, qory says what the refusal means and what to do,
 then Forager's words and the code:

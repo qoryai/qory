@@ -88,6 +88,8 @@ qory gateway: stopping
 It refuses to start, before it listens:
 
 - `~/.config/qory/forager.yaml has no gateway section, so there is no gateway to run`
+- `<file>: gateway.server.via does nothing for qory gateway: a gateway reaches the server
+  directly; remove gateway.server.via`
 - `<file>: gateway.listen is required to run the gateway as a service: the address the
   other machines reach, such as 0.0.0.0:8443; or --listen`
 - `<file>: gateway.listen is not host:port, such as 0.0.0.0:8443`, and for `--listen`,

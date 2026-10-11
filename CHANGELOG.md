@@ -24,10 +24,13 @@ release may change what an existing document does, and states it under Upgrading
   a node's or node pool's access key it holds exactly one id, the workspace the node or
   pool belongs to, `ws_` and 16 lower-case Crockford base32 characters, such as
   `ws_f1xt0re000000000`. A server you run yourself must list it too.
-- A machine that holds an access key runs walled only: every run there needs a wall,
-  `--local` and a `forager.yaml` without a server included, or it is refused before it
-  starts, `key_needs_wall`. Give the machine a wall, or keep the key with a starter, such
-  as a CI, and run the machine behind a gateway with the run key `qory run register` gets.
+- A machine that holds an access key runs walled only: every run there needs a wall, or
+  it is refused before it starts, `key_needs_wall`, whether the key comes from
+  `access-key-secret` or a key file beside it, from `QORY_ACCESS_KEY_SECRET`, and, against
+  the server, from `--access-key-secret-fd` too. `--local` and a `forager.yaml` without a
+  server are included, except for a key given by `--access-key-secret-fd` alone. Give the
+  machine a wall, or keep the key with a starter, such as a CI, and run the machine behind
+  a gateway with the run key `qory run register` gets.
 
 ### Added
 
@@ -262,6 +265,16 @@ release may change what an existing document does, and states it under Upgrading
   registration say `this machine's node`, and `node_uses_gateway`, on a machine without
   `gateway.server.via`, says to set it. A resend to the server, of a run that had a
   gateway of its own, is refused while `gateway.server.via` is set.
+- On a machine with its own access key and `gateway.server.via`, `qory run` refuses each
+  key of the `gateway` section beside `gateway.server`, such as `gateway.egress`,
+  `gateway.credentials` and `gateway.integrations`, before anything starts or registers,
+  exit 2, one line per key: `<file>: gateway.<key> does nothing on this machine:
+  gateway.server.via sends its runs through a gateway, which holds their policy,
+  credentials and integrations; remove gateway.<key>, or remove gateway.server.via`.
+  `qory run --local` runs a gateway of its own, which reads them, and is not refused.
+- `qory gateway` refuses `gateway.server.via` before it starts, exit 2: `<file>:
+  gateway.server.via does nothing for qory gateway: a gateway reaches the server directly;
+  remove gateway.server.via`.
 - On a machine that holds an access key, every run needs a wall: an unwalled run is
   refused before it starts, `key_needs_wall`, naming where the key is, `access-key-secret`
   or a key file beside it, `QORY_ACCESS_KEY_SECRET` or `--access-key-secret-fd`. `--local`
