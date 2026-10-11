@@ -57,25 +57,29 @@ func pathsRow(rows []config.Row) config.Row {
 }
 
 // TestForagerFileRefusesPathsItCannotTake refuses gateway.egress.paths that is not a
-// mapping from a host to a list of paths, in qory's words, and a host or a path Forager
-// would refuse, in Forager's words as it reads a policy's egress.paths: each names the
-// file.
+// mapping from a host to a list of paths, a key Forager does not read as a host, a path
+// it does not read as one, and a path listed twice: each word for word after the file,
+// naming the host where it is a host, and never the key that is not one or the path.
 func TestForagerFileRefusesPathsItCannotTake(t *testing.T) {
 	hermetic(t)
+	const host = ": gateway.egress.paths: a key is not a lower-case host name or a *. suffix; no port, path or scheme"
 	for _, c := range []struct{ body, want string }{
 		{"paths: [\"/v1/*\"]", ": gateway.egress.paths is a mapping from a host to a list of paths"},
 		{"paths:", ": gateway.egress.paths is a mapping from a host to a list of paths"},
 		{"paths: {api.example.com: /v1/*}", ": gateway.egress.paths: api.example.com is a list of paths"},
 		{"paths: {api.example.com: [[/v1/*]]}", ": gateway.egress.paths: api.example.com is a list of paths"},
 		{"paths: {api.example.com: }", ": gateway.egress.paths: api.example.com is a list of paths"},
-		{"paths: {\"API.example.com\": [/v1/*]}", ": policy forager.yaml gateway.egress: jsonschema validation failed with 'https://qory.dev/contracts/forager/v1/policy.schema.json#'\n- at '/egress/paths': invalid propertyName 'API.example.com'\n  - at '': 'API.example.com' does not match pattern"},
-		{"paths: {\"api.example.com:443\": [/v1/*]}", ": policy forager.yaml gateway.egress: jsonschema validation failed with 'https://qory.dev/contracts/forager/v1/policy.schema.json#'\n- at '/egress/paths': invalid propertyName 'api.example.com:443'"},
-		{"paths: {api.example.com: [v1]}", ": policy forager.yaml gateway.egress: jsonschema validation failed with 'https://qory.dev/contracts/forager/v1/policy.schema.json#'\n- at '/egress/paths/api.example.com/0': 'v1' does not match pattern"},
-		{"paths: {api.example.com: [\"/v1/*/x\"]}", ": policy forager.yaml gateway.egress: jsonschema validation failed with 'https://qory.dev/contracts/forager/v1/policy.schema.json#'\n- at '/egress/paths/api.example.com/0': '/v1/*/x' does not match pattern"},
+		{"paths: {\"API.example.com\": [/v1/*]}", host},
+		{"paths: {\"api.example.com:443\": [/v1/*]}", host},
+		{"paths: {\"api.example.com:443\": /v1/*}", host},
+		{"paths: {? [a.example] : [/v1/*]}", host},
+		{"paths: {api.example.com: [/v1/*, v1]}", ": gateway.egress.paths.api.example.com[1] is not a path from /, matched whole or up to a final *"},
+		{"paths: {api.example.com: [\"/v1/*/x\"]}", ": gateway.egress.paths.api.example.com[0] is not a path from /, matched whole or up to a final *"},
+		{"paths: {api.example.com: [/v1, /v2, /v1]}", ": gateway.egress.paths.api.example.com lists a path twice"},
 	} {
 		path := foragerFile(t, "gateway:\n  egress:\n    mode: observe\n    "+c.body+"\n")
 		_, err := config.LoadForager()
-		if err == nil || !strings.HasPrefix(err.Error(), path+c.want) {
+		if err == nil || err.Error() != path+c.want {
 			t.Errorf("%q: %v, want %q after the file", c.body, err, c.want)
 		}
 	}

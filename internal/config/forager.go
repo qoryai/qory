@@ -1184,26 +1184,67 @@ func readCredentials(path string, node *yaml.Node) ([]ForagerCredential, error) 
 	return out, nil
 }
 
-// readPaths reads gateway.egress.paths, a mapping from a host to a list of paths. What a host and a path may be is Forager's to say: the paths are read as the
-// egress.paths of a policy document, as Forager reads the path rules it keeps beside a
-// run's policy, so the two never disagree.
+// readPaths reads gateway.egress.paths, a mapping from a host to a list of paths. What
+// a host and a path may be is Forager's to say: each host, then each path, is read as
+// the egress.paths of a policy document, as Forager reads the path rules it keeps
+// beside a run's policy, so the two never disagree. A refusal is qory's, in words that
+// hold no value.
 func readPaths(path string, node *yaml.Node) (map[string][]string, error) {
 	node = unalias(node)
 	if node.Kind != yaml.MappingNode {
 		return nil, fmt.Errorf("%s: gateway.egress.paths is a mapping from a host to a list of paths", path)
 	}
-	out := map[string][]string{}
+	values := map[string]*yaml.Node{}
+	// twice is a host written twice, by the lines of its first and its second key.
+	twice := map[string][2]int{}
+	first := map[string]int{}
 	for i := 0; i+1 < len(node.Content); i += 2 {
-		host := node.Content[i].Value
-		var list []string
-		if v := unalias(node.Content[i+1]); v.Kind != yaml.SequenceNode || safeDecode(func() error { return v.Decode(&list) }) != nil {
+		key := node.Content[i]
+		if line, ok := first[key.Value]; ok {
+			if _, noted := twice[key.Value]; !noted {
+				twice[key.Value] = [2]int{line, key.Line}
+			}
+			continue
+		}
+		first[key.Value] = key.Line
+		values[key.Value] = unalias(node.Content[i+1])
+	}
+	// Each host is read alone before its value, so a key that is not a host is never
+	// printed; a host is, as a tool's name is. A path is never printed.
+	out := map[string][]string{}
+	for _, host := range slices.Sorted(maps.Keys(values)) {
+		if !policyPaths(map[string][]string{host: {}}) {
+			return nil, fmt.Errorf("%s: gateway.egress.paths: a key is not a lower-case host name or a *. suffix; no port, path or scheme", path)
+		}
+		if lines, ok := twice[host]; ok {
+			return nil, fmt.Errorf("%s: line %d: gateway.egress.paths.%s is written twice; it was first written at line %d", path, lines[1], host, lines[0])
+		}
+		list := []string{}
+		if v := values[host]; v.Kind != yaml.SequenceNode || safeDecode(func() error { return v.Decode(&list) }) != nil {
 			return nil, fmt.Errorf("%s: gateway.egress.paths: %s is a list of paths", path, host)
 		}
-		if list == nil {
-			list = []string{}
+		for i, p := range list {
+			if slices.Index(list, p) != i {
+				return nil, fmt.Errorf("%s: gateway.egress.paths.%s lists a path twice", path, host)
+			}
+		}
+		for i, p := range list {
+			if !policyPaths(map[string][]string{host: {p}}) {
+				return nil, fmt.Errorf("%s: gateway.egress.paths.%s[%d] is not a path from /, matched whole or up to a final *", path, host, i)
+			}
 		}
 		out[host] = list
 	}
+	if !policyPaths(out) {
+		return nil, fmt.Errorf("%s: gateway.egress.paths is not a policy's egress.paths", path)
+	}
+	return out, nil
+}
+
+// policyPaths reports whether Forager reads paths as the egress.paths of a policy
+// document, as it reads the path rules it keeps beside a run's policy. What it says of
+// paths it refuses holds the value, so it is never printed.
+func policyPaths(paths map[string][]string) bool {
 	type egress struct {
 		Mode  string              `json:"mode"`
 		Paths map[string][]string `json:"paths"`
@@ -1211,14 +1252,12 @@ func readPaths(path string, node *yaml.Node) (map[string][]string, error) {
 	b, err := json.Marshal(struct {
 		Version int    `json:"version"`
 		Egress  egress `json:"egress"`
-	}{1, egress{"observe", out}})
+	}{1, egress{"observe", paths}})
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return false
 	}
-	if _, err := policy.Read(ForagerFileName+" gateway.egress", b); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	return out, nil
+	_, err = policy.Read(ForagerFileName+" gateway.egress", b)
+	return err == nil
 }
 
 // pathsOrNone is path rules as a row shows them, by host in order: the host, then its
