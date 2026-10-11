@@ -726,16 +726,25 @@ func staticELF(t *testing.T) string {
 }
 
 // fakeDocker writes a program that stands in for docker: it logs every command line,
-// answers the two the wall reads, and for run logs the environment file, prints a line
-// and exits 4, as a container's runtime would.
+// answers the two the wall reads and, as Docker Engine 28, the engine's version a run
+// with nested Docker asks for, adds an IPv6 subnet to the inside network created with
+// --ipv6, and for run logs the environment file, prints a line and exits 4, as a
+// container's runtime would.
 func fakeDocker(t *testing.T) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
 	log := filepath.Join(dir, "docker.log")
+	ipv6 := filepath.Join(dir, "ipv6")
 	script := filepath.Join(dir, "docker")
 	writeFile(t, script, `#!/bin/sh
 echo "$*" >> `+log+`
+case "$*" in
+"network create "*" --ipv6 "*) : > `+ipv6+` ;;
+"network create "*" --internal "*) rm -f `+ipv6+` ;;
+"network inspect "*.Subnet*) test -e `+ipv6+` && { echo "172.30.0.1 fd00:db8::/64 "; exit 0; } ;;
+esac
 case "$1 $2" in
+"version --format") echo "28.0.0" ;;
 "network inspect") echo "172.30.0.1 " ;;
 "logs "*) echo "relay: listening" ;;
 "run "*)
@@ -782,7 +791,7 @@ case "$1 $2" in
 	entry=
 	while [ $# -gt 0 ]; do
 		case "$1" in
-		--rm|--interactive|--tty|--init) shift ;;
+		--rm|--interactive|--tty|--init|--no-healthcheck) shift ;;
 		--env-file) envfile=$2; shift 2 ;;
 		--entrypoint) entry=$2; shift 3; break ;;
 		*) shift 2 ;;
