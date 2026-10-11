@@ -1262,11 +1262,12 @@ How it works:
   the container. The tool listens on the Unix socket `QORY_TOOL_LISTEN` names.
 - The proxy ends the container's TLS for the hosts the tool serves, decides the host and
   the path by the policy, and hands the tool each request it allows.
-- The record lists each request to such a host in `dev.qory.run.egress`, with `tool`, the
-  tool's name.
+- The record lists each request the proxy hands to a tool in `dev.qory.run.egress`, with
+  `tool`, the tool's name.
 
 A run whose policy selects a tool needs a wall; without one it does not start. Under
-`enforce`, the run's allow list covers each host the tool serves.
+`enforce`, the run's allow list must cover each host the tool serves, or the run does not
+start.
 
 With a server, the server's run configuration selects the tools: through a server, a tool
 is reached only once the server's run configuration selects it. Until then, a run reaches a

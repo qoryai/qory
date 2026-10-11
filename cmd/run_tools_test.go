@@ -1,10 +1,13 @@
 package cmd_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/qoryai/forager/gateway"
 
 	"github.com/qoryai/qory/cmd"
 )
@@ -89,11 +92,34 @@ func TestRunRefusesAToolForagerRefuses(t *testing.T) {
 	serverFile(t, newGatewayServer(t), "  listen: 127.0.0.1:0\n"+gatewayTLS+"  tools:\n    files:\n      command: [\"/opt/tools/${argument}\"]\n      serves: [files.tools.internal]\n")
 	writeCertificate(t)
 	want = `forager.yaml: tool files: the argument goes in the command's arguments, not in the program's name`
+	// A gateway that started would wait for a signal: the test ends it at its start.
+	t.Cleanup(cmd.SetStartGateway(func(gateway.Config) error { return errors.New("the gateway started") }))
 	out, err := run(t, "gateway")
 	if cmd.ExitCode(err) != cmd.ExitInput || err == nil || err.Error() != want {
 		t.Errorf("qory gateway: %v (exit %d), want %q\n%s", err, cmd.ExitCode(err), want, out)
 	}
 	lacks(t, out, "listening on")
+}
+
+// TestGatewayHandsForagerTheMachinesTools is qory gateway handing the gateway it starts
+// the tools forager.yaml defines, each as the file writes it.
+func TestGatewayHandsForagerTheMachinesTools(t *testing.T) {
+	emptyDir(t)
+	serverFile(t, newGatewayServer(t), "  listen: 127.0.0.1:0\n"+gatewayTLS+"  tools:\n    files:\n      command: [/opt/tools/files, --prefix, \"${argument}\"]\n      argument: \"[a-z0-9-]+/[a-z0-9-]+\"\n      serves: [files.tools.internal]\n      placeholders: [FILES_TOKEN]\n")
+	writeCertificate(t)
+	var got []gateway.Tool
+	stopped := errors.New("the test stopped the gateway before it started")
+	t.Cleanup(cmd.SetStartGateway(func(cfg gateway.Config) error {
+		got = cfg.Tools
+		return stopped
+	}))
+	if _, err := run(t, "gateway"); err == nil || !strings.Contains(err.Error(), stopped.Error()) {
+		t.Fatalf("qory gateway did not reach the gateway's start: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "files" || strings.Join(got[0].Command, " ") != "/opt/tools/files --prefix ${argument}" || got[0].Argument != "[a-z0-9-]+/[a-z0-9-]+" ||
+		strings.Join(got[0].Serves, " ") != "files.tools.internal" || strings.Join(got[0].Placeholders, " ") != "FILES_TOKEN" {
+		t.Errorf("the gateway's tools: %+v", got)
+	}
 }
 
 // TestConfigListsTheTools lists each tool forager.yaml defines by its program and the
