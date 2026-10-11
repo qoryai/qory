@@ -126,15 +126,9 @@ type serverIdentity struct {
 // lives for this process alone.
 func identify(r *config.Forager, report io.Writer, verb string, fd *accesskey.Key) (*serverIdentity, error) {
 	dir := machineDir()
-	key, err := readAccessKey(dir, fd)
+	key, err := signingKey(r, fd)
 	if err != nil {
-		return nil, input(err)
-	}
-	if r.Server.AccessKeyID == "" {
-		return nil, input(fmt.Errorf("%s: the server has no access_key_id: qory access-key enrol writes it, or set gateway.server.access_key_id or %s", config.ForagerFileName, accesskey.EnvID))
-	}
-	if key == nil {
-		return nil, input(fmt.Errorf("no access key secret for the server %s: qory access-key enrol makes one, or set %s", r.Server.URL, accesskey.EnvSecret))
+		return nil, err
 	}
 	id := &serverIdentity{key: key, instanceName: r.InstanceNameOrDefault(), server: r.Server.URL}
 	instance, kept, err := dir.InstanceID(foragerdir.MachineID())
@@ -146,6 +140,37 @@ func identify(r *config.Forager, report io.Writer, verb string, fd *accesskey.Ke
 	}
 	id.instanceID = instance
 	return id, nil
+}
+
+// signingKey reads the access key a command signs its requests to forager.yaml's
+// server, r's, with: its id, which the server section or QORY_ACCESS_KEY_ID holds, and
+// its secret, the one read from --access-key-secret-fd when fd is not nil. Each refusal
+// is input, and none contains the secret.
+func signingKey(r *config.Forager, fd *accesskey.Key) (*accessKey, error) {
+	key, err := readAccessKey(machineDir(), fd)
+	if err != nil {
+		return nil, input(err)
+	}
+	if r.Server.AccessKeyID == "" {
+		return nil, input(fmt.Errorf("%s: the server has no access_key_id: qory access-key enrol writes it, or set gateway.server.access_key_id or %s", config.ForagerFileName, accesskey.EnvID))
+	}
+	if key == nil {
+		return nil, input(fmt.Errorf("no access key secret for the server %s: qory access-key enrol makes one, or set %s", r.Server.URL, accesskey.EnvSecret))
+	}
+	return key, nil
+}
+
+// serverClient is Forager's client of r's server, which signs every request with key and
+// names it the instance instance, of the name name: through gateway.server.via when r
+// sets it, to the server itself otherwise.
+func serverClient(r *config.Forager, key *accesskey.Key, instance, name string) *server.Client {
+	return &server.Client{
+		Config:       &server.Config{Version: 1, URL: r.Server.URL, AccessKeyID: r.Server.AccessKeyID, ApiaryPublicKey: r.Server.Pin, Via: foragerVia(r)},
+		Key:          key,
+		InstanceID:   instance,
+		InstanceName: name,
+		UserAgent:    userAgent(),
+	}
 }
 
 // gatewayServer is the server document Forager's gateway takes; the caller adds the
@@ -356,15 +381,32 @@ func startRun(dir foragerdir.Dir, runID string, walled bool, id *serverIdentity)
 // against the server.
 func discovered(dir foragerdir.Dir, id *serverIdentity, verb string, report io.Writer) func(gateway.Discovery) error {
 	return func(d gateway.Discovery) error {
-		fmt.Fprintf(report, "qory %s: node %s, instance %s\n", verb, d.NodeID, id.instanceID)
-		if verb == "run" && strings.HasPrefix(d.NodeID, gatewayNodePrefix) {
-			return &saidError{text: gatewayRunsNoSessions}
-		}
-		if id.key.source == fromFile {
-			return settleMarker(dir, id.key.key, d.Secrets)
-		}
-		return nil
+		return onDiscovery(dir, id.key, id.instanceID, verb, report, d)
 	}
+}
+
+// onDiscovery is what a command against the server does once the server's signed
+// discovery d is read under key, signing as the instance instance: see [discovered].
+// Besides qory run, it refuses as input qory run register and qory run end under a
+// gateway's access key, which registers no run and gives no run's outcome. Those two
+// write nothing on this machine: the marker is a run's to settle.
+func onDiscovery(dir foragerdir.Dir, key *accessKey, instance, verb string, report io.Writer, d gateway.Discovery) error {
+	fmt.Fprintf(report, "qory %s: node %s, instance %s\n", verb, d.NodeID, instance)
+	starter := verb == verbRegister || verb == verbEnd
+	if strings.HasPrefix(d.NodeID, gatewayNodePrefix) {
+		switch verb {
+		case "run":
+			return &saidError{text: gatewayRunsNoSessions}
+		case verbRegister:
+			return input(errors.New("this access key is a gateway's, and a gateway registers no runs: register with the key of the node pool the run belongs to"))
+		case verbEnd:
+			return input(errors.New("this access key is a gateway's, and a gateway gives no run's outcome: use the key of the node pool that registered the run"))
+		}
+	}
+	if key.source == fromFile && !starter {
+		return settleMarker(dir, key.key, d.Secrets)
+	}
+	return nil
 }
 
 // gatewayNodePrefix is the prefix of a gateway's node id: discovery naming one says the

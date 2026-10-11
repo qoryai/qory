@@ -43,7 +43,7 @@ never rotated: a new one is enrolled, and the old one revoked.
   enrol   enrol a new key with a code from the server
 
 With --print, enrol writes no key or setting on this machine and prints the key for a
-CI's settings instead.
+starter's settings instead, such as a CI's.
 
 More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	}
@@ -91,8 +91,8 @@ does without it.
 The key's name is session.instance.name of ` + config.ForagerFileName + `, else this machine's host name.
 
 --print writes no key or setting and prints QORY_ACCESS_KEY_ID, QORY_ACCESS_KEY_SECRET
-and QORY_APIARY_PUBLIC_KEY for a CI's settings. Only the secret belongs in its secret
-store. The key is for another machine, so the server and the pin of ` + config.ForagerFileName + ` do not
+and QORY_APIARY_PUBLIC_KEY for a starter's settings, such as a CI's. Only the secret belongs
+in its secret store. The key is for another machine, so the server and the pin of ` + config.ForagerFileName + ` do not
 apply; the code is checked against QORY_APIARY_PUBLIC_KEY when it is set.
 
 --verbose adds nothing here.
@@ -100,7 +100,7 @@ apply; the code is checked against QORY_APIARY_PUBLIC_KEY when it is set.
 More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 		Example: `  qory access-key enrol https://apiary.example qec_F1XT-0RE0-0000-0000-0000-0000-00.uoES-kuj1vk0sq0qoGlmAg
   qory access-key enrol --replace https://apiary.example "$code"   # move this machine to a new key
-  qory access-key enrol --print https://apiary.example "$code"   # for a CI's settings`,
+  qory access-key enrol --print https://apiary.example "$code"   # for a starter's settings`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 2 {
 				return input(fmt.Errorf("qory access-key enrol takes the server and the code"))
@@ -114,7 +114,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			return enrol(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], args[1], print, replace)
 		},
 	}
-	c.Flags().BoolVar(&print, "print", false, "write no key or setting; print the key's three settings for a CI")
+	c.Flags().BoolVar(&print, "print", false, "write no key or setting; print the key's three settings for a starter")
 	c.Flags().BoolVar(&replace, "replace", false, "move this machine to a new key; the old key stays in use until the new one is active")
 	return c
 }
@@ -410,7 +410,7 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(info, "Only %s belongs in the CI's secret store; %s and %s are plain settings. No key or setting was written on this machine.\n", accesskey.EnvSecret, accesskey.EnvID, accesskey.EnvPin)
+		fmt.Fprintf(info, "Only %s belongs in the starter's secret store; %s and %s are plain settings. No key or setting was written on this machine.\n", accesskey.EnvSecret, accesskey.EnvID, accesskey.EnvPin)
 		fmt.Fprintf(out, "%s=%s\n%s=%s\n%s=%s\n", accesskey.EnvID, ans.AccessKeyID, accesskey.EnvSecret, key.Secret(), accesskey.EnvPin, pinJSON)
 		return nil
 	}

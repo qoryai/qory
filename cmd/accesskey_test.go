@@ -873,7 +873,7 @@ func TestEnrolPrintWritesNothing(t *testing.T) {
 		t.Errorf("the pin printed does not read: %v", err)
 	}
 	wants(t, errOut, "access key fingerprint "+key.Fingerprint(), "enrolled as ak_0123456789abcdef in the node nd_0123456789abcdef", "stored secrets: no", "the key is active: runs can start",
-		"Only QORY_ACCESS_KEY_SECRET belongs in the CI's secret store; QORY_ACCESS_KEY_ID and QORY_APIARY_PUBLIC_KEY are plain settings. No key or setting was written on this machine.")
+		"Only QORY_ACCESS_KEY_SECRET belongs in the starter's secret store; QORY_ACCESS_KEY_ID and QORY_APIARY_PUBLIC_KEY are plain settings. No key or setting was written on this machine.")
 	if strings.Contains(errOut, key.Secret()) {
 		t.Error("stderr carries the secret")
 	}

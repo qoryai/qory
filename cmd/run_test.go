@@ -1,6 +1,7 @@
 package cmd_test
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -92,6 +93,16 @@ type fakeServer struct {
 	onExited func()
 	// node is the node discovery names, testNode when empty.
 	node string
+	// handler is the receiver behind the server, whose records a test of a run through a
+	// gateway fills ([fakeServer.choose]); keyNode is the node or node pool its records
+	// hold the access key under, none when empty; gatewayKey is the access key of the
+	// gateway testGatewayNode, testGatewayKey, nil for none.
+	handler    *receiver.Handler
+	keyNode    string
+	gatewayKey *accesskey.Key
+	// outcomes are the bodies of every starter's outcome the server was sent; targets
+	// the target, the path and the query, of every request.
+	outcomes, targets []string
 }
 
 // newFakeServer starts a server whose run configuration carries policy, the JSON of a
@@ -105,7 +116,10 @@ func newFakeServer(t *testing.T, policy string) *fakeServer {
 		Keys: func(id string) (receiver.AccessKey, bool) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
-			return receiver.AccessKey{PublicKey: f.key.PublicKey()}, id == testAccessKey && !f.revoked
+			if id == testGatewayKey && f.gatewayKey != nil {
+				return receiver.AccessKey{PublicKey: f.gatewayKey.PublicKey(), Node: testGatewayNode}, true
+			}
+			return receiver.AccessKey{PublicKey: f.key.PublicKey(), Node: f.keyNode}, id == testAccessKey && !f.revoked
 		},
 		Configuration: func() ([]byte, string) {
 			f.mu.Lock()
@@ -165,9 +179,19 @@ func newFakeServer(t *testing.T, policy string) *fakeServer {
 			return stop
 		},
 	}
+	f.handler = h
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body []byte
+		if strings.HasSuffix(r.URL.Path, "/outcome") {
+			body, _ = io.ReadAll(r.Body)
+			r.Body = io.NopCloser(bytes.NewReader(body))
+		}
 		f.mu.Lock()
 		f.instances = append(f.instances, [2]string{r.Header.Get("X-Qory-Instance-Id"), r.Header.Get("X-Qory-Instance-Name")})
+		f.targets = append(f.targets, r.URL.RequestURI())
+		if body != nil {
+			f.outcomes = append(f.outcomes, string(body))
+		}
 		unavailable := f.unavailable && r.URL.Path == "/v1/events"
 		f.mu.Unlock()
 		if unavailable {
@@ -184,6 +208,27 @@ func newFakeServer(t *testing.T, policy string) *fakeServer {
 	}))
 	t.Cleanup(f.Close)
 	return f
+}
+
+// testPool is the node pool a starter's access key belongs to, and testGatewayKey the
+// access key id of the gateway testGatewayNode.
+const (
+	testPool       = "np_0123456789abcdef"
+	testGatewayKey = "ak_9atewayk00000000"
+)
+
+// choose makes the server's access key a node pool's, testPool, in the workspace
+// testWorkspace, whose choice is choice: receiver.Direct, receiver.Default or a gateway,
+// testGatewayNode. That gateway lives in the workspace, which it may serve and whose
+// default it is, at gatewayURL, with an active access key of its own.
+func (f *fakeServer) choose(choice, gatewayURL string, k *accesskey.Key) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.keyNode, f.gatewayKey = testPool, k
+	f.handler.Nodes = map[string]receiver.Node{testPool: {Workspace: testWorkspace, Gateway: choice}}
+	f.handler.Workspaces = map[string]receiver.Workspace{testWorkspace: {Organisation: "or_0123456789abcdef", Default: testGatewayNode}}
+	f.handler.Organisations = map[string]receiver.Organisation{"or_0123456789abcdef": {}}
+	f.handler.Gateways = map[string]receiver.Gateway{testGatewayNode: {URL: gatewayURL, Workspace: testWorkspace, AccessKeys: []string{testGatewayKey}}}
 }
 
 // newKey is a new Ed25519 key, for an access key or a server's signing key.

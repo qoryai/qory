@@ -87,5 +87,7 @@ qory run [runtime] [-- argument...] [flags]
 ### SEE ALSO
 
 * [qory](qory.md)	 - Get your coding agent ready to work, and keep it in check
+* [qory run end](qory_run_end.md)	 - End a run a starter registered, and say how it went
+* [qory run register](qory_run_register.md)	 - Register a run with the server, and print its run key for the job
 * [qory run resend](qory_run_resend.md)	 - Send a finished run's record to the server again
 
