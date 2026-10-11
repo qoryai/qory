@@ -848,7 +848,8 @@ func (r *Forager) InstanceNameOrDefault() string {
 
 // ForagersOwn reports whether a variable is Forager's own, never the session's: the
 // access key's secret, its id and the pin, QORY_SERVER_SECRET, which held a workspace
-// access key's secret, and QORY_RUN_CREDENTIAL_SECRET, the run credential.
+// access key's secret, QORY_RUN_CREDENTIAL_SECRET, the run credential, and QORY_RUN_KEY,
+// the run key.
 func ForagersOwn(name string) bool {
 	return slices.Contains(serverVariableNames, name)
 }

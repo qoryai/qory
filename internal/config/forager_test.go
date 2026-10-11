@@ -312,6 +312,7 @@ func TestForagerFileRefusesAMistake(t *testing.T) {
 		{"wall: {adapter: docker, env: [QORY_APIARY_PUBLIC_KEY]}\n", `wall.env[0] names a variable that is Forager's own`},
 		{"wall: {adapter: docker, env: [QORY_SERVER_SECRET]}\n", `wall.env[0] names a variable that is Forager's own and never the agent's`},
 		{"wall: {adapter: docker, env: [QORY_RUN_CREDENTIAL_SECRET]}\n", `wall.env[0] names a variable that is Forager's own and never the agent's`},
+		{"wall: {adapter: docker, env: [QORY_RUN_KEY]}\n", `wall.env[0] names a variable that is Forager's own and never the agent's`},
 		{"gateway: {credentials: {product: {adapter: [git-host]}}}\n", `gateway.credentials.product.adapter is a program by its absolute path`},
 		{"gateway: {credentials: {product: {command: [/x]}}}\n", `gateway.credentials.product: key "command" is not one`},
 		{"gateway: {credentials: [product]}\n", `gateway.credentials is a mapping`},
