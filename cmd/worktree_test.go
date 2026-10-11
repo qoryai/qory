@@ -397,7 +397,7 @@ func TestWorktreeRemoveGuardsAndRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, out, "  counting the commits of feature that are not on every remote branch, the main checkout's HEAD "+gitOut(t, root, "rev-parse", "--short=7", "HEAD")+", its recorded base origin/main\n", "  feature has 1 unpushed commit, the newest ", `"new"`, "\nbye feature off origin/main\n", "  git worktree remove --force "+wt+"\n", "  git branch -D feature\n")
+	wants(t, out, "  counting the commits only on feature: on no remote branch, not in the main checkout's HEAD "+gitOut(t, root, "rev-parse", "--short=7", "HEAD")+" and not on its recorded base origin/main\n", "  1 commit only on feature, the newest ", `"new"`, "\nbye feature off origin/main\n", "  git worktree remove --force "+wt+"\n", "  git branch -D feature\n")
 	wantsRow(t, out, "branch", "feature  (deleted with 1 commit nothing else has; git reflog finds it for 30 days)")
 	if gitOut(t, root, "branch", "--list", "feature") != "" {
 		t.Errorf("the branch stayed")
@@ -410,6 +410,22 @@ func TestWorktreeRemoveGuardsAndRuns(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "no worktree is at nothing, on a branch of that name or added as it") {
 		t.Fatalf("unknown: %v", err)
 	}
+}
+
+// TestWorktreeRemoveTracesWithoutABase is remove --verbose on a branch whose recorded
+// base is unset: the trace says the commits counted are on no base, since none is
+// recorded, and that the branch has no commit that is only on it.
+func TestWorktreeRemoveTracesWithoutABase(t *testing.T) {
+	root := worktreeRepo(t)
+	if _, err := run(t, "wa", "feature", "--no-compose"); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "config", "--unset", "branch.feature.qory-base")
+	out, err := runNoTTY(t, "wr", "feature", "-v")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants(t, out, "  counting the commits only on feature: on no remote branch, not in the main checkout's HEAD "+gitOut(t, root, "rev-parse", "--short=7", "HEAD")+" and on no base, since none is recorded for it\n", "  feature has no commit that is only on it\n")
 }
 
 // TestWorktreeRemoveAsksAboutOwnCommits is remove on a branch with a commit of its own
