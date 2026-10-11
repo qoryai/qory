@@ -133,7 +133,7 @@ More: ` + gatewayDocs,
 			}
 			// The gateway runs no agent on this machine, so no run of its is refused for
 			// want of a wall here.
-			gw.Discovered = discovered(machineDir(), id, "gateway", true, stderr)
+			gw.Discovered = discovered(machineDir(), id, "gateway", stderr)
 			// The server supplies every run's policy, so every integration is described.
 			shadowed := r.Shadowed()
 			e := config.Expansion{Only: func(key string) bool { return !slices.Contains(shadowed, key) }}

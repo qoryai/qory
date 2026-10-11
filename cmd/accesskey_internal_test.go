@@ -293,3 +293,20 @@ func TestARefusalMovesAsideOnlyTheKeyMadeForTheCode(t *testing.T) {
 		}
 	}
 }
+
+// TestHeldSecretFailsClosed is heldSecret on a directory that cannot be searched, where
+// no file can be looked at: access-key-secret counts as held, as the stored-secrets
+// marker does, never as no secret.
+func TestHeldSecretFailsClosed(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root searches a directory it may not")
+	}
+	dir := foragerdir.Dir(t.TempDir())
+	if err := os.Chmod(string(dir), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(string(dir), 0o700) })
+	if held, err := heldSecret(dir); held != dir.Path(foragerdir.SecretFile) || err != nil {
+		t.Errorf("a directory that cannot be searched: %q, %v", held, err)
+	}
+}

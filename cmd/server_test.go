@@ -563,6 +563,72 @@ func TestAKeyedMachineRunsNoAgentWithoutAWall(t *testing.T) {
 	}
 }
 
+// TestAKeyFromTheEnvironmentAloneNeedsAWall is a machine with no key file whose access
+// key is in QORY_ACCESS_KEY_SECRET alone: an unwalled run is refused before anything
+// starts, key_needs_wall, exit 1, against the server, with --local and with a
+// forager.yaml without a server, since an agent can read qory's starting environment.
+// With the key from --access-key-secret-fd instead, read and closed, an unwalled run
+// that contacts no server starts.
+func TestAKeyFromTheEnvironmentAloneNeedsAWall(t *testing.T) {
+	root, srv := serverRun(t, "", "")
+	dir := configDir()
+	if err := os.Remove(dir.Path(foragerdir.SecretFile)); err != nil {
+		t.Fatal(err)
+	}
+	want := "QORY_ACCESS_KEY_SECRET holds an access key, so every run needs a wall: --wall docker, or wall in forager.yaml; or keep the key with a starter, and run this machine without it, behind a gateway (key_needs_wall)"
+	refused := func(name string, args ...string) {
+		t.Helper()
+		t.Setenv("QORY_ACCESS_KEY_SECRET", srv.key.Secret())
+		clearRuns(t, root)
+		out, err := run(t, args...)
+		if cmd.ExitCode(err) != 1 || err == nil || err.Error() != want {
+			t.Errorf("%s: %v (exit %d), want %q\n%s", name, err, cmd.ExitCode(err), want, out)
+		}
+		lacks(t, out, "hello from", srv.key.Secret())
+	}
+	refused("the server", "run", "--wall", "none")
+	refused("--local", "run", "--local", "--wall", "none")
+	writeFile(t, foragerFile(), "apiVersion: qory.dev/v1alpha1\n")
+	refused("no server", "run")
+	if len(srv.registered) != 0 || len(srv.byType()) != 0 {
+		t.Errorf("a refused run registered %q or posted %v", srv.registered, srv.byType())
+	}
+
+	t.Setenv("QORY_ACCESS_KEY_SECRET", "")
+	for _, args := range [][]string{{"run"}, {"run", "--local", "--wall", "none"}} {
+		clearRuns(t, root)
+		args = append(args, "--access-key-secret-fd", descriptor(t, srv.key.Secret()))
+		if out, err := run(t, args...); err != nil || !strings.Contains(out, "hello from") {
+			t.Errorf("%v, a descriptor and no server: %v\n%s", args, err, out)
+		}
+	}
+}
+
+// TestASecretThatCannotBeLookedForKeepsAnUnwalledRunOut is forager.yaml's directory
+// that can be searched but not listed: whether a secret was moved aside is unknown, so
+// an unwalled run is refused before it starts, with the directory and the error.
+func TestASecretThatCannotBeLookedForKeepsAnUnwalledRunOut(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root lists a directory it may not read")
+	}
+	root, _ := serverRun(t, "", "")
+	dir := configDir()
+	if err := os.Remove(dir.Path(foragerdir.SecretFile)); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, foragerFile(), "apiVersion: qory.dev/v1alpha1\n")
+	if err := os.Chmod(string(dir), 0o300); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(string(dir), 0o700) })
+	clearRuns(t, root)
+	out, err := run(t, "run", "--local", "--wall", "none")
+	if err == nil || err.Error() != "open "+string(dir)+": permission denied" {
+		t.Errorf("a directory that cannot be listed: %v\n%s", err, out)
+	}
+	lacks(t, out, "hello from")
+}
+
 // TestARunWaitsForAKeyCommand is a run that starts while a key command holds the key
 // lock: it waits, and goes on once the lock is dropped.
 func TestARunWaitsForAKeyCommand(t *testing.T) {

@@ -105,7 +105,11 @@ func behindGateway(r *config.Forager, local, policy, keyFD bool, given []string)
 		return input(errors.New("--policy is the run's own policy for a gateway the run starts itself, and QORY_RUN_KEY is set: the gateway its run key names takes the run's policy from the server"))
 	}
 	if dir := machineDir(); dir != "" {
-		if held := heldSecret(dir); held != "" {
+		held, err := heldSecret(dir)
+		if err != nil {
+			return err
+		}
+		if held != "" {
 			return input(fmt.Errorf("%s exists, and QORY_RUN_KEY is set: a machine whose runs a starter registers holds no access key; remove the file", held))
 		}
 	}

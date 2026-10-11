@@ -314,7 +314,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			defer runLock.Release()
 			if id != nil {
-				gw.Discovered = discovered(machineDir(), id, "run", walled, stderr)
+				gw.Discovered = discovered(machineDir(), id, "run", stderr)
 			}
 			apiary := ""
 			if server != nil {

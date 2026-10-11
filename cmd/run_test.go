@@ -1451,7 +1451,8 @@ func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
 		t.Error("a refused run left a record")
 	}
 	// Without a server section, QORY_SERVER_SECRET is taken and removed as the others are.
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), machine)
+	// An access key in qory's environment needs a wall, which passes none of them.
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), machine+passingWall(t))
 	setVariables()
 	t.Setenv("QORY_SERVER_SECRET", "a-workspace-secret")
 	const id = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f"
