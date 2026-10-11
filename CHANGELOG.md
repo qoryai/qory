@@ -24,6 +24,10 @@ release may change what an existing document does, and states it under Upgrading
   a node's or node pool's access key it holds exactly one id, the workspace the node or
   pool belongs to, `ws_` and 16 lower-case Crockford base32 characters, such as
   `ws_f1xt0re000000000`. A server you run yourself must list it too.
+- A machine that holds an access key runs walled only: every run there needs a wall,
+  `--local` and a `forager.yaml` without a server included, or it is refused before it
+  starts, `key_needs_wall`. Give the machine a wall, or keep the key with a starter, such
+  as a CI, and run the machine behind a gateway with the run key `qory run register` gets.
 
 ### Added
 
@@ -48,10 +52,10 @@ release may change what an existing document does, and states it under Upgrading
   `gateway.server.apiary_public_key` by fingerprint and `session.instance.name`.
 - `qory run` and `qory run resend` say what a refusal of the server means and what to do:
   `unauthorized`, `answer_unsigned`, `instance_limit` and `apiary_public_key_missing`.
-- When the server lists stored secrets for the machine's access key, every run needs a
-  wall: an unwalled run is refused, `server_needs_wall`. The marker `stored-secrets`
-  beside `forager.yaml` keeps refusing unwalled runs, `--local` included, until a server's
-  configuration read with the secret of `access-key-secret` lists none.
+- When the server lists stored secrets for the machine's access key, qory writes the
+  marker `stored-secrets` beside `forager.yaml`. While it exists, an unwalled run that
+  contacts no server, `--local` included, is refused, `server_needs_wall`, until a
+  server's configuration read with the secret of `access-key-secret` lists none.
 - A walled run that cannot ask Docker whether an earlier walled run on this machine is
   still going is refused before anything is bound, `engine_unreachable`: `Docker could
   not be asked whether an earlier walled run is still going, so the run does not start`,
@@ -126,8 +130,10 @@ release may change what an existing document does, and states it under Upgrading
   two keys keeps it, and the same command succeeds once an owner or administrator in
   Qory Apiary has revoked one; an answer that does not verify changes nothing.
   With `--print` enrol writes no key or setting and prints `QORY_ACCESS_KEY_ID`,
-  `QORY_ACCESS_KEY_SECRET` and `QORY_APIARY_PUBLIC_KEY` for a CI's settings. The key is
-  for another machine, so enrol `--print` reads only `session.instance.name` from `forager.yaml`:
+  `QORY_ACCESS_KEY_SECRET` and `QORY_APIARY_PUBLIC_KEY` for a starter's settings, such as
+  a CI's, and says that only `QORY_ACCESS_KEY_SECRET` belongs in the starter's secret
+  store. The key is for another machine, so enrol `--print` reads only
+  `session.instance.name` from `forager.yaml`:
   its `gateway.server` section neither applies nor stops the command, even where it and the
   variables set the same value, and the code is checked against `QORY_APIARY_PUBLIC_KEY`
   when it is set. Without `--print` enrol refuses when qory started with
@@ -167,57 +173,23 @@ release may change what an existing document does, and states it under Upgrading
   `--access-key-secret-fd` included, and prints each integration it describes,
   `qory gateway: node <node-id>, instance <instance-id>` and
   `qory gateway: listening on <addr>`. Before it listens it refuses a `forager.yaml`
-  without a `gateway` section, an address that is missing or not host:port, no
-  `gateway.server`, an address other than loopback without `gateway.tls`, and no
-  `gateway.run_credentials`. Forager keeps the gateway's directory in qory's state
+  without a `gateway` section, an address that is missing or not host:port, and no
+  `gateway.server`. It always serves TLS, whatever the address: without `gateway.tls` it
+  refuses, `gateway.tls is required with gateway.listen: a gateway serves other machines`.
+  It needs a gateway's access key: once Qory Apiary's configuration names another node,
+  it refuses, `qory gateway needs a gateway's access key, and this one is node <id>'s:
+  enrol a key with a code from the gateway's page in Qory Apiary`. A machine whose runs go
+  through it names no gateway: each run brings a run key that names this gateway. For a
+  starter or a machine with its own key that reaches Qory Apiary only through it, it
+  passes on enrolment, the server's configuration, registrations and outcomes,
+  unchanged, and nothing else. Forager keeps the gateway's directory in qory's state
   directory, `gateway/`: its own certificate authority, `authority/ca.pem`, and its
   runs' records. See `docs/gateway.md`.
-- `forager.yaml` takes `gateway.listen`, host:port; `gateway.tls.certificate` and
-  `gateway.tls.key`, both or neither; and `gateway.run_credentials`, the run starters
-  whose run credentials open runs, as Forager's `run-credentials.schema.json` defines
-  them, with `introspection` of `url`, `client_id`, `client_secret_file` and `cache`. A
-  path in them is relative to the directory of `forager.yaml` unless it is absolute.
-  `qory run` does not use them. `qory config` lists them,
-  `gateway.run_credentials[<n>].<member>` and
-  `gateway.run_credentials[<n>].introspection.<member>` each, the paths as written and
-  never what a key or secret file holds, and `forager.schema.json` defines them.
-- `qory config` lists a `gateway.run_credentials` written with aliases or merges as qory
-  reads it: each alias shows its value, merged keys show where the merge stands, and a
-  list aliased from another section shows its rows.
-- `qory run` runs through a separate gateway, on another machine or a service on this
-  one, when `forager.yaml` names it in `session.gateway`: `url`, `ca_file`,
-  `certificate_sha256` and `run_credential_file`. It then starts no gateway of its own
-  and holds no access key, prints `qory run: through the gateway <host>, run <run-id>`,
-  and sends the run credential its starter signed on every request, from
-  `--run-credential-fd`, else `QORY_RUN_CREDENTIAL_SECRET`, else the file, which it reads
-  again before each request. `--run-credential-fd` is a stream: the writer keeps it open
-  and writes each fresh run credential as a new line, qory uses the latest complete line
-  it has read, and no program qory starts inherits the descriptor.
-  `QORY_RUN_CREDENTIAL_SECRET` is read once. Before anything starts it refuses a
-  `gateway` section beside `session.gateway`, an `access-key-secret` file, the access
-  key's variables, `--access-key-secret-fd`, `--local`, `--label`, `--policy`, a
-  `ca_file` it cannot read or that holds no certificate, and no run credential. When the
-  credential comes from the file, it refuses before anything starts a file that is not
-  there or cannot be reached, a directory, and a regular file it cannot open. It refuses a run credential file whose mode grants the
-  group or others read or write, before anything starts and at each read. A walled run whose mounts hold the run credential's file is refused. It says the gateway's refusal of the run credential,
-  of a checkout that is not the credential's target and of a `--details` key the
-  credential decides, a run that ends at the credential's expiry or by its starter, and
-  a run that did not start or ended because its run credential could not be checked.
-  `qory config` lists `session.gateway`, and `forager.schema.json` defines it.
-  See `docs/run.md`.
-- `qory run resend` sends a run's record through the gateway `session.gateway` names,
-  with the run's run credential from `--run-credential-fd`, else
-  `QORY_RUN_CREDENTIAL_SECRET`, else `session.gateway.run_credential_file`, and refuses
-  before anything is sent what `qory run` refuses behind a gateway. It says how many
-  events the gateway accepted, exit 0 when nothing is left to send, and a run the gateway
-  never opened, whose record has nothing to send and stays, exit 0. It says events the
-  gateway did not accept, a run credential that expired, that it refused or that differs
-  from the one the run started with, and a run that had ended, each exit 1, the events
-  kept in the run directory. A record a gateway
-  of the run's own made is refused: it goes to the server. See `docs/run.md`.
-- `qory run resend` through a separate gateway, of a record that has lost its
-  `run-secret` file, says so: `this run's record has no run-secret file, which the
-  gateway needs to accept its events; they stay in <dir>`, exit 1.
+- `forager.yaml` takes `gateway.listen`, host:port, and `gateway.tls.certificate` and
+  `gateway.tls.key`, both or neither. A path in them is relative to the directory of
+  `forager.yaml` unless it is absolute. `qory run` does not use them. `qory config` lists
+  them, the paths as written and never what a key or secret file holds, and
+  `forager.schema.json` defines them.
 - `qory run resend` to the server sends nothing of a run the server never opened, whose
   registration it never accepted, or of a run that had no server, such as a `--local`
   run's, and leaves its record as it is: it says `the server never opened run <id>, so
@@ -227,20 +199,78 @@ release may change what an existing document does, and states it under Upgrading
   One the server stops during the resend says how many events it accepted and how many
   were not sent, and that those stay in the run directory; it no longer points at
   `undelivered`, which holds none of them.
-- qory takes `QORY_RUN_CREDENTIAL_SECRET` out of its environment when a command starts, as
-  it does the access key's variables, so no program it starts receives it; `wall.env` or
-  `--env` naming it is refused.
-- `docs/run.md` says that an unwalled run's agent runs as you and can read what qory
-  started with, its environment and your files included; that on Linux it can also open
-  qory's descriptors through `/proc`, `--run-credential-fd` included, so no source of the
-  run credential is out of its reach there, and only a wall, or running the agent as
-  another user, keeps it out; that the run credential stays in qory's memory for the
-  whole run, where an unwalled agent running as you can read it if your programs may
-  debug one another, as on Linux with `kernel.yama.ptrace_scope` 0; and that
-  `QORY_RUN_CREDENTIAL_SECRET` is read once, so a run longer than its credential needs
-  `session.gateway.run_credential_file` or `--run-credential-fd`.
-- `qory gateway`'s help and `docs/gateway.md` say how a machine behind the gateway names
-  it.
+- `qory run register` registers a run as its starter, for a job a runner behind a
+  gateway runs: it signs the registration with the node pool's access key, read as
+  `qory run` reads it, `--access-key-secret-fd` included, and writes the run key the
+  server answers with to the descriptor `--run-key-fd` names, 3 or above. stdout gets
+  nothing, every other line goes to stderr, and nothing is written on the machine. It
+  takes `--run-id`, `--instance-id`, the runner the run takes a place on, by default the
+  run's own id, and `--attach-within`, how long the runner has to start the run, and
+  `qory run`'s `--label`, `--kind`, `--title`, `--subject` and `--details`; it adds no
+  `forge` or `repository` of its own. It prints `qory run register: node <id>, instance
+  <id>` and `qory run register: run <id>, through the gateway <host>, to start by <time>`.
+  It refuses a `forager.yaml` without a server, no `--run-key-fd`, one below 3 or one
+  that is not open, and a gateway's access key, and says what the server's refusals
+  mean: `no_default_gateway`, `gateway_not_serving`, `gateway_without_key`,
+  `node_is_direct`, `gateway_key`, `instance_limit`, `run_id_used` and
+  `answer_unsigned`. A run key it cannot write once the run registered is said with `end
+  the run with qory run end <run-id>`. See `docs/run.md`.
+- `qory run end <run-id>` gives the server a run's outcome as its starter: `--outcome
+  completed`, `failed` or `cancelled`, with `--reason`, a code of the starter's own;
+  without `--outcome`, the run is cancelled, with no outcome given. A run still running
+  ends, and its runtime is stopped. It signs with the node pool's access key, read as
+  `qory run register` reads it, and prints `✓ the server records the run <id> as
+  <outcome>[: <reason>]`. A run has one outcome: the same one again gets the same
+  answer, and another is refused, `outcome_given`. It refuses `--reason` without
+  `--outcome`, a reason that is not a code or is one of Forager's own, and a gateway's
+  access key.
+- `qory run` goes through a separate gateway when it is given a run key, by
+  `--run-key-fd`, 0 for stdin or a descriptor of 3 or above, or by `QORY_RUN_KEY`: it
+  starts no gateway of its own, reaches the gateway the run key names, and prints `qory
+  run: through the gateway <host>, run <run-id>`. qory takes `QORY_RUN_KEY` out of its
+  environment when a command starts, as it does the access key's variables, so no
+  program it starts receives it; `wall.env` or `--env` naming it is refused. A run key
+  given both ways is refused, and so is a value that is not a run key, `QORY_RUN_KEY is
+  not a run key: <reason>` or `--run-key-fd <n> gives no run key: <reason>`, naming the
+  part that is wrong and never the value. Before anything starts it refuses `--local`,
+  `--policy`, an access key on the machine, in a file beside `forager.yaml`, a variable or
+  `--access-key-secret-fd`, a `gateway` section, and `--label`, `--kind`, `--title`,
+  `--subject` and `--details`, which go to `qory run register`; it sends no `forge` or
+  `repository` of the checkout's. `qory run resend` takes the run key the same two ways,
+  `QORY_RUN_KEY` needing no wall there, and sends a record that went through a separate
+  gateway to that gateway; with a run key given, a record a gateway of the run's own made
+  is refused, since it goes to the server. `docs/run.md` says that an unwalled agent
+  behind a gateway holds at most the run key, and that within the live run, whoever holds
+  it can post events and open proxy connections as the session, for that run only.
+- An unwalled run with `QORY_RUN_KEY` set is refused before anything starts,
+  `run_key_needs_wall`, since an unwalled agent can read the environment qory started
+  with. A walled run still takes it, and an unwalled one takes the run key from
+  `--run-key-fd`.
+- `gateway.server.via` in `forager.yaml` is the gateway a machine reaches the server
+  through: `url`, an https URL of a host and an optional port, with nothing after, and
+  optional `ca_file` and `certificate_sha256`. `qory access-key enrol --via <url>`, with
+  `--via-ca-file` and `--via-certificate-sha256`, enrols through that gateway and writes
+  `gateway.server.via`; enrol without `--via` goes through the one the file names.
+  `qory run register` and `qory run end` go through it too. `qory config` lists
+  `gateway.server.via.url`, `(none: the server is reached directly)` without one, and its
+  `ca_file` and `certificate_sha256` with one, and `forager.schema.json` defines it.
+- A machine with its own access key and `gateway.server.via` registers each run itself,
+  through that gateway, with its labels and what it is about, and runs it through the
+  gateway the run key names. It keeps the run key in `run-keys/<run-id>` beside
+  `forager.yaml`, mode 0600, until nothing of the run is left to send or the gateway has
+  ended the run, and `qory run resend` reads it from there. The server's refusals of the
+  registration say `this machine's node`, and `node_uses_gateway`, on a machine without
+  `gateway.server.via`, says to set it. A resend to the server, of a run that had a
+  gateway of its own, is refused while `gateway.server.via` is set.
+- On a machine that holds an access key, every run needs a wall: an unwalled run is
+  refused before it starts, `key_needs_wall`, naming where the key is, `access-key-secret`
+  or a key file beside it, `QORY_ACCESS_KEY_SECRET` or `--access-key-secret-fd`. `--local`
+  and a `forager.yaml` without a server are included: `QORY_ACCESS_KEY_SECRET` refuses an
+  unwalled `--local` run too, while a key given by `--access-key-secret-fd` alone, which
+  qory reads and closes before anything starts, refuses no run that contacts no server.
+  `qory run` under a gateway's access key is refused before the run registers: `this
+  machine's gateway serves other machines and runs no sessions; give this machine a node
+  of its own`.
 
 ### Changed
 
@@ -347,40 +377,28 @@ release may change what an existing document does, and states it under Upgrading
   got SIGTERM, and <runtime> was stopped`, exit 1, whatever the runtime's status; one that
   comes after the runtime exited changes neither its line nor the exit status. A signal from
   elsewhere that kills the runtime says `✗ <runtime> ended on the signal SIGKILL`, in place of
-  `✗ <runtime> was ended by <signal>`. A run the gateway stopped during the run, and one
-  whose run credential expired at a time qory cannot read, say so, where they said
-  nothing: `✗ the run failed: the gateway stopped during the run, and <runtime> was
-  stopped` and `✗ the run was cancelled: the run credential expired, and <runtime> was
-  stopped`. When the run's own gateway records the run's end after the runtime exited by
-  itself, a second line follows the runtime's, such as `✗ the run was lost: it lost
+  `✗ <runtime> was ended by <signal>`. A run the gateway stopped during the run says so,
+  where it said nothing: `✗ the run failed: the gateway stopped during the run, and
+  <runtime> was stopped`. When the run's own gateway records the run's end after the
+  runtime exited by itself, a second line follows the runtime's, such as `✗ the run was lost: it lost
   contact with the gateway for 1m30s` or `✗ the run failed: its events could not be
   recorded`, and the exit status follows it, 0 when the run completed and 1 otherwise; an
   end that agrees with the runtime's exit adds no line. The gateway's own line that it
   ends the run, and its line of events the server did not accept, are no longer printed
   beside qory's.
-- Behind a separate gateway, a run its starter ends says the starter's outcome and
-  reason, `✗ the run was cancelled, with no outcome given, and <runtime> was stopped`
-  when it gives none, and exits 0 when the run completed, 1 otherwise. When the runtime
-  exits by itself, the session asks the gateway once for the starter's outcome; one that
-  differs from the runtime's exit is said in a second line, such as `✗ the run failed:
-  checks failed`, and `qory run`'s exit status follows it, 0 when the run completed and 1
-  otherwise, where it was the runtime's. A run whose run credential could not be checked says `✗ the run failed: its
-  run credential could not be checked, and <runtime> was stopped`, and one that could not
-  start for it `qory run: the run did not start: its run credential could not be checked`,
-  with `; try again` when the check had no answer. A run that ended before its runtime
-  started says `✗ the run did not start: it has ended already`. A run credential's expiry
-  says `✗ the run was cancelled: the run credential expired at <time>, …`.
+- Behind a separate gateway, a run its starter ends with `qory run end` says the
+  starter's outcome and reason, `✗ the run was cancelled, with no outcome given, and
+  <runtime> was stopped` when it gives none, and exits 0 when the run completed, 1
+  otherwise. A run that ended before its runtime started says `✗ the run did not start:
+  it has ended already`.
 - `qory run resend` through a separate gateway says a run that had ended in one line,
   `✗ the run has ended (<outcome>[: <reason>]), so no more of its events are taken; they
-  stay in <dir>`, and an expired run credential `✗ the run credential expired at <time>,
-  so no more of this run's events are taken; they stay in <dir>`. `qory run resend` to the
+  stay in <dir>`. `qory run resend` to the
   server says `✓ the record had no end, and now ends as lost: its end was never recorded`
   where it said `the record had no exit and was closed with the reason gateway_lost`, and
   `✗ the server wants no more events of the run <id>; …` without the status. Forager's
   lines of events the server did not accept, and that the server wants no more events
   of the run, are no longer printed beside qory's.
-- `qory gateway`'s help says `run_credentials    the run starters whose signed run
-  credentials open runs of clients with no session`.
 - `gateway.server.access_key` and `gateway.server.secret` in `forager.yaml` are refused,
   and so is `QORY_SERVER_SECRET` when `forager.yaml` has a `gateway.server` section; the refusal says to
   remove the two keys, or unset the variable, and then connect the machine as a node,
@@ -467,11 +485,10 @@ release may change what an existing document does, and states it under Upgrading
   the folder of that id is the other run's.
 - A refusal of `forager.yaml` never prints a value of it: it names the file, the key as
   a dotted path, such as `gateway.egress.allow[1]`, with its line when the YAML decoder
-  reports one, and what is wrong, such as `<file>: line <line>: session.gateway.url is
+  reports one, and what is wrong, such as `<file>: line <line>: wall.image is
   tagged !!int, and its value is not of that type` or `<file>: wall.helper is not an
   absolute path`. This replaces the YAML decoder's text, which quoted the value and a Go
-  type, and the refusals that quoted the value. The report of `gateway.run_credentials`
-  against its schema leaves the value out of a pattern or a format it fails. Anchors,
+  type, and the refusals that quoted the value. Anchors,
   aliases and merges the decoder cannot read are refused in qory's words, which name no
   anchor: `<file>: an anchor's value holds an alias of that anchor`, `<file>: its aliases
   expand to more values than qory reads`, `<file>: a merge, <<, holds a value that is
