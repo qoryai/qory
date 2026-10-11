@@ -275,7 +275,8 @@ func TestAMachineBehindViaSaysItsGatewaysRefusals(t *testing.T) {
 // whose forager.yaml sets gateway.server.via and keys of the gateway section beside
 // gateway.server: qory run refuses each, one line per key, sorted, exit 2, before it
 // reads the server's discovery or registers, and nothing is kept and no record made.
-// --local runs a gateway of its own, which reads them, so it is not refused.
+// --local runs a gateway of its own, which reads their policy, credentials and
+// integrations, so it is not refused.
 func TestAMachineBehindViaRefusesItsOwnGatewaysKeys(t *testing.T) {
 	root := runKeyCheckout(t)
 	srv := newFakeServer(t, "")

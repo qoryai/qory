@@ -840,7 +840,7 @@ nothing there: `qory run` refuses each key of it beside `gateway.server`, such a
 alphabetical order: `<file>: gateway.<key> does nothing on this machine: gateway.server.via
 sends its runs through a gateway, which holds their policy, credentials and integrations;
 remove gateway.<key>, or remove gateway.server.via`. `qory run --local` runs a gateway of
-its own, which reads them, so it is not refused.
+its own, which reads their policy, credentials and integrations, so it is not refused.
 
 When the server refuses the registration, qory says what the refusal means and what to do,
 then Forager's words and the code:
