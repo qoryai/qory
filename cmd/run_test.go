@@ -538,11 +538,11 @@ func TestRunExpandsTheIntegrationsTheMachineDeclares(t *testing.T) {
 		t.Error("a run that did not start left a record")
 	}
 	srv := newFakeServer(t, "")
-	serverFile(t, srv, "  integrations:\n    broken: {}\n")
+	walledServerFile(t, srv, "  integrations:\n    broken: {}\n")
 	if _, err := run(t, "run"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), want) {
 		t.Errorf("a run whose policy the server supplies: %v", err)
 	}
-	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\ngateway:\n  credentials:\n    tracker:\n      env: TRACKER_TOKEN\n      hosts: [tracker.acme.example]\n      auth: {scheme: bearer}\n  integrations:\n    tracker: {settings: {project: SHOP}}\n")
+	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\ngateway:\n  credentials:\n    tracker:\n      env: TRACKER_TOKEN\n      hosts: [tracker.acme.example]\n      auth: {scheme: bearer}\n  integrations:\n    tracker: {settings: {project: SHOP}}\n"+passingWall(t))
 	line := "forager.yaml: gateway.credentials.tracker defines the credential tracker, and gateway.integrations.tracker defines none\n"
 	out, err = run(t, "config")
 	if err != nil {
@@ -556,7 +556,7 @@ func TestRunExpandsTheIntegrationsTheMachineDeclares(t *testing.T) {
 	wants(t, out, "qory run: "+line)
 	// A run describes every integration when the server supplies the policy, but one
 	// the credentials section shadows defines nothing for it and is not described.
-	serverFile(t, srv, "  credentials:\n    broken:\n      env: BROKEN_TOKEN\n      hosts: [broken.acme.example]\n      auth: {scheme: bearer}\n  integrations:\n    broken: {}\n")
+	walledServerFile(t, srv, "  credentials:\n    broken:\n      env: BROKEN_TOKEN\n      hosts: [broken.acme.example]\n      auth: {scheme: bearer}\n  integrations:\n    broken: {}\n")
 	out, err = run(t, "run")
 	if err != nil {
 		t.Fatalf("a run with a shadowed integration that does not describe: %v\n%s", err, out)
@@ -696,6 +696,56 @@ esac
 		t.Fatal(err)
 	}
 	return script, log
+}
+
+// passingWall is a wall section whose docker is a program that stands in for it and
+// runs the agent's container on this machine: the runtime's entrypoint, with its
+// arguments, the variables of the container's environment file and PATH alone, and
+// the signals the session sends; QORY_TEST_EXIT of the docker command's environment
+// passes into it, as the wall passes no variable of Forager's name. A run on a machine that holds an access key needs a
+// wall; this one lets such a run reach its runtime as an unwalled run would.
+func passingWall(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	enter := filepath.Join(dir, "enter")
+	writeFile(t, enter, `#!/bin/sh
+f=$1
+shift
+while IFS= read -r line; do
+	export "$line"
+done < "$f"
+exec "$@"
+`)
+	script := filepath.Join(dir, "docker")
+	writeFile(t, script, `#!/bin/sh
+case "$1 $2" in
+"network inspect") echo "172.30.0.1 " ;;
+"logs "*) echo "relay: listening" ;;
+"run --rm")
+	shift 2
+	envfile=
+	entry=
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--rm|--interactive|--tty|--init) shift ;;
+		--env-file) envfile=$2; shift 2 ;;
+		--entrypoint) entry=$2; shift 3; break ;;
+		*) shift 2 ;;
+		esac
+	done
+	exec env -i PATH="$PATH" ${QORY_TEST_EXIT+QORY_TEST_EXIT=$QORY_TEST_EXIT} /bin/sh `+enter+` "$envfile" "$entry" "$@" ;;
+esac
+`)
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: " + script + "\n  helper: " + staticELF(t) + "\n  user: \"1000:1000\"\n"
+}
+
+// walledServerFile is [serverFile] with the wall of [passingWall] after more.
+func walledServerFile(t *testing.T, srv *fakeServer, more string) {
+	t.Helper()
+	serverFile(t, srv, more+passingWall(t))
 }
 
 // TestRunRefusesAProgramUnderAReadWriteMount declares an integration whose program is
@@ -1430,7 +1480,7 @@ func TestRunReportsToTheServer(t *testing.T) {
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, fakeRuntime(t))
 	srv := newFakeServer(t, `{"version":1,"egress":{"mode":"enforce","allow":["api.example"]}}`)
-	serverFile(t, srv, "  egress:\n    mode: observe\n")
+	walledServerFile(t, srv, "  egress:\n    mode: observe\n")
 	t.Setenv("QORY_TEST_EXIT", "0")
 	out, err := run(t, "run", "--label", "issue=77")
 	if err != nil {
@@ -1487,7 +1537,7 @@ func TestRunReportsToTheServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv = newFakeServer(t, "")
-	serverFile(t, srv, "  egress:\n    mode: enforce\n    allow: [api.example]\n")
+	walledServerFile(t, srv, "  egress:\n    mode: enforce\n    allow: [api.example]\n")
 	if out, err := run(t, "run"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
@@ -1499,7 +1549,7 @@ func TestRunReportsToTheServer(t *testing.T) {
 	}
 	gone := newFakeServer(t, "")
 	gone.Close()
-	serverFile(t, gone, "")
+	walledServerFile(t, gone, "")
 	if _, err := run(t, "run"); err == nil || !strings.Contains(err.Error(), gone.URL) {
 		t.Errorf("a server that does not answer: %v", err)
 	}
@@ -1518,7 +1568,7 @@ func TestResendClosesAndDeliversARunItsForagerLeft(t *testing.T) {
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, fakeRuntime(t))
 	srv := newFakeServer(t, "")
-	serverFile(t, srv, "")
+	walledServerFile(t, srv, "")
 	const id = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f"
 	if out, err := run(t, "run", "--local", "--run-id", id); cmd.ExitCode(err) != 3 {
 		t.Fatalf("%v\n%s", err, out)
@@ -1579,7 +1629,7 @@ func TestResendSendsNothingOfARunTheServerNeverOpened(t *testing.T) {
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, fakeRuntime(t))
 	srv := newFakeServer(t, "")
-	serverFile(t, srv, "")
+	walledServerFile(t, srv, "")
 	// record runs a run with args, which exits exit, and returns its directory, its
 	// events.jsonl and what that held.
 	record := func(t *testing.T, id string, exit int, args ...string) (string, string, []byte) {
@@ -1690,7 +1740,7 @@ func TestResendSaysTheServerWantsNoMoreEvents(t *testing.T) {
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, fakeRuntime(t))
 	srv := newFakeServer(t, "")
-	serverFile(t, srv, "")
+	walledServerFile(t, srv, "")
 	// record runs a run with no server, and makes its record that of a run that opened
 	// at its server, which accepted nothing of it, with more events than one batch
 	// holds. It returns the run directory, its events.jsonl, what that holds and how many

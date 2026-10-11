@@ -214,13 +214,58 @@ func needsWall(dir foragerdir.Dir, listed bool) error {
 	}
 }
 
+// codeKeyNeedsWall is the refusal of an unwalled run on a machine that holds an access
+// key: an agent without a wall could read the key.
+const codeKeyNeedsWall = "key_needs_wall"
+
+// keyNeedsWall is the key_needs_wall refusal, saying where the access key is: the
+// descriptor --access-key-secret-fd names, QORY_ACCESS_KEY_SECRET, or the file path, one
+// that holds a secret in forager.yaml's directory. Its texts are here alone.
+func keyNeedsWall(source keySource, path string) error {
+	var why string
+	switch source {
+	case fromFD:
+		why = "--" + secretFDFlag + " gives an access key"
+	case fromEnv:
+		why = accesskey.EnvSecret + " holds an access key"
+	default:
+		why = path + " holds this machine's access key"
+	}
+	return &refusedError{
+		text: fmt.Sprintf("%s, so every run needs a wall: --wall %s, or wall in %s; or keep the key with a starter, and run this machine without it, behind a gateway", why, config.WallDocker, config.ForagerFileName),
+		err:  &session.Refusal{Code: codeKeyNeedsWall},
+	}
+}
+
+// heldSecret is the first file of dir that holds an access key's secret, an unwalled
+// agent being able to read each: access-key-secret, access-key-secret.new, the secret
+// --replace replaced, or a secret moved aside. It is "" for none.
+func heldSecret(dir foragerdir.Dir) string {
+	switch {
+	case dir.HasSecret():
+		return dir.Path(foragerdir.SecretFile)
+	case dir.HasNewSecret():
+		return dir.Path(foragerdir.NewSecretFile)
+	case dir.HasReplaced():
+		return dir.Path(foragerdir.ReplacedFile)
+	}
+	if old, _ := dir.OldSecrets(); len(old) > 0 {
+		return dir.Path(old[0])
+	}
+	return ""
+}
+
 // startRun is the start of every run, before anything is started: under the key lock
 // held shared, it refuses an unwalled run that contacts no server while the
-// stored-secrets marker exists, then creates and holds the run's own lock file, naming
-// whether it is walled, and drops the key lock. A key command, which holds the key lock
-// exclusively, so waits for starting runs, and they for it. In a directory that cannot
-// be written no key command can work either, and the run goes on without the locks.
-func startRun(dir foragerdir.Dir, runID string, walled, noServer bool) (*foragerdir.Lock, error) {
+// stored-secrets marker exists; an unwalled run against the server, id not nil, which
+// signs with the access key it names; and any other unwalled run, --local and one
+// without a server included, while forager.yaml's directory holds an access key's
+// secret. Then it creates and holds the run's own lock file, naming whether it is
+// walled, and drops the key lock. A key command, which holds the key lock exclusively,
+// so waits for starting runs, and they for it. In a directory that cannot be written no
+// key command can work either, and the run goes on without the locks. Without a
+// directory there is no forager.yaml, so no server, and no secret file.
+func startRun(dir foragerdir.Dir, runID string, walled bool, id *serverIdentity) (*foragerdir.Lock, error) {
 	if dir == "" {
 		return nil, nil
 	}
@@ -229,10 +274,18 @@ func startRun(dir foragerdir.Dir, runID string, walled, noServer bool) (*forager
 		return nil, fmt.Errorf("the key lock: %w", err)
 	}
 	defer key.Release()
-	// A marker that cannot be looked at counts as one.
-	marker, _ := dir.HasMarker()
-	if marker && noServer && !walled {
-		return nil, needsWall(dir, false)
+	if !walled {
+		// A marker that cannot be looked at counts as one.
+		marker, _ := dir.HasMarker()
+		switch {
+		case marker && id == nil:
+			return nil, needsWall(dir, false)
+		case id != nil:
+			return nil, keyNeedsWall(id.key.source, dir.Path(foragerdir.SecretFile))
+		}
+		if held := heldSecret(dir); held != "" {
+			return nil, keyNeedsWall(fromFile, held)
+		}
 	}
 	if key == nil {
 		return nil, nil

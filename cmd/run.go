@@ -304,7 +304,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			walled := spec.Wall != nil
 			spec.LaunchFixed, spec.LaunchDefaults, spec.HarnessHome = launch.Fixed, launch.Defaults, launch.HarnessHome
-			runLock, err := startRun(machineDir(), spec.RunID, walled, id == nil)
+			runLock, err := startRun(machineDir(), spec.RunID, walled, id)
 			if err != nil {
 				return err
 			}

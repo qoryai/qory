@@ -266,7 +266,7 @@ func TestRunSaysTheExitOfARuntimeThatExitedBeforeASignal(t *testing.T) {
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, fakeRuntime(t))
 	srv := newFakeServer(t, "")
-	serverFile(t, srv, "")
+	walledServerFile(t, srv, "")
 	var once sync.Once
 	srv.mu.Lock()
 	srv.onExited = func() {
@@ -343,7 +343,7 @@ func TestRunSaysASignalThatStoppedTheRuntime(t *testing.T) {
 	}
 	composedForFake(t, root, runtime)
 	srv := newFakeServer(t, "")
-	serverFile(t, srv, "")
+	walledServerFile(t, srv, "")
 	go func() {
 		for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
 			if _, err := os.Stat(started); err == nil {
@@ -410,7 +410,7 @@ func TestRunSaysASignalThatStoppedARuntimeThatExited0(t *testing.T) {
 	}
 	composedForFake(t, root, runtime)
 	srv := newFakeServer(t, "")
-	serverFile(t, srv, "")
+	walledServerFile(t, srv, "")
 	go func() {
 		for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
 			if _, err := os.Stat(started); err == nil {
