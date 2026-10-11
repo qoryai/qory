@@ -462,8 +462,8 @@ release may change what an existing document does, and states it under Upgrading
   command within the code's 15 minutes succeeds. A signed 429, `rate_limited`, means the code
   was tried too often: qory keeps the key and says `the server refused the attempt: this
   code was tried too often; run the same command again later, within the code's 15
-  minutes`. A 401 for a code you did not use means the
-  code's issuer must revoke the key it enrolled.
+  minutes`. A 401 for a code you did not use means someone else used it: the owner or
+  administrator in Qory Apiary who made the code must revoke the key it enrolled.
 - `qory harness compose` takes a branch's current commit on every compose, without
   `--update`. A tag or a commit id stays pinned. Offline, it keeps the cached commit and
   warns.
