@@ -52,7 +52,7 @@ const DescriptorsDir = "runtimes"
 // exits with the runtime's status.
 func newRun() *cobra.Command {
 	var h homeOptions
-	var local, headless bool
+	var local, headless, relabel bool
 	var o wallOptions
 	var policyFile, runID string
 	var labels []string
@@ -145,9 +145,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						given = append(given, f)
 					}
 				}
-				if err := behindGateway(conf.Forager, local, policyFile != "", fdKey != nil, given); err != nil {
+				if err := behindGateway(conf.Forager, local, policyFile != "", relabel, fdKey != nil, given); err != nil {
 					return err
 				}
+			}
+			if relabel && local {
+				return relabelLocal()
 			}
 			rep, err := readReport(at)
 			if err != nil {
@@ -197,16 +200,26 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// starter's registration's: the session sends none.
 			var named map[string]string
 			var about *session.About
+			var keep *keptLabels
 			if !remote {
-				if named, err = parseLabels(labels); err != nil {
+				explicit, err := parseLabels(labels)
+				if err != nil {
 					return err
 				}
-				named = withOrigin(named, at.root)
+				named = withOrigin(explicit, at.root)
 				if err := session.CheckLabels(named); err != nil {
 					return input(err)
 				}
 				if about, err = aboutFrom(kind, title, subjects, details, stdin, isTerminal(stdin)); err != nil {
 					return err
+				}
+				// A run against the server, directly or through via, runs only with the
+				// labels its checkout's origin remote gave when the server first accepted
+				// one of its runs, or with --relabel.
+				if server != nil && !local {
+					if keep, err = checkLabels(machineDir(), at.root, explicit, relabel); err != nil {
+						return err
+					}
 				}
 			}
 			if runID != "" {
@@ -333,11 +346,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// run its starter registered does. The run key it keeps beside forager.yaml goes
 			// once nothing of the run is left to send.
 			kept := runsThroughVia(conf.Forager, id)
+			said := func(line string) { fmt.Fprintln(stderr, "qory run:", line) }
 			switch {
 			case kept:
 				if key, err = registerThroughVia(ctx, conf.Forager, id, spec.RunID, named, about, stderr); err != nil {
 					return err
 				}
+				// The server accepted the run.
+				keep.keep(said)
 				remote = true
 				spec.Labels, spec.About = nil, nil
 			case id != nil:
@@ -348,6 +364,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				apiary = server.URL
 			}
 			spec.OnVariables = unusedEnv(stderr, apiary)
+			if !kept && keep != nil {
+				// Forager resolves the run's variables once the gateway's run answer came,
+				// and the gateway answers once the server accepted the run's registration.
+				unused := spec.OnVariables
+				spec.OnVariables = func(a session.Applied) {
+					unused(a)
+					keep.keep(said)
+				}
+			}
 			if r := conf.Forager; r != nil && !remote {
 				if gw.Credentials, err = machineCredentials(ctx, r, expansion(r, pol, server != nil && !local, at.root, cwd, spec.Mounts), "run", stderr); err != nil {
 					return err
@@ -460,6 +485,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 		},
 	}
 	c.Flags().BoolVar(&local, "local", false, "run without the server: record to files, under the machine's policy")
+	c.Flags().BoolVar(&relabel, relabelFlag, false, relabelUsage)
 	c.Flags().BoolVar(&headless, "headless", false, "run on pipes even at a terminal; -p for claude implies it")
 	c.Flags().StringVar(&policyFile, "policy", "", "this run's policy file, kept outside the checkout; it narrows gateway.egress of "+config.ForagerFileName+", never widens it (with a server: needs --local)")
 	c.Flags().StringVar(&runID, "run-id", "", "the run's id, a UUID in lower case (default a new one)")

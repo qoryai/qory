@@ -67,6 +67,7 @@ qory run [runtime] [-- argument...] [flags]
       --mount stringArray          a path of this machine the container sees too, :ro for read-only; repeatable (forager.yaml: wall.mounts)
       --pids-limit int             the most processes and threads in the container (forager.yaml: wall.pids_limit)
       --policy string              this run's policy file, kept outside the checkout; it narrows gateway.egress of forager.yaml, never widens it (with a server: needs --local)
+      --relabel                    run although the checkout's origin remote gives other labels (forge, repository) than at its first run against the server, and keep the new ones
       --run-id string              the run's id, a UUID in lower case (default a new one)
       --run-key-fd int             read the run key from this file descriptor, 0 for stdin, in place of QORY_RUN_KEY, which an unwalled agent can read
       --shm-size string            the size of /dev/shm in the container, such as 2g (forager.yaml: wall.shm_size)
