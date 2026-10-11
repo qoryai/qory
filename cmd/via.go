@@ -41,7 +41,7 @@ func viaGatewayKeys(r *config.Forager) error {
 	}
 	lines := make([]string, len(r.GatewayKeys))
 	for i, k := range r.GatewayKeys {
-		lines[i] = fmt.Sprintf("%s: gateway.%s does nothing on this machine: gateway.server.via sends its runs through a gateway, which holds their policy, credentials and integrations; remove gateway.%s, or remove gateway.server.via", r.File, k, k)
+		lines[i] = fmt.Sprintf("%s: gateway.%s does nothing on this machine: gateway.server.via sends its runs through a gateway, which holds their policy, credentials, tools and integrations; remove gateway.%s, or remove gateway.server.via", r.File, k, k)
 	}
 	return input(errors.New(strings.Join(lines, "\n")))
 }

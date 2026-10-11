@@ -248,7 +248,13 @@ func TestARunKeyRefusesWhatItsRunCannotHave(t *testing.T) {
 			writeFile(t, file, "apiVersion: qory.dev/v1alpha1\ngateway:\n  listen: 127.0.0.1:8443\n")
 			return []string{"run"}
 		}, func() string {
-			return file + ": gateway: a run key is given, by QORY_RUN_KEY or --run-key-fd, so the run goes through the gateway its run key names, which holds the server, the policy and the credentials, and this machine runs no gateway: remove the gateway section, or give no run key"
+			return file + ": gateway: a run key is given, by QORY_RUN_KEY or --run-key-fd, so the run goes through the gateway its run key names, which holds the server, the policy, the credentials and the tools, and this machine runs no gateway: remove the gateway section, or give no run key"
+		}},
+		{"a gateway section of tools", func(t *testing.T) []string {
+			writeFile(t, file, "apiVersion: qory.dev/v1alpha1\ngateway:\n  tools:\n    files:\n      command: [/opt/tools/files]\n      serves: [files.tools.internal]\n")
+			return []string{"run"}
+		}, func() string {
+			return file + ": gateway: a run key is given, by QORY_RUN_KEY or --run-key-fd, so the run goes through the gateway its run key names, which holds the server, the policy, the credentials and the tools, and this machine runs no gateway: remove the gateway section, or give no run key"
 		}},
 		{"--label", func(*testing.T) []string { return []string{"run", "--label", "team=a"} }, func() string {
 			return registered("--label goes") + "it to qory run register"

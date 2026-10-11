@@ -180,7 +180,7 @@ A run whose policy selects a credential needs a wall; without one it does not st
 One optional file defines what Forager does on this machine:
 `~/.config/qory/forager.yaml`. It lives beside your `qory.yaml`, and nowhere else. So a
 repository cannot set it. It has three sections beside `apiVersion`: `gateway`, the
-proxy's policy, the server, the credentials and the integrations; `session`, this
+proxy's policy, the server, the credentials, the tools and the integrations; `session`, this
 instance and what applies to every run; and `wall`, the container. `gateway.listen` and
 `gateway.tls` are `qory gateway`'s: `qory run` does not use them. See [the gateway as a
 service](gateway.md).
@@ -838,8 +838,8 @@ nothing there: `qory run` refuses each key of it beside `gateway.server`, such a
 `gateway.egress`, `gateway.credentials`, `gateway.integrations`, `gateway.listen` and
 `gateway.tls`, before anything starts or registers, exit 2, one line per key in
 alphabetical order: `<file>: gateway.<key> does nothing on this machine: gateway.server.via
-sends its runs through a gateway, which holds their policy, credentials and integrations;
-remove gateway.<key>, or remove gateway.server.via`. `qory run --local` starts a gateway itself,
+sends its runs through a gateway, which holds their policy, credentials, tools and
+integrations; remove gateway.<key>, or remove gateway.server.via`. `qory run --local` starts a gateway itself,
 which reads their policy, credentials and integrations, so it is not refused.
 
 When the server refuses the registration, qory says what the refusal means and what to do,

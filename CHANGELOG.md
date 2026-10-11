@@ -278,7 +278,7 @@ release may change what an existing document does, and states it under Upgrading
   `gateway.credentials` and `gateway.integrations`, before anything starts or registers,
   exit 2, one line per key: `<file>: gateway.<key> does nothing on this machine:
   gateway.server.via sends its runs through a gateway, which holds their policy,
-  credentials and integrations; remove gateway.<key>, or remove gateway.server.via`.
+  credentials, tools and integrations; remove gateway.<key>, or remove gateway.server.via`.
   `qory run --local` starts a gateway itself, which reads their policy, credentials
   and integrations, and is not refused.
 - `qory gateway` refuses `gateway.server.via` before it starts, exit 2: `<file>:

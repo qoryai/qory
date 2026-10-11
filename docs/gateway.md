@@ -39,7 +39,7 @@ gateway:
 |---|---|
 | `gateway.listen` | The address qory gateway listens on for the runs of other machines, host:port. qory run never listens on it: it starts a gateway itself on a loopback port for each run. |
 | `gateway.tls.certificate`, `gateway.tls.key` | The certificate and key the gateway serves the other machines with, files in PEM. The address speaks TLS 1.3 alone. `qory gateway` needs them, whatever address it listens on: a gateway serves other machines. |
-| `gateway.server`, `gateway.egress`, `gateway.credentials`, `gateway.integrations` | As for `qory run`: see [forager.yaml](run.md#forageryaml). |
+| `gateway.server`, `gateway.egress`, `gateway.credentials`, `gateway.tools`, `gateway.integrations` | As for `qory run`: see [forager.yaml](run.md#forageryaml). |
 
 A path in `gateway.tls` is relative to the directory of `forager.yaml`, unless it is
 absolute. `qory config` lists each value, the paths as the file writes them; it never

@@ -214,7 +214,7 @@ func behindGateway(r *config.Forager, local, policy, keyFD bool, given []string)
 		return input(fmt.Errorf("--%s and a run key are both given: a machine whose runs a starter registers holds no access key; leave out --%s", secretFDFlag, secretFDFlag))
 	}
 	if r != nil && r.Gateway {
-		return input(fmt.Errorf("%s: gateway: %s, so the run goes through the gateway its run key names, which holds the server, the policy and the credentials, and this machine runs no gateway: remove the gateway section, or give no run key", r.File, runKeyGiven))
+		return input(fmt.Errorf("%s: gateway: %s, so the run goes through the gateway its run key names, which holds the server, the policy, the credentials and the tools, and this machine runs no gateway: remove the gateway section, or give no run key", r.File, runKeyGiven))
 	}
 	if len(given) > 0 {
 		return input(registeredAlready(given))

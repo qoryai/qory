@@ -283,7 +283,7 @@ func TestAMachineBehindViaRefusesItsOwnGatewaysKeys(t *testing.T) {
 	srv.choose(receiver.Default, "https://gateway.example:8443", newKey(t))
 	via := newViaGateway(t, srv.URL)
 	line := func(key string) string {
-		return foragerFile() + ": gateway." + key + " does nothing on this machine: gateway.server.via sends its runs through a gateway, which holds their policy, credentials and integrations; remove gateway." + key + ", or remove gateway.server.via"
+		return foragerFile() + ": gateway." + key + " does nothing on this machine: gateway.server.via sends its runs through a gateway, which holds their policy, credentials, tools and integrations; remove gateway." + key + ", or remove gateway.server.via"
 	}
 	tls := filepath.Join(t.TempDir(), "gateway")
 	for _, c := range []struct {
