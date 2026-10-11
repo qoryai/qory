@@ -30,7 +30,7 @@ const (
 )
 
 // registerRunKeyFDUsage is the help of qory run register's --run-key-fd.
-const registerRunKeyFDUsage = "write the run key to this file descriptor, 3 or above, in place of QORY_RUN_KEY=<key> on stdout"
+const registerRunKeyFDUsage = "write the run key to this file descriptor, 3 or above; required"
 
 // newRegister builds the register verb: a run's starter registers the run with the
 // server under the node pool's access key, and hands the run key the server answers
@@ -43,7 +43,7 @@ func newRegister() *cobra.Command {
 	var secretFD, keyFD int
 	c := &cobra.Command{
 		Use:   "register",
-		Short: "Register a run with the server, and print its run key for the job",
+		Short: "Register a run with the server, and write its run key for the job to a descriptor",
 		Long: `Register a run with the server in ` + config.ForagerFileName + `, for a job a runner behind a gateway runs.
 This is the starter's command: it signs the registration with the access key of the node
 pool, and the key stays on this machine. The server answers with the run's run key, which

@@ -594,3 +594,20 @@ func TestGatewayNeedsAGatewaysKey(t *testing.T) {
 	wants(t, out, "qory gateway: node "+testNode+", instance ")
 	lacks(t, out, "listening on")
 }
+
+// TestGatewayRefusesVia is qory gateway with gateway.server.via set: a gateway reaches
+// the server directly, so it is refused, exit 2, before it reaches the server or listens.
+func TestGatewayRefusesVia(t *testing.T) {
+	emptyDir(t)
+	srv := newFakeServer(t, "")
+	via := newViaGateway(t, srv.URL)
+	serverFile(t, srv, via.via()+"  listen: 127.0.0.1:0\n")
+	out, err := run(t, "gateway")
+	lacks(t, out, "listening on")
+	if want := foragerFile() + ": gateway.server.via does nothing for qory gateway: a gateway reaches the server directly; remove gateway.server.via"; err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
+		t.Errorf("%v (exit %d)\nwant %q", err, cmd.ExitCode(err), want)
+	}
+	if relayed, targets := via.relayed(), srvTargets(srv); len(relayed) != 0 || len(targets) != 0 {
+		t.Errorf("a refused gateway sent %v through via, and the server got %v", relayed, targets)
+	}
+}

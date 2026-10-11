@@ -579,6 +579,18 @@ func finishEnrolment(dir foragerdir.Dir, info io.Writer, r *config.Forager, serv
 	if err := dir.RemoveAnswer(); err != nil {
 		return err
 	}
+	fmt.Fprintf(info, "wrote %s to %s\n", joinAnd(enrolmentWritten(r, e)), path)
+	if old != "" {
+		fmt.Fprintf(info, "revoke the old key %s on the node's page, unless it is revoked already: until then it still works on Qory Apiary\n", old)
+	}
+	return nil
+}
+
+// enrolmentWritten names the keys of forager.yaml an enrolment e writes, in the order
+// they are written, where r is forager.yaml as it was read: gateway.server.url when the
+// file had no server section, gateway.server.access_key_id, gateway.server.apiary_public_key
+// when e carries the pin, and each key of gateway.server.via e sets.
+func enrolmentWritten(r *config.Forager, e config.Enrolment) []string {
 	var written []string
 	if r == nil || r.Server == nil {
 		written = append(written, "gateway.server.url")
@@ -589,12 +601,14 @@ func finishEnrolment(dir foragerdir.Dir, info io.Writer, r *config.Forager, serv
 	}
 	if e.Via != nil {
 		written = append(written, "gateway.server.via.url")
+		if e.Via.CAFile != "" {
+			written = append(written, "gateway.server.via.ca_file")
+		}
+		if e.Via.CertificateSHA256 != "" {
+			written = append(written, "gateway.server.via.certificate_sha256")
+		}
 	}
-	fmt.Fprintf(info, "wrote %s to %s\n", joinAnd(written), path)
-	if old != "" {
-		fmt.Fprintf(info, "revoke the old key %s on the node's page, unless it is revoked already: until then it still works on Qory Apiary\n", old)
-	}
-	return nil
+	return written
 }
 
 // joinAnd joins names as a sentence lists them: commas, and "and" before the last.

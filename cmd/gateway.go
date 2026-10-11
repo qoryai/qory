@@ -79,6 +79,9 @@ More: ` + gatewayDocs,
 			if r == nil || !r.Gateway {
 				return input(fmt.Errorf("%s has no gateway section, so there is no gateway to run; see %s", foragerFileShown(), gatewayDocs))
 			}
+			if err := viaForGateway(r); err != nil {
+				return err
+			}
 			addr := r.Listen
 			if cmd.Flags().Changed("listen") {
 				if !config.HostPort(listen) {

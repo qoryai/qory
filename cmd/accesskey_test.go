@@ -1,6 +1,7 @@
 package cmd_test
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -988,7 +989,7 @@ func TestEnrolGoesThroughVia(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s%s", err, out, errOut)
 	}
-	wants(t, errOut, "wrote gateway.server.url, gateway.server.access_key_id, gateway.server.apiary_public_key and gateway.server.via.url to "+foragerFile()+"\n")
+	wants(t, errOut, "wrote gateway.server.url, gateway.server.access_key_id, gateway.server.apiary_public_key, gateway.server.via.url and gateway.server.via.ca_file to "+foragerFile()+"\n")
 	if relayed := g.relayed(); len(relayed) != 1 || relayed[0] != accesskey.EnrolmentPath || len(srv.sent()) != 1 {
 		t.Errorf("the gateway relayed %v, and the server verified %d", relayed, len(srv.sent()))
 	}
@@ -1010,4 +1011,20 @@ func TestEnrolGoesThroughVia(t *testing.T) {
 		t.Errorf("--replace: the gateway relayed %v, and the server verified %d", relayed, len(srv.sent()))
 	}
 	wants(t, readForagerFile(t), "    via:\n      url: "+g.URL+"\n      ca_file: "+g.caFile+"\n")
+}
+
+// TestEnrolViaNamesItsCertificate is qory access-key enrol --via with both
+// --via-ca-file and --via-certificate-sha256: the line names each via key written.
+func TestEnrolViaNamesItsCertificate(t *testing.T) {
+	emptyDir(t)
+	srv := newEnrolServer(t)
+	g := newViaGateway(t, srv.URL)
+	sum := sha256.Sum256(g.Certificate().RawSubjectPublicKeyInfo)
+	pin := base64.StdEncoding.EncodeToString(sum[:])
+	out, errOut, err := runSplit(t, "", "access-key", "enrol", "--via", g.URL, "--via-ca-file", g.caFile, "--via-certificate-sha256", pin, srv.URL, srv.code(1, false))
+	if err != nil {
+		t.Fatalf("%v\n%s%s", err, out, errOut)
+	}
+	wants(t, errOut, "wrote gateway.server.url, gateway.server.access_key_id, gateway.server.apiary_public_key, gateway.server.via.url, gateway.server.via.ca_file and gateway.server.via.certificate_sha256 to "+foragerFile()+"\n")
+	wants(t, readForagerFile(t), "    via:\n      url: "+g.URL+"\n      ca_file: "+g.caFile+"\n      certificate_sha256: "+pin+"\n")
 }

@@ -177,6 +177,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					if err := checkVia(r); err != nil {
 						return err
 					}
+					if !local && !remote {
+						if err := viaGatewayKeys(r); err != nil {
+							return err
+						}
+					}
 					server = gatewayServer(r.Server)
 				}
 			}

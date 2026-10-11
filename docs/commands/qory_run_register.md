@@ -1,6 +1,6 @@
 ## qory run register
 
-Register a run with the server, and print its run key for the job
+Register a run with the server, and write its run key for the job to a descriptor
 
 ### Synopsis
 
@@ -49,7 +49,7 @@ qory run register [flags]
       --kind string                what kind of run it is, such as review or fix, reported when the run starts
       --label stringArray          a key=value name for the run, reported in its events; repeatable
       --run-id string              the run's id, a UUID in lower case (default a new one)
-      --run-key-fd int             write the run key to this file descriptor, 3 or above, in place of QORY_RUN_KEY=<key> on stdout
+      --run-key-fd int             write the run key to this file descriptor, 3 or above; required
       --subject stringArray        what the run works on, type=<type>,ref=<ref>[,url=<url>][,title=<title>], such as type=ticket,ref=7; title takes the rest of the value, commas too; repeatable
       --title string               the run's title, for a person to read, reported when the run starts
 ```

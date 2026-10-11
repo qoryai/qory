@@ -270,3 +270,59 @@ func TestAMachineBehindViaSaysItsGatewaysRefusals(t *testing.T) {
 		}
 	}
 }
+
+// TestAMachineBehindViaRefusesItsOwnGatewaysKeys is a machine with its own access key
+// whose forager.yaml sets gateway.server.via and keys of the gateway section beside
+// gateway.server: qory run refuses each, one line per key, sorted, exit 2, before it
+// reads the server's discovery or registers, and nothing is kept and no record made.
+// --local runs a gateway of its own, which reads them, so it is not refused.
+func TestAMachineBehindViaRefusesItsOwnGatewaysKeys(t *testing.T) {
+	root := runKeyCheckout(t)
+	srv := newFakeServer(t, "")
+	srv.choose(receiver.Default, "https://gateway.example:8443", newKey(t))
+	via := newViaGateway(t, srv.URL)
+	line := func(key string) string {
+		return foragerFile() + ": gateway." + key + " does nothing on this machine: gateway.server.via sends its runs through a gateway, which holds their policy, credentials and integrations; remove gateway." + key + ", or remove gateway.server.via"
+	}
+	tls := filepath.Join(t.TempDir(), "gateway")
+	for _, c := range []struct {
+		name, more string
+		keys       []string
+	}{
+		{"egress", "  egress:\n    mode: enforce\n    allow: [api.example.com]\n", []string{"egress"}},
+		{"credentials", "  credentials:\n    tracker:\n      env: TRACKER_TOKEN\n      hosts: [tracker.acme.example]\n      auth: {scheme: bearer}\n", []string{"credentials"}},
+		{"integrations", "  integrations:\n    tracker: {settings: {project: SHOP}}\n", []string{"integrations"}},
+		{"listen", "  listen: 127.0.0.1:8443\n", []string{"listen"}},
+		{"tls", "  tls:\n    certificate: " + tls + ".crt\n    key: " + tls + ".key\n", []string{"tls"}},
+		{"egress, written null", "  egress:\n", []string{"egress"}},
+		{"every key, out of order", "  tls:\n    certificate: " + tls + ".crt\n    key: " + tls + ".key\n  listen: 127.0.0.1:8443\n  integrations:\n    tracker: {settings: {project: SHOP}}\n  egress:\n    mode: observe\n  credentials:\n    tracker:\n      env: TRACKER_TOKEN\n      hosts: [tracker.acme.example]\n      auth: {scheme: bearer}\n",
+			[]string{"credentials", "egress", "integrations", "listen", "tls"}},
+	} {
+		walledServerFile(t, srv, via.via()+c.more)
+		lines := make([]string, len(c.keys))
+		for i, k := range c.keys {
+			lines[i] = line(k)
+		}
+		_, err := run(t, "run")
+		if want := strings.Join(lines, "\n"); err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
+			t.Errorf("%s: %v (exit %d)\nwant %q", c.name, err, cmd.ExitCode(err), want)
+		}
+	}
+	if relayed, targets := via.relayed(), srvTargets(srv); len(relayed) != 0 || len(targets) != 0 {
+		t.Errorf("a refused run sent %v through via, and the server got %v", relayed, targets)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(string(configDir()), foragerdir.RunKeysDir)); len(entries) != 0 {
+		t.Errorf("a refused run kept %d run keys", len(entries))
+	}
+	if entries, _ := os.ReadDir(runsDir(t, root)); len(entries) != 0 {
+		t.Errorf("a refused run left %d records", len(entries))
+	}
+
+	walledServerFile(t, srv, via.via()+"  egress:\n    mode: observe\n")
+	if out, err := run(t, "run", "--local"); err != nil {
+		t.Errorf("--local, with gateway.egress: %v\n%s", err, out)
+	}
+	if relayed := via.relayed(); len(relayed) != 0 {
+		t.Errorf("--local sent %v through via", relayed)
+	}
+}

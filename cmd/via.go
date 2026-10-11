@@ -29,6 +29,32 @@ func runsThroughVia(r *config.Forager, id *serverIdentity) bool {
 	return id != nil && r != nil && r.Server != nil && r.Server.Via != nil
 }
 
+// viaGatewayKeys refuses, as input, each key of r's gateway section other than
+// gateway.server when r sets gateway.server.via: a run that goes through via's gateway
+// starts no gateway of its own, so the egress policy, the credentials, the integrations
+// and every other key only a gateway of this machine's own reads do nothing. One line
+// per key, in the order [config.Forager.GatewayKeys] lists them. qory run checks it
+// before anything starts or registers, unless --local, which runs a gateway of its own.
+func viaGatewayKeys(r *config.Forager) error {
+	if r == nil || r.Server == nil || r.Server.Via == nil || len(r.GatewayKeys) == 0 {
+		return nil
+	}
+	lines := make([]string, len(r.GatewayKeys))
+	for i, k := range r.GatewayKeys {
+		lines[i] = fmt.Sprintf("%s: gateway.%s does nothing on this machine: gateway.server.via sends its runs through a gateway, which holds their policy, credentials and integrations; remove gateway.%s, or remove gateway.server.via", r.File, k, k)
+	}
+	return input(errors.New(strings.Join(lines, "\n")))
+}
+
+// viaForGateway refuses, as input, gateway.server.via in r for qory gateway: a gateway
+// reaches the server directly.
+func viaForGateway(r *config.Forager) error {
+	if r == nil || r.Server == nil || r.Server.Via == nil {
+		return nil
+	}
+	return input(fmt.Errorf("%s: gateway.server.via does nothing for qory gateway: a gateway reaches the server directly; remove gateway.server.via", r.File))
+}
+
 // registerThroughVia registers the run runID of a machine with its own access key,
 // signed as id, through r's gateway.server.via, with the run's labels and what it is
 // about: it reads the server's discovery, prints the node line and refuses a gateway's

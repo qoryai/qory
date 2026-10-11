@@ -218,3 +218,29 @@ func TestTheForagerSchemaTakesAVia(t *testing.T) {
 		}
 	}
 }
+
+// TestGatewayKeysListsWhatAGatewayOfItsOwnReads is GatewayKeys: the keys of the gateway
+// section beside server, sorted, a key written null among them; none without a gateway
+// section, or with server alone.
+func TestGatewayKeysListsWhatAGatewayOfItsOwnReads(t *testing.T) {
+	hermetic(t)
+	for _, c := range []struct {
+		name, file string
+		want       string
+	}{
+		{"no gateway section", "session:\n  instance:\n    name: build-01\n", ""},
+		{"server alone", viaFile("{url: \"https://gateway.example:8443\"}"), ""},
+		{"out of order", "gateway:\n  tls:\n    certificate: c.pem\n    key: k.pem\n  listen: 127.0.0.1:8443\n  server:\n    url: https://apiary.example\n  egress:\n    mode: observe\n", "egress listen tls"},
+		{"a key written null", "gateway:\n  egress:\n  server:\n    url: https://apiary.example\n", "egress"},
+	} {
+		foragerFile(t, c.file)
+		r, err := config.LoadForager()
+		if err != nil {
+			t.Errorf("%s: %v", c.name, err)
+			continue
+		}
+		if got := strings.Join(r.GatewayKeys, " "); got != c.want {
+			t.Errorf("%s: GatewayKeys %q, want %q", c.name, got, c.want)
+		}
+	}
+}

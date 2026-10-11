@@ -18,6 +18,7 @@ import (
 	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/contracts"
 
+	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/foragerdir"
 )
 
@@ -308,5 +309,47 @@ func TestHeldSecretFailsClosed(t *testing.T) {
 	t.Cleanup(func() { os.Chmod(string(dir), 0o700) })
 	if held, err := heldSecret(dir); held != dir.Path(foragerdir.SecretFile) || err != nil {
 		t.Errorf("a directory that cannot be searched: %q, %v", held, err)
+	}
+}
+
+// TestEnrolmentWrittenNamesEachViaKey is the line enrol prints of what it wrote: it names
+// gateway.server.via.url whenever via is written, and gateway.server.via.ca_file and
+// gateway.server.via.certificate_sha256 when each is given, joined as a sentence lists
+// them, after the server's url when the file had no server section and the pin when the
+// enrolment writes it.
+func TestEnrolmentWrittenNamesEachViaKey(t *testing.T) {
+	const url = "https://gateway.example:8443"
+	const ca = "/etc/qory/gateway-ca.pem"
+	const sum = "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
+	pin := make(accesskey.Pin, 1)
+	known := &config.Forager{Server: &config.ForagerServer{URL: "https://apiary.example"}}
+	for _, c := range []struct {
+		name string
+		r    *config.Forager
+		e    config.Enrolment
+		want string
+	}{
+		{"no via", nil, config.Enrolment{Pin: pin},
+			"gateway.server.url, gateway.server.access_key_id and gateway.server.apiary_public_key"},
+		{"via", nil, config.Enrolment{Pin: pin, Via: &config.ForagerVia{URL: url}},
+			"gateway.server.url, gateway.server.access_key_id, gateway.server.apiary_public_key and gateway.server.via.url"},
+		{"via and its CA file", nil, config.Enrolment{Pin: pin, Via: &config.ForagerVia{URL: url, CAFile: ca}},
+			"gateway.server.url, gateway.server.access_key_id, gateway.server.apiary_public_key, gateway.server.via.url and gateway.server.via.ca_file"},
+		{"via and its certificate", nil, config.Enrolment{Pin: pin, Via: &config.ForagerVia{URL: url, CertificateSHA256: sum}},
+			"gateway.server.url, gateway.server.access_key_id, gateway.server.apiary_public_key, gateway.server.via.url and gateway.server.via.certificate_sha256"},
+		{"via, its CA file and its certificate", nil, config.Enrolment{Pin: pin, Via: &config.ForagerVia{URL: url, CAFile: ca, CertificateSHA256: sum}},
+			"gateway.server.url, gateway.server.access_key_id, gateway.server.apiary_public_key, gateway.server.via.url, gateway.server.via.ca_file and gateway.server.via.certificate_sha256"},
+		{"a known server, via", known, config.Enrolment{Via: &config.ForagerVia{URL: url}},
+			"gateway.server.access_key_id and gateway.server.via.url"},
+		{"a known server, via and its CA file", known, config.Enrolment{Via: &config.ForagerVia{URL: url, CAFile: ca}},
+			"gateway.server.access_key_id, gateway.server.via.url and gateway.server.via.ca_file"},
+		{"a known server, via and its certificate", known, config.Enrolment{Via: &config.ForagerVia{URL: url, CertificateSHA256: sum}},
+			"gateway.server.access_key_id, gateway.server.via.url and gateway.server.via.certificate_sha256"},
+		{"a known server, via, its CA file and its certificate", known, config.Enrolment{Via: &config.ForagerVia{URL: url, CAFile: ca, CertificateSHA256: sum}},
+			"gateway.server.access_key_id, gateway.server.via.url, gateway.server.via.ca_file and gateway.server.via.certificate_sha256"},
+	} {
+		if got := joinAnd(enrolmentWritten(c.r, c.e)); got != c.want {
+			t.Errorf("%s: wrote %s\nwant %s", c.name, got, c.want)
+		}
 	}
 }

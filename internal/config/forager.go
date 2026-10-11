@@ -73,6 +73,10 @@ type Forager struct {
 	// Gateway reports whether the file has a gateway section: qory gateway runs none
 	// without one.
 	Gateway bool
+	// GatewayKeys are the keys the gateway section writes beside server, sorted: what
+	// a gateway of this machine's own uses, and a run that goes through another gateway
+	// does not.
+	GatewayKeys []string
 	// Listen is gateway.listen, the address qory gateway listens on for the runs of
 	// other machines, host:port; empty when the file sets none. qory run does not use it.
 	Listen string
@@ -465,7 +469,7 @@ func LoadForager() (*Forager, error) {
 	if _, err := exports.ResolveAPIVersion(f.APIVersion); err != nil {
 		return nil, fmt.Errorf("%s: apiVersion is not one this qory reads; versions: %s", path, exports.APIVersion)
 	}
-	r := &Forager{File: path, Gateway: f.Gateway != nil}
+	r := &Forager{File: path, Gateway: f.Gateway != nil, GatewayKeys: gatewayKeys(data)}
 	g, ses := f.Gateway, f.Session
 	if g == nil {
 		g = &gatewaySection{}
@@ -657,6 +661,26 @@ func viaNull(path string, data []byte) error {
 		return fmt.Errorf("%s: gateway.server.via is empty", path)
 	}
 	return nil
+}
+
+// gatewayKeys are the keys of the gateway section of data, a forager.yaml the decoder
+// has read, other than server, sorted; a key written with a null value is one of them.
+// Merges and alias keys are resolved as the decoder resolves them.
+func gatewayKeys(data []byte) []string {
+	var f struct {
+		Gateway map[string]yaml.Node `yaml:"gateway"`
+	}
+	if err := safeDecode(func() error { return yaml.Unmarshal(data, &f) }); err != nil {
+		return nil
+	}
+	var keys []string
+	for k := range f.Gateway {
+		if k != "server" {
+			keys = append(keys, k)
+		}
+	}
+	slices.Sort(keys)
+	return keys
 }
 
 // viaShape ends a refusal of gateway.server.via.url: what it takes.
