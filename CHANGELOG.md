@@ -181,9 +181,11 @@ release may change what an existing document does, and states it under Upgrading
   refuses, `gateway.tls is required with gateway.listen: a gateway serves other machines`.
   It needs a gateway's access key: once Qory Apiary's configuration names another node,
   it refuses, `qory gateway needs a gateway's access key, and this one is node <id>'s:
-  enrol a key with a code from the gateway's page in Qory Apiary`. A machine whose runs go
-  through it names no gateway: each run brings a run key that names this gateway. For a
-  starter or a machine with its own key that reaches Qory Apiary only through it, it
+  enrol a key with a code from the gateway's page in Qory Apiary`. Enrolling a gateway's
+  key says `enrolled as … in the gateway ng_…` and `the key is active: the gateway can
+  serve runs`. A machine whose runs go through it names no gateway: each run brings a run
+  key that names this gateway. For a starter or a machine with its own key that reaches
+  Qory Apiary only through it, it
   passes on enrolment, the server's configuration, registrations and outcomes,
   unchanged, and nothing else. Forager keeps the gateway's directory in qory's state
   directory, `gateway/`: its own certificate authority, `authority/ca.pem`, and its

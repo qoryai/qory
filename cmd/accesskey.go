@@ -527,13 +527,16 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 
 // printEnrolled prints what the server's verified 201 says.
 func printEnrolled(info io.Writer, ans *accesskey.EnrolmentAnswer) {
-	kind := "node"
-	if ans.NodeKind == "pool" {
+	kind, active := "node", "runs can start"
+	switch ans.NodeKind {
+	case "pool":
 		kind = "node pool"
+	case "gateway":
+		kind, active = "gateway", "the gateway can serve runs"
 	}
 	fmt.Fprintf(info, "enrolled as %s in the %s %s\n", ans.AccessKeyID, kind, ans.NodeID)
 	fmt.Fprintf(info, "stored secrets: %s\n", yesNo(ans.StoredSecrets))
-	fmt.Fprintln(info, "the key is active: runs can start")
+	fmt.Fprintf(info, "the key is active: %s\n", active)
 }
 
 // finishEnrolment is what follows the server's verified 201 for key on this machine,

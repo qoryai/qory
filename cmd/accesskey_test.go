@@ -71,7 +71,7 @@ func newEnrolServer(t *testing.T) *enrolServer {
 			status, body, signBy = http.StatusConflict, []byte(`{"error":"key_invalid","apiary_public_key":`+s.keys()+`}`), s.signer
 		}
 		if body == nil {
-			body = s.answer(true)
+			body = s.answer("node")
 		}
 		if signBy != nil && status != http.StatusUnauthorized {
 			w.Header().Set(accesskey.HeaderSignature, signBy.SignAnswer(accesskey.Answer{Enrolment: true, Status: status, RequestSignature: req.Proof, Body: body}))
@@ -98,12 +98,10 @@ func (s *enrolServer) keys() string {
 	return "[" + l + "]"
 }
 
-// answer is the 201 for the node nd_0123456789abcdef.
-func (s *enrolServer) answer(node bool) []byte {
-	id, kind := "nd_0123456789abcdef", "node"
-	if !node {
-		id, kind = "np_0123456789abcdef", "pool"
-	}
+// answer is the 201 for an access key of kind: the node nd_0123456789abcdef, the node
+// pool np_0123456789abcdef or the gateway ng_0123456789abcdef.
+func (s *enrolServer) answer(kind string) []byte {
+	id := map[string]string{"node": "nd_", "pool": "np_", "gateway": "ng_"}[kind] + "0123456789abcdef"
 	return []byte(`{"version":1,"access_key_id":"ak_0123456789abcdef","node_id":"` + id + `","node_kind":"` + kind + `","stored_secrets":false,"apiary_public_key":` + s.keys() + `}`)
 }
 
@@ -317,7 +315,7 @@ func TestEnrolCreatesTheForagerFileAndPinsOnlyTheCodesKeys(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
 	srv.rotate = true
-	srv.body = srv.answer(false)
+	srv.body = srv.answer("pool")
 	out, err := run(t, "access-key", "enrol", srv.URL, srv.code(1, false))
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -336,6 +334,28 @@ func TestEnrolCreatesTheForagerFileAndPinsOnlyTheCodesKeys(t *testing.T) {
 	}
 	if len(r.Server.Pin) != 1 || r.Server.Pin[0].PublicKey != srv.signer.PublicKey().String() {
 		t.Errorf("the pin %v", r.Server.Pin)
+	}
+}
+
+// TestEnrolSaysWhatTheKeyBelongsTo is an enrolment of a node's key, a node pool's and a
+// gateway's: the lines after the fingerprint name what the key belongs to and what it
+// lets that do.
+func TestEnrolSaysWhatTheKeyBelongsTo(t *testing.T) {
+	for _, c := range []struct{ kind, want string }{
+		{"node", "enrolled as ak_0123456789abcdef in the node nd_0123456789abcdef\nstored secrets: no\nthe key is active: runs can start\n"},
+		{"pool", "enrolled as ak_0123456789abcdef in the node pool np_0123456789abcdef\nstored secrets: no\nthe key is active: runs can start\n"},
+		{"gateway", "enrolled as ak_0123456789abcdef in the gateway ng_0123456789abcdef\nstored secrets: no\nthe key is active: the gateway can serve runs\n"},
+	} {
+		emptyDir(t)
+		srv := newEnrolServer(t)
+		srv.body = srv.answer(c.kind)
+		_, errOut, err := runSplit(t, "", "access-key", "enrol", srv.URL, srv.code(1, false))
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", c.kind, err, errOut)
+		}
+		if !strings.Contains(errOut, "access key fingerprint "+heldKey(t).Fingerprint()+"\n"+c.want) {
+			t.Errorf("%s: stderr\n%s\nwant the lines\n%s", c.kind, errOut, c.want)
+		}
 	}
 }
 
