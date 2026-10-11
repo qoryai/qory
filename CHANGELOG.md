@@ -87,6 +87,11 @@ release may change what an existing document does, and states it under Upgrading
   the requests to the hosts it `serves`. A run's policy selects tools by name, with an
   argument, as it selects credentials, and a tool needs a wall. `qory config` lists each
   tool.
+- `qory run` keeps the labels a checkout's origin remote gives, `forge` and `repository`,
+  from the checkout's first run the server accepts, in `labels/` beside `forager.yaml`. A
+  later run whose origin gives others does not start, `labels_changed`, exit 2, until it
+  is run with `--relabel`: the server chooses a run's policy by its labels, and an agent
+  can rewrite `.git/config`. Labels given with `--label` are used as given.
 - Nested Docker, a Docker daemon inside the wall, separate from the machine's, experimental: an image with `docker: true` under
   `runtime: sysbox-runc` starts with `qory run nest`, a hidden verb of `qory`'s Linux
   build, as the container's entry point. It runs Forager's `wall.Nest`: `dockerd` on

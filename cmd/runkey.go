@@ -187,13 +187,17 @@ const runKeyGiven = "a run key is given, by QORY_RUN_KEY or --run-key-fd"
 // the run's own; an access key on this machine, in a file beside forager.yaml, a
 // variable or the descriptor --access-key-secret-fd names, which keyFD says was given;
 // a gateway section in r; and the flags of the run's registration that were given,
-// given. r is nil without forager.yaml.
-func behindGateway(r *config.Forager, local, policy, keyFD bool, given []string) error {
+// given. r is nil without forager.yaml. --relabel, which relabel says was given, is
+// refused after --policy: the run's starter chose the run's labels.
+func behindGateway(r *config.Forager, local, policy, relabel, keyFD bool, given []string) error {
 	if local {
 		return input(errors.New("--local runs with a gateway the run starts itself and no server, and " + runKeyGiven + ": the run goes through the gateway its run key names; give no run key to run --local"))
 	}
 	if policy {
 		return input(errors.New("--policy is a run's policy file for a gateway the run starts itself, and " + runKeyGiven + ": the gateway its run key names takes the run's policy from the server"))
+	}
+	if relabel {
+		return relabelRunKey()
 	}
 	if dir := machineDir(); dir != "" {
 		held, err := heldSecret(dir)

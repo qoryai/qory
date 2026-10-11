@@ -706,6 +706,38 @@ anything starts, so an unwalled run that contacts no server, `--local` or one wh
 `forager.yaml` has no server, may have it. An unwalled run against the server with that key
 is refused.
 
+### A checkout's labels
+
+The server chooses a run's policy by the run's labels. qory takes two of them from the
+checkout's origin remote, `forge` and `repository`, and an agent can change the remote by
+rewriting `.git/config`. So qory keeps the two labels the origin remote gives at the
+checkout's first run the server accepts, directly or through `gateway.server.via`. They
+are kept in `labels/` beside `forager.yaml`, mode 0700, one file per checkout, mode 0600,
+named by the SHA-256 of the checkout's real path. A run the server refuses keeps nothing.
+An agent without a wall runs as you and can rewrite `labels/` too, so the labels hold for
+walled runs.
+
+A later run whose origin remote gives other labels does not start. It is refused before
+anything starts or registers, `labels_changed`, exit 2, and no event is written:
+
+```text
+the checkout /home/you/src/app first ran against the server as forge git.example.com, repository acme/app, and its origin remote now gives forge git.example.com, repository acme/shop; the server chooses a run's policy by its labels, so the run does not start: if you changed the remote, run the same command with --relabel (labels_changed)
+```
+
+A checkout without an origin remote reads `no forge, no repository`. If you changed the
+remote, run the same command with `--relabel`: the run starts, and once the server
+accepts it, qory keeps the new labels and says so:
+
+```text
+qory run: the checkout's labels are now forge git.example.com, repository acme/shop
+```
+
+A label given with `--label` is used as given: it is neither checked nor kept. A run
+with `--local`, a run without a server and a run given a run key neither check nor keep
+labels: behind a gateway its run key names, the run's starter chose its labels.
+`--relabel` is refused with `--local` and with a run key. When the labels cannot be
+kept, qory says so in one line, and the run goes on.
+
 ## Through a separate gateway
 
 A run goes through a separate gateway when it is given a run key, by `--run-key-fd` or
