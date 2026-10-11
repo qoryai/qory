@@ -54,10 +54,10 @@ func newKeyedGateway(t *testing.T) *keyedGateway {
 			c.SetReadDeadline(time.Now().Add(5 * time.Second))
 			b := make([]byte, 64<<10)
 			n, _ := c.Read(b)
-			c.Close()
 			g.mu.Lock()
 			g.got, g.conns = append(g.got, b[:n]...), g.conns+1
 			g.mu.Unlock()
+			c.Close()
 		}
 	}()
 	return g

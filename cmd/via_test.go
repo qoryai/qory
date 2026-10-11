@@ -39,7 +39,6 @@ func newKeptKeyGateway(t *testing.T, path func() string) *keptKeyGateway {
 			if err != nil {
 				return
 			}
-			c.Close()
 			mode, key := os.FileMode(0), ""
 			if info, err := os.Lstat(path()); err == nil {
 				mode = info.Mode()
@@ -49,6 +48,7 @@ func newKeptKeyGateway(t *testing.T, path func() string) *keptKeyGateway {
 			g.mu.Lock()
 			g.modes, g.keys = append(g.modes, mode), append(g.keys, key)
 			g.mu.Unlock()
+			c.Close()
 		}
 	}()
 	return g

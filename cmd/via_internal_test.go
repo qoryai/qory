@@ -15,10 +15,11 @@ import (
 // made its record, and goes once nothing is left: every event delivered, the run closed,
 // or a run that failed before it made its record.
 //
-// A test of qory run itself cannot leave events undelivered behind a separate gateway:
-// a run makes its record, and sends events, only once its session is attached at the
-// gateway the run key names, over TLS that Forager checks against the system's roots
-// alone outside its own tests, so no gateway a test starts is one a run reaches.
+// A test of qory run itself is impractical to set up with events left undelivered behind
+// a separate gateway: a run makes its record, and sends events, only once its session is
+// attached at the gateway the run key names, over TLS that Forager checks against the
+// system's roots alone outside its own tests, and Go loads those roots once per process,
+// so a gateway a test starts would have to be trusted by the whole test binary.
 func TestARunKeepsItsKeyWhileEventsRemain(t *testing.T) {
 	record := filepath.Join(t.TempDir(), "0192f0c1-7d4e-7a2b-8c3d-444444444444")
 	failed := errors.New("the session failed")
