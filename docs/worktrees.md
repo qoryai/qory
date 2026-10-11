@@ -1,7 +1,7 @@
 # Worktrees
 
-A worktree is a second checkout of the same repository, on its own branch. `qory` gives
-each branch its own worktree, beside the main checkout. It prepares the worktree and
+A worktree is a second checkout of the same repository, on a separate branch. `qory` gives
+each branch a separate worktree, beside the main checkout. It prepares the worktree and
 composes the harness into it, so the agent can start right away.
 
 ## What a new worktree needs
@@ -47,7 +47,7 @@ The harness is composed into the new worktree when the repository contains a
 `qory-stack.yaml`, or a `qory.yaml` that defines a stack.
 
 - `-f` selects the stack to compose instead, as it does on `harness compose`. When the
-  worktree's own document extends a stack, the one `-f` selects is its base. That is how
+  worktree's document extends a stack, the one `-f` selects is its base. That is how
   a runner that has the stack tree supplies one.
 - `--no-compose` composes nothing.
 
@@ -67,7 +67,7 @@ qory setup shell                 # make your shell cd into a new worktree, and b
 
 `-v` on `add` or `remove` prints each git command as it runs. It also prints what the
 configured commands print. On `add`, the compose lists its entries too. On `remove`, it
-also shows how the branch's own commits were counted. Without `-v`, a command's output
+also shows how the branch's unpushed commits (on no remote branch) were counted. Without `-v`, a command's output
 shows only when the command fails.
 
 ## Adding a worktree
@@ -97,8 +97,8 @@ A base that matches a branch of the remote is read there, as `<remote>/<base>`. 
 branch you never checked out works as a base, and a local copy that fell behind is not
 used. `heads/<base>` selects the local branch instead.
 
-The base is not the worktree's upstream. The worktree pushes to a remote branch of its
-own name, which the first push creates.
+The base is not the worktree's upstream. The worktree pushes to a remote branch with the
+same name as its branch, which the first push creates.
 
 A worktree already on the branch is reused, and the rows say so.
 
@@ -106,13 +106,13 @@ A worktree already on the branch is reused, and the rows say so.
 
 `--base` on a branch that already exists moves it:
 
-- A branch with no commits of its own is reset onto the base.
+- A branch with no commits on top of its current base is reset onto the base.
 - A branch with commits has them rebased onto the base.
 
 `qory` asks first. `--rebase` moves it at once. A no keeps the branch where it is.
 
 `qory` records the base a branch was cut from in its git config, as
-`branch.<name>.qory-base`. That is how it knows the branch's own commits. A branch made
+`branch.<name>.qory-base`. That is how it knows which commits are on top of its base. A branch made
 without `qory` counts from the remote's HEAD branch.
 
 ## Attaching to a remote branch or a pull request
@@ -120,7 +120,7 @@ without `qory` counts from the remote's HEAD branch.
 `--branch` attaches the worktree to a branch of the remote, to go on with work pushed
 from elsewhere:
 
-- The branch is fetched, checked out under its own name, and set to track the remote's.
+- The branch is fetched, checked out under its name, and set to track the remote's.
 - A branch the remote does not have is refused, not cut new.
 - A local branch of that name is fast-forwarded to the remote's, when that is possible.
 
@@ -186,17 +186,17 @@ shell function that does it. The function runs `worktree add` and `worktree remo
 
 `--path` prints that path alone on standard output. The rows go to standard error.
 
-## Your own settings
+## Your settings
 
 Where a worktree goes and what it is called is your choice, not the repository's. Set it
-in your own `qory.yaml`, in `~/.config/qory`. `qory setup machine` writes that file.
+in your `qory.yaml`, in `~/.config/qory`. `qory setup machine` writes that file.
 
 - `worktree.dir`: where worktrees go, relative to the main checkout. Default: `..`.
 - `worktree.name`: what a worktree is called. Default: `wt-{branch}`.
 - `worktree.branch`: what happens to the branch on remove, `delete` or `keep`.
 
 Some files live at a path on your machine that the repository's `qory.yaml` must not
-mention. Link those from your own file too:
+mention. Link those from your file too:
 
 ```yaml
 # ~/.config/qory/qory.yaml

@@ -5,7 +5,7 @@ machine as a service, until it is stopped, for the runs of other machines.
 
 A gateway decides every connection of the runs that go through it by the run's policy,
 records it, sets credentials on requests, and sends the runs' events to Qory Apiary.
-`qory run` on this machine needs no service: it starts a gateway of its own for each run
+`qory run` on this machine needs no service: it starts a gateway itself for each run
 (see [docs/run.md](run.md)).
 
 ```sh
@@ -37,7 +37,7 @@ gateway:
 
 | Key | What it is |
 |---|---|
-| `gateway.listen` | The address qory gateway listens on for the runs of other machines, host:port. qory run never listens on it: it starts a gateway of its own on a loopback port for each run. |
+| `gateway.listen` | The address qory gateway listens on for the runs of other machines, host:port. qory run never listens on it: it starts a gateway itself on a loopback port for each run. |
 | `gateway.tls.certificate`, `gateway.tls.key` | The certificate and key the gateway serves the other machines with, files in PEM. The address speaks TLS 1.3 alone. `qory gateway` needs them, whatever address it listens on: a gateway serves other machines. |
 | `gateway.server`, `gateway.egress`, `gateway.credentials`, `gateway.integrations` | As for `qory run`: see [forager.yaml](run.md#forageryaml). |
 
@@ -53,15 +53,15 @@ which its starter got from Qory Apiary and which names this gateway. Such a mach
 the gateway over https alone, so a gateway that serves them has `gateway.tls`. See
 [Through a separate gateway](run.md#through-a-separate-gateway).
 
-For a starter or a machine with its own key that reaches Qory Apiary only through it, the
+For a starter or a machine with a separate access key that reaches Qory Apiary only through it, the
 gateway passes on enrolment, the server's configuration, registrations and outcomes,
-unchanged, and nothing else. They set `gateway.server.via`: see [A machine with its own key
-behind a gateway](run.md#a-machine-with-its-own-key-behind-a-gateway).
+unchanged, and nothing else. They set `gateway.server.via`: see [A machine with a separate access
+key, behind a gateway](run.md#a-machine-with-a-separate-access-key-behind-a-gateway).
 
 ## The access key
 
-The gateway is the node toward Qory Apiary, with this machine's access key, as `qory run`'s
-own gateway is. The gateway's access key is a gateway's: enrol it with a code from the
+The gateway is the node toward Qory Apiary, with this machine's access key, as the gateway
+`qory run` starts itself is. The gateway's access key is a gateway's: enrol it with a code from the
 gateway's page in Qory Apiary, with `qory access-key enrol` on the gateway's machine. The
 secret is read from `--access-key-secret-fd`, else `QORY_ACCESS_KEY_SECRET`, else the file
 `access-key-secret` beside `forager.yaml`: see
@@ -108,5 +108,5 @@ a key with a code from the gateway's page in Qory Apiary`.
 
 The gateway keeps its directory in qory's state directory: `~/.local/state/qory/gateway`,
 or `$XDG_STATE_HOME/qory/gateway` when that is set to an absolute path, mode 0700. There,
-Forager keeps the gateway's own certificate authority, `authority/ca.pem`, made at the
+Forager keeps the gateway's certificate authority, `authority/ca.pem`, made at the
 first start and read at every later one, and the record of each run under `runs/`.

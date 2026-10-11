@@ -27,7 +27,7 @@ func newWorktree() *cobra.Command {
 
 A worktree is one branch, checked out beside the main checkout. qory prepares it the way
 the repository's qory.yaml says: files linked or copied in, commands run, the harness
-composed. Where worktrees go and what they are called is set in your own qory.yaml.
+composed. Where worktrees go and what they are called is set in your qory.yaml.
 
 Shortcuts:
   wa  worktree add
@@ -353,8 +353,8 @@ checkout, or on its base, even when merged there by squash or rebase. Otherwise 
 asks: push, keep, delete anyway, or stop. --keep-branch keeps it. --delete-branch deletes
 it without asking.
 
---verbose prints how the branch's own commits were counted, each git command, and what
-the configured commands print.
+--verbose prints how the branch's unpushed commits (on no remote branch) were counted, each
+git command, and what the configured commands print.
 
 More: https://github.com/qoryai/qory/blob/main/docs/worktrees.md`,
 		Example: `  qory worktree remove                 # the worktree you stand in

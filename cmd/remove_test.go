@@ -50,7 +50,7 @@ func TestRemoveKeepsTheCheckoutsOwnAgentsFile(t *testing.T) {
 	}
 	wants(t, out, ui.Mark+" acme/app · any opus")
 	wantsRow(t, out, "any", ".agents/skills")
-	wantsRow(t, out, "kept", "AGENTS.md  (the checkout's own; not linked)")
+	wantsRow(t, out, "kept", "AGENTS.md  (the checkout's files or directories; not linked)")
 	ownedByCheckout(t, own, "The checkout's own instructions.\n")
 	dirLinks(t, root, filepath.Join(".agents", "skills"), "review", "test", "e2e")
 
@@ -117,8 +117,8 @@ func TestComposeForceReplacesTrackedFiles(t *testing.T) {
 	}
 	// One replaced row per runtime, under the runtime whose link took the place.
 	if rows := fieldRows(out)["replaced"]; !slices.Equal(rows, []string{
-		".claude/settings.json  (the checkout's own; git checkout -- restores it)",
-		"AGENTS.md  (the checkout's own; git checkout -- restores it)",
+		".claude/settings.json  (the checkout's file or directory; git checkout -- restores it)",
+		"AGENTS.md  (the checkout's file or directory; git checkout -- restores it)",
 	}) {
 		t.Errorf("replaced rows = %q", rows)
 	}

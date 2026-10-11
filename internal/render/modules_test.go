@@ -162,7 +162,7 @@ func TestModuleLinkRefusesARuntimesPath(t *testing.T) {
 	for _, c := range []struct{ link, want string }{
 		{"AGENTS.md", "link AGENTS.md is where the amp runtime links AGENTS.md"},
 		{".claude", "link .claude is where the claude runtime links .claude"},
-		{".qory", "link .qory is qory's own directory"},
+		{".qory", "link .qory is qory's directory"},
 	} {
 		t.Run(c.link, func(t *testing.T) {
 			res, root, home := composeFixture(t, "claude")

@@ -219,7 +219,7 @@ func TestResendTakesTheKeptRunKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = run(t, "run", "resend", own)
-	if want := "the run " + own + " ran with a gateway of its own on this machine, so its record goes to the server, and qory sends it there through no gateway, while gateway.server.via is set: resend it with a forager.yaml without gateway.server.via"; err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
+	if want := "the run " + own + " started its gateway itself on this machine, so its record goes to the server, and qory sends it there through no gateway, while gateway.server.via is set: resend it with a forager.yaml without gateway.server.via"; err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Errorf("a run with its own gateway, and via: %v (exit %d)\nwant %q", err, cmd.ExitCode(err), want)
 	}
 	if relayed := via.relayed(); len(relayed) != 0 {

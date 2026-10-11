@@ -234,7 +234,7 @@ func TestRegisterSaysTheServersRefusals(t *testing.T) {
 		{"direct", func() {
 			srv.handler.Nodes[testPool] = receiver.Node{Workspace: testWorkspace, Gateway: receiver.Direct}
 		}, nil,
-			`this key's node is set to "Direct": each of its machines registers its own runs, and a starter registers none. Choose a gateway for the node in Qory Apiary (register ` + runURL + `: node_is_direct (status 409))`},
+			`this key's node is set to "Direct": each of its machines registers each run itself, and a starter registers none. Choose a gateway for the node in Qory Apiary (register ` + runURL + `: node_is_direct (status 409))`},
 		{"no default", func() {
 			srv.handler.Nodes[testPool] = receiver.Node{Workspace: testWorkspace, Gateway: receiver.Default}
 			srv.handler.Workspaces[testWorkspace] = receiver.Workspace{Organisation: "or_0123456789abcdef"}
@@ -346,7 +346,7 @@ func TestEndRefusesItsInput(t *testing.T) {
 		{[]string{id, "--outcome", "succeeded"}, "--outcome succeeded is not completed, failed or cancelled"},
 		{[]string{id, "--reason", "checks_failed"}, "--reason needs --outcome: without one, the run is cancelled, with no outcome given"},
 		{[]string{id, "--outcome", "failed", "--reason", "Checks failed"}, "--reason Checks failed is not a code: a lower-case letter, then lower-case letters, digits and _, at most 64"},
-		{[]string{id, "--outcome", "failed", "--reason", "timeout"}, "--reason timeout is one of Forager's own reasons; give one of yours"},
+		{[]string{id, "--outcome", "failed", "--reason", "timeout"}, "--reason timeout is one of Forager's reasons; give one of yours"},
 	} {
 		_, stderr, err := runSplit(t, "", append([]string{"run", "end"}, c.args...)...)
 		if err == nil || !strings.HasPrefix(err.Error(), c.want) || cmd.ExitCode(err) != cmd.ExitInput {

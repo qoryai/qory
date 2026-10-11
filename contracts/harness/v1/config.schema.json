@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://qory.dev/contracts/harness/v1/config.schema.json",
   "title": "qory.yaml, or harness.yaml",
-  "description": "qory.yaml, or under its second name harness.yaml: the repository's own document at the checkout root, and the machine's in the user's directory and the checkout's ancestors. Every key is optional, apiVersion too: a file leaving it out is read as qory.dev/v1alpha1.",
+  "description": "qory.yaml, or under its second name harness.yaml: the repository's document at the checkout root, and the machine's in the user's directory and the checkout's ancestors. Every key is optional, apiVersion too: a file leaving it out is read as qory.dev/v1alpha1.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -13,7 +13,7 @@
       "pattern": "^\\s*(>=|<=|>|<|=)v?\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?(\\s+(>=|<=|>|<|=)v?\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?)*\\s*$"
     },
     "harness": {
-      "description": "The machine's choices for a compose, and in a checkout's file its document: the checkout's own stack, a target and modules, or the stack it extends, the target it composes it for and the modules it appends. A document may leave extends out when qory harness compose -f <stack> selects the base, and a document that extends a stack may list no modules, containing its target and extensions alone.",
+      "description": "The machine's choices for a compose, and in a checkout's file its document: the checkout's stack, a target and modules, or the stack it extends, the target it composes it for and the modules it appends. A document may leave extends out when qory harness compose -f <stack> selects the base, and a document that extends a stack may list no modules, containing its target and extensions alone.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -37,7 +37,7 @@
           "enum": ["checkout", "none"]
         },
         "launch": {
-          "description": "How a runtime's program is started on the home, by runtime name, for qory harness launch: each key set here replaces the runtime's own. ${home} is the home, ${dir} the runtime's directory in it.",
+          "description": "How a runtime's program is started on the home, by runtime name, for qory harness launch: each key set here replaces that key of the runtime's launch template. ${home} is the home, ${dir} the runtime's directory in it.",
           "type": "object",
           "additionalProperties": {
             "type": "object",
@@ -70,7 +70,7 @@
           "$ref": "#/$defs/base"
         },
         "target": {
-          "description": "The runtime and model the checkout composes for: required for its own stack, and beside extends what it composes the base for, which harness.runtime, harness.model and the flags override. A delivered stack has none.",
+          "description": "The runtime and model the checkout composes for: required for a stack the checkout defines, and beside extends what it composes the base for, which harness.runtime, harness.model and the flags override. A delivered stack has none.",
           "type": "object",
           "required": ["runtime"],
           "additionalProperties": false,

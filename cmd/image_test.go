@@ -89,7 +89,7 @@ func TestImageCheckChecksTheMachinesImage(t *testing.T) {
 		"example.com/agent:1\n✓ the engine holds it, for linux/amd64",
 		"✓ the image sets HOME=/home/agent",
 		"✓ HOME is /home/agent, and the user 65532:65532 writes in it",
-		"✓ none of the image's 3 files is setuid or setgid or has capabilities of its own",
+		"✓ none of the image's 3 files is setuid or setgid or has file capabilities",
 		"  reference  not pinned by digest, and the engine holds no digest of it: a local build",
 		"  docker     no dockerd",
 		"✓ example.com/agent:1 has what the wall needs",

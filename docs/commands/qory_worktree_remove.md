@@ -15,8 +15,8 @@ checkout, or on its base, even when merged there by squash or rebase. Otherwise 
 asks: push, keep, delete anyway, or stop. --keep-branch keeps it. --delete-branch deletes
 it without asking.
 
---verbose prints how the branch's own commits were counted, each git command, and what
-the configured commands print.
+--verbose prints how the branch's unpushed commits (on no remote branch) were counted, each
+git command, and what the configured commands print.
 
 More: https://github.com/qoryai/qory/blob/main/docs/worktrees.md
 

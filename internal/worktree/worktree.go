@@ -628,7 +628,7 @@ func (r runner) onto(remote string, a *Added, o Options) error {
 		if o.Ask == nil {
 			return fmt.Errorf("%s exists off %s, so --base %s needs an answer: add --rebase to move it onto %s, or leave --base out to keep it", a.Branch, old, o.Base, o.Base)
 		}
-		question := fmt.Sprintf("%s sits on %s with no commits of its own. Move it onto %s? [Y/n] ", a.Branch, old, o.Base)
+		question := fmt.Sprintf("%s sits on %s with no commits on top of its current base. Move it onto %s? [Y/n] ", a.Branch, old, o.Base)
 		if n > 0 {
 			question = fmt.Sprintf("%s has %d commit%s off %s. Rebase %s onto %s? [y/N] ", a.Branch, n, plural(n), old, map[bool]string{true: "them", false: "it"}[n > 1], o.Base)
 		}
@@ -825,12 +825,12 @@ func (r runner) own(path, branch string) (int, string) {
 	r.say("counting the commits of %s that are not on %s", branch, strings.Join(notOn, ", "))
 	out, err := r.git(path, args...)
 	if err != nil || out == "" {
-		r.say("%s has no commit of its own", branch)
+		r.say("%s has no unpushed commit", branch)
 		return 0, ""
 	}
 	commits := strings.Split(out, "\n")
 	subject, _ := r.git(path, "log", "-1", "--format=%s", commits[0])
-	r.say("%s has %d commit%s of its own, the newest %s %q", branch, len(commits), plural(len(commits)), short(commits[0]), subject)
+	r.say("%s has %d unpushed commit%s, the newest %s %q", branch, len(commits), plural(len(commits)), short(commits[0]), subject)
 	return len(commits), subject
 }
 

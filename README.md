@@ -17,11 +17,11 @@ It does three things:
 
 ## Why
 
-You have many repositories. You use more than one agent. Each agent reads its own folder:
+You have many repositories. You use more than one agent. Each agent reads a different folder:
 `.claude`, `.codex`, `.gemini`. So every repository keeps copies. The copies drift.
 Nobody knows which version a checkout runs.
 
-And an agent acts on its own. It calls hosts you don't see. It holds your tokens.
+And an agent acts unsupervised. It calls hosts you don't see. It holds your tokens.
 Afterwards, you can't tell what it did.
 
 ## Install
@@ -68,7 +68,7 @@ harness:
   modules:
     - name: core             # shared by every repository, pinned to a tag
       source: {git: https://github.com/acme/harness, ref: v2.4.0, path: core}
-    - name: app              # this repository's own
+    - name: app              # this repository's module
       source: {path: ./harness}
 ```
 
@@ -123,7 +123,7 @@ More: [docs/run.md](docs/run.md).
 | ---------------------- | --------------------------------------------------------- |
 | `qory setup repo`      | Write the repository's `qory.yaml`                        |
 | `qory setup example`   | Write the hello example into this folder                  |
-| `qory setup machine`   | Write your own `qory.yaml`: how `qory` runs here          |
+| `qory setup machine`   | Write your `qory.yaml`: how `qory` runs here              |
 | `qory setup shell`     | Completions, and a shell that follows worktrees           |
 | `qory harness compose` | Build the harness (`qory hc`)                             |
 | `qory harness inspect` | Show where each entry came from (`qory hi`)               |

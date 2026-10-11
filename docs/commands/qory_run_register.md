@@ -19,7 +19,7 @@ else access-key-secret, as for qory run. With gateway.server.via set, the regist
 through that gateway, unchanged.
 
 Use a new run id for each attempt, a retry included. --instance-id names the runner the run
-takes a place on: by default the run's own id, for a runner used once. --attach-within is
+takes a place on: by default the run's id, for a runner used once. --attach-within is
 how long the runner has to start the run; by default the server's window, and never more
 than the server allows.
 
@@ -42,8 +42,8 @@ qory run register [flags]
 
 ```
       --access-key-secret-fd int   read the access key's secret from this file descriptor, 3 or above; it wins over QORY_ACCESS_KEY_SECRET and the access-key-secret file
-      --attach-within duration     how long the runner has to start the run, in whole seconds, such as 15m (default the server's; the server allows at most its own limit)
-      --details string             a JSON object of the run's own details, read from this file, or - for stdin when stdin is not a terminal; at most 8192 bytes compacted, 4 levels deep
+      --attach-within duration     how long the runner has to start the run, in whole seconds, such as 15m (default the server's; the server allows at most its limit)
+      --details string             a JSON object of the run's details, read from this file, or - for stdin when stdin is not a terminal; at most 8192 bytes compacted, 4 levels deep
   -h, --help                       help for register
       --instance-id string         the runner the run takes a place on, 1 to 64 of A-Z, a-z, 0-9, dot, underscore and dash (default the run id: a runner used once)
       --kind string                what kind of run it is, such as review or fix, reported when the run starts

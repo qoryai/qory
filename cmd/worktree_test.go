@@ -235,7 +235,7 @@ func TestWorktreeAddMovesAnExistingBranchOntoABase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, stdout)
 	}
-	wants(t, stdout, "feature sits on origin/main with no commits of its own. Move it onto v0.4.0? [Y/n]")
+	wants(t, stdout, "feature sits on origin/main with no commits on top of its current base. Move it onto v0.4.0? [Y/n]")
 	wantsRow(t, stdout, "branch", "feature  (moved onto v0.4.0; was on origin/main)")
 	if gitOut(t, wt, "rev-parse", "HEAD") != gitOut(t, root, "rev-parse", "v0.4.0") {
 		t.Errorf("the branch did not move")
@@ -397,7 +397,7 @@ func TestWorktreeRemoveGuardsAndRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, out, "  counting the commits of feature that are not on every remote branch, the main checkout's HEAD "+gitOut(t, root, "rev-parse", "--short=7", "HEAD")+", its recorded base origin/main\n", "  feature has 1 commit of its own, the newest ", `"new"`, "\nbye feature off origin/main\n", "  git worktree remove --force "+wt+"\n", "  git branch -D feature\n")
+	wants(t, out, "  counting the commits of feature that are not on every remote branch, the main checkout's HEAD "+gitOut(t, root, "rev-parse", "--short=7", "HEAD")+", its recorded base origin/main\n", "  feature has 1 unpushed commit, the newest ", `"new"`, "\nbye feature off origin/main\n", "  git worktree remove --force "+wt+"\n", "  git branch -D feature\n")
 	wantsRow(t, out, "branch", "feature  (deleted with 1 commit nothing else has; git reflog finds it for 30 days)")
 	if gitOut(t, root, "branch", "--list", "feature") != "" {
 		t.Errorf("the branch stayed")

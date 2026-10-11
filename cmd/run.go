@@ -76,7 +76,7 @@ otherwise.
 
 The agent is the runtime the harness is composed for. Name one first when it is composed
 for several. Arguments after -- go to the agent. At a terminal the agent runs with its
-own interface; --headless, no terminal, or a headless argument such as -p runs it on
+interface; --headless, no terminal, or a headless argument such as -p runs it on
 pipes.
 
 ` + config.ForagerFileName + ` in ~/.config/qory sets what Forager does on this machine. A repository
@@ -96,7 +96,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
   qory run claude -- -p "Reply pong"                # one headless turn
   qory run --wall docker --image agent:1            # in a container
   qory run --image go-docker                        # in an image forager.yaml defines
-  qory run --policy ~/policy.yaml -- -p "$prompt"   # with this run's own policy
+  qory run --policy ~/policy.yaml -- -p "$prompt"   # with this run's policy file
   qory run --timeout 5h30m -- -p "$prompt"          # stop it after five and a half hours
   qory run --subject type=ticket,ref=7              # say which ticket the run works on`,
 		Args: func(cmd *cobra.Command, args []string) error {
@@ -187,7 +187,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			if policyFile != "" {
 				if server != nil && !local {
-					return input(fmt.Errorf("--policy is the run's own policy without a server; with server configured the server's run configuration is the policy, and --local runs with the files alone"))
+					return input(fmt.Errorf("--policy is a run's policy file without a server; with server configured the server's run configuration is the policy, and --local runs with the files alone"))
 				}
 				if pol, err = runPolicy(policyFile, at.root, pol); err != nil {
 					return err
@@ -458,13 +458,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	}
 	c.Flags().BoolVar(&local, "local", false, "run without the server: record to files, under the machine's policy")
 	c.Flags().BoolVar(&headless, "headless", false, "run on pipes even at a terminal; -p for claude implies it")
-	c.Flags().StringVar(&policyFile, "policy", "", "this run's own policy file, kept outside the checkout; it narrows gateway.egress of "+config.ForagerFileName+", never widens it (with a server: needs --local)")
+	c.Flags().StringVar(&policyFile, "policy", "", "this run's policy file, kept outside the checkout; it narrows gateway.egress of "+config.ForagerFileName+", never widens it (with a server: needs --local)")
 	c.Flags().StringVar(&runID, "run-id", "", "the run's id, a UUID in lower case (default a new one)")
 	c.Flags().StringArrayVar(&labels, "label", nil, "a key=value name for the run, reported in its events; repeatable (forge and repository come from the origin remote)")
 	c.Flags().StringVar(&kind, "kind", "", "what kind of run it is, such as review or fix, reported when the run starts")
 	c.Flags().StringVar(&title, "title", "", "the run's title, for a person to read, reported when the run starts")
 	c.Flags().StringArrayVar(&subjects, "subject", nil, "what the run works on, type=<type>,ref=<ref>[,url=<url>][,title=<title>], such as type=ticket,ref=7; title takes the rest of the value, commas too; repeatable")
-	c.Flags().StringVar(&details, "details", "", "a JSON object of the run's own details, read from this file, or - for stdin when stdin is not a terminal; at most 8192 bytes compacted, 4 levels deep")
+	c.Flags().StringVar(&details, "details", "", "a JSON object of the run's details, read from this file, or - for stdin when stdin is not a terminal; at most 8192 bytes compacted, 4 levels deep")
 	c.Flags().DurationVar(&timeout, "timeout", 0, "stop the agent after this long, such as 5h30m, and exit "+fmt.Sprint(exitTimeout)+" (default no limit; "+config.ForagerFileName+": session.run.timeout)")
 	c.Flags().StringVar(&stopSignal, "stop-signal", "", "the signal that stops the agent: SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2 (default SIGTERM; "+config.ForagerFileName+": session.run.stop_signal)")
 	c.Flags().DurationVar(&grace, "stop-grace", 0, "the time between the stop signal and SIGKILL (default 10s; "+config.ForagerFileName+": session.run.stop_grace)")
@@ -1155,7 +1155,7 @@ func mountRefused(err error, p passed) error {
 		text = fmt.Sprintf("this run's records %s %s %s, which the run %s also uses: it is still going on this machine, or its containers were left behind. Its agent could read or change them, so the run does not start. Wait for %s to end; if it has ended, remove its containers, which docker ps --all --filter label=dev.qory.run=%s lists; or keep qory's state directory out of its mounts", runs, how, otherPath, other, other, other)
 	case ref.Code == codeMountSharedWithRun && len(ref.Names) == 3:
 		path, other, otherPath := ref.Names[0], ref.Names[1], ref.Names[2]
-		text = fmt.Sprintf("%s %s %s, which the run %s also uses: it is still going on this machine, or its containers were left behind. One agent could read or change what the other uses, so the run does not start. Wait for %s to end; if it has ended, remove its containers, which docker ps --all --filter label=dev.qory.run=%s lists; or work in a checkout of its own", p.place(path), overlap(path, otherPath), otherPath, other, other, other)
+		text = fmt.Sprintf("%s %s %s, which the run %s also uses: it is still going on this machine, or its containers were left behind. One agent could read or change what the other uses, so the run does not start. Wait for %s to end; if it has ended, remove its containers, which docker ps --all --filter label=dev.qory.run=%s lists; or work in a separate checkout", p.place(path), overlap(path, otherPath), otherPath, other, other, other)
 		if info, err := os.Lstat(filepath.Join(path, ".git")); err == nil && info.Mode().IsRegular() {
 			text += "; make the worktree beside the checkout, not inside it"
 		}
@@ -1520,7 +1520,7 @@ func passedVariables(names []string) ([]string, error) {
 	var out []string
 	for _, n := range names {
 		if config.ForagersOwn(n) {
-			return nil, input(fmt.Errorf("--env %s: the variable is Forager's own and never the agent's", n))
+			return nil, input(fmt.Errorf("--env %s: the variable is Forager's and never the agent's", n))
 		}
 		if v, ok := os.LookupEnv(n); ok {
 			out = withEnv(out, map[string]string{n: v})
@@ -1538,7 +1538,7 @@ func wallHelper(section config.ForagerWall, exe string) (string, error) {
 		return section.Helper, nil
 	}
 	if runtime.GOOS != "linux" {
-		return "", input(fmt.Errorf("the container runs qory's Linux build as its relay, its hook forwarder and what starts an image's own Docker, and this is the %s build; set wall.helper in %s to the Linux one", runtime.GOOS, config.ForagerFileName))
+		return "", input(fmt.Errorf("the container runs qory's Linux build as its relay, its hook forwarder and what starts nested Docker, and this is the %s build; set wall.helper in %s to the Linux one", runtime.GOOS, config.ForagerFileName))
 	}
 	return exe, nil
 }
@@ -1556,9 +1556,9 @@ func newResend() *cobra.Command {
 		Long: `Send a finished run's record to the server in ` + config.ForagerFileName + ` again: after a Forager process that
 died, or a server that was away. A job runs it last, whatever happened before.
 
-Only what the server has not accepted is sent. With a gateway of the run's own, a record
-Forager left open is closed first, unless the server never opened the run. The containers
-and networks its wall left are removed. A run that is still running is refused.
+Only what the server has not accepted is sent. When the run started its gateway itself, a
+record Forager left open is closed first, unless the server never opened the run. The
+containers and networks its wall left are removed. A run that is still running is refused.
 
 The exit status is 0 when the server has everything, or never opened the run, and 1 when
 events remain, or the server said stop.
@@ -1889,7 +1889,7 @@ func newRelay() *cobra.Command {
 func newNest() *cobra.Command {
 	return &cobra.Command{
 		Use:                "nest --user uid:gid -- command [argument...]",
-		Short:              "Start the container's own Docker, then the agent as its user",
+		Short:              "Start nested Docker, then the agent as its user",
 		Hidden:             true,
 		Annotations:        map[string]string{inWall: "nest"},
 		DisableFlagParsing: true,
@@ -1929,7 +1929,7 @@ func newForward() *cobra.Command {
 // [checkout.Key]. Two paths to one directory are one home.
 func ownHome(at places, rep report.Report) error {
 	if !composedFor(at.root, at.home) {
-		return input(fmt.Errorf("the harness report %s names the checkout %s, and %s is not that checkout's home; a run uses only a checkout's own home, so the run does not start. Run qory harness compose again", ui.Short(at.report, at.root), at.root, at.home))
+		return input(fmt.Errorf("the harness report %s names the checkout %s, and %s is not that checkout's home; a run uses only its checkout's home, so the run does not start. Run qory harness compose again", ui.Short(at.report, at.root), at.root, at.home))
 	}
 	if !samePath(rep.Home, at.home) {
 		return input(fmt.Errorf("the harness report %s names the home %s, and this checkout's home is %s; a run uses only the home qory computes, so the run does not start. Run qory harness compose again", ui.Short(at.report, at.root), rep.Home, at.home))

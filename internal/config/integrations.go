@@ -439,7 +439,7 @@ func trusted(path string, o fileOwner, euid uint32, n names) error {
 		primary, ok := n.Primary(o.UID)
 		own := group != "" && group == n.User(o.UID) && ok && primary == o.GID
 		if o.GID != 0 && group != "wheel" && group != "admin" && !own {
-			return fmt.Errorf("%s may be written by the group %s, which is neither root's, wheel, admin nor its owner's own", path, named(group, o.GID))
+			return fmt.Errorf("%s may be written by the group %s, which is neither root's, wheel, admin nor its owner's primary group named as the owner", path, named(group, o.GID))
 		}
 	}
 	return nil

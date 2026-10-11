@@ -480,7 +480,7 @@ func TestReadManifestRefusesEnv(t *testing.T) {
 		{"a key with a dash", "  core-home: scripts\n", "env: core-home is not an environment variable name"},
 		{"a key starting with a digit", "  1CORE: scripts\n", "env: 1CORE is not an environment variable name"},
 		{"an empty key", `  "": scripts` + "\n", "env:  is not an environment variable name"},
-		{"qory's own variable", "  QORY_HARNESS_HOME: .\n", "env.QORY_HARNESS_HOME is qory's own; a module exports another name"},
+		{"qory's own variable", "  QORY_HARNESS_HOME: .\n", "env.QORY_HARNESS_HOME is qory's; a module exports another name"},
 		{"an empty value", `  CORE_HOME: ""` + "\n", "env.CORE_HOME:  is not a path inside the module"},
 		{"an absolute value", "  CORE_HOME: /etc\n", "env.CORE_HOME: /etc is not a path inside the module"},
 		{"the parent", "  CORE_HOME: ..\n", "env.CORE_HOME: .. is not a path inside the module"},

@@ -320,7 +320,7 @@ func effectivePin(r *config.Forager, print bool) (accesskey.Pin, error) {
 	}
 	p, err := accesskey.ParsePin([]byte(v))
 	if err == nil && p.Fixture() {
-		err = errors.New("it lists the Forager contract's published fixture key, whose secret anyone can read; pin your server's own key")
+		err = errors.New("it lists the Forager contract's published fixture key, whose secret anyone can read; pin your server's key")
 	}
 	if err != nil {
 		return nil, input(fmt.Errorf("%s: %w", accesskey.EnvPin, err))

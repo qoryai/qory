@@ -150,7 +150,7 @@ func TestForagerRefusalsSayWhatIsWrongWithoutTheValue(t *testing.T) {
 		{"wall: {adapter: docker, pids_limit: -7}\n", ": wall.pids_limit is below 1; a limit is at least 1"},
 		{"wall: {adapter: docker, ca_env: [\"" + marker + "-X\"]}\n", ": wall.ca_env[0] is not a variable's name"},
 		{"wall: {adapter: docker, env: [HOME, \"" + marker + "=x\"]}\n", ": wall.env[1] is not a variable's name; the value comes from the environment, never from this file"},
-		{"wall: {adapter: docker, env: [QORY_ACCESS_KEY_SECRET]}\n", ": wall.env[0] names a variable that is Forager's own and never the agent's"},
+		{"wall: {adapter: docker, env: [QORY_ACCESS_KEY_SECRET]}\n", ": wall.env[0] names a variable that is Forager's and never the agent's"},
 		{"wall: {adapter: docker, images: {go: {ref: \"--" + marker + "\"}}}\n", ": wall.images.go.ref is not an image reference, such as ghcr.io/acme/agent@sha256:…"},
 		{"wall: {adapter: docker, images: {go: {ref: a, runtime: \"--" + marker + "\"}}}\n", ": wall.images.go.runtime is not a container runtime's name, such as sysbox-runc"},
 		{"apiVersion: " + marker + "\n", ": apiVersion is not one this qory reads; versions: qory.dev/v1alpha1"},

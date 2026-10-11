@@ -493,7 +493,7 @@ harness:
 		{"harness: {launch: {claude: {command: \"\"}}}\n", "harness.launch.claude.command is empty"},
 		{"harness: {launch: {claude: {args: [[]]}}}\n", "harness.launch.claude.args[0] is empty"},
 		{"harness: {launch: {codex: {env: {1BAD: x}}}}\n", "harness.launch.codex.env: 1BAD is not an environment variable name"},
-		{"harness: {launch: {codex: {env: {QORY_HARNESS_HOME: x}}}}\n", "harness.launch.codex.env.QORY_HARNESS_HOME is qory's own"},
+		{"harness: {launch: {codex: {env: {QORY_HARNESS_HOME: x}}}}\n", "harness.launch.codex.env.QORY_HARNESS_HOME is qory's"},
 	} {
 		writeFile(t, user, "apiVersion: qory.dev/v1alpha1\n"+c.file)
 		if _, err := run(t, "config"); err == nil || !strings.Contains(err.Error(), c.want) || cmd.ExitCode(err) != cmd.ExitInput {

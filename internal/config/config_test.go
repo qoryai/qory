@@ -132,7 +132,7 @@ func TestLoadRefusesAMistake(t *testing.T) {
 		{"git: {timeout: 0s}\n", `git.timeout "0s" is not a duration above zero`},
 		{"git: {cache: \"\"}\n", "git.cache is empty"},
 		{"env: {1A: x}\n", "env: 1A is not an environment variable name"},
-		{"env: {QORY_HARNESS_HOME: x}\n", "env.QORY_HARNESS_HOME is qory's own"},
+		{"env: {QORY_HARNESS_HOME: x}\n", "env.QORY_HARNESS_HOME is qory's"},
 		{"harness: {runtime: []}\n", "harness.runtime is empty"},
 		{"harness: {model: &m opus}\nworktree: {base: *m}\n", "line 3: *m is a YAML alias, which qory.yaml may not contain"},
 		{"env: &e {A: x}\nharness:\n  extensions:\n    ci:\n      <<: *e\n", "line 6: *e is a YAML alias"},

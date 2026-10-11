@@ -12,7 +12,7 @@ Everywhere. Three kinds are the most useful:
   hundred lines. Add a row to the runtimes table in `contracts/harness/v1/README.md` and a
   line in the runtime test. A runtime that changes what it reads is a fix to its package.
 - **The contract.** The harness compose format under `contracts/harness/v1/`, its schemas
-  and its fixtures. A module follows the contract and lives in your own repository; nothing
+  and its fixtures. A module follows the contract and lives in your repository; nothing
   in this one has to change for it.
 - **The `qory` command** and the compose rules.
 
@@ -90,7 +90,7 @@ conventions, beyond what `revive` can check:
 
 One vocabulary, no synonyms: **runtime** is the program that runs the harness, such as
 Claude Code; **stack** is `qory-stack.yaml`, the ordered modules and the target for one kind
-of work; **configuration** is `qory.yaml`, the repository's own document at its root and
+of work; **configuration** is `qory.yaml`, the repository's document at its root and
 the machine's elsewhere, whose `harness` section selects the stack a checkout extends and
 the modules it appends; **manifest** is `qory-module.yaml`; **base** is the stack a
 checkout extends; **module**, **source**, **entry**, **kind**, **variant**, **exclude**,

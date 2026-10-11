@@ -1374,12 +1374,12 @@ func TestRunRefusesAWallItCannotBuild(t *testing.T) {
 		{[]string{"run", "--mount", "/srv"}, "behind a wall"},
 		{[]string{"run", "--shm-size", "2g"}, "behind a wall"},
 		{[]string{"run", "--wall", "docker", "--image", "i", "--mount", "srv"}, "not an absolute path"},
-		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_ACCESS_KEY_SECRET"}, "--env QORY_ACCESS_KEY_SECRET: the variable is Forager's own"},
-		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_ACCESS_KEY_ID"}, "Forager's own"},
-		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_APIARY_PUBLIC_KEY"}, "Forager's own"},
-		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_SERVER_SECRET"}, "--env QORY_SERVER_SECRET: the variable is Forager's own and never the agent's"},
-		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_RUN_KEY"}, "--env QORY_RUN_KEY: the variable is Forager's own and never the agent's"},
-		{[]string{"run", "--env", "QORY_RUN_KEY"}, "--env QORY_RUN_KEY: the variable is Forager's own and never the agent's"},
+		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_ACCESS_KEY_SECRET"}, "--env QORY_ACCESS_KEY_SECRET: the variable is Forager's and"},
+		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_ACCESS_KEY_ID"}, "Forager's and"},
+		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_APIARY_PUBLIC_KEY"}, "Forager's and"},
+		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_SERVER_SECRET"}, "--env QORY_SERVER_SECRET: the variable is Forager's and never the agent's"},
+		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_RUN_KEY"}, "--env QORY_RUN_KEY: the variable is Forager's and never the agent's"},
+		{[]string{"run", "--env", "QORY_RUN_KEY"}, "--env QORY_RUN_KEY: the variable is Forager's and never the agent's"},
 		{[]string{"run", "--label", "issue"}, "not key=value"},
 		{[]string{"run", "--label", "Issue=1"}, "label key"},
 		{[]string{"run", "--run-id", "../x"}, "not a UUID"},
@@ -1489,7 +1489,7 @@ func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
 	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), machine+"  server:\n    url: https://qory.example\n")
 	policy := filepath.Join(t.TempDir(), "run-policy.yaml")
 	writeFile(t, policy, "version: 1\negress:\n  mode: enforce\n  allow: [api.github.com, pypi.org]\n")
-	if _, err := run(t, "run", "--policy", policy); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "--policy is the run's own policy without a server; with server configured the server's run configuration is the policy") {
+	if _, err := run(t, "run", "--policy", policy); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "--policy is a run's policy file without a server; with server configured the server's run configuration is the policy") {
 		t.Errorf("--policy with a server: %v", err)
 	}
 	if ids := recorded(t, root); len(ids) != 0 {

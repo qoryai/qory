@@ -186,7 +186,7 @@ func TestProbeSaysWhetherTheImageCarriesADocker(t *testing.T) {
 	files["opt/docker/bin/dockerd"] = ""
 	root := imageRoot(t, files)
 	p := image.Probe{Root: root, Env: env(map[string]string{"HOME": "/home/agent", "PATH": "/usr/local/bin:/usr/bin"}), Exec: goodVersions().exec}
-	want(t, byName(p.Report(context.Background())), "docker", image.Pass, "/usr/local/bin/dockerd", "iptables in the system's directories", "can carry a Docker of the agent's own")
+	want(t, byName(p.Report(context.Background())), "docker", image.Pass, "/usr/local/bin/dockerd", "iptables in the system's directories", "can carry nested Docker")
 
 	if err := os.Rename(filepath.Join(root, "usr/local/bin/docker"), filepath.Join(root, "opt/docker/bin/docker")); err != nil {
 		t.Fatal(err)

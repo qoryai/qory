@@ -342,7 +342,7 @@ func TestMountRefusedNamesTheRunStillGoing(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(worktree, ".git"), []byte("gitdir: "+filepath.Join(checkout, ".git", "worktrees", "wt-feature")+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	tail := ", which the run " + other + " also uses: it is still going on this machine, or its containers were left behind. One agent could read or change what the other uses, so the run does not start. Wait for " + other + " to end; if it has ended, remove its containers, which docker ps --all --filter label=dev.qory.run=" + other + " lists; or work in a checkout of its own"
+	tail := ", which the run " + other + " also uses: it is still going on this machine, or its containers were left behind. One agent could read or change what the other uses, so the run does not start. Wait for " + other + " to end; if it has ended, remove its containers, which docker ps --all --filter label=dev.qory.run=" + other + " lists; or work in a separate checkout"
 	hint := "; make the worktree beside the checkout, not inside it"
 	for _, c := range []struct {
 		root, path, otherPath, want string
