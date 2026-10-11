@@ -5,8 +5,10 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -142,18 +144,27 @@ func TestARunKeyThatIsNotOneIsRefused(t *testing.T) {
 	}
 }
 
-// TestARunKeyTakesTheRunThroughItsGateway is QORY_RUN_KEY set to a run key, white
-// space around it: qory run starts no gateway of its own, says first that the run goes
-// through the gateway the key names, by its host and port, and the run the key names,
-// and its session goes to that gateway's address. A --run-id that is the key's is the
-// same run; another is Forager's refusal, as input, before anything is reached.
+// TestARunKeyTakesTheRunThroughItsGateway is a run key given by --run-key-fd, from a
+// descriptor, white space around it, or from stdin, 0: qory run starts no gateway of its
+// own, says first that the run goes through the gateway the key names, by its host and
+// port, and the run the key names, and its session goes to that gateway's address. A
+// --run-id that is the key's is the same run; another is Forager's refusal, as input,
+// before anything is reached.
 func TestARunKeyTakesTheRunThroughItsGateway(t *testing.T) {
 	root := runKeyCheckout(t)
 	gw := newKeyedGateway(t)
 	key := mintRunKey(t, keyRunID, gw.url())
-	for _, args := range [][]string{{"run"}, {"run", "--run-id", keyRunID}} {
-		t.Setenv("QORY_RUN_KEY", " "+key+"\n")
-		out, err := run(t, args...)
+	t.Setenv("QORY_RUN_KEY", "")
+	for _, c := range []struct {
+		args  []string
+		stdin string
+	}{
+		{[]string{"run", "--run-key-fd", descriptor(t, " "+key+"\n")}, ""},
+		{[]string{"run", "--run-id", keyRunID, "--run-key-fd", descriptor(t, key)}, ""},
+		{[]string{"run", "--run-key-fd", "0"}, key + "\n"},
+	} {
+		args := c.args
+		out, err := runIn(t, c.stdin, args...)
 		if err == nil {
 			t.Fatalf("%v: the run went on without its gateway:\n%s", args, out)
 		}
@@ -163,14 +174,13 @@ func TestARunKeyTakesTheRunThroughItsGateway(t *testing.T) {
 		lacks(t, out, "qory run: node", "hello from")
 		lacks(t, out+err.Error(), key, key[4:40])
 	}
-	if _, n := gw.received(); n < 2 {
+	if _, n := gw.received(); n < 3 {
 		t.Errorf("the gateway's address was reached %d times, want once a run", n)
 	}
 
 	const other = "0192f0c1-7d4e-7a2b-8c3d-000000000000"
-	t.Setenv("QORY_RUN_KEY", key)
 	_, before := gw.received()
-	out, err := run(t, "run", "--run-id", other)
+	out, err := run(t, "run", "--run-id", other, "--run-key-fd", descriptor(t, key))
 	if want := "the run id " + other + " is not the one QORY_RUN_KEY names, " + keyRunID; err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Errorf("--run-id %s: %v (exit %d), want %q", other, err, cmd.ExitCode(err), want)
 	}
@@ -195,7 +205,7 @@ func TestARunKeyRefusesWhatItsRunCannotHave(t *testing.T) {
 	key := mintRunKey(t, keyRunID, gw.url())
 	file := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml")
 	registered := func(flags string) string {
-		return flags + " into the run's registration, and QORY_RUN_KEY is set: its starter registered the run already, so give "
+		return flags + " into the run's registration, and a run key is given, by QORY_RUN_KEY or --run-key-fd: its starter registered the run already, so give "
 	}
 	for _, c := range []struct {
 		name  string
@@ -203,42 +213,42 @@ func TestARunKeyRefusesWhatItsRunCannotHave(t *testing.T) {
 		want  func() string
 	}{
 		{"--local", func(*testing.T) []string { return []string{"run", "--local"} }, func() string {
-			return "--local runs with a gateway of this run's own and no server, and QORY_RUN_KEY is set: the run goes through the gateway its run key names; unset QORY_RUN_KEY to run --local"
+			return "--local runs with a gateway of this run's own and no server, and a run key is given, by QORY_RUN_KEY or --run-key-fd: the run goes through the gateway its run key names; give no run key to run --local"
 		}},
 		{"--policy", func(t *testing.T) []string {
 			writeFile(t, filepath.Join(root, "policy.yaml"), "egress:\n  mode: observe\n")
 			return []string{"run", "--policy", filepath.Join(root, "policy.yaml")}
 		}, func() string {
-			return "--policy is the run's own policy for a gateway the run starts itself, and QORY_RUN_KEY is set: the gateway its run key names takes the run's policy from the server"
+			return "--policy is the run's own policy for a gateway the run starts itself, and a run key is given, by QORY_RUN_KEY or --run-key-fd: the gateway its run key names takes the run's policy from the server"
 		}},
 		{"an access key's file", func(t *testing.T) []string {
 			writeSecret(t, newKey(t))
 			return []string{"run"}
 		}, func() string {
-			return configDir().Path(foragerdir.SecretFile) + " exists, and QORY_RUN_KEY is set: a machine whose runs a starter registers holds no access key; remove the file"
+			return configDir().Path(foragerdir.SecretFile) + " exists, and a run key is given, by QORY_RUN_KEY or --run-key-fd: a machine whose runs a starter registers holds no access key; remove the file"
 		}},
 		{"QORY_ACCESS_KEY_SECRET", func(t *testing.T) []string {
 			t.Setenv("QORY_ACCESS_KEY_SECRET", newKey(t).Secret())
 			return []string{"run"}
 		}, func() string {
-			return "QORY_ACCESS_KEY_SECRET and QORY_RUN_KEY are both set: a machine whose runs a starter registers holds no access key; unset QORY_ACCESS_KEY_SECRET"
+			return "QORY_ACCESS_KEY_SECRET is set, and a run key is given, by QORY_RUN_KEY or --run-key-fd: a machine whose runs a starter registers holds no access key; unset QORY_ACCESS_KEY_SECRET"
 		}},
 		{"QORY_ACCESS_KEY_ID", func(t *testing.T) []string {
 			t.Setenv("QORY_ACCESS_KEY_ID", testAccessKey)
 			return []string{"run"}
 		}, func() string {
-			return "QORY_ACCESS_KEY_ID and QORY_RUN_KEY are both set: a machine whose runs a starter registers holds no access key; unset QORY_ACCESS_KEY_ID"
+			return "QORY_ACCESS_KEY_ID is set, and a run key is given, by QORY_RUN_KEY or --run-key-fd: a machine whose runs a starter registers holds no access key; unset QORY_ACCESS_KEY_ID"
 		}},
 		{"--access-key-secret-fd", func(t *testing.T) []string {
 			return []string{"run", "--access-key-secret-fd", descriptor(t, newKey(t).Secret())}
 		}, func() string {
-			return "--access-key-secret-fd and QORY_RUN_KEY are both given: a machine whose runs a starter registers holds no access key; leave out --access-key-secret-fd"
+			return "--access-key-secret-fd and a run key are both given: a machine whose runs a starter registers holds no access key; leave out --access-key-secret-fd"
 		}},
 		{"a gateway section", func(t *testing.T) []string {
 			writeFile(t, file, "apiVersion: qory.dev/v1alpha1\ngateway:\n  listen: 127.0.0.1:8443\n")
 			return []string{"run"}
 		}, func() string {
-			return file + ": gateway: QORY_RUN_KEY is set, so the run goes through the gateway its run key names, which holds the server, the policy and the credentials, and this machine runs no gateway: remove the gateway section, or unset QORY_RUN_KEY"
+			return file + ": gateway: a run key is given, by QORY_RUN_KEY or --run-key-fd, so the run goes through the gateway its run key names, which holds the server, the policy and the credentials, and this machine runs no gateway: remove the gateway section, or give no run key"
 		}},
 		{"--label", func(*testing.T) []string { return []string{"run", "--label", "team=a"} }, func() string {
 			return registered("--label goes") + "it to qory run register"
@@ -253,18 +263,24 @@ func TestARunKeyRefusesWhatItsRunCannotHave(t *testing.T) {
 		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			os.Remove(file)
-			os.Remove(configDir().Path(foragerdir.SecretFile))
-			args := c.setup(t)
-			t.Setenv("QORY_RUN_KEY", key)
-			_, before := gw.received()
-			out, err := run(t, args...)
-			if want := c.want(); err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
-				t.Errorf("%v (exit %d)\nwant %q", err, cmd.ExitCode(err), want)
-			}
-			lacks(t, out, key[4:40], "hello from", "through the gateway")
-			if _, n := gw.received(); n != before {
-				t.Error("a refused run reached the gateway")
+			for _, by := range []string{"QORY_RUN_KEY", "--run-key-fd"} {
+				os.Remove(file)
+				os.Remove(configDir().Path(foragerdir.SecretFile))
+				args := c.setup(t)
+				t.Setenv("QORY_RUN_KEY", key)
+				if by == "--run-key-fd" {
+					t.Setenv("QORY_RUN_KEY", "")
+					args = append(args, "--run-key-fd", descriptor(t, key))
+				}
+				_, before := gw.received()
+				out, err := run(t, args...)
+				if want := c.want(); err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
+					t.Errorf("by %s: %v (exit %d)\nwant %q", by, err, cmd.ExitCode(err), want)
+				}
+				lacks(t, out, key[4:40], "hello from", "through the gateway")
+				if _, n := gw.received(); n != before {
+					t.Error("a refused run reached the gateway")
+				}
 			}
 		})
 	}
@@ -362,7 +378,7 @@ func TestResendGoesWhereTheRunWent(t *testing.T) {
 	t.Setenv("QORY_RUN_KEY", key)
 	_, before := gw.received()
 	out, err = run(t, "run", "resend", own)
-	if want := "the run " + own + " ran with a gateway of its own on this machine, so its record goes to the server, not to a gateway: resend it without QORY_RUN_KEY"; err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
+	if want := "the run " + own + " ran with a gateway of its own on this machine, so its record goes to the server, not to a gateway: resend it without a run key"; err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Errorf("a run with its own gateway: %v (exit %d)\nwant %q", err, cmd.ExitCode(err), want)
 	}
 	const missing = "0192f0c1-7d4e-7a2b-8c3d-222222222222"
@@ -481,4 +497,117 @@ func TestRunRefusesAGatewaysAccessKey(t *testing.T) {
 	if len(srv.registered) != 0 {
 		t.Errorf("the run registered: %v", srv.registered)
 	}
+}
+
+// TestARunKeyFromADescriptorIsReadOnce is --run-key-fd on qory run and qory run resend:
+// the standard output and error are refused, so are a descriptor that is not open, more
+// than a run key, a run key given both ways, and one that does not read as a run key,
+// naming the part that is wrong and never the value; each as input, before anything
+// starts, and the descriptor is closed.
+func TestARunKeyFromADescriptorIsReadOnce(t *testing.T) {
+	root := runKeyCheckout(t)
+	gw := newKeyedGateway(t)
+	key := mintRunKey(t, keyRunID, gw.url())
+	const marker = "run-key-marker-5be1a7c3"
+	for _, verb := range [][]string{{"run"}, {"run", "resend", keyRunID}} {
+		for _, c := range []struct {
+			name, env string
+			fd        func() string
+			want      func(fd string) string
+		}{
+			{"stdout", "", func() string { return "1" }, func(string) string {
+				return "--run-key-fd 1: the standard output and error carry no run key; name 0 for stdin, or a descriptor of 3 or above"
+			}},
+			{"stderr", "", func() string { return "2" }, func(string) string {
+				return "--run-key-fd 2: the standard output and error carry no run key; name 0 for stdin, or a descriptor of 3 or above"
+			}},
+			{"not open", "", func() string { return "1000" }, func(string) string {
+				return "--run-key-fd 1000: read --run-key-fd: bad file descriptor"
+			}},
+			{"more than a run key", "", func() string { return descriptor(t, strings.Repeat(marker, 400)) }, func(fd string) string {
+				return "--run-key-fd " + fd + ": more than a run key"
+			}},
+			{"both ways", key, func() string { return descriptor(t, key) }, func(string) string {
+				return "--run-key-fd and QORY_RUN_KEY both give a run key; give it one way"
+			}},
+			{"not a run key", "", func() string { return descriptor(t, " qrk_"+marker+"\n") }, func(fd string) string {
+				return "--run-key-fd " + fd + " gives no run key: it has no dot between its payload and its signature"
+			}},
+		} {
+			t.Setenv("QORY_RUN_KEY", c.env)
+			fd := c.fd()
+			out, err := run(t, append(append([]string{}, verb...), "--run-key-fd", fd)...)
+			if want := c.want(fd); err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
+				t.Errorf("%v %s: %v (exit %d)\nwant %q", verb, c.name, err, cmd.ExitCode(err), want)
+			}
+			lacks(t, out, marker, key[4:40], "hello from")
+			if n, _ := strconv.Atoi(fd); n > 2 && n != 1000 {
+				var st syscall.Stat_t
+				if syscall.Fstat(n, &st) == nil {
+					t.Errorf("%v %s: the descriptor %d is still open", verb, c.name, n)
+				}
+			}
+		}
+	}
+	if _, n := gw.received(); n != 0 {
+		t.Error("a refused run key reached the gateway")
+	}
+	if ids := recorded(t, root); len(ids) != 0 {
+		t.Errorf("refused runs left records %v", ids)
+	}
+}
+
+// TestARunKeyInTheEnvironmentNeedsAWall is a run key in QORY_RUN_KEY, which an unwalled agent can
+// read in qory's environment: an unwalled run is refused, run_key_needs_wall, as input,
+// before anything starts; a walled one goes on to the gateway, and so does an unwalled
+// run whose run key came by --run-key-fd.
+func TestARunKeyInTheEnvironmentNeedsAWall(t *testing.T) {
+	root := runKeyCheckout(t)
+	gw := newKeyedGateway(t)
+	key := mintRunKey(t, keyRunID, gw.url())
+	t.Setenv("QORY_RUN_KEY", key)
+	out, err := run(t, "run")
+	if want := "QORY_RUN_KEY is in qory's environment, which an unwalled agent can read, so a run with it needs a wall: --wall docker, or wall in forager.yaml; or give the run key with --run-key-fd, such as --run-key-fd 0 for stdin (run_key_needs_wall)"; err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
+		t.Errorf("unwalled: %v (exit %d)\nwant %q", err, cmd.ExitCode(err), want)
+	}
+	lacks(t, out, key[4:40], "through the gateway", "hello from")
+	if _, n := gw.received(); n != 0 {
+		t.Error("the unwalled run reached the gateway")
+	}
+	if ids := recorded(t, root); len(ids) != 0 {
+		t.Errorf("the refused run left records %v", ids)
+	}
+
+	docker, _ := fakeDocker(t)
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "wall:\n  adapter: docker\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
+	t.Setenv("QORY_RUN_KEY", key)
+	out, err = run(t, "run", "--image", "example.com/agent:1")
+	if err != nil && strings.Contains(err.Error(), "run_key_needs_wall") {
+		t.Errorf("walled: %v", err)
+	}
+	wants(t, out, "qory run: through the gateway "+gw.host()+", run "+keyRunID)
+	lacks(t, out, key[4:40])
+}
+
+// TestResendTakesTheRunKeyFromADescriptor is qory run resend with --run-key-fd: the
+// record goes to the gateway the key names, as with QORY_RUN_KEY, and the key reaches
+// nothing before its TLS.
+func TestResendTakesTheRunKeyFromADescriptor(t *testing.T) {
+	root := runKeyCheckout(t)
+	gw := newKeyedGateway(t)
+	key := mintRunKey(t, keyRunID, gw.url())
+	behindRecord(t, root, keyRunID, true)
+	t.Setenv("QORY_RUN_KEY", "")
+	out, err := run(t, "run", "resend", keyRunID, "--run-key-fd", descriptor(t, key+"\n"))
+	if err == nil || cmd.ExitCode(err) == 0 {
+		t.Fatalf("the resend went on without its gateway: %v\n%s", err, out)
+	}
+	got, n := gw.received()
+	if n == 0 {
+		t.Errorf("the resend did not reach the gateway's address: %v\n%s", err, out)
+	}
+	if bytes.Contains(got, []byte(key[4:40])) {
+		t.Error("the run key reached the gateway's address before its TLS")
+	}
+	lacks(t, out+err.Error(), key[4:40])
 }

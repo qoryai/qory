@@ -68,6 +68,7 @@ qory run [runtime] [-- argument...] [flags]
       --pids-limit int             the most processes and threads in the container (forager.yaml: wall.pids_limit)
       --policy string              this run's own policy file, kept outside the checkout; it narrows gateway.egress of forager.yaml, never widens it (with a server: needs --local)
       --run-id string              the run's id, a UUID in lower case (default a new one)
+      --run-key-fd int             read the run key from this file descriptor, 0 for stdin, in place of QORY_RUN_KEY, which an unwalled agent can read
       --shm-size string            the size of /dev/shm in the container, such as 2g (forager.yaml: wall.shm_size)
       --stop-grace duration        the time between the stop signal and SIGKILL (default 10s; forager.yaml: session.run.stop_grace)
       --stop-signal string         the signal that stops the agent: SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2 (default SIGTERM; forager.yaml: session.run.stop_signal)

@@ -243,6 +243,19 @@ func run(t *testing.T, args ...string) (string, error) {
 	return out.String(), err
 }
 
+// runIn is [run] with stdin, the command's standard input, which holds in.
+func runIn(t *testing.T, in string, args ...string) (string, error) {
+	t.Helper()
+	var out output
+	root := cmd.Root()
+	root.SetArgs(args)
+	root.SetIn(strings.NewReader(in))
+	root.SetOut(&out)
+	root.SetErr(&out)
+	err := root.Execute()
+	return out.String(), err
+}
+
 // output is a command's output, stdout and stderr together, which goroutines of the
 // command, such as the gateway's reports and the runtime's copied output, write at once.
 type output struct {

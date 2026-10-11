@@ -38,6 +38,7 @@ qory run resend <run-id> [flags]
 ```
       --access-key-secret-fd int   read the access key's secret from this file descriptor, 3 or above; it wins over QORY_ACCESS_KEY_SECRET and the access-key-secret file
   -h, --help                       help for resend
+      --run-key-fd int             read the run key from this file descriptor, 0 for stdin, in place of QORY_RUN_KEY, which an unwalled agent can read
       --wait duration              how long to keep trying a server that does not accept (default 2m0s)
 ```
 

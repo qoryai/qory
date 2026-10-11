@@ -60,7 +60,7 @@ func newRun() *cobra.Command {
 	var subjects []string
 	var timeout, grace time.Duration
 	var stopSignal string
-	var secretFD int
+	var secretFD, keyFD int
 	c := &cobra.Command{
 		Use:   "run [runtime] [-- argument...]",
 		Short: "Run the agent on its harness, observed and recorded",
@@ -120,12 +120,17 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				fdKey = k
 			}
-			// A run whose starter registered it, QORY_RUN_KEY being set, goes through the
+			// A run whose starter registered it, a run key being given, goes through the
 			// separate gateway its run key names: this machine starts no gateway of its own
-			// and holds no access key.
-			key, err := takenRunKey()
+			// and holds no access key. The run key's descriptor is read and closed here.
+			stdin := cmd.InOrStdin()
+			key, err := givenRunKey(cmd.Flags().Changed(runKeyFDFlag), keyFD, stdin)
 			if err != nil {
 				return err
+			}
+			if key != nil && key.fromFD && keyFD == 0 {
+				// The run key took stdin, to its end: the agent gets none.
+				stdin = strings.NewReader("")
 			}
 			remote := key != nil
 			runtime, extra := splitAtDash(cmd, args)
@@ -195,7 +200,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if err := session.CheckLabels(named); err != nil {
 					return input(err)
 				}
-				if about, err = aboutFrom(kind, title, subjects, details, cmd.InOrStdin(), isTerminal(cmd.InOrStdin())); err != nil {
+				if about, err = aboutFrom(kind, title, subjects, details, stdin, isTerminal(stdin)); err != nil {
 					return err
 				}
 			}
@@ -248,8 +253,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				Args:           append(append([]string{}, launch.Args...), extra...),
 				Env:            os.Environ(),
 				Dir:            cwd,
-				Interactive:    !headless && isTerminal(cmd.InOrStdin()) && isTerminal(cmd.OutOrStdout()),
-				Stdin:          cmd.InOrStdin(),
+				Interactive:    !headless && isTerminal(stdin) && isTerminal(cmd.OutOrStdout()),
+				Stdin:          stdin,
 				Stdout:         cmd.OutOrStdout(),
 				Stderr:         stderr,
 				Declared:       rep.Hosts(),
@@ -284,6 +289,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			if err := enclose(&spec, conf.Forager, o, selected, remote || server != nil && !local, exe, at.root, at.home); err != nil {
 				return err
+			}
+			// QORY_RUN_KEY is in the environment qory started with, which an agent without
+			// a wall can read even once qory unset it.
+			if remote && !key.fromFD && spec.Wall == nil {
+				return runKeyNeedsWall()
 			}
 			if spec.Wall != nil && h.home == "" {
 				if err := userHome(at, conf); err != nil {
@@ -446,6 +456,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	c.Flags().StringVar(&o.limits.Memory, "memory", "", "the most memory the container gets, such as 8g ("+config.ForagerFileName+": wall.memory)")
 	c.Flags().IntVar(&o.limits.PIDs, "pids-limit", 0, "the most processes and threads in the container ("+config.ForagerFileName+": wall.pids_limit)")
 	c.Flags().IntVar(&secretFD, secretFDFlag, 0, secretFDUsage)
+	c.Flags().IntVar(&keyFD, runKeyFDFlag, 0, runKeyFDUsage)
 	c.Flags().StringVar(&o.limits.ShmSize, "shm-size", "", "the size of /dev/shm in the container, such as 2g ("+config.ForagerFileName+": wall.shm_size)")
 	homeFlags(c, &h)
 	c.AddCommand(newResend(), newForward(), newRelay(), newNest())
@@ -1500,7 +1511,7 @@ func wallHelper(section config.ForagerWall, exe string) (string, error) {
 // server.
 func newResend() *cobra.Command {
 	var wait time.Duration
-	var secretFD int
+	var secretFD, keyFD int
 	c := &cobra.Command{
 		Use:   "resend <run-id>",
 		Short: "Send a finished run's record to the server again",
@@ -1532,7 +1543,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 				}
 				fdKey = k
 			}
-			key, err := takenRunKey()
+			key, err := givenRunKey(cmd.Flags().Changed(runKeyFDFlag), keyFD, cmd.InOrStdin())
 			if err != nil {
 				return err
 			}
@@ -1652,6 +1663,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 	}
 	c.Flags().DurationVar(&wait, "wait", 2*time.Minute, "how long to keep trying a server that does not accept")
 	c.Flags().IntVar(&secretFD, secretFDFlag, 0, secretFDUsage)
+	c.Flags().IntVar(&keyFD, runKeyFDFlag, 0, runKeyFDUsage)
 	return c
 }
 

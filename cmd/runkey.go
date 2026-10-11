@@ -7,8 +7,10 @@ import (
 	"io"
 	"io/fs"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/qoryai/forager/accesskey"
@@ -21,13 +23,16 @@ import (
 	"github.com/qoryai/qory/internal/ui"
 )
 
-// runKey is the run key qory took from QORY_RUN_KEY, white space around it trimmed, and
-// what it says, read as a runner reads it, unverified: the run, and the separate gateway
-// the run goes through. It is a secret: it is handed to Forager's session alone, and fmt
-// prints a runKey by its gateway and its run, never its value.
+// runKey is the run key qory was given, white space around it trimmed, and what it
+// says, read as a runner reads it, unverified: the run, and the separate gateway the
+// run goes through. fromFD says it came from the descriptor --run-key-fd names, not
+// from QORY_RUN_KEY, which an unwalled agent can read. It is a secret: it is handed to
+// Forager's session alone, and fmt prints a runKey by its gateway and its run, never its
+// value.
 type runKey struct {
-	value string
-	key   runkey.Key
+	value  string
+	key    runkey.Key
+	fromFD bool
 }
 
 // String names the run key by its run and its gateway, never its value.
@@ -40,6 +45,71 @@ func (k runKey) GoString() string { return k.String() }
 
 // Format prints k as String does, under every verb and flag.
 func (k runKey) Format(f fmt.State, _ rune) { io.WriteString(f, k.String()) }
+
+// runKeyFDFlag is the flag that names the descriptor the run key is read from.
+const runKeyFDFlag = "run-key-fd"
+
+// runKeyFDUsage is the help of qory run's and qory run resend's --run-key-fd.
+const runKeyFDUsage = "read the run key from this file descriptor, 0 for stdin, in place of " + config.EnvRunKey + ", which an unwalled agent can read"
+
+// maxRunKeyFD is the most read from the run key's descriptor: a run key is at most
+// runkey.MaxLength characters, and white space may surround it.
+const maxRunKeyFD = 4 << 10
+
+// givenRunKey is the run key the run was given, nil for none: read from the descriptor
+// fd when set says --run-key-fd was given, stdin for 0, else the one QORY_RUN_KEY held
+// when qory started. The descriptor is read once, to its end, and closed, whatever comes
+// next, so nothing qory starts inherits it; both ways at once are refused. A value that
+// does not read as a run key is refused, naming the part that is wrong and never the
+// value. Every refusal is input.
+func givenRunKey(set bool, fd int, stdin io.Reader) (*runKey, error) {
+	if !set {
+		return takenRunKey()
+	}
+	raw, err := readRunKeyFD(fd, stdin)
+	defer clear(raw)
+	if err != nil {
+		return nil, err
+	}
+	if config.TakenRunKey() != "" {
+		return nil, input(fmt.Errorf("--%s and %s both give a run key; give it one way", runKeyFDFlag, config.EnvRunKey))
+	}
+	v := strings.TrimSpace(string(raw))
+	k, err := runkey.Parse(v)
+	if err != nil {
+		return nil, input(fmt.Errorf("--%s %d gives no run key: %s", runKeyFDFlag, fd, runKeyReason(err)))
+	}
+	return &runKey{value: v, key: k, fromFD: true}, nil
+}
+
+// readRunKeyFD reads what the descriptor n holds, to its end, at most maxRunKeyFD bytes,
+// and closes it: stdin for 0. The standard output and error are refused.
+func readRunKeyFD(n int, stdin io.Reader) ([]byte, error) {
+	if n == 1 || n == 2 {
+		return nil, input(fmt.Errorf("--%s %d: the standard output and error carry no run key; name 0 for stdin, or a descriptor of 3 or above", runKeyFDFlag, n))
+	}
+	var r io.Reader = stdin
+	if n != 0 {
+		f := os.NewFile(uintptr(n), "--"+runKeyFDFlag)
+		if f == nil || n < 0 {
+			return nil, input(fmt.Errorf("--%s %d: %w", runKeyFDFlag, n, syscall.EBADF))
+		}
+		r = f
+	}
+	if c, ok := r.(io.Closer); ok {
+		defer c.Close()
+	}
+	b, err := io.ReadAll(io.LimitReader(r, maxRunKeyFD+1))
+	if err != nil {
+		clear(b)
+		return nil, input(fmt.Errorf("--%s %d: %w", runKeyFDFlag, n, err))
+	}
+	if len(b) > maxRunKeyFD {
+		clear(b)
+		return nil, input(fmt.Errorf("--%s %d: more than a run key", runKeyFDFlag, n))
+	}
+	return b, nil
+}
 
 // takenRunKey is the run key QORY_RUN_KEY held when qory started, nil when it was unset
 // or empty. A value that does not read as a run key is [runKeyNotAKey]'s refusal, which
@@ -60,11 +130,28 @@ func takenRunKey() (*runKey, error) {
 // runKeyNotAKey is the refusal of a QORY_RUN_KEY that is not a run key, with the part
 // that is wrong as Forager's runkey.Parse names it.
 func runKeyNotAKey(err error) error {
-	reason := err.Error()
+	return input(fmt.Errorf("QORY_RUN_KEY is not a run key: %s", runKeyReason(err)))
+}
+
+// runKeyReason is the part of a run key that is wrong, as Forager's runkey.Parse names
+// it, never the value.
+func runKeyReason(err error) string {
 	if re := (*runkey.Error)(nil); errors.As(err, &re) {
-		reason = re.Reason
+		return re.Reason
 	}
-	return input(fmt.Errorf("QORY_RUN_KEY is not a run key: %s", reason))
+	return err.Error()
+}
+
+// codeRunKeyNeedsWall is the refusal of an unwalled run whose run key QORY_RUN_KEY
+// holds: qory's environment, which the agent can read, holds the key.
+const codeRunKeyNeedsWall = "run_key_needs_wall"
+
+// runKeyNeedsWall is the run_key_needs_wall refusal, as input.
+func runKeyNeedsWall() error {
+	return input(&refusedError{
+		text: fmt.Sprintf("%s is in qory's environment, which an unwalled agent can read, so a run with it needs a wall: --wall %s, or wall in %s; or give the run key with --%s, such as --%s 0 for stdin", config.EnvRunKey, config.WallDocker, config.ForagerFileName, runKeyFDFlag, runKeyFDFlag),
+		err:  &session.Refusal{Code: codeRunKeyNeedsWall},
+	})
 }
 
 // remoteGateway is the separate gateway the run key names, as the session reaches it.
@@ -88,21 +175,25 @@ func gatewayHost(raw string) string {
 }
 
 // The flags of qory run that go into a run's registration, which the run's starter made
-// when QORY_RUN_KEY is set.
+// when a run key is given.
 var registrationFlags = []string{"label", "kind", "title", "subject", "details"}
 
+// runKeyGiven says how a run key reaches qory, in the refusals of what a run whose
+// starter registered it cannot have.
+const runKeyGiven = "a run key is given, by QORY_RUN_KEY or --run-key-fd"
+
 // behindGateway refuses, before anything starts, what a run whose starter registered it,
-// QORY_RUN_KEY being set, cannot have: --local and --policy, which are for a gateway of
+// a run key being given, cannot have: --local and --policy, which are for a gateway of
 // the run's own; an access key on this machine, in a file beside forager.yaml, a
 // variable or the descriptor --access-key-secret-fd names, which keyFD says was given;
 // a gateway section in r; and the flags of the run's registration that were given,
 // given. r is nil without forager.yaml.
 func behindGateway(r *config.Forager, local, policy, keyFD bool, given []string) error {
 	if local {
-		return input(errors.New("--local runs with a gateway of this run's own and no server, and QORY_RUN_KEY is set: the run goes through the gateway its run key names; unset QORY_RUN_KEY to run --local"))
+		return input(errors.New("--local runs with a gateway of this run's own and no server, and " + runKeyGiven + ": the run goes through the gateway its run key names; give no run key to run --local"))
 	}
 	if policy {
-		return input(errors.New("--policy is the run's own policy for a gateway the run starts itself, and QORY_RUN_KEY is set: the gateway its run key names takes the run's policy from the server"))
+		return input(errors.New("--policy is the run's own policy for a gateway the run starts itself, and " + runKeyGiven + ": the gateway its run key names takes the run's policy from the server"))
 	}
 	if dir := machineDir(); dir != "" {
 		held, err := heldSecret(dir)
@@ -110,20 +201,20 @@ func behindGateway(r *config.Forager, local, policy, keyFD bool, given []string)
 			return err
 		}
 		if held != "" {
-			return input(fmt.Errorf("%s exists, and QORY_RUN_KEY is set: a machine whose runs a starter registers holds no access key; remove the file", held))
+			return input(fmt.Errorf("%s exists, and %s: a machine whose runs a starter registers holds no access key; remove the file", held, runKeyGiven))
 		}
 	}
 	v := config.TakenServerVariables()
 	for _, set := range []struct{ name, value string }{{accesskey.EnvID, v.AccessKeyID}, {accesskey.EnvSecret, v.AccessKeySecret}, {accesskey.EnvPin, v.ApiaryPublicKey}} {
 		if set.value != "" {
-			return input(fmt.Errorf("%s and QORY_RUN_KEY are both set: a machine whose runs a starter registers holds no access key; unset %s", set.name, set.name))
+			return input(fmt.Errorf("%s is set, and %s: a machine whose runs a starter registers holds no access key; unset %s", set.name, runKeyGiven, set.name))
 		}
 	}
 	if keyFD {
-		return input(fmt.Errorf("--%s and QORY_RUN_KEY are both given: a machine whose runs a starter registers holds no access key; leave out --%s", secretFDFlag, secretFDFlag))
+		return input(fmt.Errorf("--%s and a run key are both given: a machine whose runs a starter registers holds no access key; leave out --%s", secretFDFlag, secretFDFlag))
 	}
 	if r != nil && r.Gateway {
-		return input(fmt.Errorf("%s: gateway: QORY_RUN_KEY is set, so the run goes through the gateway its run key names, which holds the server, the policy and the credentials, and this machine runs no gateway: remove the gateway section, or unset QORY_RUN_KEY", r.File))
+		return input(fmt.Errorf("%s: gateway: %s, so the run goes through the gateway its run key names, which holds the server, the policy and the credentials, and this machine runs no gateway: remove the gateway section, or give no run key", r.File, runKeyGiven))
 	}
 	if len(given) > 0 {
 		return input(registeredAlready(given))
@@ -132,7 +223,7 @@ func behindGateway(r *config.Forager, local, policy, keyFD bool, given []string)
 }
 
 // registeredAlready is the refusal of the flags of a run's registration, names, given
-// to qory run while QORY_RUN_KEY is set: the run's starter registered it already.
+// to qory run while a run key is given: the run's starter registered it already.
 func registeredAlready(names []string) error {
 	flags := make([]string, len(names))
 	for i, n := range names {
@@ -143,7 +234,7 @@ func registeredAlready(names []string) error {
 		joined = strings.Join(flags[:len(flags)-1], ", ") + " and " + flags[len(flags)-1]
 		goes, it = "go", "them"
 	}
-	return fmt.Errorf("%s %s into the run's registration, and QORY_RUN_KEY is set: its starter registered the run already, so give %s to qory run register", joined, goes, it)
+	return fmt.Errorf("%s %s into the run's registration, and %s: its starter registered the run already, so give %s to qory run register", joined, goes, runKeyGiven, it)
 }
 
 // resendThroughGateway sends the separate gateway a run spoke to what the session of the
@@ -209,11 +300,11 @@ func resendThroughGateway(sig context.Context, wait time.Duration, w io.Writer, 
 	return nil
 }
 
-// ownGatewayResend is the refusal of a resend with QORY_RUN_KEY set of the run runID,
+// ownGatewayResend is the refusal of a resend with a run key given of the run runID,
 // which ran with a gateway of its own on this machine: its record goes to the server.
 // It unwraps to err.
 func ownGatewayResend(runID string, err error) error {
-	return &saidError{text: fmt.Sprintf("the run %s ran with a gateway of its own on this machine, so its record goes to the server, not to a gateway: resend it without QORY_RUN_KEY", runID), err: err}
+	return &saidError{text: fmt.Sprintf("the run %s ran with a gateway of its own on this machine, so its record goes to the server, not to a gateway: resend it without a run key", runID), err: err}
 }
 
 // gatewayEndedResend says that the run had ended when its events were sent again, and
