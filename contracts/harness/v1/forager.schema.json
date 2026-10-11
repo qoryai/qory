@@ -335,7 +335,7 @@
                 "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
               },
               "docker": {
-                "description": "Experimental. The agent gets a Docker daemon of its own inside the container, which qory's helper starts before the agent; the image holds dockerd. Needs a runtime that runs a daemon without privileges: sysbox-runc. Any policy can select the image, so define one only where every run may get a daemon. Default false.",
+                "description": "Experimental. The agent gets a Docker daemon of its own inside the container, which qory's helper starts before the agent; the image holds dockerd. Needs Docker Engine 28 or later and a runtime that runs a daemon without privileges: sysbox-runc. Any policy can select the image, so define one only where every run may get a daemon. Default false.",
                 "type": "boolean"
               }
             },

@@ -1804,10 +1804,11 @@ machine's. Its tests can start a database. It can build and run images.
 Define an image with `docker: true` only where every run may get one: any policy can
 select it.
 
-It needs [Sysbox](https://github.com/nestybox/sysbox), registered with your engine as
-`sysbox-runc`, and `runtime: sysbox-runc` on the image. Sysbox gives the container a root
-of its own, a user of your machine that is not root. A Mac's own engine has no Sysbox:
-run these images on a Linux machine that has it.
+It needs Docker Engine 28 or later, with [Sysbox](https://github.com/nestybox/sysbox)
+registered as `sysbox-runc`, and `runtime: sysbox-runc` on the image; with an older
+engine, the run is refused before it starts. Sysbox gives the container a root of its own,
+a user of your machine that is not root. A Mac's own engine has no Sysbox: run these
+images on a Linux machine that has it.
 
 What the image holds:
 

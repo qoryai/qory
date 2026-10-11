@@ -91,7 +91,8 @@ release may change what an existing document does, and states it under Upgrading
   configuration beneath it the agent's alone, so the agent's `docker` command reads it
   and the containers it starts get the proxy. `dockerd`, `containerd`, `runc` and
   `iptables` come from the image's system directories, and the daemon gets none of the
-  run's environment but the proxy and the run's certificate bundle.
+  run's environment but the proxy and the run's certificate bundle. It needs Docker Engine
+  28 or later; Forager refuses the run on an older engine.
 - The images the wall runs the agent in, defined under `images/` and built by hand for
   linux/amd64 or linux/arm64; they are not published. `agent` holds Claude Code 2.1.273,
   the version Forager's descriptor is written against, git, gh 2.101.0 and Node 24 on
