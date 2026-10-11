@@ -24,6 +24,7 @@ release may change what an existing document does, and states it under Upgrading
   a node's or node pool's access key it holds exactly one id, the workspace the node or
   pool belongs to, `ws_` and 16 lower-case Crockford base32 characters, such as
   `ws_f1xt0re000000000`. A server you run yourself must list it too.
+- A self-hosted server's discovery must now name `run`; Forager refuses one without it.
 - A machine that holds an access key runs walled only: every run there needs a wall, or
   it is refused before it starts, `key_needs_wall`, whether the key comes from
   `access-key-secret` or a key file beside it, from `QORY_ACCESS_KEY_SECRET`, and, against
