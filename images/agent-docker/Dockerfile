@@ -1,4 +1,4 @@
-# agent-docker: the agent image with a Docker of the agent's own. It is agent with
+# agent-docker: the agent image with nested Docker. It is agent with
 # Docker's daemon, its containerd and runc, and the docker command, from Docker's static
 # release, and iptables for the daemon's networks.
 #
@@ -74,5 +74,5 @@ RUN dockerd --version \
  && test -x /usr/sbin/iptables && dpkg-query -W iptables
 
 LABEL org.opencontainers.image.title="agent-docker" \
-      org.opencontainers.image.description="Qory's agent image with a Docker daemon of the agent's own, started by the wall under a nested runtime." \
+      org.opencontainers.image.description="Qory's agent image with nested Docker: a Docker daemon the wall starts under a nested runtime." \
       org.opencontainers.image.base.name="${BASE}"

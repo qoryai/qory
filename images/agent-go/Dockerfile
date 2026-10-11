@@ -1,6 +1,6 @@
 # agent-go and agent-go-docker: an agent image with Go. They are the target's images,
 # not Qory's: the images of a repository written in Go, built here because the first
-# repository Qory's factory works on is Qory's own. One Dockerfile makes both, from a
+# repository Qory's factory works on is one of Qory's repositories. One Dockerfile makes both, from a
 # different BASE: agent-go FROM agent, and agent-go-docker FROM agent-docker.
 #
 # Go is at the version the target pins, and GOTOOLCHAIN=local keeps it there: a go.mod

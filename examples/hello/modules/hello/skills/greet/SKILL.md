@@ -24,7 +24,7 @@ Then offer these, one line each:
 - Another runtime: `qory hc --runtime codex` renders the same modules into `.codex`, and
   `qory hc --runtime claude,codex` renders both at once, so two agents read this harness in
   this directory and you can switch between them mid-branch.
-- A module of your own: a directory with `skills/<name>/SKILL.md`, added under `modules:` in
+- A module you write: a directory with `skills/<name>/SKILL.md`, added under `modules:` in
   `qory-stack.yaml`, then `qory hc`.
 - Shared modules: point a module's `source.path` outside this checkout and compose the same
   harness in every repository that lists it.
