@@ -839,8 +839,9 @@ nothing there: `qory run` refuses each key of it beside `gateway.server`, such a
 `gateway.tls`, before anything starts or registers, exit 2, one line per key in
 alphabetical order: `<file>: gateway.<key> does nothing on this machine: gateway.server.via
 sends its runs through a gateway, which holds their policy, credentials, tools and
-integrations; remove gateway.<key>, or remove gateway.server.via`. `qory run --local` starts a gateway itself,
-which reads their policy, credentials and integrations, so it is not refused.
+integrations; remove gateway.<key>, or remove gateway.server.via`. `qory run --local`
+starts a gateway itself, which reads their policy, credentials, tools and integrations, so
+it is not refused.
 
 When the server refuses the registration, qory says what the refusal means and what to do,
 then Forager's words and the code:
@@ -1198,9 +1199,9 @@ gateway:
 
 ### TLS on credential hosts
 
-For the hosts of the credentials the policy selects and the hosts with path rules, and no
-other, the proxy ends the container's TLS itself. It uses an authority made for the run.
-The authority's key never leaves the gateway.
+For the hosts of the credentials and tools the policy selects and the hosts with path
+rules, and no other, the proxy ends the container's TLS itself. It uses an authority made
+for the run. The authority's key never leaves the gateway.
 
 The container receives one bundle to trust: its image's authorities, and the run's
 certificate. The bundle goes in through these variables:
