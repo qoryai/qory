@@ -344,9 +344,10 @@ pool's key, that is one id, `ws_` and 16 characters: the workspace the node or p
 belongs to. A configuration without it is refused, and the run does not start.
 
 The configuration defines where the gateway sends the run's events, and where the run
-registers. The gateway registers the run with its labels, the checkout's forge and
-repository among them, and the server answers with the run configuration. It fetches it
-again when the server reports it changed. It may hold:
+registers, `run`. A configuration without `run` is refused, and the run does not start.
+The gateway registers the run with its labels, the checkout's forge and repository among
+them, and the server answers with the run configuration. It fetches it again when the
+server reports it changed. It may hold:
 
 - `security_policy`, the server's policy. `gateway.egress` of `forager.yaml` narrows it:
   see [A run's policy file](#a-runs-policy-file). Without it, `gateway.egress` is the
