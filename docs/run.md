@@ -330,6 +330,10 @@ configured, the gateway starts by fetching the server's configuration. It signs 
 request with the access key's secret, and checks every answer against the server's key
 it pins, `apiary_public_key`. The run does not start unless the server answers.
 
+The configuration lists the access key's workspace in `workspaces`. For a node's or node
+pool's key, that is one id, `ws_` and 16 characters: the workspace the node or pool
+belongs to. A configuration without it is refused, and the run does not start.
+
 The configuration defines where the gateway sends the run's events, and where the run
 registers. The gateway registers the run with its labels, the checkout's forge and
 repository among them, and the server answers with the run configuration. It fetches it
@@ -341,6 +345,11 @@ again when the server reports it changed. It may hold:
 - `variables`, which reach the agent's process. A value of the server wins over every
   source but the values qory and the runtime fix, and a run without a wall gets none of
   them. See [A run's variables](#a-runs-variables).
+
+Once the server accepts the registration, the gateway writes the record's first line,
+`dev.qory.run.registered`. It names the run's `workspace`, its `node_id` and its
+`instance_id`, the instance id the registration was signed with. This line stays on this
+machine: it is never sent to the server.
 
 `--local` runs with the files alone and the machine's policy. The server is not
 contacted.
