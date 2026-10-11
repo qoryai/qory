@@ -1900,7 +1900,8 @@ func TestResendSaysTheServerWantsNoMoreEvents(t *testing.T) {
 	srv.unavailable = true
 	const awayID = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5ec3"
 	dir, _, _, owed = record(t, awayID)
-	out, err = run(t, "run", "resend", awayID, "--wait", "2s")
+	// The server answers every try a 503, so a short --wait says the same as a long one.
+	out, err = run(t, "run", "resend", awayID, "--wait", "300ms")
 	want = fmt.Sprintf(resendNotAccepted, 0, owed, ui.Short(dir, root)) + "\n"
 	if cmd.ExitCode(err) != 1 || out != want {
 		t.Errorf("a server away: %v (exit %d)\n%q\nwant\n%q", err, cmd.ExitCode(err), out, want)
@@ -1971,7 +1972,8 @@ rules:
     data: {session_id: session, outcome: text, is_error: ok}
 `)
 	t.Setenv("QORY_TEST_WAIT", "1")
-	out, err = run(t, "run", "--headless", "--timeout", "500ms")
+	// A short grace: the runtime's sleep holds its output open until the grace ends, 10s by default.
+	out, err = run(t, "run", "--headless", "--timeout", "500ms", "--stop-grace", "1s")
 	if cmd.ExitCode(err) != 124 {
 		t.Fatalf("%v\n%s", err, out)
 	}
