@@ -408,11 +408,22 @@ func onDiscovery(dir foragerdir.Dir, key *accessKey, instance, verb string, repo
 		case verbEnd:
 			return input(errors.New("this access key is a gateway's, and a gateway gives no run's outcome: use the key of the node pool that registered the run"))
 		}
+	} else if verb == verbGateway {
+		return input(gatewayNeedsGatewayKey(d.NodeID))
 	}
 	if key.source == fromFile && !starter {
 		return settleMarker(dir, key.key, d.Secrets)
 	}
 	return nil
+}
+
+// verbGateway is qory gateway's verb, which signs with a gateway's access key alone.
+const verbGateway = "gateway"
+
+// gatewayNeedsGatewayKey is qory gateway's refusal, at its start, of an access key
+// whose node, node, discovery names, is not a gateway's.
+func gatewayNeedsGatewayKey(node string) error {
+	return fmt.Errorf("qory gateway needs a gateway's access key, and this one is node %s's: enrol a key with a code from the gateway's page in Qory Apiary", node)
 }
 
 // gatewayNodePrefix is the prefix of a gateway's node id: discovery naming one says the

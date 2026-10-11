@@ -162,9 +162,15 @@ func TestGatewayRefusesWhatItCannotServe(t *testing.T) {
 				serverFile(t, newFakeServer(t, ""), "  listen: 0.0.0.0:8443\n")
 				return []string{"gateway"}
 			},
-			want: func() string {
-				return file() + ": gateway.tls is required with a gateway.listen other machines reach: a run's events carry its prompts and terminal output; set gateway.tls.certificate and gateway.tls.key"
+			want: func() string { return "gateway.tls is required with gateway.listen: a gateway serves other machines" },
+		},
+		{
+			name: "no tls on loopback",
+			setup: func(t *testing.T) []string {
+				serverFile(t, newGatewayServer(t), "  listen: 127.0.0.1:0\n")
+				return []string{"gateway"}
 			},
+			want: func() string { return "gateway.tls is required with gateway.listen: a gateway serves other machines" },
 		},
 		{
 			name: "no tls off loopback, by --listen",
@@ -172,9 +178,7 @@ func TestGatewayRefusesWhatItCannotServe(t *testing.T) {
 				serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n")
 				return []string{"gateway", "--listen", ":8443"}
 			},
-			want: func() string {
-				return file() + ": gateway.tls is required with a gateway.listen other machines reach: a run's events carry its prompts and terminal output; set gateway.tls.certificate and gateway.tls.key"
-			},
+			want: func() string { return "gateway.tls is required with gateway.listen: a gateway serves other machines" },
 		},
 	}
 	for _, c := range cases {
@@ -498,7 +502,8 @@ func TestGatewayRefusesALinkForItsDirectory(t *testing.T) {
 	for _, name := range []string{"qory", filepath.Join("qory", "gateway")} {
 		t.Run(name, func(t *testing.T) {
 			emptyDir(t)
-			serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n")
+			serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n"+gatewayTLS)
+			writeCertificate(t)
 			link := filepath.Join(os.Getenv("XDG_STATE_HOME"), name)
 			elsewhere := t.TempDir()
 			if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
@@ -574,34 +579,17 @@ func TestGatewayRefusesAKeyAnotherUserOwns(t *testing.T) {
 	lacks(t, out, "listening on")
 }
 
-// TestGatewayTakesForagersRefusals is what Forager's gateway refuses once qory's own
-// checks pass, said as Forager says it, exit 1: an address without TLS, loopback
-// included, and an access key whose node discovery names is not a gateway's.
-func TestGatewayTakesForagersRefusals(t *testing.T) {
-	for _, c := range []struct {
-		name  string
-		setup func(t *testing.T)
-		want  string
-	}{
-		{"loopback without TLS", func(t *testing.T) {
-			serverFile(t, newGatewayServer(t), "  listen: 127.0.0.1:0\n")
-		}, "the gateway's address 127.0.0.1:0 needs TLS, a certificate and its key: every connection of the link there is bound to its TLS"},
-		{"a node's key", func(t *testing.T) {
-			serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n"+gatewayTLS)
-			writeCertificate(t)
-		}, "the access key's node " + testNode + " is not a gateway, ng_: the gateway's address 127.0.0.1:0 needs a gateway's access key"},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			emptyDir(t)
-			c.setup(t)
-			out, err := run(t, "gateway")
-			if err == nil || !strings.Contains(err.Error(), c.want) {
-				t.Errorf("error\n got %v\nwant %q", err, c.want)
-			}
-			if code := cmd.ExitCode(err); code != 1 {
-				t.Errorf("exit %d, want 1", code)
-			}
-			lacks(t, out, "listening on")
-		})
+// TestGatewayNeedsAGatewaysKey is qory gateway with an access key whose node discovery
+// names is not a gateway's: once the node line is printed, it is refused as input, in
+// qory's words, before the gateway listens.
+func TestGatewayNeedsAGatewaysKey(t *testing.T) {
+	emptyDir(t)
+	serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n"+gatewayTLS)
+	writeCertificate(t)
+	out, err := run(t, "gateway")
+	if want := "qory gateway needs a gateway's access key, and this one is node " + testNode + "'s: enrol a key with a code from the gateway's page in Qory Apiary"; err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
+		t.Errorf("a node's key: %v (exit %d)\nwant %q", err, cmd.ExitCode(err), want)
 	}
+	wants(t, out, "qory gateway: node "+testNode+", instance ")
+	lacks(t, out, "listening on")
 }

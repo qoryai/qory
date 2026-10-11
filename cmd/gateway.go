@@ -9,7 +9,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"slices"
-	"strings"
 	"syscall"
 
 	"github.com/qoryai/forager/accesskey"
@@ -30,9 +29,9 @@ const gatewayDirName = "gateway"
 
 // newGateway builds the gateway verb, which runs Forager's gateway on this machine as a
 // service for the runs of other machines, until SIGINT or SIGTERM. It is the node
-// toward the server, with this machine's access key, as qory run's own gateway is; it
-// serves gateway.listen of forager.yaml, over TLS unless the address is loopback, and
-// opens the runs whose run keys name it.
+// toward the server, with a gateway's access key; it serves gateway.listen of
+// forager.yaml, always over TLS, since it serves other machines, and opens the runs whose
+// run keys name it.
 func newGateway() *cobra.Command {
 	var listen string
 	var secretFD int
@@ -93,15 +92,15 @@ More: ` + gatewayDocs,
 			if r.Server == nil {
 				return input(fmt.Errorf("%s: gateway.server is required to run the gateway as a service: it reports every run to Qory Apiary and takes the runs' policies from it", r.File))
 			}
-			if r.TLS == nil && !loopbackListen(addr) {
-				return input(fmt.Errorf("%s: gateway.tls is required with a gateway.listen other machines reach: a run's events carry its prompts and terminal output; set gateway.tls.certificate and gateway.tls.key", r.File))
+			if r.TLS == nil {
+				return input(errors.New("gateway.tls is required with gateway.listen: a gateway serves other machines"))
 			}
 			tlsKey, err := checkServiceSecrets(r)
 			if err != nil {
 				return input(err)
 			}
 			stderr := cmd.ErrOrStderr()
-			id, err := identify(r, stderr, "gateway", fdKey)
+			id, err := identify(r, stderr, verbGateway, fdKey)
 			if err != nil {
 				return err
 			}
@@ -133,7 +132,7 @@ More: ` + gatewayDocs,
 			}
 			// The gateway runs no agent on this machine, so no run of its is refused for
 			// want of a wall here.
-			gw.Discovered = discovered(machineDir(), id, "gateway", stderr)
+			gw.Discovered = discovered(machineDir(), id, verbGateway, stderr)
 			// The server supplies every run's policy, so every integration is described.
 			shadowed := r.Shadowed()
 			e := config.Expansion{Only: func(key string) bool { return !slices.Contains(shadowed, key) }}
@@ -173,20 +172,6 @@ func foragerFileShown() string {
 		return "~/.config/qory/" + config.ForagerFileName
 	}
 	return ui.Short(filepath.Join(dir, config.ForagerFileName), "")
-}
-
-// loopbackListen reports whether a listen address, host:port, is loopback: localhost,
-// or a loopback address. An empty host is every address of the machine, which is not.
-func loopbackListen(addr string) bool {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		return false
-	}
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 // checkServiceSecrets checks the secret file gateway.tls names, before Forager reads it,
