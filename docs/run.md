@@ -1219,6 +1219,62 @@ path and `credential`, the name of the credential whose token it carried.
 
 Every other host stays a tunnel that nobody reads.
 
+## Tools the agent reaches
+
+A **tool** is a program of yours that serves hosts, for what a run reaches that needs more
+than a token in a header: a request signed with a key that stays outside the container, or
+a service only this machine has. `forager.yaml` defines the tools the machine has, under
+`gateway.tools`, each by its name. A run's policy selects among them by name, with an
+argument, as it selects credentials. A policy defines no tool.
+
+```yaml
+# ~/.config/qory/forager.yaml
+gateway:
+  tools:
+    files:
+      command: [/opt/tools/files, --prefix, "${argument}"]
+      argument: '[a-z0-9-]+/[a-z0-9-]+'
+      serves: [files.tools.internal]
+```
+
+```yaml
+# the run's policy, passed with --policy
+version: 1
+egress:
+  mode: enforce
+  allow: [files.tools.internal]
+tools:
+  - {name: files, argument: acme/shop}
+```
+
+- `command` is the program, by its absolute path, and its arguments. The gateway puts the
+  policy's argument where an argument says `${argument}`.
+- `argument` is the pattern the policy's argument must match whole. Without it, a policy
+  passes none.
+- `serves` are the hosts whose requests go to the tool, at least one. A host need not
+  exist: the proxy never dials it, so a name under `.internal` serves.
+- Each of `placeholders` is a variable that holds a placeholder inside the container.
+
+How it works:
+
+- Before the agent starts, Forager's gateway starts each tool the policy selects, outside
+  the container. The tool listens on the Unix socket `QORY_TOOL_LISTEN` names.
+- The proxy ends the container's TLS for the hosts the tool serves, decides the host and
+  the path by the policy, and hands the tool each request it allows.
+- The record lists each request to such a host in `dev.qory.run.egress`, with `tool`, the
+  tool's name.
+
+A run whose policy selects a tool needs a wall; without one it does not start. Under
+`enforce`, the run's allow list covers each host the tool serves.
+
+With a server, the server's run configuration selects the tools: through a server, a tool
+is reached only once the server's run configuration selects it. Until then, a run reaches a
+tool through `--policy`, on a machine without a server or with `--local`.
+
+`qory config` lists each tool by its program and the hosts it serves. What a tool receives
+is in the [Forager
+contract](https://github.com/qoryai/forager/blob/main/contracts/forager/v1/README.md#tools).
+
 ## Integrations
 
 An **integration** is a program that connects a run to an outside system, and describes

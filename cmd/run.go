@@ -352,6 +352,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if gw.Credentials, err = machineCredentials(ctx, r, expansion(r, pol, server != nil && !local, at.root, cwd, spec.Mounts), "run", stderr); err != nil {
 					return err
 				}
+				if gw.Tools, err = machineTools(r); err != nil {
+					return err
+				}
 			}
 			// The files the settings name are known once the integrations are described.
 			own := foragerFiles(foragerDir, state, spec.RunsDir, settingFiles(conf.Forager))
@@ -511,6 +514,20 @@ func machineCredentials(ctx context.Context, r *config.Forager, e config.Expansi
 	var out []gateway.Credential
 	for _, c := range r.Credentials {
 		def := gateway.Credential{Name: c.Name, Env: c.Env, File: c.File, Adapter: c.Adapter, Argument: c.Argument, Hosts: c.Hosts, Scheme: c.Scheme, Username: c.Username, Header: c.Header, Paths: c.Paths, Placeholders: c.Placeholders}
+		if err := def.Check(); err != nil {
+			return nil, input(fmt.Errorf("%s: %w", config.ForagerFileName, err))
+		}
+		out = append(out, def)
+	}
+	return out, nil
+}
+
+// machineTools returns the tools forager.yaml defines, the machine's gateway's, each one
+// Forager's check takes: a definition it refuses is an input error, in its words.
+func machineTools(r *config.Forager) ([]gateway.Tool, error) {
+	var out []gateway.Tool
+	for _, t := range r.Tools {
+		def := gateway.Tool{Name: t.Name, Command: t.Command, Argument: t.Argument, Serves: t.Serves, Placeholders: t.Placeholders}
 		if err := def.Check(); err != nil {
 			return nil, input(fmt.Errorf("%s: %w", config.ForagerFileName, err))
 		}

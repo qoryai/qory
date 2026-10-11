@@ -142,6 +142,9 @@ More: ` + gatewayDocs,
 			if gw.Credentials, err = machineCredentials(ctx, r, e, "gateway", stderr); err != nil {
 				return err
 			}
+			if gw.Tools, err = machineTools(r); err != nil {
+				return err
+			}
 			g, err := gateway.Start(ctx, gw)
 			if err != nil {
 				var op *net.OpError

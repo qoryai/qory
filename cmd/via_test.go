@@ -295,9 +295,10 @@ func TestAMachineBehindViaRefusesItsOwnGatewaysKeys(t *testing.T) {
 		{"integrations", "  integrations:\n    tracker: {settings: {project: SHOP}}\n", []string{"integrations"}},
 		{"listen", "  listen: 127.0.0.1:8443\n", []string{"listen"}},
 		{"tls", "  tls:\n    certificate: " + tls + ".crt\n    key: " + tls + ".key\n", []string{"tls"}},
+		{"tools", "  tools:\n    files:\n      command: [/opt/tools/files]\n      serves: [files.tools.internal]\n", []string{"tools"}},
 		{"egress, written null", "  egress:\n", []string{"egress"}},
-		{"every key, out of order", "  tls:\n    certificate: " + tls + ".crt\n    key: " + tls + ".key\n  listen: 127.0.0.1:8443\n  integrations:\n    tracker: {settings: {project: SHOP}}\n  egress:\n    mode: observe\n  credentials:\n    tracker:\n      env: TRACKER_TOKEN\n      hosts: [tracker.acme.example]\n      auth: {scheme: bearer}\n",
-			[]string{"credentials", "egress", "integrations", "listen", "tls"}},
+		{"every key, out of order", "  tls:\n    certificate: " + tls + ".crt\n    key: " + tls + ".key\n  listen: 127.0.0.1:8443\n  integrations:\n    tracker: {settings: {project: SHOP}}\n  egress:\n    mode: observe\n  credentials:\n    tracker:\n      env: TRACKER_TOKEN\n      hosts: [tracker.acme.example]\n      auth: {scheme: bearer}\n  tools:\n    files:\n      command: [/opt/tools/files]\n      serves: [files.tools.internal]\n",
+			[]string{"credentials", "egress", "integrations", "listen", "tls", "tools"}},
 	} {
 		walledServerFile(t, srv, via.via()+c.more)
 		lines := make([]string, len(c.keys))

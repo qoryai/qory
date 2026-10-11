@@ -66,6 +66,10 @@ type Forager struct {
 	// container and its proxy sets it on the requests to the hosts it is for. The ones
 	// an integration defines are added by [Forager.Expand].
 	Credentials []ForagerCredential
+	// Tools are the tools this machine defines, in the file's order: programs Forager
+	// starts for a run, outside the container, that receive the requests to the hosts
+	// they serve. A run's policy selects among them by name.
+	Tools []ForagerTool
 	// Integrations are the integrations this machine declares, in the file's order:
 	// programs that speak the integration contract, which [Forager.Expand] describes and
 	// expands into the definitions they return.
@@ -249,6 +253,18 @@ type ForagerCredential struct {
 	Integration string
 }
 
+// ForagerTool is one entry of the tools section, as Forager's gateway.Tool: Command is
+// the program, by its absolute path, and its arguments; Argument the pattern a policy's
+// argument must match whole; Serves the hosts whose requests go to the tool; and
+// Placeholders the variables the container gets with a placeholder value.
+type ForagerTool struct {
+	Name         string
+	Command      []string
+	Argument     string
+	Serves       []string
+	Placeholders []string
+}
+
 // WallDocker is the one wall adapter there is.
 const WallDocker = "docker"
 
@@ -387,7 +403,7 @@ type foragerFile struct {
 }
 
 // gatewaySection is the gateway section as written: the egress policy, the server, the
-// credentials and the integrations.
+// credentials, the tools and the integrations.
 type gatewaySection struct {
 	Egress *struct {
 		Mode  *string   `yaml:"mode"`
@@ -404,6 +420,7 @@ type gatewaySection struct {
 		Via       *viaSection `yaml:"via,omitempty"`
 	} `yaml:"server,omitempty"`
 	Credentials  yaml.Node `yaml:"credentials,omitempty"`
+	Tools        yaml.Node `yaml:"tools,omitempty"`
 	Integrations yaml.Node `yaml:"integrations,omitempty"`
 	Listen       *string   `yaml:"listen"`
 	TLS          *struct {
@@ -551,6 +568,11 @@ func LoadForager() (*Forager, error) {
 	}
 	if g.Credentials.Kind != 0 {
 		if r.Credentials, err = readCredentials(path, &g.Credentials); err != nil {
+			return nil, err
+		}
+	}
+	if g.Tools.Kind != 0 {
+		if r.Tools, err = readTools(path, &g.Tools); err != nil {
 			return nil, err
 		}
 	}
@@ -1147,6 +1169,62 @@ func readCredentials(path string, node *yaml.Node) ([]ForagerCredential, error) 
 	return out, nil
 }
 
+// toolFile is one entry of the tools section as written.
+type toolFile struct {
+	Command      *[]string `yaml:"command"`
+	Argument     *string   `yaml:"argument"`
+	Serves       *[]string `yaml:"serves"`
+	Placeholders *[]string `yaml:"placeholders"`
+}
+
+// readTools reads the tools section, a mapping from name to entry, in the file's order.
+// What an entry may hold together is Forager's to say, and qory run asks it before a
+// run, as for the credentials.
+func readTools(path string, node *yaml.Node) ([]ForagerTool, error) {
+	if node.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("%s: gateway.tools is a mapping from a name to a tool", path)
+	}
+	var out []ForagerTool
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		t := ForagerTool{Name: node.Content[i].Value}
+		var f toolFile
+		// A node decodes loosely, so a key that is not one is refused here as the rest
+		// of the file refuses it.
+		if entry := node.Content[i+1]; entry.Kind == yaml.MappingNode {
+			for k := 0; k+1 < len(entry.Content); k += 2 {
+				switch key := entry.Content[k].Value; key {
+				case "command", "argument", "serves", "placeholders":
+				default:
+					return nil, fmt.Errorf("%s: gateway.tools.%s: key %q is not one", path, t.Name, key)
+				}
+			}
+		}
+		if fault := mergeKeyFault(node.Content[i+1], reflect.TypeOf(f), "gateway.tools."+t.Name, false); fault != nil {
+			return nil, fault.error(path)
+		}
+		if err := safeDecode(func() error { return node.Content[i+1].Decode(&f) }); err != nil {
+			return nil, foragerDecodeError(path, node.Content[i+1], reflect.TypeOf(f), "gateway.tools."+t.Name, false, err)
+		}
+		// A tool is its program, so a tool without one is refused as one not by its
+		// absolute path is.
+		if f.Command == nil || len(*f.Command) == 0 || !filepath.IsAbs((*f.Command)[0]) {
+			return nil, fmt.Errorf("%s: gateway.tools.%s.command is a program by its absolute path, and its arguments", path, t.Name)
+		}
+		t.Command = *f.Command
+		if f.Argument != nil {
+			t.Argument = *f.Argument
+		}
+		if f.Serves != nil {
+			t.Serves = *f.Serves
+		}
+		if f.Placeholders != nil {
+			t.Placeholders = *f.Placeholders
+		}
+		out = append(out, t)
+	}
+	return out, nil
+}
+
 // loopback reports whether host is this machine: localhost or a loopback address.
 func loopback(host string) bool {
 	if host == "localhost" {
@@ -1232,6 +1310,9 @@ func (r *Forager) Rows() []Row {
 				from = "adapter " + c.Adapter[0]
 			}
 			rows = append(rows, Row{"gateway.credentials." + c.Name, from, origin})
+		}
+		for _, t := range r.Tools {
+			rows = append(rows, Row{"gateway.tools." + t.Name, t.Command[0] + ", serves " + listOrNone(t.Serves), origin})
 		}
 		shadowed := r.Shadowed()
 		for _, in := range r.Integrations {
