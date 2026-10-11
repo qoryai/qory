@@ -272,6 +272,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				Timeout:        timeout,
 				StopSignal:     stopSignal,
 				StopGrace:      grace,
+				SocketGrace:    socketGrace,
 			}
 			switch {
 			case spec.RunID == "" && remote:
@@ -528,6 +529,10 @@ const runHeartbeat = config.Heartbeat
 // runQuiet is how long a run's session may send its gateway nothing before the gateway
 // ends the run, session_lost.
 const runQuiet = 3 * runHeartbeat
+
+// socketGrace is how long a run's socket keeps accepting after the runtime exits,
+// session.Spec.SocketGrace: zero, which is Forager's 200 ms. Only the tests shorten it.
+var socketGrace time.Duration
 
 // runEnd is what qory knows of a run besides its result: its runtime's name, its time
 // limit, the signal qory run got that ended the run, "" for none, and the run's end that
