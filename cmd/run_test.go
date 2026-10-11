@@ -41,6 +41,9 @@ const testAccessKey = "ak_f1xt0re000000000"
 // testNode is the node every test's server names in discovery.
 const testNode = "nd_0123456789abcdef"
 
+// testWorkspace is the one workspace every test's server lists in discovery.
+const testWorkspace = "ws_f1xt0re000000000"
+
 // fakeServer stands in for the server Forager reports to: Forager's own
 // receiver, which verifies every request under the machine's access key and signs
 // every answer under a key of its own, with the configuration document, the run
@@ -101,7 +104,7 @@ func newFakeServer(t *testing.T, policy string) *fakeServer {
 		Configuration: func() ([]byte, string) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
-			doc := `{"version":1,"node_id":"` + testNode + `","events":{"url":"` + f.URL + `/v1/events","types":["*"]},"run":{"url":"` + f.URL + receiver.DefaultRunPath + `"}`
+			doc := `{"version":1,"node_id":"` + testNode + `","workspaces":["` + testWorkspace + `"],"events":{"url":"` + f.URL + `/v1/events","types":["*"]},"run":{"url":"` + f.URL + receiver.DefaultRunPath + `"}`
 			if f.secrets {
 				doc += `,"secrets":{"url":"` + f.URL + `/v1/secrets"}`
 			}
@@ -1453,6 +1456,17 @@ func TestRunReportsToTheServer(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(first), &line1); err != nil || line1.Type != event.RunRegistered || line1.Sequence != "0000000001" || line1.Data["contract_version"] != float64(1) || line1.Data["interval_seconds"] == nil || line1.Data["forager_version"] == nil || line1.Data["events"] == nil {
 		t.Errorf("the record's line 1: %s (%v)", first, err)
+	}
+	// Line 1 also names the workspace discovery lists, its node, and the instance id
+	// the registration was signed with.
+	srv.mu.Lock()
+	instance := ""
+	if len(srv.instances) > 0 {
+		instance = srv.instances[0][0]
+	}
+	srv.mu.Unlock()
+	if line1.Data["workspace"] != testWorkspace || line1.Data["node_id"] != testNode || instance == "" || line1.Data["instance_id"] != instance {
+		t.Errorf("the record's line 1 names workspace %v, node %v and instance %v, want %s, %s and %q", line1.Data["workspace"], line1.Data["node_id"], line1.Data["instance_id"], testWorkspace, testNode, instance)
 	}
 	got := srv.byType()
 	if len(got[event.RunRegistered]) != 0 || len(got["dev.qory.ping"]) != 0 {
