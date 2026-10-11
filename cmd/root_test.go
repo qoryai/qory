@@ -93,26 +93,25 @@ func inComposedCheckout(t *testing.T, args ...string) string {
 	return strings.ReplaceAll(out, root, "CHECKOUT")
 }
 
-// TestEveryCommandTakesTheServerVariables is the four variables of the server, the run
-// credential's and the run key's in qory's environment, read into memory and removed when a command starts, before it starts
-// anything: a worktree's add command, run through the shell, inherits none of them, and
+// TestEveryCommandTakesTheServerVariables is the four variables of the server and the
+// run key's in qory's environment, read into memory and removed when a command starts,
+// before it starts anything: a worktree's add command, run through the shell, inherits none of them, and
 // qory's environment holds none of them afterwards. No command of the tree sets a
 // PersistentPreRun of its own, which would skip the root's.
 func TestEveryCommandTakesTheServerVariables(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
-	configure(t, root, nil, []string{"worktree:", "  run:", `    add: ['printf "[%s]" "$QORY_ACCESS_KEY_SECRET$QORY_ACCESS_KEY_ID$QORY_APIARY_PUBLIC_KEY$QORY_SERVER_SECRET$QORY_RUN_CREDENTIAL_SECRET$QORY_RUN_KEY" > inherited.txt']`})
+	configure(t, root, nil, []string{"worktree:", "  run:", `    add: ['printf "[%s]" "$QORY_ACCESS_KEY_SECRET$QORY_ACCESS_KEY_ID$QORY_APIARY_PUBLIC_KEY$QORY_SERVER_SECRET$QORY_RUN_KEY" > inherited.txt']`})
 	runGit(t, root, "add", "-A")
 	runGit(t, root, "commit", "-q", "-m", "stack")
 	localOrigin(t, root)
 	runGit(t, root, "push", "--quiet", "origin", "main")
 	runGit(t, root, "remote", "set-head", "origin", "main")
-	want := config.ServerVariables{AccessKeyID: "ak_0123456789abcdef", AccessKeySecret: "qak_not-a-real-secret", ApiaryPublicKey: "[]", WorkspaceSecret: "a-workspace-secret", RunCredentialSecret: "header.claims.signature", RunKey: "a-run-key"}
+	want := config.ServerVariables{AccessKeyID: "ak_0123456789abcdef", AccessKeySecret: "qak_not-a-real-secret", ApiaryPublicKey: "[]", WorkspaceSecret: "a-workspace-secret", RunKey: "a-run-key"}
 	t.Setenv("QORY_ACCESS_KEY_ID", want.AccessKeyID)
 	t.Setenv("QORY_ACCESS_KEY_SECRET", want.AccessKeySecret)
 	t.Setenv("QORY_APIARY_PUBLIC_KEY", want.ApiaryPublicKey)
 	t.Setenv("QORY_SERVER_SECRET", want.WorkspaceSecret)
-	t.Setenv("QORY_RUN_CREDENTIAL_SECRET", want.RunCredentialSecret)
 	t.Setenv("QORY_RUN_KEY", want.RunKey)
 	t.Cleanup(func() { config.SetServerVariables(config.ServerVariables{}) })
 	if out, err := run(t, "worktree", "add", "feature"); err != nil {
@@ -121,7 +120,7 @@ func TestEveryCommandTakesTheServerVariables(t *testing.T) {
 	if data, err := os.ReadFile(filepath.Join(filepath.Dir(root), "wt-feature", "inherited.txt")); err != nil || string(data) != "[]" {
 		t.Errorf("the add command inherited %q, %v", data, err)
 	}
-	for _, name := range []string{"QORY_ACCESS_KEY_ID", "QORY_ACCESS_KEY_SECRET", "QORY_APIARY_PUBLIC_KEY", "QORY_SERVER_SECRET", "QORY_RUN_CREDENTIAL_SECRET", "QORY_RUN_KEY"} {
+	for _, name := range []string{"QORY_ACCESS_KEY_ID", "QORY_ACCESS_KEY_SECRET", "QORY_APIARY_PUBLIC_KEY", "QORY_SERVER_SECRET", "QORY_RUN_KEY"} {
 		if _, ok := os.LookupEnv(name); ok {
 			t.Errorf("%s stayed in qory's environment", name)
 		}

@@ -48,7 +48,7 @@ func knownEnrolment(t *testing.T) (requests []accesskey.EnrolmentRequest, answer
 	if err := json.Unmarshal(contractFile(t, "fixtures/known-answers/signatures.json"), &v); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"fixtures/enrolment/request.json", "fixtures/enrolment/request-two-fingerprints.json"} {
+	for _, name := range []string{"fixtures/enrolment/request.json", "fixtures/enrolment/request-two-fingerprints.json", "fixtures/enrolment/request-gateway.json"} {
 		var r accesskey.EnrolmentRequest
 		if err := json.Unmarshal(contractFile(t, name), &r); err != nil {
 			t.Fatal(err)
@@ -66,23 +66,36 @@ func knownEnrolment(t *testing.T) (requests []accesskey.EnrolmentRequest, answer
 // fixtureAccessKey is the contract's published fixture access key.
 func fixtureAccessKey(t *testing.T) *accesskey.Key {
 	t.Helper()
+	return fixtureKeys(t)[0]
+}
+
+// fixtureKeys are the contract's published fixture access key, then its fixture
+// gateway key.
+func fixtureKeys(t *testing.T) []*accesskey.Key {
+	t.Helper()
+	type secret struct {
+		Secret string `json:"secret"`
+	}
 	var k struct {
-		AccessKey struct {
-			Secret string `json:"secret"`
-		} `json:"access_key"`
+		AccessKey  secret `json:"access_key"`
+		GatewayKey secret `json:"gateway_key"`
 	}
 	if err := json.Unmarshal(contractFile(t, "fixtures/known-answers/keys.json"), &k); err != nil {
 		t.Fatal(err)
 	}
-	key, err := accesskey.ParseSecret(k.AccessKey.Secret)
-	if err != nil {
-		t.Fatal(err)
+	var keys []*accesskey.Key
+	for _, s := range []string{k.AccessKey.Secret, k.GatewayKey.Secret} {
+		key, err := accesskey.ParseSecret(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		keys = append(keys, key)
 	}
-	return key
+	return keys
 }
 
 // TestEnrolmentKnownAnswers posts the published enrolment requests, under the fixture
-// access key, to a server that answers each with a published answer and its published
+// access key or, for a gateway's code, the fixture gateway key, to a server that answers each with a published answer and its published
 // signature, and acts on each as enrol does: the 201 verifies and pins the fixture
 // signing key, which enrol refuses to pin; a signed key_limit, and a signed 429
 // rate_limited where the contract publishes one, keeps the secret and the pending
@@ -90,7 +103,7 @@ func fixtureAccessKey(t *testing.T) *accesskey.Key {
 // tampered with is answer_unsigned and acts on nothing.
 func TestEnrolmentKnownAnswers(t *testing.T) {
 	requests, answers := knownEnrolment(t)
-	key := fixtureAccessKey(t)
+	keys := fixtureKeys(t)
 	n := 0
 	for _, a := range answers {
 		for _, tamper := range []bool{false, true} {
@@ -113,6 +126,12 @@ func TestEnrolmentKnownAnswers(t *testing.T) {
 			for _, r := range requests {
 				if r.Proof == a.Lines[2] {
 					published = r
+				}
+			}
+			key := keys[0]
+			for _, k := range keys {
+				if k.PublicKey().String() == published.PublicKey {
+					key = k
 				}
 			}
 			req, err := accesskey.NewEnrolmentRequest(key, published.Code, published.Name, time.Unix(published.Timestamp, 0))

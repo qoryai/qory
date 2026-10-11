@@ -15,6 +15,16 @@ const (
 	oldReasonInvalid     = "issuer_answer_invalid"
 )
 
+// The reasons Forager no longer ends a run with and keeps reserved, so a record written
+// before still reads: a run credential that could not be checked or had expired, and a
+// run that went quiet.
+const (
+	oldReasonCredentialUnreachable = "credential_check_unreachable"
+	oldReasonCredentialInvalid     = "credential_check_invalid"
+	oldReasonCredentialExpired     = "credential_expired"
+	oldReasonQuiet                 = "quiet"
+)
+
 // outcome is how qory says a run ended, by the state and the reason Forager gives: the
 // outcome, as qory says it after "the run", and the reason in qory's words, empty when
 // there is none to say.
@@ -45,13 +55,13 @@ func outcomeOf(state, reason string) outcome {
 		o.failed, o.reason = true, "its events could not be recorded"
 	case event.ReasonRunClosed:
 		o.failed, o.reason = true, "the gateway stopped during the run"
-	case event.ReasonCredentialCheckUnreachable, event.ReasonCredentialCheckInvalid, oldReasonUnreachable, oldReasonInvalid:
+	case oldReasonCredentialUnreachable, oldReasonCredentialInvalid, oldReasonUnreachable, oldReasonInvalid:
 		o.failed, o.reason = true, "its run credential could not be checked"
-	case event.ReasonCredentialExpired:
+	case oldReasonCredentialExpired:
 		o.cancelled, o.reason = true, "the run credential expired"
 	case event.ReasonStopped, oldReasonStopped:
 		o.cancelled, o.noOutcome = true, true
-	case event.ReasonTimeout, event.ReasonQuiet, event.ReasonInterrupted:
+	case event.ReasonTimeout, oldReasonQuiet, event.ReasonInterrupted:
 		o.cancelled = true
 	default:
 		switch state {

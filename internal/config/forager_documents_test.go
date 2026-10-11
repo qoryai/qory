@@ -15,11 +15,11 @@ const moreThanOne = ": holds more than one YAML document; forager.yaml is one do
 // TestAForagerFileIsOneDocument is forager.yaml with --- at its start, at its end and in
 // its middle. A --- that starts the one document, and a ... that ends it, read; a second
 // document is refused wherever it stands, an empty one after a trailing --- among them,
-// by every reader of the file, so a session.gateway in the second is never ignored.
+// by every reader of the file, so a gateway section in the second is never ignored.
 func TestAForagerFileIsOneDocument(t *testing.T) {
 	hermetic(t)
 	const instance = "session:\n  instance:\n    name: build-01\n"
-	const gateway = "session:\n  gateway:\n    url: https://gateway.example\n"
+	const gateway = "gateway:\n  server:\n    url: https://apiary.example\n"
 	for _, body := range []string{
 		"---\n" + instance,
 		"--- # the one document\n" + instance,
@@ -37,7 +37,7 @@ func TestAForagerFileIsOneDocument(t *testing.T) {
 	}
 	for _, body := range []string{"", "---\n", "# a comment\n"} {
 		foragerFile(t, body)
-		if r, err := config.LoadForager(); err != nil || r.SessionGateway != nil {
+		if r, err := config.LoadForager(); err != nil || r.Server != nil {
 			t.Errorf("%q: %+v, %v; want it read as no settings", body, r, err)
 		}
 	}
@@ -74,7 +74,7 @@ func TestAForagerFileIsOneDocument(t *testing.T) {
 // with a second document: it is refused, and the file is left as it was, since the
 // encoder would write the first document alone.
 func TestWriteEnrolmentRefusesASecondDocument(t *testing.T) {
-	const body = "session:\n  instance:\n    name: build-01\n---\nsession:\n  gateway:\n    url: https://gateway.example\n"
+	const body = "session:\n  instance:\n    name: build-01\n---\ngateway:\n  server:\n    url: https://apiary.example\n    via:\n      url: https://gateway.example\n"
 	path := filepath.Join(t.TempDir(), "forager.yaml")
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)

@@ -2,8 +2,6 @@ package config
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -12,14 +10,12 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/qoryai/forager/accesskey"
-	"github.com/qoryai/forager/runcredential"
 	"github.com/qoryai/forager/session"
 	"gopkg.in/yaml.v3"
 
@@ -32,6 +28,10 @@ import (
 // does on this machine. It has no counterpart in a repository, so a checkout cannot set
 // the policy the agent runs under or where the run's events go.
 const ForagerFileName = "forager.yaml"
+
+// Heartbeat is the heartbeat interval of every gateway qory starts, qory run's own and
+// qory gateway, Forager's default.
+const Heartbeat = 30 * time.Second
 
 // Forager is the machine's forager.yaml, read.
 type Forager struct {
@@ -73,20 +73,8 @@ type Forager struct {
 	Listen string
 	// TLS is gateway.tls, the certificate and key qory gateway serves Listen with; nil
 	// when the file sets none.
-	TLS *ForagerTLS
-	// SessionGateway is session.gateway, the gateway on another machine, or a service on
-	// this one, that this machine's runs go through; nil when the file sets none, and
-	// qory run starts a gateway of its own for each run.
-	SessionGateway *ForagerSessionGateway
-	// RunCredentials is gateway.run_credentials, the issuers whose run credentials open
-	// runs at qory gateway, in Forager's run-credentials.schema.json shape, with every
-	// path as the file writes it; [Forager.Path] resolves one.
-	RunCredentials runcredential.Issuers
-
-	// runCredentialRows are the rows of gateway.run_credentials, each value as the file
-	// writes it.
-	runCredentialRows []Row
-	expanded          bool
+	TLS      *ForagerTLS
+	expanded bool
 }
 
 // ForagerTLS is gateway.tls: the files of the certificate and its key, as the file
@@ -96,54 +84,21 @@ type ForagerTLS struct {
 	Key         string
 }
 
-// ForagerSessionGateway is session.gateway: the gateway's URL, the PEM file of the
-// authorities its certificate chains to, the pin of its certificate's public key, and the
-// file of the run's run credential, each as the file writes it; [Forager.Path] resolves a
-// path. A setting the file does not write is empty.
-type ForagerSessionGateway struct {
-	URL               string
-	CAFile            string
-	CertificateSHA256 string
-	RunCredentialFile string
-}
-
-// certificatePin is session.gateway.certificate_sha256's shape: 32 bytes in standard
-// base64 with padding, as Forager's session takes it.
-var certificatePin = regexp.MustCompile(`^[A-Za-z0-9+/]{43}=$`)
-
-// CertificatePin reports whether v is a certificate pin as Forager's session takes it:
-// the SHA-256 of a public key, 32 bytes, in standard base64 with padding.
-func CertificatePin(v string) bool {
-	if !certificatePin.MatchString(v) {
-		return false
-	}
-	b, err := base64.StdEncoding.Strict().DecodeString(v)
-	return err == nil && len(b) == sha256.Size
-}
-
-// urlHoldsSecret reports whether a URL holds an access key secret as written, or in
-// its host as Go decodes it, an IPv6 zone included, either form with its
-// percent-encoding undone again and again until nothing changes: a refusal names the
-// host, so a secret there must be caught before anything prints it, however many times
-// it is encoded. A form still encoded after [urlUnescapeLimit] rounds counts as holding
-// one; [scanURL] tells the two apart.
-func urlHoldsSecret(raw string) bool {
-	secret, tooDeep := scanURL(raw)
-	return secret || tooDeep
-}
-
-// scanURL is what [urlHoldsSecret] finds in a URL: whether a form of it holds an access
-// key secret within [urlUnescapeLimit] rounds of undoing its encoding, and whether a form
-// is still encoded after them, so whatever it holds is not known.
-func scanURL(raw string) (secret, tooDeep bool) {
+// scanURL is what a URL holds that no refusal may print: a URL as written, or its host
+// as Go decodes it, an IPv6 zone included, either form with its percent-encoding undone
+// again and again until nothing changes, since a refusal names the host. secret is
+// [accesskey.SecretInDocument]'s error of the first form that holds an access key secret
+// or a run key within [urlUnescapeLimit] rounds, nil for none; tooDeep says a form is
+// still encoded after them, so whatever it holds is not known.
+func scanURL(raw string) (tooDeep bool, secret error) {
 	forms := []string{raw}
 	if u, err := url.Parse(raw); err == nil {
 		forms = append(forms, u.Host)
 	}
 	for _, v := range forms {
 		for n := 0; ; n++ {
-			if accesskey.ContainsSecret(v) {
-				return true, false
+			if err := accesskey.SecretInDocument(v); err != nil {
+				return false, err
 			}
 			dec := unescapeEvery(v)
 			if dec == v {
@@ -156,7 +111,7 @@ func scanURL(raw string) (secret, tooDeep bool) {
 			v = dec
 		}
 	}
-	return false, tooDeep
+	return tooDeep, nil
 }
 
 // urlUnescapeLimit is how many rounds [scanURL] undoes a URL's encoding.
@@ -193,36 +148,9 @@ func unhex(c byte) int {
 	return -1
 }
 
-// urlOrigin is u's scheme, host and port, as Forager's RemoteGateway.String names a
-// gateway: never its user information, path, query or fragment.
+// urlOrigin is u's scheme, host and port: never its user information, path, query or
+// fragment.
 func urlOrigin(u *url.URL) string { return u.Scheme + "://" + u.Host }
-
-// gatewayURLWrong says what is wrong with v as a gateway's URL, as Forager's session
-// takes it: https, a host and an optional port, and no user information, path other
-// than "/", query or fragment; empty when nothing is. What it says never holds more of
-// v than its scheme, its host and its port, so user information or a query that holds a
-// credential is never printed.
-func gatewayURLWrong(v string) string {
-	u, err := url.Parse(v)
-	if err != nil || u.Scheme == "" || u.Host == "" || u.Opaque != "" {
-		return "is not a URL"
-	}
-	if u.Hostname() == "" {
-		return "has no host"
-	}
-	origin := urlOrigin(u)
-	switch {
-	case u.Scheme != "https":
-		return "for " + origin + " is not https"
-	case u.User != nil:
-		return "for " + origin + " holds user information"
-	case u.Path != "" && u.Path != "/":
-		return "for " + origin + " has a path"
-	case u.RawQuery != "" || u.ForceQuery || u.Fragment != "":
-		return "for " + origin + " has a query or a fragment"
-	}
-	return ""
-}
 
 // Path is a path a setting of the file names, resolved: an absolute one as it is, a
 // relative one under the file's directory.
@@ -418,19 +346,10 @@ type gatewaySection struct {
 		Certificate *string `yaml:"certificate"`
 		Key         *string `yaml:"key"`
 	} `yaml:"tls,omitempty"`
-	RunCredentials yaml.Node `yaml:"run_credentials,omitempty"`
 }
 
-// sessionSection is the session section as written: the gateway, the instance and the
-// run. The gateway's keys are nodes, merges and alias keys resolved by the decoder, so
-// a key written with a null value is told from an absent one.
+// sessionSection is the session section as written: the instance and the run.
 type sessionSection struct {
-	Gateway *struct {
-		URL               yaml.Node `yaml:"url"`
-		CAFile            yaml.Node `yaml:"ca_file"`
-		CertificateSHA256 yaml.Node `yaml:"certificate_sha256"`
-		RunCredentialFile yaml.Node `yaml:"run_credential_file"`
-	} `yaml:"gateway,omitempty"`
 	Instance *instanceSection `yaml:"instance,omitempty"`
 	Run      *struct {
 		Timeout    *string `yaml:"timeout"`
@@ -518,58 +437,6 @@ func LoadForager() (*Forager, error) {
 			return nil, err
 		}
 	}
-	if err := sessionGatewayNull(path, data); err != nil {
-		return nil, err
-	}
-	if sg := ses.Gateway; sg != nil {
-		var url, caFile, pin, credFile *string
-		for _, v := range []struct {
-			key string
-			in  *yaml.Node
-			out **string
-		}{{"url", &sg.URL, &url}, {"ca_file", &sg.CAFile, &caFile}, {"certificate_sha256", &sg.CertificateSHA256, &pin}, {"run_credential_file", &sg.RunCredentialFile, &credFile}} {
-			if *v.out, err = gatewayKey(v.in); err != nil {
-				return nil, foragerDecodeError(path, v.in, reflect.TypeFor[string](), "session.gateway."+v.key, false, err)
-			}
-		}
-		// A machine whose runs go through a gateway runs none: what a gateway section
-		// holds belongs on the gateway's machine.
-		if f.Gateway != nil {
-			return nil, fmt.Errorf("%s: gateway: this machine's runs go through the gateway session.gateway.url names, so it runs no gateway, and its file holds none: Qory Apiary's access key and the credentials' secrets belong on the gateway's machine. Remove the gateway section, or remove session.gateway to run the gateway here", path)
-		}
-		if url == nil || *url == "" {
-			return nil, fmt.Errorf("%s: session.gateway.url is required", path)
-		}
-		// A URL encoded too many times to tell what it holds is refused for that, and
-		// the refusal holds no part of it.
-		switch secret, tooDeep := scanURL(*url); {
-		case secret:
-			return nil, fmt.Errorf("%s: session.gateway.url: %w", path, accesskey.ErrSecretInDocument)
-		case tooDeep:
-			return nil, fmt.Errorf("%s: session.gateway.url is percent-encoded more than %d times: an https URL of a host and an optional port, with nothing after", path, urlUnescapeLimit)
-		}
-		if wrong := gatewayURLWrong(*url); wrong != "" {
-			return nil, fmt.Errorf("%s: session.gateway.url %s: an https URL of a host and an optional port, with nothing after", path, wrong)
-		}
-		r.SessionGateway = &ForagerSessionGateway{URL: *url}
-		for _, v := range []struct {
-			key string
-			in  *string
-			out *string
-		}{{"ca_file", caFile, &r.SessionGateway.CAFile}, {"certificate_sha256", pin, &r.SessionGateway.CertificateSHA256}, {"run_credential_file", credFile, &r.SessionGateway.RunCredentialFile}} {
-			if v.in == nil {
-				continue
-			}
-			// A key that is present holds a value: an empty pin would turn the pin off.
-			if *v.in == "" {
-				return nil, fmt.Errorf("%s: session.gateway.%s is empty", path, v.key)
-			}
-			*v.out = *v.in
-		}
-		if p := r.SessionGateway.CertificateSHA256; p != "" && !CertificatePin(p) {
-			return nil, fmt.Errorf("%s: session.gateway.certificate_sha256 is not the SHA-256 of a public key in standard base64 with padding, 44 characters ending in =", path)
-		}
-	}
 	if in := ses.Instance; in != nil && in.Name != nil {
 		if accesskey.CheckName(*in.Name) != nil {
 			return nil, fmt.Errorf("%s: session.instance.name %s", path, notAName)
@@ -622,11 +489,6 @@ func LoadForager() (*Forager, error) {
 			return nil, fmt.Errorf("%s: gateway.tls needs both certificate and key", path)
 		}
 		r.TLS = &ForagerTLS{Certificate: *t.Certificate, Key: *t.Key}
-	}
-	if g.RunCredentials.Kind != 0 {
-		if r.RunCredentials, r.runCredentialRows, err = readRunCredentials(path, &g.RunCredentials); err != nil {
-			return nil, err
-		}
 	}
 	if w := f.Wall; w != nil {
 		if w.Adapter == nil || *w.Adapter != WallDocker {
@@ -700,43 +562,6 @@ func LoadForager() (*Forager, error) {
 	return r, nil
 }
 
-// sessionGatewayNull refuses a session.gateway the file writes with a null value:
-// decoded, it reads as absent, and the machine would run a gateway of its own. It is
-// refused as its empty form is. The decoder resolves merges and alias keys.
-func sessionGatewayNull(path string, data []byte) error {
-	var f struct {
-		Session *struct {
-			Gateway yaml.Node `yaml:"gateway"`
-		} `yaml:"session"`
-	}
-	if err := safeDecode(func() error { return yaml.Unmarshal(data, &f) }); err != nil || f.Session == nil {
-		return nil
-	}
-	if g := followAliases(&f.Session.Gateway); g.Kind != 0 && g.ShortTag() == "!!null" {
-		return fmt.Errorf("%s: session.gateway is empty", path)
-	}
-	return nil
-}
-
-// gatewayKey is a key of session.gateway as decoded: nil when the file does not write
-// it, its string otherwise, and "" when the file writes it with a null value, so a null
-// key is refused as its empty form is: a null certificate_sha256 would otherwise turn
-// the pin off without a word.
-func gatewayKey(n *yaml.Node) (*string, error) {
-	n = followAliases(n)
-	if n.Kind == 0 {
-		return nil, nil
-	}
-	var s string
-	if n.ShortTag() == "!!null" {
-		return &s, nil
-	}
-	if err := safeDecode(func() error { return n.Decode(&s) }); err != nil {
-		return nil, err
-	}
-	return &s, nil
-}
-
 // followAliases is n with its aliases followed.
 func followAliases(n *yaml.Node) *yaml.Node {
 	for n.Kind == yaml.AliasNode && n.Alias != nil {
@@ -751,7 +576,7 @@ var errMoreThanOneDocument = errors.New("holds more than one YAML document; " + 
 
 // oneDocument refuses forager.yaml's content when it holds more than one YAML document,
 // an empty one after a trailing --- among them: the decoder reads the first alone, and
-// what the others say, a session.gateway say, would be ignored without a word. Content
+// what the others say, a gateway section say, would be ignored without a word. Content
 // that does not parse is left to the reader, which says why.
 func oneDocument(data []byte) error {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
@@ -848,8 +673,7 @@ func (r *Forager) InstanceNameOrDefault() string {
 
 // ForagersOwn reports whether a variable is Forager's own, never the session's: the
 // access key's secret, its id and the pin, QORY_SERVER_SECRET, which held a workspace
-// access key's secret, QORY_RUN_CREDENTIAL_SECRET, the run credential, and QORY_RUN_KEY,
-// the run key.
+// access key's secret, and QORY_RUN_KEY, the run key.
 func ForagersOwn(name string) bool {
 	return slices.Contains(serverVariableNames, name)
 }
@@ -913,8 +737,8 @@ func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *y
 			if e.Alg == nil || e.PublicKey == nil {
 				return nil, fmt.Errorf("%s: gateway.server.apiary_public_key[%d] needs both alg and public_key", path, i)
 			}
-			if accesskey.ContainsSecret(*e.Alg) || accesskey.ContainsSecret(*e.PublicKey) {
-				return nil, fmt.Errorf("%s: gateway.server.apiary_public_key: %w", path, accesskey.ErrSecretInDocument)
+			if err := accesskey.SecretInDocument([]any{*e.Alg, *e.PublicKey}); err != nil {
+				return nil, fmt.Errorf("%s: gateway.server.apiary_public_key: %w", path, err)
 			}
 			// Each entry is checked here as [accesskey.Pin.Check] checks it, so the
 			// refusal names the entry and never quotes it.
@@ -974,9 +798,9 @@ const serverURLShape = "an https URL of a host and an optional port, or an http 
 // names the part that is wrong and holds no more of the URL than its scheme, its host
 // and its port.
 func CheckServerURL(raw string) error {
-	switch secret, tooDeep := scanURL(raw); {
-	case secret:
-		return fmt.Errorf("gateway.server.url: %w", accesskey.ErrSecretInDocument)
+	switch tooDeep, secret := scanURL(raw); {
+	case secret != nil:
+		return fmt.Errorf("gateway.server.url: %w", secret)
 	case tooDeep:
 		return fmt.Errorf("gateway.server.url is percent-encoded more than %d times: %s", urlUnescapeLimit, serverURLShape)
 	}
@@ -1098,14 +922,6 @@ func loopback(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// sessionGateway is r's session.gateway, nil for none or for no file.
-func (r *Forager) sessionGateway() *ForagerSessionGateway {
-	if r == nil {
-		return nil
-	}
-	return r.SessionGateway
-}
-
 // Rows lists forager.yaml's effective values with the file as origin, and the
 // defaults with [Default] when there is no file or a section is absent.
 func (r *Forager) Rows() []Row {
@@ -1148,28 +964,6 @@ func (r *Forager) Rows() []Row {
 		rows = append(rows, Row{"gateway.tls.certificate", r.TLS.Certificate, origin}, Row{"gateway.tls.key", r.TLS.Key, origin})
 	} else {
 		rows = append(rows, Row{"gateway.tls.certificate", "(none)", Default}, Row{"gateway.tls.key", "(none)", Default})
-	}
-	if r != nil && len(r.runCredentialRows) > 0 {
-		rows = append(rows, r.runCredentialRows...)
-	} else {
-		rows = append(rows, Row{"gateway.run_credentials", "(none)", Default})
-	}
-	if g := r.sessionGateway(); g != nil {
-		rows = append(rows, Row{"session.gateway.url", g.URL, origin})
-		if g.CAFile != "" {
-			rows = append(rows, Row{"session.gateway.ca_file", g.CAFile, origin})
-		} else {
-			rows = append(rows, Row{"session.gateway.ca_file", "(none: the system's roots)", Default})
-		}
-		for _, v := range [][2]string{{"session.gateway.certificate_sha256", g.CertificateSHA256}, {"session.gateway.run_credential_file", g.RunCredentialFile}} {
-			if v[1] != "" {
-				rows = append(rows, Row{v[0], v[1], origin})
-			} else {
-				rows = append(rows, Row{v[0], "(none)", Default})
-			}
-		}
-	} else {
-		rows = append(rows, Row{"session.gateway.url", "(none: qory run starts a gateway for each run)", Default})
 	}
 	if r != nil && r.InstanceName != "" {
 		rows = append(rows, Row{"session.instance.name", r.InstanceName, origin})

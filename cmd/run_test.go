@@ -38,8 +38,12 @@ import (
 // testAccessKey is the access key id of every test's server.
 const testAccessKey = "ak_f1xt0re000000000"
 
-// testNode is the node every test's server names in discovery.
-const testNode = "nd_0123456789abcdef"
+// testNode is the node every test's server names in discovery, unless it names
+// testGatewayNode, a gateway's node.
+const (
+	testNode        = "nd_0123456789abcdef"
+	testGatewayNode = "ng_0123456789abcdef"
+)
 
 // testWorkspace is the one workspace every test's server lists in discovery.
 const testWorkspace = "ws_f1xt0re000000000"
@@ -86,6 +90,8 @@ type fakeServer struct {
 	// onExited, when set, is called once the server keeps a dev.qory.run.exited,
 	// before the delivery that carries it is answered.
 	onExited func()
+	// node is the node discovery names, testNode when empty.
+	node string
 }
 
 // newFakeServer starts a server whose run configuration carries policy, the JSON of a
@@ -104,7 +110,11 @@ func newFakeServer(t *testing.T, policy string) *fakeServer {
 		Configuration: func() ([]byte, string) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
-			doc := `{"version":1,"node_id":"` + testNode + `","workspaces":["` + testWorkspace + `"],"events":{"url":"` + f.URL + `/v1/events","types":["*"]},"run":{"url":"` + f.URL + receiver.DefaultRunPath + `"}`
+			node := f.node
+			if node == "" {
+				node = testNode
+			}
+			doc := `{"version":1,"node_id":"` + node + `","workspaces":["` + testWorkspace + `"],"events":{"url":"` + f.URL + `/v1/events","types":["*"]},"run":{"url":"` + f.URL + receiver.DefaultRunPath + `"}`
 			if f.secrets {
 				doc += `,"secrets":{"url":"` + f.URL + `/v1/secrets"}`
 			}
@@ -1323,7 +1333,6 @@ func TestRunRefusesAWallItCannotBuild(t *testing.T) {
 		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_ACCESS_KEY_ID"}, "Forager's own"},
 		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_APIARY_PUBLIC_KEY"}, "Forager's own"},
 		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_SERVER_SECRET"}, "--env QORY_SERVER_SECRET: the variable is Forager's own and never the agent's"},
-		{[]string{"run", "--env", "QORY_RUN_CREDENTIAL_SECRET"}, "--env QORY_RUN_CREDENTIAL_SECRET: the variable is Forager's own and never the agent's"},
 		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_RUN_KEY"}, "--env QORY_RUN_KEY: the variable is Forager's own and never the agent's"},
 		{[]string{"run", "--env", "QORY_RUN_KEY"}, "--env QORY_RUN_KEY: the variable is Forager's own and never the agent's"},
 		{[]string{"run", "--label", "issue"}, "not key=value"},
@@ -1728,8 +1737,8 @@ const (
 	resendNotAccepted = "✗ %d events were accepted and %d were not; %s/undelivered contains them"
 )
 
-// TestResendSaysTheServerWantsNoMoreEvents is a resend to the server, with no
-// session.gateway, of a record that owes the server more events than one batch holds. A
+// TestResendSaysTheServerWantsNoMoreEvents is a resend to the server, of a run that had
+// a gateway of its own, of a record that owes the server more events than one batch holds. A
 // server that answers a signed 410 during the resend is sent nothing more: qory says what
 // it accepted before and what was not sent, which stays in the run directory, none of it
 // under undelivered/, exit 1. A server that stopped the run during the run is sent

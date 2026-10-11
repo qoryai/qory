@@ -11,13 +11,9 @@ import (
 	"github.com/qoryai/qory/internal/config"
 )
 
-// issuerSection is one issuer of gateway.run_credentials, in flow style.
-const issuerSection = `{issuer: "https://issuer.example", audience: qory-gateway, algorithms: [RS256], keys: [{kid: k1, alg: RS256, public_key_file: issuer-k1.pem}], labels: {forge: {value: example-forge}, repository: {claims: [namespace, project], join: /}, run_key: {claim: sub}}, introspection: {url: "https://issuer.example/introspect", client_id: example-gateway, client_secret_file: issuer-secret, cache: 30s}}`
-
 // TestTheForagerSchemaTakesTheGatewayService holds forager.schema.json to what the
-// reader takes of gateway.listen, gateway.tls and gateway.run_credentials, Forager's
-// run-credentials.schema.json: an HMAC algorithm, an issuer without an audience, a
-// run_key that is not sub and a TLS without its key fail it.
+// reader takes of gateway.listen and gateway.tls: a TLS without its key fails it, and so
+// does gateway.run_credentials, which is no key of the file.
 func TestTheForagerSchemaTakesTheGatewayService(t *testing.T) {
 	schema, err := jsonschema.NewCompiler().Compile(filepath.Join("..", "..", "contracts", "harness", "v1", "forager.schema.json"))
 	if err != nil {
@@ -27,17 +23,14 @@ func TestTheForagerSchemaTakesTheGatewayService(t *testing.T) {
 		body  string
 		valid bool
 	}{
-		{"gateway: {listen: \"0.0.0.0:8443\", tls: {certificate: gateway.pem, key: gateway-key.pem}, run_credentials: [" + issuerSection + "]}\n", true},
+		{"gateway: {listen: \"0.0.0.0:8443\", tls: {certificate: gateway.pem, key: gateway-key.pem}}\n", true},
 		{"gateway: {listen: \"127.0.0.1:8443\"}\n", true},
 		{"gateway: {listen: \"[::1]:8443\"}\n", true},
 		{"gateway: {listen: gateway.example}\n", false},
 		{"gateway: {tls: {certificate: gateway.pem}}\n", false},
 		{"gateway: {tls: {certificate: gateway.pem, key: gateway-key.pem, ca: ca.pem}}\n", false},
 		{"gateway: {run_credentials: []}\n", false},
-		{"gateway: {run_credentials: [" + strings.Replace(issuerSection, "[RS256]", "[HS256]", 1) + "]}\n", false},
-		{"gateway: {run_credentials: [" + strings.Replace(issuerSection, "audience: qory-gateway, ", "", 1) + "]}\n", false},
-		{"gateway: {run_credentials: [" + strings.Replace(issuerSection, "{claim: sub}", "{claim: jti}", 1) + "]}\n", false},
-		{"gateway: {run_credentials: [" + strings.Replace(issuerSection, "client_secret_file: issuer-secret, ", "client_secret: x, ", 1) + "]}\n", false},
+		{"gateway: {run_credentials: [{issuer: \"https://issuer.example\"}]}\n", false},
 		{"session: {listen: \"0.0.0.0:8443\"}\n", false},
 	} {
 		var doc any
@@ -50,12 +43,12 @@ func TestTheForagerSchemaTakesTheGatewayService(t *testing.T) {
 	}
 }
 
-// TestTheGatewayServiceReads is gateway.listen, gateway.tls and gateway.run_credentials
-// read: each as written, a relative path resolved under forager.yaml's directory, and
-// what Forager's schema or the reader refuses an error that names the file and the key.
+// TestTheGatewayServiceReads is gateway.listen and gateway.tls read: each as written, a
+// relative path resolved under forager.yaml's directory, and what the reader refuses an
+// error that names the file and the key. gateway.run_credentials is no key of the file.
 func TestTheGatewayServiceReads(t *testing.T) {
 	hermetic(t)
-	path := foragerFile(t, "apiVersion: qory.dev/v1alpha1\ngateway:\n  listen: 0.0.0.0:8443\n  tls: {certificate: gateway.pem, key: /etc/qory/gateway-key.pem}\n  run_credentials: ["+issuerSection+"]\n")
+	path := foragerFile(t, "apiVersion: qory.dev/v1alpha1\ngateway:\n  listen: 0.0.0.0:8443\n  tls: {certificate: gateway.pem, key: /etc/qory/gateway-key.pem}\n")
 	r, err := config.LoadForager()
 	if err != nil {
 		t.Fatal(err)
@@ -69,14 +62,11 @@ func TestTheGatewayServiceReads(t *testing.T) {
 	if got := r.Path(r.TLS.Key); got != "/etc/qory/gateway-key.pem" {
 		t.Errorf("the key resolves to %s, want it as written", got)
 	}
-	if len(r.RunCredentials) != 1 || r.RunCredentials[0].Issuer != "https://issuer.example" || r.RunCredentials[0].Introspection == nil || r.RunCredentials[0].Introspection.ClientSecretFile != "issuer-secret" {
-		t.Errorf("run credentials %+v", r.RunCredentials)
-	}
 	for _, c := range []struct{ body, want string }{
 		{"gateway: {listen: gateway.example}\n", `gateway.listen is not host:port, such as 0.0.0.0:8443`},
 		{"gateway: {listen: \"0.0.0.0:99999\"}\n", `gateway.listen is not host:port, such as 0.0.0.0:8443`},
 		{"gateway: {tls: {certificate: gateway.pem}}\n", "gateway.tls needs both certificate and key"},
-		{"gateway: {run_credentials: [" + strings.Replace(issuerSection, "[RS256]", "[HS256]", 1) + "]}\n", "gateway.run_credentials: "},
+		{"gateway: {run_credentials: [{issuer: \"https://issuer.example\"}]}\n", `line 2: key "run_credentials" is not one forager.yaml reads`},
 	} {
 		path := foragerFile(t, "apiVersion: qory.dev/v1alpha1\n"+c.body)
 		_, err := config.LoadForager()

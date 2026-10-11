@@ -53,13 +53,13 @@ func TestRunEndedSaysTheOutcome(t *testing.T) {
 			"the run was lost: it lost contact with the gateway for 1m30s, and claude was stopped\n", 1},
 		{"the gateway stopped", closed("failed", event.ReasonRunClosed), "",
 			"the run failed: the gateway stopped during the run, and claude was stopped\n", 1},
-		{"an expiry with no time", closed("cancelled", event.ReasonCredentialExpired), "",
+		{"an expiry with no time", closed("cancelled", oldReasonCredentialExpired), "",
 			"the run was cancelled: the run credential expired, and claude was stopped\n", 1},
-		{"an expiry before the gateway gives its state", closed("failed", event.ReasonCredentialExpired), "",
+		{"an expiry before the gateway gives its state", closed("failed", oldReasonCredentialExpired), "",
 			"the run was cancelled: the run credential expired, and claude was stopped\n", 1},
-		{"no answer to the check", closed("failed", event.ReasonCredentialCheckUnreachable), "",
+		{"no answer to the check", closed("failed", oldReasonCredentialUnreachable), "",
 			"the run failed: its run credential could not be checked, and claude was stopped\n", 1},
-		{"no valid answer to the check", closed("failed", event.ReasonCredentialCheckInvalid), "",
+		{"no valid answer to the check", closed("failed", oldReasonCredentialInvalid), "",
 			"the run failed: its run credential could not be checked, and claude was stopped\n", 1},
 		{"stopped with no outcome", closed("cancelled", event.ReasonStopped), "",
 			"the run was cancelled, with no outcome given, and claude was stopped\n", 1},
@@ -146,33 +146,6 @@ func TestRunEndedMarksTheOutcome(t *testing.T) {
 	}
 }
 
-// TestRunEndedSaysTheExpiryBySource is a run the gateway closed at the run credential's
-// expiry, cancelled, in the words of where the credential came from when qory can read
-// its exp, and without the time when it cannot. Exit 1 either way.
-func TestRunEndedSaysTheExpiryBySource(t *testing.T) {
-	exp := time.Unix(1791549000, 0).UTC().Format(time.RFC3339)
-	fromVariable := &runCredential{variable: unsignedCredential(`{"exp":1791549000}`)}
-	fromVariable.get(context.Background())
-	fromFD := &runCredential{fd: streamOf(unsignedCredential(`{"exp":1791549000}`))}
-	fromFD.get(context.Background())
-	unread := &runCredential{variable: "no-exp"}
-	unread.get(context.Background())
-	res := &session.Result{RunClosed: true, ClosedReason: event.ReasonCredentialExpired, State: "cancelled", Reason: event.ReasonCredentialExpired, ExitCode: -1}
-	for _, c := range []struct {
-		credential *runCredential
-		want       string
-	}{
-		{fromVariable, "the run was cancelled: the run credential expired at " + exp + "; QORY_RUN_CREDENTIAL_SECRET is read once, so a run longer than its credential needs session.gateway.run_credential_file or --run-credential-fd\n"},
-		{fromFD, "the run was cancelled: the run credential expired at " + exp + ", and the descriptor gave no fresh one\n"},
-		{unread, "the run was cancelled: the run credential expired, and claude was stopped\n"},
-	} {
-		said, code := endOf(res, runEnd{runtime: "claude", credential: c.credential})
-		if said != c.want || code != 1 {
-			t.Errorf("said %q, exit %d; want %q, exit 1", said, code, c.want)
-		}
-	}
-}
-
 // TestGatewayEndedResendSaysTheOutcome is qory run resend's one line of a run that had
 // ended at the gateway: its outcome, and its reason in the words of qory run, or the
 // starter's with spaces; a run whose end nothing records ends as the code of the
@@ -190,8 +163,8 @@ func TestGatewayEndedResendSaysTheOutcome(t *testing.T) {
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonStopped, State: "failed"}, "the run has ended (failed)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonSessionLost, State: "failed", Reason: event.ReasonSessionLost}, "the run has ended (lost: it lost contact with the gateway for 1m30s)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonBatchRefused, State: "failed", Reason: event.ReasonBatchRefused}, "the run has ended (failed: its events could not be recorded)" + tail},
-		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonCredentialExpired, State: "failed", Reason: event.ReasonCredentialExpired}, "the run has ended (cancelled: the run credential expired)" + tail},
-		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonCredentialCheckUnreachable, State: "failed", Reason: event.ReasonCredentialCheckUnreachable}, "the run has ended (failed: its run credential could not be checked)" + tail},
+		{session.ResendResult{RunClosed: true, ClosedReason: oldReasonCredentialExpired, State: "failed", Reason: oldReasonCredentialExpired}, "the run has ended (cancelled: the run credential expired)" + tail},
+		{session.ResendResult{RunClosed: true, ClosedReason: oldReasonCredentialUnreachable, State: "failed", Reason: oldReasonCredentialUnreachable}, "the run has ended (failed: its run credential could not be checked)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "succeeded"}, "the run has ended (completed)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "cancelled", Reason: event.ReasonTimeout}, "the run has ended (cancelled)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "failed", Reason: event.ReasonRunClosed}, "the run has ended (failed: the gateway stopped during the run)" + tail},
@@ -200,10 +173,10 @@ func TestGatewayEndedResendSaysTheOutcome(t *testing.T) {
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonRunClosed}, "the run has ended (failed: the gateway stopped during the run)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonStopped}, "the run has ended (cancelled)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "cancelled", Reason: event.ReasonInterrupted}, "the run has ended (cancelled)" + tail},
-		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonCredentialExpired}, "the run has ended (cancelled: the run credential expired)" + tail},
+		{session.ResendResult{RunClosed: true, ClosedReason: oldReasonCredentialExpired}, "the run has ended (cancelled: the run credential expired)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonSessionLost}, "the run has ended (lost: it lost contact with the gateway for 1m30s)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonBatchRefused}, "the run has ended (failed: its events could not be recorded)" + tail},
-		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonCredentialCheckInvalid}, "the run has ended (failed: its run credential could not be checked)" + tail},
+		{session.ResendResult{RunClosed: true, ClosedReason: oldReasonCredentialInvalid}, "the run has ended (failed: its run credential could not be checked)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: "another_code"}, "the run has ended (failed: the gateway stopped during the run)" + tail},
 	} {
 		got := gatewayEndedResend(c.res, "runs/x").Error()
@@ -270,7 +243,7 @@ func TestRunEndedSaysTheEndTheGatewayRecordedAfterTheExit(t *testing.T) {
 			"claude exited 3\nthe run was lost: it lost contact with the gateway for 1m30s\n", 1},
 		{"a batch refused after exit 0", &session.Result{State: "succeeded"}, gw("failed", event.ReasonBatchRefused),
 			"claude exited 0\nthe run failed: its events could not be recorded\n", 1},
-		{"a reason with no words", &session.Result{State: "succeeded"}, gw("cancelled", event.ReasonQuiet),
+		{"a reason with no words", &session.Result{State: "succeeded"}, gw("cancelled", oldReasonQuiet),
 			"claude exited 0\nthe run was cancelled\n", 1},
 		{"interrupted, with no words", &session.Result{State: "succeeded"}, gw("cancelled", event.ReasonInterrupted),
 			"claude exited 0\nthe run was cancelled\n", 1},
