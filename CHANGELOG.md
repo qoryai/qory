@@ -358,8 +358,8 @@ release may change what an existing document does, and states it under Upgrading
   `QORY_HARNESS_HOME`. A module's export is a default like the others: the server's
   value, `--env` and `wall.env` win over it, and the deny list leaves out one whose name
   it holds. They reach the agent in the container and outside it alike.
-- qory builds against `github.com/qoryai/forager` at commit `55f2d9f` of its `next`,
-  `v0.6.1-0.20261011105629-55f2d9f4e930`, contract `v1` revision 1 as amended there.
+- qory builds against `github.com/qoryai/forager` at commit `f092687` of its `next`,
+  `v0.6.1-0.20261011193135-f0926870ffa3`, contract `v1` revision 1 as amended there.
   `qory run` starts Forager's gateway on this machine for each run: it holds the proxy,
   the policy, the credentials and the access key, and sends the run's events to the
   server; the session speaks to it alone, and records its events in the run's
@@ -472,8 +472,8 @@ release may change what an existing document does, and states it under Upgrading
   command within the code's 15 minutes succeeds. A signed 429, `rate_limited`, means the code
   was tried too often: qory keeps the key and says `the server refused the attempt: this
   code was tried too often; run the same command again later, within the code's 15
-  minutes`. A 401 for a code you did not use means the
-  code's issuer must revoke the key it enrolled.
+  minutes`. A 401 for a code you did not use means someone else used it: the owner or
+  administrator in Qory Apiary who made the code must revoke the key it enrolled.
 - `qory harness compose` takes a branch's current commit on every compose, without
   `--update`. A tag or a commit id stays pinned. Offline, it keeps the cached commit and
   warns.

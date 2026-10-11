@@ -811,27 +811,43 @@ func Find(main, name string) (Entry, error) {
 // leaves out and what it found.
 func (r runner) own(path, branch string) (int, string) {
 	args := []string{"rev-list", "HEAD", "--not", "--remotes"}
-	notOn := []string{"every remote branch"}
-	if head, err := r.git(r.main, "rev-parse", "HEAD"); err == nil {
+	head, err := r.git(r.main, "rev-parse", "HEAD")
+	if err == nil {
 		args = append(args, head)
-		notOn = append(notOn, "the main checkout's HEAD "+short(head))
-	}
-	if base := r.recordedBase(branch); base != "" {
-		args = append(args, base)
-		notOn = append(notOn, "its recorded base "+base)
 	} else {
-		notOn = append(notOn, "no base, since none is recorded for it")
+		head = ""
 	}
-	r.say("counting the commits of %s that are not on %s", branch, strings.Join(notOn, ", "))
+	base := r.recordedBase(branch)
+	if base != "" {
+		args = append(args, base)
+	}
+	r.say("counting the commits only on %s: %s", branch, onlyOn(head, base))
 	out, err := r.git(path, args...)
 	if err != nil || out == "" {
-		r.say("%s has no unpushed commit", branch)
+		r.say("%s has no commit that is only on it", branch)
 		return 0, ""
 	}
 	commits := strings.Split(out, "\n")
 	subject, _ := r.git(path, "log", "-1", "--format=%s", commits[0])
-	r.say("%s has %d unpushed commit%s, the newest %s %q", branch, len(commits), plural(len(commits)), short(commits[0]), subject)
+	r.say("%d commit%s only on %s, the newest %s %q", len(commits), plural(len(commits)), branch, short(commits[0]), subject)
 	return len(commits), subject
+}
+
+// onlyOn defines, for the trace, the commits [runner.own] counts: on no remote branch, not
+// in the main checkout's HEAD when head is read, and not on the recorded base, or on no
+// base when base is "". The clauses are joined by ", ", with " and " before the last.
+func onlyOn(head, base string) string {
+	clauses := []string{"on no remote branch"}
+	if head != "" {
+		clauses = append(clauses, "not in the main checkout's HEAD "+short(head))
+	}
+	if base != "" {
+		clauses = append(clauses, "not on its recorded base "+base)
+	} else {
+		clauses = append(clauses, "on no base, since none is recorded for it")
+	}
+	last := len(clauses) - 1
+	return strings.Join(clauses[:last], ", ") + " and " + clauses[last]
 }
 
 // landingBase is the base a branch's change lands on: its recorded base, else the

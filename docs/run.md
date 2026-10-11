@@ -492,7 +492,7 @@ When the enrolment does not complete:
 
 | Answer | What qory does |
 | --- | --- |
-| 401, `unauthorized` | the code was used or has expired. The secret made for it, in `access-key-secret.new`, is moved aside, and enrolling needs a new code. If you did not use the code, someone else did: tell the owner or administrator in Qory Apiary who made it. The code's issuer must revoke the key it enrolled |
+| 401, `unauthorized` | the code was used or has expired. The secret made for it, in `access-key-secret.new`, is moved aside, and enrolling needs a new code. If you did not use the code, someone else did: tell the owner or administrator in Qory Apiary who made it. They must revoke the key the code enrolled |
 | `key_invalid` | the server refused the key. The secret made for it, in `access-key-secret.new`, is moved aside, and enrolling needs a new code |
 | `key_limit` | the node already holds two keys. qory keeps the key: once an owner or administrator in Qory Apiary has revoked one of them, the same command within the 15 minutes succeeds |
 | 429, `rate_limited`, signed | this code was tried too often. `forager.yaml` is not changed. qory keeps the key, and the same command, run later within the code's 15 minutes, retries with it. An unsigned 429 is an `answer_unsigned` |
@@ -871,8 +871,9 @@ nothing there: `qory run` refuses each key of it beside `gateway.server`, such a
 `gateway.tls`, before anything starts or registers, exit 2, one line per key in
 alphabetical order: `<file>: gateway.<key> does nothing on this machine: gateway.server.via
 sends its runs through a gateway, which holds their policy, credentials, tools and
-integrations; remove gateway.<key>, or remove gateway.server.via`. `qory run --local` starts a gateway itself,
-which reads their policy, credentials and integrations, so it is not refused.
+integrations; remove gateway.<key>, or remove gateway.server.via`. `qory run --local`
+starts a gateway itself, which reads their policy, credentials, tools and integrations, so
+it is not refused.
 
 When the server refuses the registration, qory says what the refusal means and what to do,
 then Forager's words and the code:
@@ -1230,9 +1231,9 @@ gateway:
 
 ### TLS on credential hosts
 
-For the hosts of the credentials the policy selects and the hosts with path rules, and no
-other, the proxy ends the container's TLS itself. It uses an authority made for the run.
-The authority's key never leaves the gateway.
+For the hosts of the credentials and tools the policy selects and the hosts with path
+rules, and no other, the proxy ends the container's TLS itself. It uses an authority made
+for the run. The authority's key never leaves the gateway.
 
 The container receives one bundle to trust: its image's authorities, and the run's
 certificate. The bundle goes in through these variables:
@@ -1293,11 +1294,12 @@ How it works:
   the container. The tool listens on the Unix socket `QORY_TOOL_LISTEN` names.
 - The proxy ends the container's TLS for the hosts the tool serves, decides the host and
   the path by the policy, and hands the tool each request it allows.
-- The record lists each request to such a host in `dev.qory.run.egress`, with `tool`, the
-  tool's name.
+- The record lists each request the proxy hands to a tool in `dev.qory.run.egress`, with
+  `tool`, the tool's name.
 
 A run whose policy selects a tool needs a wall; without one it does not start. Under
-`enforce`, the run's allow list covers each host the tool serves.
+`enforce`, the run's allow list must cover each host the tool serves, or the run does not
+start.
 
 With a server, the server's run configuration selects the tools: through a server, a tool
 is reached only once the server's run configuration selects it. Until then, a run reaches a

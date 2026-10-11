@@ -145,7 +145,7 @@ More: ` + gatewayDocs,
 			if gw.Tools, err = machineTools(r); err != nil {
 				return err
 			}
-			g, err := gateway.Start(ctx, gw)
+			g, err := startGateway(ctx, gw)
 			if err != nil {
 				var op *net.OpError
 				if errors.As(err, &op) && op.Op == "listen" {
@@ -169,6 +169,10 @@ More: ` + gatewayDocs,
 	c.Flags().IntVar(&secretFD, secretFDFlag, 0, secretFDUsage)
 	return c
 }
+
+// startGateway starts the gateway qory gateway runs, with the configuration qory built
+// from forager.yaml; a test replaces it to read that configuration.
+var startGateway = gateway.Start
 
 // foragerFileShown is forager.yaml's path as a person reads it, with the home
 // directory as ~.

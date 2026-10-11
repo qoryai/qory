@@ -253,7 +253,7 @@ func (p Probe) lookPath(name string, dirs []string) string {
 	return ""
 }
 
-// docker reports whether the image can carry a Docker of the agent's own: dockerd and
+// docker reports whether the image can carry a nested Docker for the agent: dockerd and
 // every program it runs in [SystemDirs], where Forager looks for the daemon and which
 // it gives the daemon as its PATH, and the docker command on the image's PATH, where
 // the agent finds it.

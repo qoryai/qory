@@ -726,16 +726,25 @@ func staticELF(t *testing.T) string {
 }
 
 // fakeDocker writes a program that stands in for docker: it logs every command line,
-// answers the two the wall reads, and for run logs the environment file, prints a line
-// and exits 4, as a container's runtime would.
+// answers the two the wall reads and, as Docker Engine 28, the engine's version a run
+// with nested Docker asks for, adds an IPv6 subnet to the inside network created with
+// --ipv6, and for run logs the environment file, prints a line and exits 4, as a
+// container's runtime would.
 func fakeDocker(t *testing.T) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
 	log := filepath.Join(dir, "docker.log")
+	ipv6 := filepath.Join(dir, "ipv6")
 	script := filepath.Join(dir, "docker")
 	writeFile(t, script, `#!/bin/sh
 echo "$*" >> `+log+`
+case "$*" in
+"network create "*" --ipv6 "*) : > `+ipv6+` ;;
+"network create "*" --internal "*) rm -f `+ipv6+` ;;
+"network inspect "*.Subnet*) test -e `+ipv6+` && { echo "172.30.0.1 fd00:db8::/64 "; exit 0; } ;;
+esac
 case "$1 $2" in
+"version --format") echo "28.0.0" ;;
 "network inspect") echo "172.30.0.1 " ;;
 "logs "*) echo "relay: listening" ;;
 "run "*)
@@ -782,7 +791,7 @@ case "$1 $2" in
 	entry=
 	while [ $# -gt 0 ]; do
 		case "$1" in
-		--rm|--interactive|--tty|--init) shift ;;
+		--rm|--interactive|--tty|--init|--no-healthcheck) shift ;;
 		--env-file) envfile=$2; shift 2 ;;
 		--entrypoint) entry=$2; shift 3; break ;;
 		*) shift 2 ;;
@@ -1900,7 +1909,8 @@ func TestResendSaysTheServerWantsNoMoreEvents(t *testing.T) {
 	srv.unavailable = true
 	const awayID = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5ec3"
 	dir, _, _, owed = record(t, awayID)
-	out, err = run(t, "run", "resend", awayID, "--wait", "2s")
+	// The server answers every try a 503, so a short --wait says the same as a long one.
+	out, err = run(t, "run", "resend", awayID, "--wait", "300ms")
 	want = fmt.Sprintf(resendNotAccepted, 0, owed, ui.Short(dir, root)) + "\n"
 	if cmd.ExitCode(err) != 1 || out != want {
 		t.Errorf("a server away: %v (exit %d)\n%q\nwant\n%q", err, cmd.ExitCode(err), out, want)
@@ -1971,7 +1981,8 @@ rules:
     data: {session_id: session, outcome: text, is_error: ok}
 `)
 	t.Setenv("QORY_TEST_WAIT", "1")
-	out, err = run(t, "run", "--headless", "--timeout", "500ms")
+	// A short grace: the runtime's sleep holds its output open until the grace ends, 10s by default.
+	out, err = run(t, "run", "--headless", "--timeout", "500ms", "--stop-grace", "1s")
 	if cmd.ExitCode(err) != 124 {
 		t.Fatalf("%v\n%s", err, out)
 	}
