@@ -537,7 +537,8 @@ func TestGatewayRefusesAnotherUsersDirectory(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			emptyDir(t)
-			serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n")
+			serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n"+gatewayTLS)
+			writeCertificate(t)
 			path := filepath.Join(os.Getenv("XDG_STATE_HOME"), c.name)
 			if err := os.MkdirAll(path, 0o700); err != nil {
 				t.Fatal(err)

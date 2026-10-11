@@ -41,14 +41,31 @@ func TestRunTakesTheSecretFromADescriptor(t *testing.T) {
 	}
 }
 
+// pipeHolds is the most descriptor writes into a pipe before the command reads it: a
+// pipe holds at least this much, PIPE_BUF, wherever the tests run, as root in a
+// container included, where a pipe can hold as little as one or two pages.
+const pipeHolds = 4096
+
 // descriptor is the number of the read end of a pipe that holds value, its write end
-// closed. The descriptor is raw, owned by no os.File, so the command that reads it
-// closes it alone.
+// closed once all of value is written. The descriptor is raw, owned by no os.File, so
+// the command that reads it closes it alone. A value a pipe may not hold is written
+// from a goroutine as the command reads it, so the write never blocks the test; the
+// command refuses such a value before it starts anything that could inherit the write
+// end.
 func descriptor(t *testing.T, value string) string {
 	t.Helper()
 	var p [2]int
 	if err := syscall.Pipe(p[:]); err != nil {
 		t.Fatal(err)
+	}
+	if len(value) > pipeHolds {
+		go func() {
+			// The command may close the read end before it has read everything; the
+			// rest of the write then fails, and that is all.
+			_, _ = syscall.Write(p[1], []byte(value))
+			syscall.Close(p[1])
+		}()
+		return strconv.Itoa(p[0])
 	}
 	if _, err := syscall.Write(p[1], []byte(value)); err != nil {
 		t.Fatal(err)
