@@ -56,8 +56,14 @@ func (d Dir) WriteRunKey(runID, key string) error {
 // ReadRunKey reads the run key kept for the run runID, whose id the caller checked:
 // from a regular file, not a link, that the effective user owns and that grants nothing
 // to the group or to others, in a directory that is the user's alone. A run whose key
-// is not kept is [ErrNoRunKey]. No error contains the key.
+// is not kept is [ErrNoRunKey]. A run-keys directory that is a link is refused, as
+// [Dir.WriteRunKey] refuses it. No error contains the key.
 func (d Dir) ReadRunKey(runID string) (string, error) {
+	if err := d.runKeysNotLinked(); errors.Is(err, fs.ErrNotExist) {
+		return "", ErrNoRunKey
+	} else if err != nil {
+		return "", err
+	}
 	path := d.runKeyPath(runID)
 	if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
 		return "", ErrNoRunKey
@@ -92,10 +98,31 @@ func (d Dir) ReadRunKey(runID string) (string, error) {
 }
 
 // RemoveRunKey removes the run key kept for the run runID, whose id the caller checked;
-// one that is not kept is no error.
+// one that is not kept is no error. A run-keys directory that is a link is refused, as
+// [Dir.WriteRunKey] refuses it, and nothing where it leads is removed.
 func (d Dir) RemoveRunKey(runID string) error {
+	if err := d.runKeysNotLinked(); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
 	if err := os.Remove(d.runKeyPath(runID)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
+	}
+	return nil
+}
+
+// runKeysNotLinked checks run-keys without following a link: a link is refused in
+// [MakePrivateDir]'s words, and a directory that is not there is an error that is
+// [fs.ErrNotExist].
+func (d Dir) runKeysNotLinked() error {
+	dir := filepath.Join(string(d), RunKeysDir)
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&fs.ModeSymlink != 0 {
+		return fmt.Errorf("%s is a symbolic link; it must be the directory itself", dir)
 	}
 	return nil
 }

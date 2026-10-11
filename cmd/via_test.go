@@ -226,3 +226,47 @@ func TestResendTakesTheKeptRunKey(t *testing.T) {
 		t.Errorf("a resend sent %v through via", relayed)
 	}
 }
+
+// TestAMachineBehindViaSaysItsGatewaysRefusals is the server refusing a registration
+// through gateway.server.via because the node's gateway cannot take the run: no default
+// gateway, a gateway that no longer serves the workspace, and one with no active access
+// key are each said of "this machine's node", then Forager's line, exit 1, before
+// anything starts, and nothing is kept.
+func TestAMachineBehindViaSaysItsGatewaysRefusals(t *testing.T) {
+	runKeyCheckout(t)
+	srv := newFakeServer(t, "")
+	srv.choose(receiver.Default, "https://gateway.example:8443", newKey(t))
+	via := newViaGateway(t, srv.URL)
+	walledServerFile(t, srv, via.via())
+	runURL := srv.URL + receiver.DefaultRunPath
+	for _, c := range []struct {
+		name  string
+		setup func()
+		want  string
+	}{
+		{"no default", func() {
+			srv.handler.Nodes[testPool] = receiver.Node{Workspace: testWorkspace, Gateway: receiver.Default}
+			srv.handler.Workspaces[testWorkspace] = receiver.Workspace{Organisation: "or_0123456789abcdef"}
+		}, `this machine's node is set to "Default gateway", and no default gateway serves its workspace: mark a gateway as default in Qory Apiary, or choose one for the node (register ` + runURL + `: no_default_gateway (status 409))`},
+		{"not serving", func() {
+			srv.handler.Nodes[testPool] = receiver.Node{Workspace: testWorkspace, Gateway: "ng_0000000000000000"}
+		}, "the gateway this machine's node names no longer serves the node's workspace: choose another gateway for the node in Qory Apiary (register " + runURL + ": gateway_not_serving (status 409))"},
+		{"no gateway key", func() {
+			srv.handler.Nodes[testPool] = receiver.Node{Workspace: testWorkspace, Gateway: testGatewayNode}
+			srv.gatewayKey = nil
+		}, "the gateway this machine's node goes through has no active access key, so no run could start there: enrol a key for the gateway, then register again (register " + runURL + ": gateway_without_key (status 409))"},
+	} {
+		srv.mu.Lock()
+		c.setup()
+		srv.mu.Unlock()
+		out, err := run(t, "run")
+		if err == nil || err.Error() != c.want || cmd.ExitCode(err) != 1 {
+			t.Errorf("%s: %v (exit %d)\nwant %q", c.name, err, cmd.ExitCode(err), c.want)
+		}
+		wants(t, out, "qory run: node "+testPool+", instance ")
+		lacks(t, out, "through the gateway", "hello from")
+		if entries, _ := os.ReadDir(filepath.Join(string(configDir()), foragerdir.RunKeysDir)); len(entries) != 0 {
+			t.Errorf("%s: a refused run kept %d run keys", c.name, len(entries))
+		}
+	}
+}

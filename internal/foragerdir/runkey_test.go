@@ -82,3 +82,45 @@ func TestARunKeyIsKeptPrivately(t *testing.T) {
 		t.Errorf("run-keys as a link: %v", err)
 	}
 }
+
+// TestARunKeysDirectoryThatIsALinkIsNotFollowed is run-keys a link to a directory that
+// holds a run's key: reading the kept key and removing it refuse the link, as keeping
+// one does, in the same words, without the key; the key where the link leads is neither
+// read nor removed. A run-keys that is not there is still no kept key, and nothing to
+// remove.
+func TestARunKeysDirectoryThatIsALinkIsNotFollowed(t *testing.T) {
+	const id, key = "0192f0c1-7d4e-7a2b-8c3d-4e5f6a7b8c9d", "qrk_payload.signature"
+	d := newDir(t)
+	if err := d.RemoveRunKey(id); err != nil {
+		t.Errorf("remove with no run-keys: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(string(d), foragerdir.RunKeysDir)); !os.IsNotExist(err) {
+		t.Errorf("removing made run-keys: %v", err)
+	}
+
+	elsewhere := t.TempDir()
+	if err := os.Chmod(elsewhere, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	kept := filepath.Join(elsewhere, id)
+	if err := os.WriteFile(kept, []byte(key+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(string(d), foragerdir.RunKeysDir)
+	if err := os.Symlink(elsewhere, link); err != nil {
+		t.Fatal(err)
+	}
+	want := link + " is a symbolic link; it must be the directory itself"
+	if got, err := d.ReadRunKey(id); err == nil || err.Error() != want || strings.Contains(got, key) {
+		t.Errorf("read through a linked run-keys: %q, %v\nwant %q", got, err, want)
+	}
+	if err := d.RemoveRunKey(id); err == nil || err.Error() != want {
+		t.Errorf("remove through a linked run-keys: %v\nwant %q", err, want)
+	}
+	if err := d.WriteRunKey(id, key); err == nil || err.Error() != want {
+		t.Errorf("write through a linked run-keys: %v\nwant %q", err, want)
+	}
+	if b, err := os.ReadFile(kept); err != nil || string(b) != key+"\n" {
+		t.Errorf("the key where the link leads: %q, %v", b, err)
+	}
+}

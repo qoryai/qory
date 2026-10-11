@@ -387,7 +387,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					gw.Report(closeErr.Error())
 				}
 			}
-			if kept && (err != nil && !recorded(record) || err == nil && (res.Undelivered == 0 || res.RunClosed)) {
+			if kept && nothingLeftToSend(err, record, res) {
 				dropKeptRunKey(spec.RunID, func(line string) { fmt.Fprintln(stderr, "qory run:", line) })
 			}
 			if err != nil {
@@ -1451,6 +1451,18 @@ const (
 func recorded(dir string) bool {
 	_, err := os.Lstat(dir)
 	return err == nil
+}
+
+// nothingLeftToSend reports whether a run through a separate gateway that ended with
+// err, res its result, has nothing left to send, so the run key kept for it can go: it
+// failed before it made its record, at record, or it ended with every event delivered
+// or with its run closed. A run that made its record and failed, or that left events
+// undelivered on a run that is not closed, keeps its key for qory run resend.
+func nothingLeftToSend(err error, record string, res *session.Result) bool {
+	if err != nil {
+		return !recorded(record)
+	}
+	return res.Undelivered == 0 || res.RunClosed
 }
 
 // stateDir is qory's state directory, absolute: $XDG_STATE_HOME/qory, else
