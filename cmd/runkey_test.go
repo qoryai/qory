@@ -322,7 +322,7 @@ func TestResendGoesWhereTheRunWent(t *testing.T) {
 
 	t.Setenv("QORY_RUN_KEY", "")
 	out, err := run(t, "run", "resend", keyRunID)
-	if want := "resend " + dir + ": the run key is needed to send to its gateway; set QORY_RUN_KEY"; err == nil || err.Error() != want {
+	if want := "resend " + dir + ": the run key is needed to send to its gateway; set QORY_RUN_KEY"; err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Errorf("without a run key: %v (exit %d)\nwant %q\n%s", err, cmd.ExitCode(err), want, out)
 	}
 

@@ -323,7 +323,19 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return err
 			}
 			defer runLock.Release()
-			if id != nil {
+			// A machine with its own access key and gateway.server.via registers the run
+			// itself, through via, and runs it through the gateway the run key names, as a
+			// run its starter registered does. The run key it keeps beside forager.yaml goes
+			// once nothing of the run is left to send.
+			kept := runsThroughVia(conf.Forager, id)
+			switch {
+			case kept:
+				if key, err = registerThroughVia(ctx, conf.Forager, id, spec.RunID, named, about, stderr); err != nil {
+					return err
+				}
+				remote = true
+				spec.Labels, spec.About = nil, nil
+			case id != nil:
 				gw.Discovered = discovered(machineDir(), id, "run", stderr)
 			}
 			apiary := ""
@@ -374,6 +386,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if closeErr != nil {
 					gw.Report(closeErr.Error())
 				}
+			}
+			if kept && (err != nil && !recorded(record) || err == nil && (res.Undelivered == 0 || res.RunClosed)) {
+				dropKeptRunKey(spec.RunID, func(line string) { fmt.Fprintln(stderr, "qory run:", line) })
 			}
 			if err != nil {
 				lines.done(nil)
@@ -1301,7 +1316,7 @@ func configLinks(dir string) (files []string, shown map[string]string) {
 	resolved, err := filepath.EvalSymlinks(dir)
 	exists := err == nil
 	inside := func(p string) bool { return exists && within(resolved, p) }
-	names := append([]string{".", config.ForagerFileName, DescriptorsDir}, config.Names...)
+	names := append([]string{".", config.ForagerFileName, DescriptorsDir, foragerdir.RunKeysDir}, config.Names...)
 	if entries, err := os.ReadDir(filepath.Join(dir, DescriptorsDir)); err == nil {
 		for _, e := range entries {
 			if strings.EqualFold(filepath.Ext(e.Name()), ".yaml") {
@@ -1431,6 +1446,12 @@ const (
 	codeMountSharedWithRun        = "mount_shared_with_run"
 	codeEngineUnreachable         = "engine_unreachable"
 )
+
+// recorded reports whether the run directory dir is there: a run that started has one.
+func recorded(dir string) bool {
+	_, err := os.Lstat(dir)
+	return err == nil
+}
 
 // stateDir is qory's state directory, absolute: $XDG_STATE_HOME/qory, else
 // ~/.local/state/qory when XDG_STATE_HOME is unset or not absolute.
@@ -1573,6 +1594,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 				return err
 			}
 			if behind {
+				// A run this machine registered through gateway.server.via has its run key
+				// kept beside forager.yaml, which goes once nothing is left to send.
+				if key == nil {
+					if key, err = keptRunKey(args[0]); err != nil {
+						return err
+					}
+				}
 				sig, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 				defer stop()
 				return resendThroughGateway(sig, wait, stderr, r, key, args[0], dir, at.root, report)
@@ -1589,6 +1617,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 			}
 			if r == nil || r.Server == nil {
 				return input(fmt.Errorf("%s defines no server to send the record to", config.ForagerFileName))
+			}
+			if r.Server.Via != nil {
+				return ownGatewayViaResend(args[0])
 			}
 			id, err := identify(r, stderr, "run resend", fdKey)
 			if err != nil {
@@ -1670,8 +1701,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 // resendThroughGatewayHelp is the paragraph of qory run resend's help on a run that went
 // through a separate gateway.
 const resendThroughGatewayHelp = `A run that went through a separate gateway sends its record to that gateway instead,
-with its run key, QORY_RUN_KEY. The exit status is 0 when nothing is left to send, and 1
-when events remain or the gateway takes no more of them.`
+with its run key: QORY_RUN_KEY, or, on a machine that registered the run itself, the run
+key qory kept for it. The exit status is 0 when nothing is left to send, and 1 when events
+remain or the gateway takes no more of them.`
 
 // The kinds of Forager's report lines qory holds back until it knows whether its own
 // line says the same: a run that never opened, gateway.ResendNotOpened and

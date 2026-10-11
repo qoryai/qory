@@ -245,11 +245,17 @@ func explain(err error, id *serverIdentity) error {
 		text = "an answer of the server does not verify under the pinned apiary_public_key, so the run does not start: check gateway.server.url and the pin"
 	case accesskey.CodeInstanceLimit:
 		text = fmt.Sprintf("the node's live instances have reached its limit, so the instance %s does not start: wait for a run of another instance to end, or have an owner or administrator in Qory Apiary clear that instance", instance)
+	case codeNodeUsesGateway:
+		text = `this machine's node goes through a gateway, and gateway.server.via is not set: set gateway.server.via.url to the gateway's address, or set the node to "Direct" in Qory Apiary`
 	default:
 		return err
 	}
 	return &refusedError{text: text, err: err}
 }
+
+// codeNodeUsesGateway is the server's refusal of a run a machine registered itself,
+// whose node goes through a gateway.
+const codeNodeUsesGateway = "node_uses_gateway"
 
 // codeServerNeedsWall is the refusal of an unwalled run while the machine keeps stored
 // secrets: the stored-secrets marker exists, which a discovery that lists them writes.

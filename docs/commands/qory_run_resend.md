@@ -15,8 +15,9 @@ The exit status is 0 when the server has everything, or never opened the run, an
 events remain, or the server said stop.
 
 A run that went through a separate gateway sends its record to that gateway instead,
-with its run key, QORY_RUN_KEY. The exit status is 0 when nothing is left to send, and 1
-when events remain or the gateway takes no more of them.
+with its run key: QORY_RUN_KEY, or, on a machine that registered the run itself, the run
+key qory kept for it. The exit status is 0 when nothing is left to send, and 1 when events
+remain or the gateway takes no more of them.
 
 --verbose adds nothing here.
 

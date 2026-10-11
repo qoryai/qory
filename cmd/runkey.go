@@ -263,6 +263,11 @@ func resendThroughGateway(sig context.Context, wait time.Duration, w io.Writer, 
 	lines.done(func(kind int) bool {
 		return kind == heldNotOpened && err == nil && res.NotOpened && !res.RunClosed && res.Undelivered == 0
 	})
+	if err == nil && (res.Undelivered == 0 || res.RunClosed) {
+		// Nothing is left to send, or the gateway ended the run: a run key this machine
+		// kept for the run has done its work.
+		dropKeptRunKey(runID, report)
+	}
 	shown := ui.Short(dir, root)
 	var pe *fs.PathError
 	switch {
@@ -272,6 +277,9 @@ func resendThroughGateway(sig context.Context, wait time.Duration, w io.Writer, 
 		return input(fmt.Errorf("no run %s is recorded in this checkout", runID))
 	case errors.As(err, &pe) && errors.Is(err, fs.ErrExist) && pe.Path == filepath.Join(dir, sink.EventsFile):
 		return input(ownGatewayResend(runID, err))
+	case err != nil && k == nil && strings.HasSuffix(err.Error(), runKeyNeeded):
+		// Forager's own line, word for word: the run key is missing from the input.
+		return input(err)
 	case err != nil:
 		return explain(err, nil)
 	}
@@ -299,6 +307,10 @@ func resendThroughGateway(sig context.Context, wait time.Duration, w io.Writer, 
 	u.Success("%d events were accepted; nothing is left to send to the gateway", res.Sent)
 	return nil
 }
+
+// runKeyNeeded ends Forager's error of a resend through a gateway without the run key,
+// which has no sentinel of its own.
+const runKeyNeeded = ": the run key is needed to send to its gateway; set QORY_RUN_KEY"
 
 // ownGatewayResend is the refusal of a resend with a run key given of the run runID,
 // which ran with a gateway of its own on this machine: its record goes to the server.
