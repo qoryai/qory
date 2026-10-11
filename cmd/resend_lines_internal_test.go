@@ -63,7 +63,7 @@ func TestRunLinesLeaveOutForagersRepeats(t *testing.T) {
 		limit       = "the runtime was stopped at the limit of 5m0s"
 		undelivered = "3 events were not accepted by the server; see /runs/x/undelivered"
 		silent      = "run " + id + ": its session sent nothing for 1m30s; the run ends, session_lost"
-		refused     = "run " + id + ": the gateway refused a batch of its session's, too large; the run ends: failed"
+		refused     = "run " + id + ": the gateway refused a batch from the run's session, too large; the run ends: failed"
 		other       = "run 0191f2a4-3c5e-7b8d-9e0f-000000000000: its session sent nothing for 1m30s; the run ends, session_lost"
 		sinks       = "closing the sinks: context deadline exceeded"
 	)

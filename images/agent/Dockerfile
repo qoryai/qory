@@ -77,7 +77,7 @@ ARG DEBIAN_SNAPSHOT
 ARG CLAUDE_CODE_VERSION
 
 # From the snapshot, through a copy of the base's sources that names it; the image keeps
-# its own sources, so what is built FROM it installs from Debian as usual.
+# the base's apt sources, so what is built FROM it installs from Debian as usual.
 RUN apt="-o Dir::Etc::SourceList=/tmp/snapshot.sources -o Dir::Etc::SourceParts=- -o Acquire::Check-Valid-Until=false" \
  && sed -e "s|^URIs: http://deb.debian.org/debian-security\$|URIs: http://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}|" \
         -e "s|^URIs: http://deb.debian.org/debian\$|URIs: http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}|" \

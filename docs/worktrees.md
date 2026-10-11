@@ -67,7 +67,8 @@ qory setup shell                 # make your shell cd into a new worktree, and b
 
 `-v` on `add` or `remove` prints each git command as it runs. It also prints what the
 configured commands print. On `add`, the compose lists its entries too. On `remove`, it
-also shows how the branch's unpushed commits (on no remote branch) were counted. Without `-v`, a command's output
+also shows how the commits only on the branch were counted: on no remote branch, not in
+the main checkout's HEAD and not on its recorded base. Without `-v`, a command's output
 shows only when the command fails.
 
 ## Adding a worktree

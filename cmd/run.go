@@ -272,6 +272,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				Timeout:        timeout,
 				StopSignal:     stopSignal,
 				StopGrace:      grace,
+				SocketGrace:    socketGrace,
 			}
 			switch {
 			case spec.RunID == "" && remote:
@@ -545,6 +546,10 @@ const runHeartbeat = config.Heartbeat
 // runQuiet is how long a run's session may send its gateway nothing before the gateway
 // ends the run, session_lost.
 const runQuiet = 3 * runHeartbeat
+
+// socketGrace is how long a run's socket keeps accepting after the runtime exits,
+// session.Spec.SocketGrace: zero, which is Forager's 200 ms. Only the tests shorten it.
+var socketGrace time.Duration
 
 // runEnd is what qory knows of a run besides its result: its runtime's name, its time
 // limit, the signal qory run got that ended the run, "" for none, and the run's end that
@@ -1866,10 +1871,10 @@ func reallyWithin(root, path string) bool {
 	return within(root, path)
 }
 
-// The arguments that select the hidden verbs the wall runs from qory's own binary: the
-// relay, the start of a Docker of the agent's own, and the hook forwarder, which also
-// runs on this machine without a wall. Each verb carries [inWall], so no look for a
-// release runs inside a container.
+// The arguments that select the hidden verbs the wall runs from the qory binary: the
+// relay, the start of a nested Docker, and the hook forwarder, which also runs on this
+// machine without a wall. Each verb carries [inWall], so no look for a release runs
+// inside a container.
 var (
 	relayArgs   = []string{"run", "relay"}
 	nestArgs    = []string{"run", "nest"}
@@ -1897,9 +1902,9 @@ func newRelay() *cobra.Command {
 	}
 }
 
-// newNest builds the hidden nest verb, what the wall starts from qory's own binary as the
-// entry point of a container whose image has a Docker of the agent's own: it runs as
-// the container's root, which the runtime maps to a user of the machine's that is not
+// newNest builds the hidden nest verb, what the wall starts from the qory binary as the
+// entry point of a container whose image has a nested Docker: it runs as the
+// container's root, which the runtime maps to a user of the machine's that is not
 // root, starts dockerd on its socket alone, drops every capability and executes the
 // launch as the agent's user. Its arguments, --user uid:gid, -- and the launch, go to
 // [wall.Nest] as they are, so it parses no flag of its own. It returns only on an error.
