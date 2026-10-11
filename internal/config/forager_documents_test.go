@@ -15,11 +15,11 @@ const moreThanOne = ": holds more than one YAML document; forager.yaml is one do
 // TestAForagerFileIsOneDocument is forager.yaml with --- at its start, at its end and in
 // its middle. A --- that starts the one document, and a ... that ends it, read; a second
 // document is refused wherever it stands, an empty one after a trailing --- among them,
-// by every reader of the file, so a gateway section in the second is never ignored.
+// by every reader of the file, so a gateway.server.via in the second is never ignored.
 func TestAForagerFileIsOneDocument(t *testing.T) {
 	hermetic(t)
 	const instance = "session:\n  instance:\n    name: build-01\n"
-	const gateway = "gateway:\n  server:\n    url: https://apiary.example\n"
+	const gateway = "gateway:\n  server:\n    url: https://apiary.example\n    via:\n      url: https://gateway.example\n"
 	for _, body := range []string{
 		"---\n" + instance,
 		"--- # the one document\n" + instance,

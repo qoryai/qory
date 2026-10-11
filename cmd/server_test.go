@@ -591,3 +591,30 @@ func TestARunWaitsForAKeyCommand(t *testing.T) {
 		t.Fatal("the run never started")
 	}
 }
+
+// TestRunChecksTheServersVia is gateway.server.via in forager.yaml: qory config lists
+// it, and qory run reads its ca_file before anything starts, refusing one that is not
+// there as input, with the file's path and never what it holds.
+func TestRunChecksTheServersVia(t *testing.T) {
+	_, srv := serverRun(t, "", "")
+	file := foragerFile()
+	via := "    via:\n      url: https://gateway.example:8443\n      ca_file: gateway-ca.pem\n"
+	walledServerFile(t, srv, via)
+	out, err := run(t, "config")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	rows := configRows(out)
+	wantsConfigRow(t, rows, "gateway.server.via.url", "https://gateway.example:8443", "~/.config/qory/forager.yaml")
+	wantsConfigRow(t, rows, "gateway.server.via.ca_file", "gateway-ca.pem", "~/.config/qory/forager.yaml")
+	wantsConfigRow(t, rows, "gateway.server.via.certificate_sha256", "(none)", "default")
+	out, err = run(t, "run")
+	ca := filepath.Join(filepath.Dir(file), "gateway-ca.pem")
+	if want := file + ": gateway.server.via.ca_file " + ca + ": no such file or directory"; err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
+		t.Errorf("%v (exit %d)\nwant %q", err, cmd.ExitCode(err), want)
+	}
+	lacks(t, out, "qory run: node", "hello from")
+	if srv.instances != nil {
+		t.Error("the run reached the server")
+	}
+}

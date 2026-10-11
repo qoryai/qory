@@ -2,14 +2,19 @@ package config
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -84,6 +89,30 @@ type ForagerTLS struct {
 	Key         string
 }
 
+// ForagerVia is gateway.server.via: the gateway this machine reaches the server through,
+// by its URL, the PEM file of the authorities its certificate chains to, and the pin of
+// its certificate's public key, each as the file writes it; [Forager.Path] resolves the
+// file. A setting the file does not write is empty.
+type ForagerVia struct {
+	URL               string
+	CAFile            string
+	CertificateSHA256 string
+}
+
+// certificatePin is gateway.server.via.certificate_sha256's shape: 32 bytes in standard
+// base64 with padding, as Forager takes it.
+var certificatePin = regexp.MustCompile(`^[A-Za-z0-9+/]{43}=$`)
+
+// CertificatePin reports whether v is a certificate pin as Forager takes it: the SHA-256
+// of a public key, 32 bytes, in standard base64 with padding.
+func CertificatePin(v string) bool {
+	if !certificatePin.MatchString(v) {
+		return false
+	}
+	b, err := base64.StdEncoding.Strict().DecodeString(v)
+	return err == nil && len(b) == sha256.Size
+}
+
 // scanURL is what a URL holds that no refusal may print: a URL as written, or its host
 // as Go decodes it, an IPv6 zone included, either form with its percent-encoding undone
 // again and again until nothing changes, since a refusal names the host. secret is
@@ -151,6 +180,33 @@ func unhex(c byte) int {
 // urlOrigin is u's scheme, host and port: never its user information, path, query or
 // fragment.
 func urlOrigin(u *url.URL) string { return u.Scheme + "://" + u.Host }
+
+// gatewayURLWrong says what is wrong with v as a gateway's URL, as Forager's via takes
+// it: https, a host and an optional port, and no user information, path other than
+// "/", query or fragment; empty when nothing is. What it says never holds more of
+// v than its scheme, its host and its port, so user information or a query that holds a
+// credential is never printed.
+func gatewayURLWrong(v string) string {
+	u, err := url.Parse(v)
+	if err != nil || u.Scheme == "" || u.Host == "" || u.Opaque != "" {
+		return "is not a URL"
+	}
+	if u.Hostname() == "" {
+		return "has no host"
+	}
+	origin := urlOrigin(u)
+	switch {
+	case u.Scheme != "https":
+		return "for " + origin + " is not https"
+	case u.User != nil:
+		return "for " + origin + " holds user information"
+	case u.Path != "" && u.Path != "/":
+		return "for " + origin + " has a path"
+	case u.RawQuery != "" || u.ForceQuery || u.Fragment != "":
+		return "for " + origin + " has a query or a fragment"
+	}
+	return ""
+}
 
 // Path is a path a setting of the file names, resolved: an absolute one as it is, a
 // relative one under the file's directory.
@@ -286,6 +342,9 @@ type ForagerServer struct {
 	// when neither the file nor the environment pins one. PinFrom is where it came from.
 	Pin     accesskey.Pin
 	PinFrom string
+	// Via is gateway.server.via, the gateway this machine reaches the server through;
+	// nil when the file sets none, and the server is reached directly.
+	Via *ForagerVia
 }
 
 // EnvOrigin starts the origin of a value read from a variable: "$" and its name.
@@ -336,8 +395,9 @@ type gatewaySection struct {
 		AccessKeyID     *string     `yaml:"access_key_id"`
 		ApiaryPublicKey *[]pinEntry `yaml:"apiary_public_key"`
 		// Secret and AccessKey are read only to say where what they would hold belongs.
-		Secret    yaml.Node `yaml:"secret,omitempty"`
-		AccessKey yaml.Node `yaml:"access_key,omitempty"`
+		Secret    yaml.Node   `yaml:"secret,omitempty"`
+		AccessKey yaml.Node   `yaml:"access_key,omitempty"`
+		Via       *viaSection `yaml:"via,omitempty"`
 	} `yaml:"server,omitempty"`
 	Credentials  yaml.Node `yaml:"credentials,omitempty"`
 	Integrations yaml.Node `yaml:"integrations,omitempty"`
@@ -346,6 +406,15 @@ type gatewaySection struct {
 		Certificate *string `yaml:"certificate"`
 		Key         *string `yaml:"key"`
 	} `yaml:"tls,omitempty"`
+}
+
+// viaSection is gateway.server.via as written. Its keys are nodes, merges and alias keys
+// resolved by the decoder, so a key written with a null value is told from an absent
+// one.
+type viaSection struct {
+	URL               yaml.Node `yaml:"url"`
+	CAFile            yaml.Node `yaml:"ca_file"`
+	CertificateSHA256 yaml.Node `yaml:"certificate_sha256"`
 }
 
 // sessionSection is the session section as written: the instance and the run.
@@ -435,6 +504,14 @@ func LoadForager() (*Forager, error) {
 	if w := g.Server; w != nil {
 		if r.Server, err = readServer(path, w.URL, w.AccessKeyID, w.ApiaryPublicKey, &w.Secret, &w.AccessKey); err != nil {
 			return nil, err
+		}
+		if err := viaNull(path, data); err != nil {
+			return nil, err
+		}
+		if w.Via != nil {
+			if r.Server.Via, err = readVia(path, w.Via); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if in := ses.Instance; in != nil && in.Name != nil {
@@ -562,6 +639,122 @@ func LoadForager() (*Forager, error) {
 	return r, nil
 }
 
+// viaNull refuses a gateway.server.via the file writes with a null value: decoded, it
+// reads as absent, and the machine would reach the server directly. It is refused as its
+// empty form is. The decoder resolves merges and alias keys.
+func viaNull(path string, data []byte) error {
+	var f struct {
+		Gateway *struct {
+			Server *struct {
+				Via yaml.Node `yaml:"via"`
+			} `yaml:"server"`
+		} `yaml:"gateway"`
+	}
+	if err := safeDecode(func() error { return yaml.Unmarshal(data, &f) }); err != nil || f.Gateway == nil || f.Gateway.Server == nil {
+		return nil
+	}
+	if v := followAliases(&f.Gateway.Server.Via); v.Kind != 0 && v.ShortTag() == "!!null" {
+		return fmt.Errorf("%s: gateway.server.via is empty", path)
+	}
+	return nil
+}
+
+// viaShape ends a refusal of gateway.server.via.url: what it takes.
+const viaShape = "an https URL of a host and an optional port, with nothing after"
+
+// readVia reads gateway.server.via: url is required, an https URL of a host and an
+// optional port alone, and ca_file and certificate_sha256 are optional, each one written
+// holding a value. A URL that holds an access key secret or a run key is refused without
+// being quoted, and so is one encoded too many times to tell. It reads no file:
+// [Forager.CheckVia] reads ca_file when a run starts.
+func readVia(path string, v *viaSection) (*ForagerVia, error) {
+	var url, caFile, pin *string
+	for _, k := range []struct {
+		key string
+		in  *yaml.Node
+		out **string
+	}{{"url", &v.URL, &url}, {"ca_file", &v.CAFile, &caFile}, {"certificate_sha256", &v.CertificateSHA256, &pin}} {
+		var err error
+		if *k.out, err = viaKey(k.in); err != nil {
+			return nil, foragerDecodeError(path, k.in, reflect.TypeFor[string](), "gateway.server.via."+k.key, false, err)
+		}
+	}
+	if url == nil || *url == "" {
+		return nil, fmt.Errorf("%s: gateway.server.via.url is required", path)
+	}
+	// A URL encoded too many times to tell what it holds is refused for that, and the
+	// refusal holds no part of it.
+	switch tooDeep, secret := scanURL(*url); {
+	case secret != nil:
+		return nil, fmt.Errorf("%s: gateway.server.via.url: %w", path, secret)
+	case tooDeep:
+		return nil, fmt.Errorf("%s: gateway.server.via.url is percent-encoded more than %d times: %s", path, urlUnescapeLimit, viaShape)
+	}
+	if wrong := gatewayURLWrong(*url); wrong != "" {
+		return nil, fmt.Errorf("%s: gateway.server.via.url %s: %s", path, wrong, viaShape)
+	}
+	out := &ForagerVia{URL: *url}
+	for _, k := range []struct {
+		key string
+		in  *string
+		out *string
+	}{{"ca_file", caFile, &out.CAFile}, {"certificate_sha256", pin, &out.CertificateSHA256}} {
+		if k.in == nil {
+			continue
+		}
+		// A key that is present holds a value: an empty pin would turn the pin off.
+		if *k.in == "" {
+			return nil, fmt.Errorf("%s: gateway.server.via.%s is empty", path, k.key)
+		}
+		*k.out = *k.in
+	}
+	if p := out.CertificateSHA256; p != "" && !CertificatePin(p) {
+		return nil, fmt.Errorf("%s: gateway.server.via.certificate_sha256 is not the SHA-256 of a public key in standard base64 with padding, 44 characters ending in =", path)
+	}
+	return out, nil
+}
+
+// CheckVia reads the file gateway.server.via.ca_file names, when it names one: it must
+// be there, open, and hold a PEM certificate. It says nothing of what the file holds.
+// Without a via there is nothing to check.
+func (r *Forager) CheckVia() error {
+	if r == nil || r.Server == nil || r.Server.Via == nil || r.Server.Via.CAFile == "" {
+		return nil
+	}
+	path := r.Path(r.Server.Via.CAFile)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		var pe *fs.PathError
+		if errors.As(err, &pe) {
+			err = pe.Err
+		}
+		return fmt.Errorf("%s: gateway.server.via.ca_file %s: %w", r.File, path, err)
+	}
+	if !x509.NewCertPool().AppendCertsFromPEM(b) {
+		return fmt.Errorf("%s: gateway.server.via.ca_file %s holds no PEM certificate", r.File, path)
+	}
+	return nil
+}
+
+// viaKey is a key of gateway.server.via as decoded: nil when the file does not write it,
+// its string otherwise, and "" when the file writes it with a null value, so a null key
+// is refused as its empty form is: a null certificate_sha256 would otherwise turn the
+// pin off without a word.
+func viaKey(n *yaml.Node) (*string, error) {
+	n = followAliases(n)
+	if n.Kind == 0 {
+		return nil, nil
+	}
+	var s string
+	if n.ShortTag() == "!!null" {
+		return &s, nil
+	}
+	if err := safeDecode(func() error { return n.Decode(&s) }); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
 // followAliases is n with its aliases followed.
 func followAliases(n *yaml.Node) *yaml.Node {
 	for n.Kind == yaml.AliasNode && n.Alias != nil {
@@ -576,7 +769,7 @@ var errMoreThanOneDocument = errors.New("holds more than one YAML document; " + 
 
 // oneDocument refuses forager.yaml's content when it holds more than one YAML document,
 // an empty one after a trailing --- among them: the decoder reads the first alone, and
-// what the others say, a gateway section say, would be ignored without a word. Content
+// what the others say, a gateway.server.via say, would be ignored without a word. Content
 // that does not parse is left to the reader, which says why.
 func oneDocument(data []byte) error {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
@@ -951,6 +1144,7 @@ func (r *Forager) Rows() []Row {
 		} else {
 			rows = append(rows, Row{"gateway.server.apiary_public_key", "(none: qory access-key enrol writes it)", Default})
 		}
+		rows = append(rows, viaRows(r.Server.Via, origin)...)
 	} else {
 		rows = append(rows, Row{"gateway.server.url", "(none)", Default})
 	}
@@ -1052,6 +1246,27 @@ func (r *Forager) Rows() []Row {
 		}
 	} else {
 		rows = append(rows, Row{"wall.adapter", "(none)", Default})
+	}
+	return rows
+}
+
+// viaRows are the rows of gateway.server.via: its url, or that the server is reached
+// directly; with a via, its ca_file and certificate_sha256 as the file writes them, or
+// their defaults. What the CA file holds is never read here.
+func viaRows(v *ForagerVia, origin string) []Row {
+	if v == nil {
+		return []Row{{"gateway.server.via.url", "(none: the server is reached directly)", Default}}
+	}
+	rows := []Row{{"gateway.server.via.url", v.URL, origin}}
+	if v.CAFile != "" {
+		rows = append(rows, Row{"gateway.server.via.ca_file", v.CAFile, origin})
+	} else {
+		rows = append(rows, Row{"gateway.server.via.ca_file", "(none: the system's roots)", Default})
+	}
+	if v.CertificateSHA256 != "" {
+		rows = append(rows, Row{"gateway.server.via.certificate_sha256", v.CertificateSHA256, origin})
+	} else {
+		rows = append(rows, Row{"gateway.server.via.certificate_sha256", "(none)", Default})
 	}
 	return rows
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/gateway"
+	"github.com/qoryai/forager/server"
 	"github.com/qoryai/forager/session"
 
 	"github.com/qoryai/qory/internal/config"
@@ -149,6 +150,31 @@ func identify(r *config.Forager, report io.Writer, verb string, fd *accesskey.Ke
 // access key and the instance it signs and names every request with.
 func gatewayServer(s *config.ForagerServer) *gateway.Server {
 	return &gateway.Server{Version: 1, URL: s.URL, AccessKeyID: s.AccessKeyID, ApiaryPublicKey: s.Pin}
+}
+
+// checkVia refuses a gateway.server.via of r Forager cannot send through, before
+// anything starts: a CA file that is not there or holds no PEM certificate, in qory's
+// words, then whatever Forager's own check refuses. r has a server.
+func checkVia(r *config.Forager) error {
+	if err := r.CheckVia(); err != nil {
+		return input(err)
+	}
+	if v := foragerVia(r); v != nil {
+		if err := v.Check(); err != nil {
+			return input(fmt.Errorf("%s: gateway.server.via: %w", r.File, err))
+		}
+	}
+	return nil
+}
+
+// foragerVia is r's gateway.server.via as Forager's server document holds it, its CA
+// file resolved under forager.yaml's directory; nil without one.
+func foragerVia(r *config.Forager) *server.Via {
+	if r == nil || r.Server == nil || r.Server.Via == nil {
+		return nil
+	}
+	v := r.Server.Via
+	return &server.Via{URL: v.URL, CAFile: r.Path(v.CAFile), CertificateSHA256: v.CertificateSHA256}
 }
 
 // refusedError is a refusal of Forager's, said for the person: what it means and what

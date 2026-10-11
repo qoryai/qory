@@ -169,6 +169,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if r := conf.Forager; r != nil {
 				pol = machinePolicy(r)
 				if r.Server != nil {
+					if err := checkVia(r); err != nil {
+						return err
+					}
 					server = gatewayServer(r.Server)
 				}
 			}

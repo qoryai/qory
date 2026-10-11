@@ -87,6 +87,29 @@
                   }
                 }
               }
+            },
+            "via": {
+              "description": "Optional: the gateway this machine reaches the server through, when that gateway is its only way out. Every request to the server goes to the gateway's address with its path unchanged, and the gateway passes it on and passes the answer back; url above stays the server's own. The gateway's certificate chain is always checked. Absent, the server is reached directly.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["url"],
+              "properties": {
+                "url": {
+                  "description": "The gateway: an https URL of a host and an optional port, with nothing after.",
+                  "type": "string",
+                  "pattern": "^https://[^/?#@\\s:][^/?#@\\s]*/?$"
+                },
+                "ca_file": {
+                  "description": "A PEM file of the certificate authority that signed the gateway's certificate, when the system's roots do not hold it. qory reads it relative to forager.yaml's directory, and it takes the place of the system's roots for this connection.",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "certificate_sha256": {
+                  "description": "Optional: the SHA-256 of the gateway certificate's public key, base64. With it, qory accepts only a certificate with that key, and still checks its chain.",
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9+/]{43}=$"
+                }
+              }
             }
           }
         },
