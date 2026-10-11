@@ -4,7 +4,7 @@
 // authorities in a bundle where the wall reads them; it holds the runtime and the programs
 // an agent delivers its work with; and it needs no setuid program and no capability. An
 // image that holds dockerd, and what the daemon runs, in the system's directories can
-// carry a Docker of the agent's own.
+// carry a nested Docker for the agent.
 //
 // A check has two sides. From outside, [Engine.Check] reads the image as the engine holds
 // it, with docker image inspect; reads its every file with docker export from a container
