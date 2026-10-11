@@ -726,8 +726,9 @@ func staticELF(t *testing.T) string {
 }
 
 // fakeDocker writes a program that stands in for docker: it logs every command line,
-// answers the two the wall reads, and for run logs the environment file, prints a line
-// and exits 4, as a container's runtime would.
+// answers what the wall reads (the engine's version, a network's gateway and its
+// subnets), and for run logs the environment file, prints a line and exits 4, as a
+// container's runtime would.
 func fakeDocker(t *testing.T) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -736,7 +737,12 @@ func fakeDocker(t *testing.T) (string, string) {
 	writeFile(t, script, `#!/bin/sh
 echo "$*" >> `+log+`
 case "$1 $2" in
-"network inspect") echo "172.30.0.1 " ;;
+"version --format") echo 28.0.0 ;;
+"network inspect")
+	case "$*" in
+	*.Subnet*) echo "172.30.0.0/16 fd00:db8::/64 " ;;
+	*) echo "172.30.0.1 " ;;
+	esac ;;
 "logs "*) echo "relay: listening" ;;
 "run "*)
 	while [ $# -gt 0 ]; do
@@ -782,7 +788,7 @@ case "$1 $2" in
 	entry=
 	while [ $# -gt 0 ]; do
 		case "$1" in
-		--rm|--interactive|--tty|--init) shift ;;
+		--rm|--interactive|--tty|--init|--no-healthcheck) shift ;;
 		--env-file) envfile=$2; shift 2 ;;
 		--entrypoint) entry=$2; shift 3; break ;;
 		*) shift 2 ;;
