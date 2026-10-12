@@ -339,6 +339,12 @@ release may change what an existing document does, and states it under Upgrading
   domain added: a name of one label is reached only at the addresses the hosts file
   gives it, so a host that only a search domain completed needs its full name, in the
   request and in the run's egress lists.
+- `forager.yaml` refuses an entry that is not a string in any of its lists:
+  `gateway.egress.allow` and `deny`, a credential's `adapter`, `hosts`, `paths` and
+  `placeholders`, a tool's `command`, `serves` and `placeholders`, and `wall.env`,
+  `wall.mounts` and `wall.ca_env`. A null, a number, a boolean, a list or a mapping is
+  refused by its index, without its value; quote an entry such as `"123"` or `"true"` to
+  write it as a string.
 - The runner library is now Forager, `github.com/qoryai/forager`, and qory says
   Forager, the gateway, the session or the wall where it said the runner. The machine's
   file is `~/.config/qory/forager.yaml`, in place of `runner.yaml`, which qory no longer
