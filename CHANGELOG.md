@@ -40,6 +40,22 @@ release may change what an existing document does, and states it under Upgrading
   `gateway.egress` in mode `enforce`: the proxy reads the requests to those hosts and
   holds them to the paths, so such a run needs a wall. Before, the file's path rules were
   dropped.
+- `forager.yaml` refuses an entry that is not a string in any of its lists of strings:
+  `gateway.egress.allow` and `deny`, a credential's `adapter`, `hosts`, `paths` and
+  `placeholders`, a tool's `command`, `serves` and `placeholders`, and `wall.env`,
+  `wall.mounts` and `wall.ca_env`. A null, a number, a boolean, a list or a mapping is
+  refused by its index, without its value; quote an entry such as `"123"` or `"true"` to
+  write it as a string.
+- `gateway.egress.allow`, `deny` and the hosts of `gateway.egress.paths`, like those of
+  a policy from `--policy` or the server, take a host name of ASCII letters, digits,
+  hyphens and dots, or an IPv4 address in canonical form, such as `192.0.2.1`. A host
+  whose last label is all digits, or `0x` and hex digits, is read as an address, so
+  `api.example.123` and `127.1` are refused: a `gateway.egress.allow` or `deny` entry or
+  a `gateway.egress.paths` key when `forager.yaml` is read, and a policy's entry when
+  the run starts, with "egress.<list> holds <entry>, which is neither a host name nor an
+  IPv4 address in canonical form". The gateway refuses an agent's request to a host that
+  is neither such a name nor an IP address in canonical form with the rule
+  `wall:host-form` and a `403`.
 
 ### Added
 
@@ -339,7 +355,7 @@ release may change what an existing document does, and states it under Upgrading
   domain added: a name of one label is reached as written, at the addresses the hosts
   file gives it or else from a name server, so a host that only a search domain
   completed needs its full name, in the request and in the run's egress lists.
-- `forager.yaml` refuses an entry that is not a string in any of its lists:
+- `forager.yaml` refuses an entry that is not a string in any of its lists of strings:
   `gateway.egress.allow` and `deny`, a credential's `adapter`, `hosts`, `paths` and
   `placeholders`, a tool's `command`, `serves` and `placeholders`, and `wall.env`,
   `wall.mounts` and `wall.ca_env`. A null, a number, a boolean, a list or a mapping is
