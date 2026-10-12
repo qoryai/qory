@@ -329,6 +329,8 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- The integration description schema is the one in `github.com/qoryai/integrations`
+  0.3.0, `contracts/integration/v1`.
 - A run's policy file in mode `observe` keeps its `egress.paths` under a `forager.yaml`
   `gateway.egress` in mode `enforce`: the proxy reads the requests to those hosts and
   holds them to the paths, so such a run needs a wall. Before, the file's path rules were
