@@ -22,9 +22,10 @@ release may change what an existing document does, and states it under Upgrading
   machine as a node, with `qory access-key enrol <server> <code>` and a code from the
   node's page in Qory Apiary, or with a key generated on that page.
 - `qory config` lists the values as `gateway.*`, `session.*` and `wall.*` where it listed
-  `runner.*`, and the file's schema is
-  `https://qory.dev/contracts/harness/v1/forager.schema.json`, where it was
-  `runner.schema.json`: point an editor's schema setting at it.
+  `runner.*`, and the file's schema is `contracts/harness/v1/forager.schema.json` in
+  qory's repository, where it was `runner.schema.json`: point an editor's schema setting
+  at it, such as
+  `https://raw.githubusercontent.com/qoryai/qory/v0.13.0/contracts/harness/v1/forager.schema.json`.
 - Forager keeps its registry of walled runs under `$XDG_STATE_HOME/qory-forager/walled`,
   else `~/.local/state/qory-forager/walled`, where it was `qory-runner`. A walled run an
   earlier qory started is not among the earlier walled runs this one checks a new run
@@ -46,8 +47,8 @@ release may change what an existing document does, and states it under Upgrading
   `runner_version`, the reason `gateway_lost` where it was `runner_lost`, a `dataschema`
   under `https://qory.dev/contracts/forager/v1/` where it was under
   `https://qory.dev/contracts/runner/v1/`, and the User-Agent `qory-forager/<version>`
-  where it was `qory-runner/<version>`. No `dev.qory.ping` is posted: a run registers at
-  the run endpoint in its place.
+  where it was `qory-runner/<version>`. `dev.qory.ping` is gone, and nothing is posted in
+  its place; a run registers at the run endpoint.
 - A machine that holds an access key runs walled only: every run there needs a wall, or
   it is refused before it starts, `key_needs_wall`, whether the key comes from
   `access-key-secret` or a key file beside it, from `QORY_ACCESS_KEY_SECRET`, and, against
@@ -87,11 +88,14 @@ release may change what an existing document does, and states it under Upgrading
   name, in the request and in the run's egress lists.
 - A mount that is, contains or lies inside qory's configuration directory or its state
   directory, such as your home directory, is refused, `mount_contains_forager_files`, and
-  so is a mount reached through a link inside the workspace or a writable mount,
-  `mount_through_link`: mount a narrower path, or list the link's target itself.
+  so is a mount or the workspace whose path goes through a link inside the workspace or
+  a writable mount and resolves outside that place, `mount_through_link`: mount a
+  narrower path, or list the link's target itself.
 - A walled run takes `harness.home` from the `qory.yaml` in qory's configuration
-  directory alone: move a `harness.home` that a checkout's `qory.yaml`, or one in a
-  directory above it, sets into that file, or the run is refused.
+  directory alone. Without `--home`, it is refused when a checkout's `qory.yaml`, or one
+  in a directory above it, sets a `harness.home` that puts the home anywhere but where
+  the configuration directory's file, or the default if that file sets none, puts it:
+  move such a `harness.home` into the configuration directory's file.
 - The harness's variables are no longer written into Claude Code's `settings.json` or
   Codex's `config.toml`: start the runtime with `qory harness launch` or `qory run`, run
   `qory harness compose` again in each checkout, and use Codex 0.76.0 or later, or set
