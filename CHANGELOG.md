@@ -6,7 +6,7 @@ release may change what an existing document does, and states it under Upgrading
 
 ## [Unreleased]
 
-## [0.13.0] - 2026-10-12
+## [0.13.0] - 2026-10-13
 
 ### Upgrading
 
