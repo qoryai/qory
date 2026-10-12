@@ -76,8 +76,8 @@ release may change what an existing document does, and states it under Upgrading
   is neither such a name nor an IP address in canonical form with the rule
   `wall:host-form` and a `403`.
 - `qory run` records each run in qory's state directory, and `qory run resend` reads no
-  record under `.qory/runs` in the checkout: send what is left there with 0.12.1 before
-  upgrading, then remove `.qory/runs`.
+  record under `.qory/runs` in the checkout, so it sends none of the runs recorded there:
+  remove `.qory/runs`.
 - `qory run resend` sends nothing of a run that had no server, such as a `--local` run's:
   its record stays where it is.
 - With a server, a checkout keeps the `forge` and `repository` of its first run the
@@ -103,14 +103,16 @@ release may change what an existing document does, and states it under Upgrading
 - `forager.yaml` is one YAML document: remove a second one, an empty one after a
   trailing `---` included, or the file is refused.
 - `wall.env` and `--env` refuse `QORY_ACCESS_KEY_ID`, `QORY_ACCESS_KEY_SECRET`,
-  `QORY_APIARY_PUBLIC_KEY` and `QORY_RUN_KEY`. A run leaves out a value of `wall.env`,
-  `--env` or the harness's `env` whose name is on the deny list of the Forager contract,
-  `denied-variables.json`, such as `PATH`, `DOCKER_HOST`, `HTTPS_PROXY` or any other
-  `QORY_*` name, and one of a variable the launch template sets, such as Codex's
-  `CODEX_HOME`; `qory run` says so for `--env`.
+  `QORY_APIARY_PUBLIC_KEY` and `QORY_RUN_KEY`. A walled run that passes a `QORY_`
+  variable other than `QORY_RUN_ID` and `QORY_RUN_SOCKET`, by `wall.env`, `--env` or the
+  harness's `env`, is refused before it starts, `variable_reserved`: remove it. A run
+  leaves out a value of `wall.env`, `--env` or the harness's `env` whose name is on the
+  deny list of the Forager contract, `denied-variables.json`, such as `PATH`,
+  `DOCKER_HOST` or `HTTPS_PROXY`, and one of a variable the launch template sets, such as
+  Codex's `CODEX_HOME`; `qory run` says so for `--env`.
 - `qory run` exits 1 when it gets a signal while the runtime runs, whatever the runtime's
   status, and when the gateway records the run as failed or lost after the runtime
-  exited 0: a script that reads the exit status follows it.
+  exited 0: a script that reads the exit status sees 1.
 - Needs `github.com/qoryai/forager` 0.7.0, contract `v1` revision 1 as amended in 0.7.0.
 
 ### Added
