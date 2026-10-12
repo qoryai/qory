@@ -36,6 +36,10 @@ release may change what an existing document does, and states it under Upgrading
   server are included, except for a key given by `--access-key-secret-fd` alone. Give the
   machine a wall, or keep the key with a starter, such as a CI, and run the machine behind
   a gateway with the run key `qory run register` gets.
+- A run's policy file in mode `observe` keeps its `egress.paths` under a `forager.yaml`
+  `gateway.egress` in mode `enforce`: the proxy reads the requests to those hosts and
+  holds them to the paths, so such a run needs a wall. Before, the file's path rules were
+  dropped.
 
 ### Added
 
@@ -308,6 +312,12 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- A run's policy file in mode `observe` keeps its `egress.paths` under a `forager.yaml`
+  `gateway.egress` in mode `enforce`: the proxy reads the requests to those hosts and
+  holds them to the paths, so such a run needs a wall. Before, the file's path rules were
+  dropped.
+- Of a policy's path rules, the entry for the most specific host pattern that matches
+  holds a host: its name before a `*.` entry, a longer suffix before a shorter.
 - The runner library is now Forager, `github.com/qoryai/forager`, and qory says
   Forager, the gateway, the session or the wall where it said the runner. The machine's
   file is `~/.config/qory/forager.yaml`, in place of `runner.yaml`, which qory no longer
