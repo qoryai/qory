@@ -414,15 +414,7 @@ type foragerFile struct {
 // gatewaySection is the gateway section as written: the egress policy, the server, the
 // credentials, the tools and the integrations.
 type gatewaySection struct {
-	Egress *struct {
-		Mode *string `yaml:"mode"`
-		// Allow and Deny are read as nodes, so an entry that is not a string is refused
-		// by its index.
-		Allow yaml.Node `yaml:"allow,omitempty"`
-		Deny  yaml.Node `yaml:"deny,omitempty"`
-		// Paths is read as a node, so its shape is refused in qory's words.
-		Paths yaml.Node `yaml:"paths,omitempty"`
-	} `yaml:"egress,omitempty"`
+	Egress *egressSection `yaml:"egress,omitempty"`
 	Server *struct {
 		URL             *string     `yaml:"url"`
 		AccessKeyID     *string     `yaml:"access_key_id"`
@@ -440,6 +432,17 @@ type gatewaySection struct {
 		Certificate *string `yaml:"certificate"`
 		Key         *string `yaml:"key"`
 	} `yaml:"tls,omitempty"`
+}
+
+// egressSection is gateway.egress as written.
+type egressSection struct {
+	Mode *string `yaml:"mode"`
+	// Allow and Deny are read as nodes, so an entry that is not a string is refused by
+	// its index.
+	Allow yaml.Node `yaml:"allow,omitempty"`
+	Deny  yaml.Node `yaml:"deny,omitempty"`
+	// Paths is read as a node, so its shape is refused in qory's words.
+	Paths yaml.Node `yaml:"paths,omitempty"`
 }
 
 // viaSection is gateway.server.via as written. Its keys are nodes, merges and alias keys
@@ -515,30 +518,8 @@ func LoadForager() (*Forager, error) {
 			return nil, fmt.Errorf("%s: gateway.egress.mode is not observe or enforce", path)
 		}
 		r.Egress = &ForagerEgress{Mode: *e.Mode}
-		// Each host is read as an entry of a policy's list of the same name, as Forager
-		// reads the lists of a run's policy, so the two never disagree.
-		for _, l := range []struct {
-			list string
-			in   *yaml.Node
-			out  *[]string
-		}{{"allow", &e.Allow, &r.Egress.Allow}, {"deny", &e.Deny, &r.Egress.Deny}} {
-			key := "gateway.egress." + l.list
-			notHost := func(i, _ int) error {
-				return fmt.Errorf("%s: %s[%d] %s", path, key, i, notAPolicyHost)
-			}
-			var hosts []string
-			if hosts, err = stringList(path, key, l.in, notHost); err != nil {
-				return nil, err
-			}
-			for i, host := range hosts {
-				if !policyHost(l.list, host) {
-					return nil, notHost(i, 0)
-				}
-				*l.out = append(*l.out, host)
-			}
-		}
-		if e.Paths.Kind != 0 {
-			if r.Egress.Paths, err = readPaths(path, &e.Paths); err != nil {
+		if !egressAtOnce(e, r.Egress) {
+			if err := egressOneByOne(path, e, r.Egress); err != nil {
 				return nil, err
 			}
 		}
@@ -700,6 +681,128 @@ func LoadForager() (*Forager, error) {
 		}
 	}
 	return r, nil
+}
+
+// egressAtOnce reads the hosts and paths of e into out as one policy document, through
+// Forager's policy.Read, and reports whether it read them. Forager holds each entry of a
+// policy's allow, deny and paths alone, so a document of them all that it reads is one
+// whose every entry [egressOneByOne] reads; one it refuses, or one that is not lists of
+// strings and a mapping of them, is left to [egressOneByOne], which finds the entry and
+// says why. out is left as it is when they are not read.
+func egressAtOnce(e *egressSection, out *ForagerEgress) bool {
+	allow, okAllow := stringsAtOnce(&e.Allow)
+	deny, okDeny := stringsAtOnce(&e.Deny)
+	if !okAllow || !okDeny {
+		return false
+	}
+	var paths map[string][]string
+	if e.Paths.Kind != 0 {
+		var ok bool
+		if paths, ok = pathsAtOnce(&e.Paths); !ok {
+			return false
+		}
+	}
+	egress := map[string]any{"mode": "observe"}
+	for list, v := range map[string][]string{"allow": allow, "deny": deny} {
+		if v != nil {
+			egress[list] = v
+		}
+	}
+	if paths != nil {
+		egress["paths"] = paths
+	}
+	b, err := json.Marshal(map[string]any{"version": 1, "egress": egress})
+	if err != nil {
+		return false
+	}
+	if _, err := policy.Read(ForagerFileName+" gateway.egress", b); err != nil {
+		return false
+	}
+	// As [egressOneByOne] keeps them: an empty list as none, and the paths as read.
+	out.Allow = append([]string(nil), allow...)
+	out.Deny = append([]string(nil), deny...)
+	out.Paths = paths
+	return true
+}
+
+// stringsAtOnce is [stringList] of node without a refusal: the list, nil for one the
+// file does not write or writes null, and false where stringList refuses it.
+func stringsAtOnce(node *yaml.Node) ([]string, bool) {
+	list, err := stringList("", "", node, func(int, int) error { return errNotRead })
+	return list, err == nil
+}
+
+// errNotRead is the refusal of a reading that says nothing: the reading after it does.
+var errNotRead = errors.New("not read")
+
+// pathsAtOnce is gateway.egress.paths as [readPaths] reads it, without Forager's
+// reading of its hosts and paths and without a refusal: false where readPaths refuses
+// its shape, a key that is not a string or written twice, a value that is not a list of
+// strings, or a path listed twice.
+func pathsAtOnce(node *yaml.Node) (map[string][]string, bool) {
+	node = unalias(node)
+	if node.Kind != yaml.MappingNode {
+		return nil, false
+	}
+	out := map[string][]string{}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := unalias(node.Content[i])
+		if key.Kind != yaml.ScalarNode || key.ShortTag() != "!!str" {
+			return nil, false
+		}
+		if _, twice := out[key.Value]; twice {
+			return nil, false
+		}
+		v := unalias(node.Content[i+1])
+		if v.Kind != yaml.SequenceNode {
+			return nil, false
+		}
+		list, err := stringEntries(v, func(int, int) error { return errNotRead })
+		if err != nil {
+			return nil, false
+		}
+		for j, p := range list {
+			if slices.Index(list, p) != j {
+				return nil, false
+			}
+		}
+		out[key.Value] = list
+	}
+	return out, true
+}
+
+// egressOneByOne reads the hosts and paths of e into out entry by entry, each host read
+// as an entry of a policy's list of the same name, as Forager reads the lists of a run's
+// policy, so the two never disagree. A refusal names the first entry Forager does not
+// read, by its index, and holds no value.
+func egressOneByOne(path string, e *egressSection, out *ForagerEgress) error {
+	for _, l := range []struct {
+		list string
+		in   *yaml.Node
+		out  *[]string
+	}{{"allow", &e.Allow, &out.Allow}, {"deny", &e.Deny, &out.Deny}} {
+		key := "gateway.egress." + l.list
+		notHost := func(i, _ int) error {
+			return fmt.Errorf("%s: %s[%d] %s", path, key, i, notAPolicyHost)
+		}
+		hosts, err := stringList(path, key, l.in, notHost)
+		if err != nil {
+			return err
+		}
+		for i, host := range hosts {
+			if !policyHost(l.list, host) {
+				return notHost(i, 0)
+			}
+			*l.out = append(*l.out, host)
+		}
+	}
+	if e.Paths.Kind != 0 {
+		var err error
+		if out.Paths, err = readPaths(path, &e.Paths); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // viaNull refuses a gateway.server.via the file writes with a null value: decoded, it

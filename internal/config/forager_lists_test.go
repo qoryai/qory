@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/qoryai/qory/internal/config"
 )
@@ -172,5 +173,32 @@ func TestForagerReadsTheEgressHostsAsForagerDoes(t *testing.T) {
 		if !slices.Equal(got, hosts) {
 			t.Errorf("%q: read as %q, want %q", body, got, hosts)
 		}
+	}
+}
+
+// TestForagerReadsALongEgressAtOnce reads 2,000 hosts of gateway.egress.allow, and deny
+// and paths beside them, in order and at once; a host written twice, which a policy's
+// list may not hold, is read as before, each time it is written.
+func TestForagerReadsALongEgressAtOnce(t *testing.T) {
+	hermetic(t)
+	hosts := make([]string, 2000)
+	for i := range hosts {
+		hosts[i] = fmt.Sprintf("h%d.example.com", i)
+	}
+	foragerFile(t, "gateway: {egress: {mode: enforce, allow: ["+strings.Join(hosts, ", ")+"], deny: [d.example.com], paths: {p.example.com: [/v1, \"/v2/*\"], \"*.files.example.com\": []}}}\n")
+	start := time.Now()
+	r, err := config.LoadForager()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took > 2*time.Second {
+		t.Errorf("2,000 hosts read in %v", took)
+	}
+	if e := r.Egress; !slices.Equal(e.Allow, hosts) || !slices.Equal(e.Deny, []string{"d.example.com"}) || len(e.Paths) != 2 || !slices.Equal(e.Paths["p.example.com"], []string{"/v1", "/v2/*"}) || e.Paths["*.files.example.com"] == nil || len(e.Paths["*.files.example.com"]) != 0 {
+		t.Errorf("read as %+v", e)
+	}
+	foragerFile(t, "gateway: {egress: {mode: enforce, allow: [a.example, a.example], deny: [d.example, d.example]}}\n")
+	if r, err = config.LoadForager(); err != nil || !slices.Equal(r.Egress.Allow, []string{"a.example", "a.example"}) || !slices.Equal(r.Egress.Deny, []string{"d.example", "d.example"}) {
+		t.Errorf("a host written twice: %+v, %v", r, err)
 	}
 }
