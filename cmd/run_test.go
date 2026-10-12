@@ -91,7 +91,9 @@ type fakeServer struct {
 	// onExited, when set, is called once the server keeps a dev.qory.run.exited,
 	// before the delivery that carries it is answered.
 	onExited func()
-	// node is the node discovery names, testNode when empty.
+	// node is the node discovery names, testNode when empty. Discovery lists the
+	// workspace testWorkspace for a node's or node pool's key, and no workspaces for a
+	// gateway's, ng_.
 	node string
 	// handler is the receiver behind the server, whose records a test of a run through a
 	// gateway fills ([fakeServer.choose]); keyNode is the node or node pool its records
@@ -128,7 +130,11 @@ func newFakeServer(t *testing.T, policy string) *fakeServer {
 			if node == "" {
 				node = testNode
 			}
-			doc := `{"version":1,"node_id":"` + node + `","workspaces":["` + testWorkspace + `"],"events":{"url":"` + f.URL + `/v1/events","types":["*"]},"run":{"url":"` + f.URL + receiver.DefaultRunPath + `"}`
+			doc := `{"version":1,"node_id":"` + node + `"`
+			if !strings.HasPrefix(node, "ng_") {
+				doc += `,"workspaces":["` + testWorkspace + `"]`
+			}
+			doc += `,"events":{"url":"` + f.URL + `/v1/events","types":["*"]},"run":{"url":"` + f.URL + receiver.DefaultRunPath + `"}`
 			if f.secrets {
 				doc += `,"secrets":{"url":"` + f.URL + `/v1/secrets"}`
 			}
