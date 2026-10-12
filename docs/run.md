@@ -341,9 +341,9 @@ it pins, `apiary_public_key`. The run does not start unless the server answers. 
 machine holds an access key, so every run needs a wall: see [An access key needs a
 wall](#an-access-key-needs-a-wall).
 
-The configuration lists the access key's workspace in `workspaces`. For a node's or node
-pool's key, that is one id, `ws_` and 16 characters: the workspace the node or pool
-belongs to. A configuration without it is refused, and the run does not start.
+For a node's or node pool's access key, the configuration lists in `workspaces` one id,
+`ws_` and 16 characters: the workspace the node or pool belongs to. A configuration
+without it is refused, and the run does not start.
 
 The configuration defines where the gateway sends the run's events, and where the run
 registers, `run`. A configuration without `run` is refused, and the run does not start.

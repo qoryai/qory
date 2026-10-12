@@ -62,7 +62,7 @@ func pathsRow(rows []config.Row) config.Row {
 // naming the host where it is a host, and never the key that is not one or the path.
 func TestForagerFileRefusesPathsItCannotTake(t *testing.T) {
 	hermetic(t)
-	const host = ": gateway.egress.paths: a key is not a lower-case host name or a *. suffix; no port, path or scheme"
+	const host = ": gateway.egress.paths: a key is not a lower-case host name or a *. suffix, or it ends in a number and is not an IPv4 address in canonical form; no port, path or scheme"
 	for _, c := range []struct{ body, want string }{
 		{"paths: [\"/v1/*\"]", ": gateway.egress.paths is a mapping from a host to a list of paths"},
 		{"paths:", ": gateway.egress.paths is a mapping from a host to a list of paths"},
@@ -76,6 +76,8 @@ func TestForagerFileRefusesPathsItCannotTake(t *testing.T) {
 		{"paths: {api.example.com: }", ": gateway.egress.paths: api.example.com is a list of paths"},
 		{"paths: {\"API.example.com\": [/v1/*]}", host},
 		{"paths: {\"api.example.com:443\": [/v1/*]}", host},
+		{"paths: {api.example.123: [/v1/*]}", host},
+		{"paths: {\"127.1\": [/v1/*]}", host},
 		{"paths: {\"api.example.com:443\": /v1/*}", host},
 		{"paths: {? [a.example] : [/v1/*]}", host},
 		{"paths: {api.example.com: [/v1/*, v1]}", ": gateway.egress.paths.api.example.com[1] is not a path from /, matched whole or up to a final *"},
@@ -109,7 +111,7 @@ func TestForagerFileReadsThePathsAsTheirValues(t *testing.T) {
 		t.Errorf("an alias key that writes a host again: %v, want %q", err, want)
 	}
 	path = foragerFile(t, "gateway:\n  egress:\n    mode: observe\n    paths:\n      a.example: &h [/v1]\n      *h: [/v2]\n")
-	want = path + ": gateway.egress.paths: a key is not a lower-case host name or a *. suffix; no port, path or scheme"
+	want = path + ": gateway.egress.paths: a key is not a lower-case host name or a *. suffix, or it ends in a number and is not an IPv4 address in canonical form; no port, path or scheme"
 	if _, err := config.LoadForager(); err == nil || err.Error() != want {
 		t.Errorf("an alias key of a list: %v, want %q", err, want)
 	}

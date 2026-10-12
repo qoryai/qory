@@ -19,11 +19,13 @@ release may change what an existing document does, and states it under Upgrading
   else `~/.local/state/qory-forager/walled`, where it was `qory-runner`. A walled run an
   earlier qory started is not among the earlier walled runs this one checks a new run
   against, so let such runs end before upgrading.
-- A server's configuration lists the access key's workspace in `workspaces`, and one
-  without it is refused: the run does not start, and `qory gateway` does not listen. For
-  a node's or node pool's access key it holds exactly one id, the workspace the node or
-  pool belongs to, `ws_` and 16 lower-case Crockford base32 characters, such as
-  `ws_f1xt0re000000000`. A server you run yourself must list it too.
+- For a node's or node pool's access key, a server's configuration lists in `workspaces`
+  exactly one id, the workspace the node or pool belongs to, `ws_` and 16 lower-case
+  Crockford base32 characters, such as `ws_f1xt0re000000000`, and one without it is
+  refused: the run does not start. For a gateway's access key it lists no `workspaces`,
+  since the gateway takes each run's workspace from the run's run key, and one that lists
+  any is refused: `qory gateway` does not listen. A server you run yourself must do the
+  same.
 - A self-hosted server's discovery must now name `run`; Forager refuses one without it.
 - A self-hosted server's discovery must now name `node_id` and `apiary_public_key` too;
   Forager refuses one without them.
@@ -389,14 +391,15 @@ release may change what an existing document does, and states it under Upgrading
   1m30s, and <runtime> was stopped`, and exits 1.
 - A run registers with the server before it starts: Forager's gateway posts it, signed,
   to the run endpoint the server's discovery names, with the run's labels and `about`,
-  and the answer is the run configuration; `about` never chooses the run's policy. The
-  discovery lists the access key's workspace in `workspaces`, and one without it is
-  refused. A refusal names the request, such as `register <url>: instance_limit (status
-  409)`. The record's first line is `dev.qory.run.registered`, in place of
-  `dev.qory.ping`, and is not sent to the server. It names the run's `workspace`, the one
-  discovery lists, its `node_id`, discovery's, and its `instance_id`, the instance id the
-  registration was signed with. `qory run resend` of a record that holds no event sends
-  nothing and says the server never opened the run, exit 0, where it failed.
+  and the answer is the run configuration; `about` never chooses the run's policy. For a
+  node's or node pool's access key, the discovery lists the workspace the node or pool
+  belongs to in `workspaces`, and one without it is refused. A refusal names the
+  request, such as `register <url>: instance_limit (status 409)`. The record's first
+  line is `dev.qory.run.registered`, in place of `dev.qory.ping`, and is not sent to the
+  server. It names the run's `workspace`, the one discovery lists, its `node_id`,
+  discovery's, and its `instance_id`, the instance id the registration was signed with.
+  `qory run resend` of a record that holds no event sends nothing and says the server
+  never opened the run, exit 0, where it failed.
 - `qory run` says how a run ended as its outcome, then its reason, and never who ended
   it: `✓ the run completed: <reason>`, `✗ the run failed: <reason>`, `✗ the run was
   cancelled: <reason>` or `✗ the run was lost: <reason>`, with `, and <runtime> was

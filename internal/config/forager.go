@@ -1203,7 +1203,7 @@ func readPaths(path string, node *yaml.Node) (map[string][]string, error) {
 		// value, not its name. A key that is not a string is not a host.
 		line, key := node.Content[i].Line, unalias(node.Content[i])
 		if key.Kind != yaml.ScalarNode || key.ShortTag() != "!!str" {
-			return nil, fmt.Errorf("%s: gateway.egress.paths: a key is not a lower-case host name or a *. suffix; no port, path or scheme", path)
+			return nil, fmt.Errorf("%s: gateway.egress.paths: a key is not a lower-case host name or a *. suffix, or it ends in a number and is not an IPv4 address in canonical form; no port, path or scheme", path)
 		}
 		if at, ok := first[key.Value]; ok {
 			if _, noted := twice[key.Value]; !noted {
@@ -1219,7 +1219,7 @@ func readPaths(path string, node *yaml.Node) (map[string][]string, error) {
 	out := map[string][]string{}
 	for _, host := range slices.Sorted(maps.Keys(values)) {
 		if !policyPaths(map[string][]string{host: {}}) {
-			return nil, fmt.Errorf("%s: gateway.egress.paths: a key is not a lower-case host name or a *. suffix; no port, path or scheme", path)
+			return nil, fmt.Errorf("%s: gateway.egress.paths: a key is not a lower-case host name or a *. suffix, or it ends in a number and is not an IPv4 address in canonical form; no port, path or scheme", path)
 		}
 		if lines, ok := twice[host]; ok {
 			return nil, fmt.Errorf("%s: line %d: gateway.egress.paths.%s is written twice; it was first written at line %d", path, lines[1], host, lines[0])
