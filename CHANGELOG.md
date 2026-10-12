@@ -329,11 +329,12 @@ release may change what an existing document does, and states it under Upgrading
   a policy from `--policy` or the server, take a host name of ASCII letters, digits,
   hyphens and dots, or an IPv4 address in canonical form, such as `192.0.2.1`. A host
   whose last label is all digits, or `0x` and hex digits, is read as an address, so
-  `api.example.123` and `127.1` are refused: a `gateway.egress.paths` key when
-  `forager.yaml` is read, and any other entry when the run starts, with "egress.<list>
-  holds <entry>, which is neither a host name nor an IPv4 address in canonical form".
-  The gateway refuses an agent's request to a host that is neither such a name nor an IP
-  address in canonical form with the rule `wall:host-form` and a `403`.
+  `api.example.123` and `127.1` are refused: a `gateway.egress.allow` or `deny` entry or
+  a `gateway.egress.paths` key when `forager.yaml` is read, and a policy's entry when
+  the run starts, with "egress.<list> holds <entry>, which is neither a host name nor an
+  IPv4 address in canonical form". The gateway refuses an agent's request to a host that
+  is neither such a name nor an IP address in canonical form with the rule
+  `wall:host-form` and a `403`.
 - The gateway reaches a host an agent requests exactly as it is written, with no search
   domain added: a name of one label is reached only at the addresses the hosts file
   gives it, so a host that only a search domain completed needs its full name, in the

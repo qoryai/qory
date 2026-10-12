@@ -28,7 +28,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/qoryai/qory/internal/exports"
-	"github.com/qoryai/qory/internal/module"
 	"github.com/qoryai/qory/internal/stack"
 )
 
@@ -516,20 +515,23 @@ func LoadForager() (*Forager, error) {
 			return nil, fmt.Errorf("%s: gateway.egress.mode is not observe or enforce", path)
 		}
 		r.Egress = &ForagerEgress{Mode: *e.Mode}
+		// Each host is read as an entry of a policy's list of the same name, as Forager
+		// reads the lists of a run's policy, so the two never disagree.
 		for _, l := range []struct {
-			key string
-			in  *yaml.Node
-			out *[]string
-		}{{"gateway.egress.allow", &e.Allow, &r.Egress.Allow}, {"gateway.egress.deny", &e.Deny, &r.Egress.Deny}} {
+			list string
+			in   *yaml.Node
+			out  *[]string
+		}{{"allow", &e.Allow, &r.Egress.Allow}, {"deny", &e.Deny, &r.Egress.Deny}} {
+			key := "gateway.egress." + l.list
 			notHost := func(i, _ int) error {
-				return fmt.Errorf("%s: %s[%d] is not a lower-case host name or a *. suffix; no port, path or scheme", path, l.key, i)
+				return fmt.Errorf("%s: %s[%d] %s", path, key, i, notAPolicyHost)
 			}
 			var hosts []string
-			if hosts, err = stringList(path, l.key, l.in, notHost); err != nil {
+			if hosts, err = stringList(path, key, l.in, notHost); err != nil {
 				return nil, err
 			}
 			for i, host := range hosts {
-				if !module.EgressHost.MatchString(host) {
+				if !policyHost(l.list, host) {
 					return nil, notHost(i, 0)
 				}
 				*l.out = append(*l.out, host)
@@ -1275,6 +1277,22 @@ func readPaths(path string, node *yaml.Node) (map[string][]string, error) {
 		return nil, fmt.Errorf("%s: gateway.egress.paths is not a policy's egress.paths", path)
 	}
 	return out, nil
+}
+
+// notAPolicyHost is what a refusal of a host of gateway.egress.allow or deny says is
+// wrong with it.
+const notAPolicyHost = "is not a lower-case host name or a *. suffix, or it ends in a number and is not an IPv4 address in canonical form; no port, path or scheme"
+
+// policyHost reports whether Forager reads host as an entry of list, allow or deny, of
+// a policy document's egress, as it reads the lists of a run's policy. What it says of
+// a host it refuses holds the value, so it is never printed.
+func policyHost(list, host string) bool {
+	b, err := json.Marshal(map[string]any{"version": 1, "egress": map[string]any{"mode": "observe", list: []string{host}}})
+	if err != nil {
+		return false
+	}
+	_, err = policy.Read(ForagerFileName+" gateway.egress", b)
+	return err == nil
 }
 
 // policyPaths reports whether Forager reads paths as the egress.paths of a policy
