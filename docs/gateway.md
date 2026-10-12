@@ -104,6 +104,10 @@ Once Qory Apiary's configuration names the key's node, it refuses a key that is 
 gateway's: `qory gateway needs a gateway's access key, and this one is node <id>'s: enrol
 a key with a code from the gateway's page in Qory Apiary`.
 
+A gateway's access key gets a configuration that lists no `workspaces`: the gateway
+takes each run's workspace from the run's run key, and a configuration that lists any is
+refused.
+
 ## What it keeps
 
 The gateway keeps its directory in qory's state directory: `~/.local/state/qory/gateway`,

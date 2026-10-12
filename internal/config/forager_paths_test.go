@@ -149,3 +149,50 @@ func TestTheForagerSchemaTakesThePaths(t *testing.T) {
 		}
 	}
 }
+
+// TestTheForagerSchemaTakesTheEgressHostsTheReaderTakes holds forager.schema.json to
+// what the reader takes of a host of gateway.egress.allow, deny and paths: a name, a *.
+// suffix, or an IPv4 address in canonical form, as Forager reads a policy's. A host
+// whose last label is all digits, or 0x and hex digits, and that is no such address is
+// refused by both.
+func TestTheForagerSchemaTakesTheEgressHostsTheReaderTakes(t *testing.T) {
+	hermetic(t)
+	schema, err := jsonschema.NewCompiler().Compile(filepath.Join("..", "..", "contracts", "harness", "v1", "forager.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		host  string
+		valid bool
+	}{
+		{"api.example.com", true},
+		{"*.example.com", true},
+		{"10.0.0.1", true},
+		{"0.0.0.0", true},
+		{"0x7f.example", true},
+		{"*.example.123", true},
+		{"api.example.123", false},
+		{"127.1", false},
+		{"443", false},
+		{"0x1f", false},
+		{"example.0x", false},
+		{"10.0.0.01", false},
+		{"256.1.1.1", false},
+		{"api.example.com:443", false},
+	} {
+		for _, egress := range []string{"allow: [\"" + c.host + "\"]", "deny: [\"" + c.host + "\"]", "paths: {\"" + c.host + "\": [/v1]}"} {
+			body := "apiVersion: qory.dev/v1alpha1\ngateway: {egress: {mode: enforce, " + egress + "}}\n"
+			var doc any
+			if err := yaml.Unmarshal([]byte(body), &doc); err != nil {
+				t.Fatal(err)
+			}
+			if err := schema.Validate(doc); (err == nil) != c.valid {
+				t.Errorf("schema: %q: %v, want valid %v", body, err, c.valid)
+			}
+			foragerFile(t, body)
+			if _, err := config.LoadForager(); (err == nil) != c.valid {
+				t.Errorf("reader: %q: %v, want valid %v", body, err, c.valid)
+			}
+		}
+	}
+}
