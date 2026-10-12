@@ -239,7 +239,7 @@ is particular to one runtime.
 
 Forager's session reads what it needs to know about a runtime from a **descriptor**. A
 descriptor is a file of data, in the format of the [Forager
-contract](https://github.com/qoryai/forager/blob/main/contracts/forager/v1/README.md#the-runtime).
+contract](https://github.com/qoryai/forager/blob/v0.7.0/contracts/forager/v1/README.md#the-runtime).
 It says:
 
 - how the runtime's hooks are installed,
@@ -1317,7 +1317,7 @@ tool through `--policy`, on a machine without a server or with `--local`.
 
 `qory config` lists each tool by its program and the hosts it serves. What a tool receives
 is in the [Forager
-contract](https://github.com/qoryai/forager/blob/main/contracts/forager/v1/README.md#tools).
+contract](https://github.com/qoryai/forager/blob/v0.7.0/contracts/forager/v1/README.md#tools).
 
 ## Integrations
 
@@ -1327,14 +1327,14 @@ run, which the agent must not hold. The program runs on your machine, outside th
 The agent never holds its secrets, or the token it mints.
 
 - Qory publishes integrations, each in a separate repository, such as
-  [`qory-github`](https://github.com/qoryai/qory-github). Its integration is named
-  `github`.
+  [`qory-github`](https://github.com/qoryai/qory-github/tree/v0.2.0). Its integration
+  is named `github`.
 - A program of yours starts from the
-  [integration template](https://github.com/qoryai/integration-template).
+  [integration template](https://github.com/qoryai/integration-template/tree/v0.1.0).
 
 Both are declared and checked the same way. The rules a program follows are the
 [integration
-contract](https://github.com/qoryai/integrations/tree/main/contracts/integration/v1).
+contract](https://github.com/qoryai/integrations/tree/v0.3.0/contracts/integration/v1).
 
 Declare an integration in `forager.yaml`, under `gateway.integrations`, with its `program`
 and its `settings`. A run's policy selects its credential by the key, as
@@ -1361,7 +1361,7 @@ The description of `github`, shortened. Its argument is one repository or severa
 owner, separated by commas:
 
 ```json
-{"version": 1, "name": "github", "title": "GitHub", "program_version": "0.1.0",
+{"version": 1, "name": "github", "title": "GitHub", "program_version": "0.2.0",
  "settings": {"type": "object", "additionalProperties": false, "required": ["app_id"],
    "properties": {
      "app_id": {"title": "App id", "type": ["integer", "string"]},
@@ -1434,7 +1434,7 @@ A policy selects it by the key: `{name: github, argument: acme/shop}`.
 `qory run` prints the program it found, and its version, on a separate line:
 
 ```
-qory run: integration github: /usr/local/bin/qory-github 0.1.0
+qory run: integration github: /usr/local/bin/qory-github 0.2.0
 ```
 
 #### Where a program may live
@@ -1550,7 +1550,7 @@ Each of these stops the run before the agent starts:
 | Forager | the run passes a value for a placeholder, `placeholder_conflict` |
 
 `qory run` prints why the run did not start. The
-[Forager contract](https://github.com/qoryai/forager/tree/main/contracts/forager/v1) has
+[Forager contract](https://github.com/qoryai/forager/tree/v0.7.0/contracts/forager/v1) has
 every code.
 
 ### The credential role
@@ -1646,7 +1646,7 @@ when events remain, or when the server said stop. Events the server did not acce
 in the run directory.
 
 The formats are in the
-[Forager contract](https://github.com/qoryai/forager/tree/main/contracts/forager/v1).
+[Forager contract](https://github.com/qoryai/forager/tree/v0.7.0/contracts/forager/v1).
 
 ## The wall
 
