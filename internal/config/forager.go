@@ -1199,14 +1199,19 @@ func readPaths(path string, node *yaml.Node) (map[string][]string, error) {
 	twice := map[string][2]int{}
 	first := map[string]int{}
 	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := node.Content[i]
-		if line, ok := first[key.Value]; ok {
+		// A key is a host as the value it stands for: an alias key is the anchor's
+		// value, not its name. A key that is not a string is not a host.
+		line, key := node.Content[i].Line, unalias(node.Content[i])
+		if key.Kind != yaml.ScalarNode || key.ShortTag() != "!!str" {
+			return nil, fmt.Errorf("%s: gateway.egress.paths: a key is not a lower-case host name or a *. suffix; no port, path or scheme", path)
+		}
+		if at, ok := first[key.Value]; ok {
 			if _, noted := twice[key.Value]; !noted {
-				twice[key.Value] = [2]int{line, key.Line}
+				twice[key.Value] = [2]int{at, line}
 			}
 			continue
 		}
-		first[key.Value] = key.Line
+		first[key.Value] = line
 		values[key.Value] = unalias(node.Content[i+1])
 	}
 	// Each host is read alone before its value, so a key that is not a host is never
@@ -1219,9 +1224,18 @@ func readPaths(path string, node *yaml.Node) (map[string][]string, error) {
 		if lines, ok := twice[host]; ok {
 			return nil, fmt.Errorf("%s: line %d: gateway.egress.paths.%s is written twice; it was first written at line %d", path, lines[1], host, lines[0])
 		}
-		list := []string{}
-		if v := values[host]; v.Kind != yaml.SequenceNode || safeDecode(func() error { return v.Decode(&list) }) != nil {
+		v := values[host]
+		if v.Kind != yaml.SequenceNode {
 			return nil, fmt.Errorf("%s: gateway.egress.paths: %s is a list of paths", path, host)
+		}
+		// Each entry is read as the value it stands for, an alias's included, and one
+		// that is not a string, a null among them, is refused by its index.
+		list := []string{}
+		for i, entry := range v.Content {
+			if entry = unalias(entry); entry.Kind != yaml.ScalarNode || entry.ShortTag() != "!!str" {
+				return nil, fmt.Errorf("%s: gateway.egress.paths.%s[%d] is not a path from /, matched whole or up to a final *", path, host, i)
+			}
+			list = append(list, entry.Value)
 		}
 		for i, p := range list {
 			if slices.Index(list, p) != i {

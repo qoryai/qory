@@ -67,7 +67,12 @@ func TestForagerFileRefusesPathsItCannotTake(t *testing.T) {
 		{"paths: [\"/v1/*\"]", ": gateway.egress.paths is a mapping from a host to a list of paths"},
 		{"paths:", ": gateway.egress.paths is a mapping from a host to a list of paths"},
 		{"paths: {api.example.com: /v1/*}", ": gateway.egress.paths: api.example.com is a list of paths"},
-		{"paths: {api.example.com: [[/v1/*]]}", ": gateway.egress.paths: api.example.com is a list of paths"},
+		{"paths: {api.example.com: [[/v1/*]]}", ": gateway.egress.paths.api.example.com[0] is not a path from /, matched whole or up to a final *"},
+		{"paths: {api.example.com: [/v1, ~]}", ": gateway.egress.paths.api.example.com[1] is not a path from /, matched whole or up to a final *"},
+		{"paths: {api.example.com: [~, v1]}", ": gateway.egress.paths.api.example.com[0] is not a path from /, matched whole or up to a final *"},
+		{"paths: {api.example.com: [/v1, null, v1]}", ": gateway.egress.paths.api.example.com[1] is not a path from /, matched whole or up to a final *"},
+		{"paths: {api.example.com: [/v1, !!int 7]}", ": gateway.egress.paths.api.example.com[1] is not a path from /, matched whole or up to a final *"},
+		{"paths: {443: [/v1]}", host},
 		{"paths: {api.example.com: }", ": gateway.egress.paths: api.example.com is a list of paths"},
 		{"paths: {\"API.example.com\": [/v1/*]}", host},
 		{"paths: {\"api.example.com:443\": [/v1/*]}", host},
@@ -82,6 +87,31 @@ func TestForagerFileRefusesPathsItCannotTake(t *testing.T) {
 		if err == nil || err.Error() != path+c.want {
 			t.Errorf("%q: %v, want %q after the file", c.body, err, c.want)
 		}
+	}
+}
+
+// TestForagerFileReadsThePathsAsTheirValues reads an alias key as the host its anchor
+// holds, not the anchor's name, and an alias entry as the path it stands for; an alias
+// key that writes a host again is refused as a host written twice.
+func TestForagerFileReadsThePathsAsTheirValues(t *testing.T) {
+	hermetic(t)
+	foragerFile(t, "gateway:\n  egress:\n    mode: observe\n    allow: [&h api.example.com]\n    paths:\n      *h: [&p /v1/*, /v2]\n      files.example.com: [*p]\n")
+	r, err := config.LoadForager()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paths := r.Egress.Paths; len(paths) != 2 || strings.Join(paths["api.example.com"], " ") != "/v1/* /v2" || strings.Join(paths["files.example.com"], " ") != "/v1/*" {
+		t.Errorf("aliases read as %#v", paths)
+	}
+	path := foragerFile(t, "gateway:\n  egress:\n    mode: observe\n    allow: [&h api.example.com]\n    paths:\n      api.example.com: [/v1/*]\n      *h: [/v2]\n")
+	want := path + ": line 7: gateway.egress.paths.api.example.com is written twice; it was first written at line 6"
+	if _, err := config.LoadForager(); err == nil || err.Error() != want {
+		t.Errorf("an alias key that writes a host again: %v, want %q", err, want)
+	}
+	path = foragerFile(t, "gateway:\n  egress:\n    mode: observe\n    paths:\n      a.example: &h [/v1]\n      *h: [/v2]\n")
+	want = path + ": gateway.egress.paths: a key is not a lower-case host name or a *. suffix; no port, path or scheme"
+	if _, err := config.LoadForager(); err == nil || err.Error() != want {
+		t.Errorf("an alias key of a list: %v, want %q", err, want)
 	}
 }
 
