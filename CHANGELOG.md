@@ -336,9 +336,9 @@ release may change what an existing document does, and states it under Upgrading
   is neither such a name nor an IP address in canonical form with the rule
   `wall:host-form` and a `403`.
 - The gateway reaches a host an agent requests exactly as it is written, with no search
-  domain added: a name of one label is reached only at the addresses the hosts file
-  gives it, so a host that only a search domain completed needs its full name, in the
-  request and in the run's egress lists.
+  domain added: a name of one label is reached as written, at the addresses the hosts
+  file gives it or else from a name server, so a host that only a search domain
+  completed needs its full name, in the request and in the run's egress lists.
 - `forager.yaml` refuses an entry that is not a string in any of its lists:
   `gateway.egress.allow` and `deny`, a credential's `adapter`, `hosts`, `paths` and
   `placeholders`, a tool's `command`, `serves` and `placeholders`, and `wall.env`,
