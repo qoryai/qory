@@ -1327,8 +1327,8 @@ run, which the agent must not hold. The program runs on your machine, outside th
 The agent never holds its secrets, or the token it mints.
 
 - Qory publishes integrations, each in a separate repository, such as
-  [`qory-github`](https://github.com/qoryai/qory-github). Its integration is named
-  `github`.
+  [`qory-github`](https://github.com/qoryai/qory-github/tree/v0.2.0). Its integration
+  is named `github`.
 - A program of yours starts from the
   [integration template](https://github.com/qoryai/integration-template/tree/v0.1.0).
 
@@ -1361,7 +1361,7 @@ The description of `github`, shortened. Its argument is one repository or severa
 owner, separated by commas:
 
 ```json
-{"version": 1, "name": "github", "title": "GitHub", "program_version": "0.1.0",
+{"version": 1, "name": "github", "title": "GitHub", "program_version": "0.2.0",
  "settings": {"type": "object", "additionalProperties": false, "required": ["app_id"],
    "properties": {
      "app_id": {"title": "App id", "type": ["integer", "string"]},
@@ -1434,7 +1434,7 @@ A policy selects it by the key: `{name: github, argument: acme/shop}`.
 `qory run` prints the program it found, and its version, on a separate line:
 
 ```
-qory run: integration github: /usr/local/bin/qory-github 0.1.0
+qory run: integration github: /usr/local/bin/qory-github 0.2.0
 ```
 
 #### Where a program may live
