@@ -399,14 +399,16 @@ type foragerFile struct {
 		Images  yaml.Node `yaml:"images,omitempty"`
 		Command *string   `yaml:"command"`
 		Helper  *string   `yaml:"helper"`
-		Env     *[]string `yaml:"env"`
+		// Env, Mounts and CAEnv are read as nodes, so an entry that is not a string
+		// is refused by its index.
+		Env     yaml.Node `yaml:"env,omitempty"`
 		User    *string   `yaml:"user"`
-		Mounts  *[]string `yaml:"mounts"`
+		Mounts  yaml.Node `yaml:"mounts,omitempty"`
 		CPUs    *string   `yaml:"cpus"`
 		Memory  *string   `yaml:"memory"`
 		PIDs    *int      `yaml:"pids_limit"`
 		ShmSize *string   `yaml:"shm_size"`
-		CAEnv   *[]string `yaml:"ca_env"`
+		CAEnv   yaml.Node `yaml:"ca_env,omitempty"`
 	} `yaml:"wall,omitempty"`
 }
 
@@ -414,9 +416,11 @@ type foragerFile struct {
 // credentials, the tools and the integrations.
 type gatewaySection struct {
 	Egress *struct {
-		Mode  *string   `yaml:"mode"`
-		Allow *[]string `yaml:"allow"`
-		Deny  *[]string `yaml:"deny"`
+		Mode *string `yaml:"mode"`
+		// Allow and Deny are read as nodes, so an entry that is not a string is refused
+		// by its index.
+		Allow yaml.Node `yaml:"allow,omitempty"`
+		Deny  yaml.Node `yaml:"deny,omitempty"`
 		// Paths is read as a node, so its shape is refused in qory's words.
 		Paths yaml.Node `yaml:"paths,omitempty"`
 	} `yaml:"egress,omitempty"`
@@ -512,20 +516,23 @@ func LoadForager() (*Forager, error) {
 			return nil, fmt.Errorf("%s: gateway.egress.mode is not observe or enforce", path)
 		}
 		r.Egress = &ForagerEgress{Mode: *e.Mode}
-		if e.Allow != nil {
-			for i, host := range *e.Allow {
-				if !module.EgressHost.MatchString(host) {
-					return nil, fmt.Errorf("%s: gateway.egress.allow[%d] is not a lower-case host name or a *. suffix; no port, path or scheme", path, i)
-				}
-				r.Egress.Allow = append(r.Egress.Allow, host)
+		for _, l := range []struct {
+			key string
+			in  *yaml.Node
+			out *[]string
+		}{{"gateway.egress.allow", &e.Allow, &r.Egress.Allow}, {"gateway.egress.deny", &e.Deny, &r.Egress.Deny}} {
+			notHost := func(i, _ int) error {
+				return fmt.Errorf("%s: %s[%d] is not a lower-case host name or a *. suffix; no port, path or scheme", path, l.key, i)
 			}
-		}
-		if e.Deny != nil {
-			for i, host := range *e.Deny {
+			var hosts []string
+			if hosts, err = stringList(path, l.key, l.in, notHost); err != nil {
+				return nil, err
+			}
+			for i, host := range hosts {
 				if !module.EgressHost.MatchString(host) {
-					return nil, fmt.Errorf("%s: gateway.egress.deny[%d] is not a lower-case host name or a *. suffix; no port, path or scheme", path, i)
+					return nil, notHost(i, 0)
 				}
-				r.Egress.Deny = append(r.Egress.Deny, host)
+				*l.out = append(*l.out, host)
 			}
 		}
 		if e.Paths.Kind != 0 {
@@ -633,14 +640,19 @@ func LoadForager() (*Forager, error) {
 		if w.User != nil {
 			r.Wall.User = *w.User
 		}
-		if w.Mounts != nil {
-			for i, v := range *w.Mounts {
-				m, err := ParseMount(v)
-				if err != nil {
-					return nil, fmt.Errorf("%s: wall.mounts[%d] is not an absolute path, with :ro after it for a read-only one", path, i)
-				}
-				r.Wall.Mounts = append(r.Wall.Mounts, m)
+		notMount := func(i, _ int) error {
+			return fmt.Errorf("%s: wall.mounts[%d] is not an absolute path, with :ro after it for a read-only one", path, i)
+		}
+		var mounts, caEnv, env []string
+		if mounts, err = stringList(path, "wall.mounts", &w.Mounts, notMount); err != nil {
+			return nil, err
+		}
+		for i, v := range mounts {
+			m, err := ParseMount(v)
+			if err != nil {
+				return nil, notMount(i, 0)
 			}
+			r.Wall.Mounts = append(r.Wall.Mounts, m)
 		}
 		if w.CPUs != nil {
 			r.Wall.CPUs = *w.CPUs
@@ -657,24 +669,32 @@ func LoadForager() (*Forager, error) {
 		if w.ShmSize != nil {
 			r.Wall.ShmSize = *w.ShmSize
 		}
-		if w.CAEnv != nil {
-			for i, name := range *w.CAEnv {
-				if !envName.MatchString(name) {
-					return nil, fmt.Errorf("%s: wall.ca_env[%d] is not a variable's name", path, i)
-				}
-				r.Wall.CAEnv = append(r.Wall.CAEnv, name)
-			}
+		notCAEnv := func(i, _ int) error {
+			return fmt.Errorf("%s: wall.ca_env[%d] is not a variable's name", path, i)
 		}
-		if w.Env != nil {
-			for i, name := range *w.Env {
-				if ForagersOwn(name) {
-					return nil, fmt.Errorf("%s: wall.env[%d] names a variable that is Forager's and never the agent's", path, i)
-				}
-				if !envName.MatchString(name) {
-					return nil, fmt.Errorf("%s: wall.env[%d] is not a variable's name; the value comes from the environment, never from this file", path, i)
-				}
-				r.Wall.Env = append(r.Wall.Env, name)
+		if caEnv, err = stringList(path, "wall.ca_env", &w.CAEnv, notCAEnv); err != nil {
+			return nil, err
+		}
+		for i, name := range caEnv {
+			if !envName.MatchString(name) {
+				return nil, notCAEnv(i, 0)
 			}
+			r.Wall.CAEnv = append(r.Wall.CAEnv, name)
+		}
+		notEnv := func(i, _ int) error {
+			return fmt.Errorf("%s: wall.env[%d] is not a variable's name; the value comes from the environment, never from this file", path, i)
+		}
+		if env, err = stringList(path, "wall.env", &w.Env, notEnv); err != nil {
+			return nil, err
+		}
+		for i, name := range env {
+			if ForagersOwn(name) {
+				return nil, fmt.Errorf("%s: wall.env[%d] names a variable that is Forager's and never the agent's", path, i)
+			}
+			if !envName.MatchString(name) {
+				return nil, notEnv(i, 0)
+			}
+			r.Wall.Env = append(r.Wall.Env, name)
 		}
 	}
 	return r, nil
@@ -1097,20 +1117,21 @@ func CheckServerURL(raw string) error {
 	return fmt.Errorf("gateway.server.url for %s %s: %s", urlOrigin(u), wrong, serverURLShape)
 }
 
-// credentialFile is one entry of the credentials section as written.
+// credentialFile is one entry of the credentials section as written. Its lists are read
+// as nodes, so an entry that is not a string is refused by its index.
 type credentialFile struct {
 	Env      *string   `yaml:"env"`
 	File     *string   `yaml:"file"`
-	Adapter  *[]string `yaml:"adapter"`
+	Adapter  yaml.Node `yaml:"adapter,omitempty"`
 	Argument *string   `yaml:"argument"`
-	Hosts    *[]string `yaml:"hosts"`
-	Paths    *[]string `yaml:"paths"`
+	Hosts    yaml.Node `yaml:"hosts,omitempty"`
+	Paths    yaml.Node `yaml:"paths,omitempty"`
 	Auth     *struct {
 		Scheme   *string `yaml:"scheme"`
 		Username *string `yaml:"username"`
 		Header   *string `yaml:"header"`
 	} `yaml:"auth"`
-	Placeholders *[]string `yaml:"placeholders"`
+	Placeholders yaml.Node `yaml:"placeholders,omitempty"`
 }
 
 // readCredentials reads the credentials section, a mapping from name to entry, in the
@@ -1141,6 +1162,18 @@ func readCredentials(path string, node *yaml.Node) ([]ForagerCredential, error) 
 		if err := safeDecode(func() error { return node.Content[i+1].Decode(&f) }); err != nil {
 			return nil, foragerDecodeError(path, node.Content[i+1], reflect.TypeOf(f), "gateway.credentials."+c.Name, false, err)
 		}
+		var adapter []string
+		for _, l := range []struct {
+			key string
+			in  *yaml.Node
+			out *[]string
+		}{{"adapter", &f.Adapter, &adapter}, {"hosts", &f.Hosts, &c.Hosts}, {"paths", &f.Paths, &c.Paths}, {"placeholders", &f.Placeholders, &c.Placeholders}} {
+			key := "gateway.credentials." + c.Name + "." + l.key
+			var err error
+			if *l.out, err = stringList(path, key, l.in, notAString(path, key)); err != nil {
+				return nil, err
+			}
+		}
 		if f.Env != nil {
 			c.Env = *f.Env
 		}
@@ -1150,20 +1183,14 @@ func readCredentials(path string, node *yaml.Node) ([]ForagerCredential, error) 
 			}
 			c.File = *f.File
 		}
-		if f.Adapter != nil {
-			if len(*f.Adapter) == 0 || !filepath.IsAbs((*f.Adapter)[0]) {
+		if adapter != nil {
+			if len(adapter) == 0 || !filepath.IsAbs(adapter[0]) {
 				return nil, fmt.Errorf("%s: gateway.credentials.%s.adapter is a program by its absolute path, and its arguments", path, c.Name)
 			}
-			c.Adapter = *f.Adapter
+			c.Adapter = adapter
 		}
 		if f.Argument != nil {
 			c.Argument = *f.Argument
-		}
-		if f.Hosts != nil {
-			c.Hosts = *f.Hosts
-		}
-		if f.Paths != nil {
-			c.Paths = *f.Paths
 		}
 		if f.Auth != nil {
 			if f.Auth.Scheme != nil {
@@ -1175,9 +1202,6 @@ func readCredentials(path string, node *yaml.Node) ([]ForagerCredential, error) 
 			if f.Auth.Header != nil {
 				c.Header = *f.Auth.Header
 			}
-		}
-		if f.Placeholders != nil {
-			c.Placeholders = *f.Placeholders
 		}
 		out = append(out, c)
 	}
@@ -1228,14 +1252,12 @@ func readPaths(path string, node *yaml.Node) (map[string][]string, error) {
 		if v.Kind != yaml.SequenceNode {
 			return nil, fmt.Errorf("%s: gateway.egress.paths: %s is a list of paths", path, host)
 		}
-		// Each entry is read as the value it stands for, an alias's included, and one
-		// that is not a string, a null among them, is refused by its index.
-		list := []string{}
-		for i, entry := range v.Content {
-			if entry = unalias(entry); entry.Kind != yaml.ScalarNode || entry.ShortTag() != "!!str" {
-				return nil, fmt.Errorf("%s: gateway.egress.paths.%s[%d] is not a path from /, matched whole or up to a final *", path, host, i)
-			}
-			list = append(list, entry.Value)
+		notPath := func(i, _ int) error {
+			return fmt.Errorf("%s: gateway.egress.paths.%s[%d] is not a path from /, matched whole or up to a final *", path, host, i)
+		}
+		list, err := stringEntries(v, notPath)
+		if err != nil {
+			return nil, err
 		}
 		for i, p := range list {
 			if slices.Index(list, p) != i {
@@ -1244,7 +1266,7 @@ func readPaths(path string, node *yaml.Node) (map[string][]string, error) {
 		}
 		for i, p := range list {
 			if !policyPaths(map[string][]string{host: {p}}) {
-				return nil, fmt.Errorf("%s: gateway.egress.paths.%s[%d] is not a path from /, matched whole or up to a final *", path, host, i)
+				return nil, notPath(i, 0)
 			}
 		}
 		out[host] = list
@@ -1292,6 +1314,50 @@ func pathsOrNone(paths map[string][]string) string {
 	return strings.Join(hosts, "; ")
 }
 
+// stringList is the list of strings at key, written as node, read as the value it stands
+// for when it is an alias: nil when the file does not write it or writes it null, and the
+// list, empty when the file writes it empty, otherwise. A value that is not a list is
+// refused, by its line, and an entry that is not a string as [stringEntries] refuses it.
+func stringList(path, key string, node *yaml.Node, notString func(i, line int) error) ([]string, error) {
+	line, n := node.Line, unalias(node)
+	if n.Kind == 0 {
+		return nil, nil
+	}
+	if f := tagFault(n, line, key); f != nil {
+		return nil, f.error(path)
+	}
+	if null(n) {
+		return nil, nil
+	}
+	if n.Kind != yaml.SequenceNode {
+		return nil, keyFault(line, key, "is not a list of strings").error(path)
+	}
+	return stringEntries(n, notString)
+}
+
+// stringEntries are the entries of the list seq, each read as the value it stands for,
+// an alias's included. An entry that is not a string, a null among them, is refused by
+// notString, with its index and its line, and the refusal holds no value.
+func stringEntries(seq *yaml.Node, notString func(i, line int) error) ([]string, error) {
+	list := []string{}
+	for i, entry := range seq.Content {
+		line := entry.Line
+		if entry = unalias(entry); entry.Kind != yaml.ScalarNode || entry.ShortTag() != "!!str" {
+			return nil, notString(i, line)
+		}
+		list = append(list, entry.Value)
+	}
+	return list, nil
+}
+
+// notAString is the refusal of an entry of the list at key that is not a string, by its
+// line and its index.
+func notAString(path, key string) func(i, line int) error {
+	return func(i, line int) error {
+		return keyFault(line, fmt.Sprintf("%s[%d]", key, i), "is not a string").error(path)
+	}
+}
+
 // unalias is the node an alias stands for, and any other node itself.
 func unalias(node *yaml.Node) *yaml.Node {
 	for node.Kind == yaml.AliasNode && node.Alias != nil {
@@ -1300,12 +1366,13 @@ func unalias(node *yaml.Node) *yaml.Node {
 	return node
 }
 
-// toolFile is one entry of the tools section as written.
+// toolFile is one entry of the tools section as written. Its lists are read as nodes, so
+// an entry that is not a string is refused by its index.
 type toolFile struct {
-	Command      *[]string `yaml:"command"`
+	Command      yaml.Node `yaml:"command,omitempty"`
 	Argument     *string   `yaml:"argument"`
-	Serves       *[]string `yaml:"serves"`
-	Placeholders *[]string `yaml:"placeholders"`
+	Serves       yaml.Node `yaml:"serves,omitempty"`
+	Placeholders yaml.Node `yaml:"placeholders,omitempty"`
 }
 
 // readTools reads the tools section, a mapping from name to entry, in the file's order.
@@ -1336,20 +1403,24 @@ func readTools(path string, node *yaml.Node) ([]ForagerTool, error) {
 		if err := safeDecode(func() error { return node.Content[i+1].Decode(&f) }); err != nil {
 			return nil, foragerDecodeError(path, node.Content[i+1], reflect.TypeOf(f), "gateway.tools."+t.Name, false, err)
 		}
+		for _, l := range []struct {
+			key string
+			in  *yaml.Node
+			out *[]string
+		}{{"command", &f.Command, &t.Command}, {"serves", &f.Serves, &t.Serves}, {"placeholders", &f.Placeholders, &t.Placeholders}} {
+			key := "gateway.tools." + t.Name + "." + l.key
+			var err error
+			if *l.out, err = stringList(path, key, l.in, notAString(path, key)); err != nil {
+				return nil, err
+			}
+		}
 		// A tool is its program, so a tool without one is refused as one not by its
 		// absolute path is.
-		if f.Command == nil || len(*f.Command) == 0 || !filepath.IsAbs((*f.Command)[0]) {
+		if len(t.Command) == 0 || !filepath.IsAbs(t.Command[0]) {
 			return nil, fmt.Errorf("%s: gateway.tools.%s.command is a program by its absolute path, and its arguments", path, t.Name)
 		}
-		t.Command = *f.Command
 		if f.Argument != nil {
 			t.Argument = *f.Argument
-		}
-		if f.Serves != nil {
-			t.Serves = *f.Serves
-		}
-		if f.Placeholders != nil {
-			t.Placeholders = *f.Placeholders
 		}
 		out = append(out, t)
 	}

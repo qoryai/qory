@@ -23,7 +23,9 @@ var foragerKeys = []struct{ body, key string }{
 	{"apiVersion: %s\n", "apiVersion"},
 	{"gateway: {egress: {mode: %s}}\n", "gateway.egress.mode"},
 	{"gateway: {egress: {mode: observe, allow: %s}}\n", "gateway.egress.allow"},
+	{"gateway: {egress: {mode: observe, allow: [a.example, %s]}}\n", "gateway.egress.allow[1]"},
 	{"gateway: {egress: {mode: observe, deny: %s}}\n", "gateway.egress.deny"},
+	{"gateway: {egress: {mode: observe, deny: [a.example, %s]}}\n", "gateway.egress.deny[1]"},
 	{"gateway: {egress: {mode: observe, paths: %s}}\n", "gateway.egress.paths"},
 	{"gateway: {egress: {mode: observe, paths: {%s: []}}}\n", "gateway.egress.paths"},
 	{"gateway: {egress: {mode: observe, paths: {a.example: %s}}}\n", "gateway.egress.paths"},
@@ -39,18 +41,25 @@ var foragerKeys = []struct{ body, key string }{
 	{"gateway: {credentials: {c: {env: %s}}}\n", "gateway.credentials.c.env"},
 	{"gateway: {credentials: {c: {file: %s}}}\n", "gateway.credentials.c.file"},
 	{"gateway: {credentials: {c: {adapter: %s}}}\n", "gateway.credentials.c.adapter"},
+	{"gateway: {credentials: {c: {adapter: [/x, %s]}}}\n", "gateway.credentials.c.adapter[1]"},
 	{"gateway: {credentials: {c: {argument: %s}}}\n", "gateway.credentials.c.argument"},
 	{"gateway: {credentials: {c: {hosts: %s}}}\n", "gateway.credentials.c.hosts"},
+	{"gateway: {credentials: {c: {hosts: [a.example, %s]}}}\n", "gateway.credentials.c.hosts[1]"},
 	{"gateway: {credentials: {c: {paths: %s}}}\n", "gateway.credentials.c.paths"},
+	{"gateway: {credentials: {c: {paths: [/v1, %s]}}}\n", "gateway.credentials.c.paths[1]"},
 	{"gateway: {credentials: {c: {auth: {scheme: %s}}}}\n", "gateway.credentials.c.auth.scheme"},
 	{"gateway: {credentials: {c: {auth: {username: %s}}}}\n", "gateway.credentials.c.auth.username"},
 	{"gateway: {credentials: {c: {auth: {header: %s}}}}\n", "gateway.credentials.c.auth.header"},
 	{"gateway: {credentials: {c: {placeholders: %s}}}\n", "gateway.credentials.c.placeholders"},
+	{"gateway: {credentials: {c: {placeholders: [T, %s]}}}\n", "gateway.credentials.c.placeholders[1]"},
 	{"gateway: {tools: %s}\n", "gateway.tools"},
 	{"gateway: {tools: {t: {command: %s}}}\n", "gateway.tools.t.command"},
+	{"gateway: {tools: {t: {command: [/x, %s]}}}\n", "gateway.tools.t.command[1]"},
 	{"gateway: {tools: {t: {command: [/x], argument: %s}}}\n", "gateway.tools.t.argument"},
 	{"gateway: {tools: {t: {command: [/x], serves: %s}}}\n", "gateway.tools.t.serves"},
+	{"gateway: {tools: {t: {command: [/x], serves: [a.example, %s]}}}\n", "gateway.tools.t.serves[1]"},
 	{"gateway: {tools: {t: {command: [/x], placeholders: %s}}}\n", "gateway.tools.t.placeholders"},
+	{"gateway: {tools: {t: {command: [/x], placeholders: [T, %s]}}}\n", "gateway.tools.t.placeholders[1]"},
 	{"gateway: {integrations: %s}\n", "gateway.integrations"},
 	{"gateway: {integrations: {i: {program: %s}}}\n", "gateway.integrations.i.program"},
 	{"gateway: {integrations: {i: {settings: {s: %s}}}}\n", "gateway.integrations.i.settings"},
@@ -73,20 +82,23 @@ var foragerKeys = []struct{ body, key string }{
 	{"wall: {adapter: docker, command: %s}\n", "wall.command"},
 	{"wall: {adapter: docker, helper: %s}\n", "wall.helper"},
 	{"wall: {adapter: docker, env: %s}\n", "wall.env"},
+	{"wall: {adapter: docker, env: [HOME, %s]}\n", "wall.env[1]"},
 	{"wall: {adapter: docker, user: %s}\n", "wall.user"},
 	{"wall: {adapter: docker, mounts: %s}\n", "wall.mounts"},
+	{"wall: {adapter: docker, mounts: [/srv, %s]}\n", "wall.mounts[1]"},
 	{"wall: {adapter: docker, cpus: %s}\n", "wall.cpus"},
 	{"wall: {adapter: docker, memory: %s}\n", "wall.memory"},
 	{"wall: {adapter: docker, pids_limit: %s}\n", "wall.pids_limit"},
 	{"wall: {adapter: docker, shm_size: %s}\n", "wall.shm_size"},
 	{"wall: {adapter: docker, ca_env: %s}\n", "wall.ca_env"},
+	{"wall: {adapter: docker, ca_env: [X, %s]}\n", "wall.ca_env[1]"},
 	{"webhook: %s\n", "webhook"},
 }
 
-// TestNoForagerRefusalPrintsAValue writes into every key of forager.yaml a value the
-// reader cannot take: an access key secret under a tag its value does not fit, and a
-// mapping or a list where another kind goes. Each is refused, naming the file and the
-// key, and no refusal holds the value.
+// TestNoForagerRefusalPrintsAValue writes into every key of forager.yaml, and into an
+// entry of every list of strings, a value the reader cannot take: an access key secret
+// under a tag its value does not fit, and a mapping or a list where another kind goes.
+// Each is refused, naming the file and the key, and no refusal holds the value.
 func TestNoForagerRefusalPrintsAValue(t *testing.T) {
 	hermetic(t)
 	for _, k := range foragerKeys {
@@ -124,7 +136,7 @@ func TestForagerRefusalsSayWhatIsWrongWithoutTheValue(t *testing.T) {
 		{"gateway:\n  server:\n    url: https://qory.example\n    via:\n      url: https://gateway.example\n      ca_file: &a {k: " + secret + "}\n      certificate_sha256: *a\n", ": line 6: gateway.server.via.ca_file is not a string"},
 		{"gateway: {egress: {mode: {k: " + secret + "}}}\n", ": line 1: gateway.egress.mode is not a string"},
 		{"gateway:\n  egress:\n    mode: observe\n    allow: " + secret + "\n", ": line 4: gateway.egress.allow is not a list of strings"},
-		{"gateway:\n  egress:\n    mode: observe\n    allow:\n      - a.example\n      - !!int " + secret + "\n", ": line 6: gateway.egress.allow[1] is tagged !!int, and its value is not of that type"},
+		{"gateway:\n  egress:\n    mode: observe\n    allow:\n      - a.example\n      - !!int " + secret + "\n", ": gateway.egress.allow[1] is not a lower-case host name or a *. suffix; no port, path or scheme"},
 		{"gateway: {server: {url: \"https://qory.example\", apiary_public_key: " + secret + "}}\n", ": line 1: gateway.server.apiary_public_key is not a list"},
 		{"gateway: {server: {url: \"https://qory.example\", apiary_public_key: [" + secret + "]}}\n", ": line 1: gateway.server.apiary_public_key[0] is not a mapping"},
 		{"wall:\n  adapter: docker\n  pids_limit: " + secret + "\n", ": line 3: wall.pids_limit is not a whole number"},
@@ -282,19 +294,20 @@ func manyAliases(n int) string {
 }
 
 // TestAWalkAtItsLimitSaysNoAliases writes more aliases than qory's walk of the file
-// takes, 150,000 of one value, which the decoder reads: a refusal names a fault the walk
-// still finds, or says one without its place, never that the aliases expand too far, and
-// a file the decoder reads is read. A key that is not a name beside a merge, in a
-// mapping the walk no longer reaches, is still refused, by the decoder's failure.
+// takes, 120,000 of one entry of gateway.server.apiary_public_key, which the decoder
+// reads: a refusal names a fault the walk still finds, or says one without its place,
+// never that the aliases expand too far, and a file the decoder reads is read. A key
+// that is not a name beside a merge, in a mapping the walk no longer reaches, is still
+// refused, by the decoder's failure.
 func TestAWalkAtItsLimitSaysNoAliases(t *testing.T) {
 	hermetic(t)
-	many := manyAliases(150_000)
-	env := "wall: {adapter: docker, env: [&u " + secret + ", " + many + "]}\n"
+	server := "  server:\n    url: https://qory.example\n    apiary_public_key: [&u {alg: ed25519, public_key: " + secret + "}, " + manyAliases(120_000) + "]\n"
+	pins := "gateway:\n" + server
 	for _, c := range []struct{ body, whole, instance string }{
-		{env + "session: {run: {timeout: [" + secret + "]}}\n", ": line 2: session.run.timeout is not a string", ""},
-		{"wall: {adapter: docker, mounts: &m [" + secret + "], env: [&u " + secret + ", " + many + "], cpus: *m}\n", ": a value is not of the type its key takes", ""},
-		{env + "session:\n  instance:\n    ? [" + secret + "]\n    : y\n    <<: {name: box}\n", ": line 4: session.instance has a key that is not a name", ": line 4: session.instance has a key that is not a name"},
-		{"gateway: {credentials: {c: &p {env: X, hosts: [h], ? [" + secret + "] : y, <<: {file: f}}}}\n" + env + "session: {instance: *p}\n", ": the YAML decoder failed reading the file", ": line 1: session.instance has a key that is not a name"},
+		{pins + "session: {run: {timeout: [" + secret + "]}}\n", ": line 5: session.run.timeout is not a string", ""},
+		{pins + "wall: {adapter: docker, mounts: &m [" + secret + "], cpus: *m}\n", ": a value is not of the type its key takes", ""},
+		{pins + "session:\n  instance:\n    ? [" + secret + "]\n    : y\n    <<: {name: box}\n", ": line 7: session.instance has a key that is not a name", ": line 7: session.instance has a key that is not a name"},
+		{"gateway:\n  credentials: {c: &p {env: X, hosts: [h], ? [" + secret + "] : y, <<: {file: f}}}\n" + server + "session: {instance: *p}\n", ": the YAML decoder failed reading the file", ": line 2: session.instance has a key that is not a name"},
 	} {
 		path := foragerFile(t, c.body)
 		for _, r := range []struct {
@@ -348,14 +361,14 @@ func TestForagerReadsAtOnceWhatItCannotSayWithoutAValue(t *testing.T) {
 	hermetic(t)
 	const number = "987654321"
 	binary := base64.StdEncoding.EncodeToString([]byte(secret))
-	env := "wall: {adapter: docker, pids_limit: &p " + number + ", env: [&n X, " + repeated("*n", 100_001) + "]}\n"
+	merges := "wall: {adapter: docker, pids_limit: &p " + number + "}\nsession: {instance: &n {}, <<: [" + repeated("*n", 100_001) + "]}\n"
 	for _, c := range []struct{ body, whole, instance string }{
 		{"gateway: {credentials: &a {" + numbered("k", 5000) + "}, server: {url: https://apiary.example, apiary_public_key: [" + repeated("{<<: *a}", 5000) + "]}}\n", ": its aliases expand to more values than qory reads", ""},
 		{"x: &a {" + numbered("k", 2000) + "}\nsession: {instance: {<<: [" + repeated("*a", 2000) + "]}}\n", ": its aliases expand to more values than qory reads", ": its aliases expand to more values than qory reads"},
 		{"wall:\n  adapter: docker\n  image: a\n  image: b\n  adapter: docker\n", ": line 5: wall.adapter is written twice; it was first written at line 2", ""},
 		{"session:\n  instance:\n    name: &a !!binary " + binary + "\n  *a : 1\n", ": line 4: key *a is an alias of a key forager.yaml does not read", ": session.instance.name is not 1 to 64 of A-Z, a-z, 0-9, dot, underscore and dash, starting with a letter or digit"},
-		{env + "gateway: {<<: {listen: \"a:1\"}, ? {a: {[*p]: 1}} : x}\n", ": line 2: gateway has a key that is not a name", ""},
-		{env + "webhook: &g {<<: {listen: \"a:1\"}, ? {a: {[*p]: 1}} : x}\ngateway: *g\n", ": a value is not of the type its key takes", ""},
+		{merges + "gateway: {<<: {listen: \"a:1\"}, ? {a: {[*p]: 1}} : x}\n", ": line 3: gateway has a key that is not a name", ""},
+		{merges + "webhook: &g {<<: {listen: \"a:1\"}, ? {a: {[*p]: 1}} : x}\ngateway: *g\n", ": a value is not of the type its key takes", ""},
 	} {
 		path := foragerFile(t, c.body)
 		for _, r := range []struct {
