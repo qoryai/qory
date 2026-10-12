@@ -52,7 +52,7 @@ const DescriptorsDir = "runtimes"
 // exits with the runtime's status.
 func newRun() *cobra.Command {
 	var h homeOptions
-	var local, headless bool
+	var local, headless, relabel bool
 	var o wallOptions
 	var policyFile, runID string
 	var labels []string
@@ -145,9 +145,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						given = append(given, f)
 					}
 				}
-				if err := behindGateway(conf.Forager, local, policyFile != "", fdKey != nil, given); err != nil {
+				if err := behindGateway(conf.Forager, local, policyFile != "", relabel, fdKey != nil, given); err != nil {
 					return err
 				}
+			}
+			if relabel && local {
+				return relabelLocal()
 			}
 			rep, err := readReport(at)
 			if err != nil {
@@ -197,16 +200,29 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// starter's registration's: the session sends none.
 			var named map[string]string
 			var about *session.About
+			var keep *keptLabels
 			if !remote {
-				if named, err = parseLabels(labels); err != nil {
+				explicit, err := parseLabels(labels)
+				if err != nil {
 					return err
 				}
-				named = withOrigin(named, at.root)
+				// The origin remote is read once: the labels the run sends are the ones
+				// checked against the kept labels, and kept.
+				origin := originLabels(at.root)
+				named = withOrigin(explicit, origin)
 				if err := session.CheckLabels(named); err != nil {
 					return input(err)
 				}
 				if about, err = aboutFrom(kind, title, subjects, details, stdin, isTerminal(stdin)); err != nil {
 					return err
+				}
+				// A run against the server, directly or through via, runs only with the
+				// labels its checkout's origin remote gave when the server first accepted
+				// one of its runs, or with --relabel.
+				if server != nil && !local {
+					if keep, err = checkLabels(machineDir(), at.root, explicit, origin, relabel); err != nil {
+						return err
+					}
 				}
 			}
 			if runID != "" {
@@ -272,6 +288,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				Timeout:        timeout,
 				StopSignal:     stopSignal,
 				StopGrace:      grace,
+				SocketGrace:    socketGrace,
 			}
 			switch {
 			case spec.RunID == "" && remote:
@@ -333,11 +350,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// run its starter registered does. The run key it keeps beside forager.yaml goes
 			// once nothing of the run is left to send.
 			kept := runsThroughVia(conf.Forager, id)
+			said := func(line string) { fmt.Fprintln(stderr, "qory run:", line) }
 			switch {
 			case kept:
 				if key, err = registerThroughVia(ctx, conf.Forager, id, spec.RunID, named, about, stderr); err != nil {
 					return err
 				}
+				// The server accepted the run.
+				keep.keep(said)
 				remote = true
 				spec.Labels, spec.About = nil, nil
 			case id != nil:
@@ -348,6 +368,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				apiary = server.URL
 			}
 			spec.OnVariables = unusedEnv(stderr, apiary)
+			if !kept && keep != nil {
+				// Forager resolves the run's variables once the gateway's run answer came,
+				// and the gateway answers once the server accepted the run's registration.
+				unused := spec.OnVariables
+				spec.OnVariables = func(a session.Applied) {
+					unused(a)
+					keep.keep(said)
+				}
+			}
 			if r := conf.Forager; r != nil && !remote {
 				if gw.Credentials, err = machineCredentials(ctx, r, expansion(r, pol, server != nil && !local, at.root, cwd, spec.Mounts), "run", stderr); err != nil {
 					return err
@@ -460,6 +489,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 		},
 	}
 	c.Flags().BoolVar(&local, "local", false, "run without the server: record to files, under the machine's policy")
+	c.Flags().BoolVar(&relabel, relabelFlag, false, relabelUsage)
 	c.Flags().BoolVar(&headless, "headless", false, "run on pipes even at a terminal; -p for claude implies it")
 	c.Flags().StringVar(&policyFile, "policy", "", "this run's policy file, kept outside the checkout; it narrows gateway.egress of "+config.ForagerFileName+", never widens it (with a server: needs --local)")
 	c.Flags().StringVar(&runID, "run-id", "", "the run's id, a UUID in lower case (default a new one)")
@@ -545,6 +575,10 @@ const runHeartbeat = config.Heartbeat
 // runQuiet is how long a run's session may send its gateway nothing before the gateway
 // ends the run, session_lost.
 const runQuiet = 3 * runHeartbeat
+
+// socketGrace is how long a run's socket keeps accepting after the runtime exits,
+// session.Spec.SocketGrace: zero, which is Forager's 200 ms. Only the tests shorten it.
+var socketGrace time.Duration
 
 // runEnd is what qory knows of a run besides its result: its runtime's name, its time
 // limit, the signal qory run got that ended the run, "" for none, and the run's end that
@@ -827,16 +861,16 @@ func parseLabels(labels []string) (map[string]string, error) {
 	return out, nil
 }
 
-// withOrigin adds the labels the checkout's origin remote gives, forge and repository,
-// to the caller's, which win: a caller that names them knows better than the remote,
-// and one that names neither gets what [checkout.Origin] reads. A checkout with no
-// origin, or one on this machine, adds nothing.
-func withOrigin(labels map[string]string, root string) map[string]string {
-	forge, repository, ok := checkout.Origin(root)
-	if !ok {
+// withOrigin adds the labels the checkout's origin remote gives, origin as
+// [originLabels] read it, to the caller's, which win: a caller that names them knows
+// better than the remote, and one that names neither gets what [checkout.Origin] reads.
+// A checkout with no origin, or one on this machine, adds nothing: [checkout.Origin]
+// gives both labels or neither.
+func withOrigin(labels map[string]string, origin foragerdir.Labels) map[string]string {
+	if origin["forge"] == "" {
 		return labels
 	}
-	out := map[string]string{"forge": forge, "repository": repository}
+	out := map[string]string{"forge": origin["forge"], "repository": origin["repository"]}
 	for k, v := range labels {
 		out[k] = v
 	}
@@ -1320,7 +1354,7 @@ func recordLinks(state, runs string) (files []string, shown map[string]string) {
 
 // configLinks is what qory passes Forager for the files it reads from its
 // configuration directory dir, absolute, when a link takes one out of it: dir itself,
-// forager.yaml, qory.yaml or qory.yml, runtimes/ and the descriptors in it,
+// forager.yaml, qory.yaml or qory.yml, run-keys/, labels/, runtimes/ and the descriptors in it,
 // runtimes/*.yaml in any case, as a disk that ignores case opens them. Each is followed
 // from dir as given, one link at a time, each part of its path that is a link included,
 // dir's own, and every link on the way and where it leads is one of Forager's files,
@@ -1338,7 +1372,7 @@ func configLinks(dir string) (files []string, shown map[string]string) {
 	resolved, err := filepath.EvalSymlinks(dir)
 	exists := err == nil
 	inside := func(p string) bool { return exists && within(resolved, p) }
-	names := append([]string{".", config.ForagerFileName, DescriptorsDir, foragerdir.RunKeysDir}, config.Names...)
+	names := append([]string{".", config.ForagerFileName, DescriptorsDir, foragerdir.RunKeysDir, foragerdir.LabelsDir}, config.Names...)
 	if entries, err := os.ReadDir(filepath.Join(dir, DescriptorsDir)); err == nil {
 		for _, e := range entries {
 			if strings.EqualFold(filepath.Ext(e.Name()), ".yaml") {
@@ -1866,10 +1900,10 @@ func reallyWithin(root, path string) bool {
 	return within(root, path)
 }
 
-// The arguments that select the hidden verbs the wall runs from qory's own binary: the
-// relay, the start of a Docker of the agent's own, and the hook forwarder, which also
-// runs on this machine without a wall. Each verb carries [inWall], so no look for a
-// release runs inside a container.
+// The arguments that select the hidden verbs the wall runs from the qory binary: the
+// relay, the start of a nested Docker, and the hook forwarder, which also runs on this
+// machine without a wall. Each verb carries [inWall], so no look for a release runs
+// inside a container.
 var (
 	relayArgs   = []string{"run", "relay"}
 	nestArgs    = []string{"run", "nest"}
@@ -1897,9 +1931,9 @@ func newRelay() *cobra.Command {
 	}
 }
 
-// newNest builds the hidden nest verb, what the wall starts from qory's own binary as the
-// entry point of a container whose image has a Docker of the agent's own: it runs as
-// the container's root, which the runtime maps to a user of the machine's that is not
+// newNest builds the hidden nest verb, what the wall starts from the qory binary as the
+// entry point of a container whose image has a nested Docker: it runs as the
+// container's root, which the runtime maps to a user of the machine's that is not
 // root, starts dockerd on its socket alone, drops every capability and executes the
 // launch as the agent's user. Its arguments, --user uid:gid, -- and the launch, go to
 // [wall.Nest] as they are, so it parses no flag of its own. It returns only on an error.

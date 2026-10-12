@@ -10,9 +10,18 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/qoryai/qory/cmd"
 )
+
+// TestMain runs the package's tests with each run's socket draining for 10ms after the
+// runtime exits, in place of Forager's 200 ms: the hooks of these tests' runtimes
+// forward their events before the runtime exits, so none needs the longer drain.
+func TestMain(m *testing.M) {
+	cmd.ShortenSocketGrace(10 * time.Millisecond)
+	os.Exit(m.Run())
+}
 
 // fixtures is the contract fixture directory, resolved from the working directory the test
 // binary starts in, so a test can copy a fixture after it has changed directory.

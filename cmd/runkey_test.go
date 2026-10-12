@@ -194,7 +194,7 @@ func TestARunKeyTakesTheRunThroughItsGateway(t *testing.T) {
 }
 
 // TestARunKeyRefusesWhatItsRunCannotHave is QORY_RUN_KEY beside what a run whose
-// starter registered it cannot have: --local and --policy, an access key on this
+// starter registered it cannot have: --local, --relabel and --policy, an access key on this
 // machine, by its file, a variable or the descriptor, a gateway section in forager.yaml,
 // and the flags of the run's registration. Each is refused as input, before the
 // gateway's address is reached and before anything is recorded; the access key's file
@@ -213,6 +213,12 @@ func TestARunKeyRefusesWhatItsRunCannotHave(t *testing.T) {
 		want  func() string
 	}{
 		{"--local", func(*testing.T) []string { return []string{"run", "--local"} }, func() string {
+			return "--local runs with a gateway the run starts itself and no server, and a run key is given, by QORY_RUN_KEY or --run-key-fd: the run goes through the gateway its run key names; give no run key to run --local"
+		}},
+		{"--relabel", func(*testing.T) []string { return []string{"run", "--relabel"} }, func() string {
+			return "--relabel keeps a checkout's new labels, and a run key is given, by QORY_RUN_KEY or --run-key-fd: the run's starter chose its labels; leave out --relabel"
+		}},
+		{"--relabel and --local", func(*testing.T) []string { return []string{"run", "--relabel", "--local"} }, func() string {
 			return "--local runs with a gateway the run starts itself and no server, and a run key is given, by QORY_RUN_KEY or --run-key-fd: the run goes through the gateway its run key names; give no run key to run --local"
 		}},
 		{"--policy", func(t *testing.T) []string {

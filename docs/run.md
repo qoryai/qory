@@ -346,9 +346,10 @@ pool's key, that is one id, `ws_` and 16 characters: the workspace the node or p
 belongs to. A configuration without it is refused, and the run does not start.
 
 The configuration defines where the gateway sends the run's events, and where the run
-registers. The gateway registers the run with its labels, the checkout's forge and
-repository among them, and the server answers with the run configuration. It fetches it
-again when the server reports it changed. It may hold:
+registers, `run`. A configuration without `run` is refused, and the run does not start.
+The gateway registers the run with its labels, the checkout's forge and repository among
+them, and the server answers with the run configuration. It fetches it again when the
+server reports it changed. It may hold:
 
 - `security_policy`, the server's policy. `gateway.egress` of `forager.yaml` narrows it:
   see [A run's policy file](#a-runs-policy-file). Without it, `gateway.egress` is the
@@ -494,7 +495,7 @@ When the enrolment does not complete:
 
 | Answer | What qory does |
 | --- | --- |
-| 401, `unauthorized` | the code was used or has expired. The secret made for it, in `access-key-secret.new`, is moved aside, and enrolling needs a new code. If you did not use the code, someone else did: tell the owner or administrator in Qory Apiary who made it. The code's issuer must revoke the key it enrolled |
+| 401, `unauthorized` | the code was used or has expired. The secret made for it, in `access-key-secret.new`, is moved aside, and enrolling needs a new code. If you did not use the code, someone else did: tell the owner or administrator in Qory Apiary who made it. They must revoke the key the code enrolled |
 | `key_invalid` | the server refused the key. The secret made for it, in `access-key-secret.new`, is moved aside, and enrolling needs a new code |
 | `key_limit` | the node already holds two keys. qory keeps the key: once an owner or administrator in Qory Apiary has revoked one of them, the same command within the 15 minutes succeeds |
 | 429, `rate_limited`, signed | this code was tried too often. `forager.yaml` is not changed. qory keeps the key, and the same command, run later within the code's 15 minutes, retries with it. An unsigned 429 is an `answer_unsigned` |
@@ -707,6 +708,38 @@ server: the agent can read the environment qory started with. A key given by
 anything starts, so an unwalled run that contacts no server, `--local` or one whose
 `forager.yaml` has no server, may have it. An unwalled run against the server with that key
 is refused.
+
+### A checkout's labels
+
+The server chooses a run's policy by the run's labels. qory takes two of them from the
+checkout's origin remote, `forge` and `repository`, and an agent can change the remote by
+rewriting `.git/config`. So qory keeps the two labels the origin remote gives at the
+checkout's first run the server accepts, directly or through `gateway.server.via`. They
+are kept in `labels/` beside `forager.yaml`, mode 0700, one file per checkout, mode 0600,
+named by the SHA-256 of the checkout's real path. A run the server refuses keeps nothing.
+An agent without a wall runs as you and can rewrite `labels/` too, so the labels hold for
+walled runs.
+
+A later run whose origin remote gives other labels does not start. It is refused before
+anything starts or registers, `labels_changed`, exit 2, and no event is written:
+
+```text
+the checkout /home/you/src/app first ran against the server as forge git.example.com, repository acme/app, and its origin remote now gives forge git.example.com, repository acme/shop; the server chooses a run's policy by its labels, so the run does not start: if you changed the remote, run the same command with --relabel (labels_changed)
+```
+
+A checkout without an origin remote reads `no forge, no repository`. If you changed the
+remote, run the same command with `--relabel`: the run starts, and once the server
+accepts it, qory keeps the new labels and says so:
+
+```text
+qory run: the checkout's labels are now forge git.example.com, repository acme/shop
+```
+
+A label given with `--label` is used as given: it is neither checked nor kept. A run
+with `--local`, a run without a server and a run given a run key neither check nor keep
+labels: behind a gateway its run key names, the run's starter chose its labels.
+`--relabel` is refused with `--local` and with a run key. When the labels cannot be
+kept, qory says so in one line, and the run goes on.
 
 ## Through a separate gateway
 

@@ -24,6 +24,9 @@ release may change what an existing document does, and states it under Upgrading
   a node's or node pool's access key it holds exactly one id, the workspace the node or
   pool belongs to, `ws_` and 16 lower-case Crockford base32 characters, such as
   `ws_f1xt0re000000000`. A server you run yourself must list it too.
+- A self-hosted server's discovery must now name `run`; Forager refuses one without it.
+- A self-hosted server's discovery must now name `node_id` and `apiary_public_key` too;
+  Forager refuses one without them.
 - A machine that holds an access key runs walled only: every run there needs a wall, or
   it is refused before it starts, `key_needs_wall`, whether the key comes from
   `access-key-secret` or a key file beside it, from `QORY_ACCESS_KEY_SECRET`, and, against
@@ -86,6 +89,11 @@ release may change what an existing document does, and states it under Upgrading
   the requests to the hosts it `serves`. A run's policy selects tools by name, with an
   argument, as it selects credentials, and a tool needs a wall. `qory config` lists each
   tool.
+- `qory run` keeps the labels a checkout's origin remote gives, `forge` and `repository`,
+  from the checkout's first run the server accepts, in `labels/` beside `forager.yaml`. A
+  later run whose origin gives others does not start, `labels_changed`, exit 2, until it
+  is run with `--relabel`: the server chooses a run's policy by its labels, and an agent
+  can rewrite `.git/config`. Labels given with `--label` are used as given.
 - forager.yaml `gateway.egress.paths`: the paths a run may request on a host, for every
   run on the machine, with or without a server. With it set, every run needs a wall.
 - Nested Docker, a Docker daemon inside the wall, separate from the machine's, experimental: an image with `docker: true` under
@@ -469,8 +477,8 @@ release may change what an existing document does, and states it under Upgrading
   command within the code's 15 minutes succeeds. A signed 429, `rate_limited`, means the code
   was tried too often: qory keeps the key and says `the server refused the attempt: this
   code was tried too often; run the same command again later, within the code's 15
-  minutes`. A 401 for a code you did not use means the
-  code's issuer must revoke the key it enrolled.
+  minutes`. A 401 for a code you did not use means someone else used it: the owner or
+  administrator in Qory Apiary who made the code must revoke the key it enrolled.
 - `qory harness compose` takes a branch's current commit on every compose, without
   `--update`. A tag or a commit id stays pinned. Offline, it keeps the cached commit and
   warns.
