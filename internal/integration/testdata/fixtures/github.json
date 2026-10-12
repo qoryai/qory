@@ -34,17 +34,19 @@
           "string"
         ],
         "minimum": 1,
+        "maximum": 9007199254740991,
         "pattern": "^[A-Za-z0-9.]{1,64}$"
       },
       "installation_id": {
         "title": "Installation id",
         "description": "The App's installation on the account whose repositories runs work on. Absent means it is looked up from the repositories on every call.",
         "type": "integer",
-        "minimum": 1
+        "minimum": 1,
+        "maximum": 9007199254740991
       },
       "permissions": {
         "title": "Permissions",
-        "description": "The most a run's token gets, by GitHub's permission name, of those a run may be granted: read or write, never admin. At least one; absent is the default. Administration, secrets, environments and every organisation's and member's permission are refused.",
+        "description": "The most a run's token gets, by GitHub's permission name, of those a run may be granted: read or write, never admin. At least one; absent is the default. Administration, secrets, environments and every organisation's and member's permission are refused. workflows write lets a run change the repositories' workflows, which run with their Actions secrets, so grant it only to runs that must edit workflows. An App that qory-github setup creates lacks it until its owner adds it on GitHub.",
         "type": "object",
         "minProperties": 1,
         "propertyNames": {
@@ -74,14 +76,14 @@
       },
       "api_url": {
         "title": "API",
-        "description": "GitHub's API, https, or http on loopback alone. Another than the default is for a test: GitHub Enterprise Server is not supported.",
+        "description": "GitHub's API, where qory-github sends the App's token: https://api.github.com, the default, or http or https on a loopback host, 127.0.0.0/8, ::1 or localhost, for a test. GitHub Enterprise Server is not supported.",
         "type": "string",
-        "pattern": "^(https://[^\\s/@]+|http://(127\\.0\\.0\\.1|\\[::1\\]|localhost)(:[0-9]{1,5})?)(/[^\\s]*)?$",
+        "pattern": "^(https://api\\.github\\.com(:443)?|https?://(localhost|\\[::1\\]|127(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3})(:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?)/?$",
         "default": "https://api.github.com"
       },
       "private_key_file": {
         "title": "Private key file",
-        "description": "A file that contains the App's private key and that only its owner reads: how a machine hands the key in.",
+        "description": "A file that contains the App's private key and that only its owner reads: the one way to hand the key in on a command line.",
         "type": "string",
         "minLength": 1
       },
