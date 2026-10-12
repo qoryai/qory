@@ -6,6 +6,8 @@ release may change what an existing document does, and states it under Upgrading
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-12
+
 ### Upgrading
 
 - qory reads only `~/.config/qory/forager.yaml`. Move `runner.yaml` there, and put its
@@ -15,6 +17,14 @@ release may change what an existing document does, and states it under Upgrading
   credentials, no integrations, no wall and no time limit. The files beside it keep
   applying, so while the `stored-secrets` marker exists a run without a wall is still
   refused.
+- `gateway.server.access_key` and `gateway.server.secret` are refused, and so is
+  `QORY_SERVER_SECRET` beside a `gateway.server` section: remove them, and connect the
+  machine as a node, with `qory access-key enrol <server> <code>` and a code from the
+  node's page in Qory Apiary, or with a key generated on that page.
+- `qory config` lists the values as `gateway.*`, `session.*` and `wall.*` where it listed
+  `runner.*`, and the file's schema is
+  `https://qory.dev/contracts/harness/v1/forager.schema.json`, where it was
+  `runner.schema.json`: point an editor's schema setting at it.
 - Forager keeps its registry of walled runs under `$XDG_STATE_HOME/qory-forager/walled`,
   else `~/.local/state/qory-forager/walled`, where it was `qory-runner`. A walled run an
   earlier qory started is not among the earlier walled runs this one checks a new run
@@ -29,6 +39,15 @@ release may change what an existing document does, and states it under Upgrading
 - A self-hosted server's discovery must now name `run`; Forager refuses one without it.
 - A self-hosted server's discovery must now name `node_id` and `apiary_public_key` too;
   Forager refuses one without them.
+- A self-hosted server must now check each request's Ed25519 signature by the machine's
+  access key and sign each answer, as the Forager contract defines at 0.7.0; a machine
+  refuses an answer that is not signed by a key it pins.
+- A server or receiver you run yourself reads `forager_version` where the events carried
+  `runner_version`, the reason `gateway_lost` where it was `runner_lost`, a `dataschema`
+  under `https://qory.dev/contracts/forager/v1/` where it was under
+  `https://qory.dev/contracts/runner/v1/`, and the User-Agent `qory-forager/<version>`
+  where it was `qory-runner/<version>`. No `dev.qory.ping` is posted: a run registers at
+  the run endpoint in its place.
 - A machine that holds an access key runs walled only: every run there needs a wall, or
   it is refused before it starts, `key_needs_wall`, whether the key comes from
   `access-key-secret` or a key file beside it, from `QORY_ACCESS_KEY_SECRET`, and, against
@@ -56,6 +75,42 @@ release may change what an existing document does, and states it under Upgrading
   IPv4 address in canonical form". The gateway refuses an agent's request to a host that
   is neither such a name nor an IP address in canonical form with the rule
   `wall:host-form` and a `403`.
+- `qory run` records each run in qory's state directory, and `qory run resend` reads no
+  record under `.qory/runs` in the checkout: send what is left there with 0.12.1 before
+  upgrading, then remove `.qory/runs`.
+- `qory run resend` sends nothing of a run that had no server, such as a `--local` run's:
+  its record stays where it is.
+- With a server, a checkout keeps the `forge` and `repository` of its first run the
+  server accepts: after changing the origin remote, run once with `--relabel`, or the run
+  is refused, `labels_changed`.
+- The gateway adds no search domain to a host the agent requests: write each host's full
+  name, in the request and in the run's egress lists.
+- A mount that is, contains or lies inside qory's configuration directory or its state
+  directory, such as your home directory, is refused, `mount_contains_forager_files`, and
+  so is a mount reached through a link inside the workspace or a writable mount,
+  `mount_through_link`: mount a narrower path, or list the link's target itself.
+- A walled run takes `harness.home` from the `qory.yaml` in qory's configuration
+  directory alone: move a `harness.home` that a checkout's `qory.yaml`, or one in a
+  directory above it, sets into that file, or the run is refused.
+- The harness's variables are no longer written into Claude Code's `settings.json` or
+  Codex's `config.toml`: start the runtime with `qory harness launch` or `qory run`, run
+  `qory harness compose` again in each checkout, and use Codex 0.76.0 or later, or set
+  `ignore_default_excludes = true` in a settings fragment, to keep the names that contain
+  `KEY`, `SECRET` or `TOKEN`.
+- `qory harness compose` takes a branch's current commit on every compose, where it kept
+  the cached one until `--update`: set a git source's `ref` to a tag or a full commit id
+  to keep it where it is.
+- `forager.yaml` is one YAML document: remove a second one, an empty one after a
+  trailing `---` included, or the file is refused.
+- `wall.env` and `--env` refuse `QORY_ACCESS_KEY_ID`, `QORY_ACCESS_KEY_SECRET`,
+  `QORY_APIARY_PUBLIC_KEY` and `QORY_RUN_KEY`. A run leaves out a value of `wall.env`,
+  `--env` or the harness's `env` whose name is on the deny list of the Forager contract,
+  `denied-variables.json`, such as `PATH`, `DOCKER_HOST`, `HTTPS_PROXY` or any other
+  `QORY_*` name, and one of a variable the launch template sets, such as Codex's
+  `CODEX_HOME`; `qory run` says so for `--env`.
+- `qory run` exits 1 when it gets a signal while the runtime runs, whatever the runtime's
+  status, and when the gateway records the run as failed or lost after the runtime
+  exited 0: a script that reads the exit status follows it.
 - Needs `github.com/qoryai/forager` 0.7.0, contract `v1` revision 1 as amended in 0.7.0.
 
 ### Added
@@ -1391,7 +1446,8 @@ The first release: a stack of modules composed into one tree, linked into the ch
 and kept out of git, with a report naming the module of every entry and a refusal when
 two modules provide the same one.
 
-[Unreleased]: https://github.com/qoryai/qory/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/qoryai/qory/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/qoryai/qory/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/qoryai/qory/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/qoryai/qory/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/qoryai/qory/compare/v0.10.0...v0.11.0
