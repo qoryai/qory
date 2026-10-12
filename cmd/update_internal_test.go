@@ -48,10 +48,10 @@ func TestStartUpdateCheckIsSilentOffATerminal(t *testing.T) {
 	}
 }
 
-// TestNoUpdateCheckInsideTheWall feeds the command lines enclose gives the wall for
-// qory's own binary, the relay, the start of a Docker of the agent's own and the hook
-// forwarder, to the check that keeps the look for a release out of the container: each
-// is a verb the wall runs inside, with -v before it too, and no verb a person runs is.
+// TestNoUpdateCheckInsideTheWall feeds the command lines enclose gives the wall to run
+// the qory binary as the relay, the start of a nested Docker and the hook forwarder, to
+// the check that keeps the look for a release out of the container: each is a verb the
+// wall runs inside, with -v before it too, and no verb a person runs is.
 func TestNoUpdateCheckInsideTheWall(t *testing.T) {
 	var spec session.Spec
 	r := &config.Forager{Wall: &config.ForagerWall{Adapter: config.WallDocker, Image: "example.com/agent:1", Helper: "/opt/qory/qory-linux"}}

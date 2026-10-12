@@ -278,7 +278,7 @@ func ReadManifest(dir string) (*Manifest, error) {
 	}
 	for key, value := range raw.Env {
 		if key == "QORY_HARNESS_HOME" {
-			return nil, fmt.Errorf("%s: env.QORY_HARNESS_HOME is qory's own; a module exports another name", path)
+			return nil, fmt.Errorf("%s: env.QORY_HARNESS_HOME is qory's; a module exports another name", path)
 		}
 		if !envName.MatchString(key) {
 			return nil, fmt.Errorf("%s: env: %s is not an environment variable name", path, key)

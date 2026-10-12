@@ -21,7 +21,13 @@ jobs:
     if: github.event_name != 'pull_request' || github.head_ref != 'next' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     container:
-      image: public.ecr.aws/docker/library/golang:1.27
+      # Docker Hub's official golang:1.27, copied by digest to qoryai's public package,
+      # and pulled with the job's token. The container has no docker command and no
+      # engine, so the tests that start containers skip here.
+      image: ghcr.io/qoryai/ci-images:golang-1.27@sha256:e432b43af23a9328d56a7c499be0476810aa344acbcf65fc7c455d4ff5a40602
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Install node for the JavaScript actions
         # checkout@v7 runs on node 24; the image has none.
@@ -51,15 +57,22 @@ jobs:
 
       - name: Find the build cache
         # Asked of go, as the runner sets HOME for the container, and the cache is under it.
+        # The mark, an hour before the job, tells the entries this run uses from the rest:
+        # go sets an entry's time to now when it uses one older than an hour.
         id: gocache
-        run: echo "dir=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "dir=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+          touch -d '1 hour ago' "$RUNNER_TEMP/gocache-mark"
 
+      # A push, to next or main, saves the build cache under its own commit, and a run
+      # restores the newest saved under the same go.sum, else the newest of all, so go
+      # compiles only what changed since. A pull request's run restores but saves nothing.
       - name: Restore the build cache
-        uses: actions/cache@v6
+        id: restore-gocache
+        uses: actions/cache/restore@v6
         with:
           path: ${{ steps.gocache.outputs.dir }}
-          # Each run saves its own, and restores the newest of the same go.sum first.
-          key: gocache-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
+          key: gocache-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
           restore-keys: |
             gocache-${{ runner.os }}-${{ hashFiles('go.sum') }}-
             gocache-${{ runner.os }}-
@@ -84,3 +97,17 @@ jobs:
         run: |
           go run ./internal/gendocs "$RUNNER_TEMP/commands"
           diff -r docs/commands "$RUNNER_TEMP/commands"
+
+      # After the last step that compiles, and also when a check failed: every entry go
+      # wrote is sound. Only the entries this run used are kept, so the cache holds one
+      # build of the code and its tools, and does not grow from push to push.
+      - name: Keep only the build cache this run used
+        if: ${{ !cancelled() && github.event_name == 'push' && steps.restore-gocache.outcome == 'success' && steps.restore-gocache.outputs.cache-hit != 'true' }}
+        run: find "${{ steps.gocache.outputs.dir }}" -mindepth 2 -type f ! -newer "$RUNNER_TEMP/gocache-mark" -delete
+
+      - name: Save the build cache
+        if: ${{ !cancelled() && github.event_name == 'push' && steps.restore-gocache.outcome == 'success' && steps.restore-gocache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ steps.gocache.outputs.dir }}
+          key: ${{ steps.restore-gocache.outputs.cache-primary-key }}

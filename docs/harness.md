@@ -7,7 +7,7 @@ repository commits the list of modules, not a copy of their files.
 ## The problem
 
 Your coding agent reads its harness from the repository. You have many repositories. You
-use more than one agent. Each agent reads its own folder:
+use more than one agent. Each agent reads a different folder:
 
 - Claude Code reads `.claude`.
 - Codex reads `.codex`.
@@ -58,7 +58,7 @@ compose. The stack selects which one to keep. Nothing wins by coming last.
          source: {git: https://github.com/acme/harness, ref: v2.4.0, path: core}
        - name: nextjs           # the harness for Next.js apps
          source: {path: ../harness/nextjs}
-       - name: app              # this repository's own, committed with it
+       - name: app              # this repository's module, committed with it
          source: {path: ./harness}
    ```
 
@@ -75,12 +75,12 @@ compose. The stack selects which one to keep. Nothing wins by coming last.
 
 ## Take a stack someone else delivers
 
-A repository can also take a stack someone else delivers: a `qory-stack.yaml`. In its own
+A repository can also take a stack someone else delivers: a `qory-stack.yaml`. In its
 `qory.yaml`, the repository:
 
 - selects that stack under `extends`,
 - defines what it composes it for under `target`,
-- adds its own modules.
+- adds more modules.
 
 ```yaml
 apiVersion: qory.dev/v1alpha1
@@ -102,7 +102,7 @@ version, ref or URL of it.
 
 Under `extends`, the compose reads the repository's file for its document and its
 `worktree` keys. Its `git` and `env` keys and its machine keys under `harness`, such as
-`model` or `force`, are left out: your own `qory.yaml` and the files above the checkout
+`model` or `force`, are left out: your `qory.yaml` and the files above the checkout
 set those. The compose prints a `read` row with what it took from the file, and an
 `ignored` row with the keys it left out, when the file sets any:
 
@@ -114,7 +114,7 @@ ignored  qory.yaml: harness.model, env  (under extends, only ~/.config/qory/qory
 ## Publish stacks and modules
 
 `stack` and `module` select what a harness repository publishes. It lists them in the
-`exports` section of its own `qory.yaml`. So nobody outside it depends on its
+`exports` section of its `qory.yaml`. So nobody outside it depends on its
 directories:
 
 ```yaml
@@ -124,7 +124,7 @@ exports:
   modules: [core, nextjs, marketing]
 ```
 
-The harness repository states the qory it needs once, in its own `qory.yaml`:
+The harness repository states the qory it needs once, in its `qory.yaml`:
 `qory: ">=0.5.0"`. That requirement applies to every stack it delivers.
 
 ## See a collision
@@ -138,8 +138,8 @@ For a real repository, run `qory setup repo` instead.
 ## What you get
 
 - **The files your tool reads.** They are linked to a composed tree under `.qory` and
-  kept out of git. Your own `settings.local.json` stays yours.
-- **Settings merged from every module**, in the tool's own format. Permission lists join.
+  kept out of git. Your `settings.local.json` stays yours.
+- **Settings merged from every module**, in the tool's format. Permission lists join.
   Hooks join. A value set twice to different things is a collision. It is never a silent
   override.
 - **MCP servers.** Each is one file in a module. `qory` writes them where every tool
@@ -203,7 +203,7 @@ It exits 6 when a merged copy is behind. That is the check a CI job runs.
 
 The checkout contains links too:
 
-- `.claude` is a real directory with one symlink per entry. So Claude Code's own
+- `.claude` is a real directory with one symlink per entry. So Claude Code's
   `settings.local.json` stays beside them.
 - `.mcp.json` and a root `AGENTS.md` are symlinks.
 
@@ -231,10 +231,10 @@ a launcher. The checkout then contains nothing of it:
 
 So a tracked `harness/` directory is no collision. A pull is an ordinary pull.
 
-`--home <dir>` defines the directory. So does `harness.home` in your own `qory.yaml`.
-Every checkout and worktree gets its own home under it.
+`--home <dir>` defines the directory. So does `harness.home` in your `qory.yaml`.
+Every checkout and worktree gets a separate home under it.
 
-Each tool takes such a home from its own command line or environment.
+Each tool takes such a home from its command line or environment.
 `qory harness launch` prints the command:
 
 ```sh
@@ -269,18 +269,18 @@ and what it reads from the checkout.
 ### What `qory harness launch` prints
 
 The command is one line, quoted for a POSIX shell. A launcher runs it as it is, with
-arguments of its own after it:
+the launcher's arguments after it:
 
 ```sh
 cd <checkout> && eval "$(qory harness launch --runtime claude)"
 ```
 
-- The line is the tool's own launch template: the program, the arguments that hand it the
+- The line is the tool's launch template: the program, the arguments that hand it the
   home's files, and the variables it takes them from. `${dir}` in a template is the
   tool's directory in the home.
 - The line also sets the harness's variables, through `env`. No settings file holds them:
   - `QORY_HARNESS_HOME`, the home, comes first.
-  - Then the fixed ones: qory's own. These are the template's variables.
+  - Then the fixed ones, which qory sets. These are the template's variables.
   - Then the defaults: what an author wrote. These are `env` in `qory.yaml`, the `env` of
     `harness.launch.<runtime>`, the `env` a settings fragment sets, Claude Code's
     `settings.json` `env` and Codex's `shell_environment_policy.set`, and what the modules
@@ -313,7 +313,7 @@ uses it to build its first prompt from an entry point, such as `/harness:impleme
 | Flag                     | What it does                                                                                   |
 | ------------------------ | ---------------------------------------------------------------------------------------------- |
 | `-f <stack>`             | Compose this `qory-stack.yaml`, `qory.yaml` or `harness.yaml` instead of the one found.        |
-|                          | When the checkout's own document extends a stack, this one is its base.                        |
+|                          | When the checkout's document extends a stack, this one is its base.                            |
 | `--dry-run`              | Print the report. Write nothing.                                                               |
 | `--runtime claude,codex` | Render for these runtimes instead of the document's.                                           |
 | `--model opus`           | Write this model instead of the document's.                                                    |
@@ -367,7 +367,7 @@ They apply in this order, each over the one before it:
 
 1. yours,
 2. those above the checkout, the farthest first,
-3. the repository's own.
+3. the repository's file.
 
 A command-line flag overrides every file. `qory config` shows every setting and the file
 it came from.
@@ -376,7 +376,7 @@ it came from.
 
 `qory setup repo` writes the repository's file into the current directory:
 
-- the repository's own stack, with one runtime and one module,
+- the repository's stack, with one runtime and one module,
 - every key a repository commits, shown,
 - that module under `harness/`, with its manifest and `AGENTS.md`.
 
@@ -390,7 +390,7 @@ kept. It holds:
 - `force` and `update`,
 - where a worktree goes, and what it is called,
 - the git timeout and cache,
-- environment variables, which every launch sets, but a name the runtime's own launch
+- environment variables, which every launch sets, but a name the runtime's launch
   template sets.
 
 The reference, one page per command, is under [commands](commands/qory.md).

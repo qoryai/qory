@@ -235,3 +235,36 @@ func document(t *testing.T, path string) any {
 	}
 	return v
 }
+
+// TestModuleSchemaTakesTheHostForagerTakes holds a declared host to the form Forager
+// holds a policy's hosts to: a name, a *. suffix, or an IPv4 address in canonical form.
+// A host whose last label is all digits, or 0x and hex digits, is no name.
+func TestModuleSchemaTakesTheHostForagerTakes(t *testing.T) {
+	schema, err := jsonschema.NewCompiler().Compile("../../contracts/harness/v1/module.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		host  string
+		valid bool
+	}{
+		{"api.example.com", true},
+		{"*.example.com", true},
+		{"10.0.0.1", true},
+		{"0x7f.example", true},
+		{"*.example.123", true},
+		{"api.example.123", false},
+		{"127.1", false},
+		{"443", false},
+		{"0x1f", false},
+		{"example.0x", false},
+		{"10.0.0.01", false},
+		{"256.1.1.1", false},
+		{"api.example.com:443", false},
+	} {
+		doc := map[string]any{"apiVersion": "qory.dev/v1alpha1", "name": "core", "egress": []any{c.host}}
+		if err := schema.Validate(doc); (err == nil) != c.valid {
+			t.Errorf("%q: %v, want valid %v", c.host, err, c.valid)
+		}
+	}
+}

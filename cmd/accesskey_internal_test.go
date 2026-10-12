@@ -18,6 +18,7 @@ import (
 	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/contracts"
 
+	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/foragerdir"
 )
 
@@ -48,7 +49,7 @@ func knownEnrolment(t *testing.T) (requests []accesskey.EnrolmentRequest, answer
 	if err := json.Unmarshal(contractFile(t, "fixtures/known-answers/signatures.json"), &v); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"fixtures/enrolment/request.json", "fixtures/enrolment/request-two-fingerprints.json"} {
+	for _, name := range []string{"fixtures/enrolment/request.json", "fixtures/enrolment/request-two-fingerprints.json", "fixtures/enrolment/request-gateway.json"} {
 		var r accesskey.EnrolmentRequest
 		if err := json.Unmarshal(contractFile(t, name), &r); err != nil {
 			t.Fatal(err)
@@ -66,23 +67,36 @@ func knownEnrolment(t *testing.T) (requests []accesskey.EnrolmentRequest, answer
 // fixtureAccessKey is the contract's published fixture access key.
 func fixtureAccessKey(t *testing.T) *accesskey.Key {
 	t.Helper()
+	return fixtureKeys(t)[0]
+}
+
+// fixtureKeys are the contract's published fixture access key, then its fixture
+// gateway key.
+func fixtureKeys(t *testing.T) []*accesskey.Key {
+	t.Helper()
+	type secret struct {
+		Secret string `json:"secret"`
+	}
 	var k struct {
-		AccessKey struct {
-			Secret string `json:"secret"`
-		} `json:"access_key"`
+		AccessKey  secret `json:"access_key"`
+		GatewayKey secret `json:"gateway_key"`
 	}
 	if err := json.Unmarshal(contractFile(t, "fixtures/known-answers/keys.json"), &k); err != nil {
 		t.Fatal(err)
 	}
-	key, err := accesskey.ParseSecret(k.AccessKey.Secret)
-	if err != nil {
-		t.Fatal(err)
+	var keys []*accesskey.Key
+	for _, s := range []string{k.AccessKey.Secret, k.GatewayKey.Secret} {
+		key, err := accesskey.ParseSecret(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		keys = append(keys, key)
 	}
-	return key
+	return keys
 }
 
 // TestEnrolmentKnownAnswers posts the published enrolment requests, under the fixture
-// access key, to a server that answers each with a published answer and its published
+// access key or, for a gateway's code, the fixture gateway key, to a server that answers each with a published answer and its published
 // signature, and acts on each as enrol does: the 201 verifies and pins the fixture
 // signing key, which enrol refuses to pin; a signed key_limit, and a signed 429
 // rate_limited where the contract publishes one, keeps the secret and the pending
@@ -90,7 +104,7 @@ func fixtureAccessKey(t *testing.T) *accesskey.Key {
 // tampered with is answer_unsigned and acts on nothing.
 func TestEnrolmentKnownAnswers(t *testing.T) {
 	requests, answers := knownEnrolment(t)
-	key := fixtureAccessKey(t)
+	keys := fixtureKeys(t)
 	n := 0
 	for _, a := range answers {
 		for _, tamper := range []bool{false, true} {
@@ -113,6 +127,12 @@ func TestEnrolmentKnownAnswers(t *testing.T) {
 			for _, r := range requests {
 				if r.Proof == a.Lines[2] {
 					published = r
+				}
+			}
+			key := keys[0]
+			for _, k := range keys {
+				if k.PublicKey().String() == published.PublicKey {
+					key = k
 				}
 			}
 			req, err := accesskey.NewEnrolmentRequest(key, published.Code, published.Name, time.Unix(published.Timestamp, 0))
@@ -271,6 +291,65 @@ func TestARefusalMovesAsideOnlyTheKeyMadeForTheCode(t *testing.T) {
 		}
 		if _, err := os.Lstat(dir.Path(foragerdir.PendingFile)); !errors.Is(err, fs.ErrNotExist) {
 			t.Errorf("%s: the pending enrolment stayed: %v", c.name, err)
+		}
+	}
+}
+
+// TestHeldSecretFailsClosed is heldSecret on a directory that cannot be searched, where
+// no file can be looked at: access-key-secret counts as held, as the stored-secrets
+// marker does, never as no secret.
+func TestHeldSecretFailsClosed(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root searches a directory it may not")
+	}
+	dir := foragerdir.Dir(t.TempDir())
+	if err := os.Chmod(string(dir), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(string(dir), 0o700) })
+	if held, err := heldSecret(dir); held != dir.Path(foragerdir.SecretFile) || err != nil {
+		t.Errorf("a directory that cannot be searched: %q, %v", held, err)
+	}
+}
+
+// TestEnrolmentWrittenNamesEachViaKey is the line enrol prints of what it wrote: it names
+// gateway.server.via.url whenever via is written, and gateway.server.via.ca_file and
+// gateway.server.via.certificate_sha256 when each is given, joined as a sentence lists
+// them, after the server's url when the file had no server section and the pin when the
+// enrolment writes it.
+func TestEnrolmentWrittenNamesEachViaKey(t *testing.T) {
+	const url = "https://gateway.example:8443"
+	const ca = "/etc/qory/gateway-ca.pem"
+	const sum = "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
+	pin := make(accesskey.Pin, 1)
+	known := &config.Forager{Server: &config.ForagerServer{URL: "https://apiary.example"}}
+	for _, c := range []struct {
+		name string
+		r    *config.Forager
+		e    config.Enrolment
+		want string
+	}{
+		{"no via", nil, config.Enrolment{Pin: pin},
+			"gateway.server.url, gateway.server.access_key_id and gateway.server.apiary_public_key"},
+		{"via", nil, config.Enrolment{Pin: pin, Via: &config.ForagerVia{URL: url}},
+			"gateway.server.url, gateway.server.access_key_id, gateway.server.apiary_public_key and gateway.server.via.url"},
+		{"via and its CA file", nil, config.Enrolment{Pin: pin, Via: &config.ForagerVia{URL: url, CAFile: ca}},
+			"gateway.server.url, gateway.server.access_key_id, gateway.server.apiary_public_key, gateway.server.via.url and gateway.server.via.ca_file"},
+		{"via and its certificate", nil, config.Enrolment{Pin: pin, Via: &config.ForagerVia{URL: url, CertificateSHA256: sum}},
+			"gateway.server.url, gateway.server.access_key_id, gateway.server.apiary_public_key, gateway.server.via.url and gateway.server.via.certificate_sha256"},
+		{"via, its CA file and its certificate", nil, config.Enrolment{Pin: pin, Via: &config.ForagerVia{URL: url, CAFile: ca, CertificateSHA256: sum}},
+			"gateway.server.url, gateway.server.access_key_id, gateway.server.apiary_public_key, gateway.server.via.url, gateway.server.via.ca_file and gateway.server.via.certificate_sha256"},
+		{"a known server, via", known, config.Enrolment{Via: &config.ForagerVia{URL: url}},
+			"gateway.server.access_key_id and gateway.server.via.url"},
+		{"a known server, via and its CA file", known, config.Enrolment{Via: &config.ForagerVia{URL: url, CAFile: ca}},
+			"gateway.server.access_key_id, gateway.server.via.url and gateway.server.via.ca_file"},
+		{"a known server, via and its certificate", known, config.Enrolment{Via: &config.ForagerVia{URL: url, CertificateSHA256: sum}},
+			"gateway.server.access_key_id, gateway.server.via.url and gateway.server.via.certificate_sha256"},
+		{"a known server, via, its CA file and its certificate", known, config.Enrolment{Via: &config.ForagerVia{URL: url, CAFile: ca, CertificateSHA256: sum}},
+			"gateway.server.access_key_id, gateway.server.via.url, gateway.server.via.ca_file and gateway.server.via.certificate_sha256"},
+	} {
+		if got := joinAnd(enrolmentWritten(c.r, c.e)); got != c.want {
+			t.Errorf("%s: wrote %s\nwant %s", c.name, got, c.want)
 		}
 	}
 }

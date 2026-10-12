@@ -44,7 +44,7 @@ func TestTheRuleOfWhoMayChangeAProgram(t *testing.T) {
 		{"a directory every user may write", fileOwner{me, 20, dir(0o777)}, "/x may be written by every user"},
 		{"a sticky directory the user owns", fileOwner{me, 20, dir(0o777) | os.ModeSticky}, "/x may be written by every user"},
 		{"a program every user may write", fileOwner{0, 0, 0o757}, "/x may be written by every user"},
-		{"a group of others", fileOwner{me, 1002, dir(0o775)}, "/x may be written by the group builders (1002), which is neither root's, wheel, admin nor its owner's own"},
+		{"a group of others", fileOwner{me, 1002, dir(0o775)}, "/x may be written by the group builders (1002), which is neither root's, wheel, admin nor its owner's primary group named as the owner"},
 		{"another user's private group", fileOwner{me, 1001, 0o775}, "the group guest (1001)"},
 		{"the user's primary group, staff", fileOwner{me, 20, 0o775}, "the group staff (20)"},
 		{"an unnamed group", fileOwner{me, 4242, 0o775}, "the group 4242,"},

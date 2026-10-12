@@ -298,7 +298,7 @@ func newCompose(use string, aliases ...string) *cobra.Command {
 		Short:   "Build the harness into the checkout you stand in",
 		Long: `Build the harness from the stack's modules into the checkout you stand in.
 
-The tree goes to .qory/harness. Each agent's own paths link into it. Git does not see it.
+The tree goes to .qory/harness. Each agent's paths link into it. Git does not see it.
 When two modules provide the same entry, compose refuses until the stack picks one.
 
 With --home, or harness.home in qory.yaml, the tree goes outside the checkout, one home
@@ -329,7 +329,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/harness.md`,
 			return runCompose(cmd.OutOrStdout(), cmd.ErrOrStderr(), o)
 		},
 	}
-	c.Flags().StringVarP(&file, "file", "f", "", "the qory-stack.yaml, qory.yaml or harness.yaml to compose instead of the one found; when the checkout's own document extends a stack, this one is its base")
+	c.Flags().StringVarP(&file, "file", "f", "", "the qory-stack.yaml, qory.yaml or harness.yaml to compose instead of the one found; when the checkout's document extends a stack, this one is its base")
 	c.Flags().StringVar(&runtime, "runtime", "", "render for these runtimes instead of target.runtime, comma separated ("+strings.Join(render.Names(), ", ")+"; qory.yaml: runtime)")
 	c.Flags().StringVar(&model, "model", "", "write this model instead of target.model (qory.yaml: model)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the report and write nothing")
@@ -957,10 +957,10 @@ func write(out io.Writer, o composeOptions, at places, res *compose.Result, rep,
 		}
 		rows = append(rows, [2]string{rt.Name(), row})
 		if kept := linked[rt.Name()].Skipped; len(kept) > 0 {
-			rows = append(rows, [2]string{"kept", strings.Join(kept, "  ") + "  (the checkout's own; not linked)"})
+			rows = append(rows, [2]string{"kept", strings.Join(kept, "  ") + "  (the checkout's files or directories; not linked)"})
 		}
 		if replaced := linked[rt.Name()].Replaced; len(replaced) > 0 {
-			rows = append(rows, [2]string{"replaced", strings.Join(replaced, "  ") + "  (the checkout's own; git checkout -- restores it)"})
+			rows = append(rows, [2]string{"replaced", strings.Join(replaced, "  ") + "  (the checkout's file or directory; git checkout -- restores it)"})
 		}
 		for _, s := range render.Skipped(rt, res) {
 			rows = append(rows, [2]string{"skipped", s + "  (no place in " + rt.Name() + ")"})
@@ -975,7 +975,7 @@ func write(out io.Writer, o composeOptions, at places, res *compose.Result, rep,
 		case !at.links:
 			rows = append(rows, [2]string{"link", l.Link + "  (module " + l.Name + "; not written, the checkout gets no links)"})
 		case slices.Contains(moduleLinks.Replaced, l.Link):
-			rows = append(rows, [2]string{"replaced", l.Link + "  (the checkout's own; git checkout -- restores it)"})
+			rows = append(rows, [2]string{"replaced", l.Link + "  (the checkout's file or directory; git checkout -- restores it)"})
 		default:
 			rows = append(rows, [2]string{"link", l.Link + "  (module " + l.Name + ")"})
 		}
@@ -1344,7 +1344,7 @@ func newLaunch(use string, aliases ...string) *cobra.Command {
 		Short:   "Print the command that starts an agent on the harness",
 		Long: `Print the command that starts an agent on the composed harness.
 
-The command is one line, quoted for a POSIX shell. Run it as it is, with your own
+The command is one line, quoted for a POSIX shell. Run it as it is, with your
 arguments after it. It is the agent's launch template; harness.launch.<runtime> in
 qory.yaml changes it. The paths are absolute, so the line works from anywhere.
 

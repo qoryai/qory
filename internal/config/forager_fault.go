@@ -9,9 +9,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/santhosh-tekuri/jsonschema/v6"
-	"github.com/santhosh-tekuri/jsonschema/v6/kind"
-	"golang.org/x/text/message"
 	"gopkg.in/yaml.v3"
 )
 
@@ -634,44 +631,14 @@ func join(section, key string) string {
 	return section + "." + key
 }
 
-// valueFree replaces each error kind under e whose message may quote the value with one
-// that does not, so the schema's report of gateway.run_credentials names the place and
-// what is wrong, and never what the file holds there. A kind that quotes no value is
-// kept as the schema words it.
-func valueFree(e *jsonschema.ValidationError) {
-	switch k := e.ErrorKind.(type) {
-	case *kind.Schema, *kind.Group, *kind.Not, *kind.AllOf, *kind.AnyOf, *kind.OneOf, *kind.FalseSchema,
-		*kind.RefCycle, *kind.Reference, *kind.Type, *kind.Enum, *kind.Const, *kind.MinProperties,
-		*kind.MaxProperties, *kind.MinItems, *kind.MaxItems, *kind.AdditionalItems, *kind.Required,
-		*kind.Dependency, *kind.DependentRequired, *kind.AdditionalProperties, *kind.PropertyNames,
-		*kind.UniqueItems, *kind.Contains, *kind.MinContains, *kind.MaxContains, *kind.MinLength,
-		*kind.MaxLength, *kind.ContentSchema:
-	case *kind.Pattern:
-		e.ErrorKind = noValue{k.KeywordPath(), "value does not match pattern " + schemaQuote(k.Want)}
-	case *kind.Format:
-		e.ErrorKind = noValue{k.KeywordPath(), "value is not valid " + k.Want}
-	default:
-		e.ErrorKind = noValue{e.ErrorKind.KeywordPath(), "value fails '" + strings.Join(e.ErrorKind.KeywordPath(), "/") + "'"}
-	}
-	for _, c := range e.Causes {
-		valueFree(c)
-	}
+// isMergeKey reports whether k is a merge key as the decoder takes one: a scalar <<,
+// untagged, tagged ! or tagged !!merge. An alias of one is no merge key, nor is a key
+// tagged !!merge whose value is not <<.
+func isMergeKey(k *yaml.Node) bool {
+	return k.Kind == yaml.ScalarNode && k.Value == "<<" && (k.Tag == "" || k.Tag == "!" || mergeTagged(k))
 }
 
-// schemaQuote is s quoted as the schema's report quotes it.
-func schemaQuote(s string) string {
-	s = strings.ReplaceAll(strings.ReplaceAll(fmt.Sprintf("%q", s), `\"`, `"`), "'", `\'`)
-	return "'" + s[1:len(s)-1] + "'"
+// mergeTagged reports whether n is tagged !!merge, in its short form or its long one.
+func mergeTagged(n *yaml.Node) bool {
+	return n.Tag == "!!merge" || n.Tag == "tag:yaml.org,2002:merge"
 }
-
-// noValue is an error kind whose message holds no value.
-type noValue struct {
-	path []string
-	text string
-}
-
-// KeywordPath is the schema's keyword the value fails.
-func (k noValue) KeywordPath() []string { return k.path }
-
-// LocalizedString is the message, which holds no value.
-func (k noValue) LocalizedString(*message.Printer) string { return k.text }

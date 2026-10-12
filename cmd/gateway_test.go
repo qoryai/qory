@@ -2,7 +2,6 @@ package cmd_test
 
 import (
 	"crypto/ecdsa"
-	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
@@ -24,54 +23,18 @@ import (
 	"github.com/qoryai/qory/cmd"
 )
 
-// issuerSecret is what the introspection client's secret file holds in the tests: qory
-// config must never print it.
-const issuerSecret = "example-introspection-secret-value"
-
-// runCredentials is a gateway.run_credentials section, indented to continue the gateway
-// section, whose files are relative to forager.yaml's directory, where
-// writeIssuerFiles writes them.
-const runCredentials = `  run_credentials:
-    - issuer: https://issuer.example
-      audience: qory-gateway
-      algorithms: [EdDSA]
-      keys:
-        - {kid: k1, alg: EdDSA, public_key_file: issuer-k1.pem}
-      allow: {claim: namespace, values: [example-namespace]}
-      labels:
-        forge: {value: example-forge}
-        repository: {claims: [namespace, project], join: "/"}
-        run_key: {claim: sub}
-      details:
-        requester: {claim: requester}
-      introspection:
-        url: https://issuer.example/introspect
-        client_id: example-gateway
-        client_secret_file: issuer-introspection-secret
-`
-
-// writeIssuerFiles writes the issuer's public key and the introspection client's secret
-// beside forager.yaml, and returns the key's PEM.
-func writeIssuerFiles(t *testing.T) string {
+// newGatewayServer starts a server, as newFakeServer does, whose discovery names a
+// gateway's node: the access key it knows is a gateway's.
+func newGatewayServer(t *testing.T) *fakeServer {
 	t.Helper()
-	pub, _, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	der, err := x509.MarshalPKIXPublicKey(pub)
-	if err != nil {
-		t.Fatal(err)
-	}
-	key := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))
-	dir := string(configDir())
-	writeFile(t, filepath.Join(dir, "issuer-k1.pem"), key)
-	secret := filepath.Join(dir, "issuer-introspection-secret")
-	writeFile(t, secret, issuerSecret+"\n")
-	if err := os.Chmod(secret, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return key
+	srv := newFakeServer(t, "")
+	srv.node = testGatewayNode
+	return srv
 }
+
+// gatewayTLS is gateway.tls naming gateway.pem and gateway-key.pem, which
+// writeCertificate writes, indented to continue the gateway section.
+const gatewayTLS = "  tls:\n    certificate: gateway.pem\n    key: gateway-key.pem\n"
 
 // writeCertificate writes a self-signed certificate for 127.0.0.1 and its key beside
 // forager.yaml, as gateway.pem and gateway-key.pem, and returns the key's PEM.
@@ -158,7 +121,7 @@ func TestGatewayRefusesWhatItCannotServe(t *testing.T) {
 		{
 			name: "no listen",
 			setup: func(t *testing.T) []string {
-				serverFile(t, newFakeServer(t, ""), runCredentials)
+				serverFile(t, newFakeServer(t, ""), "")
 				return []string{"gateway"}
 			},
 			want: func() string {
@@ -168,7 +131,7 @@ func TestGatewayRefusesWhatItCannotServe(t *testing.T) {
 		{
 			name: "a listen that is not host:port",
 			setup: func(t *testing.T) []string {
-				serverFile(t, newFakeServer(t, ""), "  listen: gateway.example\n"+runCredentials)
+				serverFile(t, newFakeServer(t, ""), "  listen: gateway.example\n")
 				return []string{"gateway"}
 			},
 			want: func() string {
@@ -178,7 +141,7 @@ func TestGatewayRefusesWhatItCannotServe(t *testing.T) {
 		{
 			name: "a --listen that is not host:port",
 			setup: func(t *testing.T) []string {
-				serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n"+runCredentials)
+				serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n")
 				return []string{"gateway", "--listen", "127.0.0.1"}
 			},
 			want: func() string { return `--listen "127.0.0.1" is not host:port, such as 0.0.0.0:8443` },
@@ -186,7 +149,7 @@ func TestGatewayRefusesWhatItCannotServe(t *testing.T) {
 		{
 			name: "no server",
 			setup: func(t *testing.T) []string {
-				writeFile(t, foragerFile(), "apiVersion: qory.dev/v1alpha1\ngateway:\n  listen: 127.0.0.1:0\n"+runCredentials)
+				writeFile(t, foragerFile(), "apiVersion: qory.dev/v1alpha1\ngateway:\n  listen: 127.0.0.1:0\n")
 				return []string{"gateway"}
 			},
 			want: func() string {
@@ -196,32 +159,26 @@ func TestGatewayRefusesWhatItCannotServe(t *testing.T) {
 		{
 			name: "no tls off loopback",
 			setup: func(t *testing.T) []string {
-				serverFile(t, newFakeServer(t, ""), "  listen: 0.0.0.0:8443\n"+runCredentials)
+				serverFile(t, newFakeServer(t, ""), "  listen: 0.0.0.0:8443\n")
 				return []string{"gateway"}
 			},
-			want: func() string {
-				return file() + ": gateway.tls is required with a gateway.listen other machines reach: a run's events carry its prompts and terminal output; set gateway.tls.certificate and gateway.tls.key"
+			want: func() string { return "gateway.tls is required with gateway.listen: a gateway serves other machines" },
+		},
+		{
+			name: "no tls on loopback",
+			setup: func(t *testing.T) []string {
+				serverFile(t, newGatewayServer(t), "  listen: 127.0.0.1:0\n")
+				return []string{"gateway"}
 			},
+			want: func() string { return "gateway.tls is required with gateway.listen: a gateway serves other machines" },
 		},
 		{
 			name: "no tls off loopback, by --listen",
 			setup: func(t *testing.T) []string {
-				serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n"+runCredentials)
+				serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n")
 				return []string{"gateway", "--listen", ":8443"}
 			},
-			want: func() string {
-				return file() + ": gateway.tls is required with a gateway.listen other machines reach: a run's events carry its prompts and terminal output; set gateway.tls.certificate and gateway.tls.key"
-			},
-		},
-		{
-			name: "no run credentials",
-			setup: func(t *testing.T) []string {
-				serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n")
-				return []string{"gateway"}
-			},
-			want: func() string {
-				return file() + ": gateway.run_credentials is required to serve other machines: their runs bring run credentials, and the gateway verifies each one; see https://github.com/qoryai/qory/blob/main/docs/gateway.md"
-			},
+			want: func() string { return "gateway.tls is required with gateway.listen: a gateway serves other machines" },
 		},
 	}
 	for _, c := range cases {
@@ -252,8 +209,8 @@ func TestGatewaySaysWhereItCannotListen(t *testing.T) {
 	}
 	defer taken.Close()
 	addr := taken.Addr().String()
-	serverFile(t, newFakeServer(t, ""), "  listen: "+addr+"\n"+runCredentials)
-	writeIssuerFiles(t)
+	serverFile(t, newGatewayServer(t), "  listen: "+addr+"\n"+gatewayTLS)
+	writeCertificate(t)
 	out, err := run(t, "gateway")
 	if err == nil {
 		t.Fatalf("qory gateway listened on a taken address:\n%s", out)
@@ -328,15 +285,14 @@ func stopGateway(t *testing.T, done <-chan error) error {
 	}
 }
 
-// TestGatewayServesLoopbackUntilSIGTERM is a gateway on a loopback address without
-// TLS: --listen wins over gateway.listen, which names an address that would need TLS;
-// the gateway prints the node, its instance and where it listens, and on SIGTERM it
-// says it stops, says it stopped, and exits 0.
+// TestGatewayServesLoopbackUntilSIGTERM is a gateway on a loopback address: --listen
+// wins over gateway.listen; the gateway prints the node, a gateway's, its instance and
+// where it listens, and on SIGTERM it says it stops, says it stopped, and exits 0.
 func TestGatewayServesLoopbackUntilSIGTERM(t *testing.T) {
 	emptyDir(t)
-	srv := newFakeServer(t, "")
-	serverFile(t, srv, "  listen: 0.0.0.0:8443\n"+runCredentials)
-	writeIssuerFiles(t)
+	srv := newGatewayServer(t)
+	serverFile(t, srv, "  listen: 0.0.0.0:8443\n"+gatewayTLS)
+	writeCertificate(t)
 	addr, out, done := startGateway(t, "--listen", "127.0.0.1:0")
 	if host, port, _ := net.SplitHostPort(addr); host != "127.0.0.1" || port == "0" || port == "8443" {
 		t.Errorf("listening on %s, want 127.0.0.1 and the port the system chose", addr)
@@ -354,13 +310,13 @@ func TestGatewayServesLoopbackUntilSIGTERM(t *testing.T) {
 		t.Errorf("exit %d, want 0", code)
 	}
 	text := out.String()
-	wants(t, text, "qory gateway: node "+testNode+", instance i_", "qory gateway: listening on "+addr, "qory gateway: stopping\n", "the gateway stopped\n")
+	wants(t, text, "qory gateway: node "+testGatewayNode+", instance i_", "qory gateway: listening on "+addr, "qory gateway: stopping\n", "the gateway stopped\n")
 	if i, j := strings.Index(text, "qory gateway: stopping"), strings.Index(text, "the gateway stopped"); i < 0 || j < i {
 		t.Errorf("the stopping lines are out of order:\n%s", text)
 	}
-	lacks(t, text, issuerSecret, srv.key.Secret()[4:])
-	if _, err := os.Stat(filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "gateway", "authority", "ca.pem")); err != nil {
-		t.Errorf("the gateway's certificate authority is not in qory's state directory: %v", err)
+	lacks(t, text, srv.key.Secret()[4:])
+	if fi, err := os.Stat(filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "gateway")); err != nil || !fi.IsDir() || fi.Mode().Perm() != 0o700 {
+		t.Errorf("the gateway's directory is not in qory's state directory, the user's alone: %v", err)
 	}
 }
 
@@ -370,9 +326,8 @@ func TestGatewayServesLoopbackUntilSIGTERM(t *testing.T) {
 // certificate tool keeps one: it speaks TLS 1.3 with that certificate.
 func TestGatewayServesTLSOffLoopback(t *testing.T) {
 	emptyDir(t)
-	srv := newFakeServer(t, "")
-	serverFile(t, srv, "  listen: 0.0.0.0:0\n  tls:\n    certificate: gateway.pem\n    key: gateway-key.pem\n"+runCredentials)
-	writeIssuerFiles(t)
+	srv := newGatewayServer(t)
+	serverFile(t, srv, "  listen: 0.0.0.0:0\n"+gatewayTLS)
 	key := writeCertificate(t)
 	dir := string(configDir())
 	archive := filepath.Join(dir, "archive")
@@ -406,16 +361,14 @@ func TestGatewayServesTLSOffLoopback(t *testing.T) {
 	if err := stopGateway(t, done); err != nil {
 		t.Fatalf("qory gateway ended with %v\n%s", err, out)
 	}
-	lacks(t, out.String(), issuerSecret, strings.Split(key, "\n")[1], srv.key.Secret()[4:])
+	lacks(t, out.String(), strings.Split(key, "\n")[1], srv.key.Secret()[4:])
 }
 
-// TestConfigListsTheGatewaysSettings is qory config with the gateway's address, its TLS
-// and its run credentials: every path as the file writes it, the defaults beside them,
-// and nothing a key or secret file holds.
+// TestConfigListsTheGatewaysSettings is qory config with the gateway's address and its
+// TLS: every path as the file writes it, and nothing the key file holds.
 func TestConfigListsTheGatewaysSettings(t *testing.T) {
 	emptyDir(t)
-	serverFile(t, newFakeServer(t, ""), "  listen: 0.0.0.0:8443\n  tls:\n    certificate: gateway.pem\n    key: gateway-key.pem\n"+runCredentials)
-	issuerKey := writeIssuerFiles(t)
+	serverFile(t, newFakeServer(t, ""), "  listen: 0.0.0.0:8443\n"+gatewayTLS)
 	tlsKey := writeCertificate(t)
 	out, err := run(t, "config")
 	if err != nil {
@@ -427,30 +380,17 @@ func TestConfigListsTheGatewaysSettings(t *testing.T) {
 		{"gateway.listen", "0.0.0.0:8443"},
 		{"gateway.tls.certificate", "gateway.pem"},
 		{"gateway.tls.key", "gateway-key.pem"},
-		{"gateway.run_credentials[0].issuer", "https://issuer.example"},
-		{"gateway.run_credentials[0].audience", "qory-gateway"},
-		{"gateway.run_credentials[0].algorithms", "[EdDSA]"},
-		{"gateway.run_credentials[0].keys", "[{kid: k1, alg: EdDSA, public_key_file: issuer-k1.pem}]"},
-		{"gateway.run_credentials[0].allow", "{claim: namespace, values: [example-namespace]}"},
-		{"gateway.run_credentials[0].labels", `{forge: {value: example-forge}, repository: {claims: [namespace, project], join: "/"}, run_key: {claim: sub}}`},
-		{"gateway.run_credentials[0].details", "{requester: {claim: requester}}"},
-		{"gateway.run_credentials[0].introspection.url", "https://issuer.example/introspect"},
-		{"gateway.run_credentials[0].introspection.client_id", "example-gateway"},
-		{"gateway.run_credentials[0].introspection.client_secret_file", "issuer-introspection-secret"},
 	} {
 		wantsConfigRow(t, rows, r[0], r[1], file)
 	}
-	wantsConfigRow(t, rows, "gateway.run_credentials[0].leeway", "60s", "default")
-	wantsConfigRow(t, rows, "gateway.run_credentials[0].max_lifetime", "(none)", "default")
-	wantsConfigRow(t, rows, "gateway.run_credentials[0].introspection.cache", "30s", "default")
 	if t.Failed() {
 		t.Log(out)
 	}
-	lacks(t, out, issuerSecret, "BEGIN", strings.TrimSpace(strings.Split(issuerKey, "\n")[1]), strings.TrimSpace(strings.Split(tlsKey, "\n")[1]))
+	lacks(t, out, "BEGIN", strings.TrimSpace(strings.Split(tlsKey, "\n")[1]))
 }
 
-// TestConfigListsNoGatewayService is qory config without the gateway's address, TLS
-// or run credentials: each is listed as none.
+// TestConfigListsNoGatewayService is qory config without the gateway's address or
+// TLS: each is listed as none, and gateway.run_credentials is no row.
 func TestConfigListsNoGatewayService(t *testing.T) {
 	emptyDir(t)
 	out, err := run(t, "config")
@@ -458,30 +398,31 @@ func TestConfigListsNoGatewayService(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	rows := configRows(out)
-	for _, key := range []string{"gateway.listen", "gateway.tls.certificate", "gateway.tls.key", "gateway.run_credentials"} {
+	for _, key := range []string{"gateway.listen", "gateway.tls.certificate", "gateway.tls.key"} {
 		wantsConfigRow(t, rows, key, "(none)", "default")
 	}
+	lacks(t, out, "run_credentials")
 }
 
-// TestGatewayRefusesRunCredentialsTheSchemaRefuses is a gateway.run_credentials that
-// Forager's schema refuses: every command that reads forager.yaml stops on it.
-func TestGatewayRefusesRunCredentialsTheSchemaRefuses(t *testing.T) {
+// TestGatewayRefusesRunCredentials is a gateway.run_credentials, which forager.yaml no
+// longer has: every command that reads forager.yaml stops on it, as on any key it does
+// not read.
+func TestGatewayRefusesRunCredentials(t *testing.T) {
 	emptyDir(t)
-	serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n  run_credentials:\n    - issuer: https://issuer.example\n      algorithms: [HS256]\n")
+	serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n  run_credentials:\n    - issuer: https://issuer.example\n")
 	_, err := run(t, "gateway")
-	if err == nil || !strings.HasPrefix(err.Error(), foragerFile()+": gateway.run_credentials: ") {
-		t.Errorf("error %v, want one that names gateway.run_credentials", err)
+	if want := foragerFile() + `: line 8: key "run_credentials" is not one forager.yaml reads`; err == nil || err.Error() != want {
+		t.Errorf("error %v, want %q", err, want)
 	}
 	if code := cmd.ExitCode(err); code != cmd.ExitInput {
 		t.Errorf("exit %d, want %d", code, cmd.ExitInput)
 	}
 }
 
-// TestGatewayRefusesSecretFilesOthersMayRead is the TLS key and an introspection
-// client's secret checked as access-key-secret is, before the gateway listens: a key
-// the group or others may read, a key in a directory others may read, and a client
-// secret that is a link, here to a file anyone may write, are each refused, and no
-// refusal holds what the file does.
+// TestGatewayRefusesSecretFilesOthersMayRead is the TLS key checked as
+// access-key-secret is, before the gateway listens: a key the group or others may read
+// and a key in a directory others may read are each refused, and no refusal holds what
+// the file does.
 func TestGatewayRefusesSecretFilesOthersMayRead(t *testing.T) {
 	for _, c := range []struct {
 		name  string
@@ -512,26 +453,10 @@ func TestGatewayRefusesSecretFilesOthersMayRead(t *testing.T) {
 			keys, _ = filepath.EvalSymlinks(keys)
 			return keys + " is mode 0755, which grants access to the group or others; it holds gateway.tls.key: chmod 700 " + keys
 		}},
-		{"a client secret linked to a file anyone may write", func(t *testing.T, dir string) string {
-			secret := filepath.Join(dir, "issuer-introspection-secret")
-			elsewhere := filepath.Join(t.TempDir(), "secret")
-			writeFile(t, elsewhere, issuerSecret+"\n")
-			if err := os.Chmod(elsewhere, 0o666); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.Remove(secret); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.Symlink(elsewhere, secret); err != nil {
-				t.Fatal(err)
-			}
-			return secret + " is a symbolic link; it must be the file itself"
-		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			emptyDir(t)
-			serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n  tls:\n    certificate: gateway.pem\n    key: gateway-key.pem\n"+runCredentials)
-			writeIssuerFiles(t)
+			serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n"+gatewayTLS)
 			key := writeCertificate(t)
 			want := c.setup(t, string(configDir()))
 			out, err := run(t, "gateway")
@@ -541,7 +466,7 @@ func TestGatewayRefusesSecretFilesOthersMayRead(t *testing.T) {
 			if code := cmd.ExitCode(err); code != cmd.ExitInput {
 				t.Errorf("exit %d, want %d", code, cmd.ExitInput)
 			}
-			lacks(t, out+fmt.Sprint(err), "listening on", issuerSecret, strings.Split(key, "\n")[1])
+			lacks(t, out+fmt.Sprint(err), "listening on", strings.Split(key, "\n")[1])
 		})
 	}
 }
@@ -553,8 +478,8 @@ func TestGatewayMakesNoLinkSocket(t *testing.T) {
 	emptyDir(t)
 	tmp := shortTempDir(t)
 	t.Setenv("TMPDIR", tmp)
-	serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n"+runCredentials)
-	writeIssuerFiles(t)
+	serverFile(t, newGatewayServer(t), "  listen: 127.0.0.1:0\n"+gatewayTLS)
+	writeCertificate(t)
 	_, out, done := startGateway(t)
 	entries, err := os.ReadDir(tmp)
 	if err != nil {
@@ -577,8 +502,8 @@ func TestGatewayRefusesALinkForItsDirectory(t *testing.T) {
 	for _, name := range []string{"qory", filepath.Join("qory", "gateway")} {
 		t.Run(name, func(t *testing.T) {
 			emptyDir(t)
-			serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n"+runCredentials)
-			writeIssuerFiles(t)
+			serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n"+gatewayTLS)
+			writeCertificate(t)
 			link := filepath.Join(os.Getenv("XDG_STATE_HOME"), name)
 			elsewhere := t.TempDir()
 			if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
@@ -612,8 +537,8 @@ func TestGatewayRefusesAnotherUsersDirectory(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			emptyDir(t)
-			serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n"+runCredentials)
-			writeIssuerFiles(t)
+			serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n"+gatewayTLS)
+			writeCertificate(t)
 			path := filepath.Join(os.Getenv("XDG_STATE_HOME"), c.name)
 			if err := os.MkdirAll(path, 0o700); err != nil {
 				t.Fatal(err)
@@ -639,8 +564,7 @@ func TestGatewayRefusesAKeyAnotherUserOwns(t *testing.T) {
 		t.Skip("only root can give a file to another user")
 	}
 	emptyDir(t)
-	serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n  tls:\n    certificate: gateway.pem\n    key: gateway-key.pem\n"+runCredentials)
-	writeIssuerFiles(t)
+	serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n"+gatewayTLS)
 	writeCertificate(t)
 	key, err := filepath.EvalSymlinks(filepath.Join(string(configDir()), "gateway-key.pem"))
 	if err != nil {
@@ -654,4 +578,36 @@ func TestGatewayRefusesAKeyAnotherUserOwns(t *testing.T) {
 		t.Errorf("error\n got %v\nwant %q", err, want)
 	}
 	lacks(t, out, "listening on")
+}
+
+// TestGatewayNeedsAGatewaysKey is qory gateway with an access key whose node discovery
+// names is not a gateway's: once the node line is printed, it is refused as input, in
+// qory's words, before the gateway listens.
+func TestGatewayNeedsAGatewaysKey(t *testing.T) {
+	emptyDir(t)
+	serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n"+gatewayTLS)
+	writeCertificate(t)
+	out, err := run(t, "gateway")
+	if want := "qory gateway needs a gateway's access key, and this one is node " + testNode + "'s: enrol a key with a code from the gateway's page in Qory Apiary"; err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
+		t.Errorf("a node's key: %v (exit %d)\nwant %q", err, cmd.ExitCode(err), want)
+	}
+	wants(t, out, "qory gateway: node "+testNode+", instance ")
+	lacks(t, out, "listening on")
+}
+
+// TestGatewayRefusesVia is qory gateway with gateway.server.via set: a gateway reaches
+// the server directly, so it is refused, exit 2, before it reaches the server or listens.
+func TestGatewayRefusesVia(t *testing.T) {
+	emptyDir(t)
+	srv := newFakeServer(t, "")
+	via := newViaGateway(t, srv.URL)
+	serverFile(t, srv, via.via()+"  listen: 127.0.0.1:0\n")
+	out, err := run(t, "gateway")
+	lacks(t, out, "listening on")
+	if want := foragerFile() + ": gateway.server.via does nothing for qory gateway: a gateway reaches the server directly; remove gateway.server.via"; err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
+		t.Errorf("%v (exit %d)\nwant %q", err, cmd.ExitCode(err), want)
+	}
+	if relayed, targets := via.relayed(), srvTargets(srv); len(relayed) != 0 || len(targets) != 0 {
+		t.Errorf("a refused gateway sent %v through via, and the server got %v", relayed, targets)
+	}
 }

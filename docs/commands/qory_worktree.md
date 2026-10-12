@@ -8,7 +8,7 @@ Add, remove and list the worktrees of the repository you stand in.
 
 A worktree is one branch, checked out beside the main checkout. qory prepares it the way
 the repository's qory.yaml says: files linked or copied in, commands run, the harness
-composed. Where worktrees go and what they are called is set in your own qory.yaml.
+composed. Where worktrees go and what they are called is set in your qory.yaml.
 
 Shortcuts:
   wa  worktree add

@@ -278,8 +278,8 @@ func TestForagerFileRefusesAMistake(t *testing.T) {
 		{"gateway: [egress]\n", "gateway"},
 		{"gateway: {egress: {allow: [a.example]}}\n", "gateway.egress.mode is required"},
 		{"gateway: {egress: {mode: log}}\n", `gateway.egress.mode is not observe or enforce`},
-		{"gateway: {egress: {mode: enforce, allow: [\"api.example.com:443\"]}}\n", `gateway.egress.allow[0] is not a lower-case host name or a *. suffix; no port, path or scheme`},
-		{"gateway: {egress: {mode: observe, deny: [\"tracker.example:443\"]}}\n", `gateway.egress.deny[0] is not a lower-case host name or a *. suffix; no port, path or scheme`},
+		{"gateway: {egress: {mode: enforce, allow: [\"api.example.com:443\"]}}\n", `gateway.egress.allow[0] is not a lower-case host name or a *. suffix, or it ends in a number and is not an IPv4 address in canonical form; no port, path or scheme`},
+		{"gateway: {egress: {mode: observe, deny: [\"tracker.example:443\"]}}\n", `gateway.egress.deny[0] is not a lower-case host name or a *. suffix, or it ends in a number and is not an IPv4 address in canonical form; no port, path or scheme`},
 		{"gateway: {server: {access_key_id: ak_f1xt0re000000000}}\n", "gateway.server.url is required"},
 		{"gateway: {server: {url: \"ftp://x\"}}\n", `gateway.server.url for ftp://x is not https or http: an https URL of a host and an optional port, or an http one to this machine, with nothing after`},
 		{"gateway: {server: {url: \"http://qory.example\"}}\n", `gateway.server.url for http://qory.example is http to a host that is not this machine: an https URL of a host and an optional port, or an http one to this machine, with nothing after`},
@@ -307,14 +307,19 @@ func TestForagerFileRefusesAMistake(t *testing.T) {
 		{"wall: {adapter: docker, network: host}\n", `key "network" is not one`},
 		{"wall: {adapter: docker, mounts: [srv]}\n", `wall.mounts[0] is not an absolute path, with :ro after it for a read-only one`},
 		{"wall: {adapter: docker, pids_limit: 0}\n", `wall.pids_limit is below 1; a limit is at least 1`},
-		{"wall: {adapter: docker, env: [QORY_ACCESS_KEY_SECRET]}\n", `wall.env[0] names a variable that is Forager's own and never the agent's`},
-		{"wall: {adapter: docker, env: [QORY_ACCESS_KEY_ID]}\n", `wall.env[0] names a variable that is Forager's own`},
-		{"wall: {adapter: docker, env: [QORY_APIARY_PUBLIC_KEY]}\n", `wall.env[0] names a variable that is Forager's own`},
-		{"wall: {adapter: docker, env: [QORY_SERVER_SECRET]}\n", `wall.env[0] names a variable that is Forager's own and never the agent's`},
-		{"wall: {adapter: docker, env: [QORY_RUN_CREDENTIAL_SECRET]}\n", `wall.env[0] names a variable that is Forager's own and never the agent's`},
+		{"wall: {adapter: docker, env: [QORY_ACCESS_KEY_SECRET]}\n", `wall.env[0] names a variable that is Forager's and never the agent's`},
+		{"wall: {adapter: docker, env: [QORY_ACCESS_KEY_ID]}\n", `wall.env[0] names a variable that is Forager's and`},
+		{"wall: {adapter: docker, env: [QORY_APIARY_PUBLIC_KEY]}\n", `wall.env[0] names a variable that is Forager's and`},
+		{"wall: {adapter: docker, env: [QORY_SERVER_SECRET]}\n", `wall.env[0] names a variable that is Forager's and never the agent's`},
+		{"wall: {adapter: docker, env: [QORY_RUN_KEY]}\n", `wall.env[0] names a variable that is Forager's and never the agent's`},
 		{"gateway: {credentials: {product: {adapter: [git-host]}}}\n", `gateway.credentials.product.adapter is a program by its absolute path`},
 		{"gateway: {credentials: {product: {command: [/x]}}}\n", `gateway.credentials.product: key "command" is not one`},
 		{"gateway: {credentials: [product]}\n", `gateway.credentials is a mapping`},
+		{"gateway: {tools: [files]}\n", `gateway.tools is a mapping from a name to a tool`},
+		{"gateway: {tools: {files: {command: [/opt/tools/files], adapter: [/x]}}}\n", `gateway.tools.files: key "adapter" is not one`},
+		{"gateway: {tools: {files: {command: [files-tool], serves: [files.tools.internal]}}}\n", `gateway.tools.files.command is a program by its absolute path, and its arguments`},
+		{"gateway: {tools: {files: {command: [], serves: [files.tools.internal]}}}\n", `gateway.tools.files.command is a program by its absolute path, and its arguments`},
+		{"gateway: {tools: {files: {serves: [files.tools.internal]}}}\n", `gateway.tools.files.command is a program by its absolute path, and its arguments`},
 		{"session: {run: {timeout: soon}}\n", `session.run.timeout is not a duration above zero, such as 5h30m or 30s`},
 		{"session: {run: {stop_grace: 0s}}\n", `session.run.stop_grace is not a duration above zero, such as 5h30m or 30s`},
 		{"session: {run: {stop_signal: SIGKILL}}\n", `session.run.stop_signal is not one of SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1, SIGUSR2`},
@@ -357,6 +362,72 @@ func TestTheForagerSchemaTakesTheServerSection(t *testing.T) {
 		{"instance: {name: build-01}\n", false},
 		{"gateway: {instance: {name: build-01}}\n", false},
 		{"session: {server: {url: \"https://qory.example\"}}\n", false},
+	} {
+		var doc any
+		if err := yaml.Unmarshal([]byte("apiVersion: qory.dev/v1alpha1\n"+c.body), &doc); err != nil {
+			t.Fatal(err)
+		}
+		if err := schema.Validate(doc); (err == nil) != c.valid {
+			t.Errorf("%q: %v, want valid %v", c.body, err, c.valid)
+		}
+	}
+}
+
+// TestForagerFileReadsTheTools reads gateway.tools in the file's order, each tool's
+// command, argument, hosts and placeholders, and lists each tool by its program and the
+// hosts it serves.
+func TestForagerFileReadsTheTools(t *testing.T) {
+	hermetic(t)
+	path := foragerFile(t, "gateway:\n  tools:\n    files:\n      command: [/opt/tools/files, --prefix, \"${argument}\"]\n      argument: \"[a-z0-9-]+/[a-z0-9-]+\"\n      serves: [files.tools.internal, media.tools.internal]\n      placeholders: [FILES_TOKEN]\n    search:\n      command: [/opt/tools/search]\n      serves: [search.tools.internal]\n")
+	c, err := config.Load(t.TempDir(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := c.Forager.Tools
+	if len(tools) != 2 || tools[0].Name != "files" || strings.Join(tools[0].Command, " ") != "/opt/tools/files --prefix ${argument}" || tools[0].Argument != "[a-z0-9-]+/[a-z0-9-]+" ||
+		strings.Join(tools[0].Serves, " ") != "files.tools.internal media.tools.internal" || strings.Join(tools[0].Placeholders, " ") != "FILES_TOKEN" ||
+		tools[1].Name != "search" || strings.Join(tools[1].Command, " ") != "/opt/tools/search" || tools[1].Argument != "" || strings.Join(tools[1].Serves, " ") != "search.tools.internal" {
+		t.Fatalf("gateway.tools read as %+v", tools)
+	}
+	rows := map[string]config.Row{}
+	for _, row := range c.Rows() {
+		rows[row.Key] = row
+	}
+	for key, want := range map[string]string{
+		"gateway.tools.files":  "/opt/tools/files, serves files.tools.internal, media.tools.internal",
+		"gateway.tools.search": "/opt/tools/search, serves search.tools.internal",
+	} {
+		if rows[key].Value != want || rows[key].Origin != path {
+			t.Errorf("%s: %+v, want %q from %s", key, rows[key], want, path)
+		}
+	}
+}
+
+// TestTheForagerSchemaTakesTheTools holds forager.schema.json to what Forager takes of a
+// tool: a command whose program is an absolute path, at least one host it serves, an
+// optional argument and placeholders, and no other key.
+func TestTheForagerSchemaTakesTheTools(t *testing.T) {
+	schema, err := jsonschema.NewCompiler().Compile(filepath.Join("..", "..", "contracts", "harness", "v1", "forager.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		body  string
+		valid bool
+	}{
+		{"gateway: {tools: {files: {command: [/opt/tools/files], serves: [files.tools.internal]}}}\n", true},
+		{"gateway: {tools: {files: {command: [/opt/tools/files, \"${argument}\"], argument: \"[a-z/]+\", serves: [\"*.tools.internal\"], placeholders: [FILES_TOKEN]}}}\n", true},
+		{"gateway: {tools: {files: {command: [files-tool], serves: [files.tools.internal]}}}\n", false},
+		{"gateway: {tools: {files: {command: [], serves: [files.tools.internal]}}}\n", false},
+		{"gateway: {tools: {files: {serves: [files.tools.internal]}}}\n", false},
+		{"gateway: {tools: {files: {command: [/opt/tools/files]}}}\n", false},
+		{"gateway: {tools: {files: {command: [/opt/tools/files], serves: []}}}\n", false},
+		{"gateway: {tools: {files: {command: [/opt/tools/files], serves: [\"files.tools.internal:443\"]}}}\n", false},
+		{"gateway: {tools: {files: {command: [/opt/tools/files], serves: [files.tools.internal], placeholders: [\"FILES-TOKEN\"]}}}\n", false},
+		{"gateway: {tools: {files: {command: [/opt/tools/files], serves: [files.tools.internal], hosts: [files.tools.internal]}}}\n", false},
+		{"gateway: {tools: {Files: {command: [/opt/tools/files], serves: [files.tools.internal]}}}\n", false},
+		{"gateway: {tools: [files]}\n", false},
+		{"tools: {files: {command: [/opt/tools/files], serves: [files.tools.internal]}}\n", false},
 	} {
 		var doc any
 		if err := yaml.Unmarshal([]byte("apiVersion: qory.dev/v1alpha1\n"+c.body), &doc); err != nil {

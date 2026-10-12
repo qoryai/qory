@@ -21,10 +21,19 @@ on:
 permissions:
   contents: read
 
+# The images' bases, Docker Hub's official Debian and Node under the same digests as the
+# Dockerfiles' defaults, copied to qoryai's public package and pulled with the job's token.
+env:
+  FETCH_IMAGE: ghcr.io/qoryai/ci-images:debian-trixie-20260918-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
+  NODE_IMAGE: ghcr.io/qoryai/ci-images:node-24.21.0-trixie-slim@sha256:8ec5d7557396cfe32d21c3f9c13072355ceab22b584578ca4bb28af31120cffe
+
 jobs:
   check:
     name: Build and check the images for amd64
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v7
 
@@ -36,19 +45,24 @@ jobs:
         # Static, as the wall mounts it into an image that may hold no loader.
         run: CGO_ENABLED=0 go build -o "$RUNNER_TEMP/qory" .
 
+      - name: Log in to ghcr.io
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
       # The engine's own builder, so each image is built FROM the one before it as this
       # engine holds it, no builder image is pulled, and nothing is pushed.
       - name: Build agent
-        run: docker build --platform linux/amd64 -t qory-agent images/agent
+        run: docker build --platform linux/amd64 -t qory-agent --build-arg FETCH_IMAGE="$FETCH_IMAGE" --build-arg NODE_IMAGE="$NODE_IMAGE" images/agent
 
       - name: Build agent-docker
-        run: docker build --platform linux/amd64 -t qory-agent-docker --build-arg BASE=qory-agent images/agent-docker
+        run: docker build --platform linux/amd64 -t qory-agent-docker --build-arg BASE=qory-agent --build-arg FETCH_IMAGE="$FETCH_IMAGE" images/agent-docker
 
       - name: Build agent-go
-        run: docker build --platform linux/amd64 -t qory-agent-go --build-arg BASE=qory-agent images/agent-go
+        run: docker build --platform linux/amd64 -t qory-agent-go --build-arg BASE=qory-agent --build-arg FETCH_IMAGE="$FETCH_IMAGE" images/agent-go
 
       - name: Build agent-go-docker
-        run: docker build --platform linux/amd64 -t qory-agent-go-docker --build-arg BASE=qory-agent-docker --build-arg TITLE=agent-go-docker images/agent-go
+        run: docker build --platform linux/amd64 -t qory-agent-go-docker --build-arg BASE=qory-agent-docker --build-arg TITLE=agent-go-docker --build-arg FETCH_IMAGE="$FETCH_IMAGE" images/agent-go
 
       - name: Check them
         # On Linux the probe is qory itself, and a configuration directory with no
@@ -62,18 +76,26 @@ jobs:
     # Built, with no qory image check: what goes wrong for one architecture alone, a sum
     # or a download, shows here. The runner is arm64, so every build step runs natively.
     runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v7
 
+      - name: Log in to ghcr.io
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
       # The engine's own builder, as for amd64: no builder image to pin.
       - name: Build agent
-        run: docker build --platform linux/arm64 -t qory-agent images/agent
+        run: docker build --platform linux/arm64 -t qory-agent --build-arg FETCH_IMAGE="$FETCH_IMAGE" --build-arg NODE_IMAGE="$NODE_IMAGE" images/agent
 
       - name: Build agent-docker
-        run: docker build --platform linux/arm64 -t qory-agent-docker --build-arg BASE=qory-agent images/agent-docker
+        run: docker build --platform linux/arm64 -t qory-agent-docker --build-arg BASE=qory-agent --build-arg FETCH_IMAGE="$FETCH_IMAGE" images/agent-docker
 
       - name: Build agent-go
-        run: docker build --platform linux/arm64 -t qory-agent-go --build-arg BASE=qory-agent images/agent-go
+        run: docker build --platform linux/arm64 -t qory-agent-go --build-arg BASE=qory-agent --build-arg FETCH_IMAGE="$FETCH_IMAGE" images/agent-go
 
       - name: Build agent-go-docker
-        run: docker build --platform linux/arm64 -t qory-agent-go-docker --build-arg BASE=qory-agent-docker --build-arg TITLE=agent-go-docker images/agent-go
+        run: docker build --platform linux/arm64 -t qory-agent-go-docker --build-arg BASE=qory-agent-docker --build-arg TITLE=agent-go-docker --build-arg FETCH_IMAGE="$FETCH_IMAGE" images/agent-go

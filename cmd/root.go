@@ -41,7 +41,7 @@ func Root() *cobra.Command {
 		Long: `qory gets your coding agent ready to work, and keeps it in check.
 
   harness     build the agent's harness from modules, once for every agent you use
-  worktree    give each branch its own worktree, ready to work
+  worktree    give each branch a separate worktree, ready to work
   run         run the agent behind a proxy: recorded, fenced, no tokens inside
   access-key  make the key this machine signs its runs to the server with
 

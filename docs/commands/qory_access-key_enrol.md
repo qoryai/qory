@@ -38,8 +38,8 @@ does without it.
 The key's name is session.instance.name of forager.yaml, else this machine's host name.
 
 --print writes no key or setting and prints QORY_ACCESS_KEY_ID, QORY_ACCESS_KEY_SECRET
-and QORY_APIARY_PUBLIC_KEY for a CI's settings. Only the secret belongs in its secret
-store. The key is for another machine, so the server and the pin of forager.yaml do not
+and QORY_APIARY_PUBLIC_KEY for a starter's settings, such as a CI's. Only the secret belongs
+in its secret store. The key is for another machine, so the server and the pin of forager.yaml do not
 apply; the code is checked against QORY_APIARY_PUBLIC_KEY when it is set.
 
 --verbose adds nothing here.
@@ -55,15 +55,18 @@ qory access-key enrol <server> <code> [flags]
 ```
   qory access-key enrol https://apiary.example qec_F1XT-0RE0-0000-0000-0000-0000-00.uoES-kuj1vk0sq0qoGlmAg
   qory access-key enrol --replace https://apiary.example "$code"   # move this machine to a new key
-  qory access-key enrol --print https://apiary.example "$code"   # for a CI's settings
+  qory access-key enrol --print https://apiary.example "$code"   # for a starter's settings
 ```
 
 ### Options
 
 ```
-  -h, --help      help for enrol
-      --print     write no key or setting; print the key's three settings for a CI
-      --replace   move this machine to a new key; the old key stays in use until the new one is active
+  -h, --help                            help for enrol
+      --print                           write no key or setting; print the key's three settings for a starter
+      --replace                         move this machine to a new key; the old key stays in use until the new one is active
+      --via string                      enrol through this gateway, and write it to gateway.server.via.url
+      --via-ca-file string              a PEM file of the authorities the gateway's certificate chains to, in place of the system's roots; written to gateway.server.via.ca_file
+      --via-certificate-sha256 string   the SHA-256 of the gateway certificate's public key, in standard base64; written to gateway.server.via.certificate_sha256
 ```
 
 ### Options inherited from parent commands

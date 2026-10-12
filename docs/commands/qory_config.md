@@ -11,7 +11,7 @@ before it:
 
   1. yours, in ~/.config/qory ($XDG_CONFIG_HOME/qory)
   2. those in the directories above the checkout that you own, the farthest first
-  3. the checkout's own
+  3. the checkout's file
 
 A compose flag overrides every file.
 

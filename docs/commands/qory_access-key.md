@@ -13,7 +13,7 @@ never rotated: a new one is enrolled, and the old one revoked.
   enrol   enrol a new key with a code from the server
 
 With --print, enrol writes no key or setting on this machine and prints the key for a
-CI's settings instead.
+starter's settings instead, such as a CI's.
 
 More: https://github.com/qoryai/qory/blob/main/docs/run.md
 

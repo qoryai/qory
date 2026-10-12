@@ -108,7 +108,7 @@ func TestRunAboutGoesWithTheRegistration(t *testing.T) {
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, fakeRuntime(t))
 	srv := newFakeServer(t, `{"version":1,"egress":{"mode":"enforce","allow":["api.example"]}}`)
-	serverFile(t, srv, "")
+	walledServerFile(t, srv, "")
 	t.Setenv("QORY_TEST_EXIT", "0")
 	out, err := run(t, "run", "--label", "issue=77", "--kind", "fix", "--title", "Fix the parser", "--subject", "type=ticket,ref=7")
 	if err != nil {

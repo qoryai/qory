@@ -21,13 +21,13 @@ earlier one.
 
 - A repository decides what only the machine may: anything in a checkout, its
   `qory.yaml`, a module, a composed harness, changes what `~/.config/qory/forager.yaml`
-  defines for egress, the server, credentials, integrations, run credentials or the wall,
+  defines for egress, the server, credentials, integrations or the wall,
   or a run's `--policy` widens the machine's.
 - `qory run` passes a session something it must not receive: the server's secret, a
-  credential, the run credential, a variable of your environment that was not listed for
-  a walled run.
-- `qory run` on a machine whose runs go through a separate gateway prints or records the
-  run credential, or reaches the gateway without verifying its certificate.
+  credential, the run key, behind a wall, a variable of your environment that was not
+  listed for a walled run.
+- `qory run` behind a separate gateway prints or records the run key, or sends it anywhere
+  but the gateway the run key names.
 - `qory gateway` serves an address other machines reach without TLS, or `qory config`
   prints what a key or secret file of `forager.yaml` holds.
 - Composing a harness writes outside the checkout and the home it was set to use.

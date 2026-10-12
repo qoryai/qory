@@ -63,3 +63,48 @@ func TestADecoderPanicIsARefusal(t *testing.T) {
 		t.Errorf("the enrolment writer: %v", err)
 	}
 }
+
+// TestAMergeKeyIsTheDecoders is isMergeKey against the decoder, by the key's tag and
+// form: a plain <<, one tagged ! and one tagged !!merge, short or long, merge; a quoted
+// "<<", an alias of <<, and a key tagged !!merge that is not << do not. For each the
+// decoder agrees: the mapping it merges holds the merged key, and one it does not holds
+// "<<" as a key of its own.
+func TestAMergeKeyIsTheDecoders(t *testing.T) {
+	for _, c := range []struct {
+		doc   string
+		merge bool
+	}{
+		{"<<: {a: 1}\n", true},
+		{"! <<: {a: 1}\n", true},
+		{"!!merge <<: {a: 1}\n", true},
+		{"!<tag:yaml.org,2002:merge> <<: {a: 1}\n", true},
+		{`"<<": {a: 1}` + "\n", false},
+		{"'<<': {a: 1}\n", false},
+		{"!!str <<: {a: 1}\n", false},
+		{"k: &m <<\n*m : {a: 1}\n", false},
+	} {
+		var doc yaml.Node
+		if err := yaml.Unmarshal([]byte(c.doc), &doc); err != nil {
+			t.Fatalf("%q: %v", c.doc, err)
+		}
+		m := doc.Content[0]
+		key := m.Content[len(m.Content)-2]
+		if got := isMergeKey(key); got != c.merge {
+			t.Errorf("%q: isMergeKey is %v, want %v", c.doc, got, c.merge)
+		}
+		var out map[string]any
+		if err := yaml.Unmarshal([]byte(c.doc), &out); err != nil {
+			t.Fatalf("%q: the decoder: %v", c.doc, err)
+		}
+		if _, merged := out["a"]; merged != c.merge {
+			t.Errorf("%q: the decoder merges %v, and the test says %v: %v", c.doc, merged, c.merge, out)
+		}
+	}
+
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte("!!merge team: {a: 1}\n"), &doc); err == nil {
+		if key := doc.Content[0].Content[0]; isMergeKey(key) {
+			t.Error("a key tagged !!merge that is not << is a merge key")
+		}
+	}
+}

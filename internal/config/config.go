@@ -592,7 +592,7 @@ func closedAtRoot(path string) error {
 		return err
 	}
 	if p.Extending == nil {
-		return fmt.Errorf("%s: a stack at a repository root is delivered to be extended, and this one declares no extending block; a repository's own stack goes under harness in %s, which qory setup repo writes", path, FileName)
+		return fmt.Errorf("%s: a stack at a repository root is delivered to be extended, and this one declares no extending block; a repository's stack goes under harness in %s, which qory setup repo writes", path, FileName)
 	}
 	return nil
 }
@@ -652,7 +652,7 @@ func Compose(path string) (*stack.Stack, error) {
 		return nil, fmt.Errorf("%s: the harness section lists no modules, no stack to extend and no extensions", path)
 	}
 	if !f.Harness.extends() && len(f.Harness.Target.Runtimes) == 0 {
-		return nil, fmt.Errorf("%s: harness sets no target.runtime and no stack to extend; the section contains this repository's own stack, a target and its modules, or extends one, or leaves extends out for the base that qory harness compose -f <stack> selects", path)
+		return nil, fmt.Errorf("%s: harness sets no target.runtime and no stack to extend; the section contains this repository's stack, a target and its modules, or extends one, or leaves extends out for the base that qory harness compose -f <stack> selects", path)
 	}
 	return stack.NewCompose(path, f.document())
 }
@@ -837,7 +837,7 @@ func (c *Config) apply(path string, machine bool) (file, error) {
 			return f, fmt.Errorf("%s: env: %s is not an environment variable name", path, name)
 		}
 		if name == "QORY_HARNESS_HOME" {
-			return f, fmt.Errorf("%s: env.QORY_HARNESS_HOME is qory's own; the configuration exports another name", path)
+			return f, fmt.Errorf("%s: env.QORY_HARNESS_HOME is qory's; the configuration exports another name", path)
 		}
 		c.Env[name] = value
 		c.origins["env."+name] = path
@@ -1042,7 +1042,7 @@ func launchOf(path, name string, l launchSection) (Launch, error) {
 	var out Launch
 	if l.Command != nil {
 		if strings.TrimSpace(*l.Command) == "" {
-			return out, fmt.Errorf("%s: %s.command is empty; it is the program, or is left out for the runtime's own", path, key)
+			return out, fmt.Errorf("%s: %s.command is empty; it is the program, or is left out for the runtime's program", path, key)
 		}
 		out.Command = *l.Command
 	}
@@ -1062,7 +1062,7 @@ func launchOf(path, name string, l launchSection) (Launch, error) {
 				return out, fmt.Errorf("%s: %s.env: %s is not an environment variable name", path, key, k)
 			}
 			if k == "QORY_HARNESS_HOME" {
-				return out, fmt.Errorf("%s: %s.env.QORY_HARNESS_HOME is qory's own; every launch sets it to the home", path, key)
+				return out, fmt.Errorf("%s: %s.env.QORY_HARNESS_HOME is qory's; every launch sets it to the home", path, key)
 			}
 			out.Env[k] = v
 		}

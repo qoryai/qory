@@ -7,11 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/gateway"
+	"github.com/qoryai/forager/server"
 	"github.com/qoryai/forager/session"
 
 	"github.com/qoryai/qory/internal/config"
@@ -123,7 +126,28 @@ type serverIdentity struct {
 // lives for this process alone.
 func identify(r *config.Forager, report io.Writer, verb string, fd *accesskey.Key) (*serverIdentity, error) {
 	dir := machineDir()
-	key, err := readAccessKey(dir, fd)
+	key, err := signingKey(r, fd)
+	if err != nil {
+		return nil, err
+	}
+	id := &serverIdentity{key: key, instanceName: r.InstanceNameOrDefault(), server: r.Server.URL}
+	instance, kept, err := dir.InstanceID(foragerdir.MachineID())
+	if err != nil {
+		return nil, fmt.Errorf("the instance id: %w", err)
+	}
+	if !kept {
+		fmt.Fprintf(report, "qory %s: instance %s, this process's alone: %s cannot be written\n", verb, instance, dir.Path(foragerdir.InstanceFile))
+	}
+	id.instanceID = instance
+	return id, nil
+}
+
+// signingKey reads the access key a command signs its requests to forager.yaml's
+// server, r's, with: its id, which the server section or QORY_ACCESS_KEY_ID holds, and
+// its secret, the one read from --access-key-secret-fd when fd is not nil. Each refusal
+// is input, and none contains the secret.
+func signingKey(r *config.Forager, fd *accesskey.Key) (*accessKey, error) {
+	key, err := readAccessKey(machineDir(), fd)
 	if err != nil {
 		return nil, input(err)
 	}
@@ -133,22 +157,51 @@ func identify(r *config.Forager, report io.Writer, verb string, fd *accesskey.Ke
 	if key == nil {
 		return nil, input(fmt.Errorf("no access key secret for the server %s: qory access-key enrol makes one, or set %s", r.Server.URL, accesskey.EnvSecret))
 	}
-	id := &serverIdentity{key: key, instanceName: r.InstanceNameOrDefault(), server: r.Server.URL}
-	instance, kept, err := dir.InstanceID(foragerdir.MachineID())
-	if err != nil {
-		return nil, fmt.Errorf("the instance id: %w", err)
+	return key, nil
+}
+
+// serverClient is Forager's client of r's server, which signs every request with key and
+// names it the instance instance, of the name name: through gateway.server.via when r
+// sets it, to the server itself otherwise.
+func serverClient(r *config.Forager, key *accesskey.Key, instance, name string) *server.Client {
+	return &server.Client{
+		Config:       &server.Config{Version: 1, URL: r.Server.URL, AccessKeyID: r.Server.AccessKeyID, ApiaryPublicKey: r.Server.Pin, Via: foragerVia(r)},
+		Key:          key,
+		InstanceID:   instance,
+		InstanceName: name,
+		UserAgent:    userAgent(),
 	}
-	if !kept {
-		fmt.Fprintf(report, "qory %s: instance %s, this process's own: %s cannot be written\n", verb, instance, dir.Path(foragerdir.InstanceFile))
-	}
-	id.instanceID = instance
-	return id, nil
 }
 
 // gatewayServer is the server document Forager's gateway takes; the caller adds the
 // access key and the instance it signs and names every request with.
 func gatewayServer(s *config.ForagerServer) *gateway.Server {
 	return &gateway.Server{Version: 1, URL: s.URL, AccessKeyID: s.AccessKeyID, ApiaryPublicKey: s.Pin}
+}
+
+// checkVia refuses a gateway.server.via of r Forager cannot send through, before
+// anything starts: a CA file that is not there or holds no PEM certificate, in qory's
+// words, then whatever Forager's own check refuses. r has a server.
+func checkVia(r *config.Forager) error {
+	if err := r.CheckVia(); err != nil {
+		return input(err)
+	}
+	if v := foragerVia(r); v != nil {
+		if err := v.Check(); err != nil {
+			return input(fmt.Errorf("%s: gateway.server.via: %w", r.File, err))
+		}
+	}
+	return nil
+}
+
+// foragerVia is r's gateway.server.via as Forager's server document holds it, its CA
+// file resolved under forager.yaml's directory; nil without one.
+func foragerVia(r *config.Forager) *server.Via {
+	if r == nil || r.Server == nil || r.Server.Via == nil {
+		return nil
+	}
+	v := r.Server.Via
+	return &server.Via{URL: v.URL, CAFile: r.Path(v.CAFile), CertificateSHA256: v.CertificateSHA256}
 }
 
 // refusedError is a refusal of Forager's, said for the person: what it means and what
@@ -192,47 +245,130 @@ func explain(err error, id *serverIdentity) error {
 		text = "an answer of the server does not verify under the pinned apiary_public_key, so the run does not start: check gateway.server.url and the pin"
 	case accesskey.CodeInstanceLimit:
 		text = fmt.Sprintf("the node's live instances have reached its limit, so the instance %s does not start: wait for a run of another instance to end, or have an owner or administrator in Qory Apiary clear that instance", instance)
+	case codeNodeUsesGateway:
+		text = `this machine's node goes through a gateway, and gateway.server.via is not set: set gateway.server.via.url to the gateway's address, or set the node to "Direct" in Qory Apiary`
 	default:
 		return err
 	}
 	return &refusedError{text: text, err: err}
 }
 
+// codeNodeUsesGateway is the server's refusal of a run a machine registered itself,
+// whose node goes through a gateway.
+const codeNodeUsesGateway = "node_uses_gateway"
+
 // codeServerNeedsWall is the refusal of an unwalled run while the machine keeps stored
-// secrets: the server's discovery lists them, or the stored-secrets marker exists.
+// secrets: the stored-secrets marker exists, which a discovery that lists them writes.
 const codeServerNeedsWall = "server_needs_wall"
 
-// needsWall is the server_needs_wall refusal, saying why.
-func needsWall(dir foragerdir.Dir, listed bool) error {
-	why := "the stored-secrets marker " + dir.Path(foragerdir.MarkerFile) + " exists: this machine's access key may receive stored secrets"
-	if listed {
-		why = "the server lists stored secrets for this machine's access key"
-	}
+// needsWall is the server_needs_wall refusal of the stored-secrets marker.
+func needsWall(dir foragerdir.Dir) error {
 	return &refusedError{
-		text: fmt.Sprintf("%s, so every run needs a wall: --wall %s, or wall in %s", why, config.WallDocker, config.ForagerFileName),
+		text: fmt.Sprintf("the stored-secrets marker %s exists: this machine's access key may receive stored secrets, so every run needs a wall: --wall %s, or wall in %s", dir.Path(foragerdir.MarkerFile), config.WallDocker, config.ForagerFileName),
 		err:  &session.Refusal{Code: codeServerNeedsWall},
 	}
 }
 
+// codeKeyNeedsWall is the refusal of an unwalled run on a machine that holds an access
+// key: an agent without a wall could read the key.
+const codeKeyNeedsWall = "key_needs_wall"
+
+// keyNeedsWall is the key_needs_wall refusal, saying where the access key is: the
+// descriptor --access-key-secret-fd names, QORY_ACCESS_KEY_SECRET, or the file path, one
+// that holds a secret in forager.yaml's directory. Its texts are here alone.
+func keyNeedsWall(source keySource, path string) error {
+	var why string
+	switch source {
+	case fromFD:
+		why = "--" + secretFDFlag + " gives an access key"
+	case fromEnv:
+		why = accesskey.EnvSecret + " holds an access key"
+	default:
+		why = path + " holds this machine's access key"
+	}
+	return &refusedError{
+		text: fmt.Sprintf("%s, so every run needs a wall: --wall %s, or wall in %s; or keep the key with a starter, and run this machine without it, behind a gateway", why, config.WallDocker, config.ForagerFileName),
+		err:  &session.Refusal{Code: codeKeyNeedsWall},
+	}
+}
+
+// heldSecret is the first file of dir that holds an access key's secret, an unwalled
+// agent being able to read each: access-key-secret, access-key-secret.new, the secret
+// --replace replaced, or a secret moved aside. It is "" for none. A file that cannot be
+// looked at counts as one, as the stored-secrets marker does, and a directory that
+// cannot be listed is an error: neither is taken for no secret.
+func heldSecret(dir foragerdir.Dir) (string, error) {
+	for _, name := range []string{foragerdir.SecretFile, foragerdir.NewSecretFile, foragerdir.ReplacedFile} {
+		if _, err := os.Lstat(dir.Path(name)); !errors.Is(err, fs.ErrNotExist) {
+			return dir.Path(name), nil
+		}
+	}
+	old, err := dir.OldSecrets()
+	if err != nil {
+		return "", err
+	}
+	if len(old) > 0 {
+		return dir.Path(old[0]), nil
+	}
+	return "", nil
+}
+
+// refuseUnwalled is the refusal of an unwalled run, nil for none: server_needs_wall
+// while the stored-secrets marker exists and the run contacts no server; key_needs_wall
+// for a run against the server, id not nil, which signs with the access key it names;
+// for any other run while QORY_ACCESS_KEY_SECRET held an access key when qory started,
+// since an agent can read qory's starting environment even once qory unset it; and while
+// dir holds an access key's secret. The descriptor --access-key-secret-fd names is read
+// and closed, so a run that contacts no server may have it. Without a directory there
+// is no marker and no secret file.
+func refuseUnwalled(dir foragerdir.Dir, id *serverIdentity) error {
+	if dir != "" {
+		// A marker that cannot be looked at counts as one.
+		if marker, _ := dir.HasMarker(); marker && id == nil {
+			return needsWall(dir)
+		}
+	}
+	switch {
+	case id != nil:
+		return keyNeedsWall(id.key.source, dir.Path(foragerdir.SecretFile))
+	case config.TakenServerVariables().AccessKeySecret != "":
+		return keyNeedsWall(fromEnv, "")
+	case dir == "":
+		return nil
+	}
+	held, err := heldSecret(dir)
+	if err != nil {
+		return err
+	}
+	if held != "" {
+		return keyNeedsWall(fromFile, held)
+	}
+	return nil
+}
+
 // startRun is the start of every run, before anything is started: under the key lock
-// held shared, it refuses an unwalled run that contacts no server while the
-// stored-secrets marker exists, then creates and holds the run's own lock file, naming
-// whether it is walled, and drops the key lock. A key command, which holds the key lock
-// exclusively, so waits for starting runs, and they for it. In a directory that cannot
-// be written no key command can work either, and the run goes on without the locks.
-func startRun(dir foragerdir.Dir, runID string, walled, noServer bool) (*foragerdir.Lock, error) {
+// held shared, it refuses an unwalled run by [refuseUnwalled], --local and one without a
+// server included. Then it creates and holds the run's own lock file, naming whether it is
+// walled, and drops the key lock. A key command, which holds the key lock exclusively,
+// so waits for starting runs, and they for it. In a directory that cannot be written no
+// key command can work either, and the run goes on without the locks. Without a
+// directory there is no forager.yaml, so no server, and no lock.
+func startRun(dir foragerdir.Dir, runID string, walled bool, id *serverIdentity) (*foragerdir.Lock, error) {
 	if dir == "" {
-		return nil, nil
+		if walled {
+			return nil, nil
+		}
+		return nil, refuseUnwalled(dir, id)
 	}
 	key, err := dir.LockKey(false)
 	if err != nil && !errors.Is(err, foragerdir.ErrReadOnly) {
 		return nil, fmt.Errorf("the key lock: %w", err)
 	}
 	defer key.Release()
-	// A marker that cannot be looked at counts as one.
-	marker, _ := dir.HasMarker()
-	if marker && noServer && !walled {
-		return nil, needsWall(dir, false)
+	if !walled {
+		if err := refuseUnwalled(dir, id); err != nil {
+			return nil, err
+		}
 	}
 	if key == nil {
 		return nil, nil
@@ -241,33 +377,62 @@ func startRun(dir foragerdir.Dir, runID string, walled, noServer bool) (*forager
 }
 
 // discovered is what a run against the server does once the server's signed discovery
-// is read, before the run's registration: it prints the node, after "qory <verb>:". When the run's secret is the one in
+// is read, before the run's registration: it prints the node, after "qory <verb>:", and
+// refuses qory run under a gateway's access key, whose node is a gateway's. When the run's secret is the one in
 // access-key-secret, still there, it then, under the key lock held exclusively, deletes
 // every secret moved aside, since the key's signed discovery succeeded; writes the
 // stored-secrets marker when discovery lists secrets, a marker it cannot write being no
 // run; and removes it when discovery lists none and that secret is the directory's only
-// one. An unwalled run is refused, server_needs_wall, when discovery lists secrets or
-// the marker still exists.
-func discovered(dir foragerdir.Dir, id *serverIdentity, verb string, walled bool, report io.Writer) func(gateway.Discovery) error {
+// one. Only qory gateway and a walled run get here: [startRun] refuses an unwalled run
+// against the server.
+func discovered(dir foragerdir.Dir, id *serverIdentity, verb string, report io.Writer) func(gateway.Discovery) error {
 	return func(d gateway.Discovery) error {
-		fmt.Fprintf(report, "qory %s: node %s, instance %s\n", verb, d.NodeID, id.instanceID)
-		if id.key.source == fromFile {
-			if err := settleMarker(dir, id.key.key, d.Secrets); err != nil {
-				return err
-			}
-		}
-		if walled {
-			return nil
-		}
-		if d.Secrets {
-			return needsWall(dir, true)
-		}
-		if marker, _ := dir.HasMarker(); marker {
-			return needsWall(dir, false)
-		}
-		return nil
+		return onDiscovery(dir, id.key, id.instanceID, verb, report, d)
 	}
 }
+
+// onDiscovery is what a command against the server does once the server's signed
+// discovery d is read under key, signing as the instance instance: see [discovered].
+// Besides qory run, it refuses as input qory run register and qory run end under a
+// gateway's access key, which registers no run and gives no run's outcome. Those two
+// write nothing on this machine: the marker is a run's to settle.
+func onDiscovery(dir foragerdir.Dir, key *accessKey, instance, verb string, report io.Writer, d gateway.Discovery) error {
+	fmt.Fprintf(report, "qory %s: node %s, instance %s\n", verb, d.NodeID, instance)
+	starter := verb == verbRegister || verb == verbEnd
+	if strings.HasPrefix(d.NodeID, gatewayNodePrefix) {
+		switch verb {
+		case "run":
+			return &saidError{text: gatewayRunsNoSessions}
+		case verbRegister:
+			return input(errors.New("this access key is a gateway's, and a gateway registers no runs: register with the key of the node pool the run belongs to"))
+		case verbEnd:
+			return input(errors.New("this access key is a gateway's, and a gateway gives no run's outcome: use the key of the node pool that registered the run"))
+		}
+	} else if verb == verbGateway {
+		return input(gatewayNeedsGatewayKey(d.NodeID))
+	}
+	if key.source == fromFile && !starter {
+		return settleMarker(dir, key.key, d.Secrets)
+	}
+	return nil
+}
+
+// verbGateway is qory gateway's verb, which signs with a gateway's access key alone.
+const verbGateway = "gateway"
+
+// gatewayNeedsGatewayKey is qory gateway's refusal, at its start, of an access key
+// whose node, node, discovery names, is not a gateway's.
+func gatewayNeedsGatewayKey(node string) error {
+	return fmt.Errorf("qory gateway needs a gateway's access key, and this one is node %s's: enrol a key with a code from the gateway's page in Qory Apiary", node)
+}
+
+// gatewayNodePrefix is the prefix of a gateway's node id: discovery naming one says the
+// access key is a gateway's.
+const gatewayNodePrefix = "ng_"
+
+// gatewayRunsNoSessions is the refusal of qory run under a gateway's access key, which
+// discovery tells by its node, before the run registers.
+const gatewayRunsNoSessions = "this machine's gateway serves other machines and runs no sessions; give this machine a separate node"
 
 // settleMarker is the marker rule of a signed discovery under the secret of
 // access-key-secret, under the key lock held exclusively.

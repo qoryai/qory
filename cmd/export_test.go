@@ -1,6 +1,20 @@
 package cmd
 
-import "github.com/qoryai/forager/link"
+import (
+	"context"
+	"time"
+
+	"github.com/qoryai/forager/gateway"
+
+	"github.com/qoryai/qory/internal/foragerdir"
+)
+
+// SetWriteLabels makes qory run keep a checkout's labels with f, and returns what
+// restores the default.
+func SetWriteLabels(f func(d foragerdir.Dir, root string, l foragerdir.Labels) error) func() {
+	writeLabels = f
+	return func() { writeLabels = foragerdir.Dir.WriteLabels }
+}
 
 // SetAfterStep makes every enrolment stop after the steps that follow the server's
 // answer as f says, and returns what restores the default.
@@ -9,9 +23,17 @@ func SetAfterStep(f func(step string) error) func() {
 	return func() { afterStep = func(string) error { return nil } }
 }
 
-// SetLinkHanded makes every run tell f the gateway's local link it hands its session,
-// and returns what restores the default.
-func SetLinkHanded(f func(link.Local)) func() {
-	linkHanded = f
-	return func() { linkHanded = func(link.Local) {} }
+// SetStartGateway makes qory gateway hand the configuration of its gateway to f in place
+// of starting it, and end with what f returns; it returns what restores the default.
+func SetStartGateway(f func(gateway.Config) error) func() {
+	startGateway = func(_ context.Context, cfg gateway.Config) (*gateway.Gateway, error) { return nil, f(cfg) }
+	return func() { startGateway = gateway.Start }
+}
+
+// ShortenSocketGrace has every run's socket keep accepting for d after the runtime
+// exits, in place of Forager's 200 ms, and returns what restores the default.
+func ShortenSocketGrace(d time.Duration) func() {
+	before := socketGrace
+	socketGrace = d
+	return func() { socketGrace = before }
 }

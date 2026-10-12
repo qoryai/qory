@@ -10,7 +10,7 @@ qory run reads --image.
 
 From outside, it reads the image the engine holds: its platform, HOME in its
 environment, whether the reference is pinned by digest, and every file, for one that is
-setuid or setgid or has capabilities of its own. Then it starts the image the way the
+setuid or setgid or has file capabilities. Then it starts the image the way the
 wall starts the agent, as a user the image does not know, with no capability and no
 network, and qory's Linux build checks from inside:
 
@@ -19,7 +19,7 @@ network, and qory's Linux build checks from inside:
   - /bin/sh is there, for the runtime's hooks and the session's API-key approval
   - claude is the version Forager's descriptor is written against
   - git and gh run
-  - dockerd, for a Docker of the agent's own, and what it runs
+  - dockerd, for nested Docker, and what it runs
 
 The Linux build is wall.helper, for the engine's architecture; on Linux, this binary
 when wall.helper is not set. The docker command is wall.command, or docker.

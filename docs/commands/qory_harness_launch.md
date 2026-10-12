@@ -6,7 +6,7 @@ Print the command that starts an agent on the harness
 
 Print the command that starts an agent on the composed harness.
 
-The command is one line, quoted for a POSIX shell. Run it as it is, with your own
+The command is one line, quoted for a POSIX shell. Run it as it is, with your
 arguments after it. It is the agent's launch template; harness.launch.<runtime> in
 qory.yaml changes it. The paths are absolute, so the line works from anywhere.
 

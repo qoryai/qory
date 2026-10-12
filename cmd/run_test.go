@@ -1,6 +1,7 @@
 package cmd_test
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -38,8 +39,15 @@ import (
 // testAccessKey is the access key id of every test's server.
 const testAccessKey = "ak_f1xt0re000000000"
 
-// testNode is the node every test's server names in discovery.
-const testNode = "nd_0123456789abcdef"
+// testNode is the node every test's server names in discovery, unless it names
+// testGatewayNode, a gateway's node.
+const (
+	testNode        = "nd_0123456789abcdef"
+	testGatewayNode = "ng_0123456789abcdef"
+)
+
+// testWorkspace is the one workspace every test's server lists in discovery.
+const testWorkspace = "ws_f1xt0re000000000"
 
 // fakeServer stands in for the server Forager reports to: Forager's own
 // receiver, which verifies every request under the machine's access key and signs
@@ -83,6 +91,20 @@ type fakeServer struct {
 	// onExited, when set, is called once the server keeps a dev.qory.run.exited,
 	// before the delivery that carries it is answered.
 	onExited func()
+	// node is the node discovery names, testNode when empty. Discovery lists the
+	// workspace testWorkspace for a node's or node pool's key, and no workspaces for a
+	// gateway's, ng_.
+	node string
+	// handler is the receiver behind the server, whose records a test of a run through a
+	// gateway fills ([fakeServer.choose]); keyNode is the node or node pool its records
+	// hold the access key under, none when empty; gatewayKey is the access key of the
+	// gateway testGatewayNode, testGatewayKey, nil for none.
+	handler    *receiver.Handler
+	keyNode    string
+	gatewayKey *accesskey.Key
+	// outcomes are the bodies of every starter's outcome the server was sent; targets
+	// the target, the path and the query, of every request.
+	outcomes, targets []string
 }
 
 // newFakeServer starts a server whose run configuration carries policy, the JSON of a
@@ -96,12 +118,23 @@ func newFakeServer(t *testing.T, policy string) *fakeServer {
 		Keys: func(id string) (receiver.AccessKey, bool) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
-			return receiver.AccessKey{PublicKey: f.key.PublicKey()}, id == testAccessKey && !f.revoked
+			if id == testGatewayKey && f.gatewayKey != nil {
+				return receiver.AccessKey{PublicKey: f.gatewayKey.PublicKey(), Node: testGatewayNode}, true
+			}
+			return receiver.AccessKey{PublicKey: f.key.PublicKey(), Node: f.keyNode}, id == testAccessKey && !f.revoked
 		},
 		Configuration: func() ([]byte, string) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
-			doc := `{"version":1,"node_id":"` + testNode + `","events":{"url":"` + f.URL + `/v1/events","types":["*"]},"run":{"url":"` + f.URL + receiver.DefaultRunPath + `"}`
+			node := f.node
+			if node == "" {
+				node = testNode
+			}
+			doc := `{"version":1,"node_id":"` + node + `"`
+			if !strings.HasPrefix(node, "ng_") {
+				doc += `,"workspaces":["` + testWorkspace + `"]`
+			}
+			doc += `,"events":{"url":"` + f.URL + `/v1/events","types":["*"]},"run":{"url":"` + f.URL + receiver.DefaultRunPath + `"}`
 			if f.secrets {
 				doc += `,"secrets":{"url":"` + f.URL + `/v1/secrets"}`
 			}
@@ -152,9 +185,19 @@ func newFakeServer(t *testing.T, policy string) *fakeServer {
 			return stop
 		},
 	}
+	f.handler = h
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body []byte
+		if strings.HasSuffix(r.URL.Path, "/outcome") {
+			body, _ = io.ReadAll(r.Body)
+			r.Body = io.NopCloser(bytes.NewReader(body))
+		}
 		f.mu.Lock()
 		f.instances = append(f.instances, [2]string{r.Header.Get("X-Qory-Instance-Id"), r.Header.Get("X-Qory-Instance-Name")})
+		f.targets = append(f.targets, r.URL.RequestURI())
+		if body != nil {
+			f.outcomes = append(f.outcomes, string(body))
+		}
 		unavailable := f.unavailable && r.URL.Path == "/v1/events"
 		f.mu.Unlock()
 		if unavailable {
@@ -171,6 +214,27 @@ func newFakeServer(t *testing.T, policy string) *fakeServer {
 	}))
 	t.Cleanup(f.Close)
 	return f
+}
+
+// testPool is the node pool a starter's access key belongs to, and testGatewayKey the
+// access key id of the gateway testGatewayNode.
+const (
+	testPool       = "np_0123456789abcdef"
+	testGatewayKey = "ak_9atewayk00000000"
+)
+
+// choose makes the server's access key a node pool's, testPool, in the workspace
+// testWorkspace, whose choice is choice: receiver.Direct, receiver.Default or a gateway,
+// testGatewayNode. That gateway lives in the workspace, which it may serve and whose
+// default it is, at gatewayURL, with an active access key of its own.
+func (f *fakeServer) choose(choice, gatewayURL string, k *accesskey.Key) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.keyNode, f.gatewayKey = testPool, k
+	f.handler.Nodes = map[string]receiver.Node{testPool: {Workspace: testWorkspace, Gateway: choice}}
+	f.handler.Workspaces = map[string]receiver.Workspace{testWorkspace: {Organisation: "or_0123456789abcdef", Default: testGatewayNode}}
+	f.handler.Organisations = map[string]receiver.Organisation{"or_0123456789abcdef": {}}
+	f.handler.Gateways = map[string]receiver.Gateway{testGatewayNode: {URL: gatewayURL, Workspace: testWorkspace, AccessKeys: []string{testGatewayKey}}}
 }
 
 // newKey is a new Ed25519 key, for an access key or a server's signing key.
@@ -535,11 +599,11 @@ func TestRunExpandsTheIntegrationsTheMachineDeclares(t *testing.T) {
 		t.Error("a run that did not start left a record")
 	}
 	srv := newFakeServer(t, "")
-	serverFile(t, srv, "  integrations:\n    broken: {}\n")
+	walledServerFile(t, srv, "  integrations:\n    broken: {}\n")
 	if _, err := run(t, "run"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), want) {
 		t.Errorf("a run whose policy the server supplies: %v", err)
 	}
-	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\ngateway:\n  credentials:\n    tracker:\n      env: TRACKER_TOKEN\n      hosts: [tracker.acme.example]\n      auth: {scheme: bearer}\n  integrations:\n    tracker: {settings: {project: SHOP}}\n")
+	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\ngateway:\n  credentials:\n    tracker:\n      env: TRACKER_TOKEN\n      hosts: [tracker.acme.example]\n      auth: {scheme: bearer}\n  integrations:\n    tracker: {settings: {project: SHOP}}\n"+passingWall(t))
 	line := "forager.yaml: gateway.credentials.tracker defines the credential tracker, and gateway.integrations.tracker defines none\n"
 	out, err = run(t, "config")
 	if err != nil {
@@ -553,7 +617,7 @@ func TestRunExpandsTheIntegrationsTheMachineDeclares(t *testing.T) {
 	wants(t, out, "qory run: "+line)
 	// A run describes every integration when the server supplies the policy, but one
 	// the credentials section shadows defines nothing for it and is not described.
-	serverFile(t, srv, "  credentials:\n    broken:\n      env: BROKEN_TOKEN\n      hosts: [broken.acme.example]\n      auth: {scheme: bearer}\n  integrations:\n    broken: {}\n")
+	walledServerFile(t, srv, "  credentials:\n    broken:\n      env: BROKEN_TOKEN\n      hosts: [broken.acme.example]\n      auth: {scheme: bearer}\n  integrations:\n    broken: {}\n")
 	out, err = run(t, "run")
 	if err != nil {
 		t.Fatalf("a run with a shadowed integration that does not describe: %v\n%s", err, out)
@@ -668,17 +732,30 @@ func staticELF(t *testing.T) string {
 }
 
 // fakeDocker writes a program that stands in for docker: it logs every command line,
-// answers the two the wall reads, and for run logs the environment file, prints a line
-// and exits 4, as a container's runtime would.
+// answers what the wall reads, a network's gateway and its subnets, and, as Docker
+// Engine 28, the engine's version a run with nested Docker asks for, adds an IPv6
+// subnet to the inside network created with --ipv6, and for run logs the environment
+// file, prints a line and exits 4, as a container's runtime would.
 func fakeDocker(t *testing.T) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
 	log := filepath.Join(dir, "docker.log")
+	ipv6 := filepath.Join(dir, "ipv6")
 	script := filepath.Join(dir, "docker")
 	writeFile(t, script, `#!/bin/sh
 echo "$*" >> `+log+`
+case "$*" in
+"network create "*" --ipv6 "*) : > `+ipv6+` ;;
+"network create "*" --internal "*) rm -f `+ipv6+` ;;
+"network inspect "*.Subnet*) test -e `+ipv6+` && { echo "172.30.0.0/16 fd00:db8::/64 "; exit 0; } ;;
+esac
 case "$1 $2" in
-"network inspect") echo "172.30.0.1 " ;;
+"version --format") echo "28.0.0" ;;
+"network inspect")
+	case "$*" in
+	*.Subnet*) echo "172.30.0.0/16 " ;;
+	*) echo "172.30.0.1 " ;;
+	esac ;;
 "logs "*) echo "relay: listening" ;;
 "run "*)
 	while [ $# -gt 0 ]; do
@@ -693,6 +770,56 @@ esac
 		t.Fatal(err)
 	}
 	return script, log
+}
+
+// passingWall is a wall section whose docker is a program that stands in for it and
+// runs the agent's container on this machine: the runtime's entrypoint, with its
+// arguments, the variables of the container's environment file and PATH alone, and
+// the signals the session sends; QORY_TEST_EXIT of the docker command's environment
+// passes into it, as the wall passes no variable of Forager's name. A run on a machine that holds an access key needs a
+// wall; this one lets such a run reach its runtime as an unwalled run would.
+func passingWall(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	enter := filepath.Join(dir, "enter")
+	writeFile(t, enter, `#!/bin/sh
+f=$1
+shift
+while IFS= read -r line; do
+	export "$line"
+done < "$f"
+exec "$@"
+`)
+	script := filepath.Join(dir, "docker")
+	writeFile(t, script, `#!/bin/sh
+case "$1 $2" in
+"network inspect") echo "172.30.0.1 " ;;
+"logs "*) echo "relay: listening" ;;
+"run --rm")
+	shift 2
+	envfile=
+	entry=
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--rm|--interactive|--tty|--init|--no-healthcheck) shift ;;
+		--env-file) envfile=$2; shift 2 ;;
+		--entrypoint) entry=$2; shift 3; break ;;
+		*) shift 2 ;;
+		esac
+	done
+	exec env -i PATH="$PATH" ${QORY_TEST_EXIT+QORY_TEST_EXIT=$QORY_TEST_EXIT} /bin/sh `+enter+` "$envfile" "$entry" "$@" ;;
+esac
+`)
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: " + script + "\n  helper: " + staticELF(t) + "\n  user: \"1000:1000\"\n"
+}
+
+// walledServerFile is [serverFile] with the wall of [passingWall] after more.
+func walledServerFile(t *testing.T, srv *fakeServer, more string) {
+	t.Helper()
+	serverFile(t, srv, more+passingWall(t))
 }
 
 // TestRunRefusesAProgramUnderAReadWriteMount declares an integration whose program is
@@ -1266,11 +1393,12 @@ func TestRunRefusesAWallItCannotBuild(t *testing.T) {
 		{[]string{"run", "--mount", "/srv"}, "behind a wall"},
 		{[]string{"run", "--shm-size", "2g"}, "behind a wall"},
 		{[]string{"run", "--wall", "docker", "--image", "i", "--mount", "srv"}, "not an absolute path"},
-		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_ACCESS_KEY_SECRET"}, "--env QORY_ACCESS_KEY_SECRET: the variable is Forager's own"},
-		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_ACCESS_KEY_ID"}, "Forager's own"},
-		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_APIARY_PUBLIC_KEY"}, "Forager's own"},
-		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_SERVER_SECRET"}, "--env QORY_SERVER_SECRET: the variable is Forager's own and never the agent's"},
-		{[]string{"run", "--env", "QORY_RUN_CREDENTIAL_SECRET"}, "--env QORY_RUN_CREDENTIAL_SECRET: the variable is Forager's own and never the agent's"},
+		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_ACCESS_KEY_SECRET"}, "--env QORY_ACCESS_KEY_SECRET: the variable is Forager's and"},
+		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_ACCESS_KEY_ID"}, "Forager's and"},
+		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_APIARY_PUBLIC_KEY"}, "Forager's and"},
+		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_SERVER_SECRET"}, "--env QORY_SERVER_SECRET: the variable is Forager's and never the agent's"},
+		{[]string{"run", "--wall", "docker", "--image", "i", "--env", "QORY_RUN_KEY"}, "--env QORY_RUN_KEY: the variable is Forager's and never the agent's"},
+		{[]string{"run", "--env", "QORY_RUN_KEY"}, "--env QORY_RUN_KEY: the variable is Forager's and never the agent's"},
 		{[]string{"run", "--label", "issue"}, "not key=value"},
 		{[]string{"run", "--label", "Issue=1"}, "label key"},
 		{[]string{"run", "--run-id", "../x"}, "not a UUID"},
@@ -1304,7 +1432,7 @@ func TestRunBehindARealWall(t *testing.T) {
 	here := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "this machine") }))
 	defer here.Close()
 	name := fmt.Sprintf("qory-test-origin-%d", os.Getpid())
-	if out, err := exec.Command("docker", "run", "--detach", "--rm", "--name", name, "public.ecr.aws/docker/library/busybox:stable", "sh", "-c", "mkdir /w && echo from the origin > /w/index.html && httpd -f -p 8080 -h /w").CombinedOutput(); err != nil {
+	if out, err := exec.Command("docker", "run", "--detach", "--rm", "--name", name, "ghcr.io/qoryai/ci-images:busybox-stable@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662", "sh", "-c", "mkdir /w && echo from the origin > /w/index.html && httpd -f -p 8080 -h /w").CombinedOutput(); err != nil {
 		t.Fatalf("the origin: %v: %s", err, out)
 	}
 	t.Cleanup(func() { exec.Command("docker", "rm", "--force", name).Run() })
@@ -1338,7 +1466,7 @@ harness:
 	if out, err := run(t, "harness", "compose", "--runtime", "claude", "--no-links"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "wall:\n  adapter: docker\n  image: public.ecr.aws/docker/library/busybox:stable\n  helper: "+helper+"\n")
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "wall:\n  adapter: docker\n  image: ghcr.io/qoryai/ci-images:busybox-stable@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662\n  helper: "+helper+"\n")
 	out, err := run(t, "run", "claude", "--mount", sibling+":ro", "--shm-size", "256m", "--pids-limit", "512", "--memory", "512m")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -1380,14 +1508,15 @@ func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
 	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), machine+"  server:\n    url: https://qory.example\n")
 	policy := filepath.Join(t.TempDir(), "run-policy.yaml")
 	writeFile(t, policy, "version: 1\negress:\n  mode: enforce\n  allow: [api.github.com, pypi.org]\n")
-	if _, err := run(t, "run", "--policy", policy); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "--policy is the run's own policy without a server; with server configured the server's run configuration is the policy") {
+	if _, err := run(t, "run", "--policy", policy); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "--policy is a run's policy file without a server; with server configured the server's run configuration is the policy") {
 		t.Errorf("--policy with a server: %v", err)
 	}
 	if ids := recorded(t, root); len(ids) != 0 {
 		t.Error("a refused run left a record")
 	}
 	// Without a server section, QORY_SERVER_SECRET is taken and removed as the others are.
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), machine)
+	// An access key in qory's environment needs a wall, which passes none of them.
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), machine+passingWall(t))
 	setVariables()
 	t.Setenv("QORY_SERVER_SECRET", "a-workspace-secret")
 	const id = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f"
@@ -1425,7 +1554,7 @@ func TestRunReportsToTheServer(t *testing.T) {
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, fakeRuntime(t))
 	srv := newFakeServer(t, `{"version":1,"egress":{"mode":"enforce","allow":["api.example"]}}`)
-	serverFile(t, srv, "  egress:\n    mode: observe\n")
+	walledServerFile(t, srv, "  egress:\n    mode: observe\n")
 	t.Setenv("QORY_TEST_EXIT", "0")
 	out, err := run(t, "run", "--label", "issue=77")
 	if err != nil {
@@ -1454,6 +1583,17 @@ func TestRunReportsToTheServer(t *testing.T) {
 	if err := json.Unmarshal([]byte(first), &line1); err != nil || line1.Type != event.RunRegistered || line1.Sequence != "0000000001" || line1.Data["contract_version"] != float64(1) || line1.Data["interval_seconds"] == nil || line1.Data["forager_version"] == nil || line1.Data["events"] == nil {
 		t.Errorf("the record's line 1: %s (%v)", first, err)
 	}
+	// Line 1 also names the workspace discovery lists, its node, and the instance id
+	// the registration was signed with.
+	srv.mu.Lock()
+	instance := ""
+	if len(srv.instances) > 0 {
+		instance = srv.instances[0][0]
+	}
+	srv.mu.Unlock()
+	if line1.Data["workspace"] != testWorkspace || line1.Data["node_id"] != testNode || instance == "" || line1.Data["instance_id"] != instance {
+		t.Errorf("the record's line 1 names workspace %v, node %v and instance %v, want %s, %s and %q", line1.Data["workspace"], line1.Data["node_id"], line1.Data["instance_id"], testWorkspace, testNode, instance)
+	}
 	got := srv.byType()
 	if len(got[event.RunRegistered]) != 0 || len(got["dev.qory.ping"]) != 0 {
 		t.Errorf("the server was posted the registration's line or a ping: %v", got)
@@ -1471,7 +1611,7 @@ func TestRunReportsToTheServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv = newFakeServer(t, "")
-	serverFile(t, srv, "  egress:\n    mode: enforce\n    allow: [api.example]\n")
+	walledServerFile(t, srv, "  egress:\n    mode: enforce\n    allow: [api.example]\n")
 	if out, err := run(t, "run"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
@@ -1483,7 +1623,7 @@ func TestRunReportsToTheServer(t *testing.T) {
 	}
 	gone := newFakeServer(t, "")
 	gone.Close()
-	serverFile(t, gone, "")
+	walledServerFile(t, gone, "")
 	if _, err := run(t, "run"); err == nil || !strings.Contains(err.Error(), gone.URL) {
 		t.Errorf("a server that does not answer: %v", err)
 	}
@@ -1502,7 +1642,7 @@ func TestResendClosesAndDeliversARunItsForagerLeft(t *testing.T) {
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, fakeRuntime(t))
 	srv := newFakeServer(t, "")
-	serverFile(t, srv, "")
+	walledServerFile(t, srv, "")
 	const id = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f"
 	if out, err := run(t, "run", "--local", "--run-id", id); cmd.ExitCode(err) != 3 {
 		t.Fatalf("%v\n%s", err, out)
@@ -1563,7 +1703,7 @@ func TestResendSendsNothingOfARunTheServerNeverOpened(t *testing.T) {
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, fakeRuntime(t))
 	srv := newFakeServer(t, "")
-	serverFile(t, srv, "")
+	walledServerFile(t, srv, "")
 	// record runs a run with args, which exits exit, and returns its directory, its
 	// events.jsonl and what that held.
 	record := func(t *testing.T, id string, exit int, args ...string) (string, string, []byte) {
@@ -1662,8 +1802,8 @@ const (
 	resendNotAccepted = "✗ %d events were accepted and %d were not; %s/undelivered contains them"
 )
 
-// TestResendSaysTheServerWantsNoMoreEvents is a resend to the server, with no
-// session.gateway, of a record that owes the server more events than one batch holds. A
+// TestResendSaysTheServerWantsNoMoreEvents is a resend to the server, of a run that had
+// a gateway of its own, of a record that owes the server more events than one batch holds. A
 // server that answers a signed 410 during the resend is sent nothing more: qory says what
 // it accepted before and what was not sent, which stays in the run directory, none of it
 // under undelivered/, exit 1. A server that stopped the run during the run is sent
@@ -1674,7 +1814,7 @@ func TestResendSaysTheServerWantsNoMoreEvents(t *testing.T) {
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, fakeRuntime(t))
 	srv := newFakeServer(t, "")
-	serverFile(t, srv, "")
+	walledServerFile(t, srv, "")
 	// record runs a run with no server, and makes its record that of a run that opened
 	// at its server, which accepted nothing of it, with more events than one batch
 	// holds. It returns the run directory, its events.jsonl, what that holds and how many
@@ -1779,7 +1919,8 @@ func TestResendSaysTheServerWantsNoMoreEvents(t *testing.T) {
 	srv.unavailable = true
 	const awayID = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5ec3"
 	dir, _, _, owed = record(t, awayID)
-	out, err = run(t, "run", "resend", awayID, "--wait", "2s")
+	// The server answers every try a 503, so a short --wait says the same as a long one.
+	out, err = run(t, "run", "resend", awayID, "--wait", "300ms")
 	want = fmt.Sprintf(resendNotAccepted, 0, owed, ui.Short(dir, root)) + "\n"
 	if cmd.ExitCode(err) != 1 || out != want {
 		t.Errorf("a server away: %v (exit %d)\n%q\nwant\n%q", err, cmd.ExitCode(err), out, want)
@@ -1850,7 +1991,8 @@ rules:
     data: {session_id: session, outcome: text, is_error: ok}
 `)
 	t.Setenv("QORY_TEST_WAIT", "1")
-	out, err = run(t, "run", "--headless", "--timeout", "500ms")
+	// A short grace: the runtime's sleep holds its output open until the grace ends, 10s by default.
+	out, err = run(t, "run", "--headless", "--timeout", "500ms", "--stop-grace", "1s")
 	if cmd.ExitCode(err) != 124 {
 		t.Fatalf("%v\n%s", err, out)
 	}

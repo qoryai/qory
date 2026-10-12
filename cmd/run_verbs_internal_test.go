@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/foragerdir"
 	"github.com/qoryai/qory/internal/render"
 )
 
@@ -342,7 +343,7 @@ func TestMountRefusedNamesTheRunStillGoing(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(worktree, ".git"), []byte("gitdir: "+filepath.Join(checkout, ".git", "worktrees", "wt-feature")+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	tail := ", which the run " + other + " also uses: it is still going on this machine, or its containers were left behind. One agent could read or change what the other uses, so the run does not start. Wait for " + other + " to end; if it has ended, remove its containers, which docker ps --all --filter label=dev.qory.run=" + other + " lists; or work in a checkout of its own"
+	tail := ", which the run " + other + " also uses: it is still going on this machine, or its containers were left behind. One agent could read or change what the other uses, so the run does not start. Wait for " + other + " to end; if it has ended, remove its containers, which docker ps --all --filter label=dev.qory.run=" + other + " lists; or work in a separate checkout"
 	hint := "; make the worktree beside the checkout, not inside it"
 	for _, c := range []struct {
 		root, path, otherPath, want string
@@ -669,6 +670,33 @@ func TestConfigLinksGuardsTheLinksOnTheWay(t *testing.T) {
 		if ok, _ := filepath.Match(pattern, name+"x"); ok {
 			t.Errorf("%q matches %q", pattern, name+"x")
 		}
+	}
+}
+
+// TestConfigLinksGuardsTheLabelsDirectory is a labels directory beside forager.yaml that
+// is a link out of the configuration directory: where it leads is one of Forager's
+// files, so no mount reaches the kept labels, as run-keys.
+func TestConfigLinksGuardsTheLabelsDirectory(t *testing.T) {
+	resolve := func(p string) string {
+		r, err := filepath.EvalSymlinks(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	dir, elsewhere := resolve(t.TempDir()), resolve(t.TempDir())
+	for _, name := range []string{foragerdir.LabelsDir, foragerdir.RunKeysDir} {
+		target := filepath.Join(elsewhere, name)
+		if err := os.Mkdir(target, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(dir, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files, _ := configLinks(dir)
+	if want := []string{filepath.Join(elsewhere, foragerdir.RunKeysDir), filepath.Join(elsewhere, foragerdir.LabelsDir)}; !slices.Equal(files, want) {
+		t.Errorf("files %q, want %q", files, want)
 	}
 }
 
