@@ -123,10 +123,10 @@ func TestEnrolKeepsNoKeyForAnotherKind(t *testing.T) {
 	}
 }
 
-// TestEnrolRetryKeepsNoKeyForAnotherKind is the same command again within the code's 15
-// minutes, after a swap put the key made for the code in access-key-secret and lost its
-// kept answer, now answered for an integration: access-key-secret, which the enrolment
-// never touches, stays byte for byte, and the pending enrolment ends.
+// TestEnrolRetryKeepsNoKeyForAnotherKind is a retry, planted by hand: access-key-secret
+// holds the key the pending enrolment records for the code, and the server answers the
+// retry for an integration. access-key-secret, which the enrolment never touches, stays
+// byte for byte, and the pending enrolment ends.
 func TestEnrolRetryKeepsNoKeyForAnotherKind(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
@@ -149,9 +149,11 @@ func TestEnrolRetryKeepsNoKeyForAnotherKind(t *testing.T) {
 	noEnrolmentLeft(t, "a retry")
 }
 
-// TestEnrolPrintKeepsNoKeyForAnotherKind is --print answered for an integration: the
-// same one line, nothing on stdout, nothing on stderr after the fingerprint, and no file
-// of the directory changes.
+// TestEnrolPrintKeepsNoKeyForAnotherKind is --print answered for an integration, on a
+// machine with an enrolment of another code pending, its new key in
+// access-key-secret.new: the same one line, nothing on stdout, nothing on stderr after
+// the fingerprint, and no file of the directory changes, the pending enrolment and the
+// new key of the other code included.
 func TestEnrolPrintKeepsNoKeyForAnotherKind(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
@@ -159,6 +161,14 @@ func TestEnrolPrintKeepsNoKeyForAnotherKind(t *testing.T) {
 	writeFile(t, foragerFile(), file)
 	writeSecret(t, newKey(t))
 	dir := configDir()
+	other := newKey(t)
+	if err := dir.WriteNewSecret(other); err != nil {
+		t.Fatal(err)
+	}
+	if err := dir.WritePending(mustNormalise(t, srv.code(2, false)), other.PublicKey(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	pending, staged := heldSecret(foragerdir.PendingFile), heldSecret(foragerdir.NewSecretFile)
 	before := snapshot(t, string(dir))
 	srv.body = srv.answer("adapter")
 	out, errOut, err := runSplit(t, "", "access-key", "enrol", "--print", srv.URL, srv.code(1, false))
@@ -168,6 +178,9 @@ func TestEnrolPrintKeepsNoKeyForAnotherKind(t *testing.T) {
 	}
 	if out != "" {
 		t.Errorf("stdout carries %q", out)
+	}
+	if heldSecret(foragerdir.PendingFile) != pending || heldSecret(foragerdir.NewSecretFile) != staged {
+		t.Error("the other code's pending enrolment or new key changed")
 	}
 	if errOut != "access key fingerprint "+pub.Fingerprint()+"\n" {
 		t.Errorf("stderr:\n%s", errOut)
@@ -191,7 +204,7 @@ func TestEnrolPrintKeepsNoKeyForAnotherKind(t *testing.T) {
 }
 
 // keepAnswerFor plants in enrolment-answer the server's verified 201 of kind to the
-// enrolment of key with code, as an earlier run would have kept it, and records the
+// enrolment of key with code, in the form enrol keeps an answer in, and records the
 // pending enrolment.
 func keepAnswerFor(t *testing.T, srv *enrolServer, key *accesskey.Key, code, kind string) {
 	t.Helper()
@@ -224,11 +237,12 @@ func keepAnswerFor(t *testing.T, srv *enrolServer, key *accesskey.Key, code, kin
 }
 
 // TestEnrolFinishesNoKeptAnswerForAnotherKind is a kept answer that enrols the key for
-// an integration, which enrol no longer keeps but an earlier build could have: with the
-// key still in access-key-secret.new, the same command deletes it; with the key a swap
-// put in access-key-secret, that file stays byte for byte. Either way nothing reaches
-// the server, nothing is printed, forager.yaml stays, and the pending enrolment and the
-// kept answer are removed. A kept node's answer still finishes, as before.
+// an integration, planted by hand as a guard: no build of qory keeps such an answer, so
+// this is a state no build makes. With the key in access-key-secret.new, the same
+// command deletes it; with the key in access-key-secret, that file stays byte for byte.
+// Either way nothing reaches the server, nothing is printed, forager.yaml stays, and
+// the pending enrolment and the kept answer are removed. A kept node's answer, planted
+// the same way, still finishes, as before.
 func TestEnrolFinishesNoKeptAnswerForAnotherKind(t *testing.T) {
 	const file = "session:\n  instance:\n    name: build-01\n"
 	for _, placed := range []bool{false, true} {
