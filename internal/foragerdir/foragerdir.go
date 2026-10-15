@@ -345,6 +345,26 @@ func (d Dir) MoveNewAside(now time.Time) (string, error) {
 	}
 }
 
+// DeleteNewSecret unlinks access-key-secret.new and syncs the directory. Its bytes are
+// not overwritten first. A directory with no access-key-secret.new deletes nothing.
+//
+// It is for a key that is kept nowhere, not even aside: one the server enrolled for a
+// kind of node this machine does not take. access-key-secret is never touched.
+func (d Dir) DeleteNewSecret() error {
+	path := d.Path(NewSecretFile)
+	err := os.Remove(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("delete %s: %w", path, err)
+	}
+	if err := d.sync(); err != nil {
+		return fmt.Errorf("delete %s: %w", path, err)
+	}
+	return nil
+}
+
 // OldSecrets returns the names of the secrets moved aside.
 func (d Dir) OldSecrets() ([]string, error) {
 	entries, err := os.ReadDir(string(d))

@@ -99,9 +99,10 @@ func (s *enrolServer) keys() string {
 }
 
 // answer is the 201 for an access key of kind: the node nd_0123456789abcdef, the node
-// pool np_0123456789abcdef or the gateway ng_0123456789abcdef.
+// pool np_0123456789abcdef, the gateway ng_0123456789abcdef or the integration
+// na_0123456789abcdef, of the kind "adapter".
 func (s *enrolServer) answer(kind string) []byte {
-	id := map[string]string{"node": "nd_", "pool": "np_", "gateway": "ng_"}[kind] + "0123456789abcdef"
+	id := map[string]string{"node": "nd_", "pool": "np_", "gateway": "ng_", "adapter": "na_"}[kind] + "0123456789abcdef"
 	return []byte(`{"version":1,"access_key_id":"ak_0123456789abcdef","node_id":"` + id + `","node_kind":"` + kind + `","stored_secrets":false,"apiary_public_key":` + s.keys() + `}`)
 }
 

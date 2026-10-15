@@ -407,13 +407,17 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	defer lock.Release()
 	now := keyClock()
 	// An enrolment the server has answered already is finished on this machine: the
-	// server refuses a code it used and a key it enrolled, so nothing posts it again.
+	// server refuses a code it used and a key it enrolled, so nothing posts it again. A
+	// kept answer for a kind this machine does not take finishes nothing, see [refuseKind].
 	if !print {
 		k, ans, err := answerKept(dir, server, code)
 		if err != nil {
 			return err
 		}
 		if k != nil {
+			if !takesKind(ans) {
+				return refuseKind(dir, k, false, true)
+			}
 			if err := dir.WriteMarker(); err != nil {
 				return err
 			}
@@ -500,6 +504,9 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	}
 	if err != nil {
 		return enrolFailed(dir, err, key, print, now)
+	}
+	if !takesKind(ans) {
+		return refuseKind(dir, key, print, false)
 	}
 	if ans.Pin.Fixture() {
 		return refuseFixturePin(dir, key, print, now)
@@ -694,6 +701,44 @@ func discardKey(dir foragerdir.Dir, key *accesskey.Key, now time.Time) (string, 
 		return "", nil
 	}
 	return dir.MoveNewAside(now)
+}
+
+// takesKind reports whether the verified 201 enrols the key for a node, a node pool or
+// a gateway, the kinds a key on this machine or a starter's key belongs to. Any other
+// kind, such as an integration's ("adapter"), is not.
+func takesKind(ans *accesskey.EnrolmentAnswer) bool {
+	switch ans.NodeKind {
+	case "node", "pool", "gateway":
+		return true
+	}
+	return false
+}
+
+// refuseKind refuses a verified 201 for a kind [takesKind] does not take, before
+// anything is printed, kept, placed or written. The key is active on the server for that
+// kind of node, so it is kept nowhere, not even aside: --print wrote nothing; otherwise
+// access-key-secret.new is deleted when it holds the key, the pending enrolment ends and,
+// with kept set, the answer enrolment-answer keeps is removed, in that order.
+// access-key-secret and forager.yaml are left as they are.
+func refuseKind(dir foragerdir.Dir, key *accesskey.Key, print, kept bool) error {
+	msg := "PLACEHOLDER-B1D-490 fingerprint=" + key.Fingerprint()
+	if print {
+		return errors.New(msg)
+	}
+	if dir.SameNewSecret(key) {
+		if err := dir.DeleteNewSecret(); err != nil {
+			return fmt.Errorf("%s; %w", msg, err)
+		}
+	}
+	if err := dir.RemovePending(); err != nil {
+		return fmt.Errorf("%s; %w", msg, err)
+	}
+	if kept {
+		if err := dir.RemoveAnswer(); err != nil {
+			return fmt.Errorf("%s; %w", msg, err)
+		}
+	}
+	return errors.New(msg)
 }
 
 // refuseFixturePin refuses a 201 whose pin lists the Forager contract's published
