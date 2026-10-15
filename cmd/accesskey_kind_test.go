@@ -15,9 +15,10 @@ import (
 	"github.com/qoryai/qory/internal/foragerdir"
 )
 
-// kindRefused is the error of a verified 201 for a kind enrol does not take.
+// kindRefused is the error of a verified 201 for another kind than the code's, or for
+// a kind enrol does not take: the key's fingerprint and the id the server gave it.
 func kindRefused(fingerprint string) string {
-	return "PLACEHOLDER-B1D-490 fingerprint=" + fingerprint
+	return "PLACEHOLDER-B1D-490 fingerprint=" + fingerprint + " access_key_id=" + newID
 }
 
 // sentKey is the public key of the server's last verified request.
@@ -71,10 +72,11 @@ func noEnrolmentLeft(t *testing.T, name string) {
 	}
 }
 
-// TestEnrolKeepsNoKeyForAnotherKind is a verified 201 that enrols the key for an
-// integration, node_kind "adapter", to an enrolment on a machine without a key and to a
-// --replace on a machine with one: the error is the one line naming the key's
-// fingerprint, with no retry and no code; the new secret is deleted, not moved aside,
+// TestEnrolKeepsNoKeyForAnotherKind is a qecn_ code answered with a verified 201 that
+// enrols the key for an integration, node_kind "adapter", a [accesskey.KindError], to an
+// enrolment on a machine without a key and to a --replace on a machine with one: the
+// error is the one line naming the key's fingerprint and its id, with no retry and no
+// code; the new secret is deleted, not moved aside,
 // the pending enrolment ends and no answer is kept; access-key-secret and forager.yaml
 // are the same, byte for byte; and nothing after the fingerprint is printed.
 func TestEnrolKeepsNoKeyForAnotherKind(t *testing.T) {
@@ -124,8 +126,8 @@ func TestEnrolKeepsNoKeyForAnotherKind(t *testing.T) {
 }
 
 // TestEnrolRetryKeepsNoKeyForAnotherKind is a retry, planted by hand: access-key-secret
-// holds the key the pending enrolment records for the code, and the server answers the
-// retry for an integration. access-key-secret, which the enrolment never touches, stays
+// holds the key the pending enrolment records for the qecn_ code, and the server answers
+// the retry for an integration. access-key-secret, which the enrolment never touches, stays
 // byte for byte, and the pending enrolment ends.
 func TestEnrolRetryKeepsNoKeyForAnotherKind(t *testing.T) {
 	emptyDir(t)
@@ -149,8 +151,8 @@ func TestEnrolRetryKeepsNoKeyForAnotherKind(t *testing.T) {
 	noEnrolmentLeft(t, "a retry")
 }
 
-// TestEnrolPrintKeepsNoKeyForAnotherKind is --print answered for an integration, on a
-// machine with an enrolment of another code pending, its new key in
+// TestEnrolPrintKeepsNoKeyForAnotherKind is --print with a qecn_ code answered for an
+// integration, on a machine with an enrolment of another code pending, its new key in
 // access-key-secret.new: the same one line, nothing on stdout, nothing on stderr after
 // the fingerprint, and no file of the directory changes, the pending enrolment and the
 // new key of the other code included.
@@ -236,9 +238,10 @@ func keepAnswerFor(t *testing.T, srv *enrolServer, key *accesskey.Key, code, kin
 	}
 }
 
-// TestEnrolFinishesNoKeptAnswerForAnotherKind is a kept answer that enrols the key for
-// an integration, planted by hand as a guard: no build of qory keeps such an answer, so
-// this is a state no build makes. With the key in access-key-secret.new, the same
+// TestEnrolFinishesNoKeptAnswerForAnotherKind is a kept answer to a qecn_ code that
+// enrols the key for an integration, a [accesskey.KindError] when it is verified, planted
+// by hand as a guard: no build of qory keeps such an answer, so this is a state no build
+// makes. With the key in access-key-secret.new, the same
 // command deletes it; with the key in access-key-secret, that file stays byte for byte.
 // Either way nothing reaches the server, nothing is printed, forager.yaml stays, and
 // the pending enrolment and the kept answer are removed. A kept node's answer, planted
@@ -314,5 +317,76 @@ func TestEnrolFinishesNoKeptAnswerForAnotherKind(t *testing.T) {
 	wants(t, out, "enrolled as "+newID+" in the node nd_0123456789abcdef")
 	if heldKey(t).PublicKey() != key.PublicKey() || len(srv.sent()) != 0 {
 		t.Errorf("a node's kept answer: access-key-secret holds another key, or %d requests were sent", len(srv.sent()))
+	}
+}
+
+// TestEnrolRefusesAnIntegrationsCode is a qeci_ code, an integration's, given to enrol
+// on a machine without a key, with --print, with --replace on a machine with one and
+// with --via: each is refused with the one line, before a key is made, anything is
+// written or anything is sent, so no file of the directory changes and the server gets
+// no request. A bare qec_ code is refused before any request too, as a code of no kind.
+func TestEnrolRefusesAnIntegrationsCode(t *testing.T) {
+	const refused = "this code is for an integration: use a code made for this machine or its pool"
+	for _, c := range []struct {
+		name  string
+		flags []string
+		key   bool
+	}{
+		{"a machine without a key", nil, false},
+		{"--print", []string{"--print"}, true},
+		{"--replace", []string{"--replace"}, true},
+		{"--via", []string{"--via", "https://gateway.example:8443"}, false},
+	} {
+		emptyDir(t)
+		srv := newEnrolServer(t)
+		srv.kind = "adapter"
+		var file string
+		if c.key {
+			file = enrolled(t, srv, newKey(t))
+		} else {
+			file = commentedForager
+			writeFile(t, foragerFile(), file)
+		}
+		dir := configDir()
+		before := snapshot(t, string(dir))
+		args := append(append([]string{"access-key", "enrol"}, c.flags...), srv.URL, srv.code(1, false))
+		out, errOut, err := runSplit(t, "", args...)
+		if err == nil || err.Error() != refused {
+			t.Errorf("%s: %v, want %q", c.name, err, refused)
+		}
+		if out != "" || errOut != "" {
+			t.Errorf("%s: printed\n%s%s", c.name, out, errOut)
+		}
+		if n := len(srv.sent()); n != 0 {
+			t.Errorf("%s: %d requests reached the server", c.name, n)
+		}
+		after := snapshot(t, string(dir))
+		for p, v := range after {
+			if before[p] != v {
+				t.Errorf("%s: %s changed", c.name, p)
+			}
+		}
+		if len(after) != len(before) {
+			t.Errorf("%s: files before %v, after %v", c.name, before, after)
+		}
+		if got := readForagerFile(t); got != file {
+			t.Errorf("%s: forager.yaml changed:\n%s", c.name, got)
+		}
+	}
+
+	// A bare qec_ code names no kind.
+	emptyDir(t)
+	srv := newEnrolServer(t)
+	writeFile(t, foragerFile(), commentedForager)
+	code := "qec_" + strings.TrimPrefix(srv.code(1, false), accesskey.CodePrefixNode)
+	_, err := run(t, "access-key", "enrol", srv.URL, code)
+	if want := "an enrolment code is qecn_, qecp_, qecg_ or qeci_, 26 characters, then a dot and a fingerprint"; err == nil || err.Error() != want {
+		t.Errorf("a qec_ code: %v, want %q", err, want)
+	}
+	if n := len(srv.sent()); n != 0 {
+		t.Errorf("a qec_ code: %d requests reached the server", n)
+	}
+	if exists(configDir().Path(foragerdir.NewSecretFile)) || exists(configDir().Path(foragerdir.PendingFile)) {
+		t.Error("a qec_ code: a key was made")
 	}
 }

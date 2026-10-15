@@ -262,7 +262,7 @@ func TestTheMarkerAndThePendingEnrolment(t *testing.T) {
 		t.Error("the marker stayed")
 	}
 
-	const code = "qec_F1XT0RE0000000000000000000.uoES-kuj1vk0sq0qoGlmAg"
+	const code = "qecn_F1XT0RE0000000000000000000.uoES-kuj1vk0sq0qoGlmAg"
 	now := time.Unix(1700000000, 0)
 	k, other := newKey(t), newKey(t)
 	key := k.PublicKey()
@@ -287,7 +287,7 @@ func TestTheMarkerAndThePendingEnrolment(t *testing.T) {
 		{"within its 15 minutes", code, key, now.Add(14*time.Minute + 59*time.Second), true},
 		{"after its 15 minutes", code, key, now.Add(15 * time.Minute), false},
 		{"before it was written", code, key, now.Add(-time.Second), false},
-		{"another code", "qec_F1XT0RE0000000000000000001.uoES-kuj1vk0sq0qoGlmAg", key, now, false},
+		{"another code", "qecn_F1XT0RE0000000000000000001.uoES-kuj1vk0sq0qoGlmAg", key, now, false},
 		{"another key", code, other.PublicKey(), now, false},
 	} {
 		if got := d.Pending(c.code, c.key, c.at); got != c.want {

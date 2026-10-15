@@ -217,7 +217,7 @@ func TestKeyCommandsRefuseAFixtureKey(t *testing.T) {
 	}))
 	defer srv.Close()
 	signer, _ := accesskey.Generate()
-	code := "qec_F1XT0RE0000000000000000000." + signer.Fingerprint()
+	code := "qecn_F1XT0RE0000000000000000000." + signer.Fingerprint()
 	dir := machineDir()
 	if err := os.MkdirAll(string(dir), 0o700); err != nil {
 		t.Fatal(err)
@@ -279,7 +279,7 @@ func TestARefusalMovesAsideOnlyTheKeyMadeForTheCode(t *testing.T) {
 		if err := dir.WriteSecret(mine); err != nil {
 			t.Fatal(err)
 		}
-		if err := dir.WritePending("qec_F1XT0RE0000000000000000000.uoES-kuj1vk0sq0qoGlmAg", sent.PublicKey(), now); err != nil {
+		if err := dir.WritePending("qecn_F1XT0RE0000000000000000000.uoES-kuj1vk0sq0qoGlmAg", sent.PublicKey(), now); err != nil {
 			t.Fatal(err)
 		}
 		got := c.act(dir, now)

@@ -30,10 +30,14 @@ import (
 type enrolServer struct {
 	*httptest.Server
 	signer *accesskey.Key
+	// kind is the kind of key the server's codes enrol, their prefix names and its 201
+	// is for: node unless set.
+	kind string
 	// next is the server's next key, listed after signer while rotate is set.
 	next *accesskey.Key
 	mu   sync.Mutex
-	// status and body are the answer; a nil body is the 201 of [enrolServer.answer].
+	// status and body are the answer; a nil body is the 201 of [enrolServer.answer] for
+	// kind.
 	status int
 	body   []byte
 	// signBy signs the answer, nil for an unsigned one.
@@ -48,7 +52,7 @@ type enrolServer struct {
 
 func newEnrolServer(t *testing.T) *enrolServer {
 	t.Helper()
-	s := &enrolServer{signer: newKey(t), next: newKey(t), status: http.StatusCreated, used: map[string]bool{}, enrolled: map[string]bool{}}
+	s := &enrolServer{signer: newKey(t), next: newKey(t), kind: "node", status: http.StatusCreated, used: map[string]bool{}, enrolled: map[string]bool{}}
 	s.signBy = s.signer
 	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
@@ -71,7 +75,7 @@ func newEnrolServer(t *testing.T) *enrolServer {
 			status, body, signBy = http.StatusConflict, []byte(`{"error":"key_invalid","apiary_public_key":`+s.keys()+`}`), s.signer
 		}
 		if body == nil {
-			body = s.answer("node")
+			body = s.answer(s.kind)
 		}
 		if signBy != nil && status != http.StatusUnauthorized {
 			w.Header().Set(accesskey.HeaderSignature, signBy.SignAnswer(accesskey.Answer{Enrolment: true, Status: status, RequestSignature: req.Proof, Body: body}))
@@ -116,10 +120,11 @@ func (s *enrolServer) refusal(code string, names ...string) {
 	}
 }
 
-// code is an enrolment code of the server, in groups, carrying the signer's
-// fingerprint, and the next key's too when both is set.
+// code is an enrolment code of the server for a key of kind, in groups, carrying the
+// signer's fingerprint, and the next key's too when both is set.
 func (s *enrolServer) code(n byte, both bool) string {
-	c := "qec_F1XT-0RE0-0000-0000-0000-0000-0" + string('0'+n) + "." + s.signer.Fingerprint()
+	prefix := map[string]string{"node": accesskey.CodePrefixNode, "pool": accesskey.CodePrefixPool, "gateway": accesskey.CodePrefixGateway, "adapter": accesskey.CodePrefixAdapter}[s.kind]
+	c := prefix + "F1XT-0RE0-0000-0000-0000-0000-0" + string('0'+n) + "." + s.signer.Fingerprint()
 	if both {
 		c += "." + s.next.Fingerprint()
 	}
@@ -228,7 +233,7 @@ func TestEnrolWritesTheServerSectionAndKeepsTheRest(t *testing.T) {
 		t.Error("the secret was printed")
 	}
 	sent := srv.sent()
-	if len(sent) != 1 || sent[0].Code != "qec_F1XT0RE0000000000000000001."+srv.signer.Fingerprint() || sent[0].Name != "build-01" || sent[0].PublicKey != key.PublicKey().String() {
+	if len(sent) != 1 || sent[0].Code != "qecn_F1XT0RE0000000000000000001."+srv.signer.Fingerprint() || sent[0].Name != "build-01" || sent[0].PublicKey != key.PublicKey().String() {
 		t.Fatalf("sent %+v", sent)
 	}
 	if !strings.HasPrefix(srv.agents[0], "qory-forager/") {
@@ -316,7 +321,7 @@ func TestEnrolCreatesTheForagerFileAndPinsOnlyTheCodesKeys(t *testing.T) {
 	emptyDir(t)
 	srv := newEnrolServer(t)
 	srv.rotate = true
-	srv.body = srv.answer("pool")
+	srv.kind = "pool"
 	out, err := run(t, "access-key", "enrol", srv.URL, srv.code(1, false))
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -338,24 +343,28 @@ func TestEnrolCreatesTheForagerFileAndPinsOnlyTheCodesKeys(t *testing.T) {
 	}
 }
 
-// TestEnrolSaysWhatTheKeyBelongsTo is an enrolment of a node's key, a node pool's and a
-// gateway's: the lines after the fingerprint name what the key belongs to and what it
-// lets that do.
+// TestEnrolSaysWhatTheKeyBelongsTo is an enrolment of a node's key with a qecn_ code, a
+// node pool's with a qecp_ code and a gateway's with a qecg_ code: the code is sent with
+// its prefix, and the lines after the fingerprint name what the key belongs to and what
+// it lets that do.
 func TestEnrolSaysWhatTheKeyBelongsTo(t *testing.T) {
-	for _, c := range []struct{ kind, want string }{
-		{"node", "enrolled as ak_0123456789abcdef in the node nd_0123456789abcdef\nstored secrets: no\nthe key is active: runs can start\n"},
-		{"pool", "enrolled as ak_0123456789abcdef in the node pool np_0123456789abcdef\nstored secrets: no\nthe key is active: runs can start\n"},
-		{"gateway", "enrolled as ak_0123456789abcdef in the gateway ng_0123456789abcdef\nstored secrets: no\nthe key is active: the gateway can serve runs\n"},
+	for _, c := range []struct{ kind, prefix, want string }{
+		{"node", "qecn_", "enrolled as ak_0123456789abcdef in the node nd_0123456789abcdef\nstored secrets: no\nthe key is active: runs can start\n"},
+		{"pool", "qecp_", "enrolled as ak_0123456789abcdef in the node pool np_0123456789abcdef\nstored secrets: no\nthe key is active: runs can start\n"},
+		{"gateway", "qecg_", "enrolled as ak_0123456789abcdef in the gateway ng_0123456789abcdef\nstored secrets: no\nthe key is active: the gateway can serve runs\n"},
 	} {
 		emptyDir(t)
 		srv := newEnrolServer(t)
-		srv.body = srv.answer(c.kind)
+		srv.kind = c.kind
 		_, errOut, err := runSplit(t, "", "access-key", "enrol", srv.URL, srv.code(1, false))
 		if err != nil {
 			t.Fatalf("%s: %v\n%s", c.kind, err, errOut)
 		}
 		if !strings.Contains(errOut, "access key fingerprint "+heldKey(t).Fingerprint()+"\n"+c.want) {
 			t.Errorf("%s: stderr\n%s\nwant the lines\n%s", c.kind, errOut, c.want)
+		}
+		if sent := srv.sent(); len(sent) != 1 || !strings.HasPrefix(sent[0].Code, c.prefix) {
+			t.Errorf("%s: sent %+v", c.kind, sent)
 		}
 	}
 }
@@ -399,7 +408,7 @@ func TestEnrolRefusesBeforeItMakesAKey(t *testing.T) {
 		{"another server's code", pinned, nil, []string{srv.URL, srv.code(1, false)}, "the enrolment code is for a server whose key this machine does not pin: the code is from another server, or the pin is out of date"},
 		{"another server's code, the pin from the environment", "session:\n  instance:\n    name: build-01\n", map[string]string{"QORY_APIARY_PUBLIC_KEY": `[{"alg":"ed25519","public_key":"` + other.PublicKey().String() + `"}]`}, []string{"--print", srv.URL, srv.code(1, false)}, "the enrolment code is for a server whose key this machine does not pin"},
 		{"another server", "gateway:\n  server:\n    url: https://apiary.example\n", nil, []string{srv.URL, srv.code(1, false)}, foragerFile() + " names the server https://apiary.example, and this command " + srv.URL + ": enrol with the server forager.yaml names, or change its gateway.server.url first"},
-		{"not a code", "", nil, []string{srv.URL, "qec_F1XT0RE000000000000000000U." + srv.signer.Fingerprint()}, "which is not a character of Crockford's base32"},
+		{"not a code", "", nil, []string{srv.URL, "qecn_F1XT0RE000000000000000000U." + srv.signer.Fingerprint()}, "which is not a character of Crockford's base32"},
 		{"plain http elsewhere", "", nil, []string{"http://apiary.example", srv.code(1, false)}, "gateway.server.url for http://apiary.example is http to a host that is not this machine: an https URL of a host and an optional port, or an http one to this machine, with nothing after"},
 		{"a path", "", nil, []string{"https://apiary.example/x", srv.code(1, false)}, "gateway.server.url for https://apiary.example has a path: an https URL of a host and an optional port, or an http one to this machine, with nothing after"},
 		{"a URL encoded too often", "", nil, []string{"https://apiary.example/%" + strings.Repeat("25", 8) + "41", srv.code(1, false)}, "gateway.server.url is percent-encoded more than 8 times: an https URL of a host and an optional port, or an http one to this machine, with nothing after"},

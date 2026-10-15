@@ -103,7 +103,7 @@ apply; the code is checked against QORY_APIARY_PUBLIC_KEY when it is set.
 --verbose adds nothing here.
 
 More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
-		Example: `  qory access-key enrol https://apiary.example qec_F1XT-0RE0-0000-0000-0000-0000-00.uoES-kuj1vk0sq0qoGlmAg
+		Example: `  qory access-key enrol https://apiary.example qecn_F1XT-0RE0-0000-0000-0000-0000-00.uoES-kuj1vk0sq0qoGlmAg
   qory access-key enrol --replace https://apiary.example "$code"   # move this machine to a new key
   qory access-key enrol --print https://apiary.example "$code"   # for a starter's settings`,
 		Args: func(cmd *cobra.Command, args []string) error {
@@ -345,6 +345,16 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	if err != nil {
 		return input(err)
 	}
+	// The code's prefix names the kind of key it enrols. An integration's is refused
+	// before anything is made, written or sent: the server would enrol the key for the
+	// integration, active until revoked.
+	kind, err := accesskey.CodeKind(code)
+	if err != nil {
+		return input(err)
+	}
+	if kind == "adapter" {
+		return input(errors.New("this code is for an integration: use a code made for this machine or its pool"))
+	}
 	if err := flagVia.check(); err != nil {
 		return err
 	}
@@ -411,12 +421,16 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	// kept answer for a kind this machine does not take finishes nothing, see [refuseKind].
 	if !print {
 		k, ans, err := answerKept(dir, server, code)
+		var kindErr *accesskey.KindError
+		if errors.As(err, &kindErr) {
+			return refuseKind(dir, k, false, true, kindErr.AccessKeyID)
+		}
 		if err != nil {
 			return err
 		}
 		if k != nil {
 			if !takesKind(ans) {
-				return refuseKind(dir, k, false, true)
+				return refuseKind(dir, k, false, true, ans.AccessKeyID)
 			}
 			if err := dir.WriteMarker(); err != nil {
 				return err
@@ -502,11 +516,17 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	} else {
 		ans, err = req.Post(ctx, client, server, userAgent())
 	}
+	// A verified 201 for another kind than the code's is a [accesskey.KindError]: the
+	// server enrolled the key, so it is refused as [refuseKind] refuses, never retried.
+	var kindErr *accesskey.KindError
+	if errors.As(err, &kindErr) {
+		return refuseKind(dir, key, print, false, kindErr.AccessKeyID)
+	}
 	if err != nil {
 		return enrolFailed(dir, err, key, print, now)
 	}
 	if !takesKind(ans) {
-		return refuseKind(dir, key, print, false)
+		return refuseKind(dir, key, print, false, ans.AccessKeyID)
 	}
 	if ans.Pin.Fixture() {
 		return refuseFixturePin(dir, key, print, now)
@@ -714,14 +734,15 @@ func takesKind(ans *accesskey.EnrolmentAnswer) bool {
 	return false
 }
 
-// refuseKind refuses a verified 201 for a kind [takesKind] does not take, before
-// anything is printed, kept, placed or written. The key is active on the server for that
-// kind of node, so it is kept nowhere, not even aside: --print wrote nothing; otherwise
-// access-key-secret.new is deleted when it holds the key, the pending enrolment ends and,
-// with kept set, the answer enrolment-answer keeps is removed, in that order.
-// access-key-secret and forager.yaml are left as they are.
-func refuseKind(dir foragerdir.Dir, key *accesskey.Key, print, kept bool) error {
-	msg := "PLACEHOLDER-B1D-490 fingerprint=" + key.Fingerprint()
+// refuseKind refuses a verified 201 for a kind [takesKind] does not take, or for
+// another kind than the code's, a [accesskey.KindError], before anything is printed,
+// kept, placed or written. The key is active on the server as id, so it is kept nowhere,
+// not even aside: --print wrote nothing; otherwise access-key-secret.new is deleted when
+// it holds the key, the pending enrolment ends and, with kept set, the answer
+// enrolment-answer keeps is removed, in that order. access-key-secret and forager.yaml
+// are left as they are.
+func refuseKind(dir foragerdir.Dir, key *accesskey.Key, print, kept bool, id string) error {
+	msg := "PLACEHOLDER-B1D-490 fingerprint=" + key.Fingerprint() + " access_key_id=" + id
 	if print {
 		return errors.New(msg)
 	}

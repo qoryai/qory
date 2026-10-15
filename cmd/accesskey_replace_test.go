@@ -198,7 +198,7 @@ func TestEnrolReplaceKeepsTheOldKeyOnAFailure(t *testing.T) {
 			}, discarded,
 			"the server's answer lists the Forager contract's published fixture key, whose secret anyone can read: it is no server to pin; forager.yaml was not changed; the secret made for it was moved aside to "},
 		{"another server's code", nil, func(srv *enrolServer) string {
-			return "qec_F1XT-0RE0-0000-0000-0000-0000-01." + newKey(t).Fingerprint()
+			return "qecn_F1XT-0RE0-0000-0000-0000-0000-01." + newKey(t).Fingerprint()
 		}, nil, none,
 			"the enrolment code is for a server whose key this machine does not pin"},
 	} {

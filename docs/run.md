@@ -462,7 +462,7 @@ An owner or administrator in Qory Apiary creates an enrolment code on the node's
 The code is used once, and lasts 15 minutes.
 
 ```sh
-qory access-key enrol https://apiary.example qec_…
+qory access-key enrol https://apiary.example qecn_…
 ```
 
 qory makes the key, keeps its secret in `access-key-secret.new`, mode `0600`, and prints
@@ -514,7 +514,7 @@ a wall is running on this machine: it must end before a key is made.
 #### Replace the machine's key
 
 ```sh
-qory access-key enrol --replace https://apiary.example qec_…
+qory access-key enrol --replace https://apiary.example qecn_…
 ```
 
 `--replace` moves a machine that holds a key to a new one, with a new code. The old key
@@ -845,7 +845,7 @@ wall:
 Enrol the machine's key through the gateway with `--via`:
 
 ```sh
-qory access-key enrol --via https://gateway.example:8443 https://apiary.example qec_…
+qory access-key enrol --via https://gateway.example:8443 https://apiary.example qecn_…
 ```
 
 The enrolment goes through the gateway, and enrol writes `gateway.server.via` beside the key:

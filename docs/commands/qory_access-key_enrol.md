@@ -53,7 +53,7 @@ qory access-key enrol <server> <code> [flags]
 ### Examples
 
 ```
-  qory access-key enrol https://apiary.example qec_F1XT-0RE0-0000-0000-0000-0000-00.uoES-kuj1vk0sq0qoGlmAg
+  qory access-key enrol https://apiary.example qecn_F1XT-0RE0-0000-0000-0000-0000-00.uoES-kuj1vk0sq0qoGlmAg
   qory access-key enrol --replace https://apiary.example "$code"   # move this machine to a new key
   qory access-key enrol --print https://apiary.example "$code"   # for a starter's settings
 ```
