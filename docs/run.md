@@ -504,7 +504,8 @@ When the enrolment does not complete:
 A secret enrol moves aside goes to `access-key-secret.old.<Unix time>`. It is deleted
 once a new key is enrolled and a run uses it. Enrol moves aside only
 `access-key-secret.new`: a refused enrolment never moves or changes
-`access-key-secret`.
+`access-key-secret`. A key the server enrolled for something else is deleted from
+`access-key-secret.new` instead, since it is active until it is revoked in Qory Apiary.
 
 Enrol refuses while `QORY_ACCESS_KEY_ID`, `QORY_ACCESS_KEY_SECRET` or
 `QORY_APIARY_PUBLIC_KEY` is set: the key it keeps in this machine's files would

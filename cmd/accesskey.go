@@ -74,7 +74,7 @@ The key is active from that answer on: runs can start. qory keeps the answer in
 enrolment-answer until the enrolment is finished: should the command stop after the
 answer came, the same command finishes it on this machine, at any time, without asking
 the server again. A refused enrolment moves aside only access-key-secret.new, never
-access-key-secret.
+access-key-secret; a key the server enrolled for something else is deleted instead.
 
 When access-key-secret exists, enrol refuses, so it never replaces this machine's key
 unasked: use --replace to move this machine to a new key, or --print for a key kept
@@ -423,14 +423,14 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 		k, ans, err := answerKept(dir, server, code)
 		var kindErr *accesskey.KindError
 		if errors.As(err, &kindErr) {
-			return refuseKind(dir, k, false, true, kindErr.AccessKeyID)
+			return refuseKind(dir, k, false, true, kindErr.Kind, kindErr.AccessKeyID)
 		}
 		if err != nil {
 			return err
 		}
 		if k != nil {
 			if !takesKind(ans) {
-				return refuseKind(dir, k, false, true, ans.AccessKeyID)
+				return refuseKind(dir, k, false, true, ans.NodeKind, ans.AccessKeyID)
 			}
 			if err := dir.WriteMarker(); err != nil {
 				return err
@@ -520,13 +520,13 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	// server enrolled the key, so it is refused as [refuseKind] refuses, never retried.
 	var kindErr *accesskey.KindError
 	if errors.As(err, &kindErr) {
-		return refuseKind(dir, key, print, false, kindErr.AccessKeyID)
+		return refuseKind(dir, key, print, false, kindErr.Kind, kindErr.AccessKeyID)
 	}
 	if err != nil {
 		return enrolFailed(dir, err, key, print, now)
 	}
 	if !takesKind(ans) {
-		return refuseKind(dir, key, print, false, ans.AccessKeyID)
+		return refuseKind(dir, key, print, false, ans.NodeKind, ans.AccessKeyID)
 	}
 	if ans.Pin.Fixture() {
 		return refuseFixturePin(dir, key, print, now)
@@ -734,15 +734,23 @@ func takesKind(ans *accesskey.EnrolmentAnswer) bool {
 	return false
 }
 
+// kindWords is how the refusal of a key enrolled for another kind names each node_kind.
+var kindWords = map[string]string{"node": "a machine", "pool": "a pool", "gateway": "a gateway", "adapter": "an integration"}
+
 // refuseKind refuses a verified 201 for a kind [takesKind] does not take, or for
 // another kind than the code's, a [accesskey.KindError], before anything is printed,
-// kept, placed or written. The key is active on the server as id, so it is kept nowhere,
-// not even aside: --print wrote nothing; otherwise access-key-secret.new is deleted when
-// it holds the key, the pending enrolment ends and, with kept set, the answer
-// enrolment-answer keeps is removed, in that order. access-key-secret and forager.yaml
-// are left as they are.
-func refuseKind(dir foragerdir.Dir, key *accesskey.Key, print, kept bool, id string) error {
-	msg := "PLACEHOLDER-B1D-490 fingerprint=" + key.Fingerprint() + " access_key_id=" + id
+// kept, placed or written. The key is active on the server as id, enrolled for kind, so
+// it is kept nowhere, not even aside: --print wrote nothing; otherwise
+// access-key-secret.new is deleted when it holds the key, the pending enrolment ends
+// and, with kept set, the answer enrolment-answer keeps is removed, in that order.
+// access-key-secret and forager.yaml are left as they are. A kind outside [kindWords],
+// which Forager refuses before this, is named "something else".
+func refuseKind(dir foragerdir.Dir, key *accesskey.Key, print, kept bool, kind, id string) error {
+	what, ok := kindWords[kind]
+	if !ok {
+		what = "something else"
+	}
+	msg := "the server enrolled the key " + id + " for " + what + " instead, so qory did not use it; the key stays active until you revoke it in Qory Apiary"
 	if print {
 		return errors.New(msg)
 	}

@@ -16,7 +16,7 @@ The key is active from that answer on: runs can start. qory keeps the answer in
 enrolment-answer until the enrolment is finished: should the command stop after the
 answer came, the same command finishes it on this machine, at any time, without asking
 the server again. A refused enrolment moves aside only access-key-secret.new, never
-access-key-secret.
+access-key-secret; a key the server enrolled for something else is deleted instead.
 
 When access-key-secret exists, enrol refuses, so it never replaces this machine's key
 unasked: use --replace to move this machine to a new key, or --print for a key kept

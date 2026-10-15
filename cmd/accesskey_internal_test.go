@@ -353,3 +353,42 @@ func TestEnrolmentWrittenNamesEachViaKey(t *testing.T) {
 		}
 	}
 }
+
+// TestRefuseKindNamesWhatTheServerEnrolledItFor is the refusal of a key the server
+// enrolled for another kind: each node_kind as the line names it, a kind Forager would
+// refuse first as "something else", and a new secret that cannot be deleted, whose
+// path-only error follows the line. No line carries the secret.
+func TestRefuseKindNamesWhatTheServerEnrolledItFor(t *testing.T) {
+	key, err := accesskey.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const tail = " instead, so qory did not use it; the key stays active until you revoke it in Qory Apiary"
+	for kind, what := range map[string]string{"node": "a machine", "pool": "a pool", "gateway": "a gateway", "adapter": "an integration", "": "something else", "other": "something else"} {
+		err := refuseKind(foragerdir.Dir(t.TempDir()), key, true, false, kind, "ak_0123456789abcdef")
+		if want := "the server enrolled the key ak_0123456789abcdef for " + what + tail; err == nil || err.Error() != want {
+			t.Errorf("%q: %v, want %q", kind, err, want)
+		}
+	}
+	if os.Geteuid() == 0 {
+		return
+	}
+	dir := foragerdir.Dir(filepath.Join(t.TempDir(), "qory"))
+	if _, err := dir.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	if err := dir.WriteNewSecret(key); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(string(dir), 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(string(dir), 0o700) })
+	err = refuseKind(dir, key, false, false, "adapter", "ak_0123456789abcdef")
+	if want := "the server enrolled the key ak_0123456789abcdef for an integration" + tail + "; delete " + dir.Path(foragerdir.NewSecretFile) + ": "; err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("a new secret that cannot be deleted: %v, want it to start %q", err, want)
+	}
+	if err != nil && accesskey.ContainsSecret(err.Error()) {
+		t.Error("the error carries the secret")
+	}
+}

@@ -16,9 +16,20 @@ import (
 )
 
 // kindRefused is the error of a verified 201 for another kind than the code's, or for
-// a kind enrol does not take: the key's fingerprint and the id the server gave it.
-func kindRefused(fingerprint string) string {
-	return "PLACEHOLDER-B1D-490 fingerprint=" + fingerprint + " access_key_id=" + newID
+// a kind enrol does not take: the id the server gave the key, and what it enrolled it
+// for, as "a pool" or "an integration".
+func kindRefused(what string) string {
+	return "the server enrolled the key " + newID + " for " + what + " instead, so qory did not use it; the key stays active until you revoke it in Qory Apiary"
+}
+
+// noSecret fails the test for each text that carries an access key secret.
+func noSecret(t *testing.T, name string, texts ...string) {
+	t.Helper()
+	for _, text := range texts {
+		if accesskey.ContainsSecret(text) {
+			t.Errorf("%s: a secret was printed or returned", name)
+		}
+	}
 }
 
 // sentKey is the public key of the server's last verified request.
@@ -74,34 +85,44 @@ func noEnrolmentLeft(t *testing.T, name string) {
 
 // TestEnrolKeepsNoKeyForAnotherKind is a qecn_ code answered with a verified 201 that
 // enrols the key for an integration, node_kind "adapter", a [accesskey.KindError], to an
-// enrolment on a machine without a key and to a --replace on a machine with one: the
-// error is the one line naming the key's fingerprint and its id, with no retry and no
-// code; the new secret is deleted, not moved aside,
-// the pending enrolment ends and no answer is kept; access-key-secret and forager.yaml
-// are the same, byte for byte; and nothing after the fingerprint is printed.
+// enrolment on a machine without a key and to a --replace on a machine with one, and
+// answered with one for a pool: the error is the one line naming the key's id and what
+// the server enrolled it for, with no retry, no code and no secret; the new secret is
+// deleted, not moved aside, the pending enrolment ends and no answer is kept;
+// access-key-secret and forager.yaml are the same, byte for byte; and nothing after the
+// fingerprint is printed.
 func TestEnrolKeepsNoKeyForAnotherKind(t *testing.T) {
-	for _, replace := range []bool{false, true} {
-		name := "a machine without a key"
+	for _, c := range []struct {
+		kind, what string
+		replace    bool
+	}{
+		{"adapter", "an integration", false},
+		{"adapter", "an integration", true},
+		{"pool", "a pool", false},
+	} {
+		replace := c.replace
+		name := "a machine without a key, answered for " + c.what
 		emptyDir(t)
 		srv := newEnrolServer(t)
 		file := commentedForager
 		var own *accesskey.Key
 		args := []string{"access-key", "enrol", srv.URL, srv.code(1, false)}
 		if replace {
-			name = "--replace"
+			name = "--replace, answered for " + c.what
 			own = newKey(t)
 			file = enrolled(t, srv, own)
 			args = []string{"access-key", "enrol", "--replace", srv.URL, srv.code(1, false)}
 		} else {
 			writeFile(t, foragerFile(), file)
 		}
-		srv.body = srv.answer("adapter")
+		srv.body = srv.answer(c.kind)
 		out, errOut, err := runSplit(t, "", args...)
 		pub := sentKey(t, srv)
-		if err == nil || err.Error() != kindRefused(pub.Fingerprint()) {
-			t.Fatalf("%s: %v, want %q", name, err, kindRefused(pub.Fingerprint()))
+		if err == nil || err.Error() != kindRefused(c.what) {
+			t.Fatalf("%s: %v, want %q", name, err, kindRefused(c.what))
 		}
 		lacks(t, err.Error(), "retr", "(", "moved aside")
+		noSecret(t, name, err.Error(), out, errOut)
 		if out != "" {
 			t.Errorf("%s: stdout carries %q", name, out)
 		}
@@ -142,9 +163,10 @@ func TestEnrolRetryKeepsNoKeyForAnotherKind(t *testing.T) {
 	active := heldSecret(foragerdir.SecretFile)
 	srv.body = srv.answer("adapter")
 	_, err := run(t, "access-key", "enrol", srv.URL, code)
-	if err == nil || err.Error() != kindRefused(key.Fingerprint()) {
-		t.Fatalf("%v, want %q", err, kindRefused(key.Fingerprint()))
+	if err == nil || err.Error() != kindRefused("an integration") {
+		t.Fatalf("%v, want %q", err, kindRefused("an integration"))
 	}
+	noSecret(t, "a retry", err.Error())
 	if heldSecret(foragerdir.SecretFile) != active {
 		t.Error("access-key-secret changed")
 	}
@@ -175,9 +197,10 @@ func TestEnrolPrintKeepsNoKeyForAnotherKind(t *testing.T) {
 	srv.body = srv.answer("adapter")
 	out, errOut, err := runSplit(t, "", "access-key", "enrol", "--print", srv.URL, srv.code(1, false))
 	pub := sentKey(t, srv)
-	if err == nil || err.Error() != kindRefused(pub.Fingerprint()) {
-		t.Fatalf("%v, want %q", err, kindRefused(pub.Fingerprint()))
+	if err == nil || err.Error() != kindRefused("an integration") {
+		t.Fatalf("%v, want %q", err, kindRefused("an integration"))
 	}
+	noSecret(t, "--print", err.Error(), out, errOut)
 	if out != "" {
 		t.Errorf("stdout carries %q", out)
 	}
@@ -272,9 +295,10 @@ func TestEnrolFinishesNoKeptAnswerForAnotherKind(t *testing.T) {
 		keepAnswerFor(t, srv, key, code, "adapter")
 		active := heldSecret(foragerdir.SecretFile)
 		out, errOut, err := runSplit(t, "", "access-key", "enrol", srv.URL, code)
-		if err == nil || err.Error() != kindRefused(key.Fingerprint()) {
-			t.Fatalf("%s: %v, want %q", name, err, kindRefused(key.Fingerprint()))
+		if err == nil || err.Error() != kindRefused("an integration") {
+			t.Fatalf("%s: %v, want %q", name, err, kindRefused("an integration"))
 		}
+		noSecret(t, name, err.Error(), out, errOut)
 		if out != "" || errOut != "" {
 			t.Errorf("%s: printed\n%s%s", name, out, errOut)
 		}
