@@ -2,11 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [main, next]
+    branches: [main, next, factory]
   pull_request:
 
 # A newer push to a pull request cancels the pull request's run in progress or
-# waiting. Every push to main or next runs on its own, and is never cancelled.
+# waiting. Every push to main, next or factory runs on its own, and is never cancelled.
 concurrency:
   group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
