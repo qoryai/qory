@@ -145,6 +145,11 @@ More: ` + gatewayDocs,
 			if gw.Tools, err = machineTools(r); err != nil {
 				return err
 			}
+			// The credentials gateway.selects names are checked against the ones the
+			// integrations define too, so only once they are described.
+			if gw.Selects, err = r.Selections(); err != nil {
+				return input(err)
+			}
 			g, err := startGateway(ctx, gw)
 			if err != nil {
 				var op *net.OpError
