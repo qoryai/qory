@@ -322,7 +322,7 @@ func TestTheInstanceIDIsKeptForThisMachine(t *testing.T) {
 	d := newDir(t)
 	machine := []byte("machine-a")
 	id, kept, err := d.InstanceID(machine)
-	if err != nil || !kept || accesskey.CheckInstanceID(id) != nil || !strings.HasPrefix(id, "i_") || len(id) != 24 {
+	if err != nil || !kept || accesskey.CheckInstanceID(id) != nil || !strings.HasPrefix(id, "i_") || len(id) != 28 {
 		t.Fatalf("a new id: %q, %v, %v", id, kept, err)
 	}
 	if mode(t, d.Path(foragerdir.InstanceFile)) != 0o600 {

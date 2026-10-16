@@ -47,7 +47,7 @@ func clearRuns(t *testing.T, root string) {
 	}
 }
 
-var instanceShape = regexp.MustCompile(`^i_[A-Za-z0-9_-]{22}$`)
+var instanceShape = regexp.MustCompile(`^i_[0-9a-hjkmnp-tv-z]{26}$`)
 
 // TestRunSignsWithTheAccessKeyAndNamesTheInstance is a run against a server: every
 // request is signed under the machine's access key, carries the instance id qory keeps
