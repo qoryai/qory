@@ -319,6 +319,38 @@
               "minLength": 1
             }
           }
+        },
+        "selects": {
+          "description": "The credentials the gateway selects for a walled run when the server's policy selects none, each by name, with the label of the run's registration whose value is the argument, and the forge the run's forge label must name. The label's value must name one repository; a run whose label names none, or several, gets no credential. qory gateway alone reads it.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "credentials": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "argument_label": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "forge": {
+                    "enum": [
+                      "github.com"
+                    ]
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },

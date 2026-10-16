@@ -88,8 +88,23 @@ type Forager struct {
 	Listen string
 	// TLS is gateway.tls, the certificate and key qory gateway serves Listen with; nil
 	// when the file sets none.
-	TLS      *ForagerTLS
+	TLS *ForagerTLS
+	// Selects is gateway.selects.credentials, in the file's order: the credentials qory
+	// gateway selects for a walled run when the server's policy selects none. qory run
+	// refuses it. [Forager.Selections] checks it against the credentials once the
+	// integrations are described.
+	Selects  []ForagerSelect
 	expanded bool
+}
+
+// ForagerSelect is one entry of gateway.selects.credentials, as the file writes it: the
+// credential's name, and for one that takes an argument, the label of the run's
+// registration whose value is the argument and the forge the run's forge label must
+// name; both empty for one that takes none.
+type ForagerSelect struct {
+	Name          string
+	ArgumentLabel string
+	Forge         string
 }
 
 // ForagerTLS is gateway.tls: the files of the certificate and its key, as the file
@@ -432,6 +447,19 @@ type gatewaySection struct {
 		Certificate *string `yaml:"certificate"`
 		Key         *string `yaml:"key"`
 	} `yaml:"tls,omitempty"`
+	Selects *selectsSection `yaml:"selects,omitempty"`
+}
+
+// selectsSection is gateway.selects as written.
+type selectsSection struct {
+	Credentials []selectEntry `yaml:"credentials"`
+}
+
+// selectEntry is one entry of gateway.selects.credentials as written.
+type selectEntry struct {
+	Name          *string `yaml:"name"`
+	ArgumentLabel *string `yaml:"argument_label"`
+	Forge         *string `yaml:"forge"`
 }
 
 // egressSection is gateway.egress as written.
@@ -597,6 +625,21 @@ func LoadForager() (*Forager, error) {
 			return nil, fmt.Errorf("%s: gateway.tls needs both certificate and key", path)
 		}
 		r.TLS = &ForagerTLS{Certificate: *t.Certificate, Key: *t.Key}
+	}
+	if sel := g.Selects; sel != nil {
+		for i, e := range sel.Credentials {
+			if e.Name == nil || *e.Name == "" {
+				return nil, fmt.Errorf("%s: gateway.selects.credentials[%d].name is required", path, i)
+			}
+			s := ForagerSelect{Name: *e.Name}
+			if e.ArgumentLabel != nil {
+				s.ArgumentLabel = *e.ArgumentLabel
+			}
+			if e.Forge != nil {
+				s.Forge = *e.Forge
+			}
+			r.Selects = append(r.Selects, s)
+		}
 	}
 	if w := f.Wall; w != nil {
 		if w.Adapter == nil || *w.Adapter != WallDocker {
@@ -1648,6 +1691,13 @@ func (r *Forager) Rows() []Row {
 				program += ", shadowed by gateway.credentials." + in.Key
 			}
 			rows = append(rows, Row{"gateway.integrations." + in.Key, program, origin})
+		}
+		for _, sel := range r.Selects {
+			value := "(no argument)"
+			if sel.ArgumentLabel != "" || sel.Forge != "" {
+				value = "argument_label " + orNone(sel.ArgumentLabel) + ", forge " + orNone(sel.Forge)
+			}
+			rows = append(rows, Row{"gateway.selects.credentials." + sel.Name, value, origin})
 		}
 	}
 	if r != nil && r.Wall != nil {
