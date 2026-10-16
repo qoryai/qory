@@ -39,6 +39,7 @@ gateway:
 |---|---|
 | `gateway.listen` | The address qory gateway listens on for the runs of other machines, host:port. qory run never listens on it: it starts a gateway itself on a loopback port for each run. |
 | `gateway.tls.certificate`, `gateway.tls.key` | The certificate and key the gateway serves the other machines with, files in PEM. The address speaks TLS 1.3 alone. `qory gateway` needs them, whatever address it listens on: a gateway serves other machines. |
+| `gateway.selects` | The credentials the gateway selects for a walled run when the server's policy selects none, each by name, with the label of the run's registration whose value is the argument, and the forge the run's `forge` label must name. The label's value must name one repository; a run whose label names none, or several, gets no credential. qory gateway alone reads it. |
 | `gateway.server`, `gateway.egress`, `gateway.egress.paths`, `gateway.credentials`, `gateway.tools`, `gateway.integrations` | As for `qory run`: see [forager.yaml](run.md#forageryaml). |
 
 A path in `gateway.tls` is relative to the directory of `forager.yaml`, unless it is
@@ -52,6 +53,24 @@ A machine whose runs go through this gateway names no gateway: each run brings a
 which its starter got from Qory Apiary and which names this gateway. Such a machine reaches
 the gateway over https alone, so a gateway that serves them has `gateway.tls`. See
 [Through a separate gateway](run.md#through-a-separate-gateway).
+
+A run's policy, from Qory Apiary, selects its credentials. When it selects none, the gateway
+selects them for a walled run, with `gateway.selects`. An entry names a credential this file
+defines; for one that takes an argument, it also names the label whose value is the
+argument, and the forge the run's `forge` label must name:
+
+```yaml
+gateway:
+  selects:
+    credentials:
+      - {name: github, argument_label: repository, forge: github.com}
+      - {name: model}
+```
+
+Where an entry names a label, its value must name one repository on that forge, or the run
+gets no credential from the entry. A run without a wall gets none from `gateway.selects`.
+`qory run` refuses `gateway.selects`: a run it starts with a gateway on the same machine
+takes its credentials from its policy.
 
 For a starter or a machine with a separate access key that reaches Qory Apiary only through it, the
 gateway passes on enrolment, the server's configuration, registrations and outcomes,

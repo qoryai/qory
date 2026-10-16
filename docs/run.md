@@ -753,8 +753,10 @@ The gateway is `qory gateway` on another machine, or a service on this one: see 
 gateway as a service](gateway.md). The session reaches it over TLS 1.3, at the address the
 run key names, and every request carries the run key. The proxy, the policy, the
 credentials and the access key are the gateway's, on its machine, and the gateway reports
-the run to Qory Apiary. Without a run key or `gateway.server.via`, nothing changes: `qory
-run` starts a gateway itself for each run.
+the run to Qory Apiary. The run's policy selects its credentials. When it selects none, the
+gateway can select them for a walled run, by the run's labels: see
+[gateway.selects](gateway.md#the-machines-behind-it). Without a run key or
+`gateway.server.via`, nothing changes: `qory run` starts a gateway itself for each run.
 
 The run's first line names the gateway and the run:
 

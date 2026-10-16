@@ -6,6 +6,12 @@ release may change what an existing document does, and states it under Upgrading
 
 ## [Unreleased]
 
+### Added
+
+- `gateway.selects` in forager.yaml: when a run's policy selects no credentials, `qory
+  gateway` selects them for a walled run by the run's labels, such as the GitHub credential
+  for the repository the run's `repository` label names. `qory run` refuses it.
+
 ## [0.13.0] - 2026-10-13
 
 ### Upgrading
