@@ -24,6 +24,7 @@ import (
 	"os/exec"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -109,7 +110,10 @@ var contract = sync.OnceValues(func() (*jsonschema.Schema, error) {
 // The program runs in a process group of its own, and the whole group is stopped when
 // describe returns, so no process of its group outlives it. Describe refuses a program
 // that does not exit 0 within [DescribeWait], with the one line it wrote on standard
-// error, and an answer that is not one JSON document the contract's schema accepts.
+// error, and an answer that is not one JSON document within the contract's limits that
+// the contract's schema accepts. The limits are checked before the schema, and the first
+// broken is the one refusal: the raw size, then the values the document holds, how deep
+// it nests, and the first string or member name too long, as [beyond] has them.
 func Describe(ctx context.Context, program string) (*Description, error) {
 	ctx, cancel := context.WithTimeout(ctx, describeWait)
 	defer cancel()
@@ -145,6 +149,9 @@ func Describe(ctx context.Context, program string) (*Description, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s describe did not print one JSON document: %w", program, err)
 	}
+	if err := beyond(program, doc); err != nil {
+		return nil, err
+	}
 	schema, err := contract()
 	if err != nil {
 		return nil, err
@@ -157,6 +164,109 @@ func Describe(ctx context.Context, program string) (*Description, error) {
 		return nil, fmt.Errorf("%s describe: %w", program, err)
 	}
 	return d, nil
+}
+
+// The limits of a description the integration contract states in words and its schema
+// cannot express: a string or a member name of at most maxText bytes of UTF-8, where the
+// schema counts characters; at most maxValues JSON values in the decoded document, the
+// document itself, each array entry and each member's value counting one, a container
+// or not, and member names not counting; and arrays and objects nested at most maxDepth
+// levels deep, the top-level object being level 1.
+const (
+	maxText   = 16384
+	maxValues = 4096
+	maxDepth  = 64
+)
+
+// The refusals of a description past a limit of [beyond]. Each names where the limit
+// is broken, never what is there.
+const (
+	refusedString = "%s describe printed a description the integration contract refuses: the string at %s is more than 16384 bytes"
+	refusedName   = "%s describe printed a description the integration contract refuses: the member name at %s is more than 16384 bytes"
+	refusedValues = "%s describe printed a description the integration contract refuses: it holds more than 4096 values"
+	refusedDepth  = "%s describe printed a description the integration contract refuses: it nests arrays and objects more than 64 deep"
+)
+
+// beyond refuses a description doc, as program printed it, past a limit of the
+// integration contract its schema cannot express, or returns nil. One limit is refused,
+// the first broken of: the values, then the depth, then the strings and member names,
+// the first too long in the order [walker.walk] visits them.
+func beyond(program string, doc any) error {
+	var w walker
+	if !w.walk(doc, 0) {
+		return fmt.Errorf(refusedValues, program)
+	}
+	if w.deepest > maxDepth {
+		return fmt.Errorf(refusedDepth, program)
+	}
+	if w.long != "" {
+		return fmt.Errorf(w.long, program, Printable(cmp.Or(w.at, "/")))
+	}
+	return nil
+}
+
+// walker counts the values of a description, notes how deep it nests, and keeps the
+// first string or member name longer than [maxText] bytes: its refusal and its JSON
+// pointer. path is the pointer's tokens of the value walked, joined only for the one
+// kept, so a long name is not copied into the pointer of every value under it.
+type walker struct {
+	values, deepest int
+	path            []string
+	long, at        string
+}
+
+// walk visits v, inside a container nested level deep, and every value under it, depth
+// first: an array's entries in order, an object's members in the order of their names,
+// each name before its value. It stops, returning false, at the value past [maxValues],
+// so it visits at most one more than that.
+func (w *walker) walk(v any, level int) bool {
+	w.values++
+	if w.values > maxValues {
+		return false
+	}
+	switch v := v.(type) {
+	case string:
+		w.note(len(v), refusedString)
+	case []any:
+		w.deepest = max(w.deepest, level+1)
+		for i, e := range v {
+			if !w.member(strconv.Itoa(i), e, level+1, false) {
+				return false
+			}
+		}
+	case map[string]any:
+		w.deepest = max(w.deepest, level+1)
+		for _, name := range slices.Sorted(maps.Keys(v)) {
+			if !w.member(name, v[name], level+1, true) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// member walks v under token, an array's index or, when named, an object's member name,
+// which is checked before v.
+func (w *walker) member(token string, v any, level int, named bool) bool {
+	w.path = append(w.path, token)
+	defer func() { w.path = w.path[:len(w.path)-1] }()
+	if named {
+		w.note(len(token), refusedName)
+	}
+	return w.walk(v, level)
+}
+
+// note keeps refusal and the pointer of the value walked when n bytes are past
+// [maxText] and nothing is kept yet.
+func (w *walker) note(n int, refusal string) {
+	if n <= maxText || w.long != "" {
+		return
+	}
+	var at strings.Builder
+	for _, token := range w.path {
+		at.WriteString("/" + pointerToken(token))
+	}
+	w.long, w.at = refusal, at.String()
 }
 
 // maxLine is the most runes of a program's text an error or a line quotes.

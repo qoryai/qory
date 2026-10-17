@@ -294,3 +294,115 @@ func TestADescriptionIsAtMost256KiB(t *testing.T) {
 		t.Errorf("262145 bytes: %v", err)
 	}
 }
+
+// TestTheContractsBoundsFixturesAreRefused describes the contract's three fixtures past
+// its bounds: the schema refuses the array of 1025 entries and the object of 1025
+// members, and the string of 16385 characters, 16385 bytes, is refused by its bytes,
+// which are checked before the schema.
+func TestTheContractsBoundsFixturesAreRefused(t *testing.T) {
+	for f, want := range map[string]string{
+		"description-settings-enum-1025-entries.json":       "a description the integration contract refuses: at '': 'allOf' failed; at '/settings/properties/level/enum': maxItems: got 1,025, want 1,024",
+		"description-settings-properties-1025-members.json": "a description the integration contract refuses: at '': 'allOf' failed; at '/settings/properties': maxProperties: got 1,025, want 1,024",
+		"description-string-16385-characters.json":          "a description the integration contract refuses: the string at /description is more than 16384 bytes",
+	} {
+		doc, err := os.ReadFile(filepath.Join("testdata/fixtures/invalid", f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = integration.Describe(context.Background(), program(t, string(doc)))
+		if err == nil || !strings.HasSuffix(err.Error(), want) {
+			t.Errorf("%s: %v, want %q", f, err, want)
+		}
+	}
+}
+
+// bounded is a description of 12 values whose settings schema's default is fill: it
+// holds 12 values and as many as fill holds, and nests 4 deep, or 2 and as deep as fill
+// nests when that is deeper.
+func bounded(fill string) string {
+	return `{"version": 1, "name": "acme-tracker", "title": "Acme tracker", "program_version": "0.1.0", "settings": {"type": "object", "default": ` + fill + `}, "roles": {"credential": {"argument": "[A-Z]+", "hosts": ["tracker.acme.example"]}}}`
+}
+
+// values is an array that holds n values, itself included, n at least 1: arrays of at
+// most 1000 zeros, within the schema's bounds.
+func values(n int) string {
+	var parts []string
+	for n--; n > 0; {
+		k := min(n-1, 1000)
+		parts = append(parts, "["+strings.TrimSuffix(strings.Repeat("0,", k), ",")+"]")
+		n -= k + 1
+	}
+	return "[" + strings.Join(parts, ",") + "]"
+}
+
+// TestADescriptionIsHeldToTheContractsLimits describes a description at each limit the
+// integration contract states and its schema cannot express, which is read, and one
+// past it, which is refused with where, never what: a string and a member name of 16384
+// bytes of UTF-8, under 16384 characters, and of 16385; 4096 values and 4097; and
+// arrays or objects 64 deep and 65.
+func TestADescriptionIsHeldToTheContractsLimits(t *testing.T) {
+	refuses := " describe printed a description the integration contract refuses: "
+	under := strings.Repeat("é", 8192) // 16384 bytes, 8192 characters
+	over := under + "a"                // 16385 bytes, 8193 characters
+	described := func(desc string) string {
+		return strings.Replace(bounded("0"), `"title": "Acme tracker"`, `"title": "Acme tracker", "description": "`+desc+`"`, 1)
+	}
+	named := func(name string) string {
+		return strings.Replace(bounded("0"), `"type": "object", "default": 0`, `"type": "object", "properties": {"`+name+`": {"description": "MARKED"}}`, 1)
+	}
+	nested := func(open, close string, n int) string { return strings.Repeat(open, n) + strings.Repeat(close, n) }
+	for _, c := range []struct{ name, doc, want string }{
+		{"a string of 16384 bytes", described(under), ""},
+		{"a string of 16385 bytes", described(over), "the string at /description is more than 16384 bytes"},
+		{"a member name of 16384 bytes", named(under), ""},
+		{"a member name of 16385 bytes", named(over), "the member name at " + integration.Printable("/settings/properties/"+over) + " is more than 16384 bytes"},
+		{"a string in an array, under a name with / and ~", bounded(`{"a/b~": [0, "` + over + `"]}`), "the string at /settings/default/a~1b~0/1 is more than 16384 bytes"},
+		{"4096 values", bounded(values(4096 - 12)), ""},
+		{"4097 values", bounded(values(4097 - 12)), "it holds more than 4096 values"},
+		{"arrays 64 deep", bounded(nested("[", "]", 62)), ""},
+		{"arrays 65 deep", bounded(nested("[", "]", 63)), "it nests arrays and objects more than 64 deep"},
+		{"objects 64 deep", bounded(strings.Repeat(`{"a":`, 62) + "0" + strings.Repeat("}", 62)), ""},
+		{"objects 65 deep", bounded(strings.Repeat(`{"a":`, 63) + "0" + strings.Repeat("}", 63)), "it nests arrays and objects more than 64 deep"},
+		// One refusal, of the first limit broken: the values, the depth, then the strings,
+		// and each before the schema.
+		{"every limit", strings.Replace(described(over), `"default": 0`, `"default": [`+nested("[", "]", 63)+","+values(4097)+"]", 1), "it holds more than 4096 values"},
+		{"the depth and a string", strings.Replace(described(over), `"default": 0`, `"default": `+nested("[", "]", 63), 1), "it nests arrays and objects more than 64 deep"},
+		// Members are visited in the order of their names, not as they were printed.
+		{"two strings", strings.Replace(described(over), `"title": "Acme tracker"`, `"title": "`+over+`"`, 1), "the string at /description is more than 16384 bytes"},
+	} {
+		prog := program(t, c.doc)
+		_, err := integration.Describe(context.Background(), prog)
+		switch {
+		case c.want == "" && err != nil:
+			t.Errorf("%s: %v", c.name, err)
+		case c.want != "" && (err == nil || err.Error() != prog+refuses+c.want):
+			t.Errorf("%s: %v, want %q", c.name, err, prog+refuses+c.want)
+		case err != nil && (strings.Contains(err.Error(), "MARKED") || strings.Contains(err.Error(), "éa") || strings.Count(err.Error(), "é") > 200):
+			t.Errorf("%s: the refusal carries a value: %.300v", c.name, err)
+		}
+	}
+}
+
+// TestASourceRoleIsReadAsTheContractHasIt describes a program that plays the source
+// role as the contract defines it, which is read with the role and no credential, and
+// one whose source role misses a field or has one the contract does not define, which
+// is refused.
+func TestASourceRoleIsReadAsTheContractHasIt(t *testing.T) {
+	source := `{"description": "Reads the open items of Acme Tracker projects.", "program": "qory-acme-tracker", "setup": {"command": "qory-acme-tracker setup", "help": "Asks for the address of the Acme Tracker site."}, "start": "qory-acme-tracker serve", "connect": "Acme Tracker asks you to sign in.", "access": "In Acme Tracker, open Settings to change the projects.", "disconnect": "In Acme Tracker, open Settings and remove the adapter."}`
+	doc := func(role string) string {
+		return `{"version": 1, "name": "acme-tracker", "title": "Acme tracker", "program_version": "0.1.0", "settings": {"type": "object"}, "roles": {"source": ` + role + `}}`
+	}
+	d, err := integration.Describe(context.Background(), program(t, doc(source)))
+	if err != nil || strings.Join(d.Roles, " ") != "source" || d.Credential != nil {
+		t.Errorf("a source role: %+v, %v", d, err)
+	}
+	for _, c := range []struct{ role, want string }{
+		{strings.Replace(source, `"start": "qory-acme-tracker serve", `, "", 1), "at '/roles/source': missing property 'start'"},
+		{strings.Replace(source, `"program"`, `"button": "Connect", "program"`, 1), "at '/roles/source': additional properties 'button' not allowed"},
+	} {
+		_, err := integration.Describe(context.Background(), program(t, doc(c.role)))
+		if err == nil || !strings.HasSuffix(err.Error(), "a description the integration contract refuses: "+c.want) {
+			t.Errorf("%s: %v, want %q", c.role, err, c.want)
+		}
+	}
+}
