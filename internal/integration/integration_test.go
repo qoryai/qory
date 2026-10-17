@@ -425,7 +425,7 @@ func TestADescriptionReadsAsQoryApiaryReadsIt(t *testing.T) {
 	over := strings.Repeat("é", 8192) + "a"
 	// u is a backslash and u, which start a \u escape in the JSON a test prints.
 	u := string([]byte{0x5c, 'u'})
-	lone := notOne + "the string at /description holds a " + u + " escape of a lone surrogate"
+	lone := refuses + "the string at /description holds a " + u + " escape of a lone surrogate"
 	for _, c := range []struct{ name, doc, want string }{
 		{"a surrogate pair", described("VALUE-MARK " + u + "d83d" + u + "de00"), ""},
 		{"a character past U+FFFF", described("VALUE-MARK " + string(rune(0x1F600))), ""},
@@ -435,15 +435,17 @@ func TestADescriptionReadsAsQoryApiaryReadsIt(t *testing.T) {
 		{"a high surrogate before another escape", described("VALUE-MARK " + u + "d83d" + u + "0041"), lone},
 		{"two high surrogates before a low one", described("VALUE-MARK " + u + "d83d" + u + "d83d" + u + "de00"), lone},
 		{"a lone low surrogate", described("VALUE-MARK " + u + "dc00"), lone},
-		{"a lone surrogate in an array", bounded(`[0, {"k": ["VALUE-MARK ` + u + `d800"]}]`), notOne + "the string at /settings/default/1/k/0 holds a " + u + " escape of a lone surrogate"},
-		{"a lone surrogate in a member name", bounded(`{"x": {"a/` + u + `dfff": "VALUE-MARK"}}`), notOne + "the member name at " + integration.Printable("/settings/default/x/a~1"+string(rune(0xFFFD))) + " holds a " + u + " escape of a lone surrogate"},
-		{"a name twice in a nested object", bounded(`{"x": {"a": 1, "b": "VALUE-MARK", "a": 2}}`), refuses + "the object at /settings/default/x names a twice"},
-		{"a name twice, once escaped", bounded(`{"x": [{"a": 1, "` + u + `0061": "VALUE-MARK"}]}`), refuses + "the object at /settings/default/x/0 names a twice"},
-		{"a name twice in the document itself", strings.Replace(bounded("0"), `"title": "Acme tracker"`, `"title": "Acme tracker", "title": "VALUE-MARK"`, 1), refuses + "the object at / names title twice"},
+		{"a lone surrogate in an array", bounded(`[0, {"k": ["VALUE-MARK ` + u + `d800"]}]`), refuses + "the string at /settings/default/1/k/0 holds a " + u + " escape of a lone surrogate"},
+		{"a lone surrogate in a member name", bounded(`{"x": {"a/` + u + `dfff": "VALUE-MARK"}}`), refuses + "the member name at " + integration.Printable("/settings/default/x/a~1"+string(rune(0xFFFD))) + " holds a " + u + " escape of a lone surrogate"},
+		{"a name twice in a nested object", bounded(`{"x": {"a": 1, "b": "VALUE-MARK", "a": 2}}`), refuses + "the object at /settings/default/x names \"a\" twice"},
+		{"a name twice, once escaped", bounded(`{"x": [{"a": 1, "` + u + `0061": "VALUE-MARK"}]}`), refuses + "the object at /settings/default/x/0 names \"a\" twice"},
+		{"an empty name twice", bounded(`{"x": {"": 1, "": "VALUE-MARK"}}`), refuses + `the object at /settings/default/x names "" twice`},
+		{"a name with a space twice", bounded(`{"x": {"a b": 1, "a b": "VALUE-MARK"}}`), refuses + `the object at /settings/default/x names "a b" twice`},
+		{"a name twice in the document itself", strings.Replace(bounded("0"), `"title": "Acme tracker"`, `"title": "Acme tracker", "title": "VALUE-MARK"`, 1), refuses + "the object at / names \"title\" twice"},
 		// The first in the document is refused, and before the values and the strings.
-		{"a name twice before a lone surrogate", bounded(`{"a": 1, "a": 2, "z": "VALUE-MARK ` + u + `d800"}`), refuses + "the object at /settings/default names a twice"},
-		{"a lone surrogate before a name twice", bounded(`{"a": "VALUE-MARK ` + u + `d800", "b": 1, "b": 2}`), notOne + "the string at /settings/default/a holds a " + u + " escape of a lone surrogate"},
-		{"a name twice and 4097 values", bounded(`{"a": ` + values(4097) + `, "a": 0}`), refuses + "the object at /settings/default names a twice"},
+		{"a name twice before a lone surrogate", bounded(`{"a": 1, "a": 2, "z": "VALUE-MARK ` + u + `d800"}`), refuses + "the object at /settings/default names \"a\" twice"},
+		{"a lone surrogate before a name twice", bounded(`{"a": "VALUE-MARK ` + u + `d800", "b": 1, "b": 2}`), refuses + "the string at /settings/default/a holds a " + u + " escape of a lone surrogate"},
+		{"a name twice and 4097 values", bounded(`{"a": ` + values(4097) + `, "a": 0}`), refuses + "the object at /settings/default names \"a\" twice"},
 		{"a lone surrogate in a string too long", described(over + u + "d800"), lone},
 	} {
 		prog := program(t, c.doc)
@@ -469,11 +471,11 @@ func TestADescriptionReadsAsQoryApiaryReadsIt(t *testing.T) {
 	}
 }
 
-// TestTheScanOfADescriptionIsLinear scans descriptions of 256 KiB built to cost the
-// most: many small objects, one object of many names, one name and one string of many
+// TestTheScanOfAHostileDescriptionIsQuick scans descriptions of 256 KiB built to cost
+// the most: many small objects, one object of many names, one name and one string of many
 // escapes, and arrays nested deep. Each is read once, each object holds its names
 // only while it is open, and none takes long.
-func TestTheScanOfADescriptionIsLinear(t *testing.T) {
+func TestTheScanOfAHostileDescriptionIsQuick(t *testing.T) {
 	const size = 262144
 	fill := func(head, unit, sep, tail string) []byte {
 		var b strings.Builder
@@ -519,8 +521,8 @@ func TestTheContractsReaderFixturesAreRefused(t *testing.T) {
 	u := string([]byte{0x5c, 'u'})
 	want := map[string]string{
 		"description-string-invalid-utf-8.json":  " describe did not print one JSON document: it is not valid UTF-8",
-		"description-string-lone-surrogate.json": " describe did not print one JSON document: the string at /title holds a " + u + " escape of a lone surrogate",
-		"description-member-repeated.json":       " describe printed a description the integration contract refuses: the object at /settings names type twice",
+		"description-string-lone-surrogate.json": " describe printed a description the integration contract refuses: the string at /title holds a " + u + " escape of a lone surrogate",
+		"description-member-repeated.json":       " describe printed a description the integration contract refuses: the object at /settings names \"type\" twice",
 	}
 	fixtures, _ := filepath.Glob("testdata/fixtures/refused-by-reader/*.json")
 	if len(fixtures) != len(want) {

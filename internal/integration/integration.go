@@ -199,16 +199,16 @@ const (
 	refusedDepth  = "%s describe printed a description the integration contract refuses: it nests arrays and objects more than 64 deep"
 )
 
-// The refusals of a description Qory Apiary's reader takes otherwise than Go's: Go
-// reads invalid UTF-8 and an escaped lone surrogate as U+FFFD, which Qory Apiary
-// refuses, and keeps the last of a repeated member name, where Qory Apiary keeps the
-// first. qory refuses all three, so no description reads one way here and another
-// there.
+// The refusals of a description that breaks a rule of the integration contract a
+// schema cannot express: a description is JSON in UTF-8, no string or member name holds
+// a \u escape of a lone surrogate, and no object repeats a member. Qory Apiary refuses
+// a description that breaks one; Go's reader takes all three, reading the first two as
+// U+FFFD and keeping the last of a repeated member, so they are refused here.
 const (
 	refusedEncoding        = "%s describe did not print one JSON document: it is not valid UTF-8"
-	refusedSurrogateString = `%s describe did not print one JSON document: the string at %s holds a \u escape of a lone surrogate`
-	refusedSurrogateName   = `%s describe did not print one JSON document: the member name at %s holds a \u escape of a lone surrogate`
-	refusedRepeated        = "%s describe printed a description the integration contract refuses: the object at %s names %s twice"
+	refusedSurrogateString = `%s describe printed a description the integration contract refuses: the string at %s holds a \u escape of a lone surrogate`
+	refusedSurrogateName   = `%s describe printed a description the integration contract refuses: the member name at %s holds a \u escape of a lone surrogate`
+	refusedRepeated        = "%s describe printed a description the integration contract refuses: the object at %s names \"%s\" twice"
 )
 
 // scan refuses a description raw, as program printed it, one JSON document of valid
