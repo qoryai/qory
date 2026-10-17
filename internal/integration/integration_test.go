@@ -17,10 +17,11 @@ import (
 
 // The fixtures under testdata/fixtures are contracts/integration/v1/fixtures of
 // github.com/qoryai/integrations, copied unchanged with the schema: the ones of v0.3.0,
-// which the contract as of commit b02db3c keeps as they were, and three of that commit
-// under invalid that break the bounds of every value: an array of 1025 entries, an
-// object of 1025 members and a string of 16385 characters. unknown-role.json plays
-// acme_role as the role qory does not know.
+// which the contract as of commit 952eec3 keeps as they were; three under invalid that
+// break the bounds of every value, an array of 1025 entries, an object of 1025 members
+// and a string of 16385 characters; and the three under refused-by-reader, which the
+// schema accepts once they are read and a reader refuses on their raw bytes.
+// unknown-role.json plays acme_role as the role qory does not know.
 
 // program writes a program that answers describe with doc and exits 0.
 func program(t *testing.T, doc string) string {
@@ -507,6 +508,33 @@ func TestTheScanOfADescriptionIsLinear(t *testing.T) {
 		}
 		if took := time.Since(began); took > 5*time.Second {
 			t.Errorf("%s: the scan took %s", name, took)
+		}
+	}
+}
+
+// TestTheContractsReaderFixturesAreRefused describes the contract's three fixtures the
+// schema accepts once they are read and a reader refuses on their raw bytes, each
+// printed byte for byte: invalid UTF-8, a lone surrogate escape and a repeated member.
+func TestTheContractsReaderFixturesAreRefused(t *testing.T) {
+	u := string([]byte{0x5c, 'u'})
+	want := map[string]string{
+		"description-string-invalid-utf-8.json":  " describe did not print one JSON document: it is not valid UTF-8",
+		"description-string-lone-surrogate.json": " describe did not print one JSON document: the string at /title holds a " + u + " escape of a lone surrogate",
+		"description-member-repeated.json":       " describe printed a description the integration contract refuses: the object at /settings names type twice",
+	}
+	fixtures, _ := filepath.Glob("testdata/fixtures/refused-by-reader/*.json")
+	if len(fixtures) != len(want) {
+		t.Fatalf("fixtures %v", fixtures)
+	}
+	for _, f := range fixtures {
+		doc, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		prog := printing(t, doc)
+		_, err = integration.Describe(context.Background(), prog)
+		if w, ok := want[filepath.Base(f)]; !ok || err == nil || err.Error() != prog+w {
+			t.Errorf("%s: %v, want %q", f, err, prog+w)
 		}
 	}
 }

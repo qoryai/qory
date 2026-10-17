@@ -39,7 +39,7 @@ import (
 )
 
 // descriptionSchema is a copy of contracts/integration/v1/description.schema.json of
-// github.com/qoryai/integrations, byte for byte: the contract as of commit b02db3c. A
+// github.com/qoryai/integrations, byte for byte: the contract as of commit 952eec3. A
 // new revision of the contract is copied over it.
 //
 //go:embed description.schema.json
