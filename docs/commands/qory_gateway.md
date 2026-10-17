@@ -18,7 +18,7 @@ The gateway section of forager.yaml in ~/.config/qory sets it:
   egress        the hosts a run may reach; it narrows Qory Apiary's policy
   credentials   secrets the gateway sets on requests; the agents never have them
   integrations  programs that supply such secrets
-  selects       the credentials it selects for a walled run whose policy selects none
+  selects       the credentials it selects for a walled run when the server's policy selects none
 
 A machine whose runs go through this gateway names no gateway: each run brings a run
 key, which its starter got from Qory Apiary and which names this gateway. For machines
