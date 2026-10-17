@@ -12,6 +12,16 @@ release may change what an existing document does, and states it under Upgrading
   gateway` selects them for a walled run by the run's labels, such as the GitHub credential
   for the repository the run's `repository` label names. `qory run` refuses it.
 
+### Changed
+
+- `qory access-key enrol` takes an enrolment code that carries the prefix of the kind it
+  enrols, such as `qecn_` for a node and `qecg_` for a gateway. A `qec_` code without a
+  kind is malformed, and a code made for another kind is refused before anything is made
+  or sent.
+- `qory access-key enrol` keeps no key the server enrolled for a kind other than the
+  code's. It deletes the key from `access-key-secret.new`, prints and keeps nothing, and
+  says to revoke the key in Qory Apiary.
+
 ## [0.13.0] - 2026-10-13
 
 ### Upgrading
