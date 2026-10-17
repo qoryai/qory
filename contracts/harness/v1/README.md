@@ -911,8 +911,8 @@ the document under `harness` is (§Extending a stack).
 nowhere else: it has no counterpart in a repository or an ancestor directory, so a
 checkout cannot set the policy the agent runs under, which server the run reports to or
 what the agent is enclosed in. Its sections follow Forager's parts: `gateway` holds
-`egress`, `server`, `credentials`, `tools` and `integrations`; `session` holds `instance`
-and `run`; `wall` is the wall. `gateway.egress` and `gateway.server` are the Forager
+`egress`, `server`, `credentials`, `tools`, `integrations` and `selects`; `session` holds
+`instance` and `run`; `wall` is the wall. `gateway.egress` and `gateway.server` are the Forager
 contract's objects, `https://qory.dev/contracts/forager/v1/`, in that contract's
 grammar; `qory run` passes them to Forager as they are, `gateway.server` with the access
 key's id and the pin from the environment when the file holds none. `wall` chooses that
