@@ -25,7 +25,8 @@ release may change what an existing document does, and states it under Upgrading
   and `qory config`, refuses a description past the integration contract's limits, as
   Qory Apiary does: a string or member name over 16384 bytes, an array or object over
   1024 entries, more than 4096 values, nesting deeper than 64 levels, or more than 256
-  KiB.
+  KiB, and a description that is not valid UTF-8, holds a `\u` escape of a lone
+  surrogate or repeats a member.
 
 ## [0.13.0] - 2026-10-13
 
