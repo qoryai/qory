@@ -14,8 +14,11 @@ import (
 )
 
 // The fixtures under testdata/fixtures are contracts/integration/v1/fixtures of
-// github.com/qoryai/integrations at v0.3.0, copied unchanged with the schema;
-// unknown-role.json plays acme_role as the role qory does not know.
+// github.com/qoryai/integrations, copied unchanged with the schema: the ones of v0.3.0,
+// which the contract as of commit b02db3c keeps as they were, and three of that commit
+// under invalid that break the bounds of every value: an array of 1025 entries, an
+// object of 1025 members and a string of 16385 characters. unknown-role.json plays
+// acme_role as the role qory does not know.
 
 // program writes a program that answers describe with doc and exits 0.
 func program(t *testing.T, doc string) string {
@@ -34,7 +37,7 @@ func program(t *testing.T, doc string) string {
 func TestTheSchemaCopyHoldsToTheContractsFixtures(t *testing.T) {
 	valid, _ := filepath.Glob("testdata/fixtures/*.json")
 	invalid, _ := filepath.Glob("testdata/fixtures/invalid/*.json")
-	if len(valid) != 4 || len(invalid) != 9 {
+	if len(valid) != 4 || len(invalid) != 12 {
 		t.Fatalf("fixtures %v %v", valid, invalid)
 	}
 	for _, f := range valid {
