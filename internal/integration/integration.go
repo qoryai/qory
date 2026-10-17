@@ -55,9 +55,13 @@ const DescribeWait = 10 * time.Second
 // describeWait is [DescribeWait], which a test shortens.
 var describeWait = DescribeWait
 
-// maxOutput is the most of describe's output that is kept, on either stream; a
-// description is a few kilobytes.
-const maxOutput = 1 << 20
+// maxDescription is the most of describe's standard output that is kept, the most raw
+// bytes the integration contract takes for a description, 256 KiB; a description is a
+// few kilobytes.
+const maxDescription = 256 << 10
+
+// maxStandardError is the most of describe's standard error that is kept.
+const maxStandardError = 1 << 20
 
 // RoleCredential is the credential role, the one this package expands.
 const RoleCredential = "credential"
@@ -114,7 +118,7 @@ func Describe(ctx context.Context, program string) (*Description, error) {
 	// The access key's variables and the run key are Forager's alone: describe never
 	// receives them.
 	cmd.Env = accesskey.WithoutVariables(os.Environ())
-	stdout, stderr := &capped{}, &capped{}
+	stdout, stderr := &capped{limit: maxDescription}, &capped{limit: maxStandardError}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	// A process left holding the output is not waited for past the limit.
 	cmd.WaitDelay = time.Second
@@ -135,7 +139,7 @@ func Describe(ctx context.Context, program string) (*Description, error) {
 		return nil, fmt.Errorf("%s describe: %w", program, err)
 	}
 	if stdout.over {
-		return nil, fmt.Errorf("%s describe printed more than %d bytes; a description is a few kilobytes", program, maxOutput)
+		return nil, fmt.Errorf("%s describe printed more than %d bytes; a description is a few kilobytes", program, maxDescription)
 	}
 	doc, err := jsonschema.UnmarshalJSON(strings.NewReader(stdout.String()))
 	if err != nil {
@@ -446,19 +450,20 @@ func propertiesPath(schemaURL string) ([]string, bool) {
 	return path, true
 }
 
-// capped keeps the first [maxOutput] bytes written to it and drops the rest, noting
-// that it did, so a program that prints without end holds no more than that. The buffer
-// is a field and not embedded, so a copy into capped goes through Write and never
-// through the buffer's own ReadFrom.
+// capped keeps the first limit bytes written to it and drops the rest, noting that it
+// did, so a program that prints without end holds no more than that. The buffer is a
+// field and not embedded, so a copy into capped goes through Write and never through
+// the buffer's ReadFrom.
 type capped struct {
-	buf  bytes.Buffer
-	over bool
+	limit int
+	buf   bytes.Buffer
+	over  bool
 }
 
 // Write keeps what fits and reports every byte written, so the program is not stopped
 // by a short write before its status is known.
 func (c *capped) Write(p []byte) (int, error) {
-	if room := maxOutput - c.buf.Len(); len(p) > room {
+	if room := c.limit - c.buf.Len(); len(p) > room {
 		c.over = true
 		c.buf.Write(p[:max(room, 0)])
 		return len(p), nil

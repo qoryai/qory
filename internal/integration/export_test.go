@@ -12,5 +12,5 @@ func ShortenDescribeWait(t *testing.T, d time.Duration) {
 	t.Cleanup(func() { describeWait = before })
 }
 
-// MaxOutput is the most of describe's output that is kept.
-const MaxOutput = maxOutput
+// MaxDescription is the most of describe's standard output that is kept.
+const MaxDescription = maxDescription

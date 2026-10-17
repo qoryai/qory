@@ -197,11 +197,11 @@ func TestDescribeKeepsWhatItQuotesShort(t *testing.T) {
 	if err != nil || d.ProgramVersion != "/" {
 		t.Errorf("describe ran in %+v, %v; want /", d, err)
 	}
-	_, err = integration.Describe(context.Background(), script(t, fmt.Sprintf("head -c %d /dev/zero\n", integration.MaxOutput+1)))
-	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("describe printed more than %d bytes", integration.MaxOutput)) {
+	_, err = integration.Describe(context.Background(), script(t, fmt.Sprintf("head -c %d /dev/zero\n", integration.MaxDescription+1)))
+	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("describe printed more than %d bytes", integration.MaxDescription)) {
 		t.Errorf("more than the cap: %v", err)
 	}
-	if _, err := integration.Describe(context.Background(), script(t, fmt.Sprintf("head -c %d /dev/zero | tr '\\0' ' '\necho '{}'\n", integration.MaxOutput-10))); err == nil || !strings.Contains(err.Error(), "a description the integration contract refuses") {
+	if _, err := integration.Describe(context.Background(), script(t, fmt.Sprintf("head -c %d /dev/zero | tr '\\0' ' '\necho '{}'\n", integration.MaxDescription-10))); err == nil || !strings.Contains(err.Error(), "a description the integration contract refuses") {
 		t.Errorf("just under the cap is read: %v", err)
 	}
 	_, err = integration.Describe(context.Background(), script(t, "printf 'bad\\033thing\\n' >&2\nexit 1\n"))
@@ -261,5 +261,36 @@ func TestDescribeNeverReceivesTheAccessKey(t *testing.T) {
 	body := "test -z \"$QORY_ACCESS_KEY_SECRET$QORY_ACCESS_KEY_ID$QORY_APIARY_PUBLIC_KEY$QORY_RUN_KEY\" || exit 7\ntest \"$QORY_TEST_KEPT\" = kept || exit 8\ncat <<'EOF'\n" + string(doc) + "\nEOF\n"
 	if _, err := integration.Describe(context.Background(), script(t, body)); err != nil {
 		t.Errorf("describe: %v", err)
+	}
+}
+
+// printing writes a program that prints out, byte for byte, and exits 0.
+func printing(t *testing.T, out []byte) string {
+	t.Helper()
+	dir := t.TempDir()
+	file := filepath.Join(dir, "description")
+	if err := os.WriteFile(file, out, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return script(t, "cat '"+file+"'\n")
+}
+
+// TestADescriptionIsAtMost256KiB reads a description of exactly 262144 bytes, the most
+// the integration contract takes, and refuses one byte more by its size alone.
+func TestADescriptionIsAtMost256KiB(t *testing.T) {
+	if integration.MaxDescription != 262144 {
+		t.Fatalf("the cap is %d bytes, want 262144", integration.MaxDescription)
+	}
+	doc, err := os.ReadFile("testdata/fixtures/acme-tracker.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	padded := func(n int) []byte { return append(bytes.Clone(doc), bytes.Repeat([]byte(" "), n-len(doc))...) }
+	if d, err := integration.Describe(context.Background(), printing(t, padded(262144))); err != nil || d.Name != "acme-tracker" {
+		t.Errorf("262144 bytes: %+v, %v", d, err)
+	}
+	_, err = integration.Describe(context.Background(), printing(t, padded(262145)))
+	if err == nil || !strings.HasSuffix(err.Error(), " describe printed more than 262144 bytes; a description is a few kilobytes") {
+		t.Errorf("262145 bytes: %v", err)
 	}
 }
