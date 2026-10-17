@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/qoryai/qory/internal/integration"
 )
@@ -403,6 +405,108 @@ func TestASourceRoleIsReadAsTheContractHasIt(t *testing.T) {
 		_, err := integration.Describe(context.Background(), program(t, doc(c.role)))
 		if err == nil || !strings.HasSuffix(err.Error(), "a description the integration contract refuses: "+c.want) {
 			t.Errorf("%s: %v, want %q", c.role, err, c.want)
+		}
+	}
+}
+
+// TestADescriptionReadsAsQoryApiaryReadsIt refuses what Qory Apiary's reader refuses and
+// Go's reads otherwise: invalid UTF-8, a \u escape of a lone surrogate in a string or a
+// member name, and an object that names a member twice, compared as the names read,
+// each refused before the values are counted and before the schema, the first in the
+// document, with where and never what. A surrogate pair, an escaped backslash before u,
+// and one name in two objects are read.
+func TestADescriptionReadsAsQoryApiaryReadsIt(t *testing.T) {
+	notOne := " describe did not print one JSON document: "
+	refuses := " describe printed a description the integration contract refuses: "
+	described := func(desc string) string {
+		return strings.Replace(bounded("0"), `"title": "Acme tracker"`, `"title": "Acme tracker", "description": "`+desc+`"`, 1)
+	}
+	over := strings.Repeat("é", 8192) + "a"
+	// u is a backslash and u, which start a \u escape in the JSON a test prints.
+	u := string([]byte{0x5c, 'u'})
+	lone := notOne + "the string at /description holds a " + u + " escape of a lone surrogate"
+	for _, c := range []struct{ name, doc, want string }{
+		{"a surrogate pair", described("VALUE-MARK " + u + "d83d" + u + "de00"), ""},
+		{"a character past U+FFFF", described("VALUE-MARK " + string(rune(0x1F600))), ""},
+		{"an escaped backslash before u", described("VALUE-MARK " + string([]byte{0x5c}) + u + "d800"), ""},
+		{"one name in two objects", bounded(`{"x": {"a": 1}, "y": {"a": 1, "b": [{"a": 1}, {"a": 2}]}}`), ""},
+		{"a lone high surrogate at the end", described("VALUE-MARK " + u + "d800"), lone},
+		{"a high surrogate before another escape", described("VALUE-MARK " + u + "d83d" + u + "0041"), lone},
+		{"two high surrogates before a low one", described("VALUE-MARK " + u + "d83d" + u + "d83d" + u + "de00"), lone},
+		{"a lone low surrogate", described("VALUE-MARK " + u + "dc00"), lone},
+		{"a lone surrogate in an array", bounded(`[0, {"k": ["VALUE-MARK ` + u + `d800"]}]`), notOne + "the string at /settings/default/1/k/0 holds a " + u + " escape of a lone surrogate"},
+		{"a lone surrogate in a member name", bounded(`{"x": {"a/` + u + `dfff": "VALUE-MARK"}}`), notOne + "the member name at " + integration.Printable("/settings/default/x/a~1"+string(rune(0xFFFD))) + " holds a " + u + " escape of a lone surrogate"},
+		{"a name twice in a nested object", bounded(`{"x": {"a": 1, "b": "VALUE-MARK", "a": 2}}`), refuses + "the object at /settings/default/x names a twice"},
+		{"a name twice, once escaped", bounded(`{"x": [{"a": 1, "` + u + `0061": "VALUE-MARK"}]}`), refuses + "the object at /settings/default/x/0 names a twice"},
+		{"a name twice in the document itself", strings.Replace(bounded("0"), `"title": "Acme tracker"`, `"title": "Acme tracker", "title": "VALUE-MARK"`, 1), refuses + "the object at / names title twice"},
+		// The first in the document is refused, and before the values and the strings.
+		{"a name twice before a lone surrogate", bounded(`{"a": 1, "a": 2, "z": "VALUE-MARK ` + u + `d800"}`), refuses + "the object at /settings/default names a twice"},
+		{"a lone surrogate before a name twice", bounded(`{"a": "VALUE-MARK ` + u + `d800", "b": 1, "b": 2}`), notOne + "the string at /settings/default/a holds a " + u + " escape of a lone surrogate"},
+		{"a name twice and 4097 values", bounded(`{"a": ` + values(4097) + `, "a": 0}`), refuses + "the object at /settings/default names a twice"},
+		{"a lone surrogate in a string too long", described(over + u + "d800"), lone},
+	} {
+		prog := program(t, c.doc)
+		_, err := integration.Describe(context.Background(), prog)
+		switch {
+		case c.want == "" && err != nil:
+			t.Errorf("%s: %v", c.name, err)
+		case c.want != "" && (err == nil || err.Error() != prog+c.want):
+			t.Errorf("%s: %.300v, want %q", c.name, err, prog+c.want)
+		case err != nil && (strings.Contains(err.Error(), "VALUE-MARK") || strings.Contains(err.Error(), "é")):
+			t.Errorf("%s: the refusal carries a value: %.300v", c.name, err)
+		}
+	}
+	// Invalid UTF-8, a byte that starts no character or a surrogate written as UTF-8
+	// in three bytes, is refused before the JSON is read, and before a name twice.
+	for _, bad := range [][]byte{{0xff}, {0xed, 0xa0, 0x80}} {
+		doc := strings.Replace(described("VALUE-MARK "+string(bad)), `"version": 1`, `"version": 1, "version": 1`, 1)
+		prog := printing(t, []byte(doc))
+		_, err := integration.Describe(context.Background(), prog)
+		if err == nil || err.Error() != prog+notOne+"it is not valid UTF-8" {
+			t.Errorf("% x: %v", bad, err)
+		}
+	}
+}
+
+// TestTheScanOfADescriptionIsLinear scans descriptions of 256 KiB built to cost the
+// most: many small objects, one object of many names, one name and one string of many
+// escapes, and arrays nested deep. Each is read once, each object holds its names
+// only while it is open, and none takes long.
+func TestTheScanOfADescriptionIsLinear(t *testing.T) {
+	const size = 262144
+	fill := func(head, unit, sep, tail string) []byte {
+		var b strings.Builder
+		b.WriteString(head)
+		for i := 0; b.Len() < size-len(tail)-len(unit)-len(sep)-16; i++ {
+			if i > 0 {
+				b.WriteString(sep)
+			}
+			b.WriteString(strings.ReplaceAll(unit, "#", strconv.Itoa(i)))
+		}
+		b.WriteString(tail)
+		return []byte(b.String())
+	}
+	// A pair, an escaped backslash, and an escaped a.
+	u := string([]byte{0x5c, 'u'})
+	escapes := u + "d83d" + u + "de00" + string([]byte{0x5c, 0x5c}) + u + "0061"
+	for name, doc := range map[string][]byte{
+		"many objects":         fill(`{"a": [`, `{"k#": 0, "j": [1, "x"]}`, ",", `]}`),
+		"one object of names":  fill(`{`, `"k#": 0`, ",", `}`),
+		"a name of escapes":    fill(`{"`, escapes, "", `": 0}`),
+		"a string of escapes":  fill(`{"a": "`, escapes, "", `"}`),
+		"arrays nested deep":   []byte(`{"a": ` + strings.Repeat("[", 9000) + strings.Repeat("]", 9000) + `}`),
+		"objects nested deep":  []byte(strings.Repeat(`{"a": `, 9000) + "0" + strings.Repeat("}", 9000)),
+		"many repeated levels": fill(`[`, `{"a": {"a": {"a": 0}}}`, ",", `]`),
+	} {
+		if !json.Valid(doc) || len(doc) > size {
+			t.Fatalf("%s: %d bytes, valid %v", name, len(doc), json.Valid(doc))
+		}
+		began := time.Now()
+		if err := integration.Scan("describe", doc); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+		if took := time.Since(began); took > 5*time.Second {
+			t.Errorf("%s: the scan took %s", name, took)
 		}
 	}
 }

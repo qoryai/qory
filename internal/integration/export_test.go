@@ -14,3 +14,6 @@ func ShortenDescribeWait(t *testing.T, d time.Duration) {
 
 // MaxDescription is the most of describe's standard output that is kept.
 const MaxDescription = maxDescription
+
+// Scan is [scan]: the lone surrogates and repeated member names of a description.
+var Scan = scan
