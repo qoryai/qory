@@ -21,6 +21,11 @@ release may change what an existing document does, and states it under Upgrading
 - `qory access-key enrol` keeps no key the server enrolled for a kind other than the
   code's. It deletes the key from `access-key-secret.new`, keeps nothing, and says to
   revoke the key in Qory Apiary.
+- Every qory command that describes an integration, such as `qory run`, `qory gateway`
+  and `qory config`, refuses a description past the integration contract's limits, as
+  Qory Apiary does: a string or member name over 16384 bytes, an array or object over
+  1024 entries, more than 4096 values, nesting deeper than 64 levels, or more than 256
+  KiB.
 
 ## [0.13.0] - 2026-10-13
 
