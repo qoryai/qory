@@ -19,8 +19,8 @@ release may change what an existing document does, and states it under Upgrading
   kind is malformed, and a code made for another kind is refused before anything is made
   or sent.
 - `qory access-key enrol` keeps no key the server enrolled for a kind other than the
-  code's. It deletes the key from `access-key-secret.new`, prints and keeps nothing, and
-  says to revoke the key in Qory Apiary.
+  code's. It deletes the key from `access-key-secret.new`, keeps nothing, and says to
+  revoke the key in Qory Apiary.
 
 ## [0.13.0] - 2026-10-13
 
