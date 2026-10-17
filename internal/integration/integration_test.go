@@ -410,13 +410,13 @@ func TestASourceRoleIsReadAsTheContractHasIt(t *testing.T) {
 	}
 }
 
-// TestADescriptionReadsAsQoryApiaryReadsIt refuses what Qory Apiary's reader refuses and
-// Go's reads otherwise: invalid UTF-8, a \u escape of a lone surrogate in a string or a
+// TestADescriptionReadsAsTheContractHasIt refuses what the integration contract refuses
+// and Go's reader takes: invalid UTF-8, a \u escape of a lone surrogate in a string or a
 // member name, and an object that names a member twice, compared as the names read,
 // each refused before the values are counted and before the schema, the first in the
 // document, with where and never what. A surrogate pair, an escaped backslash before u,
 // and one name in two objects are read.
-func TestADescriptionReadsAsQoryApiaryReadsIt(t *testing.T) {
+func TestADescriptionReadsAsTheContractHasIt(t *testing.T) {
 	notOne := " describe did not print one JSON document: "
 	refuses := " describe printed a description the integration contract refuses: "
 	described := func(desc string) string {

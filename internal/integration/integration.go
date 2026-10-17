@@ -201,9 +201,10 @@ const (
 
 // The refusals of a description that breaks a rule of the integration contract a
 // schema cannot express: a description is JSON in UTF-8, no string or member name holds
-// a \u escape of a lone surrogate, and no object repeats a member. Qory Apiary refuses
-// a description that breaks one; Go's reader takes all three, reading the first two as
-// U+FFFD and keeping the last of a repeated member, so they are refused here.
+// a \u escape of a lone surrogate, and no object repeats a member. The contract has
+// Qory Apiary refuse a description that breaks one; Go's reader takes all three,
+// reading the first two as U+FFFD and keeping the last of a repeated member, so they
+// are refused here.
 const (
 	refusedEncoding        = "%s describe did not print one JSON document: it is not valid UTF-8"
 	refusedSurrogateString = `%s describe printed a description the integration contract refuses: the string at %s holds a \u escape of a lone surrogate`
