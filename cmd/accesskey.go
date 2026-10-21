@@ -20,6 +20,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/foragerdir"
 )
 
@@ -74,7 +75,7 @@ The key is active from that answer on: runs can start. qory keeps the answer in
 enrolment-answer until the enrolment is finished: should the command stop after the
 answer came, the same command finishes it on this machine, at any time, without asking
 the server again. A refused enrolment moves aside only access-key-secret.new, never
-access-key-secret.
+access-key-secret; a key the server enrolled for something else is deleted instead.
 
 When access-key-secret exists, enrol refuses, so it never replaces this machine's key
 unasked: use --replace to move this machine to a new key, or --print for a key kept
@@ -103,7 +104,7 @@ apply; the code is checked against QORY_APIARY_PUBLIC_KEY when it is set.
 --verbose adds nothing here.
 
 More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
-		Example: `  qory access-key enrol https://apiary.example qec_F1XT-0RE0-0000-0000-0000-0000-00.uoES-kuj1vk0sq0qoGlmAg
+		Example: `  qory access-key enrol https://apiary.example qecn_F1XT-0RE0-0000-0000-0000-0000-00.uoES-kuj1vk0sq0qoGlmAg
   qory access-key enrol --replace https://apiary.example "$code"   # move this machine to a new key
   qory access-key enrol --print https://apiary.example "$code"   # for a starter's settings`,
 		Args: func(cmd *cobra.Command, args []string) error {
@@ -138,7 +139,8 @@ type enrolVia struct {
 // made: --via-ca-file or --via-certificate-sha256 without --via, a URL that is not a
 // gateway's, a CA file that is not there or holds no PEM certificate, and a pin not in its
 // form. The CA file's path is made absolute, since forager.yaml's paths are relative to
-// its own directory. Each refusal is input, and none quotes the URL.
+// its own directory. Each refusal is input, and none quotes the URL; a refusal prints the
+// CA file's path as [exports.Value] prints it.
 func (v *enrolVia) check() error {
 	if v.url == "" {
 		for _, f := range []struct{ name, value string }{{"--via-ca-file", v.caFile}, {"--via-certificate-sha256", v.pin}} {
@@ -154,7 +156,7 @@ func (v *enrolVia) check() error {
 	if v.caFile != "" {
 		abs, err := filepath.Abs(v.caFile)
 		if err != nil {
-			return input(fmt.Errorf("--via-ca-file %s: %w", v.caFile, err))
+			return input(fmt.Errorf("--via-ca-file %s: %w", exports.Value(v.caFile, false), err))
 		}
 		v.caFile = abs
 		b, err := os.ReadFile(abs)
@@ -163,10 +165,10 @@ func (v *enrolVia) check() error {
 			if errors.As(err, &pe) {
 				err = pe.Err
 			}
-			return input(fmt.Errorf("--via-ca-file %s: %w", abs, err))
+			return input(fmt.Errorf("--via-ca-file %s: %w", exports.Value(abs, false), err))
 		}
 		if !x509.NewCertPool().AppendCertsFromPEM(b) {
-			return input(fmt.Errorf("--via-ca-file %s holds no PEM certificate", abs))
+			return input(fmt.Errorf("--via-ca-file %s holds no PEM certificate", exports.Value(abs, false)))
 		}
 	}
 	if v.pin != "" && !config.CertificatePin(v.pin) {
@@ -345,6 +347,16 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	if err != nil {
 		return input(err)
 	}
+	// The code's prefix names the kind of key it enrols. An integration's is refused
+	// before anything is made, written or sent: the server would enrol the key for the
+	// integration, active until revoked.
+	kind, err := accesskey.CodeKind(code)
+	if err != nil {
+		return input(err)
+	}
+	if kind == "adapter" {
+		return input(errors.New("this code is for an integration: use a code made for this machine or its pool"))
+	}
 	if err := flagVia.check(); err != nil {
 		return err
 	}
@@ -388,7 +400,10 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	if err := accesskey.CheckName(name); err != nil {
 		return input(fmt.Errorf("session.instance.name: %w", err))
 	}
-	dir := machineDir()
+	dir, err := machineDir()
+	if err != nil {
+		return err
+	}
 	if dir == "" {
 		return fmt.Errorf("no configuration directory: set HOME or XDG_CONFIG_HOME")
 	}
@@ -407,13 +422,21 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	defer lock.Release()
 	now := keyClock()
 	// An enrolment the server has answered already is finished on this machine: the
-	// server refuses a code it used and a key it enrolled, so nothing posts it again.
+	// server refuses a code it used and a key it enrolled, so nothing posts it again. A
+	// kept answer for a kind this machine does not take finishes nothing, see [refuseKind].
 	if !print {
 		k, ans, err := answerKept(dir, server, code)
+		var kindErr *accesskey.KindError
+		if errors.As(err, &kindErr) {
+			return refuseKind(dir, k, false, true, kindErr.Kind, kindErr.AccessKeyID)
+		}
 		if err != nil {
 			return err
 		}
 		if k != nil {
+			if !takesKind(ans) {
+				return refuseKind(dir, k, false, true, ans.NodeKind, ans.AccessKeyID)
+			}
 			if err := dir.WriteMarker(); err != nil {
 				return err
 			}
@@ -498,8 +521,17 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	} else {
 		ans, err = req.Post(ctx, client, server, userAgent())
 	}
+	// A verified 201 for another kind than the code's is a [accesskey.KindError]: the
+	// server enrolled the key, so it is refused as [refuseKind] refuses, never retried.
+	var kindErr *accesskey.KindError
+	if errors.As(err, &kindErr) {
+		return refuseKind(dir, key, print, false, kindErr.Kind, kindErr.AccessKeyID)
+	}
 	if err != nil {
 		return enrolFailed(dir, err, key, print, now)
+	}
+	if !takesKind(ans) {
+		return refuseKind(dir, key, print, false, ans.NodeKind, ans.AccessKeyID)
 	}
 	if ans.Pin.Fixture() {
 		return refuseFixturePin(dir, key, print, now)
@@ -694,6 +726,53 @@ func discardKey(dir foragerdir.Dir, key *accesskey.Key, now time.Time) (string, 
 		return "", nil
 	}
 	return dir.MoveNewAside(now)
+}
+
+// takesKind reports whether the verified 201 enrols the key for a node, a node pool or
+// a gateway, the kinds a key on this machine or a starter's key belongs to. Any other
+// kind, such as an integration's ("adapter"), is not.
+func takesKind(ans *accesskey.EnrolmentAnswer) bool {
+	switch ans.NodeKind {
+	case "node", "pool", "gateway":
+		return true
+	}
+	return false
+}
+
+// kindWords is how the refusal of a key enrolled for another kind names each node_kind.
+var kindWords = map[string]string{"node": "a machine", "pool": "a pool", "gateway": "a gateway", "adapter": "an integration"}
+
+// refuseKind refuses a verified 201 for a kind [takesKind] does not take, or for
+// another kind than the code's, a [accesskey.KindError], before anything is printed,
+// kept, placed or written. The key is active on the server as id, enrolled for kind, so
+// it is kept nowhere, not even aside: --print wrote nothing; otherwise
+// access-key-secret.new is deleted when it holds the key, the pending enrolment ends
+// and, with kept set, the answer enrolment-answer keeps is removed, in that order.
+// access-key-secret and forager.yaml are left as they are. A kind outside [kindWords],
+// which Forager refuses before this, is named "something else".
+func refuseKind(dir foragerdir.Dir, key *accesskey.Key, print, kept bool, kind, id string) error {
+	what, ok := kindWords[kind]
+	if !ok {
+		what = "something else"
+	}
+	msg := "the server enrolled the key " + id + " for " + what + " instead, so qory did not use it; the key stays active until you revoke it in Qory Apiary"
+	if print {
+		return errors.New(msg)
+	}
+	if dir.SameNewSecret(key) {
+		if err := dir.DeleteNewSecret(); err != nil {
+			return fmt.Errorf("%s; %w", msg, err)
+		}
+	}
+	if err := dir.RemovePending(); err != nil {
+		return fmt.Errorf("%s; %w", msg, err)
+	}
+	if kept {
+		if err := dir.RemoveAnswer(); err != nil {
+			return fmt.Errorf("%s; %w", msg, err)
+		}
+	}
+	return errors.New(msg)
 }
 
 // refuseFixturePin refuses a 201 whose pin lists the Forager contract's published

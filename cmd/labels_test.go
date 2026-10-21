@@ -12,6 +12,7 @@ import (
 
 	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/foragerdir"
+	"github.com/qoryai/qory/internal/places"
 )
 
 // keptLabels is the labels qory keeps for the checkout at root, nil for none.
@@ -65,7 +66,7 @@ func TestACheckoutKeepsItsLabels(t *testing.T) {
 		t.Errorf("%s is mode %v", filepath.Dir(path), m)
 	}
 
-	runGit(t, root, "remote", "set-url", "origin", "https://git.example.com/acme/shop.git")
+	changeOrigin(t, root, "https://git.example.com/acme/shop.git")
 	clearRuns(t, root)
 	before := len(srvTargets(srv))
 	out, err := run(t, "run")
@@ -93,7 +94,7 @@ func TestACheckoutKeepsItsLabels(t *testing.T) {
 	}
 	lacks(t, out, "labels are now", "labels were not kept")
 
-	runGit(t, root, "remote", "set-url", "origin", "https://git.example.com/acme/other.git")
+	changeOrigin(t, root, "https://git.example.com/acme/other.git")
 	if out, err := run(t, "run", "--label", "repository=acme/given"); err != nil {
 		t.Fatalf("a repository given with --label: %v\n%s", err, out)
 	}
@@ -117,6 +118,7 @@ func TestACheckoutWithoutAnOriginKeepsNone(t *testing.T) {
 	}
 	wantsLabels(t, root, foragerdir.Labels{"forge": "", "repository": ""})
 	runGit(t, root, "remote", "add", "origin", "https://git.example.com/acme/app.git")
+	acceptChanges(t, root)
 	_, err := run(t, "run")
 	if want := labelsChangedText(root, "no forge, no repository", "forge git.example.com, repository acme/app"); err == nil || err.Error() != want {
 		t.Errorf("a remote added: %v\nwant %q", err, want)
@@ -146,7 +148,7 @@ func TestLabelsAreKeptOnlyAgainstTheServer(t *testing.T) {
 		t.Fatalf("an accepted run: %v\n%s", err, out)
 	}
 	wantsLabels(t, root, foragerdir.Labels{"forge": "git.example.com", "repository": "acme/app"})
-	runGit(t, root, "remote", "set-url", "origin", "https://git.example.com/acme/shop.git")
+	changeOrigin(t, root, "https://git.example.com/acme/shop.git")
 	clearRuns(t, root)
 	if out, err := run(t, "run", "--local"); err != nil {
 		t.Fatalf("--local with another origin: %v\n%s", err, out)
@@ -166,6 +168,8 @@ func TestLabelsAreKeptOnlyAgainstTheServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	clearRuns(t, root)
+	// The walled runs before recorded the checkout; the run below has no wall.
+	forgetPlaces(t)
 	if out, err := run(t, "run"); err != nil {
 		t.Fatalf("without a server: %v\n%s", err, out)
 	}
@@ -258,7 +262,7 @@ func TestTheOriginIsReadOnceForARun(t *testing.T) {
 	if out, err := run(t, "run"); err != nil {
 		t.Fatalf("the first run: %v\n%s", err, out)
 	}
-	runGit(t, root, "remote", "set-url", "origin", "https://git.example.com/acme/shop.git")
+	changeOrigin(t, root, "https://git.example.com/acme/shop.git")
 	clearRuns(t, root)
 	srv.mu.Lock()
 	registered := len(srv.registered)
@@ -312,7 +316,7 @@ func TestARunKeyNeitherChecksNorKeepsLabels(t *testing.T) {
 	if err := configDir().WriteLabels(root, pinned); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, root, "remote", "set-url", "origin", "https://git.example.com/acme/shop.git")
+	changeOrigin(t, root, "https://git.example.com/acme/shop.git")
 	gw := newKeyedGateway(t)
 	key := mintRunKey(t, keyRunID, gw.url())
 	t.Setenv("QORY_RUN_KEY", "")
@@ -353,7 +357,7 @@ func TestAMachineBehindViaKeepsItsCheckoutsLabels(t *testing.T) {
 	}
 	wantsLabels(t, root, foragerdir.Labels{"forge": "git.example.com", "repository": "acme/app"})
 
-	runGit(t, root, "remote", "set-url", "origin", "https://git.example.com/acme/shop.git")
+	changeOrigin(t, root, "https://git.example.com/acme/shop.git")
 	before := len(via.relayed())
 	_, err := run(t, "run")
 	if want := labelsChangedText(root, "forge git.example.com, repository acme/app", "forge git.example.com, repository acme/shop"); err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
@@ -361,5 +365,28 @@ func TestAMachineBehindViaKeepsItsCheckoutsLabels(t *testing.T) {
 	}
 	if n := len(via.relayed()); n != before {
 		t.Errorf("a refused run sent via %d requests", n-before)
+	}
+}
+
+// changeOrigin points the origin remote of the checkout at root to url, as a person
+// does, and accepts the change with qory setup repo --accept-checkout when a walled run
+// has used the checkout: the settings check refuses a remote's URL the record does not
+// hold.
+func changeOrigin(t *testing.T, root, url string) {
+	t.Helper()
+	runGit(t, root, "remote", "set-url", "origin", url)
+	acceptChanges(t, root)
+}
+
+// acceptChanges accepts the checkout at root as it is now, with qory setup repo
+// --accept-checkout, when a walled run has used it.
+func acceptChanges(t *testing.T, root string) {
+	t.Helper()
+	if r, err := places.Get(root); err != nil || r == nil {
+		return
+	}
+	defer cmd.SetTerminal(true)()
+	if out, err := runIn(t, "y\n", "setup", "repo", "--accept-checkout"); err != nil {
+		t.Fatalf("accepting the origin: %v\n%s", err, out)
 	}
 }

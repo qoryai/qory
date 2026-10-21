@@ -174,3 +174,24 @@ func TestDiffComparesALinkThatLeavesTheCacheByItsTarget(t *testing.T) {
 		t.Errorf("differences = %+v, want %+v", got, expected)
 	}
 }
+
+// TestDiffNamesAChangedExecutableBit is a copied script whose bytes are the same in both
+// trees and whose executable bit is not: the check lists it as changed, the way it lists
+// a script whose bytes changed.
+func TestDiffNamesAChangedExecutableBit(t *testing.T) {
+	want, have := t.TempDir(), t.TempDir()
+	for _, dir := range []string{want, have} {
+		write(t, filepath.Join(dir, "hooks", "guard.sh"), "#!/bin/sh\nexit 0\n")
+	}
+	if err := os.Chmod(filepath.Join(want, "hooks", "guard.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := render.Diff(want, have, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := []render.Difference{{Path: "hooks/guard.sh", What: "changed"}}
+	if !reflect.DeepEqual(got, expected) {
+		t.Errorf("differences = %+v\nwant %+v", got, expected)
+	}
+}

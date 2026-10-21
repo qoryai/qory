@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/qoryai/forager/accesskey"
 	"gopkg.in/yaml.v3"
 
 	"github.com/qoryai/qory/internal/exports"
@@ -118,6 +121,9 @@ type Entry struct {
 	// References are the entries the entry's documents reference, as sorted <kind>/<name>
 	// keys, each once, see [References]; nil for an entry that references none.
 	References []string
+	// Tier is the tier an agent's frontmatter model sets as a placeholder, one of
+	// [Tiers]; "" for an agent with a model id or none, and for every other kind.
+	Tier string
 }
 
 // Module is a module read from disk.
@@ -166,7 +172,7 @@ func readRequirement(item map[string]yaml.Node) (entry string, needs []string, e
 			continue
 		}
 		if !isKind(k) {
-			return "", nil, fmt.Errorf("key %q is not one requires reads; an item selects its entry as skill, agent, command, output-style, hook, mcp or file, and what it needs under skills, agents, commands, output-styles, hooks, mcp and files", k)
+			return "", nil, fmt.Errorf("key %s is not one requires reads; an item selects its entry as skill, agent, command, output-style, hook, mcp or file, and what it needs under skills, agents, commands, output-styles, hooks, mcp and files", accesskey.ShownName(k, true))
 		}
 		var names []string
 		if err := node.Decode(&names); err != nil || len(names) == 0 {
@@ -214,20 +220,6 @@ func sortedKeys(m map[string][]string) []string {
 // manifest's env has.
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// unknownKey is the decoder's report of a key the document has no field for. It names the
-// Go type, which the message a person reads leaves out.
-var unknownKey = regexp.MustCompile(`(line \d+: )?field (\S+) not found in type \S+`)
-
-// decodeError prefixes a decode error with path. An unknown key is reported as one the
-// manifest does not read, with the decoder's line number when it gives one; any other
-// error is returned as the decoder wrote it.
-func decodeError(path string, err error) error {
-	if m := unknownKey.FindStringSubmatch(err.Error()); m != nil {
-		return fmt.Errorf("%s: %skey %q is not one %s reads", path, m[1], m[2], ManifestName)
-	}
-	return fmt.Errorf("%s: %w", path, err)
-}
-
 // ReadManifest reads and validates qory-module.yaml at dir. A directory without one is
 // not a module, and the error states that and contains the directory, because a source
 // that points at the wrong directory is the mistake this catches.
@@ -236,8 +228,11 @@ func decodeError(path string, err error) error {
 // retired spelling of it, a missing name, a default that selects something other than
 // a declared variant or "fail", an env key that is not an environment variable name or
 // is QORY_HARNESS_HOME, and an env value that is not a relative path inside the module.
-// Every error contains the manifest path. The env values come back cleaned, "." for the
-// root.
+// Every error contains the manifest path. A name the file writes that contains an access
+// key secret or a run key, a key of env, of variants or of a requires item, an entry a
+// requires item lists, and the variant default selects, is printed as
+// [accesskey.ShownName] prints it, and a value it writes as [exports.Value] prints it.
+// The env values come back cleaned, "." for the root.
 //
 // A requires item selects one entry of the module by its singular kind and lists what it
 // needs under the plural kinds:
@@ -251,23 +246,41 @@ func decodeError(path string, err error) error {
 // twice are errors. Whether the entry is one the module ships is [Read]'s check, since
 // the entries are read then. The result is keyed <kind>/<name> with sorted values.
 func ReadManifest(dir string) (*Manifest, error) {
+	data, err := os.ReadFile(filepath.Join(dir, ManifestName))
+	return parseManifest(dir, data, err)
+}
+
+// ReadManifestIn is [ReadManifest] for the module directory dir opened as root: it reads
+// qory-module.yaml through root, so the file comes from the directory root was opened
+// at, even when a link on the way to dir leads elsewhere since. dir is what the errors
+// print.
+func ReadManifestIn(root *os.Root, dir string) (*Manifest, error) {
+	data, err := root.ReadFile(ManifestName)
+	return parseManifest(dir, data, err)
+}
+
+// parseManifest is the manifest of the module directory dir in data, the bytes a read of
+// its qory-module.yaml returned, or the refusal of err, that read's error.
+func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 	path := filepath.Join(dir, ManifestName)
-	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("%s has no %s; a module has one that defines its name", dir, ManifestName)
+		return nil, fmt.Errorf("%s has no %s; a module has one that defines its name", exports.HidePath(dir), ManifestName)
 	}
+	// The directory of a module listed by name is that name, which the errors print as
+	// exports.HidePath prints it.
 	if err != nil {
-		return nil, err
+		return nil, exports.HideError(err)
 	}
+	path = exports.HidePath(path)
 	raw := rawManifest{}
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
 	dec.KnownFields(true)
 	if err := dec.Decode(&raw); err != nil {
-		return nil, decodeError(path, err)
+		return nil, exports.DecodeError(path, err)
 	}
 	current, err := exports.ResolveAPIVersion(raw.APIVersion)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, fmt.Errorf("%s: %w", path, exports.HideValueError(err, ""))
 	}
 	if raw.Name == "" {
 		return nil, fmt.Errorf("%s: name is required", path)
@@ -281,11 +294,11 @@ func ReadManifest(dir string) (*Manifest, error) {
 			return nil, fmt.Errorf("%s: env.QORY_HARNESS_HOME is qory's; a module exports another name", path)
 		}
 		if !envName.MatchString(key) {
-			return nil, fmt.Errorf("%s: env: %s is not an environment variable name", path, key)
+			return nil, fmt.Errorf("%s: env: %s is not an environment variable name", path, accesskey.ShownName(key, false))
 		}
 		clean := filepath.Clean(value)
 		if value == "" || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-			return nil, fmt.Errorf("%s: env.%s: %s is not a path inside the module", path, key, value)
+			return nil, fmt.Errorf("%s: env.%s: %s is not a path inside the module", path, accesskey.ShownName(key, false), exports.Value(value, false))
 		}
 		if m.Env == nil {
 			m.Env = map[string]string{}
@@ -299,7 +312,7 @@ func ReadManifest(dir string) (*Manifest, error) {
 		}
 		if _, dup := m.Requires[entry]; dup {
 			kind, name, _ := strings.Cut(entry, "/")
-			return nil, fmt.Errorf("%s: requires lists %s twice", path, Describe(kind, name))
+			return nil, fmt.Errorf("%s: requires lists %s twice", path, Describe(kind, accesskey.ShownName(name, false)))
 		}
 		if m.Requires == nil {
 			m.Requires = map[string][]string{}
@@ -310,7 +323,7 @@ func ReadManifest(dir string) (*Manifest, error) {
 		m.Egress = []string{}
 		for _, host := range *raw.Egress {
 			if !EgressHost.MatchString(host) {
-				return nil, fmt.Errorf("%s: egress: %q is not a lower-case host name or a *. suffix; no port, path or scheme", path, host)
+				return nil, fmt.Errorf("%s: egress: %s is not a lower-case host name or a *. suffix; no port, path or scheme", path, exports.Value(host, true))
 			}
 			if !slices.Contains(m.Egress, host) {
 				m.Egress = append(m.Egress, host)
@@ -327,7 +340,8 @@ func ReadManifest(dir string) (*Manifest, error) {
 		}
 		v := Variant{}
 		if err := node.Decode(&v); err != nil {
-			return nil, fmt.Errorf("%s: variants.%s: %w", path, name, err)
+			// The decoder quotes up to ten characters of a value that is not a map.
+			return nil, fmt.Errorf("%s: variants.%s: %w", path, accesskey.ShownName(name, false), exports.HideValueError(err, ""))
 		}
 		if m.Variants == nil {
 			m.Variants = map[string]Variant{}
@@ -336,7 +350,7 @@ func ReadManifest(dir string) (*Manifest, error) {
 	}
 	if m.Default != "" && m.Default != "fail" {
 		if _, ok := m.Variants[m.Default]; !ok {
-			return nil, fmt.Errorf("%s: variants.default selects %q, which is not a variant", path, m.Default)
+			return nil, fmt.Errorf("%s: variants.default selects %s, which is not a variant", path, accesskey.ShownName(m.Default, true))
 		}
 	}
 	return m, nil
@@ -350,17 +364,18 @@ func ReadManifest(dir string) (*Manifest, error) {
 // It returns an error when the stack forces a variant the module does not have, or forces
 // one on a module that declares none, and when the module has no variant for the runtime
 // and its default is missing or "fail". Every message lists the variant names the module
-// has.
+// has. A variant's name and the runtime's are printed as [accesskey.ShownName] prints
+// them.
 func SelectVariant(m *Manifest, forced, runtime string) (string, error) {
 	if m == nil || len(m.Variants) == 0 {
 		if forced != "" {
-			return "", fmt.Errorf("variant %q is forced, and the module declares no variants", forced)
+			return "", fmt.Errorf("variant %s is forced, and the module declares no variants", accesskey.ShownName(forced, true))
 		}
 		return "", nil
 	}
 	if forced != "" {
 		if _, ok := m.Variants[forced]; !ok {
-			return "", fmt.Errorf("variant %q is forced, and the module has no such variant; variants: %s", forced, names(m.Variants))
+			return "", fmt.Errorf("variant %s is forced, and the module has no such variant; variants: %s", accesskey.ShownName(forced, true), names(m.Variants))
 		}
 		return forced, nil
 	}
@@ -368,26 +383,31 @@ func SelectVariant(m *Manifest, forced, runtime string) (string, error) {
 		return runtime, nil
 	}
 	if m.Default == "fail" {
-		return "", fmt.Errorf("the module has no variant for runtime %s and its default is fail; variants: %s", runtime, names(m.Variants))
+		return "", fmt.Errorf("the module has no variant for runtime %s and its default is fail; variants: %s", accesskey.ShownName(runtime, false), names(m.Variants))
 	}
 	if m.Default == "" {
-		return "", fmt.Errorf("the module has no variant for runtime %s and declares no default; variants: %s", runtime, names(m.Variants))
+		return "", fmt.Errorf("the module has no variant for runtime %s and declares no default; variants: %s", accesskey.ShownName(runtime, false), names(m.Variants))
 	}
 	return m.Default, nil
 }
 
-// names lists the variant names, sorted, for the error messages of [SelectVariant].
+// names lists the variant names, sorted, for the error messages of [SelectVariant], each
+// as [accesskey.ShownName] prints it.
 func names(v map[string]Variant) string {
 	ns := make([]string, 0, len(v))
 	for n := range v {
 		ns = append(ns, n)
 	}
 	sort.Strings(ns)
+	for i, n := range ns {
+		ns[i] = accesskey.ShownName(n, false)
+	}
 	return strings.Join(ns, ", ")
 }
 
 // Read scans the module at dir for one variant and returns what it ships. The name is the
-// stack's name for the module and appears in every error. The variant is the one
+// stack's name for the module and appears in every error, as [accesskey.ShownName]
+// prints it. The variant is the one
 // [SelectVariant] returned for m; "" reads every kind from the module root.
 //
 // A kind the variant redirects is read from the directory it sets, which must be a
@@ -404,68 +424,79 @@ func names(v map[string]Variant) string {
 // is one entry named <runtime>/<path>, at any depth, and a file directly under files is
 // an error. A name starting with a dot is skipped everywhere. Settings are read from
 // settings/ at the module root, which no variant redirects, and AGENTS.md from the root
-// as well.
+// as well. A path inside the module that an error prints, and the path in an error of the
+// file system, are printed as [exports.HidePath] prints them.
 func Read(name, dir string, m *Manifest, variant string) (*Module, error) {
+	return ReadWith(name, dir, m, variant, os.ReadFile)
+}
+
+// ReadWith is [Read] with readFile reading the bytes of each settings fragment, AGENTS.md,
+// MCP server, hook and files entry, such as [ReadThrough] for a module the home holds a
+// copy of. Which files there are is read by path.
+func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path string) ([]byte, error)) (*Module, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
 	}
 	l := &Module{Name: name, Dir: abs, Manifest: m, Variant: variant}
+	// shown is the module's name as the errors print it.
+	shown := accesskey.ShownName(name, false)
 	dirs := map[string]string{"skills": "skills", "agents": "agents", "commands": "commands", "output-styles": "output-styles", "hooks": "hooks", "mcp": "mcp", "files": "files"}
 	if m != nil && variant != "" {
 		for kind, sub := range m.Variants[variant] {
 			if _, ok := dirs[kind]; !ok {
-				return nil, fmt.Errorf("module %s: variant %s sets kind %q", name, variant, kind)
+				return nil, fmt.Errorf("module %s: variant %s sets kind %s", shown, accesskey.ShownName(variant, false), accesskey.ShownName(kind, true))
 			}
 			clean := filepath.Clean(sub)
 			if sub == "" || clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-				return nil, fmt.Errorf("module %s: variant %s reads %s from %q, which is not a directory inside the module", name, variant, kind, sub)
+				return nil, fmt.Errorf("module %s: variant %s reads %s from %s, which is not a directory inside the module", shown, accesskey.ShownName(variant, false), kind, exports.Value(sub, true))
 			}
 			dirs[kind] = clean
 		}
 	}
 	skills, err := readSkills(dirs["skills"], filepath.Join(abs, dirs["skills"]))
 	if err != nil {
-		return nil, fmt.Errorf("module %s: %w", name, err)
+		return nil, fmt.Errorf("module %s: %w", shown, err)
 	}
 	l.Entries = append(l.Entries, skills...)
 	for _, kind := range []string{"agents", "commands", "output-styles"} {
 		es, err := readMarkdown(kind, filepath.Join(abs, dirs[kind]))
 		if err != nil {
-			return nil, fmt.Errorf("module %s: %w", name, err)
+			return nil, fmt.Errorf("module %s: %w", shown, err)
 		}
 		l.Entries = append(l.Entries, es...)
 	}
-	hooks, err := readHooks(name, dirs["hooks"], filepath.Join(abs, dirs["hooks"]))
+	hooks, err := readHooks(shown, dirs["hooks"], filepath.Join(abs, dirs["hooks"]))
 	if err != nil {
-		return nil, fmt.Errorf("module %s: %w", name, err)
+		return nil, fmt.Errorf("module %s: %w", shown, err)
 	}
 	l.Entries = append(l.Entries, hooks...)
-	servers, mcp, err := readMCP(dirs["mcp"], filepath.Join(abs, dirs["mcp"]))
+	servers, mcp, err := readMCP(dirs["mcp"], filepath.Join(abs, dirs["mcp"]), readFile)
 	if err != nil {
-		return nil, fmt.Errorf("module %s: %w", name, err)
+		return nil, fmt.Errorf("module %s: %w", shown, err)
 	}
 	l.Entries = append(l.Entries, servers...)
 	l.MCP = mcp
 	files, err := readFiles(dirs["files"], filepath.Join(abs, dirs["files"]))
 	if err != nil {
-		return nil, fmt.Errorf("module %s: %w", name, err)
+		return nil, fmt.Errorf("module %s: %w", shown, err)
 	}
 	l.Entries = append(l.Entries, files...)
 	for i, e := range l.Entries {
 		if err := inside(abs, e.Path); err != nil {
-			return nil, fmt.Errorf("module %s: %s/%s %w", name, e.Kind, e.Name, err)
+			return nil, fmt.Errorf("module %s: %s %w", shown, exports.HidePath(e.Kind+"/"+e.Name), err)
 		}
 		if e.Kind == "skills" {
 			if err := insideAll(abs, e.Path); err != nil {
-				return nil, fmt.Errorf("module %s: skills/%s/%w", name, e.Name, err)
+				return nil, fmt.Errorf("module %s: %s/%w", shown, exports.HidePath("skills/"+e.Name), err)
 			}
 		}
-		refs, err := references(abs, e)
+		refs, tier, err := references(abs, e)
 		if err != nil {
-			return nil, fmt.Errorf("module %s: %w", name, err)
+			return nil, fmt.Errorf("module %s: %w", shown, err)
 		}
 		l.Entries[i].References = refs
+		l.Entries[i].Tier = tier
 	}
 	sort.Slice(l.Entries, func(i, j int) bool {
 		if l.Entries[i].Kind != l.Entries[j].Kind {
@@ -473,6 +504,21 @@ func Read(name, dir string, m *Manifest, variant string) (*Module, error) {
 		}
 		return l.Entries[i].Name < l.Entries[j].Name
 	})
+	// Hooks, servers and files are not read for references; a tier placeholder in one is
+	// refused all the same. The entries are sorted, so the first one is the same each run.
+	for _, e := range l.Entries {
+		if e.Kind != "hooks" && e.Kind != "mcp" && e.Kind != "files" {
+			continue
+		}
+		data, err := readFile(e.Path)
+		if err != nil {
+			return nil, exports.HideError(err)
+		}
+		if err := NoTier(string(data)); err != nil {
+			rel, _ := filepath.Rel(abs, e.Path)
+			return nil, fmt.Errorf("module %s: %s: %w", shown, exports.HidePath(filepath.ToSlash(rel)), err)
+		}
+	}
 	if m != nil {
 		shipped := map[string]bool{}
 		for _, e := range l.Entries {
@@ -481,28 +527,140 @@ func Read(name, dir string, m *Manifest, variant string) (*Module, error) {
 		for _, key := range sortedKeys(m.Requires) {
 			if !shipped[key] {
 				kind, entry, _ := strings.Cut(key, "/")
-				return nil, fmt.Errorf("module %s: requires lists %s, which the module does not ship", name, Describe(kind, entry))
+				return nil, fmt.Errorf("module %s: requires lists %s, which the module does not ship", shown, Describe(kind, accesskey.ShownName(entry, false)))
 			}
 		}
 	}
 	l.Settings, err = readSettings(filepath.Join(abs, "settings"))
 	if err != nil {
-		return nil, fmt.Errorf("module %s: %w", name, err)
+		return nil, fmt.Errorf("module %s: %w", shown, err)
 	}
-	for runtime, files := range l.Settings {
-		for file, path := range files {
+	for _, runtime := range slices.Sorted(maps.Keys(l.Settings)) {
+		files := l.Settings[runtime]
+		for _, file := range slices.Sorted(maps.Keys(files)) {
+			path := files[file]
 			if err := inside(abs, path); err != nil {
-				return nil, fmt.Errorf("module %s: settings/%s/%s %w", name, runtime, file, err)
+				return nil, fmt.Errorf("module %s: %s %w", shown, exports.HidePath("settings/"+runtime+"/"+file), err)
+			}
+			data, err := readFile(path)
+			if err != nil {
+				return nil, exports.HideError(err)
+			}
+			if err := NoTier(string(data)); err != nil {
+				return nil, fmt.Errorf("module %s: %s: %w", shown, exports.HidePath("settings/"+runtime+"/"+file), err)
 			}
 		}
 	}
 	if _, err := os.Stat(filepath.Join(abs, InstructionsName)); err == nil {
 		l.Instructions = filepath.Join(abs, InstructionsName)
 		if err := inside(abs, l.Instructions); err != nil {
-			return nil, fmt.Errorf("module %s: %s %w", name, InstructionsName, err)
+			return nil, fmt.Errorf("module %s: %s %w", shown, InstructionsName, err)
+		}
+		data, err := readFile(l.Instructions)
+		if err != nil {
+			return nil, exports.HideError(err)
+		}
+		if err := NoTier(string(data)); err != nil {
+			return nil, fmt.Errorf("module %s: %s: %w", shown, InstructionsName, err)
 		}
 	}
 	return l, nil
+}
+
+// ReadThrough returns a read of a file at an absolute path inside the module directory
+// dir through root, dir opened as a root, see [ReadWith]: the bytes come from the
+// directory root was opened at, whatever a link on the way to dir leads to since. Each
+// link on the path is followed through root alone, as [ResolveIn] follows it, with
+// realDir the real path of root's directory as recorded when root was opened.
+func ReadThrough(root *os.Root, dir, realDir string) func(path string) ([]byte, error) {
+	return func(path string) ([]byte, error) {
+		abs, err := filepath.Abs(dir)
+		if err != nil {
+			return nil, err
+		}
+		rel, err := filepath.Rel(abs, path)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+			return nil, fmt.Errorf("%s lies outside the module", exports.HidePath(path))
+		}
+		inner, err := ResolveIn(root, realDir, rel)
+		if err != nil {
+			return nil, err
+		}
+		data, err := root.ReadFile(inner)
+		return data, exports.HideError(err)
+	}
+}
+
+// maxLinks is the most links [ResolveIn] follows for one path, as many as Linux follows.
+const maxLinks = 40
+
+// ResolveIn is rel, a path relative to the directory root was opened at, with every link
+// on it followed through root: a relative link as root follows it, and an absolute one
+// only when its target lies under realDir, the real path of root's directory as recorded
+// when root was opened, at that part of the target. Nothing is resolved outside root. A
+// link that leads out of the module, an absolute link when realDir is "", and a path with
+// more than 40 links are refused. The result contains no link, as root showed it.
+func ResolveIn(root *os.Root, realDir, rel string) (string, error) {
+	out := func() error {
+		return fmt.Errorf("%s leads out of the module", exports.HidePath(filepath.ToSlash(rel)))
+	}
+	pending := splitPath(rel)
+	var cur []string
+	for hops := 0; len(pending) > 0; {
+		part := pending[0]
+		pending = pending[1:]
+		switch part {
+		case ".":
+			continue
+		case "..":
+			if len(cur) == 0 {
+				return "", out()
+			}
+			cur = cur[:len(cur)-1]
+			continue
+		}
+		next := filepath.Join(append(cur[:len(cur):len(cur)], part)...)
+		info, err := root.Lstat(next)
+		if err != nil {
+			return "", exports.HideError(err)
+		}
+		if info.Mode()&fs.ModeSymlink == 0 {
+			cur = append(cur, part)
+			continue
+		}
+		if hops++; hops > maxLinks {
+			return "", fmt.Errorf("%s passes more than %d links", exports.HidePath(filepath.ToSlash(rel)), maxLinks)
+		}
+		target, err := root.Readlink(next)
+		if err != nil {
+			return "", exports.HideError(err)
+		}
+		if filepath.IsAbs(target) {
+			prefix := realDir + string(filepath.Separator)
+			if realDir == "" || target != realDir && !strings.HasPrefix(target, prefix) {
+				return "", out()
+			}
+			cur = nil
+			target = strings.TrimPrefix(strings.TrimPrefix(target, realDir), string(filepath.Separator))
+		}
+		pending = append(splitPath(target), pending...)
+	}
+	if len(cur) == 0 {
+		return ".", nil
+	}
+	return filepath.Join(cur...), nil
+}
+
+// splitPath is the names of path between separators, without empty ones, as written:
+// a ".." is kept, since the name before it may be a link.
+func splitPath(path string) []string {
+	var parts []string
+	for _, p := range strings.Split(path, string(filepath.Separator)) {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	return parts
 }
 
 // inside checks that path, with every symlink resolved, is under the module root. A
@@ -511,14 +669,14 @@ func Read(name, dir string, m *Manifest, variant string) (*Module, error) {
 func inside(root, path string) error {
 	realRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
-		return err
+		return exports.HideError(err)
 	}
 	real, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return err
+		return exports.HideError(err)
 	}
 	if real != realRoot && !strings.HasPrefix(real, realRoot+string(filepath.Separator)) {
-		return fmt.Errorf("links to %s, outside the module", real)
+		return fmt.Errorf("links to %s, outside the module", exports.HidePath(real))
 	}
 	return nil
 }
@@ -532,7 +690,7 @@ func inside(root, path string) error {
 func insideAll(root, dir string) error {
 	return filepath.WalkDir(dir, func(path string, _ os.DirEntry, err error) error {
 		if err != nil {
-			return err
+			return exports.HideError(err)
 		}
 		if path == dir {
 			return nil
@@ -542,7 +700,7 @@ func insideAll(root, dir string) error {
 			if relErr != nil {
 				rel = path
 			}
-			return fmt.Errorf("%s %w", filepath.ToSlash(rel), err)
+			return fmt.Errorf("%s %w", exports.HidePath(filepath.ToSlash(rel)), err)
 		}
 		return nil
 	})
@@ -557,7 +715,7 @@ func readSkills(rel, dir string) ([]Entry, error) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, exports.HideError(err)
 	}
 	var es []Entry
 	for _, it := range items {
@@ -567,13 +725,13 @@ func readSkills(rel, dir string) ([]Entry, error) {
 		path := filepath.Join(dir, it.Name())
 		info, err := os.Stat(path)
 		if err != nil {
-			return nil, err
+			return nil, exports.HideError(err)
 		}
 		if !info.IsDir() {
 			continue
 		}
 		if _, err := os.Stat(filepath.Join(path, "SKILL.md")); err != nil {
-			return nil, fmt.Errorf("%s/%s has no SKILL.md", filepath.ToSlash(rel), it.Name())
+			return nil, fmt.Errorf("%s has no SKILL.md", exports.HidePath(filepath.ToSlash(rel)+"/"+it.Name()))
 		}
 		es = append(es, Entry{Kind: "skills", Name: it.Name(), Path: path})
 	}
@@ -589,7 +747,7 @@ func readMarkdown(kind, dir string) ([]Entry, error) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, exports.HideError(err)
 	}
 	var es []Entry
 	for _, it := range items {
@@ -599,7 +757,7 @@ func readMarkdown(kind, dir string) ([]Entry, error) {
 		path := filepath.Join(dir, it.Name())
 		info, err := os.Stat(path)
 		if err != nil {
-			return nil, err
+			return nil, exports.HideError(err)
 		}
 		if info.IsDir() {
 			continue
@@ -622,7 +780,7 @@ func readFiles(rel, dir string) ([]Entry, error) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, exports.HideError(err)
 	}
 	var es []Entry
 	for _, rt := range runtimes {
@@ -632,10 +790,10 @@ func readFiles(rel, dir string) ([]Entry, error) {
 		root := filepath.Join(dir, rt.Name())
 		info, err := os.Stat(root)
 		if err != nil {
-			return nil, err
+			return nil, exports.HideError(err)
 		}
 		if !info.IsDir() {
-			return nil, fmt.Errorf("%s/%s is not under a runtime directory; a file ships as %s/<runtime>/<path>", filepath.ToSlash(rel), rt.Name(), filepath.ToSlash(rel))
+			return nil, fmt.Errorf("%s is not under a runtime directory; a file ships as %s/<runtime>/<path>", exports.HidePath(filepath.ToSlash(rel)+"/"+rt.Name()), exports.HidePath(filepath.ToSlash(rel)))
 		}
 		err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
@@ -668,7 +826,7 @@ func readFiles(rel, dir string) ([]Entry, error) {
 			return nil
 		})
 		if err != nil {
-			return nil, err
+			return nil, exports.HideError(err)
 		}
 	}
 	return es, nil
@@ -687,7 +845,7 @@ func readSettings(dir string) (map[string]map[string]string, error) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, exports.HideError(err)
 	}
 	out := map[string]map[string]string{}
 	for _, p := range runtimes {
@@ -696,14 +854,14 @@ func readSettings(dir string) (map[string]map[string]string, error) {
 		}
 		info, err := os.Stat(filepath.Join(dir, p.Name()))
 		if err != nil {
-			return nil, err
+			return nil, exports.HideError(err)
 		}
 		if !info.IsDir() {
 			continue
 		}
 		files, err := os.ReadDir(filepath.Join(dir, p.Name()))
 		if err != nil {
-			return nil, err
+			return nil, exports.HideError(err)
 		}
 		for _, f := range files {
 			if strings.HasPrefix(f.Name(), ".") {
@@ -711,10 +869,11 @@ func readSettings(dir string) (map[string]map[string]string, error) {
 			}
 			info, err := os.Stat(filepath.Join(dir, p.Name(), f.Name()))
 			if err != nil {
-				return nil, err
+				return nil, exports.HideError(err)
 			}
 			if info.IsDir() {
-				return nil, fmt.Errorf("settings/%s/%s is a directory; settings contains one fragment per target file, and a runtime's other files go under files/%s/%s", p.Name(), f.Name(), p.Name(), f.Name())
+				sub := exports.HidePath(p.Name() + "/" + f.Name())
+				return nil, fmt.Errorf("settings/%s is a directory; settings contains one fragment per target file, and a runtime's other files go under files/%s", sub, sub)
 			}
 			if out[p.Name()] == nil {
 				out[p.Name()] = map[string]string{}
@@ -730,14 +889,15 @@ func readSettings(dir string) (map[string]map[string]string, error) {
 // has. A directory in there, or a link to one, is an error rather than a silent skip, so
 // a module that keeps a script's helpers under hooks/ learns where they go instead: the
 // message names the directory as the variant reads it, and how a file elsewhere in the
-// module is reached. rel is the hooks directory relative to the module root.
+// module is reached. name is the module's name as the errors print it, and rel the hooks
+// directory relative to the module root.
 func readHooks(name, rel, dir string) ([]Entry, error) {
 	items, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, exports.HideError(err)
 	}
 	var es []Entry
 	for _, it := range items {
@@ -747,10 +907,10 @@ func readHooks(name, rel, dir string) ([]Entry, error) {
 		path := filepath.Join(dir, it.Name())
 		info, err := os.Stat(path)
 		if err != nil {
-			return nil, err
+			return nil, exports.HideError(err)
 		}
 		if info.IsDir() {
-			sub := filepath.ToSlash(filepath.Join(rel, it.Name()))
+			sub := exports.HidePath(filepath.ToSlash(filepath.Join(rel, it.Name())))
 			return nil, fmt.Errorf("%s is a directory; a hook is one file. Keep its helpers elsewhere in the module, reached as $QORY_HARNESS_HOME/modules/%s/<path>", sub, name)
 		}
 		es = append(es, Entry{Kind: "hooks", Name: it.Name(), Path: path})
@@ -768,15 +928,16 @@ var serverKeys = map[string]bool{"type": true, "command": true, "args": true, "e
 // readMCP lists mcp/<name>.json as MCP server entries named without the extension, and
 // returns each file's object by name. A file that is not one JSON object, or an object
 // [checkServer] refuses, is an error naming the file as the variant reads it; when the
-// file does not parse, the message keeps the decoder's own, which names the offset. A
-// directory or a file of another extension is not a server.
-func readMCP(rel, dir string) ([]Entry, map[string]map[string]any, error) {
+// file does not parse, the message keeps the decoder's message, which names the offset. A
+// directory or a file of another extension is not a server. An error of the file system
+// prints its path as [exports.HideError] prints it.
+func readMCP(rel, dir string, readFile func(string) ([]byte, error)) ([]Entry, map[string]map[string]any, error) {
 	items, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, exports.HideError(err)
 	}
 	var es []Entry
 	servers := map[string]map[string]any{}
@@ -787,16 +948,18 @@ func readMCP(rel, dir string) ([]Entry, map[string]map[string]any, error) {
 		path := filepath.Join(dir, it.Name())
 		info, err := os.Stat(path)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, exports.HideError(err)
 		}
 		if info.IsDir() {
 			continue
 		}
-		data, err := os.ReadFile(path)
+		data, err := readFile(path)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, exports.HideError(err)
 		}
-		file := filepath.ToSlash(filepath.Join(rel, it.Name()))
+		// The file's name is the server's name, which errors print as
+		// accesskey.ShownName prints it.
+		file := filepath.ToSlash(filepath.Join(rel, accesskey.ShownName(strings.TrimSuffix(it.Name(), ".json"), false)+".json"))
 		var server map[string]any
 		if err := json.Unmarshal(data, &server); err != nil {
 			return nil, nil, fmt.Errorf("%s does not contain a JSON object: %w", file, err)
@@ -821,11 +984,11 @@ func readMCP(rel, dir string) ([]Entry, map[string]map[string]any, error) {
 // mcp.schema.json refuses: a key no runtime reads, no command and no url, both, a command
 // or url that is not a non-empty string, a type outside stdio, http and sse, an args
 // element or an env or headers value that is not a string, a description that is not a
-// string.
+// string. A value the refusal prints is printed as [shownJSON] prints it.
 func checkServer(server map[string]any) error {
 	for k := range server {
 		if !serverKeys[k] {
-			return fmt.Errorf("key %q is not one of an MCP server's; keys: type, command, args, env, url, headers, description", k)
+			return fmt.Errorf("key %s is not one of an MCP server's; keys: type, command, args, env, url, headers, description", accesskey.ShownName(k, true))
 		}
 	}
 	command, hasCommand := server["command"]
@@ -842,7 +1005,7 @@ func checkServer(server map[string]any) error {
 	}
 	if t, ok := server["type"]; ok {
 		if s, _ := t.(string); s != "stdio" && s != "http" && s != "sse" {
-			return fmt.Errorf("type %v is not stdio, http or sse", t)
+			return fmt.Errorf("type %s is not stdio, http or sse", shownJSON(t))
 		}
 	}
 	if args, ok := server["args"]; ok {
@@ -852,7 +1015,7 @@ func checkServer(server map[string]any) error {
 		}
 		for _, a := range list {
 			if _, ok := a.(string); !ok {
-				return fmt.Errorf("args contains %v, which is not a string", a)
+				return fmt.Errorf("args contains %s, which is not a string", shownJSON(a))
 			}
 		}
 	}
@@ -867,17 +1030,22 @@ func checkServer(server map[string]any) error {
 		}
 		for k, e := range m {
 			if _, ok := e.(string); !ok {
-				return fmt.Errorf("%s.%s is %v, which is not a string", key, k, e)
+				return fmt.Errorf("%s.%s is %s, which is not a string", key, accesskey.ShownName(k, false), shownJSON(e))
 			}
 		}
 	}
 	if d, ok := server["description"]; ok {
 		if _, isString := d.(string); !isString {
-			return fmt.Errorf("description is %v, which is not a string", d)
+			return fmt.Errorf("description is %s, which is not a string", shownJSON(d))
 		}
 	}
 	return nil
 }
+
+// shownJSON is a value of a server object as a refusal prints it: as %v formats it, or,
+// when that text contains an access key secret or a run key, as [exports.Value] prints
+// it. A map or a list prints its keys and values, so a secret in one is left out too.
+func shownJSON(v any) string { return exports.Value(fmt.Sprint(v), false) }
 
 // nonEmptyString reports whether v is a string with at least one character.
 func nonEmptyString(v any) bool {

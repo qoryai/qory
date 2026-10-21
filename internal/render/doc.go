@@ -23,6 +23,12 @@
 // the staging directory, and a settings file it writes contains the home, the path the
 // runtime reads the tree from.
 //
+// A home outside the checkout contains copies in place of links for a module that lies in
+// the checkout, see [compose.Module.Copy]: modules/<name> and every entry of the module,
+// files and directories, each link inside followed within the module. A walled run can
+// write the checkout, and a link from the home into it would let the run change what the
+// program loads.
+//
 // A runtime that is a [Launcher] also renders a launch spec into its directory, what
 // its program takes from outside the checkout, and [Launch] lists the arguments that
 // start the program on it, with the variables the harness sets, see [LaunchEnv]; that is
@@ -65,7 +71,8 @@
 //
 //   - [PlaceEntries] puts the atomic entries of the kinds it lists into the runtime's
 //     directory for the path's [Address], one link per entry, or a written copy where a
-//     document contains a reference.
+//     document contains a reference, or a copy of the entry for a module the home holds
+//     a copy of.
 //   - [WriteSettings] writes the runtime's merged settings files, JSON or TOML by
 //     extension, handing each to a patch function, which is where the target model goes.
 //   - [WriteAgents] writes one Markdown file per composed agent, keeping the frontmatter

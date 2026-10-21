@@ -23,7 +23,8 @@ qory setup repo [flags]
 ### Options
 
 ```
-  -h, --help   help for repo
+      --accept-checkout   accept the checkout's git settings and qory.yaml commands and paths as they are now, after you checked them
+  -h, --help              help for repo
 ```
 
 ### Options inherited from parent commands

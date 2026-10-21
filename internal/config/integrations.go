@@ -6,17 +6,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/gateway"
 	"gopkg.in/yaml.v3"
 
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/integration"
 )
 
@@ -57,11 +61,12 @@ func readIntegrations(path string, node *yaml.Node) ([]ForagerIntegration, error
 	seen := map[string]bool{}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := node.Content[i].Value
+		at := entryAt("gateway.integrations", node.Content[i])
 		if !integrationKey.MatchString(key) {
-			return nil, fmt.Errorf("%s: gateway.integrations: %q is not 1 to 64 of a-z, 0-9, underscore and dash, starting with a letter or a digit", path, key)
+			return nil, fmt.Errorf("%s: gateway.integrations: %s is not 1 to 64 of a-z, 0-9, underscore and dash, starting with a letter or a digit", path, quotedName(node.Content[i]))
 		}
 		if seen[key] {
-			return nil, fmt.Errorf("%s: gateway.integrations.%s is declared twice", path, key)
+			return nil, fmt.Errorf("%s: %s is declared twice", path, at)
 		}
 		seen[key] = true
 		in := ForagerIntegration{Key: key, Program: ProgramPrefix + key, Settings: []byte("{}")}
@@ -71,30 +76,30 @@ func readIntegrations(path string, node *yaml.Node) ([]ForagerIntegration, error
 			continue
 		}
 		if entry.Kind != yaml.MappingNode {
-			return nil, fmt.Errorf("%s: gateway.integrations.%s is a mapping: program and settings", path, key)
+			return nil, fmt.Errorf("%s: %s is a mapping: program and settings", path, at)
 		}
 		for k := 0; k+1 < len(entry.Content); k += 2 {
 			value := entry.Content[k+1]
 			switch name := entry.Content[k].Value; name {
 			case "program":
 				if value.Kind != yaml.ScalarNode || value.ShortTag() != "!!str" || value.Value == "" {
-					return nil, fmt.Errorf("%s: gateway.integrations.%s.program is a path or a name on the PATH", path, key)
+					return nil, fmt.Errorf("%s: %s.program is a path or a name on the PATH", path, at)
 				}
 				if strings.ContainsRune(value.Value, '/') && !filepath.IsAbs(value.Value) {
-					return nil, fmt.Errorf("%s: gateway.integrations.%s.program is not an absolute path; set program to an absolute path or a name on the PATH", path, key)
+					return nil, fmt.Errorf("%s: %s.program is not an absolute path; set program to an absolute path or a name on the PATH", path, at)
 				}
 				in.Program = value.Value
 			case "settings":
 				if value.Kind != yaml.MappingNode {
-					return nil, fmt.Errorf("%s: gateway.integrations.%s.settings is a mapping, the settings document", path, key)
+					return nil, fmt.Errorf("%s: %s.settings is a mapping, the settings document", path, at)
 				}
 				var b bytes.Buffer
 				if err := writeJSON(&b, value, "settings"); err != nil {
-					return nil, fmt.Errorf("%s: gateway.integrations.%s.%w", path, key, err)
+					return nil, fmt.Errorf("%s: %s.%w", path, at, err)
 				}
 				in.Settings = b.Bytes()
 			default:
-				return nil, fmt.Errorf("%s: gateway.integrations.%s: key %q is not one", path, key, name)
+				return nil, keyNotOne(path, at, entry.Content[k], "")
 			}
 		}
 		out = append(out, in)
@@ -105,14 +110,18 @@ func readIntegrations(path string, node *yaml.Node) ([]ForagerIntegration, error
 // writeJSON writes the YAML under n as compact JSON, a mapping's keys in the file's
 // order. at is where n stands, for an error, which names the place and never the value.
 // An alias is refused: the settings go on a command line, whole, and a few chained
-// aliases expand to more than one can hold.
+// aliases expand to more than one can hold. A key or an anchor whose name contains an
+// access key secret or a run key is placed by its line, without the name.
 func writeJSON(b *bytes.Buffer, n *yaml.Node, at string) error {
 	switch n.Kind {
 	case yaml.AliasNode:
+		if accesskey.ContainsSecret(n.Value) {
+			return fmt.Errorf("%s: line %d: the value is a YAML alias, which the settings may not contain; write the value out in full", at, n.Line)
+		}
 		return fmt.Errorf("%s: line %d: *%s is a YAML alias, which the settings may not contain; write the value out in full", at, n.Line, n.Value)
 	case yaml.MappingNode:
 		b.WriteByte('{')
-		seen := map[string]bool{}
+		seen := map[string]int{}
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			k := n.Content[i]
 			if k.Kind == yaml.AliasNode || isMergeKey(k) {
@@ -121,16 +130,19 @@ func writeJSON(b *bytes.Buffer, n *yaml.Node, at string) error {
 			if k.Kind != yaml.ScalarNode || k.ShortTag() != "!!str" {
 				return fmt.Errorf("%s: line %d: a key that is not a string", at, k.Line)
 			}
-			if seen[k.Value] {
+			if first, ok := seen[k.Value]; ok {
+				if accesskey.ContainsSecret(k.Value) {
+					return fmt.Errorf("%s: line %d: a key is written twice; it was first written at line %d", at, k.Line, first)
+				}
 				return fmt.Errorf("%s.%s appears twice", at, k.Value)
 			}
-			seen[k.Value] = true
+			seen[k.Value] = k.Line
 			if i > 0 {
 				b.WriteByte(',')
 			}
 			writeString(b, k.Value)
 			b.WriteByte(':')
-			if err := writeJSON(b, n.Content[i+1], at+"."+k.Value); err != nil {
+			if err := writeJSON(b, n.Content[i+1], entryAt(at, k)); err != nil {
 				return err
 			}
 		}
@@ -184,10 +196,10 @@ func writeString(b *bytes.Buffer, s string) {
 // Expansion selects which integrations [Forager.Expand] describes, and where their
 // programs may not be.
 type Expansion struct {
-	// Workspace are the files and directories a run may write: its checkout, and the
-	// mounts a wall passes to the container read-write. A program that is one of them, or
-	// under one, is refused: what a run may change may not choose what runs with the
-	// machine's credentials.
+	// Workspace are the files and directories a run may write: its checkout, the mounts a
+	// wall passes to the container read-write, and every place a walled run has used. A
+	// program that is one of them, or under one, is refused: what a run may change may
+	// not choose what runs with the machine's credentials.
 	Workspace []string
 	// Only, when set, selects which integrations are described, by key: the ones a run's
 	// policy selects. Nil describes every one.
@@ -202,7 +214,10 @@ type Expansion struct {
 // refused in a directory of [Expansion.Workspace] and where [trusted] refuses it. A
 // program that is not found or does not answer, settings the description refuses, and an
 // integration that plays no role qory expands are errors that contain the file and the
-// key. The credential role defines the credential whose name is the key, with the
+// key. A key that contains an access key secret or a run key is printed as
+// [accesskey.ShownName] prints it, and so is each word of the error that contains the
+// key; each other word of the error that contains one, such as the program's path, is
+// printed as [exports.Value] prints it. The credential role defines the credential whose name is the key, with the
 // adapter [integration.CredentialAdapter] returns, unless the file's credentials section
 // defines that name itself: then the file's definition stands, [Forager.Shadowed] lists
 // the key, and the integration's credential is not defined. Roles qory does not expand are
@@ -222,12 +237,20 @@ func (r *Forager) Expand(ctx context.Context, e Expansion) error {
 		if e.Only != nil && !e.Only(in.Key) {
 			continue
 		}
+		// A key that contains an access key secret or a run key is in the program's name
+		// too, qory-<key>, and in its path, and Forager's refusal of the credential
+		// prints it unquoted: each copy prints as accesskey.ShownName prints it. A value
+		// with one, such as a program path the file sets, prints as exports.Value prints
+		// it.
 		fail := func(format string, a ...any) error {
-			return fmt.Errorf("%s: gateway.integrations.%s: %s", r.File, in.Key, fmt.Sprintf(format, a...))
+			return fmt.Errorf("%s: gateway.integrations.%s: %s", r.File, accesskey.ShownName(in.Key, false), exports.HideValues(exports.HideName(fmt.Sprintf(format, a...), in.Key)))
 		}
 		found, err := program(in.Program, e.Workspace)
 		if err != nil {
 			return fail("%v", err)
+		}
+		if name := relativeFile(in.Settings); name != "" {
+			return fail("settings.%s is a relative path; qory takes the file by its absolute path, since a relative one moves with the working folder", accesskey.ShownName(name, false))
 		}
 		d, err := integration.Describe(ctx, found)
 		if err != nil {
@@ -280,31 +303,89 @@ func (r *Forager) Shadowed() []string {
 // program in or under a directory of workspace, judged by where its links lead, and a
 // program [trusted] refuses: the resolved file and every directory above it up to /,
 // and every directory above each link on the way there, the PATH directory it was found
-// in among them.
+// in among them. Its refusals print the program, its paths and the PATH entry as they
+// are: [Forager.Expand] prints them as the integration's key requires.
 func program(name string, workspace []string) (string, error) {
+	return find(name, workspace, "an integration", finding{
+		relative: "set its absolute path with the `program` key",
+		missing:  "set program to its path",
+		resolved: true,
+		raw:      true,
+	})
+}
+
+// finding is how [find] words what it refuses for one kind of program: relative and
+// missing end the lines of a program found through a relative PATH entry and of one the
+// PATH does not hold, and resolved is whether a line names the program where it
+// resolves, after its name, when that is another path. raw is whether a line prints the
+// program, its paths, the PATH entry and the directories as they are, for a caller that
+// hides them in its refusal, as [Forager.Expand] does; otherwise each prints as
+// [exports.Value] prints it.
+type finding struct {
+	relative, missing string
+	resolved, raw     bool
+}
+
+// shown is v as a line of f prints it: quoted when quote is true, and, unless f is raw,
+// as [exports.Value] prints it.
+func (f finding) shown(v string, quote bool) string {
+	switch {
+	case !f.raw:
+		return exports.Value(v, quote)
+	case quote:
+		return strconv.Quote(v)
+	}
+	return v
+}
+
+// hidden is err, a refusal that prints a path, as a line of f prints it: as it is when
+// f is raw, and otherwise with each word that contains an access key secret or a run key
+// as [exports.Value] prints it. The result unwraps to err.
+func (f finding) hidden(err error) error {
+	if f.raw {
+		return err
+	}
+	return exports.HideValueError(err, "")
+}
+
+// Program finds the program of an adapter or a tool, what names it, as [program] finds
+// an integration's, and returns the path it checked, which is the path to run: the
+// gateway runs it by that path, so the program it starts is the one checked, wherever
+// the PATH or a link on the way to it leads later. A program the PATH does not find is
+// refused. A refusal prints the program, each path and the PATH entry as
+// [exports.Value] prints them.
+func Program(name string, workspace []string, what string) (string, error) {
+	return find(name, workspace, what, finding{
+		relative: "give its absolute path",
+		missing:  "give its absolute path",
+	})
+}
+
+// find is [program] for a program what names, worded as f says.
+func find(name string, workspace []string, what string, f finding) (string, error) {
 	found, err := exec.LookPath(name)
 	switch {
 	case errors.Is(err, exec.ErrDot):
-		return "", fmt.Errorf("%s is found as %s through the PATH entry %q, which is relative; qory runs a program from an absolute directory of the PATH; install it in one, or set its absolute path with the `program` key", name, dotted(found), relativeEntry(found, name))
+		return "", fmt.Errorf("%s is found as %s through the PATH entry %s, which is relative; qory runs a program from an absolute directory of the PATH; install it in one, or %s", f.shown(name, false), f.shown(dotted(found), false), f.shown(relativeEntry(found, name), true), f.relative)
 	case err != nil && filepath.IsAbs(name):
-		return "", fmt.Errorf("%s is not a program this user may run", name)
+		return "", fmt.Errorf("%s is not a program this user may run", f.shown(name, false))
 	case err != nil:
-		return "", fmt.Errorf("%s is not on the PATH; install it there, or set program to its path", name)
+		return "", fmt.Errorf("%s is not on the PATH; install it there, or %s", f.shown(name, false), f.missing)
 	}
 	if found, err = filepath.Abs(found); err != nil {
-		return "", err
+		return "", exports.HideError(err)
 	}
 	resolved, err := filepath.EvalSymlinks(found)
 	if err != nil {
-		return "", err
+		return "", exports.HideError(err)
 	}
 	// The program by its name, and by where it resolves when that is another path.
-	who := name
-	if resolved != name {
-		who = name + " is " + resolved
+	who := f.shown(name, false)
+	if resolved != name && f.resolved {
+		who += " is " + f.shown(resolved, false)
 	}
-	if err := outside(resolved, workspace); err != nil {
-		return "", fmt.Errorf("%s, %w", who, err)
+	if err := outside(resolved, workspace, what); err != nil {
+		return "", fmt.Errorf("%s, %w", who, f.hidden(err))
 	}
 	// Each link on the way is read from the directory it stands in, resolved, and a
 	// relative target is taken from there.
@@ -312,13 +393,13 @@ func program(name string, workspace []string) (string, error) {
 	for hop := found; ; {
 		dir, err := filepath.EvalSymlinks(filepath.Dir(hop))
 		if err != nil {
-			return "", err
+			return "", exports.HideError(err)
 		}
 		checked = append(checked, dir)
 		hop = filepath.Join(dir, filepath.Base(hop))
 		info, err := os.Lstat(hop)
 		if err != nil {
-			return "", err
+			return "", exports.HideError(err)
 		}
 		if info.Mode()&os.ModeSymlink == 0 {
 			break
@@ -327,13 +408,13 @@ func program(name string, workspace []string) (string, error) {
 		if len(links) > maxLinks {
 			from := ""
 			if found != name {
-				from = " from " + found
+				from = " from " + f.shown(found, false)
 			}
-			return "", fmt.Errorf("%s leads through more than %d links%s", name, maxLinks, from)
+			return "", fmt.Errorf("%s leads through more than %d links%s", f.shown(name, false), maxLinks, from)
 		}
 		target, err := os.Readlink(hop)
 		if err != nil {
-			return "", err
+			return "", exports.HideError(err)
 		}
 		if !filepath.IsAbs(target) {
 			target = filepath.Join(dir, target)
@@ -341,7 +422,7 @@ func program(name string, workspace []string) (string, error) {
 		hop = target
 	}
 	if err := ownersOnly(checked, links); err != nil {
-		return "", fmt.Errorf("%s, and %w", who, err)
+		return "", fmt.Errorf("%s, and %w", who, f.hidden(err))
 	}
 	return resolved, nil
 }
@@ -372,10 +453,26 @@ func relativeEntry(found, name string) string {
 	return filepath.Dir(found)
 }
 
+// relativeFile is the first setting, by name, whose name ends in _file and whose value
+// is a relative path; "" for none.
+func relativeFile(settings json.RawMessage) string {
+	var m map[string]any
+	if json.Unmarshal(settings, &m) != nil {
+		return ""
+	}
+	for _, name := range slices.Sorted(maps.Keys(m)) {
+		v, ok := m[name].(string)
+		if before, file := strings.CutSuffix(name, "_file"); file && before != "" && ok && v != "" && !filepath.IsAbs(v) {
+			return name
+		}
+	}
+	return ""
+}
+
 // outside refuses a path that is a file of workspace, or in or under a directory of it.
 // The path and each directory above it are compared as files, [os.SameFile], so a name
 // that differs only in case on a file system that ignores it is the same one.
-func outside(path string, workspace []string) error {
+func outside(path string, workspace []string, what string) error {
 	for _, dir := range workspace {
 		ws, err := os.Stat(dir)
 		if dir == "" || err != nil {
@@ -387,7 +484,7 @@ func outside(path string, workspace []string) error {
 				if p == path {
 					where = ""
 				}
-				return fmt.Errorf("%swhich a run may write; qory runs an integration from outside the checkout and the container's read-write mounts", where)
+				return fmt.Errorf("%swhich a run may write; qory runs %s from outside the checkout, the container's read-write mounts and the places a walled run has used", where, what)
 			}
 			if p == filepath.Dir(p) {
 				break

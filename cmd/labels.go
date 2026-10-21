@@ -8,6 +8,7 @@ import (
 	"github.com/qoryai/forager/session"
 
 	"github.com/qoryai/qory/internal/checkout"
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/foragerdir"
 )
 
@@ -57,10 +58,14 @@ type keptLabels struct {
 
 // originLabels is what the origin remote of the checkout at root gives, forge and
 // repository, both empty when [checkout.Origin] gives none. A run reads it once, so the
-// labels it sends are the ones it checks and keeps.
-func originLabels(root string) foragerdir.Labels {
-	forge, repository, _ := checkout.Origin(root)
-	return foragerdir.Labels{"forge": forge, "repository": repository}
+// labels it sends are the ones it checks and keeps. The error is the settings check's
+// refusal of the checkout's repository.
+func originLabels(root string) (foragerdir.Labels, error) {
+	forge, repository, _, err := checkout.Origin(root)
+	if err != nil {
+		return nil, err
+	}
+	return foragerdir.Labels{"forge": forge, "repository": repository}, nil
 }
 
 // checkLabels compares origin, the labels the origin remote of the checkout at root
@@ -124,7 +129,7 @@ func labelWords(l foragerdir.Labels) string {
 			out += ", "
 		}
 		if v := l[k]; v != "" {
-			out += k + " " + v
+			out += k + " " + exports.Value(v, false)
 		} else {
 			out += "no " + k
 		}
@@ -143,9 +148,9 @@ func (k *keptLabels) keep(report func(string)) {
 	}
 	if err := writeLabels(k.dir, k.root, k.labels); err != nil {
 		if k.before {
-			report(fmt.Sprintf("the checkout's labels were not kept: %v; the next run checks the ones kept before", err))
+			report(fmt.Sprintf("the checkout's labels were not kept: %v; the next run checks the ones kept before", exports.HideError(err)))
 		} else {
-			report(fmt.Sprintf("the checkout's labels were not kept: %v; the next run checks none", err))
+			report(fmt.Sprintf("the checkout's labels were not kept: %v; the next run checks none", exports.HideError(err)))
 		}
 		return
 	}

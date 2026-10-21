@@ -126,4 +126,18 @@ pseudo-version Go stamped, and one without version control reports the commit al
 `source` row, `release` or `source`, distinguishes the two kinds of build, and
 `qory version --json` prints every field as one object for a script.
 
+The `Dockerfile` at the root builds an image that holds qory's static Linux build alone,
+at `/qory/qory`, mode 0555, for linux/amd64 and linux/arm64. The image is copied from, not
+run. `scripts/build-image.sh [commit]` builds it from a commit of a clean tree into
+`dist/image/` and prints the digest of each platform's image and of the index. A push to
+the branch `prerelease` runs `.github/workflows/prerelease.yml`, which publishes the image
+of the pushed commit to the private package `ghcr.io/qoryai/qory-prerelease`, tagged
+`sha-<the commit's first 7 characters>`, and prints the index digest in the run's summary.
+To take the binary out of an image:
+
+```sh
+id=$(docker create --platform linux/arm64 ghcr.io/qoryai/qory-prerelease@sha256:<digest>)
+docker cp "$id:/qory/qory" ./qory
+```
+
 Commit messages state what changed and why it was needed, in the imperative.

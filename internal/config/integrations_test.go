@@ -383,7 +383,7 @@ func TestARelativeLinkIsFollowedFromWhereItStands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := conf.Forager.Expand(context.Background(), config.Expansion{Workspace: []string{program}}); err == nil || !strings.HasSuffix(err.Error(), "gateway.integrations.rel: "+program+", which a run may write; qory runs an integration from outside the checkout and the container's read-write mounts") {
+	if err := conf.Forager.Expand(context.Background(), config.Expansion{Workspace: []string{program}}); err == nil || !strings.HasSuffix(err.Error(), "gateway.integrations.rel: "+program+", which a run may write; qory runs an integration from outside the checkout, the container's read-write mounts and the places a walled run has used") {
 		t.Errorf("a program that is a mounted file: %v", err)
 	}
 }
@@ -549,5 +549,62 @@ func TestTheForagerSchemaTakesTheIntegrationsSection(t *testing.T) {
 		if err := schema.Validate(doc); (err == nil) != c.valid {
 			t.Errorf("%q: %v, want valid %v", c.body, err, c.valid)
 		}
+	}
+}
+
+// TestProgramFindsTheProgramWhereItRuns is a tool's program named in the checkout's
+// folder of programs, which is a run's to write: by a bare name the PATH finds there,
+// and by a relative name through a link in the working folder that leads there, each
+// refused though neither names the checkout as written. One outside it is returned by
+// the path it resolves to, the one the gateway runs, and one the PATH does not find is
+// refused. No file is ever run.
+func TestProgramFindsTheProgramWhereItRuns(t *testing.T) {
+	workspace, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(workspace, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "a-tool"), nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	want := "a-tool, inside " + workspace + ", which a run may write; qory runs a tool from outside the checkout, the container's read-write mounts and the places a walled run has used"
+	if _, err := config.Program("a-tool", []string{workspace}, "a tool"); err == nil || err.Error() != want {
+		t.Errorf("a bare name on the PATH: %v, want %q", err, want)
+	}
+	t.Setenv("PATH", "")
+	cwd := t.TempDir()
+	if err := os.Symlink(bin, filepath.Join(cwd, "tools")); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(cwd)
+	want = "tools/a-tool, inside " + workspace + ", which a run may write; qory runs a tool from outside the checkout, the container's read-write mounts and the places a walled run has used"
+	if _, err := config.Program("tools/a-tool", []string{workspace}, "a tool"); err == nil || err.Error() != want {
+		t.Errorf("a relative name through a link: %v, want %q", err, want)
+	}
+	want = "not-a-program is not on the PATH; install it there, or give its absolute path"
+	if _, err := config.Program("not-a-program", []string{workspace}, "a tool"); err == nil || err.Error() != want {
+		t.Errorf("a name the PATH does not find: %v, want %q", err, want)
+	}
+	// Outside the workspace, through a link on the PATH: the path returned is the file
+	// itself, so a link the PATH leads through can change and the gateway still runs it.
+	elsewhere, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	program := filepath.Join(elsewhere, "real-tool")
+	if err := os.WriteFile(program, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	onPath := t.TempDir()
+	if err := os.Symlink(program, filepath.Join(onPath, "b-tool")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", onPath)
+	if got, err := config.Program("b-tool", []string{workspace}, "a tool"); err != nil || got != program {
+		t.Errorf("a program outside: %q, %v, want %q", got, err, program)
 	}
 }

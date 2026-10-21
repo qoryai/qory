@@ -14,6 +14,9 @@ import (
 
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/hostgit"
+	walled "github.com/qoryai/qory/internal/places"
 	"github.com/qoryai/qory/internal/ui"
 	"github.com/qoryai/qory/internal/worktree"
 )
@@ -87,7 +90,7 @@ func asker(in io.Reader, rows io.Writer) func(string) (string, error) {
 	}
 	r := bufio.NewReader(in)
 	return func(question string) (string, error) {
-		fmt.Fprint(rows, "  "+question)
+		fmt.Fprint(rows, "  "+exports.HideValues(question))
 		line, err := r.ReadString('\n')
 		if err != nil && !errors.Is(err, io.EOF) {
 			return "", err
@@ -108,7 +111,7 @@ func tracing(cmd *cobra.Command, o *worktree.Options, u *ui.UI, rows io.Writer) 
 	if !verbose(cmd) {
 		return
 	}
-	o.Trace = func(line string) { u.Text(line) }
+	o.Trace = func(line string) { u.Text(exports.HideValues(line)) }
 	o.Output = rows
 }
 
@@ -223,7 +226,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/worktrees.md`,
 					title = branch
 				}
 			}
-			u.Title(filepath.Base(main), "worktree "+title)
+			u.Title(filepath.Base(main), "worktree "+exports.Value(title, false))
 			a, err := worktree.Add(main, branch, o)
 			var runErr *worktree.RunError
 			if errors.As(err, &runErr) {
@@ -278,34 +281,37 @@ func shortPath(main, path string) string {
 // printAdded prints the rows of an add: the path, the branch and where it came from, the
 // upstream, and what was linked, copied, kept, missing and run.
 func printAdded(u *ui.UI, main string, a worktree.Added) {
-	path := shortPath(main, a.Path)
+	path := exports.Value(shortPath(main, a.Path), false)
 	if inside(a.Path) {
 		path += "  (you are in it)"
 	}
 	rows := [][2]string{{"path", path}}
 	if a.How != "" {
-		rows = append(rows, [2]string{"branch", a.Branch + "  (" + a.How + ")"})
+		rows = append(rows, [2]string{"branch", exports.Value(a.Branch, false) + "  (" + exports.HideValues(a.How) + ")"})
 	}
 	if a.Upstream != "" {
-		rows = append(rows, [2]string{"pushes to", a.Upstream})
+		rows = append(rows, [2]string{"pushes to", exports.Value(a.Upstream, false)})
 	}
 	if a.Head != "" {
-		rows = append(rows, [2]string{"pulls from", a.Head + "  (on no branch of the remote, as for a pull request from a fork or from a deleted branch; a push from here goes nowhere)"})
+		rows = append(rows, [2]string{"pulls from", exports.Value(a.Head, false) + "  (on no branch of the remote, as for a pull request from a fork or from a deleted branch; a push from here goes nowhere)"})
 	}
 	for _, p := range a.Linked {
-		rows = append(rows, [2]string{"linked", p.To + "  (" + from(p) + ")"})
+		rows = append(rows, [2]string{"linked", exports.Value(p.To, false) + "  (" + from(p) + ")"})
 	}
 	for _, p := range a.Copied {
-		rows = append(rows, [2]string{"copied", p.To + "  (" + from(p) + ")"})
+		rows = append(rows, [2]string{"copied", exports.Value(p.To, false) + "  (" + from(p) + ")"})
 	}
 	for _, p := range a.Kept {
-		rows = append(rows, [2]string{"kept", p.To + "  (already in the worktree)"})
+		rows = append(rows, [2]string{"kept", exports.Value(p.To, false) + "  (already in the worktree)"})
 	}
 	for _, p := range a.Missing {
-		rows = append(rows, [2]string{"missing", p.To + "  (" + notAt(p) + "; nothing linked)"})
+		rows = append(rows, [2]string{"missing", exports.Value(p.To, false) + "  (" + notAt(p) + "; nothing linked)"})
+	}
+	for _, p := range a.Through {
+		rows = append(rows, [2]string{"refused", exports.Value(p.To, false) + "  (" + exports.Value(p.From, false) + " in the main checkout is a link or lies under one; qory brings nothing through a link of the checkout)"})
 	}
 	for _, c := range a.Ran {
-		rows = append(rows, [2]string{"ran", c})
+		rows = append(rows, [2]string{"ran", exports.Value(c, false)})
 	}
 	u.Fields(rows)
 }
@@ -315,11 +321,11 @@ func printAdded(u *ui.UI, main string, a worktree.Added) {
 func from(p worktree.Path) string {
 	switch {
 	case p.Outside():
-		return "from " + ui.Short(p.From, "")
+		return "from " + exports.Value(ui.Short(p.From, ""), false)
 	case p.From == p.To:
 		return "from the main checkout"
 	default:
-		return "from " + p.From + " in the main checkout"
+		return "from " + exports.Value(p.From, false) + " in the main checkout"
 	}
 }
 
@@ -327,11 +333,11 @@ func from(p worktree.Path) string {
 func notAt(p worktree.Path) string {
 	switch {
 	case p.Outside():
-		return "not at " + ui.Short(p.From, "")
+		return "not at " + exports.Value(ui.Short(p.From, ""), false)
 	case p.From == p.To:
 		return "not in the main checkout"
 	default:
-		return p.From + " is not in the main checkout"
+		return exports.Value(p.From, false) + " is not in the main checkout"
 	}
 }
 
@@ -385,7 +391,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/worktrees.md`,
 				// is its branch unless a name was given beside --branch or --pr.
 				if target, err = worktree.Find(main, args[0]); err != nil {
 					if target, err = worktree.Find(main, worktree.PathFor(main, args[0], o)); err != nil {
-						return input(fmt.Errorf("no worktree is at %s, on a branch of that name or added as it; qory worktree list shows them", args[0]))
+						return input(fmt.Errorf("no worktree is at %s, on a branch of that name or added as it; qory worktree list shows them", exports.Value(args[0], false)))
 					}
 				}
 			} else {
@@ -409,22 +415,28 @@ More: https://github.com/qoryai/qory/blob/main/docs/worktrees.md`,
 			o.Ask = asker(cmd.InOrStdin(), rows)
 			u := ui.New(rows)
 			tracing(cmd, &o, u, rows)
-			u.Title(filepath.Base(main), "worktree remove "+shortPath(main, target.Path))
+			u.Title(filepath.Base(main), "worktree remove "+exports.Value(shortPath(main, target.Path), false))
 			// A home outside the worktree goes with it, and is found before the worktree
 			// is gone, since its configuration is read from there.
 			var outside *places
 			if at, err := placesAt(target.Path); err == nil && at.dir == "" {
 				outside = &at
 			}
+			// The record of the worktree's folder, if a walled run used it, goes with the
+			// folder; its name is taken while the folder is there to resolve.
+			recorded := walled.Real(target.Path)
 			r, err := worktree.Remove(main, target.Path, o)
 			if err != nil {
 				return input(err)
 			}
+			if err := walled.Remove(recorded); err != nil {
+				return err
+			}
 			fields := [][2]string{}
 			for _, c := range r.Ran {
-				fields = append(fields, [2]string{"ran", c})
+				fields = append(fields, [2]string{"ran", exports.Value(c, false)})
 			}
-			fields = append(fields, [2]string{"removed", shortPath(main, r.Path)})
+			fields = append(fields, [2]string{"removed", exports.Value(shortPath(main, r.Path), false)})
 			if outside != nil {
 				for _, path := range []string{outside.home, outside.report, outside.home + ".tmp"} {
 					if _, err := os.Lstat(path); err != nil {
@@ -433,7 +445,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/worktrees.md`,
 					if err := os.RemoveAll(path); err != nil {
 						return err
 					}
-					fields = append(fields, [2]string{"removed", ui.Short(path, "") + "  (its home)"})
+					fields = append(fields, [2]string{"removed", exports.Value(ui.Short(path, ""), false) + "  (its home)"})
 				}
 			}
 			fields = append(fields, [2]string{"branch", branchRow(r)}, [2]string{"main", r.Main})
@@ -456,20 +468,23 @@ More: https://github.com/qoryai/qory/blob/main/docs/worktrees.md`,
 // branchRow is the branch row of a remove: the branch and, in parentheses, what became
 // of it and why.
 func branchRow(r worktree.Removed) string {
+	// The branch, the remote branch and the base as they can be printed: git allows a
+	// name that a terminal does not show.
+	branch := hostgit.Shown(exports.Value(r.Branch, false))
 	own := fmt.Sprintf("%d commit%s nothing else has", r.Own, map[bool]string{true: "", false: "s"}[r.Own == 1])
 	switch {
 	case r.BranchDeleted && r.Pushed:
-		return r.Branch + "  (pushed to " + r.Upstream + ", then deleted)"
+		return branch + "  (pushed to " + hostgit.Shown(exports.Value(r.Upstream, false)) + ", then deleted)"
 	case r.BranchDeleted && r.Landed != "":
-		return r.Branch + "  (deleted; landed on " + r.LandedOn + " as " + r.Landed[:min(7, len(r.Landed))] + ")"
+		return branch + "  (deleted; landed on " + hostgit.Shown(exports.Value(r.LandedOn, false)) + " as " + r.Landed[:min(7, len(r.Landed))] + ")"
 	case r.BranchDeleted && r.Own > 0:
-		return r.Branch + "  (deleted with " + own + "; git reflog finds " + map[bool]string{true: "it", false: "them"}[r.Own == 1] + " for 30 days)"
+		return branch + "  (deleted with " + own + "; git reflog finds " + map[bool]string{true: "it", false: "them"}[r.Own == 1] + " for 30 days)"
 	case r.BranchDeleted:
-		return r.Branch + "  (deleted; every commit of it is on the remote, in the main checkout or on its base)"
+		return branch + "  (deleted; every commit of it is on the remote, in the main checkout or on its base)"
 	case r.Own > 0:
-		return r.Branch + "  (kept with " + own + "; git branch -D " + r.Branch + " deletes it)"
+		return branch + "  (kept with " + own + "; git branch -D " + branch + " deletes it)"
 	default:
-		return r.Branch + "  (kept; git branch -d " + r.Branch + " deletes it)"
+		return branch + "  (kept; git branch -d " + branch + " deletes it)"
 	}
 }
 
@@ -502,7 +517,7 @@ row says whether the worktree has a composed harness.
 			u.Title(filepath.Base(main), "worktrees")
 			var rows [][]string
 			for _, e := range entries {
-				branch := e.Branch
+				branch := exports.Value(e.Branch, false)
 				if branch == "" {
 					branch = "(detached)"
 				}
@@ -513,9 +528,9 @@ row says whether the worktree has a composed harness.
 				if e.Composed {
 					notes = append(notes, "composed")
 				}
-				row := []string{shortPath(main, e.Path), branch, strings.Join(notes, ", ")}
+				row := []string{exports.Value(shortPath(main, e.Path), false), branch, strings.Join(notes, ", ")}
 				if verbose(cmd) && e.Report != "" {
-					row = append(row, shortPath(main, e.Report))
+					row = append(row, exports.Value(shortPath(main, e.Report), false))
 				}
 				rows = append(rows, row)
 			}

@@ -10,7 +10,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/qoryai/forager/accesskey"
+
 	"github.com/qoryai/qory/internal/compose"
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/ui"
 )
 
@@ -40,6 +43,10 @@ type Module struct {
 	// Link is the checkout-root name that links to the module's directory, absent when
 	// the stack sets none.
 	Link string `json:"link,omitempty"`
+	// Copied marks a module whose directory lies in the checkout, composed into a home
+	// outside it: the home contains copies of its files in place of links to them, so an
+	// edit to the module reaches the home on the next compose. Absent otherwise.
+	Copied bool `json:"copied,omitempty"`
 	// Base marks a module of the base stack, when a checkout's qory.yaml extends one.
 	Base bool `json:"base,omitempty"`
 }
@@ -81,6 +88,19 @@ type Entry struct {
 	// References are the entries the entry's documents reference, as <kind>/<name> keys
 	// as written, a role's name included; absent when it references none.
 	References []string `json:"references,omitempty"`
+	// Tier is the tier the agent's model sets as a placeholder, absent for an agent with
+	// a model id or none, and for every other kind.
+	Tier string `json:"tier,omitempty"`
+}
+
+// Tier is the entry a tier the agents use maps to.
+type Tier struct {
+	// Model is the model id the agents of the tier get.
+	Model string `json:"model"`
+	// Effort is the effort value the entry sets, absent when it sets none.
+	Effort string `json:"effort,omitempty"`
+	// From is where the entry was set: --tier, or the absolute path of the qory.yaml.
+	From string `json:"from"`
 }
 
 // Exclude is one excluded entry.
@@ -191,6 +211,9 @@ type Report struct {
 	// Bind is the stack's bindings, <kind>/<role> to the name of the entry that fills the
 	// role, absent when the stack binds none.
 	Bind map[string]string `json:"bind,omitempty"`
+	// Tiers is, for each tier an agent sets that has a map, the entry it maps to; a tier
+	// an agent sets that is absent here has no map. Absent when no such tier has one.
+	Tiers map[string]Tier `json:"tiers,omitempty"`
 	// Egress is the union of the hosts the modules declared, sorted by host, each with
 	// the modules that declared it, the target runtime among them for the hosts its
 	// program reaches. Absent when no module declares egress, which leaves a run's policy
@@ -312,13 +335,19 @@ func New(res *compose.Result, name, checkout, home string) Report {
 		r.Base = &Base{Name: res.Base.Name, Source: res.Base.Source, Pin: res.Base.Pin}
 	}
 	for _, l := range res.Modules {
-		r.Modules = append(r.Modules, Module{Name: l.Name, Description: l.Description, Source: l.Source, Pin: l.Pin, Dirty: l.Dirty, Variant: l.Variant, Link: l.Link, Base: l.Base})
+		r.Modules = append(r.Modules, Module{Name: l.Name, Description: l.Description, Source: l.Source, Pin: l.Pin, Dirty: l.Dirty, Variant: l.Variant, Link: l.Link, Copied: l.Copy, Base: l.Base})
 		if l.Egress != nil {
 			r.AddEgress(l.Name, l.Egress)
 		}
 	}
 	for _, e := range res.Entries {
-		r.Entries = append(r.Entries, Entry{Kind: e.Kind, Name: e.Name, Module: e.Module, For: e.For, References: e.References})
+		r.Entries = append(r.Entries, Entry{Kind: e.Kind, Name: e.Name, Module: e.Module, For: e.For, References: e.References, Tier: e.Tier})
+	}
+	for name, t := range res.Tiers {
+		if r.Tiers == nil {
+			r.Tiers = map[string]Tier{}
+		}
+		r.Tiers[name] = Tier{Model: t.Model, Effort: t.Effort, From: t.From}
 	}
 	for _, x := range res.Excludes {
 		r.Excludes = append(r.Excludes, Exclude{Module: x.Module, Kind: x.Kind, Name: x.Name})
@@ -327,16 +356,37 @@ func New(res *compose.Result, name, checkout, home string) Report {
 }
 
 // Write stores the report as indented JSON with a trailing newline, creating the parent
-// directories. It overwrites a report already at path.
+// directories. It replaces what is at path, a report or a link, through a new temporary
+// file beside it renamed into place, so it never writes through a link to a file
+// elsewhere.
 func Write(path string, r Report) error {
 	data, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
+	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	_, err = f.Write(append(data, '\n'))
+	if err == nil {
+		err = f.Chmod(0o644)
+	}
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = os.Rename(tmp, path)
+	}
+	if err != nil {
+		os.Remove(tmp)
+	}
+	return err
 }
 
 // Read loads a stored report. It does not check the version, so a caller that reads only one
@@ -360,7 +410,7 @@ func Read(path string) (Report, error) {
 // the callers that check one.
 func (r Report) Print(w io.Writer) error {
 	u := ui.New(w)
-	u.Title(r.Stack, strings.TrimSpace(strings.Join(r.Target.Runtimes, ", ")+" "+r.Target.Model))
+	u.Title(accesskey.ShownName(r.Stack, false), strings.TrimSpace(strings.Join(accesskey.ShownNames(r.Target.Runtimes), ", ")+" "+exports.Value(r.Target.Model, false)))
 	return r.PrintBody(w)
 }
 
@@ -370,10 +420,10 @@ func (r Report) PrintBody(w io.Writer) error {
 	u := ui.New(w)
 	fields := [][2]string{{"file", ui.Short(r.File, r.Checkout)}}
 	if r.Description != "" {
-		fields = append(fields, [2]string{"about", r.Description})
+		fields = append(fields, [2]string{"about", exports.Value(r.Description, false)})
 	}
 	if r.Base != nil {
-		fields = append(fields, [2]string{"extends", r.Base.Name + "  " + r.Base.Source + "  " + r.Base.Pin})
+		fields = append(fields, [2]string{"extends", accesskey.ShownName(r.Base.Name, false) + "  " + exports.URL(r.Base.Source) + "  " + r.Base.Pin})
 	}
 	fields = append(fields, [2]string{"checkout", ui.Short(r.Checkout, "")}, [2]string{"home", ui.Short(r.Home, r.Checkout)})
 	if r.Links != "" {
@@ -381,7 +431,7 @@ func (r Report) PrintBody(w io.Writer) error {
 	}
 	if r.Worktree != nil && r.Worktree.Base != nil {
 		b := r.Worktree.Base
-		fields = append(fields, [2]string{"base branch", b.Ref + "  (" + ui.Short(b.Source, r.Checkout) + ")"})
+		fields = append(fields, [2]string{"base branch", exports.Value(b.Ref, false) + "  (" + ui.Short(b.Source, r.Checkout) + ")"})
 	}
 	if r.Qory != nil {
 		fields = append(fields, [2]string{"qory", strings.TrimSpace(r.Qory.Version + "  " + r.Qory.Commit + "  " + r.Qory.Source)})
@@ -395,18 +445,21 @@ func (r Report) PrintBody(w io.Writer) error {
 		if l.Dirty {
 			pin += " (dirty)"
 		}
-		row := []string{l.Name, l.Source, pin}
+		row := []string{accesskey.ShownName(l.Name, false), exports.URL(l.Source), pin}
 		if l.Variant != "" {
-			row = append(row, "variant "+l.Variant)
+			row = append(row, "variant "+accesskey.ShownName(l.Variant, false))
 		}
 		if l.Link != "" {
-			row = append(row, "linked as "+l.Link)
+			row = append(row, "linked as "+accesskey.ShownName(l.Link, false))
+		}
+		if l.Copied {
+			row = append(row, "copied")
 		}
 		if l.Base {
 			row = append(row, "base")
 		}
 		if l.Description != "" {
-			row = append(row, l.Description)
+			row = append(row, exports.Value(l.Description, false))
 		}
 		rows = append(rows, row)
 	}
@@ -415,12 +468,12 @@ func (r Report) PrintBody(w io.Writer) error {
 	u.Heading("Entries")
 	rows = nil
 	for _, e := range r.Entries {
-		row := []string{e.Kind + "/" + e.Name, e.Module}
+		row := []string{accesskey.ShownName(e.Kind+"/"+e.Name, false), accesskey.ShownName(e.Module, false)}
 		if e.For != "" {
-			row = append(row, "required by "+e.For)
+			row = append(row, "required by "+accesskey.ShownName(e.For, false))
 		}
 		if len(e.References) > 0 {
-			row = append(row, "references "+strings.Join(e.References, ", "))
+			row = append(row, "references "+strings.Join(accesskey.ShownNames(e.References), ", "))
 		}
 		rows = append(rows, row)
 	}
@@ -430,7 +483,7 @@ func (r Report) PrintBody(w io.Writer) error {
 		u.Heading("Bind")
 		rows = nil
 		for _, role := range sorted(r.Bind) {
-			rows = append(rows, []string{role, r.Bind[role]})
+			rows = append(rows, []string{accesskey.ShownName(role, false), accesskey.ShownName(r.Bind[role], false)})
 		}
 		u.Table(rows)
 	}
@@ -439,7 +492,7 @@ func (r Report) PrintBody(w io.Writer) error {
 		u.Heading("Egress")
 		rows = nil
 		for _, e := range r.Egress {
-			rows = append(rows, []string{e.Host, strings.Join(e.Modules, ", ")})
+			rows = append(rows, []string{e.Host, strings.Join(accesskey.ShownNames(e.Modules), ", ")})
 		}
 		if len(rows) == 0 {
 			u.Text("declared: nothing")
@@ -451,7 +504,7 @@ func (r Report) PrintBody(w io.Writer) error {
 		u.Heading("Excludes")
 		rows = nil
 		for _, x := range r.Excludes {
-			rows = append(rows, []string{x.Module, x.Kind + "/" + x.Name})
+			rows = append(rows, []string{accesskey.ShownName(x.Module, false), accesskey.ShownName(x.Kind+"/"+x.Name, false)})
 		}
 		u.Table(rows)
 	}
@@ -469,12 +522,12 @@ func (r Report) PrintBody(w io.Writer) error {
 			if values, ok := r.Extensions[key].(map[string]any); ok && len(values) > 0 {
 				for _, sub := range sorted(values) {
 					value, _ := json.Marshal(values[sub])
-					rows = append(rows, []string{key + "." + sub, string(value)})
+					rows = append(rows, []string{accesskey.ShownName(key+"."+sub, false), exports.Value(string(value), false)})
 				}
 				continue
 			}
 			value, _ := json.Marshal(r.Extensions[key])
-			rows = append(rows, []string{key, string(value)})
+			rows = append(rows, []string{accesskey.ShownName(key, false), exports.Value(string(value), false)})
 		}
 		u.Table(rows)
 	}
@@ -489,7 +542,7 @@ func (r Report) envRows() [][]string {
 	var rows [][]string
 	if len(r.LaunchEnv) == 0 {
 		for _, name := range sorted(r.Env) {
-			rows = append(rows, []string{name, r.Env[name]})
+			rows = append(rows, []string{accesskey.ShownName(name, false), exports.Value(r.Env[name], false)})
 		}
 		return rows
 	}
@@ -505,7 +558,7 @@ func (r Report) envRows() [][]string {
 	}
 	sort.SliceStable(vars, func(i, j int) bool { return vars[i].Name < vars[j].Name })
 	for _, v := range vars {
-		rows = append(rows, []string{v.Name, v.Value, "default, " + v.From})
+		rows = append(rows, []string{accesskey.ShownName(v.Name, false), exports.Value(v.Value, false), "default, " + exports.HidePath(v.From)})
 	}
 	return rows
 }

@@ -85,9 +85,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/qoryai/forager/accesskey"
 	"gopkg.in/yaml.v3"
 
+	"github.com/qoryai/qory/internal/acting"
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/module"
 	"github.com/qoryai/qory/internal/source"
 	"github.com/qoryai/qory/internal/stack"
 )
@@ -238,12 +241,12 @@ type Path struct {
 }
 
 // String is the entry as a row prints it: the path alone when the two are the same,
-// else "from -> to".
+// else "from -> to", each path as [exports.Value] prints it.
 func (p Path) String() string {
 	if p.From == p.To {
-		return p.To
+		return exports.Value(p.To, false)
 	}
-	return p.From + " -> " + p.To
+	return exports.Value(p.From, false) + " -> " + exports.Value(p.To, false)
 }
 
 // pathEntry is a worktree.link or worktree.copy entry as written: a string, or a
@@ -307,6 +310,12 @@ type Config struct {
 	Runtime stack.Runtimes
 	// Model replaces the document's target.model, "" to keep the document's.
 	Model string
+	// Tiers is the machine's tier map, harness.tiers of every file but the checkout
+	// root's, by tier, the nearer file's entry for each; nil when no file sets one.
+	Tiers map[string]stack.Tier
+	// RepoTiers is the repository's tier map, harness.tiers of the checkout root's file,
+	// read under extends as well; nil when that file sets none.
+	RepoTiers map[string]stack.Tier
 	// Force replaces a tracked, unmodified file of the checkout where a link goes.
 	Force bool
 	// Update fetches every git source again on each compose.
@@ -371,6 +380,7 @@ type file struct {
 type harnessSection struct {
 	Runtime     *stack.Runtimes          `yaml:"runtime,omitempty"`
 	Model       *string                  `yaml:"model,omitempty"`
+	Tiers       map[string]yaml.Node     `yaml:"tiers,omitempty"`
 	Force       *bool                    `yaml:"force,omitempty"`
 	Update      *string                  `yaml:"update,omitempty"`
 	Home        *string                  `yaml:"home,omitempty"`
@@ -451,7 +461,7 @@ func Load(root string, own bool) (Config, error) {
 		return c, err
 	}
 	for _, path := range files {
-		f, err := c.apply(path, own || filepath.Dir(path) != root)
+		f, err := c.apply(path, own || filepath.Dir(path) != root, filepath.Dir(path) == root)
 		if err != nil {
 			return c, err
 		}
@@ -471,15 +481,15 @@ func Load(root string, own bool) (Config, error) {
 // Forager's files, while another qory.yaml may lie in a place its agent can write.
 func LoadUser() (Config, error) {
 	c := Defaults()
-	dir := UserDir()
-	if dir == "" {
-		return c, nil
+	dir, err := UserDir()
+	if err != nil || dir == "" {
+		return c, err
 	}
 	path, err := FileIn(dir)
 	if err != nil || path == "" {
 		return c, err
 	}
-	_, err = c.apply(path, true)
+	_, err = c.apply(path, true, false)
 	return c, err
 }
 
@@ -491,7 +501,11 @@ func LoadUser() (Config, error) {
 // root is absolute, so the checkout's own file is the one whose directory is root.
 func Discover(root string) ([]string, error) {
 	var files []string
-	if dir := UserDir(); dir != "" {
+	dir, err := UserDir()
+	if err != nil {
+		return nil, err
+	}
+	if dir != "" {
 		path, err := FileIn(dir)
 		if err != nil {
 			return nil, err
@@ -500,7 +514,7 @@ func Discover(root string) ([]string, error) {
 			files = append(files, path)
 		}
 	}
-	root, err := filepath.Abs(root)
+	root, err = filepath.Abs(root)
 	if err != nil {
 		return files, nil
 	}
@@ -698,17 +712,26 @@ func (f file) document() *stack.Stack {
 	return &stack.Stack{APIVersion: f.APIVersion, RetiredAPIVersion: f.retired, Qory: f.Qory, Name: h.Name, Description: h.Description, Extends: h.Extends, Target: h.Target, Modules: h.Modules, Bind: h.Bind, Extensions: h.Extensions}
 }
 
+// ErrRelativeConfigHome is the refusal of an XDG_CONFIG_HOME that is no absolute path,
+// which [UserDir] returns before anything is read from the directory it would name.
+var ErrRelativeConfigHome = errors.New("qory: XDG_CONFIG_HOME is not an absolute path; qory reads its configuration only from an absolute one, so that it does not change with the working folder")
+
 // UserDir is the user's configuration directory: $XDG_CONFIG_HOME/qory, else
-// ~/.config/qory, and "" when neither can be found.
-func UserDir() string {
+// ~/.config/qory, and "" when neither can be found. An XDG_CONFIG_HOME that is set but
+// is no absolute path is [ErrRelativeConfigHome], so that the directory never moves with
+// the working folder.
+func UserDir() (string, error) {
 	if base := os.Getenv("XDG_CONFIG_HOME"); base != "" {
-		return filepath.Join(base, "qory")
+		if !filepath.IsAbs(base) {
+			return "", ErrRelativeConfigHome
+		}
+		return filepath.Join(base, "qory"), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ""
+		return "", nil
 	}
-	return filepath.Join(home, ".config", "qory")
+	return filepath.Join(home, ".config", "qory"), nil
 }
 
 // exists reports whether a regular file, or a link to one, is at path.
@@ -724,9 +747,12 @@ func ownedFile(path string) bool {
 }
 
 // apply reads one file, sets the keys it names and returns the file as read. With
-// machine false, only the worktree section and the qory key are taken: the harness, git
-// and env keys are the machine's and left out.
-func (c *Config) apply(path string, machine bool) (file, error) {
+// machine false, only the worktree section, the qory key and the tiers are taken: the
+// other harness keys, git and env are the machine's and left out. With root, the file is
+// the checkout root's, and its tiers are the repository's map; any other file's are the
+// machine's. A refusal prints a value the file sets as [exports.Value] prints it, and a
+// variable's or a tier's name as [accesskey.ShownName] prints it.
+func (c *Config) apply(path string, machine, root bool) (file, error) {
 	f, err := read(path)
 	if err != nil {
 		return f, err
@@ -741,6 +767,11 @@ func (c *Config) apply(path string, machine bool) (file, error) {
 	if err := c.applyWorktree(path, f.Worktree); err != nil {
 		return f, err
 	}
+	if f.Harness != nil && f.Harness.Tiers != nil {
+		if err := c.applyTiers(path, f.Harness.Tiers, root); err != nil {
+			return f, err
+		}
+	}
 	if !machine {
 		c.Ignored = f.machineKeys()
 		return f, nil
@@ -751,7 +782,7 @@ func (c *Config) apply(path string, machine bool) (file, error) {
 				return f, fmt.Errorf("%s: harness.runtime is empty; it is one runtime or a list of them", path)
 			}
 			if err := h.Runtime.Validate(); err != nil {
-				return f, fmt.Errorf("%s: harness.%w", path, err)
+				return f, fmt.Errorf("%s: harness.%w", path, exports.HideValueError(err, ""))
 			}
 			c.Runtime = *h.Runtime
 			c.origins["harness.runtime"] = path
@@ -771,7 +802,7 @@ func (c *Config) apply(path string, machine bool) (file, error) {
 			case "never":
 				c.Update = false
 			default:
-				return f, fmt.Errorf("%s: harness.update %q is not always or never", path, *h.Update)
+				return f, fmt.Errorf("%s: harness.update %s is not always or never", path, exports.Value(*h.Update, true))
 			}
 			c.origins["harness.update"] = path
 		}
@@ -783,7 +814,7 @@ func (c *Config) apply(path string, machine bool) (file, error) {
 			if dir == "~" || strings.HasPrefix(dir, "~/") {
 				home, err := os.UserHomeDir()
 				if err != nil {
-					return f, fmt.Errorf("%s: harness.home is %s, and the home directory is unknown: %w", path, dir, err)
+					return f, fmt.Errorf("%s: harness.home is %s, and the home directory is unknown: %w", path, exports.Value(dir, false), err)
 				}
 				dir = filepath.Join(home, dir[1:])
 			}
@@ -795,7 +826,7 @@ func (c *Config) apply(path string, machine bool) (file, error) {
 			case LinksCheckout, LinksNone:
 				c.Links = *h.Links
 			default:
-				return f, fmt.Errorf("%s: harness.links %q is not %s or %s", path, *h.Links, LinksCheckout, LinksNone)
+				return f, fmt.Errorf("%s: harness.links %s is not %s or %s", path, exports.Value(*h.Links, true), LinksCheckout, LinksNone)
 			}
 			c.origins["harness.links"] = path
 		}
@@ -815,7 +846,7 @@ func (c *Config) apply(path string, machine bool) (file, error) {
 		if f.Git.Timeout != nil {
 			d, err := time.ParseDuration(*f.Git.Timeout)
 			if err != nil || d <= 0 {
-				return f, fmt.Errorf("%s: git.timeout %q is not a duration above zero, such as 10m", path, *f.Git.Timeout)
+				return f, fmt.Errorf("%s: git.timeout %s is not a duration above zero, such as 10m", path, exports.Value(*f.Git.Timeout, true))
 			}
 			c.Git.Timeout = d
 			c.origins["git.timeout"] = path
@@ -834,7 +865,7 @@ func (c *Config) apply(path string, machine bool) (file, error) {
 	}
 	for name, value := range f.Env {
 		if !envName.MatchString(name) {
-			return f, fmt.Errorf("%s: env: %s is not an environment variable name", path, name)
+			return f, fmt.Errorf("%s: env: %s is not an environment variable name", path, accesskey.ShownName(name, false))
 		}
 		if name == "QORY_HARNESS_HOME" {
 			return f, fmt.Errorf("%s: env.QORY_HARNESS_HOME is qory's; the configuration exports another name", path)
@@ -843,6 +874,72 @@ func (c *Config) apply(path string, machine bool) (file, error) {
 		c.origins["env."+name] = path
 	}
 	return f, nil
+}
+
+// applyTiers checks each entry of a file's harness.tiers and adds it to the repository's
+// map for the checkout root's file, else to the machine's, over an entry an earlier file
+// set for the tier. An entry is a model id, or a mapping of model and an optional effort.
+func (c *Config) applyTiers(path string, tiers map[string]yaml.Node, root bool) error {
+	for _, name := range sortedNames(tiers) {
+		key := "harness.tiers." + name
+		if !module.IsTier(name) {
+			shown := accesskey.ShownName(name, false)
+			return fmt.Errorf("%s: %w", path, module.NotATier("harness.tiers."+shown, shown))
+		}
+		node := tiers[name]
+		t, ok := tierEntry(&node)
+		if !ok {
+			return fmt.Errorf("%s: %s: write a model id, or {model: <model id>, effort: <value>}", path, key)
+		}
+		if _, placeholder := module.TierOf(t.Model); placeholder {
+			return fmt.Errorf("%s: %s: write a model id; %s is a tier placeholder, which goes only in an agent's model", path, key, exports.Value(t.Model, false))
+		}
+		t.From = path
+		if root {
+			if c.RepoTiers == nil {
+				c.RepoTiers = map[string]stack.Tier{}
+			}
+			c.RepoTiers[name] = t
+			continue
+		}
+		if c.Tiers == nil {
+			c.Tiers = map[string]stack.Tier{}
+		}
+		c.Tiers[name] = t
+		c.origins[key] = path
+	}
+	return nil
+}
+
+// tierEntry reads one tier entry: a string that is the model id, or a mapping with a
+// model string and an optional effort string, neither empty and no other key.
+func tierEntry(node *yaml.Node) (stack.Tier, bool) {
+	var t stack.Tier
+	switch node.Kind {
+	case yaml.ScalarNode:
+		if node.Tag != "!!str" || node.Value == "" || module.HasControl(node.Value) {
+			return t, false
+		}
+		t.Model = node.Value
+		return t, true
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			k, v := node.Content[i], node.Content[i+1]
+			if v.Kind != yaml.ScalarNode || v.Tag != "!!str" || v.Value == "" || module.HasControl(v.Value) {
+				return t, false
+			}
+			switch k.Value {
+			case "model":
+				t.Model = v.Value
+			case "effort":
+				t.Effort = v.Value
+			default:
+				return t, false
+			}
+		}
+		return t, t.Model != ""
+	}
+	return t, false
 }
 
 // machineKeys lists the machine's keys the file sets: the harness keys that are not its
@@ -873,7 +970,8 @@ func (f file) machineKeys() []string {
 }
 
 // applyWorktree sets the worktree keys the section names. A list replaces the one before
-// it; the nearest file's list is the one in force.
+// it; the nearest file's list is the one in force. A refusal prints a value the section
+// sets as [exports.Value] prints it.
 func (c *Config) applyWorktree(path string, w *worktreeSection) error {
 	if w == nil {
 		return nil
@@ -887,10 +985,10 @@ func (c *Config) applyWorktree(path string, w *worktreeSection) error {
 	}
 	if w.Name != nil {
 		if !strings.Contains(*w.Name, "{branch}") {
-			return fmt.Errorf("%s: worktree.name %q contains no {branch}, and without it two worktrees share one directory", path, *w.Name)
+			return fmt.Errorf("%s: worktree.name %s contains no {branch}, and without it two worktrees share one directory", path, exports.Value(*w.Name, true))
 		}
 		if strings.ContainsAny(*w.Name, `/\`) {
-			return fmt.Errorf("%s: worktree.name %q contains a slash; it is one directory name under worktree.dir", path, *w.Name)
+			return fmt.Errorf("%s: worktree.name %s contains a slash; it is one directory name under worktree.dir", path, exports.Value(*w.Name, true))
 		}
 		c.Worktree.Name = *w.Name
 		c.origins["worktree.name"] = path
@@ -901,14 +999,14 @@ func (c *Config) applyWorktree(path string, w *worktreeSection) error {
 	}
 	if w.PR != nil {
 		if !strings.HasPrefix(*w.PR, "refs/") || !strings.Contains(*w.PR, "{n}") {
-			return fmt.Errorf("%s: worktree.pr %q is not a ref under refs/ with {n} for the pull request number, as refs/pull/{n}/head", path, *w.PR)
+			return fmt.Errorf("%s: worktree.pr %s is not a ref under refs/ with {n} for the pull request number, as refs/pull/{n}/head", path, exports.Value(*w.PR, true))
 		}
 		c.Worktree.PR = *w.PR
 		c.origins["worktree.pr"] = path
 	}
 	if w.Branch != nil {
 		if *w.Branch != "delete" && *w.Branch != "keep" {
-			return fmt.Errorf("%s: worktree.branch %q is not delete or keep", path, *w.Branch)
+			return fmt.Errorf("%s: worktree.branch %s is not delete or keep", path, exports.Value(*w.Branch, true))
 		}
 		c.Worktree.Branch = *w.Branch
 		c.origins["worktree.branch"] = path
@@ -949,7 +1047,7 @@ func (c *Config) applyWorktree(path string, w *worktreeSection) error {
 // returns it as a [Path]. A path named alone, or a from written relative, is inside the
 // checkout and goes to the same path unless to says otherwise; a from that is absolute
 // or starts with ~ comes from outside the checkout and needs a to. A to is relative and
-// stays inside the worktree.
+// stays inside the worktree. A refusal prints a path as [exports.Value] prints it.
 func worktreePath(path, key string, e pathEntry) (Path, error) {
 	from := e.From
 	if from == "" {
@@ -958,29 +1056,29 @@ func worktreePath(path, key string, e pathEntry) (Path, error) {
 	if from == "~" || strings.HasPrefix(from, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return Path{}, fmt.Errorf("%s: %s lists %s, and the home directory is unknown: %w", path, key, from, err)
+			return Path{}, fmt.Errorf("%s: %s lists %s, and the home directory is unknown: %w", path, key, exports.Value(from, false), err)
 		}
 		from = filepath.Join(home, from[1:])
 	}
 	to := e.To
 	switch {
 	case filepath.IsAbs(from) && !e.mapping:
-		return Path{}, fmt.Errorf("%s: %s lists %q, which is not a path inside the checkout; a path from outside goes as {from: %s, to: <path in the worktree>}", path, key, e.From, e.From)
+		return Path{}, fmt.Errorf("%s: %s lists %s, which is not a path inside the checkout; a path from outside goes as {from: %s, to: <path in the worktree>}", path, key, exports.Value(e.From, true), exports.Value(e.From, false))
 	case filepath.IsAbs(from):
 		from = filepath.Clean(from)
 		if to == "" {
-			return Path{}, fmt.Errorf("%s: %s lists %s with no to; a path from outside the checkout sets where it goes, as {from: %s, to: <path in the worktree>}", path, key, e.From, e.From)
+			return Path{}, fmt.Errorf("%s: %s lists %s with no to; a path from outside the checkout sets where it goes, as {from: %s, to: <path in the worktree>}", path, key, exports.Value(e.From, false), exports.Value(e.From, false))
 		}
 	default:
 		if !insideRel(from) {
-			return Path{}, fmt.Errorf("%s: %s lists %q, which is not a path inside the checkout", path, key, from)
+			return Path{}, fmt.Errorf("%s: %s lists %s, which is not a path inside the checkout", path, key, exports.Value(from, true))
 		}
 		if to == "" {
 			to = from
 		}
 	}
 	if !insideRel(to) {
-		return Path{}, fmt.Errorf("%s: %s maps %s to %q, which is not a path inside the worktree", path, key, e.From, to)
+		return Path{}, fmt.Errorf("%s: %s maps %s to %s, which is not a path inside the worktree", path, key, exports.Value(e.From, false), exports.Value(to, true))
 	}
 	return Path{From: from, To: to}, nil
 }
@@ -1004,13 +1102,24 @@ func read(path string) (file, error) {
 	if err != nil {
 		return f, err
 	}
+	// The user's qory.yaml is never in a place a walled run may write: Forager refuses a
+	// mount of the directory that holds it.
+	dir, err := UserDir()
+	if err != nil {
+		return f, err
+	}
+	if dir == "" || filepath.Dir(path) != filepath.Clean(dir) {
+		if err := acting.Check(path, data); err != nil {
+			return f, err
+		}
+	}
 	if err := exports.RefuseAliases(path, data); err != nil {
 		return f, err
 	}
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
 	dec.KnownFields(true)
 	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
-		return f, decodeError(path, err)
+		return f, exports.DecodeError(path, err)
 	}
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return f, fmt.Errorf("%s: contains more than one document; a configuration is one", path)
@@ -1033,12 +1142,12 @@ func read(path string) (file, error) {
 	return f, nil
 }
 
-// unknownKey is the decoder's report of a key the document has no field for. It names the
 // launchOf reads one harness.launch entry: the command has to be a word when set, every
 // argument group a word or more, and every variable an environment variable name other
-// than qory's own.
+// than qory's own. A refusal prints the runtime's name and a variable's name as
+// [accesskey.ShownName] prints them.
 func launchOf(path, name string, l launchSection) (Launch, error) {
-	key := "harness.launch." + name
+	key := "harness.launch." + accesskey.ShownName(name, false)
 	var out Launch
 	if l.Command != nil {
 		if strings.TrimSpace(*l.Command) == "" {
@@ -1059,7 +1168,7 @@ func launchOf(path, name string, l launchSection) (Launch, error) {
 		out.Env = map[string]string{}
 		for k, v := range l.Env {
 			if !envName.MatchString(k) {
-				return out, fmt.Errorf("%s: %s.env: %s is not an environment variable name", path, key, k)
+				return out, fmt.Errorf("%s: %s.env: %s is not an environment variable name", path, key, accesskey.ShownName(k, false))
 			}
 			if k == "QORY_HARNESS_HOME" {
 				return out, fmt.Errorf("%s: %s.env.QORY_HARNESS_HOME is qory's; every launch sets it to the home", path, key)
@@ -1082,32 +1191,21 @@ func sortedNames[V any](m map[string]V) []string {
 }
 
 // String is the entry as a row prints it: the variables, the command and the groups on
-// one line, with a field the runtime's own left out.
+// one line, with a field the runtime's own left out. A variable's name prints as
+// [accesskey.ShownName] prints it, and its value, the command and each word of a group
+// as [exports.Value] prints them.
 func (l Launch) String() string {
 	var parts []string
 	for _, k := range sortedNames(l.Env) {
-		parts = append(parts, k+"="+l.Env[k])
+		parts = append(parts, accesskey.ShownName(k, false)+"="+exports.Value(l.Env[k], false))
 	}
 	if l.Command != "" {
-		parts = append(parts, l.Command)
+		parts = append(parts, exports.Value(l.Command, false))
 	}
 	for _, g := range l.Args {
-		parts = append(parts, strings.Join(g, " "))
+		parts = append(parts, strings.Join(exports.Values(g), " "))
 	}
 	return strings.Join(parts, " ")
-}
-
-// Go type, which the message a person reads leaves out.
-var unknownKey = regexp.MustCompile(`(line \d+: )?field (\S+) not found in type \S+`)
-
-// decodeError prefixes a decode error with path. An unknown key is reported as one the
-// configuration does not read, with the decoder's line number when it gives one; any
-// other error is returned as the decoder wrote it.
-func decodeError(path string, err error) error {
-	if m := unknownKey.FindStringSubmatch(err.Error()); m != nil {
-		return fmt.Errorf("%s: %skey %q is not one %s reads", path, m[1], m[2], filepath.Base(path))
-	}
-	return fmt.Errorf("%s: %w", path, err)
 }
 
 // Row is one effective value and where it came from.
@@ -1143,31 +1241,33 @@ func (c Config) SetBy(path, section string) []string {
 
 // Rows lists every effective value with its origin: the qory ranges when a file sets
 // one, the fixed keys, the worktree lists that are set, the variables after them in
-// name order, and the exports when the root's file lists any.
+// name order, and the exports when the root's file lists any. A value a file sets prints
+// as [exports.Value] prints it, and a name in a key or a value as [accesskey.ShownName]
+// prints it.
 func (c Config) Rows() []Row {
 	runtime, model := "(stack)", "(stack)"
 	if c.Runtime != nil {
-		runtime = c.Runtime.String()
+		runtime = strings.Join(exports.Values(c.Runtime), ", ")
 	}
 	if c.Model != "" {
-		model = c.Model
+		model = exports.Value(c.Model, false)
 	}
 	update := "never"
 	if c.Update {
 		update = "always"
 	}
-	base := c.Worktree.Base
+	base := exports.Value(c.Worktree.Base, false)
 	if base == "" {
 		base = "(remote HEAD)"
 	}
-	home, links := c.Home, c.Links
+	home, links := exports.Value(c.Home, false), c.Links
 	if home == "" {
 		home = DefaultHome
 	}
 	if links == "" {
 		links = "(by home)"
 	}
-	cache := c.Git.Cache
+	cache := exports.Value(c.Git.Cache, false)
 	if cache == "" {
 		cache, _ = source.CacheDir()
 	}
@@ -1182,24 +1282,33 @@ func (c Config) Rows() []Row {
 		Row{"harness.update", update, c.origins["harness.update"]},
 		Row{"harness.home", home, c.origins["harness.home"]},
 		Row{"harness.links", links, c.origins["harness.links"]},
-		Row{"worktree.dir", c.Worktree.Dir, c.origins["worktree.dir"]},
-		Row{"worktree.name", c.Worktree.Name, c.origins["worktree.name"]},
+		Row{"worktree.dir", exports.Value(c.Worktree.Dir, false), c.origins["worktree.dir"]},
+		Row{"worktree.name", exports.Value(c.Worktree.Name, false), c.origins["worktree.name"]},
 		Row{"worktree.base", base, c.origins["worktree.base"]},
 		Row{"worktree.branch", c.Worktree.Branch, c.origins["worktree.branch"]},
 	)
 	if c.Worktree.PR != "" {
-		rows = append(rows, Row{"worktree.pr", c.Worktree.PR, c.origins["worktree.pr"]})
+		rows = append(rows, Row{"worktree.pr", exports.Value(c.Worktree.PR, false), c.origins["worktree.pr"]})
 	}
 	for _, list := range []struct {
 		key   string
 		items []string
-	}{{"worktree.link", pathStrings(c.Worktree.Link)}, {"worktree.copy", pathStrings(c.Worktree.Copy)}, {"worktree.run.add", c.Worktree.Add}, {"worktree.run.remove", c.Worktree.Remove}} {
+	}{{"worktree.link", pathStrings(c.Worktree.Link)}, {"worktree.copy", pathStrings(c.Worktree.Copy)}, {"worktree.run.add", exports.Values(c.Worktree.Add)}, {"worktree.run.remove", exports.Values(c.Worktree.Remove)}} {
 		if len(list.items) > 0 {
 			rows = append(rows, Row{list.key, strings.Join(list.items, ", "), c.origins[list.key]})
 		}
 	}
+	for _, name := range module.Tiers {
+		t, ok := c.Tiers[name]
+		if !ok {
+			if t, ok = c.RepoTiers[name]; !ok {
+				continue
+			}
+		}
+		rows = append(rows, Row{"harness.tiers." + name, TierValue(t), t.From})
+	}
 	for _, name := range sortedNames(c.Launch) {
-		rows = append(rows, Row{"harness.launch." + name, c.Launch[name].String(), c.origins["harness.launch."+name]})
+		rows = append(rows, Row{"harness.launch." + accesskey.ShownName(name, false), c.Launch[name].String(), c.origins["harness.launch."+name]})
 	}
 	rows = append(rows,
 		Row{"git.timeout", c.Git.Timeout.String(), c.origins["git.timeout"]},
@@ -1211,18 +1320,27 @@ func (c Config) Rows() []Row {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		rows = append(rows, Row{"env." + name, c.Env[name], c.origins["env."+name]})
+		rows = append(rows, Row{"env." + accesskey.ShownName(name, false), exports.Value(c.Env[name], false), c.origins["env."+name]})
 	}
 	rows = append(rows, c.Forager.Rows()...)
 	if e := c.Exports; e != nil {
 		rows = append(rows,
-			Row{"exports.dir.stacks", e.Dir.Stacks, e.File},
-			Row{"exports.dir.modules", e.Dir.Modules, e.File},
-			Row{"exports.stacks", listOrNone(e.Stacks), e.File},
-			Row{"exports.modules", listOrNone(e.Modules), e.File},
+			Row{"exports.dir.stacks", exports.Value(e.Dir.Stacks, false), e.File},
+			Row{"exports.dir.modules", exports.Value(e.Dir.Modules, false), e.File},
+			Row{"exports.stacks", listOrNone(accesskey.ShownNames(e.Stacks)), e.File},
+			Row{"exports.modules", listOrNone(accesskey.ShownNames(e.Modules)), e.File},
 		)
 	}
 	return rows
+}
+
+// TierValue is a tier entry as a row prints it: the model id, then the effort when the
+// entry sets one, "claude-opus-5-5, effort max", each as [exports.Value] prints it.
+func TierValue(t stack.Tier) string {
+	if t.Effort == "" {
+		return exports.Value(t.Model, false)
+	}
+	return exports.Value(t.Model, false) + ", effort " + exports.Value(t.Effort, false)
 }
 
 // pathStrings is each path as [Path.String] prints it.

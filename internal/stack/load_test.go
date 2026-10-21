@@ -140,6 +140,7 @@ func TestLoadReportsAMissingFile(t *testing.T) {
 // TestLoadRefuses covers every document validation turns down. The message names the
 // offending field, because the command prints it as it comes.
 func TestLoadRefuses(t *testing.T) {
+	isolate(t)
 	cases := []struct {
 		name string
 		yaml string
@@ -175,6 +176,12 @@ func TestLoadRefuses(t *testing.T) {
 			"a target",
 			"apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: core\n    source:\n      path: modules/core\n",
 			"target is not a stack's; a stack is delivered to be extended, and the checkout extending it sets target under harness, beside extends",
+			false,
+		},
+		{
+			"a tier map",
+			"apiVersion: qory.dev/v1alpha1\ntiers:\n  light: claude-haiku-5-5\nmodules:\n  - name: core\n    source:\n      path: modules/core\n",
+			"A stack file does not set tiers; a repository maps tiers under harness.tiers in its qory.yaml, and a machine in the user's qory.yaml",
 			false,
 		},
 		{
@@ -277,6 +284,7 @@ func TestLoadRefuses(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			path := write(t, c.yaml)
+			t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(filepath.Dir(path)))
 			_, err := Load(path)
 			if err == nil {
 				t.Fatalf("loaded %q without an error", c.yaml)

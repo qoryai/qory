@@ -29,7 +29,9 @@ import (
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/gateway"
 	"github.com/qoryai/forager/receiver"
+	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/sink"
+	"github.com/qoryai/forager/wall"
 
 	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/foragerdir"
@@ -121,7 +123,7 @@ func newFakeServer(t *testing.T, policy string) *fakeServer {
 			if id == testGatewayKey && f.gatewayKey != nil {
 				return receiver.AccessKey{PublicKey: f.gatewayKey.PublicKey(), Node: testGatewayNode}, true
 			}
-			return receiver.AccessKey{PublicKey: f.key.PublicKey(), Node: f.keyNode}, id == testAccessKey && !f.revoked
+			return receiver.AccessKey{PublicKey: f.key.PublicKey(), Node: f.keyNode, StoredSecrets: f.secrets}, id == testAccessKey && !f.revoked
 		},
 		Configuration: func() ([]byte, string) {
 			f.mu.Lock()
@@ -237,14 +239,25 @@ func (f *fakeServer) choose(choice, gatewayURL string, k *accesskey.Key) {
 	f.handler.Gateways = map[string]receiver.Gateway{testGatewayNode: {URL: gatewayURL, Workspace: testWorkspace, AccessKeys: []string{testGatewayKey}}}
 }
 
-// newKey is a new Ed25519 key, for an access key or a server's signing key.
+// newKey is a new Ed25519 key, for an access key or a server's signing key. A key
+// whose public key contains qak_ or qrk_ in any case, about 1 in 27,000, is drawn
+// again. qory reads a pin with Forager 1056b47d's accesskey.SecretInPinEntry or
+// ParsePin, and Forager reads a server document with server.Parse; each refuses a pin's
+// public key that starts with qak_ or qrk_ in any case, about 1 in 1,000,000 keys, as
+// one that contains a secret, and no test that calls newKey means to prove that
+// refusal. The redraw is wider than that rule: those readers accept a valid key that
+// contains either text after its first character.
 func newKey(t *testing.T) *accesskey.Key {
 	t.Helper()
-	k, err := accesskey.Generate()
-	if err != nil {
-		t.Fatal(err)
+	for {
+		k, err := accesskey.Generate()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !accesskey.ContainsSecret(k.PublicKey().String()) {
+			return k
+		}
 	}
-	return k
 }
 
 // statusRecorder remembers the status an answer was written with.
@@ -572,17 +585,18 @@ func TestRunExpandsTheIntegrationsTheMachineDeclares(t *testing.T) {
 	if err := os.RemoveAll(runsDir(t, root)); err != nil {
 		t.Fatal(err)
 	}
-	// A policy that selects a credential needs a wall, which Forager asks for once
-	// the integration it selects is described.
+	// A policy that selects a credential runs without a wall too: once the integration
+	// it selects is described, the gateway starts its credential adapter, which this
+	// stub is not.
 	out, err = run(t, "run", "--policy", policy("tracker"))
 	wants(t, out, "qory run: integration tracker: "+tracker+" 0.3.0\n")
 	lacks(t, out, "integration broken")
-	if err == nil || !strings.Contains(err.Error(), "need a wall") {
+	if err == nil || !strings.Contains(err.Error(), "credential tracker: the adapter "+tracker+": exit status 64") {
 		t.Errorf("a run that selects tracker: %v", err)
 	}
 	// Forager stopped the run once it had started its record: qory prints the error,
 	// then the line that names the record.
-	if ids := recorded(t, root); len(ids) != 1 || !strings.HasSuffix(out, "need a wall: without one a program that ignores the proxy is bound by none of them\nqory run: the record is in "+filepath.Join(runsDir(t, root), ids[0])+"\n") || !errors.Is(err, cmd.ErrReported) {
+	if ids := recorded(t, root); len(ids) != 1 || !strings.HasSuffix(out, "exit status 64: \nqory run: the record is in "+filepath.Join(runsDir(t, root), ids[0])+"\n") || !errors.Is(err, cmd.ErrReported) {
 		t.Errorf("a run stopped after its record started: %v, %v\n%s", ids, err, out)
 	}
 	if err := os.RemoveAll(runsDir(t, root)); err != nil {
@@ -734,7 +748,8 @@ func staticELF(t *testing.T) string {
 // fakeDocker writes a program that stands in for docker: it logs every command line,
 // answers what the wall reads, a network's gateway and its subnets, and, as Docker
 // Engine 28, the engine's version a run with nested Docker asks for, adds an IPv6
-// subnet to the inside network created with --ipv6, and for run logs the environment
+// subnet to the inside network created with --ipv6, answers that it holds no image by
+// reference, as an engine that has not pulled it, and for run logs the environment
 // file, prints a line and exits 4, as a container's runtime would.
 func fakeDocker(t *testing.T) (string, string) {
 	t.Helper()
@@ -748,6 +763,7 @@ case "$*" in
 "network create "*" --ipv6 "*) : > `+ipv6+` ;;
 "network create "*" --internal "*) rm -f `+ipv6+` ;;
 "network inspect "*.Subnet*) test -e `+ipv6+` && { echo "172.30.0.0/16 fd00:db8::/64 "; exit 0; } ;;
+"image inspect --format {{json .RepoDigests}} "*) echo "Error response from daemon: No such image: $5" >&2; exit 1 ;;
 esac
 case "$1 $2" in
 "version --format") echo "28.0.0" ;;
@@ -776,18 +792,59 @@ esac
 // runs the agent's container on this machine: the runtime's entrypoint, with its
 // arguments, the variables of the container's environment file and PATH alone, and
 // the signals the session sends; QORY_TEST_EXIT of the docker command's environment
-// passes into it, as the wall passes no variable of Forager's name. A run on a machine that holds an access key needs a
-// wall; this one lets such a run reach its runtime as an unwalled run would.
+// passes into it, as the wall passes no variable of Forager's name. The variables of the
+// file QORY_TEST_IMAGE_ENV names, when it is set, stand for the image's environment,
+// under the container's. The exec step in front of the launch is the real qory run
+// exec: this test binary through its QORY_TEST_EXEC hook, with Forager's arguments, in
+// place of qory's Linux build inside, which this machine does not have at its path; the
+// program after its -- starts through the script again, without the hook's variable.
+// The run's preparation script runs as it is, with a program that exits 0 in place of
+// qory's Linux build inside. A run on a machine that holds an access key needs a wall;
+// this one lets such a run reach its runtime as an unwalled run would.
 func passingWall(t *testing.T) string {
 	t.Helper()
+	bin, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
 	dir := t.TempDir()
 	enter := filepath.Join(dir, "enter")
+	prepared := filepath.Join(dir, "prepared.sh")
 	writeFile(t, enter, `#!/bin/sh
 f=$1
 shift
-while IFS= read -r line; do
-	export "$line"
-done < "$f"
+if [ "$f" = - ]; then
+	unset QORY_TEST_EXEC
+else
+	if [ -n "$QORY_TEST_IMAGE_ENV" ]; then
+		while IFS= read -r line; do
+			export "$line"
+		done < "$QORY_TEST_IMAGE_ENV"
+	fi
+	unset QORY_TEST_IMAGE_ENV
+	while IFS= read -r line; do
+		export "$line"
+	done < "$f"
+fi
+if [ "$1" = `+wall.HelperPath+` ] && [ "$2" = run ] && [ "$3" = exec ]; then
+	shift 3
+	seen=
+	for a do
+		shift
+		if [ -z "$seen" ] && [ "$a" = -- ]; then
+			set -- "$@" -- /bin/sh `+enter+` -
+			seen=1
+			continue
+		fi
+		set -- "$@" "$a"
+	done
+	QORY_TEST_EXEC=1 exec '`+bin+`' -test.run='^$' -- "$@"
+fi
+if [ "$1" = /bin/sh ] && [ "${2##*/}" = `+session.PreparationScript+` ]; then
+	sed "s|'`+wall.HelperPath+`' 'run' 'prepare'|true|" "$2" > `+prepared+`
+	shift 2
+	exec /bin/sh `+prepared+` "$@"
+fi
 exec "$@"
 `)
 	script := filepath.Join(dir, "docker")
@@ -807,7 +864,7 @@ case "$1 $2" in
 		*) shift 2 ;;
 		esac
 	done
-	exec env -i PATH="$PATH" ${QORY_TEST_EXIT+QORY_TEST_EXIT=$QORY_TEST_EXIT} /bin/sh `+enter+` "$envfile" "$entry" "$@" ;;
+	exec env -i PATH="$PATH" ${QORY_TEST_EXIT+QORY_TEST_EXIT=$QORY_TEST_EXIT} ${QORY_TEST_IMAGE_ENV+QORY_TEST_IMAGE_ENV=$QORY_TEST_IMAGE_ENV} /bin/sh `+enter+` "$envfile" "$entry" "$@" ;;
 esac
 `)
 	if err := os.Chmod(script, 0o755); err != nil {
@@ -905,7 +962,9 @@ func TestRunBehindAWall(t *testing.T) {
 		"--entrypoint /qory/qory example.com/agent:2 run relay 3128=",
 		"src="+helper+",dst=/qory/qory,readonly",
 		"--mount type=bind,src="+root+",dst="+root+" ",
-		"--entrypoint claude example.com/agent:2 --settings "+runsDir(t, root),
+		"--entrypoint /qory/qory example.com/agent:2 run exec --unset ",
+		" -- /bin/sh "+runsDir(t, root),
+		"/"+session.PreparationScript+" claude --settings "+runsDir(t, root),
 		" -p hi",
 		"env: MODEL_KEY=not-a-real-key", "env: FLAG_NAMED=goes in", "env: HTTPS_PROXY=http://qory-proxy:3128",
 		"network rm",
@@ -922,6 +981,8 @@ func TestRunBehindAWall(t *testing.T) {
 	dir, evs := events(t, root)
 	if started := evs["dev.qory.run.started"]; len(started) != 1 || started[0]["wall"] != "docker" || started[0]["image"] != "example.com/agent:2" {
 		t.Errorf("run.started %v", started)
+	} else if got := fmt.Sprint(started[0]["preparation"]); got != "["+wall.HelperPath+" run prepare]" {
+		t.Errorf("a walled run's preparation is %s, want qory run prepare from the qory inside", got)
 	}
 	settings, err := os.ReadFile(filepath.Join(dir, "settings.json"))
 	if err != nil {
@@ -929,16 +990,26 @@ func TestRunBehindAWall(t *testing.T) {
 	}
 	wants(t, string(settings), "/qory/qory run forward")
 
-	// --wall none runs without the section's wall, as this machine's process.
+	// --wall none in the checkout a walled run used is refused, and starts nothing.
 	if err := os.RemoveAll(runsDir(t, root)); err != nil {
 		t.Fatal(err)
 	}
 	composedForFake(t, root, fakeRuntime(t))
+	want := "a walled run has used " + root + ", so qory runs no agent there without a wall, since the run could have left settings, hooks or scripts the agent would run; run it behind a wall, or in another clone or worktree"
+	if out, err := run(t, "run", "claude", "--wall", "none"); err == nil || err.Error() != want || cmd.ExitCode(err) != 1 {
+		t.Fatalf("--wall none after a walled run: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	if _, err := os.Stat(runsDir(t, root)); err == nil {
+		t.Error("the refused run left records")
+	}
+	// --wall none runs without the section's wall, as this machine's process, in a
+	// checkout no walled run used.
+	forgetPlaces(t)
 	if out, err := run(t, "run", "claude", "--wall", "none"); cmd.ExitCode(err) != 3 {
 		t.Fatalf("--wall none: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
-	if _, evs := events(t, root); evs["dev.qory.run.started"][0]["wall"] != nil {
-		t.Errorf("--wall none still walled: %v", evs["dev.qory.run.started"])
+	if _, evs := events(t, root); evs["dev.qory.run.started"][0]["wall"] != nil || evs["dev.qory.run.started"][0]["preparation"] != nil {
+		t.Errorf("--wall none still walled or prepared: %v", evs["dev.qory.run.started"])
 	}
 }
 
@@ -1418,7 +1489,8 @@ func TestRunRefusesAWallItCannotBuild(t *testing.T) {
 // engine: QORY_WALL_HELPER names a static Linux build of qory, and without it the test
 // is skipped. A shell stands in for the runtime: what it fetches through the proxy
 // arrives and is recorded, what it dials around the proxy goes nowhere, and qory's own
-// build runs inside as the forwarder.
+// build runs inside as the forwarder. The launch passes the settings of the home, which
+// lies in the checkout the wall binds writable, and reads the copy Forager wrote.
 func TestRunBehindARealWall(t *testing.T) {
 	helper := os.Getenv("QORY_WALL_HELPER")
 	if helper == "" {
@@ -1462,6 +1534,7 @@ harness:
             touch `+sibling+`/mine 2>/dev/null && echo "sibling: written" || echo "sibling: read-only"
             echo "shm: $(df -k /dev/shm | tail -1 | awk '{print $2}') pids: $(cat /sys/fs/cgroup/pids.max)"
             id -u
+        - [--settings, "${dir}/settings.json"]
 `)
 	if out, err := run(t, "harness", "compose", "--runtime", "claude", "--no-links"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -2008,13 +2081,13 @@ rules:
 	}
 }
 
-// TestRunRefusesWhenTheEngineCannotBeAsked is an earlier walled run whose wall could not
-// be removed, so Forager keeps its entry. While the engine lists that run's
-// containers, it has none, and the next walled run of the same checkout starts. Once
-// listing them fails, the next run cannot tell whether an earlier one is still going,
-// and is refused before the wall runs anything, in qory's words, giving the command
-// that lists the earlier run's containers by its id, and the registry entry to delete.
-func TestRunRefusesWhenTheEngineCannotBeAsked(t *testing.T) {
+// TestRunInACheckoutOfARunWhoseContainerCannotBeCheckedStopsAtGit runs a walled run
+// whose wall the script in place of docker cannot remove, so Forager keeps its entry.
+// While docker ps lists none of that run's containers, the next walled run of the same
+// checkout starts. Once docker ps exits 1, the git qory runs in the checkout before the
+// wall returns the refusal that lists the earlier run's id, the docker ps command and
+// the registry entry to delete, and the wall runs nothing.
+func TestRunInACheckoutOfARunWhoseContainerCannotBeCheckedStopsAtGit(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, "claude")
@@ -2069,7 +2142,7 @@ esac
 	if _, statErr := os.Stat(entry); statErr != nil {
 		t.Fatalf("no registry entry for the second run: %v", statErr)
 	}
-	want := "Docker could not be asked whether an earlier walled run is still going, so the run does not start. If docker ps --all --filter label=dev.qory.run=" + ids[len(ids)-1] + " lists no container, or that Docker is gone for good, delete " + entry + " (engine_unreachable)"
+	want := "The check for a container of the walled run " + ids[len(ids)-1] + " failed. That run used " + root + ", so qory runs no git there. If docker ps --all --filter label=dev.qory.run=" + ids[len(ids)-1] + " lists no container, or the Docker engine of that run no longer exists, delete " + entry
 	if err == nil || err.Error() != want {
 		t.Fatalf("a run beside an earlier one the engine cannot be asked about: %v, want %q", err, want)
 	}

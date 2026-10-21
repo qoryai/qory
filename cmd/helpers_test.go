@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -19,6 +20,33 @@ import (
 // runtime exits, in place of Forager's 200 ms: the hooks of these tests' runtimes
 // forward their events before the runtime exits, so none needs the longer drain.
 func TestMain(m *testing.M) {
+	// A test that needs qory run prepare as a separate process starts this binary
+	// with QORY_TEST_PREPARE set, and the binary is that verb, which looks for the
+	// image's copy where QORY_TEST_PREPARE_SEED says when it is set.
+	if os.Getenv("QORY_TEST_PREPARE") == "1" {
+		if seed := os.Getenv("QORY_TEST_PREPARE_SEED"); seed != "" {
+			cmd.SetPrepareSeed(seed)
+		}
+		root := cmd.Root()
+		root.SetArgs([]string{"run", "prepare"})
+		os.Exit(cmd.ExitCode(root.Execute()))
+	}
+	// A test that needs qory run agent-env as a separate process, since it replaces
+	// the process with the launch, starts this binary with QORY_TEST_AGENT_ENV set and
+	// the verb's arguments after --.
+	if os.Getenv("QORY_TEST_AGENT_ENV") == "1" {
+		root := cmd.Root()
+		root.SetArgs(append([]string{"run", "agent-env"}, os.Args[slices.Index(os.Args, "--")+1:]...))
+		os.Exit(cmd.ExitCode(root.Execute()))
+	}
+	// A test that needs qory run exec as a separate process, since it replaces the
+	// process with the program or exits, starts this binary with QORY_TEST_EXEC set
+	// and the verb's arguments after --.
+	if os.Getenv("QORY_TEST_EXEC") == "1" {
+		root := cmd.Root()
+		root.SetArgs(append([]string{"run", "exec"}, os.Args[slices.Index(os.Args, "--")+1:]...))
+		os.Exit(cmd.ExitCode(root.Execute()))
+	}
 	cmd.ShortenSocketGrace(10 * time.Millisecond)
 	os.Exit(m.Run())
 }
@@ -59,7 +87,7 @@ var twoModuleEntries = map[string]string{
 }
 
 // emptyDir makes an empty directory the working directory, in an environment that reads
-// nothing of the machine's own: HOME, the cache, configuration and state directories, git's
+// nothing of the machine's own: HOME, Claude Code's configuration directory, the cache, configuration, state and data directories, git's
 // global config and gh's config directory all point at temporary paths, git's system config is off, and colour
 // is off. Nothing there names the person, so a command that greets one prints no name.
 func emptyDir(t *testing.T) string {
@@ -69,10 +97,14 @@ func emptyDir(t *testing.T) string {
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(home, ".gitconfig"))
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	t.Setenv("GH_CONFIG_DIR", filepath.Join(home, "gh"))
 	t.Setenv("NO_COLOR", "1")
+	// Claude Code's configuration directory, whose settings file a compose for claude
+	// checks, is the one under the temporary HOME.
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	for _, name := range []string{"QORY_ACCESS_KEY_SECRET", "QORY_ACCESS_KEY_ID", "QORY_APIARY_PUBLIC_KEY", "QORY_SERVER_SECRET", "QORY_RUN_KEY"} {
 		t.Setenv(name, "")
 	}

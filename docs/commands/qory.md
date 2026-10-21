@@ -8,7 +8,7 @@ qory gets your coding agent ready to work, and keeps it in check.
 
   harness     build the agent's harness from modules, once for every agent you use
   worktree    give each branch a separate worktree, ready to work
-  run         run the agent behind a proxy: recorded, fenced, no tokens inside
+  run         run the agent behind a proxy: recorded; behind a wall, fenced, no tokens inside
   access-key  make the key this machine signs its runs to the server with
 
 It serves Claude Code, Codex, Gemini CLI, OpenCode, Cursor, Copilot CLI, Amp, Goose, and

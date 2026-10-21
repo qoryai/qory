@@ -134,7 +134,9 @@ func keepAnswer(dir foragerdir.Dir, s *storedAnswer) error {
 // error, and an answer for another server, another code or a key neither file holds
 // is none. A file that does not read as an answer, or an answer for this enrolment
 // that does not verify, is an error: nothing may then post the enrolment again, since
-// the server refuses a code it used and a key it enrolled.
+// the server refuses a code it used and a key it enrolled. An answer for another kind
+// than the code's returns the key with the [accesskey.KindError], so the caller keeps
+// that key nowhere.
 func answerKept(dir foragerdir.Dir, server, code string) (*accesskey.Key, *accesskey.EnrolmentAnswer, error) {
 	b, err := dir.ReadAnswer()
 	if errors.Is(err, foragerdir.ErrNoAnswer) {
@@ -165,6 +167,10 @@ func answerKept(dir foragerdir.Dir, server, code string) (*accesskey.Key, *acces
 		return nil, nil, nil
 	}
 	ans, err := s.verify()
+	var kindErr *accesskey.KindError
+	if errors.As(err, &kindErr) {
+		return key, nil, kindErr
+	}
 	if err != nil {
 		return nil, nil, refused(err)
 	}

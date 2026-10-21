@@ -140,3 +140,7 @@ func renderPlugin(res *compose.Result, dir string) error {
 func (cursor) Template() render.Template {
 	return render.Template{Command: "cursor-agent", Args: [][]string{{"--plugin-dir", "${dir}/" + Plugin}}}
 }
+
+// AgentEfforts is nil: an agent's file gets the model a tier maps to, and qory writes no
+// effort into it.
+func (cursor) AgentEfforts() []string { return nil }

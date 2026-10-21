@@ -1,10 +1,14 @@
 package user_test
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
+	"github.com/qoryai/qory/internal/hostgit"
+	"github.com/qoryai/qory/internal/places"
 	"github.com/qoryai/qory/internal/user"
 )
 
@@ -125,5 +129,45 @@ func TestNameIsEmptyWithoutAHomeDirectory(t *testing.T) {
 	t.Chdir(dir)
 	if got := user.Name(); got != "" {
 		t.Errorf("got %q, want the empty string", got)
+	}
+}
+
+// TestNameFallsThroughARefusedRepository stands in a checkout a walled run used, with a
+// key added since: git runs nothing there, and the name is gh's.
+func TestNameFallsThroughARefusedRepository(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(home, "gitconfig"))
+	dir := t.TempDir()
+	t.Setenv("GH_CONFIG_DIR", dir)
+	if err := os.WriteFile(filepath.Join(dir, "hosts.yml"), []byte("github.com:\n    user: octocat\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"init", "-q"}, {"config", "user.name", "Ada Lovelace"}} {
+		c := exec.Command("git", args...)
+		c.Dir = repo
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+	}
+	hostgit.Forget()
+	t.Cleanup(hostgit.Forget)
+	if err := hostgit.Record(context.Background(), repo, places.KindCheckout, "run-1"); err != nil {
+		t.Fatal(err)
+	}
+	c := exec.Command("git", "config", "alias.x", "log")
+	c.Dir = repo
+	if out, err := c.CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	t.Chdir(repo)
+	if got := user.Name(); got != "octocat" {
+		t.Errorf("got %q, want octocat", got)
 	}
 }

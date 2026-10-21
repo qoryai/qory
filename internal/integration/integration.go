@@ -17,26 +17,31 @@ import (
 	"cmp"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"os/exec"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 )
 
 // descriptionSchema is a copy of contracts/integration/v1/description.schema.json of
-// github.com/qoryai/integrations, byte for byte. A new revision of the contract is
-// copied over it.
+// github.com/qoryai/integrations, byte for byte: the contract as of commit 952eec3. A
+// new revision of the contract is copied over it.
 //
 //go:embed description.schema.json
 var descriptionSchema []byte
@@ -55,9 +60,13 @@ const DescribeWait = 10 * time.Second
 // describeWait is [DescribeWait], which a test shortens.
 var describeWait = DescribeWait
 
-// maxOutput is the most of describe's output that is kept, on either stream; a
-// description is a few kilobytes.
-const maxOutput = 1 << 20
+// maxDescription is the most of describe's standard output that is kept, the most raw
+// bytes the integration contract takes for a description, 256 KiB; a description is a
+// few kilobytes.
+const maxDescription = 256 << 10
+
+// maxStandardError is the most of describe's standard error that is kept.
+const maxStandardError = 1 << 20
 
 // RoleCredential is the credential role, the one this package expands.
 const RoleCredential = "credential"
@@ -105,16 +114,23 @@ var contract = sync.OnceValues(func() (*jsonschema.Schema, error) {
 // The program runs in a process group of its own, and the whole group is stopped when
 // describe returns, so no process of its group outlives it. Describe refuses a program
 // that does not exit 0 within [DescribeWait], with the one line it wrote on standard
-// error, and an answer that is not one JSON document the contract's schema accepts.
+// error, and an answer that is not one JSON document within the contract's limits that
+// the contract's schema accepts. The answer is checked in this order, and the first
+// rule broken is the one refusal: the raw size; UTF-8; the JSON; a lone surrogate
+// escaped in a string or a member name repeated in one object, the first in the
+// document, as [scan] has them; the values the document holds, how deep it nests, and
+// the first string or member name too long, as [beyond] has them; then the schema.
 func Describe(ctx context.Context, program string) (*Description, error) {
 	ctx, cancel := context.WithTimeout(ctx, describeWait)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, program, "describe")
+	// The program's path as a message prints it.
+	shown := exports.Value(program, false)
 	cmd.Dir = "/"
 	// The access key's variables and the run key are Forager's alone: describe never
 	// receives them.
 	cmd.Env = accesskey.WithoutVariables(os.Environ())
-	stdout, stderr := &capped{}, &capped{}
+	stdout, stderr := &capped{limit: maxDescription}, &capped{limit: maxStandardError}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	// A process left holding the output is not waited for past the limit.
 	cmd.WaitDelay = time.Second
@@ -123,36 +139,299 @@ func Describe(ctx context.Context, program string) (*Description, error) {
 	stopGroup(cmd)
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, fmt.Errorf("%s describe did not answer within %s", program, describeWait)
+			return nil, fmt.Errorf("%s describe did not answer within %s", shown, describeWait)
 		}
 		if errors.Is(err, exec.ErrWaitDelay) {
-			return nil, fmt.Errorf("%s describe exited and left a process that keeps its output open", program)
+			return nil, fmt.Errorf("%s describe exited and left a process that keeps its output open", shown)
 		}
 		// The line is the program's own to word, and never a secret: the contract says so.
+		// A word of it with an access key secret or a run key prints as the phrase all
+		// the same.
 		if line := firstLine(stderr.String()); line != "" {
-			return nil, fmt.Errorf("%s describe: %w: %s", program, err, line)
+			return nil, fmt.Errorf("%s describe: %w: %s", shown, exports.HideValueError(err, program), line)
 		}
-		return nil, fmt.Errorf("%s describe: %w", program, err)
+		return nil, fmt.Errorf("%s describe: %w", shown, exports.HideValueError(err, program))
 	}
 	if stdout.over {
-		return nil, fmt.Errorf("%s describe printed more than %d bytes; a description is a few kilobytes", program, maxOutput)
+		return nil, fmt.Errorf("%s describe printed more than %d bytes; a description is a few kilobytes", shown, maxDescription)
 	}
-	doc, err := jsonschema.UnmarshalJSON(strings.NewReader(stdout.String()))
+	raw := stdout.buf.Bytes()
+	if !utf8.Valid(raw) {
+		return nil, fmt.Errorf(refusedEncoding, shown)
+	}
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
 	if err != nil {
-		return nil, fmt.Errorf("%s describe did not print one JSON document: %w", program, err)
+		return nil, fmt.Errorf("%s describe did not print one JSON document: %w", shown, err)
+	}
+	if err := scan(shown, raw); err != nil {
+		return nil, err
+	}
+	if err := beyond(shown, doc); err != nil {
+		return nil, err
 	}
 	schema, err := contract()
 	if err != nil {
 		return nil, err
 	}
 	if err := schema.Validate(doc); err != nil {
-		return nil, fmt.Errorf("%s describe printed a description the integration contract refuses: %s", program, failures(err, true))
+		return nil, fmt.Errorf("%s describe printed a description the integration contract refuses: %s", shown, exports.HideValues(failures(err, true)))
 	}
 	d, err := read(doc.(map[string]any))
 	if err != nil {
-		return nil, fmt.Errorf("%s describe: %w", program, err)
+		return nil, fmt.Errorf("%s describe: %w", shown, err)
 	}
 	return d, nil
+}
+
+// The limits of a description the integration contract states in words and its schema
+// cannot express: a string or a member name of at most maxText bytes of UTF-8, where the
+// schema counts characters; at most maxValues JSON values in the decoded document, the
+// document itself, each array entry and each member's value counting one, a container
+// or not, and member names not counting; and arrays and objects nested at most maxDepth
+// levels deep, the top-level object being level 1.
+const (
+	maxText   = 16384
+	maxValues = 4096
+	maxDepth  = 64
+)
+
+// The refusals of a description past a limit of [beyond]. Each names where the limit
+// is broken, never what is there.
+const (
+	refusedString = "%s describe printed a description the integration contract refuses: the string at %s is more than 16384 bytes"
+	refusedName   = "%s describe printed a description the integration contract refuses: the member name at %s is more than 16384 bytes"
+	refusedValues = "%s describe printed a description the integration contract refuses: it holds more than 4096 values"
+	refusedDepth  = "%s describe printed a description the integration contract refuses: it nests arrays and objects more than 64 deep"
+)
+
+// The refusals of a description that breaks a rule of the integration contract a
+// schema cannot express: a description is JSON in UTF-8, no string or member name holds
+// a \u escape of a lone surrogate, and no object repeats a member. The contract has
+// Qory Apiary refuse a description that breaks one; Go's reader takes all three,
+// reading the first two as U+FFFD and keeping the last of a repeated member, so they
+// are refused here.
+const (
+	refusedEncoding        = "%s describe did not print one JSON document: it is not valid UTF-8"
+	refusedSurrogateString = `%s describe printed a description the integration contract refuses: the string at %s holds a \u escape of a lone surrogate`
+	refusedSurrogateName   = `%s describe printed a description the integration contract refuses: the member name at %s holds a \u escape of a lone surrogate`
+	refusedRepeated        = "%s describe printed a description the integration contract refuses: the object at %s names \"%s\" twice"
+)
+
+// scan refuses a description raw, as program printed it, one JSON document of valid
+// UTF-8, that holds a \u escape of a lone surrogate in a string or a member name, or an
+// object that names a member twice, the names compared as they read; or returns nil.
+// The first of these in the document is the one refused. It reads raw once, token by
+// token: the raw text of each string token is what lies between the decoder's offset
+// before the token and after it, a colon, a comma and space at most before the string,
+// and that text is scanned once for its escapes. Each open object holds the set of the
+// names it has read, dropped when it closes.
+func scan(program string, raw []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var open []*container
+	for {
+		start := dec.InputOffset()
+		tok, err := dec.Token()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("%s describe did not print one JSON document: %w", program, err)
+		}
+		var top *container
+		if len(open) > 0 {
+			top = open[len(open)-1]
+		}
+		if d, ok := tok.(json.Delim); ok && (d == '}' || d == ']') {
+			open = open[:len(open)-1]
+			if len(open) > 0 && open[len(open)-1].object {
+				open[len(open)-1].named = false
+			}
+			continue
+		}
+		name := top != nil && top.object && !top.named
+		if top != nil && !top.object {
+			top.index++
+		}
+		switch t := tok.(type) {
+		case json.Delim:
+			c := &container{object: t == '{', index: -1}
+			if c.object {
+				c.names = map[string]struct{}{}
+			}
+			open = append(open, c)
+			continue
+		case string:
+			lone := loneSurrogate(raw[start:dec.InputOffset()])
+			switch {
+			case name && lone:
+				return fmt.Errorf(refusedSurrogateName, program, Printable(exports.HidePath(cmp.Or(pointer(open, false)+"/"+pointerToken(t), "/"))))
+			case lone:
+				return fmt.Errorf(refusedSurrogateString, program, Printable(exports.HidePath(cmp.Or(pointer(open, true), "/"))))
+			case name:
+				if _, twice := top.names[t]; twice {
+					return fmt.Errorf(refusedRepeated, program, Printable(exports.HidePath(cmp.Or(pointer(open, false), "/"))), Printable(accesskey.ShownName(t, false)))
+				}
+				top.names[t] = struct{}{}
+				top.name, top.named = t, true
+				continue
+			}
+		}
+		// A value other than an array or an object ends here.
+		if top != nil && top.object {
+			top.named = false
+		}
+	}
+}
+
+// container is an array or an object [scan] is reading: an array's entry being read,
+// or an object's member, whether its name is read, and the names read before it.
+type container struct {
+	object bool
+	index  int
+	name   string
+	named  bool
+	names  map[string]struct{}
+}
+
+// pointer is the JSON pointer of the value [scan] is reading inside open, or, without
+// last, of the innermost container itself.
+func pointer(open []*container, last bool) string {
+	if !last {
+		open = open[:len(open)-1]
+	}
+	var at strings.Builder
+	for _, c := range open {
+		if c.object {
+			at.WriteString("/" + pointerToken(c.name))
+		} else {
+			at.WriteString("/" + strconv.Itoa(c.index))
+		}
+	}
+	return at.String()
+}
+
+// loneSurrogate reports whether text, a JSON string token as it was printed, with at
+// most a colon, a comma and space before it, holds a \u escape of a surrogate that is
+// not a pair: a high surrogate, D800 to DBFF, not followed at once by an escaped low
+// one, DC00 to DFFF, or a low one standing alone. Every other escape is two bytes, so
+// a backslash read as an escape's first byte is never mistaken for one.
+func loneSurrogate(text []byte) bool {
+	for i := 0; i < len(text); i++ {
+		if text[i] != '\\' {
+			continue
+		}
+		r, ok := escaped(text[i:])
+		if !ok {
+			i++ // the escaped character
+			continue
+		}
+		switch {
+		case r >= 0xDC00 && r <= 0xDFFF:
+			return true
+		case r >= 0xD800 && r <= 0xDBFF:
+			low, ok := escaped(text[i+6:])
+			if !ok || low < 0xDC00 || low > 0xDFFF {
+				return true
+			}
+			i += 11
+		default:
+			i += 5
+		}
+	}
+	return false
+}
+
+// escaped is the code unit of the \u escape text starts with, and false when it starts
+// with none.
+func escaped(text []byte) (rune, bool) {
+	if len(text) < 6 || text[0] != '\\' || text[1] != 'u' {
+		return 0, false
+	}
+	n, err := strconv.ParseUint(string(text[2:6]), 16, 16)
+	return rune(n), err == nil
+}
+
+// beyond refuses a description doc, as program printed it, past a limit of the
+// integration contract its schema cannot express, or returns nil. One limit is refused,
+// the first broken of: the values, then the depth, then the strings and member names,
+// the first too long in the order [walker.walk] visits them.
+func beyond(program string, doc any) error {
+	var w walker
+	if !w.walk(doc, 0) {
+		return fmt.Errorf(refusedValues, program)
+	}
+	if w.deepest > maxDepth {
+		return fmt.Errorf(refusedDepth, program)
+	}
+	if w.long != "" {
+		return fmt.Errorf(w.long, program, Printable(exports.HidePath(cmp.Or(w.at, "/"))))
+	}
+	return nil
+}
+
+// walker counts the values of a description, notes how deep it nests, and keeps the
+// first string or member name longer than [maxText] bytes: its refusal and its JSON
+// pointer. path is the pointer's tokens of the value walked, joined only for the one
+// kept, so a long name is not copied into the pointer of every value under it.
+type walker struct {
+	values, deepest int
+	path            []string
+	long, at        string
+}
+
+// walk visits v, inside a container nested level deep, and every value under it, depth
+// first: an array's entries in order, an object's members in the order of their names,
+// each name before its value. It stops, returning false, at the value past [maxValues],
+// so it visits at most one more than that.
+func (w *walker) walk(v any, level int) bool {
+	w.values++
+	if w.values > maxValues {
+		return false
+	}
+	switch v := v.(type) {
+	case string:
+		w.note(len(v), refusedString)
+	case []any:
+		w.deepest = max(w.deepest, level+1)
+		for i, e := range v {
+			if !w.member(strconv.Itoa(i), e, level+1, false) {
+				return false
+			}
+		}
+	case map[string]any:
+		w.deepest = max(w.deepest, level+1)
+		for _, name := range slices.Sorted(maps.Keys(v)) {
+			if !w.member(name, v[name], level+1, true) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// member walks v under token, an array's index or, when named, an object's member name,
+// which is checked before v.
+func (w *walker) member(token string, v any, level int, named bool) bool {
+	w.path = append(w.path, token)
+	defer func() { w.path = w.path[:len(w.path)-1] }()
+	if named {
+		w.note(len(token), refusedName)
+	}
+	return w.walk(v, level)
+}
+
+// note keeps refusal and the pointer of the value walked when n bytes are past
+// [maxText] and nothing is kept yet.
+func (w *walker) note(n int, refusal string) {
+	if n <= maxText || w.long != "" {
+		return
+	}
+	var at strings.Builder
+	for _, token := range w.path {
+		at.WriteString("/" + pointerToken(token))
+	}
+	w.long, w.at = refusal, at.String()
 }
 
 // maxLine is the most runes of a program's text an error or a line quotes.
@@ -162,7 +441,7 @@ const maxLine = 200
 // [Printable] has it.
 func firstLine(s string) string {
 	line, _, _ := strings.Cut(strings.TrimSpace(s), "\n")
-	return Printable(strings.TrimSpace(line))
+	return Printable(exports.HideValues(strings.TrimSpace(line)))
 }
 
 // Printable is text a program wrote, a line of its standard error or a string of its
@@ -203,13 +482,13 @@ func read(doc map[string]any) (*Description, error) {
 	}
 	settings := doc["settings"].(map[string]any)
 	if v, ok := settings["$schema"]; ok && v != draft2020 && v != draft2020+"#" {
-		return nil, fmt.Errorf("the settings schema is written in %s; the integration contract takes draft 2020-12, %s", Printable(fmt.Sprint(v)), draft2020)
+		return nil, fmt.Errorf("the settings schema is written in %s; the integration contract takes draft 2020-12, %s", Printable(exports.Value(fmt.Sprint(v), false)), draft2020)
 	}
 	// A secret is a property of the settings themselves and never a nested one, so the
 	// settings' own properties are where writeOnly marks one, and anywhere else it marks
 	// what no check here could keep off a command line.
 	if at := misplacedWriteOnly(settings, "", true, false); at != "" {
-		return nil, fmt.Errorf("the settings schema marks %s writeOnly; a secret is a property of the settings themselves, /properties/<name>", at)
+		return nil, fmt.Errorf("the settings schema marks %s writeOnly; a secret is a property of the settings themselves, /properties/<name>", exports.HidePath(at))
 	}
 	props, _ := settings["properties"].(map[string]any)
 	for name, p := range props {
@@ -245,12 +524,12 @@ func (d *Description) CheckSettings(settings []byte) error {
 	if m, ok := doc.(map[string]any); ok {
 		for _, name := range d.secrets {
 			if _, set := m[name]; set {
-				return fmt.Errorf("settings.%s is a secret, and the settings go on a command line; set %s_file, the path of a file that contains it, in its place", name, name)
+				return fmt.Errorf("settings.%s is a secret, and the settings go on a command line; set %s, the path of a file that contains it, in its place", accesskey.ShownName(name, false), accesskey.ShownName(name+"_file", false))
 			}
 		}
 	}
 	if err := d.settings.Validate(doc); err != nil {
-		return fmt.Errorf("the settings are not what %s takes: %s", d.Name, failures(err, false))
+		return fmt.Errorf("the settings are not what %s takes: %s", accesskey.ShownName(d.Name, false), failures(err, false))
 	}
 	return nil
 }
@@ -359,7 +638,7 @@ func broken(e *jsonschema.ValidationError) []string {
 		if p, ok := propertiesPath(e.SchemaURL); ok && len(p) == len(loc) {
 			loc = p
 		}
-		return []string{located(loc) + "." + Printable(k.Property) + " is not a setting it takes"}
+		return []string{located(loc) + "." + name(k.Property) + " is not a setting it takes"}
 	case *kind.OneOf, *kind.AnyOf:
 		if len(e.Causes) > 0 {
 			var alternatives []string
@@ -380,19 +659,19 @@ func broken(e *jsonschema.ValidationError) []string {
 	case *kind.Required:
 		var out []string
 		for _, m := range k.Missing {
-			out = append(out, at+"."+Printable(m)+" is required")
+			out = append(out, at+"."+name(m)+" is required")
 		}
 		return out
 	case *kind.DependentRequired:
 		var out []string
 		for _, m := range k.Missing {
-			out = append(out, at+"."+Printable(m)+" is required with "+at+"."+Printable(k.Prop))
+			out = append(out, at+"."+name(m)+" is required with "+at+"."+name(k.Prop))
 		}
 		return out
 	case *kind.AdditionalProperties:
 		var out []string
 		for _, p := range k.Properties {
-			out = append(out, at+"."+Printable(p)+" is not a setting it takes")
+			out = append(out, at+"."+name(p)+" is not a setting it takes")
 		}
 		return out
 	case *kind.Type:
@@ -400,7 +679,7 @@ func broken(e *jsonschema.ValidationError) []string {
 	}
 	var keyword []string
 	for _, k := range e.ErrorKind.KeywordPath() {
-		keyword = append(keyword, Printable(k))
+		keyword = append(keyword, name(k))
 	}
 	return []string{at + " breaks the schema's " + strings.Join(keyword, "/")}
 }
@@ -410,10 +689,15 @@ func broken(e *jsonschema.ValidationError) []string {
 func located(path []string) string {
 	out := []string{"settings"}
 	for _, p := range path {
-		out = append(out, Printable(p))
+		out = append(out, name(p))
 	}
 	return strings.Join(out, ".")
 }
+
+// name is a name of a settings document or of its schema as [broken] prints it: as
+// [Printable] has it, and as [accesskey.ShownName] prints it when it contains an access
+// key secret or a run key.
+func name(n string) string { return Printable(accesskey.ShownName(n, false)) }
 
 // propertiesPath is the object a propertyNames keyword applies to, read from the
 // keyword's own location when that is a chain of properties: #/properties/a/propertyNames
@@ -446,19 +730,20 @@ func propertiesPath(schemaURL string) ([]string, bool) {
 	return path, true
 }
 
-// capped keeps the first [maxOutput] bytes written to it and drops the rest, noting
-// that it did, so a program that prints without end holds no more than that. The buffer
-// is a field and not embedded, so a copy into capped goes through Write and never
-// through the buffer's own ReadFrom.
+// capped keeps the first limit bytes written to it and drops the rest, noting that it
+// did, so a program that prints without end holds no more than that. The buffer is a
+// field and not embedded, so a copy into capped goes through Write and never through
+// the buffer's ReadFrom.
 type capped struct {
-	buf  bytes.Buffer
-	over bool
+	limit int
+	buf   bytes.Buffer
+	over  bool
 }
 
 // Write keeps what fits and reports every byte written, so the program is not stopped
 // by a short write before its status is known.
 func (c *capped) Write(p []byte) (int, error) {
-	if room := maxOutput - c.buf.Len(); len(p) > room {
+	if room := c.limit - c.buf.Len(); len(p) > room {
 		c.over = true
 		c.buf.Write(p[:max(room, 0)])
 		return len(p), nil

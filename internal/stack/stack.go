@@ -6,13 +6,15 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"sort"
 	"strings"
+	"unicode"
 
+	"github.com/qoryai/forager/accesskey"
 	"gopkg.in/yaml.v3"
 
+	"github.com/qoryai/qory/internal/acting"
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/exports"
 )
@@ -84,6 +86,27 @@ func (s Source) String() string {
 	return out
 }
 
+// Shown is the source as a message prints it: [Source.String]'s form, with the git URL
+// as [exports.URL] prints it, the ref and the path as [exports.Value] prints them, and
+// the export's name as [accesskey.ShownName] prints it, so neither a secret nor the
+// password of a URL's user part is printed.
+func (s Source) Shown() string {
+	out := exports.Value(s.Path, false)
+	if s.Git != "" {
+		out = exports.URL(s.Git) + "#" + exports.Value(s.Ref, false)
+		if s.Path != "" {
+			out += ":" + exports.Value(s.Path, false)
+		}
+	}
+	switch {
+	case s.Stack != "":
+		out += " stack " + accesskey.ShownName(s.Stack, false)
+	case s.Module != "":
+		out += " module " + accesskey.ShownName(s.Module, false)
+	}
+	return out
+}
+
 // exported reports whether the source names an export of a repository.
 func (s Source) exported() bool { return s.Module != "" || s.Stack != "" }
 
@@ -128,6 +151,17 @@ type Target struct {
 	// it. A target that lists several runtimes usually leaves it out, because one model
 	// name rarely means anything to two of them.
 	Model string `yaml:"model,omitempty"`
+}
+
+// Tier is one entry of a tier map: the model id a tier maps to and, when the entry sets
+// one, the effort, with where the entry came from.
+type Tier struct {
+	// Model is the model id, written as the entry has it.
+	Model string
+	// Effort is the effort value, "" when the entry sets none.
+	Effort string
+	// From is where the entry was set: the path of the file, or the flag.
+	From string
 }
 
 // Runtimes is the list of runtime names a target lists. Both spellings decode into it, so
@@ -178,7 +212,7 @@ func (r Runtimes) Validate() error {
 			return errors.New("target.runtime lists an empty runtime")
 		}
 		if seen[name] {
-			return fmt.Errorf("target.runtime lists %s twice", name)
+			return fmt.Errorf("target.runtime lists %s twice", accesskey.ShownName(name, false))
 		}
 		seen[name] = true
 	}
@@ -263,20 +297,26 @@ func (t *TargetPolicy) validate() error {
 	for _, l := range []struct {
 		key   string
 		names Names
-	}{{"runtime", t.Runtime}, {"model", t.Model}} {
+		shown func(string) string
+	}{{"runtime", t.Runtime, shownName}, {"model", t.Model, shownValue}} {
 		seen := map[string]bool{}
 		for _, name := range l.names {
 			if name == "" {
 				return fmt.Errorf("extending.target.%s lists an empty name", l.key)
 			}
 			if seen[name] {
-				return fmt.Errorf("extending.target.%s lists %s twice", l.key, name)
+				return fmt.Errorf("extending.target.%s lists %s twice", l.key, l.shown(name))
 			}
 			seen[name] = true
 		}
 	}
 	return nil
 }
+
+// shownName and shownValue are a name and a value as a message prints them, for a list
+// of runtime names beside a list of model ids.
+func shownName(n string) string  { return accesskey.ShownName(n, false) }
+func shownValue(v string) string { return exports.Value(v, false) }
 
 // Check refuses a resolved target outside the policy: a runtime not listed, a model not
 // listed, and, when models are listed, no model at all. base is the stack in the
@@ -288,16 +328,16 @@ func (t *TargetPolicy) Check(target Target, base string) error {
 	if len(t.Runtime) > 0 {
 		for _, r := range target.Runtimes {
 			if !slices.Contains(t.Runtime, r) {
-				return fmt.Errorf("runtime %s is not one the base stack %s is written for; runtimes: %s", r, base, strings.Join(t.Runtime, ", "))
+				return fmt.Errorf("runtime %s is not one the base stack %s is written for; runtimes: %s", accesskey.ShownName(r, false), accesskey.ShownName(base, false), strings.Join(accesskey.ShownNames(t.Runtime), ", "))
 			}
 		}
 	}
 	if len(t.Model) > 0 {
 		if target.Model == "" {
-			return fmt.Errorf("the target sets no model, and the base stack %s is written for one of these; models: %s", base, strings.Join(t.Model, ", "))
+			return fmt.Errorf("the target sets no model, and the base stack %s is written for one of these; models: %s", accesskey.ShownName(base, false), strings.Join(exports.Values(t.Model), ", "))
 		}
 		if !slices.Contains(t.Model, target.Model) {
-			return fmt.Errorf("model %s is not one the base stack %s is written for; models: %s", target.Model, base, strings.Join(t.Model, ", "))
+			return fmt.Errorf("model %s is not one the base stack %s is written for; models: %s", exports.Value(target.Model, false), accesskey.ShownName(base, false), strings.Join(exports.Values(t.Model), ", "))
 		}
 	}
 	return nil
@@ -330,6 +370,9 @@ type Stack struct {
 	// composes the base for, which the machine's configuration and the flags may
 	// replace. A qory-stack.yaml has none, and one that has one is refused.
 	Target Target `yaml:"target,omitempty"`
+	// Tiers is read from a qory-stack.yaml only to refuse it: a stack file maps no tier,
+	// since a repository's qory.yaml and the machine's configuration map them.
+	Tiers map[string]any `yaml:"tiers,omitempty"`
 	// Modules are the modules to compose, in the order they merge.
 	Modules []Module `yaml:"modules"`
 	// Bind selects the entry that fills each role a document references, <kind>/<role> to
@@ -397,17 +440,28 @@ func (p *Stack) DirOf(l Module) string {
 // ignored, and so is a second YAML document in the file. The error from a missing or
 // unreadable file is returned as it comes from the operating system, and a caller can
 // match it with errors.Is and os.ErrNotExist; a decoding or validation error is prefixed
-// with path.
+// with path. Each error prints a path segment that contains an access key secret or a
+// run key as [exports.HideError] prints it, since -f and a base's path or cache
+// directory put a name a person wrote in path.
 func Load(path string) (*Stack, error) {
+	p, err := loadFile(path)
+	return p, exports.HideError(err)
+}
+
+// loadFile is [Load] with the path in its errors as written.
+func loadFile(path string) (*Stack, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
+		return nil, err
+	}
+	if err := acting.Check(path, data); err != nil {
 		return nil, err
 	}
 	p := &Stack{}
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
 	dec.KnownFields(true)
 	if err := dec.Decode(p); err != nil {
-		return nil, decodeError(path, err)
+		return nil, exports.DecodeError(path, err)
 	}
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("%s: contains more than one document; a stack is one", path)
@@ -473,20 +527,6 @@ func (p *Stack) extends() bool {
 	return p.Extends.Path != "" || p.Extends.Git != "" || p.Extends.Ref != "" || p.Extends.exported()
 }
 
-// unknownKey is the decoder's report of a key the document has no field for. It names the
-// Go type, which the message a person reads leaves out.
-var unknownKey = regexp.MustCompile(`(line \d+: )?field (\S+) not found in type \S+`)
-
-// decodeError prefixes a decode error with path. An unknown key is reported as one the
-// stack does not read, with the decoder's line number when it gives one; any other
-// error is returned as the decoder wrote it.
-func decodeError(path string, err error) error {
-	if m := unknownKey.FindStringSubmatch(err.Error()); m != nil {
-		return fmt.Errorf("%s: %skey %q is not one %s reads", path, m[1], m[2], filepath.Base(path))
-	}
-	return fmt.Errorf("%s: %w", path, err)
-}
-
 // validate checks the whole document before a caller sees it, so a document that reaches
 // the compose is known to contain what the compose requires: a runtime for a checkout's
 // own stack, a base for a document that extends one and no target for a stack file, at
@@ -510,7 +550,7 @@ func (p *Stack) validate(compose bool) error {
 				return fmt.Errorf("extends: %w", err)
 			}
 			if p.Extends.Module != "" {
-				return fmt.Errorf("extends selects module %s; a checkout extends a stack, and a module goes under modules", p.Extends.Module)
+				return fmt.Errorf("extends selects module %s; a checkout extends a stack, and a module goes under modules", accesskey.ShownName(p.Extends.Module, false))
 			}
 		}
 		if p.Extending != nil {
@@ -530,11 +570,14 @@ func (p *Stack) validate(compose bool) error {
 		if len(p.Target.Runtimes) > 0 || p.Target.Model != "" {
 			return errors.New("target is not a stack's; a stack is delivered to be extended, and the checkout extending it sets target under harness, beside extends")
 		}
+		if p.Tiers != nil {
+			return errors.New("A stack file does not set tiers; a repository maps tiers under harness.tiers in its qory.yaml, and a machine in the user's qory.yaml")
+		}
 	}
 	if p.Extending != nil {
 		for _, k := range p.Extending.Kinds {
 			if !isKind(k) {
-				return fmt.Errorf("extending.kinds lists kind %q; kinds: %s", k, strings.Join(Kinds, ", "))
+				return fmt.Errorf("extending.kinds lists kind %s; kinds: %s", accesskey.ShownName(k, true), strings.Join(Kinds, ", "))
 			}
 			if k == "hooks" || k == "mcp" {
 				return fmt.Errorf("extending.kinds lists %s, which an extending module may never ship; the runtime executes those without the agent", k)
@@ -545,12 +588,12 @@ func (p *Stack) validate(compose bool) error {
 		}
 		for _, key := range p.Extending.Settings {
 			if key == "" || strings.HasPrefix(key, ".") || strings.HasSuffix(key, ".") {
-				return fmt.Errorf("extending.settings lists %q, which is not a dotted key path", key)
+				return fmt.Errorf("extending.settings lists %s, which is not a dotted key path", accesskey.ShownName(key, true))
 			}
 		}
 		for _, prefix := range p.Extending.Files {
 			if !filePrefix(prefix) {
-				return fmt.Errorf("extending.files lists %q, which is not a <runtime>/<path> prefix; a prefix is relative, contains no dot segment and starts with the runtime", prefix)
+				return fmt.Errorf("extending.files lists %s, which is not a <runtime>/<path> prefix; a prefix is relative, contains no dot segment and starts with the runtime", exports.Value(prefix, true))
 			}
 		}
 		if p.Extending.Target != nil {
@@ -562,13 +605,13 @@ func (p *Stack) validate(compose bool) error {
 	for _, role := range sortedKeys(p.Bind) {
 		kind, name, ok := strings.Cut(role, "/")
 		if !ok || !isReferable(kind) {
-			return fmt.Errorf("bind %s: a role is <kind>/<name>, the kind one of %s", role, strings.Join(Referable, ", "))
+			return fmt.Errorf("bind %s: a role is <kind>/<name>, the kind one of %s", accesskey.ShownName(role, false), strings.Join(Referable, ", "))
 		}
 		if !segment(name) || strings.Contains(name, " ") {
-			return fmt.Errorf("bind %s: %q is not an entry name; a name is one path segment", role, name)
+			return fmt.Errorf("bind %s: %s is not an entry name; a name is one path segment", accesskey.ShownName(role, false), accesskey.ShownName(name, true))
 		}
 		if to := p.Bind[role]; !segment(to) || strings.Contains(to, " ") || strings.Contains(to, "/") {
-			return fmt.Errorf("bind %s: %q is not an entry name; a role is bound to the name of an entry of its kind", role, to)
+			return fmt.Errorf("bind %s: %s is not an entry name; a role is bound to the name of an entry of its kind", accesskey.ShownName(role, false), accesskey.ShownName(to, true))
 		}
 	}
 	// A document that extends a stack may append nothing and carry only what is the
@@ -582,12 +625,12 @@ func (p *Stack) validate(compose bool) error {
 	for i, l := range p.Modules {
 		who := fmt.Sprintf("modules[%d]", i)
 		if l.Name != "" {
-			who = "module " + l.Name
+			who = "module " + accesskey.ShownName(l.Name, false)
 			if !segment(l.Name) {
-				return fmt.Errorf("modules[%d]: name %q is not one path segment; a module name contains no slash, backslash, @ or leading dot", i, l.Name)
+				return fmt.Errorf("modules[%d]: name %s is not one path segment; a module name contains no slash, backslash, @ or leading dot", i, accesskey.ShownName(l.Name, true))
 			}
 			if seen[l.Name] {
-				return fmt.Errorf("module %s is listed twice", l.Name)
+				return fmt.Errorf("module %s is listed twice", accesskey.ShownName(l.Name, false))
 			}
 			seen[l.Name] = true
 		}
@@ -596,7 +639,7 @@ func (p *Stack) validate(compose bool) error {
 				return fmt.Errorf("%s: %w", who, err)
 			}
 			if l.Source.Stack != "" {
-				return fmt.Errorf("%s: source selects stack %s; a module's source selects a module, and a stack goes under extends", who, l.Source.Stack)
+				return fmt.Errorf("%s: source selects stack %s; a module's source selects a module, and a stack goes under extends", who, accesskey.ShownName(l.Source.Stack, false))
 			}
 		} else if l.Name == "" {
 			return fmt.Errorf("%s: a module has a name, a source, or both", who)
@@ -612,11 +655,14 @@ func (p *Stack) validate(compose bool) error {
 			return fmt.Errorf("%s: %w", who, err)
 		}
 		if l.Link != "" {
+			if strings.ContainsFunc(l.Link, unicode.IsControl) {
+				return fmt.Errorf("%s: the link name %s holds a control character", who, accesskey.ShownName(l.Link, true))
+			}
 			if !segment(l.Link) || l.Link == ".qory" {
-				return fmt.Errorf("%s: link %q is not one path segment; a link contains no slash, backslash, @ or leading dot", who, l.Link)
+				return fmt.Errorf("%s: link %s is not one path segment; a link contains no slash, backslash, @ or leading dot", who, accesskey.ShownName(l.Link, true))
 			}
 			if links[l.Link] != "" {
-				return fmt.Errorf("%s and %s both link %s", links[l.Link], who, l.Link)
+				return fmt.Errorf("%s and %s both link %s", links[l.Link], who, accesskey.ShownName(l.Link, false))
 			}
 			links[l.Link] = who
 		}
@@ -638,7 +684,7 @@ func (l Module) besideOnly() error {
 	for _, kind := range l.Exclude.KindNames() {
 		for _, name := range l.Exclude.Kinds[kind] {
 			if slices.Contains(l.Only.Kinds[kind], name) {
-				return fmt.Errorf("%s/%s is listed in only and in exclude; list it in one", kind, name)
+				return fmt.Errorf("%s/%s is listed in only and in exclude; list it in one", accesskey.ShownName(kind, false), accesskey.ShownName(name, false))
 			}
 		}
 	}
@@ -655,7 +701,7 @@ func (s Source) validate() error {
 	}
 	for _, e := range []struct{ key, name string }{{"module", s.Module}, {"stack", s.Stack}} {
 		if e.name != "" && !segment(e.name) {
-			return fmt.Errorf("source.%s %q is not one path segment; an export's name contains no slash, backslash, @ or leading dot", e.key, e.name)
+			return fmt.Errorf("source.%s %s is not one path segment; an export's name contains no slash, backslash, @ or leading dot", e.key, accesskey.ShownName(e.name, true))
 		}
 	}
 	if s.Git == "" {
@@ -679,7 +725,7 @@ func (s Source) validate() error {
 	if s.Path != "" {
 		clean := filepath.Clean(s.Path)
 		if filepath.IsAbs(clean) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-			return fmt.Errorf("source.path %q is not a directory inside the repository", s.Path)
+			return fmt.Errorf("source.path %s is not a directory inside the repository", exports.Value(s.Path, true))
 		}
 	}
 	return nil
@@ -763,10 +809,10 @@ func FileAllowed(name string, prefixes []string) bool {
 // p's.
 func Extend(base, p *Stack) (*Stack, error) {
 	if base.Extends.Path != "" || base.Extends.Git != "" {
-		return nil, fmt.Errorf("%s extends %s, and a stack does not extend another", base.File, base.Extends.String())
+		return nil, fmt.Errorf("%s extends %s, and a stack does not extend another", exports.HidePath(base.File), base.Extends.Shown())
 	}
 	if base.Extending == nil {
-		return nil, fmt.Errorf("the stack at %s is closed: it declares no extending block, so nothing may extend it", base.File)
+		return nil, fmt.Errorf("the stack at %s is closed: it declares no extending block, so nothing may extend it", exports.HidePath(base.File))
 	}
 	out := *p
 	out.Modules = nil
@@ -784,7 +830,7 @@ func Extend(base, p *Stack) (*Stack, error) {
 			}
 			rel, err := filepath.Rel(base.Root, abs)
 			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-				return nil, fmt.Errorf("%s: module %s is outside the base stack's repository", base.File, l.Name)
+				return nil, fmt.Errorf("%s: module %s is outside the base stack's repository", exports.HidePath(base.File), accesskey.ShownName(l.Name, false))
 			}
 			if p.Extends.Git != "" {
 				l.Source = Source{Git: p.Extends.Git, Ref: p.Extends.Ref, Path: filepath.ToSlash(rel)}
@@ -802,7 +848,7 @@ func Extend(base, p *Stack) (*Stack, error) {
 	}
 	for _, l := range p.Modules {
 		if inBase[l.Name] {
-			return nil, fmt.Errorf("module %s belongs to the base stack; a checkout's qory.yaml cannot list a base module, exclude from it or replace it", l.Name)
+			return nil, fmt.Errorf("module %s belongs to the base stack; a checkout's qory.yaml cannot list a base module, exclude from it or replace it", accesskey.ShownName(l.Name, false))
 		}
 	}
 	out.Modules = append(out.Modules, p.Modules...)

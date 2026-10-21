@@ -8,11 +8,11 @@ Run the agent on the composed harness, inside Forager's session.
 
 Every connection goes through a proxy on this machine and is recorded. The record,
 events.jsonl and output.log, goes to a folder of the checkout's under
-~/.local/state/qory/runs ($XDG_STATE_HOME/qory/runs when that is set to an absolute
-path), and qory names it when the run ends. The exit status is the agent's when it
-exits by itself. When the run ends in another way, or its starter says it went
-otherwise, the exit status is 0 if the run completed, 124 at the time limit, and 1
-otherwise.
+~/.local/state/qory/runs ($XDG_STATE_HOME/qory/runs when that is set; qory refuses a
+relative XDG_STATE_HOME), and qory names it when the run ends. The exit status is the
+agent's when it exits by itself. When the run ends in another way, or its starter says
+it went otherwise, the exit status is 0 if the run completed, 124 at the time limit,
+and 1 otherwise.
 
 The agent is the runtime the harness is composed for. Name one first when it is composed
 for several. Arguments after -- go to the agent. At a terminal the agent runs with its
@@ -69,7 +69,7 @@ qory run [runtime] [-- argument...] [flags]
       --policy string              this run's policy file, kept outside the checkout; it narrows gateway.egress of forager.yaml, never widens it (with a server: needs --local)
       --relabel                    run although the checkout's origin remote gives other labels (forge, repository) than at its first run against the server, and keep the new ones
       --run-id string              the run's id, a UUID in lower case (default a new one)
-      --run-key-fd int             read the run key from this file descriptor, 0 for stdin, in place of QORY_RUN_KEY, which an unwalled agent can read
+      --run-key-fd int             read the run key from this file descriptor, 0 for stdin, in place of QORY_RUN_KEY, which an unwalled agent may read
       --shm-size string            the size of /dev/shm in the container, such as 2g (forager.yaml: wall.shm_size)
       --stop-grace duration        the time between the stop signal and SIGKILL (default 10s; forager.yaml: session.run.stop_grace)
       --stop-signal string         the signal that stops the agent: SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2 (default SIGTERM; forager.yaml: session.run.stop_signal)

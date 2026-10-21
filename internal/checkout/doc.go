@@ -7,12 +7,13 @@
 //
 //	root, err := checkout.Root(cwd)
 //	dir := checkout.QoryDir(root)   // <root>/.qory
-//	name := checkout.RepoKey(root)  // acme/app
+//	name, err := checkout.RepoKey(root)  // acme/app
 //
-// Every function runs git and none of them treats a missing git or a directory outside a
-// working tree as an error. They fall back instead: [Root] to the directory itself,
-// [RepoKey] to its base name, [ExcludeFile] to "", [Worktrees] to nil, [Restorable] to a
-// reason. A caller
-// reads a checkout it cannot identify, and writes no exclude, rather than refusing to
-// run.
+// Every function runs git through [github.com/qoryai/qory/internal/hostgit] and none of
+// them treats a missing git or a directory outside a working tree as an error. They fall
+// back instead: [Root] to the directory itself, [RepoKey] to its base name, [ExcludeFile]
+// to "", [Worktrees] to nil, [Restorable] to a reason. A caller reads a checkout it cannot
+// identify, and writes no exclude, rather than refusing to run. The one error they return
+// is the settings check refusing the repository, a [*hostgit.RefusedError]: qory then runs
+// no git there, and the caller stops.
 package checkout

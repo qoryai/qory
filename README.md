@@ -9,7 +9,7 @@ It does three things:
    every agent you use.
 2. **It prepares the workspace.** One worktree per branch. Set up and ready to work.
 3. **It runs the agent safely.** Every connection is recorded. You decide what the agent
-   may reach. Your tokens stay outside.
+   may reach. Behind a wall, your tokens stay outside.
 
 <p align="center">
   <img src="docs/assets/slogan.png" alt="Don't worry, use Qory" width="720">
@@ -37,6 +37,8 @@ above:
 curl -fsSL https://raw.githubusercontent.com/qoryai/qory/main/install.sh | sh
 go install github.com/qoryai/qory@latest
 ```
+
+qory needs git 2.36 or later.
 
 `qory update` installs the newest release, the same way this `qory` was installed. Every
 command tells you when a newer release is out. `QORY_NO_UPDATE_CHECK=1` turns that off.
@@ -101,13 +103,13 @@ More: [docs/worktrees.md](docs/worktrees.md).
 
 `qory run` starts the agent on its harness.
 
-- **Observed.** All traffic goes through a proxy on your machine. Each run is recorded in
-  `~/.local/state/qory/runs/`, or under `$XDG_STATE_HOME/qory` when that is set to an
-  absolute path, outside the checkout.
+- **Observed.** All traffic goes through a proxy on your machine. Each run is recorded
+  outside the checkout, in `~/.local/state/qory/runs/`, or under `$XDG_STATE_HOME/qory`
+  when that is set; qory refuses a relative `XDG_STATE_HOME`.
 - **Fenced.** Add a **wall**: the agent runs in a container. Its only way out is the
   proxy. You decide which hosts it may reach.
-- **No tokens inside.** The agent gets a placeholder. The proxy adds the real token on
-  the way out.
+- **No tokens inside.** Behind a wall, the agent gets a placeholder. The proxy adds the
+  real token on the way out.
 - **Reported.** Optionally, every run reports to your server.
 
 ```sh

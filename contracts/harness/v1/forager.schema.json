@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://qory.dev/contracts/harness/v1/forager.schema.json",
   "title": "forager.yaml",
-  "description": "The machine's forager.yaml, under the user's configuration directory alone: what qory run does on this machine. gateway holds the run policy's egress section, the server document, the credentials, the tools and the integrations; session holds the instance and what applies to every run; wall is the container the runtime is started in. egress and server follow the Forager contract's grammar, https://qory.dev/contracts/forager/v1/, and wall is that contract's wall.",
+  "description": "The machine's forager.yaml, under the user's configuration directory alone: what qory run does on this machine. gateway holds the run policy's egress section, the server document, the credentials, the tools, the integrations and selects; session holds the instance and what applies to every run; wall is the container the runtime is started in. egress and server follow the Forager contract's grammar, https://qory.dev/contracts/forager/v1/, and wall is that contract's wall.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -10,7 +10,7 @@
       "const": "qory.dev/v1alpha1"
     },
     "gateway": {
-      "description": "The gateway's sections: the egress policy, the server, the credentials, the tools and the integrations; and for qory gateway, listen and tls.",
+      "description": "The gateway's sections: the egress policy, the server, the credentials, the tools, the integrations, the memory lock and the run limits; and for qory gateway, listen, tls and selects.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -132,7 +132,7 @@
           }
         },
         "credentials": {
-          "description": "The credentials this machine has for its runs, by name. A run's policy selects among them and defines none. Behind a wall the gateway keeps each outside the container and sets it on the requests to the hosts it is for, ending the container's TLS for those hosts alone. Exactly one of env, file and adapter defines where the token comes from.",
+          "description": "The credentials this machine has for its runs, by name. A run's policy selects among them and defines none. Behind a wall the gateway keeps each outside the container and sets it on the requests to the hosts it is for, ending the container's TLS for those hosts alone. Exactly one of env, file and adapter defines where the token comes from. A model key has format, endpoint and auth in place of hosts, paths and placeholders.",
           "type": "object",
           "propertyNames": {
             "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}$"
@@ -182,7 +182,7 @@
                 }
               },
               "auth": {
-                "description": "With env or file, how the token is set: bearer, basic with a username, or header with a header's name.",
+                "description": "How the token is set: bearer, basic with a username, or header with a header's name. A credential from env or file needs it, and so does a model key from an adapter. Any other credential from an adapter takes none: the adapter's answer contains how its token is set.",
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
@@ -204,6 +204,10 @@
                   "header": {
                     "type": "string",
                     "pattern": "^[A-Za-z0-9-]+$"
+                  },
+                  "oauth": {
+                    "description": "For a model key with the scheme bearer: true marks the key as an OAuth token, such as a Claude subscription login's.",
+                    "type": "boolean"
                   }
                 }
               },
@@ -214,6 +218,32 @@
                 "items": {
                   "type": "string",
                   "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                }
+              },
+              "format": {
+                "description": "A model key's API format. The run's runtime gets the key in the variable it reads for this format and auth.",
+                "type": "string",
+                "enum": [
+                  "anthropic-messages",
+                  "openai-responses",
+                  "openai-chat",
+                  "gemini"
+                ]
+              },
+              "endpoint": {
+                "description": "A model key's base URL: https, a host, an optional port and path, and no user, query or fragment. The proxy sets the key on every path of this host alone, and the run's runtime gets this URL as its model endpoint.",
+                "type": "string",
+                "pattern": "^https://(\\[[^\\]/?#@\\s]+\\]|[^/?#@\\s:\\[\\]]+)(:(0*([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?)?(/[^?#\\s]*)?$"
+              },
+              "key_prefixes": {
+                "description": "A model key's prefixes, such as sk-ant-: 1 to 4, each 1 to 32 characters of printable ASCII without a space. If the key starts with none of them, the run does not start. Without key_prefixes, any key is accepted.",
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 4,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[!-~]{1,32}$"
                 }
               }
             }
@@ -319,6 +349,67 @@
               "minLength": 1
             }
           }
+        },
+        "selects": {
+          "description": "The credentials the gateway selects for a run, with a wall or without, when the server's policy selects none, each by name, with the label of the run's registration whose value is the argument, and the forge the run's forge label must name. On github.com the label's value is one repository or several of one owner, separated by commas with no space, such as acme/shop,acme/lib; a run whose label is missing, empty or of another form gets no credential from the entry. A value that lists repositories of several owners, or one repository twice, has that form, and the github integration mints no token for it: the run does not start. qory gateway alone reads it.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "credentials": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "argument_label": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "forge": {
+                    "enum": [
+                      "github.com"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "lock_memory": {
+          "description": "On Linux, true locks every page of the gateway's process in memory, so that no key it holds is written to swap. It needs RLIMIT_MEMLOCK unlimited, or the capability CAP_IPC_LOCK. On any other system, true stops the gateway. The default is false.",
+          "type": "boolean"
+        },
+        "run_limits": {
+          "description": "The limits of each run on the gateway, the same for every run. A field left out is its default.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "connections": {
+              "description": "The most connections a run has open at once. The default is 256.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65536
+            },
+            "requests_per_second": {
+              "description": "The requests a run sends a second. The default is 50.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            "burst": {
+              "description": "The requests a run sends at once after a pause. The default is 200.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            }
+          }
         }
       }
     },
@@ -384,7 +475,7 @@
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._/:@-]*$"
         },
         "images": {
-          "description": "The images this machine defines, by name. A run's policy selects one by its name, as it selects credentials, and names no reference; image and --image name the default by it. The Forager contract's Images.",
+          "description": "The images this machine defines, by name. A run's policy selects one by its name, as it selects credentials, or names a reference only under images_allow; image and --image name the default by it. The Forager contract's Images.",
           "type": "object",
           "propertyNames": {
             "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}$"
@@ -426,6 +517,14 @@
                 "runtime"
               ]
             }
+          }
+        },
+        "images_allow": {
+          "description": "Where a run's image may come from when the run's policy, the server's signed run configuration or --policy, names one by a reference pinned by digest: the prefixes of the references the machine runs, in lower case and up to a whole part of a reference, such as a registry, a name or a path ending in a slash, or a name and its @. An image by reference starts under the default image's runtime, so a list needs image or --image. Default none: a run whose policy names an image by reference is refused.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._:/@-]*$"
           }
         },
         "command": {
@@ -482,13 +581,52 @@
           "pattern": "^[0-9]+[bkmgBKMG]?$"
         },
         "ca_env": {
-          "description": "The variables that point a program in the container at the bundle of authorities it trusts, the image's and the run's, when an authority is made for the run. Default SSL_CERT_FILE, GIT_SSL_CAINFO, NODE_EXTRA_CA_CERTS, REQUESTS_CA_BUNDLE, CURL_CA_BUNDLE, AWS_CA_BUNDLE.",
+          "description": "The variables that point a program at the bundle of authorities it trusts, the image's or this machine's and the run's, when an authority is made for the run: in the container, or on this machine for a run without a wall. Default SSL_CERT_FILE, GIT_SSL_CAINFO, NODE_EXTRA_CA_CERTS, REQUESTS_CA_BUNDLE, CURL_CA_BUNDLE, AWS_CA_BUNDLE.",
           "type": "array",
           "uniqueItems": true,
           "items": {
             "type": "string",
             "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
           }
+        }
+      }
+    },
+    "pool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "registry",
+        "run_config"
+      ],
+      "oneOf": [
+        {"required": ["harness_ref"]},
+        {"required": ["harness_path"]}
+      ],
+      "properties": {
+        "runs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "prebuilds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "registry": {
+          "type": "string",
+          "maxLength": 238,
+          "pattern": "^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*(?::[0-9]{1,5})?/)?[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$"
+        },
+        "harness_ref": {
+          "type": "string",
+          "pattern": "^([0-9a-f]{40}|v[0-9]+\\.[0-9]+\\.[0-9]+)$"
+        },
+        "harness_path": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "run_config": {
+          "type": "string",
+          "pattern": "^/"
         }
       }
     }

@@ -21,8 +21,12 @@ import (
 	"github.com/qoryai/qory/internal/foragerdir"
 )
 
-// machineDir is the directory of forager.yaml: everything qory keeps for its server.
-func machineDir() foragerdir.Dir { return foragerdir.Dir(config.UserDir()) }
+// machineDir is the directory of forager.yaml: everything qory keeps for its server. It
+// is the refusal of [config.UserDir] when that refuses the configuration directory.
+func machineDir() (foragerdir.Dir, error) {
+	dir, err := config.UserDir()
+	return foragerdir.Dir(dir), err
+}
 
 // keySource says where a run's access key secret came from.
 type keySource int
@@ -125,7 +129,10 @@ type serverIdentity struct {
 // and name. It prints a line when the instance id cannot be kept in the directory and
 // lives for this process alone.
 func identify(r *config.Forager, report io.Writer, verb string, fd *accesskey.Key) (*serverIdentity, error) {
-	dir := machineDir()
+	dir, err := machineDir()
+	if err != nil {
+		return nil, err
+	}
 	key, err := signingKey(r, fd)
 	if err != nil {
 		return nil, err
@@ -147,7 +154,11 @@ func identify(r *config.Forager, report io.Writer, verb string, fd *accesskey.Ke
 // its secret, the one read from --access-key-secret-fd when fd is not nil. Each refusal
 // is input, and none contains the secret.
 func signingKey(r *config.Forager, fd *accesskey.Key) (*accessKey, error) {
-	key, err := readAccessKey(machineDir(), fd)
+	dir, err := machineDir()
+	if err != nil {
+		return nil, err
+	}
+	key, err := readAccessKey(dir, fd)
 	if err != nil {
 		return nil, input(err)
 	}
@@ -257,18 +268,6 @@ func explain(err error, id *serverIdentity) error {
 // whose node goes through a gateway.
 const codeNodeUsesGateway = "node_uses_gateway"
 
-// codeServerNeedsWall is the refusal of an unwalled run while the machine keeps stored
-// secrets: the stored-secrets marker exists, which a discovery that lists them writes.
-const codeServerNeedsWall = "server_needs_wall"
-
-// needsWall is the server_needs_wall refusal of the stored-secrets marker.
-func needsWall(dir foragerdir.Dir) error {
-	return &refusedError{
-		text: fmt.Sprintf("the stored-secrets marker %s exists: this machine's access key may receive stored secrets, so every run needs a wall: --wall %s, or wall in %s", dir.Path(foragerdir.MarkerFile), config.WallDocker, config.ForagerFileName),
-		err:  &session.Refusal{Code: codeServerNeedsWall},
-	}
-}
-
 // codeKeyNeedsWall is the refusal of an unwalled run on a machine that holds an access
 // key: an agent without a wall could read the key.
 const codeKeyNeedsWall = "key_needs_wall"
@@ -295,8 +294,8 @@ func keyNeedsWall(source keySource, path string) error {
 // heldSecret is the first file of dir that holds an access key's secret, an unwalled
 // agent being able to read each: access-key-secret, access-key-secret.new, the secret
 // --replace replaced, or a secret moved aside. It is "" for none. A file that cannot be
-// looked at counts as one, as the stored-secrets marker does, and a directory that
-// cannot be listed is an error: neither is taken for no secret.
+// looked at counts as one, and a directory that cannot be listed is an error: neither
+// is taken for no secret.
 func heldSecret(dir foragerdir.Dir) (string, error) {
 	for _, name := range []string{foragerdir.SecretFile, foragerdir.NewSecretFile, foragerdir.ReplacedFile} {
 		if _, err := os.Lstat(dir.Path(name)); !errors.Is(err, fs.ErrNotExist) {
@@ -313,21 +312,17 @@ func heldSecret(dir foragerdir.Dir) (string, error) {
 	return "", nil
 }
 
-// refuseUnwalled is the refusal of an unwalled run, nil for none: server_needs_wall
-// while the stored-secrets marker exists and the run contacts no server; key_needs_wall
-// for a run against the server, id not nil, which signs with the access key it names;
+// refuseUnwalled is the refusal of an unwalled run, nil for none: key_needs_wall for a
+// run against the server, id not nil, which signs with the access key it names;
 // for any other run while QORY_ACCESS_KEY_SECRET held an access key when qory started,
-// since an agent can read qory's starting environment even once qory unset it; and while
+// since an unwalled agent can read qory's starting environment, on macOS from qory and on
+// Linux from the program that started qory, even once qory unset it; and while
 // dir holds an access key's secret. The descriptor --access-key-secret-fd names is read
 // and closed, so a run that contacts no server may have it. Without a directory there
-// is no marker and no secret file.
+// is no secret file. The stored-secrets marker stops no run. Stored secrets reach only
+// a run that signs with this machine's access key, and on a machine that holds that
+// key, qory starts no run without a wall.
 func refuseUnwalled(dir foragerdir.Dir, id *serverIdentity) error {
-	if dir != "" {
-		// A marker that cannot be looked at counts as one.
-		if marker, _ := dir.HasMarker(); marker && id == nil {
-			return needsWall(dir)
-		}
-	}
 	switch {
 	case id != nil:
 		return keyNeedsWall(id.key.source, dir.Path(foragerdir.SecretFile))

@@ -15,14 +15,23 @@ import (
 )
 
 // serverKey is a server's signing key of the test's own, and the pin of it as
-// forager.yaml writes one.
+// forager.yaml writes one. A key whose public key contains qak_ or qrk_ in any case,
+// about 1 in 27,000, is drawn again. accesskey.SecretInPinEntry, in Forager 1056b47d,
+// refuses a pin's public key that starts with qak_ or qrk_ in any case, about 1 in
+// 1,000,000 keys, as one that contains a secret, and no test that calls serverKey means
+// to prove that refusal. The redraw is wider than that rule: SecretInPinEntry accepts a
+// valid key that contains either text after its first character.
 func serverKey(t *testing.T) (*accesskey.Key, string) {
 	t.Helper()
-	k, err := accesskey.Generate()
-	if err != nil {
-		t.Fatal(err)
+	for {
+		k, err := accesskey.Generate()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !accesskey.ContainsSecret(k.PublicKey().String()) {
+			return k, "[{alg: ed25519, public_key: " + k.PublicKey().String() + "}]"
+		}
 	}
-	return k, "[{alg: ed25519, public_key: " + k.PublicKey().String() + "}]"
 }
 
 // foragerFile writes the machine's forager.yaml under the configuration directory.
@@ -244,6 +253,98 @@ func TestForagerFileRefusesTheIDAndThePinTwice(t *testing.T) {
 		if err == nil || !strings.HasPrefix(err.Error(), c.want) || strings.Contains(err.Error(), "AQIDBAUG") {
 			t.Errorf("%q %q: %v, want %q", c.id, c.pin, err, c.want)
 		}
+	}
+}
+
+// Two server public keys whose base64url contains qak_ and QRK_. A one-off program
+// found them: it made Ed25519 keys from the seeds SHA-256("qory pin-exempt test key
+// qak_" or "... QRK_", then a big-endian uint64 counter), and kept the first key that
+// contains the text, that accesskey.ParsePublicKey reads and that PublicKey.Check
+// passes, at counters 792413 and 298278.
+const (
+	pinKeyQak = "5SDoeW8KoXUu3HsttjTPTeJzn09DpiSRkf11Gqak_es"
+	pinKeyQRK = "EhnhC_UcQRK_c9QsrBKFeNww1k3aYbp3rXFEz20Wf6k"
+)
+
+// TestForagerFileReadsAPinKeyThatContainsASecretPrefix is a pin whose public key is
+// one valid key that contains qak_ or QRK_: forager.yaml and QORY_APIARY_PUBLIC_KEY
+// read it.
+func TestForagerFileReadsAPinKeyThatContainsASecretPrefix(t *testing.T) {
+	hermetic(t)
+	for _, key := range []string{pinKeyQak, pinKeyQRK} {
+		t.Run("forager.yaml/"+key, func(t *testing.T) {
+			path := foragerFile(t, "gateway:\n  server:\n    url: https://qory.example\n    apiary_public_key: [{alg: ed25519, public_key: "+key+"}]\n")
+			c, err := config.Load(t.TempDir(), true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if s := c.Forager.Server; len(s.Pin) != 1 || s.Pin[0].PublicKey != key || s.PinFrom != path {
+				t.Errorf("the pin read as %+v from %s", s.Pin, s.PinFrom)
+			}
+		})
+		t.Run("QORY_APIARY_PUBLIC_KEY/"+key, func(t *testing.T) {
+			foragerFile(t, "gateway:\n  server:\n    url: https://qory.example\n")
+			serverVariables(t, config.ServerVariables{ApiaryPublicKey: `[{"alg":"ed25519","public_key":"` + key + `"}]`})
+			c, err := config.Load(t.TempDir(), true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if s := c.Forager.Server; len(s.Pin) != 1 || s.Pin[0].PublicKey != key || s.PinFrom != config.EnvOrigin+accesskey.EnvPin {
+				t.Errorf("the pin read as %+v from %s", s.Pin, s.PinFrom)
+			}
+		})
+	}
+}
+
+// TestForagerFileRefusesASecretInAPinsAlg is a pin entry whose alg contains an access
+// key secret or a run key, beside a valid public key that contains the other prefix:
+// forager.yaml and QORY_APIARY_PUBLIC_KEY refuse it for the alg's prefix, and the
+// refusal quotes neither. A scan of the key alone would return the other prefix's error.
+func TestForagerFileRefusesASecretInAPinsAlg(t *testing.T) {
+	hermetic(t)
+	for _, c := range []struct{ alg, key, want string }{
+		{"qrk_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", pinKeyQak, "the document contains a run key"},
+		{"qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", pinKeyQRK, "the document contains an access key secret"},
+	} {
+		serverVariables(t, config.ServerVariables{})
+		path := foragerFile(t, "gateway:\n  server:\n    url: https://qory.example\n    apiary_public_key: [{alg: "+c.alg+", public_key: "+c.key+"}]\n")
+		_, err := config.Load(t.TempDir(), true)
+		if want := path + ": gateway.server.apiary_public_key: " + c.want; err == nil || !strings.HasPrefix(err.Error(), want) || strings.Contains(err.Error(), "AQIDBAUG") {
+			t.Errorf("forager.yaml, alg %.4s: %v, want %q", c.alg, err, want)
+		}
+		foragerFile(t, "gateway:\n  server:\n    url: https://qory.example\n")
+		serverVariables(t, config.ServerVariables{ApiaryPublicKey: `[{"alg":"` + c.alg + `","public_key":"` + c.key + `"}]`})
+		_, err = config.Load(t.TempDir(), true)
+		if want := "QORY_APIARY_PUBLIC_KEY: " + c.want; err == nil || !strings.HasPrefix(err.Error(), want) || strings.Contains(err.Error(), "AQIDBAUG") {
+			t.Errorf("QORY_APIARY_PUBLIC_KEY, alg %.4s: %v, want %q", c.alg, err, want)
+		}
+	}
+}
+
+// pinKeyStartsQak is a server public key that starts with qaK_. A one-off program
+// found it: it made Ed25519 keys from the seeds SHA-256("qory pin-exempt test key
+// starts qak_", then a big-endian uint64 counter), and kept the first key that starts
+// with qak_ in any letter case, that accesskey.ParsePublicKey reads and that
+// PublicKey.Check passes, at counter 5143145.
+const pinKeyStartsQak = "qaK_juvG8Q7hwpuGkJe1opX7YF993TJbZMf-wnnoYG0"
+
+// TestForagerFileRefusesAPinKeyThatStartsWithASecretPrefix is a pin whose public key is
+// one valid key that starts with qak_ in some letter case, as an access key secret cut
+// to 43 characters does: forager.yaml and QORY_APIARY_PUBLIC_KEY refuse it as one that
+// contains an access key secret, and the refusal does not contain the key.
+func TestForagerFileRefusesAPinKeyThatStartsWithASecretPrefix(t *testing.T) {
+	hermetic(t)
+	const refusal = "the document contains an access key secret, which belongs in access-key-secret or QORY_ACCESS_KEY_SECRET and nowhere else"
+	path := foragerFile(t, "gateway:\n  server:\n    url: https://qory.example\n    apiary_public_key: [{alg: ed25519, public_key: "+pinKeyStartsQak+"}]\n")
+	_, err := config.Load(t.TempDir(), true)
+	if want := path + ": gateway.server.apiary_public_key: " + refusal; err == nil || err.Error() != want {
+		t.Errorf("forager.yaml: %v, want %q", err, want)
+	}
+	foragerFile(t, "gateway:\n  server:\n    url: https://qory.example\n")
+	serverVariables(t, config.ServerVariables{ApiaryPublicKey: `[{"alg":"ed25519","public_key":"` + pinKeyStartsQak + `"}]`})
+	_, err = config.Load(t.TempDir(), true)
+	if want := "QORY_APIARY_PUBLIC_KEY: " + refusal; err == nil || err.Error() != want {
+		t.Errorf("QORY_APIARY_PUBLIC_KEY: %v, want %q", err, want)
 	}
 }
 

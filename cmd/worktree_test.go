@@ -1,13 +1,18 @@
 package cmd_test
 
 import (
+	"errors"
+	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/qoryai/qory/cmd"
+	"github.com/qoryai/qory/internal/places"
 	"github.com/qoryai/qory/internal/report"
 )
 
@@ -397,7 +402,7 @@ func TestWorktreeRemoveGuardsAndRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, out, "  counting the commits only on feature: on no remote branch, not in the main checkout's HEAD "+gitOut(t, root, "rev-parse", "--short=7", "HEAD")+" and not on its recorded base origin/main\n", "  1 commit only on feature, the newest ", `"new"`, "\nbye feature off origin/main\n", "  git worktree remove --force "+wt+"\n", "  git branch -D feature\n")
+	wants(t, out, "  counting the commits only on feature: on no remote branch, not in the main checkout's HEAD "+gitOut(t, root, "rev-parse", "--short=7", "HEAD")+" and not on its recorded base origin/main\n", "  1 commit only on feature, the newest ", `"new"`, "\nbye feature off origin/main\n", "  git worktree remove --force "+wt+"\n", "  git branch -D -- feature\n")
 	wantsRow(t, out, "branch", "feature  (deleted with 1 commit nothing else has; git reflog finds it for 30 days)")
 	if gitOut(t, root, "branch", "--list", "feature") != "" {
 		t.Errorf("the branch stayed")
@@ -487,6 +492,299 @@ func TestWorktreeRemoveAsksAboutOwnCommits(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	wantsRow(t, out, "branch", "feature  (deleted; every commit of it is on the remote, in the main checkout or on its base)")
+}
+
+// TestWorktreeRemoveRefusesABranchNamedAsAnOption writes a worktree's HEAD to name the
+// branch --mirror, which a walled run in the worktree could: remove, with --force and
+// --delete-branch, refuses the name before any git command takes it, and pushes, deletes
+// and removes nothing.
+func TestWorktreeRemoveRefusesABranchNamedAsAnOption(t *testing.T) {
+	root := worktreeRepo(t)
+	if _, err := run(t, "wa", "feature", "--no-compose"); err != nil {
+		t.Fatal(err)
+	}
+	wt := filepath.Join(filepath.Dir(root), "wt-feature")
+	heads := gitOut(t, root, "ls-remote", "--heads", "origin")
+	writeFile(t, filepath.Join(root, ".git", "worktrees", "wt-feature", "HEAD"), "ref: refs/heads/--mirror\n")
+	out, err := runIn(t, "p\n", "wr", wt, "--force", "--delete-branch")
+	if want := `"--mirror" is not a branch name`; err == nil || err.Error() != want {
+		t.Fatalf("%v, want %q\n%s", err, want, out)
+	}
+	if got := gitOut(t, root, "ls-remote", "--heads", "origin"); got != heads {
+		t.Errorf("the remote changed:\n%s\nwas\n%s", got, heads)
+	}
+	if gitOut(t, root, "branch", "--list", "feature") == "" {
+		t.Errorf("the branch feature went")
+	}
+	if _, err := os.Stat(wt); err != nil {
+		t.Errorf("the worktree went: %v", err)
+	}
+}
+
+// TestWorktreeRemoveTakesTheRemoteWhereItPushes gives the main checkout its origin in
+// its config.worktree alone, so git in the worktree knows no remote: remove asked to push
+// a branch with a separate commit says there is no remote to push to, rather than
+// handing git push the main checkout's remote name, which git in the worktree would take
+// for a path there. Nothing is pushed, and the worktree stays.
+func TestWorktreeRemoveTakesTheRemoteWhereItPushes(t *testing.T) {
+	root := worktreeRepo(t)
+	if _, err := run(t, "wa", "feature", "--no-compose"); err != nil {
+		t.Fatal(err)
+	}
+	wt := filepath.Join(filepath.Dir(root), "wt-feature")
+	commitOn(t, wt, "feature.txt", "work on feature")
+	bare := gitOut(t, root, "remote", "get-url", "origin")
+	runGit(t, root, "config", "extensions.worktreeConfig", "true")
+	runGit(t, root, "config", "--worktree", "remote.origin.url", bare)
+	runGit(t, root, "config", "--worktree", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+	runGit(t, root, "config", "--remove-section", "remote.origin")
+	if got := gitOut(t, wt, "remote"); got != "" {
+		t.Fatalf("git in the worktree lists the remotes %q", got)
+	}
+	heads := gitOut(t, root, "ls-remote", "--heads", "origin")
+	out, err := runIn(t, "p\n", "wr", wt)
+	if want := "no remote to push to"; err == nil || err.Error() != want {
+		t.Fatalf("%v, want %q\n%s", err, want, out)
+	}
+	if got := gitOut(t, root, "ls-remote", "--heads", "origin"); got != heads {
+		t.Errorf("the remote changed:\n%s\nwas\n%s", got, heads)
+	}
+	if _, err := os.Stat(wt); err != nil {
+		t.Errorf("the worktree went: %v", err)
+	}
+}
+
+// TestWorktreeRemovePushesTheBranchAfterTheOptions answers p for a branch with a
+// separate commit, with --verbose: the push puts -- before the branch, so git takes no
+// branch for an option.
+func TestWorktreeRemovePushesTheBranchAfterTheOptions(t *testing.T) {
+	root := worktreeRepo(t)
+	if _, err := run(t, "wa", "feature", "--no-compose"); err != nil {
+		t.Fatal(err)
+	}
+	wt := filepath.Join(filepath.Dir(root), "wt-feature")
+	commitOn(t, wt, "feature.txt", "work on feature")
+	out, err := runIn(t, "p\n", "wr", "feature", "-v")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "  git push --quiet --set-upstream origin -- feature  (in ../wt-feature)\n")
+	if gitOut(t, root, "ls-remote", "--heads", "origin", "feature") == "" {
+		t.Errorf("origin lacks the branch")
+	}
+}
+
+// TestWorktreeRemovePrintsABranchNameAsItCanBePrinted removes the worktree of a branch
+// whose name holds a zero-width space, which git allows and a terminal does not show:
+// the question to push, the trace and the failure of git branch -D, which a second
+// worktree on the branch makes, print the name quoted.
+func TestWorktreeRemovePrintsABranchNameAsItCanBePrinted(t *testing.T) {
+	const name = "feat\u200bure"
+	const shown = `"feat\u200bure"`
+	root := worktreeRepo(t)
+	if out, err := run(t, "wa", name, "--no-compose"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wt := filepath.Join(filepath.Dir(root), "wt-"+name)
+	commitOn(t, wt, "feature.txt", "work on the branch")
+	out, err := runIn(t, "p\n", "wr", name, "-v")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "branch "+shown+" has 1 commit that no remote branch", "  git push --quiet --set-upstream origin -- "+shown+"  (in "+`"../wt-`+name[:4]+`\u200bure"`+")\n")
+
+	if out, err := run(t, "wa", name, "--no-compose"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	other := filepath.Join(filepath.Dir(root), "other")
+	runGit(t, root, "worktree", "add", "--force", "--quiet", other, name)
+	out, err = runIn(t, "", "wr", wt, "--delete-branch")
+	if err == nil || !strings.Contains(err.Error(), "git branch -D "+shown+" failed") || strings.Contains(err.Error(), name) {
+		t.Errorf("%v, want the failure of git branch -D %s, with git's message naming it so too\n%s", err, shown, out)
+	}
+}
+
+// TestWorktreeRemoveRowPrintsABranchNameAsItCanBePrinted removes worktrees whose
+// branch, or the base it landed on, has a name that contains a zero-width space. The branch
+// row prints each name quoted: a kept branch and the git branch -D it suggests, the
+// remote branch a branch was pushed to, and the base a branch landed on.
+func TestWorktreeRemoveRowPrintsABranchNameAsItCanBePrinted(t *testing.T) {
+	const name = "kept\u200bbranch"
+	const shown = `"kept\u200bbranch"`
+	root := worktreeRepo(t)
+	if out, err := run(t, "wa", name, "--no-compose"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	commitOn(t, filepath.Join(filepath.Dir(root), "wt-"+name), "kept.txt", "work on the branch")
+	out, err := runIn(t, "k\n", "wr", name)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "branch", shown+"  (kept with 1 commit nothing else has; git branch -D "+shown+" deletes it)")
+
+	if out, err := run(t, "wa", name, "--no-compose"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	out, err = runIn(t, "p\n", "wr", name)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "branch", shown+`  (pushed to "origin/kept\u200bbranch", then deleted)`)
+
+	// The base ba\u200bse is a branch of the remote; another machine squashes the branch
+	// landed onto it, pushes it and deletes the branch.
+	const base = "ba\u200bse"
+	runGit(t, root, "push", "--quiet", "origin", "main:refs/heads/"+base)
+	runGit(t, root, "fetch", "--quiet", "origin")
+	other := clone(t, gitOut(t, root, "remote", "get-url", "origin"))
+	if out, err := run(t, "wa", "landed", "--no-compose", "--base", base); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wt := filepath.Join(filepath.Dir(root), "wt-landed")
+	commitOn(t, wt, "landed.txt", "work on landed")
+	runGit(t, wt, "push", "--quiet", "origin", "landed")
+	runGit(t, other, "fetch", "--quiet", "origin")
+	runGit(t, other, "checkout", "--quiet", "-b", "onto", "origin/"+base)
+	runGit(t, other, "merge", "--quiet", "--squash", "origin/landed")
+	runGit(t, other, "commit", "-q", "-m", "Landed (#1)")
+	runGit(t, other, "push", "--quiet", "origin", "onto:"+base, ":landed")
+	runGit(t, root, "branch", "--quiet", "--delete", "--remotes", "origin/landed")
+	squash := gitOut(t, other, "rev-parse", "HEAD")
+	out, err = runNoTTY(t, "wr", "landed")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "branch", `landed  (deleted; landed on "origin/ba\u200bse" as `+squash[:7]+")")
+}
+
+// TestWorktreeRemoveSaysAWalledRunHoldsTheWorktree records a worktree as a walled run's
+// place and holds it as the run does: remove stops with the settings check's line that
+// the worktree is in use, not with one that it is no worktree, and removes nothing.
+func TestWorktreeRemoveSaysAWalledRunHoldsTheWorktree(t *testing.T) {
+	root := worktreeRepo(t)
+	if _, err := run(t, "wa", "feature", "--no-compose"); err != nil {
+		t.Fatal(err)
+	}
+	wt := filepath.Join(filepath.Dir(root), "wt-feature")
+	if err := cmd.RecordCheckout(wt); err != nil {
+		t.Fatal(err)
+	}
+	live, err := places.Starting([]string{wt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer live.Release()
+	out, err := runIn(t, "", "wr", wt, "--force")
+	want := wt + " is in use by a walled run; qory runs no git there until the run ends, since the run could change git's configuration between qory's check and git's read"
+	if err == nil || err.Error() != want {
+		t.Fatalf("%v, want %q\n%s", err, want, out)
+	}
+	if _, err := os.Stat(wt); err != nil {
+		t.Errorf("the worktree went: %v", err)
+	}
+}
+
+// answerLater is the standard input of a command that asks one question: the first read
+// closes asked, and returns answer once answering is closed.
+type answerLater struct {
+	asked, answering chan struct{}
+	answer           string
+	once             bool
+}
+
+func (a *answerLater) Read(p []byte) (int, error) {
+	if a.once {
+		return 0, io.EOF
+	}
+	a.once = true
+	close(a.asked)
+	<-a.answering
+	return copy(p, a.answer), nil
+}
+
+// TestWorktreeRemoveHoldsTheWorktreeWhileItAsks removes a worktree whose branch has a
+// commit nothing else has, at a terminal. While remove waits for the answer, a walled
+// run that starts in the worktree waits; it starts once the worktree is removed.
+func TestWorktreeRemoveHoldsTheWorktreeWhileItAsks(t *testing.T) {
+	root := worktreeRepo(t)
+	if _, err := run(t, "wa", "feature", "--no-compose"); err != nil {
+		t.Fatal(err)
+	}
+	wt := filepath.Join(filepath.Dir(root), "wt-feature")
+	commitOn(t, wt, "feature.txt", "work on feature")
+	in := &answerLater{asked: make(chan struct{}), answering: make(chan struct{}), answer: "d\n"}
+	done := make(chan error, 1)
+	var out strings.Builder
+	go func() {
+		root := cmd.Root()
+		root.SetArgs([]string{"wr", "feature"})
+		root.SetOut(&out)
+		root.SetErr(&out)
+		root.SetIn(in)
+		done <- root.Execute()
+	}()
+	select {
+	case <-in.asked:
+	case err := <-done:
+		t.Fatalf("remove asked nothing: %v\n%s", err, out.String())
+	}
+	started := make(chan *places.Hold, 1)
+	go func() {
+		h, err := places.Starting([]string{wt})
+		if err != nil {
+			t.Error(err)
+		}
+		started <- h
+	}()
+	waited := true
+	select {
+	case h := <-started:
+		h.Release()
+		waited = false
+		t.Errorf("a walled run started in the worktree while remove asked")
+	case <-time.After(300 * time.Millisecond):
+	}
+	close(in.answering)
+	if err := <-done; err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if _, err := os.Stat(wt); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the worktree stayed: %v", err)
+	}
+	if !waited {
+		return
+	}
+	select {
+	case h := <-started:
+		h.Release()
+	case <-time.After(10 * time.Second):
+		t.Fatal("the walled run did not start once remove was done")
+	}
+}
+
+// TestWorktreeAddSaysAWalledRunHoldsTheWorktree records an existing worktree as a
+// walled run's place and holds it as the run does: add of its branch again stops with
+// the settings check's line that the worktree is in use, not with one that it is no
+// worktree of this repository.
+func TestWorktreeAddSaysAWalledRunHoldsTheWorktree(t *testing.T) {
+	root := worktreeRepo(t)
+	if _, err := run(t, "wa", "feature", "--no-compose"); err != nil {
+		t.Fatal(err)
+	}
+	wt := filepath.Join(filepath.Dir(root), "wt-feature")
+	if err := cmd.RecordCheckout(wt); err != nil {
+		t.Fatal(err)
+	}
+	live, err := places.Starting([]string{wt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer live.Release()
+	out, err := run(t, "wa", "feature", "--no-compose")
+	want := wt + " is in use by a walled run; qory runs no git there until the run ends, since the run could change git's configuration between qory's check and git's read"
+	if err == nil || err.Error() != want {
+		t.Fatalf("%v, want %q\n%s", err, want, out)
+	}
 }
 
 // TestWorktreeRemoveFindsTheBranchLanded is remove on branches whose pull requests

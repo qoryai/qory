@@ -41,7 +41,8 @@ const (
 	// ReplacedFile is a second name of the secret --replace replaces, made just before
 	// the new one takes its place and removed once forager.yaml names the new key.
 	ReplacedFile = SecretFile + ".replaced"
-	// MarkerFile is the stored-secrets marker: while it exists, every run needs a wall.
+	// MarkerFile is the stored-secrets marker, which a discovery that lists stored
+	// secrets writes. No run reads it.
 	MarkerFile = "stored-secrets"
 	// PendingFile records an enrolment that has not been answered yet: the SHA-256 of
 	// its code, the fingerprint of the public key made for it and the time.
@@ -345,6 +346,26 @@ func (d Dir) MoveNewAside(now time.Time) (string, error) {
 	}
 }
 
+// DeleteNewSecret unlinks access-key-secret.new and syncs the directory. Its bytes are
+// not overwritten first. A directory with no access-key-secret.new deletes nothing.
+//
+// It is for a key that is kept nowhere, not even aside: one the server enrolled for a
+// kind of node this machine does not take. access-key-secret is never touched.
+func (d Dir) DeleteNewSecret() error {
+	path := d.Path(NewSecretFile)
+	err := os.Remove(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("delete %s: %w", path, err)
+	}
+	if err := d.sync(); err != nil {
+		return fmt.Errorf("delete %s: %w", path, err)
+	}
+	return nil
+}
+
 // OldSecrets returns the names of the secrets moved aside.
 func (d Dir) OldSecrets() ([]string, error) {
 	entries, err := os.ReadDir(string(d))
@@ -390,8 +411,8 @@ func (d Dir) HasMarker() (bool, error) {
 	return true, nil
 }
 
-// markerText is what the marker holds, for a person who finds it.
-const markerText = "While this file exists, qory runs every session behind a wall: this machine's access key may receive stored secrets.\n"
+// markerText is the text of the marker file, for a person who finds it.
+const markerText = "This machine's access key may receive stored secrets.\nqory writes this file when the server lists stored secrets for the key whose secret is in access-key-secret, or before an enrolment makes a key. It removes the file when a later discovery for that key lists none.\n"
 
 // WriteMarker writes the stored-secrets marker, mode 0600; one that exists stays.
 func (d Dir) WriteMarker() error {

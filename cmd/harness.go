@@ -13,11 +13,15 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/qoryai/forager/accesskey"
 	"github.com/spf13/cobra"
 
+	"github.com/qoryai/qory/internal/acting"
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
 	"github.com/qoryai/qory/internal/source"
@@ -56,7 +60,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/harness.md`,
 		// A verb this noun does not have is an input error, not a help page and exit 0.
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
-				return input(fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath()))
+				return input(fmt.Errorf("unknown command %s for %q", exports.Value(args[0], true), cmd.CommandPath()))
 			}
 			return cmd.Help()
 		},
@@ -102,6 +106,11 @@ func reportFor(home string) string { return home + "-report.json" }
 // it is for, so a verb runs from either side of the pair; else from the checkout the
 // process stands in and its configuration.
 func locate(o homeOptions) (places, config.Config, error) {
+	return locateWith(o, configFor)
+}
+
+// locateWith is [locate] with load reading the checkout's configuration.
+func locateWith(o homeOptions, load func(root string) (config.Config, error)) (places, config.Config, error) {
 	at, ok, err := placesFromReport(o)
 	if err != nil {
 		return at, config.Config{}, err
@@ -112,7 +121,7 @@ func locate(o homeOptions) (places, config.Config, error) {
 			return places{}, config.Config{}, err
 		}
 	}
-	conf, err := configFor(root)
+	conf, err := load(root)
 	if err != nil {
 		return places{}, conf, err
 	}
@@ -142,8 +151,15 @@ func placesFromReport(o homeOptions) (places, bool, error) {
 		return places{}, false, err
 	}
 	at := places{root: rep.Checkout, home: home, report: reportFor(home), links: rep.Links != report.NoLinks && !o.noLinks}
-	if within(at.root, home) {
+	// A home is the checkout's .qory/harness, the one home inside a checkout, or a home
+	// outside it; any other home is taken as one outside, whatever its report says, so
+	// a verb touches nothing of the checkout beyond it.
+	if home == filepath.Join(at.root, config.DefaultHome) {
 		at.dir = checkout.QoryDir(at.root)
+		if info, err := os.Lstat(at.dir); err == nil && (info.Mode()&os.ModeSymlink != 0 || !info.IsDir()) {
+			target, _ := os.Readlink(at.dir)
+			return places{}, false, &render.ForeignPathError{Path: at.dir, Target: target}
+		}
 	} else {
 		at.links = false
 	}
@@ -165,7 +181,9 @@ func locateRoot(dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if checkout.ExcludeFile(root) == "" {
+	if file, err := checkout.ExcludeFile(root); err != nil {
+		return "", err
+	} else if file == "" {
 		return "", input(fmt.Errorf("%s is not inside a git working tree; qory composes for a checkout", root))
 	}
 	return root, nil
@@ -222,13 +240,13 @@ func placesFor(root string, conf config.Config, o homeOptions) (places, error) {
 			home = real
 		}
 		if conf.Links == config.LinksCheckout && !o.noLinks {
-			return places{}, input(fmt.Errorf("harness.links: checkout needs the home inside the checkout, %s; the home is %s", config.DefaultHome, home))
+			return places{}, input(fmt.Errorf("harness.links: checkout needs the home inside the checkout, %s; the home is %s", config.DefaultHome, exports.Value(home, false)))
 		}
 		home = filepath.Join(home, checkout.Key(root))
 		return places{root: root, home: home, report: reportFor(home)}, nil
 	}
 	if home != filepath.Join(root, config.DefaultHome) {
-		return places{}, input(fmt.Errorf("a home inside the checkout is %s; %s is not it, and a home elsewhere goes outside the checkout", config.DefaultHome, ui.Short(home, root)))
+		return places{}, input(fmt.Errorf("a home inside the checkout is %s; %s is not it, and a home elsewhere goes outside the checkout", config.DefaultHome, exports.Value(ui.Short(home, root), false)))
 	}
 	qdir := checkout.QoryDir(root)
 	if info, err := os.Lstat(qdir); err == nil && (info.Mode()&os.ModeSymlink != 0 || !info.IsDir()) {
@@ -290,6 +308,7 @@ func homeFlags(c *cobra.Command, o *homeOptions) {
 // as --force=false, wins over the file.
 func newCompose(use string, aliases ...string) *cobra.Command {
 	var file, runtime, model string
+	var tiers []string
 	var dryRun, check, force, update bool
 	var h homeOptions
 	c := &cobra.Command{
@@ -316,7 +335,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/harness.md`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			defer buzzing(cmd)()
-			o := composeOptions{file: file, runtime: runtime, model: model, dryRun: dryRun, check: check, verbose: verbose(cmd), homeOptions: h}
+			o := composeOptions{file: file, runtime: runtime, model: model, tiers: tiers, dryRun: dryRun, check: check, verbose: verbose(cmd), homeOptions: h}
 			if cmd.Flags().Changed("force") {
 				if check {
 					return input(errors.New("--check writes nothing, so --force has nothing to replace"))
@@ -332,6 +351,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/harness.md`,
 	c.Flags().StringVarP(&file, "file", "f", "", "the qory-stack.yaml, qory.yaml or harness.yaml to compose instead of the one found; when the checkout's document extends a stack, this one is its base")
 	c.Flags().StringVar(&runtime, "runtime", "", "render for these runtimes instead of target.runtime, comma separated ("+strings.Join(render.Names(), ", ")+"; qory.yaml: runtime)")
 	c.Flags().StringVar(&model, "model", "", "write this model instead of target.model (qory.yaml: model)")
+	c.Flags().StringArrayVar(&tiers, "tier", nil, "map a tier to a model id for each agent whose model is ${qory:<tier>}, as <tier>=<model id>; repeat it for each tier (tiers: light, fast, thinking; qory.yaml: harness.tiers)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the report and write nothing")
 	c.Flags().BoolVar(&check, "check", false, "compare the home with the stack and modules, write nothing, and exit 6 when a file, a link or a launch variable differs; the checkout's links and the rest of the report are not compared")
 	c.Flags().BoolVar(&force, "force", false, "replace a tracked, unmodified file where a link goes; git checkout -- restores it (qory.yaml: force)")
@@ -348,6 +368,7 @@ type composeOptions struct {
 	dir            string
 	file           string
 	runtime, model string
+	tiers          []string // the values of --tier, each <tier>=<model id>
 	dryRun         bool
 	check          bool
 	verbose        bool
@@ -404,14 +425,14 @@ func runCheck(out io.Writer, pr *prepared) error {
 		return input(err)
 	}
 	differences = append(differences, envDifferences(env, pr.previous.LaunchEnv)...)
-	rows := [][2]string{{"home", ui.Short(pr.at.home, pr.at.root)}}
+	rows := [][2]string{{"home", exports.Value(ui.Short(pr.at.home, pr.at.root), false)}}
 	if len(differences) == 0 {
 		u.Success("up to date")
 		u.Fields(append(rows, pr.rows...))
 		return nil
 	}
 	for _, d := range differences {
-		rows = append(rows, [2]string{d.Path, d.What})
+		rows = append(rows, [2]string{exports.HidePath(d.Path), d.What})
 	}
 	u.Fields(append(rows, pr.rows...))
 	return &staleError{Differences: differences}
@@ -489,6 +510,7 @@ func runCompose(out, errOut io.Writer, o composeOptions) error {
 	if err != nil {
 		return err
 	}
+	defer pr.res.Close()
 	if o.check {
 		return runCheck(out, pr)
 	}
@@ -520,7 +542,13 @@ func runCompose(out, errOut io.Writer, o composeOptions) error {
 	if err := render.Build(res, at.home, all...); err != nil {
 		return err
 	}
-	return write(out, o, at, res, rep, previous, targets, all, force, skippedConfig, u)
+	// What the compose wrote, the home and its report, is what the record of a place
+	// they lie in holds from here on, a compose that stopped on the way included.
+	err = write(out, o, at, res, rep, previous, targets, all, force, skippedConfig, u)
+	if recordErr := recordHarness(at); err == nil {
+		err = recordErr
+	}
+	return err
 }
 
 // launchEnv is, per runtime with a launch template, the variables the harness sets when
@@ -566,7 +594,11 @@ func allRuntimes(home string, targets []render.Runtime) []render.Runtime {
 // qory key, resolves the base, applies the configuration's runtime and model and then the
 // --runtime and --model flags, looks every runtime up, prints the title, composes, and
 // builds the report. A collision is printed on errOut and comes back marked reported.
-func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
+func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) {
+	flagTiers, err := tierFlags(o.tiers)
+	if err != nil {
+		return nil, input(err)
+	}
 	// A --home naming a composed home says which checkout it is for; otherwise the
 	// checkout is the one the process, or the worktree add, stands in.
 	at, located, err := placesFromReport(o.homeOptions)
@@ -654,13 +686,18 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 	// the pin only offline, and an edited ref resolves anew. The memo puts every
 	// source at one URL and ref, the base included, on one commit for this compose.
 	previous, _ := report.Read(at.report)
+	if checkHarness(at) != nil {
+		// A report in a recorded place that is not the one the last compose wrote
+		// pins, replaces and links nothing: the compose starts as if there were none.
+		previous = report.Report{}
+	}
 	pins := map[string]string{}
 	for _, l := range previous.Modules {
 		if l.Pin != source.WorkingTree {
 			pins[l.Source] = l.Pin
 		}
 	}
-	opts := compose.Options{Update: update, Pins: pins, Cache: conf.Git.Cache, Timeout: conf.Git.Timeout, Env: conf.Env, Memo: source.NewMemo()}
+	opts := compose.Options{Update: update, Pins: pins, Cache: conf.Git.Cache, Timeout: conf.Git.Timeout, Env: conf.Env, Memo: source.NewMemo(), Tiers: resolveTiers(flagTiers, conf), Copies: copies(at)}
 	var basePin string
 	if previous.Base != nil && previous.Base.Source == p.Extends.String() {
 		basePin = previous.Base.Pin
@@ -674,12 +711,15 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 		return nil, composeError(err)
 	}
 	if opts.Base != nil {
-		if err := checks.check(p.File, "the base stack "+opts.Base.String(), opts.Base.Qory); err != nil {
+		if err := checks.check(p.File, "the base stack "+shownBase(opts.Base), opts.Base.Qory); err != nil {
 			return nil, err
 		}
 		if base == nil {
-			retired.add("the base stack "+opts.Base.String(), opts.Base.RetiredAPIVersion)
+			retired.add("the base stack "+shownBase(opts.Base), opts.Base.RetiredAPIVersion)
 		}
+	}
+	if err := mainModelTier(p, conf, o.model); err != nil {
+		return nil, input(err)
 	}
 	if err := applyTarget(p, opts.Base, conf, o.runtime, o.model); err != nil {
 		return nil, input(err)
@@ -696,10 +736,13 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 	}
 	name := p.Name
 	if name == "" {
-		name = checkout.RepoKey(at.root)
+		if name, err = checkout.RepoKey(at.root); err != nil {
+			return nil, err
+		}
 	}
 	u := ui.New(out)
-	u.Title(name, strings.TrimSpace(p.Target.Runtimes.String()+" "+p.Target.Model))
+	// The runtimes passed render.Lookup above, so each is a runtime qory knows.
+	u.Title(accesskey.ShownName(name, false), strings.TrimSpace(p.Target.Runtimes.String()+" "+exports.Value(p.Target.Model, false)))
 	res, err := compose.ComposeWith(p, opts)
 	var collision *compose.CollisionError
 	switch {
@@ -709,12 +752,29 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 	case err != nil:
 		return nil, composeError(err)
 	}
+	// The module roots stay open until the build is done; runCompose closes them, and
+	// every refusal below does.
+	defer func() {
+		if pr == nil {
+			res.Close()
+		}
+	}()
 	if err := render.CheckFiles(res); err != nil {
+		return nil, input(err)
+	}
+	// The runtimes the home holds after this compose, the targets and the ones a previous
+	// compose wrote, all get the agents' tiers.
+	all := allRuntimes(at.home, targets)
+	if err := checkTierEfforts(res, all, at.root); err != nil {
+		return nil, input(err)
+	}
+	envRows, err := checkModelVariables(res, conf, all, at)
+	if err != nil {
 		return nil, input(err)
 	}
 	moved := resolvedRows(res, u)
 	for _, m := range res.Modules {
-		retired.add("module "+m.Name, m.RetiredAPIVersion)
+		retired.add("module "+accesskey.ShownName(m.Name, false), m.RetiredAPIVersion)
 	}
 	rep := report.New(res, name, at.root, at.home)
 	if rep.LaunchEnv, err = launchEnv(res, targets, conf.Launch); err != nil {
@@ -747,16 +807,18 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 	if base != nil {
 		what := "(set by -f)"
 		if named.Path != "" || named.Git != "" {
-			what = "(set by -f, in place of extends " + named.String() + ")"
+			what = "(set by -f, in place of extends " + named.Shown() + ")"
 		}
-		skippedConfig = append(skippedConfig, [2]string{"base", ui.Short(base.File, at.root) + "  " + what})
+		skippedConfig = append(skippedConfig, [2]string{"base", exports.HidePath(ui.Short(base.File, at.root)) + "  " + what})
 	}
 	if own, _ := config.FileIn(at.root); extends && own != "" {
 		skippedConfig = append(skippedConfig, ownFileRows(own, doc, conf)...)
 	}
 	if baseErr != nil {
-		skippedConfig = append(skippedConfig, [2]string{"skipped", "worktree.base  (" + baseErr.Error() + "; the report lists no base)"})
+		skippedConfig = append(skippedConfig, [2]string{"skipped", "worktree.base  (" + exports.HideValueError(baseErr, conf.Worktree.Base).Error() + "; the report lists no base)"})
 	}
+	skippedConfig = append(skippedConfig, tierRows(res, all, at.root)...)
+	skippedConfig = append(skippedConfig, envRows...)
 	skippedConfig = append(skippedConfig, checks.rows...)
 	skippedConfig = append(skippedConfig, retired.rows...)
 	cache := conf.Git.Cache
@@ -764,6 +826,39 @@ func prepare(out, errOut io.Writer, o composeOptions) (*prepared, error) {
 		cache, _ = source.CacheDir()
 	}
 	return &prepared{at: at, res: res, rep: rep, previous: previous, targets: targets, launch: conf.Launch, force: force, cache: cache, rows: skippedConfig, u: u}, nil
+}
+
+// copies decides, for the compose, whether the home contains copies of a module's files:
+// when the home is outside the checkout and the module's directory lies in the
+// checkout, as written or with every link resolved, against the checkout root as given
+// and resolved. A walled run can write the checkout, so a link from the home into it
+// would let the run change what the runtime loads. A home inside the checkout keeps its
+// links: a walled run does not take such a home, and a copy there would end live editing.
+func copies(at places) func(dir string) bool {
+	if at.dir != "" {
+		return nil
+	}
+	roots := []string{at.root, resolved(at.root)}
+	return func(dir string) bool {
+		dirs := []string{dir, resolved(dir)}
+		for _, root := range roots {
+			for _, d := range dirs {
+				if within(root, d) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+}
+
+// resolved is path with every link resolved, or path as it is when it cannot be
+// resolved.
+func resolved(path string) string {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return real
+	}
+	return path
 }
 
 // resolvedRows prints a warning for each git source whose remote could not be reached, one
@@ -778,7 +873,7 @@ func resolvedRows(res *compose.Result, u *ui.UI) [][2]string {
 			warnings = append(warnings, b.Warning)
 		}
 		if b.Previous != "" {
-			rows = append(rows, [2]string{"extends", b.Name + "  " + b.Ref + " " + b.Previous + " → " + b.Pin})
+			rows = append(rows, [2]string{"extends", accesskey.ShownName(b.Name, false) + "  " + exports.Value(b.Ref, false) + " " + b.Previous + " → " + b.Pin})
 		}
 	}
 	for _, l := range res.Modules {
@@ -786,7 +881,7 @@ func resolvedRows(res *compose.Result, u *ui.UI) [][2]string {
 			warnings = append(warnings, l.Warning)
 		}
 		if l.Previous != "" {
-			rows = append(rows, [2]string{"module", l.Name + "  " + l.Ref + " " + l.Previous + " → " + l.Pin})
+			rows = append(rows, [2]string{"module", accesskey.ShownName(l.Name, false) + "  " + exports.Value(l.Ref, false) + " " + l.Previous + " → " + l.Pin})
 		}
 	}
 	for _, w := range warnings {
@@ -804,7 +899,7 @@ func ownFileRows(own string, doc *stack.Stack, conf config.Config) [][2]string {
 	name := filepath.Base(own)
 	var read []string
 	if same(doc.File, own) {
-		if t := strings.TrimSpace(doc.Target.Runtimes.String() + " " + doc.Target.Model); t != "" {
+		if t := strings.TrimSpace(strings.Join(accesskey.ShownNames(doc.Target.Runtimes), ", ") + " " + exports.Value(doc.Target.Model, false)); t != "" {
 			read = append(read, "target "+t)
 		}
 		if n := len(doc.Modules); n > 0 {
@@ -819,7 +914,7 @@ func ownFileRows(own string, doc *stack.Stack, conf config.Config) [][2]string {
 	}
 	for _, key := range conf.SetBy(own, "worktree") {
 		if key == "worktree.base" {
-			key += " " + conf.Worktree.Base
+			key += " " + exports.Value(conf.Worktree.Base, false)
 		}
 		read = append(read, key)
 	}
@@ -829,10 +924,10 @@ func ownFileRows(own string, doc *stack.Stack, conf config.Config) [][2]string {
 	}
 	if len(conf.Ignored) > 0 {
 		user := "your qory.yaml"
-		if dir := config.UserDir(); dir != "" {
+		if dir, err := config.UserDir(); err == nil && dir != "" {
 			user = ui.Short(filepath.Join(dir, name), "")
 		}
-		rows = append(rows, [2]string{"ignored", name + ": " + strings.Join(conf.Ignored, ", ") + "  (under extends, only " + user + " and the files above the checkout set these)"})
+		rows = append(rows, [2]string{"ignored", name + ": " + strings.Join(accesskey.ShownNames(conf.Ignored), ", ") + "  (under extends, only " + user + " and the files above the checkout set these)"})
 	}
 	return rows
 }
@@ -931,14 +1026,14 @@ func write(out io.Writer, o composeOptions, at places, res *compose.Result, rep,
 	if o.verbose {
 		var rows [][]string
 		for _, e := range rep.Entries {
-			rows = append(rows, []string{e.Kind + "/" + e.Name, e.Module})
+			rows = append(rows, []string{accesskey.ShownName(e.Kind+"/"+e.Name, false), accesskey.ShownName(e.Module, false)})
 		}
 		u.Table(rows)
 	}
 	u.Success("composed %s from %s %s", count(len(rep.Entries), "entry", "entries"), count(len(rep.Modules), "module", "modules"), ui.Pot)
-	rows := [][2]string{{"home", ui.Short(at.home, at.root)}}
+	rows := [][2]string{{"home", exports.Value(ui.Short(at.home, at.root), false)}}
 	for _, path := range takenBack {
-		rows = append(rows, [2]string{"removed", path + "  (linked by a previous compose; the checkout gets no links)"})
+		rows = append(rows, [2]string{"removed", exports.HidePath(path) + "  (linked by a previous compose; the checkout gets no links)"})
 	}
 	for _, rt := range all {
 		var links []string
@@ -963,7 +1058,7 @@ func write(out io.Writer, o composeOptions, at places, res *compose.Result, rep,
 			rows = append(rows, [2]string{"replaced", strings.Join(replaced, "  ") + "  (the checkout's file or directory; git checkout -- restores it)"})
 		}
 		for _, s := range render.Skipped(rt, res) {
-			rows = append(rows, [2]string{"skipped", s + "  (no place in " + rt.Name() + ")"})
+			rows = append(rows, [2]string{"skipped", accesskey.ShownName(s, false) + "  (no place in " + rt.Name() + ")"})
 		}
 	}
 	rows = append(rows, skippedConfig...)
@@ -973,11 +1068,16 @@ func write(out io.Writer, o composeOptions, at places, res *compose.Result, rep,
 		}
 		switch {
 		case !at.links:
-			rows = append(rows, [2]string{"link", l.Link + "  (module " + l.Name + "; not written, the checkout gets no links)"})
+			rows = append(rows, [2]string{"link", accesskey.ShownName(l.Link, false) + "  (module " + accesskey.ShownName(l.Name, false) + "; not written, the checkout gets no links)"})
 		case slices.Contains(moduleLinks.Replaced, l.Link):
-			rows = append(rows, [2]string{"replaced", l.Link + "  (the checkout's file or directory; git checkout -- restores it)"})
+			rows = append(rows, [2]string{"replaced", accesskey.ShownName(l.Link, false) + "  (the checkout's file or directory; git checkout -- restores it)"})
 		default:
-			rows = append(rows, [2]string{"link", l.Link + "  (module " + l.Name + ")"})
+			rows = append(rows, [2]string{"link", accesskey.ShownName(l.Link, false) + "  (module " + accesskey.ShownName(l.Name, false) + ")"})
+		}
+	}
+	for _, l := range res.Modules {
+		if l.Copy {
+			rows = append(rows, [2]string{"copied", exports.HidePath(l.Source) + "  (module " + accesskey.ShownName(l.Name, false) + " lies in the checkout, which a walled run can write, so the home contains copies; an edit reaches it on the next compose)"})
 		}
 	}
 	u.Fields(rows)
@@ -1017,12 +1117,12 @@ func applyTarget(p *stack.Stack, base *compose.Base, conf config.Config, runtime
 	}
 	if err := want.Runtimes.Validate(); err != nil {
 		if len(want.Runtimes) == 0 && base != nil {
-			return fmt.Errorf("target.runtime is required; the base stack %s defines no target, so the document sets one beside extends, or the configuration or --runtime does", base)
+			return fmt.Errorf("target.runtime is required; the base stack %s defines no target, so the document sets one beside extends, or the configuration or --runtime does", shownBase(base))
 		}
 		return err
 	}
 	if base != nil && base.Extending != nil {
-		if err := base.Extending.Target.Check(want, base.String()); err != nil {
+		if err := base.Extending.Target.Check(want, shownBase(base)); err != nil {
 			return err
 		}
 	}
@@ -1030,15 +1130,21 @@ func applyTarget(p *stack.Stack, base *compose.Base, conf config.Config, runtime
 	return nil
 }
 
+// shownBase is the base stack as a message prints it, name@pin as [compose.Base.String]
+// writes it, with the name as [accesskey.ShownName] prints it.
+func shownBase(b *compose.Base) string { return accesskey.ShownName(b.Name, false) + "@" + b.Pin }
+
 // composeError classifies what a compose returned: a git source that could not be fetched
 // and a file the operating system would not read are failures of the machine, left as
 // they are; everything else is a mistake in the stack or a module, an input error. A ref
 // the remote no longer has is an input error that reads as the source's own message, with
-// no module or extends before it, since it names the URL and the ref itself.
+// no module or extends before it, since it names the URL and the ref itself. When the
+// message contains an access key secret or a run key, it reads the same with only the
+// secret hidden, as [exports.HideError] prints it.
 func composeError(err error) error {
 	var gone *source.GoneError
 	if errors.As(err, &gone) {
-		return input(gone)
+		return input(exports.HideError(gone))
 	}
 	var fetch *source.FetchError
 	var pathErr *fs.PathError
@@ -1087,10 +1193,12 @@ func (e inputError) Error() string { return e.err.Error() }
 func (e inputError) Unwrap() error { return e.err }
 
 // input wraps err as an error in the input. A nil err stays nil, so a check that passed
-// can be wrapped as it is returned.
+// can be wrapped as it is returned, and so do the settings check's refusal of a
+// repository and the refusal of a qory file whose acting keys changed since a walled run
+// began in its place, which are no mistake in the input.
 func input(err error) error {
-	if err == nil {
-		return nil
+	if err == nil || hostgit.Refused(err) || acting.Refused(err) {
+		return err
 	}
 	return inputError{err}
 }
@@ -1126,6 +1234,7 @@ func ExitCode(err error) int {
 	var foreign *render.ForeignPathError
 	var version *versionError
 	var stale *staleError
+	var git *hostgit.GitVersionError
 	switch {
 	case err == nil:
 		return 0
@@ -1140,6 +1249,10 @@ func ExitCode(err error) int {
 		return ExitVersion
 	case errors.As(err, &stale):
 		return ExitStale
+	case errors.As(err, &git):
+		// The settings check's refusals exit with 1 too, also where a verb marks them as
+		// input.
+		return 1
 	case errors.As(err, &in), strings.HasPrefix(err.Error(), "unknown command"):
 		return ExitInput
 	default:
@@ -1180,7 +1293,10 @@ func explainForeign(err error, root, file string, replaced []string, force bool)
 		return err
 	}
 	rel = filepath.ToSlash(rel)
-	reason := checkout.Restorable(root, foreign.Path)
+	reason, refused := checkout.Restorable(root, foreign.Path)
+	if refused != nil {
+		return refused
+	}
 	if reason == "" && force {
 		return err
 	}
@@ -1220,7 +1336,10 @@ func explainForeign(err error, root, file string, replaced []string, force bool)
 		lines = append(lines, flagRefuses(force)+": git does not track it, so git checkout -- could not restore it.",
 			"Move it out of the way and compose again, or commit it, then: "+command)
 	default:
-		changes := checkout.Changes(root, foreign.Path)
+		changes, refused := checkout.Changes(root, foreign.Path)
+		if refused != nil {
+			return refused
+		}
 		named := changes
 		if len(changes) > maxChanges {
 			named = append(slices.Clip(changes[:maxChanges]), fmt.Sprintf("and %d more", len(changes)-maxChanges))
@@ -1235,7 +1354,7 @@ func explainForeign(err error, root, file string, replaced []string, force bool)
 		}
 		lines = append(lines, line+".", next+command)
 	}
-	return &foreignError{err: foreign, text: strings.Join(lines, "\n")}
+	return &foreignError{err: foreign, text: exports.HidePath(strings.Join(lines, "\n"))}
 }
 
 // flagRefuses opens the line that says --force does not replace a path: it refused, when
@@ -1251,14 +1370,14 @@ func flagRefuses(force bool) string {
 // resolve it by keeping the last module that ships each entry.
 func printCollision(u *ui.UI, e *compose.CollisionError) {
 	for _, c := range e.Collisions {
-		u.Fail(fmt.Errorf("%s/%s is provided by %d modules", c.Kind, c.Name, len(c.Modules)))
+		u.Fail(fmt.Errorf("%s is provided by %d modules", accesskey.ShownName(c.Kind+"/"+c.Name, false), len(c.Modules)))
 		var rows [][]string
 		for _, l := range c.Modules {
-			rows = append(rows, []string{l, e.Sources[l], e.Pins[l]})
+			rows = append(rows, []string{accesskey.ShownName(l, false), exports.URL(e.Sources[l]), e.Pins[l]})
 		}
 		u.Table(rows)
 		if c.Base != "" {
-			u.Text("It belongs to the base stack " + c.Base + "; rename yours.")
+			u.Text("It belongs to the base stack " + accesskey.ShownName(c.Base, false) + "; rename yours.")
 		}
 	}
 	modules, excludes := e.Suggest(e.Order)
@@ -1270,14 +1389,14 @@ func printCollision(u *ui.UI, e *compose.CollisionError) {
 	u.Text("Keep one and exclude it from the others. For example, in qory-stack.yaml:")
 	for _, l := range modules {
 		u.Blank()
-		u.Code("- name: "+l, "  ...", "  exclude:")
+		u.Code("- name: "+accesskey.ShownName(l, false), "  ...", "  exclude:")
 		var kinds []string
 		for k := range excludes[l] {
 			kinds = append(kinds, k)
 		}
 		sort.Strings(kinds)
 		for _, k := range kinds {
-			u.Code("    " + k + ": [" + strings.Join(excludes[l][k], ", ") + "]")
+			u.Code("    " + k + ": [" + strings.Join(accesskey.ShownNames(excludes[l][k]), ", ") + "]")
 		}
 	}
 }
@@ -1312,9 +1431,13 @@ func newInspect(use string, aliases ...string) *cobra.Command {
 }
 
 // readReport reads the report of the last compose for the places, and refuses a report
-// of a version this qory does not read. Nothing composed is a plain error naming the
-// compose verb.
+// of a version this qory does not read, and a home and report in a recorded place that
+// are not what the last compose wrote there. Nothing composed is a plain error naming
+// the compose verb.
 func readReport(at places) (report.Report, error) {
+	if err := checkHarness(at); err != nil {
+		return report.Report{}, err
+	}
 	rep, err := report.Read(at.report)
 	if errors.Is(err, os.ErrNotExist) {
 		return rep, fmt.Errorf("no composed harness for %s; run qory harness compose", at.root)
@@ -1323,7 +1446,7 @@ func readReport(at places) (report.Report, error) {
 		return rep, err
 	}
 	if rep.Version != report.Version {
-		return rep, input(fmt.Errorf("%s: report version %d is not one this qory reads; versions: %d", at.report, rep.Version, report.Version))
+		return rep, input(fmt.Errorf("%s: report version %d is not one this qory reads; versions: %d", exports.Value(at.report, false), rep.Version, report.Version))
 	}
 	return rep, nil
 }
@@ -1365,12 +1488,28 @@ More: https://github.com/qoryai/qory/blob/main/docs/harness.md#a-home-outside-th
 			if err != nil {
 				return err
 			}
+			// The line starts the agent on this machine, without a wall.
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			if err := unwalledHere(at.root, cwd); err != nil {
+				return err
+			}
 			rep, err := readReport(at)
 			if err != nil {
 				return err
 			}
-			name, launch, err := resolveLaunch(rep, conf, runtime, rep.Home)
+			if err := ownHome(at, rep, "a launch", "qory prints no launch"); err != nil {
+				return err
+			}
+			name, launch, err := resolveLaunch(rep, conf, runtime, at.home)
 			if err != nil {
+				return err
+			}
+			// What the line starts takes the harness's defaults as a run does: a name the
+			// deny list holds is left out.
+			if launch.Defaults, err = allowedDefaults(launch.Defaults); err != nil {
 				return err
 			}
 			rt, err := render.Lookup(name)
@@ -1386,7 +1525,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/harness.md#a-home-outside-th
 				kind, entry, _ := strings.Cut(address, "/")
 				registered, ok := addresses[kind][entry]
 				if !ok {
-					return input(fmt.Errorf("%s is not an agent, skill, command or bound role the harness is composed with for %s; --json lists them under addresses", address, name))
+					return input(fmt.Errorf("%s is not an agent, skill, command or bound role the harness is composed with for %s; --json lists them under addresses", exports.Value(address, false), name))
 				}
 				_, err = fmt.Fprintln(cmd.OutOrStdout(), registered)
 				return err
@@ -1487,18 +1626,29 @@ func newRemove(use string, aliases ...string) *cobra.Command {
 A home outside the checkout, under --home or harness.home, is removed with its report.
 The checkout is not touched: nothing was written there.`,
 		Args: noArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (removeErr error) {
 			at, _, err := locate(h)
 			if err != nil {
 				return err
 			}
+			if err := checkHarness(at); err != nil {
+				return err
+			}
+			// What the remove leaves is what the place's record holds from here on.
+			defer func() {
+				if err := recordHarness(at); err != nil && removeErr == nil {
+					removeErr = err
+				}
+			}()
 			u := ui.New(cmd.OutOrStdout())
 			rep, _ := report.Read(at.report)
 			name := rep.Stack
 			if name == "" {
-				name = checkout.RepoKey(at.root)
+				if name, err = checkout.RepoKey(at.root); err != nil {
+					return err
+				}
 			}
-			u.Title(name)
+			u.Title(accesskey.ShownName(name, false))
 			if runtime != "" {
 				rt, err := render.Lookup(runtime)
 				if err != nil {
@@ -1511,7 +1661,7 @@ The checkout is not touched: nothing was written there.`,
 			}
 			removedAny, unlinkErr := unlinkAll(at.root)
 			for _, path := range removedAny {
-				u.Success("removed %s", path)
+				u.Success("removed %s", exports.HidePath(path))
 			}
 			present := had(at)
 			if err := removeDir(u, at); err != nil {
@@ -1563,7 +1713,7 @@ func removeOutside(u *ui.UI, at places) error {
 		if err := os.RemoveAll(path); err != nil {
 			return err
 		}
-		u.Success("removed %s", ui.Short(path, ""))
+		u.Success("removed %s", exports.Value(ui.Short(path, ""), false))
 		removed = true
 	}
 	if !removed {
@@ -1578,6 +1728,11 @@ func removeOutside(u *ui.UI, at places) error {
 // way remove without --runtime takes it. A replaced file whose link went is named with
 // the git command that restores it, and drops out of the report.
 func removeRuntime(u *ui.UI, at places, rt render.Runtime) error {
+	// A link at the home would take the removal into the folder it leads to.
+	if info, err := os.Lstat(at.home); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		target, _ := os.Readlink(at.home)
+		return &render.ForeignPathError{Path: at.home, Target: target}
+	}
 	var others []render.Runtime
 	for _, o := range render.Composed(at.home) {
 		if o.Name() != rt.Name() {
@@ -1592,7 +1747,7 @@ func removeRuntime(u *ui.UI, at places, rt render.Runtime) error {
 		var err error
 		removed, err = render.Unlink(rt, at.root, others...)
 		for _, path := range removed {
-			u.Success("removed %s", path)
+			u.Success("removed %s", exports.HidePath(path))
 		}
 		if err != nil {
 			return err
@@ -1603,7 +1758,7 @@ func removeRuntime(u *ui.UI, at places, rt render.Runtime) error {
 		if err := os.RemoveAll(dir); err != nil {
 			return err
 		}
-		u.Success("removed %s", ui.Short(dir, at.root))
+		u.Success("removed %s", exports.Value(ui.Short(dir, at.root), false))
 	} else if len(removed) == 0 {
 		u.Text("nothing composed here for " + rt.Name())
 		return nil
@@ -1614,7 +1769,7 @@ func removeRuntime(u *ui.UI, at places, rt render.Runtime) error {
 		}
 		gone, err := render.UnlinkModuleLinks(at.root)
 		for _, path := range gone {
-			u.Success("removed %s", path)
+			u.Success("removed %s", exports.HidePath(path))
 		}
 		if err != nil {
 			return err

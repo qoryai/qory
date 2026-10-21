@@ -7,6 +7,8 @@ import (
 	"io"
 	"path"
 	"strings"
+
+	"github.com/qoryai/qory/internal/exports"
 )
 
 // capabilityRecord is the PAX record a tar stream carries a file's capabilities in, the
@@ -73,10 +75,11 @@ func (s Special) check() Check {
 	return Check{"files", Fail, strings.Join(found, "; ") + "; remove them in the image: " + strings.Join(mend, ", and ")}
 }
 
-// shown names the first [filesShown] paths, and how many more there are.
+// shown names the first [filesShown] paths, each segment with an access key secret or a
+// run key as [exports.HidePath] prints it, and how many more there are.
 func shown(paths []string) string {
 	if len(paths) <= filesShown {
-		return strings.Join(paths, ", ")
+		return exports.HidePath(strings.Join(paths, ", "))
 	}
-	return fmt.Sprintf("%s and %d more", strings.Join(paths[:filesShown], ", "), len(paths)-filesShown)
+	return fmt.Sprintf("%s and %d more", exports.HidePath(strings.Join(paths[:filesShown], ", ")), len(paths)-filesShown)
 }

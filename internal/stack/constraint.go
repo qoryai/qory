@@ -8,6 +8,8 @@ import (
 
 	"golang.org/x/mod/semver"
 	"gopkg.in/yaml.v3"
+
+	"github.com/qoryai/qory/internal/exports"
 )
 
 // Constraint is the range of qory versions a document accepts, from its qory key:
@@ -50,13 +52,13 @@ func ParseConstraint(s string) (Constraint, error) {
 			}
 		}
 		if op == "" {
-			return Constraint{}, fmt.Errorf("qory %q is not one or more comparators such as >=0.3.0", s)
+			return Constraint{}, fmt.Errorf("qory %s is not one or more comparators such as >=0.3.0", exports.Value(s, true))
 		}
 		v := withV(strings.TrimPrefix(field, op))
 		// A comparator names all three numbers and no build metadata, so that two
 		// people read the same range: "0.3" is refused, "0.3.0-rc.1" is read.
 		if !semver.IsValid(v) || semver.Canonical(v) != v {
-			return Constraint{}, fmt.Errorf("qory %q: %q is not a version such as 0.3.0", s, strings.TrimPrefix(field, op))
+			return Constraint{}, fmt.Errorf("qory %s: %s is not a version such as 0.3.0", exports.Value(s, true), exports.Value(strings.TrimPrefix(field, op), true))
 		}
 		c.comparators = append(c.comparators, comparator{op, v})
 	}

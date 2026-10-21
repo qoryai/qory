@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -296,5 +297,168 @@ func TestPrintEnvSaysWhereEachVariableComesFrom(t *testing.T) {
 	}
 	if !reflect.DeepEqual(rows, wantRows) {
 		t.Errorf("env rows %q, want %q\n%s", rows, wantRows, buf.String())
+	}
+}
+
+// TestWriteReplacesALinkAtThePath writes a report where a link stands at its path: the
+// link is replaced by the report, and the file it pointed at is left as it was.
+func TestWriteReplacesALinkAtThePath(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "elsewhere.json")
+	if err := os.WriteFile(target, []byte("left alone\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "harness-report.json")
+	if err := os.Symlink(target, path); err != nil {
+		t.Fatal(err)
+	}
+	if err := report.Write(path, report.Report{Version: report.Version}); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(target); err != nil || string(data) != "left alone\n" {
+		t.Errorf("the link's target is now %q, %v", data, err)
+	}
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o644 {
+		t.Errorf("the report is %v, %v", info, err)
+	}
+	if r, err := report.Read(path); err != nil || r.Version != report.Version {
+		t.Errorf("read back %+v, %v", r, err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("the write left %v", entries)
+	}
+}
+
+// secret is an access key secret's shape for the tests, not a real key.
+const secret = "qak_AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA"
+
+// printedRows prints r and returns each line with its spaces cut to one, and fails t
+// when the printed report contains qak_ or qrk_ in any letter case.
+func printedRows(t *testing.T, r report.Report) []string {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := r.Print(&buf); err != nil {
+		t.Fatal(err)
+	}
+	if lower := strings.ToLower(buf.String()); strings.Contains(lower, "qak_") || strings.Contains(lower, "qrk_") {
+		t.Errorf("the report prints a secret:\n%s", buf.String())
+	}
+	var rows []string
+	for _, line := range strings.Split(buf.String(), "\n") {
+		rows = append(rows, strings.Join(strings.Fields(line), " "))
+	}
+	return rows
+}
+
+// hasRows fails t for each of want that is not one of rows.
+func hasRows(t *testing.T, rows []string, want ...string) {
+	t.Helper()
+	for _, w := range want {
+		if !slices.Contains(rows, w) {
+			t.Errorf("the report has no row %q:\n%s", w, strings.Join(rows, "\n"))
+		}
+	}
+}
+
+// TestPrintHidesASecretInEnvAndExtensions is a report whose Env and Extensions tables
+// hold a name and a value that contain an access key secret or a run key: each prints
+// as Forager's phrase, and the printed report contains no qak_ or qrk_.
+func TestPrintHidesASecretInEnvAndExtensions(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	t.Setenv("HOME", t.TempDir())
+	r := want()
+	r.Env = map[string]string{"API_TOKEN": "token-" + secret, "QAK_m": "plain"}
+	r.Extensions = map[string]any{
+		"team":    map[string]any{"deploy": secret, "qak_m": "plain"},
+		"release": "token-" + secret,
+	}
+	hasRows(t, printedRows(t, r),
+		"API_TOKEN (a value that contains an access key secret)",
+		"(a name that contains an access key secret) plain",
+		"release (a value that contains an access key secret)",
+		"team.deploy (a value that contains an access key secret)",
+		`(a name that contains an access key secret) "plain"`,
+	)
+
+	r = want()
+	r.LaunchEnv = map[string][]report.Var{"claude": {
+		{Name: "API_TOKEN", Value: "token-qrk_m", From: "configuration"},
+		{Name: "qrk_m", Value: "plain", From: "module qak_m, settings/claude/settings.json"},
+	}}
+	hasRows(t, printedRows(t, r),
+		"API_TOKEN (a value that contains a run key) default, configuration",
+		"(a name that contains a run key) plain default, module (a name that contains an access key secret), settings/claude/settings.json",
+	)
+}
+
+// TestPrintHidesASecretInNamesAndSources is a report whose stack, base, modules,
+// entries, bindings and excludes have names, values and sources that contain an access
+// key secret or a run key, and a module from a git URL with a password: each prints as
+// Forager's phrase, the password as (hidden).
+func TestPrintHidesASecretInNamesAndSources(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	t.Setenv("HOME", t.TempDir())
+	r := want()
+	r.Stack = "qrk_app"
+	r.Description = "token-qak_d"
+	r.Target.Model = "qak_model"
+	r.Base = &report.Base{Name: "qak_base", Source: "https://u:qak_p@git.example/base.git#main", Pin: "abc1234"}
+	r.Modules = []report.Module{
+		{Name: "qak_m", Source: "https://u:token-123@git.example/h.git#main", Pin: "abc1234", Variant: "qak_v", Link: "qak_link", Description: "qak_d"},
+		{Name: "core", Source: "../modules/qak_core", Pin: "working-tree"},
+	}
+	r.Entries = []report.Entry{{Kind: "skills", Name: "qak_s", Module: "qak_m", For: "agents/qak_a", References: []string{"skills/qak_r", "skills/ship"}}}
+	r.Bind = map[string]string{"agents/qak_role": "qak_agent"}
+	r.Excludes = []report.Exclude{{Module: "qak_m", Kind: "skills", Name: "qak_old"}}
+	r.Egress = []report.Egress{{Host: "api.example.com", Modules: []string{"qak_m"}}}
+	name := "(a name that contains an access key secret)"
+	value := "(a value that contains an access key secret)"
+	hasRows(t, printedRows(t, r),
+		"🐝 (a name that contains a run key) · claude "+value,
+		"about "+value,
+		"extends "+name+" "+value+" abc1234",
+		name+" https://u:(hidden)@git.example/h.git#main abc1234 variant "+name+" linked as "+name+" "+value,
+		"core "+value+" working-tree",
+		name+" "+name+" required by "+name+" references "+name+", skills/ship",
+		name+" "+name,
+		"api.example.com "+name,
+	)
+}
+
+// TestCopiedModule is a module whose files the home contains copies of: the report
+// marks it copied, the JSON as "copied": true, the table with copied after its pin, and a
+// module the home links to has neither.
+func TestCopiedModule(t *testing.T) {
+	res := &compose.Result{Stack: &stack.Stack{}, Modules: []compose.Module{
+		{Name: "app", Source: "./harness", Pin: source.WorkingTree, Copy: true},
+		{Name: "lib", Source: "../lib", Pin: source.WorkingTree},
+	}}
+	r := report.New(res, "app", "/work/app", "/work/homes/app-0123abcd")
+	if !r.Modules[0].Copied || r.Modules[1].Copied {
+		t.Errorf("copied = %v, %v; want true, false", r.Modules[0].Copied, r.Modules[1].Copied)
+	}
+	data, err := json.Marshal(r.Modules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(data), `"copied":true`); got != 1 || strings.Contains(string(data), `"copied":false`) {
+		t.Errorf("modules as JSON: %s", data)
+	}
+	var b bytes.Buffer
+	if err := r.PrintBody(&b); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "app  ./harness  working-tree  copied\n") {
+		t.Errorf("the table lacks the copied module:\n%s", b.String())
+	}
+	lib := ""
+	for _, line := range strings.Split(b.String(), "\n") {
+		if line = strings.TrimSpace(line); strings.HasPrefix(line, "lib ") {
+			lib = line
+		}
+	}
+	if fields := strings.Fields(lib); len(fields) != 3 || fields[2] != "working-tree" {
+		t.Errorf("the linked module's row is %q, want lib, ../lib and working-tree alone:\n%s", lib, b.String())
 	}
 }

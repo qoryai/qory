@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"maps"
 	"os"
@@ -13,10 +14,14 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/qoryai/forager/accesskey"
 	"gopkg.in/yaml.v3"
 
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/compose"
+	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/hostgit"
+	"github.com/qoryai/qory/internal/module"
 )
 
 // Link is one path in a checkout that points into the composed home.
@@ -67,11 +72,11 @@ type ForeignPathError struct {
 func (e *ForeignPathError) Error() string {
 	switch {
 	case e.Reason != "":
-		return fmt.Sprintf("%s %s; qory does not replace it", e.Path, e.Reason)
+		return fmt.Sprintf("%s %s; qory does not replace it", exports.HidePath(e.Path), e.Reason)
 	case e.Target != "":
-		return fmt.Sprintf("%s links to %s, which qory did not write; qory does not replace it", e.Path, e.Target)
+		return fmt.Sprintf("%s links to %s, which qory did not write; qory does not replace it", exports.HidePath(e.Path), exports.Value(e.Target, false))
 	default:
-		return fmt.Sprintf("%s is not a link qory wrote; qory does not replace it", e.Path)
+		return fmt.Sprintf("%s is not a link qory wrote; qory does not replace it", exports.HidePath(e.Path))
 	}
 }
 
@@ -121,6 +126,30 @@ type Runtime interface {
 type Launcher interface {
 	// Template is how the program is started on a home, see [Template].
 	Template() Template
+}
+
+// AgentModel is a [Runtime] that writes the model id an agent's tier maps to into the
+// agent's file. A runtime that does not implement it writes no model for a tier.
+type AgentModel interface {
+	// AgentEfforts are the effort values the runtime's agent file takes, nil for a
+	// runtime that writes no effort into an agent.
+	AgentEfforts() []string
+}
+
+// TierFront returns an agent file with its tier written into the frontmatter keys model
+// and effort, the form of an agent file that takes both: the mapped model id, and the
+// entry's effort when it sets one, in place of the agent's. An agent whose tier has no
+// map gets no model line, so it runs on the main model, and keeps its effort.
+func TierFront(res *compose.Result, e compose.Entry, data []byte) []byte {
+	t, ok := res.Tiers[e.Tier]
+	if !ok {
+		return module.SetFront(data, "model", "")
+	}
+	data = module.SetFront(data, "model", t.Model)
+	if t.Effort != "" {
+		data = module.SetFront(data, "effort", t.Effort)
+	}
+	return data
 }
 
 // Declarer is a runtime whose program reaches hosts of its own, such as its model
@@ -356,7 +385,8 @@ func CopyFile(src, dir, name string) error {
 // address, see [PluginAddress], and copies the agents with their references resolved the
 // same way: Claude Code reads a plugin's agents directory by entry type and passes over a
 // link there, where it follows one in a checkout's .claude/agents and a plugin's skills,
-// so a linked agent registers nowhere and a copied one as <plugin>:<name>.
+// so a linked agent registers nowhere and a copied one as <plugin>:<name>. An agent of a
+// module the home holds a copy of is read the way the copy reads its files.
 func WritePlugin(res *compose.Result, dir, manifestDir string, extra map[string]any) error {
 	if err := PlaceEntries(res, dir, PluginAddress, "skills", "commands"); err != nil {
 		return err
@@ -365,11 +395,15 @@ func WritePlugin(res *compose.Result, dir, manifestDir string, extra map[string]
 		if e.Kind != "agents" {
 			continue
 		}
-		data, err := os.ReadFile(e.Path)
+		data, err := readSource(res, e)
 		if err != nil {
 			return err
 		}
-		if err := WriteFile(dir, filepath.Join("agents", e.Name+".md"), []byte(res.Substitute(string(data), PluginAddress))); err != nil {
+		data = []byte(res.Substitute(string(data), PluginAddress))
+		if e.Tier != "" {
+			data = TierFront(res, e, data)
+		}
+		if err := WriteFile(dir, filepath.Join("agents", e.Name+".md"), data); err != nil {
 			return err
 		}
 	}
@@ -412,7 +446,7 @@ func Register(p Runtime) { runtimes[p.Name()] = p }
 func Lookup(name string) (Runtime, error) {
 	p, ok := runtimes[name]
 	if !ok {
-		return nil, fmt.Errorf("runtime %q is not one this qory renders; runtimes: %s", name, strings.Join(Names(), ", "))
+		return nil, fmt.Errorf("runtime %s is not one this qory renders; runtimes: %s", accesskey.ShownName(name, true), strings.Join(Names(), ", "))
 	}
 	return p, nil
 }
@@ -492,12 +526,16 @@ func Build(res *compose.Result, home string, runtimes ...Runtime) (err error) {
 // BuildAt writes the composed tree into stage, addressed as home: the paths written into
 // files, such as $QORY_HARNESS_HOME and a server's command, contain home, where the tree
 // is read from, while the files themselves go under stage. [Build] stages beside the home
-// and renames; a check stages elsewhere and compares. BuildAt links the shared skills and
-// hooks for the bare address, links every module's directory as modules/<name> and writes
-// AGENTS.md at the staging root with its references resolved the same way, since every
-// checkout link reads them, then calls each runtime's Render for the subdirectory named
-// after it and links the runtime's files entries into that subdirectory. The links point
-// at the modules by absolute path, so a tree staged anywhere contains the same links.
+// and renames; a check stages elsewhere and compares. BuildAt links every module's
+// directory as modules/<name>, links the shared skills and hooks for the bare address and
+// writes AGENTS.md at the staging root with its references resolved the same way, since
+// every checkout link reads them, then calls each runtime's Render for the subdirectory
+// named after it and links the runtime's files entries into that subdirectory. The links
+// point at the modules by absolute path, so a tree staged anywhere contains the same
+// links. A module the home holds a copy of, see [compose.Module.Copy], is copied in place
+// of each link, and its modules/<name> comes first: a copy of one of its entries leaves
+// out .git as the copy of the module does, so it is part of the module's copy, and the
+// module's limit of 10,000 entries bounds each such copy.
 //
 // The files come after Render, so a files entry at a path Render wrote fails the build.
 // [CheckFiles] refuses such an entry before a build, and the failure here is the check
@@ -509,10 +547,10 @@ func BuildAt(res *compose.Result, stage, home string, runtimes ...Runtime) error
 	if err := os.MkdirAll(stage, 0o755); err != nil {
 		return err
 	}
-	if err := PlaceEntries(res, stage, Bare, "skills", "hooks"); err != nil {
+	if err := linkModules(res, stage); err != nil {
 		return err
 	}
-	if err := linkModules(res, stage); err != nil {
+	if err := PlaceEntries(res, stage, Bare, "skills", "hooks"); err != nil {
 		return err
 	}
 	if res.Instructions != "" {
@@ -539,20 +577,20 @@ func BuildAt(res *compose.Result, stage, home string, runtimes ...Runtime) error
 type Difference struct {
 	// Path is the path relative to the trees' roots, with forward slashes.
 	Path string
-	// What is how the trees differ there: "changed" for a file whose bytes differ,
-	// "missing" for a path the first tree contains and the second does not, "extra" for
-	// one only the second contains, "target" for a link pointing elsewhere, and "kind"
-	// for a file where the other tree contains a directory or a link.
+	// What is how the trees differ there: "changed" for a file whose bytes or executable
+	// bit differ, "missing" for a path the first tree contains and the second does not,
+	// "extra" for one only the second contains, "target" for a link pointing elsewhere,
+	// and "kind" for a file where the other tree contains a directory or a link.
 	What string
 }
 
 // Diff compares the tree at want with the tree at have and lists every path at which they
 // differ, sorted by path. A link is compared by its target and not followed, a file by
-// its bytes, and a directory in both trees is the same whatever it contains, since what
-// it contains is compared on its own. A check renders the home again into a scratch
-// directory and calls Diff with that as want and the home as have, so "missing" is a path
-// a compose writes and "extra" one it removes. A root that does not exist is an empty
-// tree.
+// its bytes and its executable bit, and a directory in both trees is the same whatever it
+// contains, since what it contains is compared on its own. A check renders the home again
+// into a scratch directory and calls Diff with that as want and the home as have, so
+// "missing" is a path a compose writes and "extra" one it removes. A root that does not
+// exist is an empty tree.
 //
 // cache is the directory git sources are fetched to, "" for none. Two links whose targets
 // are both inside it point into clones, one per commit, so they are compared by what they
@@ -594,7 +632,7 @@ func Diff(want, have, cache string) ([]Difference, error) {
 			if !same {
 				out = append(out, Difference{p, "target"})
 			}
-		case x.kind == "file" && x.body != y.body:
+		case x.kind == "file" && (x.body != y.body || x.exec != y.exec):
 			out = append(out, Difference{p, "changed"})
 		}
 	}
@@ -673,9 +711,9 @@ func contents(root string) (map[string]node, error) {
 			if err != nil {
 				return err
 			}
-			nodes[key] = node{"link", target}
+			nodes[key] = node{kind: "link", body: target}
 		case d.IsDir():
-			nodes[key] = node{"dir", ""}
+			nodes[key] = node{kind: "dir"}
 		default:
 			info, err := d.Info()
 			if err != nil {
@@ -689,7 +727,7 @@ func contents(root string) (map[string]node, error) {
 			if info.Mode()&0o111 != 0 {
 				kind = "executable"
 			}
-			nodes[key] = node{kind, string(data)}
+			nodes[key] = node{kind: kind, body: string(data)}
 		}
 		return nil
 	})
@@ -697,14 +735,16 @@ func contents(root string) (map[string]node, error) {
 }
 
 // node is one path of a tree as [readTree] records it: its kind, "dir", "link" or "file",
-// and the link's target or the file's bytes.
+// the link's target or the file's bytes, and whether the file has an executable bit.
 type node struct {
 	kind string
 	body string
+	exec bool
 }
 
 // readTree records every path under root, links not followed, keyed relative to root
-// with forward slashes. A root that does not exist is an empty tree.
+// with forward slashes, a file with its bytes and whether it is executable. A root that
+// does not exist is an empty tree.
 func readTree(root string) (map[string]node, error) {
 	nodes := map[string]node{}
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -728,15 +768,19 @@ func readTree(root string) (map[string]node, error) {
 			if err != nil {
 				return err
 			}
-			nodes[key] = node{"link", target}
+			nodes[key] = node{kind: "link", body: target}
 		case d.IsDir():
-			nodes[key] = node{"dir", ""}
+			nodes[key] = node{kind: "dir"}
 		default:
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
 			data, err := os.ReadFile(path)
 			if err != nil {
 				return err
 			}
-			nodes[key] = node{"file", string(data)}
+			nodes[key] = node{kind: "file", body: string(data), exec: info.Mode()&0o111 != 0}
 		}
 		return nil
 	})
@@ -765,24 +809,39 @@ func realDir(path string) error {
 }
 
 // linkFiles writes one symlink per files entry of the runtime at dir/<path>, pointing at
-// the file in its module, and creates the directories between. A runtime whose Skips
-// names the files kind gets none. A path Render already wrote is an error naming the
-// entry, because [CheckFiles] is meant to have refused the entry before the build.
+// the file in its module, or a copy of the file when the home holds a copy of the module,
+// and creates the directories between. Every directory and link is made through a root at
+// dir, so none lands through a link out of dir, such as a skill the home links to another
+// module. A runtime whose Skips names the files kind gets
+// none. A path Render already wrote is an error naming the entry, because [CheckFiles] is
+// meant to have refused the entry before the build.
 func linkFiles(res *compose.Result, p Runtime, dir string) error {
 	if contains(p.Skips(), FilesKind) {
 		return nil
 	}
+	out := &stageRoot{dir: dir}
+	defer out.Close()
 	for _, e := range res.Entries {
 		path, ok := FileFor(e, p.Name())
 		if !ok {
 			continue
 		}
-		link := filepath.Join(dir, filepath.FromSlash(path))
-		if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
-			return fmt.Errorf("files/%s from module %s: %w", e.Name, e.Module, err)
+		name := filepath.FromSlash(path)
+		root, err := out.get()
+		if err == nil {
+			err = root.MkdirAll(filepath.Dir(name), 0o755)
 		}
-		if err := os.Symlink(e.Path, link); err != nil {
-			return fmt.Errorf("files/%s from module %s: %w", e.Name, e.Module, err)
+		if err != nil {
+			return fmt.Errorf("files/%s from module %s: %w", accesskey.ShownName(e.Name, false), accesskey.ShownName(e.Module, false), exports.HideError(err))
+		}
+		if m, copied := moduleOf(res, e.Module); copied {
+			if err := copyEntry(m, e.Path, root, name, nil); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := root.Symlink(e.Path, name); err != nil {
+			return fmt.Errorf("files/%s from module %s: %w", accesskey.ShownName(e.Name, false), accesskey.ShownName(e.Module, false), exports.HideError(err))
 		}
 	}
 	return nil
@@ -819,11 +878,11 @@ func CheckFiles(res *compose.Result) error {
 		rt, path, _ := strings.Cut(e.Name, "/")
 		p, ok := runtimes[rt]
 		if !ok {
-			return fmt.Errorf("module %s ships files/%s, and %s is not a runtime qory renders; runtimes: %s", e.Module, e.Name, rt, strings.Join(Names(), ", "))
+			return fmt.Errorf("module %s ships files/%s, and %s is not a runtime qory renders; runtimes: %s", accesskey.ShownName(e.Module, false), accesskey.ShownName(e.Name, false), accesskey.ShownName(rt, false), strings.Join(Names(), ", "))
 		}
 		for _, r := range p.Reserved() {
 			if path == r.Path || strings.HasPrefix(path, r.Path+"/") {
-				return fmt.Errorf("module %s ships files/%s, and %s", e.Module, e.Name, r.Why)
+				return fmt.Errorf("module %s ships files/%s, and %s", accesskey.ShownName(e.Module, false), accesskey.ShownName(e.Name, false), r.Why)
 			}
 		}
 	}
@@ -1045,7 +1104,11 @@ func link(root, path, src string, l Link, force bool, out *Linked) error {
 	if errors.As(err, &foreign) {
 		switch {
 		case force:
-			if reason := checkout.Restorable(root, path); reason != "" {
+			reason, err := checkout.Restorable(root, path)
+			if err != nil {
+				return err
+			}
+			if reason != "" {
 				return &ForeignPathError{Path: path, Reason: reason}
 			}
 			if err := os.RemoveAll(path); err != nil {
@@ -1071,7 +1134,7 @@ func link(root, path, src string, l Link, force bool, out *Linked) error {
 	if err := os.Symlink(target, path); err != nil {
 		return err
 	}
-	return exclude(root, "/"+l.Checkout)
+	return exclude(root, excludePattern(l.Checkout))
 }
 
 // clearForDir makes room for a real directory at path. A directory already there, the
@@ -1100,7 +1163,11 @@ func clearForDir(root, path string, l Link, force bool, out *Linked) (skip bool,
 	}
 	switch {
 	case force:
-		if reason := checkout.Restorable(root, path); reason != "" {
+		reason, err := checkout.Restorable(root, path)
+		if err != nil {
+			return false, err
+		}
+		if reason != "" {
 			return false, &ForeignPathError{Path: path, Reason: reason}
 		}
 		if err := os.RemoveAll(path); err != nil {
@@ -1252,7 +1319,7 @@ func Unlink(p Runtime, root string, others ...Runtime) ([]string, error) {
 				}
 				return removed, err
 			}
-			if err := unexclude(root, "/"+l.Checkout); err != nil {
+			if err := unexclude(root, excludePattern(l.Checkout)); err != nil {
 				return removed, err
 			}
 			removed = append(removed, l.Checkout)
@@ -1446,7 +1513,23 @@ func excludeLine(root, path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return "/" + filepath.ToSlash(rel), nil
+	return excludePattern(filepath.ToSlash(rel)), nil
+}
+
+// excludePattern is the exclude file's line for the checkout path rel, with forward
+// slashes: anchored at the root by its slash, and with every character an exclude
+// pattern reads as a wildcard or an escape, and a trailing space, escaped, so the line
+// excludes that path and no other.
+func excludePattern(rel string) string {
+	var b strings.Builder
+	b.WriteString("/")
+	for i, r := range rel {
+		if strings.ContainsRune(`\*?[`, r) || r == ' ' && i == len(rel)-1 {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // ownLink reports whether path is a link qory wrote into this checkout: a relative symlink
@@ -1540,11 +1623,11 @@ func removeOwnLink(root, path string) error {
 // exclude appends one line to the checkout's clone-local exclude file, once. A checkout
 // outside git has no such file, and then there is nothing to exclude and no error.
 func exclude(root, line string) error {
-	file := checkout.ExcludeFile(root)
-	if file == "" {
-		return nil
+	file, err := checkout.ExcludeFile(root)
+	if file == "" || err != nil {
+		return err
 	}
-	data, err := os.ReadFile(file)
+	data, err := readExclude(file)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -1553,14 +1636,74 @@ func exclude(root, line string) error {
 			return nil
 		}
 	}
-	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
-		return err
-	}
 	text := string(data)
 	if text != "" && !strings.HasSuffix(text, "\n") {
 		text += "\n"
 	}
-	return os.WriteFile(file, []byte(text+line+"\n"), 0o644)
+	return writeExclude(file, text+line+"\n")
+}
+
+// readExclude reads the exclude file, never through a link at its path: a link there is
+// refused, so the file it leads to, a key say, is never copied into the exclude file,
+// and so is anything that is not a regular file, before it is opened, so no device or
+// socket there is ever opened. The file is opened without following a link and without
+// becoming a terminal's, and the file opened must be a regular one. No file is
+// [os.ErrNotExist].
+func readExclude(file string) ([]byte, error) {
+	if info, err := os.Lstat(file); err != nil {
+		return nil, err
+	} else if info.Mode()&os.ModeSymlink != 0 {
+		target, _ := os.Readlink(file)
+		return nil, fmt.Errorf("%s is a link to %s; qory reads the exclude file only when it is no link", hostgit.Shown(file), hostgit.Shown(target))
+	} else if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file; qory reads the exclude file only when it is one", hostgit.Shown(file))
+	}
+	f, err := os.OpenFile(file, os.O_RDONLY|openFlags, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file; qory reads the exclude file only when it is one", hostgit.Shown(file))
+	}
+	return io.ReadAll(f)
+}
+
+// writeExclude writes the exclude file with text: into the folder that holds it, which
+// is no link, through a new temporary file beside it renamed into place, so a link at
+// the file is replaced and never written through.
+func writeExclude(file, text string) error {
+	dir := filepath.Dir(file)
+	if info, err := os.Lstat(dir); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		target, _ := os.Readlink(dir)
+		return fmt.Errorf("%s is a link to %s; qory writes the exclude file only in a folder that is no link", hostgit.Shown(dir), hostgit.Shown(target))
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, ".exclude.*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	_, err = f.WriteString(text)
+	if err == nil {
+		err = f.Chmod(0o644)
+	}
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = os.Rename(tmp, file)
+	}
+	if err != nil {
+		os.Remove(tmp)
+	}
+	return err
 }
 
 // RemoveExclude takes one line out of the checkout's clone-local exclude file, the way
@@ -1580,11 +1723,11 @@ func Exclude(root, line string) error { return exclude(root, line) }
 // turn. A file without the line, no file, or a checkout outside git is nothing to change
 // and no error.
 func unexclude(root, line string) error {
-	file := checkout.ExcludeFile(root)
-	if file == "" {
-		return nil
+	file, err := checkout.ExcludeFile(root)
+	if file == "" || err != nil {
+		return err
 	}
-	data, err := os.ReadFile(file)
+	data, err := readExclude(file)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -1600,41 +1743,62 @@ func unexclude(root, line string) error {
 		}
 		kept = append(kept, l)
 	}
-	if !found || heldElsewhere(root, line) {
+	if !found {
 		return nil
 	}
-	return os.WriteFile(file, []byte(strings.Join(kept, "")), 0o644)
+	if held, err := heldElsewhere(root, line); held || err != nil {
+		return err
+	}
+	return writeExclude(file, strings.Join(kept, ""))
 }
 
 // heldElsewhere reports whether a worktree of the repository other than root has
 // something, a dangling link included, at the path an exclude line names. Git lists
-// worktrees by their real paths, so root is told apart by its own.
-func heldElsewhere(root, line string) bool {
+// worktrees by their real paths, so root is told apart by its real path. The error is
+// the settings check's refusal of the repository.
+func heldElsewhere(root, line string) (bool, error) {
 	self := root
 	if resolved, err := filepath.EvalSymlinks(root); err == nil {
 		self = resolved
 	}
 	rel := filepath.FromSlash(strings.TrimPrefix(line, "/"))
-	for _, wt := range checkout.Worktrees(root) {
+	worktrees, err := checkout.Worktrees(root)
+	if err != nil {
+		return false, err
+	}
+	for _, wt := range worktrees {
 		if wt == self {
 			continue
 		}
 		if _, err := os.Lstat(filepath.Join(wt, rel)); err == nil {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // linkModules writes one symlink per module at dir/modules/<name>, pointing at the module's
 // directory, so a settings fragment or a hook reaches a module's other files as
-// $QORY_HARNESS_HOME/modules/<name>/<path>.
+// $QORY_HARNESS_HOME/modules/<name>/<path>. A module the home holds a copy of, see
+// [compose.Module.Copy], is copied there instead, without its .git.
 func linkModules(res *compose.Result, dir string) error {
 	modules := filepath.Join(dir, "modules")
 	if err := os.MkdirAll(modules, 0o755); err != nil {
 		return err
 	}
+	out := &stageRoot{dir: modules}
+	defer out.Close()
 	for _, l := range res.Modules {
+		if l.Copy {
+			root, err := out.get()
+			if err != nil {
+				return err
+			}
+			if err := copyModule(l, root, l.Name); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := os.Symlink(l.Dir, filepath.Join(modules, l.Name)); err != nil {
 			return err
 		}
@@ -1776,6 +1940,12 @@ func WriteAgents(res *compose.Result, addr Address, dir, sub, suffix string, kee
 		}
 		if _, ok := front["name"]; !ok && contains(keep, "name") {
 			front["name"] = e.Name
+		}
+		if e.Tier != "" {
+			delete(front, "model")
+			if t, ok := res.Tiers[e.Tier]; ok && contains(keep, "model") {
+				front["model"] = t.Model
+			}
 		}
 		var b bytes.Buffer
 		b.WriteString("---\n")

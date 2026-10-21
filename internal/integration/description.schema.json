@@ -2,8 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://qory.dev/contracts/integration/v1/description.schema.json",
   "title": "Integration description",
-  "description": "What <program> describe prints on its standard output, once, as one JSON document, and exits 0: the integration's name, the domains it works with, the settings it takes and the roles it plays. It takes no settings and reaches no network. A program that fails prints nothing on standard output, one line on standard error describing what failed, and exits non-zero. A reader expands any declared integration into its definitions from this document alone.",
+  "description": "What <program> describe prints on its standard output, once, as one JSON document, and exits 0: the integration's name, the domains it works with, the settings it takes and the roles it plays. It takes no settings and reaches no network. A program that fails prints nothing on standard output, one line on standard error describing what failed, and exits non-zero. A reader expands any declared integration into its definitions from this document alone. The document is JSON in UTF-8: no string, a member name included, holds invalid UTF-8 or a \\u escape of a lone surrogate, one of U+D800 to U+DFFF that is not in a valid pair, and no object repeats a member, at any depth. Every value of the document, the settings schema included, is bounded: an array holds at most 1024 entries, an object at most 1024 members, and a string, a member name included, at most 16384 bytes of UTF-8; $defs.bounds states that limit only as 16384 characters, since a schema counts characters. The document holds at most 4096 JSON values in all, the document itself, each array entry and each member's value counting one, a container or not, and member names not counting; it nests arrays and objects at most 64 levels deep, the top-level object being level 1; and its raw bytes are at most 262144 (256 KiB). The control plane refuses a description that breaks any of these rules or goes past any of these limits.",
   "type": "object",
+  "allOf": [{"$ref": "#/$defs/bounds"}],
   "additionalProperties": false,
   "required": ["version", "name", "title", "program_version", "settings", "roles"],
   "properties": {
@@ -51,8 +52,49 @@
               "items": {"type": "string", "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"}
             }
           }
+        },
+        "source": {
+          "description": "The source adapter: the program that reads a source of work, such as a tracker, and speaks the integration contract to the control plane (adapter.schema.json). Every value here is the integration's words, which the control plane shows verbatim as plain text, never as Markdown or HTML. Each value is one line with no control characters, none of the format characters listed for a prose line ($defs.line) and no bidirectional controls, so no control character in a value overrides the order it is shown in, and names the system itself, with no placeholder. The source role is not one a reader starts: it is not started as <program> <role> --settings <json>, and it does not end by printing one document as those roles do: start runs the program as a server, and the enrol command prints only the settings to add, as program says. A person runs setup.command, then the enrol command under program, then start, and the program runs as a server. The rules for how a role is started and how it ends apply to describe and to the roles a reader starts, not to this one. A prose line is 1 to 300 characters, and a command 1 to 200 characters of printable ASCII.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["description", "program", "setup", "start", "connect", "access", "disconnect"],
+          "properties": {
+            "description": {"description": "The catalogue line: one sentence on what the source adapter does.", "$ref": "#/$defs/line"},
+            "program": {
+              "description": "The source adapter program's name. Every such program takes the enrol command <program> access-key enrol --secret-file FILE <server> <code>, where FILE is the file the program writes the access key's secret to; the control plane fills in <server>, its origin, and <code>, the enrolment code, when it shows the command. The enrol command creates the secret file and refuses a FILE that already exists; nothing is overwritten. On success it writes the access key's secret to FILE and prints, on standard output, the settings to add to the program's settings file. The printed settings never include the access key's secret, which goes only to FILE. A program already running uses a new access key only after it is restarted.",
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+            },
+            "setup": {
+              "description": "The one step that prepares the source side.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["command", "help"],
+              "properties": {
+                "command": {"description": "The one command a person runs to prepare the source side, shown as a command.", "$ref": "#/$defs/command"},
+                "help": {"description": "One line on what the command asks and what it does.", "$ref": "#/$defs/line"}
+              }
+            },
+            "start": {"description": "The command that runs the program after enrolment, shown as a command.", "$ref": "#/$defs/command"},
+            "connect": {"description": "The line the control plane shows before its button that sends the person to the source, saying what happens at the source. The button's label is the control plane's text, not this line.", "$ref": "#/$defs/line"},
+            "access": {"description": "How to change, at the source, which collections the adapter reaches.", "$ref": "#/$defs/line"},
+            "disconnect": {"description": "How to remove the grant at the source.", "$ref": "#/$defs/line"}
+          }
         }
       }
     }
+  },
+  "$defs": {
+    "bounds": {
+      "description": "The limits of the schema's description that a schema can express, applied to every value of the document, the settings schema included.",
+      "maxItems": 1024,
+      "maxProperties": 1024,
+      "maxLength": 16384,
+      "propertyNames": {"maxLength": 16384},
+      "items": {"$ref": "#/$defs/bounds"},
+      "additionalProperties": {"$ref": "#/$defs/bounds"}
+    },
+    "line": {"description": "A prose line of the integration's words: 1 to 300 characters, one line, with no control characters, no bidirectional controls (the marks U+061C, U+200E and U+200F, the embeddings and overrides U+202A to U+202E and the isolates U+2066 to U+2069, so no control character in a value overrides the order it is shown in), and none of these format characters, which are usually not shown: U+00AD, U+180E, U+200B, U+2060 to U+2064, U+FEFF and U+FFF9 to U+FFFB.", "type": "string", "minLength": 1, "maxLength": 300, "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f\u00ad\u061c\u180e\u200b\u200e\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\ufff9-\ufffb]+$"},
+    "command": {"description": "A command a person runs: 1 to 200 characters of printable ASCII.", "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[ -~]+$"}
   }
 }

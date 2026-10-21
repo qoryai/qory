@@ -6,6 +6,193 @@ release may change what an existing document does, and states it under Upgrading
 
 ## [Unreleased]
 
+### Upgrading
+
+- Where `wall.helper` is set, point it at the Linux build of this release. A walled run
+  that has variables to unset, as every run of Claude Code has, starts its launch through
+  a step of that build; an earlier release's build does not have the step, so with one
+  such a run fails as it starts.
+- qory needs git 2.36 or later.
+- Compose again each home outside the checkout that has a module in the checkout. Until
+  then, `--check` exits 6 with a `kind` row for each of the module's entries.
+
+### Added
+
+- Map a tier to a model id for agents whose `model` is `${qory:light}`, `${qory:fast}` or
+  `${qory:thinking}`, with `--tier`, `harness.tiers` in your `qory.yaml`, or
+  `harness.tiers` in the repository's `qory.yaml`.
+- `gateway.selects` in forager.yaml: when a run's policy selects no credentials, `qory
+  gateway` selects them for a run, with a wall or without, by the run's labels, such as
+  the GitHub credential for the repositories the run's `repository` label names, one or
+  several of one owner, separated by commas. `qory run` refuses it.
+- `wall.images_allow` in forager.yaml: where a run's image may come from when the run's
+  policy names one by a reference pinned by digest, a list of the prefixes of the
+  references the machine runs. Without it, such a run is refused.
+- `gateway.run_limits` in forager.yaml: the most connections each run has open through
+  the gateway at once, the requests it sends a second, and the requests it sends at once
+  after a pause; 256, 50 and 200 unless set. A request past a limit gets `429 Too Many
+  Requests`. `qory gateway`, and a `qory run` with no separate gateway, apply them, and
+  `qory config` lists them.
+- `gateway.lock_memory` in forager.yaml: on Linux, `true` keeps the memory of the gateway
+  out of swap, in `qory gateway` and in a `qory run` with no separate gateway. It needs
+  the locked-memory limit `RLIMIT_MEMLOCK` at unlimited, or the capability
+  `CAP_IPC_LOCK`. On any other system, `true` stops the gateway.
+- When to run without a wall, in `docs/run.md`: without a wall for an agent you start
+  yourself on your machine; with a wall for a run that nobody watches, such as one that a
+  work item or a schedule starts.
+
+### Changed
+
+- Behind a wall, and for every run through a separate gateway, the gateway reaches the
+  gateway's machine and a private network address, such as `10.0.0.5`, only for a host
+  that `gateway.egress.allow` of the gateway's `forager.yaml` lists by name, and that the
+  run's policy allows. Before, it reached a private network address for any host the
+  policy allowed, and the gateway's machine for a host that an allow entry of the policy
+  in force named, Qory Apiary's included. It also never reaches the cloud metadata
+  addresses outside the link-local range, such as `100.100.100.200` and `fd00:ec2::254`,
+  whatever the lists contain. A request it blocks gets `403 Forbidden`, and the record
+  has the egress rule `wall:own-address`.
+- Every `qory` command first denies core dumps of its process, and debugger attaches by a
+  process of the same user. On Linux the process is not dumpable: a process of the same
+  user without `CAP_SYS_PTRACE` can neither attach to it nor read its memory or
+  environment under `/proc`; root, or a process with `CAP_SYS_PTRACE`, still can. On
+  macOS no debugger attaches with ptrace; root, or a debugger that macOS allows to call
+  `task_for_pid`, can still read its memory, and a process of the same user can still
+  read the environment it started with. On Linux and macOS its core size limit is 0, soft
+  and hard, which every program it starts keeps. If a call fails, qory exits with 1
+  before the command runs, and the message starts with the fix. On macOS, a qory started
+  under a debugger exits at once with status 45.
+- A home outside the checkout contains copies, not links, of the files of a module that
+  lies in the checkout, so a walled run cannot change them. An edit to such a module
+  reaches the home on the next compose; until then `qory harness compose --check` exits
+  6. The report marks the module `copied`.
+- Compose refuses a Claude Code settings `env` that sets one of 8 model or effort
+  variables, such as `ANTHROPIC_MODEL`. It refuses them the same way in the
+  configuration's `env`, in `harness.launch.claude.env` and in a module's `env` export.
+- A walled `qory run` given a run key does not start when `--env` or `wall.env` names a
+  variable the runtime reads its model key from: `ANTHROPIC_API_KEY`,
+  `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_AUTH_TOKEN` for Claude Code. An unwalled run,
+  and a run without a run key, are unchanged.
+- `qory access-key enrol` takes an enrolment code that carries the prefix of the kind it
+  enrols, such as `qecn_` for a node and `qecg_` for a gateway. A `qec_` code without a
+  kind is malformed, and a code made for another kind is refused before anything is made
+  or sent.
+- `qory access-key enrol` keeps no key the server enrolled for a kind other than the
+  code's. It deletes the key from `access-key-secret.new`, keeps nothing, and says to
+  revoke the key in Qory Apiary.
+- Every qory command that describes an integration, such as `qory run`, `qory gateway`
+  and `qory config`, refuses a description past the integration contract's limits, as
+  Qory Apiary does: a string or member name over 16384 bytes, an array or object over
+  1024 entries, more than 4096 values, nesting deeper than 64 levels, or more than 256
+  KiB, and a description that is not valid UTF-8, holds a `\u` escape of a lone
+  surrogate or repeats a member.
+- `qory run` given a run key starts Claude Code with `--setting-sources user`,
+  `--strict-mcp-config`, and the harness's MCP list or an empty one. Behind a wall,
+  Claude Code's `CLAUDE_CONFIG_DIR` is an empty folder qory makes after the commands the
+  repository's configuration runs, and the run is refused when the image has
+  `/etc/claude-code` or the harness home is inside the checkout.
+- `qory run` given a run key reads no `harness`, `git` or `env` key of the checkout's
+  `qory.yaml`. Behind a wall, its Claude Code gets none of the image's values of the
+  variables named `ANTHROPIC_*`, `CLAUDE_*`, `QORY_*`, `MCP_*` and `OTEL_*`, of
+  `NODE_OPTIONS`, `NODE_PATH`, `LD_PRELOAD`, `LD_AUDIT`, `BASH_ENV` and `ENV`, of the proxy
+  variables, and of `SSL_CERT_FILE`, `SSL_CERT_DIR` and `NODE_EXTRA_CA_CERTS`; the values
+  Forager, the wall and the server set stay, and so does a value of `ANTHROPIC_*`,
+  `CLAUDE_*`, `QORY_*`, `MCP_*` or `OTEL_*` that is the gateway's placeholder. These
+  checks guard against what the image and the repository's files leave in place, not
+  against a repository that acts against them: the image's programs and the repository's
+  commands run as the agent's user in the agent's container. Against a hostile repository,
+  the boundary is the wall: the container reaches out only through the gateway, which
+  holds the credentials and starts the tools of `gateway.tools` outside it. The run's
+  record is written outside the container, and what Forager and the gateway record there,
+  the run's start and end and its egress, cannot be changed from inside it; the hook
+  events come from inside, so a program left running there can send hook events Claude
+  Code did not make.
+- Behind a wall, the runtime's variables that nothing sets for the run are unset in the
+  container. Its declared and reserved variables were empty before. The names it denies,
+  such as Claude Code's `ANTHROPIC_BASE_URL`, `CLAUDE_CONFIG_DIR`,
+  `CLAUDE_CODE_USE_BEDROCK` and `CLAUDE_CODE_SHELL`, kept the image's value before, which
+  reached the agent; now they are unset too. The launch starts through a step that qory's
+  Linux build, `wall.helper`, runs inside the container, which unsets them first.
+- A run without a wall whose policy selects a credential starts. The gateway sets the
+  credential's value, and the agent's environment gets only its placeholder. Before,
+  such a run was refused. Without a wall, qory and the agent run as the same user, so
+  the agent can still read the value from the environment qory started with on macOS, or
+  on Linux from the starting environment of the program that started qory, from the
+  credential's file, or by running its adapter. It can also read every other credential
+  this machine holds. To keep the value out of the agent's reach, run with a wall or
+  through a separate gateway.
+- The `stored-secrets` marker refuses no run. Before, while it existed, an unwalled run
+  that contacts no server was refused, `server_needs_wall`. On a machine that holds an
+  access key, qory still refuses every unwalled run, `key_needs_wall`.
+- `wall.ca_env` applies to a run without a wall too. When the run has a credential, its
+  variables point the run's programs at `ca-bundle.pem` in the run's directory: this
+  machine's authorities and the run's certificate.
+- A model key in `gateway.credentials` of forager.yaml has `format`, `endpoint`, `auth`
+  and an optional `key_prefixes`, the fields Qory Apiary uses for a model key, in place of
+  `hosts`, `paths` and `placeholders`: such as `{env: CLAUDE_CODE_OAUTH_TOKEN, format:
+  anthropic-messages, endpoint: https://api.anthropic.com, auth: {scheme: bearer, oauth:
+  true}}`. `auth` takes `oauth: true` beside the scheme `bearer`, for an OAuth token. The
+  run's runtime gets the key's placeholder in the variable it reads for the format and
+  `auth`, and the endpoint as its model endpoint. A credential without `format` whose
+  `placeholders` list a variable Claude Code reads its key from, such as
+  `CLAUDE_CODE_OAUTH_TOKEN`, stops the run, `run_configuration_invalid`.
+
+### Fixed
+
+- A pin's public key that is one valid Ed25519 key and contains `qak_` or `qrk_`, in any
+  letter case, after its first character is no longer refused as a secret, in
+  `gateway.server.apiary_public_key` of forager.yaml and in `QORY_APIARY_PUBLIC_KEY`. A
+  key that starts with `qak_` or `qrk_`, in any letter case, and the pin's `alg` are
+  scanned as before.
+- A refusal that qory gives while it reads a file, before it runs any program the file
+  names, reports a key or entry name, and in forager.yaml an anchor name, that contains
+  an access key secret or a run key by its line, without the name: in forager.yaml, an
+  unknown key, a key written as an alias, a key written twice, an entry of
+  `gateway.credentials`, `gateway.tools`, `gateway.integrations` or `wall.images`, and a
+  key or an alias in an integration's `settings`; in qory.yaml, harness.yaml,
+  qory-stack.yaml and qory-module.yaml, an unknown key that the YAML decoder reports and
+  a key written twice. In those four files, when the decoder reports an unknown key whose
+  name has no line break, qory gives only the first such key and leaves out the
+  decoder's other refusals; otherwise, each other refusal of the decoder whose text
+  contains such a secret gives its line, or the file's path when it has no line, and
+  says that qory does not print the decoder's message.
+- Where qory has no line to give, it prints "(a name that contains an access key secret)"
+  or "(a name that contains a run key)" in place of a name that contains such a secret, in
+  these refusals: of an integration, from a program not on the PATH to a credential the
+  program defines; of a credential or a tool that Forager refuses for `qory run` or `qory
+  gateway`; of a `gateway.selects` entry; of a key of `env`, `variants` or a `requires`
+  item in qory-module.yaml, an entry `requires` lists, and the variant `variants.default`
+  selects; of a variant; of a module's files, of the variant it has for a runtime, and of
+  the source, `exclude`, `only` or `link` of its entry in qory-stack.yaml, by the module's
+  name at the start; and of a module's `mcp/<name>.json`, by the file's name and by a key
+  of the object or of its `env` or `headers`. When the integration's key or the
+  credential's or tool's name contains such a secret, each word of the refusal that
+  contains one prints a phrase in its place, the program's name and path and a name
+  Forager quotes among them. `qory run` and `qory gateway` print the phrase in their line
+  about an integration and in their line about a credential that `gateway.credentials`
+  shadows. `qory config` prints it in that second line, and in its rows of credentials and
+  the variables they read, tools, integrations, selected credentials, images,
+  `wall.image`, `wall.env` and `wall.ca_env`. An alias in qory.yaml or harness.yaml whose
+  anchor name contains such a secret is refused as "the value is a YAML alias" at its
+  line, and a key of an `exclude` or `only` block as "the name at line N". A refusal of
+  the YAML decoder that contains such a secret keeps the words qory writes in front of it,
+  as for `target.runtime`, unless those words contain one too. A name without such a
+  secret prints as before.
+- qory prints "(a value that contains an access key secret)" or "(a value that contains
+  a run key)" in place of a value that contains `qak_` or `qrk_`, in any letter case: an
+  env value, a `harness.launch` command, a `worktree.run.add` or `worktree.run.remove`
+  command and what it printed, an MCP server's `env` or `headers` value, a git URL, a
+  ref, a model id, an image reference and the other values of qory.yaml, harness.yaml, a
+  stack, a module and forager.yaml. It prints the phrase in the rows of `qory config`,
+  the tables of `qory harness inspect`, the compose output and the refusals. The name
+  phrase replaces such a name in more refusals and rows too: module, entry, export,
+  runtime, variable, bind role, link, settings key and devcontainer names among them. A
+  path prints the name phrase in place of each part between slashes that contains such a
+  secret; a path given alone in a flag such as `--via-ca-file` prints the value phrase.
+  A git URL with a password in its user part prints as `https://user:(hidden)@host/…`.
+  `qory harness launch` and its `--json` line print the values as written, since a person
+  copies that line to run it.
+
 ## [0.13.0] - 2026-10-13
 
 ### Upgrading

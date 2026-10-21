@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/gateway"
 	"github.com/qoryai/forager/runkey"
 	"github.com/qoryai/forager/server"
@@ -41,7 +42,7 @@ func viaGatewayKeys(r *config.Forager) error {
 	}
 	lines := make([]string, len(r.GatewayKeys))
 	for i, k := range r.GatewayKeys {
-		lines[i] = fmt.Sprintf("%s: gateway.%s does nothing on this machine: gateway.server.via sends its runs through a gateway, which holds their policy, credentials, tools and integrations; remove gateway.%s, or remove gateway.server.via", r.File, k, k)
+		lines[i] = fmt.Sprintf("%s: gateway.%s does nothing on this machine: gateway.server.via sends its runs through a gateway, which holds their policy, credentials, tools and integrations; remove gateway.%s, or remove gateway.server.via", r.File, accesskey.ShownName(k, false), accesskey.ShownName(k, false))
 	}
 	return input(errors.New(strings.Join(lines, "\n")))
 }
@@ -67,7 +68,11 @@ func registerThroughVia(ctx context.Context, r *config.Forager, id *serverIdenti
 	if err != nil {
 		return nil, explainRegistration(err, id, runID, true)
 	}
-	if err := onDiscovery(machineDir(), id.key, id.instanceID, "run", report, gateway.Discovery{NodeID: conf.NodeID, Secrets: conf.Secrets != nil}); err != nil {
+	dir, err := machineDir()
+	if err != nil {
+		return nil, err
+	}
+	if err := onDiscovery(dir, id.key, id.instanceID, "run", report, gateway.Discovery{NodeID: conf.NodeID, Secrets: conf.Secrets != nil}); err != nil {
 		return nil, err
 	}
 	body, err := server.GatewayRegistration{RunID: runID, Labels: labels, About: about}.Body()
@@ -83,7 +88,7 @@ func registerThroughVia(ctx context.Context, r *config.Forager, id *serverIdenti
 		// Forager read it as a run key of the run already; the reason holds no key.
 		return nil, err
 	}
-	if err := machineDir().WriteRunKey(runID, ans.RunKey); err != nil {
+	if err := dir.WriteRunKey(runID, ans.RunKey); err != nil {
 		return nil, keptRunKeyNotWritten(runID, err)
 	}
 	return &runKey{value: ans.RunKey, key: k}, nil
@@ -100,9 +105,9 @@ func keptRunKeyNotWritten(runID string, err error) error {
 // forager.yaml. A kept key that is not a run key is said as qory says one in
 // QORY_RUN_KEY, without the key.
 func keptRunKey(runID string) (*runKey, error) {
-	dir := machineDir()
-	if dir == "" {
-		return nil, nil
+	dir, err := machineDir()
+	if err != nil || dir == "" {
+		return nil, err
 	}
 	v, err := dir.ReadRunKey(runID)
 	if errors.Is(err, foragerdir.ErrNoRunKey) {
@@ -123,7 +128,11 @@ func keptRunKey(runID string) (*runKey, error) {
 // left to send or its gateway has ended it; a key that cannot be removed is said on
 // report, with its path.
 func dropKeptRunKey(runID string, report func(string)) {
-	dir := machineDir()
+	dir, err := machineDir()
+	if err != nil {
+		report(err.Error())
+		return
+	}
 	if dir == "" {
 		return
 	}

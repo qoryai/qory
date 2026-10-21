@@ -550,3 +550,36 @@ func indent(t *testing.T, v any) string {
 	}
 	return string(data)
 }
+
+// TestComposeOpensTheDirectoryOfEachCopiedModule is two modules, one of which the home
+// holds a copy of: that module is marked Copy, its Root is open at the directory the
+// compose read it from, DirInfo is that directory, and RealDir its real path. The other
+// has no root.
+func TestComposeOpensTheDirectoryOfEachCopiedModule(t *testing.T) {
+	files := map[string]string{
+		stack.FileName:            twoModules,
+		"modules/a/agents/one.md": "# one\n",
+		"modules/b/agents/two.md": "# two\n",
+	}
+	res, err := composeTreeWith(t, files, compose.Options{Copies: func(dir string) bool { return filepath.Base(dir) == "a" }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Close()
+	a, b := res.Modules[0], res.Modules[1]
+	info, err := os.Stat(a.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !a.Copy || a.Root == nil || a.DirInfo == nil || !os.SameFile(a.DirInfo, info) {
+		t.Errorf("module a: Copy %v, root %v, not open at %s", a.Copy, a.Root, a.Dir)
+	} else if _, err := a.Root.Stat("agents"); err != nil {
+		t.Errorf("module a: the root has no agents: %v", err)
+	}
+	if real, err := filepath.EvalSymlinks(a.Dir); err != nil || a.RealDir != real {
+		t.Errorf("module a: RealDir %q, want %q (%v)", a.RealDir, real, err)
+	}
+	if b.Copy || b.Root != nil || b.DirInfo != nil {
+		t.Errorf("module b: Copy %v, root %v; want no copy and no root", b.Copy, b.Root)
+	}
+}

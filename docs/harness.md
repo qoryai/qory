@@ -181,6 +181,7 @@ The composed tree lives in the **home**, `.qory/harness`. The home has one direc
 runtime.
 
 Most of the home is symlinks to files in modules: every skill, agent, command and hook.
+A home outside the checkout contains copies instead for a module that lies in the checkout.
 
 Beside the links are generated copies. Each is joined from the modules' fragments:
 
@@ -191,13 +192,16 @@ Beside the links are generated copies. Each is joined from the modules' fragment
 
 ### Editing a module
 
-An edit to a module's file is live, through the link.
+An edit to a module's file is live, through the link. In a home outside the checkout, a
+module that lies in the checkout is copied, so an edit there reaches the home on the next
+compose.
 
 An edit to a module's instruction section or a settings fragment is not. The merged copy
 is generated. It stays as it was until the next compose.
 
 `qory harness compose --check` compares the home with what the stack and modules define.
-It exits 6 when a merged copy is behind. That is the check a CI job runs.
+It exits 6 when a merged copy, or a copied module, is behind. That is the check a CI job
+runs.
 
 ### Links in the checkout
 
@@ -310,20 +314,21 @@ uses it to build its first prompt from an entry point, such as `/harness:impleme
 
 ## Flags of compose
 
-| Flag                     | What it does                                                                                   |
-| ------------------------ | ---------------------------------------------------------------------------------------------- |
-| `-f <stack>`             | Compose this `qory-stack.yaml`, `qory.yaml` or `harness.yaml` instead of the one found.        |
-|                          | When the checkout's document extends a stack, this one is its base.                            |
-| `--dry-run`              | Print the report. Write nothing.                                                               |
-| `--runtime claude,codex` | Render for these runtimes instead of the document's.                                           |
-| `--model opus`           | Write this model instead of the document's.                                                    |
-| `--force`                | Replace a tracked, unmodified file where a link goes. `git checkout --` restores it.           |
-| `--update`               | Re-fetch every git source, tags included.                                                      |
-| `--check`                | Exit 6 when a file or link of the home, or a variable a launch sets, differs from the stack,   |
-|                          | the modules and `qory.yaml`. Write nothing. The checkout's links and the rest of the report    |
-|                          | are not compared.                                                                              |
-| `--home <dir>`           | Compose under a directory outside the checkout. Write nothing into the checkout.               |
-| `--no-links`             | Write no link and no exclude line into the checkout. The tree goes under `.qory`.              |
+| Flag                            | What it does                                                                                 |
+| ------------------------------- | -------------------------------------------------------------------------------------------- |
+| `-f <stack>`                    | Compose this `qory-stack.yaml`, `qory.yaml` or `harness.yaml` instead of the one found.      |
+|                                 | When the checkout's document extends a stack, this one is its base.                          |
+| `--dry-run`                     | Print the report. Write nothing.                                                             |
+| `--runtime claude,codex`        | Render for these runtimes instead of the document's.                                         |
+| `--model opus`                  | Write this model instead of the document's.                                                  |
+| `--tier light=claude-haiku-5-5` | Give agents whose model is `${qory:light}` this model. Repeat it for each tier.              |
+| `--force`                       | Replace a tracked, unmodified file where a link goes. `git checkout --` restores it.         |
+| `--update`                      | Re-fetch every git source, tags included.                                                    |
+| `--check`                       | Exit 6 when a file or link of the home, or a variable a launch sets, differs from the stack, |
+|                                 | the modules and `qory.yaml`. Write nothing. The checkout's links and the rest of the report  |
+|                                 | are not compared.                                                                            |
+| `--home <dir>`                  | Compose under a directory outside the checkout. Write nothing into the checkout.             |
+| `--no-links`                    | Write no link and no exclude line into the checkout. The tree goes under `.qory`.            |
 
 `--force`, `--update` and `--no-links` have keys in `qory.yaml` too: `force`, `update` and
 `harness.links: none`.
@@ -341,6 +346,10 @@ compose stops, names the path, and says whether `--force` replaces it:
 `--force` replaces only a path git can restore. A path git does not track, or one with
 changes, is refused under `--force` too. The refusal says why and names the changed
 files.
+
+## Tiers
+
+An agent in a module sets `model: ${qory:light}`, `${qory:fast}` or `${qory:thinking}` in place of a model id. You map each tier to a model id with `--tier`, `harness.tiers` in your `qory.yaml`, or `harness.tiers` in the repository's `qory.yaml`, in that order of precedence. A tier with no map leaves the agent on the main model.
 
 ## Removing the harness
 

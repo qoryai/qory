@@ -34,16 +34,17 @@ qory harness compose [flags]
 ### Options
 
 ```
-      --check            compare the home with the stack and modules, write nothing, and exit 6 when a file, a link or a launch variable differs; the checkout's links and the rest of the report are not compared
-      --dry-run          print the report and write nothing
-  -f, --file string      the qory-stack.yaml, qory.yaml or harness.yaml to compose instead of the one found; when the checkout's document extends a stack, this one is its base
-      --force            replace a tracked, unmodified file where a link goes; git checkout -- restores it (qory.yaml: force)
-  -h, --help             help for compose
-      --home string      where the harness is composed: a directory outside the checkout, one home per checkout under it, or .qory/harness (qory.yaml: harness.home)
-      --model string     write this model instead of target.model (qory.yaml: model)
-      --no-links         write no link and no exclude line into the checkout; harness launch prints how an agent reads the home (qory.yaml: harness.links: none)
-      --runtime string   render for these runtimes instead of target.runtime, comma separated (amp, any, claude, codex, copilot, cursor, gemini, goose, opencode; qory.yaml: runtime)
-      --update           fetch every git source again, not the cached clone (qory.yaml: update)
+      --check              compare the home with the stack and modules, write nothing, and exit 6 when a file, a link or a launch variable differs; the checkout's links and the rest of the report are not compared
+      --dry-run            print the report and write nothing
+  -f, --file string        the qory-stack.yaml, qory.yaml or harness.yaml to compose instead of the one found; when the checkout's document extends a stack, this one is its base
+      --force              replace a tracked, unmodified file where a link goes; git checkout -- restores it (qory.yaml: force)
+  -h, --help               help for compose
+      --home string        where the harness is composed: a directory outside the checkout, one home per checkout under it, or .qory/harness (qory.yaml: harness.home)
+      --model string       write this model instead of target.model (qory.yaml: model)
+      --no-links           write no link and no exclude line into the checkout; harness launch prints how an agent reads the home (qory.yaml: harness.links: none)
+      --runtime string     render for these runtimes instead of target.runtime, comma separated (amp, any, claude, codex, copilot, cursor, gemini, goose, opencode; qory.yaml: runtime)
+      --tier stringArray   map a tier to a model id for each agent whose model is ${qory:<tier>}, as <tier>=<model id>; repeat it for each tier (tiers: light, fast, thinking; qory.yaml: harness.tiers)
+      --update             fetch every git source again, not the cached clone (qory.yaml: update)
 ```
 
 ### Options inherited from parent commands

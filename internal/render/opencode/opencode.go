@@ -138,3 +138,7 @@ func server(in map[string]any) map[string]any {
 func (opencode) Template() render.Template {
 	return render.Template{Command: "opencode", Env: map[string]string{"OPENCODE_CONFIG_DIR": "${dir}"}}
 }
+
+// AgentEfforts is nil: an agent's file gets the model a tier maps to, and qory writes no
+// effort into it.
+func (opencode) AgentEfforts() []string { return nil }

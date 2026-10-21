@@ -31,6 +31,7 @@ harness:
   name: %[1]s%[2]s# the stack's name in the report
   target:
     runtime: claude            # or a list: [claude, codex]
+  #tiers: {light: claude-haiku-5-5}   # this repository's model id per tier; your qory.yaml and --tier win
   modules:
     - name: %[1]s%[3]s# this repository's module, committed with it
       source: {path: ./` + moduleDir + `}
@@ -77,10 +78,11 @@ Instructions every agent reads in this repository.
 // value at its default.
 const userConfig = `apiVersion: qory.dev/v1alpha1
 
-# How qory runs on this machine. A checkout's qory.yaml overrides the keys it sets.
+# How qory runs on this machine. A checkout's qory.yaml overrides the keys it sets; for tiers, this file wins.
 harness:
   #runtime: claude             # render for this runtime, or a list, instead of the document's
   #model: opus                 # write this model instead of the document's
+  #tiers: {light: claude-haiku-5-5}   # the model id for agents whose model is ${qory:light}; also fast, thinking
   force: false                 # replace a tracked, unmodified file where a link goes
   update: never                # always: fetch every git source again on each compose
 worktree:
@@ -100,7 +102,8 @@ var notAName = regexp.MustCompile(`[^a-z0-9._-]+`)
 // newSetupRepo builds the setup repo verb, which sets the repository up for qory: a
 // qory.yaml holding its own stack, and the module that stack names.
 func newSetupRepo() *cobra.Command {
-	return &cobra.Command{
+	var accept bool
+	c := &cobra.Command{
 		Use:   "repo",
 		Short: "Write the repository's qory.yaml and its module",
 		Long: `Set the repository up for qory.
@@ -116,11 +119,14 @@ Commit this qory.yaml. It decides for everyone who clones the repository: the st
 what a worktree needs. Your settings go in the qory.yaml that setup machine writes.`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			u := ui.New(cmd.OutOrStdout())
 			dir, err := os.Getwd()
 			if err != nil {
 				return err
 			}
+			if accept {
+				return acceptCheckout(cmd.Context(), dir, cmd.InOrStdin(), cmd.OutOrStdout())
+			}
+			u := ui.New(cmd.OutOrStdout())
 			name := repositoryName(dir)
 			u.Title(name)
 			var rows [][2]string
@@ -154,7 +160,9 @@ what a worktree needs. Your settings go in the qory.yaml that setup machine writ
 			// repository becomes one here, and a row says so.
 			if root, err := checkout.Root(dir); err != nil {
 				return err
-			} else if checkout.ExcludeFile(root) == "" {
+			} else if file, err := checkout.ExcludeFile(root); err != nil {
+				return err
+			} else if file == "" {
 				if err := checkout.Init(dir); err != nil {
 					return fmt.Errorf("git init in %s: %w", dir, err)
 				}
@@ -164,6 +172,8 @@ what a worktree needs. Your settings go in the qory.yaml that setup machine writ
 			return nil
 		},
 	}
+	c.Flags().BoolVar(&accept, "accept-checkout", false, "accept the checkout's git settings and qory.yaml commands and paths as they are now, after you checked them")
+	return c
 }
 
 // newSetupMachine builds the setup machine verb, which writes the machine's qory.yaml.
@@ -183,7 +193,10 @@ came from.`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			u := ui.New(cmd.OutOrStdout())
-			dir := config.UserDir()
+			dir, err := config.UserDir()
+			if err != nil {
+				return input(err)
+			}
 			u.Title("qory setup machine", ui.Short(dir, ""))
 			row, err := writeOnce(dir, config.FileName, userConfig)
 			if err != nil {

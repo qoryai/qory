@@ -8,10 +8,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/session/runtimes/catalog"
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/image"
 	"github.com/qoryai/qory/internal/ui"
 )
@@ -97,7 +99,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#qorys-images`,
 			for i, name := range names {
 				refs[i] = imageRef(section, name)
 				if err := image.CheckRef(refs[i]); err != nil {
-					return input(err)
+					return input(exports.HideValueError(err, refs[i]))
 				}
 			}
 			exe, err := os.Executable()
@@ -110,9 +112,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#qorys-images`,
 			}
 			arch, err := image.HelperArch(helper)
 			if err != nil {
-				return input(fmt.Errorf("qory's Linux build %s: %w", helper, err))
+				return input(fmt.Errorf("qory's Linux build %s: %w", exports.Value(helper, false), exports.HideError(err)))
 			}
-			rt, err := catalog.Lookup("claude", filepath.Join(config.UserDir(), DescriptorsDir))
+			user, err := config.UserDir()
+			if err != nil {
+				return input(err)
+			}
+			rt, err := catalog.Lookup("claude", filepath.Join(user, DescriptorsDir))
 			if err != nil {
 				return input(err)
 			}
@@ -123,7 +129,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#qorys-images`,
 			}
 			// The probe runs as the engine runs it, whatever the image's architecture.
 			if want := image.Arch(platform); arch != want {
-				return input(fmt.Errorf("qory's Linux build %s is for %s, and the engine runs %s; set wall.helper to the Linux build for %s", helper, arch, platform, want))
+				return input(fmt.Errorf("qory's Linux build %s is for %s, and the engine runs %s; set wall.helper to the Linux build for %s", exports.Value(helper, false), arch, platform, want))
 			}
 
 			u := ui.New(cmd.OutOrStdout())
@@ -132,36 +138,36 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#qorys-images`,
 			if rt.Version() == "" {
 				claude = "any version; Forager's descriptor names none"
 			}
-			u.Fields([][2]string{{"probe", ui.Short(helper, "") + ", " + arch}, {"claude", claude}})
+			u.Fields([][2]string{{"probe", exports.Value(ui.Short(helper, ""), false) + ", " + arch}, {"claude", claude}})
 			var failed []string
 			for i, ref := range refs {
 				u.Blank()
 				if names[i] == ref {
-					u.Heading(ref)
+					u.Heading(shownImage(ref, ref))
 				} else {
-					u.Heading(names[i] + " (" + ref + ")")
+					u.Heading(shownImage(names[i], ref) + " (" + exports.Value(ref, false) + ")")
 				}
 				checks := engine.Check(cmd.Context(), platform, image.Target{Ref: ref, Helper: helper, Claude: rt.Version()})
 				var facts [][2]string
 				for _, c := range checks {
 					switch c.Result {
 					case image.Pass:
-						u.Success("%s", c.Detail)
+						u.Success("%s", exports.HideValue(c.Detail, ref))
 					case image.Fail:
-						u.Fail(errors.New(c.Detail))
+						u.Fail(errors.New(exports.HideValue(c.Detail, ref)))
 					default:
-						facts = append(facts, [2]string{c.Name, c.Detail})
+						facts = append(facts, [2]string{c.Name, exports.HideValue(c.Detail, ref)})
 					}
 				}
 				u.Fields(facts)
 				if image.Failed(checks) {
-					failed = append(failed, names[i])
+					failed = append(failed, shownImage(names[i], refs[i]))
 				}
 			}
 			u.Blank()
 			switch {
 			case len(failed) > 0 && len(names) == 1:
-				err := fmt.Errorf("%s lacks what the wall needs", names[0])
+				err := fmt.Errorf("%s lacks what the wall needs", failed[0])
 				u.Fail(err)
 				return reported(err)
 			case len(failed) > 0:
@@ -169,13 +175,23 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#qorys-images`,
 				u.Fail(err)
 				return reported(err)
 			case len(names) == 1:
-				u.Success("%s has what the wall needs %s", names[0], ui.Pot)
+				u.Success("%s has what the wall needs %s", shownImage(names[0], refs[0]), ui.Pot)
 			default:
 				u.Success("%d images have what the wall needs %s", len(names), ui.Pot)
 			}
 			return nil
 		},
 	}
+}
+
+// shownImage is an image as qory image check names it: the reference, as
+// [exports.Value] prints it, for an image named by its reference, ref, and the name of
+// wall.images, as [accesskey.ShownName] prints it, for one named there.
+func shownImage(name, ref string) string {
+	if name == ref {
+		return exports.Value(ref, false)
+	}
+	return accesskey.ShownName(name, false)
 }
 
 // imageRef is the reference qory image check reads name as: the ref of the image

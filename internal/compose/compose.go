@@ -3,6 +3,7 @@ package compose
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,7 +14,9 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/qoryai/forager/accesskey"
 
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/module"
 	"github.com/qoryai/qory/internal/source"
 	"github.com/qoryai/qory/internal/stack"
@@ -59,6 +62,29 @@ type Module struct {
 	// it declares none, empty when it declares that it reaches nothing. An exclude or
 	// an only leaves it as it is: a module composed at all declares.
 	Egress []string
+	// Copy marks a module whose directory lies in the checkout, as written or with every
+	// link resolved, composed into a home outside the checkout: the home contains copies
+	// of its files in place of links to them, so a walled run, which can write the
+	// checkout, cannot change what the runtime loads. The compose sets it, once per
+	// module, as [Options.Copies] decides.
+	Copy bool
+	// Root is the directory of a module marked Copy, opened before the compose read the
+	// manifest; nil for any other module, or when the directory could not be opened. The
+	// compose reads the bytes of the manifest, AGENTS.md, the settings fragments, the MCP
+	// servers and the hooks through Root, and a copy of the module reads every file
+	// through it, so what the home receives from the module comes from the directory
+	// Root was opened at, whatever a link on the way to Dir leads to later. Which files
+	// the module has is read by path. Root stays open until [Result.Close].
+	Root *os.Root
+	// RealDir is the real path of Root's directory, recorded as the root opened: the
+	// directory Dir led to with every link resolved, when that is the directory Root is;
+	// "" otherwise. An absolute link inside the module is followed only into it, see
+	// [module.ResolveIn].
+	RealDir string
+	// DirInfo is the directory Root is, as Root's Stat of "." returned it; nil with Root.
+	// A copy refuses the module unless Dir, with every link resolved, is still this
+	// directory, since the copy follows a link inside the module by that path.
+	DirInfo fs.FileInfo
 }
 
 // Entry is one entry of the composed tree and the module it came from.
@@ -79,6 +105,9 @@ type Entry struct {
 	// References are the entries the entry's documents reference, as sorted <kind>/<name>
 	// keys as written, a role's name included; nil for an entry that references none.
 	References []string
+	// Tier is the tier an agent's model sets as a placeholder; "" for an agent with a
+	// model id or none, and for every other kind.
+	Tier string
 }
 
 // Exclude is one entry a module left out.
@@ -125,6 +154,11 @@ type Result struct {
 	// Base is the stack the checkout's qory.yaml extends, nil for a stack that extends
 	// none.
 	Base *Base
+	// Tiers is, for each tier an agent sets that [Options.Tiers] maps, the entry it maps
+	// to; nil when there is none. An agent whose tier is absent here has no map.
+	Tiers map[string]stack.Tier
+	// roots are the module roots the compose opened, which [Result.Close] closes.
+	roots []*os.Root
 	// setBy is the module that set each settings leaf, keyed
 	// settings/<runtime>/<file>/<dotted.key.path>, so a later fragment setting the same
 	// path to another value names both modules.
@@ -152,7 +186,19 @@ type Options struct {
 	// Base is the base stack [LoadBase] resolved, recorded in the result and enforced on
 	// the modules that are not its own; nil for a stack that extends none.
 	Base *Base
+	// Tiers is the tier map the agents' tiers resolve against, by tier, each entry whole
+	// from one source; a tier absent from it has no map.
+	Tiers map[string]stack.Tier
+	// Copies reports whether the home holds copies of the files of the module at dir,
+	// the module's absolute directory as written, see [Module.Copy]; nil for a home that
+	// holds none. The compose opens such a module's directory before it reads the
+	// manifest, see [Module.Root]. Close the result after the build with [Result.Close].
+	Copies func(dir string) bool
 }
+
+// beforeManifest and afterManifest, when a test sets them, run with each module's
+// directory just before and just after the compose reads its manifest.
+var beforeManifest, afterManifest func(dir string)
 
 // Compose is [ComposeWith] and the default options.
 func Compose(p *stack.Stack) (*Result, error) { return ComposeWith(p, Options{}) }
@@ -164,8 +210,13 @@ func Compose(p *stack.Stack) (*Result, error) { return ComposeWith(p, Options{})
 // [*CollisionError], which a caller matches with errors.As, and a git source that cannot
 // be fetched a [*source.FetchError]. The package comment has the order of the rules and
 // the merge semantics.
-func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
+func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	res := &Result{Stack: p, Base: opts.Base, Settings: map[string]map[string]map[string]any{}, MCP: map[string]map[string]any{}, Env: map[string]string{}, Exported: map[string]string{}, setBy: map[string]string{}}
+	defer func() {
+		if err != nil {
+			res.Close()
+		}
+	}()
 	if len(p.Bind) > 0 {
 		res.Bind = map[string]string{}
 		for role, to := range p.Bind {
@@ -179,6 +230,7 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 	paths := map[string]string{}
 	fors := map[string]string{}
 	refs := map[string][]string{}
+	tiers := map[string]string{}
 	servers := map[string]map[string]any{}
 	exporters := map[string]string{}
 	var instructions []string
@@ -186,9 +238,9 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 	requires := map[string]map[string][]Need{}
 	for _, pl := range p.Modules {
 		ps := p.SourceOf(pl)
-		who := "module " + pl.Name
+		who := "module " + accesskey.ShownName(pl.Name, false)
 		if pl.Name == "" {
-			who = "module at " + ps.String()
+			who = "module at " + ps.Shown()
 		}
 		so := source.Options{Pin: opts.Pins[ps.String()], Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Memo: opts.Memo}
 		if pl.Base && opts.Base != nil && ps.Git != "" && ps.Git == p.Extends.Git && ps.Ref == p.Extends.Ref {
@@ -199,29 +251,58 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 		}
 		src, err := source.Resolve(p.DirOf(pl), ps, so)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", who, err)
+			// The directory of a module listed by name is that name.
+			return nil, fmt.Errorf("%s: %w", who, exports.HideError(err))
 		}
-		m, err := module.ReadManifest(src.Dir)
+		var root *os.Root
+		var rootInfo fs.FileInfo
+		var realDir string
+		copied := false
+		if opts.Copies != nil {
+			if abs, err := filepath.Abs(src.Dir); err == nil && opts.Copies(abs) {
+				copied = true
+				root, rootInfo, realDir = openRoot(res, src.Dir)
+			}
+		}
+		if beforeManifest != nil {
+			beforeManifest(src.Dir)
+		}
+		var m *module.Manifest
+		if root != nil {
+			m, err = module.ReadManifestIn(root, src.Dir)
+		} else {
+			m, err = module.ReadManifest(src.Dir)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", who, err)
 		}
+		if afterManifest != nil {
+			afterManifest(src.Dir)
+		}
 		if pl.Name != "" && m.Name != pl.Name {
-			return nil, fmt.Errorf("module %s: the module at %s has the name %s in its %s", pl.Name, ps.String(), m.Name, module.ManifestName)
+			return nil, fmt.Errorf("module %s: the module at %s has the name %s in its %s", accesskey.ShownName(pl.Name, false), ps.Shown(), accesskey.ShownName(m.Name, false), module.ManifestName)
 		}
 		name := m.Name
 		if other, ok := dirs[name]; ok {
-			return nil, fmt.Errorf("module %s is composed twice, from %s and from %s", name, other, ps.String())
+			return nil, fmt.Errorf("module %s is composed twice, from %s and from %s", accesskey.ShownName(name, false), other, ps.Shown())
 		}
-		dirs[name] = ps.String()
+		dirs[name] = ps.Shown()
 		variant, err := selectVariant(m, pl, p.Target.Runtimes, name)
 		if err != nil {
-			return nil, fmt.Errorf("module %s: %w", name, err)
+			return nil, fmt.Errorf("module %s: %w", accesskey.ShownName(name, false), err)
 		}
-		l, err := module.Read(name, src.Dir, m, variant)
+		// A module read through a root reads every file's bytes through it, so a link on
+		// the way to its directory that leads elsewhere since the root opened changes
+		// nothing the home receives.
+		readFile := os.ReadFile
+		if root != nil {
+			readFile = module.ReadThrough(root, src.Dir, realDir)
+		}
+		l, err := module.ReadWith(name, src.Dir, m, variant, readFile)
 		if err != nil {
 			return nil, err
 		}
-		rl := Module{Name: name, Description: m.Description, Dir: l.Dir, Source: ps.String(), Pin: src.Pin, Ref: ps.Ref, Previous: src.Previous, Warning: src.Warning, Dirty: src.Dirty, Variant: variant, Link: pl.Link, Base: pl.Base, RetiredAPIVersion: m.RetiredAPIVersion, Egress: m.Egress}
+		rl := Module{Name: name, Description: m.Description, Dir: l.Dir, Source: ps.String(), Pin: src.Pin, Ref: ps.Ref, Previous: src.Previous, Warning: src.Warning, Dirty: src.Dirty, Variant: variant, Link: pl.Link, Base: pl.Base, RetiredAPIVersion: m.RetiredAPIVersion, Egress: m.Egress, Copy: copied, Root: root, RealDir: realDir, DirInfo: rootInfo}
 		requires[name] = needs(l, m.Requires, res.Bind)
 		// The selection comes first, so that what the base allows and what the module
 		// exports are checked on what the module contributes, not on what it ships.
@@ -246,6 +327,7 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 				fors[key+"@"+name] = by
 			}
 			refs[key+"@"+name] = e.References
+			tiers[key+"@"+name] = e.Tier
 			if e.Kind == "mcp" {
 				servers[key+"@"+name] = l.MCP[e.Name]
 			}
@@ -258,15 +340,15 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 				if res.Settings[runtime][file] == nil {
 					res.Settings[runtime][file] = map[string]any{}
 				}
-				if err := mergeFile(res, runtime, file, path, name, opts.Env); err != nil {
-					return nil, fmt.Errorf("module %s: %w", name, err)
+				if err := mergeFile(res, runtime, file, path, name, opts.Env, readFile); err != nil {
+					return nil, fmt.Errorf("module %s: %w", shown(name), err)
 				}
 			}
 		}
 		if l.Instructions != "" {
-			data, err := os.ReadFile(l.Instructions)
+			data, err := readFile(l.Instructions)
 			if err != nil {
-				return nil, err
+				return nil, exports.HideError(err)
 			}
 			instructions = append(instructions, strings.TrimRight(string(data), "\n"))
 		}
@@ -279,7 +361,15 @@ func ComposeWith(p *stack.Stack, opts Options) (*Result, error) {
 	}
 	for key, ls := range owners {
 		kind, name, _ := strings.Cut(key, "/")
-		res.Entries = append(res.Entries, Entry{Kind: kind, Name: name, Module: ls[0], Path: paths[key+"@"+ls[0]], For: fors[key+"@"+ls[0]], References: refs[key+"@"+ls[0]]})
+		res.Entries = append(res.Entries, Entry{Kind: kind, Name: name, Module: ls[0], Path: paths[key+"@"+ls[0]], For: fors[key+"@"+ls[0]], References: refs[key+"@"+ls[0]], Tier: tiers[key+"@"+ls[0]]})
+		if tier := tiers[key+"@"+ls[0]]; tier != "" {
+			if t, ok := opts.Tiers[tier]; ok {
+				if res.Tiers == nil {
+					res.Tiers = map[string]stack.Tier{}
+				}
+				res.Tiers[tier] = t
+			}
+		}
 		if kind == "mcp" {
 			res.MCP[name] = servers[key+"@"+ls[0]]
 		}
@@ -321,7 +411,7 @@ func exportEnv(res *Result, exporters map[string]string, module string, env, dec
 			continue
 		}
 		if other, ok := exporters[name]; ok && res.Env[name] != value {
-			return fmt.Errorf("env %s is exported by modules %s and %s; set it in qory.yaml to decide", name, other, module)
+			return fmt.Errorf("env %s is exported by modules %s and %s; set it in qory.yaml to decide", shown(name), shown(other), shown(module))
 		}
 		exporters[name] = module
 		res.Env[name] = value
@@ -380,7 +470,7 @@ func (r *Result) LaunchEnv(runtime, file string, path ...string) ([]Var, error) 
 			}
 			value, err := envValue(env[name])
 			if err != nil {
-				return nil, fmt.Errorf("%s: %s.%s %w", prefix, key, name, err)
+				return nil, fmt.Errorf("%s: %s.%s %w", exports.HidePath(prefix), key, shown(name), err)
 			}
 			vars[name] = Var{Name: name, Value: value, From: "module " + r.setBy[prefix+"/"+key+"."+name] + ", " + prefix}
 		}
@@ -435,7 +525,7 @@ func selectVariant(m *module.Manifest, pl stack.Module, runtimes stack.Runtimes,
 		}
 		if v != first {
 			return "", fmt.Errorf("module %s reads from %s for %s and from %s for %s; compose one runtime at a time, or select one variant of the module for both",
-				name, variantName(first), runtimes.First(), variantName(v), r)
+				shown(name), variantName(first), shown(runtimes.First()), variantName(v), shown(r))
 		}
 	}
 	return first, nil
@@ -446,8 +536,16 @@ func variantName(v string) string {
 	if v == "" {
 		return "the module root"
 	}
-	return "variant " + v
+	return "variant " + shown(v)
 }
+
+// shown is a name a person wrote as a compose refusal prints it, as
+// [accesskey.ShownName] prints it unquoted.
+func shown(name string) string { return accesskey.ShownName(name, false) }
+
+// described is an entry as a refusal prints it, as [module.Describe] prints it with the
+// name as [accesskey.ShownName] prints it.
+func described(kind, name string) string { return module.Describe(shown(kind), shown(name)) }
 
 // Need is one thing a composed entry needs beside it: an entry its manifest's requires
 // lists, or one its documents reference.
@@ -535,7 +633,7 @@ func checkResolved(res *Result, requires map[string]map[string][]Need) error {
 		if composed[role] {
 			for _, e := range res.Entries {
 				if e.Kind == kind && e.Name == name {
-					lines = append(lines, fmt.Sprintf("bind %s defines a role, and module %s ships %s; a role's name is no entry's", role, e.Module, module.Describe(kind, name)))
+					lines = append(lines, fmt.Sprintf("bind %s defines a role, and module %s ships %s; a role's name is no entry's", shown(role), shown(e.Module), described(kind, name)))
 				}
 			}
 		}
@@ -543,10 +641,10 @@ func checkResolved(res *Result, requires map[string]map[string][]Need) error {
 			continue
 		}
 		if by := leftOut(kind, to); by != "" {
-			lines = append(lines, fmt.Sprintf("bind %s selects %s, which module %s leaves out", role, module.Describe(kind, to), by))
+			lines = append(lines, fmt.Sprintf("bind %s selects %s, which module %s leaves out", shown(role), described(kind, to), shown(by)))
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("bind %s selects %s, which no module ships", role, module.Describe(kind, to)))
+		lines = append(lines, fmt.Sprintf("bind %s selects %s, which no module ships", shown(role), described(kind, to)))
 	}
 	for _, e := range res.Entries {
 		for _, need := range requires[e.Module][e.Kind+"/"+e.Name] {
@@ -559,14 +657,14 @@ func checkResolved(res *Result, requires map[string]map[string][]Need) error {
 				verb = "references"
 			}
 			if by := leftOut(kind, name); by != "" {
-				lines = append(lines, fmt.Sprintf("module %s: %s %s %s, which module %s leaves out", e.Module, module.Describe(e.Kind, e.Name), verb, module.Describe(kind, name), by))
+				lines = append(lines, fmt.Sprintf("module %s: %s %s %s, which module %s leaves out", shown(e.Module), described(e.Kind, e.Name), verb, described(kind, name), shown(by)))
 				continue
 			}
 			why := "which no module ships"
 			if need.Reference {
 				why += " and the stack does not bind"
 			}
-			lines = append(lines, fmt.Sprintf("module %s: %s %s %s, %s", e.Module, module.Describe(e.Kind, e.Name), verb, module.Describe(kind, name), why))
+			lines = append(lines, fmt.Sprintf("module %s: %s %s %s, %s", shown(e.Module), described(e.Kind, e.Name), verb, described(kind, name), why))
 		}
 	}
 	if len(lines) == 0 {
@@ -630,7 +728,7 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 	for _, kind := range sel.KindNames() {
 		for _, name := range sel.Kinds[kind] {
 			if !shipped[kind+"/"+name] {
-				return nil, nil, fmt.Errorf("module %s: %s %s/%s selects nothing the module ships", l.Name, block, kind, name)
+				return nil, nil, fmt.Errorf("module %s: %s %s/%s selects nothing the module ships", shown(l.Name), block, shown(kind), shown(name))
 			}
 			named[kind+"/"+name] = true
 		}
@@ -662,9 +760,9 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 				key := kind + "/" + name
 				if _, ok := pulled[key]; !ok {
 					if !shipped[key] {
-						return nil, nil, fmt.Errorf("module %s: exclude %s selects nothing the module ships", l.Name, key)
+						return nil, nil, fmt.Errorf("module %s: exclude %s selects nothing the module ships", shown(l.Name), shown(key))
 					}
-					return nil, nil, fmt.Errorf("module %s: exclude %s selects nothing only brings in; only leaves it out", l.Name, key)
+					return nil, nil, fmt.Errorf("module %s: exclude %s selects nothing only brings in; only leaves it out", shown(l.Name), shown(key))
 				}
 				delete(pulled, key)
 			}
@@ -683,7 +781,7 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 	l.Entries = kept
 	// The instruction section: named means true in the block.
 	if sel.Instructions && l.Instructions == "" {
-		return nil, nil, fmt.Errorf("module %s: %s instructions selects nothing the module ships; it has no %s", l.Name, block, module.InstructionsName)
+		return nil, nil, fmt.Errorf("module %s: %s instructions selects nothing the module ships; it has no %s", shown(l.Name), block, module.InstructionsName)
 	}
 	if l.Instructions != "" && sel.Instructions != only {
 		res.Excludes = append(res.Excludes, Exclude{Module: l.Name, Kind: "instructions", Name: module.InstructionsName})
@@ -697,11 +795,11 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 		}
 	}
 	if sel.Settings.All && len(fragments) == 0 {
-		return nil, nil, fmt.Errorf("module %s: %s settings selects nothing the module ships; it has no settings fragment", l.Name, block)
+		return nil, nil, fmt.Errorf("module %s: %s settings selects nothing the module ships; it has no settings fragment", shown(l.Name), block)
 	}
 	for _, name := range sel.Settings.Names {
 		if !fragments[name] {
-			return nil, nil, fmt.Errorf("module %s: %s settings/%s selects nothing the module ships", l.Name, block, name)
+			return nil, nil, fmt.Errorf("module %s: %s settings/%s selects nothing the module ships", shown(l.Name), block, exports.HidePath(name))
 		}
 	}
 	for _, name := range sortedKeys(fragments) {
@@ -718,11 +816,11 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 	}
 	// The exported variables.
 	if sel.Env.All && len(env) == 0 {
-		return nil, nil, fmt.Errorf("module %s: %s env selects nothing the module ships; it exports no variable", l.Name, block)
+		return nil, nil, fmt.Errorf("module %s: %s env selects nothing the module ships; it exports no variable", shown(l.Name), block)
 	}
 	for _, name := range sel.Env.Names {
 		if _, ok := env[name]; !ok {
-			return nil, nil, fmt.Errorf("module %s: %s env %s selects nothing the module ships", l.Name, block, name)
+			return nil, nil, fmt.Errorf("module %s: %s env %s selects nothing the module ships", shown(l.Name), block, shown(name))
 		}
 	}
 	remaining := map[string]string{}
@@ -803,19 +901,19 @@ func (e *CollisionError) Error() string {
 		var named []string
 		width := 0
 		for _, l := range c.Modules {
-			named = append(named, l+"@"+e.Pins[l])
-			if len(l)+1 > width {
-				width = len(l) + 1
+			named = append(named, shown(l)+"@"+e.Pins[l])
+			if len(shown(l))+1 > width {
+				width = len(shown(l)) + 1
 			}
 		}
-		fmt.Fprintf(&b, "%s/%s is provided by %d modules: %s\n", c.Kind, c.Name, len(c.Modules), strings.Join(named, ", "))
+		fmt.Fprintf(&b, "%s/%s is provided by %d modules: %s\n", shown(c.Kind), shown(c.Name), len(c.Modules), strings.Join(named, ", "))
 		if c.Base != "" {
-			fmt.Fprintf(&b, "  it belongs to the base stack %s; rename yours\n", c.Base)
+			fmt.Fprintf(&b, "  it belongs to the base stack %s; rename yours\n", shown(c.Base))
 			continue
 		}
 		b.WriteString("  keep one and exclude the others, for example\n")
 		for _, l := range c.Modules[:len(c.Modules)-1] {
-			fmt.Fprintf(&b, "    %-*s exclude: {%s: [%s]}\n", width, l+":", c.Kind, c.Name)
+			fmt.Fprintf(&b, "    %-*s exclude: {%s: [%s]}\n", width, shown(l)+":", shown(c.Kind), shown(c.Name))
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
@@ -859,31 +957,31 @@ func collisions(owners map[string][]string, modules []Module, base *Base) error 
 	return e
 }
 
-// mergeFile decodes one settings fragment of the named module and folds it into the
-// result's target file for the runtime. The extension decides the format, and a TOML
+// mergeFile decodes one settings fragment of the named module, read with readFile, and
+// folds it into the result's target file for the runtime. The extension decides the format, and a TOML
 // document is normalized to the types the JSON decoder produces. The top-level key
 // decides how lists combine, and the mode applies to the whole subtree under that key.
 // A key path another module set to a different value is an error, unless it is env.<NAME>
 // and decided lists NAME: the configuration's value is written then, whatever the
 // fragments set.
-func mergeFile(res *Result, runtime, file, path, module string, decided map[string]string) error {
-	data, err := os.ReadFile(path)
+func mergeFile(res *Result, runtime, file, path, module string, decided map[string]string, readFile func(string) ([]byte, error)) error {
+	data, err := readFile(path)
 	if err != nil {
-		return err
+		return exports.HideError(err)
 	}
 	src := map[string]any{}
 	switch filepath.Ext(path) {
 	case ".json":
 		if err := json.Unmarshal(data, &src); err != nil {
-			return fmt.Errorf("%s: %w", path, err)
+			return fmt.Errorf("%s: %w", exports.HidePath(path), exports.HideValueError(err, ""))
 		}
 	case ".toml":
 		if err := toml.Unmarshal(data, &src); err != nil {
-			return fmt.Errorf("%s: %w", path, err)
+			return fmt.Errorf("%s: %w", exports.HidePath(path), exports.HideValueError(err, ""))
 		}
 		src = normalize(src).(map[string]any)
 	default:
-		return fmt.Errorf("%s: settings fragments are .json or .toml", path)
+		return fmt.Errorf("%s: settings fragments are .json or .toml", exports.HidePath(path))
 	}
 	m := &merger{file: "settings/" + runtime + "/" + file, module: module, setBy: res.setBy}
 	dst := res.Settings[runtime][file]
@@ -989,9 +1087,14 @@ func (m *merger) merge(dst, src any, path string, mode listMode) (any, error) {
 	return src, nil
 }
 
+// SetBy is the module whose fragment set a settings leaf, by its key
+// settings/<runtime>/<file>/<dotted.key.path>, such as
+// settings/claude/settings.json/env.ANTHROPIC_MODEL; "" for a key no fragment set.
+func (r *Result) SetBy(key string) string { return r.setBy[key] }
+
 // collision is the error for a key path two modules set to different values.
 func (m *merger) collision(path string) error {
-	return fmt.Errorf("%s: %s is set by modules %s and %s with different values", m.file, path, m.setBy[m.file+"/"+path], m.module)
+	return fmt.Errorf("%s: %s is set by modules %s and %s with different values", exports.HidePath(m.file), shown(path), shown(m.setBy[m.file+"/"+path]), shown(m.module))
 }
 
 // exportsAgainstSettings refuses a variable a module's manifest exports that a fragment's
@@ -1009,7 +1112,7 @@ func exportsAgainstSettings(res *Result, exporters map[string]string, decided ma
 				}
 				prefix := "settings/" + runtime + "/" + file
 				return fmt.Errorf("%s: env.%s is set by module %s and exported by module %s with different values",
-					prefix, name, res.setBy[prefix+"/env."+name], exporter)
+					exports.HidePath(prefix), shown(name), shown(res.setBy[prefix+"/env."+name]), shown(exporter))
 			}
 		}
 	}
@@ -1133,4 +1236,41 @@ func substitute(v any, from, to string) any {
 	default:
 		return v
 	}
+}
+
+// openRoot opens the module directory dir as a root for res, see [Module.Root], with
+// what the root is and its real path, see [Module.RealDir]. All are empty when dir cannot
+// be opened: the compose then reads the manifest by path and can succeed, and a copy of
+// the module is refused at the build.
+func openRoot(res *Result, dir string) (*os.Root, fs.FileInfo, string) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, nil, ""
+	}
+	info, err := root.Stat(".")
+	if err != nil {
+		root.Close()
+		return nil, nil, ""
+	}
+	res.roots = append(res.roots, root)
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return root, info, ""
+	}
+	if at, err := os.Stat(real); err != nil || !os.SameFile(at, info) {
+		return root, info, ""
+	}
+	return root, info, real
+}
+
+// Close closes the module roots the compose opened, see [Module.Root]. A nil
+// result has none.
+func (r *Result) Close() {
+	if r == nil {
+		return
+	}
+	for _, root := range r.roots {
+		root.Close()
+	}
+	r.roots = nil
 }

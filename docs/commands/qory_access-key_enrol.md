@@ -16,7 +16,7 @@ The key is active from that answer on: runs can start. qory keeps the answer in
 enrolment-answer until the enrolment is finished: should the command stop after the
 answer came, the same command finishes it on this machine, at any time, without asking
 the server again. A refused enrolment moves aside only access-key-secret.new, never
-access-key-secret.
+access-key-secret; a key the server enrolled for something else is deleted instead.
 
 When access-key-secret exists, enrol refuses, so it never replaces this machine's key
 unasked: use --replace to move this machine to a new key, or --print for a key kept
@@ -53,7 +53,7 @@ qory access-key enrol <server> <code> [flags]
 ### Examples
 
 ```
-  qory access-key enrol https://apiary.example qec_F1XT-0RE0-0000-0000-0000-0000-00.uoES-kuj1vk0sq0qoGlmAg
+  qory access-key enrol https://apiary.example qecn_F1XT-0RE0-0000-0000-0000-0000-00.uoES-kuj1vk0sq0qoGlmAg
   qory access-key enrol --replace https://apiary.example "$code"   # move this machine to a new key
   qory access-key enrol --print https://apiary.example "$code"   # for a starter's settings
 ```

@@ -88,8 +88,53 @@ type Forager struct {
 	Listen string
 	// TLS is gateway.tls, the certificate and key qory gateway serves Listen with; nil
 	// when the file sets none.
-	TLS      *ForagerTLS
+	TLS *ForagerTLS
+	// Selects is gateway.selects.credentials, in the file's order: the credentials qory
+	// gateway selects for a run, with a wall or without, when the server's policy
+	// selects none. qory run refuses it. [Forager.Selections] checks it against the
+	// credentials once the integrations are described.
+	Selects []ForagerSelect
+	// LockMemory is gateway.lock_memory: on Linux, the gateway locks every page of its
+	// process in memory, so that no key it holds is written to swap. False when the file
+	// does not set it.
+	LockMemory bool
+	// RunLimits is gateway.run_limits: the limits of each run on the gateway.
+	RunLimits ForagerRunLimits
+	// Pool is the pool section, nil when the file has none: what qory run pool runs by.
+	// No other command reads it.
+	Pool     *ForagerPool
 	expanded bool
+}
+
+// ForagerRunLimits is gateway.run_limits, as Forager's gateway.RunLimits: the most
+// connections a run has open at once, the requests it sends a second, and the requests
+// it sends at once after a pause. A field the file does not set is zero, which is
+// Forager's default: 256, 50 and 200.
+type ForagerRunLimits struct {
+	Connections       int
+	RequestsPerSecond int
+	Burst             int
+}
+
+// runLimits are the fields of gateway.run_limits: the key, the most the field takes,
+// and Forager's default. The least is 1.
+var runLimits = []struct {
+	key          string
+	most, normal int
+}{
+	{"connections", 65536, 256},
+	{"requests_per_second", 10000, 50},
+	{"burst", 100000, 200},
+}
+
+// ForagerSelect is one entry of gateway.selects.credentials, as the file writes it: the
+// credential's name, and for one that takes an argument, the label of the run's
+// registration whose value is the argument and the forge the run's forge label must
+// name; both empty for one that takes none.
+type ForagerSelect struct {
+	Name          string
+	ArgumentLabel string
+	Forge         string
 }
 
 // ForagerTLS is gateway.tls: the files of the certificate and its key, as the file
@@ -240,7 +285,8 @@ func HostPort(v string) bool {
 
 // ForagerCredential is one entry of the credentials section. Exactly one of Env, File
 // and Adapter defines where the token comes from; an adapter defines how its token is
-// used, and for the other two Hosts, Scheme, Username, Header and Paths do.
+// used, and for the other two Hosts, Scheme, Username, Header and Paths do. A model key
+// has Format, Endpoint and the scheme in place of Hosts, Paths and Placeholders.
 type ForagerCredential struct {
 	Name                     string
 	Env, File                string
@@ -250,6 +296,13 @@ type ForagerCredential struct {
 	Scheme, Username, Header string
 	Paths                    []string
 	Placeholders             []string
+	// Format is a model key's API format, such as anthropic-messages; Endpoint the base
+	// URL of its API, whose host alone gets the key; OAuth marks a bearer as an OAuth
+	// token; and KeyPrefixes are the prefixes the key must start with, nil for any.
+	// Each is empty for any other credential.
+	Format, Endpoint string
+	OAuth            bool
+	KeyPrefixes      []string
 	// Integration is the key of the integration the definition was expanded from,
 	// empty for one of the file's credentials section.
 	Integration string
@@ -283,6 +336,10 @@ type ForagerWall struct {
 	// Images are the images this machine defines, in the file's order; a run's policy
 	// selects among them by name.
 	Images []ForagerImage
+	// ImagesAllow are the prefixes of the references pinned by digest a run's policy may
+	// name its image by, Forager's Spec.ImagesAllow; nil allows no reference. A list
+	// needs a default image, Image or --image.
+	ImagesAllow []string
 	// Command is the program the adapter runs, such as podman; empty means docker.
 	Command string
 	// Helper is the path of a static Linux build of qory, mounted into the container as
@@ -306,8 +363,9 @@ type ForagerWall struct {
 	Memory  string
 	PIDs    int
 	ShmSize string
-	// CAEnv lists the variables that point a program in the container at the bundle of
-	// authorities, when a run has one of its own; nil means Forager's defaults.
+	// CAEnv lists the variables that point a program at the bundle of authorities when
+	// the gateway makes an authority for the run: in the container, or on this machine
+	// for a run without a wall. Nil means Forager's defaults.
 	CAEnv []string
 }
 
@@ -319,7 +377,8 @@ type ForagerMount struct {
 }
 
 // ParseMount reads a mount as wall.mounts and --mount write it: an absolute path, and
-// :ro after it for one the container cannot change. :rw sets the default explicitly.
+// :ro after it for one the container cannot change. :rw sets the default explicitly. The
+// refusal prints the mount as [exports.Value] prints it, quoted.
 func ParseMount(v string) (ForagerMount, error) {
 	m := ForagerMount{Path: v}
 	if p, ok := strings.CutSuffix(v, ":ro"); ok {
@@ -328,7 +387,7 @@ func ParseMount(v string) (ForagerMount, error) {
 		m.Path = p
 	}
 	if !filepath.IsAbs(m.Path) {
-		return m, fmt.Errorf("the mount %q is not an absolute path, with :ro after it for a read-only one", v)
+		return m, fmt.Errorf("the mount %s is not an absolute path, with :ro after it for a read-only one", exports.Value(v, true))
 	}
 	m.Path = filepath.Clean(m.Path)
 	return m, nil
@@ -383,8 +442,8 @@ type pinEntry struct {
 	PublicKey *string `yaml:"public_key"`
 }
 
-// foragerFile is forager.yaml as written: the gateway's sections, the session's and the
-// wall's.
+// foragerFile is forager.yaml as written: the gateway's sections, the session's, the
+// wall's and the pool's.
 type foragerFile struct {
 	APIVersion string `yaml:"apiVersion"`
 	// Webhook is the section qory 0.10.0 replaced with server, read only to refuse it
@@ -408,7 +467,12 @@ type foragerFile struct {
 		PIDs    *int      `yaml:"pids_limit"`
 		ShmSize *string   `yaml:"shm_size"`
 		CAEnv   yaml.Node `yaml:"ca_env,omitempty"`
+
+		// ImagesAllow is read as a node, so an entry that is not a string is refused
+		// by its index.
+		ImagesAllow yaml.Node `yaml:"images_allow,omitempty"`
 	} `yaml:"wall,omitempty"`
+	Pool *poolSection `yaml:"pool,omitempty"`
 }
 
 // gatewaySection is the gateway section as written: the egress policy, the server, the
@@ -432,6 +496,26 @@ type gatewaySection struct {
 		Certificate *string `yaml:"certificate"`
 		Key         *string `yaml:"key"`
 	} `yaml:"tls,omitempty"`
+	Selects *selectsSection `yaml:"selects,omitempty"`
+	// LockMemory and RunLimits are given to Forager's gateway as they are.
+	LockMemory *bool `yaml:"lock_memory"`
+	RunLimits  *struct {
+		Connections       *int `yaml:"connections"`
+		RequestsPerSecond *int `yaml:"requests_per_second"`
+		Burst             *int `yaml:"burst"`
+	} `yaml:"run_limits,omitempty"`
+}
+
+// selectsSection is gateway.selects as written.
+type selectsSection struct {
+	Credentials []selectEntry `yaml:"credentials"`
+}
+
+// selectEntry is one entry of gateway.selects.credentials as written.
+type selectEntry struct {
+	Name          *string `yaml:"name"`
+	ArgumentLabel *string `yaml:"argument_label"`
+	Forge         *string `yaml:"forge"`
 }
 
 // egressSection is gateway.egress as written.
@@ -473,7 +557,18 @@ type instanceSection struct {
 // configuration and returns nil; a file that does not read is an error that contains its
 // path.
 func LoadForager() (*Forager, error) {
-	path, data, err := readForagerFile()
+	dir, err := UserDir()
+	if err != nil {
+		return nil, err
+	}
+	return LoadForagerIn(dir)
+}
+
+// LoadForagerIn reads forager.yaml in dir, a configuration directory as [UserDir] is, as
+// [LoadForager] reads the machine's: such as the one qory run pool gives the runs it
+// starts. No file is nil.
+func LoadForagerIn(dir string) (*Forager, error) {
+	path, data, err := readForagerFile(dir)
 	if data == nil || err != nil {
 		return nil, err
 	}
@@ -598,6 +693,38 @@ func LoadForager() (*Forager, error) {
 		}
 		r.TLS = &ForagerTLS{Certificate: *t.Certificate, Key: *t.Key}
 	}
+	if g.LockMemory != nil {
+		r.LockMemory = *g.LockMemory
+	}
+	if l := g.RunLimits; l != nil {
+		for i, f := range []struct {
+			in  *int
+			out *int
+		}{{l.Connections, &r.RunLimits.Connections}, {l.RequestsPerSecond, &r.RunLimits.RequestsPerSecond}, {l.Burst, &r.RunLimits.Burst}} {
+			if f.in == nil {
+				continue
+			}
+			if lim := runLimits[i]; *f.in < 1 || *f.in > lim.most {
+				return nil, fmt.Errorf("%s: set gateway.run_limits.%s to a number from 1 to %d, or remove it for the default of %d", path, lim.key, lim.most, lim.normal)
+			}
+			*f.out = *f.in
+		}
+	}
+	if sel := g.Selects; sel != nil {
+		for i, e := range sel.Credentials {
+			if e.Name == nil || *e.Name == "" {
+				return nil, fmt.Errorf("%s: gateway.selects.credentials[%d].name is required", path, i)
+			}
+			s := ForagerSelect{Name: *e.Name}
+			if e.ArgumentLabel != nil {
+				s.ArgumentLabel = *e.ArgumentLabel
+			}
+			if e.Forge != nil {
+				s.Forge = *e.Forge
+			}
+			r.Selects = append(r.Selects, s)
+		}
+	}
 	if w := f.Wall; w != nil {
 		if w.Adapter == nil || *w.Adapter != WallDocker {
 			return nil, fmt.Errorf("%s: wall.adapter is required, and %s is the one there is", path, WallDocker)
@@ -610,6 +737,9 @@ func LoadForager() (*Forager, error) {
 			if r.Wall.Images, err = readImages(path, &w.Images); err != nil {
 				return nil, err
 			}
+		}
+		if r.Wall.ImagesAllow, err = readImagesAllow(path, &w.ImagesAllow); err != nil {
+			return nil, err
 		}
 		if w.Command != nil {
 			r.Wall.Command = *w.Command
@@ -678,6 +808,11 @@ func LoadForager() (*Forager, error) {
 				return nil, notEnv(i, 0)
 			}
 			r.Wall.Env = append(r.Wall.Env, name)
+		}
+	}
+	if f.Pool != nil {
+		if r.Pool, err = readPool(path, f.Pool); err != nil {
+			return nil, err
 		}
 	}
 	return r, nil
@@ -919,7 +1054,8 @@ func CheckViaURL(flag, v string) error {
 
 // CheckVia reads the file gateway.server.via.ca_file names, when it names one: it must
 // be there, open, and hold a PEM certificate. It says nothing of what the file holds.
-// Without a via there is nothing to check.
+// Without a via there is nothing to check. A refusal prints the file's path as
+// [exports.Value] prints it.
 func (r *Forager) CheckVia() error {
 	if r == nil || r.Server == nil || r.Server.Via == nil || r.Server.Via.CAFile == "" {
 		return nil
@@ -931,10 +1067,10 @@ func (r *Forager) CheckVia() error {
 		if errors.As(err, &pe) {
 			err = pe.Err
 		}
-		return fmt.Errorf("%s: gateway.server.via.ca_file %s: %w", r.File, path, err)
+		return fmt.Errorf("%s: gateway.server.via.ca_file %s: %w", r.File, exports.Value(path, false), err)
 	}
 	if !x509.NewCertPool().AppendCertsFromPEM(b) {
-		return fmt.Errorf("%s: gateway.server.via.ca_file %s holds no PEM certificate", r.File, path)
+		return fmt.Errorf("%s: gateway.server.via.ca_file %s holds no PEM certificate", r.File, exports.Value(path, false))
 	}
 	return nil
 }
@@ -986,10 +1122,9 @@ func oneDocument(data []byte) error {
 	return errMoreThanOneDocument
 }
 
-// readForagerFile reads the machine's forager.yaml under [UserDir]: its path and its
-// content, which is nil when there is no file.
-func readForagerFile() (string, []byte, error) {
-	dir := UserDir()
+// readForagerFile reads forager.yaml in dir, the machine's under [UserDir] or another
+// configuration directory: its path and its content, which is nil when there is no file.
+func readForagerFile(dir string) (string, []byte, error) {
 	if dir == "" {
 		return "", nil, nil
 	}
@@ -1012,7 +1147,11 @@ func readForagerFile() (string, []byte, error) {
 // it is the [Forager] with File and InstanceName set, and nil when there is no file. The
 // file must still be YAML, and session.instance.name a name; every other key is left unread.
 func LoadForagerInstance() (*Forager, error) {
-	path, data, err := readForagerFile()
+	dir, err := UserDir()
+	if err != nil {
+		return nil, err
+	}
+	path, data, err := readForagerFile(dir)
 	if data == nil || err != nil {
 		return nil, err
 	}
@@ -1133,7 +1272,7 @@ func readServer(path string, rawURL, id *string, pin *[]pinEntry, secret, key *y
 			if e.Alg == nil || e.PublicKey == nil {
 				return nil, fmt.Errorf("%s: gateway.server.apiary_public_key[%d] needs both alg and public_key", path, i)
 			}
-			if err := accesskey.SecretInDocument([]any{*e.Alg, *e.PublicKey}); err != nil {
+			if err := accesskey.SecretInPinEntry(*e.Alg, *e.PublicKey); err != nil {
 				return nil, fmt.Errorf("%s: gateway.server.apiary_public_key: %w", path, err)
 			}
 			// Each entry is checked here as [accesskey.Pin.Check] checks it, so the
@@ -1235,8 +1374,12 @@ type credentialFile struct {
 		Scheme   *string `yaml:"scheme"`
 		Username *string `yaml:"username"`
 		Header   *string `yaml:"header"`
+		OAuth    *bool   `yaml:"oauth"`
 	} `yaml:"auth"`
 	Placeholders yaml.Node `yaml:"placeholders,omitempty"`
+	Format       *string   `yaml:"format"`
+	Endpoint     *string   `yaml:"endpoint"`
+	KeyPrefixes  yaml.Node `yaml:"key_prefixes,omitempty"`
 }
 
 // readCredentials reads the credentials section, a mapping from name to entry, in the
@@ -1249,31 +1392,32 @@ func readCredentials(path string, node *yaml.Node) ([]ForagerCredential, error) 
 	var out []ForagerCredential
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		c := ForagerCredential{Name: node.Content[i].Value}
+		at := entryAt("gateway.credentials", node.Content[i])
 		var f credentialFile
 		// A node decodes loosely, so a key that is not one is refused here as the rest
 		// of the file refuses it.
 		if entry := node.Content[i+1]; entry.Kind == yaml.MappingNode {
 			for k := 0; k+1 < len(entry.Content); k += 2 {
 				switch key := entry.Content[k].Value; key {
-				case "env", "file", "adapter", "argument", "hosts", "paths", "auth", "placeholders":
+				case "env", "file", "adapter", "argument", "hosts", "paths", "auth", "placeholders", "format", "endpoint", "key_prefixes":
 				default:
-					return nil, fmt.Errorf("%s: gateway.credentials.%s: key %q is not one", path, c.Name, key)
+					return nil, keyNotOne(path, at, entry.Content[k], "")
 				}
 			}
 		}
-		if fault := mergeKeyFault(node.Content[i+1], reflect.TypeOf(f), "gateway.credentials."+c.Name, false); fault != nil {
+		if fault := mergeKeyFault(node.Content[i+1], reflect.TypeOf(f), at, false); fault != nil {
 			return nil, fault.error(path)
 		}
 		if err := safeDecode(func() error { return node.Content[i+1].Decode(&f) }); err != nil {
-			return nil, foragerDecodeError(path, node.Content[i+1], reflect.TypeOf(f), "gateway.credentials."+c.Name, false, err)
+			return nil, foragerDecodeError(path, node.Content[i+1], reflect.TypeOf(f), at, false, err)
 		}
 		var adapter []string
 		for _, l := range []struct {
 			key string
 			in  *yaml.Node
 			out *[]string
-		}{{"adapter", &f.Adapter, &adapter}, {"hosts", &f.Hosts, &c.Hosts}, {"paths", &f.Paths, &c.Paths}, {"placeholders", &f.Placeholders, &c.Placeholders}} {
-			key := "gateway.credentials." + c.Name + "." + l.key
+		}{{"adapter", &f.Adapter, &adapter}, {"hosts", &f.Hosts, &c.Hosts}, {"paths", &f.Paths, &c.Paths}, {"placeholders", &f.Placeholders, &c.Placeholders}, {"key_prefixes", &f.KeyPrefixes, &c.KeyPrefixes}} {
+			key := at + "." + l.key
 			var err error
 			if *l.out, err = stringList(path, key, l.in, notAString(path, key)); err != nil {
 				return nil, err
@@ -1284,13 +1428,13 @@ func readCredentials(path string, node *yaml.Node) ([]ForagerCredential, error) 
 		}
 		if f.File != nil {
 			if !filepath.IsAbs(*f.File) {
-				return nil, fmt.Errorf("%s: gateway.credentials.%s.file is not an absolute path", path, c.Name)
+				return nil, fmt.Errorf("%s: %s.file is not an absolute path", path, at)
 			}
 			c.File = *f.File
 		}
 		if adapter != nil {
 			if len(adapter) == 0 || !filepath.IsAbs(adapter[0]) {
-				return nil, fmt.Errorf("%s: gateway.credentials.%s.adapter is a program by its absolute path, and its arguments", path, c.Name)
+				return nil, fmt.Errorf("%s: %s.adapter is a program by its absolute path, and its arguments", path, at)
 			}
 			c.Adapter = adapter
 		}
@@ -1307,6 +1451,15 @@ func readCredentials(path string, node *yaml.Node) ([]ForagerCredential, error) 
 			if f.Auth.Header != nil {
 				c.Header = *f.Auth.Header
 			}
+			if f.Auth.OAuth != nil {
+				c.OAuth = *f.Auth.OAuth
+			}
+		}
+		if f.Format != nil {
+			c.Format = *f.Format
+		}
+		if f.Endpoint != nil {
+			c.Endpoint = *f.Endpoint
 		}
 		out = append(out, c)
 	}
@@ -1418,8 +1571,9 @@ func policyPaths(paths map[string][]string) bool {
 }
 
 // pathsOrNone is path rules as a row shows them, by host in order: the host, then its
-// paths, "; " between hosts; a host with an empty list is no path of it. No rules is
-// "(none)".
+// paths, each as [exports.Value] prints it, "; " between hosts; a host with an empty list
+// is no path of it. No rules is "(none)". A host is printed as it is: Forager's policy
+// reads no underscore in one, so it never contains qak_ or qrk_.
 func pathsOrNone(paths map[string][]string) string {
 	if len(paths) == 0 {
 		return "(none)"
@@ -1430,7 +1584,7 @@ func pathsOrNone(paths map[string][]string) string {
 			hosts = append(hosts, host+" (no path)")
 			continue
 		}
-		hosts = append(hosts, host+" "+strings.Join(paths[host], ", "))
+		hosts = append(hosts, host+" "+strings.Join(exports.Values(paths[host]), ", "))
 	}
 	return strings.Join(hosts, "; ")
 }
@@ -1506,6 +1660,7 @@ func readTools(path string, node *yaml.Node) ([]ForagerTool, error) {
 	var out []ForagerTool
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		t := ForagerTool{Name: node.Content[i].Value}
+		at := entryAt("gateway.tools", node.Content[i])
 		var f toolFile
 		// A node decodes loosely, so a key that is not one is refused here as the rest
 		// of the file refuses it.
@@ -1514,22 +1669,22 @@ func readTools(path string, node *yaml.Node) ([]ForagerTool, error) {
 				switch key := entry.Content[k].Value; key {
 				case "command", "argument", "serves", "placeholders":
 				default:
-					return nil, fmt.Errorf("%s: gateway.tools.%s: key %q is not one", path, t.Name, key)
+					return nil, keyNotOne(path, at, entry.Content[k], "")
 				}
 			}
 		}
-		if fault := mergeKeyFault(node.Content[i+1], reflect.TypeOf(f), "gateway.tools."+t.Name, false); fault != nil {
+		if fault := mergeKeyFault(node.Content[i+1], reflect.TypeOf(f), at, false); fault != nil {
 			return nil, fault.error(path)
 		}
 		if err := safeDecode(func() error { return node.Content[i+1].Decode(&f) }); err != nil {
-			return nil, foragerDecodeError(path, node.Content[i+1], reflect.TypeOf(f), "gateway.tools."+t.Name, false, err)
+			return nil, foragerDecodeError(path, node.Content[i+1], reflect.TypeOf(f), at, false, err)
 		}
 		for _, l := range []struct {
 			key string
 			in  *yaml.Node
 			out *[]string
 		}{{"command", &f.Command, &t.Command}, {"serves", &f.Serves, &t.Serves}, {"placeholders", &f.Placeholders, &t.Placeholders}} {
-			key := "gateway.tools." + t.Name + "." + l.key
+			key := at + "." + l.key
 			var err error
 			if *l.out, err = stringList(path, key, l.in, notAString(path, key)); err != nil {
 				return nil, err
@@ -1538,7 +1693,7 @@ func readTools(path string, node *yaml.Node) ([]ForagerTool, error) {
 		// A tool is its program, so a tool without one is refused as one not by its
 		// absolute path is.
 		if len(t.Command) == 0 || !filepath.IsAbs(t.Command[0]) {
-			return nil, fmt.Errorf("%s: gateway.tools.%s.command is a program by its absolute path, and its arguments", path, t.Name)
+			return nil, fmt.Errorf("%s: %s.command is a program by its absolute path, and its arguments", path, at)
 		}
 		if f.Argument != nil {
 			t.Argument = *f.Argument
@@ -1558,7 +1713,12 @@ func loopback(host string) bool {
 }
 
 // Rows lists forager.yaml's effective values with the file as origin, and the
-// defaults with [Default] when there is no file or a section is absent.
+// defaults with [Default] when there is no file or a section is absent. A name that
+// contains an access key secret or a run key is printed as [accesskey.ShownName]
+// prints it, and a value the file sets as [exports.Value] prints it. The egress hosts,
+// the server's and the via's URLs, the access key id, the instance name and the
+// certificate's SHA-256 are printed as they are: each is refused when it could contain
+// qak_ or qrk_.
 func (r *Forager) Rows() []Row {
 	origin := Default
 	if r != nil {
@@ -1592,15 +1752,31 @@ func (r *Forager) Rows() []Row {
 		rows = append(rows, Row{"gateway.server.url", "(none)", Default})
 	}
 	if r != nil && r.Listen != "" {
-		rows = append(rows, Row{"gateway.listen", r.Listen, origin})
+		rows = append(rows, Row{"gateway.listen", exports.Value(r.Listen, false), origin})
 	} else {
 		rows = append(rows, Row{"gateway.listen", "(none)", Default})
 	}
 	// The paths as the file writes them; what the key file holds is never read here.
 	if r != nil && r.TLS != nil {
-		rows = append(rows, Row{"gateway.tls.certificate", r.TLS.Certificate, origin}, Row{"gateway.tls.key", r.TLS.Key, origin})
+		rows = append(rows, Row{"gateway.tls.certificate", exports.Value(r.TLS.Certificate, false), origin}, Row{"gateway.tls.key", exports.Value(r.TLS.Key, false), origin})
 	} else {
 		rows = append(rows, Row{"gateway.tls.certificate", "(none)", Default}, Row{"gateway.tls.key", "(none)", Default})
+	}
+	if r != nil && r.LockMemory {
+		rows = append(rows, Row{"gateway.lock_memory", "true", origin})
+	} else {
+		rows = append(rows, Row{"gateway.lock_memory", "false", Default})
+	}
+	for i, lim := range runLimits {
+		var v int
+		if r != nil {
+			v = []int{r.RunLimits.Connections, r.RunLimits.RequestsPerSecond, r.RunLimits.Burst}[i]
+		}
+		if v > 0 {
+			rows = append(rows, Row{"gateway.run_limits." + lim.key, strconv.Itoa(v), origin})
+		} else {
+			rows = append(rows, Row{"gateway.run_limits." + lim.key, strconv.Itoa(lim.normal), Default})
+		}
 	}
 	if r != nil && r.InstanceName != "" {
 		rows = append(rows, Row{"session.instance.name", r.InstanceName, origin})
@@ -1624,30 +1800,39 @@ func (r *Forager) Rows() []Row {
 	}
 	if r != nil {
 		for _, c := range r.Credentials {
-			from := "env " + c.Env
+			from := "env " + accesskey.ShownName(c.Env, false)
 			switch {
 			case c.File != "":
-				from = "file " + c.File
+				from = "file " + exports.Value(c.File, false)
 			case c.Integration != "":
-				from = "integration " + c.Integration
+				from = "integration " + accesskey.ShownName(c.Integration, false)
 			case len(c.Adapter) > 0:
-				from = "adapter " + c.Adapter[0]
+				from = "adapter " + exports.Value(c.Adapter[0], false)
 			}
-			rows = append(rows, Row{"gateway.credentials." + c.Name, from, origin})
+			rows = append(rows, Row{"gateway.credentials." + accesskey.ShownName(c.Name, false), from, origin})
 		}
 		for _, t := range r.Tools {
-			rows = append(rows, Row{"gateway.tools." + t.Name, t.Command[0] + ", serves " + listOrNone(t.Serves), origin})
+			rows = append(rows, Row{"gateway.tools." + accesskey.ShownName(t.Name, false), exports.Value(t.Command[0], false) + ", serves " + listOrNone(accesskey.ShownNames(t.Serves)), origin})
 		}
 		shadowed := r.Shadowed()
 		for _, in := range r.Integrations {
-			program := in.Program
+			// The program's name and path contain the key, qory-<key>, unless the file
+			// sets another.
+			program := accesskey.ShownName(in.Program, false)
 			if in.Path != "" {
-				program = in.Path + " " + in.Version
+				program = accesskey.ShownName(in.Path, false) + " " + exports.Value(in.Version, false)
 			}
 			if slices.Contains(shadowed, in.Key) {
-				program += ", shadowed by gateway.credentials." + in.Key
+				program += ", shadowed by gateway.credentials." + accesskey.ShownName(in.Key, false)
 			}
-			rows = append(rows, Row{"gateway.integrations." + in.Key, program, origin})
+			rows = append(rows, Row{"gateway.integrations." + accesskey.ShownName(in.Key, false), program, origin})
+		}
+		for _, sel := range r.Selects {
+			value := "(no argument)"
+			if sel.ArgumentLabel != "" || sel.Forge != "" {
+				value = "argument_label " + orNone(accesskey.ShownName(sel.ArgumentLabel, false)) + ", forge " + orNone(exports.Value(sel.Forge, false))
+			}
+			rows = append(rows, Row{"gateway.selects.credentials." + accesskey.ShownName(sel.Name, false), value, origin})
 		}
 	}
 	if r != nil && r.Wall != nil {
@@ -1656,36 +1841,39 @@ func (r *Forager) Rows() []Row {
 			Row{"wall.image", defaultRow(r.Wall), origin},
 		)
 		for _, i := range r.Wall.Images {
-			rows = append(rows, Row{"wall.images." + i.Name, imageRow(i), origin})
+			rows = append(rows, Row{"wall.images." + accesskey.ShownName(i.Name, false), imageRow(i), origin})
 		}
-		rows = append(rows, Row{"wall.env", listOrNone(r.Wall.Env), origin})
+		if len(r.Wall.ImagesAllow) > 0 {
+			rows = append(rows, Row{"wall.images_allow", strings.Join(exports.Values(r.Wall.ImagesAllow), ", "), origin})
+		}
+		rows = append(rows, Row{"wall.env", listOrNone(shownNames(r.Wall.Env)), origin})
 		if r.Wall.Command != "" {
-			rows = append(rows, Row{"wall.command", r.Wall.Command, origin})
+			rows = append(rows, Row{"wall.command", exports.Value(r.Wall.Command, false), origin})
 		}
 		if r.Wall.Helper != "" {
-			rows = append(rows, Row{"wall.helper", r.Wall.Helper, origin})
+			rows = append(rows, Row{"wall.helper", exports.Value(r.Wall.Helper, false), origin})
 		}
 		if r.Wall.User != "" {
-			rows = append(rows, Row{"wall.user", r.Wall.User, origin})
+			rows = append(rows, Row{"wall.user", exports.Value(r.Wall.User, false), origin})
 		}
 		if len(r.Wall.Mounts) > 0 {
 			var mounts []string
 			for _, m := range r.Wall.Mounts {
 				if m.ReadOnly {
-					mounts = append(mounts, m.Path+":ro")
+					mounts = append(mounts, exports.Value(m.Path, false)+":ro")
 				} else {
-					mounts = append(mounts, m.Path)
+					mounts = append(mounts, exports.Value(m.Path, false))
 				}
 			}
 			rows = append(rows, Row{"wall.mounts", strings.Join(mounts, ", "), origin})
 		}
 		for _, l := range [][2]string{{"cpus", r.Wall.CPUs}, {"memory", r.Wall.Memory}, {"shm_size", r.Wall.ShmSize}} {
 			if l[1] != "" {
-				rows = append(rows, Row{"wall." + l[0], l[1], origin})
+				rows = append(rows, Row{"wall." + l[0], exports.Value(l[1], false), origin})
 			}
 		}
 		if len(r.Wall.CAEnv) > 0 {
-			rows = append(rows, Row{"wall.ca_env", strings.Join(r.Wall.CAEnv, ", "), origin})
+			rows = append(rows, Row{"wall.ca_env", strings.Join(shownNames(r.Wall.CAEnv), ", "), origin})
 		}
 		if r.Wall.PIDs > 0 {
 			rows = append(rows, Row{"wall.pids_limit", strconv.Itoa(r.Wall.PIDs), origin})
@@ -1693,19 +1881,32 @@ func (r *Forager) Rows() []Row {
 	} else {
 		rows = append(rows, Row{"wall.adapter", "(none)", Default})
 	}
+	if r != nil && r.Pool != nil {
+		rows = append(rows, r.Pool.rows(origin)...)
+	}
 	return rows
 }
 
+// shownNames are the names of a list as the rows print them, each as
+// [accesskey.ShownName] prints it; nil for none.
+func shownNames(list []string) []string {
+	var out []string
+	for _, n := range list {
+		out = append(out, accesskey.ShownName(n, false))
+	}
+	return out
+}
+
 // viaRows are the rows of gateway.server.via: its url, or that the server is reached
-// directly; with a via, its ca_file and certificate_sha256 as the file writes them, or
-// their defaults. What the CA file holds is never read here.
+// directly; with a via, its ca_file as [exports.Value] prints it and certificate_sha256
+// as the file writes it, or their defaults. What the CA file holds is never read here.
 func viaRows(v *ForagerVia, origin string) []Row {
 	if v == nil {
 		return []Row{{"gateway.server.via.url", "(none: the server is reached directly)", Default}}
 	}
 	rows := []Row{{"gateway.server.via.url", v.URL, origin}}
 	if v.CAFile != "" {
-		rows = append(rows, Row{"gateway.server.via.ca_file", v.CAFile, origin})
+		rows = append(rows, Row{"gateway.server.via.ca_file", exports.Value(v.CAFile, false), origin})
 	} else {
 		rows = append(rows, Row{"gateway.server.via.ca_file", "(none: the system's roots)", Default})
 	}

@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -143,9 +144,11 @@ func TestForagerReadsAListAsBefore(t *testing.T) {
 // TestForagerReadsTheEgressHostsAsForagerDoes reads each host of gateway.egress.allow
 // and deny as Forager reads a policy's: a name, a *. suffix, or an IPv4 address in
 // canonical form. A host that ends in a number and is no such address is refused by
-// its index, and never printed.
+// its index, and never printed: the refusal after the file's path does not hold it,
+// though the path does, under a folder named 443.
 func TestForagerReadsTheEgressHostsAsForagerDoes(t *testing.T) {
 	hermetic(t)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "443", ".config"))
 	for _, list := range []string{"allow", "deny"} {
 		for _, host := range []string{"api.example.123", "127.1", "443", "0x1f", "10.0.0.01", "256.1.1.1", "example.0x", "api.example.com:443", "API.example.com"} {
 			body := "gateway: {egress: {mode: enforce, " + list + ": [a.example, \"" + host + "\"]}}\n"
@@ -154,7 +157,7 @@ func TestForagerReadsTheEgressHostsAsForagerDoes(t *testing.T) {
 			if want := path + ": gateway.egress." + list + "[1]" + notAHost; err == nil || err.Error() != want {
 				t.Errorf("%q: %v, want %q", body, err, want)
 			}
-			if err != nil && strings.Contains(err.Error(), host) {
+			if err != nil && strings.Contains(strings.TrimPrefix(err.Error(), path), host) {
 				t.Errorf("%q: the refusal holds the host: %v", body, err)
 			}
 		}
