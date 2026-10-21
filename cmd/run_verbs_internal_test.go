@@ -1,13 +1,16 @@
 package cmd
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -17,6 +20,7 @@ import (
 
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/foragerdir"
+	walled "github.com/qoryai/qory/internal/places"
 	"github.com/qoryai/qory/internal/render"
 )
 
@@ -38,7 +42,7 @@ func TestNoRuntimeIsNamedAfterAVerbTheWallRuns(t *testing.T) {
 		}
 	}
 	walk(Root())
-	for _, want := range []string{"forward", "nest", "relay"} {
+	for _, want := range []string{"exec", "forward", "nest", "prepare", "relay"} {
 		if !slices.Contains(verbs, want) {
 			t.Errorf("the walk found the verbs %v, without %s: it no longer sees what carries %s", verbs, want, inWall)
 		}
@@ -316,7 +320,23 @@ func TestMountRefusedNamesTheLinkOnTheWay(t *testing.T) {
 			t.Errorf("%s: %v, want %q", c.name, err, c.want)
 		}
 	}
-	p := passed{root: root, spec: &session.Spec{Dir: root, Mounts: []wall.Mount{{Path: root}}}}
+	// A link, a mount and a place a walled run has used whose names hold a rune Go does
+	// not print as it is are quoted.
+	odd := filepath.Join(root, "ven\u202edor")
+	oddLink := filepath.Join(root, "third\u200b_party")
+	oddUsed := filepath.Join(t.TempDir(), "used\x1b[2J")
+	p := passed{root: root, spec: &session.Spec{Dir: root, Mounts: []wall.Mount{{Path: root}, {Path: odd}}}}
+	for _, c := range []struct{ name, place, link, outer, want string }{
+		{"a mount and a link", odd, oddLink, root, "the mount " + strconv.Quote(odd) + " is reached through the link " + strconv.Quote(oddLink) + " inside the workspace " + root + tail},
+		{"the mount is the link", odd, odd, root, "the mount " + strconv.Quote(odd) + " is a link inside the workspace " + root + tail},
+		{"a place a walled run has used", odd, oddLink, oddUsed, "the mount " + strconv.Quote(odd) + " is reached through the link " + strconv.Quote(oddLink) + " inside " + strconv.Quote(oddUsed) + ", a place a walled run has used" + tail},
+	} {
+		err := mountRefused(&session.Refusal{Code: "mount_through_link", Names: []string{c.place, c.link, c.outer}}, p)
+		if err == nil || err.Error() != c.want {
+			t.Errorf("%s: %v, want %q", c.name, err, c.want)
+		}
+	}
+	p = passed{root: root, spec: &session.Spec{Dir: root, Mounts: []wall.Mount{{Path: root}}}}
 	for _, names := range [][]string{{vendor, root}, {vendor, vendor, root, root}} {
 		if err := mountRefused(&session.Refusal{Code: "mount_through_link", Names: names}, p); err != nil {
 			t.Errorf("%d names: %v", len(names), err)
@@ -387,9 +407,10 @@ func TestMountRefusedNamesTheRunStillGoing(t *testing.T) {
 }
 
 // TestRunsDirIsTheCheckoutsFolder is where a checkout's run records go: under
-// $XDG_STATE_HOME/qory when it is absolute, else under ~/.local/state/qory, in a folder
+// $XDG_STATE_HOME/qory when it is set, else under ~/.local/state/qory, in a folder
 // named after the checkout and the hash of where it really is, so a link to it leads to
-// the same folder and another checkout of the same name to another.
+// the same folder and another checkout of the same name to another. A relative
+// XDG_STATE_HOME is refused.
 func TestRunsDirIsTheCheckoutsFolder(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -397,13 +418,17 @@ func TestRunsDirIsTheCheckoutsFolder(t *testing.T) {
 	for _, c := range []struct{ value, want string }{
 		{filepath.Join(home, "xdg"), filepath.Join(home, "xdg", "qory")},
 		{"", fallback},
-		{"relative/state", fallback},
 	} {
 		t.Setenv("XDG_STATE_HOME", c.value)
 		if got, err := stateDir(); err != nil || got != c.want {
 			t.Errorf("XDG_STATE_HOME=%q: %q, %v; want %q", c.value, got, err, c.want)
 		}
 	}
+	t.Setenv("XDG_STATE_HOME", "relative/state")
+	if got, err := stateDir(); got != "" || !errors.Is(err, walled.ErrRelativeStateHome) {
+		t.Errorf("XDG_STATE_HOME=relative/state: %q, %v", got, err)
+	}
+	t.Setenv("XDG_STATE_HOME", "")
 	real, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -455,7 +480,7 @@ func TestSettingFilesAreTheFileSettingsOfTheDescribedIntegrations(t *testing.T) 
 		t.Errorf("no forager.yaml: %q", got)
 	}
 	state := "/state/qory"
-	own := foragerFiles("", state, filepath.Join(state, "runs", "app-0123456789ab"), want)
+	own := foragerFiles("", state, filepath.Join(state, "runs", "app-0123456789ab"), want, nil)
 	if !slices.Equal(own.files, append([]string{state}, want...)) {
 		t.Errorf("files %q", own.files)
 	}
@@ -484,10 +509,10 @@ func TestForagerFilesPutsTheStateDirAfterTheConfigDir(t *testing.T) {
 	}
 	state := "/state/qory"
 	runs := filepath.Join(state, "runs", "app-0123456789ab")
-	if own := foragerFiles(dir, state, runs, nil); !slices.Equal(own.files, []string{dir, state, target}) || len(own.records) != 0 {
+	if own := foragerFiles(dir, state, runs, nil, nil); !slices.Equal(own.files, []string{dir, state, target}) || len(own.records) != 0 {
 		t.Errorf("files %q, records %v", own.files, own.records)
 	}
-	if own := foragerFiles("", state, runs, nil); !slices.Equal(own.files, []string{state}) || len(own.links) != 0 {
+	if own := foragerFiles("", state, runs, nil, nil); !slices.Equal(own.files, []string{state}) || len(own.links) != 0 {
 		t.Errorf("no configuration directory: %q, %v", own.files, own.links)
 	}
 	base, real := resolve(t.TempDir()), resolve(t.TempDir())
@@ -501,7 +526,7 @@ func TestForagerFilesPutsTheStateDirAfterTheConfigDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	place := linkPlace(link)
-	own := foragerFiles(dir, state, runs, nil)
+	own := foragerFiles(dir, state, runs, nil, nil)
 	if !slices.Equal(own.files, []string{dir, state, place, target}) || !own.records[place] || own.records[target] || own.links[place] != link {
 		t.Errorf("a linked state directory: files %q, records %v, links %v", own.files, own.records, own.links)
 	}
@@ -711,7 +736,9 @@ func TestUserHomeNeedsAConfigurationDirectory(t *testing.T) {
 	}
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("HOME", "")
-	if config.UserDir() != "" {
+	// The records of the places need a state directory, which XDG_STATE_HOME gives.
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if dir, _ := config.UserDir(); dir != "" {
 		t.Skip("this system has a home directory without HOME")
 	}
 	conf, err := config.Load(root, true)
@@ -731,23 +758,68 @@ func TestUserHomeNeedsAConfigurationDirectory(t *testing.T) {
 // cannot ask the container engine whether an earlier walled run is still going, with
 // that run's id its one name: the text leaves the id out. With the path of that run's
 // registry entry as a second name, the text gives the docker ps command that lists that
-// run's containers, and says to delete the entry when it lists none or that Docker is
-// gone for good. Any other number of names falls through to Forager's own words.
+// run's containers, and says to delete the entry when it lists none or the Docker engine
+// of that run no longer exists. Any other number of names falls through to Forager's own words.
 func TestEngineUnreachableIsWorded(t *testing.T) {
 	const id = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f"
 	p := passed{spec: &session.Spec{}}
 	err := mountRefused(&session.Refusal{Code: "engine_unreachable", Names: []string{id}}, p)
-	if want := "Docker could not be asked whether an earlier walled run is still going, so the run does not start (engine_unreachable)"; err == nil || err.Error() != want {
+	if want := "The check for a container of an earlier walled run failed, so the run does not start (engine_unreachable)"; err == nil || err.Error() != want {
 		t.Errorf("engine_unreachable: %v, want %q", err, want)
 	}
 	entry := "/var/state/qory/walled/" + id + ".json"
 	err = mountRefused(&session.Refusal{Code: "engine_unreachable", Names: []string{id, entry}}, p)
-	if want := "Docker could not be asked whether an earlier walled run is still going, so the run does not start. If docker ps --all --filter label=dev.qory.run=" + id + " lists no container, or that Docker is gone for good, delete " + entry + " (engine_unreachable)"; err == nil || err.Error() != want {
+	if want := "The check for a container of an earlier walled run failed, so the run does not start. If docker ps --all --filter label=dev.qory.run=" + id + " lists no container, or the Docker engine of that run no longer exists, delete " + entry + " (engine_unreachable)"; err == nil || err.Error() != want {
 		t.Errorf("engine_unreachable with the entry: %v, want %q", err, want)
 	}
 	for _, names := range [][]string{nil, {id, entry, entry}} {
 		if err := mountRefused(&session.Refusal{Code: "engine_unreachable", Names: names}, p); err != nil {
 			t.Errorf("engine_unreachable with names %v: %v, want it to fall through", names, err)
 		}
+	}
+}
+
+// TestTheGatewayRunsAProgramByThePathChecked names an adapter's and a tool's program by
+// a bare name the PATH finds through a link: the gateway is given the file the link
+// leads to, the one checked, so a PATH entry or a link that changes later does not
+// choose what it runs. A program the PATH does not find is refused. No file is run.
+func TestTheGatewayRunsAProgramByThePathChecked(t *testing.T) {
+	elsewhere, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	program := filepath.Join(elsewhere, "acme-adapter")
+	if err := os.WriteFile(program, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	onPath := t.TempDir()
+	if err := os.Symlink(program, filepath.Join(onPath, "acme")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", onPath)
+	workspace := []string{t.TempDir()}
+	r := &config.Forager{
+		Credentials: []config.ForagerCredential{{Name: "product", Adapter: []string{"acme", "${argument}"}, Argument: "[a-z]+", Hosts: []string{"git.example.com"}}},
+		Tools:       []config.ForagerTool{{Name: "files", Command: []string{"acme", "serve"}, Serves: []string{"files.tools.internal"}}},
+	}
+	creds, err := machineCredentials(context.Background(), r, config.Expansion{Workspace: workspace}, "run", io.Discard)
+	if err != nil || len(creds) != 1 || !slices.Equal(creds[0].Adapter, []string{program, "${argument}"}) {
+		t.Errorf("the adapter: %v, %v", creds, err)
+	}
+	tools, err := machineTools(r, workspace)
+	if err != nil || len(tools) != 1 || !slices.Equal(tools[0].Command, []string{program, "serve"}) {
+		t.Errorf("the tool: %v, %v", tools, err)
+	}
+	if !slices.Equal(r.Credentials[0].Adapter, []string{"acme", "${argument}"}) || !slices.Equal(r.Tools[0].Command, []string{"acme", "serve"}) {
+		t.Errorf("the definitions changed: %v, %v", r.Credentials[0].Adapter, r.Tools[0].Command)
+	}
+	t.Setenv("PATH", t.TempDir())
+	want := "forager.yaml: gateway.credentials.product.adapter: acme is not on the PATH; install it there, or give its absolute path"
+	if _, err := machineCredentials(context.Background(), r, config.Expansion{Workspace: workspace}, "run", io.Discard); err == nil || err.Error() != want {
+		t.Errorf("an adapter not found: %v, want %q", err, want)
+	}
+	want = "forager.yaml: gateway.tools.files.command: acme is not on the PATH; install it there, or give its absolute path"
+	if _, err := machineTools(r, workspace); err == nil || err.Error() != want {
+		t.Errorf("a tool not found: %v, want %q", err, want)
 	}
 }

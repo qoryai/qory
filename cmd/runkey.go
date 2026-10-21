@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/runkey"
 	"github.com/qoryai/forager/session"
+	"github.com/qoryai/forager/session/runtimes"
 	"github.com/qoryai/forager/sink"
 
 	"github.com/qoryai/qory/internal/config"
@@ -26,9 +28,9 @@ import (
 // runKey is the run key qory was given, white space around it trimmed, and what it
 // says, read as a runner reads it, unverified: the run, and the separate gateway the
 // run goes through. fromFD says it came from the descriptor --run-key-fd names, not
-// from QORY_RUN_KEY, which an unwalled agent can read. It is a secret: it is handed to
-// Forager's session alone, and fmt prints a runKey by its gateway and its run, never its
-// value.
+// from QORY_RUN_KEY, which an unwalled agent can read on macOS, and on Linux from the
+// program that started qory. It is a secret: it is handed to Forager's session alone,
+// and fmt prints a runKey by its gateway and its run, never its value.
 type runKey struct {
 	value  string
 	key    runkey.Key
@@ -50,7 +52,7 @@ func (k runKey) Format(f fmt.State, _ rune) { io.WriteString(f, k.String()) }
 const runKeyFDFlag = "run-key-fd"
 
 // runKeyFDUsage is the help of qory run's and qory run resend's --run-key-fd.
-const runKeyFDUsage = "read the run key from this file descriptor, 0 for stdin, in place of " + config.EnvRunKey + ", which an unwalled agent can read"
+const runKeyFDUsage = "read the run key from this file descriptor, 0 for stdin, in place of " + config.EnvRunKey + ", which an unwalled agent may read"
 
 // maxRunKeyFD is the most read from the run key's descriptor: a run key is at most
 // runkey.MaxLength characters, and white space may surround it.
@@ -143,13 +145,14 @@ func runKeyReason(err error) string {
 }
 
 // codeRunKeyNeedsWall is the refusal of an unwalled run whose run key QORY_RUN_KEY
-// holds: qory's environment, which the agent can read, holds the key.
+// holds: the environment qory started with, which an unwalled agent can read on macOS,
+// and on Linux from the program that started qory, holds the key.
 const codeRunKeyNeedsWall = "run_key_needs_wall"
 
 // runKeyNeedsWall is the run_key_needs_wall refusal, as input.
 func runKeyNeedsWall() error {
 	return input(&refusedError{
-		text: fmt.Sprintf("%s is in qory's environment, which an unwalled agent can read, so a run with it needs a wall: --wall %s, or wall in %s; or give the run key with --%s, such as --%s 0 for stdin", config.EnvRunKey, config.WallDocker, config.ForagerFileName, runKeyFDFlag, runKeyFDFlag),
+		text: fmt.Sprintf("%s is in the environment qory started with, which an unwalled agent can read (on macOS always, on Linux through the program that started qory), so a run with it needs a wall: --wall %s, or wall in %s; or give the run key with --%s, such as --%s 0 for stdin", config.EnvRunKey, config.WallDocker, config.ForagerFileName, runKeyFDFlag, runKeyFDFlag),
 		err:  &session.Refusal{Code: codeRunKeyNeedsWall},
 	})
 }
@@ -199,7 +202,11 @@ func behindGateway(r *config.Forager, local, policy, relabel, keyFD bool, given 
 	if relabel {
 		return relabelRunKey()
 	}
-	if dir := machineDir(); dir != "" {
+	dir, err := machineDir()
+	if err != nil {
+		return err
+	}
+	if dir != "" {
 		held, err := heldSecret(dir)
 		if err != nil {
 			return err
@@ -222,6 +229,54 @@ func behindGateway(r *config.Forager, local, policy, relabel, keyFD bool, given 
 	}
 	if len(given) > 0 {
 		return input(registeredAlready(given))
+	}
+	return nil
+}
+
+// credentialVariables are the variables rt reads a credential from: the ones its
+// descriptor declares a secret in, the ones it reserves, and the ones its model section
+// lists a model key in, for Claude Code ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN and
+// CLAUDE_CODE_OAUTH_TOKEN. A name may be listed twice. Nil for a runtime that describes
+// none.
+func credentialVariables(rt runtimes.Runtime) []string {
+	var names []string
+	if s, ok := rt.(runtimes.Secrets); ok {
+		secrets := s.Secrets()
+		names = slices.Clone(secrets.Reserves)
+		for _, d := range secrets.Declares {
+			names = append(names, d.Name)
+		}
+	}
+	if m, ok := rt.(runtimes.Model); ok {
+		if model, ok := m.Model(); ok {
+			for _, k := range model.Keys {
+				names = append(names, k.Variable)
+			}
+		}
+	}
+	return names
+}
+
+// modelCredentialPassed refuses, as input, a variable of the model's credential that a
+// walled run given a run key would pass to its agent: such a run takes the credential
+// through the gateway its run key names alone. The variables are [credentialVariables]
+// of rt. This machine holds no credentials section, so the runtime names them. env is
+// --env, each entry NAME or NAME=value, and wallEnv is wall.env. Names match exactly, as
+// in a Linux environment. The line names the variable, never a value.
+func modelCredentialPassed(rt runtimes.Runtime, env, wallEnv []string) error {
+	names := credentialVariables(rt)
+	refused := func(name, from string) error {
+		return input(fmt.Errorf("qory run: %s is the model's credential, which a walled run given a run key takes only through the gateway; remove it from %s", name, from))
+	}
+	for _, n := range env {
+		if name, _, _ := strings.Cut(n, "="); slices.Contains(names, name) {
+			return refused(name, "--env")
+		}
+	}
+	for _, name := range wallEnv {
+		if slices.Contains(names, name) {
+			return refused(name, "wall.env in "+config.ForagerFileName)
+		}
 	}
 	return nil
 }

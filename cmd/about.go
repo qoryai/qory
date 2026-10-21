@@ -11,7 +11,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/session"
+
+	"github.com/qoryai/qory/internal/exports"
 )
 
 // maxSubjects is how many --subject a run carries, the Forager contract's bound.
@@ -62,7 +65,7 @@ func parseSubjects(values []string) ([]session.Subject, error) {
 		}
 		for i, earlier := range out {
 			if earlier.Type == s.Type && earlier.Ref == s.Ref {
-				return nil, input(fmt.Errorf("--subject %s and --subject %s have the same type and ref", values[i], values[j]))
+				return nil, input(fmt.Errorf("--subject %s and --subject %s have the same type and ref", exports.Value(values[i], false), exports.Value(values[j], false)))
 			}
 		}
 		out = append(out, s)
@@ -88,13 +91,13 @@ func parseSubject(v string) (session.Subject, error) {
 			key, value, ok := strings.Cut(part, "=")
 			switch {
 			case part == "":
-				return s, input(fmt.Errorf("--subject %s: an empty part is not key=value", v))
+				return s, input(fmt.Errorf("--subject %s: an empty part is not key=value", exports.Value(v, false)))
 			case !ok || key == "":
-				return s, input(fmt.Errorf("--subject %s: %s is not key=value", v, part))
+				return s, input(fmt.Errorf("--subject %s: %s is not key=value", exports.Value(v, false), exports.Value(part, false)))
 			case key != "type" && key != "ref" && key != "url":
-				return s, input(fmt.Errorf("--subject %s: %s is not type, ref, url or title", v, key))
+				return s, input(fmt.Errorf("--subject %s: %s is not type, ref, url or title", exports.Value(v, false), accesskey.ShownName(key, false)))
 			case seen[key]:
-				return s, input(fmt.Errorf("--subject %s sets %s twice", v, key))
+				return s, input(fmt.Errorf("--subject %s sets %s twice", exports.Value(v, false), key))
 			}
 			seen[key] = true
 			switch key {
@@ -113,9 +116,9 @@ func parseSubject(v string) (session.Subject, error) {
 		}
 		// A title= before the key took it into the title.
 		if titled && strings.Contains(","+s.Title, ","+key+"=") {
-			return s, input(fmt.Errorf("--subject %s has no %s; title= takes the rest of the value, so it comes last", v, key))
+			return s, input(fmt.Errorf("--subject %s has no %s; title= takes the rest of the value, so it comes last", exports.Value(v, false), key))
 		}
-		return s, input(fmt.Errorf("--subject %s has no %s", v, key))
+		return s, input(fmt.Errorf("--subject %s has no %s", exports.Value(v, false), key))
 	}
 	return s, nil
 }
@@ -137,25 +140,25 @@ func readDetails(name string, stdin io.Reader, terminal bool) (json.RawMessage, 
 	default:
 		f, err := os.Open(name)
 		if err != nil {
-			return nil, input(fmt.Errorf("--details %s: %w", name, unwrapPath(err)))
+			return nil, input(fmt.Errorf("--details %s: %w", exports.Value(name, false), unwrapPath(err)))
 		}
 		defer f.Close()
 		r = f
 	}
 	b, err := io.ReadAll(io.LimitReader(r, maxDetailsRead+1))
 	if err != nil {
-		return nil, input(fmt.Errorf("--details %s: %w", name, unwrapPath(err)))
+		return nil, input(fmt.Errorf("--details %s: %w", exports.Value(name, false), unwrapPath(err)))
 	}
 	if len(b) > maxDetailsRead {
-		return nil, input(fmt.Errorf("--details %s is larger than 1 MiB; the details are at most 8192 bytes compacted", name))
+		return nil, input(fmt.Errorf("--details %s is larger than 1 MiB; the details are at most 8192 bytes compacted", exports.Value(name, false)))
 	}
 	var d json.RawMessage
 	if err := json.Unmarshal(b, &d); err != nil {
 		var syntax *json.SyntaxError
 		if errors.As(err, &syntax) {
-			return nil, input(fmt.Errorf("--details %s is not JSON at byte %d: %w", name, syntax.Offset, err))
+			return nil, input(fmt.Errorf("--details %s is not JSON at byte %d: %w", exports.Value(name, false), syntax.Offset, err))
 		}
-		return nil, input(fmt.Errorf("--details %s is not JSON: %w", name, err))
+		return nil, input(fmt.Errorf("--details %s is not JSON: %w", exports.Value(name, false), err))
 	}
 	return d, nil
 }
@@ -188,11 +191,11 @@ func aboutInput(err error, subjects []string, details string) error {
 	case "about.title":
 		return input(fmt.Errorf("--title %s", ae.Reason))
 	case "about.details":
-		return input(fmt.Errorf("--details %s %s", details, ae.Reason))
+		return input(fmt.Errorf("--details %s %s", exports.Value(details, false), ae.Reason))
 	}
 	if m := subjectField.FindStringSubmatch(ae.Field); m != nil && m[2] != "" {
 		if i, convErr := strconv.Atoi(m[1]); convErr == nil && i < len(subjects) {
-			return input(fmt.Errorf("--subject %s: the %s %s", subjects[i], m[2], ae.Reason))
+			return input(fmt.Errorf("--subject %s: the %s %s", exports.Value(subjects[i], false), m[2], ae.Reason))
 		}
 	}
 	return input(err)

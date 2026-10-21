@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
+	"github.com/qoryai/forager/accesskey"
 	"gopkg.in/yaml.v3"
 )
 
@@ -82,9 +84,10 @@ func (s *Selection) UnmarshalYAML(n *yaml.Node) error {
 
 // parse reads the kept block: a mapping whose keys are kinds with a list of names,
 // instructions with true, and settings and env with true or a list of names. An unknown
-// key, a false, and an empty list are errors, each naming the key; the caller prefixes
-// the module and whether the block is exclude or only. A selection built in code, with
-// no block kept, is left as it is.
+// key, a false, and an empty list are errors, each naming the key, or "the name at line
+// N" for an unknown key whose name contains an access key secret or a run key; the
+// caller prefixes the module and whether the block is exclude or only. A selection
+// built in code, with no block kept, is left as it is.
 func (s *Selection) parse() error {
 	n := s.raw
 	if n == nil {
@@ -128,7 +131,12 @@ func (s *Selection) parse() error {
 				s.Env = part
 			}
 		default:
-			return fmt.Errorf("selects kind %q; kinds: %s; parts: %s", key, strings.Join(Kinds, ", "), strings.Join(Parts, ", "))
+			kind := strconv.Quote(key)
+			if accesskey.ContainsSecret(key) {
+				// The key's line places it, and its name is left out.
+				kind = fmt.Sprintf("the name at line %d", n.Content[i].Line)
+			}
+			return fmt.Errorf("selects kind %s; kinds: %s; parts: %s", kind, strings.Join(Kinds, ", "), strings.Join(Parts, ", "))
 		}
 	}
 	return nil

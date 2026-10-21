@@ -47,7 +47,10 @@ func clearRuns(t *testing.T, root string) {
 	}
 }
 
-var instanceShape = regexp.MustCompile(`^i_[A-Za-z0-9_-]{22}$`)
+// instanceShape is a new instance id: "i_" and 26 characters of lower-case Crockford
+// base32, 0-9 and a-z without i, l, o and u, as Forager's accesskey.NewInstanceID makes
+// it.
+var instanceShape = regexp.MustCompile(`^i_[0-9a-hjkmnp-tv-z]{26}$`)
 
 // TestRunSignsWithTheAccessKeyAndNamesTheInstance is a run against a server: every
 // request is signed under the machine's access key, carries the instance id qory keeps
@@ -387,58 +390,59 @@ func TestA410MidRunLeavesTheRuntimeRunning(t *testing.T) {
 	}
 }
 
-// TestTheMarkerKeepsEveryUnwalledRunOut is the stored-secrets marker: an unwalled run
-// that contacts no server is refused before it starts, --local included, and the
-// marker's refusal comes before the one of the secret beside it. (Any unwalled run on a
-// machine that holds an access key is refused too, TestAKeyedMachineRunsNoAgentWithoutAWall.)
-// A run's lock file names it unwalled and stays for a key command to remove.
-func TestTheMarkerKeepsEveryUnwalledRunOut(t *testing.T) {
+// TestTheMarkerNeedsNoWall is the stored-secrets marker on a machine without a wall:
+// a run that holds an access key is refused, key_needs_wall, naming where the key is. A
+// machine that has the marker but no key starts unwalled runs, --local and without a
+// server, and the marker stays. A run's lock file names it unwalled and stays for a key command to remove.
+func TestTheMarkerNeedsNoWall(t *testing.T) {
 	root, srv := serverRun(t, "", "")
 	dir := configDir()
 	if err := dir.WriteMarker(); err != nil {
 		t.Fatal(err)
 	}
-	marker := dir.Path(foragerdir.MarkerFile)
-	want := "the stored-secrets marker " + marker + " exists: this machine's access key may receive stored secrets, so every run needs a wall: --wall docker, or wall in forager.yaml (server_needs_wall)"
-	for _, c := range []struct {
-		name, secret string
-		args         []string
-	}{
-		{"--local", "", []string{"run", "--local", "--wall", "none"}},
-		{"--local, a key from the environment", srv.key.Secret(), []string{"run", "--local", "--wall", "none"}},
-	} {
-		t.Setenv("QORY_ACCESS_KEY_SECRET", c.secret)
+	const tail = ", so every run needs a wall: --wall docker, or wall in forager.yaml; or keep the key with a starter, and run this machine without it, behind a gateway (key_needs_wall)"
+	fromFile := dir.Path(foragerdir.SecretFile) + " holds this machine's access key" + tail
+	fromEnv := "QORY_ACCESS_KEY_SECRET holds an access key" + tail
+	refused := func(name, secret, want string, args ...string) {
+		t.Helper()
+		t.Setenv("QORY_ACCESS_KEY_SECRET", secret)
 		clearRuns(t, root)
-		out, err := run(t, c.args...)
+		out, err := run(t, args...)
 		if cmd.ExitCode(err) != 1 || err == nil || err.Error() != want {
-			t.Errorf("%s: %v (exit %d)\n%s", c.name, err, cmd.ExitCode(err), out)
+			t.Errorf("%s: %v (exit %d), want %q\n%s", name, err, cmd.ExitCode(err), want, out)
 		}
-		if strings.Contains(out, "hello from") {
-			t.Errorf("%s: the runtime ran", c.name)
-		}
-		if has, _ := dir.HasMarker(); !has {
-			t.Errorf("%s: the marker is gone", c.name)
-		}
+		lacks(t, out, "hello from")
 	}
+	refused("--local, the key's file", "", fromFile, "run", "--local", "--wall", "none")
+	refused("--local, the file and the environment", srv.key.Secret(), fromEnv, "run", "--local", "--wall", "none")
 	if got := srv.byType(); len(got) != 0 || len(srv.registered) != 0 {
 		t.Errorf("a refused run registered %q or posted %v", srv.registered, got)
 	}
-	t.Setenv("QORY_ACCESS_KEY_SECRET", "")
-	writeFile(t, filepath.Join(string(dir), "forager.yaml"), "apiVersion: qory.dev/v1alpha1\n")
-	clearRuns(t, root)
-	if _, err := run(t, "run"); cmd.ExitCode(err) != 1 || !strings.Contains(err.Error(), "server_needs_wall") {
-		t.Errorf("a forager.yaml without a server: %v", err)
-	}
-
-	dir.RemoveMarker()
 	if err := os.Remove(dir.Path(foragerdir.SecretFile)); err != nil {
 		t.Fatal(err)
 	}
-	clearRuns(t, root)
-	if out, err := run(t, "run"); err != nil {
-		t.Fatalf("without the marker and the key: %v\n%s", err, out)
+	refused("--local, the environment", srv.key.Secret(), fromEnv, "run", "--local", "--wall", "none")
+	t.Setenv("QORY_ACCESS_KEY_SECRET", "")
+
+	for name, args := range map[string][]string{
+		"--local":   {"run", "--local", "--wall", "none"},
+		"no server": {"run"},
+	} {
+		if name == "no server" {
+			writeFile(t, filepath.Join(string(dir), "forager.yaml"), "apiVersion: qory.dev/v1alpha1\n")
+		}
+		clearRuns(t, root)
+		if out, err := run(t, args...); err != nil || !strings.Contains(out, "hello from") {
+			t.Errorf("%s, the marker without a key: %v\n%s", name, err, out)
+		}
+		if has, _ := dir.HasMarker(); !has {
+			t.Errorf("%s: the marker is gone", name)
+		}
 	}
 	entries, _ := os.ReadDir(runsDir(t, root))
+	if len(entries) != 1 {
+		t.Fatalf("%d runs recorded, want 1", len(entries))
+	}
 	b, err := os.ReadFile(filepath.Join(dir.Path(foragerdir.LocksDir), entries[0].Name()+".lock"))
 	if err != nil || string(b) != "unwalled\n" {
 		t.Errorf("the run's lock file: %q, %v", b, err)
@@ -542,7 +546,9 @@ func TestAKeyedMachineRunsNoAgentWithoutAWall(t *testing.T) {
 	}
 	t.Setenv("QORY_ACCESS_KEY_SECRET", "")
 
-	// Without a server, each file that holds a secret keeps an unwalled run out.
+	// Without a server, each file that holds a secret keeps an unwalled run out. The
+	// walled runs before recorded the checkout, which keeps every unwalled run out.
+	forgetPlaces(t)
 	writeFile(t, filepath.Join(string(dir), "forager.yaml"), "apiVersion: qory.dev/v1alpha1\n")
 	secret := dir.Path(foragerdir.SecretFile)
 	for _, name := range []string{foragerdir.NewSecretFile, foragerdir.ReplacedFile, foragerdir.OldPrefix + "1700000000"} {
@@ -566,7 +572,8 @@ func TestAKeyedMachineRunsNoAgentWithoutAWall(t *testing.T) {
 // TestAKeyFromTheEnvironmentAloneNeedsAWall is a machine with no key file whose access
 // key is in QORY_ACCESS_KEY_SECRET alone: an unwalled run is refused before anything
 // starts, key_needs_wall, exit 1, against the server, with --local and with a
-// forager.yaml without a server, since an agent can read qory's starting environment.
+// forager.yaml without a server, since an unwalled agent can read qory's starting
+// environment, on macOS from qory and on Linux from the program that started qory.
 // With the key from --access-key-secret-fd instead, read and closed, an unwalled run
 // that contacts no server starts.
 func TestAKeyFromTheEnvironmentAloneNeedsAWall(t *testing.T) {

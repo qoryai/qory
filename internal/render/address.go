@@ -163,7 +163,10 @@ func sortedNames(m map[string]string) []string {
 // the references resolved: a single file is written, a skill becomes a real directory
 // containing a link per file and directory that contains no reference and a written copy
 // of each Markdown file that does, so the module's files stay live wherever nothing had
-// to change. Every kind directory in keep is created, with no entry of that kind as well,
+// to change. An entry of a module the home holds a copy of, see [compose.Module.Copy], is
+// a copy instead, files and directories, with the references of each Markdown file that
+// holds one resolved. An agent with a tier is written with the tier's model and effort, see
+// [TierFront]. Every kind directory in keep is created, with no entry of that kind as well,
 // so a checkout link to it resolves. Entries of any other kind are left out, and it is
 // the caller's job to pass every kind the runtime reads from the directory.
 func PlaceEntries(res *compose.Result, dir string, addr Address, keep ...string) error {
@@ -174,15 +177,39 @@ func PlaceEntries(res *compose.Result, dir string, addr Address, keep ...string)
 			return err
 		}
 	}
+	out := &stageRoot{dir: dir}
+	defer out.Close()
 	for _, e := range res.Entries {
 		if !wanted[e.Kind] {
 			continue
 		}
-		dst := filepath.Join(dir, e.Kind, e.Name)
+		name := filepath.Join(e.Kind, e.Name)
 		switch e.Kind {
 		case "skills", "hooks":
 		default:
-			dst += ".md"
+			name += ".md"
+		}
+		dst := filepath.Join(dir, name)
+		if e.Kind == "agents" && e.Tier != "" {
+			data, err := readSource(res, e)
+			if err != nil {
+				return err
+			}
+			data = TierFront(res, e, []byte(res.Substitute(string(data), addr)))
+			if err := WriteFile(filepath.Dir(dst), filepath.Base(dst), data); err != nil {
+				return err
+			}
+			continue
+		}
+		if m, copied := moduleOf(res, e.Module); copied {
+			root, err := out.get()
+			if err != nil {
+				return err
+			}
+			if err := copyEntry(m, e.Path, root, name, resolver(res, e, addr)); err != nil {
+				return err
+			}
+			continue
 		}
 		if len(e.References) == 0 {
 			if err := os.Symlink(e.Path, dst); err != nil {
@@ -195,6 +222,40 @@ func PlaceEntries(res *compose.Result, dir string, addr Address, keep ...string)
 		}
 	}
 	return nil
+}
+
+// moduleOf is the module of res named name, and whether the home holds a copy of it.
+func moduleOf(res *compose.Result, name string) (compose.Module, bool) {
+	for _, m := range res.Modules {
+		if m.Name == name {
+			return m, m.Copy
+		}
+	}
+	return compose.Module{}, false
+}
+
+// readSource reads the file of the entry e: through the module's directory, the way a copy
+// reads it, when the home holds a copy of the module, else at its path.
+func readSource(res *compose.Result, e compose.Entry) ([]byte, error) {
+	if m, copied := moduleOf(res, e.Module); copied {
+		return readEntry(m, e.Path)
+	}
+	return os.ReadFile(e.Path)
+}
+
+// resolver is what a copy of the entry e passes each Markdown file through for the path
+// addr addresses: nil when e references nothing, else a function that resolves the
+// references of a file that holds one.
+func resolver(res *compose.Result, e compose.Entry, addr Address) func([]byte) []byte {
+	if len(e.References) == 0 {
+		return nil
+	}
+	return func(data []byte) []byte {
+		if !module.HasReference(data) {
+			return data
+		}
+		return []byte(res.Substitute(string(data), addr))
+	}
 }
 
 // place puts the file or directory at src at dst for the path addr names, see

@@ -10,7 +10,9 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/qoryai/forager/accesskey"
 
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/module"
 	"github.com/qoryai/qory/internal/source"
 	"github.com/qoryai/qory/internal/stack"
@@ -45,7 +47,7 @@ type Base struct {
 }
 
 // String returns the base for a message, <name>@<pin>.
-func (b *Base) String() string { return b.Name + "@" + b.Pin }
+func (b *Base) String() string { return shown(b.Name) + "@" + b.Pin }
 
 // LoadBase resolves the base stack p extends and returns the stack to compose, the
 // base's modules first and closed, with the base recorded for the result. It is
@@ -64,18 +66,18 @@ func LoadBase(p *stack.Stack, pin string, opts Options) (*stack.Stack, *Base, er
 	src, err := source.Resolve(p.Dir(), p.Extends, source.Options{Pin: pin, Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Memo: opts.Memo})
 	var fetch *source.FetchError
 	if errors.As(err, &fetch) {
-		return nil, nil, fmt.Errorf("the stack %s is not reachable from here: %w", p.Extends.String(), err)
+		return nil, nil, fmt.Errorf("the stack %s is not reachable from here: %w", p.Extends.Shown(), err)
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("extends %s: %w", p.Extends.String(), err)
+		return nil, nil, fmt.Errorf("extends %s: %w", p.Extends.Shown(), exports.HideError(err))
 	}
 	file := filepath.Join(src.Dir, stack.FileName)
 	base, err := stack.Load(file)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil, fmt.Errorf("extends %s: %s contains no %s", p.Extends.String(), src.Dir, stack.FileName)
+		return nil, nil, fmt.Errorf("extends %s: %s contains no %s", p.Extends.Shown(), exports.Value(src.Dir, false), stack.FileName)
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, exports.HideError(err)
 	}
 	merged, b, err := ExtendOn(p, base, src.Pin)
 	if err != nil {
@@ -114,16 +116,16 @@ func checkExtending(l *module.Module, base *Base) error {
 	for _, e := range l.Entries {
 		if e.Kind == "files" {
 			if !stack.FileAllowed(e.Name, base.Extending.Files) {
-				return fmt.Errorf("module %s ships files/%s, and the base stack %s lets an extending module ship files under %s", l.Name, e.Name, base, filesText(base.Extending.Files))
+				return fmt.Errorf("module %s ships files/%s, and the base stack %s lets an extending module ship files under %s", shown(l.Name), exports.HidePath(e.Name), base, filesText(base.Extending.Files))
 			}
 			continue
 		}
 		if !allowed[e.Kind] {
-			return fmt.Errorf("module %s ships %s/%s, and the base stack %s lets an extending module ship %s", l.Name, e.Kind, e.Name, base, kindsText(base.Extending.Kinds))
+			return fmt.Errorf("module %s ships %s/%s, and the base stack %s lets an extending module ship %s", shown(l.Name), shown(e.Kind), shown(e.Name), base, kindsText(base.Extending.Kinds))
 		}
 	}
 	if l.Instructions != "" && !base.Extending.Instructions {
-		return fmt.Errorf("module %s ships %s, and the base stack %s lets an extending module ship no instructions", l.Name, module.InstructionsName, base)
+		return fmt.Errorf("module %s ships %s, and the base stack %s lets an extending module ship no instructions", shown(l.Name), module.InstructionsName, base)
 	}
 	runtimes := make([]string, 0, len(l.Settings))
 	for rt := range l.Settings {
@@ -139,11 +141,11 @@ func checkExtending(l *module.Module, base *Base) error {
 		for _, f := range files {
 			keys, err := leafKeys(l.Settings[rt][f])
 			if err != nil {
-				return fmt.Errorf("module %s: %w", l.Name, err)
+				return fmt.Errorf("module %s: %w", shown(l.Name), err)
 			}
 			for _, key := range keys {
 				if !settingAllowed(key, base.Extending.Settings) {
-					return fmt.Errorf("module %s sets %s in settings/%s/%s, and the base stack %s lets an extending module set %s", l.Name, key, rt, f, base, settingsText(base.Extending.Settings))
+					return fmt.Errorf("module %s sets %s in settings/%s/%s, and the base stack %s lets an extending module set %s", shown(l.Name), shown(key), shown(rt), exports.HidePath(f), base, settingsText(base.Extending.Settings))
 				}
 			}
 		}
@@ -167,7 +169,7 @@ func settingAllowed(key string, allowed []string) bool {
 func leafKeys(path string) ([]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, exports.HideError(err)
 	}
 	doc := map[string]any{}
 	switch filepath.Ext(path) {
@@ -176,10 +178,10 @@ func leafKeys(path string) ([]string, error) {
 	case ".toml":
 		err = toml.Unmarshal(data, &doc)
 	default:
-		return nil, fmt.Errorf("%s: settings fragments are .json or .toml", path)
+		return nil, fmt.Errorf("%s: settings fragments are .json or .toml", exports.HidePath(path))
 	}
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, fmt.Errorf("%s: %w", exports.HidePath(path), exports.HideValueError(err, ""))
 	}
 	var keys []string
 	var walk func(prefix string, v any)
@@ -209,7 +211,7 @@ func kindsText(kinds []string) string {
 	if len(kinds) == 0 {
 		return "no entries"
 	}
-	return strings.Join(kinds, ", ")
+	return strings.Join(accesskey.ShownNames(kinds), ", ")
 }
 
 // filesText lists allowed file prefixes for a message, "no path" for none.
@@ -217,7 +219,7 @@ func filesText(prefixes []string) string {
 	if len(prefixes) == 0 {
 		return "no path"
 	}
-	return strings.Join(prefixes, ", ")
+	return strings.Join(exports.Values(prefixes), ", ")
 }
 
 // settingsText lists allowed settings paths for a message, "no settings" for none.
@@ -225,5 +227,5 @@ func settingsText(keys []string) string {
 	if len(keys) == 0 {
 		return "no settings"
 	}
-	return strings.Join(keys, ", ")
+	return strings.Join(accesskey.ShownNames(keys), ", ")
 }

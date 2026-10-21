@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/qoryai/forager/wall"
+	"github.com/qoryai/qory/internal/exports"
 )
 
 // ProbeUser is the user the probe's container runs as: a uid and a gid no image names,
@@ -39,7 +40,7 @@ var refShape = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/:@-]*$`)
 // CheckRef refuses what cannot be an image reference.
 func CheckRef(ref string) error {
 	if !refShape.MatchString(ref) {
-		return fmt.Errorf("%q is not an image reference", ref)
+		return fmt.Errorf("%s is not an image reference", exports.Value(ref, true))
 	}
 	return nil
 }
@@ -121,15 +122,17 @@ type inspected struct {
 // since it is built for the engine, and the image's programs as the engine runs them.
 func (e Engine) Check(ctx context.Context, platform string, t Target) []Check {
 	out, errOut, err := e.run(ctx, engineWait, "image", "inspect", "--format", "{{json .}}", t.Ref)
+	// The reference as a message prints it.
+	ref := exports.Value(t.Ref, false)
 	if err != nil {
 		if bytes.Contains(bytes.ToLower(errOut), []byte("no such image")) {
-			return []Check{{"image", Fail, "the engine does not hold " + t.Ref + "; docker pull " + t.Ref}}
+			return []Check{{"image", Fail, "the engine does not hold " + ref + "; docker pull " + ref}}
 		}
-		return []Check{{"image", Fail, "docker image inspect " + t.Ref + ": " + lastLine(errOut, err)}}
+		return []Check{{"image", Fail, "docker image inspect " + ref + ": " + lastLine(errOut, err)}}
 	}
 	var img inspected
 	if err := json.Unmarshal(bytes.TrimSpace(out), &img); err != nil {
-		return []Check{{"image", Fail, "docker image inspect " + t.Ref + " printed what does not read: " + err.Error()}}
+		return []Check{{"image", Fail, "docker image inspect " + ref + " printed what does not read: " + err.Error()}}
 	}
 	own := img.Os + "/" + img.Architecture
 	checks := []Check{{"image", Pass, "the engine holds it, for " + own + ", the platform the engine runs"}}
@@ -145,7 +148,7 @@ func (e Engine) Check(ctx context.Context, platform string, t Target) []Check {
 func homeSet(env []string) Check {
 	for _, kv := range env {
 		if v, ok := strings.CutPrefix(kv, "HOME="); ok {
-			return Check{"home", Pass, "the image sets HOME=" + v}
+			return Check{"home", Pass, "the image sets HOME=" + exports.Value(v, false)}
 		}
 	}
 	return Check{"home", Fail, "the image sets no HOME, so the engine gives /; set one any user may write, such as ENV HOME=/home/agent with mode 1777"}
@@ -207,7 +210,7 @@ func (e Engine) files(ctx context.Context, ref string) Check {
 // that lacks one of [ProbeChecks], or has a line of no known result, fails.
 func (e Engine) probe(ctx context.Context, t Target) []Check {
 	if strings.ContainsAny(t.Helper, ",\"\n") {
-		return []Check{{"probe", Fail, "the probe's path " + t.Helper + " holds a comma or a quote and cannot be mounted"}}
+		return []Check{{"probe", Fail, "the probe's path " + exports.Value(t.Helper, false) + " holds a comma or a quote and cannot be mounted"}}
 	}
 	args := []string{"run", "--rm", "--pull", "never", "--network", "none",
 		"--user", ProbeUser, "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--init",
@@ -222,7 +225,7 @@ func (e Engine) probe(ctx context.Context, t Target) []Check {
 	if jerr := json.Unmarshal(bytes.TrimSpace(out), &rep); jerr != nil || rep.Version != ReportVersion {
 		why := lastLine(errOut, err)
 		if strings.Contains(string(errOut), "unknown command") {
-			why = t.Helper + " has no image probe; set wall.helper to the Linux build of this qory"
+			why = exports.Value(t.Helper, false) + " has no image probe; set wall.helper to the Linux build of this qory"
 		} else if err == nil && jerr != nil {
 			why = "it printed what does not read: " + jerr.Error()
 		} else if err == nil {
@@ -249,14 +252,16 @@ func (e Engine) probe(ctx context.Context, t Target) []Check {
 }
 
 // lastLine is the last line a command printed on its standard error, or its error when
-// it printed none.
+// it printed none, with a URL's password as (hidden) and each word with an access key
+// secret or a run key as Forager's value phrase, as [exports.HideURLs] and
+// [exports.HideValues] print them.
 func lastLine(stderr []byte, err error) string {
 	lines := strings.Split(strings.TrimSpace(string(stderr)), "\n")
 	if last := strings.TrimSpace(lines[len(lines)-1]); last != "" {
-		return last
+		return exports.HideValues(exports.HideURLs(last))
 	}
 	if err != nil {
-		return err.Error()
+		return exports.HideValues(exports.HideURLs(err.Error()))
 	}
 	return "no answer"
 }
@@ -274,7 +279,7 @@ func Arch(platform string) string {
 func HelperArch(path string) (string, error) {
 	f, err := elf.Open(path)
 	if err != nil {
-		return "", fmt.Errorf("not a Linux executable: %w", err)
+		return "", fmt.Errorf("not a Linux executable: %w", exports.HideError(err))
 	}
 	defer f.Close()
 	for _, p := range f.Progs {

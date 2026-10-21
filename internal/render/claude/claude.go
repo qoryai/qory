@@ -15,10 +15,11 @@
 // --mcp-config and launch/CLAUDE.md to --append-system-prompt-file. [Template] contains
 // those arguments, and neither the plugin nor the launch directory is linked into the
 // checkout. The plugin's agents are copies where everything else in the home is a link,
-// see [render.WritePlugin]: Claude Code passes over a link in a plugin's agents
-// directory, and registers a file there as harness:<name>. The launch line adds to the
-// session the program was started in and takes nothing over: whatever configuration
-// directory, login and memory the launcher has stay its own.
+// or a copy for a module that lies in the checkout, see [render.WritePlugin]: Claude
+// Code passes over a link in a plugin's agents directory, and registers a file there as
+// harness:<name>. The launch line adds to the session the program was started in and
+// takes nothing over: whatever configuration directory, login and memory the launcher
+// has stay its own.
 //
 // The two paths register the same entries under different names, and that is why the
 // instructions are written twice. A session reading the checkout's .claude finds its
@@ -171,7 +172,9 @@ func (claude) Address() render.Address { return render.PluginAddress }
 // holds one. The manifest names no agents key: Claude Code discovers agents/ on its own,
 // and a manifest that names the directory turns the discovery off. The hooks, the servers, the settings and the instructions are not
 // in the plugin: they reach the session through the settings and files [Template] names,
-// the same ones the checkout's links point at, so nothing is rendered twice.
+// the same ones the checkout's links point at, so nothing is rendered twice. A plugin of
+// a home that holds a copy of a module is refused past 10,000 entries, see
+// [render.CheckPluginSize], so a walled launch does not refuse it later.
 func renderPlugin(res *compose.Result, dir string) error {
 	extra := map[string]any{}
 	for _, e := range res.Entries {
@@ -184,8 +187,26 @@ func renderPlugin(res *compose.Result, dir string) error {
 			return err
 		}
 	}
-	return render.WritePlugin(res, dir, ".claude-plugin", extra)
+	if err := render.WritePlugin(res, dir, ".claude-plugin", extra); err != nil {
+		return err
+	}
+	if render.Copies(res) {
+		return render.CheckPluginSize(dir)
+	}
+	return nil
 }
+
+// ModelVariables are the environment variables Claude Code ranks above the model and
+// effort qory writes: the main model, the aliases' models, the agents' model and the
+// effort. A compose for claude refuses each place that sets one for the session.
+var ModelVariables = []string{
+	"ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+	"ANTHROPIC_DEFAULT_FABLE_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "CLAUDE_CODE_EFFORT_LEVEL",
+}
+
+// AgentEfforts are the effort values a Claude Code agent file takes in its effort
+// frontmatter. The effortLevel setting does not take max; an agent file does.
+func (claude) AgentEfforts() []string { return []string{"low", "medium", "high", "xhigh", "max"} }
 
 // Egress is the host Claude Code's program reaches for the model: the API. The
 // telemetry and the MCP proxy hosts it also tries are not declared; a policy that does

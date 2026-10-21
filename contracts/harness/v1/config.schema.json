@@ -24,6 +24,25 @@
           ]
         },
         "model": {"type": "string", "minLength": 1},
+        "tiers": {
+          "description": "The model id each tier maps to, for the agents whose model is ${qory:<tier>}: a model id, or {model, effort}, the effort one of the values the runtime takes for an agent. In the user's file and an ancestor's it is the machine's map, the nearest file per tier; in the checkout root's file it is the repository's map, read under extends too. Per tier, --tier wins over the machine's map, and the machine's map over the repository's; an entry comes whole from one of the three.",
+          "type": "object",
+          "propertyNames": {"enum": ["light", "fast", "thinking"]},
+          "additionalProperties": {
+            "oneOf": [
+              {"type": "string", "minLength": 1},
+              {
+                "type": "object",
+                "required": ["model"],
+                "additionalProperties": false,
+                "properties": {
+                  "model": {"type": "string", "minLength": 1},
+                  "effort": {"type": "string", "minLength": 1}
+                }
+              }
+            ]
+          }
+        },
         "force": {"type": "boolean"},
         "update": {"type": "string", "enum": ["always", "never"]},
         "home": {

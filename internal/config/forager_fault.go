@@ -9,14 +9,66 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/qoryai/forager/accesskey"
 	"gopkg.in/yaml.v3"
+
+	"github.com/qoryai/qory/internal/exports"
 )
 
 // What follows says what is wrong with forager.yaml without any value of it: a refusal
 // names the file, the key and what is wrong, and never what the key holds, since a
 // value may be a secret written in the wrong place. The decoder's own messages quote a
-// value, or a Go type, so forager.yaml does not print them; [decodeError], which qory's
-// other files use, is left as it is.
+// value, or a Go type, so forager.yaml does not print them; [exports.DecodeError], which
+// qory's other files use, is left as it is. A name that contains an access key secret or
+// a run key is a secret written in the wrong place too, so a refusal places it by its
+// line and leaves the name out.
+
+// foragerReads is what follows "is not one" in the refusal of a key forager.yaml does not
+// read.
+const foragerReads = " " + ForagerFileName + " reads"
+
+// aliasNotRead is the refusal of a key written as an alias of the anchor anchor, which
+// forager.yaml does not read. It contains the alias, unless the anchor's name contains
+// an access key secret or a run key: that name is left out as [exports.KeyNotRead]
+// leaves one out.
+func aliasNotRead(anchor string) string {
+	if accesskey.ContainsSecret(anchor) {
+		return "key is an alias of a key " + ForagerFileName + " does not read"
+	}
+	return fmt.Sprintf("key *%s is an alias of a key %s does not read", anchor, ForagerFileName)
+}
+
+// entryAt is the entry of section whose name is the key k, as a refusal places it:
+// section.name; or, when the name contains an access key secret or a run key, as
+// [accesskey.ContainsSecret] reports one, the section and the name's line, as
+// "section (line N)", so the refusal does not contain the secret.
+func entryAt(section string, k *yaml.Node) string {
+	if accesskey.ContainsSecret(k.Value) {
+		return fmt.Sprintf("%s (line %d)", section, k.Line)
+	}
+	return join(section, k.Value)
+}
+
+// quotedName is the entry name k as a refusal quotes it: quoted; or, when the name
+// contains an access key secret or a run key, "the name at line N".
+func quotedName(k *yaml.Node) string {
+	if accesskey.ContainsSecret(k.Value) {
+		return fmt.Sprintf("the name at line %d", k.Line)
+	}
+	return fmt.Sprintf("%q", k.Value)
+}
+
+// keyNotOne is the refusal, in the file at path, of the key k of the entry at at that
+// the entry does not take: "key", the name quoted, "is not one" and rest, as
+// [exports.KeyNotRead] says it. When the name contains an access key secret or a run
+// key, the refusal leaves it out and starts with the key's line.
+func keyNotOne(path, at string, k *yaml.Node, rest string) error {
+	text := exports.KeyNotRead(k.Value, rest)
+	if accesskey.ContainsSecret(k.Value) {
+		return fmt.Errorf("%s: line %d: %s: %s", path, k.Line, at, text)
+	}
+	return fmt.Errorf("%s: %s: %s", path, at, text)
+}
 
 // fault is what is wrong at one place of forager.yaml: the line, and what follows it,
 // the key and what is wrong with what it holds, which never holds the value.
@@ -76,13 +128,13 @@ func aliasRefusal(err error) (string, bool) {
 }
 
 // foragerSyntaxError is err, an error reading forager.yaml as YAML at all: a refusal of
-// its anchors in qory's words, which name no anchor, and any other as [decodeError]
-// says it.
+// its anchors in qory's words, which name no anchor, and any other as
+// [exports.DecodeError] says it.
 func foragerSyntaxError(path string, err error) error {
 	if text, ok := aliasRefusal(err); ok {
 		return fmt.Errorf("%s: %s", path, text)
 	}
-	return decodeError(path, err)
+	return exports.DecodeError(path, err)
 }
 
 // tagRefusal matches the decoder's refusal of a scalar whose tag its value does not fit,
@@ -90,7 +142,7 @@ func foragerSyntaxError(path string, err error) error {
 var tagRefusal = regexp.MustCompile("^yaml: (cannot decode !!\\S+ `|!!binary value contains invalid base64 data$)")
 
 // foragerDecodeError is an error decoding n, which stands at key, into t, said without a
-// value: an unknown key as [decodeError] says it; a refusal of the file's anchors,
+// value: an unknown key as [exports.DecodeError] says it; a refusal of the file's anchors,
 // aliases or merges in words of qory's own, without a walk of n, which they could make
 // endless; a value of the wrong type or tag by the first place under n the decoder
 // cannot take, which [findFault] names; a failure of the decoder as [errDecoderFailed];
@@ -100,13 +152,13 @@ func foragerDecodeError(path string, n *yaml.Node, t reflect.Type, key string, k
 	var te *yaml.TypeError
 	if errors.As(err, &te) {
 		for _, e := range te.Errors {
-			if m := unknownKey.FindStringSubmatch(e); m != nil && m[0] == e {
+			if m := exports.UnknownKey.FindStringSubmatch(e); m != nil && m[0] == e {
 				// The decoder names a key by what it decodes into, which for a key
 				// written as an alias is a value written elsewhere in the file.
 				if a := aliasKeyAt(n, m[1], m[2]); a != nil {
-					return fmt.Errorf("%s: %skey *%s is an alias of a key %s does not read", path, m[1], a.Value, ForagerFileName)
+					return fmt.Errorf("%s: %s%s", path, m[1], aliasNotRead(a.Value))
 				}
-				return fmt.Errorf("%s: %skey %q is not one %s reads", path, m[1], m[2], ForagerFileName)
+				return fmt.Errorf("%s: %s%s", path, m[1], exports.KeyNotRead(m[2], foragerReads))
 			}
 		}
 	}
@@ -434,9 +486,9 @@ func (w *walk) structFault(n *yaml.Node, t reflect.Type, key string, merged map[
 		if !ok {
 			if w.known && !w.keys {
 				if raw := n.Content[i]; raw.Kind == yaml.AliasNode {
-					return &fault{raw.Line, fmt.Sprintf("key *%s is an alias of a key %s does not read", raw.Value, ForagerFileName)}
+					return &fault{raw.Line, aliasNotRead(raw.Value)}
 				}
-				return &fault{k.Line, fmt.Sprintf("key %q is not one %s reads", k.Value, ForagerFileName)}
+				return &fault{k.Line, exports.KeyNotRead(k.Value, foragerReads)}
 			}
 			continue
 		}
@@ -508,9 +560,18 @@ func writtenAgain(n *yaml.Node) (first, again *yaml.Node) {
 }
 
 // writtenTwice is the fault of name, a key of the mapping at key, written at the line
-// first and again at the line again.
+// first and again at the line again. A name that contains an access key secret or a
+// run key is left out, as "a key of" the mapping, or "a key" at the top of the file;
+// the fault's line places it.
 func writtenTwice(key, name string, first, again int) *fault {
-	return &fault{again, fmt.Sprintf("%s is written twice; it was first written at line %d", join(key, name), first)}
+	at := join(key, name)
+	if accesskey.ContainsSecret(name) {
+		at = "a key"
+		if key != "" {
+			at = "a key of " + key
+		}
+	}
+	return &fault{again, fmt.Sprintf("%s is written twice; it was first written at line %d", at, first)}
 }
 
 // keyNotAName is the fault of a key at line, of the mapping at key, that is a list or a

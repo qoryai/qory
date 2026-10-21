@@ -71,11 +71,14 @@ The session runs on pipes instead, and `qory` reads the runtime's structured out
 
 Each run is recorded on your machine, outside the checkout, in qory's state directory:
 `~/.local/state/qory/runs/<checkout>-<hash>/<id>/`, or under `$XDG_STATE_HOME/qory` when
-that is set to an absolute path. `<checkout>` is the checkout's directory name, and
-`<hash>` the first 12 hex digits of the SHA-256 of its full path, with links resolved.
-Each checkout has a separate folder. The state directory, its `runs` directory and the
-checkout's folder are mode 0700: only you can open them. qory names the run's folder
-when the run ends:
+that is set; qory refuses a relative `XDG_STATE_HOME`. `<checkout>` is the checkout's
+directory name, and `<hash>` the first 12 hex digits of the SHA-256 of its full path, with
+links resolved. Each checkout has a separate folder. The state directory, its `runs`
+directory and the checkout's folder are mode 0700: only you can open them. The state
+directory also keeps, in `places`, the record of the places each walled run used. qory
+checks it before it runs git or acts on a qory file there; a qory started with another
+`HOME` or `XDG_STATE_HOME` does not see those records, so it does not check those places.
+qory names the run's folder when the run ends:
 
 ```
 qory run: the record is in /home/you/.local/state/qory/runs/app-3f9a1c0b7d2e/0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f
@@ -126,8 +129,8 @@ docker build -t qory-agent qory/images/agent
 On a Mac, first set `wall.helper` to the Linux build of the same `qory` release. See
 [The wall](#the-wall).
 
-A walled run of Claude Code can keep its model credential outside the container. Define
-the wall, the credential and what the agent may reach in `~/.config/qory/forager.yaml`:
+A walled run of Claude Code can keep its model key outside the container. Define the
+wall, the model key and what the agent may reach in `~/.config/qory/forager.yaml`:
 
 ```yaml
 apiVersion: qory.dev/v1alpha1
@@ -138,15 +141,15 @@ gateway:
   credentials:
     model:
       env: CLAUDE_CODE_OAUTH_TOKEN
-      hosts: [api.anthropic.com]
-      auth: {scheme: bearer}
-      placeholders: [CLAUDE_CODE_OAUTH_TOKEN]
+      format: anthropic-messages
+      endpoint: https://api.anthropic.com
+      auth: {scheme: bearer, oauth: true}
 wall:
   adapter: docker
   image: qory-agent
 ```
 
-Then pass the run a policy that selects the credential. Keep the policy outside the
+Then pass the run a policy that selects the model key. Keep the policy outside the
 checkout:
 
 ```yaml
@@ -166,24 +169,42 @@ qory run --policy ~/hello-policy.yaml -- -p "/hello"
 
 The agent greets you as before. What changed:
 
-- Inside the container, `CLAUDE_CODE_OAUTH_TOKEN` is a placeholder.
+- Inside the container, `CLAUDE_CODE_OAUTH_TOKEN` is a placeholder, and
+  `ANTHROPIC_BASE_URL` is `https://api.anthropic.com`.
 - The proxy sets the real token on each request to `api.anthropic.com`.
 - The record lists those requests with the credential's name, `model`, as `credential`
   in `dev.qory.run.egress`. It never lists the token's value.
 - Everything else the agent tries to reach is denied and recorded.
 
-A run whose policy selects a credential needs a wall; without one it does not start. See
-[Credentials the agent never has](#credentials-the-agent-never-has).
+If you run it without a wall, the agent can read the token too. qory and the agent run as
+the same user. On macOS, the agent can read the environment qory started with, where
+`CLAUDE_CODE_OAUTH_TOKEN` is set. On Linux, it can read the environment that the program
+that started qory, such as your shell, started with, which may contain the token. The
+agent can also read the environment of any other process of yours that started with the
+token set. To keep the token out of the agent's reach without a wall, run the gateway on
+another machine, as in [Through a separate gateway](#through-a-separate-gateway).
+
+### When to run without a wall
+
+If you start the agent yourself on your machine, a run without a wall is fine. There, an
+agent you start without qory can reach your credentials too.
+
+If nobody watches the run, such as a run that a work item or a schedule starts, run it
+with a wall. Text the agent reads, such as an issue, a web page or a file, can contain
+instructions that make the agent act against you (prompt injection). Without a wall, such
+an agent can read every credential stored on this machine, and a program that ignores the
+proxy reaches any host. To run with a wall, see [Behind a wall](#behind-a-wall) and [The
+wall](#the-wall).
 
 ## forager.yaml
 
 One optional file defines what Forager does on this machine:
 `~/.config/qory/forager.yaml`. It lives beside your `qory.yaml`, and nowhere else. So a
 repository cannot set it. It has three sections beside `apiVersion`: `gateway`, the
-proxy's policy, the server, the credentials, the tools and the integrations; `session`, this
-instance and what applies to every run; and `wall`, the container. `gateway.listen` and
-`gateway.tls` are `qory gateway`'s: `qory run` does not use them. See [the gateway as a
-service](gateway.md).
+proxy's policy, the server, the credentials, the tools, the integrations and the limits of
+each run; `session`, this instance and what applies to every run; and `wall`, the
+container. `gateway.listen` and `gateway.tls` are `qory gateway`'s: `qory run` does not use
+them. See [the gateway as a service](gateway.md).
 
 `gateway.server.via` reaches the server through a gateway, on a machine whose node goes
 through one; a runner whose starter registers its runs needs no such setting: see
@@ -206,15 +227,24 @@ gateway:
       - {alg: ed25519, public_key: mptNqtgGKgLhLZxmOGfpBQkdeBNH7QN3Qs9ETNumy8Q}
     # via: {url: https://gateway.example:8443}   # reach the server through a gateway
   credentials:             # tokens the proxy sets on requests; a run's policy selects them
-    model:                                # the model credential, kept outside the container
+    model:                                # a model key, kept outside the container
       env: CLAUDE_CODE_OAUTH_TOKEN        # or file: an absolute path; or adapter: a program
-      hosts: [api.anthropic.com]
-      auth: {scheme: bearer}              # or basic with username, or header with header
+      format: anthropic-messages          # the API the endpoint serves
+      endpoint: https://api.anthropic.com # the key goes to this host alone
+      auth: {scheme: bearer, oauth: true} # or header with header, or basic with username
+    tracker:                              # a token for other hosts
+      env: TRACKER_TOKEN
+      hosts: [api.example.com]
+      auth: {scheme: header, header: X-Api-Key}
       paths: [/v1/*]                      # where on its hosts the token goes; optional
-      placeholders: [CLAUDE_CODE_OAUTH_TOKEN]
   integrations:            # programs that mint a credential; optional
     github:                               # qory-github, found on the PATH
       settings: {app_id: 123456, private_key_file: /etc/qory/github-app.pem}
+  run_limits:              # the limits of each run; optional
+    connections: 256                      # open at once, 1 to 65536
+    requests_per_second: 50               # 1 to 10000
+    burst: 200                            # requests at once after a pause, 1 to 100000
+  lock_memory: true        # Linux only: keep the gateway's memory out of swap; optional
 session:
   instance:                # optional
     name: build-01         # how the server shows this machine; the host name by default
@@ -230,7 +260,12 @@ wall:                      # start the runtime in a container; optional
 ```
 
 Without `gateway.egress`, everything the runtime reaches is allowed and recorded. A
-`forager.yaml` that does not read means no run.
+`forager.yaml` that does not read means no run. Behind a wall, the runtime reaches your
+machine or a private network address, such as `10.0.0.5`, only for a host that
+`gateway.egress.allow` of this `forager.yaml` lists by name. Through a separate gateway, the
+rule covers the gateway's machine, and the list that counts is `gateway.egress.allow` of the
+gateway's `forager.yaml`. See [The gateway's machine and private
+addresses](gateway.md#the-gateways-machine-and-private-addresses).
 
 ## Runtimes
 
@@ -245,8 +280,7 @@ It says:
 - how the runtime's hooks are installed,
 - what its output means as events,
 - which signal asks it to stop,
-- which variables hold its model credential: see [The model
-  credential](#the-model-credential).
+- which variables hold its model key: see [The model key](#the-model-key).
 
 Forager ships the descriptor for Claude Code. `~/.config/qory/runtimes/<runtime>.yaml`
 describes another runtime, or replaces the one shipped.
@@ -292,6 +326,35 @@ on `SIGTERM`. So the signal is yours to choose: `SIGTERM`, `SIGINT`, `SIGHUP`, `
 
 `session.run.timeout`, `session.run.stop_signal` and `session.run.stop_grace` in
 `forager.yaml` set these for every run on the machine.
+
+## Limits of each run
+
+`gateway.run_limits` in `forager.yaml` limits each run on the gateway, so that one run
+cannot slow down the others. Each run has separate counters.
+
+```yaml
+# ~/.config/qory/forager.yaml
+gateway:
+  run_limits:
+    connections: 256          # open at once, 1 to 65536
+    requests_per_second: 50   # 1 to 10000
+    burst: 200                # requests at once after a pause, 1 to 100000
+```
+
+- `connections` is the most connections a run has open through the gateway at once. The
+  next one gets `429 Too Many Requests` at once.
+- `requests_per_second` is how many requests a run sends a second, and `burst` how many it
+  sends at once after a pause. A request past the limit waits up to 5 seconds, then gets
+  `429 Too Many Requests`.
+- A field you leave out has its default: 256, 50 and 200.
+- A value outside its range stops every qory command that reads `forager.yaml`, with the
+  fix, such as `set gateway.run_limits.connections to a number from 1 to 65536, or remove
+  it for the default of 256`.
+- The record has a `dev.qory.run.egress` with the rule `wall:connection-limit` or
+  `wall:rate-limit` for a request that gets the `429`, at most one per limit and second.
+
+`qory gateway` applies the same limits to each run it serves. A `qory run` through a
+separate gateway gets that gateway's limits.
 
 ## A run's variables
 
@@ -415,7 +478,8 @@ Forager's, and so does `QORY_RUN_KEY`, the run key a starter gives a job. Every 
 command reads them into memory when it starts, and removes them from its environment
 before it starts anything. So no session, worktree command, tool or integration it starts
 inherits them. A `wall.env` or `--env` that names one is refused. An unwalled agent can
-still read the environment qory started with, so a run while `QORY_ACCESS_KEY_SECRET` or
+still read the environment qory started with on macOS, and on Linux the starting
+environment of the program that started qory, so a run while `QORY_ACCESS_KEY_SECRET` or
 `QORY_RUN_KEY` is set needs a wall: see [An access key needs a
 wall](#an-access-key-needs-a-wall) and [The run key](#the-run-key).
 
@@ -462,7 +526,7 @@ An owner or administrator in Qory Apiary creates an enrolment code on the node's
 The code is used once, and lasts 15 minutes.
 
 ```sh
-qory access-key enrol https://apiary.example qec_…
+qory access-key enrol https://apiary.example qecn_…
 ```
 
 qory makes the key, keeps its secret in `access-key-secret.new`, mode `0600`, and prints
@@ -504,7 +568,8 @@ When the enrolment does not complete:
 A secret enrol moves aside goes to `access-key-secret.old.<Unix time>`. It is deleted
 once a new key is enrolled and a run uses it. Enrol moves aside only
 `access-key-secret.new`: a refused enrolment never moves or changes
-`access-key-secret`.
+`access-key-secret`. A key the server enrolled for something else is deleted from
+`access-key-secret.new` instead, since it is active until it is revoked in Qory Apiary.
 
 Enrol refuses while `QORY_ACCESS_KEY_ID`, `QORY_ACCESS_KEY_SECRET` or
 `QORY_APIARY_PUBLIC_KEY` is set: the key it keeps in this machine's files would
@@ -514,7 +579,7 @@ a wall is running on this machine: it must end before a key is made.
 #### Replace the machine's key
 
 ```sh
-qory access-key enrol --replace https://apiary.example qec_…
+qory access-key enrol --replace https://apiary.example qecn_…
 ```
 
 `--replace` moves a machine that holds a key to a new one, with a new code. The old key
@@ -667,16 +732,15 @@ as the server answers. It keeps nothing, so an enrolment whose answer is lost or
 not verify cannot be retried: get a new code, and have the owner or administrator in
 Qory Apiary revoke the key qory printed the fingerprint of, should Qory Apiary show it.
 
-#### Stored secrets need a wall
+#### Stored secrets
 
 When the server lists stored secrets for the machine's access key, qory keeps a marker, the
-file `stored-secrets` beside `forager.yaml`. While it is there, an unwalled run that
-contacts no server, `--local` or one whose `forager.yaml` has no server, is refused before
-it starts, `server_needs_wall`. An unwalled run against the server is refused by
-`key_needs_wall` instead: see [An access key needs a wall](#an-access-key-needs-a-wall).
-With the secret from `access-key-secret`, a server's configuration that lists no stored
-secrets removes the marker. With the secret from `QORY_ACCESS_KEY_SECRET` or
-`--access-key-secret-fd`, the marker stays as it is.
+file `stored-secrets` beside `forager.yaml`. The marker stops no run. Stored secrets reach
+only a run that signs with this machine's access key, and on a machine that holds that
+key, qory starts no run without a wall: see [An access key
+needs a wall](#an-access-key-needs-a-wall). With the secret from `access-key-secret`, a
+server's configuration that lists no stored secrets removes the marker. With the secret
+from `QORY_ACCESS_KEY_SECRET` or `--access-key-secret-fd`, the marker stays as it is.
 
 `qory access-key enrol` writes the marker before it makes a key, unless `--print`, since
 the new key may receive stored secrets. It is removed as above.
@@ -703,7 +767,8 @@ enrol moved aside, `access-key-secret.old.<Unix time>`: an unwalled agent could 
 and the refusal names the one it found.
 
 `QORY_ACCESS_KEY_SECRET` refuses an unwalled `--local` run too, though the run contacts no
-server: the agent can read the environment qory started with. A key given by
+server: on macOS the agent can read the environment qory started with, and on Linux the
+starting environment of the program that started qory. A key given by
 `--access-key-secret-fd` alone does not: qory reads the descriptor and closes it before
 anything starts, so an unwalled run that contacts no server, `--local` or one whose
 `forager.yaml` has no server, may have it. An unwalled run against the server with that key
@@ -752,8 +817,10 @@ The gateway is `qory gateway` on another machine, or a service on this one: see 
 gateway as a service](gateway.md). The session reaches it over TLS 1.3, at the address the
 run key names, and every request carries the run key. The proxy, the policy, the
 credentials and the access key are the gateway's, on its machine, and the gateway reports
-the run to Qory Apiary. Without a run key or `gateway.server.via`, nothing changes: `qory
-run` starts a gateway itself for each run.
+the run to Qory Apiary. The run's policy selects its credentials. When it selects none, the
+gateway can select them for a run, with a wall or without, by the run's labels: see
+[gateway.selects](gateway.md#the-machines-behind-it). Without a run key or
+`gateway.server.via`, nothing changes: `qory run` starts a gateway itself for each run.
 
 The run's first line names the gateway and the run:
 
@@ -777,16 +844,20 @@ takes it from the descriptor `--run-key-fd` names, or from `QORY_RUN_KEY`:
 Giving it both ways is refused: `--run-key-fd and QORY_RUN_KEY both give a run key; give it
 one way`. White space around the key is left out.
 
-An unwalled agent behind a gateway holds at most the run key. qory takes `QORY_RUN_KEY` out of
-the environment the agent gets. But on Linux, an agent running as you can read qory's
-environment through `/proc`, and its memory where your programs may debug one another. Within
-the live run, whoever holds the run key can post events and open proxy connections as the
-session, for that run only. A wall keeps it out.
+An unwalled agent behind a gateway holds at most the run key. qory takes `QORY_RUN_KEY` out
+of the environment the agent gets. On Linux, an agent that runs as you without
+`CAP_SYS_PTRACE` reads neither qory's environment nor its memory: qory is not dumpable. But
+it can read, through `/proc`, the environment that the program that started qory started
+with, such as a job step's shell, and that environment may contain `QORY_RUN_KEY`. The agent
+can also read the environment of any other process of yours that started with
+`QORY_RUN_KEY` set. On macOS, an agent that runs as you can read the environment qory
+started with. Within the live run, whoever holds the run key can post events and open proxy
+connections as the session, for that run only. A wall keeps it out.
 
 So an unwalled run with `QORY_RUN_KEY` set is refused before anything starts:
 
 ```text
-QORY_RUN_KEY is in qory's environment, which an unwalled agent can read, so a run with it needs a wall: --wall docker, or wall in forager.yaml; or give the run key with --run-key-fd, such as --run-key-fd 0 for stdin (run_key_needs_wall)
+QORY_RUN_KEY is in the environment qory started with, which an unwalled agent can read (on macOS always, on Linux through the program that started qory), so a run with it needs a wall: --wall docker, or wall in forager.yaml; or give the run key with --run-key-fd, such as --run-key-fd 0 for stdin (run_key_needs_wall)
 ```
 
 `--run-key-fd` keeps the run key out of qory's environment, not out of the job's: see [For a
@@ -805,6 +876,44 @@ The run's labels and what it is about are its registration's, which its starter 
 --run-key-fd: its starter registered the run already, so give them to qory run register`.
 qory sends no `forge` or `repository` of the checkout's either: the starter gives them as
 labels.
+
+A run given a run key starts Claude Code with `--setting-sources user`,
+`--strict-mcp-config` and `--mcp-config` with the harness's MCP list, or an empty one when
+the harness has none: Claude Code reads no settings of the checkout's `.claude` and no
+`.mcp.json`, and loads no MCP server but those `--mcp-config` names. Other runtimes get
+none of these flags. For any runtime, a run given a run key reads no `git`, `env` or
+machine key under `harness`, such as `launch` or `home`, from the checkout's `qory.yaml`:
+your `qory.yaml` and the files above the checkout set those. Without a wall, Claude Code
+reads the settings, `CLAUDE.md`, plugins and memory of the user running qory, as
+`--setting-sources user` reads them. Behind a wall, `CLAUDE_CONFIG_DIR` is
+`/tmp/qory-agent-home` in the container, an empty folder of mode 0700 that qory makes after
+the commands the repository's configuration runs, last before Claude Code starts; the run is
+refused when anything is at that path then. The model key comes through the gateway, so
+the empty folder needs no login. `HOME` stays the image's. Claude Code starts through
+qory, which removes the image's values of the variables named `ANTHROPIC_*`, `CLAUDE_*`,
+`QORY_*`, `MCP_*` and `OTEL_*`, of `NODE_OPTIONS`, `NODE_PATH`, `LD_PRELOAD`, `LD_AUDIT`,
+`BASH_ENV` and `ENV`, of `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` and `ALL_PROXY` in either
+case, and of `SSL_CERT_FILE`, `SSL_CERT_DIR` and `NODE_EXTRA_CA_CERTS`; the values Forager,
+the wall and the server set for the run stay, and so does a value of a variable named
+`ANTHROPIC_*`, `CLAUDE_*`, `QORY_*`, `MCP_*` or `OTEL_*` that is the gateway's placeholder.
+Behind a wall, the run is also refused when the image has `/etc/claude-code`, where Claude
+Code reads managed settings, and when the harness home is inside the checkout: compose it
+outside with `--home`.
+
+These checks guard against what the run's image and the repository's files leave in place: a
+configuration folder, managed settings or variables that change what Claude Code does. They
+also refuse a harness home that the machine's settings put inside the checkout, where the
+repository decides what is there. They do not hold against a repository that acts against
+them. The image's programs, and the commands the repository's configuration runs, run as the
+agent's user in the agent's container, so they can change what Claude Code reads after qory
+checked it, such as through a program they leave running. Against a hostile repository, the
+boundary is the wall: the container reaches out only through the gateway, the credentials
+stay at the gateway, outside the container, and the gateway starts the tools `gateway.tools`
+defines, outside the container too; Claude Code's shell and edit tools run inside it. The
+run's record is written outside the container, and what Forager and the gateway record, the
+run's start and end and its egress, cannot be changed from inside it. The hook events come
+from inside the container, so a program left running there can send hook events Claude Code
+did not make.
 
 ### A machine with a separate access key, behind a gateway
 
@@ -845,7 +954,7 @@ wall:
 Enrol the machine's key through the gateway with `--via`:
 
 ```sh
-qory access-key enrol --via https://gateway.example:8443 https://apiary.example qec_…
+qory access-key enrol --via https://gateway.example:8443 https://apiary.example qecn_…
 ```
 
 The enrolment goes through the gateway, and enrol writes `gateway.server.via` beside the key:
@@ -912,6 +1021,10 @@ Before anything starts, `qory run` given a run key refuses:
 - `--label`, `--kind`, `--title`, `--subject` and `--details`, as [The run key](#the-run-key)
   says
 - an unwalled run with `QORY_RUN_KEY` set, `run_key_needs_wall`
+- `qory run: <variable> is the model's credential, which a walled run given a run key takes
+  only through the gateway; remove it from --env`, or `...; remove it from wall.env in
+  forager.yaml`, for a variable the runtime reads its model key from: `ANTHROPIC_API_KEY`,
+  `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_AUTH_TOKEN` for Claude Code
 - `--run-key-fd <n>: the standard output and error carry no run key; name 0 for stdin, or
   a descriptor of 3 or above`, `--run-key-fd <n>: more than a run key`, and `--run-key-fd
   <n>: <err>` for a descriptor qory cannot read
@@ -1002,7 +1115,10 @@ through no gateway, so resend it with a `forager.yaml` without `gateway.server.v
 ## Runs started by another system
 
 A system that starts runs sets their id and labels, and says what each is
-about. It passes each run its policy:
+about. Start these runs with a wall: see [When to run without a
+wall](#when-to-run-without-a-wall).
+
+The system passes each run its policy:
 
 ```sh
 qory run --run-id "$uuid" --label job=1234 --label issue=77 \
@@ -1136,11 +1252,11 @@ repository. A policy defines no credential.
 # ~/.config/qory/forager.yaml
 gateway:
   credentials:
-    model:                                  # a token from qory run's environment
+    model:                                  # a model key from qory run's environment
       env: CLAUDE_CODE_OAUTH_TOKEN
-      hosts: [api.anthropic.com]
-      auth: {scheme: bearer}                # or basic with a username, or header with a name
-      placeholders: [CLAUDE_CODE_OAUTH_TOKEN]
+      format: anthropic-messages
+      endpoint: https://api.anthropic.com
+      auth: {scheme: bearer, oauth: true}
     product:                                # a token from an adapter of yours
       adapter: [/opt/adapters/code-host, --repo, "${argument}"]
       argument: '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+'
@@ -1160,11 +1276,20 @@ credentials:
 How it works:
 
 - Forager's gateway keeps each token outside the container.
-- Its proxy sets the token on the requests to the hosts the token is for.
+- Its proxy sets the token on the requests to the hosts the token is for. A model key's
+  host is its endpoint's host.
 - Where a program wants a credential set, the container gets a placeholder. It never gets
   the token.
 
-A run whose policy selects a credential needs a wall; without one it does not start.
+Without a wall, the run gets the same placeholders, and the proxy sets the same tokens.
+Without a wall, qory and the agent run as the same user. So the agent can read the run's
+credentials: an `env` credential from the environment qory started with on macOS, or on
+Linux from the starting environment of the program that started qory; a `file` credential
+from its file; and an adapter's credential by running the adapter. It can also read every
+other credential this machine holds, and a program that ignores the proxy reaches the
+hosts without the token. If you run without a wall, run the gateway on another machine, as
+in [Through a separate gateway](#through-a-separate-gateway), on a machine that holds no
+other credential.
 
 ### Adapters
 
@@ -1180,15 +1305,24 @@ match whole, and the gateway puts the argument where the adapter's words say
 `${argument}`. `hosts` and `paths` on an adapter's entry are the most its answer may claim.
 An [integration](#integrations) is an adapter that describes itself.
 
-### The model credential
+### The model key
 
-Claude Code reads its model credential from `CLAUDE_CODE_OAUTH_TOKEN`, a token from
-`claude setup-token`, or from `ANTHROPIC_API_KEY`. A walled run gets it one of two ways:
+A **model key** is the key of a model API. Claude Code reads it from one of three
+variables, chosen by how the key is set:
+
+| `auth`                                | Claude Code's variable                                       |
+| ------------------------------------- | ------------------------------------------------------------ |
+| `{scheme: header, header: x-api-key}` | `ANTHROPIC_API_KEY`                                          |
+| `{scheme: bearer}`                    | `ANTHROPIC_AUTH_TOKEN`                                       |
+| `{scheme: bearer, oauth: true}`       | `CLAUDE_CODE_OAUTH_TOKEN`, a token from `claude setup-token` |
+
+A walled run gets it one of two ways:
 
 - **Passed in.** `wall.env` or `--env` names the variable, and the agent holds the
-  credential inside the container.
-- **Kept outside.** A credential with the variable as a placeholder, which the run's
-  policy selects:
+  credential inside the container. A run given a run key refuses this: it takes the
+  credential only through the gateway its run key names. See [What is
+  refused](#what-is-refused).
+- **Kept outside.** A model key in `forager.yaml`, which the run's policy selects:
 
 ```yaml
 # ~/.config/qory/forager.yaml
@@ -1196,20 +1330,36 @@ gateway:
   credentials:
     model:
       env: CLAUDE_CODE_OAUTH_TOKEN          # read once at run start
-      hosts: [api.anthropic.com]
-      auth: {scheme: bearer}                # for ANTHROPIC_API_KEY: {scheme: header, header: x-api-key}
-      paths: [/v1/*]
-      placeholders: [CLAUDE_CODE_OAUTH_TOKEN]
+      format: anthropic-messages            # the API the endpoint serves
+      endpoint: https://api.anthropic.com
+      auth: {scheme: bearer, oauth: true}   # for ANTHROPIC_API_KEY: {scheme: header, header: x-api-key}
+      key_prefixes: [sk-ant-]               # optional
 ```
 
-- Inside the container, the placeholder's variable holds a placeholder,
-  `qory-sets-the-credential-outside-the-enclosure`. The runtime's other declared and
-  reserved variables are empty there.
-- With `paths: [/v1/*]`, under `enforce`, a request to `api.anthropic.com` outside `/v1/`
-  is refused. Under `observe`, it is sent on without the token, and recorded.
-- A run that passes a value for a placeholder does not start, `placeholder_conflict`. So
-  once a credential keeps the model credential outside, `wall.env` and `--env` no longer
-  name its variable.
+- `format` is one of `anthropic-messages`, `openai-responses`, `openai-chat` and
+  `gemini`.
+- `endpoint` is the base URL of the model API: `https`, a host, an optional port and path,
+  and no user, query or fragment. The proxy sets the key on every path of the endpoint's
+  host, and on no other host. Under `enforce`, the run's allow list must cover that host.
+- `auth` is `{scheme: bearer}`, `{scheme: header, header: …}` or
+  `{scheme: basic, username: …}`. Add `oauth: true` to a bearer for an OAuth token.
+- `key_prefixes`, optional, are 1 to 4 prefixes, each 1 to 32 printable ASCII characters
+  without a space. If the key starts with none of them, the run does not start, and the
+  message does not contain the key.
+- A model key has no `hosts`, `paths` or `placeholders`.
+
+What the run gets:
+
+- Inside the container, the variable for the key's format and `auth` holds a placeholder,
+  such as `qory-model-sets-the-credential-outside-the-enclosure` for the key `model`.
+  `ANTHROPIC_BASE_URL` holds the endpoint. Claude Code's other key variables are unset
+  there.
+- A run that passes a value for the key's variable does not start. If the run is walled
+  and the variable is the one `env` reads, such as `CLAUDE_CODE_OAUTH_TOKEN` in the
+  example, the code is `variable_reserved`; otherwise it is `placeholder_conflict`. So
+  once a model key is kept outside, `wall.env` and `--env` no longer name its variable.
+- A credential without `format` whose `placeholders` list one of Claude Code's key
+  variables stops the run, `run_configuration_invalid`. Write it as a model key.
 
 ### A static key
 
@@ -1239,6 +1389,24 @@ gateway:
 - A walled run that passes into the container the variable an `env` credential reads does
   not start, `variable_reserved`.
 
+### Keep the gateway's memory out of swap
+
+On Linux, `gateway.lock_memory: true` in `forager.yaml` keeps every page of the gateway's
+process in RAM, so that no key the gateway holds is written to swap. A `qory run` with no
+separate gateway starts the gateway in the `qory run` process, so the lock covers that whole
+process. Through a separate gateway, the lock is set by that gateway's `forager.yaml`: see
+[Through a separate gateway](#through-a-separate-gateway). The default is `false`.
+
+1. Set the locked-memory limit of the process to unlimited: `LimitMEMLOCK=infinity` in a
+   systemd unit, `ulimit -l unlimited` in a shell, or `--ulimit memlock=-1` in Docker. Or
+   give the process the capability `CAP_IPC_LOCK`, which lifts the limit.
+2. Set `gateway.lock_memory: true`.
+
+If the lock fails, the gateway does not start, and the error starts with the fix, such as
+`raise RLIMIT_MEMLOCK to unlimited: LimitMEMLOCK=infinity in a systemd unit, or ulimit -l
+unlimited`. On any other system, `true` stops the gateway: `set gateway.lock_memory to
+false: Forager locks memory only on Linux, and this system is darwin`.
+
 ### TLS on credential hosts
 
 For the hosts of the credentials and tools the policy selects and the hosts with path
@@ -1256,6 +1424,13 @@ certificate. The bundle goes in through these variables:
 - `AWS_CA_BUNDLE`
 
 Or through the variables `wall.ca_env` lists.
+
+A run without a wall gets the same variables, `wall.ca_env` included. They point at
+`ca-bundle.pem` in the run's directory: this machine's authorities and the run's
+certificate. Forager reads the authorities from the first of
+`/etc/ssl/certs/ca-certificates.crt`, `/etc/pki/tls/certs/ca-bundle.crt`,
+`/etc/ssl/ca-bundle.pem` and `/etc/ssl/cert.pem` that this machine has. With none of them,
+the run stops.
 
 The record lists the terminated hosts. For each request to one, it lists the method, the
 path and `credential`, the name of the credential whose token it carried.
@@ -1541,7 +1716,6 @@ Each of these stops the run before the agent starts:
 | `qory` | the description refuses the settings, a secret's value among them |
 | `qory` | the integration plays no role `qory` expands |
 | Forager | the policy selects a credential the machine does not define |
-| Forager | the policy selects a credential, and the run has no wall |
 | Forager | the policy's argument does not match the credential's `argument` whole |
 | Forager | two credentials claim the same host |
 | Forager | under `enforce`, a host of a credential that the allow list does not cover |
@@ -1655,12 +1829,18 @@ The proxy sees only programs that honour it. A **wall** makes the rest fail.
 Turn it on with a `wall` section, or with `--wall docker --image <image>` for one run.
 `--wall none` runs one run without the section's wall; on a machine that holds an access
 key, such a run is refused (see [An access key needs a wall](#an-access-key-needs-a-wall)).
+Run without a wall, by `--wall none` or with no `wall` section in `forager.yaml`, only for
+an agent you start yourself on your machine: see [When to run without a
+wall](#when-to-run-without-a-wall).
+
 With a wall:
 
 - The runtime starts in a container, on a network with no route out.
 - It reaches the proxy, and nothing else, through a relay.
 - The container sees the checkout and the composed home, at the same paths as on
-  your machine, and the run's record directory, read-only. It sees nothing else of your machine.
+  your machine, and the run's record directory, read-only. A run of Claude Code given a
+  run key also sees a folder that holds the names of the variables its agent keeps,
+  read-only. It sees nothing else of your machine.
 - Of your environment, the container gets the ones `wall.env` or `--env` lists, and
   nothing else. The harness's launch variables, fixed and defaults, reach the agent in
   the container as they do outside it. See [A run's variables](#a-runs-variables).
@@ -1673,17 +1853,20 @@ images](#the-agents-images).
 
 What to know:
 
-- **The model credential.** `wall.env` or `--env` passes it in, and the agent holds it.
-  A credential with its variable as a placeholder keeps it outside: see [The model
-  credential](#the-model-credential). A run that then passes a value for that variable
-  does not start, `placeholder_conflict`. A subscription login kept in a Mac's Keychain
-  does not reach a container. Use an API key, or a token from `claude setup-token`.
+- **The model key.** `wall.env` or `--env` passes it in, and the agent holds it.
+  With a run key, such a run does not start: see [What is refused](#what-is-refused).
+  A model key in `forager.yaml` keeps it outside: see [The model key](#the-model-key). A
+  run that then passes a value for its variable does not start: `variable_reserved` when
+  the key's `env` reads that variable, and `placeholder_conflict` otherwise.
+  A subscription login kept in a Mac's Keychain does not reach a container. Use an API
+  key, or a token from `claude setup-token`.
 - **The helper on a Mac.** Inside the container, the relay, the hook forwarder and what
   starts nested Docker are `qory`'s Linux build, mounted read-only. On Linux, that is the binary you run. On a Mac, download the
   Linux archive of the same release, for your engine's architecture. Set `wall.helper` to
   that binary.
-- **What the container sees.** The checkout it was started in, and the run's record directory,
-  read-only, and no other directory. `--mount <path>[:ro]` or `wall.mounts` shows it another one, at the same path as on your machine, such as a
+- **What the container sees.** The checkout it was started in, the run's record directory,
+  read-only, and for a run of Claude Code given a run key, the folder of the names of the
+  variables its agent keeps, read-only; no other directory. `--mount <path>[:ro]` or `wall.mounts` shows it another one, at the same path as on your machine, such as a
   sibling checkout the session reads. A socket is never mounted. A mount is refused
   before the run starts, `mount_contains_forager_files`, when it is, contains or lies
   inside one of these:
@@ -1752,9 +1935,13 @@ What to know:
   writes them: a number and `b`, `k`, `m` or `g`, in either case. So `14g` is 14 GB and
   `2g` is 2 GB; `14GB` or `14GiB` is refused. A headless browser wants `--shm-size 2g`:
   an engine's default `/dev/shm` is 64 MB.
-- **Your machine.** Behind a wall, the proxy reaches your machine only for a host
-  that the policy's `egress.allow` lists itself, in either mode. It never reaches the
-  cloud metadata address. For a local model endpoint or MCP server, list your machine's host name, and
+- **Your machine.** Behind a wall, the proxy reaches your machine, or a private network
+  address, only for a host that `gateway.egress.allow` of your `forager.yaml` lists by
+  name, in either mode. Through a separate gateway, the proxy runs on the gateway's
+  machine: the rule covers that machine, and the list that counts is in the gateway's
+  `forager.yaml`. See [The gateway's machine and private
+  addresses](gateway.md#the-gateways-machine-and-private-addresses). It never reaches a
+  link-local or cloud metadata address. For a local model endpoint or MCP server, list your machine's host name, and
   point the harness at that name. `localhost` inside the container is the container.
 - **Hooks in a virtual machine.** With the engine in a virtual machine, as on a Mac, the
   runtime's hooks do not reach the session. So a walled run there has no hook events. The
@@ -1878,15 +2065,25 @@ image: go-docker
   `wall.images`, or a reference. A name is read as that image first.
 - A policy's selection wins over the default, `--image` included. A run whose policy
   selects no image starts in the default.
-- A run whose `--policy` selects an image needs no default. A machine that reports
-  to a server sets `wall.image`: the server's run configuration arrives once the run
-  starts, and may select none.
+- A run whose `--policy` selects an image needs no default, unless `wall.images_allow`
+  is set. A machine that reports to a server sets `wall.image`: the server's run
+  configuration arrives once the run starts, and may select none.
+- `wall.images_allow` lists where a run's image may come from when the run's policy
+  names it by a reference instead of a name of `wall.images`: the prefixes of the
+  references the machine runs, such as `registry.example/agents/`. The reference must
+  be pinned by digest, `NAME@sha256:` and 64 lower-case hexadecimal digits. The list
+  needs a default, `wall.image` or `--image`, whose runtime such an image starts under.
+  Without the list, a run whose policy names an image by reference is refused.
 - `qory config` lists the images, and shows whether `wall.image` is a name of
   `wall.images` or a reference. A mistyped name shows as a reference.
 
-Before the run starts, `qory run` refuses a `--policy` that selects an image
-`wall.images` does not define, or one for a run without a wall. A server's run
-configuration that selects such an image stops the run as it starts. Every command that
+Before the run starts, `qory run` refuses a `--policy` that selects an image by a name
+`wall.images` does not define, or by a reference not pinned by digest, or one for a run
+without a wall. A `--policy` that names a reference pinned by digest goes to the run: a
+reference under none of `wall.images_allow` stops the run as it starts,
+`image_not_allowed`, and the run is recorded. A server's run configuration that selects
+an image `wall.images` does not define, or a reference under none of the prefixes, stops
+the run as it starts. Every command that
 reads `forager.yaml` refuses `docker: true` without a `runtime`.
 
 `dev.qory.run.started` names the image the run started in: `image`, the reference. For an

@@ -118,3 +118,7 @@ func (copilot) Render(res *compose.Result, dir, home string) error {
 func (copilot) Template() render.Template {
 	return render.Template{Command: "copilot", Args: [][]string{{"--add-dir", "${dir}/workspace"}, {"--additional-mcp-config", "@${dir}/mcp.json"}}}
 }
+
+// AgentEfforts is nil: an agent's file gets the model a tier maps to, and qory writes no
+// effort into it.
+func (copilot) AgentEfforts() []string { return nil }

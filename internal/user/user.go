@@ -7,11 +7,12 @@
 package user
 
 import (
+	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/qoryai/qory/internal/hostgit"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,13 +24,16 @@ import (
 //   - the login of the github.com account in gh's hosts file
 //
 // The result is a first name only when git's user.name begins with one, and a gh login is
-// returned whole. Name reports no error. A missing git, an unset user.name and an
-// unreadable hosts file each fall through to the next source, and the last of them
-// returns "".
+// returned whole. Name reports no error. A missing git, a git older than 2.36, an unset
+// user.name, a repository whose git settings the settings check of
+// [github.com/qoryai/qory/internal/hostgit] refuses, and an unreadable hosts file each
+// fall through to the next source, and the last of them returns "".
 func Name() string {
-	if out, err := exec.Command("git", "config", "user.name").Output(); err == nil {
-		if name := strings.TrimSpace(string(out)); name != "" {
-			return strings.Fields(name)[0]
+	if c, err := hostgit.Command(context.Background(), ".", "config", "user.name"); err == nil {
+		if out, err := c.Output(); err == nil {
+			if name := strings.TrimSpace(string(out)); name != "" {
+				return strings.Fields(name)[0]
+			}
 		}
 	}
 	return ghLogin()

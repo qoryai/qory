@@ -18,6 +18,7 @@ func hermetic(t *testing.T) {
 	t.Helper()
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("XDG_STATE_HOME", filepath.Join(t.TempDir(), "state"))
 }
 
 // run runs git in dir and fails the test with its output.

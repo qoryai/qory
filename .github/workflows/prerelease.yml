@@ -1,0 +1,139 @@
+name: Pre-release image
+
+# Run only by pushing a commit to the branch prerelease, which nothing else pushes to.
+# Never on a push to any other branch, a pull request or a schedule. Each run costs
+# Actions minutes and package storage.
+on:
+  push:
+    branches: [prerelease]
+
+permissions:
+  contents: read
+
+# Two runs for the branch do not tag at once: a run waits while another runs, and a newer
+# run that starts waiting cancels the run already waiting, so at most one waits. No
+# running run is cancelled.
+concurrency:
+  group: prerelease-${{ github.ref }}
+  cancel-in-progress: false
+
+# Builds the image of the pushed commit, the Dockerfile at the root, which holds qory's
+# static Linux build at /qory/qory and nothing else, for linux/amd64 and linux/arm64 in
+# one build: the build stage runs on the runner's platform and cross-compiles for each,
+# so nothing runs under emulation. It publishes the image to
+# ghcr.io/qoryai/qory-prerelease, tagged only sha-<the commit's first 7 characters>, and
+# prints the image index's digest in the run's summary. What takes the binary from the
+# image takes it by that digest, as ghcr.io/qoryai/qory-prerelease@sha256:<digest>; the
+# tag is for people to read.
+#
+# ghcr.io/qoryai/qory-prerelease stays private: it is never made public.
+#
+# The build reads only the pushed sources: a go.mod that replaces a module with a local
+# path fails it, as that path is not in the checkout.
+#
+# No job deletes old images: old sha- tags are deleted by hand, in the package's settings
+# on GitHub.
+env:
+  IMAGE: ghcr.io/qoryai/qory-prerelease
+  # Docker Hub's official golang:1.27 under the same digest as the Dockerfile's default,
+  # copied to qoryai's public package and pulled with the job's token.
+  GO_IMAGE: ghcr.io/qoryai/ci-images:golang-1.27@sha256:e432b43af23a9328d56a7c499be0476810aa344acbcf65fc7c455d4ff5a40602
+
+jobs:
+  image:
+    name: Build and publish the image
+    # Pre-release images are published from GitHub, as releases are.
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      # Every commit and tag, so go stamps the version after the last tag as a source
+      # build does, and no token in .git/config, as .git is in the build's context.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The commit the image is built from and named after.
+      - name: Name the commit
+        id: commit
+        run: |
+          sha="$(git rev-parse HEAD)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "short=${sha:0:7}" >> "$GITHUB_OUTPUT"
+          echo "::notice::Building $GITHUB_REF_NAME at $sha"
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=ghcr.io/qoryai/ci-images:buildkit-buildx-stable-1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+
+      # Both platforms in one image index, pushed by digest alone: no tag names the image
+      # until both are built and checked. With no attestations, as scripts/build-image.sh
+      # builds it, so the index names the two images alone.
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          provenance: false
+          sbom: false
+          build-args: |
+            GO_IMAGE=${{ env.GO_IMAGE }}
+          labels: |
+            org.opencontainers.image.revision=${{ steps.commit.outputs.sha }}
+          cache-from: type=gha,scope=qory-image
+          cache-to: type=gha,mode=max,scope=qory-image
+
+      # The binary for this runner's platform, taken out as a consumer takes it: qory
+      # version must print the pushed commit, not dirty, and the file must be 0555.
+      - name: Check the binary
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          SHA: ${{ steps.commit.outputs.sha }}
+        run: |
+          set -euo pipefail
+          id="$(docker create --platform linux/amd64 "${IMAGE}@${DIGEST}")"
+          docker cp "$id:/qory/qory" "$RUNNER_TEMP/qory"
+          docker rm "$id" > /dev/null
+          mode="$(stat -c %a "$RUNNER_TEMP/qory")"
+          [ "$mode" = 555 ] || { echo "/qory/qory is mode $mode, not 555" >&2; exit 1; }
+          "$RUNNER_TEMP/qory" version
+          stamp="$("$RUNNER_TEMP/qory" version --json | jq -r '.commit + (if .dirty then " (dirty)" else "" end)')"
+          [ "$stamp" = "${SHA:0:12}" ] || { echo "qory version prints the commit ${stamp:-none}, not ${SHA:0:12}" >&2; exit 1; }
+
+      # sha-<7> names the image index pushed above, under the same digest; a tag that
+      # names another digest fails the run.
+      - name: Tag the image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          SHA: ${{ steps.commit.outputs.sha }}
+          SHORT: ${{ steps.commit.outputs.short }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create --tag "${IMAGE}:sha-${SHORT}" "${IMAGE}@${DIGEST}"
+          docker buildx imagetools inspect "${IMAGE}:sha-${SHORT}" | tee inspect.txt
+          tagged="$(awk '/^Digest:/ { print $2; exit }' inspect.txt)"
+          [ "$tagged" = "$DIGEST" ] || {
+            echo "${IMAGE}:sha-${SHORT} names ${tagged:-no digest}, not the image pushed, ${DIGEST}" >&2; exit 1; }
+          {
+            echo "## Pre-release image"
+            echo
+            echo "Built from \`${SHA}\` for linux/amd64 and linux/arm64. Take /qory/qory from it by the index digest:"
+            echo
+            echo '```'
+            echo "${IMAGE}@${DIGEST}"
+            echo '```'
+            echo
+            echo "Tagged \`${IMAGE}:sha-${SHORT}\`, for people to read."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::Published ${IMAGE}:sha-${SHORT}, ${IMAGE}@${DIGEST}"

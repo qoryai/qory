@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/foragerdir"
 	"github.com/qoryai/qory/internal/ui"
 )
@@ -52,6 +53,8 @@ The gateway section of ` + config.ForagerFileName + ` in ~/.config/qory sets it:
   egress        the hosts a run may reach; it narrows Qory Apiary's policy
   credentials   secrets the gateway sets on requests; the agents never have them
   integrations  programs that supply such secrets
+  selects       the credentials it selects for a run, with a wall or without, when
+                the server's policy selects none
 
 ` + gatewayMachinesHelp + `
 
@@ -85,7 +88,7 @@ More: ` + gatewayDocs,
 			addr := r.Listen
 			if cmd.Flags().Changed("listen") {
 				if !config.HostPort(listen) {
-					return input(fmt.Errorf("--listen %q is not host:port, such as 0.0.0.0:8443", listen))
+					return input(fmt.Errorf("--listen %s is not host:port, such as 0.0.0.0:8443", exports.Value(listen, true)))
 				}
 				addr = listen
 			}
@@ -127,6 +130,8 @@ More: ` + gatewayDocs,
 				// Nothing on this machine uses the local link: no socket for it.
 				NoLinkSocket: true,
 				Heartbeat:    runHeartbeat,
+				LockMemory:   r.LockMemory,
+				RunLimits:    gatewayRunLimits(r),
 			}
 			gw.Server.AccessKey, gw.Server.InstanceID, gw.Server.InstanceName = id.key.key, id.instanceID, id.instanceName
 			if r.TLS != nil {
@@ -135,21 +140,35 @@ More: ` + gatewayDocs,
 			}
 			// The gateway runs no agent on this machine, so no run of its is refused for
 			// want of a wall here.
-			gw.Discovered = discovered(machineDir(), id, verbGateway, stderr)
+			machine, err := machineDir()
+			if err != nil {
+				return err
+			}
+			gw.Discovered = discovered(machine, id, verbGateway, stderr)
 			// The server supplies every run's policy, so every integration is described.
 			shadowed := r.Shadowed()
-			e := config.Expansion{Only: func(key string) bool { return !slices.Contains(shadowed, key) }}
+			// A program in a place a walled run has used is refused, as a run refuses it.
+			recorded, err := recordedPlaces()
+			if err != nil {
+				return err
+			}
+			e := config.Expansion{Workspace: recorded, Only: func(key string) bool { return !slices.Contains(shadowed, key) }}
 			if gw.Credentials, err = machineCredentials(ctx, r, e, "gateway", stderr); err != nil {
 				return err
 			}
-			if gw.Tools, err = machineTools(r); err != nil {
+			if gw.Tools, err = machineTools(r, e.Workspace); err != nil {
 				return err
+			}
+			// The credentials gateway.selects names are checked against the ones the
+			// integrations define too, so only once they are described.
+			if gw.Selects, err = r.Selections(); err != nil {
+				return input(err)
 			}
 			g, err := startGateway(ctx, gw)
 			if err != nil {
 				var op *net.OpError
 				if errors.As(err, &op) && op.Op == "listen" {
-					return fmt.Errorf("listen on %s: %w", addr, op.Err)
+					return fmt.Errorf("listen on %s: %w", exports.Value(addr, false), op.Err)
 				}
 				return explain(err, id)
 			}
@@ -170,15 +189,16 @@ More: ` + gatewayDocs,
 	return c
 }
 
-// startGateway starts the gateway qory gateway runs, with the configuration qory built
-// from forager.yaml; a test replaces it to read that configuration.
+// startGateway starts the gateway qory gateway runs, and the one a qory run with no
+// separate gateway starts, with the configuration qory built from forager.yaml; a test
+// replaces it to read that configuration.
 var startGateway = gateway.Start
 
 // foragerFileShown is forager.yaml's path as a person reads it, with the home
 // directory as ~.
 func foragerFileShown() string {
-	dir := config.UserDir()
-	if dir == "" {
+	dir, err := config.UserDir()
+	if err != nil || dir == "" {
 		return "~/.config/qory/" + config.ForagerFileName
 	}
 	return ui.Short(filepath.Join(dir, config.ForagerFileName), "")

@@ -2,6 +2,7 @@ package cmd_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 	"os"
 	"os/exec"
@@ -697,5 +698,380 @@ func TestLaunchKeepsTheTemplatesOwnVariable(t *testing.T) {
 	}
 	if out, err := run(t, "harness", "compose", "--check"); err != nil {
 		t.Fatalf("check after the second compose: %v\n%s", err, out)
+	}
+}
+
+// harnessStack is a stack of one module, app, read from ./harness in the checkout, for
+// claude.
+const harnessStack = `apiVersion: qory.dev/v1alpha1
+target:
+  runtime: claude
+modules:
+  - name: app
+    source: {path: ./harness}
+`
+
+// writeAppModule writes the module app into dir: a skill deploy and a command ship,
+// neither with a reference.
+func writeAppModule(t *testing.T, dir string) {
+	t.Helper()
+	writeManifest(t, dir, "app")
+	writeFile(t, filepath.Join(dir, "skills", "deploy", "SKILL.md"), "---\nname: deploy\ndescription: Deploys the app.\n---\n\nSteps.\n")
+	writeFile(t, filepath.Join(dir, "commands", "ship.md"), "# ship\n\nShips the app.\n")
+}
+
+// symlinkTo writes a link at path to target, failing the test on an error.
+func symlinkTo(t *testing.T, target, path string) {
+	t.Helper()
+	if err := os.Symlink(target, path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCopyDecision is the decision a compose makes once per module: a home outside the
+// checkout contains copies of a module that lies in the checkout, as written or with
+// every link resolved, and links to every other module; a home inside the checkout
+// contains links to every module.
+func TestCopyDecision(t *testing.T) {
+	t.Run("a module at ./harness is copied", func(t *testing.T) {
+		root := newCheckout(t)
+		writeOwnStack(t, root, harnessStack)
+		writeAppModule(t, filepath.Join(root, "harness"))
+		copied, err := cmd.CopiedModules(tempDir(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !copied["app"] {
+			t.Errorf("copied = %v, want app copied", copied)
+		}
+	})
+	t.Run("a ./harness that links out of the checkout is copied", func(t *testing.T) {
+		root := newCheckout(t)
+		writeOwnStack(t, root, harnessStack)
+		shared := tempDir(t)
+		writeAppModule(t, shared)
+		symlinkTo(t, shared, filepath.Join(root, "harness"))
+		copied, err := cmd.CopiedModules(tempDir(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !copied["app"] {
+			t.Errorf("copied = %v, want app copied", copied)
+		}
+	})
+	t.Run("a module outside the checkout that links into it is copied", func(t *testing.T) {
+		root := newCheckout(t)
+		writeAppModule(t, filepath.Join(root, "harness"))
+		outside := tempDir(t)
+		symlinkTo(t, filepath.Join(root, "harness"), filepath.Join(outside, "app"))
+		writeOwnStack(t, root, strings.Replace(harnessStack, "./harness", filepath.Join(outside, "app"), 1))
+		copied, err := cmd.CopiedModules(tempDir(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !copied["app"] {
+			t.Errorf("copied = %v, want app copied", copied)
+		}
+	})
+	t.Run("a module outside the checkout is linked", func(t *testing.T) {
+		root := newCheckout(t)
+		outside := tempDir(t)
+		writeAppModule(t, outside)
+		writeOwnStack(t, root, strings.Replace(harnessStack, "./harness", outside, 1))
+		copied, err := cmd.CopiedModules(tempDir(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if copied["app"] {
+			t.Errorf("copied = %v, want app linked", copied)
+		}
+	})
+	t.Run("a home inside the checkout copies nothing", func(t *testing.T) {
+		root := newCheckout(t)
+		writeOwnStack(t, root, harnessStack)
+		writeAppModule(t, filepath.Join(root, "harness"))
+		copied, err := cmd.CopiedModules("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(copied) != 1 || copied["app"] {
+			t.Errorf("copied = %v, want app linked", copied)
+		}
+	})
+}
+
+// writeFullAppModule writes the module app into dir with an entry of every kind a home
+// links today: the skill deploy and the command ship, a skill release whose SKILL.md
+// references the command, beside a file that references nothing, an agent, an output
+// style, an executable hook, a files entry for claude, and a script no entry lists.
+func writeFullAppModule(t *testing.T, dir string) {
+	t.Helper()
+	writeAppModule(t, dir)
+	writeFile(t, filepath.Join(dir, "skills", "release", "SKILL.md"), "---\nname: release\ndescription: Releases the app.\n---\n\nRun ${qory:commands/ship}.\n")
+	writeFile(t, filepath.Join(dir, "skills", "release", "notes.txt"), "No reference here.\n")
+	writeFile(t, filepath.Join(dir, "agents", "reviewer.md"), "# reviewer\n")
+	writeFile(t, filepath.Join(dir, "output-styles", "terse.md"), "# terse\n")
+	writeFile(t, filepath.Join(dir, "hooks", "guard.sh"), "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(filepath.Join(dir, "hooks", "guard.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, "files", "claude", "rules", "style.md"), "# style\n")
+	writeFile(t, filepath.Join(dir, "scripts", "db.py"), "print('db')\n")
+}
+
+// linksUnder lists every link in tree whose target, with every link resolved, lies under
+// root, as the path relative to tree.
+func linksUnder(t *testing.T, tree, root string) []string {
+	t.Helper()
+	var found []string
+	err := filepath.WalkDir(tree, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.Type()&os.ModeSymlink == 0 {
+			return nil
+		}
+		real, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			return err
+		}
+		if rel, err := filepath.Rel(root, real); err == nil && !strings.HasPrefix(rel, "..") {
+			found = append(found, strings.TrimPrefix(path, tree+"/"))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return found
+}
+
+// TestHomeOutsideCopiesAModuleInTheCheckout is a compose of a module at ./harness into a
+// home outside the checkout: no link in the home leads under the checkout, every entry
+// and modules/app are copies, a skill with a reference is a full copy with the
+// reference resolved, and an edit to the module makes --check exit 6 until the next
+// compose.
+func TestHomeOutsideCopiesAModuleInTheCheckout(t *testing.T) {
+	root := newCheckout(t)
+	writeOwnStack(t, root, harnessStack)
+	writeFullAppModule(t, filepath.Join(root, "harness"))
+	homes := tempDir(t)
+	home := filepath.Join(homes, checkout.Key(root))
+	if out, err := run(t, "harness", "compose", "--home", homes); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if links := linksUnder(t, home, root); len(links) > 0 {
+		t.Errorf("links in the home lead under the checkout: %v", links)
+	}
+	for name, want := range map[string]string{
+		"skills/deploy/SKILL.md":                 "Steps.",
+		"claude/skills/deploy/SKILL.md":          "Steps.",
+		"claude/commands/ship.md":                "Ships the app.",
+		"claude/plugin/skills/deploy/SKILL.md":   "Steps.",
+		"claude/plugin/commands/ship.md":         "Ships the app.",
+		"claude/agents/reviewer.md":              "# reviewer",
+		"claude/output-styles/terse.md":          "# terse",
+		"claude/plugin/output-styles/terse.md":   "# terse",
+		"claude/rules/style.md":                  "# style",
+		"hooks/guard.sh":                         "exit 0",
+		"claude/hooks/guard.sh":                  "exit 0",
+		"modules/app/scripts/db.py":              "print('db')",
+		"modules/app/qory-module.yaml":           "name: app",
+		"skills/release/notes.txt":               "No reference here.",
+		"skills/release/SKILL.md":                "Run ship.",
+		"claude/skills/release/SKILL.md":         "Run ship.",
+		"claude/plugin/skills/release/SKILL.md":  "Run harness:ship.",
+		"claude/plugin/skills/release/notes.txt": "No reference here.",
+	} {
+		path := filepath.Join(home, name)
+		info, err := os.Lstat(path)
+		if err != nil || !info.Mode().IsRegular() {
+			t.Errorf("%s is not a file: %v %v", name, info, err)
+			continue
+		}
+		data, _ := os.ReadFile(path)
+		if !strings.Contains(string(data), want) {
+			t.Errorf("%s = %q, want %q in it", name, data, want)
+		}
+	}
+	if info, err := os.Stat(filepath.Join(home, "hooks", "guard.sh")); err != nil || info.Mode().Perm() != 0o755 {
+		t.Errorf("hooks/guard.sh: %v %v, want mode 0755", info, err)
+	}
+	if out, err := run(t, "harness", "compose", "--check", "--home", homes); err != nil {
+		t.Fatalf("a home just composed is stale: %v\n%s", err, out)
+	}
+	writeFile(t, filepath.Join(root, "harness", "skills", "deploy", "SKILL.md"), "---\nname: deploy\ndescription: Deploys the app.\n---\n\nOther steps.\n")
+	out, err := run(t, "harness", "compose", "--check", "--home", homes)
+	if got := cmd.ExitCode(err); got != cmd.ExitStale {
+		t.Fatalf("exit %d for %v, want %d\n%s", got, err, cmd.ExitStale, out)
+	}
+	wantsRow(t, out, "claude/plugin/skills/deploy/SKILL.md", "changed")
+	if out, err := run(t, "harness", "compose", "--home", homes); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if data, _ := os.ReadFile(filepath.Join(home, "claude", "plugin", "skills", "deploy", "SKILL.md")); !strings.Contains(string(data), "Other steps.") {
+		t.Errorf("the next compose did not take the edit: %q", data)
+	}
+}
+
+// TestHomeInsideKeepsLinksToAModuleInTheCheckout is the same module composed into the
+// home inside the checkout: every entry and modules/app are links into the module, as
+// before.
+func TestHomeInsideKeepsLinksToAModuleInTheCheckout(t *testing.T) {
+	root := newCheckout(t)
+	writeOwnStack(t, root, harnessStack)
+	writeFullAppModule(t, filepath.Join(root, "harness"))
+	if out, err := run(t, "harness", "compose"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	home := filepath.Join(root, ".qory", "harness")
+	module := filepath.Join(root, "harness")
+	for name, want := range map[string]string{
+		"skills/deploy":                          "skills/deploy",
+		"claude/skills/deploy":                   "skills/deploy",
+		"claude/commands/ship.md":                "commands/ship.md",
+		"claude/plugin/skills/deploy":            "skills/deploy",
+		"claude/plugin/commands/ship.md":         "commands/ship.md",
+		"claude/agents/reviewer.md":              "agents/reviewer.md",
+		"claude/rules/style.md":                  "files/claude/rules/style.md",
+		"hooks/guard.sh":                         "hooks/guard.sh",
+		"modules/app":                            "",
+		"claude/plugin/skills/release/notes.txt": "skills/release/notes.txt",
+	} {
+		target, err := os.Readlink(filepath.Join(home, name))
+		if err != nil || target != filepath.Join(module, want) {
+			t.Errorf("%s links to %q (%v), want %s", name, target, err, filepath.Join(module, want))
+		}
+	}
+}
+
+// TestPluginOfTwoModulesInTheCheckoutStopsAt10000 is two modules in the checkout whose
+// skills hold 5,000 files each: each module is copied, and the plugin, with more than
+// 10,000 entries, is refused at the compose, before a walled launch would refuse it.
+func TestPluginOfTwoModulesInTheCheckoutStopsAt10000(t *testing.T) {
+	root := newCheckout(t)
+	writeOwnStack(t, root, harnessStack+"  - name: lib\n    source: {path: ./lib}\n")
+	writeAppModule(t, filepath.Join(root, "harness"))
+	writeManifest(t, filepath.Join(root, "lib"), "lib")
+	writeFile(t, filepath.Join(root, "lib", "skills", "build", "SKILL.md"), "---\nname: build\ndescription: Builds the app.\n---\n\nSteps.\n")
+	for _, dir := range []string{filepath.Join(root, "harness", "skills", "deploy"), filepath.Join(root, "lib", "skills", "build")} {
+		for i := range 5_000 {
+			if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("f%05d", i)), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	out, err := run(t, "harness", "compose", "--home", tempDir(t))
+	if err == nil || !strings.Contains(out+err.Error(), "Move a module out of the checkout, or ship fewer files. claude/plugin contains more than 10,000 files, directories and links, the most a walled Claude Code run takes.") {
+		t.Errorf("compose: %v\n%s", err, out)
+	}
+}
+
+// TestCopiedModuleRows is what a person sees of a module the home contains copies of: a
+// row of the compose saying why, the module's row of inspect and of a dry run marked
+// copied, and "copied": true in the report. A home inside the checkout shows none of it.
+func TestCopiedModuleRows(t *testing.T) {
+	root := newCheckout(t)
+	writeOwnStack(t, root, harnessStack)
+	writeAppModule(t, filepath.Join(root, "harness"))
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "commit", "-q", "-m", "app with its module")
+	homes := tempDir(t)
+	out, err := run(t, "harness", "compose", "--home", homes)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantsRow(t, out, "copied", "./harness  (module app lies in the checkout, which a walled run can write, so the home contains copies; an edit reaches it on the next compose)")
+	out, err = run(t, "harness", "inspect", "--home", filepath.Join(homes, checkout.Key(root)))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "app  ./harness  working-tree  copied\n")
+	out, err = run(t, "harness", "compose", "--dry-run", "--home", homes)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "app  ./harness  working-tree  copied\n")
+	data, err := os.ReadFile(filepath.Join(homes, checkout.Key(root)) + "-report.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants(t, string(data), `"copied": true`)
+
+	out, err = run(t, "harness", "compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if strings.Contains(out, "copied") {
+		t.Errorf("a compose into the checkout mentions copies:\n%s", out)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, ".qory", "harness-report.json")); strings.Contains(string(data), "copied") {
+		t.Errorf("the report of a home inside the checkout marks a copy:\n%s", data)
+	}
+}
+
+// TestCopiedModuleSkipsALinkThatLeadsNowhere is a module in the checkout that ships a
+// script link to nothing: the compose into a home outside the checkout goes on, and the
+// home has no file at that name.
+func TestCopiedModuleSkipsALinkThatLeadsNowhere(t *testing.T) {
+	root := newCheckout(t)
+	writeOwnStack(t, root, harnessStack)
+	writeAppModule(t, filepath.Join(root, "harness"))
+	if err := os.MkdirAll(filepath.Join(root, "harness", "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	symlinkTo(t, "missing.sh", filepath.Join(root, "harness", "scripts", "dangle"))
+	homes := tempDir(t)
+	if out, err := run(t, "harness", "compose", "--home", homes); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if _, err := os.Lstat(filepath.Join(homes, checkout.Key(root), "modules", "app", "scripts", "dangle")); !os.IsNotExist(err) {
+		t.Errorf("the home has modules/app/scripts/dangle: %v", err)
+	}
+}
+
+// TestModuleAtTheCheckoutRootComposesOutside is a module at source: {path: .}, the
+// checkout itself, composed first into the home inside the checkout and then into a home
+// outside it: the second compose succeeds, and its copy of the module leaves out .qory,
+// which holds the first home.
+func TestModuleAtTheCheckoutRootComposesOutside(t *testing.T) {
+	root := newCheckout(t)
+	writeOwnStack(t, root, strings.Replace(harnessStack, "./harness", ".", 1))
+	writeAppModule(t, root)
+	if out, err := run(t, "harness", "compose"); err != nil {
+		t.Fatalf("inside: %v\n%s", err, out)
+	}
+	homes := tempDir(t)
+	if out, err := run(t, "harness", "compose", "--home", homes); err != nil {
+		t.Fatalf("outside: %v\n%s", err, out)
+	}
+	home := filepath.Join(homes, checkout.Key(root))
+	if _, err := os.Lstat(filepath.Join(home, "modules", "app", ".qory")); !os.IsNotExist(err) {
+		t.Errorf("the home's copy of the module holds .qory: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "modules", "app", "skills", "deploy", "SKILL.md")); err != nil {
+		t.Error(err)
+	}
+}
+
+// TestCopiedModuleRowHidesASecret is a module named qak_m at ./qak_m in the checkout,
+// composed into a home outside it: the copied row prints the phrase in place of the name
+// and of the path, and the output contains no qak_.
+func TestCopiedModuleRowHidesASecret(t *testing.T) {
+	root := newCheckout(t)
+	writeOwnStack(t, root, "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: qak_m\n    source: {path: ./qak_m}\n")
+	dir := filepath.Join(root, "qak_m")
+	writeManifest(t, dir, "qak_m")
+	writeFile(t, filepath.Join(dir, "skills", "deploy", "SKILL.md"), "---\nname: deploy\ndescription: Deploys the app.\n---\n\nSteps.\n")
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "commit", "-q", "-m", "app with its module")
+	out, err := run(t, "harness", "compose", "--home", tempDir(t))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	const name = "(a name that contains an access key secret)"
+	wantsRow(t, out, "copied", "./"+name+"  (module "+name+" lies in the checkout, which a walled run can write, so the home contains copies; an edit reaches it on the next compose)")
+	if strings.Contains(strings.ToLower(out), "qak_") {
+		t.Errorf("the compose prints qak_:\n%s", out)
 	}
 }

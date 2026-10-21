@@ -66,3 +66,7 @@ func (goose) Render(res *compose.Result, dir, home string) error {
 	}
 	return render.WriteAgents(res, render.Bare, dir, "agents", ".md", "name", "description", "model")
 }
+
+// AgentEfforts is nil: an agent's file gets the model a tier maps to, and qory writes no
+// effort into it.
+func (goose) AgentEfforts() []string { return nil }

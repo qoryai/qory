@@ -380,6 +380,8 @@ settings/<runtime>/<file>       merged; one fragment per target file of one runt
 <anything else>                  the module's other files, reached as $QORY_HARNESS_HOME/modules/<name>/<path>
 ```
 
+`model` may be a tier, `${qory:light}`, `${qory:fast}` or `${qory:thinking}`, which the compose replaces with the model id the tier maps to (§ The configuration). A tier with no map leaves the agent without a model, so it runs on the main model, and the compose prints a row.
+
 `AGENTS.md` and skills are read by every runtime. Agents and commands are written in each
 runtime's format from the one file above; a runtime without the concept skips the kind and
 the compose reports it. Every path an entry, a fragment or `AGENTS.md` resolves to, symlinks
@@ -432,6 +434,8 @@ mentions an entry in passing stays prose; the marker identifies the strings that
 dispatched. The reference
 becomes the registered name and nothing around it, so a document that wants the slash a
 program puts before a skill writes `/${qory:skills/review}`.
+
+`${qory:<tier>}`, with no slash, is a tier, not a reference. It is allowed only as the whole value of an agent's frontmatter `model`. Anywhere else, and with a name that is not a tier, it fails the compose.
 
 A reference selects an entry of that name, or a role. A role is a name no entry has, bound
 per stack under `bind` to the entry that fills it: core writes `${qory:agents/coder}`,
@@ -546,13 +550,20 @@ with the worktree.
 
 The tree contains the runtime-agnostic parts once, `AGENTS.md`, `skills/` and `hooks/`, one
 link per module at `modules/<name>` to the module's directory, and one directory per
-runtime with that runtime's files. Every atomic entry is a symlink into its module, with
-one exception: an entry whose documents contain a reference (§References) is placed with
-the references resolved for the path it stands on, a single file written, a skill a real
-directory containing a link per file and directory without a reference and a written copy
-of each `.md` file with one, so the module's files stay live wherever nothing had to
-change, and an edit to a file with a reference reaches the tree on the next compose,
-which `--check` reports. The shared root, every checkout link and every launch path but
+runtime with that runtime's files. In a home outside the checkout, `modules/<name>` of a
+module whose directory lies in the checkout, as written or resolved, is a copy of the
+directory without `.git`, under the same rules as the entries below. Every atomic entry is
+a symlink into its module, with two exceptions. In a home outside the checkout, every
+entry of a module whose directory lies in the checkout, as written or resolved, is a copy:
+files and directories, each link inside followed within the module. A copy has the
+original's permission bits without setuid, setgid, sticky and write for group and others,
+and a directory also has read, write and search for its owner.
+The other exception: an entry whose documents contain a reference (§References) is
+placed with the references resolved for the path it stands on, a single file written, a
+skill a real directory containing a link per file and directory without a reference and a
+written copy of each `.md` file with one, so the module's files stay live wherever nothing
+had to change, and an edit to a file with a reference reaches the tree on the next
+compose, which `--check` reports. The shared root, every checkout link and every launch path but
 one resolve to the bare name, the name as the module wrote it; the `claude` plugin
 resolves to `harness:<name>`, the name Claude Code registers a plugin's entries under,
 and the plugin's copies of the same documents differ from the checkout's in that alone.
@@ -696,6 +707,8 @@ Per runtime, the files written into its directory:
 - **goose**: `agents/<name>.md` with `name`, `description` and `model`.
 - **any**: nothing.
 
+An agent's tier is written as `model` and `effort` in a claude agent; as `model` alone for opencode, cursor, copilot and goose, with a row for an effort not written; and not at all for codex and gemini, with a row. On every compose for claude, qory refuses `env` in a `settings/claude/settings.json` fragment that sets `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_DEFAULT_FABLE_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` or `CLAUDE_CODE_EFFORT_LEVEL`. It refuses them the same way in the configuration's `env`, in `harness.launch.claude.env` and in a module's `env` export. With the home inside the checkout, it also refuses them in the checkout's `.claude/settings.json` and `.claude/settings.local.json` and in the user's Claude Code settings file.
+
 Programs that read `AGENTS.md` and `.agents/skills` and have no separate package include
 DeepSeek Harness, Kilo Code, Kimi CLI, Factory Droid, Mistral Vibe, JetBrains Junie, Augment
 CLI, Warp, Windsurf, Zed and Crush; compose for them with `target.runtime: any`. A
@@ -795,12 +808,13 @@ since every one is a default, and the stack's `extensions` as written. The
 target's `runtime` is always an array: the runtimes the home contains after the compose,
 the targeted ones first. A module has its `name`, its `source` as the stack writes it,
 its `pin`, `dirty` when git saw uncommitted changes under a path source, the `variant`
-chosen, its `link` when the stack sets one, and `base` when it is the base stack's. A
+chosen, its `link` when the stack sets one, `copied` when the home contains copies of its
+entries, and `base` when it is the base stack's. A
 source that selects an export is written as the stack wrote it, `<url>#<ref> module
 <name>`. An entry an `only` brought in has `for`, the `<kind>/<name>` that required it,
 and an entry whose documents reference others has `references`, the `<kind>/<name>` keys
 as written, a role's included; the stack's bindings are `bind`, `<kind>/<role>` to the
-entry's name, absent when there are none. `egress` is the union of the hosts the modules
+entry's name, absent when there are none. An agent with a tier has `tier`. `tiers` lists each tier the agents use that has a map, with `model`, `effort` when set, and `from`: `--tier` or the file that set it. `egress` is the union of the hosts the modules
 declared (§The module manifest), sorted by host, each with the `modules` that declared it
 in stack order, and absent when no module declares; when one does, the target runtime's
 hosts, the model endpoint for `claude`, join under the runtime's name, so a stack
@@ -878,6 +892,7 @@ exports:                         # in a repository delivering stacks or modules 
 | `qory` | none | the qory versions the file is written for, as in a stack; read under `extends` as well, since it can only narrow the base's range. At the root of a repository delivering stacks it is the range every stack in it is checked against, joined with the stack's range when the stack file is read (§The stack) |
 | `harness.runtime` | the document's `target.runtime` | one runtime name or a list; `--runtime` wins over it |
 | `harness.model` | the document's `target.model` | `--model` wins over it |
+| `harness.tiers` | none | the model id each tier maps to, for the agents whose `model` is `${qory:<tier>}`: a model id, or `{model, effort}`, the effort one of the values the runtime takes for an agent. The tiers are `light`, `fast` and `thinking`. In the user's file and an ancestor's it is the machine's map, the nearest file per tier; in the checkout root's file it is the repository's map, read under `extends` too. Per tier, `--tier` wins over the machine's map, and the machine's map over the repository's; an entry comes whole from one of the three. |
 | `harness.force` | `false` | what `--force` does on every compose; `--force=false` wins over it |
 | `harness.update` | `never` | `always` fetches every git source again on each compose; `--update` and `--update=false` win over it |
 | `harness.home` | `.qory/harness` | where the harness is composed: `.qory/harness` in the checkout, or a directory outside it, absolute or under `~`, containing one home per checkout as `<name>-<digest>` (§Rendering); `--home` wins over it |
@@ -911,9 +926,9 @@ the document under `harness` is (§Extending a stack).
 nowhere else: it has no counterpart in a repository or an ancestor directory, so a
 checkout cannot set the policy the agent runs under, which server the run reports to or
 what the agent is enclosed in. Its sections follow Forager's parts: `gateway` holds
-`egress`, `server`, `credentials`, `tools` and `integrations`; `session` holds `instance`
-and `run`; `wall` is the wall. `gateway.egress` and `gateway.server` are the Forager
-contract's objects, `https://qory.dev/contracts/forager/v1/`, in that contract's
+`egress`, `server`, `credentials`, `tools`, `integrations` and `selects`; `session` holds
+`instance` and `run`; `wall` is the wall. `gateway.egress` and `gateway.server` are the
+Forager contract's objects, `https://qory.dev/contracts/forager/v1/`, in that contract's
 grammar; `qory run` passes them to Forager as they are, `gateway.server` with the access
 key's id and the pin from the environment when the file holds none. `wall` chooses that
 contract's wall and defines what `qory run` passes to it.
@@ -970,10 +985,12 @@ wall:                            # the container the runtime starts in; absent: 
 | `gateway.server.via.certificate_sha256` | none | the SHA-256 of the gateway certificate's public key, in standard base64 with padding; with it, only a certificate with that key is accepted, and its chain is still checked |
 | `gateway.listen` | none | The address qory gateway listens on for the runs of other machines, host:port. qory run never listens on it: it starts a gateway itself on a loopback port for each run. `--listen` wins over it |
 | `gateway.tls.certificate`, `gateway.tls.key` | none | the certificate and key `qory gateway` serves the other machines with, files in PEM, relative to the directory of `forager.yaml` unless absolute; both or neither. `qory gateway` needs them, whatever address it listens on: a gateway serves other machines. `qory config` lists the paths as written and never what the key file holds |
+| `gateway.selects` | none | The credentials the gateway selects for a run, with a wall or without, when the server's policy selects none, each by name, with the label of the run's registration whose value is the argument, and the forge the run's `forge` label must name. On github.com the label's value is one repository or several of one owner, separated by commas with no space, such as `acme/shop,acme/lib`; a run whose label is missing, empty or of another form gets no credential from the entry. A value that lists repositories of several owners, or one repository twice, has that form, and the `github` integration mints no token for it: the run does not start. qory gateway alone reads it. |
 | `session.instance.name` | the host name, or its first label when the whole does not fit | this instance's display name on the server, and the name an enrolled key gets: 1 to 64 of `A-Z`, `a-z`, `0-9`, dot, underscore and dash, starting with a letter or a digit. The instance's id is made by qory and kept in the file `instance-id` beside `forager.yaml` |
 | `wall.adapter` | none | `docker`, the one there is. With it set, every `qory run` starts the runtime in a container with no route out except to the gateway's proxy; `--wall none` runs once without it, `--wall docker` once with it |
-| `wall.image` | none | the container's image when the run's policy selects none, which contains the runtime and the project's toolchain: the name of one of `wall.images`, or a reference. A name `wall.images` defines is read as that image first; `--image` sets another for one run, read the same way, and a policy's selection wins over both. qory builds none, and a wall without an image is refused unless the run's `--policy` selects one; a machine that reports to a server sets it, because the server's run configuration arrives once the run starts and may select none |
+| `wall.image` | none | the container's image when the run's policy selects none, which contains the runtime and the project's toolchain: the name of one of `wall.images`, or a reference. A name `wall.images` defines is read as that image first; `--image` sets another for one run, read the same way, and a policy's selection wins over both. qory builds none, and a wall without an image is refused unless the run's `--policy` selects one and `wall.images_allow` is not set; a machine that reports to a server sets it, because the server's run configuration arrives once the run starts and may select none |
 | `wall.images.<name>` | none | an image this machine defines, which a run's policy selects by its name, `image: <name>`, the Forager contract's §Images. The name is in a credential's grammar. `ref`, required, is the reference, pinned by digest where the machine wants the same image every time; `runtime` is the container runtime the wall starts it under, one the engine has, such as `sysbox-runc`, the engine's default when absent; `docker: true`, experimental, gives the agent nested Docker, a Docker daemon inside the wall, separate from the machine's; the helper starts it before the agent, and it needs Docker Engine 28 or later and a `runtime` that runs one without privileges. A `--policy` that selects a name the section does not define, or selects one for a run without a wall, is refused before the run; every command that reads the file refuses `docker: true` without a `runtime`. `qory config` shows whether `wall.image` is a name of this section or a reference. Define an image with `docker: true` only where every run may get one: any policy can select it |
+| `wall.images_allow` | none: a run whose policy names an image by reference is refused, `image_not_allowed` | where a run's image may come from when the run's policy, the server's signed run configuration or `--policy`, names one by a reference pinned by digest, `NAME@sha256:` and 64 lower-case hexadecimal digits, in place of a name of `wall.images`: a list of the prefixes of the references the machine runs, in lower case and up to a whole part of a reference, such as `registry.example/agents/`, a registry and a path, or `registry.example/agents/go@`, a name and its `@`. `registry.example/agents` covers `registry.example/agents/go@sha256:…` and not `registry.example/agents-other/go@sha256:…`. Every command that reads the file refuses an empty entry, `*`, and one that is not such a prefix. An image by reference starts under the default image's runtime, with no nested Docker, so `qory run` refuses a list without a default, `wall.image` or `--image`; it runs as `wall.user`, which is then a numeric `uid:gid` with neither part 0 |
 | `wall.env` | none | names of variables of `qory run`'s environment that go into the container, such as the model credential, with `--env` adding to them. The launch's variables go in, `QORY_HARNESS_HOME` among them; nothing else of the environment does. A name with no value here is left out |
 | `wall.command` | `docker` | the program the adapter runs, such as `podman`, supported where the wall's conformance suite passes |
 | `wall.user` | `qory run`'s | the `uid:gid` the container runs as. Root is refused, so a machine where qory runs as root sets another, one that can write the checkout |
@@ -982,7 +999,7 @@ wall:                            # the container the runtime starts in; absent: 
 | `session.run.timeout` | none | how long a runtime may run, a duration such as `5h30m`. At the limit Forager stops it, `dev.qory.run.exited` contains `reason: timeout`, and `qory run` exits 124. `--timeout` sets another for one run, and `--timeout 0` none |
 | `session.run.stop_signal` | the runtime's descriptor's, else `SIGTERM` | the signal that requests a runtime to stop when Forager stops it, at the limit or on a signal to `qory run`: `SIGTERM`, `SIGINT`, `SIGHUP`, `SIGQUIT`, `SIGUSR1` or `SIGUSR2`. Runtimes differ in what a signal means, one closes its session on SIGINT and drops it on SIGTERM, so the runtime's descriptor defines which and the machine may set another; `--stop-signal` sets another for one run |
 | `session.run.stop_grace` | the runtime's descriptor's, else `10s` | how long a runtime gets between the stop signal and SIGKILL; `--stop-grace` sets another |
-| `wall.ca_env` | `SSL_CERT_FILE`, `GIT_SSL_CAINFO`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `AWS_CA_BUNDLE` | the variables that point a program in the container at the authorities it trusts, the image's and the run's, when a run has a credential or path rules |
+| `wall.ca_env` | `SSL_CERT_FILE`, `GIT_SSL_CAINFO`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `AWS_CA_BUNDLE` | the variables that point a program at the authorities it trusts, the image's or this machine's and the run's, when a run has a credential or path rules: in the container, or on this machine for a run without a wall |
 | `gateway.credentials.<name>` | none | a credential this machine has for its runs. Exactly one of `env`, a variable of `qory run`'s environment, `file`, an absolute path read whenever the token is used, and `adapter`, a program by its absolute path with its arguments, defines where the token comes from. An adapter prints the token with the hosts, the scheme and the paths it is for, the Forager contract's `credential.schema.json`, and takes the policy's argument as `${argument}` when `argument`, a regular expression, matches it whole; its `hosts` and `paths` here are the most it may claim. With `env` and `file`, `hosts`, `auth` (`scheme: bearer`, `basic` with `username`, or `header` with `header`) and `paths` define how the token is used. `placeholders` lists variables the container gets with a value that is no credential |
 | `gateway.tools` | none | The tools this machine has for its runs, by name. A run's policy selects among them, with an argument, and defines none. Behind a wall the gateway starts each for the run, outside the container, and the proxy hands it the requests it allows to the hosts the tool serves. |
 | `gateway.integrations.<key>` | none | an integration this machine declares: a program that speaks the [integration contract](https://github.com/qoryai/integrations/tree/v0.3.0/contracts/integration/v1), `program`, an absolute path or a name on the `PATH`, `qory-<key>` when absent, with `settings`, its settings document, `{}` when absent. The key is 1 to 64 of `a-z`, `0-9`, `_` and `-`, starting with a letter or a digit. The program is outside the checkout and outside every mount the wall makes read-write in the container, judged by where its links lead: a link on a `PATH` entry the checkout controls that resolves outside the checkout is judged by where it resolves. The rule applies to each run as it starts, so a program written into a directory while that directory was mounted read-write is judged by where it is at the start of each run; keep a program's directory out of the read-write mounts. The resolved program, every directory above it up to `/`, and every directory above each link on the way belong to root or the user running qory, and so does each link; other users may write none of them; a group may write one when it is root's, gid 0, `wheel`, `admin`, or the owner's primary group when its name is the owner's; a directory root owns with the sticky bit set keeps the rule. On a machine whose `PATH` is not its owner's alone, set `program` to its absolute path. `<program> describe` runs in `/`, in a separate process group, for 10 seconds at most; its settings schema is draft 2020-12 and marks a secret `writeOnly` on a property of the settings themselves, `properties.<name>`. qory checks the settings against the description; a value of a `writeOnly` setting is refused, since the settings go on a command line, and the setting's `<name>_file` defines the path of the file that contains it. The `credential` role defines the credential `<key>`: `adapter: [<program>, credential, --settings, <json>, --, "${argument}"]`, the settings as compact JSON with `<`, `>`, `&`, U+2028 and U+2029 escaped and every `$` written `\u0024`, and the role's `argument` and `hosts`. `qory run` describes the integrations a policy on this machine selects, and every one when the server supplies the policy; `qory config` describes every one. A name `gateway.credentials` defines itself is that section's: the integration defines no credential under it, `qory run` and `qory config` print a line that states it, and `qory config` alone describes it. A role qory does not expand is left alone, and an integration that plays none it expands is refused |

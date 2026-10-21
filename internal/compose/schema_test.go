@@ -268,3 +268,46 @@ func TestModuleSchemaTakesTheHostForagerTakes(t *testing.T) {
 		}
 	}
 }
+
+// TestConfigSchemaKnowsTiers takes harness.tiers in both entry forms, with or beside a
+// document, and refuses a name that is not a tier, an empty model, an entry without a
+// model and a key the entry does not have. A stack has no tiers.
+func TestConfigSchemaKnowsTiers(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
+	c := jsonschema.NewCompiler()
+	composeSchema, err := c.Compile("../../contracts/harness/v1/config.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stackSchema, err := c.Compile("../../contracts/harness/v1/stack.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		schema *jsonschema.Schema
+		body   string
+		valid  bool
+	}{
+		{composeSchema, `{"harness": {"tiers": {"light": "claude-haiku-5-5", "fast": "claude-sonnet-5-5", "thinking": {"model": "claude-opus-5-5", "effort": "max"}}}}`, true},
+		{composeSchema, `{"harness": {"extends": {"path": "../harness/nextjs-15"}, "tiers": {"thinking": {"model": "claude-opus-5-5"}}}}`, true},
+		{composeSchema, `{"harness": {"tiers": {"heavy": "claude-haiku-5-5"}}}`, false},
+		{composeSchema, `{"harness": {"tiers": {"light": ""}}}`, false},
+		{composeSchema, `{"harness": {"tiers": {"light": {"effort": "max"}}}}`, false},
+		{composeSchema, `{"harness": {"tiers": {"light": {"model": "a", "effort": ""}}}}`, false},
+		{composeSchema, `{"harness": {"tiers": {"light": {"model": "a", "extra": "b"}}}}`, false},
+		{composeSchema, `{"harness": {"tiers": {"light": 5}}}`, false},
+		{stackSchema, `{"tiers": {"light": "claude-haiku-5-5"}, "modules": [{"name": "app"}]}`, false},
+	} {
+		var doc any
+		if err := json.Unmarshal([]byte(`{"apiVersion": "qory.dev/v1alpha1", `+c.body[1:]), &doc); err != nil {
+			t.Fatal(err)
+		}
+		if err := c.schema.Validate(doc); (err == nil) != c.valid {
+			t.Errorf("%s: valid=%v, err=%v", c.body, c.valid, err)
+		}
+	}
+}

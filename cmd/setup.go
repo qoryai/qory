@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/ui"
 )
 
@@ -105,7 +106,7 @@ and says how to reload. --print prints them and writes nothing.`,
 			u := ui.New(out)
 			shell := filepath.Base(os.Getenv("SHELL"))
 			if !print {
-				u.Title("qory setup shell", shell)
+				u.Title("qory setup shell", exports.Value(shell, false))
 			}
 			sh, ok := shells[shell]
 			if !ok {
@@ -114,7 +115,7 @@ and says how to reload. --print prints them and writes nothing.`,
 					names = append(names, name)
 				}
 				sort.Strings(names)
-				return input(fmt.Errorf("the %s shell is not supported; qory has a setup for %s, and welcomes a contribution for yours at https://github.com/qoryai/qory", nameOrNone(shell), strings.Join(names, ", ")))
+				return input(fmt.Errorf("the %s shell is not supported; qory has a setup for %s, and welcomes a contribution for yours at https://github.com/qoryai/qory", exports.Value(nameOrNone(shell), false), strings.Join(names, ", ")))
 			}
 			lines := strings.ReplaceAll(sh.lines, "{completion}", sh.load)
 			if print {
@@ -205,7 +206,7 @@ always matches it. The lines setup shell adds already source it.`,
 			case "powershell":
 				return root.GenPowerShellCompletionWithDesc(out)
 			}
-			return input(fmt.Errorf("the %s shell is not supported; qory completes bash, fish, powershell and zsh, and welcomes a contribution for yours at https://github.com/qoryai/qory", nameOrNone(shell)))
+			return input(fmt.Errorf("the %s shell is not supported; qory completes bash, fish, powershell and zsh, and welcomes a contribution for yours at https://github.com/qoryai/qory", exports.Value(nameOrNone(shell), false)))
 		},
 	}
 }

@@ -570,16 +570,16 @@ func TestARunKeyFromADescriptorIsReadOnce(t *testing.T) {
 }
 
 // TestARunKeyInTheEnvironmentNeedsAWall is a run key in QORY_RUN_KEY, which an unwalled agent can
-// read in qory's environment: an unwalled run is refused, run_key_needs_wall, as input,
-// before anything starts; a walled one goes on to the gateway, and so does an unwalled
-// run whose run key came by --run-key-fd.
+// read on macOS, and on Linux from the program that started qory: an unwalled run is
+// refused, run_key_needs_wall, as input, before anything starts; a walled one goes on to
+// the gateway, and so does an unwalled run whose run key came by --run-key-fd.
 func TestARunKeyInTheEnvironmentNeedsAWall(t *testing.T) {
 	root := runKeyCheckout(t)
 	gw := newKeyedGateway(t)
 	key := mintRunKey(t, keyRunID, gw.url())
 	t.Setenv("QORY_RUN_KEY", key)
 	out, err := run(t, "run")
-	if want := "QORY_RUN_KEY is in qory's environment, which an unwalled agent can read, so a run with it needs a wall: --wall docker, or wall in forager.yaml; or give the run key with --run-key-fd, such as --run-key-fd 0 for stdin (run_key_needs_wall)"; err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
+	if want := "QORY_RUN_KEY is in the environment qory started with, which an unwalled agent can read (on macOS always, on Linux through the program that started qory), so a run with it needs a wall: --wall docker, or wall in forager.yaml; or give the run key with --run-key-fd, such as --run-key-fd 0 for stdin (run_key_needs_wall)"; err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Errorf("unwalled: %v (exit %d)\nwant %q", err, cmd.ExitCode(err), want)
 	}
 	lacks(t, out, key[4:40], "through the gateway", "hello from")
@@ -592,13 +592,46 @@ func TestARunKeyInTheEnvironmentNeedsAWall(t *testing.T) {
 
 	docker, _ := fakeDocker(t)
 	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "wall:\n  adapter: docker\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
+	// Behind a wall, a run given a run key needs its harness outside the checkout.
+	outside := t.TempDir()
+	if out, err := run(t, "harness", "compose", "--runtime", "claude", "--no-links", "--home", outside); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
 	t.Setenv("QORY_RUN_KEY", key)
-	out, err = run(t, "run", "--image", "example.com/agent:1")
+	out, err = run(t, "run", "--home", outside, "--image", "example.com/agent:1")
 	if err != nil && strings.Contains(err.Error(), "run_key_needs_wall") {
 		t.Errorf("walled: %v", err)
 	}
 	wants(t, out, "qory run: through the gateway "+gw.host()+", run "+keyRunID)
 	lacks(t, out, key[4:40])
+}
+
+// TestARunKeyStillNeedsAWallBesideTheMarker is a run key in QORY_RUN_KEY on a machine
+// that has the stored-secrets marker and no access key: an unwalled run is still refused,
+// run_key_needs_wall, as input, before anything starts.
+func TestARunKeyStillNeedsAWallBesideTheMarker(t *testing.T) {
+	root := runKeyCheckout(t)
+	dir := configDir()
+	if _, err := dir.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	if err := dir.WriteMarker(); err != nil {
+		t.Fatal(err)
+	}
+	gw := newKeyedGateway(t)
+	key := mintRunKey(t, keyRunID, gw.url())
+	t.Setenv("QORY_RUN_KEY", key)
+	out, err := run(t, "run")
+	if err == nil || !strings.HasSuffix(err.Error(), "(run_key_needs_wall)") || cmd.ExitCode(err) != cmd.ExitInput {
+		t.Errorf("unwalled beside the marker: %v (exit %d)", err, cmd.ExitCode(err))
+	}
+	lacks(t, out, key[4:40], "hello from")
+	if _, n := gw.received(); n != 0 {
+		t.Error("the unwalled run reached the gateway")
+	}
+	if ids := recorded(t, root); len(ids) != 0 {
+		t.Errorf("the refused run left records %v", ids)
+	}
 }
 
 // TestResendTakesTheRunKeyFromADescriptor is qory run resend with --run-key-fd: the

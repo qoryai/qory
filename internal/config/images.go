@@ -6,14 +6,18 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/forager/policy"
 	"github.com/qoryai/forager/session"
 	"gopkg.in/yaml.v3"
+
+	"github.com/qoryai/qory/internal/exports"
 )
 
 // ForagerImage is one entry of wall.images: an image this machine defines by name. A
-// run's policy selects one by that name and names no reference, so a repository never
-// chooses what it runs under; wall.image and --image name the default by it, or by a
-// reference.
+// run's policy selects one by that name, or names a reference under one of
+// wall.images_allow, so a repository chooses what it runs under only among what the
+// machine allows; wall.image and --image name the default by it, or by a reference.
 type ForagerImage struct {
 	// Name is what a policy, wall.image and --image select the image by, in a
 	// credential's grammar.
@@ -62,15 +66,16 @@ func readImages(path string, node *yaml.Node) ([]ForagerImage, error) {
 	seen := map[string]bool{}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		name := node.Content[i].Value
+		at := entryAt("wall.images", node.Content[i])
 		if !imageName.MatchString(name) {
-			return nil, fmt.Errorf("%s: wall.images: %q is not 1 to 64 of a-z, 0-9, underscore, dot and dash, starting with a letter or a digit", path, name)
+			return nil, fmt.Errorf("%s: wall.images: %s is not 1 to 64 of a-z, 0-9, underscore, dot and dash, starting with a letter or a digit", path, quotedName(node.Content[i]))
 		}
 		if seen[name] {
-			return nil, fmt.Errorf("%s: wall.images.%s is defined twice", path, name)
+			return nil, fmt.Errorf("%s: %s is defined twice", path, at)
 		}
 		seen[name] = true
 		fail := func(format string, a ...any) error {
-			return fmt.Errorf("%s: wall.images.%s%s", path, name, fmt.Sprintf(format, a...))
+			return fmt.Errorf("%s: %s%s", path, at, fmt.Sprintf(format, a...))
 		}
 		entry := node.Content[i+1]
 		if entry.Kind != yaml.MappingNode {
@@ -82,7 +87,7 @@ func readImages(path string, node *yaml.Node) ([]ForagerImage, error) {
 		for k := 0; k+1 < len(entry.Content); k += 2 {
 			key, value := entry.Content[k].Value, entry.Content[k+1]
 			if !slices.Contains(imageKeys, key) {
-				return nil, fail(": key %q is not one; an image has %s", key, strings.Join(imageKeys, ", "))
+				return nil, keyNotOne(path, at, entry.Content[k], "; an image has "+strings.Join(imageKeys, ", "))
 			}
 			if keys[key] {
 				return nil, fail(".%s appears twice", key)
@@ -119,6 +124,26 @@ func readImages(path string, node *yaml.Node) ([]ForagerImage, error) {
 	return out, nil
 }
 
+// readImagesAllow reads wall.images_allow, a list of the prefixes of the references
+// pinned by digest a run's policy may name its image by. It refuses an entry Forager
+// would refuse, by its index and without its value: an empty one, *, and one that is
+// not the start of such a reference in lower case, up to a whole part of it.
+func readImagesAllow(path string, node *yaml.Node) ([]string, error) {
+	notPrefix := func(i, _ int) error {
+		return fmt.Errorf("%s: wall.images_allow[%d] is not the start of an image reference pinned by digest, in lower case, up to a whole part of it: a registry, a name or a path ending in a slash, or a name and its @", path, i)
+	}
+	allow, err := stringList(path, "wall.images_allow", node, notPrefix)
+	if err != nil {
+		return nil, err
+	}
+	for i, entry := range allow {
+		if policy.CheckImagePrefix(entry) != nil {
+			return nil, notPrefix(i, 0)
+		}
+	}
+	return allow, nil
+}
+
 // Defines reports whether the wall section defines an image of that name: one a policy
 // may select, and one wall.image and --image read as that image before a reference.
 func (w *ForagerWall) Defines(name string) bool {
@@ -127,23 +152,23 @@ func (w *ForagerWall) Defines(name string) bool {
 
 // defaultRow is wall.image's value in the rows: the value and what it is read as, the
 // image of wall.images it names or a reference, so a name mistyped shows as a
-// reference.
+// reference. A reference prints as [exports.Value] prints it.
 func defaultRow(w *ForagerWall) string {
 	switch {
 	case w.Image == "":
 		return "(none)"
 	case w.Defines(w.Image):
-		return w.Image + " (wall.images." + w.Image + ")"
+		return accesskey.ShownName(w.Image, false) + " (wall.images." + accesskey.ShownName(w.Image, false) + ")"
 	}
-	return w.Image + " (a reference)"
+	return exports.Value(w.Image, false) + " (a reference)"
 }
 
 // imageRow is an image's value in the rows: its reference, then its runtime and its
-// daemon when it has them.
+// daemon when it has them, the reference and the runtime as [exports.Value] prints them.
 func imageRow(i ForagerImage) string {
-	v := i.Ref
+	v := exports.Value(i.Ref, false)
 	if i.Runtime != "" {
-		v += ", runtime " + i.Runtime
+		v += ", runtime " + exports.Value(i.Runtime, false)
 	}
 	if i.Docker {
 		v += ", docker (experimental)"

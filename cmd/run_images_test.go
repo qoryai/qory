@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/qoryai/forager/session"
+
 	"github.com/qoryai/qory/cmd"
 )
 
@@ -49,7 +51,9 @@ func TestRunStartsTheImageTheMachineDefines(t *testing.T) {
 	nested := []string{
 		"--runtime sysbox-runc --user 0:0 --security-opt no-new-privileges --init --mount type=volume,dst=/var/lib/docker ",
 		"src=" + helper + ",dst=/qory/qory,readonly",
-		"--entrypoint /qory/qory example.com/agent-go-docker:1 run nest --user 1000:1000 -- claude --settings " + runsDir(t, root),
+		"--entrypoint /qory/qory example.com/agent-go-docker:1 run nest --user 1000:1000 -- /qory/qory run exec --unset ",
+		" -- /bin/sh " + runsDir(t, root),
+		"/" + session.PreparationScript + " claude --settings " + runsDir(t, root),
 	}
 	for _, c := range []struct {
 		name    string
@@ -59,7 +63,7 @@ func TestRunStartsTheImageTheMachineDefines(t *testing.T) {
 		started map[string]any
 	}{
 		{"the default, by name", nil,
-			[]string{"--entrypoint claude example.com/agent-go:1 --settings " + runsDir(t, root)},
+			[]string{"--entrypoint /qory/qory example.com/agent-go:1 run exec --unset ", " -- /bin/sh " + runsDir(t, root), "/" + session.PreparationScript + " claude --settings " + runsDir(t, root)},
 			[]string{"--runtime", "run nest", "agent-go-docker"},
 			map[string]any{"image": "example.com/agent-go:1", "image_name": "go", "container_runtime": nil, "docker": nil}},
 		{"--image, by name", []string{"--image", "go-docker"}, nested, []string{"--entrypoint claude"},
@@ -71,7 +75,7 @@ func TestRunStartsTheImageTheMachineDefines(t *testing.T) {
 		{"--image over the policy's none", []string{"--image", "go-docker", "--policy", imagePolicy(t, "")}, nested, []string{"--entrypoint claude"},
 			map[string]any{"image": "example.com/agent-go-docker:1", "image_name": "go-docker", "container_runtime": "sysbox-runc", "docker": true}},
 		{"--image, a reference", []string{"--image", "example.com/other:3"},
-			[]string{"--entrypoint claude example.com/other:3 --settings"},
+			[]string{"--entrypoint /qory/qory example.com/other:3 run exec --unset ", " -- /bin/sh ", "/" + session.PreparationScript + " claude --settings"},
 			[]string{"--runtime", "run nest"},
 			map[string]any{"image": "example.com/other:3", "image_name": nil, "container_runtime": nil, "docker": nil}},
 	} {
@@ -121,13 +125,13 @@ func TestRunStartsTheImageTheMachineDefines(t *testing.T) {
 
 // TestRunRefusesAnImageSelectionItCannotStart pins the refusals of an image before
 // anything starts, each an input error that leaves no record: a policy that selects an
-// image the machine does not define, or names a reference, which Forager's policy
-// format refuses, or selects one for a run without a wall, a Docker of its own without a
-// runtime, and a wall with no image at all. A run whose own policy selects an image
-// needs no default; a run whose policy the server supplies does, since the server's run
-// configuration arrives once the run starts and may select none, and the refusal says
-// so. A run configuration from the server that selects an image the machine does not
-// define is Forager's to refuse, in its words.
+// image the machine does not define, or names a reference not pinned by digest, which
+// Forager's policy format refuses, or selects one for a run without a wall, nested
+// Docker without a runtime, and a wall with no image at all. A run whose --policy
+// selects an image needs no default, without wall.images_allow; a run whose policy the
+// server supplies does, since the server's run configuration arrives once the run starts
+// and may select none, and the refusal says so. A run configuration from the server that selects an image the
+// machine does not define is Forager's to refuse, in its words.
 func TestRunRefusesAnImageSelectionItCannotStart(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -141,7 +145,7 @@ func TestRunRefusesAnImageSelectionItCannotStart(t *testing.T) {
 		want string
 	}{
 		{[]string{"run", "--policy", imagePolicy(t, "media")}, "the policy selects the image media, which wall.images in forager.yaml does not define"},
-		{[]string{"run", "--policy", imagePolicy(t, "example.com/agent-go:1")}, "policy.yaml: jsonschema validation failed"},
+		{[]string{"run", "--policy", imagePolicy(t, "example.com/agent-go:1")}, "the policy names its image by a reference that is not pinned by digest"},
 		{[]string{"run", "--wall", "none", "--policy", imagePolicy(t, "go")}, "the policy selects the image go, which needs a wall: wall in forager.yaml, or --wall docker"},
 	} {
 		out, err := run(t, c.args...)
@@ -238,5 +242,59 @@ func TestNestIsHiddenAndTakesItsArgumentsAsTheyAre(t *testing.T) {
 	_, err = run(t, "run", "nest", "--user", "0:0", "--", "claude", "--settings", "x")
 	if err == nil || !strings.HasPrefix(err.Error(), "nest: ") || err.Error() == unread {
 		t.Errorf("with its arguments: %v", err)
+	}
+}
+
+// TestARunsPolicyNamesAnImageByReference is a --policy that names its image by a
+// reference pinned by digest: qory leaves it to Forager. Without wall.images_allow,
+// Forager refuses it as the run starts, image_not_allowed, and the run is recorded;
+// under a prefix of the list, the wall fetches it. A list without a default image is
+// refused as input before anything starts.
+func TestARunsPolicyNamesAnImageByReference(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, "claude")
+	docker, log := fakeDocker(t)
+	helper := staticELF(t)
+	file := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml")
+	const ref = "registry.example/agents/go@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	policy := imagePolicy(t, ref)
+
+	writeFile(t, file, imagesSection(docker, helper))
+	out, err := run(t, "run", "--policy", policy)
+	if err == nil || cmd.ExitCode(err) != 1 || !strings.Contains(err.Error(), "image_not_allowed") {
+		t.Fatalf("without wall.images_allow: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	ids := recorded(t, root)
+	if len(ids) != 1 {
+		t.Fatalf("the refused run is recorded %v times", ids)
+	}
+	data, err := os.ReadFile(filepath.Join(runsDir(t, root), ids[0], "session.jsonl"))
+	if err != nil || !strings.Contains(string(data), `"type":"dev.qory.run.refused"`) || !strings.Contains(string(data), `"code":"image_not_allowed"`) {
+		t.Errorf("the record holds %s (%v)", data, err)
+	}
+
+	if err := os.RemoveAll(runsDir(t, root)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(log); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, file, imagesSection(docker, helper)+"  images_allow: [registry.example/agents/]\n")
+	out, err = run(t, "run", "--policy", policy)
+	if err == nil || strings.Contains(err.Error(), "image_not_allowed") {
+		t.Errorf("under wall.images_allow: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	data, err = os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants(t, string(data), "pull "+ref+"\n")
+
+	writeFile(t, file, strings.Replace(imagesSection(docker, helper), "  image: go\n", "", 1)+"  images_allow: [registry.example/agents/]\n")
+	_, err = run(t, "run", "--policy", policy)
+	want := "wall.images_allow in forager.yaml needs a default image, which an image by reference starts under: --image, or wall.image"
+	if err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
+		t.Errorf("a list without a default: %v (exit %d), want %q", err, cmd.ExitCode(err), want)
 	}
 }

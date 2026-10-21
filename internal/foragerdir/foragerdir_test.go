@@ -195,6 +195,50 @@ func TestASecretMovedAsideGetsANameNoFileHas(t *testing.T) {
 	}
 }
 
+// TestANewSecretDeletedIsGone deletes access-key-secret.new: it is gone, nothing is moved
+// aside and access-key-secret stays, byte for byte; deleting it again deletes nothing.
+// A directory that cannot be written says which file it could not delete.
+func TestANewSecretDeletedIsGone(t *testing.T) {
+	d := newDir(t)
+	mine := newKey(t)
+	if err := d.WriteSecret(mine); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.WriteNewSecret(newKey(t)); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.DeleteNewSecret(); err != nil {
+		t.Fatal(err)
+	}
+	if d.HasNewSecret() {
+		t.Error("the new secret is still there")
+	}
+	if old, _ := d.OldSecrets(); len(old) != 0 {
+		t.Errorf("moved aside %v", old)
+	}
+	if b, _ := os.ReadFile(d.Path(foragerdir.SecretFile)); string(b) != mine.Secret()+"\n" {
+		t.Error("access-key-secret changed")
+	}
+	if err := d.DeleteNewSecret(); err != nil {
+		t.Errorf("nothing to delete: %v", err)
+	}
+
+	if os.Geteuid() == 0 {
+		return
+	}
+	if err := d.WriteNewSecret(newKey(t)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(string(d), 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(string(d), 0o700) })
+	err := d.DeleteNewSecret()
+	if err == nil || !strings.HasPrefix(err.Error(), "delete "+d.Path(foragerdir.NewSecretFile)+": ") {
+		t.Errorf("a directory that cannot be written: %v", err)
+	}
+}
+
 // TestTheMarkerAndThePendingEnrolment are the stored-secrets marker, written 0600 and
 // kept when written twice, and enrolment-pending, which holds the key's fingerprint and
 // not its secret, and matches its code and its key for 15 minutes; a record without a
@@ -218,7 +262,7 @@ func TestTheMarkerAndThePendingEnrolment(t *testing.T) {
 		t.Error("the marker stayed")
 	}
 
-	const code = "qec_F1XT0RE0000000000000000000.uoES-kuj1vk0sq0qoGlmAg"
+	const code = "qecn_F1XT0RE0000000000000000000.uoES-kuj1vk0sq0qoGlmAg"
 	now := time.Unix(1700000000, 0)
 	k, other := newKey(t), newKey(t)
 	key := k.PublicKey()
@@ -243,7 +287,7 @@ func TestTheMarkerAndThePendingEnrolment(t *testing.T) {
 		{"within its 15 minutes", code, key, now.Add(14*time.Minute + 59*time.Second), true},
 		{"after its 15 minutes", code, key, now.Add(15 * time.Minute), false},
 		{"before it was written", code, key, now.Add(-time.Second), false},
-		{"another code", "qec_F1XT0RE0000000000000000001.uoES-kuj1vk0sq0qoGlmAg", key, now, false},
+		{"another code", "qecn_F1XT0RE0000000000000000001.uoES-kuj1vk0sq0qoGlmAg", key, now, false},
 		{"another key", code, other.PublicKey(), now, false},
 	} {
 		if got := d.Pending(c.code, c.key, c.at); got != c.want {
@@ -278,7 +322,7 @@ func TestTheInstanceIDIsKeptForThisMachine(t *testing.T) {
 	d := newDir(t)
 	machine := []byte("machine-a")
 	id, kept, err := d.InstanceID(machine)
-	if err != nil || !kept || accesskey.CheckInstanceID(id) != nil || !strings.HasPrefix(id, "i_") || len(id) != 24 {
+	if err != nil || !kept || accesskey.CheckInstanceID(id) != nil || !strings.HasPrefix(id, "i_") || len(id) != 28 {
 		t.Fatalf("a new id: %q, %v, %v", id, kept, err)
 	}
 	if mode(t, d.Path(foragerdir.InstanceFile)) != 0o600 {

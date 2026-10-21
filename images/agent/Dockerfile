@@ -31,6 +31,8 @@ ARG GH_SHA256_ARM64=b57e8063f18862647c9d22727c32e9da1b963f8bf9db648fe123a6975695
 # the Forager module qory's go.mod requires, which qory image check compares. The sums are
 # npm's dist.integrity, sha512 in hex, of @anthropic-ai/claude-code and of its native
 # build for each platform, @anthropic-ai/claude-code-linux-x64 and -linux-arm64.
+# Keep it at 2.1.257 or later: a harness module's settings use
+# permissions.blockReadsOutsideWorkingDirectories, which needs it.
 ARG CLAUDE_CODE_VERSION=2.1.273
 ARG CLAUDE_CODE_SHA512=ca6e36fd63517fa1f8dc541d20f8a0bf3cd35b40de43508faab4dd6270259165468fcc7c35acac084d13535e3c99bde5a67cb9ca8d7ff78fbb7502b951298111
 ARG CLAUDE_CODE_SHA512_AMD64=22e9c65cda6c995d481e35bab6d648aa164354ece9f14660241181574572437242703598e1bdc0a2438bd1824ea6d97c1a1055ae092ce837241182d1fd035926

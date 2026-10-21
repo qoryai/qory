@@ -28,8 +28,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
+	"github.com/qoryai/forager/accesskey"
 	"gopkg.in/yaml.v3"
 )
 
@@ -80,7 +82,7 @@ func ResolveAPIVersion(version string) (string, error) {
 	if current, ok := RetiredAPIVersions[version]; ok {
 		return current, nil
 	}
-	return "", fmt.Errorf("apiVersion %q is not one this qory reads; versions: %s", version, APIVersion)
+	return "", fmt.Errorf("apiVersion %s is not one this qory reads; versions: %s", Value(version, true), APIVersion)
 }
 
 // StackFileName and ModuleFileName are what an exported directory contains: a stack its
@@ -131,7 +133,7 @@ func (d *Dirs) UnmarshalYAML(n *yaml.Node) error {
 	}
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		if k := n.Content[i].Value; k != "stacks" && k != "modules" {
-			return fmt.Errorf("dir has the key %q, which a dir map does not have; its keys are stacks and modules", k)
+			return fmt.Errorf("dir has the key %s, which a dir map does not have; its keys are stacks and modules", accesskey.ShownName(k, true))
 		}
 	}
 	*d = Dirs(m)
@@ -164,7 +166,7 @@ func (s *Section) Validate() error {
 			}
 			clean := filepath.Clean(d.dir)
 			if filepath.IsAbs(d.dir) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-				return fmt.Errorf("exports.dir %s %q is not a directory inside the repository", d.key, d.dir)
+				return fmt.Errorf("exports.dir %s %s is not a directory inside the repository", d.key, Value(d.dir, true))
 			}
 		}
 	}
@@ -175,10 +177,10 @@ func (s *Section) Validate() error {
 		seen := map[string]bool{}
 		for _, name := range list.names {
 			if !segment(name) {
-				return fmt.Errorf("exports.%s lists %q, which is not one path segment; a name contains no slash, backslash, @ or leading dot", list.key, name)
+				return fmt.Errorf("exports.%s lists %s, which is not one path segment; a name contains no slash, backslash, @ or leading dot", list.key, accesskey.ShownName(name, true))
 			}
 			if seen[name] {
-				return fmt.Errorf("exports.%s lists %s twice", list.key, name)
+				return fmt.Errorf("exports.%s lists %s twice", list.key, accesskey.ShownName(name, false))
 			}
 			seen[name] = true
 		}
@@ -213,7 +215,7 @@ type Exports struct {
 // error that lists the stacks the repository exports when name is not one of them.
 func (e *Exports) Stack(name string) (string, error) {
 	if !contains(e.Stacks, name) {
-		return "", fmt.Errorf("exports no stack named %s; %s", name, listText("stacks", e.Stacks))
+		return "", fmt.Errorf("exports no stack named %s; %s", accesskey.ShownName(name, false), listText("stacks", e.Stacks))
 	}
 	return filepath.Join(e.Dir.Stacks, name), nil
 }
@@ -222,7 +224,7 @@ func (e *Exports) Stack(name string) (string, error) {
 // error that lists the modules the repository exports when name is not one of them.
 func (e *Exports) Module(name string) (string, error) {
 	if !contains(e.Modules, name) {
-		return "", fmt.Errorf("exports no module named %s; %s", name, listText("modules", e.Modules))
+		return "", fmt.Errorf("exports no module named %s; %s", accesskey.ShownName(name, false), listText("modules", e.Modules))
 	}
 	return filepath.Join(e.Dir.Modules, name), nil
 }
@@ -234,13 +236,13 @@ func (e *Exports) Verify() error {
 	for _, name := range e.Stacks {
 		dir, _ := e.Stack(name)
 		if !isFile(filepath.Join(e.Root, dir, StackFileName)) {
-			return fmt.Errorf("%s: exports.stacks lists %s, and %s contains no %s", e.File, name, dir, StackFileName)
+			return fmt.Errorf("%s: exports.stacks lists %s, and %s contains no %s", e.File, accesskey.ShownName(name, false), HidePath(dir), StackFileName)
 		}
 	}
 	for _, name := range e.Modules {
 		dir, _ := e.Module(name)
 		if !isFile(filepath.Join(e.Root, dir, ModuleFileName)) {
-			return fmt.Errorf("%s: exports.modules lists %s, and %s contains no %s", e.File, name, dir, ModuleFileName)
+			return fmt.Errorf("%s: exports.modules lists %s, and %s contains no %s", e.File, accesskey.ShownName(name, false), HidePath(dir), ModuleFileName)
 		}
 	}
 	return nil
@@ -305,7 +307,7 @@ func read(root string) (*document, string, error) {
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
 	dec.KnownFields(true)
 	if err := dec.Decode(&doc); err != nil && !errors.Is(err, io.EOF) {
-		return nil, "", decodeError(file, err)
+		return nil, "", DecodeError(file, err)
 	}
 	if doc.APIVersion == "" {
 		doc.APIVersion = APIVersion
@@ -330,32 +332,222 @@ func ModulesDir(root string) (string, error) {
 	return e.Dir.Modules, nil
 }
 
-// unknownKey is the decoder's report of a key the document has no field for. It names the
-// Go type, which the message a person reads leaves out.
-var unknownKey = regexp.MustCompile(`(line \d+: )?field (\S+) not found in type \S+`)
+// UnknownKey is the decoder's report of a key a document has no field for: the line,
+// when the decoder gives one, and the key's name, which may contain a space. The report
+// contains the Go type, which the message a person reads leaves out.
+var UnknownKey = regexp.MustCompile(`(line \d+: )?field (.+) not found in type \S+`)
 
-// decodeError prefixes a decode error with path. An unknown key is reported as one the
-// configuration does not read, with the decoder's line number when it gives one.
-func decodeError(path string, err error) error {
-	if m := unknownKey.FindStringSubmatch(err.Error()); m != nil {
-		return fmt.Errorf("%s: %skey %q is not one %s reads", path, m[1], m[2], filepath.Base(path))
+// definedTwice is the decoder's report of a mapping key written twice, which quotes the
+// key as a Go string, and the line it was first written at.
+var definedTwice = regexp.MustCompile(`mapping key "(?:[^"\\]|\\.)*" already defined at line (\d+)`)
+
+// entryLine is the line at the start of one of the decoder's refusals of a value, and
+// unknownKeyAt the same of its refusal of an unknown key; syntaxLine is the line of the
+// decoder's refusal of the file's syntax.
+var (
+	entryLine    = regexp.MustCompile(`^line (\d+): `)
+	unknownKeyAt = regexp.MustCompile(`^line (\d+): field `)
+	syntaxLine   = regexp.MustCompile(`^yaml: line (\d+):`)
+)
+
+// DecodeError prefixes a decode error with path. An unknown key is reported by
+// [KeyNotRead] as one the file at path does not read, with the decoder's line number
+// when it gives one. A key written twice whose name contains an access key secret or a
+// run key is reported in the decoder's words without the name. Any other error is
+// returned as the decoder wrote it, unless its text still contains an access key secret
+// or a run key, as a key whose name has a newline in it does: then [withoutSecrets]
+// says it.
+func DecodeError(path string, err error) error {
+	text := err.Error()
+	rest := " " + filepath.Base(path) + " reads"
+	if m := UnknownKey.FindStringSubmatch(text); m != nil {
+		return fmt.Errorf("%s: %s%s", path, m[1], KeyNotRead(m[2], rest))
+	}
+	hidden := hideDefinedTwice(text)
+	if accesskey.ContainsSecret(hidden) {
+		return withoutSecrets(path, rest, err)
+	}
+	if hidden != text {
+		return fmt.Errorf("%s: %s", path, hidden)
 	}
 	return fmt.Errorf("%s: %w", path, err)
+}
+
+// hideDefinedTwice is text with each of the decoder's reports of a key written twice
+// whose name contains an access key secret or a run key said without the name.
+func hideDefinedTwice(text string) string {
+	return definedTwice.ReplaceAllStringFunc(text, func(m string) string {
+		if !accesskey.ContainsSecret(m) {
+			return m
+		}
+		return definedTwice.ReplaceAllString(m, "mapping key already defined at line $1")
+	})
+}
+
+// cannotRead is what a refusal says in place of the decoder's message when that message
+// contains an access key secret or a run key.
+const cannotRead = "qory cannot read the value here. The YAML decoder's message contains an access key secret or a run key, so qory does not print it."
+
+// withoutSecrets is err, a decode error of the file at path whose text contains an
+// access key secret or a run key, said without them. Each of the decoder's refusals of
+// a value that contains one is its line and [cannotRead], or, for an unknown key, its
+// line and [KeyNotRead]'s words with rest; each that contains none keeps the decoder's
+// words. When any keeps them, the error is the decoder's list of refusals with those
+// entries; when none does, it is the first unknown key, or else the one entry, or else
+// the decoder's list of the entries. A refusal of the file's syntax is its line and
+// [cannotRead], and any other error the path and cannotRead. When err wraps the
+// decoder's message in words of qory's own, as a list of runtimes does, the refusal keeps
+// those words in front, unless they contain an access key secret or a run key too.
+func withoutSecrets(path, rest string, err error) error {
+	if inner := errors.Unwrap(err); inner != nil {
+		if words, ok := strings.CutSuffix(err.Error(), inner.Error()); ok && words != "" && !accesskey.ContainsSecret(words) {
+			path += ": " + strings.TrimSuffix(words, ": ")
+		}
+	}
+	var te *yaml.TypeError
+	if !errors.As(err, &te) {
+		if m := syntaxLine.FindStringSubmatch(err.Error()); m != nil {
+			return fmt.Errorf("%s: line %s: %s", path, m[1], cannotRead)
+		}
+		return fmt.Errorf("%s: %s", path, cannotRead)
+	}
+	var entries, lines []string
+	unknown, kept := "", false
+	for _, e := range te.Errors {
+		e = hideDefinedTwice(e)
+		if !accesskey.ContainsSecret(e) {
+			entries, kept = append(entries, e), true
+			continue
+		}
+		if m := unknownKeyAt.FindStringSubmatch(e); m != nil {
+			// The entry contains a secret, so KeyNotRead leaves it out.
+			e = "line " + m[1] + ": " + KeyNotRead(e, rest)
+			if unknown == "" {
+				unknown = e
+			}
+		} else if m := entryLine.FindStringSubmatch(e); m != nil {
+			e = "line " + m[1] + ": " + cannotRead
+			lines = append(lines, e)
+		} else {
+			continue
+		}
+		entries = append(entries, e)
+	}
+	lines = slices.Compact(lines)
+	switch {
+	case kept:
+		return fmt.Errorf("%s: yaml: unmarshal errors:\n  %s", path, strings.Join(entries, "\n  "))
+	case unknown != "":
+		return fmt.Errorf("%s: %s", path, unknown)
+	case len(lines) == 1:
+		return fmt.Errorf("%s: %s", path, lines[0])
+	case len(lines) > 1:
+		return fmt.Errorf("%s: yaml: unmarshal errors:\n  %s", path, strings.Join(lines, "\n  "))
+	}
+	return fmt.Errorf("%s: %s", path, cannotRead)
+}
+
+// KeyNotRead is the refusal of the key name where no key of that name is read: "key",
+// the name quoted, "is not one" and rest, as in key "x" is not one qory.yaml reads.
+// When the name contains an access key secret or a run key, as
+// [accesskey.ContainsSecret] reports one, the refusal leaves the name out, so it does
+// not contain the secret.
+func KeyNotRead(name, rest string) string {
+	if accesskey.ContainsSecret(name) {
+		return "key is not one" + rest
+	}
+	return fmt.Sprintf("key %q is not one%s", name, rest)
+}
+
+// word is one word of a message for [HideName]: a string quoted as Go's %q quotes one,
+// with its quotes, or what stands between spaces and quotes.
+var word = regexp.MustCompile(`"(?:[^"\\]|\\.)*"|[^\s"]+`)
+
+// HideName is text with each word that contains name, or that contains an access key
+// secret or a run key in any letter case, printed as [accesskey.ShownName] prints it
+// unquoted, when name contains an access key secret or a run key; text as it is when
+// name contains neither. A word is a program's name or path, a name another program's
+// message quotes, or such a name cut short, and the colons, semicolons and commas at its
+// end stay after the phrase.
+func HideName(text, name string) string {
+	if !accesskey.ContainsSecret(name) {
+		return text
+	}
+	return word.ReplaceAllStringFunc(text, func(w string) string {
+		if !strings.Contains(w, name) && !accesskey.ContainsSecret(w) {
+			return w
+		}
+		end := strings.TrimRight(w, ":;,")
+		return accesskey.ShownName(end, false) + w[len(end):]
+	})
+}
+
+// HideError is err with its text printed as [HidePath] prints it, when the text contains
+// an access key secret or a run key. The result unwraps to err, so a caller still matches
+// a [*fs.PathError] or another error under it. An error with no secret, and nil, are
+// returned as they are.
+func HideError(err error) error {
+	if err == nil || !accesskey.ContainsSecret(err.Error()) {
+		return err
+	}
+	return hiddenError{HidePath(err.Error()), err}
+}
+
+// hiddenError is an error whose text contains a secret, with the text [HideError]
+// prints.
+type hiddenError struct {
+	text string
+	err  error
+}
+
+// Error is the text with the secret left out.
+func (e hiddenError) Error() string { return e.text }
+
+// Unwrap returns the error whose text contains the secret.
+func (e hiddenError) Unwrap() error { return e.err }
+
+// HidePath is text with each segment of a path, between slashes, that contains an access
+// key secret or a run key printed as [accesskey.ShownName] prints it unquoted, as in
+// /root/modules/(a name that contains an access key secret)/qory-module.yaml. A word
+// without a slash is one segment. The quotes around a segment, and the colons,
+// semicolons and commas after it, stay around the phrase.
+func HidePath(text string) string {
+	return word.ReplaceAllStringFunc(text, func(w string) string {
+		if !accesskey.ContainsSecret(w) {
+			return w
+		}
+		segments := strings.Split(w, "/")
+		for i, s := range segments {
+			if accesskey.ContainsSecret(s) {
+				name := strings.TrimLeft(strings.TrimRight(s, `:;,"'`), `"'`)
+				start := strings.Index(s, name)
+				segments[i] = s[:start] + accesskey.ShownName(name, false) + s[start+len(name):]
+			}
+		}
+		return strings.Join(segments, "/")
+	})
 }
 
 // RefuseAliases fails on the first YAML alias in the file at path, a *name or a <<: *name
 // merge; an anchor alone copies nothing and stands. The file's readers other than qory
 // refuse an alias, since a few hundred bytes of them chained can expand to gigabytes, and
 // read such a file as unreadable without a word to its author. qory refuses the alias
-// too, so the file fails where it is written. A file that does not parse is left to the
-// decoder, which reports why.
+// too, so the file fails where it is written. When the anchor's name contains an access
+// key secret or a run key, the refusal says "the value" in place of the alias, and its
+// line places the alias. A file that does not parse is left to the decoder, which
+// reports why.
 func RefuseAliases(path string, data []byte) error {
 	var doc yaml.Node
 	if yaml.Unmarshal(data, &doc) != nil {
 		return nil
 	}
 	if a := firstAlias(&doc); a != nil {
-		return fmt.Errorf("%s: line %d: *%s is a YAML alias, which %s may not contain; write the value out in full where it is used", path, a.Line, a.Value, filepath.Base(path))
+		alias := "*" + a.Value
+		if accesskey.ContainsSecret(a.Value) {
+			// The line places the alias, and the anchor's name is left out.
+			alias = "the value"
+		}
+		return fmt.Errorf("%s: line %d: %s is a YAML alias, which %s may not contain; write the value out in full where it is used", path, a.Line, alias, filepath.Base(path))
 	}
 	return nil
 }
@@ -395,7 +587,7 @@ func listText(kind string, names []string) string {
 	if len(names) == 0 {
 		return "it exports no " + kind
 	}
-	return kind + ": " + strings.Join(names, ", ")
+	return kind + ": " + strings.Join(accesskey.ShownNames(names), ", ")
 }
 
 // isFile reports whether a regular file, or a link to one, is at path.

@@ -1,6 +1,8 @@
 package checkout_test
 
 import (
+	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/qoryai/qory/internal/checkout"
+	"github.com/qoryai/qory/internal/hostgit"
+	"github.com/qoryai/qory/internal/places"
 )
 
 // hermetic points git at an empty global configuration and away from the system one, so no
@@ -17,8 +21,13 @@ func hermetic(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(home))
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(home, ".gitconfig"))
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	hostgit.Forget()
 }
 
 // initRepo makes dir a git checkout with a local identity and returns dir.
@@ -112,11 +121,11 @@ func TestQoryDirIsUnderTheRoot(t *testing.T) {
 func TestExcludeFileIsTheCloneLocalExcludeFile(t *testing.T) {
 	hermetic(t)
 	root := initRepo(t, t.TempDir())
-	got := checkout.ExcludeFile(root)
+	got := must(checkout.ExcludeFile(root))
 	if want := filepath.Join(root, ".git", "info", "exclude"); got != want {
 		t.Errorf("got %s, want %s", got, want)
 	}
-	if got := checkout.ExcludeFile(t.TempDir()); got != "" {
+	if got := must(checkout.ExcludeFile(t.TempDir())); got != "" {
 		t.Errorf("got %s outside git, want the empty string", got)
 	}
 }
@@ -131,12 +140,12 @@ func TestWorktreesListsEveryWorkingTree(t *testing.T) {
 	git(t, root, "commit", "-q", "-m", "first")
 	wt := filepath.Join(t.TempDir(), "feature")
 	git(t, root, "worktree", "add", "-q", "-b", "feature", wt)
-	got := checkout.Worktrees(wt)
+	got := must(checkout.Worktrees(wt))
 	want := []string{real(t, root), real(t, wt)}
 	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	if got := checkout.Worktrees(t.TempDir()); got != nil {
+	if got := must(checkout.Worktrees(t.TempDir())); got != nil {
 		t.Errorf("got %v outside git, want nil", got)
 	}
 }
@@ -165,7 +174,7 @@ func TestRepoKeyReturnsOwnerAndNameFromTheOriginRemote(t *testing.T) {
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("git remote add: %v\n%s", err, out)
 			}
-			if got := checkout.RepoKey(root); got != c.want {
+			if got := must(checkout.RepoKey(root)); got != c.want {
 				t.Errorf("got %s, want %s", got, c.want)
 			}
 		})
@@ -200,12 +209,12 @@ func TestOriginNamesTheForgeAndTheRepository(t *testing.T) {
 		if c.url != "" {
 			git(t, root, "remote", "add", "origin", c.url)
 		}
-		forge, repository, ok := checkout.Origin(root)
+		forge, repository, ok := origin(root)
 		if forge != c.forge || repository != c.repository || ok != (c.forge != "") {
 			t.Errorf("%q: got %q, %q, %v, want %q, %q", c.url, forge, repository, ok, c.forge, c.repository)
 		}
 	}
-	if forge, repository, ok := checkout.Origin(t.TempDir()); ok || forge != "" || repository != "" {
+	if forge, repository, ok := origin(t.TempDir()); ok || forge != "" || repository != "" {
 		t.Errorf("no checkout: got %q, %q, %v", forge, repository, ok)
 	}
 }
@@ -223,7 +232,7 @@ func TestRepoKeyFallsBackToTheDirectoryName(t *testing.T) {
 			if name == "a checkout without a remote" {
 				initRepo(t, root)
 			}
-			if got := checkout.RepoKey(root); got != "app" {
+			if got := must(checkout.RepoKey(root)); got != "app" {
 				t.Errorf("got %s, want app", got)
 			}
 		})
@@ -261,30 +270,30 @@ func TestRestorableIsTrackedAndUnmodified(t *testing.T) {
 	git(t, root, "add", "-A")
 	git(t, root, "commit", "-q", "-m", "first")
 	write(t, filepath.Join(root, "NOTES.md"), "untracked\n")
-	if reason := checkout.Restorable(root, filepath.Join(root, "AGENTS.md")); reason != "" {
+	if reason := must(checkout.Restorable(root, filepath.Join(root, "AGENTS.md"))); reason != "" {
 		t.Errorf("a tracked, unmodified file: %q", reason)
 	}
-	if reason := checkout.Restorable(root, filepath.Join(root, ".claude")); reason != "" {
+	if reason := must(checkout.Restorable(root, filepath.Join(root, ".claude"))); reason != "" {
 		t.Errorf("a directory of tracked files: %q", reason)
 	}
-	if reason := checkout.Restorable(root, filepath.Join(root, "NOTES.md")); reason != "is not tracked in git" {
+	if reason := must(checkout.Restorable(root, filepath.Join(root, "NOTES.md"))); reason != "is not tracked in git" {
 		t.Errorf("an untracked file: %q", reason)
 	}
 	write(t, filepath.Join(root, "AGENTS.md"), "edited\n")
-	if reason := checkout.Restorable(root, filepath.Join(root, "AGENTS.md")); reason != "has uncommitted changes" {
+	if reason := must(checkout.Restorable(root, filepath.Join(root, "AGENTS.md"))); reason != "has uncommitted changes" {
 		t.Errorf("a modified file: %q", reason)
 	}
 	write(t, filepath.Join(root, ".claude", "settings.local.json"), "{}\n")
-	if reason := checkout.Restorable(root, filepath.Join(root, ".claude")); reason != "contains files git does not track" {
+	if reason := must(checkout.Restorable(root, filepath.Join(root, ".claude"))); reason != "contains files git does not track" {
 		t.Errorf("a directory with an untracked file in it: %q", reason)
 	}
 	write(t, filepath.Join(root, ".gitignore"), ".claude/settings.local.json\n")
 	git(t, root, "add", ".gitignore")
 	git(t, root, "commit", "-q", "-m", "ignore")
-	if reason := checkout.Restorable(root, filepath.Join(root, ".claude")); reason != "contains files git does not track" {
+	if reason := must(checkout.Restorable(root, filepath.Join(root, ".claude"))); reason != "contains files git does not track" {
 		t.Errorf("a directory with an ignored file in it: %q", reason)
 	}
-	if reason := checkout.Restorable(root, filepath.Join(t.TempDir(), "elsewhere")); reason != "is outside the checkout" {
+	if reason := must(checkout.Restorable(root, filepath.Join(t.TempDir(), "elsewhere"))); reason != "is outside the checkout" {
 		t.Errorf("a path outside the checkout: %q", reason)
 	}
 }
@@ -300,7 +309,7 @@ func TestRestorableSeesUntrackedFilesTheConfigurationHides(t *testing.T) {
 	git(t, root, "add", "-A")
 	git(t, root, "commit", "-q", "-m", "first")
 	write(t, filepath.Join(root, ".claude", "settings.local.json"), "{}\n")
-	if reason := checkout.Restorable(root, filepath.Join(root, ".claude")); reason != "contains files git does not track" {
+	if reason := must(checkout.Restorable(root, filepath.Join(root, ".claude"))); reason != "contains files git does not track" {
 		t.Errorf("a directory with an untracked file the configuration hides: %q", reason)
 	}
 }
@@ -325,7 +334,7 @@ func TestRepoKeyNeverTakesTheHostForAnOwner(t *testing.T) {
 		if want == "" {
 			want = filepath.Base(root)
 		}
-		if got := checkout.RepoKey(root); got != want {
+		if got := must(checkout.RepoKey(root)); got != want {
 			t.Errorf("%s: got %q, want %q", c.url, got, want)
 		}
 	}
@@ -356,5 +365,125 @@ func TestKeyNamesACheckoutOnceHoweverItIsReached(t *testing.T) {
 	}
 	if got := checkout.Key(other); got == key {
 		t.Errorf("two checkouts named app share the key %q", got)
+	}
+}
+
+// must is v, for a call whose error is the settings check's refusal, which no test here
+// expects: it panics on one.
+func must[T any](v T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
+// origin is [checkout.Origin] without its error, which no test here expects.
+func origin(root string) (string, string, bool) {
+	forge, repository, ok, err := checkout.Origin(root)
+	if err != nil {
+		panic(err)
+	}
+	return forge, repository, ok
+}
+
+// TestEveryFunctionReturnsTheRefusal records the checkout as a walled run's, adds a key
+// after the record, and has every function that runs git return the settings check's
+// refusal in place of its fallback.
+func TestEveryFunctionReturnsTheRefusal(t *testing.T) {
+	hermetic(t)
+	root := real(t, initRepo(t, t.TempDir()))
+	if err := hostgit.Record(context.Background(), root, places.KindCheckout, "run-1"); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "config", "alias.x", "log")
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	path := filepath.Join(root, "AGENTS.md")
+	calls := map[string]func() error{
+		"Root":        func() error { _, err := checkout.Root(root); return err },
+		"RepoKey":     func() error { _, err := checkout.RepoKey(root); return err },
+		"Origin":      func() error { _, _, _, err := checkout.Origin(root); return err },
+		"ExcludeFile": func() error { _, err := checkout.ExcludeFile(root); return err },
+		"Worktrees":   func() error { _, err := checkout.Worktrees(root); return err },
+		"Restorable":  func() error { _, err := checkout.Restorable(root, path); return err },
+		"Changes":     func() error { _, err := checkout.Changes(root, path); return err },
+		"Init":        func() error { return checkout.Init(root) },
+	}
+	for name, call := range calls {
+		var r *hostgit.RefusedError
+		if err := call(); !errors.As(err, &r) || r.Key != "alias.x" {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// TestARecordThatCannotBeReadIsAnError puts a file in the directory of the records of
+// the places that is no record: the settings check cannot read the records, so no git
+// runs, and Root, RepoKey, Origin, ExcludeFile, Worktrees and Restorable each return
+// that error rather than reading the checkout as outside git.
+func TestARecordThatCannotBeReadIsAnError(t *testing.T) {
+	hermetic(t)
+	root := initRepo(t, real(t, t.TempDir()))
+	dir, err := places.Dir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "broken.json"), []byte("not a record"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hostgit.Forget()
+	t.Cleanup(hostgit.Forget)
+	_, want := places.Load()
+	if want == nil {
+		t.Fatal("the broken record reads")
+	}
+	check := func(what string, err error) {
+		t.Helper()
+		if err == nil || err.Error() != want.Error() {
+			t.Errorf("%s: %v, want %v", what, err, want)
+		}
+	}
+	_, err = checkout.Root(root)
+	check("Root", err)
+	_, err = checkout.RepoKey(root)
+	check("RepoKey", err)
+	_, _, _, err = checkout.Origin(root)
+	check("Origin", err)
+	_, err = checkout.ExcludeFile(root)
+	check("ExcludeFile", err)
+	_, err = checkout.Worktrees(root)
+	check("Worktrees", err)
+	_, err = checkout.Restorable(root, filepath.Join(root, "file"))
+	check("Restorable", err)
+}
+
+// TestAPathWithALineEndIsReadWhole looks up a checkout, its exclude file and its working
+// trees, each at a folder whose name ends in a line end: git prints such a path
+// unchanged, with one line end after it, and the lookups return the whole path.
+func TestAPathWithALineEndIsReadWhole(t *testing.T) {
+	hermetic(t)
+	root := filepath.Join(real(t, t.TempDir()), "app\n")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initRepo(t, root)
+	write(t, filepath.Join(root, "README.md"), "hello\n")
+	git(t, root, "add", "README.md")
+	git(t, root, "commit", "-q", "-m", "first")
+	wt := filepath.Join(real(t, t.TempDir()), "feature\n")
+	git(t, root, "worktree", "add", "-q", "-b", "feature", wt)
+	if got := must(checkout.Root(root)); got != root {
+		t.Errorf("root %q, want %q", got, root)
+	}
+	if got, want := must(checkout.ExcludeFile(root)), filepath.Join(root, ".git", "info", "exclude"); got != want {
+		t.Errorf("exclude file %q, want %q", got, want)
+	}
+	if got := must(checkout.Worktrees(root)); len(got) != 2 || got[0] != root || got[1] != wt {
+		t.Errorf("working trees %q, want %q", got, []string{root, wt})
 	}
 }

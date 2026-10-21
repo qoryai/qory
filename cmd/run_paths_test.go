@@ -81,7 +81,7 @@ func TestARunUnderTheMachinesPathsNeedsAWall(t *testing.T) {
 		out, err := run(t, args...)
 		var ref *forefusal.NeedsWall
 		if !errors.As(err, &ref) || !slices.Contains(ref.Names, "paths") ||
-			!strings.Contains(err.Error(), "the policy selects credentials or tools or has path rules, which need a wall: without one a program that ignores the proxy is bound by none of them") {
+			!strings.Contains(err.Error(), "run it with a wall: the policy selects tools or has path rules, and without a wall a program that ignores the proxy is bound by neither") {
 			t.Errorf("%s: %v\n%s", name, err, out)
 		}
 		lacks(t, out, "hello from")

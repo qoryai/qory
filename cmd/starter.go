@@ -20,6 +20,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/ui"
 )
 
@@ -258,7 +259,11 @@ func discover(ctx context.Context, client *server.Client, key *accessKey, verb s
 	if err != nil {
 		return nil, err
 	}
-	if err := onDiscovery(machineDir(), key, client.InstanceID, verb, report, gateway.Discovery{NodeID: conf.NodeID, Secrets: conf.Secrets != nil}); err != nil {
+	dir, err := machineDir()
+	if err != nil {
+		return nil, err
+	}
+	if err := onDiscovery(dir, key, client.InstanceID, verb, report, gateway.Discovery{NodeID: conf.NodeID, Secrets: conf.Secrets != nil}); err != nil {
 		return nil, err
 	}
 	return conf, nil
@@ -397,13 +402,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#how-a-run-ends-there`
 
 // endOutcome is the outcome qory run end sends for --outcome, word, and --reason: none
 // for no word, else the word's state and the reason, a code of the starter's own. Each
-// refusal is input.
+// refusal is input, and prints the flag's value as [exports.Value] prints it.
 func endOutcome(word, reason string) (server.Outcome, error) {
 	var o server.Outcome
 	if word != "" {
 		state, ok := endOutcomes[word]
 		if !ok {
-			return o, input(fmt.Errorf("--outcome %s is not completed, failed or cancelled", word))
+			return o, input(fmt.Errorf("--outcome %s is not completed, failed or cancelled", exports.Value(word, false)))
 		}
 		o.State = state
 	}
@@ -414,7 +419,7 @@ func endOutcome(word, reason string) (server.Outcome, error) {
 		return o, input(errors.New("--reason needs --outcome: without one, the run is cancelled, with no outcome given"))
 	}
 	if !reasonShape.MatchString(reason) {
-		return o, input(fmt.Errorf("--reason %s is not a code: a lower-case letter, then lower-case letters, digits and _, at most 64", reason))
+		return o, input(fmt.Errorf("--reason %s is not a code: a lower-case letter, then lower-case letters, digits and _, at most 64", exports.Value(reason, false)))
 	}
 	if !event.StarterReason(reason) {
 		return o, input(fmt.Errorf("--reason %s is one of Forager's reasons; give one of yours", reason))

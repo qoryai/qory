@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/qoryai/qory/internal/exports"
 )
 
 // The results a [Check] has.
@@ -126,17 +128,17 @@ func (p Probe) home() Check {
 	case path.Clean(home) == "/":
 		return Check{"home", Fail, "HOME is /, which the engine gives an image that sets none; set it to a directory any user may write, such as ENV HOME=/home/agent with mode 1777"}
 	case !path.IsAbs(home):
-		return Check{"home", Fail, "HOME is " + home + ", which is not an absolute path"}
+		return Check{"home", Fail, "HOME is " + exports.Value(home, false) + ", which is not an absolute path"}
 	}
 	f, err := os.CreateTemp(p.host(home), ".qory-image-check-")
 	if err != nil {
-		return Check{"home", Fail, fmt.Sprintf("the user %s cannot write in HOME, %s: %v; make it a directory any user may write, mode 1777", p.User, home, unwrapPath(err))}
+		return Check{"home", Fail, fmt.Sprintf("the user %s cannot write in HOME, %s: %v; make it a directory any user may write, mode 1777", p.User, exports.Value(home, false), unwrapPath(err))}
 	}
 	f.Close()
 	if err := os.Remove(f.Name()); err != nil {
-		return Check{"home", Fail, fmt.Sprintf("the user %s wrote a file in HOME, %s, and cannot remove it: %v", p.User, home, unwrapPath(err))}
+		return Check{"home", Fail, fmt.Sprintf("the user %s wrote a file in HOME, %s, and cannot remove it: %v", p.User, exports.Value(home, false), unwrapPath(err))}
 	}
-	return Check{"home", Pass, fmt.Sprintf("HOME is %s, and the user %s writes in it", home, p.User)}
+	return Check{"home", Pass, fmt.Sprintf("HOME is %s, and the user %s writes in it", exports.Value(home, false), p.User)}
 }
 
 // unwrapPath is the error a [fs.PathError] carries, without the path the line names
@@ -191,12 +193,12 @@ func (p Probe) claude(ctx context.Context) Check {
 		if got == "" {
 			got = strconv.Quote(out)
 		}
-		return Check{"claude", Fail, fmt.Sprintf("claude at %s is %s, and Forager's descriptor is written against %s; install @anthropic-ai/claude-code@%s", where, got, p.Claude, p.Claude)}
+		return Check{"claude", Fail, fmt.Sprintf("claude at %s is %s, and Forager's descriptor is written against %s; install @anthropic-ai/claude-code@%s", exports.Value(where, false), got, p.Claude, p.Claude)}
 	}
 	if p.Claude == "" {
-		return Check{"claude", Pass, fmt.Sprintf("claude at %s is %s", where, got)}
+		return Check{"claude", Pass, fmt.Sprintf("claude at %s is %s", exports.Value(where, false), got)}
 	}
-	return Check{"claude", Pass, fmt.Sprintf("claude at %s is %s, the version Forager's descriptor is written against", where, got)}
+	return Check{"claude", Pass, fmt.Sprintf("claude at %s is %s, the version Forager's descriptor is written against", exports.Value(where, false), got)}
 }
 
 // program checks that a program is on the image's PATH and answers --version.
@@ -213,7 +215,7 @@ func (p Probe) program(ctx context.Context, name string) Check {
 func (p Probe) run(ctx context.Context, name string, args ...string) (string, string, error) {
 	where := p.lookPath(name, filepath.SplitList(p.Env("PATH")))
 	if where == "" {
-		return "", "", fmt.Errorf("no %s on the image's PATH, %s", name, p.Env("PATH"))
+		return "", "", fmt.Errorf("no %s on the image's PATH, %s", name, exports.Value(p.Env("PATH"), false))
 	}
 	run := p.Exec
 	if run == nil {
@@ -221,11 +223,12 @@ func (p Probe) run(ctx context.Context, name string, args ...string) (string, st
 	}
 	out, err := run(ctx, p.host(where), args...)
 	first, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
+	first = exports.HideValues(first)
 	if err != nil {
 		if first != "" {
-			return "", where, fmt.Errorf("%s %s failed: %v: %s", where, strings.Join(args, " "), err, first)
+			return "", where, fmt.Errorf("%s %s failed: %v: %s", exports.Value(where, false), strings.Join(args, " "), exports.HideValueError(err, where), first)
 		}
-		return "", where, fmt.Errorf("%s %s failed: %v", where, strings.Join(args, " "), err)
+		return "", where, fmt.Errorf("%s %s failed: %v", exports.Value(where, false), strings.Join(args, " "), exports.HideValueError(err, where))
 	}
 	return first, where, nil
 }

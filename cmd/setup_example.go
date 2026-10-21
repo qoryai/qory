@@ -53,7 +53,9 @@ func newSetupExample() *cobra.Command {
 			var initialised bool
 			if root, err := checkout.Root(dir); err != nil {
 				return err
-			} else if checkout.ExcludeFile(root) == "" {
+			} else if file, err := checkout.ExcludeFile(root); err != nil {
+				return err
+			} else if file == "" {
 				if err := checkout.Init(dir); err != nil {
 					return fmt.Errorf("git init in %s: %w", dir, err)
 				}

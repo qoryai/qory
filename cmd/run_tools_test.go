@@ -52,7 +52,7 @@ func TestRunHandsForagerTheMachinesTools(t *testing.T) {
 	file := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml")
 	writeFile(t, file, "apiVersion: qory.dev/v1alpha1\n"+toolsSection(tool))
 	out, err := run(t, "run", "claude", "--policy", toolPolicy(t, "files"))
-	if err == nil || !strings.Contains(err.Error(), "the policy selects credentials or tools or has path rules, which need a wall") || strings.Contains(err.Error(), "does not define") {
+	if err == nil || !strings.Contains(err.Error(), "run it with a wall: the policy selects tools or has path rules") || strings.Contains(err.Error(), "does not define") {
 		t.Errorf("a run without a wall that selects the tool: %v\n%s", err, out)
 	}
 	if err := os.RemoveAll(runsDir(t, root)); err != nil {
@@ -102,10 +102,16 @@ func TestRunRefusesAToolForagerRefuses(t *testing.T) {
 }
 
 // TestGatewayHandsForagerTheMachinesTools is qory gateway handing the gateway it starts
-// the tools forager.yaml defines, each as the file writes it.
+// the tools forager.yaml defines, each as the file writes it, its program by the path
+// qory checked, with its links resolved. The program is never run.
 func TestGatewayHandsForagerTheMachinesTools(t *testing.T) {
 	emptyDir(t)
-	serverFile(t, newGatewayServer(t), "  listen: 127.0.0.1:0\n"+gatewayTLS+"  tools:\n    files:\n      command: [/opt/tools/files, --prefix, \"${argument}\"]\n      argument: \"[a-z0-9-]+/[a-z0-9-]+\"\n      serves: [files.tools.internal]\n      placeholders: [FILES_TOKEN]\n")
+	program := filepath.Join(tempDir(t), "files")
+	writeFile(t, program, "")
+	if err := os.Chmod(program, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	serverFile(t, newGatewayServer(t), "  listen: 127.0.0.1:0\n"+gatewayTLS+"  tools:\n    files:\n      command: ["+program+", --prefix, \"${argument}\"]\n      argument: \"[a-z0-9-]+/[a-z0-9-]+\"\n      serves: [files.tools.internal]\n      placeholders: [FILES_TOKEN]\n")
 	writeCertificate(t)
 	var got []gateway.Tool
 	stopped := errors.New("the test stopped the gateway before it started")
@@ -116,7 +122,7 @@ func TestGatewayHandsForagerTheMachinesTools(t *testing.T) {
 	if _, err := run(t, "gateway"); err == nil || !strings.Contains(err.Error(), stopped.Error()) {
 		t.Fatalf("qory gateway did not reach the gateway's start: %v", err)
 	}
-	if len(got) != 1 || got[0].Name != "files" || strings.Join(got[0].Command, " ") != "/opt/tools/files --prefix ${argument}" || got[0].Argument != "[a-z0-9-]+/[a-z0-9-]+" ||
+	if len(got) != 1 || got[0].Name != "files" || strings.Join(got[0].Command, " ") != program+" --prefix ${argument}" || got[0].Argument != "[a-z0-9-]+/[a-z0-9-]+" ||
 		strings.Join(got[0].Serves, " ") != "files.tools.internal" || strings.Join(got[0].Placeholders, " ") != "FILES_TOKEN" {
 		t.Errorf("the gateway's tools: %+v", got)
 	}
