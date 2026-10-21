@@ -720,16 +720,32 @@ wait
 		t.Fatal("the fake start logged no process")
 	}
 	deadline := time.Now().Add(20 * time.Second)
-	for syscall.Kill(pid, 0) == nil && time.Now().Before(deadline) {
+	for !ended(pid) && time.Now().Before(deadline) {
 		time.Sleep(50 * time.Millisecond)
 	}
-	if syscall.Kill(pid, 0) == nil {
+	if !ended(pid) {
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 		t.Error("the process docker start started is left running")
 	}
 	if !f.called("docker", "rm --force --volumes "+testName) || !f.called("docker", "image rm --force "+testName+":base "+testName+":top") {
 		t.Errorf("docker ran\n%s", f.read("docker.log"))
 	}
+}
+
+// ended is true when pid is gone or is a zombie. A PID 1 that reaps no child, as
+// tail in a GitHub Actions job container, keeps an ended orphan as a zombie, and
+// kill(pid, 0) succeeds on a zombie. Without /proc, as on macOS, only kill counts.
+func ended(pid int) bool {
+	if syscall.Kill(pid, 0) != nil {
+		return true
+	}
+	stat, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil {
+		return false
+	}
+	// The state follows the command name, which is in parentheses and may hold spaces.
+	i := bytes.LastIndexByte(stat, ')')
+	return i >= 0 && i+2 < len(stat) && stat[i+2] == 'Z'
 }
 
 // TestBuildStopsAtTheLimitOfItsOptions is a build whose Options.Limit has passed when
