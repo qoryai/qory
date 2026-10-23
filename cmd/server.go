@@ -323,22 +323,29 @@ func heldSecret(dir foragerdir.Dir) (string, error) {
 // a run that signs with this machine's access key, and on a machine that holds that
 // key, qory starts no run without a wall.
 func refuseUnwalled(dir foragerdir.Dir, id *serverIdentity) error {
-	switch {
-	case id != nil:
-		return keyNeedsWall(id.key.source, dir.Path(foragerdir.SecretFile))
-	case config.TakenServerVariables().AccessKeySecret != "":
-		return keyNeedsWall(fromEnv, "")
-	case dir == "":
-		return nil
-	}
-	held, err := heldSecret(dir)
-	if err != nil {
+	source, path, err := unwalledKey(dir, id)
+	if err != nil || source == 0 {
 		return err
 	}
-	if held != "" {
-		return keyNeedsWall(fromFile, held)
+	return keyNeedsWall(source, path)
+}
+
+// unwalledKey is where the access key is for which [refuseUnwalled] stops an unwalled
+// run: its source, and for fromFile the file's path; source 0 for none.
+func unwalledKey(dir foragerdir.Dir, id *serverIdentity) (keySource, string, error) {
+	switch {
+	case id != nil:
+		return id.key.source, dir.Path(foragerdir.SecretFile), nil
+	case config.TakenServerVariables().AccessKeySecret != "":
+		return fromEnv, "", nil
+	case dir == "":
+		return 0, "", nil
 	}
-	return nil
+	held, err := heldSecret(dir)
+	if err != nil || held == "" {
+		return 0, "", err
+	}
+	return fromFile, held, nil
 }
 
 // startRun is the start of every run, before anything is started: under the key lock

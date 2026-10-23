@@ -72,14 +72,19 @@ func writeFake(t *testing.T, path, script string) {
 	}
 }
 
+// baseDigest is the digest the fake docker reports for an image it pulled.
+const baseDigest = "ba5eba5eba5eba5eba5eba5eba5eba5eba5eba5eba5eba5eba5eba5eba5eba5e"
+
 // newFakes puts fake docker and devcontainer programs first on the PATH, and a secret
 // in the environment. Each logs its command lines and its environment. devcontainer
 // reports version 0.89.0, or the file version; read-configuration prints the file
 // merged as the merged configuration, {} without it; and build prints success. Each
 // keeps the configuration its --config names, in the file read-configuration.config or
 // build.config. docker runs an engine for linux/amd64, or the file platform; image inspect prints the file
-// config as a configuration, and the file size, 1 MiB without it, as a size; cp keeps
-// the tar stream; start runs the file start.sh, or prints the seed step's lines.
+// config as a configuration, the file size, 1 MiB without it, as a size, and the file
+// digests, or the image's name at [baseDigest], as its RepoDigests; pull runs the file
+// pull.sh; cp keeps the tar stream; start runs the file start.sh, or prints the seed
+// step's lines.
 func newFakes(t *testing.T) fakes {
 	t.Helper()
 	f := fakes{dir: t.TempDir()}
@@ -114,6 +119,8 @@ image)
 	inspect)
 		case "$*" in
 		*.Size*) if [ -f `+d+`/size ]; then cat `+d+`/size; else echo 1048576; fi ;;
+		*RepoDigests*) name=$last; case "${last##*/}" in *:*) name=${last%:*} ;; esac
+			if [ -f `+d+`/digests ]; then cat `+d+`/digests; else echo "[\"$name@sha256:`+baseDigest+`\"]"; fi ;;
 		*) ref=$(echo "$last" | tr ':/' '__')
 			if [ -f `+d+`/config-$ref ]; then cat `+d+`/config-$ref; elif [ -f `+d+`/config ]; then cat `+d+`/config; else echo '{"Entrypoint":null,"Cmd":["/bin/sh"],"Env":["PATH=/usr/bin"]}'; fi ;;
 		esac ;;
@@ -121,11 +128,13 @@ image)
 	*) exit 64 ;;
 	esac ;;
 create) echo c0ffee ;;
+pull) if [ -f `+d+`/pull.sh ]; then . `+d+`/pull.sh; fi ;;
+tag) ;;
 cp) cat > `+d+`/tree.tar ;;
 start)
 	if [ -f `+d+`/start.sh ]; then . `+d+`/start.sh; fi
-	echo "qory run prebuild: ran onCreateCommand in 1.0s"
-	echo "qory run prebuild: moved /workspace to /qory/seed in 0.1s" ;;
+	echo "prebuild: ran onCreateCommand in 1.0s"
+	echo "prebuild: moved /workspace to /qory/seed in 0.1s" ;;
 commit|rm) ;;
 *) exit 64 ;;
 esac
@@ -205,6 +214,25 @@ func options(t *testing.T, repo string, out, log io.Writer) prebuild.Options {
 	}
 }
 
+// TestBuildFindsItsProgramsOnTheGivenPATH finds the devcontainer command and docker on
+// the PATH of the build's environment, not on this process's: a pool's process builds
+// with the cleaned PATH a command of the pool gets.
+func TestBuildFindsItsProgramsOnTheGivenPATH(t *testing.T) {
+	f := newFakes(t)
+	o := options(t, repository(t, shopConfig), io.Discard, io.Discard)
+	// The fakes are scripts, which need the system's programs.
+	o.Env = append(o.Env, "PATH="+strings.Join([]string{f.dir, "/usr/bin", "/bin"}, string(os.PathListSeparator)))
+	t.Setenv("PATH", t.TempDir())
+	if _, err := prebuild.Build(t.Context(), o); err != nil {
+		t.Fatalf("with the programs on the build's PATH alone: %v", err)
+	}
+	t.Setenv("PATH", f.dir)
+	o.Env = append(o.Env, "PATH="+t.TempDir())
+	if _, err := prebuild.Build(t.Context(), o); err == nil || !strings.Contains(err.Error(), "command on the PATH") {
+		t.Errorf("with the programs on this process's PATH alone: %v", err)
+	}
+}
+
 // TestBuildBuildsTheImage is a build that succeeds: the lines in order, the programs
 // called in order with their arguments, and the clean-up of the temporary container
 // and images, not of the image made.
@@ -212,20 +240,27 @@ func TestBuildBuildsTheImage(t *testing.T) {
 	f := newFakes(t)
 	var out, log bytes.Buffer
 	o := options(t, repository(t, shopConfig), &out, &log)
-	if err := prebuild.Build(t.Context(), o); err != nil {
+	res, err := prebuild.Build(t.Context(), o)
+	if err != nil {
 		t.Fatalf("Build: %v\n%s\n%s", err, out.String(), log.String())
+	}
+	wantRes := prebuild.Result{Environment: testName + ":environment", Target: "acme/shop:prebuild", Base: "example.com/acme/shop-dev@sha256:" + baseDigest}
+	if res != wantRes {
+		t.Errorf("the result is %+v, want %+v", res, wantRes)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	wantStarts := []string{
-		"qory run prebuild: read .devcontainer/devcontainer.json in ",
-		"qory run prebuild: read the configuration merged with its features and base image in ",
-		"qory run prebuild: built the development container image in ",
-		"qory run prebuild: added the agent image's /qory/agent in ",
-		"qory run prebuild: copied the repository to /workspace in ",
-		"qory run prebuild: ran onCreateCommand in 1.0s",
-		"qory run prebuild: moved /workspace to /qory/seed in 0.1s",
-		"qory run prebuild: committed the image in ",
-		"qory run prebuild: built acme/shop:prebuild in ",
+		"prebuild: read .devcontainer/devcontainer.json in ",
+		"prebuild: read the configuration merged with its features and base image in ",
+		"prebuild: pulled the base image example.com/acme/shop-dev@sha256:" + baseDigest + " in ",
+		"prebuild: built the development container image in ",
+		"prebuild: kept the environment image as " + testName + ":environment",
+		"prebuild: added the agent image's /qory/agent in ",
+		"prebuild: copied the repository to /workspace in ",
+		"prebuild: ran onCreateCommand in 1.0s",
+		"prebuild: moved /workspace to /qory/seed in 0.1s",
+		"prebuild: committed the image in ",
+		"prebuild: built acme/shop:prebuild in ",
 	}
 	if len(lines) != len(wantStarts) {
 		t.Fatalf("printed %d lines, want %d:\n%s", len(lines), len(wantStarts), out.String())
@@ -252,7 +287,10 @@ func TestBuildBuildsTheImage(t *testing.T) {
 	create := "create --name " + testName + " --pull never --user 1234:2345 --workdir /workspace --cap-drop ALL --security-opt no-new-privileges --mount type=bind,source=" + o.Helper + ",target=" + wall.HelperPath + ",readonly --entrypoint /qory/qory " + testName + ":top run seed"
 	wantDocker := []string{
 		"version --format {{.Server.Os}}/{{.Server.Arch}}",
+		"pull example.com/acme/shop-dev:1",
+		"image inspect --format {{json .RepoDigests}} example.com/acme/shop-dev:1",
 		"image inspect --format {{json .Config}} " + testName + ":base",
+		"tag " + testName + ":base " + testName + ":environment",
 		"build --tag " + testName + ":top",
 		"image inspect --format {{json .Config}} " + testName + ":top",
 		create,
@@ -301,7 +339,7 @@ func TestBuildCopiesTheRepositoryAsTheWallUser(t *testing.T) {
 	f := newFakes(t)
 	var out bytes.Buffer
 	o := options(t, repository(t, shopConfig), &out, io.Discard)
-	if err := prebuild.Build(t.Context(), o); err != nil {
+	if _, err := prebuild.Build(t.Context(), o); err != nil {
 		t.Fatalf("Build: %v\n%s", err, out.String())
 	}
 	r := tar.NewReader(strings.NewReader(f.read("tree.tar")))
@@ -348,7 +386,7 @@ func TestBuildPassesNoSecret(t *testing.T) {
 	f := newFakes(t)
 	t.Setenv("DOCKER_HOST", "unix:///run/example.sock")
 	o := options(t, repository(t, shopConfig), io.Discard, io.Discard)
-	if err := prebuild.Build(t.Context(), o); err != nil {
+	if _, err := prebuild.Build(t.Context(), o); err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 	for _, program := range []string{"docker", "devcontainer"} {
@@ -381,19 +419,19 @@ func TestBuildRefusesBeforeBuilding(t *testing.T) {
 		want   string
 	}{
 		{name: "agent image by tag", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.AgentImage = "example.com/acme/agent:1" },
-			want: "--agent-image names the agent image by digest alone"},
+			want: "pin wall.image by its digest"},
 		{name: "short digest", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.AgentImage = "example.com/acme/agent@sha256:0123" },
-			want: "--agent-image names the agent image by digest alone"},
-		{name: "root", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.User = "0:1000" }, want: "--user is uid:gid"},
-		{name: "root written long", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.User = "00:0" }, want: "--user is uid:gid"},
+			want: "pin wall.image by its digest"},
+		{name: "root", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.User = "0:1000" }, want: "set wall.user to uid:gid"},
+		{name: "root written long", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.User = "00:0" }, want: "set wall.user to uid:gid"},
 		{name: "root's group", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.User = "1000:0" },
-			want: "--user is uid:gid, two numbers, neither of them 0"},
-		{name: "root's group written long", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.User = "1000:000" }, want: "--user is uid:gid"},
-		{name: "a name", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.User = "agent:agent" }, want: "--user is uid:gid"},
-		{name: "a uid alone", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.User = "1000" }, want: "--user is uid:gid"},
-		{name: "tag with digest", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.Tag = agentImage }, want: "--tag is the name of the image to make"},
-		{name: "tag as flag", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.Tag = "--privileged" }, want: "--tag is the name of the image to make"},
-		{name: "no repository", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.Repository = "" }, want: "--repository is the folder of the repository"},
+			want: "set wall.user to uid:gid, two numbers, neither of them 0"},
+		{name: "root's group written long", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.User = "1000:000" }, want: "set wall.user to uid:gid"},
+		{name: "a name", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.User = "agent:agent" }, want: "set wall.user to uid:gid"},
+		{name: "a uid alone", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.User = "1000" }, want: "set wall.user to uid:gid"},
+		{name: "tag with digest", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.Tag = agentImage }, want: "set pool.registry to an image name with no tag and no digest"},
+		{name: "tag as flag", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.Tag = "--privileged" }, want: "set pool.registry to an image name with no tag and no digest"},
+		{name: "no repository", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.Repository = "" }, want: "give the build the folder of the repository"},
 		{name: "repository missing", setup: func(_ *testing.T, _ fakes, o *prebuild.Options) { o.Repository = filepath.Join(o.Repository, "nope") },
 			want: "is not a folder"},
 		{name: "legacy dockerFile", config: `{"dockerFile": "Dockerfile"}`, want: ".devcontainer/devcontainer.json sets dockerFile, an earlier form of build.dockerfile"},
@@ -489,11 +527,12 @@ func TestBuildRefusesBeforeBuilding(t *testing.T) {
 		{name: "not JSON", config: `{"image": `, want: "is not JSON with comments"},
 		{name: "another version", setup: func(t *testing.T, f fakes, _ *prebuild.Options) { f.set(t, "version", "0.88.0\n") },
 			want: "the devcontainer command is 0.88.0, and the build runs @devcontainers/cli 0.89.0 exactly"},
-		{name: "no devcontainer command", setup: func(t *testing.T, f fakes, _ *prebuild.Options) {
+		{name: "no devcontainer command", setup: func(t *testing.T, f fakes, o *prebuild.Options) {
 			if err := os.Remove(f.path("devcontainer")); err != nil {
 				t.Fatal(err)
 			}
 			t.Setenv("PATH", f.dir)
+			o.Env = append(o.Env, "PATH="+f.dir)
 		}, want: "no devcontainer command on the PATH"},
 		{name: "helper not Linux", setup: func(t *testing.T, f fakes, o *prebuild.Options) { o.Helper = f.path("docker") },
 			want: "qory's Linux build"},
@@ -518,7 +557,7 @@ func TestBuildRefusesBeforeBuilding(t *testing.T) {
 			if c.setup != nil {
 				c.setup(t, f, &o)
 			}
-			err := prebuild.Build(t.Context(), o)
+			_, err := prebuild.Build(t.Context(), o)
 			var refusal *prebuild.RefusedError
 			if !errors.As(err, &refusal) {
 				t.Fatalf("Build: %v, not a refusal", err)
@@ -544,7 +583,7 @@ func TestBuildRefusesAnEmptyDockerComposeFile(t *testing.T) {
 		t.Run(value, func(t *testing.T) {
 			f := newFakes(t)
 			repo := repository(t, `{"image": "alpine", "dockerComposeFile": `+value+`, "service": "app"}`)
-			err := prebuild.Build(t.Context(), options(t, repo, io.Discard, io.Discard))
+			_, err := prebuild.Build(t.Context(), options(t, repo, io.Discard, io.Discard))
 			var refusal *prebuild.RefusedError
 			if !errors.As(err, &refusal) || err.Error() != ".devcontainer/devcontainer.json sets dockerComposeFile; an image is built only from image or build, and Docker Compose can give the container access to the host" {
 				t.Fatalf("Build: %v", err)
@@ -562,7 +601,7 @@ func TestBuildRefusesAConfigurationsInitOnlyFromFeatures(t *testing.T) {
 	f := newFakes(t)
 	f.set(t, "merged", `{"init":true}`)
 	o := options(t, repository(t, `{"image": "alpine", "init": true}`), io.Discard, io.Discard)
-	if err := prebuild.Build(t.Context(), o); err != nil {
+	if _, err := prebuild.Build(t.Context(), o); err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 }
@@ -575,7 +614,7 @@ func TestBuildRefusesAnOddFile(t *testing.T) {
 	if err := syscall.Mkfifo(filepath.Join(repo, "pipe"), 0o644); err != nil {
 		t.Skip("no named pipe here:", err)
 	}
-	err := prebuild.Build(t.Context(), options(t, repo, io.Discard, io.Discard))
+	_, err := prebuild.Build(t.Context(), options(t, repo, io.Discard, io.Discard))
 	var refusal *prebuild.RefusedError
 	if !errors.As(err, &refusal) || !strings.Contains(err.Error(), "the repository's pipe is neither a file, a folder nor a link") {
 		t.Fatalf("Build: %v", err)
@@ -591,10 +630,10 @@ func TestBuildPrintsAWorkspaceFolderElsewhere(t *testing.T) {
 	newFakes(t)
 	var out bytes.Buffer
 	o := options(t, repository(t, `{"image": "alpine", "workspaceFolder": "/workspaces/shop"}`), &out, io.Discard)
-	if err := prebuild.Build(t.Context(), o); err != nil {
+	if _, err := prebuild.Build(t.Context(), o); err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	want := "qory run prebuild: workspaceFolder is /workspaces/shop; the image is built at /workspace, where a run mounts its working folder, and the lifecycle commands see ${containerWorkspaceFolder} as /workspace\n"
+	want := "prebuild: workspaceFolder is /workspaces/shop; the image is built at /workspace, where a run mounts its working folder, and the lifecycle commands see ${containerWorkspaceFolder} as /workspace\n"
 	if !strings.Contains(out.String(), want) {
 		t.Errorf("printed\n%s\nwant\n%s", out.String(), want)
 	}
@@ -604,11 +643,11 @@ func TestBuildPrintsAWorkspaceFolderElsewhere(t *testing.T) {
 func TestBuildWithoutConfiguration(t *testing.T) {
 	f := newFakes(t)
 	var out bytes.Buffer
-	err := prebuild.Build(t.Context(), options(t, t.TempDir(), &out, io.Discard))
+	_, err := prebuild.Build(t.Context(), options(t, t.TempDir(), &out, io.Discard))
 	if !errors.Is(err, prebuild.ErrNoConfiguration) {
 		t.Fatalf("Build: %v", err)
 	}
-	want := "qory run prebuild: the repository has no development container configuration, .devcontainer/devcontainer.json or .devcontainer.json; no image is built\n"
+	want := "prebuild: the repository has no development container configuration, .devcontainer/devcontainer.json or .devcontainer.json; no image is built\n"
 	if out.String() != want {
 		t.Errorf("printed %q, want %q", out.String(), want)
 	}
@@ -623,7 +662,7 @@ func TestBuildWithoutConfiguration(t *testing.T) {
 func TestBuildRefusesTheLabelOfTheBuiltImage(t *testing.T) {
 	f := newFakes(t)
 	f.set(t, "config", `{"Labels":{"devcontainer.metadata":"[{\"id\":\"x\"},{\"capAdd\":[\"NET_ADMIN\"]}]"}}`)
-	err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), io.Discard, io.Discard))
+	_, err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), io.Discard, io.Discard))
 	if err == nil || err.Error() != "the built image's devcontainer.metadata asks for capAdd, which give the container access to the host; the image is removed" {
 		t.Fatalf("Build: %v", err)
 	}
@@ -637,10 +676,10 @@ func TestBuildRefusesTheLabelOfTheBuiltImage(t *testing.T) {
 // the images are removed.
 func TestBuildFailsWithTheSeedStepsLine(t *testing.T) {
 	f := newFakes(t)
-	f.set(t, "start.sh", `echo "qory run prebuild: onCreateCommand exited with status 2"; echo "make: no rule" >&2; exit 1
+	f.set(t, "start.sh", `echo "prebuild: onCreateCommand exited with status 2"; echo "make: no rule" >&2; exit 1
 `)
 	var out bytes.Buffer
-	err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), &out, io.Discard))
+	_, err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), &out, io.Discard))
 	var shown *prebuild.ShownError
 	if !errors.As(err, &shown) || shown.Line != "onCreateCommand exited with status 2" {
 		t.Fatalf("Build: %v", err)
@@ -658,7 +697,7 @@ func TestBuildFailsWithTheSeedStepsLine(t *testing.T) {
 func TestBuildFailsWhenTheContainerDies(t *testing.T) {
 	f := newFakes(t)
 	f.set(t, "start.sh", "exit 137\n")
-	err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), io.Discard, io.Discard))
+	_, err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), io.Discard, io.Discard))
 	if err == nil || err.Error() != "the container of the lifecycle commands exited with status 137" {
 		t.Fatalf("Build: %v", err)
 	}
@@ -670,7 +709,7 @@ func TestBuildRefusesAnImageOverTheLimit(t *testing.T) {
 	f := newFakes(t)
 	f.set(t, "size", strconv.Itoa(4<<30+1)+"\n")
 	var out bytes.Buffer
-	err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), &out, io.Discard))
+	_, err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), &out, io.Discard))
 	var refusal *prebuild.RefusedError
 	if !errors.As(err, &refusal) || err.Error() != "the image is 4.0 GiB (4294967297 bytes), more than the limit of 4 GiB; it is removed" {
 		t.Fatalf("Build: %v", err)
@@ -708,7 +747,7 @@ wait
 			time.Sleep(20 * time.Millisecond)
 		}
 	}()
-	err := prebuild.Build(ctx, options(t, repository(t, shopConfig), io.Discard, io.Discard))
+	_, err := prebuild.Build(ctx, options(t, repository(t, shopConfig), io.Discard, io.Discard))
 	if !errors.Is(err, prebuild.ErrLimit) {
 		t.Fatalf("Build: %v", err)
 	}
@@ -754,7 +793,7 @@ func TestBuildStopsAtTheLimitOfItsOptions(t *testing.T) {
 	f := newFakes(t)
 	o := options(t, repository(t, shopConfig), io.Discard, io.Discard)
 	o.Limit = time.Nanosecond
-	if err := prebuild.Build(t.Context(), o); !errors.Is(err, prebuild.ErrLimit) {
+	if _, err := prebuild.Build(t.Context(), o); !errors.Is(err, prebuild.ErrLimit) {
 		t.Fatalf("Build: %v", err)
 	}
 	if f.called("docker", "create") {
@@ -778,7 +817,7 @@ func TestBuildStopsOnCancel(t *testing.T) {
 			time.Sleep(20 * time.Millisecond)
 		}
 	}()
-	err := prebuild.Build(ctx, options(t, repository(t, shopConfig), io.Discard, io.Discard))
+	_, err := prebuild.Build(ctx, options(t, repository(t, shopConfig), io.Discard, io.Discard))
 	if !errors.Is(err, prebuild.ErrStopped) {
 		t.Fatalf("Build: %v", err)
 	}
@@ -804,7 +843,7 @@ func TestBuildRefusesAnImageEnvironmentThatWidensTheAgent(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			f := newFakes(t)
 			f.set(t, "config-"+c.ref, `{"Entrypoint":null,"Cmd":["/bin/sh"],"Env":["PATH=/usr/bin","LD_LIBRARY_PATH=/opt/lib","OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.example.com","LD_PRELOAD=/opt/`+secret+`.so"]}`)
-			err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), io.Discard, io.Discard))
+			_, err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), io.Discard, io.Discard))
 			var refusal *prebuild.RefusedError
 			want := "the image sets OTEL_EXPORTER_OTLP_ENDPOINT and LD_PRELOAD in its environment, which change what the agent does; the image is removed"
 			if !errors.As(err, &refusal) || err.Error() != want {
@@ -836,14 +875,14 @@ func TestBuildPassesTheProxies(t *testing.T) {
 	t.Setenv("HTTP_PROXY", "http://agent:pw-"+secret+"@proxy.example.com:3128")
 	t.Setenv("all_proxy", "socks5://agent-"+secret+"@proxy.example.com:1080")
 	var out, log bytes.Buffer
-	err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), &out, &log))
+	_, err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), &out, &log))
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 	lines := strings.Split(out.String(), "\n")
 	want := []string{
-		"qory run prebuild: HTTP_PROXY holds an @, which can put a user name or a password in a URL, a secret; the build runs without it",
-		"qory run prebuild: all_proxy holds an @, which can put a user name or a password in a URL, a secret; the build runs without it",
+		"prebuild: HTTP_PROXY holds an @, which can put a user name or a password in a URL, a secret; the build runs without it",
+		"prebuild: all_proxy holds an @, which can put a user name or a password in a URL, a secret; the build runs without it",
 	}
 	if len(lines) < 2 || !slices.Equal(lines[:2], want) {
 		t.Errorf("printed\n%s", out.String())
@@ -876,7 +915,7 @@ func TestBuildPassesTheProxies(t *testing.T) {
 func TestBuildKeepsTheImagesHome(t *testing.T) {
 	f := newFakes(t)
 	f.set(t, "config-"+testName+"_base", `{"Entrypoint":null,"Cmd":["/bin/sh"],"Env":["PATH=/usr/bin","HOME=/home/dev"]}`)
-	if err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), io.Discard, io.Discard)); err != nil {
+	if _, err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), io.Discard, io.Discard)); err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 	if strings.Contains(f.read("dockerfiles"), "HOME") {
@@ -946,7 +985,7 @@ func TestBuildHandsDockerAConfigurationWithoutProxies(t *testing.T) {
 				t.Setenv("DOCKER_CONFIG", original)
 			}
 			var out, log bytes.Buffer
-			if err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), &out, &log)); err != nil {
+			if _, err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), &out, &log)); err != nil {
 				t.Fatalf("Build: %v", err)
 			}
 			var got map[string]json.RawMessage
@@ -989,7 +1028,7 @@ func TestBuildHandsDockerAConfigurationWithoutProxies(t *testing.T) {
 // TestBuildWithoutADockerConfiguration is a machine with none: an empty one.
 func TestBuildWithoutADockerConfiguration(t *testing.T) {
 	f := newFakes(t)
-	if err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), io.Discard, io.Discard)); err != nil {
+	if _, err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), io.Discard, io.Discard)); err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 	if got := f.read("docker-config.json"); got != "{}" {
@@ -1005,7 +1044,7 @@ func TestBuildRefusesADockerConfigurationThatDoesNotRead(t *testing.T) {
 			f := newFakes(t)
 			original := originalDockerConfig(t, config)
 			t.Setenv("DOCKER_CONFIG", original)
-			err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), io.Discard, io.Discard))
+			_, err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), io.Discard, io.Discard))
 			var refusal *prebuild.RefusedError
 			want := "the docker configuration " + filepath.Join(original, "config.json") + " does not read as a JSON object; the build reads it for the registries' logins"
 			if !errors.As(err, &refusal) || err.Error() != want {
@@ -1025,7 +1064,7 @@ func TestBuildRefusesProxiesTheCommandsLeft(t *testing.T) {
 	f.set(t, "config-"+testName+"_top", `{"Entrypoint":null,"Cmd":["/bin/sh"],"Env":["PATH=/usr/bin","HOME=/home/agent","NO_PROXY=localhost"]}`)
 	f.set(t, "config-acme_shop_prebuild", `{"Entrypoint":null,"Cmd":["/bin/sh"],"Env":["PATH=/usr/bin","HOME=/home/agent","NO_PROXY=localhost","https_proxy=http://agent:`+secret+`@proxy.example.com","FTP_PROXY=x"]}`)
 	var out bytes.Buffer
-	err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), &out, io.Discard))
+	_, err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), &out, io.Discard))
 	var refusal *prebuild.RefusedError
 	want := "the final image sets https_proxy and FTP_PROXY in its environment to a value the image before the commands did not; the image is removed"
 	if !errors.As(err, &refusal) || err.Error() != want {
@@ -1061,7 +1100,7 @@ func TestBuildTakesAContextInsideTheRepository(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := prebuild.Build(t.Context(), options(t, repo, io.Discard, io.Discard)); err != nil {
+			if _, err := prebuild.Build(t.Context(), options(t, repo, io.Discard, io.Discard)); err != nil {
 				t.Fatalf("Build: %v", err)
 			}
 		})
@@ -1077,7 +1116,7 @@ func TestBuildKeepsTheEnginesCertificates(t *testing.T) {
 		original := originalDockerConfig(t, `{}`)
 		t.Setenv("DOCKER_CONFIG", original)
 		t.Setenv("DOCKER_TLS_VERIFY", "1")
-		if err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), io.Discard, io.Discard)); err != nil {
+		if _, err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), io.Discard, io.Discard)); err != nil {
 			t.Fatalf("Build: %v", err)
 		}
 		for _, program := range []string{"docker", "devcontainer"} {
@@ -1091,7 +1130,7 @@ func TestBuildKeepsTheEnginesCertificates(t *testing.T) {
 		f := newFakes(t)
 		t.Setenv("DOCKER_TLS_VERIFY", "1")
 		t.Setenv("DOCKER_CERT_PATH", "/etc/docker/certs")
-		if err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), io.Discard, io.Discard)); err != nil {
+		if _, err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), io.Discard, io.Discard)); err != nil {
 			t.Fatalf("Build: %v", err)
 		}
 		env := f.read("docker.env")
@@ -1111,7 +1150,7 @@ func TestBuildRefusesAProxyTheCommandsReplaced(t *testing.T) {
 		f.set(t, "config-"+testName+"_top", top)
 		f.set(t, "config-acme_shop_prebuild", `{"Entrypoint":null,"Cmd":["/bin/sh"],"Env":["PATH=/usr/bin","HOME=/home/agent","HTTP_PROXY=http://agent:`+secret+`@proxy.example.com:3128"]}`)
 		var out bytes.Buffer
-		err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), &out, io.Discard))
+		_, err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), &out, io.Discard))
 		want := "the final image sets HTTP_PROXY in its environment to a value the image before the commands did not; the image is removed"
 		if err == nil || err.Error() != want {
 			t.Fatalf("Build: %v", err)
@@ -1124,7 +1163,7 @@ func TestBuildRefusesAProxyTheCommandsReplaced(t *testing.T) {
 		f := newFakes(t)
 		f.set(t, "config-"+testName+"_top", top)
 		f.set(t, "config-acme_shop_prebuild", top)
-		if err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), io.Discard, io.Discard)); err != nil {
+		if _, err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), io.Discard, io.Discard)); err != nil {
 			t.Fatalf("Build: %v", err)
 		}
 	})
@@ -1137,7 +1176,7 @@ func TestBuildPinsBuildKit(t *testing.T) {
 		t.Run("set to "+strconv.Quote(value), func(t *testing.T) {
 			f := newFakes(t)
 			t.Setenv("DOCKER_BUILDKIT", value)
-			if err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), io.Discard, io.Discard)); err != nil {
+			if _, err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), io.Discard, io.Discard)); err != nil {
 				t.Fatalf("Build: %v", err)
 			}
 			for _, program := range []string{"docker", "devcontainer"} {

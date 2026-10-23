@@ -4,11 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/qoryai/forager/accesskey"
@@ -151,6 +154,9 @@ type Target struct {
 	// it. A target that lists several runtimes usually leaves it out, because one model
 	// name rarely means anything to two of them.
 	Model string `yaml:"model,omitempty"`
+	// Effort is the effort value the main agent runs at, from --effort or harness.effort;
+	// "" for none. It is no key of a document.
+	Effort string `yaml:"-"`
 }
 
 // Tier is one entry of a tier map: the model id a tier maps to and, when the entry sets
@@ -387,6 +393,11 @@ type Stack struct {
 	// keys to values of any shape, for the scripts of a team that keep their own
 	// settings beside the stack.
 	Extensions map[string]any `yaml:"extensions,omitempty"`
+	// Workflows are the settings of the workflows the stack starts, by name: a
+	// dispatched run starts the skill or command of a workflow's name. A stack file sets
+	// them; the harness section of a checkout's qory.yaml has no such key, and [Extend]
+	// takes the base's.
+	Workflows map[string]Workflow `yaml:"workflows,omitempty"`
 
 	// RetiredAPIVersion is the apiVersion the file declared when it is a retired
 	// spelling of [APIVersion], one of [exports.RetiredAPIVersions], "" when the file
@@ -405,6 +416,24 @@ type Stack struct {
 	// to Root, set by [Load]: what the root's qory.yaml sets under exports.dir, else
 	// modules. A stack built without [Load] reads modules.
 	ModulesDir string `yaml:"-"`
+}
+
+// Workflow is the settings of one workflow of a stack, an entry of workflows.
+type Workflow struct {
+	// TimeLimitText is time_limit as written, a duration such as 7h or 45m.
+	TimeLimitText string `yaml:"time_limit,omitempty"`
+	// TimeLimit is TimeLimitText read as a duration, above zero, or 0 when the workflow
+	// sets none. It is set as the stack is validated.
+	TimeLimit time.Duration `yaml:"-"`
+}
+
+// workflowName is a workflow's name, as the provisioner contract's workflow is.
+var workflowName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
+
+// TimeLimitOf is the time_limit of the workflow name, 0 when the stack has no such
+// workflow or the workflow sets none.
+func (p *Stack) TimeLimitOf(name string) time.Duration {
+	return p.Workflows[name].TimeLimit
 }
 
 // Dir returns the directory that contains the stack file. A module's relative path source
@@ -601,6 +630,21 @@ func (p *Stack) validate(compose bool) error {
 				return err
 			}
 		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(p.Workflows)) {
+		if !workflowName.MatchString(name) {
+			return fmt.Errorf("name the workflow %s with a lower-case letter, then up to 63 lower-case letters, digits and hyphens: workflows lists it", accesskey.ShownName(name, true))
+		}
+		w := p.Workflows[name]
+		if w.TimeLimitText == "" {
+			continue
+		}
+		d, err := time.ParseDuration(w.TimeLimitText)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("set workflows.%s.time_limit to a duration above zero, such as 7h or 45m: %s is not one", name, exports.Value(w.TimeLimitText, true))
+		}
+		w.TimeLimit = d
+		p.Workflows[name] = w
 	}
 	for _, role := range sortedKeys(p.Bind) {
 		kind, name, ok := strings.Cut(role, "/")
@@ -861,6 +905,7 @@ func Extend(base, p *Stack) (*Stack, error) {
 			out.Bind[role] = to
 		}
 	}
+	out.Workflows = base.Workflows
 	out.Extensions = map[string]any{}
 	for key, v := range base.Extensions {
 		out.Extensions[key] = v

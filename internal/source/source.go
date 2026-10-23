@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -35,6 +36,7 @@ import (
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/places"
+	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/stack"
 )
 
@@ -49,6 +51,9 @@ type Resolved struct {
 	// Pin is what the source resolved to, [WorkingTree] for a path source and the commit,
 	// twelve characters of it, for a git source.
 	Pin string
+	// Commit is the full commit id a git source resolved to, 40 or 64 hexadecimal
+	// characters in lower case; "" for a path source.
+	Commit string
 	// Dirty is set for a working tree with uncommitted changes under Dir.
 	Dirty bool
 	// Warning is set when the remote could not be reached and the source kept the commit
@@ -67,6 +72,8 @@ type Resolved struct {
 type FetchError struct {
 	// Source is the git URL and ref that failed, as the stack writes them.
 	Source string
+	// URL and Ref are the source's URL and ref, as the stack writes them.
+	URL, Ref string
 	// Output is what git printed.
 	Output string
 	// Err is the error running git returned.
@@ -99,6 +106,108 @@ type GoneError struct {
 // Error names the remote and the ref and says how to keep what was composed.
 func (e *GoneError) Error() string {
 	return fmt.Sprintf("%s has no branch or tag %s; to keep the old harness, set ref to a commit id", exports.URL(e.URL), exports.Value(e.Ref, false))
+}
+
+// SchemeError is a git source that is not an https URL, in a compose that fetches
+// through a run's host proxy, see [Git]: git does not run for it.
+type SchemeError struct {
+	// URL is the git URL as the stack writes it.
+	URL string
+	// File is the file that lists the source, as a line prints it; "" when the line
+	// names none.
+	File string
+}
+
+// Error is the line [HTTPSFix] makes for the URL and the file.
+func (e *SchemeError) Error() string { return HTTPSFix(e.URL, e.File) }
+
+// HTTPSFix is "" for a git source git fetches over https, an https URL with a host, and
+// otherwise the line a run from a control plane stops with for it: use an https URL for
+// it, in file when file is set, such as the https URL of the same repository when one
+// follows from it, and why. The source is printed with a URL's password hidden. A local
+// path or a file URL is a folder of this machine; an ssh URL or the scp form host:path,
+// which git fetches over ssh, would use this machine's keys; a git:// URL would reach
+// the host past the gateway; any other is not an https URL.
+func HTTPSFix(src, file string) string {
+	shown := exports.URL(src)
+	why, https := "", ""
+	if i := strings.Index(src, "://"); i >= 0 {
+		rest := src[i+3:]
+		switch strings.ToLower(src[:i]) {
+		case "https":
+			if u, err := url.Parse(src); err == nil && u.Host != "" {
+				return ""
+			}
+			why = shown + " is not an https URL with a host."
+		case "file":
+			why = shown + " is a folder of this machine."
+		case "ssh", "git+ssh", "ssh+git":
+			why = "ssh would use this machine's keys."
+			https = httpsOf(rest, "/")
+		case "git":
+			why = "git:// would reach the host past the gateway."
+			https = httpsOf(rest, "/")
+		case "http":
+			why = shown + " is not an https URL."
+			https = httpsOf(rest, "/")
+		default:
+			why = shown + " is not an https URL."
+		}
+	} else if strings.Contains(src, "::") {
+		// git reads <transport>::<address>, such as fd::3 or ext::<command>, as a remote
+		// helper's address, not as ssh's host:path.
+		why = shown + " is not an https URL."
+	} else if i := strings.Index(src, ":"); i > 0 && !strings.Contains(src[:i], "/") {
+		// git reads host:path as ssh when no slash comes before the first colon, and any
+		// other source without a scheme as a path on this machine.
+		why = "ssh would use this machine's keys."
+		https = httpsOf(src, ":")
+	} else {
+		why = shown + " is a folder of this machine."
+	}
+	line := "use an https URL for " + shown
+	if file != "" {
+		line += " in " + file
+	}
+	if https != "" {
+		line += ", such as " + https
+	}
+	return line + ". A run from a control plane fetches git sources only over https, through the run's gateway; " + why
+}
+
+// httpsOf is the https URL of the repository at rest, [user@]host[:port]<sep>path, with
+// no user, no port and no .git at the end; "" when rest has no host or no path, or
+// either contains what a URL cannot take as it is.
+func httpsOf(rest, sep string) string {
+	hostPart, path, ok := strings.Cut(rest, sep)
+	if !ok {
+		return ""
+	}
+	if at := strings.LastIndex(hostPart, "@"); at >= 0 {
+		hostPart = hostPart[at+1:]
+	}
+	if sep == "/" {
+		if h, _, ok := strings.Cut(hostPart, ":"); ok {
+			hostPart = h
+		}
+	}
+	path = strings.TrimSuffix(strings.Trim(path, "/"), ".git")
+	if hostPart == "" || path == "" || strings.ContainsAny(hostPart+path, " ?#%\\") || strings.Contains(hostPart, "/") {
+		return ""
+	}
+	return exports.URL("https://" + hostPart + "/" + path)
+}
+
+// Git is how a compose of a run from a control plane fetches its git sources: on this
+// machine through the run's host proxy, over https alone, with the git [proxygit] sets
+// up, which reads no configuration of the person's or the system's and no credential of
+// this machine. A source that is not an https URL is a [*SchemeError], before git runs.
+type Git struct {
+	// Proxy is the run's host proxy.
+	Proxy proxygit.Proxy
+	// Fetched, when set, is called once per URL and ref that a resolve asked the remote
+	// for, with the full commit it resolved to and how long the lookup and the fetch took.
+	Fetched func(url, ref, commit string, took time.Duration)
 }
 
 // Memo remembers what each git source resolved to during one compose, by URL and ref, so
@@ -159,6 +268,9 @@ type Options struct {
 	// Memo is shared by every source of one compose, so one URL at one ref resolves once,
 	// to one commit; nil resolves each source on its own.
 	Memo *Memo
+	// Git, when set, fetches every git source through a run's host proxy, see [Git]; nil
+	// fetches with the person's git, as [hostgit.Command] runs it.
+	Git *Git
 }
 
 // Resolve turns a source into a directory and its pin. A relative path resolves against
@@ -372,6 +484,11 @@ func CacheDir() (string, error) {
 // stays as it was when the branch moves on. [commitOf] says which commit the ref is now;
 // the memo answers for a URL and ref resolved earlier in the same compose.
 func resolveGit(s stack.Source, opts Options) (Resolved, error) {
+	if opts.Git != nil {
+		if HTTPSFix(s.Git, "") != "" {
+			return Resolved{}, &SchemeError{URL: s.Git}
+		}
+	}
 	cache := opts.Cache
 	if cache == "" {
 		var err error
@@ -383,12 +500,16 @@ func resolveGit(s stack.Source, opts Options) (Resolved, error) {
 	got, ok := opts.Memo.get(s.Git, s.Ref)
 	if !ok || !cloned(filepath.Join(dir, got.commit)) {
 		var err error
+		start := time.Now()
 		if got, err = commitOf(dir, s, opts); err != nil {
 			// The cache directory is named after the URL, so an error of a file
 			// under it prints the URL's secret unless it is hidden.
 			return Resolved{}, exports.HideError(err)
 		}
 		opts.Memo.put(s.Git, s.Ref, got)
+		if opts.Git != nil && opts.Git.Fetched != nil {
+			opts.Git.Fetched(s.Git, s.Ref, got.commit, time.Since(start))
+		}
 	}
 	commit := got.commit
 	var err error
@@ -428,7 +549,7 @@ func resolveGit(s stack.Source, opts Options) (Resolved, error) {
 	if real != base && !strings.HasPrefix(real, base+string(filepath.Separator)) {
 		return Resolved{}, fmt.Errorf("%s in %s links outside the repository", exports.Value(sub, false), at(s))
 	}
-	r := Resolved{Dir: module, Pin: commit[:12], Warning: got.warning}
+	r := Resolved{Dir: module, Pin: commit[:12], Commit: strings.ToLower(commit), Warning: got.warning}
 	if opts.Pin != "" && !strings.HasPrefix(commit, opts.Pin) {
 		r.Previous = opts.Pin
 	}
@@ -479,11 +600,11 @@ func commitOf(dir string, s stack.Source, opts Options) (memoEntry, error) {
 		if id := strings.ToLower(s.Ref); cloned(filepath.Join(dir, id)) {
 			return memoEntry{commit: id}, nil
 		}
-		return fetched(dir, refFile, s, s.Ref, kindCommit, opts.Timeout)
+		return fetched(dir, refFile, s, s.Ref, kindCommit, opts)
 	}
 	kind, recorded := readRef(refFile)
 	if opts.Update {
-		return fetched(dir, refFile, s, s.Ref, kind, opts.Timeout)
+		return fetched(dir, refFile, s, s.Ref, kind, opts)
 	}
 	cached := pinned(dir, opts.Pin)
 	if cached == "" && recorded != "" && cloned(filepath.Join(dir, recorded)) {
@@ -505,7 +626,7 @@ func commitOf(dir string, s stack.Source, opts Options) (memoEntry, error) {
 		// the commit it points at.
 		names = append(names, tag, tag+"^{}")
 	}
-	found, err := lsRemote(dir, s, opts.Timeout, names...)
+	found, err := lsRemote(dir, s, opts, names...)
 	if err != nil {
 		if cached != "" {
 			return memoEntry{commit: cached, warning: fmt.Sprintf("%s#%s: could not reach the remote; kept %s", exports.URL(s.Git), exports.Value(s.Ref, false), cached[:12])}, nil
@@ -520,7 +641,7 @@ func commitOf(dir string, s stack.Source, opts Options) (memoEntry, error) {
 			commit = peeled
 		}
 		if !cloned(filepath.Join(dir, commit)) {
-			return fetched(dir, refFile, s, tag, kindTag, opts.Timeout)
+			return fetched(dir, refFile, s, tag, kindTag, opts)
 		}
 		if kind != kindTag || recorded != commit {
 			if err := writeRef(refFile, kindTag, commit); err != nil {
@@ -531,7 +652,7 @@ func commitOf(dir string, s stack.Source, opts Options) (memoEntry, error) {
 	}
 	if remote, ok := found[branch]; ok {
 		if !cloned(filepath.Join(dir, remote)) {
-			return fetched(dir, refFile, s, branch, kindBranch, opts.Timeout)
+			return fetched(dir, refFile, s, branch, kindBranch, opts)
 		}
 		if kind != kindBranch || recorded != remote {
 			if err := writeRef(refFile, kindBranch, remote); err != nil {
@@ -549,13 +670,13 @@ func commitOf(dir string, s stack.Source, opts Options) (memoEntry, error) {
 	if cached != "" {
 		return memoEntry{commit: cached}, nil
 	}
-	return fetched(dir, refFile, s, s.Ref, kindUnknown, opts.Timeout)
+	return fetched(dir, refFile, s, s.Ref, kindUnknown, opts)
 }
 
 // fetched fetches ref, the source's ref or its full name, records the commit it landed on
 // in the refs file with kind, and returns it.
-func fetched(dir, refFile string, s stack.Source, ref, kind string, timeout time.Duration) (memoEntry, error) {
-	commit, err := fetch(dir, s, ref, timeout)
+func fetched(dir, refFile string, s stack.Source, ref, kind string, opts Options) (memoEntry, error) {
+	commit, err := fetch(dir, s, ref, opts)
 	if err != nil {
 		return memoEntry{}, err
 	}
@@ -569,7 +690,7 @@ func fetched(dir, refFile string, s stack.Source, ref, kind string, timeout time
 // the ones it has, name to commit. A name the remote does not have is left out; "" is
 // skipped. A remote that cannot be reached, or a git that runs past the timeout, is a
 // [*FetchError].
-func lsRemote(dir string, s stack.Source, timeout time.Duration, names ...string) (map[string]string, error) {
+func lsRemote(dir string, s stack.Source, opts Options, names ...string) (map[string]string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
@@ -580,12 +701,12 @@ func lsRemote(dir string, s stack.Source, timeout time.Duration, names ...string
 			args = append(args, n)
 		}
 	}
-	out, err := git(dir, timeout, args...)
+	out, err := git(dir, opts, args...)
 	if hostgit.Refused(err) {
 		return nil, err
 	}
 	if err != nil {
-		return nil, &FetchError{Source: s.Git + "#" + s.Ref, Output: string(out), Err: err}
+		return nil, &FetchError{Source: s.Git + "#" + s.Ref, URL: s.Git, Ref: s.Ref, Output: string(out), Err: err}
 	}
 	// git matches a pattern against the end of a ref's name, so refs/heads/x/refs/heads/main
 	// would answer for refs/heads/main; only an exact name counts.
@@ -683,7 +804,7 @@ func cloned(dir string) bool {
 // A ref that resolves to a commit already cloned is fetched, since the commit is known
 // only afterwards, and the clone there is kept. The ref may be a tag, a branch or a
 // commit by its full id, when the remote allows fetching a commit by id.
-func fetch(dir string, s stack.Source, ref string, timeout time.Duration) (string, error) {
+func fetch(dir string, s stack.Source, ref string, opts Options) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
@@ -702,18 +823,18 @@ func fetch(dir string, s stack.Source, ref string, timeout time.Duration) (strin
 		{"checkout", "--quiet", "--detach", "FETCH_HEAD"},
 	}
 	for _, args := range steps {
-		if out, err := git(tmp, timeout, args...); hostgit.Refused(err) {
+		if out, err := git(tmp, opts, args...); hostgit.Refused(err) {
 			return "", err
 		} else if err != nil {
-			return "", &FetchError{Source: s.Git + "#" + s.Ref, Output: string(out), Err: err}
+			return "", &FetchError{Source: s.Git + "#" + s.Ref, URL: s.Git, Ref: s.Ref, Output: string(out), Err: err}
 		}
 	}
-	out, err := git(tmp, timeout, "rev-parse", "HEAD")
+	out, err := git(tmp, opts, "rev-parse", "HEAD")
 	if hostgit.Refused(err) {
 		return "", err
 	}
 	if err != nil {
-		return "", &FetchError{Source: s.Git + "#" + s.Ref, Output: string(out), Err: err}
+		return "", &FetchError{Source: s.Git + "#" + s.Ref, URL: s.Git, Ref: s.Ref, Output: string(out), Err: err}
 	}
 	commit := strings.TrimSpace(string(out))
 	if err := os.WriteFile(filepath.Join(tmp, ".git", "qory-done"), nil, 0o644); err != nil {
@@ -737,7 +858,7 @@ func fetch(dir string, s stack.Source, ref string, timeout time.Duration) (strin
 		if cloned(clone) {
 			return commit, nil
 		}
-		return "", &FetchError{Source: s.Git + "#" + s.Ref, Output: err.Error(), Err: err}
+		return "", &FetchError{Source: s.Git + "#" + s.Ref, URL: s.Git, Ref: s.Ref, Output: err.Error(), Err: err}
 	}
 	return commit, nil
 }
@@ -754,18 +875,45 @@ func cacheName(v string) string {
 	return clean + "-" + hex.EncodeToString(sum[:4])
 }
 
-// git runs one git command in dir through [hostgit.Command], with every prompt off, the
+// git runs one git command in dir and returns its combined output. A command still
+// running after opts.Timeout is killed and the error says so; a timeout of zero is no
+// limit.
+//
+// With opts.Git nil, git runs through [hostgit.Command], with every prompt off, the
 // terminal's, an askpass program's and ssh's, so a remote that wants a password or an
-// unknown host key fails instead of waiting, and returns its combined output. A command
-// still running after the timeout is killed and the error says so; a timeout of zero is
-// no limit. A GIT_SSH_COMMAND the environment already carries is kept. The settings
-// check's refusal is a [*hostgit.RefusedError] and no output.
-func git(dir string, timeout time.Duration, args ...string) ([]byte, error) {
+// unknown host key fails instead of waiting. A GIT_SSH_COMMAND the environment already
+// carries is kept. The settings check's refusal is a [*hostgit.RefusedError] and no
+// output.
+//
+// With opts.Git set, git is the one [hostgit.Unchecked] finds, with the options of
+// [proxygit.Hardened] and [proxygit.HTTPSOnly] and the environment [proxygit.Env]
+// makes for the run's host proxy; its folder is one of the run's cache, which nothing
+// but this compose writes. The output has the proxy's password hidden.
+func git(dir string, opts Options, args ...string) ([]byte, error) {
+	timeout := opts.Timeout
 	ctx, cancel := context.Background(), func() {}
 	if timeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 	}
 	defer cancel()
+	if opts.Git != nil {
+		p := &opts.Git.Proxy
+		full := append(append(append([]string{}, proxygit.Hardened...), proxygit.HTTPSOnly...), args...)
+		cmd, err := hostgit.Unchecked(ctx, dir, os.Environ(), full...)
+		if err != nil {
+			return nil, err
+		}
+		cmd.Env = proxygit.Env(cmd.Env, p)
+		out, err := cmd.CombinedOutput()
+		out = []byte(proxygit.Hide(string(out), p))
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return out, fmt.Errorf("git %s ran past %s and was stopped", args[0], timeout)
+		}
+		if err != nil {
+			err = errors.New(proxygit.Hide(err.Error(), p))
+		}
+		return out, err
+	}
 	cmd, err := hostgit.Command(ctx, dir, args...)
 	if err != nil {
 		return nil, err

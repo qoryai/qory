@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/wall"
 
 	"github.com/qoryai/qory/cmd"
@@ -34,7 +33,7 @@ func TestAgentEnvStartsTheLaunchAsGiven(t *testing.T) {
 	c.Env = []string{
 		"QORY_TEST_AGENT_ENV=1", "PATH=" + os.Getenv("PATH"),
 		"NODE_OPTIONS=--require /x.js", "ANTHROPIC_BASE_URL=https://elsewhere.example", "ALL_PROXY=socks5://elsewhere.example",
-		"HTTP_PROXY=http://qory-proxy:3128", "CLAUDE_CONFIG_DIR=/tmp/qory-agent-home", "QORY_RUN_SYSTEM=github.com",
+		"HTTP_PROXY=http://qory-proxy:3128", "CLAUDE_CONFIG_DIR=/home/agent/.claude", "QORY_RUN_SYSTEM=github.com",
 		"ANTHROPIC_API_KEY=placeholder", "LANG=C",
 	}
 	if err := c.Run(); err != nil {
@@ -44,7 +43,7 @@ func TestAgentEnvStartsTheLaunchAsGiven(t *testing.T) {
 	if first, _, _ := strings.Cut(out, "\n"); first != "arg0|-p|two words|--settings|/s.json|" {
 		t.Errorf("the launch's arguments are %q", first)
 	}
-	wants(t, out, "\nHTTP_PROXY=http://qory-proxy:3128\n", "\nCLAUDE_CONFIG_DIR=/tmp/qory-agent-home\n", "\nQORY_RUN_SYSTEM=github.com\n", "\nANTHROPIC_API_KEY=placeholder\n", "\nLANG=C\n")
+	wants(t, out, "\nHTTP_PROXY=http://qory-proxy:3128\n", "\nCLAUDE_CONFIG_DIR=/home/agent/.claude\n", "\nQORY_RUN_SYSTEM=github.com\n", "\nANTHROPIC_API_KEY=placeholder\n", "\nLANG=C\n")
 	lacks(t, out, "NODE_OPTIONS", "ANTHROPIC_BASE_URL", "ALL_PROXY")
 	if stderr.Len() != 0 {
 		t.Errorf("printed %q", stderr.String())
@@ -90,7 +89,7 @@ exec `+docker+` "$@"
 	lines := string(data)
 	runs := runsDir(t, root)
 	wants(t, lines,
-		"/"+session.PreparationScript+" "+wall.HelperPath+" run agent-env ",
+		" -- "+wall.HelperPath+" run agent-env ",
 		"/kept -- ",
 		"/fake-runtime --settings "+runs,
 		"/settings.json -p hi",

@@ -1044,7 +1044,7 @@ func fullCheck(u *using) (map[string]string, []string, error) {
 		// No repository git can name. One whose .git lies in a recorded place may be one
 		// git cannot read, and runs no git.
 		if repo.Worktree != "" && len(places.Containing(recs, repo.Worktree)) > 0 {
-			_, err := gitIn(Env())
+			_, err := gitIn(envOf(ctx))
 			return nil, nil, unreadable(dir, err)
 		}
 		return sumsOf(slices.Concat(lookedPast(seen, tops, ""), []string{dir}, bareFolders(dir, ""))), held, nil

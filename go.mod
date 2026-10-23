@@ -1,13 +1,13 @@
 module github.com/qoryai/qory
 
-go 1.27.1
+go 1.27.3
 
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/term v0.2.1
-	github.com/qoryai/forager v0.7.1-0.20261020233018-072c240d154c
-	github.com/qoryai/integrations v0.3.1-0.20261020233107-29a8d70f7785
+	github.com/qoryai/forager v0.7.1-0.20261023001330-b6ac9f060456
+	github.com/qoryai/integrations v0.3.1-0.20261023003608-f5bc79a41034
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.9

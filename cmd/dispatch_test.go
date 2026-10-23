@@ -3,7 +3,6 @@ package cmd_test
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/qoryai/qory/cmd"
@@ -39,43 +38,26 @@ func TestAPersonsRunLoadsAsBefore(t *testing.T) {
 	lacks(t, string(data), "--strict-mcp-config", "--mcp-config", "mcpServers", "--setting-sources", "CLAUDE_CONFIG_DIR=", "qory-agent-home", "agent-env")
 }
 
-// TestARunKeyBehindAWallNeedsTheHarnessOutsideTheCheckout is a run given a run key
-// behind a wall: with the harness home inside the checkout, .qory/harness, it is refused
-// as input before the gateway's address is reached and before anything is recorded; with
-// the home outside, composed and run with --home, it goes on to the gateway. A person's
-// walled run with the home inside starts as before, see [TestAPersonsRunLoadsAsBefore].
-func TestARunKeyBehindAWallNeedsTheHarnessOutsideTheCheckout(t *testing.T) {
+// TestAWalledRunTakesAHomeWhereARunWithARunKeyComposes is a person's walled run on a
+// home under qory/homes in the cache directory, where a run with a run key composes when
+// no --home or harness.home sets its home: Forager mounts it read-only, and the agent
+// starts in the container. A home under qory's state directory would stop the run, since that
+// directory contains the run records. That a run given a run key composes there is
+// [TestARunKeyComposesOutsideTheFolder]; that a home inside the checkout stops it is
+// [TestARunKeyWithAHomeInsideTheFolderStops].
+func TestAWalledRunTakesAHomeWhereARunWithARunKeyComposes(t *testing.T) {
 	root := runKeyCheckout(t)
-	gw := newKeyedGateway(t)
-	key := mintRunKey(t, keyRunID, gw.url())
-	t.Setenv("QORY_RUN_KEY", "")
-	docker, _ := fakeDocker(t)
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
-
-	out, err := run(t, "run", "--run-key-fd", descriptor(t, key))
-	home := filepath.Join(root, ".qory", "harness")
-	want := "the harness home " + home + " is inside the checkout, which the repository's files and commands can change, so a run given a run key behind a wall does not start. Compose the harness outside the checkout with --home, such as qory harness compose --home ~/.cache/qory/homes, and run with the same --home"
-	if err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
-		t.Errorf("home inside: %v (exit %d), want %q\n%s", err, cmd.ExitCode(err), want, out)
-	}
-	if _, n := gw.received(); n != 0 {
-		t.Error("a refused run reached the gateway")
-	}
-	if ids := recorded(t, root); len(ids) != 0 {
-		t.Errorf("a refused run left records %v", ids)
-	}
-
-	outside := t.TempDir()
-	if out, err := run(t, "harness", "compose", "--runtime", "claude", "--no-links", "--home", outside); err != nil {
+	homes := filepath.Dir(runKeyHome(t, root))
+	if out, err := run(t, "harness", "compose", "--runtime", "claude", "--no-links", "--home", homes); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	out, err = run(t, "run", "--home", outside, "--run-key-fd", descriptor(t, key))
-	if err == nil || strings.Contains(err.Error(), "inside the checkout") {
-		t.Fatalf("home outside: %v\n%s", err, out)
+	t.Setenv("QORY_RUN_KEY", "")
+	walledByDocker(t)
+	out, err := run(t, "run", "claude", "--home", homes, "--", "-p", "hi")
+	if err == nil || cmd.ExitCode(err) != 4 {
+		t.Fatalf("walled run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
-	if first, _, _ := strings.Cut(out, "\n"); first != "qory run: through the gateway "+gw.host()+", run "+keyRunID {
-		t.Errorf("home outside: the first line is %q\n%s", first, out)
-	}
+	wants(t, out, "inside the container")
 }
 
 // TestACheckoutsLaunchArgumentsApplyToAPersonsRun is the checkout's qory.yaml setting
@@ -87,7 +69,7 @@ func TestACheckoutsLaunchArgumentsApplyToAPersonsRun(t *testing.T) {
 	copyFixture(t, "two-modules", root)
 	script := fakeRuntime(t)
 	composedForFake(t, root, script)
-	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.dev/v1alpha1\nharness:\n  launch:\n    claude:\n      command: "+script+"\n      args: [[--dangerously-skip-permissions]]\n")
+	configure(t, root, []string{"launch:", "  claude:", "    command: " + script, "    args: [[--dangerously-skip-permissions]]"}, nil)
 	t.Setenv("QORY_RUN_KEY", "")
 	out, err := run(t, "run", "claude")
 	if err == nil || cmd.ExitCode(err) != 3 {

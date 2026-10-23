@@ -32,7 +32,7 @@ Four are defined under images/ in qory's repository, for linux/amd64 and linux/a
   agent-go          agent, and Go
   agent-go-docker   agent-docker, and Go
 
-They are not published. Build them from a checkout of qory at the commit qory version
+They are not published for you to pull. Build them from a checkout of qory at the commit qory version
 prints, build yours FROM one of them, and check it with qory image check.`,
 	}
 	c.AddCommand(newImageCheck(), newImageProbe())

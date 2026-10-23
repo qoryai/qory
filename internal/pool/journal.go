@@ -22,44 +22,34 @@ const JournalFile = "dispatches"
 // runs at once.
 const maxJournal = 1 << 20
 
-// The phases of a dispatch, as the journal holds them: claimed, its job's start
-// recorded with dispatched, its handover about to be sent, its run handed over, and its
-// run started. From handover on, the run may be handed over, so a replay releases it
-// with retry false.
+// The phases of a dispatch, as the journal contains them: claimed, and dispatched, its
+// start recorded at Qory Apiary. A claimed dispatch may be released; a dispatched one
+// may not, so a replay drops it.
 const (
 	PhaseClaimed    = "claimed"
 	PhaseDispatched = "dispatched"
-	PhaseHandover   = "handover"
-	PhaseHandedOver = "handed_over"
-	PhaseStarted    = "started"
 )
 
-var (
-	dispatchIDShape = regexp.MustCompile(`^dp_[0-9a-hjkmnp-tv-z]{16}$`)
-	runIDShape      = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
-	// stepShape is a step, as the provisioner contract writes one.
-	stepShape = regexp.MustCompile(`^[a-z][a-z_]{0,39}$`)
-)
+var dispatchIDShape = regexp.MustCompile(`^dp_[0-9a-hjkmnp-tv-z]{16}$`)
 
-// Entry is one live dispatch in the journal: its ids, its step and its phase. It
-// holds no run key and no inputs.
+// Entry is one live dispatch in the journal: its id and its phase. It contains no run
+// code.
 type Entry struct {
-	DispatchID, RunID, Step, Phase string
+	DispatchID, Phase string
 }
 
 // line is e as the journal writes it.
 func (e Entry) line() string {
-	return e.DispatchID + " " + e.RunID + " " + e.Step + " " + e.Phase + "\n"
+	return e.DispatchID + " " + e.Phase + "\n"
 }
 
 // valid reports whether each member of e has its shape.
 func (e Entry) valid() bool {
-	return dispatchIDShape.MatchString(e.DispatchID) && runIDShape.MatchString(e.RunID) && stepShape.MatchString(e.Step) &&
-		slices.Contains([]string{PhaseClaimed, PhaseDispatched, PhaseHandover, PhaseHandedOver, PhaseStarted}, e.Phase)
+	return dispatchIDShape.MatchString(e.DispatchID) && (e.Phase == PhaseClaimed || e.Phase == PhaseDispatched)
 }
 
 // journal is the file <pool's folder>/dispatches, mode 0600: one line per live
-// dispatch, its dispatch id, run id, step and phase, in the order of their claims. Each
+// dispatch, its dispatch id and phase, in the order of their claims. Each
 // change writes the whole file anew, synced, and renames it into place, so a crash
 // leaves the file before the change or after it.
 type journal struct {
@@ -70,7 +60,7 @@ type journal struct {
 
 // openJournal reads the journal in dir. A journal that is not there is empty; one that
 // is not a regular file of at most a mebibyte, or whose lines are not each a dispatch
-// id, a run id, a step and a phase, once per dispatch, is refused.
+// id and a phase, once per dispatch, is an error.
 func openJournal(dir string) (*journal, error) {
 	j := &journal{path: filepath.Join(dir, JournalFile)}
 	info, err := os.Lstat(j.path)
@@ -102,11 +92,11 @@ func openJournal(dir string) (*journal, error) {
 			b = b[i+1:]
 		}
 		var e Entry
-		if len(fields) == 4 {
-			e = Entry{fields[0], fields[1], fields[2], fields[3]}
+		if len(fields) == 2 {
+			e = Entry{fields[0], fields[1]}
 		}
 		if !e.valid() || slices.ContainsFunc(j.entries, func(x Entry) bool { return x.DispatchID == e.DispatchID }) {
-			return nil, fmt.Errorf("%s is not a journal of the pool's dispatches: its line %d is not a dispatch id, a run id, a step and a phase, once per dispatch, so no run is claimed", j.path, n)
+			return nil, fmt.Errorf("fix line %d of %s, the journal of the pool's dispatches: each line must be one dispatch id and a phase, each dispatch once; the pool claims no run until then", n, j.path)
 		}
 		j.entries = append(j.entries, e)
 	}

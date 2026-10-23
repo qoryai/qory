@@ -24,8 +24,9 @@
           ]
         },
         "model": {"type": "string", "minLength": 1},
+        "effort": {"description": "The effort value the main agent runs at, written in the place the runtime's Forager descriptor lists for the effort, such as the flag --effort for claude: one of the values the descriptor lists for a run, or empty for no effort. --effort wins over it.", "type": "string"},
         "tiers": {
-          "description": "The model id each tier maps to, for the agents whose model is ${qory:<tier>}: a model id, or {model, effort}, the effort one of the values the runtime takes for an agent. In the user's file and an ancestor's it is the machine's map, the nearest file per tier; in the checkout root's file it is the repository's map, read under extends too. Per tier, --tier wins over the machine's map, and the machine's map over the repository's; an entry comes whole from one of the three.",
+          "description": "The model id each tier maps to, for the agents whose model is ${qory:<tier>}: a model id, or {model, effort}, the effort one of the values the runtime takes for an agent. In the user's file and an ancestor's it is the machine's map, the nearest file per tier; in the checkout root's file it is the repository's map, read under extends too. Per tier, --tier, with the effort of --tier-effort for the same tier, wins over the machine's map, and the machine's map over the repository's; an entry comes whole from one of the three.",
           "type": "object",
           "propertyNames": {"enum": ["light", "fast", "thinking"]},
           "additionalProperties": {

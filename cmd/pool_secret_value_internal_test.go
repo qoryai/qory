@@ -30,7 +30,7 @@ func TestRunPoolHidesASecretInTheJournalsPath(t *testing.T) {
 	var stderr syncBuffer
 	s := &poolSettings{
 		Forager: &config.Forager{Server: &config.ForagerServer{URL: srv.URL + "/", AccessKeyID: provisionertest.KeyID, Pin: srv.Pin()}},
-		Pool:    &config.ForagerPool{Runs: 1, Prebuilds: 1, Registry: "localhost:5001/qory-env", HarnessRef: "v1.2.3", RunConfig: filepath.Join(root, "runs")},
+		Pool:    &config.ForagerPool{Runs: 1, Registry: "localhost:5001/qory-env", RunConfig: filepath.Join(root, "runs")},
 		Runs:    &config.Forager{Wall: &config.ForagerWall{Image: "agent", User: "1000:1000", Helper: filepath.Join(root, "qory-linux")}},
 		State:   state, InstanceID: provisionertest.InstanceID, InstanceName: "pool-test", Stderr: &stderr,
 	}

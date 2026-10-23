@@ -41,7 +41,7 @@ func writablePlaces(root string, mounts []wall.Mount) []struct{ path, kind strin
 // fingerprints of the qory files of the checkout at root and of its composed harness,
 // at, that lie in the place. A place recorded before keeps its fingerprints. On an error
 // nothing stays held.
-func recordPlaces(ctx context.Context, spec *session.Spec, root string, at places) (*walled.Hold, error) {
+func recordPlaces(ctx context.Context, spec *runSpec, root string, at places) (*walled.Hold, error) {
 	files, err := qoryFiles(root)
 	if err != nil {
 		return nil, err
@@ -53,7 +53,7 @@ func recordPlaces(ctx context.Context, spec *session.Spec, root string, at place
 	}
 	// A run still going could write a place's git configuration and qory files while
 	// they are read, and they would be recorded as the person's.
-	hold, err := hostgit.Starting(ctx, paths)
+	hold, err := hostgit.Starting(ctx, spec.RunID, paths)
 	if err != nil {
 		return nil, err
 	}
@@ -65,6 +65,11 @@ func recordPlaces(ctx context.Context, spec *session.Spec, root string, at place
 	}
 	return hold, nil
 }
+
+// openingRun makes qory's checks of the places walled runs use leave out the walled run
+// runID, which this process opened: its open listed it among the walled runs going,
+// before its compose runs git. It returns what sets back the run before.
+func openingRun(runID string) (restore func()) { return walled.SetThisRun(runID) }
 
 // recordPlace records the place at path, of kind, for the walled run runID, which holds
 // the places of holding: its git fingerprint with [hostgit.Record], then the

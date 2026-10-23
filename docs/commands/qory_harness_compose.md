@@ -11,8 +11,9 @@ When two modules provide the same entry, compose refuses until the stack picks o
 
 With --home, or harness.home in qory.yaml, the tree goes outside the checkout, one home
 per checkout. The checkout then gets nothing. qory harness launch prints how an agent
-reads such a home. --no-links writes the tree to .qory/harness, with no link and no
-exclude line.
+reads such a home. A folder that is not a git working tree composes only with such a
+home. --no-links writes the tree to .qory/harness with no link; compose still writes the
+/.qory exclude line.
 
 --verbose prints each entry and the module it came from.
 
@@ -34,17 +35,19 @@ qory harness compose [flags]
 ### Options
 
 ```
-      --check              compare the home with the stack and modules, write nothing, and exit 6 when a file, a link or a launch variable differs; the checkout's links and the rest of the report are not compared
-      --dry-run            print the report and write nothing
-  -f, --file string        the qory-stack.yaml, qory.yaml or harness.yaml to compose instead of the one found; when the checkout's document extends a stack, this one is its base
-      --force              replace a tracked, unmodified file where a link goes; git checkout -- restores it (qory.yaml: force)
-  -h, --help               help for compose
-      --home string        where the harness is composed: a directory outside the checkout, one home per checkout under it, or .qory/harness (qory.yaml: harness.home)
-      --model string       write this model instead of target.model (qory.yaml: model)
-      --no-links           write no link and no exclude line into the checkout; harness launch prints how an agent reads the home (qory.yaml: harness.links: none)
-      --runtime string     render for these runtimes instead of target.runtime, comma separated (amp, any, claude, codex, copilot, cursor, gemini, goose, opencode; qory.yaml: runtime)
-      --tier stringArray   map a tier to a model id for each agent whose model is ${qory:<tier>}, as <tier>=<model id>; repeat it for each tier (tiers: light, fast, thinking; qory.yaml: harness.tiers)
-      --update             fetch every git source again, not the cached clone (qory.yaml: update)
+      --check                     compare the home with the stack and modules, write nothing, and exit 6 when a file, a link or a launch variable differs; the checkout's links and the rest of the report are not compared
+      --dry-run                   print the report and write nothing
+      --effort string             run the main agent at this effort value, one of the values the runtime's descriptor lists, such as high (qory.yaml: harness.effort)
+  -f, --file string               the qory-stack.yaml, qory.yaml or harness.yaml to compose instead of the one found, or a stack's folder in a git repository as <https URL>#<ref>:<folder>; when the checkout's document extends a stack, this one is its base
+      --force                     replace a tracked, unmodified file where a link goes; git checkout -- restores it (qory.yaml: force)
+  -h, --help                      help for compose
+      --home string               where the harness is composed: a directory outside the checkout, one home per checkout under it, or .qory/harness (qory.yaml: harness.home)
+      --model string              write this model instead of target.model (qory.yaml: model)
+      --no-links                  write no link into the checkout; with the home at .qory/harness, compose still writes the /.qory exclude line; harness launch prints how an agent reads the home (qory.yaml: harness.links: none)
+      --runtime string            render for these runtimes instead of target.runtime, comma separated (amp, any, claude, codex, copilot, cursor, gemini, goose, opencode; qory.yaml: runtime)
+      --tier stringArray          map a tier to a model id for each agent whose model is ${qory:<tier>}, as <tier>=<model id>; repeat it for each tier (tiers: light, fast, thinking; qory.yaml: harness.tiers)
+      --tier-effort stringArray   set the effort value for each agent whose model is ${qory:<tier>}, as <tier>=<effort>, beside --tier <tier>=<model id>; repeat it for each tier
+      --update                    fetch every git source again, not the cached clone (qory.yaml: update)
 ```
 
 ### Options inherited from parent commands

@@ -16,13 +16,21 @@ import (
 	"github.com/qoryai/qory/internal/ui"
 )
 
-// tierFlag is the From of a tier entry --tier set.
+// tierFlag is the From of a tier entry the command line set: its model from --tier, and
+// its effort, when it has one, from --tier-effort.
 const tierFlag = "--tier"
 
-// tierFlags reads the values of --tier, each <tier>=<model id>, into a map by tier. A
-// value of another form, a name that is not a tier, a tier given twice and a model that
-// is a tier placeholder are refused with the value as given.
-func tierFlags(values []string) (map[string]stack.Tier, error) {
+// tierEffortFlag is the flag that sets the effort of a tier entry of the command line.
+const tierEffortFlag = "--tier-effort"
+
+// tierFlags reads the values of --tier, each <tier>=<model id>, and of --tier-effort,
+// each <tier>=<effort>, into one map by tier: the command line's entries, each with the
+// model of --tier and the effort of --tier-effort. A value of another form, a name that
+// is not a tier, a tier given twice to one flag, a model that is a tier placeholder and
+// an effort for a tier --tier does not map each return an error with the value as given.
+// An entry comes whole from one source, so an effort on the command line is for the model
+// that --tier maps the tier to.
+func tierFlags(values, efforts []string) (map[string]stack.Tier, error) {
 	tiers := map[string]stack.Tier{}
 	for _, value := range values {
 		name, model, ok := strings.Cut(value, "=")
@@ -39,6 +47,26 @@ func tierFlags(values []string) (map[string]stack.Tier, error) {
 			return nil, fmt.Errorf("--tier %s: write a model id; %s is a tier placeholder, which goes only in an agent's model", exports.Value(value, false), exports.Value(model, false))
 		}
 		tiers[name] = stack.Tier{Model: model, From: tierFlag}
+	}
+	given := map[string]bool{}
+	for _, value := range efforts {
+		name, effort, ok := strings.Cut(value, "=")
+		if !ok || name == "" || effort == "" || module.HasControl(value) {
+			return nil, fmt.Errorf("%s %s: write %s <tier>=<effort>, such as %s thinking=high", tierEffortFlag, module.Escape(exports.Value(value, false)), tierEffortFlag, tierEffortFlag)
+		}
+		if !module.IsTier(name) {
+			return nil, module.NotATier(tierEffortFlag+" "+exports.Value(value, false), accesskey.ShownName(name, false))
+		}
+		if given[name] {
+			return nil, fmt.Errorf("%s %s is given twice; give each tier once", tierEffortFlag, name)
+		}
+		given[name] = true
+		t, mapped := tiers[name]
+		if !mapped {
+			return nil, fmt.Errorf("%s %s: give %s %s=<model id> as well; the effort is for the model that %s maps the tier to", tierEffortFlag, exports.Value(value, false), tierFlag, name, tierFlag)
+		}
+		t.Effort = effort
+		tiers[name] = t
 	}
 	return tiers, nil
 }
@@ -102,7 +130,7 @@ func checkTierEfforts(res *compose.Result, runtimes []render.Runtime, root strin
 			if !mapped || t.Effort == "" || len(used[name]) == 0 || slices.Contains(am.AgentEfforts(), t.Effort) {
 				continue
 			}
-			return fmt.Errorf("tier %s: set effort to one of %s for %s agents; %s is not one (from %s)", name, strings.Join(am.AgentEfforts(), ", "), rt.Name(), exports.Value(t.Effort, false), tierFrom(t, root))
+			return fmt.Errorf("tier %s: set effort to one of %s for %s agents; %s is not one (from %s)", name, strings.Join(am.AgentEfforts(), ", "), rt.Name(), exports.Value(t.Effort, false), tierEffortFrom(t, root))
 		}
 	}
 	return nil
@@ -114,12 +142,25 @@ func shownTierValue(t stack.Tier) string {
 	return config.TierValue(stack.Tier{Model: exports.Value(t.Model, false), Effort: exports.Value(t.Effort, false)})
 }
 
-// tierFrom is where a tier entry came from, for a row or a message.
+// tierFrom is where a tier entry came from, for a row or a message: for an entry of the
+// command line, --tier, and --tier-effort beside it when the entry has an effort.
 func tierFrom(t stack.Tier, root string) string {
 	if t.From == tierFlag {
+		if t.Effort != "" {
+			return tierFlag + " and " + tierEffortFlag
+		}
 		return tierFlag
 	}
 	return ui.Short(t.From, root)
+}
+
+// tierEffortFrom is where a tier entry's effort came from, for a message: --tier-effort
+// for an entry of the command line, since --tier sets no effort, else the entry's file.
+func tierEffortFrom(t stack.Tier, root string) string {
+	if t.From == tierFlag {
+		return tierEffortFlag
+	}
+	return tierFrom(t, root)
 }
 
 // tierRows are the rows of a compose for the tiers its agents set: each tier with the

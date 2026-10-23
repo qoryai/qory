@@ -42,6 +42,40 @@ func TestAValueWithASecretPrintsAsForagersPhrase(t *testing.T) {
 	}
 }
 
+// runCodeValue is a value that contains a run code; it is no real code.
+const runCodeValue = "qecr_0123456789ABCDEFGHJKMNPQRS.AAAAAAAAAAAAAAAAAAAAAA"
+
+// TestARunCodePrintsAsAPhrase is a value, a git URL, a text and an error that contain a
+// run code, qecr_ in any letter case, as written or percent-encoded: each prints the
+// run code's phrase in its place, which Forager prints once its check covers qecr_. A
+// value with an access key secret and a run code prints the access key secret's phrase.
+func TestARunCodePrintsAsAPhrase(t *testing.T) {
+	const phrase = "(a value that contains a run code)"
+	for _, v := range []string{runCodeValue, "code " + strings.ToUpper(runCodeValue), "x" + strings.ToLower(runCodeValue)} {
+		if got := exports.Value(v, true); got != phrase {
+			t.Errorf("Value(%q) = %q, want %q", v, got, phrase)
+		}
+	}
+	if got := exports.Value(secretValue+" "+runCodeValue, false); got != "(a value that contains an access key secret)" {
+		t.Errorf("Value with both = %q", got)
+	}
+	if got := exports.URL("https://git.example/h.git?c=%71ecr_x"); got != phrase {
+		t.Errorf("URL = %q, want %q", got, phrase)
+	}
+	if got, want := exports.HideValues("redeeming "+runCodeValue+": failed"), "redeeming "+phrase+": failed"; got != want {
+		t.Errorf("HideValues = %q, want %q", got, want)
+	}
+	if got, want := exports.HideValue("run "+runCodeValue+" failed", runCodeValue), "run "+phrase+" failed"; got != want {
+		t.Errorf("HideValue = %q, want %q", got, want)
+	}
+	inner := &fs.PathError{Op: "open", Path: runCodeValue, Err: fs.ErrNotExist}
+	err := exports.HideValueError(inner, runCodeValue)
+	var pe *fs.PathError
+	if err == nil || strings.Contains(strings.ToLower(err.Error()), "qecr_") || !errors.As(err, &pe) {
+		t.Errorf("HideValueError = %v", err)
+	}
+}
+
 // TestAGitURLPrintsWithoutItsPassword is a git URL with a password in its user part, one
 // with a user alone, one with a secret, and one with neither.
 func TestAGitURLPrintsWithoutItsPassword(t *testing.T) {

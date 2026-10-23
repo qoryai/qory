@@ -413,7 +413,7 @@ func TestEnrolRefusesAnIntegrationsCode(t *testing.T) {
 	writeFile(t, foragerFile(), commentedForager)
 	code := "qec_" + strings.TrimPrefix(srv.code(1, false), accesskey.CodePrefixNode)
 	_, err := run(t, "access-key", "enrol", srv.URL, code)
-	if want := "an enrolment code is qecn_, qecp_, qecg_ or qeci_, 26 characters, then a dot and a fingerprint"; err == nil || err.Error() != want {
+	if want := "an enrolment code is qecn_, qecp_, qecg_, qeci_ or a run code's prefix, 26 characters, then a dot and a fingerprint"; err == nil || err.Error() != want {
 		t.Errorf("a qec_ code: %v, want %q", err, want)
 	}
 	if n := len(srv.sent()); n != 0 {

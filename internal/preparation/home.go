@@ -27,21 +27,22 @@ const AgentHome = "/tmp/qory-agent-home"
 // https://code.claude.com/docs/en/settings. A test points it elsewhere.
 var managedSettings = "/etc/claude-code"
 
-// The words of the agent's home. Each is one format string.
+// The words of the agent's home, which qory run agent-env prints after its name. Each
+// is one format string, with the fix first.
 const (
-	textManaged        = "qory run prepare: the image has %s, where Claude Code reads managed settings above every other source, so a run given a run key does not start; use an image without it"
-	textManagedUnread  = "qory run prepare: %s, where Claude Code reads managed settings, could not be checked: %s"
-	textHomeExists     = "qory run prepare: the agent's home %s exists already, and qory makes it only where nothing is, so a run given a run key does not start"
-	textHomeNotEmpty   = "qory run prepare: the agent's home %s held something once qory made it, so a run given a run key does not start"
-	textHomeParentLink = "qory run prepare: %s, above the agent's home %s, is a symbolic link; the agent starts only with a home no link leads to"
-	textHomeNotMade    = "qory run prepare: the agent's home %s could not be made: %s"
+	textManaged        = "use an image without %s: Claude Code reads managed settings there above every other source, so a run given a run key does not start"
+	textManagedUnread  = "make %s readable for the agent's user in the image: Claude Code reads managed settings there, and the check for them failed: %s"
+	textHomeExists     = "remove %s from the image and from the setup commands: qory makes the agent's home only where nothing is, so a run given a run key does not start"
+	textHomeNotEmpty   = "leave no program of the image or the setup commands running that writes into %s: the agent's home held something once qory made it, so a run given a run key does not start"
+	textHomeParentLink = "replace the symbolic link %s with a folder in the image: the agent's home %s is made only where no link leads"
+	textHomeNotMade    = "let the agent's user make %s, then run again: the agent's home could not be made: %s"
 )
 
 // FreshHome makes the agent's home, [AgentHome], new and empty when getenv sets
 // [EnvAgentHome] to it, as qory run does for a dispatched walled run of Claude Code, and
-// does nothing otherwise. It is the last step of the preparation, and refuses anything
-// at the home when it runs, such as a home the image holds or the repository's commands
-// made. It refuses first an image with Claude Code's managed settings, which no
+// does nothing otherwise. qory run agent-env calls it last before the agent starts, after
+// the setup commands, and it refuses anything at the home when it runs, such as a home
+// the image holds or the setup commands made. It refuses first an image with Claude Code's managed settings, which no
 // configuration directory replaces. These checks guard against what the image and the
 // repository's files leave in place, not against a repository that acts against them:
 // the image's programs and the repository's commands run as the agent's user in the

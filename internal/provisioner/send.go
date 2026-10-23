@@ -22,7 +22,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-// request is one request of the pool's: what it is, as an error names it, which
+// request is one request of the pool's: what it is, as an error shows it, which
 // refusals apply, its path under [Client.URL], the schema its body is checked against
 // before it is sent, the bound of its answer's 200, its timeout, and its body with the
 // time set. Every request is a POST.
@@ -52,10 +52,10 @@ type answer struct {
 }
 
 // retryLine is the line logged for a try sent again.
-const retryLine = "Qory Apiary's answer could not be used, so the request is sent again after a wait"
+const retryLine = "Qory Apiary's response could not be used, so the request is sent again after a wait"
 
-// do sends req until Qory Apiary answers a signed status below 500, or a handover's
-// signed 503 unavailable, up to [tries] tries. Each try is built anew, its time from
+// do sends req until a try gets a signed status below 500 from Qory Apiary, up to
+// [tries] tries. Each try is built anew, its time from
 // [Client.nextTime], so its bytes and its signature are new. A try fails with no
 // answer, an answer over its bound or not signed under the pin, whatever its status, a
 // 429 among them, or any other signed server error: it changes nothing, and it is sent
@@ -68,8 +68,8 @@ func (c *Client) do(ctx context.Context, req request) (*answer, error) {
 		return nil, fmt.Errorf("%s: the request could not be made", req.what)
 	}
 	id := http.MethodPost + " " + c.URL + req.path + "\n" + string(b)
-	if accesskey.ContainsSecret(id) {
-		return nil, fmt.Errorf("%s: the request holds what looks like an access key secret or a run key, so it is not sent", req.what)
+	if containsSecret(id) {
+		return nil, fmt.Errorf("%s: %w", req.what, errSecretInRequest)
 	}
 	wait := firstWait
 	for try := 1; ; try++ {
@@ -93,9 +93,6 @@ func (c *Client) do(ctx context.Context, req request) (*answer, error) {
 		case ans.status >= 500:
 			ans.resent = try > 1
 			failure = c.refused(req.what, req.kind, ans)
-			if errors.Is(failure, ErrUnavailable) {
-				return ans, nil
-			}
 		default:
 			ans.resent = try > 1
 			return ans, nil
@@ -120,15 +117,15 @@ func (c *Client) do(ctx context.Context, req request) (*answer, error) {
 }
 
 // build is req's body with the time t, checked for what looks like a secret and
-// against its schema before it is sent. Its error names the request and the schema,
-// never a value.
+// against its schema before it is sent. Its error contains the request and the
+// schema's name, never a value.
 func (c *Client) build(req request, t time.Time) ([]byte, error) {
 	b, err := json.Marshal(req.body(contracts.FormatTime(t)))
 	if err != nil {
 		return nil, fmt.Errorf("%s: the request could not be made", req.what)
 	}
-	if accesskey.ContainsSecret(string(b)) {
-		return nil, fmt.Errorf("%s: the request holds what looks like an access key secret or a run key, so it is not sent", req.what)
+	if containsSecret(string(b)) {
+		return nil, fmt.Errorf("%s: %w", req.what, errSecretInRequest)
 	}
 	s, err := schema(req.schema)
 	if err != nil {
@@ -146,7 +143,7 @@ func (c *Client) build(req request, t time.Time) ([]byte, error) {
 // status, is marked too large, and neither its body nor its signature is read. A 401 is
 // never signed; any other answer is checked under the pin, bound to this request's
 // signature, with each signed header sent at most once. An error is no answer,
-// [ErrUnreachable]; it names the request and never a header, a body or a secret.
+// [ErrUnreachable]; it contains the request and never a header, a body or a secret.
 func (c *Client) send(ctx context.Context, req request, body []byte) (*answer, error) {
 	hr, err := http.NewRequestWithContext(ctx, http.MethodPost, c.URL+req.path, bytes.NewReader(body))
 	if err != nil {
@@ -164,7 +161,7 @@ func (c *Client) send(ctx context.Context, req request, body []byte) (*answer, e
 	}
 	hr.Header.Set(accesskey.HeaderAccessKeyID, c.KeyID)
 	hr.Header.Set(accesskey.HeaderInstanceID, c.InstanceID)
-	hr.Header.Set(headerContractVersion, strconv.Itoa(Revision))
+	hr.Header.Set(headerContractVersion, strconv.Itoa(contracts.ProvisionerRevision))
 	hr.Header.Set(accesskey.HeaderSignature, sig)
 	hc := http.Client{}
 	if c.HTTP != nil {
@@ -184,7 +181,7 @@ func (c *Client) send(ctx context.Context, req request, body []byte) (*answer, e
 	}
 	b, tooLarge, err := readLimited(resp.Body, resp.ContentLength, limit)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w: its answer could not be read", req.what, ErrUnreachable)
+		return nil, fmt.Errorf("%s: %w: its response could not be read", req.what, ErrUnreachable)
 	}
 	if tooLarge {
 		return &answer{status: resp.StatusCode, tooLarge: true, limit: limit}, nil
@@ -207,13 +204,13 @@ func (c *Client) send(ctx context.Context, req request, body []byte) (*answer, e
 }
 
 // unreachable is [ErrUnreachable] for the request what, with the transport's cause,
-// unless the cause's text holds what looks like a secret, which leaves it out.
+// unless the cause's text contains what looks like a secret, which leaves it out.
 func unreachable(what string, err error) error {
 	var u *url.Error
 	if errors.As(err, &u) {
 		err = u.Err
 	}
-	if accesskey.ContainsSecret(err.Error()) {
+	if containsSecret(err.Error()) {
 		return fmt.Errorf("%s: %w", what, ErrUnreachable)
 	}
 	return fmt.Errorf("%s: %w: %w", what, ErrUnreachable, err)
@@ -246,14 +243,22 @@ var errNotOneDocument = errors.New("it is not one JSON document with valid UTF-8
 
 // readAnswer reads body, a signed answer's, into out: one JSON document with valid
 // UTF-8 and no member twice in any object, which the schema name of provisioner/v1
-// accepts. Its error names the schema, never a value of body.
+// accepts. Its error contains the schema's name, never a value of body.
 func readAnswer(name string, body []byte, out any) error {
-	if !jsontext.Value(body).IsValid() {
-		return errNotOneDocument
-	}
 	s, err := schema(name)
 	if err != nil {
 		return err
+	}
+	return readChecked(s, name, body, out)
+}
+
+// readChecked reads body into out: one JSON document with valid UTF-8 and no member
+// twice in any object, which s, the schema name, accepts. The schema checks the bytes
+// before they are decoded, so a decoded "access":"" or "target":null is never read as
+// no target. Its error contains the schema's name, never a value of body.
+func readChecked(s *jsonschema.Schema, name string, body []byte, out any) error {
+	if !jsontext.Value(body).IsValid() {
+		return errNotOneDocument
 	}
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(body))
 	if err != nil || s.Validate(doc) != nil {
@@ -265,7 +270,7 @@ func readAnswer(name string, body []byte, out any) error {
 	return nil
 }
 
-// schemas holds each schema of provisioner/v1 compiled, by its name.
+// schemas has each schema of provisioner/v1 compiled, by its name.
 var schemas sync.Map
 
 // schema is the schema name of provisioner/v1, compiled once.
@@ -281,9 +286,18 @@ func schema(name string) (*jsonschema.Schema, error) {
 	return s, nil
 }
 
-// shown is s, or [hidden] when s holds what looks like a secret, for a value logged.
+// errSecretInRequest is a request whose bytes contain what looks like a secret.
+var errSecretInRequest = errors.New("ask Qory Apiary's operator: the request contains what looks like an access key secret, a run key or a run code, so it is not sent")
+
+// containsSecret reports whether s contains what looks like an access key secret or a
+// run key, as accesskey.ContainsSecret reports, or a run code, qecr_ in any case.
+func containsSecret(s string) bool {
+	return accesskey.ContainsSecret(s) || strings.Contains(strings.ToLower(s), accesskey.CodePrefixRun)
+}
+
+// shown is s, or [hidden] when s contains what looks like a secret, for a value logged.
 func shown(s string) string {
-	if accesskey.ContainsSecret(s) {
+	if containsSecret(s) {
 		return hiddenText
 	}
 	return s

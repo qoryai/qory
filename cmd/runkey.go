@@ -29,13 +29,20 @@ import (
 // says, read as a runner reads it, unverified: the run, and the separate gateway the
 // run goes through. fromFD says it came from the descriptor --run-key-fd names, not
 // from QORY_RUN_KEY, which an unwalled agent can read on macOS, and on Linux from the
-// program that started qory. It is a secret: it is handed to Forager's session alone,
-// and fmt prints a runKey by its gateway and its run, never its value.
+// program that started qory. redeemed is true for the run key a run code was redeemed
+// for, --run-code-file, which no environment ever contained. It is a secret: it is
+// handed to Forager's session alone, and fmt prints a runKey by its gateway and its run,
+// never its value.
 type runKey struct {
-	value  string
-	key    runkey.Key
-	fromFD bool
+	value    string
+	key      runkey.Key
+	fromFD   bool
+	redeemed bool
 }
+
+// inEnvironment reports whether the run key came from QORY_RUN_KEY, the environment qory
+// started with.
+func (k *runKey) inEnvironment() bool { return !k.fromFD && !k.redeemed }
 
 // String names the run key by its run and its gateway, never its value.
 func (k runKey) String() string {
@@ -183,7 +190,7 @@ var registrationFlags = []string{"label", "kind", "title", "subject", "details"}
 
 // runKeyGiven says how a run key reaches qory, in the refusals of what a run whose
 // starter registered it cannot have.
-const runKeyGiven = "a run key is given, by QORY_RUN_KEY or --run-key-fd"
+const runKeyGiven = "a run key is given, by QORY_RUN_KEY, --run-key-fd or --run-code-file"
 
 // behindGateway refuses, before anything starts, what a run whose starter registered it,
 // a run key being given, cannot have: --local and --policy, which are for a gateway of

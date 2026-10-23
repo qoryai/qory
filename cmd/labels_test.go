@@ -324,8 +324,8 @@ func TestARunKeyNeitherChecksNorKeepsLabels(t *testing.T) {
 	if err != nil && strings.Contains(err.Error(), "labels_changed") {
 		t.Errorf("a run with a run key checked the labels: %v", err)
 	}
-	if first, _, _ := strings.Cut(out, "\n"); first != "qory run: through the gateway "+gw.host()+", run "+keyRunID {
-		t.Errorf("the first line is %q\n%s", first, out)
+	if line := firstLine(out); line != "qory run: through the gateway "+gw.host()+", run "+keyRunID {
+		t.Errorf("the first line is %q\n%s", line, out)
 	}
 	if _, n := gw.received(); n == 0 {
 		t.Error("the run did not reach its gateway")

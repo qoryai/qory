@@ -1,18 +1,29 @@
 // Package prebuild builds a repository's development container into the image a walled
-// run starts from: what qory run prebuild does when a pool's prebuild job runs it on a
-// repository it fetched. It builds a local image and never pushes one or logs in.
+// run starts from: what a pool's prebuild runs, in the pool's process, on a repository
+// it fetched. It builds local images and never pushes one or logs in.
 //
 // [Build] reads the configuration with internal/devcontainer and refuses, before
 // anything is built or run, what the image cannot be built from, and a repository whose
 // configuration of git, which the image keeps, such as .git/config, holds a credential
 // for git. A configuration that has initializeCommand, which runs on the host, reaches
-// the devcontainer command as a copy without it, and a line says it is not run. It then
-// builds the development container with the reference devcontainer command at
-// [CLIVersion], adds the agent image's [AgentPath] on top, copies the repository to
-// [Workspace], runs onCreateCommand and updateContentCommand there in a container of
-// the image as the wall user, moves the tree to [SeedPath] and commits the container as
-// the image. The programs it runs see only [AllowedEnv] of this process's environment,
-// and the commands only the image's environment and the configuration's.
+// the devcontainer command as a copy without it, and a line says it is not run.
+//
+// It builds in two steps. The environment step builds the definition, image or the
+// Dockerfile and the features, with the reference devcontainer command at
+// [CLIVersion], into the environment image. With [Options.Registry] set, the command
+// reads a copy of the definition in which each image on one of [PublicHosts] with no
+// credential in the build's run configuration is the registry's copy,
+// <registry>/upstream/<host>/<path>: devcontainer.json's image, and FROM and COPY
+// --from in a copy of the Dockerfile. Feature IDs stay as written. The step is skipped when [Options.EnvironmentImage] is
+// set, and when the definition is a standard image, <registry>/shared/<name>, with no
+// feature and no Dockerfile. The build keeps the environment image apart, for other
+// targets with the same definition, only when it depends on the definition's bytes
+// alone, as [build.chooseSource] has it. The target step adds the agent image's
+// [AgentPath] on top, copies the target's files to [Workspace], runs onCreateCommand and
+// updateContentCommand there in a container of the image as the wall user, moves the
+// tree to [SeedPath] and commits the container as the target image. The programs it
+// runs see only [AllowedEnv] of this process's environment, and the commands only the
+// image's environment and the configuration's.
 //
 // At run time Forager starts the image as the wall user, mounts the run's working
 // folder at [Workspace], the hook socket's folder at [HooksPath] and the qory helper at
@@ -75,10 +86,17 @@ const MaxSize = 4 << 30
 // Limit is how long the whole build may take.
 const Limit = 30 * time.Minute
 
-// prefix starts every line of qory run prebuild.
-const prefix = "qory run prebuild: "
+// Prefix starts every line of the build, and every line its seed step prints.
+const Prefix = "prebuild: "
 
-// The words of qory run prebuild. Each is one format string.
+// prefix is [Prefix], as the texts below use it.
+const prefix = Prefix
+
+// SeedArgs are the arguments of the qory helper that select its seed step, the hidden
+// verb qory run seed, which [Seed] is.
+var SeedArgs = []string{"run", "seed"}
+
+// The words of the build. Each is one format string.
 const (
 	textRead         = prefix + "read %s in %s"
 	textProxyUser    = prefix + "%s holds an @, which can put a user name or a password in a URL, a secret; the build runs without it"
@@ -91,11 +109,11 @@ const (
 	textCopied       = prefix + "copied the repository to " + Workspace + " in %s"
 	textCommitted    = prefix + "committed the image in %s"
 	textDone         = prefix + "built %s in %s: %s"
-	textNotDigest    = "--agent-image names the agent image by digest alone: name@sha256: and 64 hexadecimal digits"
-	textNotUser      = "--user is uid:gid, two numbers, neither of them 0"
-	textNotTag       = "--tag is the name of the image to make, such as acme/shop:prebuild, with no digest"
+	textNotDigest    = "pin wall.image by its digest, name@sha256: and 64 hexadecimal digits: the build takes the agent image by digest alone"
+	textNotUser      = "set wall.user to uid:gid, two numbers, neither of them 0"
+	textNotTag       = "set pool.registry to an image name with no tag and no digest: the name of the image to make is not one"
 	textNoRepo       = "the repository folder %s is not a folder"
-	textNoRepoFlag   = "--repository is the folder of the repository; it is not set"
+	textNoRepoFlag   = "give the build the folder of the repository: it is not set"
 	textNoHelper     = "qory's Linux build %s: %s"
 	textHelperArch   = "qory's Linux build %s is for %s, and the engine runs %s; give the Linux build for %s"
 	textNoEngine     = "the docker command reaches no engine: %s"
@@ -138,8 +156,9 @@ const (
 var refusedMembers = []string{"dockerFile", "context", "dockerComposeFile", "build.options"}
 
 // buildMembers are the members [devcontainer.LoadMembers] reads for the build: the
-// [refusedMembers], and build.cacheFrom, which [checkCacheFrom] checks.
-var buildMembers = append(slices.Clone(refusedMembers), "build.cacheFrom")
+// [refusedMembers], build.cacheFrom, which [checkCacheFrom] checks, and build and
+// features, which the sharing rule reads, [build.chooseSource].
+var buildMembers = append(slices.Clone(refusedMembers), "build.cacheFrom", "build", "features")
 
 // featureAccess are the members of the merged configuration, and of an entry of the
 // devcontainer.metadata label, by which a feature or the base image asks for access to
@@ -162,6 +181,11 @@ var (
 	ErrLimit   = errors.New(textLimit)
 	ErrStopped = errors.New(textStopped)
 )
+
+// ErrImageMissing is an environment image, [Options.EnvironmentImage], that its
+// registry does not have: docker pull found no manifest or no repository for it. The
+// build's error matches it with errors.Is, and its text is the pull's.
+var ErrImageMissing = errors.New("the environment image is not in its registry")
 
 // RefusedError is a refusal: a flag, the repository or its configuration that no image
 // is built from, before anything is built or run, or what the build made that is not
@@ -207,6 +231,39 @@ type Options struct {
 	// Name is what the temporary containers and images are named after; empty is a
 	// random one. A test sets it.
 	Name string
+
+	// Registry is the address of the instance's registry, a host and a port or none,
+	// under which upstream/<host>/<path> are the copies of public images and
+	// shared/<name> the standard images. "" rewrites no reference and takes no image as
+	// a standard one.
+	Registry string
+	// CredentialHosts are the hosts that have a credential in the build's run
+	// configuration. A reference on one of them is not rewritten: the registry makes
+	// its copies with no credential.
+	CredentialHosts []string
+	// EnvironmentImage, when it is set, is the environment image the target image
+	// starts from, name@sha256:digest: the environment step is skipped.
+	EnvironmentImage string
+	// EnvironmentTag is the name of the environment image the build keeps apart; ""
+	// is <Name>:environment.
+	EnvironmentTag string
+}
+
+// Result is what [Build] made.
+type Result struct {
+	// Environment is the environment image the build kept apart, a local reference:
+	// [Options.EnvironmentTag], or <Name>:environment. It is "" when the build kept
+	// none: it started from [Options.EnvironmentImage] or a standard image, or the
+	// environment image depends on more than the definition's bytes. The caller pushes
+	// it or removes it.
+	Environment string
+	// Target is the target image, a local reference: [Options.Tag].
+	Target string
+	// Base is the image the definition starts from, name@sha256:digest: the standard
+	// image, or the image of devcontainer.json or of the Dockerfile's last stage, or of
+	// build.target. It is "" when the build started from [Options.EnvironmentImage], or
+	// from scratch, or from an image it cannot resolve before it builds.
+	Base string
 }
 
 // user is a checked uid:gid.
@@ -252,6 +309,30 @@ type build struct {
 	images  []string
 	// created says the container may exist: docker create ran.
 	created bool
+
+	// up rewrites the definition's images, [upstream].
+	up upstream
+	// source is what the target step starts from.
+	source source
+	// share is whether the build keeps the environment image apart; notShared is why
+	// not.
+	share     bool
+	notShared string
+	// dockerfile is the Dockerfile's path relative to the repository, with slashes, as
+	// [confine] resolved it, "" for none; dockerfileData is its copy as rewritten.
+	dockerfile     string
+	dockerfileData []byte
+	// engine is the platform of the Docker engine, os/arch, which the build runs on.
+	engine string
+	// edit is the definition's copy as [build.rewrite] set it, and rewritten is whether
+	// it changes a reference.
+	edit      devcontainer.Edit
+	rewritten bool
+	// environment is the environment image the build tagged, removed unless the build
+	// succeeds.
+	environment string
+	// res is what the build made.
+	res Result
 }
 
 // Build builds the image o names, as the package says, and prints a line for each step
@@ -259,8 +340,9 @@ type build struct {
 // configuration prints a line and returns [ErrNoConfiguration]. Every refusal is a
 // [RefusedError], and comes before anything is built or run, but for what only the
 // built image shows. Whatever the outcome, every temporary container, folder and image
-// is removed, and so is the image o.Tag names when the build made it and then failed.
-func Build(ctx context.Context, o Options) error {
+// is removed, and so are o.Tag and the environment image when the build made them and
+// then failed.
+func Build(ctx context.Context, o Options) (Result, error) {
 	limit := o.Limit
 	if limit == 0 {
 		limit = Limit
@@ -278,17 +360,23 @@ func Build(ctx context.Context, o Options) error {
 	b.clean(ctx)
 	if err != nil && ctx.Err() != nil {
 		if errors.Is(context.Cause(ctx), ErrLimit) {
-			return ErrLimit
+			return Result{}, ErrLimit
 		}
-		return ErrStopped
+		return Result{}, ErrStopped
 	}
-	return err
+	if err != nil {
+		return Result{}, err
+	}
+	return b.res, nil
 }
 
 // run is [Build] without its limit and its clean-up.
 func (b *build) run(ctx context.Context) error {
 	start := time.Now()
 	if err := b.checkOptions(); err != nil {
+		return err
+	}
+	if err := b.checkSteps(); err != nil {
 		return err
 	}
 	cfg, set, err := devcontainer.LoadMembers(b.repo, buildMembers)
@@ -319,6 +407,12 @@ func (b *build) run(ctx context.Context) error {
 	if err := b.checkGitConfig(ctx); err != nil {
 		return err
 	}
+	b.chooseSource()
+	if b.source == fromBuild {
+		if err := b.rewrite(); err != nil {
+			return err
+		}
+	}
 	if err := b.writeConfig(); err != nil {
 		return err
 	}
@@ -336,14 +430,36 @@ func (b *build) run(ctx context.Context) error {
 	if err := b.checkPrograms(ctx); err != nil {
 		return err
 	}
-	if err := b.checkMerged(ctx); err != nil {
-		return err
+	from, top := b.name+":base", b.name+":top"
+	switch b.source {
+	case fromEnvironment:
+		if _, err := b.takePulled(ctx, b.o.EnvironmentImage, textFromEnv); err != nil {
+			if nf, ok := errors.AsType[*notFoundError](err); ok {
+				nf.env = true
+			}
+			return err
+		}
+		from = b.o.EnvironmentImage
+	case fromStandard:
+		if from, err = b.takePulled(ctx, b.cfg.Image, textStandard); err != nil {
+			return err
+		}
+		b.res.Base = from
+	default:
+		if err := b.checkMerged(ctx); err != nil {
+			return err
+		}
+		if err := b.resolveBase(ctx); err != nil {
+			return err
+		}
+		if err := b.buildBase(ctx, from); err != nil {
+			return err
+		}
+		if err := b.keepEnvironment(ctx, from); err != nil {
+			return err
+		}
 	}
-	base, top := b.name+":base", b.name+":top"
-	if err := b.buildBase(ctx, base); err != nil {
-		return err
-	}
-	if err := b.addAgent(ctx, base, top); err != nil {
+	if err := b.addAgent(ctx, from, top); err != nil {
 		return err
 	}
 	if err := b.runCommands(ctx, top); err != nil {
@@ -444,6 +560,7 @@ func (b *build) checkConfig() error {
 	if err := checkFrontend(b.repo, c, dockerfile); err != nil {
 		return err
 	}
+	b.dockerfile = dockerfile
 	for _, m := range []struct {
 		member string
 		values map[string]string
@@ -535,6 +652,7 @@ func (b *build) checkPrograms(ctx context.Context) error {
 	if want := image.Arch(platform); arch != want {
 		return refused(fmt.Errorf(textHelperArch, integration.Printable(exports.Value(b.o.Helper, false)), arch, integration.Printable(platform), want))
 	}
+	b.engine = platform
 	return nil
 }
 
@@ -548,23 +666,25 @@ func (b *build) configPath() string {
 }
 
 // writeConfig writes, when the configuration has initializeCommand, whatever its value,
-// a copy of it without that member to a folder of the temporary folder, under the same
-// name, for the devcontainer command to read in its place, and prints a line. The
+// or [build.rewrite] rewrote a reference, a copy of it to a folder of the temporary
+// folder, under the same name, for the devcontainer command to read in its place: without
+// initializeCommand, which prints a line, and with the references rewritten. The
 // command is given the repository as its workspace folder still, and the copy's paths
-// name what the configuration's do: [devcontainer.Config.Relocate]. initializeCommand
-// runs on the host. devcontainer build at [CLIVersion] does not run it: only up does
-// (spec-node/configContainer.ts, resolveWithLocalFolder), and build reads the
-// configuration and builds (spec-node/devContainersSpecCLI.ts, doBuild). With the copy,
-// no version of the command can.
+// name what the configuration's do: [devcontainer.Config.RelocateEdited].
+// initializeCommand runs on the host. devcontainer build at [CLIVersion] does not run
+// it: only up does (spec-node/configContainer.ts, resolveWithLocalFolder), and build
+// reads the configuration and builds (spec-node/devContainersSpecCLI.ts, doBuild). With
+// the copy, no version of the command can.
 func (b *build) writeConfig() error {
-	if !b.cfg.Has(initializeMember) {
+	initialize := b.cfg.Has(initializeMember)
+	if !initialize && !b.rewritten {
 		return nil
 	}
 	dir := filepath.Join(b.tmp, "devcontainer")
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		return err
 	}
-	data, err := b.cfg.Relocate(b.repo, dir, initializeMember)
+	data, err := b.cfg.RelocateEdited(b.repo, dir, b.edits())
 	if err != nil {
 		return err
 	}
@@ -573,7 +693,9 @@ func (b *build) writeConfig() error {
 		return err
 	}
 	b.config = copied
-	b.initializeLine()
+	if initialize {
+		b.initializeLine()
+	}
 	return nil
 }
 
@@ -740,36 +862,51 @@ func (b *build) checkLabel(ctx context.Context, ref string) error {
 		return err
 	}
 	b.homeSet = homeSet(c.Env)
-	label, ok := c.Labels[metadataLabel]
-	if !ok {
-		return nil
-	}
-	var entries []map[string]json.RawMessage
-	if json.Unmarshal([]byte(label), &entries) != nil {
-		var one map[string]json.RawMessage
-		if json.Unmarshal([]byte(label), &one) != nil {
-			return refused(errors.New(textLabelUnread))
-		}
-		entries = []map[string]json.RawMessage{one}
-	}
-	if asked := b.asks(entries); len(asked) > 0 {
+	asked, ok := b.labelAsks(c)
+	switch {
+	case !ok:
+		return refused(errors.New(textLabelUnread))
+	case len(asked) > 0:
 		return refused(fmt.Errorf(textLabelAsks, list(asked)))
 	}
 	return nil
 }
 
+// labelAsks is what the devcontainer.metadata label of c, an array of entries or one,
+// asks for, as [build.asks] has it; ok is false for a label that does not read as JSON.
+func (b *build) labelAsks(c imageConfig) (asked []string, ok bool) {
+	label, set := c.Labels[metadataLabel]
+	if !set {
+		return nil, true
+	}
+	var entries []map[string]json.RawMessage
+	if json.Unmarshal([]byte(label), &entries) != nil {
+		var one map[string]json.RawMessage
+		if json.Unmarshal([]byte(label), &one) != nil {
+			return nil, false
+		}
+		entries = []map[string]json.RawMessage{one}
+	}
+	return b.asks(entries), true
+}
+
 // checkEnv refuses an image whose environment sets a variable [agentenv.Widens]
 // names, naming each, never its value.
 func checkEnv(c imageConfig) error {
+	if widening := envWidening(c); len(widening) > 0 {
+		return refused(fmt.Errorf(textEnvImage, printables(widening)))
+	}
+	return nil
+}
+
+// envWidening are the variables of c's environment that [agentenv.Widening] returns.
+func envWidening(c imageConfig) []string {
 	var names []string
 	for _, kv := range c.Env {
 		name, _, _ := strings.Cut(kv, "=")
 		names = append(names, name)
 	}
-	if widening := agentenv.Widening(names); len(widening) > 0 {
-		return refused(fmt.Errorf(textEnvImage, printables(widening)))
-	}
-	return nil
+	return agentenv.Widening(names)
 }
 
 // homeSet reports whether an environment sets HOME to a value that is not empty.
@@ -942,6 +1079,7 @@ func (b *build) finish(ctx context.Context, start time.Time) error {
 		return refused(fmt.Errorf(textTooBig, humanSize(size)))
 	}
 	b.images = slices.DeleteFunc(b.images, func(s string) bool { return s == b.o.Tag })
+	b.res.Target, b.res.Environment, b.environment = b.o.Tag, b.environment, ""
 	b.line(textDone, exports.Value(b.o.Tag, false), seconds(time.Since(start)), humanSize(size))
 	return nil
 }
@@ -962,14 +1100,19 @@ func humanSize(n int64) string {
 	return fmt.Sprintf("%.1f MiB (%d bytes)", float64(n)/(1<<20), n)
 }
 
-// clean removes the temporary container, the images the build made, o.Tag among them
-// when the build committed it and then failed, and the temporary folder.
+// clean removes the temporary container, the images the build made, o.Tag and the
+// environment image among them when the build made them and then failed, and the
+// temporary folder.
 func (b *build) clean(ctx context.Context) {
 	if b.created {
 		b.e.clean(ctx, "rm", "--force", "--volumes", b.name)
 	}
-	if len(b.images) > 0 {
-		b.e.clean(ctx, append([]string{"image", "rm", "--force"}, b.images...)...)
+	images := slices.Clone(b.images)
+	if b.environment != "" {
+		images = append(images, b.environment)
+	}
+	if len(images) > 0 {
+		b.e.clean(ctx, append([]string{"image", "rm", "--force"}, images...)...)
 	}
 	if b.tmp != "" {
 		_ = os.RemoveAll(b.tmp)

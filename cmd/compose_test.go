@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/qoryai/qory/cmd"
+	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
 	"github.com/qoryai/qory/internal/stack"
@@ -446,20 +448,224 @@ func TestComposeRefusesAQoryDirectoryThatIsNotADirectory(t *testing.T) {
 	}
 }
 
-// TestComposeNeedsAGitWorkingTree is a plain directory: nothing to exclude the tree
-// through, so the compose refuses and says so.
-func TestComposeNeedsAGitWorkingTree(t *testing.T) {
+// TestComposeNeedsAGitWorkingTreeForAHomeInside is a plain directory with the home
+// inside it, the default and with --no-links: nothing to exclude .qory through, so the
+// compose stops with the fix first, exit 2, and writes nothing into the folder.
+func TestComposeNeedsAGitWorkingTreeForAHomeInside(t *testing.T) {
+	for _, args := range [][]string{{"hc"}, {"hc", "--no-links"}, {"hc", "--home", ".qory/harness"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			dir := emptyDir(t)
+			copyFixture(t, "two-modules", dir)
+			before := snapshot(t, dir)
+			out, err := run(t, args...)
+			if err == nil {
+				t.Fatalf("composed outside git:\n%s", out)
+			}
+			want := "set --home or harness.home to a folder outside " + dir + ", or run git init in " + dir + ": a home inside a folder needs a git working tree there, and " + dir + " is not one"
+			if err.Error() != want {
+				t.Errorf("got %q, want %q", err, want)
+			}
+			if got := cmd.ExitCode(err); got != cmd.ExitInput {
+				t.Errorf("exit %d, want %d", got, cmd.ExitInput)
+			}
+			if !maps.Equal(snapshot(t, dir), before) {
+				t.Error("the compose changed the folder")
+			}
+		})
+	}
+}
+
+// TestComposeOutsideGitWithTheHomeOutside is a plain directory with the home outside
+// it, by --home and by harness.home: the compose writes the home under the directory,
+// keyed by the folder, and nothing into the folder; inspect, launch and remove find the
+// same home from the folder.
+func TestComposeOutsideGitWithTheHomeOutside(t *testing.T) {
+	for _, by := range []string{"--home", "harness.home"} {
+		t.Run(by, func(t *testing.T) {
+			dir := emptyDir(t)
+			copyFixture(t, "two-modules", dir)
+			homes := tempDir(t)
+			var flags []string
+			if by == "--home" {
+				flags = []string{"--home", homes}
+			} else {
+				writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "qory.yaml"), "apiVersion: qory.dev/v1alpha1\nharness: {home: "+homes+"}\n")
+			}
+			before := snapshot(t, dir)
+			out, err := run(t, append([]string{"hc"}, flags...)...)
+			if err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			wants(t, out, "composed 8 entries from 2 modules")
+			home := filepath.Join(homes, checkout.Key(dir))
+			wantsRow(t, out, "home", home)
+			if _, err := os.Stat(filepath.Join(home, "claude")); err != nil {
+				t.Errorf("no home for claude: %v", err)
+			}
+			rep, err := report.Read(home + "-report.json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rep.Checkout != dir {
+				t.Errorf("report checkout %q, want %q", rep.Checkout, dir)
+			}
+			for _, verb := range [][]string{{"hi"}, {"hl", "--runtime", "claude"}, {"hc", "--check"}} {
+				if out, err := run(t, append(verb, flags...)...); err != nil {
+					t.Errorf("%v: %v\n%s", verb, err, out)
+				}
+			}
+			if out, err := run(t, append([]string{"hr"}, flags...)...); err != nil {
+				t.Errorf("remove: %v\n%s", err, out)
+			}
+			gone(t, homes, filepath.Base(home), filepath.Base(home)+"-report.json")
+			if !maps.Equal(snapshot(t, dir), before) {
+				t.Error("a verb changed the folder")
+			}
+		})
+	}
+}
+
+// TestComposeOutsideGitWithALinkIntoTheFolder is a plain directory and a --home that is
+// a link to a directory inside it: the home is inside the folder once its links are
+// resolved, so the compose stops as for a home inside, and writes nothing there.
+func TestComposeOutsideGitWithALinkIntoTheFolder(t *testing.T) {
 	dir := emptyDir(t)
 	copyFixture(t, "two-modules", dir)
-	out, err := run(t, "hc")
-	if err == nil {
-		t.Fatalf("composed outside git:\n%s", out)
+	if err := os.Mkdir(filepath.Join(dir, "homes"), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	wants(t, err.Error(), "is not inside a git working tree")
+	link := filepath.Join(tempDir(t), "homes")
+	if err := os.Symlink(filepath.Join(dir, "homes"), link); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshot(t, dir)
+	out, err := run(t, "hc", "--home", link)
+	if err == nil {
+		t.Fatalf("composed into the folder through a link:\n%s", out)
+	}
+	wants(t, err.Error(), "set --home or harness.home to a folder outside "+dir+", or run git init in "+dir+":")
 	if got := cmd.ExitCode(err); got != cmd.ExitInput {
 		t.Errorf("exit %d, want %d", got, cmd.ExitInput)
 	}
-	gone(t, dir, ".qory", ".claude")
+	if !maps.Equal(snapshot(t, dir), before) {
+		t.Error("the compose changed the folder")
+	}
+}
+
+// TestComposeOutsideGitWithAHomeInsideElsewhere is a plain directory with a home inside
+// it that is not .qory/harness, and one with a .qory link that leads out of it: each stops
+// with the line for a home inside a folder outside git, exit 2, before the checks of a
+// home inside a checkout, and writes nothing into the folder.
+func TestComposeOutsideGitWithAHomeInsideElsewhere(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		setup func(t *testing.T, dir string) []string
+	}{
+		{"a relative --home", func(t *testing.T, dir string) []string { return []string{"--home", "homes"} }},
+		{"an absolute --home", func(t *testing.T, dir string) []string { return []string{"--home", filepath.Join(dir, "homes")} }},
+		{"harness.home", func(t *testing.T, dir string) []string {
+			configure(t, dir, []string{"home: homes"}, nil)
+			return nil
+		}},
+		{"a .qory link out of the folder", func(t *testing.T, dir string) []string {
+			if err := os.Symlink(tempDir(t), filepath.Join(dir, ".qory")); err != nil {
+				t.Fatal(err)
+			}
+			return nil
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := emptyDir(t)
+			copyFixture(t, "two-modules", dir)
+			flags := c.setup(t, dir)
+			before := snapshot(t, dir)
+			out, err := run(t, append([]string{"hc"}, flags...)...)
+			if err == nil {
+				t.Fatalf("composed outside git:\n%s", out)
+			}
+			want := "set --home or harness.home to a folder outside " + dir + ", or run git init in " + dir + ": a home inside a folder needs a git working tree there, and " + dir + " is not one"
+			if err.Error() != want {
+				t.Errorf("got %q, want %q", err, want)
+			}
+			if got := cmd.ExitCode(err); got != cmd.ExitInput {
+				t.Errorf("exit %d, want %d", got, cmd.ExitInput)
+			}
+			if !maps.Equal(snapshot(t, dir), before) {
+				t.Error("the compose changed the folder")
+			}
+		})
+	}
+}
+
+// leftoverReport makes a folder that was a git checkout composed with the home inside it,
+// and then lost .git, the links and the home: only .qory/harness-report.json is left. The
+// folder is the working directory.
+func leftoverReport(t *testing.T) string {
+	t.Helper()
+	dir := newCheckout(t)
+	copyFixture(t, "two-modules", dir)
+	if out, err := run(t, "hc"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for _, name := range []string{".git", ".claude", ".mcp.json", filepath.Join(".qory", "harness")} {
+		if err := os.RemoveAll(filepath.Join(dir, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".qory", "harness-report.json")); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// TestComposeOutsideGitWithALeftoverReport is a folder outside git that contains the
+// report of an earlier compose: --home naming the home beside that report stops the
+// compose as a home inside the folder does, exit 2, and nothing is written there.
+func TestComposeOutsideGitWithALeftoverReport(t *testing.T) {
+	dir := leftoverReport(t)
+	before := snapshot(t, dir)
+	for _, home := range []string{".qory/harness", filepath.Join(dir, ".qory", "harness")} {
+		out, err := run(t, "hc", "--home", home)
+		if err == nil {
+			t.Fatalf("--home %s composed outside git:\n%s", home, out)
+		}
+		wants(t, err.Error(), "set --home or harness.home to a folder outside "+dir+", or run git init in "+dir+":")
+		if got := cmd.ExitCode(err); got != cmd.ExitInput {
+			t.Errorf("--home %s: exit %d, want %d", home, got, cmd.ExitInput)
+		}
+	}
+	if !maps.Equal(snapshot(t, dir), before) {
+		t.Error("the compose changed the folder")
+	}
+}
+
+// TestComposeInAGitWorkingTreeIsUnchanged is a git checkout, composed from a folder
+// below its top level: the home goes to the top level's .qory/harness, the links into
+// it, and /.qory into the clone-local exclude file, as before a folder outside git was
+// composed.
+func TestComposeInAGitWorkingTreeIsUnchanged(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	sub := filepath.Join(root, "docs")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(sub)
+	if out, err := run(t, "hc"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".qory", "harness", "claude")); err != nil {
+		t.Errorf("no home at the top level: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, ".claude")); err != nil {
+		t.Errorf("no link at the top level: %v", err)
+	}
+	gone(t, sub, ".qory", ".claude")
+	exclude, err := os.ReadFile(filepath.Join(root, ".git", "info", "exclude"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants(t, string(exclude), "/.qory\n")
 }
 
 // TestComposeClassifiesAnUnreadableModuleAsTheMachines is a module directory the process

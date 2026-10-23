@@ -56,9 +56,18 @@ func TestLoadWithoutAFileIsTheDefaults(t *testing.T) {
 			t.Errorf("%s comes from %s, want %s", r.Key, r.Origin, config.Default)
 		}
 	}
-	rows := c.Rows()
-	if rows[0].Value != "(stack)" || rows[3].Value != "never" || rows[4].Value != config.DefaultHome || rows[5].Value != "(by home)" || rows[6].Value != ".." || rows[7].Value != "wt-{branch}" || rows[8].Value != "(remote HEAD)" || rows[9].Value != "delete" || rows[10].Value != "10m0s" {
-		t.Errorf("rows: %+v", rows)
+	rows := map[string]string{}
+	for _, r := range c.Rows() {
+		rows[r.Key] = r.Value
+	}
+	for key, want := range map[string]string{
+		"harness.runtime": "(stack)", "harness.model": "(stack)", "harness.effort": "(none)",
+		"harness.update": "never", "harness.home": config.DefaultHome, "harness.links": "(by home)",
+		"worktree.dir": "..", "worktree.name": "wt-{branch}", "worktree.base": "(remote HEAD)", "worktree.branch": "delete", "git.timeout": "10m0s",
+	} {
+		if rows[key] != want {
+			t.Errorf("row %s = %q, want %q", key, rows[key], want)
+		}
 	}
 }
 

@@ -1,18 +1,24 @@
-// Package preparation fetches the code of a run into its working folder and runs its
-// start commands, the preparation qory run prepare does inside the wall before the
-// agent starts. Two variables say where the code is: [EnvSystem], the host, and
-// [EnvRepositories], the repositories, the run's repository first. That one is fetched
-// into the working folder, an empty git working tree, starting from the image's copy
-// at [Seed] when a prebuilt image has one, and each further one is cloned under
-// .qory/repositories. [Start] then runs the start commands of the repository's
-// development container configuration.
+// Package preparation fetches the code of a run into its working folder, and prepares
+// the working folder inside the wall before the agent starts. Two variables say where
+// the code is: [EnvSystem], the host, and [EnvRepositories], the repositories, the run's
+// repository first.
 //
-// Every fetch runs git from PATH, at depth one, with no credential helper and no prompt:
-// the run's proxy adds what a host needs, so no token is on the machine or in git's
-// configuration. Every git the preparation runs has hooks off, through
-// core.hooksPath, and the file system monitor off; it reads the configuration of the
-// working folder's repository alone, none of the user's, the system's or the
-// environment's, and no replace object.
+// [Run] fetches on this machine, as qory run does once the run is open: the run's
+// repository into the working folder, an empty git working tree, and each further one
+// under .qory/repositories, every request through the run's host proxy, which adds what
+// a host needs, so no token is on the machine or in git's configuration. Every fetch is
+// at depth one, over https alone, with no credential helper and no prompt, as package
+// [proxygit] sets git up.
+//
+// In a container of the run's image, the setup container or the agent's, qory run prepare
+// calls [Prepare], which adds to the working folder the files of the image's copy at
+// [Seed] that the fetched commit does not track, when a prebuilt image has one, and
+// [Start], which runs the start commands of the repository's development container
+// configuration. qory run agent-env calls [FreshHome] last before the agent starts.
+//
+// Every git the preparation runs has hooks off, through core.hooksPath, and the file
+// system monitor off; it reads the configuration of the working folder's repository
+// alone, none of the user's, the system's or the environment's, and no replace object.
 package preparation
 
 import (
@@ -34,7 +40,10 @@ import (
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/integration"
+	"github.com/qoryai/qory/internal/places"
+	"github.com/qoryai/qory/internal/proxygit"
 )
 
 // The variables that say where a run's code is. Their names are each in one constant,
@@ -47,30 +56,39 @@ const (
 	EnvRepositories = "QORY_RUN_REPOSITORIES"
 )
 
-// The words of qory run prepare. Each is one format string.
+// The words of the fetch qory run does. Each is one format string.
 const (
-	textNoSystem       = "qory run prepare: %s is set but %s is not; both name where the code is"
-	textNotHost        = "qory run prepare: %s is not a host name"
-	textNotPath        = "qory run prepare: %s entry %d is not a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"
-	textNested         = "qory run prepare: %s entry %d, %s, is inside entry %d, %s; a repository is not cloned inside another"
-	textTwice          = "qory run prepare: %s names %s twice"
-	textTooLong        = "qory run prepare: %s is more than 256 bytes"
-	textNotEmpty       = "qory run prepare: the working folder holds files already; the run's repository is fetched only into an empty git working tree"
-	textNotFetched     = "qory run prepare: %s could not be fetched from %s: %s"
-	textKept           = "qory run prepare: %s has .qory/repositories already, which qory keeps for the further repositories; nothing is cloned over it"
-	textQoryNotDir     = "qory run prepare: %s has .qory as a file or a link, where qory keeps the further repositories in a folder; nothing is cloned over it"
-	textOtherOwner     = "qory run prepare: %s entry %d is of owner %s, not %s; on github.com the repositories of a run are of one owner"
-	textNotGitHub      = "qory run prepare: %s entry %d is not owner/name, the form of a repository on github.com"
-	textNotTree        = "qory run prepare: the working folder is not a git working tree without commits; the run's repository is fetched only into an empty git working tree"
-	textExcludeLink    = "qory run prepare: the working folder's %s is a link; qory writes the exclude file of the repository only where no link leads"
-	textExcludeOutside = "qory run prepare: the exclude file of the working folder's repository, %s, is outside the working folder; qory writes it only inside"
-	textGitNotDir      = "qory run prepare: the working folder's .git is a file or a link, which points at a repository elsewhere; the run's repository is fetched only into an empty git working tree"
-	textHasRemote      = "qory run prepare: the working folder's repository has a remote already; the run's repository is fetched only into an empty git working tree"
-	textGitFailed      = "qory run prepare: git could not read the working folder: %s"
-	textLocal          = "qory run prepare: %s"
-	textFetched        = "qory run prepare: fetched %s in %s"
-	textFetchedOne     = "qory run prepare: fetched %s and 1 further repository in %s"
-	textFetchedMany    = "qory run prepare: fetched %s and %d further repositories in %s"
+	textNoSystem       = "qory run: set %[2]s beside %[1]s in the run configuration: %[2]s is the host of the repositories %[1]s lists, and it is not set"
+	textNotHost        = "qory run: set %s to a host name, such as github.com"
+	textNotPath        = "qory run: make entry %[2]d of %[1]s a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"
+	textNested         = "qory run: remove entry %[2]d, %[3]s, or entry %[4]d, %[5]s, from %[1]s: the first is inside the second, and a repository is not cloned inside another"
+	textTwice          = "qory run: list %[2]s once in %[1]s, which lists it twice"
+	textTooLong        = "qory run: shorten %s to 256 bytes or fewer"
+	textNotEmpty       = "qory run: start the run in an empty git working tree: the working folder contains files already, and the run's repository is fetched only into an empty one"
+	textNotFetched     = "qory run: add a credential for %s that reads %s to the run configuration, then run again. The fetch of %s through the run's gateway failed: %s"
+	textNotReached     = "qory run: check that the run's policy allows %[1]s and that %[1]s is reachable, then run again. The fetch of %[2]s through the run's gateway failed: %[3]s"
+	textNoBranch       = "qory run: give %s on %s a default branch with a commit, then run again. The fetch through the run's gateway failed: %s"
+	textKept           = "qory run: remove .qory/repositories from the working folder of %s: qory clones the further repositories there, and nothing is cloned over it"
+	textQoryNotDir     = "qory run: remove .qory from the working folder of %s: it is a file or a link, where qory clones the further repositories into a folder, and nothing is cloned over it"
+	textOtherOwner     = "qory run: list in %[1]s only repositories of owner %[4]s: entry %[2]d is of owner %[3]s, and on github.com the repositories of a run are of one owner"
+	textNotGitHub      = "qory run: write entry %[2]d of %[1]s as owner/name, the form of a repository on github.com"
+	textNotTree        = "qory run: start the run in a git working tree without commits: the working folder is not one, and the run's repository is fetched only into an empty git working tree"
+	textExcludeLink    = "qory run: remove the link %s from the working folder: qory writes the exclude file of the repository only where no link leads"
+	textExcludeOutside = "qory run: start the run in a git working tree whose exclude file is inside the working folder: the exclude file, %s, is outside it, and qory writes it only inside"
+	textGitNotDir      = "qory run: start the run in a git working tree whose .git is a folder: the working folder's .git is a file or a link, which points at a repository elsewhere"
+	textHasRemote      = "qory run: start the run in a git working tree with no remote: the working folder's repository has a remote already, and the run's repository is fetched only into an empty git working tree"
+	textGitFailed      = "qory run: check that git on this machine can read the working folder, then run again. git failed: %s"
+	textLocal          = "qory run: check that this machine can read and write the working folder, then run again. The step failed: %s"
+	textPlaceRefused   = "qory run: start the run in a new empty git working tree that no walled run used, then run again. The check of the working folder's git configuration failed: %s"
+	textConfigKey      = "qory run: start the run in a new empty git working tree, or remove %s from %s, then run again. qory fetches only into a repository whose configuration has only the keys git init writes, since git on this machine would use any other key, such as a filter, a proxy or http.sslVerify"
+	textConfigNotFile  = "qory run: start the run in a new empty git working tree, then run again: the working folder's %s is not a regular file, and qory fetches only into a repository whose configuration it can read"
+	textAlternates     = "qory run: start the run in a new empty git working tree, then run again: the working folder's .git has %s, which makes git read objects from outside the working folder"
+	textGitLink        = "qory run: start the run in a new empty git working tree, or remove the link %s, then run again: git would read and write through that link"
+	textHardLink       = "qory run: start the run in a new empty git working tree, or remove the hard link %s, then run again: a write to it would change another file"
+	textCommonDir      = "qory run: start the run in a new empty git working tree, then run again: the working folder's .git has a commondir file, which makes git read the configuration of another repository"
+	textFetched        = "qory run: fetched %s at %s in %s"
+	textFetchedOne     = "qory run: fetched %s at %s and 1 further repository in %s"
+	textFetchedMany    = "qory run: fetched %s at %s and %d further repositories in %s"
 	// textNoDefault, textNoCommits, textNotBranch, textStopped and textCut stand for
 	// git's line in [textNotFetched] and [textGitFailed]: a remote with refs that names
 	// no default branch, a remote with no refs at all, a default branch that is no
@@ -118,14 +136,16 @@ var (
 // always https.
 var baseURL = ""
 
-// Run fetches the repositories getenv names into dir, the working folder, and reports
-// whether it fetched them. With [EnvRepositories] unset or empty it does nothing and
-// returns false. The list is checked whole before any fetch. When seed, a prebuilt
-// image's copy of the run's repository such as [Seed], is there, the run's repository
-// starts from it, as [fromSeed] has it, and Run prints a line that says so on report.
-// Once every repository is fetched, it prints the line that says what it fetched, and
-// in how long, the copy included. Every error's text is one line, ready for stderr.
-func Run(ctx context.Context, dir, seed string, getenv func(string) string, report io.Writer) (bool, error) {
+// Run fetches the repositories getenv names into dir, the working folder, on this
+// machine through the run's host proxy p, and reports whether it fetched them. With
+// [EnvRepositories] unset or empty it does nothing and returns false. The list is
+// checked whole before any fetch. Once every repository is fetched, it prints on report
+// the line that says what it fetched, the run's repository's commit, and in how long.
+// Every error's text is one line, ready for stderr, with no password of p's URL in it.
+// Every git it runs starts from base, as [hostgit.WithBase] has it: qory run gives this
+// process's environment, and a pool the environment of its commands.
+func Run(ctx context.Context, dir string, base []string, getenv func(string) string, p proxygit.Proxy, report io.Writer) (bool, error) {
+	ctx = hostgit.WithBase(ctx, base)
 	list := getenv(EnvRepositories)
 	if list == "" {
 		return false, nil
@@ -138,43 +158,50 @@ func Run(ctx context.Context, dir, seed string, getenv func(string) string, repo
 	if dir, err = filepath.Abs(dir); err != nil {
 		return false, local(err)
 	}
-	if err := emptyTree(ctx, dir); err != nil {
-		return false, err
-	}
-	start := time.Now()
-	first := integration.Printable(exports.Value(paths[0], false))
-	seeded, err := fromSeed(ctx, dir, seed, system, paths[0])
+	g := hostRunner(&p)
+	hold, err := emptyTree(ctx, g, dir)
 	if err != nil {
 		return false, err
 	}
-	if seeded {
-		fmt.Fprintf(report, textSeedReplaced+"\n", first)
-	} else if err := fetchRun(ctx, dir, system, paths[0], false); err != nil {
+	// The working folder stays held until the fetches and the checkout end: a walled run
+	// that starts there waits, so it cannot change what [safeRepository] checked.
+	defer hold.Release()
+	start := time.Now()
+	first := integration.Printable(exports.Value(paths[0], false))
+	if err := fetchRun(ctx, g, dir, system, paths[0]); err != nil {
 		return false, err
+	}
+	head, err := g(ctx, dir, "rev-parse", "HEAD")
+	if err != nil {
+		return false, notFetched(paths[0], system, err)
+	}
+	commit := strings.TrimSpace(head)
+	if len(commit) > 12 {
+		commit = commit[:12]
 	}
 	further := paths[1:]
 	if len(further) > 0 {
 		if err := keepRepositories(dir, paths[0]); err != nil {
 			return false, err
 		}
-		if err := exclude(ctx, dir); err != nil {
+		if err := exclude(ctx, g, dir); err != nil {
 			return false, err
 		}
-		for _, p := range further {
-			dest := filepath.Join(dir, filepath.FromSlash(Repositories), filepath.FromSlash(p))
-			if _, err := git(ctx, dir, "clone", "--quiet", "--depth", "1", "--", repoURL(system, p), dest); err != nil {
-				return false, notFetched(p, system, err)
+		for _, path := range further {
+			dest := filepath.Join(dir, filepath.FromSlash(Repositories), filepath.FromSlash(path))
+			if _, err := g(ctx, dir, "clone", "--quiet", "--depth", "1", "--", repoURL(system, path), dest); err != nil {
+				return false, notFetched(path, system, err)
 			}
 		}
 	}
 	took := seconds(time.Since(start))
 	switch len(further) {
 	case 0:
-		fmt.Fprintf(report, textFetched+"\n", first, took)
+		fmt.Fprintf(report, textFetched+"\n", first, commit, took)
 	case 1:
-		fmt.Fprintf(report, textFetchedOne+"\n", first, took)
+		fmt.Fprintf(report, textFetchedOne+"\n", first, commit, took)
 	default:
-		fmt.Fprintf(report, textFetchedMany+"\n", first, len(further), took)
+		fmt.Fprintf(report, textFetchedMany+"\n", first, commit, len(further), took)
 	}
 	return true, nil
 }
@@ -282,64 +309,72 @@ func repoURL(system, path string) string {
 	return base + "/" + path + ".git"
 }
 
-// emptyTree refuses a working folder that holds anything but .git and .qory; then one
-// whose .git is not a folder, a file or a link to a repository elsewhere, such as a
-// worktree's or a separate git directory's, whose path is the host's; then one with no
-// .git, which is outside a working tree or nested in one; then one that is not
-// the top of its working tree, whose repository has a commit, or has a remote. A git
+// emptyTree stops on a working folder that holds anything but .git and .qory; then on
+// one whose .git is not a folder, a file or a link to a repository elsewhere, such as a
+// worktree's or a separate git directory's, whose path is the host's; then on one with
+// no .git, which is outside a working tree or nested in one; then on one whose
+// repository [safeRepository] stops on; then on one that is not the top of its working
+// tree, whose repository has a commit, or has a remote. Otherwise it returns the hold
+// [safeRepository] took on the folder, which its caller releases once the fetch ends. A git
 // that fails to read the folder is [textGitFailed], not a refusal of the folder.
-func emptyTree(ctx context.Context, dir string) error {
+func emptyTree(ctx context.Context, git gitRunner, dir string) (hold *places.Hold, err error) {
+	defer func() {
+		if err != nil {
+			hold.Release()
+			hold = nil
+		}
+	}()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return local(err)
+		return hold, local(err)
 	}
 	hasGit := false
 	for _, e := range entries {
 		switch e.Name() {
 		case ".git":
 			if !e.IsDir() {
-				return errors.New(textGitNotDir)
+				return hold, errors.New(textGitNotDir)
 			}
 			hasGit = true
 		case checkout.Dir:
 		default:
-			return errors.New(textNotEmpty)
+			return hold, errors.New(textNotEmpty)
 		}
 	}
 	if !hasGit {
-		return errors.New(textNotTree)
+		return hold, errors.New(textNotTree)
+	}
+	if hold, err = safeRepository(ctx, dir); err != nil {
+		return nil, err
 	}
 	top, err := git(ctx, dir, "rev-parse", "--show-toplevel")
 	if err != nil {
-		return gitFailed(err)
+		return hold, gitFailed(err)
 	}
 	if !samePath(strings.TrimSpace(top), dir) {
-		return errors.New(textNotTree)
+		return hold, errors.New(textNotTree)
 	}
 	commits, err := git(ctx, dir, "rev-list", "-n", "1", "--all")
 	if err != nil {
-		return gitFailed(err)
+		return hold, gitFailed(err)
 	}
 	if strings.TrimSpace(commits) != "" {
-		return errors.New(textNotTree)
+		return hold, errors.New(textNotTree)
 	}
 	remotes, err := git(ctx, dir, "remote")
 	if err != nil {
-		return gitFailed(err)
+		return hold, gitFailed(err)
 	}
 	if strings.TrimSpace(remotes) != "" {
-		return errors.New(textHasRemote)
+		return hold, errors.New(textHasRemote)
 	}
-	return nil
+	return hold, nil
 }
 
-// fetchRun fetches the run's repository into dir: origin is its URL, and the remote's
-// default branch is fetched at depth one and checked out as the local branch of its
-// name, tracking origin. With over set, the checkout is over files that are there
-// already, the image's copy's working tree: it is by force, so the tracked files
-// become the fetched commit's and the untracked and ignored ones stay, as git reset
-// --hard leaves them.
-func fetchRun(ctx context.Context, dir, system, path string, over bool) error {
+// fetchRun fetches the run's repository into dir with git: origin is its URL, and the
+// remote's default branch is fetched at depth one and checked out as the local branch of
+// its name, tracking origin.
+func fetchRun(ctx context.Context, git gitRunner, dir, system, path string) error {
 	if _, err := git(ctx, dir, "remote", "add", "--", "origin", repoURL(system, path)); err != nil {
 		return notFetched(path, system, err)
 	}
@@ -379,11 +414,7 @@ func fetchRun(ctx context.Context, dir, system, path string, over bool) error {
 	if _, err := git(ctx, dir, "fetch", "--quiet", "--depth", "1", "origin", "--", refspec); err != nil {
 		return notFetched(path, system, err)
 	}
-	checkout := []string{"checkout", "--quiet", "-b", branch, "--track", "origin/" + branch}
-	if over {
-		checkout = []string{"checkout", "--quiet", "--force", "-B", branch, "--track", "origin/" + branch}
-	}
-	if _, err := git(ctx, dir, checkout...); err != nil {
+	if _, err := git(ctx, dir, "checkout", "--quiet", "-b", branch, "--track", "origin/"+branch); err != nil {
 		return notFetched(path, system, err)
 	}
 	return nil
@@ -426,7 +457,7 @@ func keepRepositories(dir, path string) error {
 // with the environment of every git here, unless the file has that line already. The
 // file is read and written through an [os.Root] of dir, and refused when it is outside
 // dir or when it, or a folder on the way to it, is a link: no link is followed.
-func exclude(ctx context.Context, dir string) error {
+func exclude(ctx context.Context, git gitRunner, dir string) error {
 	out, err := git(ctx, dir, "rev-parse", "--git-path", "info/exclude")
 	if err != nil {
 		return gitFailed(err)
@@ -492,44 +523,83 @@ type gitError struct {
 func (e *gitError) Error() string { return e.line }
 
 // hardened are the options every git here runs with, over the repository's
-// configuration: core.hooksPath names /dev/null, where git finds no hook file;
-// core.fsmonitor is empty, which turns the file system monitor off on any git; and the
-// credential helper is empty, so none is asked. A hook a configuration defines by
+// configuration, as [proxygit.Hardened] has them. A hook a configuration defines by
 // hook.<name>.command is not turned off here: [gitEnv] keeps every configuration but
 // the repository's away from git.
 //
-// The git program is the image's, found on PATH. In an image built from the
-// repository, the preparation is only as trustworthy as that image: the repository's
+// Inside the wall, the git program is the image's, found on PATH. In an image built from
+// the repository, the preparation is only as trustworthy as that image: the repository's
 // code, the build that ran it among it, is inside the agent's trust boundary, and the
 // options here keep a repository's configuration from running a program, not a
-// program the image holds.
-var hardened = []string{"-c", "core.hooksPath=" + os.DevNull, "-c", "core.fsmonitor=", "-c", "credential.helper="}
+// program the image holds. On this machine, git is the one [hostgit.Unchecked] finds.
+var hardened = proxygit.Hardened
 
-// git runs git in dir with args, with the [hardened] options, no prompt and no variable
-// that would point it at another repository, for at most [limitOf] its subcommand within ctx. git
-// runs in a new process group, and the whole group is stopped when the call ends, so a
-// helper git started, such as git-remote-https, never holds the call open.
-// It returns what git printed on stdout, and on a failure a [*gitError].
+// protocols are the options that let a git on this machine reach a remote, over https
+// alone: [proxygit.HTTPSOnly]. Only a test that fetches from local repositories sets it
+// otherwise.
+var protocols = proxygit.HTTPSOnly
+
+// gitRunner runs one git in dir with args and returns what it printed on stdout, and on
+// a failure a [*gitError]: [git] inside the wall, and [hostRunner]'s on this machine.
+type gitRunner func(ctx context.Context, dir string, args ...string) (string, error)
+
+// git runs git in dir with args, inside the wall: the image's git from PATH, with the
+// [hardened] options and the environment [gitEnv] makes, as [runGit] runs it.
 func git(ctx context.Context, dir string, args ...string) (string, error) {
-	limit := limitOf(args[0])
+	return runGit(ctx, nil, func(ctx context.Context) (*exec.Cmd, error) {
+		cmd := exec.CommandContext(ctx, "git", append(slices.Clone(hardened), args...)...)
+		cmd.Dir = dir
+		cmd.Env = gitEnv(os.Environ())
+		return cmd, nil
+	}, args[0])
+}
+
+// hostRunner is the [gitRunner] of a fetch on this machine through the run's host proxy
+// p: the git [hostgit.Unchecked] finds in the environment [hostgit.Base] of ctx, with
+// its options, the [hardened] ones and [protocols], and the environment [proxygit.Env]
+// makes for p, which sets the proxy and the CA bundle and reads no configuration but
+// the repository's. No error's text
+// contains the password of p's URL.
+func hostRunner(p *proxygit.Proxy) gitRunner {
+	return func(ctx context.Context, dir string, args ...string) (string, error) {
+		return runGit(ctx, p, func(ctx context.Context) (*exec.Cmd, error) {
+			full := append(append(slices.Clone(hardened), protocols...), args...)
+			cmd, err := hostgit.Unchecked(ctx, dir, hostgit.Base(ctx), full...)
+			if err != nil {
+				return nil, err
+			}
+			cmd.Env = proxygit.Env(cmd.Env, p)
+			return cmd, nil
+		}, args[0])
+	}
+}
+
+// runGit runs the git make makes, subcommand its first argument, for at most [limitOf]
+// subcommand within ctx. git runs in a new process group, and the whole group is
+// stopped when the call ends, so a helper git started, such as git-remote-https, never
+// holds the call open. It returns what git printed on stdout, and on a failure a
+// [*gitError] whose line has the password of p's URL hidden.
+func runGit(ctx context.Context, p *proxygit.Proxy, make func(context.Context) (*exec.Cmd, error), subcommand string) (string, error) {
+	limit := limitOf(subcommand)
 	call, cancel := context.WithTimeoutCause(ctx, limit, errLimit)
 	defer cancel()
-	cmd := exec.CommandContext(call, "git", append(slices.Clone(hardened), args...)...)
-	cmd.Dir = dir
-	cmd.Env = gitEnv(os.Environ())
+	cmd, err := make(call)
+	if err != nil {
+		return "", &gitError{proxygit.Hide(err.Error(), p), -1}
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	// A process left holding the output is not waited for past this.
 	cmd.WaitDelay = time.Second
 	group(cmd)
-	err := cmd.Run()
+	err = cmd.Run()
 	stopGroup(cmd)
 	if err != nil {
 		switch {
 		case errors.Is(context.Cause(call), errLimit):
-			return "", &gitError{fmt.Sprintf(textStopped, args[0], limit), -1}
+			return "", &gitError{fmt.Sprintf(textStopped, subcommand, limit), -1}
 		case ctx.Err() != nil:
-			return "", &gitError{fmt.Sprintf(textCut, args[0]), -1}
+			return "", &gitError{fmt.Sprintf(textCut, subcommand), -1}
 		}
 		exit := -1
 		var ee *exec.ExitError
@@ -537,50 +607,18 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 			exit = ee.ExitCode()
 		}
 		if line := firstLine(stderr.String()); line != "" {
-			return "", &gitError{line, exit}
+			return "", &gitError{proxygit.Hide(line, p), exit}
 		}
-		return "", &gitError{err.Error(), exit}
+		return "", &gitError{proxygit.Hide(err.Error(), p), exit}
 	}
 	return stdout.String(), nil
 }
 
-// repositoryVariables are git's variables that point it at a repository, an index or a
-// store other than the one in its directory.
-var repositoryVariables = []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE"}
-
-// droppedVariables are git's variables that add configuration, name a program git
-// runs or a folder it takes programs or templates from, turn off the check of a
-// host's certificate, trace what git does, or name replace refs. [gitEnv] drops each,
-// and the ones that set what it sets.
-var droppedVariables = []string{
-	"GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM",
-	"GIT_EXEC_PATH", "GIT_TEMPLATE_DIR", "GIT_SSH", "GIT_SSH_COMMAND", "GIT_PROXY_COMMAND", "GIT_SSL_NO_VERIFY",
-	"GIT_REPLACE_REF_BASE", "GIT_NO_REPLACE_OBJECTS",
-	"GIT_TERMINAL_PROMPT", "GIT_ASKPASS", "SSH_ASKPASS",
-}
-
-// droppedPrefixes are the starts of the names of git's variables [gitEnv] drops: the
-// configuration of GIT_CONFIG_COUNT and git's traces.
-var droppedPrefixes = []string{"GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_", "GIT_TRACE"}
-
-// gitEnv is env without [repositoryVariables] and [droppedVariables], and with git's
-// prompts off, no terminal prompt and no askpass program, no global or system
-// configuration, and no replace object: git reads the repository's configuration
-// alone. The proxy and the CA bundle it names, GIT_SSL_CAINFO, stay as given: the wall
-// gives git its proxy and its certificate authority that way.
-func gitEnv(env []string) []string {
-	out := make([]string, 0, len(env)+6)
-	for _, kv := range env {
-		name, _, _ := strings.Cut(kv, "=")
-		if slices.Contains(repositoryVariables, name) || slices.Contains(droppedVariables, name) ||
-			slices.ContainsFunc(droppedPrefixes, func(p string) bool { return strings.HasPrefix(name, p) }) {
-			continue
-		}
-		out = append(out, kv)
-	}
-	return append(out, "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=", "SSH_ASKPASS=",
-		"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1", "GIT_NO_REPLACE_OBJECTS=1")
-}
+// gitEnv is [proxygit.Env] for a git inside the wall: env without the variables that
+// point git at another repository or add configuration, with git's prompts off and no
+// global or system configuration. The proxy and the CA bundle it names, GIT_SSL_CAINFO,
+// stay as given: the wall gives git its proxy and its certificate authority that way.
+func gitEnv(env []string) []string { return proxygit.Env(env, nil) }
 
 // firstLine is the first line of s with text in it, trimmed.
 func firstLine(s string) string {
@@ -593,13 +631,36 @@ func firstLine(s string) string {
 	return ""
 }
 
-// notFetched is [textNotFetched] for path on system, with git's line made printable:
-// path and system as [exports.Value] prints them, and git's line with a URL's password
-// and each word with an access key secret or a run key hidden, as
-// [exports.HideURLError] hides them.
+// notFetched is the line for a fetch of path on system that failed with err, with git's
+// line made printable: path and system as [exports.Value] prints them, and git's line
+// with a URL's password and each word with an access key secret or a run key hidden, as
+// [exports.HideURLError] hides them. The line's fix is by what failed: a credential
+// ([textNotFetched]) for a host that answered that it needs one or has no such
+// repository, a default branch with a commit ([textNoBranch]) for a remote that has none
+// qory fetches, and the run's policy and the host ([textNotReached]) for any other
+// failure of git, such as a host the gateway does not reach or a git stopped at its
+// limit.
 func notFetched(path, system string, err error) error {
-	return fmt.Errorf(textNotFetched, integration.Printable(exports.Value(path, false)), integration.Printable(exports.Value(system, false)), integration.Printable(exports.HideURLError(err).Error()))
+	shown := integration.Printable(exports.Value(path, false))
+	host := integration.Printable(exports.Value(system, false))
+	cause := integration.Printable(exports.HideURLError(err).Error())
+	var ge *gitError
+	switch {
+	case !errors.As(err, &ge):
+		return fmt.Errorf(textNoBranch, shown, host, cause)
+	case answered.MatchString(ge.line):
+		return fmt.Errorf(textNotFetched, host, shown, shown, cause)
+	}
+	return fmt.Errorf(textNotReached, host, shown, cause)
 }
+
+// answered matches git's line for a host that answered a fetch: that it needs a
+// credential, that the credential it got does not read the repository, or that it has
+// no such repository, which a host also answers for a private one without a credential,
+// and git's line for a path with no repository, as a test's local remote has it.
+// A proxy's answer, such as "Received HTTP code 403 from proxy after CONNECT", is not
+// one: the run's policy decides it.
+var answered = regexp.MustCompile(`(?i)authentication failed|could not read (username|password)|repository .*not found|does not appear to be a git repository|returned error: (401|403|404)|invalid username or password|permission denied`)
 
 // gitFailed is [textGitFailed] with git's line, or what kept git from running, made
 // printable.
@@ -610,6 +671,23 @@ func gitFailed(err error) error {
 // local is [textLocal]: a failure on the machine, not of a fetch.
 func local(err error) error {
 	return fmt.Errorf(textLocal, integration.Printable(exports.HideError(err).Error()))
+}
+
+// The words of a failure of qory run prepare inside the wall that is not of a fetch:
+// git that could not read the working folder, and a failure on the machine.
+const (
+	textPrepareGitFailed = "qory run prepare: git could not read the working folder: %s"
+	textPrepareLocal     = "qory run prepare: %s"
+)
+
+// gitFailedIn is [gitFailed] for qory run prepare inside the wall.
+func gitFailedIn(err error) error {
+	return fmt.Errorf(textPrepareGitFailed, integration.Printable(exports.HideURLError(err).Error()))
+}
+
+// localIn is [local] for qory run prepare inside the wall.
+func localIn(err error) error {
+	return fmt.Errorf(textPrepareLocal, integration.Printable(exports.HideError(err).Error()))
 }
 
 // samePath reports whether a and b name one directory, once their links are resolved.

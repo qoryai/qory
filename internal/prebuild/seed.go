@@ -52,7 +52,7 @@ type SeedPaths struct {
 // ContainerPaths are the seed step's paths in the image's container.
 var ContainerPaths = SeedPaths{Workspace: Workspace, Seed: SeedPath, Hooks: HooksPath, ManagedSettings: ManagedSettingsPath}
 
-// Seed is the step qory run prebuild runs inside a container of the image, as the wall
+// Seed is the step the build runs inside a container of the image, as the wall
 // user: it checks nothing is at the hooks' path or at the managed settings' path,
 // before the commands and again after them, as [checkFree] has it, reads the configuration the repository
 // copied to the workspace holds, runs its onCreateCommand, then its

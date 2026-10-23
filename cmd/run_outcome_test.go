@@ -61,7 +61,7 @@ func TestRunSaysTheExitOfARuntimeThatExitedBeforeASignal(t *testing.T) {
 	srv.mu.Lock()
 	srv.onExited = func() {
 		once.Do(func() {
-			// session.Run has returned well before this: the session's record is
+			// the session has joined and closed well before this: the session's record is
 			// closed once its gateway has the event, and the server has it after.
 			time.Sleep(time.Second)
 			syscall.Kill(os.Getpid(), syscall.SIGINT)

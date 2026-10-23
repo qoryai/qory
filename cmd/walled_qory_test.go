@@ -65,8 +65,10 @@ func TestAChangedActingKeyIsRefusedUntilAccepted(t *testing.T) {
 }
 
 // TestAHarnessQoryDidNotComposeIsRefused records a composed checkout, then changes its
-// report and, after a compose, a file of its home: inspect, run and remove refuse each
-// with the approved line, and a compose takes the harness as qory wrote it again.
+// report and, after a compose, a file of its home: inspect and remove refuse each with
+// the approved line, and a compose takes the harness as qory wrote it again. A run whose
+// open fails, for a wall with no image, composes nothing; the compose of a run that
+// opens takes the harness as qory wrote it, before the agent starts.
 func TestAHarnessQoryDidNotComposeIsRefused(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -79,7 +81,7 @@ func TestAHarnessQoryDidNotComposeIsRefused(t *testing.T) {
 	appendTo(t, report, " ")
 	refusedAll := func(what string) {
 		t.Helper()
-		for _, args := range [][]string{{"harness", "inspect"}, {"run", "claude", "--local", "--wall", "docker"}, {"harness", "remove"}} {
+		for _, args := range [][]string{{"harness", "inspect"}, {"harness", "remove"}} {
 			out, err := run(t, args...)
 			if err == nil || err.Error() != harnessLine(root) || cmd.ExitCode(err) != 1 {
 				t.Errorf("%s, %v: %v (exit %d)\n%s", what, args, err, cmd.ExitCode(err), out)
@@ -98,6 +100,21 @@ func TestAHarnessQoryDidNotComposeIsRefused(t *testing.T) {
 	}
 	appendTo(t, filepath.Join(root, ".qory", "harness", "claude", "settings.json"), "\n")
 	refusedAll("a file of the home")
+	out, err := run(t, "run", "claude", "--local", "--wall", "docker")
+	if err == nil || !strings.Contains(err.Error(), "a wall needs the container's image") {
+		t.Errorf("a run on a home qory did not compose: %v\n%s", err, out)
+	}
+	refusedAll("after a run that did not open")
+	// A wall with an image opens; the agent's arguments set --settings, so the run stops
+	// after its compose.
+	docker, _ := fakeDocker(t)
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
+	if out, err := run(t, "run", "claude", "--local", "--", "--settings"); cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(err.Error(), "the agent's arguments set --settings") {
+		t.Errorf("a run that opens: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	if out, err := run(t, "harness", "inspect"); err != nil {
+		t.Fatalf("after the run's compose: %v\n%s", err, out)
+	}
 	if out, err := run(t, "harness", "compose", "--runtime", "claude", "--no-links"); err != nil {
 		t.Fatalf("compose again: %v\n%s", err, out)
 	}

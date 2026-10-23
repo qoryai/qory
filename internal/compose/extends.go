@@ -27,6 +27,8 @@ type Base struct {
 	// Pin is what the source resolved to: the commit for a git source, "working-tree" for
 	// a path.
 	Pin string
+	// Commit is the full commit id a git source resolved to, "" for a path.
+	Commit string
 	// Ref is the git source's ref as the stack writes it, "" for a path.
 	Ref string
 	// Previous is the pin the last compose recorded for the base, when this compose
@@ -63,7 +65,7 @@ func LoadBase(p *stack.Stack, pin string, opts Options) (*stack.Stack, *Base, er
 	if p.Extends.Path == "" && p.Extends.Git == "" {
 		return p, nil, nil
 	}
-	src, err := source.Resolve(p.Dir(), p.Extends, source.Options{Pin: pin, Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Memo: opts.Memo})
+	src, err := source.Resolve(p.Dir(), p.Extends, source.Options{Pin: pin, Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Memo: opts.Memo, Git: opts.Git})
 	var fetch *source.FetchError
 	if errors.As(err, &fetch) {
 		return nil, nil, fmt.Errorf("the stack %s is not reachable from here: %w", p.Extends.Shown(), err)
@@ -83,7 +85,7 @@ func LoadBase(p *stack.Stack, pin string, opts Options) (*stack.Stack, *Base, er
 	if err != nil {
 		return nil, nil, err
 	}
-	b.Ref, b.Previous, b.Warning = p.Extends.Ref, src.Previous, src.Warning
+	b.Ref, b.Commit, b.Previous, b.Warning = p.Extends.Ref, src.Commit, src.Previous, src.Warning
 	return merged, b, nil
 }
 

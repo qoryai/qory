@@ -5,7 +5,6 @@ package preparation
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -57,15 +56,15 @@ func TestStartsFromTheImagesCopy(t *testing.T) {
 	seed, head := seeded(t, base, "acme/shop", "trunk")
 	remote(t, base, "acme/lib", "main", nil)
 	dir := emptyFolder(t)
-	run(t, dir, "config", "qory.made", "by the runner")
+	run(t, dir, "config", "core.logallrefupdates", "false")
 	lines, err := prepareFrom(context.Background(), dir, seed, env("github.com", "acme/shop,acme/lib"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := run(t, dir, "config", "qory.made"); got != "by the runner" {
-		t.Errorf("the working folder's repository is not the runner's: qory.made is %q", got)
+	if got := run(t, dir, "config", "core.logallrefupdates"); got != "false" {
+		t.Errorf("the working folder's repository is not the runner's: core.logallrefupdates is %q", got)
 	}
-	if want := "qory run prepare: copied the working tree of acme/shop from the image\nqory run prepare: fetched acme/shop and 1 further repository in Xs"; lines != want {
+	if want := "qory run: fetched acme/shop at C and 1 further repository in Xs\nqory run prepare: added from the image's copy the files that the commit of acme/shop does not track"; lines != want {
 		t.Errorf("the lines are %q, want %q", lines, want)
 	}
 	if got := run(t, dir, "rev-parse", "HEAD"); got != head {
@@ -115,7 +114,7 @@ func TestStartsFromTheImagesCopy(t *testing.T) {
 // TestRefusesACopyOfAnotherRepository refuses an image's copy whose origin is not the
 // run's repository, has no url, has two, or has the right one only in a file the
 // configuration includes; it takes the url with .git at the end or without, and on
-// github.com in any case. A refused copy leaves the working folder as it was.
+// github.com in any case. A copy that is not used adds nothing to the working folder.
 func TestRefusesACopyOfAnotherRepository(t *testing.T) {
 	needGit(t)
 	base := t.TempDir()
@@ -148,9 +147,7 @@ func TestRefusesACopyOfAnotherRepository(t *testing.T) {
 		if err == nil || err.Error() != want {
 			t.Errorf("%s: %v, want %s", c.name, err, want)
 		}
-		if entries, _ := os.ReadDir(dir); len(entries) != 1 {
-			t.Errorf("%s: the working folder holds %d entries", c.name, len(entries))
-		}
+		addedNothing(t, c.name, dir)
 		if strings.Contains(err.Error(), c.setup[1]) && !strings.HasSuffix(c.setup[1], "/acme/shop") {
 			t.Errorf("%s: the error quotes the copy's url", c.name)
 		}
@@ -343,8 +340,8 @@ func TestKeepsTheWorkingFoldersQory(t *testing.T) {
 }
 
 // TestWritesNoExcludeThroughALink is a working folder whose exclude file, or the folder
-// of it, is a link: a run with a further repository is refused in words that say so,
-// and nothing is written where the link points.
+// of it, is a link: the run stops before the fetch on the link under .git, and nothing
+// is written where the link points.
 func TestWritesNoExcludeThroughALink(t *testing.T) {
 	needGit(t)
 	base := t.TempDir()
@@ -353,8 +350,8 @@ func TestWritesNoExcludeThroughALink(t *testing.T) {
 	outside := t.TempDir()
 	victim := filepath.Join(outside, "victim")
 	for _, c := range []struct{ link, target, want string }{
-		{".git/info/exclude", victim, "qory run prepare: the working folder's .git/info/exclude is a link; qory writes the exclude file of the repository only where no link leads"},
-		{".git/info", outside, "qory run prepare: the working folder's .git/info is a link; qory writes the exclude file of the repository only where no link leads"},
+		{".git/info/exclude", victim, "qory run: start the run in a new empty git working tree, or remove the link .git/info/exclude, then run again: git would read and write through that link"},
+		{".git/info", outside, "qory run: start the run in a new empty git working tree, or remove the link .git/info, then run again: git would read and write through that link"},
 	} {
 		write(t, victim, "original\n")
 		dir := emptyFolder(t)
@@ -364,7 +361,7 @@ func TestWritesNoExcludeThroughALink(t *testing.T) {
 			t.Errorf("%s: %v, want %s", c.link, err, c.want)
 		}
 		if got, _ := os.ReadFile(victim); string(got) != "original\n" {
-			t.Errorf("%s: the file the link points at holds %q", c.link, got)
+			t.Errorf("%s: the file the link points at contains %q", c.link, got)
 		}
 		if entries, _ := os.ReadDir(outside); len(entries) != 1 {
 			t.Errorf("%s: the folder outside holds %d entries", c.link, len(entries))
@@ -415,9 +412,20 @@ func TestRunsNoHookOfTheCopy(t *testing.T) {
 	}
 }
 
+// addedNothing fails the test when dir, a working folder the run's repository was fetched
+// into, holds a file of the image's copy that the fetched commit does not track.
+func addedNothing(t *testing.T, name, dir string) {
+	t.Helper()
+	for _, f := range []string{"notes.txt", "deps"} {
+		if _, err := os.Lstat(filepath.Join(dir, f)); !os.IsNotExist(err) {
+			t.Errorf("%s: the copy's %s was added: %v", name, f, err)
+		}
+	}
+}
+
 // TestRefusesACopyThatIsNoTree refuses a copy that is a link or a file, one with no
 // .git folder, and one that holds an entry that is not a file, a folder or a link, and
-// starts from nothing.
+// adds nothing.
 func TestRefusesACopyThatIsNoTree(t *testing.T) {
 	needGit(t)
 	base := t.TempDir()
@@ -456,9 +464,7 @@ func TestRefusesACopyThatIsNoTree(t *testing.T) {
 		if err == nil || err.Error() != c.want {
 			t.Errorf("%s: %v, want %s", c.name, err, c.want)
 		}
-		if out, _ := exec.Command("git", "-C", dir, "remote").Output(); strings.TrimSpace(string(out)) != "" {
-			t.Errorf("%s: a remote was added: %s", c.name, out)
-		}
+		addedNothing(t, c.name, dir)
 	}
 	if err := syscall.Mkfifo(filepath.Join(seed, "deps", "pipe"), 0o644); err != nil {
 		t.Fatal(err)
@@ -498,14 +504,14 @@ func TestCopiesNoLinkThrough(t *testing.T) {
 	}
 }
 
-// TestNoCopyIsTodaysFetch is a seed path where nothing is: the run's repository is
-// fetched as with no image's copy, and no line says a copy was used.
+// TestNoCopyIsTodaysFetch is a seed path where nothing is: the working folder is as the
+// fetch left it, and no line says a copy was used.
 func TestNoCopyIsTodaysFetch(t *testing.T) {
 	needGit(t)
 	base := t.TempDir()
 	remote(t, base, "acme/shop", "main", nil)
 	lines, err := prepareFrom(context.Background(), emptyFolder(t), filepath.Join(t.TempDir(), "seed"), env("git.example.com", "acme/shop"))
-	if err != nil || lines != "qory run prepare: fetched acme/shop in Xs" {
+	if err != nil || lines != "qory run: fetched acme/shop at C in Xs" {
 		t.Errorf("%q, %v", lines, err)
 	}
 }

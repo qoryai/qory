@@ -41,6 +41,21 @@ stack in the wrong file, refused with the place it goes. The same file selected 
 in an ancestor directory, or reached through `extends` is read as it is. When nothing is
 found, the message lists the root and every file it looked for.
 
+`-f` also takes a stack reference, `<https URL>#<ref>:<folder>`, such as
+`https://github.com/example-org/harness#v1.2.0:stacks/web`: a folder of a git repository
+at a ref, which contains a `qory-stack.yaml`. A value with `://` is a reference; any other
+value is a file. The URL is https with a host, and the ref and the folder are required.
+The folder is a path from the repository's root, and `.` is the root. An absolute folder,
+a folder with a `..` segment, a folder the repository does not have at the ref, and a
+folder with no `qory-stack.yaml` stop the compose with exit 2. The folder is fetched as a
+git module is, and its `qory-stack.yaml` is then the file `-f` selects, under the rules
+that follow. Each module that stack lists by a path or by a name alone becomes a git
+source of the same URL and ref, with its path inside the repository, and resolves on the
+commit the reference resolved to; a module path outside the repository stops the compose
+with exit 2. Under a run key, the folder and every git source of the stack are fetched
+through the run's gateway, over https only. When the checkout has a document, the `base`
+row shows the reference, and the report records the base by the reference and its commit.
+
 `-f` dispatches on the file's name. Selecting a `qory.yaml` or `harness.yaml` composes
 that file's document. Selecting a stack, any other file, in a checkout whose root
 contains a document, makes the stack that document's base: the compose reads as if the
@@ -95,6 +110,9 @@ extending:                       # optional; without it the stack cannot be exte
 extensions:                      # optional; copied into the report, not read
   required_check: Harness self-tests
   corpus_roots: [scripts]        # a value is any shape: a scalar, a list, a map of any depth
+workflows:                       # optional; the settings of the workflows a dispatched run starts
+  example:
+    time_limit: 45m              # optional; a duration, such as 45m or 7h
 ```
 
 A stack has no `target`: it is delivered to be extended, and the checkout extending it
@@ -166,6 +184,8 @@ schema is [config.schema.json](config.schema.json).
 | `modules[].link` | no | a name at the checkout root, one path segment, linked to the module's directory in the composed tree, so a permission rule or a script refers to the module's files by a checkout-relative path: `harness/scripts/check.sh`. A hard link (§Rendering), each name used once across the modules |
 | `bind` | no | the entry that fills each role a document references (§References): `<kind>/<role>` to the name of an entry of that kind, `agents/coder: rails-coder`. The kind is `agents`, `skills` or `commands`. A checkout extending a stack adds to the base's bindings and may rebind a role of the base's |
 | `extensions` | no | a map of keys the author chooses, each a value of any shape, a scalar, a list or a map of any depth; written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it |
+| `workflows` | no | the settings of each workflow of the stack, by its name: a lower-case letter, then up to 63 lower-case letters, digits and hyphens. A run that Qory Apiary dispatches from a run code starts the skill or command named like its workflow (docs/run.md, §The run key from a run code). The harness section of a `qory.yaml` has no `workflows`; a checkout extending a stack takes the base's |
+| `workflows.<name>.time_limit` | no | how long a dispatched run of the workflow may run, counted from the run's open, as a Go duration above zero, such as `7h`, `45m` or `1h30m`; qory stops with an error on any other value: `set workflows.<name>.time_limit to a duration above zero, such as 7h or 45m: <value> is not one`. The run's `run_settings.time_limit_minutes`, when Qory Apiary sets it, applies instead, and a workflow without it runs for at most 3 hours |
 | `extending` | no | what a module of a checkout extending this stack may ship: `kinds`, `instructions`, `settings`, `files` (§Extending a stack). A base without the block cannot be extended |
 | `extending.target` | no | the runtimes and the models the stack is written for, `runtime` and `model`, each one name or a list, one of the two at least. A checkout's resolved target outside either list fails the compose; listed models make the model required, since a target without one runs whatever the runtime defaults to, which is a model the stack did not list. Left out, every target is accepted, a model left out included (§Extending a stack) |
 
@@ -199,7 +219,7 @@ checkout appends:
   accepts every target. The check runs under `-f` and `extends` alike, and before
   `--dry-run` stops, since the target is resolved before the report is built.
 - The machine's keys of the checkout's `qory.yaml`, `harness.runtime`,
-  `harness.model`, `force`, `update`, `home`, `links`, `launch`, `git` and `env`, are not
+  `harness.model`, `harness.effort`, `force`, `update`, `home`, `links`, `launch`, `git` and `env`, are not
   read under `extends`, and the compose reports it; the document, `target`, `modules`,
   `bind` and `extensions`, is. The runner's configuration, in the user's directory or an
   ancestor the runner's user owns, is the only one. The `worktree` section is the
@@ -528,7 +548,8 @@ The composed tree, the home, is written into the checkout at `.qory/harness`, be
 report `.qory/harness-report.json`, and `.qory` is excluded through the clone-local
 exclude file. `.qory` must be a real directory or absent: a symlink or a file there,
 which a repository could commit, is refused, because everything qory writes and removes
-goes through it. The compose runs for a git working tree only.
+goes through it. A home inside the checkout needs a git working tree. A folder that is not
+one composes only with the home outside it.
 
 The home can stand outside the checkout instead: `harness.home` in the configuration, or
 `--home <dir>` on `compose`, `inspect`, `remove` and `launch`, sets a directory outside
@@ -751,7 +772,9 @@ environment variables, each referring to the home's files through `${home}`, the
 that refers to a file under either placeholder that the compose did not write, such as
 `mcp.json` without a server, is left out whole, and so is a variable; the placeholder and
 what follows it to the end of the word is the file, so `@${dir}/mcp.json` refers to
-`mcp.json`.
+`mcp.json`. When the report records an effort, the line passes it in the place the
+runtime's descriptor in Forager lists for the effort: for `claude`, `--effort <value>`
+before the template's arguments, so a later flag of `harness.launch.<runtime>` wins.
 
 The line sets the launch's environment through `env`, in three parts with no name in two:
 
@@ -806,7 +829,8 @@ variable the harness sets in it, `{name, value, from, fixed}`, `from` being `mod
 <name>`, `module <name>, settings/<runtime>/<file>` or `configuration` and `fixed` false,
 since every one is a default, and the stack's `extensions` as written. The
 target's `runtime` is always an array: the runtimes the home contains after the compose,
-the targeted ones first. A module has its `name`, its `source` as the stack writes it,
+the targeted ones first, and its `effort` is the effort value of the compose, absent when
+it has none, which a launch passes in the place the runtime's descriptor lists for the effort. A module has its `name`, its `source` as the stack writes it,
 its `pin`, `dirty` when git saw uncommitted changes under a path source, the `variant`
 chosen, its `link` when the stack sets one, `copied` when the home contains copies of its
 entries, and `base` when it is the base stack's. A
@@ -814,7 +838,7 @@ source that selects an export is written as the stack wrote it, `<url>#<ref> mod
 <name>`. An entry an `only` brought in has `for`, the `<kind>/<name>` that required it,
 and an entry whose documents reference others has `references`, the `<kind>/<name>` keys
 as written, a role's included; the stack's bindings are `bind`, `<kind>/<role>` to the
-entry's name, absent when there are none. An agent with a tier has `tier`. `tiers` lists each tier the agents use that has a map, with `model`, `effort` when set, and `from`: `--tier` or the file that set it. `egress` is the union of the hosts the modules
+entry's name, absent when there are none. An agent with a tier has `tier`. `tiers` lists each tier the agents use that has a map, with `model`, `effort` when set, and `from`: `--tier`, for an entry of `--tier` and `--tier-effort`, or the file that set it. `egress` is the union of the hosts the modules
 declared (§The module manifest), sorted by host, each with the `modules` that declared it
 in stack order, and absent when no module declares; when one does, the target runtime's
 hosts, the model endpoint for `claude`, join under the runtime's name, so a stack
@@ -853,6 +877,7 @@ apiVersion: qory.dev/v1alpha1     # optional; the newest format this qory reads 
 harness:
   runtime: [claude, codex]       # instead of the document's target.runtime
   model: opus                    # instead of the document's target.model
+  effort: high                   # the main agent's effort value, in the place the runtime's descriptor lists
   force: true                    # replace a tracked, unmodified file where a link goes
   update: always                 # fetch every git source again on each compose
   home: ~/.cache/qory/homes      # where the harness is composed: a directory outside the checkout, or .qory/harness
@@ -892,7 +917,8 @@ exports:                         # in a repository delivering stacks or modules 
 | `qory` | none | the qory versions the file is written for, as in a stack; read under `extends` as well, since it can only narrow the base's range. At the root of a repository delivering stacks it is the range every stack in it is checked against, joined with the stack's range when the stack file is read (§The stack) |
 | `harness.runtime` | the document's `target.runtime` | one runtime name or a list; `--runtime` wins over it |
 | `harness.model` | the document's `target.model` | `--model` wins over it |
-| `harness.tiers` | none | the model id each tier maps to, for the agents whose `model` is `${qory:<tier>}`: a model id, or `{model, effort}`, the effort one of the values the runtime takes for an agent. The tiers are `light`, `fast` and `thinking`. In the user's file and an ancestor's it is the machine's map, the nearest file per tier; in the checkout root's file it is the repository's map, read under `extends` too. Per tier, `--tier` wins over the machine's map, and the machine's map over the repository's; an entry comes whole from one of the three. |
+| `harness.effort` | none | the effort value the main agent runs at, one of the values the runtime's descriptor in Forager lists for a run, passed in the place the descriptor lists for the effort: for `claude`, the flag `--effort`, with `low`, `medium`, `high`, `xhigh` or `max`. A runtime whose descriptor has no place for it gets none, and the compose prints a row. An empty value is no effort. `--effort` wins over it |
+| `harness.tiers` | none | the model id each tier maps to, for the agents whose `model` is `${qory:<tier>}`: a model id, or `{model, effort}`, the effort one of the values the runtime takes for an agent. The tiers are `light`, `fast` and `thinking`. In the user's file and an ancestor's it is the machine's map, the nearest file per tier; in the checkout root's file it is the repository's map, read under `extends` too. Per tier, `--tier`, with the effort of `--tier-effort` for the same tier, wins over the machine's map, and the machine's map over the repository's; an entry comes whole from one of the three, so `--tier-effort` needs `--tier` for its tier. |
 | `harness.force` | `false` | what `--force` does on every compose; `--force=false` wins over it |
 | `harness.update` | `never` | `always` fetches every git source again on each compose; `--update` and `--update=false` win over it |
 | `harness.home` | `.qory/harness` | where the harness is composed: `.qory/harness` in the checkout, or a directory outside it, absolute or under `~`, containing one home per checkout as `<name>-<digest>` (§Rendering); `--home` wins over it |
@@ -996,6 +1022,7 @@ wall:                            # the container the runtime starts in; absent: 
 | `wall.user` | `qory run`'s | the `uid:gid` the container runs as. Root is refused, so a machine where qory runs as root sets another, one that can write the checkout |
 | `wall.mounts` | none | what the container sees of the machine beside the checkout and the composed home, each at the same path as on the machine: an absolute path, with `:ro` after it for one the container cannot change; `--mount` adds to them. A socket, or a directory containing a container runtime's, is refused |
 | `wall.cpus`, `wall.memory`, `wall.pids_limit`, `wall.shm_size` | the engine's | what the container may use, as `docker run`'s flags of those names read them: `3.5`, `14g`, `4096`, `2g`. A flag of the same name sets another for one run |
+| `wall.setup` | `outside` | where the setup of a run from a control plane whose run configuration lists repositories runs, after qory fetched them and composed the harness, before the agent starts: `outside`, in a separate container of the run's image on the wall's network, which runs until the run closes, or `inside`, in the agent's container. The setup is one `setup` step, `prepare`: it adds the files of a prebuilt image's copy of the repository and runs the repository's `postCreateCommand` and `postStartCommand`. Outside, the setup container gets the working folder, the agent's container's limits, the wall's proxy and authority variables, the run's placeholders, and the agent's variables from sources 2 to 5 of [a run's variables](../../../docs/run.md#a-runs-variables), with the same deny lists, `QORY_RUN_SYSTEM` and `QORY_RUN_REPOSITORIES` among them; a service that a setup command starts keeps running there, and the agent reaches it by the name `qory-setup`. A setup command that exits otherwise than 0 fails the run before the agent starts |
 | `session.run.timeout` | none | how long a runtime may run, a duration such as `5h30m`. At the limit Forager stops it, `dev.qory.run.exited` contains `reason: timeout`, and `qory run` exits 124. `--timeout` sets another for one run, and `--timeout 0` none |
 | `session.run.stop_signal` | the runtime's descriptor's, else `SIGTERM` | the signal that requests a runtime to stop when Forager stops it, at the limit or on a signal to `qory run`: `SIGTERM`, `SIGINT`, `SIGHUP`, `SIGQUIT`, `SIGUSR1` or `SIGUSR2`. Runtimes differ in what a signal means, one closes its session on SIGINT and drops it on SIGTERM, so the runtime's descriptor defines which and the machine may set another; `--stop-signal` sets another for one run |
 | `session.run.stop_grace` | the runtime's descriptor's, else `10s` | how long a runtime gets between the stop signal and SIGKILL; `--stop-grace` sets another |

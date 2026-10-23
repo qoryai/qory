@@ -310,6 +310,10 @@ type Config struct {
 	Runtime stack.Runtimes
 	// Model replaces the document's target.model, "" to keep the document's.
 	Model string
+	// Effort is the effort value the main agent runs at, written in the place the
+	// runtime's descriptor lists for the effort; "" for none, from no key or an empty one.
+	// The descriptor lists the values the runtime takes.
+	Effort string
 	// Tiers is the machine's tier map, harness.tiers of every file but the checkout
 	// root's, by tier, the nearer file's entry for each; nil when no file sets one.
 	Tiers map[string]stack.Tier
@@ -380,6 +384,7 @@ type file struct {
 type harnessSection struct {
 	Runtime     *stack.Runtimes          `yaml:"runtime,omitempty"`
 	Model       *string                  `yaml:"model,omitempty"`
+	Effort      *string                  `yaml:"effort,omitempty"`
 	Tiers       map[string]yaml.Node     `yaml:"tiers,omitempty"`
 	Force       *bool                    `yaml:"force,omitempty"`
 	Update      *string                  `yaml:"update,omitempty"`
@@ -425,7 +430,7 @@ type worktreeSection struct {
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // fixedKeys are the row keys every configuration has, in the order [Config.Rows] prints them.
-var fixedKeys = []string{"harness.runtime", "harness.model", "harness.force", "harness.update", "harness.home", "harness.links", "worktree.dir", "worktree.name", "worktree.base", "worktree.branch", "git.timeout", "git.cache"}
+var fixedKeys = []string{"harness.runtime", "harness.model", "harness.effort", "harness.force", "harness.update", "harness.home", "harness.links", "worktree.dir", "worktree.name", "worktree.base", "worktree.branch", "git.timeout", "git.cache"}
 
 // Defaults is the configuration with no file read: the stack's runtime and model, no
 // force, no update, worktrees beside the main checkout as wt-<branch> off the remote's
@@ -791,6 +796,10 @@ func (c *Config) apply(path string, machine, root bool) (file, error) {
 			c.Model = *h.Model
 			c.origins["harness.model"] = path
 		}
+		if h.Effort != nil {
+			c.Effort = *h.Effort
+			c.origins["harness.effort"] = path
+		}
 		if h.Force != nil {
 			c.Force = *h.Force
 			c.origins["harness.force"] = path
@@ -951,7 +960,7 @@ func (f file) machineKeys() []string {
 			name string
 			set  bool
 		}{
-			{"runtime", h.Runtime != nil}, {"model", h.Model != nil}, {"force", h.Force != nil},
+			{"runtime", h.Runtime != nil}, {"model", h.Model != nil}, {"effort", h.Effort != nil}, {"force", h.Force != nil},
 			{"update", h.Update != nil}, {"home", h.Home != nil}, {"links", h.Links != nil},
 			{"launch", h.Launch != nil},
 		} {
@@ -1245,12 +1254,15 @@ func (c Config) SetBy(path, section string) []string {
 // as [exports.Value] prints it, and a name in a key or a value as [accesskey.ShownName]
 // prints it.
 func (c Config) Rows() []Row {
-	runtime, model := "(stack)", "(stack)"
+	runtime, model, effort := "(stack)", "(stack)", "(none)"
 	if c.Runtime != nil {
 		runtime = strings.Join(exports.Values(c.Runtime), ", ")
 	}
 	if c.Model != "" {
 		model = exports.Value(c.Model, false)
+	}
+	if c.Effort != "" {
+		effort = exports.Value(c.Effort, false)
 	}
 	update := "never"
 	if c.Update {
@@ -1278,6 +1290,7 @@ func (c Config) Rows() []Row {
 	rows = append(rows,
 		Row{"harness.runtime", runtime, c.origins["harness.runtime"]},
 		Row{"harness.model", model, c.origins["harness.model"]},
+		Row{"harness.effort", effort, c.origins["harness.effort"]},
 		Row{"harness.force", fmt.Sprint(c.Force), c.origins["harness.force"]},
 		Row{"harness.update", update, c.origins["harness.update"]},
 		Row{"harness.home", home, c.origins["harness.home"]},

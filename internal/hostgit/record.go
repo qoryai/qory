@@ -80,11 +80,12 @@ func repositoryAt(ctx context.Context, path string, holding []string) (places.Re
 	return fp, err == nil, err
 }
 
-// Starting holds the places at paths for a walled run that starts there, see
-// [places.Starting], and then refuses a place a walled run still going binds writable,
-// see [places.Going], with the refusal [Command] returns for a place in use. Nothing is
-// recorded or read there before the hold. On a refusal or an error nothing stays held.
-func Starting(ctx context.Context, paths []string) (*places.Hold, error) {
+// Starting holds the places at paths for the walled run run that starts there, see
+// [places.Starting], and then returns the error [Command] returns for a place in use
+// when another walled run still going binds a place writable, see [places.Going].
+// Nothing is recorded or read there before the hold. On a refusal or an error nothing
+// stays held.
+func Starting(ctx context.Context, run string, paths []string) (*places.Hold, error) {
 	h, err := places.Starting(paths)
 	if err != nil {
 		return nil, err
@@ -95,7 +96,7 @@ func Starting(ctx context.Context, paths []string) (*places.Hold, error) {
 			h.Release()
 			return nil, err
 		}
-		going, err := places.Going(ctx, abs)
+		going, err := places.Going(ctx, abs, run)
 		if err := usedRefusal(p, going, err); err != nil {
 			h.Release()
 			return nil, err

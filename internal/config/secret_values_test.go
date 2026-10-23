@@ -40,6 +40,7 @@ func TestTheConfigRowsPrintAPhraseForAValueWithASecret(t *testing.T) {
 	write(t, filepath.Join(root, "qory.yaml"), `harness:
   runtime: [claude, qak_rt]
   model: qak_model
+  effort: qrk_effort
   home: /opt/qak_home
   tiers:
     fast: {model: qrk_model, effort: qak_effort}
@@ -71,6 +72,7 @@ env: {API_TOKEN: qak_v, QRK_N: plain}
 	for key, value := range map[string]string{
 		"harness.runtime":                   "claude, " + accessKeyValue,
 		"harness.model":                     accessKeyValue,
+		"harness.effort":                    runKeyValue,
 		"harness.home":                      accessKeyValue,
 		"harness.tiers.fast":                runKeyValue + ", effort " + accessKeyValue,
 		"harness.launch.claude":             "API_KEY=" + accessKeyValue + " " + accessKeyPhrase + "=plain " + accessKeyValue + " --flag --token " + runKeyValue,

@@ -118,3 +118,62 @@ func TestRelocateAtTheRoot(t *testing.T) {
 		t.Errorf("the copy is %s", out)
 	}
 }
+
+// TestRelocateEdited is a copy with image and build.dockerfile edited: the IDs of
+// Features that are not local stay as written, in features and
+// overrideFeatureInstallOrder, a local Feature is moved, and build.context, left out,
+// is written as the Dockerfile's folder, which it named; a context that is set is
+// moved as before.
+func TestRelocateEdited(t *testing.T) {
+	const root, dir, copied = "/work/shop", "/tmp/x/devcontainer", "/tmp/x/dockerfile/Dockerfile"
+	edit := devcontainer.Edit{
+		Drop:       []string{"initializeCommand"},
+		Image:      func(s string) string { return "mirror/" + s },
+		Dockerfile: copied,
+	}
+	c, err := devcontainer.Parse(".devcontainer/devcontainer.json", []byte(`{
+		"initializeCommand": "x",
+		"image": "debian:12",
+		"build": {"dockerfile": "docker/Dockerfile", "args": {"A": "1"}},
+		"features": {"ghcr.io/devcontainers/features/go:1": {"v": "1"}, "./local": {}},
+		"overrideFeatureInstallOrder": ["./local", "ghcr.io/devcontainers/features/go"],
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := c.RelocateEdited(root, dir, edit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		relocated
+		Image string `json:"image"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("the copy is not JSON: %v\n%s", err, out)
+	}
+	if got.Image != "mirror/debian:12" || got.Build.Dockerfile != copied || path.Join(dir, got.Build.Context) != root+"/.devcontainer/docker" ||
+		got.Build.Args["A"] != "1" || strings.Contains(string(out), "initializeCommand") {
+		t.Errorf("the copy is %s", out)
+	}
+	if string(got.Features["ghcr.io/devcontainers/features/go:1"]) != `{"v": "1"}` || got.Features["../../../work/shop/.devcontainer/local"] == nil || len(got.Features) != 2 {
+		t.Errorf("features are %s", out)
+	}
+	if o := got.OverrideFeatureInstallOrder; len(o) != 2 || path.Join(dir, o[0].(string)) != root+"/.devcontainer/local" || o[1] != "ghcr.io/devcontainers/features/go" {
+		t.Errorf("overrideFeatureInstallOrder is %v", o)
+	}
+
+	c, err = devcontainer.Parse(".devcontainer/devcontainer.json", []byte(`{"build": {"dockerfile": "Dockerfile", "context": ".."}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err = c.RelocateEdited(root, dir, devcontainer.Edit{Dockerfile: copied}); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Build.Dockerfile != copied || path.Join(dir, got.Build.Context) != root || strings.Count(string(out), "context") != 1 {
+		t.Errorf("the copy is %s", out)
+	}
+}

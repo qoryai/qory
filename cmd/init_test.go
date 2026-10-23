@@ -11,6 +11,7 @@ import (
 	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/stack"
 )
 
 // TestInit writes the example from the repository's own examples directory into an empty
@@ -121,6 +122,10 @@ func exampleFromDisk(t *testing.T) fstest.MapFS {
 			return err
 		}
 		rel, _ := filepath.Rel(filepath.Join("..", "examples", "hello"), path)
+		if rel == stack.FileName {
+			// The binary leaves the example's stack file out, as main embeds it.
+			return nil
+		}
 		m[filepath.ToSlash(filepath.Join(cmd.ExampleRoot, rel))] = &fstest.MapFile{Data: data}
 		return nil
 	})

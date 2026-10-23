@@ -1,29 +1,35 @@
 // Package provisionertest is a fake Qory Apiary for the pool program's tests: an
-// httptest server that speaks provisioner/v1, claim, dispatched, handover, release and
-// prebuilt, and serves Forager's configuration document and a run's outcome.
+// httptest server that serves provisioner/v1, claim, dispatched, release and
+// machine-log, and Forager's configuration document and a run's outcome.
 //
 // It checks every request as Qory Apiary does, in the contract's order: a body over a
 // mebibyte is an unsigned 413, a POST of another content type an unsigned 415, a signing
 // header sent twice an unsigned 400 bad_request, then the signature under the pool's
 // key, failing which, or for a signature it has seen before, the answer is the unsigned
 // 401; an outcome's same bytes again get the answer they got, as Forager's contract
-// says. After that every answer is signed under [Server.Signer]: an instance id outside
-// its pattern, a signed 400 bad_request; another revision than 3 on provisioner/v1, or
-// than Forager's on its routes, a signed 400 unsupported_contract_version; a body its
-// schema refuses, a signed 400 invalid_request; a time more than 300 seconds from
-// [Server.Now], the unsigned 401. Then a reply scripted for the route with
-// [Server.Script] answers, else the model below.
+// states. After that every answer is signed under [Server.Signer]: an instance id
+// outside its pattern, a signed 400 bad_request; another revision than
+// contracts.ProvisionerRevision on provisioner/v1, or than Forager's on its routes, a
+// signed 400 unsupported_contract_version; a route it does not serve, a signed 404
+// not_found; a body that breaks its schema, a signed 400 invalid_request; a time more than
+// 300 seconds from [Server.Now], the unsigned 401. Then a reply scripted for the route
+// with [Server.Script] answers, else the model below.
 //
 // The model keeps a queue of runs, which [Server.Offer] fills, and the dispatches it
-// made of them. A claim takes the first run waiting into a new dispatch, or is held up
-// to its wait_seconds and [Server.Hold] for one, then answered a signed 204. Each
-// dispatch's refusals follow the contract's order: 403 for an unknown dispatch, 410 for
-// one that ended, 409 handed_over for a second handover, 409 lease_expired once its
-// lease lapsed before its handover, or [Server.Expire] made it stale, 409
-// not_dispatched for a handover before dispatched, and a prebuilt's not_prebuild,
-// not_handed_over and run_mismatch. A release and a prebuilt end the dispatch. A run
-// handed over may be given its outcome once; the same one again is answered as before,
-// and another is 409 outcome_given. Every request is recorded in order, [Server.Calls].
+// made of them. A claim takes the first run waiting into a new dispatch, with a run
+// code and a gateway, or is held up to its wait_seconds and [Server.Hold] for one, then
+// answered a signed 204. [Server.Redeem] stands for the machine's redemption of the run
+// code, which another server serves. A dispatch is stale once its lease lapsed with
+// neither dispatched nor the redemption before its lease_until, or once [Server.Expire]
+// made it so, and it ends 15 minutes after its claim while its code is not redeemed.
+// Each request's refusals follow the contract's order: dispatched gets 403 for an
+// unknown dispatch, 410 for one that ended, then 409 lease_expired for a stale one; a
+// release gets 403, 410, then 409 machine_exists after dispatched or the redemption,
+// then 409 lease_expired; a machine log gets 403, then 409 machine_log_exists for a
+// dispatch that has one, and is taken before or after the dispatch ends. A release
+// ends the dispatch. A run whose dispatch was dispatched or redeemed may be given its
+// outcome once; the same one again is answered as before, and another is 409
+// outcome_given. Every request is recorded in order, [Server.Calls].
 package provisionertest
 
 import (
@@ -65,8 +71,17 @@ const (
 	WorkspaceID = "ws_f1xt0re000000000"
 )
 
-// Lease is a dispatch's lease when its [Run] names none, Qory Apiary's.
+// Lease is a dispatch's lease when its [Run] sets none, Qory Apiary's.
 const Lease = 600 * time.Second
+
+// CodeLife is how long after its claim a dispatch whose run code is not redeemed ends.
+const CodeLife = 15 * time.Minute
+
+// The gateway and the lifetime of a dispatch whose [Run] sets none.
+const (
+	GatewayURL         = "https://gateway.example:8443"
+	MaxLifetimeMinutes = 1470
+)
 
 // Window is how far a request's time may be from [Server.Now], either way.
 const Window = 300 * time.Second
@@ -81,9 +96,8 @@ type Route string
 const (
 	RouteClaim         Route = "claim"
 	RouteDispatched    Route = "dispatched"
-	RouteHandover      Route = "handover"
 	RouteRelease       Route = "release"
-	RoutePrebuilt      Route = "prebuilt"
+	RouteMachineLog    Route = "machine-log"
 	RouteConfiguration Route = "configuration"
 	RouteOutcome       Route = "outcome"
 	// RouteUnknown is any other path, answered a signed 404 not_found once verified.
@@ -91,33 +105,31 @@ const (
 )
 
 // The run endpoint's path, under which an outcome is posted, and the events
-// endpoint's, which the configuration document names and the fake does not serve.
+// endpoint's, which the configuration document links to and the fake does not serve.
 const (
 	RunPath    = "/v1/runs"
 	EventsPath = "/v1/events"
 )
 
 // Run is a run waiting in the queue, as [Server.Offer] puts it there. Each member left
-// empty is filled in: a new run id, the step explore, read access, the target
-// code.example.com acme/shop, the contract fixture's domain, work item for the step
-// explore, and inputs of the step, a new run key, and [Lease]. With NoTarget the run has
-// no target and no access, and its domain and inputs are the fixture's of an explore
-// run with no target. RunSettings is sent in the handover's answer as it is.
+// empty is filled in: a new run id, the step explore, the contract's documents fixture
+// of the step, a new run code, [GatewayURL], [MaxLifetimeMinutes] and [Lease]. Machine
+// empty sends no machine.
 type Run struct {
-	RunID    string
-	Step     string
-	Access   string
-	Target   *contracts.Target
-	NoTarget bool
-	Domain   string
-	WorkItem *contracts.WorkItem
-	// RunSettings is the handover answer's run_settings; nil sends none.
-	RunSettings *contracts.RunSettings
-	Inputs      json.RawMessage
-	// RunKey is the run key the handover answers with, of the contract's shape:
-	// qrk_, base64url, a dot and base64url.
-	RunKey string
-	Lease  time.Duration
+	// RunID is the run the redemption of the code makes, which an outcome is posted for.
+	RunID string
+	Step  string
+	// Documents are the run's documents, run/v1 documents.schema.json, which the
+	// redemption of the code returns.
+	Documents json.RawMessage
+	Machine   string
+	// RunCode is the run code the claim's answer contains, of the contract's shape:
+	// qecr_, 26 upper-case Crockford base32 characters, a dot and 22 base64url
+	// characters.
+	RunCode            string
+	GatewayURL         string
+	MaxLifetimeMinutes int
+	Lease              time.Duration
 }
 
 // Reply is one scripted answer, which [Server.Script] queues for a route. With Status
@@ -129,15 +141,15 @@ type Reply struct {
 	// Code is a refusal's code, the body {"error": Code} when Body is empty.
 	Code string
 	Body string
-	// Edit changes the model's 200 answer, a claim's or a handover's, before it is
-	// signed: another revision, step or run id, say.
+	// Edit changes the model's 200 answer to a claim before it is signed: another
+	// revision or a member the schema does not define, say.
 	Edit func(doc map[string]any)
 	// Unsigned leaves the answer unsigned, and WrongKey signs it under a key that is not
 	// pinned.
 	Unsigned bool
 	WrongKey bool
-	// RetryAfter is the answer's Retry-After, and Header more headers it carries, each
-	// value added after the answer's headers: a Location, a Set-Cookie, or a second
+	// RetryAfter is the answer's Retry-After, and Header more headers it has, each value
+	// added after the answer's headers: a Location, a Set-Cookie, or a second
 	// signature, say.
 	RetryAfter string
 	Header     http.Header
@@ -153,8 +165,8 @@ type Reply struct {
 // Call is one request the fake received, and what it answered.
 type Call struct {
 	Route Route
-	// Target is the request's path and query, and DispatchID the dispatch it names, or
-	// for an outcome the run.
+	// Target is the request's path and query, DispatchID the dispatch in the path, and
+	// RunID the run in an outcome's path.
 	Target     string
 	DispatchID string
 	RunID      string
@@ -177,7 +189,6 @@ type Call struct {
 const (
 	StateClaimed    = "claimed"
 	StateDispatched = "dispatched"
-	StateHandedOver = "handed_over"
 	StateEnded      = "ended"
 )
 
@@ -185,15 +196,18 @@ const (
 type Dispatch struct {
 	ID         string
 	Run        Run
+	ClaimedAt  time.Time
 	LeaseUntil time.Time
 	State      string
-	// Stale is a dispatch whose lease lapsed before its handover, and HandedOver one
-	// whose handover was answered with the 200.
-	Stale      bool
-	HandedOver bool
-	// Release and Prebuilt are the release and the prebuilt that ended it, if one did.
-	Release  *contracts.Release
-	Prebuilt *contracts.Prebuilt
+	// Stale is a dispatch whose lease lapsed with neither dispatched nor the redemption
+	// before its lease_until, and Redeemed one whose run code [Server.Redeem] redeemed.
+	Stale    bool
+	Redeemed bool
+	// Dispatched is how many dispatched the fake accepted for it.
+	Dispatched int
+	// Release is the release that ended it, if one did, and MachineLog its machine log.
+	Release    *contracts.Release
+	MachineLog *contracts.MachineLog
 }
 
 // Outcome is a run's outcome as the fake recorded it.
@@ -277,19 +291,19 @@ func (s *Server) Client() *provisioner.Client {
 	}
 }
 
-// Offer queues runs, filled in as [Run] says, and returns their run ids.
-func (s *Server) Offer(runs ...Run) []string {
+// Offer queues runs, filled in as [Run] describes, and returns them filled in.
+func (s *Server) Offer(runs ...Run) []Run {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var ids []string
+	var out []Run
 	for _, r := range runs {
 		r = filled(r)
 		s.queue = append(s.queue, r)
-		ids = append(ids, r.RunID)
+		out = append(out, r)
 	}
 	close(s.wake)
 	s.wake = make(chan struct{})
-	return ids
+	return out
 }
 
 // Script queues replies for route, each answering one request that passed the checks
@@ -300,11 +314,12 @@ func (s *Server) Script(route Route, replies ...Reply) {
 	s.scripts[route] = append(s.scripts[route], replies...)
 }
 
-// Expire makes the dispatch stale, as a lease lapsed before its handover.
+// Expire makes the dispatch stale, as a lease that lapsed with neither dispatched nor
+// the redemption before it.
 func (s *Server) Expire(dispatchID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if d := s.dispatches[dispatchID]; d != nil && d.State != StateHandedOver && d.State != StateEnded {
+	if d := s.dispatches[dispatchID]; d != nil && d.State == StateClaimed && !d.Redeemed {
 		d.Stale = true
 	}
 }
@@ -316,6 +331,25 @@ func (s *Server) End(dispatchID string) {
 	if d := s.dispatches[dispatchID]; d != nil {
 		d.State = StateEnded
 	}
+}
+
+// Redeem redeems the dispatch's run code, as the machine's redemption does, and returns
+// the run with its documents. ok is false, and nothing changes, when the code no longer
+// works: the dispatch is unknown, ended or stale. A second redemption returns the same
+// run.
+func (s *Server) Redeem(dispatchID string) (run Run, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d := s.dispatches[dispatchID]
+	if d == nil {
+		return Run{}, false
+	}
+	s.refresh(d)
+	if d.State == StateEnded || d.Stale {
+		return Run{}, false
+	}
+	d.Redeemed = true
+	return d.Run, true
 }
 
 // Calls are the requests the fake received, in order.
@@ -381,37 +415,26 @@ func (s *Server) now() time.Time {
 	return time.Now()
 }
 
-// The contract fixtures a run is filled in from, by the fixture's name: the step, or
-// [withoutTarget].
 var (
-	fixtureWorkItem   contracts.WorkItem
-	fixtureInputs     = map[string]json.RawMessage{}
-	fixtureDomain     = map[string]string{}
-	dispatchPathShape = regexp.MustCompile(`^/v1/dispatches/([^/]+)/(dispatched|handover|release|prebuilt)$`)
+	dispatchPathShape = regexp.MustCompile(`^/v1/dispatches/([^/]+)/(dispatched|release|machine-log)$`)
 	outcomePathShape  = regexp.MustCompile(`^` + RunPath + `/([^/]+)/outcome$`)
 )
 
-// withoutTarget is the fixture of an explore run with no target.
-const withoutTarget = "explore-without-target"
+// fixtureDocuments are the contract's documents fixtures of the steps explore and
+// prebuild, by step.
+var fixtureDocuments = map[string]json.RawMessage{}
 
 func init() {
-	for _, name := range []string{provisioner.StepExplore, provisioner.StepPrebuild, withoutTarget} {
-		b, err := fs.ReadFile(contracts.ProvisionerFS, "fixtures/handover-answer/"+name+".json")
+	for _, step := range []string{provisioner.StepExplore, provisioner.StepPrebuild} {
+		b, err := fs.ReadFile(contracts.RunFS, "fixtures/documents/"+step+".json")
 		if err != nil {
 			panic(err)
 		}
-		var doc contracts.HandoverAnswer
-		if err := json.Unmarshal(b, &doc); err != nil {
-			panic(err)
-		}
-		fixtureInputs[name], fixtureDomain[name] = doc.Inputs, doc.Domain
-		if doc.WorkItem != nil && name == provisioner.StepExplore {
-			fixtureWorkItem = *doc.WorkItem
-		}
+		fixtureDocuments[step] = b
 	}
 }
 
-// filled is r with every empty member filled in, as [Run] says.
+// filled is r with every empty member filled in, as [Run] describes.
 func filled(r Run) Run {
 	if r.RunID == "" {
 		r.RunID = newRunID()
@@ -419,47 +442,22 @@ func filled(r Run) Run {
 	if r.Step == "" {
 		r.Step = provisioner.StepExplore
 	}
-	fixture := r.Step
-	if r.NoTarget {
-		fixture, r.Target, r.Access = withoutTarget, nil, ""
-	} else {
-		if r.Access == "" {
-			r.Access = "read"
-		}
-		if r.Target == nil {
-			r.Target = &contracts.Target{System: "code.example.com", Path: "acme/shop"}
-		}
+	if r.Documents == nil {
+		r.Documents = fixtureDocuments[r.Step]
 	}
-	if r.Domain == "" {
-		r.Domain = fixtureDomain[fixture]
-		if r.Domain == "" {
-			r.Domain = "software"
-		}
+	if r.RunCode == "" {
+		r.RunCode = newRunCode()
 	}
-	if r.WorkItem == nil && r.Step == provisioner.StepExplore {
-		w := fixtureWorkItem
-		r.WorkItem = &w
+	if r.GatewayURL == "" {
+		r.GatewayURL = GatewayURL
 	}
-	if r.Inputs == nil {
-		r.Inputs = fixtureInputs[fixture]
-		if r.Inputs == nil {
-			r.Inputs = json.RawMessage(`{"version":1}`)
-		}
-	}
-	if r.RunKey == "" {
-		r.RunKey = "qrk_" + random(48) + "." + random(64)
+	if r.MaxLifetimeMinutes == 0 {
+		r.MaxLifetimeMinutes = MaxLifetimeMinutes
 	}
 	if r.Lease == 0 {
 		r.Lease = Lease
 	}
 	return r
-}
-
-// random is n random bytes in base64url.
-func random(n int) string {
-	b := make([]byte, n)
-	_, _ = rand.Read(b)
-	return base64.RawURLEncoding.EncodeToString(b)
 }
 
 // newRunID is a new run id, a version 4 UUID in the canonical lower-case form.
@@ -477,13 +475,25 @@ const crockford = "0123456789abcdefghjkmnpqrstvwxyz"
 
 // newDispatchID is a new dispatch id, dp_ and 16 lower-case Crockford base32 characters.
 func newDispatchID() string {
-	b := make([]byte, 16)
+	return "dp_" + randomOf(crockford, 16)
+}
+
+// newRunCode is a new run code: qecr_, 26 upper-case Crockford base32 characters, a dot
+// and the 22 base64url characters of a fingerprint.
+func newRunCode() string {
+	fp := make([]byte, 16)
+	_, _ = rand.Read(fp)
+	return "qecr_" + randomOf(strings.ToUpper(crockford), 26) + "." + base64.RawURLEncoding.EncodeToString(fp)
+}
+
+// randomOf is n random characters of chars.
+func randomOf(chars string, n int) string {
+	b := make([]byte, n)
 	_, _ = rand.Read(b)
-	id := []byte("dp_")
-	for _, c := range b {
-		id = append(id, crockford[int(c)%len(crockford)])
+	for i, c := range b {
+		b[i] = chars[int(c)%len(chars)]
 	}
-	return string(id)
+	return string(b)
 }
 
 // answer is what the fake answers: a status, a body, and the configuration digest its
@@ -593,7 +603,7 @@ func (s *Server) decide(r *http.Request, c *Call, route Route, id string, body [
 	case accesskey.CheckInstanceID(r.Header.Get(accesskey.HeaderInstanceID)) != nil:
 		return refusal(http.StatusBadRequest, "bad_request"), Reply{}, true
 	}
-	revision := strconv.Itoa(provisioner.Revision)
+	revision := strconv.Itoa(contracts.ProvisionerRevision)
 	if route == RouteConfiguration || route == RouteOutcome {
 		revision = strconv.Itoa(foragercontracts.Revision)
 	}
@@ -644,7 +654,7 @@ func twice(h http.Header) bool {
 }
 
 // routeOf is the route of r's path, whatever its method, and the dispatch or the run
-// the path names.
+// in the path.
 func routeOf(r *http.Request) (Route, string) {
 	p := r.URL.Path
 	switch {
@@ -693,9 +703,8 @@ func timeOf(r *http.Request, body []byte) time.Time {
 var schemaOf = map[Route]func() (*jsonschema.Schema, error){
 	RouteClaim:      sync.OnceValues(func() (*jsonschema.Schema, error) { return contracts.CompileProvisioner("claim.schema.json") }),
 	RouteDispatched: sync.OnceValues(func() (*jsonschema.Schema, error) { return contracts.CompileProvisioner("dispatched.schema.json") }),
-	RouteHandover:   sync.OnceValues(func() (*jsonschema.Schema, error) { return contracts.CompileProvisioner("handover.schema.json") }),
 	RouteRelease:    sync.OnceValues(func() (*jsonschema.Schema, error) { return contracts.CompileProvisioner("release.schema.json") }),
-	RoutePrebuilt:   sync.OnceValues(func() (*jsonschema.Schema, error) { return contracts.CompileProvisioner("prebuilt.schema.json") }),
+	RouteMachineLog: sync.OnceValues(func() (*jsonschema.Schema, error) { return contracts.CompileProvisioner("machine-log.schema.json") }),
 	RouteOutcome:    sync.OnceValues(func() (*jsonschema.Schema, error) { return foragercontracts.Compile("run-outcome.schema.json") }),
 }
 
@@ -717,7 +726,7 @@ func validBody(route Route, body []byte) bool {
 	return !hasFraction(doc)
 }
 
-// hasFraction reports whether a decoded document holds a number written with a
+// hasFraction reports whether a decoded document contains a number written with a
 // fraction or an exponent, which the contract refuses for an integer.
 func hasFraction(doc any) bool {
 	switch v := doc.(type) {
@@ -755,53 +764,53 @@ func (s *Server) model(ctx context.Context, route Route, id string, body []byte)
 	if d == nil {
 		return refusal(http.StatusForbidden, "forbidden")
 	}
-	if d.State != StateHandedOver && d.State != StateEnded && !s.now().Before(d.LeaseUntil) {
-		d.Stale = true
+	if route == RouteMachineLog {
+		if d.MachineLog != nil {
+			return refusal(http.StatusConflict, "machine_log_exists")
+		}
+		var ml contracts.MachineLog
+		_ = json.Unmarshal(body, &ml)
+		d.MachineLog = &ml
+		return answer{status: http.StatusNoContent}
+	}
+	s.refresh(d)
+	if d.State == StateEnded {
+		return refusal(http.StatusGone, "gone")
+	}
+	if route == RouteDispatched {
+		if d.Stale {
+			return refusal(http.StatusConflict, "lease_expired")
+		}
+		d.State = StateDispatched
+		d.Dispatched++
+		return answer{status: http.StatusNoContent}
 	}
 	switch {
-	case d.State == StateEnded:
-		return refusal(http.StatusGone, "gone")
-	case route == RouteHandover && d.State == StateHandedOver:
-		return refusal(http.StatusConflict, "handed_over")
+	case d.State == StateDispatched || d.Redeemed:
+		return refusal(http.StatusConflict, "machine_exists")
 	case d.Stale:
 		return refusal(http.StatusConflict, "lease_expired")
 	}
-	switch route {
-	case RouteDispatched:
-		if d.State == StateClaimed {
-			d.State = StateDispatched
-		}
-		return answer{status: http.StatusNoContent}
-	case RouteHandover:
-		if d.State != StateDispatched {
-			return refusal(http.StatusConflict, "not_dispatched")
-		}
-		d.State, d.HandedOver = StateHandedOver, true
-		ans := answer{status: http.StatusOK, header: http.Header{"Cache-Control": {"no-store"}}}
-		ans.body, _ = json.Marshal(contracts.HandoverAnswer{
-			Version: 1, Revision: provisioner.Revision, RunID: d.Run.RunID, RunKey: d.Run.RunKey, Step: d.Run.Step,
-			Domain: d.Run.Domain, Access: d.Run.Access, Target: d.Run.Target, WorkItem: d.Run.WorkItem,
-			RunSettings: d.Run.RunSettings, Inputs: d.Run.Inputs,
-		})
-		return ans
-	case RouteRelease:
-		var rel contracts.Release
-		_ = json.Unmarshal(body, &rel)
-		d.State, d.Release = StateEnded, &rel
-		return answer{status: http.StatusNoContent}
-	}
-	var p contracts.Prebuilt
-	_ = json.Unmarshal(body, &p)
-	switch {
-	case d.Run.Step != provisioner.StepPrebuild:
-		return refusal(http.StatusConflict, "not_prebuild")
-	case d.State != StateHandedOver:
-		return refusal(http.StatusConflict, "not_handed_over")
-	case p.RunID != d.Run.RunID:
-		return refusal(http.StatusConflict, "run_mismatch")
-	}
-	d.State, d.Prebuilt = StateEnded, &p
+	var rel contracts.Release
+	_ = json.Unmarshal(body, &rel)
+	d.State, d.Release = StateEnded, &rel
 	return answer{status: http.StatusNoContent}
+}
+
+// refresh brings d to the fake's clock: a dispatch with neither dispatched nor the
+// redemption goes stale at its lease_until, and one whose code is not redeemed ends
+// [CodeLife] after its claim. The caller holds s.mu.
+func (s *Server) refresh(d *Dispatch) {
+	if d.State == StateEnded {
+		return
+	}
+	now := s.now()
+	if d.State == StateClaimed && !d.Redeemed && !now.Before(d.LeaseUntil) {
+		d.Stale = true
+	}
+	if !d.Redeemed && !now.Before(d.ClaimedAt.Add(CodeLife)) {
+		d.State = StateEnded
+	}
 }
 
 // claim takes the first run waiting into a new dispatch, or holds the claim up to its
@@ -817,18 +826,16 @@ func (s *Server) claim(ctx context.Context, body []byte) answer {
 			defer s.mu.Unlock()
 			run := s.queue[0]
 			s.queue = s.queue[1:]
-			d := &Dispatch{ID: newDispatchID(), Run: run, LeaseUntil: s.now().Add(run.Lease).UTC().Truncate(time.Second), State: StateClaimed}
+			now := s.now().UTC().Truncate(time.Second)
+			d := &Dispatch{ID: newDispatchID(), Run: run, ClaimedAt: now, LeaseUntil: now.Add(run.Lease), State: StateClaimed}
 			s.dispatches[d.ID] = d
 			s.order = append(s.order, d.ID)
-			doc := contracts.ClaimAnswer{
-				Version: 1, Revision: provisioner.Revision, DispatchID: d.ID, RunID: run.RunID, PoolID: PoolID,
-				LeaseUntil: contracts.FormatTime(d.LeaseUntil), Step: run.Step, Access: run.Access, Target: run.Target,
-			}
-			if run.Step != provisioner.StepPrebuild {
-				doc.WorkItem = run.WorkItem
-			}
-			b, _ := json.Marshal(doc)
-			return answer{status: http.StatusOK, body: b}
+			b, _ := json.Marshal(contracts.ClaimAnswer{
+				Version: 1, Revision: contracts.ProvisionerRevision, DispatchID: d.ID, PoolID: PoolID,
+				LeaseUntil: contracts.FormatTime(d.LeaseUntil), Machine: run.Machine, RunCode: run.RunCode,
+				GatewayURL: run.GatewayURL, MaxLifetimeMinutes: run.MaxLifetimeMinutes,
+			})
+			return answer{status: http.StatusOK, body: b, header: http.Header{"Cache-Control": {"no-store"}}}
 		}
 		wake := s.wake
 		s.mu.Unlock()
@@ -857,19 +864,19 @@ func (s *Server) configuration() answer {
 	return answer{status: http.StatusOK, body: b, conf: "sha256=" + hex.EncodeToString(sum[:])}
 }
 
-// outcome records the outcome of a run the fake handed over: the same one again is
-// answered as before, another is 409 outcome_given, and a run it did not hand over is
-// 404 not_found.
+// outcome records the outcome of a run whose dispatch was dispatched or redeemed: the
+// same one again is answered as before, another is 409 outcome_given, and any other run
+// is 404 not_found.
 func (s *Server) outcome(runID string, body []byte) answer {
 	var o struct{ State, Reason, Time string }
 	_ = json.Unmarshal(body, &o)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	handed := false
+	started := false
 	for _, d := range s.dispatches {
-		handed = handed || d.Run.RunID == runID && d.HandedOver
+		started = started || d.Run.RunID == runID && (d.Dispatched > 0 || d.Redeemed)
 	}
-	if !handed {
+	if !started {
 		return refusal(http.StatusNotFound, "not_found")
 	}
 	given := outcome{Outcome: Outcome{RunID: runID, State: o.State, Reason: o.Reason, Time: o.Time}, sum: sha256.Sum256(body)}
@@ -881,7 +888,7 @@ func (s *Server) outcome(runID string, body []byte) answer {
 	return answer{status: http.StatusOK, body: []byte(`{"version":1}`)}
 }
 
-// String names the dispatch and its state, never its run key.
+// String is the dispatch's id, step and state, never its run code.
 func (d Dispatch) String() string {
 	return fmt.Sprintf("%s %s %s", d.ID, d.Run.Step, d.State)
 }

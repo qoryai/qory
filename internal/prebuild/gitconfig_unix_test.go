@@ -55,7 +55,7 @@ func TestBuildRefusesACredentialForGit(t *testing.T) {
 			var out, log bytes.Buffer
 			repo := repository(t, shopConfig)
 			withGitConfig(t, repo, c.config)
-			err := prebuild.Build(t.Context(), options(t, repo, &out, &log))
+			_, err := prebuild.Build(t.Context(), options(t, repo, &out, &log))
 			var refusal *prebuild.RefusedError
 			if !errors.As(err, &refusal) {
 				t.Fatalf("Build: %v, not a refusal", err)
@@ -81,7 +81,7 @@ func TestBuildRefusesAGitConfigGitDoesNotRead(t *testing.T) {
 	var out, log bytes.Buffer
 	repo := repository(t, shopConfig)
 	withGitConfig(t, repo, "[remote \"origin\"\n\turl = https://"+secret+"@example.com/\n")
-	err := prebuild.Build(t.Context(), options(t, repo, &out, &log))
+	_, err := prebuild.Build(t.Context(), options(t, repo, &out, &log))
 	var refusal *prebuild.RefusedError
 	if !errors.As(err, &refusal) || err.Error() != repo+" has a git configuration git does not read, .git/config; the image is built only from a repository whose git configuration git reads" {
 		t.Fatalf("Build: %v", err)
@@ -136,7 +136,7 @@ func TestBuildTakesAGitConfigWithoutACredential(t *testing.T) {
 		".git/modules/lib/config":            "[core]\n\tbare = false\n",
 		".git/modules/lib/refs/heads/config": "0123456789abcdef0123456789abcdef01234567\n",
 	})
-	if err := prebuild.Build(t.Context(), options(t, repo, io.Discard, io.Discard)); err != nil {
+	if _, err := prebuild.Build(t.Context(), options(t, repo, io.Discard, io.Discard)); err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 }
@@ -156,7 +156,7 @@ func TestBuildRunsGitFromThePathOfItsPrograms(t *testing.T) {
 			o.Env[i] = "PATH=" + dir + string(os.PathListSeparator) + v
 		}
 	}
-	if err := prebuild.Build(t.Context(), o); err != nil {
+	if _, err := prebuild.Build(t.Context(), o); err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "git.log"))
@@ -216,7 +216,7 @@ func TestBuildRefusesACredentialInEveryGitConfiguration(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			err := prebuild.Build(t.Context(), options(t, repo, &out, &log))
+			_, err := prebuild.Build(t.Context(), options(t, repo, &out, &log))
 			var refusal *prebuild.RefusedError
 			want := repo + " holds a credential for git in " + c.shown + ", http.extraheader; the image is built only from a repository fetched without one"
 			if !errors.As(err, &refusal) || err.Error() != want {
@@ -247,7 +247,7 @@ func TestBuildFollowsAGitFile(t *testing.T) {
 		gitFile(t, repo, "gitdir: .gitdata\n")
 		writeFiles(t, repo, map[string]string{".gitdata/HEAD": "ref: refs/heads/main\n", ".gitdata/config": token})
 		var out bytes.Buffer
-		err := prebuild.Build(t.Context(), options(t, repo, &out, io.Discard))
+		_, err := prebuild.Build(t.Context(), options(t, repo, &out, io.Discard))
 		want := repo + " holds a credential for git in .gitdata/config, remote.*.url; the image is built only from a repository fetched without one"
 		var refusal *prebuild.RefusedError
 		if !errors.As(err, &refusal) || err.Error() != want {
@@ -263,7 +263,7 @@ func TestBuildFollowsAGitFile(t *testing.T) {
 		elsewhere := t.TempDir()
 		writeFiles(t, elsewhere, map[string]string{"HEAD": "ref: refs/heads/main\n", "config": token})
 		gitFile(t, repo, "gitdir: "+elsewhere+"\n")
-		if err := prebuild.Build(t.Context(), options(t, repo, io.Discard, io.Discard)); err != nil {
+		if _, err := prebuild.Build(t.Context(), options(t, repo, io.Discard, io.Discard)); err != nil {
 			t.Fatalf("Build: %v", err)
 		}
 	})

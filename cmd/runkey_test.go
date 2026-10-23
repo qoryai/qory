@@ -168,8 +168,8 @@ func TestARunKeyTakesTheRunThroughItsGateway(t *testing.T) {
 		if err == nil {
 			t.Fatalf("%v: the run went on without its gateway:\n%s", args, out)
 		}
-		if first, _, _ := strings.Cut(out, "\n"); first != "qory run: through the gateway "+gw.host()+", run "+keyRunID {
-			t.Errorf("%v: the first line is %q\n%s", args, first, out)
+		if line := firstLine(out); line != "qory run: through the gateway "+gw.host()+", run "+keyRunID {
+			t.Errorf("%v: the first line is %q\n%s", args, line, out)
 		}
 		lacks(t, out, "qory run: node", "hello from")
 		lacks(t, out+err.Error(), key, key[4:40])
@@ -205,7 +205,7 @@ func TestARunKeyRefusesWhatItsRunCannotHave(t *testing.T) {
 	key := mintRunKey(t, keyRunID, gw.url())
 	file := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml")
 	registered := func(flags string) string {
-		return flags + " into the run's registration, and a run key is given, by QORY_RUN_KEY or --run-key-fd: its starter registered the run already, so give "
+		return flags + " into the run's registration, and a run key is given, by QORY_RUN_KEY, --run-key-fd or --run-code-file: its starter registered the run already, so give "
 	}
 	for _, c := range []struct {
 		name  string
@@ -213,37 +213,37 @@ func TestARunKeyRefusesWhatItsRunCannotHave(t *testing.T) {
 		want  func() string
 	}{
 		{"--local", func(*testing.T) []string { return []string{"run", "--local"} }, func() string {
-			return "--local runs with a gateway the run starts itself and no server, and a run key is given, by QORY_RUN_KEY or --run-key-fd: the run goes through the gateway its run key names; give no run key to run --local"
+			return "--local runs with a gateway the run starts itself and no server, and a run key is given, by QORY_RUN_KEY, --run-key-fd or --run-code-file: the run goes through the gateway its run key names; give no run key to run --local"
 		}},
 		{"--relabel", func(*testing.T) []string { return []string{"run", "--relabel"} }, func() string {
-			return "--relabel keeps a checkout's new labels, and a run key is given, by QORY_RUN_KEY or --run-key-fd: the run's starter chose its labels; leave out --relabel"
+			return "--relabel keeps a checkout's new labels, and a run key is given, by QORY_RUN_KEY, --run-key-fd or --run-code-file: the run's starter chose its labels; leave out --relabel"
 		}},
 		{"--relabel and --local", func(*testing.T) []string { return []string{"run", "--relabel", "--local"} }, func() string {
-			return "--local runs with a gateway the run starts itself and no server, and a run key is given, by QORY_RUN_KEY or --run-key-fd: the run goes through the gateway its run key names; give no run key to run --local"
+			return "--local runs with a gateway the run starts itself and no server, and a run key is given, by QORY_RUN_KEY, --run-key-fd or --run-code-file: the run goes through the gateway its run key names; give no run key to run --local"
 		}},
 		{"--policy", func(t *testing.T) []string {
 			writeFile(t, filepath.Join(root, "policy.yaml"), "egress:\n  mode: observe\n")
 			return []string{"run", "--policy", filepath.Join(root, "policy.yaml")}
 		}, func() string {
-			return "--policy is a run's policy file for a gateway the run starts itself, and a run key is given, by QORY_RUN_KEY or --run-key-fd: the gateway its run key names takes the run's policy from the server"
+			return "--policy is a run's policy file for a gateway the run starts itself, and a run key is given, by QORY_RUN_KEY, --run-key-fd or --run-code-file: the gateway its run key names takes the run's policy from the server"
 		}},
 		{"an access key's file", func(t *testing.T) []string {
 			writeSecret(t, newKey(t))
 			return []string{"run"}
 		}, func() string {
-			return configDir().Path(foragerdir.SecretFile) + " exists, and a run key is given, by QORY_RUN_KEY or --run-key-fd: a machine whose runs a starter registers holds no access key; remove the file"
+			return configDir().Path(foragerdir.SecretFile) + " exists, and a run key is given, by QORY_RUN_KEY, --run-key-fd or --run-code-file: a machine whose runs a starter registers holds no access key; remove the file"
 		}},
 		{"QORY_ACCESS_KEY_SECRET", func(t *testing.T) []string {
 			t.Setenv("QORY_ACCESS_KEY_SECRET", newKey(t).Secret())
 			return []string{"run"}
 		}, func() string {
-			return "QORY_ACCESS_KEY_SECRET is set, and a run key is given, by QORY_RUN_KEY or --run-key-fd: a machine whose runs a starter registers holds no access key; unset QORY_ACCESS_KEY_SECRET"
+			return "QORY_ACCESS_KEY_SECRET is set, and a run key is given, by QORY_RUN_KEY, --run-key-fd or --run-code-file: a machine whose runs a starter registers holds no access key; unset QORY_ACCESS_KEY_SECRET"
 		}},
 		{"QORY_ACCESS_KEY_ID", func(t *testing.T) []string {
 			t.Setenv("QORY_ACCESS_KEY_ID", testAccessKey)
 			return []string{"run"}
 		}, func() string {
-			return "QORY_ACCESS_KEY_ID is set, and a run key is given, by QORY_RUN_KEY or --run-key-fd: a machine whose runs a starter registers holds no access key; unset QORY_ACCESS_KEY_ID"
+			return "QORY_ACCESS_KEY_ID is set, and a run key is given, by QORY_RUN_KEY, --run-key-fd or --run-code-file: a machine whose runs a starter registers holds no access key; unset QORY_ACCESS_KEY_ID"
 		}},
 		{"--access-key-secret-fd", func(t *testing.T) []string {
 			return []string{"run", "--access-key-secret-fd", descriptor(t, newKey(t).Secret())}
@@ -254,13 +254,13 @@ func TestARunKeyRefusesWhatItsRunCannotHave(t *testing.T) {
 			writeFile(t, file, "apiVersion: qory.dev/v1alpha1\ngateway:\n  listen: 127.0.0.1:8443\n")
 			return []string{"run"}
 		}, func() string {
-			return file + ": gateway: a run key is given, by QORY_RUN_KEY or --run-key-fd, so the run goes through the gateway its run key names, which holds the server, the policy, the credentials and the tools, and this machine runs no gateway: remove the gateway section, or give no run key"
+			return file + ": gateway: a run key is given, by QORY_RUN_KEY, --run-key-fd or --run-code-file, so the run goes through the gateway its run key names, which holds the server, the policy, the credentials and the tools, and this machine runs no gateway: remove the gateway section, or give no run key"
 		}},
 		{"a gateway section of tools", func(t *testing.T) []string {
 			writeFile(t, file, "apiVersion: qory.dev/v1alpha1\ngateway:\n  tools:\n    files:\n      command: [/opt/tools/files]\n      serves: [files.tools.internal]\n")
 			return []string{"run"}
 		}, func() string {
-			return file + ": gateway: a run key is given, by QORY_RUN_KEY or --run-key-fd, so the run goes through the gateway its run key names, which holds the server, the policy, the credentials and the tools, and this machine runs no gateway: remove the gateway section, or give no run key"
+			return file + ": gateway: a run key is given, by QORY_RUN_KEY, --run-key-fd or --run-code-file, so the run goes through the gateway its run key names, which holds the server, the policy, the credentials and the tools, and this machine runs no gateway: remove the gateway section, or give no run key"
 		}},
 		{"--label", func(*testing.T) []string { return []string{"run", "--label", "team=a"} }, func() string {
 			return registered("--label goes") + "it to qory run register"

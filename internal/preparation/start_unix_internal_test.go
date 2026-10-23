@@ -6,8 +6,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // committed makes a git repository in a new folder with files in its one commit, and
@@ -245,4 +248,68 @@ func TestStartTakesTheNamesOfVariables(t *testing.T) {
 	if err != nil || output != "unset unset set\n" {
 		t.Errorf("null: %q, %v", output, err)
 	}
+}
+
+// TestStartLoggedCopiesTheOutputAsItComes is a postCreateCommand that writes a line,
+// waits, and writes another: StartLogged copies the first line to the output before the
+// command ends, then the second, the line that says which ran and the line that names
+// the file, which contains both lines. A configuration with no commands leaves no file.
+func TestStartLoggedCopiesTheOutputAsItComes(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	dir := committed(t, map[string]string{".devcontainer.json": `{"postCreateCommand": "echo first; sleep 1; echo second"}`})
+	var output safeBuilder
+	errs := make(chan error, 1)
+	go func() { errs <- StartLogged(context.Background(), dir, []string{"PATH=/usr/bin:/bin"}, &output) }()
+	deadline := time.Now().Add(900 * time.Millisecond)
+	for output.String() != "first\n" && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := output.String(); got != "first\n" {
+		t.Errorf("before the command ended: %q, want the first line", got)
+	}
+	if err := <-errs; err != nil {
+		t.Fatal(err)
+	}
+	logs, _ := filepath.Glob(filepath.Join(tmp, "qory-setup-*.log"))
+	if len(logs) != 1 {
+		t.Fatalf("the files: %v", logs)
+	}
+	want := "first\nsecond\nqory run prepare: ran postCreateCommand in Xs\nqory run prepare: " + logs[0] + " in the container that runs the setup contains the start commands' output, and what a program they leave running writes later\n"
+	if got := regexp.MustCompile(` in [0-9]+\.[0-9]s\n`).ReplaceAllString(output.String(), " in Xs\n"); got != want {
+		t.Errorf("printed %q, want %q", got, want)
+	}
+	if data, err := os.ReadFile(logs[0]); err != nil || !strings.HasPrefix(string(data), "first\nsecond\n") {
+		t.Errorf("the file contains %q, %v", data, err)
+	}
+
+	none := committed(t, map[string]string{".devcontainer.json": `{"image": "example.com/agent:1"}`})
+	if err := os.Remove(logs[0]); err != nil {
+		t.Fatal(err)
+	}
+	var quiet safeBuilder
+	if err := StartLogged(context.Background(), none, []string{"PATH=/usr/bin:/bin"}, &quiet); err != nil || quiet.String() != "" {
+		t.Errorf("no commands: printed %q, %v", quiet.String(), err)
+	}
+	if logs, _ := filepath.Glob(filepath.Join(tmp, "qory-setup-*.log")); len(logs) != 0 {
+		t.Errorf("no commands left the files %v", logs)
+	}
+}
+
+// safeBuilder is a strings.Builder that a test reads while another goroutine writes it.
+type safeBuilder struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *safeBuilder) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *safeBuilder) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }

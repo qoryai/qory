@@ -44,7 +44,7 @@ func TestForagersDirectoryRefusesARelativeConfigHome(t *testing.T) {
 	if _, err := signingKey(&config.Forager{}, nil); !errors.Is(err, config.ErrRelativeConfigHome) {
 		t.Errorf("signingKey: %v", err)
 	}
-	if err := userHome(places{}, config.Defaults()); !errors.Is(err, config.ErrRelativeConfigHome) {
+	if err := userHome(places{}, config.Defaults(), false); !errors.Is(err, config.ErrRelativeConfigHome) {
 		t.Errorf("userHome: %v", err)
 	}
 }

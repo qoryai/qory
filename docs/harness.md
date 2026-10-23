@@ -100,6 +100,21 @@ A runner may already have the stack tree. It selects the base with
 `qory harness compose -f <stack>` instead. The repository's file then contains no
 version, ref or URL of it.
 
+`-f` also takes a stack by reference: a folder of a git repository at a ref, written
+`<https URL>#<ref>:<folder>`. The folder contains the `qory-stack.yaml`, and is a path
+from the repository's root; `.` is the root:
+
+```sh
+qory harness compose -f https://github.com/acme/harness#v2.4.0:stacks/nextjs
+```
+
+The compose fetches the folder as it fetches a git module, then reads its
+`qory-stack.yaml` as if `-f` selected that file on your machine. Each module the stack
+lists by a path, or by a name alone, is read from the same repository at the same commit,
+and the report records it as a git source. A module path outside the repository stops the
+compose. The URL is https only, and the ref and the folder are required. A folder that is
+absolute, has a `..` segment or is not in the repository stops the compose with exit 2.
+
 Under `extends`, the compose reads the repository's file for its document and its
 `worktree` keys. Its `git` and `env` keys and its machine keys under `harness`, such as
 `model` or `force`, are left out: your `qory.yaml` and the files above the checkout
@@ -182,6 +197,9 @@ runtime.
 
 Most of the home is symlinks to files in modules: every skill, agent, command and hook.
 A home outside the checkout contains copies instead for a module that lies in the checkout.
+The home of a walled run contains copies for every module, of the files the stack selects.
+The home of a run whose documents set `harness_hidden: true` contains copies for every
+module too, and no link: see [A hidden harness](run.md#a-hidden-harness).
 
 Beside the links are generated copies. Each is joined from the modules' fragments:
 
@@ -237,6 +255,13 @@ So a tracked `harness/` directory is no collision. A pull is an ordinary pull.
 
 `--home <dir>` defines the directory. So does `harness.home` in your `qory.yaml`.
 Every checkout and worktree gets a separate home under it.
+A run with a run key composes into such a home when neither sets one, under
+`qory/homes` in your cache directory, and stops on a home inside the folder it runs in:
+see [Running a session](run.md#what-qory-run-does).
+
+A folder that is not a git working tree composes only with such a home, named after the
+folder. If the home is inside such a folder, `qory harness compose` stops with exit 2. Run
+`git init` in the folder, or set `--home` or `harness.home` outside it.
 
 Each tool takes such a home from its command line or environment.
 `qory harness launch` prints the command:
@@ -318,20 +343,26 @@ uses it to build its first prompt from an entry point, such as `/harness:impleme
 | ------------------------------- | -------------------------------------------------------------------------------------------- |
 | `-f <stack>`                    | Compose this `qory-stack.yaml`, `qory.yaml` or `harness.yaml` instead of the one found.      |
 |                                 | When the checkout's document extends a stack, this one is its base.                          |
+|                                 | `-f <https URL>#<ref>:<folder>` composes the stack in that folder of a git repository.       |
 | `--dry-run`                     | Print the report. Write nothing.                                                             |
 | `--runtime claude,codex`        | Render for these runtimes instead of the document's.                                         |
 | `--model opus`                  | Write this model instead of the document's.                                                  |
+| `--effort high`                 | Run the main agent at this effort value. The runtime's descriptor lists its place and the    |
+|                                 | values it takes: for claude, `--effort` with `low`, `medium`, `high`, `xhigh` or `max`.      |
 | `--tier light=claude-haiku-5-5` | Give agents whose model is `${qory:light}` this model. Repeat it for each tier.              |
+| `--tier-effort light=low`       | Give agents whose model is `${qory:light}` this effort value, beside `--tier light=<model id>`. |
+|                                 | Repeat it for each tier.                                                                     |
 | `--force`                       | Replace a tracked, unmodified file where a link goes. `git checkout --` restores it.         |
 | `--update`                      | Re-fetch every git source, tags included.                                                    |
 | `--check`                       | Exit 6 when a file or link of the home, or a variable a launch sets, differs from the stack, |
 |                                 | the modules and `qory.yaml`. Write nothing. The checkout's links and the rest of the report  |
 |                                 | are not compared.                                                                            |
 | `--home <dir>`                  | Compose under a directory outside the checkout. Write nothing into the checkout.             |
-| `--no-links`                    | Write no link and no exclude line into the checkout. The tree goes under `.qory`.            |
+| `--no-links`                    | Write no link into the checkout. With the home at `.qory/harness`, compose still writes      |
+|                                 | the `/.qory` exclude line.                                                                   |
 
-`--force`, `--update` and `--no-links` have keys in `qory.yaml` too: `force`, `update` and
-`harness.links: none`.
+`--effort`, `--force`, `--update` and `--no-links` have keys in `qory.yaml` too:
+`harness.effort`, `force`, `update` and `harness.links: none`.
 
 A link never takes the place of a path `qory` did not write unless you say so. The
 compose stops, names the path, and says whether `--force` replaces it:
@@ -350,6 +381,8 @@ files.
 ## Tiers
 
 An agent in a module sets `model: ${qory:light}`, `${qory:fast}` or `${qory:thinking}` in place of a model id. You map each tier to a model id with `--tier`, `harness.tiers` in your `qory.yaml`, or `harness.tiers` in the repository's `qory.yaml`, in that order of precedence. A tier with no map leaves the agent on the main model.
+
+A tier's entry may also set an effort value: `{model: claude-opus-5-5, effort: max}` in `harness.tiers`, or `--tier thinking=claude-opus-5-5 --tier-effort thinking=max` on the command line. The entry comes whole from one of the three places, so `--tier-effort` needs `--tier` for the same tier. An agent whose entry sets no effort keeps the effort its file sets.
 
 ## Removing the harness
 

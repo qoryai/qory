@@ -187,9 +187,9 @@ func TestALinkOutOfTheModuleWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 	target := filepath.Join(outside, "qrk_out")
 	shownTarget := filepath.Join(outside, runKeyPhrase)
 	for _, c := range []struct{ link, to, want string }{
-		{"skills/qak_s", target, "skills/" + accessKeyPhrase + " links to " + shownTarget + ", outside the module"},
-		{"skills/s/qak_f", filepath.Join(target, "f.json"), "skills/s/" + accessKeyPhrase + " links to " + filepath.Join(shownTarget, "f.json") + ", outside the module"},
-		{"settings/qak_rt/f.json", filepath.Join(target, "f.json"), "settings/" + accessKeyPhrase + "/f.json links to " + filepath.Join(shownTarget, "f.json") + ", outside the module"},
+		{"skills/qak_s", target, "Remove the link skills/" + accessKeyPhrase + " or point it inside the module. It links to " + shownTarget + ", outside the module, and qory reads only the module's files."},
+		{"skills/s/qak_f", filepath.Join(target, "f.json"), "Remove the link skills/s/" + accessKeyPhrase + " or point it inside the module. It links to " + filepath.Join(shownTarget, "f.json") + ", outside the module, and qory reads only the module's files."},
+		{"settings/qak_rt/f.json", filepath.Join(target, "f.json"), "Remove the link settings/" + accessKeyPhrase + "/f.json or point it inside the module. It links to " + filepath.Join(shownTarget, "f.json") + ", outside the module, and qory reads only the module's files."},
 	} {
 		dir := tree(t, map[string]string{"skills/s/SKILL.md": "x\n"})
 		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, c.link)), 0o755); err != nil {

@@ -55,9 +55,9 @@ func TestSeedRunsTheCommandsAndStoresTheTree(t *testing.T) {
 		t.Fatalf("Seed: %v\n%s", err, log.String())
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 3 || !strings.HasPrefix(lines[0], "qory run prebuild: ran onCreateCommand in ") ||
-		!strings.HasPrefix(lines[1], "qory run prebuild: ran updateContentCommand in ") ||
-		!strings.HasPrefix(lines[2], "qory run prebuild: moved /workspace to /qory/seed in ") {
+	if len(lines) != 3 || !strings.HasPrefix(lines[0], "prebuild: ran onCreateCommand in ") ||
+		!strings.HasPrefix(lines[1], "prebuild: ran updateContentCommand in ") ||
+		!strings.HasPrefix(lines[2], "prebuild: moved /workspace to /qory/seed in ") {
 		t.Errorf("printed\n%s", out.String())
 	}
 	if entries, _ := os.ReadDir(p.Workspace); len(entries) != 0 {
@@ -103,7 +103,7 @@ func TestSeedSaysWhatIsNotSet(t *testing.T) {
 	if err := prebuild.Seed(t.Context(), p, nil, &out, &bytes.Buffer{}); err != nil {
 		t.Fatalf("Seed: %v", err)
 	}
-	want := "qory run prebuild: onCreateCommand is not set; nothing to run\nqory run prebuild: updateContentCommand is not set; nothing to run\n"
+	want := "prebuild: onCreateCommand is not set; nothing to run\nprebuild: updateContentCommand is not set; nothing to run\n"
 	if !strings.HasPrefix(out.String(), want) {
 		t.Errorf("printed\n%s", out.String())
 	}
@@ -243,7 +243,7 @@ func TestSeedRunsWithTheImagesHome(t *testing.T) {
 		if err := prebuild.Seed(t.Context(), p, []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home}, &out, &bytes.Buffer{}); err != nil {
 			t.Fatalf("Seed: %v", err)
 		}
-		want := "qory run prebuild: HOME, " + home + ", is not a folder the wall user writes in; the commands run with it all the same\n"
+		want := "prebuild: HOME, " + home + ", is not a folder the wall user writes in; the commands run with it all the same\n"
 		if !strings.HasPrefix(out.String(), want) {
 			t.Errorf("printed\n%s\nwant first\n%s", out.String(), want)
 		}
@@ -271,7 +271,7 @@ func TestSeedRunsWithTheConfigurationsHome(t *testing.T) {
 		if err := prebuild.Seed(t.Context(), p, []string{"PATH=" + os.Getenv("PATH"), "HOME=" + open}, &out, &bytes.Buffer{}); err != nil {
 			t.Fatalf("Seed: %v", err)
 		}
-		want := "qory run prebuild: HOME, " + locked + ", is not a folder the wall user writes in; the commands run with it all the same\n"
+		want := "prebuild: HOME, " + locked + ", is not a folder the wall user writes in; the commands run with it all the same\n"
 		if !strings.HasPrefix(out.String(), want) {
 			t.Errorf("printed\n%s", out.String())
 		}

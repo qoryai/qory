@@ -20,10 +20,7 @@ import (
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/foragerdir"
-	"github.com/qoryai/qory/internal/module"
 	"github.com/qoryai/qory/internal/pool"
-	"github.com/qoryai/qory/internal/pool/explore"
-	"github.com/qoryai/qory/internal/pool/prebuild"
 	"github.com/qoryai/qory/internal/provisioner"
 )
 
@@ -43,10 +40,6 @@ const (
 // poolSampleDigest is a digest of the right shape, after a name under pool.registry: the
 // reference wall.images_allow is checked against.
 const poolSampleDigest = "@sha256:0000000000000000000000000000000000000000000000000000000000000000"
-
-// exploreModule is the module of the harness each run of the pool composes, by its path
-// in a checkout of qory-github.
-var exploreModule = filepath.Join("harness", "explore-an-item")
 
 // poolSettings is what qory run pool runs by, read and checked before the first claim.
 type poolSettings struct {
@@ -77,10 +70,17 @@ func newPool() *cobra.Command {
 		Use:   "pool",
 		Short: "Claim this pool's runs from Qory Apiary and run them on this machine",
 		Long: `Run this machine as a node pool's program, until it is stopped. It claims the pool's
-runs from Qory Apiary with the pool's access key, starts each with qory run in a container,
-and says how each ended. The pool section of forager.yaml sets it: runs, prebuilds,
-registry, harness_ref or harness_path, run_config. SIGINT or SIGTERM stops it: it claims no
-new run, stops the runs it started, and exits 0.`,
+dispatches from Qory Apiary with the pool's access key, and starts each with the command
+that runs on a machine a provisioner creates: qory run --run-code-file /dev/fd/3
+--gateway <gateway_url>, with the run code in a file that no name links to. The pool's
+access key does not reach the run, and each run reports its outcome to Qory Apiary.
+While a run runs, the pool sends dispatched every 60 s. It stops the run when Qory
+Apiary ends the dispatch or the claim's max_lifetime_minutes pass. Once the run ends,
+the pool uploads the run's output as the dispatch's machine log: at most the last
+768 KiB, with each line that contains qak_, qrk_ or qecr_ replaced. It releases a claim
+that sets a machine type, and a claim it could not start.
+The pool section of forager.yaml sets it: runs, registry, run_config. SIGINT or SIGTERM
+stops it: it claims no new run, stops the runs it started, and exits 0.`,
 		Hidden: true,
 		Args:   noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -123,8 +123,7 @@ new run, stops the runs it started, and exits 0.`,
 }
 
 // loadPool reads forager.yaml, which must define a server and a pool section, and checks
-// what the pool section names: harness_path, when it is set, a folder that holds the
-// explore-an-item module, and run_config a directory a run given a run key starts with,
+// the pool section's run_config: a directory a run given a run key starts with,
 // as [behindGateway] has it: its qory folder holds no access key, and its forager.yaml,
 // which is read, has no gateway section, and has a wall section whose wall.image is pinned
 // by its digest and whose wall.images_allow covers the images the builds push under
@@ -145,15 +144,6 @@ func loadPool() (*poolSettings, error) {
 		return nil, input(fmt.Errorf("%s has no pool section", r.File))
 	}
 	p := r.Pool
-	if p.HarnessPath != "" {
-		if info, err := os.Stat(p.HarnessPath); err != nil || !info.IsDir() {
-			return nil, input(fmt.Errorf("%s: pool.harness_path is %s, which is not a folder", r.File, p.HarnessPath))
-		}
-		manifest := filepath.Join(exploreModule, module.ManifestName)
-		if info, err := os.Stat(filepath.Join(p.HarnessPath, manifest)); err != nil || !info.Mode().IsRegular() {
-			return nil, input(fmt.Errorf("%s: pool.harness_path is %s, which holds no %s", r.File, p.HarnessPath, filepath.ToSlash(manifest)))
-		}
-	}
 	if info, err := os.Stat(p.RunConfig); err != nil || !info.IsDir() {
 		return nil, input(fmt.Errorf("%s: pool.run_config is %s, which is not a folder", r.File, p.RunConfig))
 	}
@@ -255,10 +245,8 @@ var startPool = runPool
 // under pin, while the caller holds the pool's lock, with core dumps off: it runs
 // [pool.Pool] until ctx ends or SIGINT or SIGTERM stops it, and returns nil once every
 // dispatch ended; its error is printed as [exports.HideError] prints it. A second signal
-// exits at once. Its lines go to s.Stderr; each run's commands get the runs'
-// configuration directory, and their run directories are under qory's state directory,
-// beside the pool's folder. A build pushes under pool.registry, with the agent's image,
-// the user and the helper of the runs' wall section, which [loadPool] checked is there.
+// exits at once. Its lines go to s.Stderr; each qory run gets the runs' configuration
+// directory, and its folder is under the pool's folder.
 func runPool(ctx context.Context, s *poolSettings, key *accesskey.Key, pin accesskey.Pin) error {
 	ctx, stop := pool.OnSignals(ctx, exitNow)
 	defer stop()
@@ -271,28 +259,13 @@ func runPool(ctx context.Context, s *poolSettings, key *accesskey.Key, pin acces
 }
 
 // poolLoop is the loop [runPool] runs with s, key and pin, logging to log: it reaches the
-// server directly for every call, the claims and the outcomes alike.
+// server directly for every call. Each qory run it starts is this binary.
 func poolLoop(s *poolSettings, key *accesskey.Key, pin accesskey.Pin, log *slog.Logger) *pool.Pool {
-	lines := func(line string) { log.Info(line) }
-	build := prebuild.Launcher(prebuild.Settings{
-		State: filepath.Dir(s.State), RunConfig: s.Pool.RunConfig, Registry: s.Pool.Registry,
-		AgentImage: s.Runs.Wall.Image, User: s.Runs.Wall.User, Helper: s.Runs.Wall.Helper, Log: lines,
-	})
 	return &pool.Pool{
-		Settings: pool.Settings{
-			Runs: s.Pool.Runs, Prebuilds: s.Pool.Prebuilds, State: s.State,
-			Explore: explore.Settings{
-				State: filepath.Dir(s.State), HarnessRef: s.Pool.HarnessRef, HarnessPath: s.Pool.HarnessPath,
-				RunConfig: s.Pool.RunConfig, Log: lines,
-			},
-		},
+		Settings: pool.Settings{Runs: s.Pool.Runs, State: s.State, RunConfig: s.Pool.RunConfig},
 		Client: &provisioner.Client{
 			URL: strings.TrimSuffix(s.Forager.Server.URL, "/"), KeyID: s.Forager.Server.AccessKeyID, Key: key, Pin: pin,
 			InstanceID: s.InstanceID, UserAgent: userAgent(), Log: log,
-		},
-		Outcomes: poolServerClient(s.Forager, key, s.InstanceID, s.InstanceName),
-		Prebuild: func(ctx context.Context, d pool.Prebuild) explore.Ending {
-			return build(ctx, d.RunID, d.Target, d.Key, d.Inputs, d.Report)
 		},
 		Log: log,
 	}

@@ -1,7 +1,6 @@
 package preparation
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
@@ -20,20 +19,20 @@ const valuePhrase = "(a value that contains an access key secret)"
 // (hidden) in place of a URL's password.
 func TestARepositoryWithASecretIsNotPrinted(t *testing.T) {
 	_, err := Check("git.example", "o/"+secret+",o/"+secret)
-	if want := "qory run prepare: " + EnvRepositories + " names " + valuePhrase + " twice"; err == nil || err.Error() != want {
+	if want := "qory run: list " + valuePhrase + " once in " + EnvRepositories + ", which lists it twice"; err == nil || err.Error() != want {
 		t.Errorf("twice: %v, want %q", err, want)
 	}
 	_, err = Check("github.com", "o/a,"+secret+"/b")
-	if err == nil || strings.Contains(err.Error(), secret) || !strings.Contains(err.Error(), "is of owner "+valuePhrase+", not o;") {
+	if err == nil || strings.Contains(err.Error(), secret) || !strings.Contains(err.Error(), "only repositories of owner o: entry 2 is of owner "+valuePhrase+",") {
 		t.Errorf("other owner: %v", err)
 	}
-	err = notFetched("o/"+secret, "git.example", errors.New("fatal: repository 'https://u:token-123@git.example/o/"+secret+"/' not found"))
-	want := "qory run prepare: " + valuePhrase + " could not be fetched from git.example: fatal: repository " + valuePhrase + " not found"
+	err = notFetched("o/"+secret, "git.example", &gitError{"fatal: repository 'https://u:token-123@git.example/o/" + secret + "/' not found", 128})
+	want := "qory run: add a credential for git.example that reads " + valuePhrase + " to the run configuration, then run again. The fetch of " + valuePhrase + " through the run's gateway failed: fatal: repository " + valuePhrase + " not found"
 	if err == nil || err.Error() != want {
 		t.Errorf("not fetched: %v\nwant %q", err, want)
 	}
-	err = notFetched("o/a", "git.example", errors.New("fatal: repository 'https://u:token-123@git.example/o/a/' not found"))
-	if want := "qory run prepare: o/a could not be fetched from git.example: fatal: repository 'https://u:(hidden)@git.example/o/a/' not found"; err == nil || err.Error() != want {
+	err = notFetched("o/a", "git.example", &gitError{"fatal: repository 'https://u:token-123@git.example/o/a/' not found", 128})
+	if want := "qory run: add a credential for git.example that reads o/a to the run configuration, then run again. The fetch of o/a through the run's gateway failed: fatal: repository 'https://u:(hidden)@git.example/o/a/' not found"; err == nil || err.Error() != want {
 		t.Errorf("not fetched: %v\nwant %q", err, want)
 	}
 }

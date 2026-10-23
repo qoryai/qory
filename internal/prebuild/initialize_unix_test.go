@@ -16,7 +16,7 @@ import (
 )
 
 // initializeLine is the line that says initializeCommand is not run.
-const initializeLine = "qory run prebuild: initializeCommand is not run; the image is built without it\n"
+const initializeLine = "prebuild: initializeCommand is not run; the image is built without it\n"
 
 // configArg is the --config of the devcontainer command line that starts with verb.
 func configArg(t *testing.T, f fakes, verb string) string {
@@ -69,7 +69,7 @@ func TestBuildIgnoresInitializeCommand(t *testing.T) {
 			}
 			var out bytes.Buffer
 			o := options(t, repo, &out, io.Discard)
-			if err := prebuild.Build(t.Context(), o); err != nil {
+			if _, err := prebuild.Build(t.Context(), o); err != nil {
 				t.Fatalf("Build: %v\n%s", err, out.String())
 			}
 			if strings.Count(out.String(), initializeLine) != 1 {
@@ -127,7 +127,7 @@ func TestBuildWithoutInitializeCommand(t *testing.T) {
 	f := newFakes(t)
 	var out bytes.Buffer
 	repo := repository(t, shopConfig)
-	if err := prebuild.Build(t.Context(), options(t, repo, &out, io.Discard)); err != nil {
+	if _, err := prebuild.Build(t.Context(), options(t, repo, &out, io.Discard)); err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 	original := filepath.Join(repo, ".devcontainer", "devcontainer.json")
@@ -147,7 +147,7 @@ func TestBuildIgnoresInitializeCommandOfTheMergedConfiguration(t *testing.T) {
 	f := newFakes(t)
 	f.set(t, "merged", `{"initializeCommand":"touch /tmp/qory-test-host"}`)
 	var out bytes.Buffer
-	if err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), &out, io.Discard)); err != nil {
+	if _, err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), &out, io.Discard)); err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 	if strings.Count(out.String(), initializeLine) != 1 {

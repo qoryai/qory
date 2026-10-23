@@ -356,7 +356,7 @@ func TestADecoderRefusalWithASecretKeepsTheOtherReasons(t *testing.T) {
 	path := filepath.Join(root, "harness.yaml")
 	writeRaw(t, path, "harness:\n  model: [x]\n  force: qak_x\n")
 	_, err := config.Document(root)
-	if want := path + ": yaml: unmarshal errors:\n  line 2: cannot unmarshal !!seq into string\n  line 3: qory cannot read the value here. The YAML decoder's message contains an access key secret or a run key, so qory does not print it."; err == nil || err.Error() != want {
+	if want := path + ": yaml: unmarshal errors:\n  line 2: cannot unmarshal !!seq into string\n  line 3: qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key or a run code, so qory does not print it."; err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}
 }
@@ -379,7 +379,7 @@ func TestARefusalIsPlacedByTheLineAtItsStart(t *testing.T) {
 	path := filepath.Join(root, "harness.yaml")
 	writeRaw(t, path, "harness:\n  force: !line%2099:%20field%20qak_x 1\n")
 	_, err := config.Document(root)
-	want := path + ": line 2: qory cannot read the value here. The YAML decoder's message contains an access key secret or a run key, so qory does not print it."
+	want := path + ": line 2: qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key or a run code, so qory does not print it."
 	if err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}

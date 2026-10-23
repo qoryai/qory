@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -21,60 +22,69 @@ import (
 	"testing"
 	"time"
 
-	"github.com/qoryai/forager/accesskey"
-	"github.com/qoryai/forager/server"
 	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/internal/pool"
 	"github.com/qoryai/qory/internal/pool/child"
-	"github.com/qoryai/qory/internal/pool/explore"
-	"github.com/qoryai/qory/internal/provisioner"
 	"github.com/qoryai/qory/internal/provisioner/provisionertest"
 )
 
 // The fake qory's script and reports are in the runs' configuration directory, the one
-// folder of the test's its allow-listed environment names.
-const (
-	scriptFile = "fake.json"
-	readyFile  = "ready"
-)
+// folder of the test's that its allow-listed environment contains.
+const scriptFile = "fake.json"
 
 // script is what the fake qory run does.
 type script struct {
-	// RunID is the run whose record qory run makes, with Record.
-	RunID string
-	// KeySum is the SHA-256 of the key qory run expects on descriptor 3.
-	KeySum string
-	Exit   int
-	Record bool
-	// Mode "block" waits for SIGTERM and exits 1, as qory run does.
-	Mode string
+	// Exit is the status it exits with.
+	Exit int
+	// Block makes it wait, once it wrote ready-<dispatch id>, for SIGTERM, then exit 1,
+	// as qory run does, or for the file go-<dispatch id>, then exit Exit.
+	Block bool
+	// Quiet makes it print nothing. Otherwise it prints hello, the run code it read,
+	// each line of Say with each ~ printed as _, so the script's file contains no
+	// secret's start, then the lines of [bulkOutput] Bulk.
+	Quiet bool
+	Say   []string
+	Bulk  int
 }
 
-// report is what the fake qory saw, written to report-<verb>.json.
+// bulkOutput is n lines of 100 characters and a line feed each, numbered from 0, then
+// the line "last line".
+func bulkOutput(n int) string {
+	var b strings.Builder
+	for i := range n {
+		fmt.Fprintf(&b, "line %06d %s\n", i, strings.Repeat("x", 88))
+	}
+	b.WriteString("last line\n")
+	return b.String()
+}
+
+// report is what the fake qory saw, written to report-<dispatch id>.json. It contains
+// the SHA-256 of the run code, never the code.
 type report struct {
-	Env   []string
-	Args  []string
-	KeyOK bool
+	Env  []string
+	Args []string
+	Dir  string
+	// DirEntries is how many entries its folder had when it started.
+	DirEntries int
+	// FD3File reports whether descriptor 3 was a regular file, mode 0600, that no name
+	// links to, open for reading alone.
+	FD3File bool
+	CodeSum string
 }
 
 func TestMain(m *testing.M) {
-	if len(os.Args) > 2 && os.Args[1] == "init" {
-		if err := os.MkdirAll(filepath.Join(os.Args[len(os.Args)-1], ".git"), 0o700); err != nil {
-			os.Exit(96)
-		}
-		os.Exit(0)
-	}
-	if len(os.Args) > 1 && (os.Args[1] == "harness" || os.Args[1] == "run") {
+	if len(os.Args) > 1 && os.Args[1] == "run" {
 		os.Exit(fakeQory())
 	}
 	os.Exit(m.Run())
 }
 
-// fakeQory is qory harness compose or qory run, as the script in $XDG_CONFIG_HOME says.
+// fakeQory is qory run, as the script in $XDG_CONFIG_HOME sets it. It prints the run
+// code it read, which the pool's log must leave out.
 func fakeQory() int {
 	var st syscall.Stat_t
-	fd3 := syscall.Fstat(child.KeyFD, &st) == nil && st.Mode&syscall.S_IFMT == syscall.S_IFIFO
+	fd3 := syscall.Fstat(child.KeyFD, &st) == nil && st.Mode&syscall.S_IFMT == syscall.S_IFREG && st.Nlink == 0 && st.Mode&0o777 == 0o600
 	config := os.Getenv("XDG_CONFIG_HOME")
 	b, err := os.ReadFile(filepath.Join(config, scriptFile))
 	if err != nil {
@@ -84,41 +94,48 @@ func fakeQory() int {
 	if err := json.Unmarshal(b, &s); err != nil {
 		return 91
 	}
-	verb := os.Args[1]
-	rep := report{Env: os.Environ(), Args: os.Args[1:]}
-	if verb == "harness" {
-		if i := slices.Index(os.Args, "--home"); i > 0 {
-			_ = os.MkdirAll(filepath.Join(os.Args[i+1], "claude"), 0o700)
-		}
-	} else {
-		if fd3 {
-			k, _ := io.ReadAll(os.NewFile(uintptr(child.KeyFD), "key"))
-			rep.KeyOK = sum(k) == s.KeySum
-		}
-		if s.Record {
-			cwd, _ := os.Getwd()
-			real, _ := filepath.EvalSymlinks(cwd)
-			record := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runs", filepath.Base(real)+"-"+sum([]byte(real))[:12], s.RunID)
-			if err := os.MkdirAll(record, 0o700); err != nil {
-				return 94
-			}
-		}
+	cwd, _ := os.Getwd()
+	entries, _ := os.ReadDir(cwd)
+	id := filepath.Base(filepath.Dir(cwd))
+	rep := report{Env: os.Environ(), Args: os.Args[1:], Dir: cwd, DirEntries: len(entries)}
+	var code []byte
+	if fd3 {
+		f := os.NewFile(uintptr(child.KeyFD), "code")
+		_, werr := f.Write([]byte("x"))
+		code, _ = io.ReadAll(f)
+		rep.FD3File = werr != nil
+		rep.CodeSum = sum(code)
 	}
 	out, _ := json.Marshal(rep)
-	if err := os.WriteFile(filepath.Join(config, "report-"+verb+".json"), out, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(config, "report-"+id+".json"), out, 0o600); err != nil {
 		return 92
 	}
-	if verb == "run" && s.Mode == "block" {
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, syscall.SIGTERM)
-		_ = os.WriteFile(filepath.Join(config, readyFile), nil, 0o600)
-		<-c
-		return 1
+	if !s.Quiet {
+		fmt.Println("hello")
+		fmt.Println("redeeming " + string(code))
+		for _, line := range s.Say {
+			fmt.Println(strings.ReplaceAll(line, "~", "_"))
+		}
+		if s.Bulk > 0 {
+			fmt.Print(bulkOutput(s.Bulk))
+		}
 	}
-	if verb == "run" {
+	if !s.Block {
 		return s.Exit
 	}
-	return 0
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGTERM)
+	_ = os.WriteFile(filepath.Join(config, "ready-"+id), nil, 0o600)
+	for {
+		select {
+		case <-c:
+			return 1
+		case <-time.After(10 * time.Millisecond):
+		}
+		if _, err := os.Stat(filepath.Join(config, "go-"+id)); err == nil {
+			return s.Exit
+		}
+	}
 }
 
 // sum is the SHA-256 of b, in hex.
@@ -163,7 +180,7 @@ func (l *lines) all() []map[string]any {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	var out []map[string]any
-	for _, line := range strings.Split(strings.TrimSpace(l.buf.String()), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(l.buf.String()), "\n") {
 		var m map[string]any
 		if json.Unmarshal([]byte(line), &m) == nil {
 			out = append(out, m)
@@ -205,12 +222,10 @@ func newGate() *gate { return &gate{hold: map[string]chan struct{}{}, reached: m
 // go.
 func (g *gate) holdNext(suffix string) (release func()) {
 	ch := make(chan struct{})
-	g.mu.Lock()
-	g.hold[suffix] = ch
-	g.mu.Unlock()
 	var once sync.Once
 	let := func() { once.Do(func() { close(ch) }) }
 	g.mu.Lock()
+	g.hold[suffix] = ch
 	g.held = append(g.held, let)
 	g.mu.Unlock()
 	return let
@@ -262,34 +277,36 @@ func (g *gate) RoundTrip(r *http.Request) (*http.Response, error) {
 	return http.DefaultTransport.RoundTrip(r)
 }
 
-// launch is one explore run the fake launcher was given: its id, the SHA-256 of its
-// key, and whether its holder was cleared once it returned.
-type launch struct {
-	RunID   string
-	KeySum  string
-	Inputs  string
-	Cleared bool
-}
+// The pool's waits that the harness keeps waiting until the test lets one go: the
+// heartbeat's, and the claim's max_lifetime_minutes of
+// [provisionertest.MaxLifetimeMinutes].
+const (
+	heartbeat = 60 * time.Second
+	lifetime  = provisionertest.MaxLifetimeMinutes * time.Minute
+)
 
 // harness is one pool and its world: the fake Qory Apiary, the clock, the gate, the
-// log, and a fake launcher of explore runs whose Ending the test sets.
+// log, and the fake qory run, the test binary, whose script the test sets.
 type harness struct {
-	t     *testing.T
-	srv   *provisionertest.Server
-	clk   *clock
-	gate  *gate
-	log   *lines
-	root  string
-	pool  *pool.Pool
-	state string
+	t         *testing.T
+	srv       *provisionertest.Server
+	clk       *clock
+	gate      *gate
+	log       *lines
+	root      string
+	pool      *pool.Pool
+	state     string
+	runConfig string
 
-	mu       sync.Mutex
-	waits    []time.Duration
-	launches []launch
-	// onLaunch, when set, is what the fake launcher does once it took the key: it
-	// returns the run's Result and error. Unset, the run succeeds.
-	onLaunch func(ctx context.Context, r explore.Run) (explore.Result, error)
-	// onSleep, when set, is the pool's wait, after the clock moved on.
+	// beats lets one wait of a heartbeat go, and lifetimes one wait of the lifetime.
+	// With freeBeats, a wait of a minute goes at once, as the claim's back-off is.
+	beats, lifetimes chan struct{}
+	freeBeats        bool
+
+	mu    sync.Mutex
+	waits []time.Duration
+	// onSleep, when set, is the pool's wait of any other length, after the clock moved
+	// on.
 	onSleep func(ctx context.Context, d time.Duration) error
 
 	cancel context.CancelFunc
@@ -297,16 +314,20 @@ type harness struct {
 	runErr error
 }
 
-// newHarness is a pool of runs runs and prebuilds builds, not started.
-func newHarness(t *testing.T, runs, prebuilds int) *harness {
+// newHarness is a pool of runs runs, not started, whose fake qory exits 0.
+func newHarness(t *testing.T, runs int) *harness {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &harness{t: t, srv: provisionertest.New(t), clk: &clock{}, gate: newGate(), log: &lines{}, root: root}
+	h := &harness{
+		t: t, srv: provisionertest.New(t), clk: &clock{}, gate: newGate(), log: &lines{}, root: root,
+		beats: make(chan struct{}), lifetimes: make(chan struct{}),
+	}
 	h.srv.Now = h.clk.Now
 	h.state = filepath.Join(root, "qory", "pool")
+	h.runConfig = filepath.Join(root, "runconfig")
 	c := h.srv.Client()
 	c.Now = h.clk.Now
 	c.Sleep = func(ctx context.Context, d time.Duration) error {
@@ -320,70 +341,58 @@ func newHarness(t *testing.T, runs, prebuilds int) *harness {
 	log := slog.New(slog.NewJSONHandler(h.log, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	c.Log = log
 	h.pool = &pool.Pool{
-		Settings: pool.Settings{
-			Runs: runs, Prebuilds: prebuilds, State: h.state,
-			Explore: explore.Settings{State: filepath.Join(root, "qory"), HarnessRef: testRef, RunConfig: filepath.Join(root, "runconfig"), Qory: os.Args[0], Git: os.Args[0], Grace: 2 * time.Second},
-		},
-		Client: c,
-		Outcomes: &server.Client{
-			Config: &server.Config{Version: 1, URL: h.srv.URL, AccessKeyID: provisionertest.KeyID, ApiaryPublicKey: h.srv.Pin()},
-			Key:    h.srv.Pool, InstanceID: provisionertest.InstanceID, UserAgent: "qory-test", HTTP: &http.Client{Transport: h.gate},
-		},
-		Explore: h.explore,
-		Prebuild: func(ctx context.Context, d pool.Prebuild) explore.Ending {
-			d.Key.Clear()
-			return explore.Ending{Post: true, State: explore.StateSucceeded}
-		},
-		Log: log,
-		Now: h.clk.Now,
-		Sleep: func(ctx context.Context, d time.Duration) error {
-			h.mu.Lock()
-			h.waits = append(h.waits, d)
-			sleep := h.onSleep
-			h.mu.Unlock()
-			h.clk.advance(d)
-			if sleep != nil {
-				return sleep(ctx, d)
-			}
-			return ctx.Err()
-		},
+		Settings: pool.Settings{Runs: runs, State: h.state, RunConfig: h.runConfig, Qory: os.Args[0], Grace: 2 * time.Second},
+		Client:   c,
+		Log:      log,
+		Now:      h.clk.Now,
+		Sleep:    h.sleep,
 	}
-	if err := os.MkdirAll(h.pool.Settings.Explore.RunConfig, 0o700); err != nil {
+	if err := os.MkdirAll(h.runConfig, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	h.script(script{})
 	t.Cleanup(func() { h.noLeak() })
 	return h
 }
 
-// explore is the fake launcher: it records the run, makes its run directory, takes the
-// key and runs onLaunch.
-func (h *harness) explore(ctx context.Context, s explore.Settings, r explore.Run) (explore.Result, error) {
-	dir := explore.Dir(s.State, r.RunID)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		h.t.Error(err)
-	}
-	l := launch{RunID: r.RunID, KeySum: sum(r.Key.Bytes()), Inputs: string(r.Inputs)}
+// sleep is the pool's wait: a heartbeat's or the lifetime's waits for the test, any
+// other moves the clock on and returns.
+func (h *harness) sleep(ctx context.Context, d time.Duration) error {
 	h.mu.Lock()
-	on := h.onLaunch
+	h.waits = append(h.waits, d)
+	on, free := h.onSleep, h.freeBeats
 	h.mu.Unlock()
-	res := explore.Result{Dir: dir, Record: true, Ending: explore.EndingOf(true, child.Result{})}
-	var err error
+	var let chan struct{}
+	switch {
+	case d == heartbeat && !free:
+		let = h.beats
+	case d == lifetime:
+		let = h.lifetimes
+	}
+	if let != nil {
+		select {
+		case <-let:
+			h.clk.advance(d)
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	h.clk.advance(d)
 	if on != nil {
-		res, err = on(ctx, r)
+		return on(ctx, d)
 	}
-	r.Key.Clear()
-	l.Cleared = len(r.Key.Bytes()) == 0
-	h.mu.Lock()
-	h.launches = append(h.launches, l)
-	h.mu.Unlock()
-	return res, err
+	return ctx.Err()
 }
 
-// setLaunch sets onLaunch.
-func (h *harness) setLaunch(f func(ctx context.Context, r explore.Run) (explore.Result, error)) {
-	h.mu.Lock()
-	h.onLaunch = f
-	h.mu.Unlock()
+// beat lets one heartbeat's wait go, once the pool waits on one.
+func (h *harness) beat() {
+	h.t.Helper()
+	select {
+	case h.beats <- struct{}{}:
+	case <-time.After(20 * time.Second):
+		h.t.Fatal("the pool sent no heartbeat")
+	}
 }
 
 // setSleep sets onSleep.
@@ -393,11 +402,45 @@ func (h *harness) setSleep(f func(ctx context.Context, d time.Duration) error) {
 	h.mu.Unlock()
 }
 
-// ending is a fake launcher that ends the run with record and r.
-func ending(record bool, r child.Result, err error) func(context.Context, explore.Run) (explore.Result, error) {
-	return func(context.Context, explore.Run) (explore.Result, error) {
-		return explore.Result{Record: record, Run: r, Ending: explore.EndingOf(record, r)}, err
+// script sets what the fake qory run does.
+func (h *harness) script(s script) {
+	h.t.Helper()
+	b, _ := json.Marshal(s)
+	if err := os.WriteFile(filepath.Join(h.runConfig, scriptFile), b, 0o600); err != nil {
+		h.t.Fatal(err)
 	}
+}
+
+// ready waits until the fake qory run of the dispatch id blocks.
+func (h *harness) ready(id string) {
+	h.t.Helper()
+	h.waitFor("qory run of "+id, func() bool {
+		_, err := os.Stat(filepath.Join(h.runConfig, "ready-"+id))
+		return err == nil
+	})
+}
+
+// letGo ends the blocked fake qory run of the dispatch id with the script's Exit.
+func (h *harness) letGo(id string) {
+	h.t.Helper()
+	if err := os.WriteFile(filepath.Join(h.runConfig, "go-"+id), nil, 0o600); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+// reportOf is what the fake qory run of the dispatch id saw; ok is false when it did
+// not run.
+func (h *harness) reportOf(id string) (report, bool) {
+	h.t.Helper()
+	b, err := os.ReadFile(filepath.Join(h.runConfig, "report-"+id+".json"))
+	if err != nil {
+		return report{}, false
+	}
+	var r report
+	if err := json.Unmarshal(b, &r); err != nil {
+		h.t.Fatal(err)
+	}
+	return r, true
 }
 
 // start runs the pool until stop.
@@ -433,15 +476,22 @@ func (h *harness) waitFor(what string, cond func() bool) {
 	deadline := time.Now().Add(20 * time.Second)
 	for !cond() {
 		if time.Now().After(deadline) {
-			h.t.Fatalf("%s never happened; the fake was sent %v", what, h.srv.Routes())
+			h.t.Fatalf("%s never happened; the fake was sent %v; the log:\n%s", what, h.srv.Routes(), h.log.text())
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
 }
 
-// settled waits until the fake made n dispatches, each is over, and the journal was
-// written and is empty again. A dispatch is over once the fake ended it or recorded its
-// run's outcome, or the pool logged it dropped, not released or its outcome not posted.
+// overLines are the lines after which the pool does nothing more for a dispatch but
+// take it out of the journal.
+var overLines = []string{
+	"qory run for the dispatch ended", "the run could not be started", "released the run",
+	"the dispatch was over already, so nothing was released", "the run could not be released",
+	"Qory Apiary did not record the run's start",
+}
+
+// settled waits until the fake made n dispatches, the pool logged one of [overLines]
+// for each, and the journal was written and is empty again.
 func (h *harness) settled(n int) {
 	h.t.Helper()
 	h.waitFor("the dispatches' end", func() bool {
@@ -450,7 +500,7 @@ func (h *harness) settled(n int) {
 			return false
 		}
 		for _, d := range ds {
-			if !h.over(d) {
+			if !h.over(d.ID) {
 				return false
 			}
 		}
@@ -459,25 +509,11 @@ func (h *harness) settled(n int) {
 	})
 }
 
-// over reports whether the dispatch d is over, as [harness.settled] says.
-func (h *harness) over(d provisionertest.Dispatch) bool {
-	if d.State == provisionertest.StateEnded {
-		return true
-	}
-	if _, ok := h.outcome(d.Run.RunID); ok {
-		return true
-	}
-	for _, m := range h.log.all() {
-		if m["dispatch_id"] != d.ID {
-			continue
-		}
-		switch m["msg"] {
-		case "the dispatch was over already, so nothing was released", "the handover was refused, so nothing was released", "Qory Apiary did not record the run's start",
-			"the run could not be released", "the run's outcome could not be posted":
-			return true
-		}
-	}
-	return false
+// over reports whether the pool logged one of [overLines] for the dispatch id.
+func (h *harness) over(id string) bool {
+	return slices.ContainsFunc(h.log.all(), func(m map[string]any) bool {
+		return m["dispatch_id"] == id && slices.Contains(overLines, m["msg"].(string))
+	})
 }
 
 // only is the one dispatch the fake made.
@@ -508,15 +544,8 @@ func (h *harness) waitsOf() []time.Duration {
 	return slices.Clone(h.waits)
 }
 
-func (h *harness) launched() []launch {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return slices.Clone(h.launches)
-}
-
-// released checks that the last release sent for the dispatch was for reason with
-// retry.
-func (h *harness) released(d provisionertest.Dispatch, reason string, retry bool) {
+// released checks that the last release sent for the dispatch was for reason.
+func (h *harness) released(d provisionertest.Dispatch, reason string) {
 	h.t.Helper()
 	var rel *contracts.Release
 	for _, c := range h.srv.Calls() {
@@ -528,10 +557,10 @@ func (h *harness) released(d provisionertest.Dispatch, reason string, retry bool
 		}
 	}
 	if rel == nil {
-		h.t.Fatalf("%s was not released; the fake was sent %v", d, h.srv.Routes())
+		h.t.Fatalf("%s was not released; the fake was sent %v", d.ID, h.srv.Routes())
 	}
-	if rel.Reason != reason || rel.Retry != retry {
-		h.t.Errorf("%s was released for %q, retry %v; want %q, retry %v", d, rel.Reason, rel.Retry, reason, retry)
+	if rel.Reason != reason {
+		h.t.Errorf("%s was released for %q, want %q", d.ID, rel.Reason, reason)
 	}
 }
 
@@ -543,18 +572,16 @@ func (h *harness) notReleased() {
 	}
 }
 
-// outcome is the outcome the fake recorded for the run, ok false with none.
-func (h *harness) outcome(runID string) (provisionertest.Outcome, bool) {
-	o, ok := h.srv.Outcomes()[runID]
-	return o, ok
-}
-
-// noLeak fails the test when a run key the fake handed out, the pool's access key
-// secret, or what starts either, is in a log line, Run's error, a file under the
-// test's folders, or a fake qory's arguments or environment.
+// noLeak fails the test when a run code the fake handed out, the pool's access key
+// secret, or what starts any secret, qecr_ among them, is in a log line, Run's error, a
+// file under the test's folders, a fake qory's report: its arguments and environment,
+// or the body of a request the fake got, a machine log among them.
 func (h *harness) noLeak() {
 	t := h.t
 	texts := []string{h.log.text()}
+	for _, c := range h.srv.Calls() {
+		texts = append(texts, string(c.Body))
+	}
 	if h.runErr != nil {
 		texts = append(texts, h.runErr.Error())
 	}
@@ -568,39 +595,32 @@ func (h *harness) noLeak() {
 		}
 		return nil
 	})
-	var keys []string
+	var secrets []string
 	for _, d := range h.srv.Dispatches() {
-		keys = append(keys, d.Run.RunKey)
+		secrets = append(secrets, d.Run.RunCode, d.Run.RunCode[5:20])
 	}
-	keys = append(keys, h.srv.Pool.Secret())
+	secrets = append(secrets, h.srv.Pool.Secret(), h.srv.Pool.Secret()[4:])
 	for _, text := range texts {
-		if accesskey.ContainsSecret(text) {
+		if child.ContainsSecret(text) {
 			t.Errorf("what starts a secret was written: %.300q", text)
 		}
-		for _, k := range keys {
-			if strings.Contains(text, k) || strings.Contains(text, k[4:]) {
+		for _, s := range secrets {
+			if strings.Contains(text, s) {
 				t.Errorf("a secret was written: %.300q", text)
 			}
 		}
 	}
 }
 
-// The test's ids and values.
-const (
-	testRef    = "708c43c0c0ffee0000000000000000000000beef"
-	testKey    = "qrk_eyJ0ZXN0IjoidGhlIHBvb2wncyBsb29wIn0.c2lnbmF0dXJlLW9mLW5vdGhpbmc"
-	runA       = "0192f0c1-7d4e-7a2b-8c3d-00000000000a"
-	runB       = "0192f0c1-7d4e-7a2b-8c3d-00000000000b"
-	runC       = "0192f0c1-7d4e-7a2b-8c3d-00000000000c"
-	otherStep  = "review"
-	retryAfter = "7"
-)
-
-// exploreRun and prebuildRun are a run of each step, of the id.
-func exploreRun(id string) provisionertest.Run {
-	return provisionertest.Run{RunID: id, Step: provisioner.StepExplore}
-}
-
-func prebuildRun(id string) provisionertest.Run {
-	return provisionertest.Run{RunID: id, Step: provisioner.StepPrebuild}
+// journalOf is the journal's lines in the pool's folder state.
+func journalOf(t *testing.T, state string) []string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(state, pool.JournalFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b) == 0 {
+		return nil
+	}
+	return strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")
 }

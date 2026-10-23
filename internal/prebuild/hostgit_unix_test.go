@@ -55,7 +55,7 @@ func TestBuildRunsNoGitFromARecordedPlace(t *testing.T) {
 	withGitConfig(t, repo, "[core]\n\tbare = false\n")
 	o := options(t, repo, io.Discard, io.Discard)
 	gitFirst(&o, place)
-	if err := prebuild.Build(t.Context(), o); err != nil {
+	if _, err := prebuild.Build(t.Context(), o); err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 	if ran(t, place) {
@@ -77,7 +77,7 @@ touch `+dir+`/ran
 	o := options(t, repo, io.Discard, io.Discard)
 	gitFirst(&o, dir)
 	want := "Install git 2.36 or later. qory reads git's worktree list in a form that git 2.34.1 does not print."
-	if err := prebuild.Build(t.Context(), o); err == nil || err.Error() != want {
+	if _, err := prebuild.Build(t.Context(), o); err == nil || err.Error() != want {
 		t.Errorf("Build: %v, want %q", err, want)
 	}
 	if ran(t, dir) {

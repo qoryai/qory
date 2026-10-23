@@ -10,8 +10,10 @@
 //
 // A run key goes to the command through a pipe whose read end is its descriptor 3
 // ([KeyFD]), which qory run reads with --run-key-fd 3. The program writes the key once
-// the command started, closes the write end and clears its copy. The key is never in
-// the command's arguments or environment.
+// the command started, closes the write end and clears its copy. A run code goes to it
+// as a file the caller opened and unlinked, passed as descriptor 3, which qory run
+// reads with --run-code-file /dev/fd/3. Neither is ever in the command's arguments or
+// environment.
 //
 // The command is stopped when the context ends: SIGTERM, then, once the grace has
 // passed, SIGKILL to the command's process group.
@@ -34,16 +36,22 @@ import (
 	"github.com/qoryai/qory/internal/exports"
 )
 
-// KeyFD is the descriptor the command reads the run key from: the first of
-// ExtraFiles, the one after standard error.
+// KeyFD is the descriptor the command reads the run key or the run code from: the
+// first of ExtraFiles, the one after standard error.
 const KeyFD = 3
+
+// ContainsSecret reports whether v contains what starts an access key secret, a run key
+// or a run code: qak_, qrk_ or qecr_, in any case, as [accesskey.ContainsSecret] checks.
+func ContainsSecret(v string) bool {
+	return accesskey.ContainsSecret(v) || strings.Contains(strings.ToLower(v), accesskey.CodePrefixRun)
+}
 
 // DefaultGrace is how long a command has after SIGTERM before it is killed.
 const DefaultGrace = 30 * time.Second
 
-// Secret is the run key as the program holds it: its bytes, and a way to clear them.
-// It is the smallest view of the holder the provisioner client decodes the handover
-// into, defined here so this package needs nothing of that client.
+// Secret is a run key as the program holds it: its bytes, and a way to clear them. It is
+// the smallest view of a key's holder, defined here so this package needs nothing of
+// the program that holds the key.
 type Secret interface {
 	// Bytes is the key, the holder's bytes themselves: no copy is kept of them.
 	Bytes() []byte
@@ -156,7 +164,7 @@ type Command struct {
 	// [Program] has it.
 	Path string
 	// Args are the arguments after the program's name. None of them may contain a
-	// secret, an access key secret or a run key.
+	// secret, as [ContainsSecret] checks.
 	Args []string
 	// Dir is the folder it runs in.
 	Dir string
@@ -171,12 +179,17 @@ type Command struct {
 	// Key, when set, is written to the command's descriptor [KeyFD] and cleared, on
 	// every path. The caller passes --run-key-fd 3 among Args.
 	Key Secret
+	// File, when set and Key is not, is the command's descriptor [KeyFD]: a file the
+	// caller opened for reading. Run closes it on every path.
+	File *os.File
 	// Output takes the command's standard output and error, both. It is a
 	// [LineWriter], which [Run] flushes once the command ended.
 	Output *LineWriter
 	// Grace is how long the command has after SIGTERM before it is killed; zero is
 	// [DefaultGrace].
 	Grace time.Duration
+	// Started, when set, is called once the command started.
+	Started func()
 }
 
 // Result is how a command ended.
@@ -197,9 +210,12 @@ func Run(ctx context.Context, c Command) (Result, error) {
 	if c.Key != nil {
 		defer c.Key.Clear()
 	}
+	if c.File != nil {
+		defer c.File.Close()
+	}
 	for _, a := range c.Args {
-		if accesskey.ContainsSecret(a) {
-			return Result{}, errors.New("an argument of the command holds a secret; a run key goes through its descriptor alone")
+		if ContainsSecret(a) {
+			return Result{}, errors.New("pass a run key or a run code through a descriptor alone: an argument of the command contains a secret")
 		}
 	}
 	if !filepath.IsAbs(c.ConfigHome) {
@@ -245,6 +261,8 @@ func Run(ctx context.Context, c Command) (Result, error) {
 			return Result{}, err
 		}
 		cmd.ExtraFiles = []*os.File{r}
+	} else if c.File != nil {
+		cmd.ExtraFiles = []*os.File{c.File}
 	}
 	if err := ctx.Err(); err != nil {
 		closeAll(r, w)
@@ -253,6 +271,13 @@ func Run(ctx context.Context, c Command) (Result, error) {
 	if err := cmd.Start(); err != nil {
 		closeAll(r, w)
 		return Result{}, err
+	}
+	if c.File != nil {
+		// The command has its copy of the descriptor.
+		c.File.Close()
+	}
+	if c.Started != nil {
+		c.Started()
 	}
 	if c.Key != nil {
 		// The command has its copy of the read end. The key is shorter than a pipe's

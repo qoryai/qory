@@ -553,7 +553,7 @@ func TestEnrolRefusesATamperedAnswer(t *testing.T) {
 	}
 	// Another code: the kept answer is for another enrolment, whose key stays.
 	_, err = run(t, "access-key", "enrol", "--replace", srv.URL, srv.code(2, false))
-	if want := dir.Path(foragerdir.NewSecretFile) + " holds the new key of an enrolment the server answered for another code: run that command again to finish it"; err == nil || err.Error() != want {
+	if want := dir.Path(foragerdir.NewSecretFile) + " holds the new key of an enrolment the server returned for another code: run that command again to finish it"; err == nil || err.Error() != want {
 		t.Errorf("another code: %v, want %q", err, want)
 	}
 	if heldSecret(foragerdir.NewSecretFile) != staged || movedAside(t) != 0 || len(srv.sent()) != 1 {

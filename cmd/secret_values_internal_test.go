@@ -59,16 +59,22 @@ func TestRunFlagsPrintNoSecret(t *testing.T) {
 // second is the error of a call that returns a value and an error.
 func second[T any](_ T, err error) error { return err }
 
-// TestTierRefusalsPrintNoSecret is --tier and --model with values that contain an
+// TestTierRefusalsPrintNoSecret is --tier, --tier-effort and --model with values that contain an
 // access key secret: each refusal prints the value as Forager's phrase.
 func TestTierRefusalsPrintNoSecret(t *testing.T) {
 	value := "(a value that contains an access key secret)"
-	_, err := tierFlags([]string{"qak_light"})
+	_, err := tierFlags([]string{"qak_light"}, nil)
 	wantsText(t, err, "--tier "+value+": write --tier <tier>=<model id>, such as --tier light=claude-haiku-5-5")
-	_, err = tierFlags([]string{"qak_x=m"})
+	_, err = tierFlags([]string{"qak_x=m"}, nil)
 	wantsText(t, err, "--tier "+value+": use one of the tiers light, fast and thinking; (a name that contains an access key secret) is not a tier")
-	_, err = tierFlags([]string{"light=${qory:qak_x}"})
+	_, err = tierFlags([]string{"light=${qory:qak_x}"}, nil)
 	wantsText(t, err, "--tier "+value+": write a model id; "+value+" is a tier placeholder, which goes only in an agent's model")
+	_, err = tierFlags(nil, []string{"qak_light"})
+	wantsText(t, err, "--tier-effort "+value+": write --tier-effort <tier>=<effort>, such as --tier-effort thinking=high")
+	_, err = tierFlags(nil, []string{"qak_x=low"})
+	wantsText(t, err, "--tier-effort "+value+": use one of the tiers light, fast and thinking; (a name that contains an access key secret) is not a tier")
+	_, err = tierFlags(nil, []string{"light=qrk_low"})
+	wantsText(t, err, "--tier-effort (a value that contains a run key): give --tier light=<model id> as well; the effort is for the model that --tier maps the tier to")
 	err = mainModelTier(&stack.Stack{File: "/work/app/qory.yaml"}, config.Config{}, "${qory:qak_x}")
 	wantsText(t, err, "--model "+value+" is a tier placeholder; set the main model by its id, and a tier only in an agent's model")
 }
@@ -97,7 +103,7 @@ func TestFlagsAndLabelsPrintNoSecret(t *testing.T) {
 	if got, want := labelWords(map[string]string{"forge": "git.example", "repository": "acme/qak_app"}), "forge git.example, repository "+value; got != want {
 		t.Errorf("labels %q, want %q", got, want)
 	}
-	wantsText(t, harnessInCheckout("/work/qak_home"), "the harness home "+value+" is inside the checkout, which the repository's files and commands can change, so a run given a run key behind a wall does not start. Compose the harness outside the checkout with --home, such as qory harness compose --home ~/.cache/qory/homes, and run with the same --home")
+	wantsText(t, homeInFolder("/work/qak_app", "/work/qak_app/homes"), "set --home to a folder outside "+value+": "+value+" is inside "+value+", and a run with a run key writes no harness into the folder it runs in")
 	_, err = inlineSettings([]string{"claude", "--settings", "/elsewhere/qak_settings.json"}, nil, "/work/home")
 	if err == nil || !strings.HasPrefix(err.Error(), "the Claude Code settings "+value+" lie outside the harness's home /work/home") {
 		t.Errorf("err = %v", err)

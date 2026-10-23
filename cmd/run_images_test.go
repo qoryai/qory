@@ -52,8 +52,7 @@ func TestRunStartsTheImageTheMachineDefines(t *testing.T) {
 		"--runtime sysbox-runc --user 0:0 --security-opt no-new-privileges --init --mount type=volume,dst=/var/lib/docker ",
 		"src=" + helper + ",dst=/qory/qory,readonly",
 		"--entrypoint /qory/qory example.com/agent-go-docker:1 run nest --user 1000:1000 -- /qory/qory run exec --unset ",
-		" -- /bin/sh " + runsDir(t, root),
-		"/" + session.PreparationScript + " claude --settings " + runsDir(t, root),
+		" -- claude --settings " + runsDir(t, root),
 	}
 	for _, c := range []struct {
 		name    string
@@ -63,8 +62,8 @@ func TestRunStartsTheImageTheMachineDefines(t *testing.T) {
 		started map[string]any
 	}{
 		{"the default, by name", nil,
-			[]string{"--entrypoint /qory/qory example.com/agent-go:1 run exec --unset ", " -- /bin/sh " + runsDir(t, root), "/" + session.PreparationScript + " claude --settings " + runsDir(t, root)},
-			[]string{"--runtime", "run nest", "agent-go-docker"},
+			[]string{"--entrypoint /qory/qory example.com/agent-go:1 run exec --unset ", " -- claude --settings " + runsDir(t, root)},
+			[]string{"--runtime", "run nest", "agent-go-docker", session.PreparationScript},
 			map[string]any{"image": "example.com/agent-go:1", "image_name": "go", "container_runtime": nil, "docker": nil}},
 		{"--image, by name", []string{"--image", "go-docker"}, nested, []string{"--entrypoint claude"},
 			map[string]any{"image": "example.com/agent-go-docker:1", "image_name": "go-docker", "container_runtime": "sysbox-runc", "docker": true}},
@@ -75,7 +74,7 @@ func TestRunStartsTheImageTheMachineDefines(t *testing.T) {
 		{"--image over the policy's none", []string{"--image", "go-docker", "--policy", imagePolicy(t, "")}, nested, []string{"--entrypoint claude"},
 			map[string]any{"image": "example.com/agent-go-docker:1", "image_name": "go-docker", "container_runtime": "sysbox-runc", "docker": true}},
 		{"--image, a reference", []string{"--image", "example.com/other:3"},
-			[]string{"--entrypoint /qory/qory example.com/other:3 run exec --unset ", " -- /bin/sh ", "/" + session.PreparationScript + " claude --settings"},
+			[]string{"--entrypoint /qory/qory example.com/other:3 run exec --unset ", " -- claude --settings"},
 			[]string{"--runtime", "run nest"},
 			map[string]any{"image": "example.com/other:3", "image_name": nil, "container_runtime": nil, "docker": nil}},
 	} {
@@ -96,13 +95,10 @@ func TestRunStartsTheImageTheMachineDefines(t *testing.T) {
 		wants(t, string(data), c.want...)
 		lacks(t, string(data), c.lack...)
 		_, evs := events(t, root)
-		started := evs["dev.qory.run.started"]
-		if len(started) != 1 {
-			t.Fatalf("%s: run.started %v", c.name, started)
-		}
+		started := sessionStarted(t, evs)
 		for k, v := range c.started {
-			if started[0][k] != v {
-				t.Errorf("%s: run.started %s is %v, want %v", c.name, k, started[0][k], v)
+			if started[k] != v {
+				t.Errorf("%s: session.started %s is %v, want %v", c.name, k, started[k], v)
 			}
 		}
 	}
@@ -115,10 +111,10 @@ func TestRunStartsTheImageTheMachineDefines(t *testing.T) {
 		t.Fatalf("the server's selection: run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
 	_, evs := events(t, root)
-	if started := evs["dev.qory.run.started"]; len(started) != 1 || started[0]["image_name"] != "go-docker" || started[0]["docker"] != true {
-		t.Errorf("the server's selection: run.started %v", started)
+	if started := sessionStarted(t, evs); started["image_name"] != "go-docker" || started["docker"] != true {
+		t.Errorf("the server's selection: session.started %v", started)
 	}
-	if applied := evs["dev.qory.run.policy_applied"]; len(applied) != 1 || applied[0]["image"] != "go-docker" {
+	if applied := sessionApplied(t, evs); applied["image"] != "go-docker" {
 		t.Errorf("the server's selection: run.policy_applied %v", applied)
 	}
 }

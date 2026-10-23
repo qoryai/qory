@@ -624,14 +624,13 @@ func TestSetupExampleStopsAtTheRefusal(t *testing.T) {
 }
 
 // writtenOf runs qory run with args behind the fake wall, the harness's Claude Code
-// settings in its home, and returns the Spec.Written and the Args of its one session,
+// settings in its home, and returns the SessionSpec.Written and the Args of its one session,
 // with its output. The run must reach the container: exit 4.
 func writtenOf(t *testing.T, root string, args ...string) (written, launch []string, out string) {
 	t.Helper()
-	writeFile(t, filepath.Join(root, ".qory", "harness", "claude", "settings.json"), `{"model": "a-model-of-the-settings"}`)
-	var specs []session.Spec
-	defer cmd.SetStartSession(func(s session.Spec) { specs = append(specs, s) })()
-	out, err := run(t, append([]string{"run", "claude"}, args...)...)
+	var specs []session.SessionSpec
+	defer cmd.SetJoinSession(func(s session.SessionSpec) { specs = append(specs, s) })()
+	out, err := run(t, append([]string{"run", "claude", "--model", "a-model-of-the-settings"}, args...)...)
 	if cmd.ExitCode(err) != 4 || len(specs) != 1 {
 		t.Fatalf("%d sessions, %v (exit %d)\n%s", len(specs), err, cmd.ExitCode(err), out)
 	}
@@ -650,7 +649,7 @@ func realSet(paths []string) []string {
 
 // TestAWalledRunIsGivenEveryRecordedPlace records the places of earlier walled runs: a
 // checkout, a mount, and a mount whose folder is gone since. A walled run with a
-// read-write and a read-only mount gives its session every one of them in Spec.Written,
+// read-write and a read-only mount gives its session every one of them in SessionSpec.Written,
 // with its checkout and its read-write mount; a place whose path now goes through a file,
 // which Forager cannot resolve, is left out, and the run still starts. The harness's
 // Claude Code settings go to the session once, inline, as their JSON.
@@ -686,7 +685,7 @@ func TestAWalledRunIsGivenEveryRecordedPlace(t *testing.T) {
 	written, args, out := writtenOf(t, root, "--mount", mounted, "--mount", readOnly+":ro", "--", "-p", "hi")
 	want := realSet([]string{root, mounted, other, otherMount, gone})
 	if got := realSet(written); !slices.Equal(got, want) {
-		t.Errorf("Spec.Written %q\nwant %q", written, want)
+		t.Errorf("SessionSpec.Written %q\nwant %q", written, want)
 	}
 	wants(t, out, "inside the container")
 	settings := 0
@@ -704,10 +703,10 @@ func TestAWalledRunIsGivenEveryRecordedPlace(t *testing.T) {
 }
 
 // TestAWalledRunWithNoRecordIsGivenItsPlaces runs walled with no place recorded before:
-// Spec.Written holds the run's checkout and its read-write mount, which qory recorded
+// SessionSpec.Written holds the run's checkout and its read-write mount, which qory recorded
 // before the session, and nothing else; the read-only mount is none. Forager adds the
 // writable binds of the other walled runs it lists and, behind the wall, this run's
-// writable binds itself, outside Spec.Written.
+// writable binds itself, outside SessionSpec.Written.
 func TestAWalledRunWithNoRecordIsGivenItsPlaces(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -717,7 +716,7 @@ func TestAWalledRunWithNoRecordIsGivenItsPlaces(t *testing.T) {
 	mounted, readOnly := tempDir(t), tempDir(t)
 	written, _, _ := writtenOf(t, root, "--mount", mounted, "--mount", readOnly+":ro", "--", "-p", "hi")
 	if got, want := realSet(written), realSet([]string{root, mounted}); !slices.Equal(got, want) {
-		t.Errorf("Spec.Written %q\nwant %q", written, want)
+		t.Errorf("SessionSpec.Written %q\nwant %q", written, want)
 	}
 }
 

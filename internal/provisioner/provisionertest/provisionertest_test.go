@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io/fs"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/server"
+	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/internal/provisioner/provisionertest"
 )
@@ -27,7 +29,7 @@ func post(t *testing.T, s *provisionertest.Server, key *accesskey.Key, path stri
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(accesskey.HeaderAccessKeyID, provisionertest.KeyID)
 	req.Header.Set(accesskey.HeaderInstanceID, provisionertest.InstanceID)
-	req.Header.Set("X-Qory-Contract-Version", "3")
+	req.Header.Set("X-Qory-Contract-Version", "1")
 	if edit != nil {
 		edit(req.Header)
 	}
@@ -75,8 +77,8 @@ func TestTheFakeChecksRequestsInOrder(t *testing.T) {
 		{"a signature twice", s.Pool, claimAt(now), func(h http.Header) { h.Add(accesskey.HeaderSignature, "x") }, 400, false, "bad_request"},
 		{"another key", other, claimAt(now), nil, 401, false, "unauthorized"},
 		{"an instance id outside its shape", s.Pool, claimAt(now), func(h http.Header) { h.Set(accesskey.HeaderInstanceID, "-x") }, 400, true, "bad_request"},
-		{"revision 1", s.Pool, claimAt(now), func(h http.Header) { h.Set("X-Qory-Contract-Version", "1") }, 400, true, "unsupported_contract_version"},
 		{"revision 2", s.Pool, claimAt(now), func(h http.Header) { h.Set("X-Qory-Contract-Version", "2") }, 400, true, "unsupported_contract_version"},
+		{"revision 3", s.Pool, claimAt(now), func(h http.Header) { h.Set("X-Qory-Contract-Version", "3") }, 400, true, "unsupported_contract_version"},
 		{"no revision", s.Pool, claimAt(now), func(h http.Header) { h.Del("X-Qory-Contract-Version") }, 400, true, "unsupported_contract_version"},
 		{"a member the schema does not define", s.Pool, []byte(`{"version":1,"time":"` + now.UTC().Format(time.RFC3339) + `","wait_seconds":0,"x":1}`), nil, 400, true, "invalid_request"},
 		{"a member twice", s.Pool, []byte(`{"version":1,"version":1,"time":"` + now.UTC().Format(time.RFC3339) + `","wait_seconds":0}`), nil, 400, true, "invalid_request"},
@@ -100,33 +102,31 @@ func TestTheFakeChecksRequestsInOrder(t *testing.T) {
 	if status, signed, _ := post(t, s, s.Pool, "/v1/pools/claim", sent, nil); status != 401 || signed {
 		t.Errorf("a replay: %d signed %v", status, signed)
 	}
-	if status, signed, _ := post(t, s, s.Pool, "/v1/elsewhere", claimAt(now), nil); status != 404 || !signed {
-		t.Errorf("an unknown route: %d signed %v", status, signed)
+	for _, path := range []string{"/v1/elsewhere", "/v1/dispatches/dp_0123456789abcdef/handover", "/v1/dispatches/dp_0123456789abcdef/prebuilt"} {
+		if status, signed, _ := post(t, s, s.Pool, path, claimAt(now), nil); status != 404 || !signed {
+			t.Errorf("%s: %d signed %v", path, status, signed)
+		}
 	}
 }
 
 // TestTheFakeServesTheConfigurationAndTheOutcome discovers the fake's configuration
-// and posts a run's outcome with Forager's client, as the pool program does: the
-// document verifies and names the run endpoint, an outcome of a run handed over is
-// recorded, the same one again is answered as before, another is outcome_given, and a
-// run never handed over is not_found.
+// and posts a run's outcome with Forager's client: the document verifies and links to
+// the run endpoint, an outcome of a run whose dispatch was dispatched is recorded, the
+// same one again is answered as before, another is outcome_given, and a run never
+// dispatched is not_found.
 func TestTheFakeServesTheConfigurationAndTheOutcome(t *testing.T) {
 	s := provisionertest.New(t)
 	ctx := context.Background()
-	runID := s.Offer(provisionertest.Run{})[0]
+	runID := s.Offer(provisionertest.Run{})[0].RunID
 	c := s.Client()
 	cl, _, err := c.Claim(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
+	cl.RunCode.Clear()
 	if err := c.Dispatched(ctx, cl.DispatchID); err != nil {
 		t.Fatal(err)
 	}
-	h, err := c.Handover(ctx, cl.DispatchID, cl.RunID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	h.RunKey.Clear()
 	fc := &server.Client{
 		Config: &server.Config{Version: 1, URL: s.URL, AccessKeyID: provisionertest.KeyID, ApiaryPublicKey: s.Pin()},
 		Key:    s.Pool, InstanceID: runID, UserAgent: "qory-test",
@@ -153,18 +153,65 @@ func TestTheFakeServesTheConfigurationAndTheOutcome(t *testing.T) {
 		t.Errorf("another outcome: %v", err)
 	}
 	if err := fc.PostOutcome(ctx, conf.Run.URL, "0192f0c1-7d4e-7a2b-8c3d-000000000000", o); !errors.As(err, &r) || r.Code != "not_found" {
-		t.Errorf("a run not handed over: %v", err)
+		t.Errorf("a run never dispatched: %v", err)
 	}
 	var routes []string
 	for _, r := range s.Routes() {
 		routes = append(routes, string(r))
 	}
-	if got := strings.Join(routes, " "); got != "claim dispatched handover configuration outcome outcome outcome outcome" {
+	if got := strings.Join(routes, " "); got != "claim dispatched configuration outcome outcome outcome outcome" {
 		t.Errorf("routes %s", got)
 	}
-	for _, call := range s.Calls()[3:] {
+	for _, call := range s.Calls()[2:] {
 		if call.Header.Get("X-Qory-Contract-Version") != strconv.Itoa(1) || !call.Verified || !call.Signed {
 			t.Errorf("%s: %v %v %v", call.Route, call.Header, call.Verified, call.Signed)
 		}
+	}
+}
+
+// TestTheFakeTakesOneMachineLog posts the contract's machine-log fixtures to a claimed
+// dispatch at the fixtures' time: each invalid one is a signed 400 invalid_request, the
+// first valid one a signed 204 that the fake records, and the next a signed 409
+// machine_log_exists. A machine log of an unknown dispatch is a signed 403 forbidden.
+func TestTheFakeTakesOneMachineLog(t *testing.T) {
+	s := provisionertest.New(t)
+	now := time.Date(2026, 10, 15, 12, 10, 0, 0, time.UTC)
+	s.Now = func() time.Time { return now }
+	s.Offer(provisionertest.Run{})
+	c := s.Client()
+	cl, ok, err := c.Claim(context.Background())
+	if err != nil || !ok {
+		t.Fatalf("claim: %v %v", ok, err)
+	}
+	cl.RunCode.Clear()
+	path := "/v1/dispatches/" + cl.DispatchID + "/machine-log"
+	for _, name := range []string{"machine-log-log-nul.json", "machine-log-undefined-member.json", "machine-log-version-2.json", "machine-log-without-log.json"} {
+		b, err := fs.ReadFile(contracts.ProvisionerFS, "fixtures/invalid/"+name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status, signed, body := post(t, s, s.Pool, path, b, nil); status != 400 || !signed || !strings.Contains(body, `"invalid_request"`) {
+			t.Errorf("%s: %d signed %v %s", name, status, signed, body)
+		}
+	}
+	whole, err := fs.ReadFile(contracts.ProvisionerFS, "fixtures/machine-log/whole.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	truncated, err := fs.ReadFile(contracts.ProvisionerFS, "fixtures/machine-log/truncated.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, signed, _ := post(t, s, s.Pool, path, whole, nil); status != 204 || !signed {
+		t.Errorf("the first machine log: %d signed %v", status, signed)
+	}
+	if status, signed, body := post(t, s, s.Pool, path, truncated, nil); status != 409 || !signed || !strings.Contains(body, `"machine_log_exists"`) {
+		t.Errorf("a second machine log: %d signed %v %s", status, signed, body)
+	}
+	if d, _ := s.Dispatch(cl.DispatchID); d.MachineLog == nil || d.MachineLog.Truncated || !strings.HasPrefix(d.MachineLog.Log, "2026-10-15T12:01:05Z machine created") {
+		t.Errorf("the fake recorded %+v", d.MachineLog)
+	}
+	if status, signed, body := post(t, s, s.Pool, "/v1/dispatches/dp_0123456789abcdef/machine-log", truncated, nil); status != 403 || !signed || !strings.Contains(body, `"forbidden"`) {
+		t.Errorf("an unknown dispatch: %d signed %v %s", status, signed, body)
 	}
 }

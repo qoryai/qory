@@ -8,49 +8,38 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/integrations/contracts"
 )
 
 // The refusals of Qory Apiary the pool acts on, each matched with errors.Is against the
 // [*Refusal] a request returns. A signed refusal matches only for a request whose schema
 // gives it, with its status and its code: claim.schema.json, dispatched.schema.json,
-// handover.schema.json, release.schema.json and prebuilt.schema.json of provisioner/v1.
+// release.schema.json and machine-log.schema.json of provisioner/v1, with
+// refusal.schema.json.
 var (
 	// ErrForbidden is the signed 403 forbidden: a request outside the key's rights, or a
 	// dispatch that is unknown or of another node pool.
 	ErrForbidden = errors.New("403 forbidden")
 	// ErrNotFound is the signed 404 not_found: a route Qory Apiary does not serve.
 	ErrNotFound = errors.New("404 not_found")
-	// ErrGone is the signed 410 gone: the dispatch ended, or, to a handover, the run
-	// could not be formed and Qory Apiary ended it.
+	// ErrGone is the signed 410 gone: the dispatch ended.
 	ErrGone = errors.New("410 gone")
-	// ErrHandedOver is a handover's signed 409 handed_over: the run was handed over
-	// before, through this or another dispatch. Its run key is never given again.
-	ErrHandedOver = errors.New("409 handed_over")
-	// ErrLeaseExpired is the signed 409 lease_expired: the dispatch is stale, its lease
-	// lapsed before its handover.
+	// ErrLeaseExpired is the signed 409 lease_expired: the dispatch is stale, since
+	// neither dispatched nor the redemption of its run code came before its lease_until.
 	ErrLeaseExpired = errors.New("409 lease_expired")
-	// ErrNotDispatched is a handover's signed 409 not_dispatched: it came before
-	// dispatched.
-	ErrNotDispatched = errors.New("409 not_dispatched")
-	// ErrNoGateway is the signed 409 no_gateway of a claim or a handover: the node pool
-	// has no gateway a run could be registered through. After a handover's, the dispatch
-	// stays claimed until its lease lapses.
+	// ErrMachineExists is a release's signed 409 machine_exists: Qory Apiary accepted
+	// dispatched for the dispatch, or the machine redeemed its run code.
+	ErrMachineExists = errors.New("409 machine_exists")
+	// ErrMachineLogExists is a machine log's signed 409 machine_log_exists: the dispatch
+	// has a machine log already.
+	ErrMachineLogExists = errors.New("409 machine_log_exists")
+	// ErrNoGateway is a claim's signed 409 no_gateway: the node pool has no gateway a
+	// run code could be bound to.
 	ErrNoGateway = errors.New("409 no_gateway")
-	// ErrNotPrebuild is a prebuilt's signed 409 not_prebuild: the dispatch's step is not
-	// prebuild.
-	ErrNotPrebuild = errors.New("409 not_prebuild")
-	// ErrNotHandedOver is a prebuilt's signed 409 not_handed_over: the dispatch was not
-	// handed over yet.
-	ErrNotHandedOver = errors.New("409 not_handed_over")
-	// ErrRunMismatch is a prebuilt's signed 409 run_mismatch: its run id is not the
-	// dispatch's run.
-	ErrRunMismatch = errors.New("409 run_mismatch")
-	// ErrUnavailable is a handover's signed 503 unavailable: Qory Apiary could not make
-	// the run's inputs or its run key, and the handover took no effect. The handover is
-	// returned after the one try; the contract lets it be sent again while the lease
-	// lasts.
-	ErrUnavailable = errors.New("503 unavailable")
+	// ErrUnsupportedRevision is the signed 400 unsupported_contract_version: Qory Apiary
+	// serves another revision of the provisioner contract than
+	// contracts.ProvisionerRevision, the one the request sent.
+	ErrUnsupportedRevision = errors.New("400 unsupported_contract_version")
 	// ErrRateLimited is the signed 429 rate_limited; [Refusal.RetryAfter] is the wait it
 	// asks for. An unsigned 429 is not one: it is [ErrUnsigned].
 	ErrRateLimited = errors.New("429 rate_limited")
@@ -60,17 +49,16 @@ var (
 	// does not verify. It changes no state.
 	ErrUnsigned = errors.New("an answer not signed under a key of apiary_public_key")
 	// ErrTooLarge is an answer larger than its bound, whatever its status, still so after
-	// every try: it is refused before its signature is read, so nothing says Qory Apiary
-	// sent it, and it changes no state.
+	// every try: it is refused before its signature is read, so nothing shows that Qory
+	// Apiary sent it, and it changes no state.
 	ErrTooLarge = errors.New("an answer refused for its size before its signature was read")
 	// ErrUnreachable is no answer from Qory Apiary after every try.
 	ErrUnreachable = errors.New("Qory Apiary could not be reached")
 	// ErrAnswerUnusable is a signed answer within its bound that breaks the contract: a
 	// success status the request is not given, a body that is not one JSON document or
-	// breaks its schema, another revision than the one sent, another run than the one
-	// claimed, or inputs over their bound. Nothing in it is used, and the request is not
-	// sent again, since Qory Apiary acted on it.
-	ErrAnswerUnusable = errors.New("Qory Apiary's answer breaks the contract, so nothing in it is used")
+	// breaks its schema, or another revision than the one sent. Nothing in it is used,
+	// and the request is not sent again, since Qory Apiary acted on it.
+	ErrAnswerUnusable = errors.New("Qory Apiary's response breaks the contract, so nothing in it is used")
 )
 
 // codeOf is the status and the code of each signed refusal above.
@@ -78,18 +66,15 @@ var codeOf = map[error]struct {
 	status int
 	code   string
 }{
-	ErrForbidden:     {http.StatusForbidden, "forbidden"},
-	ErrNotFound:      {http.StatusNotFound, "not_found"},
-	ErrGone:          {http.StatusGone, "gone"},
-	ErrHandedOver:    {http.StatusConflict, "handed_over"},
-	ErrLeaseExpired:  {http.StatusConflict, "lease_expired"},
-	ErrNotDispatched: {http.StatusConflict, "not_dispatched"},
-	ErrNoGateway:     {http.StatusConflict, "no_gateway"},
-	ErrNotPrebuild:   {http.StatusConflict, "not_prebuild"},
-	ErrNotHandedOver: {http.StatusConflict, "not_handed_over"},
-	ErrRunMismatch:   {http.StatusConflict, "run_mismatch"},
-	ErrUnavailable:   {http.StatusServiceUnavailable, "unavailable"},
-	ErrRateLimited:   {http.StatusTooManyRequests, "rate_limited"},
+	ErrForbidden:           {http.StatusForbidden, "forbidden"},
+	ErrNotFound:            {http.StatusNotFound, "not_found"},
+	ErrGone:                {http.StatusGone, "gone"},
+	ErrLeaseExpired:        {http.StatusConflict, "lease_expired"},
+	ErrMachineExists:       {http.StatusConflict, "machine_exists"},
+	ErrMachineLogExists:    {http.StatusConflict, "machine_log_exists"},
+	ErrNoGateway:           {http.StatusConflict, "no_gateway"},
+	ErrUnsupportedRevision: {http.StatusBadRequest, "unsupported_contract_version"},
+	ErrRateLimited:         {http.StatusTooManyRequests, "rate_limited"},
 }
 
 // kind is which request a refusal answers.
@@ -98,22 +83,19 @@ type kind int
 const (
 	kindClaim kind = iota
 	kindDispatched
-	kindHandover
 	kindRelease
-	kindPrebuilt
+	kindMachineLog
 )
 
 // refusalsOf are the signed refusals each request's schema gives, in the order Qory
-// Apiary decides them, with the 404 of a route it does not serve and the 429 every
-// request may get, refusal.schema.json.
+// Apiary decides them, refusal.schema.json, with the 400 unsupported_contract_version
+// and the 404 of a route it does not serve before them and the 429 every request may
+// get after them.
 var refusalsOf = map[kind][]error{
-	kindClaim:      {ErrForbidden, ErrNoGateway, ErrNotFound, ErrRateLimited},
-	kindDispatched: {ErrForbidden, ErrNotFound, ErrGone, ErrLeaseExpired, ErrRateLimited},
-	// A handover's 410 gone comes twice in its order: a dispatch that ended, third, and
-	// a run Qory Apiary cannot form, after 409 no_gateway.
-	kindHandover: {ErrForbidden, ErrNotFound, ErrGone, ErrHandedOver, ErrLeaseExpired, ErrNotDispatched, ErrNoGateway, ErrGone, ErrUnavailable, ErrRateLimited},
-	kindRelease:  {ErrForbidden, ErrNotFound, ErrGone, ErrLeaseExpired, ErrRateLimited},
-	kindPrebuilt: {ErrNotFound, ErrForbidden, ErrGone, ErrLeaseExpired, ErrNotPrebuild, ErrNotHandedOver, ErrRunMismatch, ErrRateLimited},
+	kindClaim:      {ErrUnsupportedRevision, ErrNotFound, ErrForbidden, ErrNoGateway, ErrRateLimited},
+	kindDispatched: {ErrUnsupportedRevision, ErrNotFound, ErrForbidden, ErrGone, ErrLeaseExpired, ErrRateLimited},
+	kindRelease:    {ErrUnsupportedRevision, ErrNotFound, ErrForbidden, ErrGone, ErrMachineExists, ErrLeaseExpired, ErrRateLimited},
+	kindMachineLog: {ErrUnsupportedRevision, ErrNotFound, ErrForbidden, ErrMachineLogExists, ErrRateLimited},
 }
 
 // Refusal is an answer that is not the one a request wants: its status, whether it was
@@ -121,9 +103,9 @@ var refusalsOf = map[kind][]error{
 // body. errors.Is matches it against [ErrForbidden] and the other signed refusals by
 // its request, its status and its code, against [ErrUnsigned] when it is within its
 // bound and not signed, and against [ErrTooLarge] when it is over its bound. Its text
-// names the request, the status and the code, never a body, a header or a secret.
+// contains the request, the status and the code, never a body, a header or a secret.
 type Refusal struct {
-	// What is the request, as an error names it: "the claim", "the handover of dp_…".
+	// What is the request, as an error shows it: "the claim", "the release of dp_…".
 	What string
 	// Status is the answer's HTTP status.
 	Status int
@@ -131,7 +113,7 @@ type Refusal struct {
 	// from a signed answer alone.
 	Signed bool
 	// Code is a signed answer's refusal code, refusal.schema.json's error, or "" when its
-	// body holds none.
+	// body has none.
 	Code string
 	// RetryAfter is the wait a signed 429 asks for, from a second to an hour; 0
 	// otherwise.
@@ -142,8 +124,8 @@ type Refusal struct {
 	Limit    int64
 	// Resent is whether the request was sent before in the same call, after a try whose
 	// answer was lost: no answer, one over its bound, one not signed under the pin, or a
-	// server error. Such a try may have taken effect, so a handover's 409 handed_over
-	// may answer a handover whose 200 was lost.
+	// server error. Such a try may have taken effect, so a release's 410 gone may answer
+	// a release whose 204 was lost.
 	Resent bool
 
 	kind kind
@@ -152,17 +134,19 @@ type Refusal struct {
 func (r *Refusal) Error() string {
 	switch {
 	case r.TooLarge:
-		return fmt.Sprintf("%s: Qory Apiary's answer, %d, is larger than %d bytes, so it was refused before its signature was read", r.What, r.Status, r.Limit)
+		return fmt.Sprintf("%s: Qory Apiary's response, %d, is larger than %d bytes, so qory stopped reading it before its signature was read", r.What, r.Status, r.Limit)
 	case !r.Signed && r.Status == http.StatusUnauthorized:
-		return r.What + ": Qory Apiary answered 401 unauthorized, which is never taken as the access key revoked"
+		return r.What + ": Qory Apiary returned 401 unauthorized, which is never taken as the access key revoked"
 	case !r.Signed:
-		return fmt.Sprintf("%s: Qory Apiary answered %d, not signed under a key of apiary_public_key, so it is not used", r.What, r.Status)
+		return fmt.Sprintf("%s: Qory Apiary returned %d, not signed under a key of apiary_public_key, so it is not used", r.What, r.Status)
+	case r.Is(ErrUnsupportedRevision):
+		return fmt.Sprintf("update qory: Qory Apiary takes another provisioner revision, and this qory sends revision %d (%s: %d %s)", contracts.ProvisionerRevision, r.What, r.Status, r.Code)
 	case r.Code == "":
-		return fmt.Sprintf("%s: Qory Apiary answered %d", r.What, r.Status)
+		return fmt.Sprintf("%s: Qory Apiary returned %d", r.What, r.Status)
 	case r.RetryAfter > 0:
-		return fmt.Sprintf("%s: Qory Apiary answered %d %s, and asks to wait %s", r.What, r.Status, r.Code, r.RetryAfter)
+		return fmt.Sprintf("%s: Qory Apiary returned %d %s; qory takes a wait of %s from the Retry-After header, kept between 1 s and 1 h, or 1 s without a readable header", r.What, r.Status, r.Code, r.RetryAfter)
 	}
-	return fmt.Sprintf("%s: Qory Apiary answered %d %s", r.What, r.Status, r.Code)
+	return fmt.Sprintf("%s: Qory Apiary returned %d %s", r.What, r.Status, r.Code)
 }
 
 // Is reports whether the refusal is target: [ErrTooLarge] for an answer over its bound,
@@ -182,7 +166,7 @@ func (r *Refusal) Is(target error) bool {
 // refused is the [*Refusal] of a signed answer that is not the one wanted, or
 // [ErrAnswerUnusable] for a success status the request is not given. Its code is read
 // only from a body that is one JSON document refusal.schema.json accepts; any other
-// body, and a code that holds what looks like a secret, names none. A 429's Retry-After
+// body, and a code that contains what looks like a secret, gives none. A 429's Retry-After
 // is read from a second to an hour.
 func (c *Client) refused(what string, k kind, ans *answer) error {
 	if ans.status >= 200 && ans.status < 300 {
@@ -192,7 +176,7 @@ func (c *Client) refused(what string, k kind, ans *answer) error {
 	var doc struct {
 		Error string `json:"error"`
 	}
-	if readAnswer("refusal.schema.json", ans.body, &doc) == nil && !accesskey.ContainsSecret(doc.Error) {
+	if readAnswer("refusal.schema.json", ans.body, &doc) == nil && !containsSecret(doc.Error) {
 		r.Code = doc.Error
 	}
 	if ans.status == http.StatusTooManyRequests {
@@ -202,7 +186,7 @@ func (c *Client) refused(what string, k kind, ans *answer) error {
 }
 
 // unusable is [ErrAnswerUnusable] for the request what, and why: a fixed text that may
-// name ids, statuses and revisions, never another value of the answer's body.
+// contain ids, statuses and revisions, never another value of the answer's body.
 func unusable(what, why string) error {
 	return fmt.Errorf("%s: %w: %s", what, ErrAnswerUnusable, why)
 }

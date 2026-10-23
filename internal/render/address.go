@@ -1,6 +1,7 @@
 package render
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -192,6 +193,9 @@ func PlaceEntries(res *compose.Result, dir string, addr Address, keep ...string)
 		dst := filepath.Join(dir, name)
 		if e.Kind == "agents" && e.Tier != "" {
 			data, err := readSource(res, e)
+			if errors.Is(err, errLeftOut) {
+				continue
+			}
 			if err != nil {
 				return err
 			}
@@ -206,7 +210,7 @@ func PlaceEntries(res *compose.Result, dir string, addr Address, keep ...string)
 			if err != nil {
 				return err
 			}
-			if err := copyEntry(m, e.Path, root, name, resolver(res, e, addr)); err != nil {
+			if err := copyEntry(m, e.Path, root, name, resolver(res, e, addr), leftOut(res, m)); err != nil {
 				return err
 			}
 			continue
@@ -235,10 +239,11 @@ func moduleOf(res *compose.Result, name string) (compose.Module, bool) {
 }
 
 // readSource reads the file of the entry e: through the module's directory, the way a copy
-// reads it, when the home holds a copy of the module, else at its path.
+// reads it, when the home holds a copy of the module, else at its path. It returns
+// [errLeftOut] for a file that the copy of a walled run's module leaves out, see [leftOut].
 func readSource(res *compose.Result, e compose.Entry) ([]byte, error) {
 	if m, copied := moduleOf(res, e.Module); copied {
-		return readEntry(m, e.Path)
+		return readEntry(m, e.Path, leftOut(res, m))
 	}
 	return os.ReadFile(e.Path)
 }

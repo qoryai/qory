@@ -35,7 +35,7 @@ var versions struct {
 // than 2.36, Resolve starts no git and returns false. A caller that reads that false as
 // a folder outside a working tree calls Ready first, so a git failure is never read
 // that way.
-func Ready(ctx context.Context) error { return ready(ctx, Env()) }
+func Ready(ctx context.Context) error { return ready(ctx, envOf(ctx)) }
 
 // ready is [Ready] for the git that the PATH of env finds.
 func ready(ctx context.Context, env []string) error {

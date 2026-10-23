@@ -46,10 +46,14 @@ var (
 // New returns a UI that writes to w. It reads from lipgloss what w supports, so the UI
 // colours its output when w is a terminal and NO_COLOR is unset, and writes the same text
 // plain otherwise. The decision is made here, once per UI, and not at each call. For a w
-// from [Buzz], lipgloss reads the terminal it prints to.
+// from [Buzz], lipgloss reads the terminal it prints to, and for a [Tee] the writer its
+// Terminal returns.
 func New(w io.Writer) *UI {
 	probe := w
-	if s, ok := w.(*Swarm); ok {
+	if t, ok := probe.(Tee); ok {
+		probe = t.Terminal()
+	}
+	if s, ok := probe.(*Swarm); ok {
 		probe = s.w
 	}
 	r := lipgloss.NewRenderer(probe)
@@ -70,6 +74,13 @@ func New(w io.Writer) *UI {
 		yellow:  r.NewStyle().Foreground(Yellow),
 		black:   r.NewStyle().Foreground(Black),
 	}
+}
+
+// Tee is a writer that writes each byte it gets to the writer Terminal returns, such as
+// stderr, and to one more place. [New] reads what that writer supports.
+type Tee interface {
+	io.Writer
+	Terminal() io.Writer
 }
 
 const (

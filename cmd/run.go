@@ -24,24 +24,29 @@ import (
 
 	"github.com/charmbracelet/x/term"
 	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/gateway"
 	"github.com/qoryai/forager/policy"
 	"github.com/qoryai/forager/refusal"
 	"github.com/qoryai/forager/session"
-	"github.com/qoryai/forager/session/runtimes"
 	"github.com/qoryai/forager/session/runtimes/catalog"
 	"github.com/qoryai/forager/sink"
 	"github.com/qoryai/forager/wall"
+	"github.com/qoryai/integrations/contracts"
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/checkout"
+	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/foragerdir"
 	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/preparation"
+	"github.com/qoryai/qory/internal/provisioner"
+	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
+	"github.com/qoryai/qory/internal/stack"
 	"github.com/qoryai/qory/internal/ui"
 )
 
@@ -52,12 +57,14 @@ const DescriptorsDir = "runtimes"
 // newRun builds the run verb, which starts a runtime on the composed harness through
 // Forager's session: the launch spec is what qory harness launch prints, the policy
 // and the server are forager.yaml in the user's configuration directory or named
-// by flag, and Forager records the session in qory's state directory, in a folder of
-// the checkout's. The verb is thin: it resolves the spec, hands it to Forager and
-// exits with the runtime's status.
+// by flag, and Forager records the run in qory's state directory, in a folder of
+// the checkout's. The verb opens the run at its gateway, composes the harness, joins
+// one session to the run, closes the run with qory's outcome, and exits with the
+// runtime's status.
 func newRun() *cobra.Command {
 	var h homeOptions
-	var local, headless, relabel, fetchOnly bool
+	var composing composeOptions
+	var local, headless, relabel bool
 	var o wallOptions
 	var policyFile, runID string
 	var labels []string
@@ -66,10 +73,11 @@ func newRun() *cobra.Command {
 	var timeout, grace time.Duration
 	var stopSignal string
 	var secretFD, keyFD int
+	var codeFile, gatewayURL string
 	c := &cobra.Command{
 		Use:   "run [runtime] [-- argument...]",
 		Short: "Run the agent on its harness, observed and recorded",
-		Long: `Run the agent on the composed harness, inside Forager's session.
+		Long: `Compose the harness, then run the agent on it, inside Forager's session.
 
 Every connection goes through a proxy on this machine and is recorded. The record,
 events.jsonl and output.log, goes to a folder of the checkout's under
@@ -79,10 +87,16 @@ agent's when it exits by itself. When the run ends in another way, or its starte
 it went otherwise, the exit status is 0 if the run completed, 124 at the time limit,
 and 1 otherwise.
 
-The agent is the runtime the harness is composed for. Name one first when it is composed
-for several. Arguments after -- go to the agent. At a terminal the agent runs with its
-interface; --headless, no terminal, or a headless argument such as -p runs it on
-pipes.
+qory run opens the run, then composes the harness, as qory harness compose does, into
+the same home, and prints the result on stderr. -f, --model, --effort, --tier and
+--tier-effort mean what they mean there. With a run key, the home is outside the folder
+the run runs in, under qory/homes in the cache directory, unless --home or harness.home
+sets another, and a home inside the folder stops the run.
+
+The agent is the runtime of the stack's target. Name another first, and the run composes
+for it instead; name one when the target has several. Arguments after -- go to the
+agent. At a terminal the agent runs with its interface; --headless, no terminal, or a
+headless argument such as -p runs it on pipes.
 
 ` + config.ForagerFileName + ` in ~/.config/qory sets what Forager does on this machine. A repository
 cannot set it:
@@ -99,6 +113,7 @@ cannot set it:
 More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 		Example: `  qory run                                          # the agent, at your terminal
   qory run claude -- -p "Reply pong"                # one headless turn
+  qory run --model claude-opus-5-5 -- -p "$prompt"  # composed with this model
   qory run --wall docker --image agent:1            # in a container
   qory run --image go-docker                        # in an image forager.yaml defines
   qory run --policy ~/policy.yaml -- -p "$prompt"   # with this run's policy file
@@ -125,26 +140,33 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				fdKey = k
 			}
+			// A run code is read here and redeemed for the run key last before the run
+			// starts, once every check that can stop the run has passed, so that a run they
+			// stop leaves the one-use code unused.
+			stdin := cmd.InOrStdin()
+			code, err := givenRunCode(cmd.Flags().Changed(runCodeFileFlag), cmd.Flags().Changed(gatewayFlag), cmd.Flags().Changed(runKeyFDFlag), codeFile, gatewayURL, stdin)
+			if err != nil {
+				return err
+			}
 			// A run whose starter registered it, a run key being given, goes through the
 			// separate gateway its run key names: this machine starts no gateway of its own
 			// and holds no access key. The run key's descriptor is read and closed here.
-			stdin := cmd.InOrStdin()
 			key, err := givenRunKey(cmd.Flags().Changed(runKeyFDFlag), keyFD, stdin)
 			if err != nil {
 				return err
 			}
-			if key != nil && key.fromFD && keyFD == 0 {
-				// The run key took stdin, to its end: the agent gets none.
+			if code != nil && code.stdin || key != nil && key.fromFD && keyFD == 0 {
+				// The run code or the run key took stdin, to its end: the agent gets none.
 				stdin = strings.NewReader("")
 			}
-			remote := key != nil
+			remote := key != nil || code != nil
 			runtime, extra := splitAtDash(cmd, args)
-			if fetchOnly {
-				if err := fetchOnlyRefusal(cmd, key, runtime, extra); err != nil {
+			if code != nil {
+				if err := fromAnswerOnly(cmd, runtime, extra); err != nil {
 					return err
 				}
 			}
-			at, conf, err := locateRun(h, key)
+			at, conf, err := locateRun(h, remote, true)
 			if err != nil {
 				return err
 			}
@@ -165,38 +187,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if relabel && local {
 				return relabelLocal()
 			}
-			// A fetch-only run has no harness: its launch is the fetch, see
-			// [fetchOnlySpec].
-			var rep report.Report
-			var name string
-			var launch render.Launch
-			if !fetchOnly {
-				if rep, err = readReport(at); err != nil {
-					return err
-				}
-				if err := ownHome(at, rep, "a run", "the run does not start"); err != nil {
-					return err
-				}
-				if name, launch, err = resolveLaunch(rep, conf, runtime, at.home); err != nil {
-					return err
-				}
-			}
 			// A run given a run key is a dispatched run, which Qory Apiary started against
 			// a repository this machine does not trust: Claude Code starts without the
 			// checkout's settings, with no MCP server but those --mcp-config names, see
-			// [dispatchedArgs].
-			dispatched := key != nil
-			claudeDispatched := dispatched && isClaude(name)
-			if dispatched {
-				launch.Args = dispatchedArgs(name, launch.Args)
-			}
-			// Claude Code's settings go to Forager as their JSON, which qory read from the
-			// home itself, after the home's check: Forager reads no file of the home.
-			launchArgs := append(append([]string{}, launch.Args...), extra...)
-			if isClaude(name) {
-				if launchArgs, err = inlineSettings(launch.Args, extra, at.home); err != nil {
-					return err
-				}
+			// [dispatchedArgs]. It is decided here, before a run through via is given the
+			// run key it registers.
+			dispatched := remote
+			// The run composes its harness once the run is open, before its session joins.
+			if err := checkoutsHome(at); err != nil {
+				return err
 			}
 			exe, err := os.Executable()
 			if err != nil {
@@ -286,12 +285,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					stopSignal = r.StopSignal
 				}
 			}
-			var rt runtimes.Runtime
-			if !fetchOnly {
-				if rt, err = catalog.Lookup(name, filepath.Join(user, DescriptorsDir)); err != nil {
-					return input(err)
-				}
-			}
 			if err := session.CheckStopSignal(stopSignal); err != nil {
 				return input(fmt.Errorf("--stop-signal: %w", exports.HideValueError(err, stopSignal)))
 			}
@@ -312,31 +305,32 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			ctx, got, stop := signalContext(cmd.Context())
 			defer stop()
-			spec := session.Spec{
-				Runtime:        rt,
-				Command:        launch.Command,
-				Args:           launchArgs,
-				Env:            os.Environ(),
-				Dir:            cwd,
-				Interactive:    !headless && isTerminal(stdin) && isTerminal(cmd.OutOrStdout()),
-				Stdin:          stdin,
-				Stdout:         cmd.OutOrStdout(),
-				Stderr:         stderr,
-				Declared:       rep.Hosts(),
-				RunsDir:        runs,
-				Forwarder:      append([]string{exe}, forwardArgs...),
-				ForagerVersion: build().title(),
-				RunID:          runID,
-				Labels:         named,
-				About:          about,
-				Timeout:        timeout,
-				StopSignal:     stopSignal,
-				StopGrace:      grace,
-				SocketGrace:    socketGrace,
+			spec := runSpec{
+				OpenSpec: session.OpenSpec{
+					RunsDir:        runs,
+					ForagerVersion: build().title(),
+					RunID:          runID,
+					Labels:         named,
+					About:          about,
+				},
+				SessionSpec: session.SessionSpec{
+					Env:         os.Environ(),
+					Dir:         cwd,
+					Interactive: !headless && isTerminal(stdin) && isTerminal(cmd.OutOrStdout()),
+					Stdin:       stdin,
+					Stdout:      cmd.OutOrStdout(),
+					Stderr:      stderr,
+					Forwarder:   append([]string{exe}, forwardArgs...),
+					StopSignal:  stopSignal,
+					StopGrace:   grace,
+					SocketGrace: socketGrace,
+				},
 			}
 			switch {
-			case spec.RunID == "" && remote:
+			case spec.RunID == "" && key != nil:
 				spec.RunID = key.key.RunID
+			case spec.RunID == "" && code != nil:
+				// The run's id is the run key's, known once the code is redeemed.
 			case spec.RunID == "":
 				spec.RunID = newRunID()
 			}
@@ -356,28 +350,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if err := enclose(&spec, conf.Forager, o, selected, remote || server != nil && !local, exe, at.root, at.home); err != nil {
 				return err
 			}
-			if fetchOnly {
-				if err := fetchOnlySpec(&spec); err != nil {
-					return err
-				}
-			}
 			// QORY_RUN_KEY is in the environment qory started with, which an unwalled agent
 			// can read on macOS, and on Linux from the program that started qory, even once
 			// qory unset it.
-			if remote && !key.fromFD && spec.Wall == nil {
+			if key != nil && key.inEnvironment() && spec.Wall == nil {
 				return runKeyNeedsWall()
-			}
-			// A walled run given a run key takes the model's credential through the gateway
-			// its run key names alone, so neither --env nor wall.env passes it in. An
-			// unwalled one, whose run key came by --run-key-fd, is as before.
-			if remote && spec.Wall != nil {
-				var wallEnv []string
-				if conf.Forager != nil && conf.Forager.Wall != nil {
-					wallEnv = conf.Forager.Wall.Env
-				}
-				if err := modelCredentialPassed(rt, o.env, wallEnv); err != nil {
-					return err
-				}
 			}
 			if spec.Wall == nil {
 				if err := unwalledHere(at.root, cwd); err != nil {
@@ -385,12 +362,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 			}
 			if spec.Wall != nil && h.home == "" {
-				if err := userHome(at, conf); err != nil {
+				if err := userHome(at, conf, remote); err != nil {
 					return err
 				}
-			}
-			if claudeDispatched && spec.Wall != nil && reallyWithin(at.root, at.home) {
-				return harnessInCheckout(at.home)
 			}
 			if policyFile != "" {
 				for _, m := range spec.Mounts {
@@ -404,16 +378,75 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if err := makeRunsDir(state, spec.RunsDir); err != nil {
 				return err
 			}
-			walled := spec.Wall != nil
-			spec.LaunchFixed, spec.LaunchDefaults, spec.HarnessHome = launch.Fixed, launch.Defaults, launch.HarnessHome
-			if claudeDispatched && walled {
-				spec.LaunchFixed = withAgentHome(spec.LaunchFixed)
+			// A run from a run code takes its stack, runtime, compose flags, inputs and time
+			// limit from the documents of the answer to the code; its workflow's time_limit
+			// is known once the stack is composed, see prepareLaunch.
+			var fromCode *codeRun
+			var in string
+			if code != nil {
+				var documents json.RawMessage
+				if key, documents, err = code.redeem(ctx, conf.Forager.InstanceNameOrDefault()); err != nil {
+					return err
+				}
+				if spec.RunID == "" {
+					spec.RunID = key.key.RunID
+				}
+				var doc contracts.Documents
+				if doc, err = codeDocumentsOf(documents); err != nil {
+					return err
+				}
+				// A prebuild opens the run itself, with no wall and no session, and ends
+				// with the build. It starts as an unwalled run does: startRun stops it on
+				// a machine with an access key, and marks its lock file unwalled, so a
+				// command that makes a key exits with an error while the prebuild runs.
+				// prebuildKeyed stops it there first, with a line of a prebuild: the fix in
+				// startRun's line, a wall, does not apply to a prebuild.
+				if doc.Step == provisioner.StepPrebuild {
+					if err := prebuildKeyed(machine, id); err != nil {
+						return err
+					}
+					runLock, err := startRun(machine, spec.RunID, false, id)
+					if err != nil {
+						return err
+					}
+					defer runLock.Release()
+					return runCodePrebuild(ctx, stderr, conf.Forager, state, user, key, doc, spec.RunID)
+				}
+				if fromCode, err = codeRunOf(doc); err != nil {
+					return err
+				}
+				if err := fromCode.apply(cmd); err != nil {
+					return err
+				}
+				runtime, composing.file = fromCode.runtime, fromCode.stack
+				// A run whose harness is hidden composes a home with no link, which Forager
+				// reads to mask the harness's text in the session's log and events.
+				composing.hidden, spec.HarnessHidden = fromCode.hidden, fromCode.hidden
+				timeout = provisioner.TimeLimit(fromCode.minutes, 0)
+				var remove func()
+				in, remove, err = fromCode.writeInputs()
+				defer remove()
+				if err != nil {
+					return fmt.Errorf("check the temporary folder %s: qory run could not write the run's inputs there: %w%s", exports.Value(os.TempDir(), false), exports.HideError(err), codeUsed)
+				}
+				if spec.Wall != nil {
+					spec.Mounts = append(spec.Mounts, wall.Mount{Path: in, ReadOnly: true})
+				}
 			}
+			walled := spec.Wall != nil
 			runLock, err := startRun(machine, spec.RunID, walled, id)
 			if err != nil {
 				return err
 			}
 			defer runLock.Release()
+			// What the session holds until the run is over, the agent's environment folder
+			// and the hold on the walled run's places, is let go in the reverse order.
+			var cleanups []func()
+			defer func() {
+				for i := len(cleanups) - 1; i >= 0; i-- {
+					cleanups[i]()
+				}
+			}()
 			// A machine with its own access key and gateway.server.via registers the run
 			// itself, through via, and runs it through the gateway the run key names, as a
 			// run its starter registered does. The run key it keeps beside forager.yaml goes
@@ -438,20 +471,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			spec.OnVariables = unusedEnv(stderr, apiary)
 			if !kept && keep != nil {
-				// Forager resolves the run's variables once the gateway's run answer came,
-				// and the gateway answers once the server accepted the run's registration.
+				// Forager resolves the session's variables once the gateway's join answer
+				// came, and the gateway answers the run once the server accepted the run's
+				// registration.
 				unused := spec.OnVariables
 				spec.OnVariables = func(a session.Applied) {
 					unused(a)
 					keep.keep(said)
 				}
-			}
-			if wrapsAgentEnv(claudeDispatched, walled) {
-				done, err := wrapAgentEnv(&spec, said)
-				if err != nil {
-					return err
-				}
-				defer done()
 			}
 			if r := conf.Forager; r != nil && !remote {
 				gw.LockMemory, gw.RunLimits = r.LockMemory, gatewayRunLimits(r)
@@ -476,63 +503,45 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// back until qory knows whether it says it.
 			lines := runLines(func(line string) { fmt.Fprintln(stderr, "qory run:", line) }, spec.RunID)
 			spec.Report = lines.line
-			// Every place the container may write is recorded before the session starts,
-			// so qory reads what a run could have written there against what the place
-			// held before, and held until the session has registered the run, from when
-			// qory's checks find it.
-			if walled {
-				hold, err := recordPlaces(ctx, &spec, at.root, at)
-				if err != nil {
-					return err
-				}
-				defer hold.Release()
-				registered := spec.OnVariables
-				spec.OnVariables = func(a session.Applied) {
-					hold.Release()
-					if registered != nil {
-						registered(a)
-					}
-				}
-				// Forager refuses a file it reads for the run from any of those places, and
-				// a mount or workspace reached through a link inside one.
-				if spec.Written, err = writtenPlaces(at.root, spec.Mounts); err != nil {
-					return err
-				}
-			}
-			var res *session.Result
-			var delivery gateway.Delivery
+			// The run opens at its gateway first, then the harness is composed, then the
+			// session joins, and the run closes with qory's outcome.
+			var g *gateway.Gateway
 			if remote {
 				// The gateway the run key names: the session reaches it over TLS and sends the
 				// run key on every request, once the connection is bound to a key the run
 				// key names.
 				spec.Gateway = key.remoteGateway()
 				fmt.Fprintln(stderr, throughGatewayLine(key, spec.RunID))
-				res, err = startSession(ctx, spec)
+				if fromCode != nil {
+					fmt.Fprintln(stderr, fromCode.startLine(spec.RunID))
+				}
 			} else {
 				// One gateway for the run, on this machine: the session speaks to it over
 				// its local link, in this process's memory.
 				gw.Report = lines.line
-				g, startErr := startGateway(ctx, gw)
-				if startErr != nil {
+				var startErr error
+				if g, startErr = startGateway(ctx, gw); startErr != nil {
 					lines.done(nil)
 					return explain(startErr, id)
 				}
 				defer g.Close(ctx)
-				l := g.LocalLink()
-				spec.Gateway = session.LocalGateway(l)
-				res, err = startSession(ctx, spec)
-				// The gateway delivers the run's last events before qory says how the run
-				// ended, and before qory exits.
+				spec.Gateway = session.LocalGateway(g.LocalLink())
+			}
+			// closeGateway has the run's gateway deliver the run's last events, before qory
+			// says how the run ended, and before qory exits.
+			var delivery gateway.Delivery
+			closeGateway := func() {
+				if g == nil {
+					return
+				}
 				var closeErr error
-				delivery, closeErr = g.Close(ctx)
-				if closeErr != nil {
+				if delivery, closeErr = g.Close(ctx); closeErr != nil {
 					gw.Report(closeErr.Error())
 				}
 			}
-			if kept && nothingLeftToSend(err, record, res) {
-				dropKeptRunKey(spec.RunID, func(line string) { fmt.Fprintln(stderr, "qory run:", line) })
-			}
-			if err != nil {
+			// failed says the error of a run that did not open, or whose session did not
+			// start, and returns it.
+			failed := func(err error) error {
 				lines.done(nil)
 				// A run id another run of this checkout has: refused before this run made
 				// anything, so the folder of that id is the other run's, and goes unnamed.
@@ -551,30 +560,297 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				} else {
 					err = explain(err, id)
 				}
-				// A run that started has a record, however it ended: the line naming it
-				// follows the error, so qory prints the error itself.
-				if _, statErr := os.Stat(record); statErr != nil {
+				return withRecord(stderr, err, record)
+			}
+			run, err := openRun(ctx, spec.OpenSpec)
+			if err != nil {
+				closeGateway()
+				if kept && nothingLeftToSend(record, nil) {
+					dropKeptRunKey(spec.RunID, said)
+				}
+				return failed(err)
+			}
+			// The open listed a walled run among the walled runs going under its id, which
+			// no other run can be listed under: the entry of that id is this run's.
+			if walled {
+				defer openingRun(spec.RunID)()
+			}
+			// The run's time limit counts from its open: the compose and the session.
+			opened := time.Now()
+			// closeRun closes the run with out, and returns what the close came to, nil when
+			// it failed, which Forager's line says.
+			closeRun := func(out session.Outcome) *session.Closed {
+				closed, err := run.Close(ctx, out)
+				if err != nil {
+					lines.line(err.Error())
+				}
+				closeGateway()
+				if kept && nothingLeftToSend(record, closed) {
+					dropKeptRunKey(spec.RunID, said)
+				}
+				return closed
+			}
+			name := ""
+			// prepareLaunch composes the harness into the home the session starts on and
+			// makes the session's launch from it, writing the compose's lines to w;
+			// claudeDispatched is true for a dispatched run of Claude Code.
+			prepareLaunch := func(w io.Writer) (claudeDispatched bool, err error) {
+				harness, workflows, err := composeForRun(w, composing, at, runtime, dispatched, walled)
+				if err != nil && composing.git != nil {
+					return false, proxyComposeError(err, composing.git.Proxy)
+				}
+				if err != nil {
+					return false, err
+				}
+				rep, err := readReport(at)
+				if err != nil {
+					return false, err
+				}
+				var launch render.Launch
+				if name, launch, err = resolveLaunch(rep, conf, runtime, at.home); err != nil {
+					return false, err
+				}
+				claudeDispatched = dispatched && isClaude(name)
+				if fromCode != nil {
+					if extra, err = fromCode.workflowArgs(name, rep, in); err != nil {
+						return false, err
+					}
+					// The time limit counts from the open, so the compose's time is in it.
+					timeout = provisioner.TimeLimit(fromCode.minutes, workflows[fromCode.workflow].TimeLimit)
+				}
+				if dispatched {
+					launch.Args = dispatchedArgs(name, launch.Args)
+				}
+				// Claude Code's settings go to Forager as their JSON, which qory read from the
+				// home itself, after the home's check: Forager reads no file of the home.
+				launchArgs := append(append([]string{}, launch.Args...), extra...)
+				if isClaude(name) {
+					if launchArgs, err = inlineSettings(launch.Args, extra, at.home); err != nil {
+						return false, err
+					}
+				}
+				rt, err := catalog.Lookup(name, filepath.Join(user, DescriptorsDir))
+				if err != nil {
+					return false, input(err)
+				}
+				// A walled run given a run key takes the model's credential through the
+				// gateway its run key names alone, so neither --env nor wall.env passes it in.
+				// An unwalled one, whose run key came by --run-key-fd, is as before.
+				if dispatched && walled {
+					var wallEnv []string
+					if conf.Forager != nil && conf.Forager.Wall != nil {
+						wallEnv = conf.Forager.Wall.Env
+					}
+					if err := modelCredentialPassed(rt, o.env, wallEnv); err != nil {
+						return false, err
+					}
+				}
+				spec.Runtime, spec.Command, spec.Args, spec.Declared, spec.Harness = rt, launch.Command, launchArgs, rep.Hosts(), harness
+				spec.LaunchFixed, spec.LaunchDefaults, spec.HarnessHome = launch.Fixed, launch.Defaults, launch.HarnessHome
+				if claudeDispatched && walled {
+					spec.LaunchFixed = withAgentHome(spec.LaunchFixed)
+				}
+				return claudeDispatched, nil
+			}
+			// prepareSession makes the rest of the session's spec once its launch is made:
+			// for a walled run the record of each place the container may write.
+			prepareSession := func(claudeDispatched bool) error {
+				if wrapsAgentEnv(claudeDispatched, walled) {
+					done, err := wrapAgentEnv(&spec, said)
+					if err != nil {
+						return err
+					}
+					cleanups = append(cleanups, done)
+				}
+				// Every place the container may write is recorded before the session starts,
+				// so qory reads what a run could have written there against what the place
+				// held before, and held until the session has registered the run, from when
+				// qory's checks find it.
+				if walled {
+					hold, err := recordPlaces(ctx, &spec, at.root, at)
+					if err != nil {
+						return err
+					}
+					cleanups = append(cleanups, hold.Release)
+					registered := spec.OnVariables
+					spec.OnVariables = func(a session.Applied) {
+						hold.Release()
+						if registered != nil {
+							registered(a)
+						}
+					}
+					// Forager ends the join before the runtime starts when it reads a file for
+					// the run from any of those places, or reaches a mount or workspace through
+					// a link inside one.
+					if spec.Written, err = writtenPlaces(at.root, spec.Mounts); err != nil {
+						return err
+					}
+				}
+				return nil
+			}
+			// hostWork is the run's work on this machine before its session joins, in two
+			// steps of the run's record: the fetch, when the run configuration lists
+			// repositories, and the compose. When the run configuration lists repositories,
+			// or the run was opened with a run key, the run's host proxy opens: the run's
+			// repositories are fetched through it into the working folder, and the compose of
+			// a run opened with a run key fetches its git sources through it, into the run's
+			// cache. The host proxy closes before the session joins; Join closes it too. A
+			// run with no control plane opens none, and composes with the person's git.
+			hostWork := func() error {
+				stopped := func() bool {
+					return ctx.Err() != nil || timeout > 0 && time.Since(opened) >= timeout
+				}
+				var h *hostProxy
+				openProxy := func() error {
+					p, err := run.HostProxy()
+					if err != nil {
+						return &runLineError{noHostProxy(err)}
+					}
+					h = &p
+					return nil
+				}
+				defer func() {
+					if h != nil {
+						h.close()
+					}
+				}()
+				if run.Repositories() != "" {
+					err := inStep(run, stderr, event.StepFetch, fetchStepName(runValues(run)), stopped, func(w io.Writer) error {
+						if err := openProxy(); err != nil {
+							return err
+						}
+						fetchCtx, cancel := ctx, func() {}
+						if timeout > 0 {
+							fetchCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+						}
+						defer cancel()
+						if _, err := preparation.Run(fetchCtx, cwd, os.Environ(), runValues(run), h.proxy, w); err != nil {
+							return &runLineError{err}
+						}
+						return nil
+					})
+					if err != nil {
+						return err
+					}
+				}
+				var claudeDispatched bool
+				err := inStep(run, stderr, event.StepCompose, composeStepName(runtime), stopped, func(w io.Writer) error {
+					if remote {
+						if h == nil {
+							if err := openProxy(); err != nil {
+								return err
+							}
+						}
+						composing.git = proxyGit(*h, w)
+						composing.cache = filepath.Join(run.Dir(), runSources)
+					}
+					var err error
+					claudeDispatched, err = prepareLaunch(w)
+					return err
+				})
+				if err != nil {
 					return err
 				}
-				if !ui.Marked() {
-					u.Title("qory")
+				return prepareSession(claudeDispatched)
+			}
+			// setupWork runs the setup of a walled run whose run configuration lists
+			// repositories, see [runSetup], within the run's time limit. A setup command that
+			// exits otherwise than 0 is the run's error line, and a mount refusal of the
+			// setup container's places, or of the places AgentEnv checks, gets the line a
+			// join's mount refusal gets.
+			setupWork := func() error {
+				setupCtx, cancel := ctx, func() {}
+				if timeout > 0 {
+					setupCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
 				}
-				u.Fail(err)
-				fmt.Fprintln(stderr, "qory run: the record is in", record)
-				return reported(err)
+				defer cancel()
+				err := runSetup(setupCtx, run, &spec)
+				var exited *session.SetupError
+				switch {
+				case err == nil:
+					return nil
+				case errors.As(err, &exited):
+					return &runLineError{err}
+				}
+				if m := mountRefused(err, passed{foragerDir: foragerDir, stateDir: state, spec: &spec, root: at.root, own: own}); m != nil {
+					return m
+				}
+				return err
+			}
+			// A run stopped or out of time before its session joins prepares nothing more.
+			var prepErr error
+			if ctx.Err() == nil && (timeout == 0 || time.Since(opened) < timeout) {
+				prepErr = hostWork()
+				if prepErr == nil && walled && run.Repositories() != "" {
+					prepErr = setupWork()
+				}
+				if beforeJoin != nil {
+					beforeJoin()
+				}
+			}
+			left := time.Duration(0)
+			if timeout > 0 {
+				left = timeout - time.Since(opened)
+			}
+			switch {
+			case ctx.Err() != nil:
+				closeRun(session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1})
+				lines.done(nil)
+				u.Fail(errors.New(cancelledBeforeJoin(got(), name)))
+				said("the record is in " + record)
+				return reported(&exitError{code: 1})
+			case timeout > 0 && left <= 0:
+				closeRun(session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout})
+				lines.done(nil)
+				line := timedOutBeforeJoin(timeout, name)
+				if fromCode != nil {
+					line = fromCode.timedOutLine(timeout, name)
+				}
+				u.Fail(errors.New(line))
+				said("the record is in " + record)
+				return reported(&exitError{code: exitTimeout})
+			case prepErr != nil:
+				// A run no session joined is failed with no_session.
+				closeRun(session.Outcome{State: event.StateFailed, ExitCode: -1})
+				lines.done(nil)
+				var line *runLineError
+				if errors.As(prepErr, &line) {
+					said(line.Error())
+					if recorded(record) {
+						said("the record is in " + record)
+					}
+					return reported(prepErr)
+				}
+				if errors.Is(prepErr, ErrReported) {
+					said("the record is in " + record)
+					return prepErr
+				}
+				return withRecord(stderr, prepErr, record)
+			}
+			spec.Timeout = left
+			res, err := joinSession(run, ctx, spec.SessionSpec)
+			closed := closeRun(sessionOutcome(res, err))
+			if err != nil {
+				return failed(err)
 			}
 			defer fmt.Fprintln(stderr, "qory run: the record is in", record)
 			end := runEnd{runtime: name, timeout: timeout}
 			if res.Cancelled {
 				// qory run's context had ended when the session saw the runtime exit: the
 				// signal qory got stopped the run, and is named. A signal that came later,
-				// as the gateway was asked for the outcome or the run's last events were
-				// delivered, did not end the run.
+				// as the run closed or the run's last events were delivered, did not end the
+				// run.
 				end.got = got()
 			}
-			if delivery.RunClosed && !res.RunClosed {
-				// The run's own gateway recorded the run's end after its runtime exited.
+			switch {
+			case res.RunClosed:
+				// The session's result has the end the gateway closed the run with.
+			case delivery.RunClosed:
+				// The gateway qory run started recorded the run's end after its runtime exited.
 				end.gateway = &gatewayEnd{state: delivery.State, reason: delivery.Reason, code: delivery.ClosedReason}
+			case closed != nil && closed.RunClosed:
+				// The gateway the run key names ended the run after its runtime exited.
+				end.gateway = &gatewayEnd{state: closed.State, reason: closed.Reason, code: closed.ClosedReason}
 			}
 			lines.done(func(kind int) bool {
 				switch kind {
@@ -603,7 +879,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	c.Flags().StringVar(&title, "title", "", "the run's title, for a person to read, reported when the run starts")
 	c.Flags().StringArrayVar(&subjects, "subject", nil, "what the run works on, type=<type>,ref=<ref>[,url=<url>][,title=<title>], such as type=ticket,ref=7; title takes the rest of the value, commas too; repeatable")
 	c.Flags().StringVar(&details, "details", "", "a JSON object of the run's details, read from this file, or - for stdin when stdin is not a terminal; at most 8192 bytes compacted, 4 levels deep")
-	c.Flags().DurationVar(&timeout, "timeout", 0, "stop the agent after this long, such as 5h30m, and exit "+fmt.Sprint(exitTimeout)+" (default no limit; "+config.ForagerFileName+": session.run.timeout)")
+	c.Flags().DurationVar(&timeout, "timeout", 0, "stop the run after this long, counted from its open, compose included, such as 5h30m, and exit "+fmt.Sprint(exitTimeout)+" (default no limit; "+config.ForagerFileName+": session.run.timeout)")
 	c.Flags().StringVar(&stopSignal, "stop-signal", "", "the signal that stops the agent: SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2 (default SIGTERM; "+config.ForagerFileName+": session.run.stop_signal)")
 	c.Flags().DurationVar(&grace, "stop-grace", 0, "the time between the stop signal and SIGKILL (default 10s; "+config.ForagerFileName+": session.run.stop_grace)")
 	c.Flags().StringVar(&o.name, "wall", "", "run the agent in a container whose one way out is the proxy: "+config.WallDocker+", or none ("+config.ForagerFileName+": wall.adapter)")
@@ -615,11 +891,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	c.Flags().IntVar(&o.limits.PIDs, "pids-limit", 0, "the most processes and threads in the container ("+config.ForagerFileName+": wall.pids_limit)")
 	c.Flags().IntVar(&secretFD, secretFDFlag, 0, secretFDUsage)
 	c.Flags().IntVar(&keyFD, runKeyFDFlag, 0, runKeyFDUsage)
+	c.Flags().StringVar(&codeFile, runCodeFileFlag, "", runCodeFileUsage)
+	c.Flags().StringVar(&gatewayURL, gatewayFlag, "", gatewayUsage)
 	c.Flags().StringVar(&o.limits.ShmSize, "shm-size", "", "the size of /dev/shm in the container, such as 2g ("+config.ForagerFileName+": wall.shm_size)")
-	c.Flags().BoolVar(&fetchOnly, fetchOnlyFlag, false, "fetch the code of a run given a run key into the working folder, behind the wall, and start no agent")
-	_ = c.Flags().MarkHidden(fetchOnlyFlag)
 	homeFlags(c, &h)
-	c.AddCommand(newResend(), newRegister(), newEnd(), newForward(), newRelay(), newNest(), newPrepare(), newAgentEnv(), newExec(), newPrebuild(), newSeed(), newPool())
+	composeFlags(c, &composing)
+	c.AddCommand(newResend(), newRegister(), newEnd(), newForward(), newRelay(), newNest(), newPrepare(), newAgentEnv(), newExec(), newHold(), newSetupCommand(), newSeed(), newPool())
 	return c
 }
 
@@ -734,16 +1011,155 @@ const runHeartbeat = config.Heartbeat
 const runQuiet = 3 * runHeartbeat
 
 // socketGrace is how long a run's socket keeps accepting after the runtime exits,
-// session.Spec.SocketGrace: zero, which is Forager's 200 ms. Only the tests shorten it.
+// session.SessionSpec.SocketGrace: zero, which is Forager's 200 ms. Only the tests
+// shorten it.
 var socketGrace time.Duration
 
-// startSession runs a run's session; a test replaces it to read the session's Spec.
-var startSession = session.Run
+// runSpec is what qory run gives Forager: the open's spec of the run, and the spec of
+// the session that joins it.
+type runSpec struct {
+	session.OpenSpec
+	session.SessionSpec
+	// setupWhere is where a walled run's setup commands run, wall.setup:
+	// [config.SetupOutside] or [config.SetupInside]; empty without a wall.
+	setupWhere string
+}
+
+// openedRun is a run open at its gateway, as qory run uses it: a [*session.Run], as
+// [foragerRun] gives it.
+type openedRun interface {
+	Join(ctx context.Context, spec session.SessionSpec) (*session.Result, error)
+	// Setup runs the run's setup commands in the setup container, before the join.
+	Setup(ctx context.Context, spec session.SetupSpec) error
+	Close(ctx context.Context, out session.Outcome) (*session.Closed, error)
+	// StartStep starts a step of the run's host work, of kind fetch or compose.
+	StartStep(kind, name string) (hostStep, error)
+	// HostProxy starts the run's host proxy, for the fetches on this machine.
+	HostProxy() (hostProxy, error)
+	// AgentEnv is the environment a session of spec gets, NAME=value sorted by name,
+	// resolved as Join resolves it; qory run gives it to the setup container outside.
+	AgentEnv(spec session.SessionSpec) ([]string, error)
+	// System and Repositories are the server's values of [preparation.EnvSystem] and
+	// [preparation.EnvRepositories], "" when it sets none; the fetch on this machine
+	// reads them.
+	System() string
+	Repositories() string
+	// Dir is the run directory.
+	Dir() string
+}
+
+// hostProxy is the run's host proxy as qory run uses it: the proxy git fetches through,
+// and what ends it.
+type hostProxy struct {
+	proxy proxygit.Proxy
+	close func() error
+}
+
+// foragerRun is a [*session.Run] as an [openedRun].
+type foragerRun struct{ *session.Run }
+
+// StartStep is [session.Run.StartStep].
+func (r foragerRun) StartStep(kind, name string) (hostStep, error) {
+	s, err := r.Run.StartStep(kind, name)
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// HostProxy is [session.Run.HostProxy]: its ProxyURL and CABundle, and its Close.
+func (r foragerRun) HostProxy() (hostProxy, error) {
+	h, err := r.Run.HostProxy()
+	if err != nil {
+		return hostProxy{}, err
+	}
+	return hostProxy{proxy: proxygit.Proxy{URL: h.ProxyURL, CABundle: h.CABundle}, close: h.Close}, nil
+}
+
+// openRun opens a run at its gateway, and joinSession runs a session in it; a test
+// replaces openRun to open a run that reaches no gateway, and joinSession to read the
+// session's spec.
+var (
+	openRun = func(ctx context.Context, spec session.OpenSpec) (openedRun, error) {
+		r, err := session.Open(ctx, spec)
+		if err != nil {
+			return nil, err
+		}
+		return foragerRun{r}, nil
+	}
+	joinSession = func(r openedRun, ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
+		return r.Join(ctx, spec)
+	}
+)
+
+// beforeJoin, when not nil, is called once the harness is composed, before the run's
+// session joins; a test sets it.
+var beforeJoin func()
+
+// sessionOutcome is the run's outcome qory closes the run with once its one session
+// ended with res, or did not start, err: the time limit's, cancelled with timeout and
+// 124; a stop from where the run was started, cancelled with interrupted and the
+// runtime's exit code; otherwise succeeded or failed by the session's state, with the
+// runtime's exit code. A session that did not start, or whose run the gateway closed,
+// is failed with -1: Forager closes a run the gateway closed with the gateway's end.
+func sessionOutcome(res *session.Result, err error) session.Outcome {
+	switch {
+	case err != nil || res == nil || res.RunClosed:
+		return session.Outcome{State: event.StateFailed, ExitCode: -1}
+	case res.TimedOut:
+		return session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}
+	case res.Cancelled:
+		return session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: res.ExitCode}
+	case res.State == event.StateSucceeded:
+		return session.Outcome{State: event.StateSucceeded, ExitCode: res.ExitCode}
+	}
+	return session.Outcome{State: event.StateFailed, ExitCode: res.ExitCode}
+}
+
+// cancelledBeforeJoin is the line of a run that qory run's signal, got, stopped before
+// its session joined, and runtime the agent's name, "" when it is not known yet.
+func cancelledBeforeJoin(got, runtime string) string {
+	if got == "" {
+		return "the run was cancelled before " + agentName(runtime) + " started"
+	}
+	return "the run was cancelled: qory run got " + got + " before " + agentName(runtime) + " started"
+}
+
+// timedOutBeforeJoin is the line of a run that reached its time limit, limit, before
+// its session joined, and runtime the agent's name, "" when it is not known yet.
+func timedOutBeforeJoin(limit time.Duration, runtime string) string {
+	return fmt.Sprintf("give the run a longer --timeout: the run was cancelled at its time limit of %s, before %s started", limit, agentName(runtime))
+}
+
+// agentName is the runtime's name as a line says it, "the agent" when it is not known.
+func agentName(runtime string) string {
+	if runtime == "" {
+		return "the agent"
+	}
+	return accesskey.ShownName(runtime, false)
+}
+
+// withRecord says err of a run that has its record at record, on stderr, with the line
+// that names the record after it, and returns err marked as printed. When record is
+// not there, the run made nothing, and err comes back as it is, for the caller to print.
+func withRecord(stderr io.Writer, err error, record string) error {
+	if _, statErr := os.Stat(record); statErr != nil {
+		return err
+	}
+	u := ui.New(stderr)
+	if !ui.Marked() {
+		u.Title("qory")
+	}
+	u.Fail(err)
+	fmt.Fprintln(stderr, "qory run: the record is in", record)
+	return reported(err)
+}
 
 // runEnd is what qory knows of a run besides its result: its runtime's name, its time
-// limit, the signal qory run got that ended the run, "" for none, and the run's end that
-// gateway of the run's own recorded after the runtime exited by itself, nil when it
-// recorded none.
+// limit, the signal qory run got that ended the run, "" for none, and the run's end its
+// gateway recorded after the runtime exited by itself, nil when it recorded none: the
+// end the gateway qory run started recorded, or the end of a separate gateway that
+// closed the run before qory run closed it, such as the run's starter's outcome.
 type runEnd struct {
 	runtime string
 	timeout time.Duration
@@ -759,9 +1175,8 @@ type gatewayEnd struct {
 
 // exitOutcome is the outcome said beside the runtime's own exit: the end the run's
 // gateway recorded after the runtime exited, when it recorded one, which is what the
-// server shows; otherwise the outcome the session gives, the one the run's starter gave
-// at the exit, or the exit's own. An end the gateway recorded with no state is the
-// outcome of its code.
+// server shows; otherwise the session's state and reason. An end the gateway recorded
+// with no state is the outcome of its code.
 func (e runEnd) exitOutcome(res *session.Result) outcome {
 	if e.gateway == nil {
 		return outcomeOf(res.State, res.Reason)
@@ -798,8 +1213,7 @@ func (e runEnd) saysOutcome(res *session.Result) bool {
 // runtime's own exit says it, with its status, or 1 for a signal; when the outcome
 // differs from what the exit says, a second line says the outcome, and the exit status
 // follows it. That outcome is the end the run's gateway recorded after the runtime
-// exited, or else the one the run's starter gave at the exit ([runEnd.exitOutcome]):
-// one line, never both.
+// exited ([runEnd.exitOutcome]).
 func runEnded(u *ui.UI, res *session.Result, e runEnd) error {
 	say := func(o outcome, text string) {
 		if o.completed {
@@ -1068,7 +1482,7 @@ const wallOff = "none"
 // image needs no default unless wall.images_allow lists prefixes. fromServer says the
 // server's run configuration is the policy; it arrives once the run starts, and may
 // select no image, so such a run needs a default.
-func enclose(spec *session.Spec, r *config.Forager, o wallOptions, selected string, fromServer bool, exe, root, home string) error {
+func enclose(spec *runSpec, r *config.Forager, o wallOptions, selected string, fromServer bool, exe, root, home string) error {
 	var section config.ForagerWall
 	if r != nil && r.Wall != nil {
 		section = *r.Wall
@@ -1144,18 +1558,21 @@ func enclose(spec *session.Spec, r *config.Forager, o wallOptions, selected stri
 	}
 	spec.Env = []string{}
 	spec.Variables.Machine = machine
-	spec.Wall = &wall.Docker{Command: section.Command, Helper: helper, RelayArgs: relayArgs, NestArgs: nestArgs, User: section.User, CAEnv: section.CAEnv}
+	spec.Wall = &wall.Docker{Command: section.Command, Helper: helper, RelayArgs: relayArgs, NestArgs: nestArgs, HoldArgs: holdArgs, User: section.User, CAEnv: section.CAEnv}
 	spec.Forwarder = append([]string{wall.HelperPath}, forwardArgs...)
 	// Forager starts the launch through the exec verb, which unsets the names nothing
 	// sets for the run before the launch starts; a walled run without it is refused.
 	spec.Exec = append([]string{wall.HelperPath}, execArgs...)
-	// The preparation runs inside the wall before the agent: qory run prepare fetches
-	// the repositories the server names, and fetches nothing when it names none. Its last
-	// step, whether or not it fetched, and unless a step before it failed, makes the
-	// agent's home of a dispatched walled run of Claude Code fresh. It checks what the
-	// image and the repository's files leave in place, not a repository that acts
-	// against it: see newPrepare.
-	spec.Preparation = append([]string{wall.HelperPath}, prepareArgs...)
+	// The setup commands of a run whose run configuration lists repositories run
+	// outside, in the setup container, unless wall.setup is inside: see [runSetup]. Only
+	// a run from a control plane gets repositories, so only its run.started has setup.
+	spec.setupWhere = section.Setup
+	if spec.setupWhere == "" {
+		spec.setupWhere = config.SetupOutside
+	}
+	if fromServer {
+		spec.OpenSpec.Setup = setupWhere(spec.setupWhere)
+	}
 	spec.Mounts = []wall.Mount{{Path: root}}
 	if !reallyWithin(root, home) {
 		spec.Mounts = append(spec.Mounts, wall.Mount{Path: home, ReadOnly: true})
@@ -1225,7 +1642,7 @@ func whyUnused(from, why, host string) string {
 // qory passed, with the links among them.
 type passed struct {
 	foragerDir, stateDir string
-	spec                 *session.Spec
+	spec                 *runSpec
 	root                 string
 	own                  ownFiles
 }
@@ -1418,7 +1835,7 @@ func mountRefused(err error, p passed) error {
 		// printed through hostgit.Shown.
 		inside := p.placeShown(outer)
 		if !p.ofRun(outer) {
-			// A place of Spec.Written that is none of this run's: an earlier walled run used it.
+			// A place of SessionSpec.Written that is none of this run's: an earlier walled run used it.
 			inside = hostgit.Shown(outer) + ", a place a walled run has used"
 		}
 		text = fmt.Sprintf("%s is reached through the link %s inside %s, which a walled agent can change, so the run does not start. List the link's target itself", p.placeShown(place), hostgit.Shown(link), inside)
@@ -1783,16 +2200,17 @@ func recorded(dir string) bool {
 	return err == nil
 }
 
-// nothingLeftToSend reports whether a run through a separate gateway that ended with
-// err, res its result, has nothing left to send, so the run key kept for it can go: it
-// failed before it made its record, at record, or it ended with every event delivered
-// or with its run closed. A run that made its record and failed, or that left events
-// undelivered on a run that is not closed, keeps its key for qory run resend.
-func nothingLeftToSend(err error, record string, res *session.Result) bool {
-	if err != nil {
+// nothingLeftToSend reports whether a run through a separate gateway, closed as closed
+// says, nil when it did not open or its close failed, has nothing left to send, so the
+// run key kept for it can go: it failed before it made its record, at record, or it
+// closed with every event delivered or with its run closed by the gateway. A run that
+// made its record and did not close, or that left events undelivered on a run the
+// gateway did not close, keeps its key for qory run resend.
+func nothingLeftToSend(record string, closed *session.Closed) bool {
+	if closed == nil {
 		return !recorded(record)
 	}
-	return res.Undelivered == 0 || res.RunClosed
+	return closed.Undelivered == 0 || closed.RunClosed
 }
 
 // runsDir is the folder of the run records of the checkout at root, under qory's state
@@ -1897,7 +2315,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 			if err != nil {
 				return err
 			}
-			at, conf, err := locateRun(homeOptions{}, key)
+			at, conf, err := locateRun(homeOptions{}, key != nil, false)
 			if err != nil {
 				return err
 			}
@@ -2163,17 +2581,20 @@ func reallyWithin(root, path string) bool {
 
 // The arguments that select the hidden verbs the wall runs from the qory binary: the
 // relay, the start of a nested Docker, the hook forwarder, which also runs on this
-// machine without a wall, the preparation that fetches the run's code before the
-// agent starts, and the exec step that starts the launch with the names nothing sets
-// unset; [agentEnvArgs] selects agent-env, which starts the agent of a dispatched
-// walled run of Claude Code. Each verb carries [inWall], so no look for a release runs
-// inside a container.
+// machine without a wall, the preparation of the working folder qory run fetched the
+// run's code into, the exec step that starts the launch with the names nothing sets
+// unset, the program that keeps the setup container running, and the runner of a setup
+// command inside the wall; [agentEnvArgs] selects agent-env, which starts the agent of
+// a dispatched walled run of Claude Code. Each verb carries [inWall], so no look for a
+// release runs inside a container.
 var (
-	relayArgs   = []string{"run", "relay"}
-	nestArgs    = []string{"run", "nest"}
-	forwardArgs = []string{"run", "forward"}
-	prepareArgs = []string{"run", "prepare"}
-	execArgs    = []string{"run", "exec"}
+	relayArgs        = []string{"run", "relay"}
+	nestArgs         = []string{"run", "nest"}
+	forwardArgs      = []string{"run", "forward"}
+	prepareArgs      = []string{"run", "prepare"}
+	execArgs         = []string{"run", "exec"}
+	holdArgs         = []string{"run", "hold"}
+	setupCommandArgs = []string{"run", "setup-command"}
 )
 
 // inWall is the annotation of a verb the wall runs inside a container.
@@ -2217,7 +2638,7 @@ func newNest() *cobra.Command {
 }
 
 // newExec builds the hidden exec verb, what Forager starts a walled run's launch
-// through, Spec.Exec, when the run has names to unset: it removes the names each
+// through, SessionSpec.Exec, when the run has names to unset: it removes the names each
 // --unset gives from its environment and executes the program after -- in its place,
 // with its arguments unchanged, as [session.Exec] does. It parses no flag, so the
 // launch's words reach the program as given. It returns only on an error,
@@ -2261,34 +2682,27 @@ func newForward() *cobra.Command {
 // repository, [preparation.Seed]; a test points it elsewhere.
 var prepareSeed = preparation.Seed
 
-// newPrepare builds the hidden prepare verb, what the wall runs from the qory binary
-// before the agent, as the agent's user, in the working folder and with the agent's
-// environment: it fetches the repositories [preparation.EnvRepositories] names from the
-// host [preparation.EnvSystem] names, through the run's proxy, starting from the image's
-// copy at [prepareSeed] when there is one, then runs the start commands of the run's
-// repository, as [preparation.Start] has them, with the verb's stderr as their stdout
-// and stderr, so that nothing they print reaches the stdout of the run; it fetches
-// nothing and runs no command when the first variable is unset or empty. Its last step,
-// whether or not it fetched, and unless a step before it failed, is the agent's home:
-// when [preparation.EnvAgentHome] is [preparation.AgentHome], as on a dispatched walled
-// run of Claude Code, [preparation.FreshHome] makes it new and empty, and refuses
-// anything the image or the start commands put there before it runs. The verb runs as
-// the agent's user in the agent's container, as the image's programs and the start
-// commands do, so it guards against what the image and the repository's files leave in
-// place, not against a repository that acts against it, such as through a program the
-// start commands leave running; against that, the boundary is the wall. It prints its
-// lines on stderr, what it did or why it failed, and exits non-zero on a failure, which
-// stops the run before the agent starts.
-//
-// With --fetch-only, the launch of a fetch-only run of qory run, it fetches the
-// repositories and does nothing else: it starts from no image's copy, runs no start
-// command and leaves the agent's home as it is, and it fails when the variable names no
-// repository.
+// newPrepare builds the hidden prepare verb, the setup command of a walled run whose run
+// configuration lists repositories, [setupCommands]: it runs from the qory binary as the
+// agent's user, in the working folder, in the setup container or, with wall.setup
+// inside, in the agent's container before the agent. qory run fetched the repositories
+// [preparation.EnvRepositories] names from the host [preparation.EnvSystem] names into
+// the working folder on this machine, before the setup, so the verb fetches nothing:
+// when the first variable names repositories, it adds to the working folder the files of
+// the image's copy at [prepareSeed] that the fetched commit does not track, when there
+// is a copy, as [preparation.Prepare] has it, then runs the start commands of the run's
+// repository, as [preparation.StartLogged] has them, with a file that it copies to the
+// verb's stderr as their stdout and stderr; it does neither when the variable is unset
+// or empty. The verb runs as the agent's user in a container of the run's image, as the
+// image's programs and the start commands do, so it guards against what the image and
+// the repository's files leave in place, not against a repository that acts against it,
+// such as through a program the start commands leave running; against that, the
+// boundary is the wall. It prints its lines on stderr, what it did or why it failed, and
+// exits non-zero on a failure, which fails its setup step, so the agent does not start.
 func newPrepare() *cobra.Command {
-	var fetchOnly bool
 	c := &cobra.Command{
 		Use:         "prepare",
-		Short:       "Fetch the run's repositories into the working folder",
+		Short:       "Prepare the working folder qory run fetched the run's repositories into",
 		Hidden:      true,
 		Annotations: map[string]string{inWall: "prepare"},
 		Args:        noArgs,
@@ -2296,47 +2710,170 @@ func newPrepare() *cobra.Command {
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			stderr := cmd.ErrOrStderr()
-			if fetchOnly {
-				fetched, err := preparation.Run(ctx, ".", "", os.Getenv, stderr)
-				if err == nil && !fetched {
-					err = fmt.Errorf(textFetchOnlyNothing, preparation.EnvRepositories)
-				}
-				if err != nil {
-					fmt.Fprintln(stderr, err)
-					return reported(err)
-				}
-				return nil
-			}
-			fetched, err := preparation.Run(ctx, ".", prepareSeed, os.Getenv, stderr)
-			if err == nil && fetched {
-				err = preparation.Start(ctx, ".", os.Environ(), stderr)
+			listed, err := preparation.Prepare(ctx, ".", prepareSeed, os.Getenv, stderr)
+			if err == nil && listed {
+				err = preparation.StartLogged(ctx, ".", os.Environ(), stderr)
 			}
 			if err != nil {
 				fmt.Fprintln(stderr, err)
 				return reported(err)
 			}
-			// Last: the agent's home of a dispatched run, made fresh.
-			if err := preparation.FreshHome(os.Getenv); err != nil {
-				fmt.Fprintln(cmd.ErrOrStderr(), err)
-				return reported(err)
-			}
 			return nil
 		},
 	}
-	c.Flags().BoolVar(&fetchOnly, fetchOnlyFlag, false, "fetch the repositories alone: no image's copy, no start command")
-	_ = c.Flags().MarkHidden(fetchOnlyFlag)
 	return c
 }
 
-// ownHome refuses a run whose report names a home other than the one qory computes for
+// newHold builds the hidden hold verb, the entry point the wall starts the setup
+// container with from the qory binary, [wall.Docker.HoldArgs]: it runs [wall.Hold], so
+// the container and the services the setup commands start keep running until the run
+// closes and the wall stops the container, with SIGTERM.
+func newHold() *cobra.Command {
+	return &cobra.Command{
+		Use:         "hold",
+		Short:       "Keep the setup container running until the run closes",
+		Hidden:      true,
+		Annotations: map[string]string{inWall: "hold"},
+		Args:        noArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			return wall.Hold(ctx)
+		},
+	}
+}
+
+// newSetupCommand builds the hidden setup-command verb, SessionSpec.SetupRunner of a run
+// with wall.setup inside: Forager's script starts it inside the agent's container once
+// for each setup command, with the command's number, -- and the command's words, and it
+// runs the command and reports it on the run's socket, as [session.RunSetupCommand]
+// does. It parses no flag, so the command's words reach it as given, and exits with the
+// command's exit status, or 125 when it cannot run the command or reach the socket.
+func newSetupCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:                "setup-command number -- command [argument...]",
+		Short:              "Run one setup command inside the wall and report it to the run",
+		Hidden:             true,
+		Annotations:        map[string]string{inWall: "setup-command"},
+		DisableFlagParsing: true,
+		Run: func(cmd *cobra.Command, args []string) {
+			os.Exit(session.RunSetupCommand(args, os.Stderr))
+		},
+	}
+}
+
+// setupStep is the name of the setup step of qory run prepare.
+const setupStep = "prepare"
+
+// setupCommands are the setup commands of a walled run whose run configuration lists
+// repositories: qory run prepare, in one setup step, which adds the image's copy of the
+// run's repository and then runs the start commands of the repository's development
+// container configuration.
+func setupCommands() []session.SetupCommand {
+	return []session.SetupCommand{{Name: setupStep, Args: append([]string{wall.HelperPath}, prepareArgs...)}}
+}
+
+// runSetup makes the setup of a walled run whose run configuration lists repositories,
+// once its session's spec is made and before the session joins. With wall.setup inside,
+// the setup commands go into the session's spec, and Forager runs them inside the
+// agent's container through qory run setup-command before the agent starts. Outside,
+// the default, run.Setup runs them now in the setup container, a separate container of
+// the run's image on the wall's network, which runs until the run closes. The setup
+// container is checked and limited as the session is: it gets the session's working
+// folder, ForagerFiles, Written and Limits, and the agent's variables, see [setupEnv].
+// Inside, the setup commands get the agent's environment.
+func runSetup(ctx context.Context, run openedRun, spec *runSpec) error {
+	commands := setupCommands()
+	if spec.setupWhere == config.SetupInside {
+		spec.SessionSpec.Setup = commands
+		spec.SetupRunner = append([]string{wall.HelperPath}, setupCommandArgs...)
+		return nil
+	}
+	env, err := setupEnv(run, spec)
+	if err != nil {
+		return err
+	}
+	return run.Setup(ctx, session.SetupSpec{
+		Dir:          spec.Dir,
+		Env:          env,
+		Commands:     commands,
+		ForagerFiles: spec.ForagerFiles,
+		Written:      spec.Written,
+		Limits:       spec.Limits,
+	})
+}
+
+// setupEnv is the variables of the setup container outside, after the ones Forager puts
+// first, the wall's and the run's placeholders: the agent's, as [session.Run.AgentEnv]
+// resolves them for the session's spec, with the deny lists and the placeholders of the
+// join applied. They contain the server's values of [preparation.EnvSystem] and
+// [preparation.EnvRepositories] when it sets them, which qory run prepare reads.
+// AgentEnv's error is the one the join would return. A variable_reserved or
+// placeholder_conflict refusal is [setupVariableError] when wall.env or --env passes
+// every refused name and neither LaunchFixed nor LaunchDefaults, the harness's values,
+// sets any of them. Any other error is AgentEnv's as it is: setupWork gives a mount
+// refusal the line a join's gets, and qory run prints every other one after its mark.
+func setupEnv(run openedRun, spec *runSpec) ([]string, error) {
+	env, err := run.AgentEnv(spec.SessionSpec)
+	if err == nil {
+		return env, nil
+	}
+	var ref *session.Refusal
+	if !errors.As(err, &ref) || ref.Code != refusal.VariableReserved && ref.Code != refusal.PlaceholderConflict || len(ref.Names) == 0 {
+		return nil, err
+	}
+	passed := slices.Concat(envNames(spec.Variables.Machine), envNames(spec.Variables.Run))
+	harness := slices.Concat(envNames(spec.LaunchFixed), envNames(spec.LaunchDefaults))
+	for _, name := range ref.Names {
+		if !slices.Contains(passed, name) || slices.Contains(harness, name) {
+			return nil, err
+		}
+	}
+	return nil, &setupVariableError{names: ref.Names, err: err}
+}
+
+// envNames is the names of env, NAME=value.
+func envNames(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		name, _, _ := strings.Cut(kv, "=")
+		out = append(out, name)
+	}
+	return out
+}
+
+// setupVariableError is AgentEnv's refusal of variables of wall.env or --env, names,
+// as the setup of a walled run gets them: the fix first, then Forager's text. It
+// unwraps to the refusal.
+type setupVariableError struct {
+	names []string
+	err   error
+}
+
+func (e *setupVariableError) Error() string {
+	return "leave " + strings.Join(e.names, ", ") + " out of wall.env and --env, then run again: " + e.err.Error()
+}
+
+func (e *setupVariableError) Unwrap() error { return e.err }
+
+// setupWhere is run.started's setup for where, wall.setup's value.
+func setupWhere(where string) string {
+	if where == config.SetupInside {
+		return event.SetupInside
+	}
+	return event.SetupOutside
+}
+
+// ownHome refuses a launch whose report contains a home other than the one qory computes for
 // the checkout: the home is a mount of a walled run, and the report can be one a
-// repository committed or a walled agent wrote, so it supplies no path the run mounts.
+// repository committed or a walled agent wrote, so it supplies no path a run mounts. qory
+// run composes the home itself, and checks only the checkout, see [checkoutsHome].
 // The home in at is [placesFor]'s, or --home's when that names a composed home; then the
 // checkout comes from the report beside it, and has to be the one the home is composed
 // for: a home inside it is its .qory/harness, and one outside is named by its
 // [checkout.Key]. Two paths to one directory are one home. what names the verb's use of
-// the home, such as "a run", and refused says what it does not do, such as "the run does
-// not start".
+// the home, such as "a launch", and refused is what it does not do, such as "qory
+// prints no launch".
 func ownHome(at places, rep report.Report, what, refused string) error {
 	if !composedFor(at.root, at.home) {
 		return input(fmt.Errorf("the harness report %s names the checkout %s, and %s is not that checkout's home; %s uses only its checkout's home, so %s. Run qory harness compose again", exports.Value(ui.Short(at.report, at.root), false), at.root, exports.Value(at.home, false), what, refused))
@@ -2345,6 +2882,17 @@ func ownHome(at places, rep report.Report, what, refused string) error {
 		return input(fmt.Errorf("the harness report %s names the home %s, and this checkout's home is %s; %s uses only the home qory computes, so %s. Run qory harness compose again", exports.Value(ui.Short(at.report, at.root), false), exports.Value(rep.Home, false), exports.Value(at.home, false), what, refused))
 	}
 	return nil
+}
+
+// checkoutsHome refuses a run whose --home is a composed home whose report, beside it, is
+// for a checkout whose home it is not. The run would compose for that checkout and
+// mount it, and the report can be one a repository committed or a walled agent wrote, so
+// it chooses no checkout the run mounts. A home found by no report is the checkout's.
+func checkoutsHome(at places) error {
+	if composedFor(at.root, at.home) {
+		return nil
+	}
+	return input(fmt.Errorf("remove the harness report %s, or give --home the home of the checkout %s. The report is for that checkout, and %s is not its home; a run uses only its checkout's home, so the run does not start", exports.Value(at.report, false), at.root, exports.Value(at.home, false)))
 }
 
 // composedFor reports whether home is where a compose puts the home of the checkout at
@@ -2377,7 +2925,9 @@ func samePath(a, b string) bool {
 // value in another file that leaves the home where the configuration directory's file
 // alone puts it is harmless and passes. With no configuration directory, any other file
 // that sets harness.home is refused, as the run records are with no state directory.
-func userHome(at places, conf config.Config) error {
+// keyed is a run given a run key or a run code, whose home with no harness.home in the
+// configuration directory's file is [runKeyHomes].
+func userHome(at places, conf config.Config, keyed bool) error {
 	origin := conf.Origin("harness.home")
 	yours := ""
 	dir, err := config.UserDir()
@@ -2406,6 +2956,11 @@ func userHome(at places, conf config.Config) error {
 	}
 	mine := conf
 	mine.Home = own.Home
+	if keyed {
+		if mine, err = withRunKeyHome(at.root, mine); err != nil {
+			return err
+		}
+	}
 	if want, err := placesFor(at.root, mine, homeOptions{}); err == nil && samePath(want.home, at.home) {
 		return nil
 	}
@@ -2418,8 +2973,9 @@ func userHome(at places, conf config.Config) error {
 
 // resolveLaunch is what qory harness launch and qory run share: the runtime, named or
 // the one the harness is composed for, and its launch spec from the runtime's template
-// with harness.launch over it, resolved against home. The report supplies the runtimes
-// composed and the harness's variables, each a default.
+// with harness.launch over it, resolved against home, and the effort the harness was
+// composed with in the place the runtime's descriptor lists. The report supplies the
+// runtimes composed, the effort and the harness's variables, each a default.
 func resolveLaunch(rep report.Report, conf config.Config, runtime, home string) (string, render.Launch, error) {
 	name := runtime
 	if name == "" {
@@ -2439,7 +2995,7 @@ func resolveLaunch(rep report.Report, conf config.Config, runtime, home string) 
 	if err != nil {
 		return "", render.Launch{}, input(err)
 	}
-	return name, launch, nil
+	return name, withRunEffort(launch, name, rep.Target.Effort), nil
 }
 
 // launchOverride is harness.launch.<runtime> as a template over the runtime's own, nil
@@ -2513,4 +3069,55 @@ func exitStatus(err error) (int, bool) {
 func exitStatusOf(err error) bool {
 	_, ok := exitStatus(err)
 	return ok
+}
+
+// composeForRun composes the harness of a qory run before its session starts: the
+// compose of qory harness compose, with the flags o contains and the run's runtime as its
+// --runtime, into the home at that the run starts on. It returns the git sources the
+// compose resolved and the composed stack's workflows. inCheckout is set for a run given a
+// run key, see [extendsInCheckout], and walled for a run behind a wall, whose home
+// contains copies of the modules' files, see [copies], as the home of a run whose
+// harness is hidden, o.hidden, does. stdout is the agent's, so the compose prints there
+// nothing; on stderr it prints a collision as compose does, a line per git source whose
+// remote could not be reached, and its result line last.
+func composeForRun(stderr io.Writer, o composeOptions, at places, runtime string, inCheckout, walled bool) ([]session.HarnessSource, map[string]stack.Workflow, error) {
+	o.runtime, o.at, o.run, o.inCheckout, o.walled = runtime, &at, true, inCheckout, walled
+	c, err := composeHome(io.Discard, stderr, o)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, w := range c.warnings {
+		fmt.Fprintln(stderr, "qory run:", w)
+	}
+	names := make([]string, 0, len(c.targets))
+	for _, rt := range c.targets {
+		names = append(names, rt.Name())
+	}
+	fmt.Fprintf(stderr, "qory run: composed %s from %s for %s\n", count(len(c.rep.Entries), "entry", "entries"), count(len(c.rep.Modules), "module", "modules"), strings.Join(names, ", "))
+	return c.harness, c.workflows, nil
+}
+
+// harnessSources is the harness's git sources a compose resolved, each with the full
+// commit it used, as the session records them: the stack res extends, when it is a git
+// source, then each module's git source in stack order, each source once. A source is
+// as the report writes it, the password of a URL's user part printed as (hidden). Path
+// sources have no commit and are left out; nil when no source is a git source.
+func harnessSources(res *compose.Result) []session.HarnessSource {
+	var out []session.HarnessSource
+	seen := map[string]bool{}
+	add := func(src, commit string) {
+		src = exports.HideURLs(src)
+		if commit == "" || seen[src] {
+			return
+		}
+		seen[src] = true
+		out = append(out, session.HarnessSource{Source: src, Commit: commit})
+	}
+	if res.Base != nil {
+		add(res.Base.Source, res.Base.Commit)
+	}
+	for _, m := range res.Modules {
+		add(m.Source, m.Commit)
+	}
+	return out
 }

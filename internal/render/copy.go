@@ -36,11 +36,12 @@ var maxModuleBytes int64 = 1 << 30
 // [compose.Module.Copy]. It reads through the [os.Root] the compose opened at the
 // module's directory, so a link inside the module is followed only within the module.
 type copier struct {
-	name    string   // the module's name as a refusal shows it
-	dir     string   // the module's directory with every link resolved
-	written string   // the module's directory as the compose read it, which entry paths start with
-	root    *os.Root // [compose.Module.Root], which [compose.Result.Close] closes
-	real    string   // [compose.Module.RealDir], where an absolute link may lead
+	name     string   // the module's name as a refusal shows it
+	dir      string   // the module's directory with every link resolved
+	written  string   // the module's directory as the compose read it, which entry paths start with
+	root     *os.Root // [compose.Module.Root], which [compose.Result.Close] closes
+	real     string   // [compose.Module.RealDir], where an absolute link may lead
+	anywhere bool     // [compose.Module.Walled] or [compose.Module.Hidden]: moving the module out of the checkout copies it too
 }
 
 // openCopier is the copier of m, which reads through [compose.Module.Root], the module
@@ -61,7 +62,7 @@ func openCopier(m compose.Module) (*copier, error) {
 	if err != nil || !os.SameFile(info, m.DirInfo) {
 		return nil, moved
 	}
-	return &copier{name: name, dir: real, written: m.Dir, root: m.Root, real: m.RealDir}, nil
+	return &copier{name: name, dir: real, written: m.Dir, root: m.Root, real: m.RealDir, anywhere: m.Walled || m.Hidden}, nil
 }
 
 // counter counts the entries a copy writes and refuses past [maxEntries].
@@ -81,6 +82,9 @@ func (n *counter) add() error {
 
 // tooMany is the refusal of a module whose copy passes [maxEntries].
 func (c *copier) tooMany() error {
+	if c.anywhere {
+		return fmt.Errorf("module %s: Ship fewer files. It contains more than 10,000 files, directories and links, the most qory copies into the home.", c.name)
+	}
 	return fmt.Errorf("module %s: Move the module out of the checkout, or ship fewer files. It contains more than 10,000 files, directories and links, the most qory copies into the home.", c.name)
 }
 
@@ -89,9 +93,62 @@ type copyRules struct {
 	edit     func([]byte) []byte // what each Markdown file's bytes go through, nil for nothing
 	skip     string              // a name left out at any depth
 	top      string              // a name left out at the top of the copy alone
+	leave    map[string]bool     // the paths, relative to the module's directory, left out
+	left     []leftEntry         // what each path in leave is, see [copier.leaveOut]
 	dangling bool                // whether a link that leads nowhere inside the module is left out
 	n        *counter
 	bytes    *budget
+}
+
+// leftEntry is one path a copy leaves out: the file it opens, and its path relative to the
+// module's directory with every link followed, "" when that path could not be resolved.
+type leftEntry struct {
+	info fs.FileInfo
+	at   string
+}
+
+// leaveOut adds each path in leave, an absolute path inside the module that the stack's
+// only or exclude left out, to what r leaves out: by its path, by the file it opens, and,
+// for a directory, by every path inside it, so a link elsewhere in the module that leads
+// to a left-out entry, or into one, is left out too.
+func (c *copier) leaveOut(r *copyRules, leave []string) {
+	if r.leave == nil {
+		r.leave = map[string]bool{}
+	}
+	for _, path := range leave {
+		rel, err := c.rel(path)
+		if err != nil || rel == "." {
+			continue
+		}
+		r.leave[rel] = true
+		info, err := c.stat(rel)
+		if err != nil {
+			continue
+		}
+		at, err := module.ResolveIn(c.root, c.real, rel)
+		if err != nil || at == "." {
+			at = ""
+		}
+		r.left = append(r.left, leftEntry{info: info, at: at})
+	}
+}
+
+// isLeft reports whether rel, opened as the file opened, is a path r leaves out: the same
+// file as a left-out entry, or a path that, with every link followed, lies inside one.
+func (c *copier) isLeft(rel string, opened fs.FileInfo, r *copyRules) bool {
+	if len(r.left) == 0 || rel == "." {
+		return false
+	}
+	at, err := module.ResolveIn(c.root, c.real, rel)
+	for _, l := range r.left {
+		if os.SameFile(l.info, opened) {
+			return true
+		}
+		if err == nil && l.at != "" && (at == l.at || strings.HasPrefix(at, l.at+string(filepath.Separator))) {
+			return true
+		}
+	}
+	return false
 }
 
 // budget is the bytes one copy may still write, see [maxModuleBytes].
@@ -102,6 +159,9 @@ type budget struct {
 
 // budget is a full budget for one copy of the module.
 func (c *copier) budget() *budget {
+	if c.anywhere {
+		return &budget{left: maxModuleBytes, refuse: fmt.Errorf("module %s: Ship fewer files. Its files add up to more than 1 GiB, the most qory copies into the home.", c.name)}
+	}
 	return &budget{left: maxModuleBytes, refuse: fmt.Errorf("module %s: Move the module out of the checkout, or ship fewer files. Its files add up to more than 1 GiB, the most qory copies into the home.", c.name)}
 }
 
@@ -131,14 +191,18 @@ func (bw budgetWriter) Write(p []byte) (int, error) {
 // none follows a link out of it. .qory is left out at the top alone: a module that is a
 // checkout holds the checkout's qory directory there, with a home inside the checkout
 // whose links lead back into the module, and a .qory deeper down is the module's content.
-func copyModule(m compose.Module, out *os.Root, to string) error {
+// Each path in leave, an absolute path inside the module that the stack's only or exclude
+// left out, is left out too.
+func copyModule(m compose.Module, out *os.Root, to string, leave []string) error {
 	c, err := openCopier(m)
 	if err != nil {
 		return err
 	}
+	r := &copyRules{skip: ".git", top: checkout.Dir, dangling: true, n: &counter{refuse: c.tooMany()}, bytes: c.budget()}
+	c.leaveOut(r, leave)
 	// An error of the file system, such as a write into the staging tree, contains a path
 	// that may contain an access key secret.
-	return exports.HideError(c.copy(".", out, to, &copyRules{skip: ".git", top: checkout.Dir, dangling: true, n: &counter{refuse: c.tooMany()}, bytes: c.budget()}))
+	return exports.HideError(c.copy(".", out, to, r))
 }
 
 // copyEntry copies the file or directory at path, an absolute path inside the directory
@@ -146,8 +210,9 @@ func copyModule(m compose.Module, out *os.Root, to string) error {
 // [copyModule] writes, leaving out every entry named .git as that copy does, so the copy
 // of an entry is part of the copy of its module. edit, when not nil, gets the bytes of
 // each Markdown file and returns what to write. A copy of more than [maxEntries] entries
-// is refused as a module of that many is.
-func copyEntry(m compose.Module, path string, out *os.Root, to string, edit func([]byte) []byte) error {
+// is refused as a module of that many is. Each path in leave is left out as [copyModule]
+// leaves it out.
+func copyEntry(m compose.Module, path string, out *os.Root, to string, edit func([]byte) []byte, leave []string) error {
 	c, err := openCopier(m)
 	if err != nil {
 		return err
@@ -156,12 +221,19 @@ func copyEntry(m compose.Module, path string, out *os.Root, to string, edit func
 	if err != nil {
 		return err
 	}
-	return exports.HideError(c.copy(rel, out, to, &copyRules{edit: edit, skip: ".git", n: &counter{refuse: c.tooMany()}, bytes: c.budget()}))
+	r := &copyRules{edit: edit, skip: ".git", n: &counter{refuse: c.tooMany()}, bytes: c.budget()}
+	c.leaveOut(r, leave)
+	return exports.HideError(c.copy(rel, out, to, r))
 }
 
+// errLeftOut is what [readEntry] returns for a file that a copy leaves out, which the
+// caller then writes nowhere in the home.
+var errLeftOut = errors.New("left out of the copy")
+
 // readEntry reads the file at path, an absolute path inside the directory of m as the
-// compose read it, the way [copyEntry] reads one.
-func readEntry(m compose.Module, path string) ([]byte, error) {
+// compose read it, the way [copyEntry] reads one. It returns [errLeftOut] for a file that
+// a copy with leave leaves out, see [copier.leaveOut].
+func readEntry(m compose.Module, path string, leave []string) ([]byte, error) {
 	c, err := openCopier(m)
 	if err != nil {
 		return nil, err
@@ -170,6 +242,8 @@ func readEntry(m compose.Module, path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	r := &copyRules{}
+	c.leaveOut(r, leave)
 	info, err := c.stat(rel)
 	if err != nil {
 		return nil, err
@@ -182,6 +256,9 @@ func readEntry(m compose.Module, path string) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
+	if r.leave[rel] || c.isLeft(rel, info, r) {
+		return nil, errLeftOut
+	}
 	if !info.Mode().IsRegular() {
 		return nil, c.notCopyable(rel)
 	}
@@ -206,6 +283,9 @@ func (c *copier) readAll(rel string, f *os.File, info fs.FileInfo) ([]byte, erro
 
 // tooLarge is the refusal of a file at rel larger than [maxFileBytes].
 func (c *copier) tooLarge(rel string) error {
+	if c.anywhere {
+		return fmt.Errorf("module %s: Ship %s under %d MiB. It is larger than %d MiB, the most qory copies into the home.", c.name, exports.HidePath(filepath.ToSlash(rel)), maxFileBytes>>20, maxFileBytes>>20)
+	}
 	return fmt.Errorf("module %s: Move the module out of the checkout, or ship %s under %d MiB. It is larger than %d MiB, the most qory copies into the home.", c.name, exports.HidePath(filepath.ToSlash(rel)), maxFileBytes>>20, maxFileBytes>>20)
 }
 
@@ -214,7 +294,7 @@ func (c *copier) tooLarge(rel string) error {
 func (c *copier) rel(path string) (string, error) {
 	rel, err := filepath.Rel(c.written, path)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return "", fmt.Errorf("module %s: %s lies outside the module", c.name, exports.HidePath(path))
+		return "", fmt.Errorf("module %s: Move %s inside the module. It lies outside the module, and qory copies only the module's files into the home.", c.name, exports.HidePath(path))
 	}
 	return rel, nil
 }
@@ -259,6 +339,10 @@ func (c *copier) copyAt(rel string, out *os.Root, to string, above []fs.FileInfo
 	if err != nil {
 		return err
 	}
+	if c.isLeft(rel, opened, r) {
+		f.Close()
+		return nil
+	}
 	if opened.IsDir() != info.IsDir() || !opened.IsDir() && !opened.Mode().IsRegular() {
 		f.Close()
 		return c.notCopyable(rel)
@@ -274,7 +358,7 @@ func (c *copier) copyAt(rel string, out *os.Root, to string, above []fs.FileInfo
 		}
 	}
 	entries, err := readCounted(f, func(e fs.DirEntry) bool {
-		return r.skip != "" && e.Name() == r.skip || r.top != "" && rel == "." && e.Name() == r.top
+		return r.skip != "" && e.Name() == r.skip || r.top != "" && rel == "." && e.Name() == r.top || r.leave[filepath.Join(rel, e.Name())]
 	}, r.n.add)
 	f.Close()
 	if err != nil {
@@ -454,17 +538,39 @@ func (c *copier) notCopyable(rel string) error {
 	return fmt.Errorf("module %s: Remove %s from the module. It is not a file, a directory or a link, so qory cannot copy it into the home.", c.name, exports.HidePath(filepath.ToSlash(rel)))
 }
 
-// failed is the error of a read of rel that failed: the refusal of a module read for a
-// link out of the module when rel leads out of it, else err with the module and the path.
+// failed is the error of a read of rel that failed: the refusal of a link out of the
+// module when rel leads out of it, else err with the module and the path.
 func (c *copier) failed(rel string, err error) error {
+	shown := exports.HidePath(filepath.ToSlash(rel))
 	if real, rerr := filepath.EvalSymlinks(filepath.Join(c.dir, rel)); rerr == nil && real != c.dir && !below(real, c.dir) {
-		return fmt.Errorf("module %s: %s links to %s, outside the module", c.name, exports.HidePath(filepath.ToSlash(rel)), exports.HidePath(real))
+		return fmt.Errorf("module %s: Remove the link %s or point it inside the module. It links to %s, outside the module, and qory copies only the module's files into the home.", c.name, shown, exports.HidePath(real))
+	}
+	if c.escapes(err) {
+		// The root fails the same way for an absolute link to a missing file inside
+		// the module, which it does not follow; ResolveIn tells that one apart.
+		if _, rerr := module.ResolveIn(c.root, c.real, rel); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
+			return fmt.Errorf("module %s: Remove the link %s or point it inside the module. It points out of the module, and qory copies only the module's files into the home.", c.name, shown)
+		}
 	}
 	var pe *fs.PathError
 	if errors.As(err, &pe) {
 		err = pe.Err
 	}
-	return fmt.Errorf("module %s: %s: %w", c.name, exports.HidePath(filepath.ToSlash(rel)), exports.HideError(err))
+	return fmt.Errorf("module %s: %s: %w", c.name, shown, exports.HideError(err))
+}
+
+// escapes reports whether err is the error an [os.Root] returns for a path that leads
+// out of the root, such as a link to nothing outside the module. Package os does not
+// export that error, so escapes takes it from a lookup of ".." in the root, which fails
+// with it before any file is read. A closed root fails that lookup with
+// [os.ErrClosed], which is not the error escapes looks for.
+func (c *copier) escapes(err error) bool {
+	_, probe := c.root.Lstat("..")
+	if errors.Is(probe, os.ErrClosed) {
+		return false
+	}
+	sentinel := errors.Unwrap(probe)
+	return sentinel != nil && errors.Is(err, sentinel)
 }
 
 // CheckPluginSize refuses the plugin directory dir when it holds more than 10,000 files,
@@ -473,9 +579,10 @@ func (c *copier) failed(rel string, err error) error {
 // link there leads to, each directory read once, by the file it is, so a directory
 // reached again through a link or under another name counts as one entry. A link that
 // leads nowhere counts as one entry. The claude runtime calls it for a home that holds a
-// copy.
-func CheckPluginSize(dir string) error {
-	s := &pluginScan{seen: map[fileKey]bool{}}
+// copy, with anywhere set for the compose of a walled run or of a run whose harness is
+// hidden, which copies every module.
+func CheckPluginSize(dir string, anywhere bool) error {
+	s := &pluginScan{seen: map[fileKey]bool{}, anywhere: anywhere}
 	if _, err := s.enter(dir); err != nil {
 		return exports.HideError(err)
 	}
@@ -485,8 +592,9 @@ func CheckPluginSize(dir string) error {
 // pluginScan is one count of [CheckPluginSize]: how many entries it read, and the
 // directories it read.
 type pluginScan struct {
-	n    int
-	seen map[fileKey]bool
+	n        int
+	seen     map[fileKey]bool
+	anywhere bool // whether the compose copies every module, see [CheckPluginSize]
 }
 
 // enter reports whether the directory at path is one the count has not read yet, and
@@ -517,6 +625,9 @@ func (s *pluginScan) dir(dir string) error {
 	}
 	entries, err := readCounted(f, nil, func() error {
 		if s.n++; s.n > maxEntries {
+			if s.anywhere {
+				return errors.New("Ship fewer files in the modules. claude/plugin contains more than 10,000 files, directories and links, the most a Claude Code run behind a wall or with a hidden harness takes.")
+			}
 			return errors.New("Move a module out of the checkout, or ship fewer files. claude/plugin contains more than 10,000 files, directories and links, the most a walled Claude Code run takes.")
 		}
 		return nil

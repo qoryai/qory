@@ -1,29 +1,34 @@
 // Package provisioner is the pool program's client of Qory Apiary's provisioner
-// contract, provisioner/v1, at revision 3: it claims a run for the node pool, says the
-// run's job started, asks for the run key, gives a run back, and reports the image a
-// prebuild built.
+// contract, provisioner/v1, at contracts.ProvisionerRevision: it claims a dispatch for
+// the node pool, reports that the dispatch's job started, gives a dispatch back, and
+// uploads a dispatch's machine log. It also reads the documents of a run code's
+// redemption, run/v1 documents.schema.json.
 //
 // Every request is signed with the pool's access key as Forager's accesskey signs one,
 // with X-Qory-Access-Key-Id, X-Qory-Instance-Id, X-Qory-Signature-Ed25519 and
-// X-Qory-Contract-Version 3, and its body is checked against its schema before it is
-// sent. Every answer is read up to its bound, then checked under the pinned server keys,
-// then against its schema and its revision, before anything in it is used. A POST's
-// time is the clock's, in whole seconds, and a try sent again is built anew with a
-// later time, since Qory Apiary refuses a signature it has seen. No redirect is
-// followed and no cookie is kept.
+// X-Qory-Contract-Version set to contracts.ProvisionerRevision, and its body is checked
+// against its schema before it is sent. Every answer is read up to its bound, then
+// checked under the pinned server keys, then against its schema and its revision, before
+// anything in it is used. A POST's time is the clock's, in whole seconds, and a try sent
+// again is built anew with a later time, since Qory Apiary returns 401 for a signature
+// it has seen. No redirect is followed and no cookie is kept.
 //
-// The run key a handover answers with is read into a [Hidden], which prints, logs and
-// marshals as [hidden], and no string ever holds it. No error and no line the client
-// logs holds the access key's secret or a run key.
+// The run code a claim's answer contains is read into a [Hidden], which prints, logs
+// and marshals as [hidden], and no string ever contains it. No error and no line the
+// client logs contains the access key's secret, a run key or a run code.
 package provisioner
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
+	"slices"
 	"sync"
 	"time"
 
@@ -31,22 +36,15 @@ import (
 	"github.com/qoryai/integrations/contracts"
 )
 
-// Revision is the revision of the provisioner contract the client speaks: the one its
-// requests name in X-Qory-Contract-Version, and the one a claim's or a handover's
-// answer must name. Qory Apiary serves this revision alone. Revision 3 makes a run's
-// target optional for the step explore, and adds the handover answer's domain and
-// run_settings.
-const Revision = 3
-
-// The steps the pool runs, as a claim names them.
+// The steps a run's documents set, run/v1 documents.schema.json, that qory knows.
 const (
 	StepExplore  = "explore"
 	StepPrebuild = "prebuild"
 )
 
-// WaitSeconds is how long Qory Apiary may hold a claim while no run can be claimed, the
-// most the contract allows. ClaimTimeout, a claim's timeout, is longer, so a held claim
-// is not cut short; RequestTimeout is every other request's.
+// WaitSeconds is how long Qory Apiary may hold a claim while no dispatch can be made,
+// the most the contract allows. ClaimTimeout, a claim's timeout, is longer, so a held
+// claim is not cut short; RequestTimeout is every other request's.
 const (
 	WaitSeconds    = 25
 	ClaimTimeout   = 40 * time.Second
@@ -54,11 +52,10 @@ const (
 )
 
 // The bounds of Qory Apiary's answers. A claim's 200 is read up to MaxClaimAnswer, far
-// more than its members' limits add up to; a handover's 200 up to
-// contracts.MaxHandoverAnswer, the contract's bound; every other answer, a refusal or a
-// 204, up to MaxAnswer. A larger answer, whatever its status, is refused before its
-// signature is read, nothing in it is used, and the request is sent again, built anew,
-// as for an answer not signed.
+// more than its members' limits add up to; every other answer, a refusal or a 204, up
+// to MaxAnswer. A larger answer, whatever its status, is refused before its signature
+// is read, nothing in it is used, and the request is sent again, built anew, as for an
+// answer not signed.
 const (
 	MaxClaimAnswer = 64 << 10
 	MaxAnswer      = 64 << 10
@@ -66,8 +63,7 @@ const (
 
 // The tries of one request: tries in all, the waits between them doubling from
 // firstWait. A try that fails, with no answer, an answer over its bound or not signed
-// under the pin, or a signed server error other than a handover's 503 unavailable, is
-// built anew and sent again after the wait.
+// under the pin, or a signed server error, is built anew and sent again after the wait.
 const (
 	tries     = 5
 	firstWait = time.Second
@@ -80,9 +76,24 @@ const (
 )
 
 // headerContractVersion carries the revision a request implements. The signature does
-// not cover it; the answers whose content the revision bounds name it in their signed
-// body.
+// not cover it; a claim's answer has the revision in its signed body.
 const headerContractVersion = "X-Qory-Contract-Version"
+
+var (
+	// dispatchIDShape is the provisioner contract's dispatch_id. An id is checked before
+	// it is put in a path.
+	dispatchIDShape = regexp.MustCompile(`^dp_[0-9a-hjkmnp-tv-z]{16}$`)
+	// runCodeShape is a claim answer's run_code, which the schema checks on every other
+	// member of the answer.
+	runCodeShape = regexp.MustCompile(`^qecr_[0-9A-HJKMNP-TV-Z]{26}(\.[A-Za-z0-9_-]{22}){1,2}$`)
+)
+
+// maxRunCode is the most characters a run code of runCodeShape has.
+const maxRunCode = len("qecr_") + 26 + 2*23
+
+// runCodeStandIn takes the run code's place in the copy of a claim's answer that the
+// schema checks: a value of the run code's shape that is no run code.
+var runCodeStandIn = []byte(`"qecr_00000000000000000000000000.0000000000000000000000"`)
 
 // Client is the pool's client of Qory Apiary's provisioner contract. It is safe for
 // concurrent use, and is used by its pointer. Within one Client, while the clock does
@@ -121,35 +132,42 @@ type Client struct {
 }
 
 // Claimed is a claim's answer, claim-answer.schema.json, checked: signed under the pin,
-// of the schema, and of the revision sent. WorkItem is set for the step explore and nil
-// for the step prebuild; its URL and title are untrusted text. Target is nil, and Access
-// empty, when the run has no target: a run with no target is given no access. The step
-// prebuild always has a target. Access is "read" or "write" exactly when Target is set.
+// of the schema, and of the revision sent. It is a request for one machine. Machine is
+// the type of machine the claim asks for, or empty when the answer has none. RunCode is
+// the run code the machine redeems, [Hidden]; the caller passes it to the machine it
+// starts for the dispatch alone, and clears it once passed, or once the dispatch is
+// dropped. GatewayURL is the gateway the code is bound to. MaxLifetimeMinutes is the
+// minutes after which the machine stops, counted from its start, 15 to 1470.
 type Claimed struct {
 	DispatchID string
-	RunID      string
 	PoolID     string
-	// LeaseUntil is when the dispatch's lease lapses: its handover must be answered
+	// LeaseUntil is when the dispatch's lease lapses: the first dispatched must come
 	// before then.
-	LeaseUntil time.Time
-	Step       string
-	Access     string
-	Target     *contracts.Target
-	WorkItem   *contracts.WorkItem
+	LeaseUntil         time.Time
+	Machine            string
+	RunCode            Hidden
+	GatewayURL         string
+	MaxLifetimeMinutes int
 }
 
 // Claim sends POST /v1/pools/claim, claim.schema.json, which Qory Apiary holds up to
-// [WaitSeconds] while no run can be claimed. A signed 204 is no run: ok is false, and
-// the pool claims again. A signed 200 is the run claimed, once it is checked, see
-// [Claimed]; one that names another revision than the one sent is [ErrAnswerUnusable].
-// A refusal is a [*Refusal]: [ErrForbidden], [ErrNoGateway], [ErrNotFound] or
-// [ErrRateLimited].
+// [WaitSeconds] while no dispatch can be made. A signed 204 is no dispatch: ok is
+// false, and the pool claims again. A signed 200 is the dispatch claimed, once it is
+// checked, see [Claimed]; one with another revision than the one sent is
+// [ErrAnswerUnusable]. A refusal is a [*Refusal]: [ErrForbidden], [ErrNoGateway],
+// [ErrNotFound], [ErrUnsupportedRevision] or [ErrRateLimited].
+//
+// The answer's bytes are cleared once read, and the run code is unquoted from them
+// straight into its [Hidden]: the schema checks a copy in which a stand-in takes the
+// run code's place, so no string ever contains it.
 func (c *Client) Claim(ctx context.Context) (claimed Claimed, ok bool, err error) {
 	const what = "the claim"
 	ans, err := c.do(ctx, request{
 		what: what, kind: kindClaim, path: routeClaim, schema: "claim.schema.json",
 		limit: MaxClaimAnswer, timeout: ClaimTimeout,
-		body: func(t string) any { return contracts.Claim{Version: 1, Time: t, WaitSeconds: WaitSeconds} },
+		body: func(t string) any {
+			return contracts.Claim{Version: 1, Time: t, WaitSeconds: WaitSeconds}
+		},
 	})
 	if err != nil {
 		return Claimed{}, false, err
@@ -164,53 +182,60 @@ func (c *Client) Claim(ctx context.Context) (claimed Claimed, ok bool, err error
 	}
 	claimed, err = readClaim(ans.body)
 	if err != nil {
-		return Claimed{}, false, unusable(what, err.Error())
+		return Claimed{}, false, claimUnusable(what, err)
 	}
 	return claimed, true, nil
 }
 
-// readClaim reads body, a claim's signed 200, into a [Claimed]. The schema checks the
-// bytes before they are decoded, since a decoded "access":"" or "target":null reads as
-// no target. Its error names the schema or a revision, never a value of body.
+// readClaim reads body, a claim's signed 200, into a [Claimed]. The run code is
+// unquoted from body straight into the Hidden and checked against its shape first. The
+// schema then checks a copy of body with [runCodeStandIn] in the run code's place. The
+// caller clears body. Its error contains the schema's name or a revision, never a value
+// of body.
 func readClaim(body []byte) (Claimed, error) {
 	const name = "claim-answer.schema.json"
+	broken := fmt.Errorf("it breaks %s", name)
+	if !jsontext.Value(body).IsValid() {
+		return Claimed{}, errNotOneDocument
+	}
+	start, end, ok := memberSpan(body, "run_code")
+	if !ok {
+		return Claimed{}, broken
+	}
+	code, err := jsontext.AppendUnquote(make([]byte, 0, end-start), body[start:end])
+	if err != nil || len(code) > maxRunCode || !runCodeShape.Match(code) {
+		clear(code)
+		return Claimed{}, broken
+	}
+	stood := slices.Concat(body[:start], runCodeStandIn, body[end:])
+	defer clear(stood)
 	var doc contracts.ClaimAnswer
-	if err := readAnswer(name, body, &doc); err != nil {
-		return Claimed{}, err
+	err = readAnswer(name, stood, &doc)
+	var lease time.Time
+	switch {
+	case err != nil:
+	case doc.Revision != contracts.ProvisionerRevision:
+		err = otherRevision(doc.Revision)
+	default:
+		if lease, err = time.Parse(time.RFC3339, doc.LeaseUntil); err != nil {
+			err = errors.New("its lease_until is not a time")
+		}
 	}
-	if doc.Revision != Revision {
-		return Claimed{}, errors.New(revisionText(doc.Revision))
-	}
-	if err := checkTarget(name, doc.Step, doc.Access, doc.Target); err != nil {
-		return Claimed{}, err
-	}
-	lease, err := time.Parse(time.RFC3339, doc.LeaseUntil)
 	if err != nil {
-		return Claimed{}, errors.New("its lease_until is not a time")
+		clear(code)
+		return Claimed{}, err
 	}
 	return Claimed{
-		DispatchID: doc.DispatchID, RunID: doc.RunID, PoolID: doc.PoolID, LeaseUntil: lease,
-		Step: doc.Step, Access: doc.Access, Target: doc.Target, WorkItem: doc.WorkItem,
+		DispatchID: doc.DispatchID, PoolID: doc.PoolID, LeaseUntil: lease, Machine: doc.Machine,
+		RunCode: Hide(code), GatewayURL: doc.GatewayURL, MaxLifetimeMinutes: doc.MaxLifetimeMinutes,
 	}, nil
 }
 
-// checkTarget checks again, on an answer of the schema name already checked, what the
-// pool relies on: a run with no target has no access, a run with a target has read or
-// write access, and the step prebuild has a target.
-func checkTarget(name, step, access string, target *contracts.Target) error {
-	switch {
-	case target == nil && access != "",
-		target != nil && access != "read" && access != "write",
-		target == nil && step == StepPrebuild:
-		return fmt.Errorf("it breaks %s", name)
-	}
-	return nil
-}
-
 // Dispatched sends POST /v1/dispatches/<dispatchID>/dispatched, dispatched.schema.json:
-// the run's job started. It must come before the handover. A signed 204 is the answer.
-// A refusal is a [*Refusal]: [ErrForbidden], [ErrNotFound], [ErrGone],
-// [ErrLeaseExpired], on which the job is stopped, or [ErrRateLimited].
+// the dispatch's job started, and has the run code. A signed 204 is the answer. A
+// refusal is a [*Refusal]: [ErrForbidden], [ErrNotFound], [ErrGone] or
+// [ErrLeaseExpired], on each of which the job is stopped, [ErrUnsupportedRevision] or
+// [ErrRateLimited].
 func (c *Client) Dispatched(ctx context.Context, dispatchID string) error {
 	return c.toDispatch(ctx, "dispatched for "+dispatchID, kindDispatched, dispatchID, "dispatched", "dispatched.schema.json", func(t string) any {
 		return contracts.Dispatched{Version: 1, Time: t}
@@ -218,43 +243,15 @@ func (c *Client) Dispatched(ctx context.Context, dispatchID string) error {
 }
 
 // Release sends POST /v1/dispatches/<dispatchID>/release, release.schema.json: the pool
-// gives the run back, for reason, display text of 1 to 200 characters, and says whether
-// it should wait for another claim. A signed 204 is the answer, after the handover too,
-// where it ends the run. A refusal is a [*Refusal]: [ErrForbidden], [ErrNotFound],
-// [ErrGone] or [ErrLeaseExpired], each meaning the dispatch is over already, or
+// gives the dispatch back before dispatched, for reason, display text of 1 to 200
+// characters. A signed 204 is the answer: the dispatch ended, and the run code is
+// unusable. A refusal is a [*Refusal]: [ErrForbidden], [ErrNotFound], [ErrGone] or
+// [ErrLeaseExpired], each meaning the dispatch is over already, [ErrMachineExists],
+// after dispatched or after the run code was redeemed, [ErrUnsupportedRevision] or
 // [ErrRateLimited].
-func (c *Client) Release(ctx context.Context, dispatchID, reason string, retry bool) error {
+func (c *Client) Release(ctx context.Context, dispatchID, reason string) error {
 	return c.toDispatch(ctx, "the release of "+dispatchID, kindRelease, dispatchID, "release", "release.schema.json", func(t string) any {
-		return contracts.Release{Version: 1, Time: t, Reason: reason, Retry: retry}
-	})
-}
-
-// Image is what a prebuild built, which [Client.Prebuilt] reports: the image pinned by
-// its digest, its size in bytes, the environment_ref of the handover's inputs, and the
-// commit it was built from.
-type Image struct {
-	Image          string
-	Size           int64
-	EnvironmentRef string
-	Commit         string
-}
-
-// Prebuilt sends POST /v1/dispatches/<dispatchID>/prebuilt, prebuilt.schema.json: the
-// prebuild of the run runID built img. A signed 204 is the answer: Qory Apiary recorded
-// the image, and the run ended. A refusal is a [*Refusal], in prebuilt.schema.json's
-// order: [ErrNotFound], [ErrForbidden], [ErrGone], [ErrLeaseExpired], [ErrNotPrebuild],
-// [ErrNotHandedOver], [ErrRunMismatch], or [ErrRateLimited]; [Refusal.Resent] says
-// whether a try before it may have taken effect.
-func (c *Client) Prebuilt(ctx context.Context, dispatchID, runID string, img Image) error {
-	what := "prebuilt for " + dispatchID
-	if !runIDShape.MatchString(runID) {
-		return fmt.Errorf("%s: the run id is not a UUID in the canonical lower-case form", what)
-	}
-	return c.toDispatch(ctx, what, kindPrebuilt, dispatchID, "prebuilt", "prebuilt.schema.json", func(t string) any {
-		return contracts.Prebuilt{
-			Version: 1, Time: t, RunID: runID, Image: img.Image, Size: img.Size,
-			EnvironmentRef: img.EnvironmentRef, Commit: img.Commit,
-		}
+		return contracts.Release{Version: 1, Time: t, Reason: reason}
 	})
 }
 
@@ -275,4 +272,79 @@ func (c *Client) toDispatch(ctx context.Context, what string, k kind, dispatchID
 		return c.refused(what, k, ans)
 	}
 	return nil
+}
+
+// memberSpan is where the value of body's top-level member name is, quotes included:
+// body[start:end]. body is one JSON object; ok is false when it has no such member or
+// its value is not a string. The decoder reads body in place, from a bytes.Buffer, so
+// the value is never copied.
+func memberSpan(body []byte, name string) (start, end int, ok bool) {
+	dec := jsontext.NewDecoder(bytes.NewBuffer(body))
+	if tok, err := dec.ReadToken(); err != nil || tok.Kind() != '{' {
+		return 0, 0, false
+	}
+	for dec.PeekKind() == '"' {
+		tok, err := dec.ReadToken()
+		if err != nil {
+			return 0, 0, false
+		}
+		if tok.String() != name {
+			if err := dec.SkipValue(); err != nil {
+				return 0, 0, false
+			}
+			continue
+		}
+		v, err := dec.ReadValue()
+		if err != nil || v.Kind() != '"' {
+			return 0, 0, false
+		}
+		end := int(dec.InputOffset())
+		return end - len(v), end, true
+	}
+	return 0, 0, false
+}
+
+// topLevelMember reports whether body, one JSON object, has the top-level member name.
+// The decoder reads body in place, from a bytes.Buffer, and stops at that member's name:
+// its value is not read.
+func topLevelMember(body []byte, name string) bool {
+	dec := jsontext.NewDecoder(bytes.NewBuffer(body))
+	if tok, err := dec.ReadToken(); err != nil || tok.Kind() != '{' {
+		return false
+	}
+	for dec.PeekKind() == '"' {
+		tok, err := dec.ReadToken()
+		if err != nil {
+			return false
+		}
+		if tok.String() == name {
+			return true
+		}
+		if err := dec.SkipValue(); err != nil {
+			return false
+		}
+	}
+	return false
+}
+
+// revisionText is the error text of an answer with the revision n, not the one sent.
+func revisionText(n int) string {
+	return fmt.Sprintf("it has the contract's revision %d, not %d", n, contracts.ProvisionerRevision)
+}
+
+// otherRevision is the error of a claim's answer with the revision it is set to, not the
+// one sent: [revisionText].
+type otherRevision int
+
+func (n otherRevision) Error() string { return revisionText(int(n)) }
+
+// claimUnusable is [ErrAnswerUnusable] for the claim what, by err, [readClaim]'s error.
+// An answer of a revision other than [contracts.ProvisionerRevision] that passes the
+// schema starts with its fix, update qory; every other cause has none. Today the
+// schema's const takes revision 1 alone, so it stops any other revision first.
+func claimUnusable(what string, err error) error {
+	if _, ok := errors.AsType[otherRevision](err); ok {
+		return fmt.Errorf("%s: update qory: %w: %s", what, ErrAnswerUnusable, err)
+	}
+	return unusable(what, err.Error())
 }

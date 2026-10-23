@@ -3,6 +3,9 @@ package cmd_test
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -12,6 +15,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/qoryai/qory/cmd"
 )
@@ -46,6 +51,22 @@ func TestMain(m *testing.M) {
 		root := cmd.Root()
 		root.SetArgs(append([]string{"run", "exec"}, os.Args[slices.Index(os.Args, "--")+1:]...))
 		os.Exit(cmd.ExitCode(root.Execute()))
+	}
+	// A test that needs qory to read a run code with the process's descriptor 0 as stdin
+	// starts this binary with QORY_TEST_RUN_CODE set and the --run-code-file after --.
+	// The binary prints whether the code came from stdin, the error, and the state of
+	// descriptor 3, and never the code.
+	if os.Getenv("QORY_TEST_RUN_CODE") == "1" {
+		fromStdin, err := cmd.GiveRunCode(os.Args[slices.Index(os.Args, "--")+1])
+		state := "closed"
+		if flags, ferr := unix.FcntlInt(3, unix.F_GETFD, 0); ferr == nil {
+			state = "open"
+			if flags&unix.FD_CLOEXEC != 0 {
+				state = "close-on-exec"
+			}
+		}
+		fmt.Printf("stdin=%t err=%v fd3=%s\n", fromStdin, err, state)
+		os.Exit(0)
 	}
 	cmd.ShortenSocketGrace(10 * time.Millisecond)
 	os.Exit(m.Run())
@@ -152,6 +173,45 @@ func recorded(t *testing.T, root string) []string {
 		ids = append(ids, e.Name())
 	}
 	return ids
+}
+
+// endsOf is how each run recorded for the checkout at root ended, in the order of its
+// id: "state/reason/exit code" of its dev.qory.run.exited, such as "failed/no_session/-1"
+// for a run whose session never started, or "none" for a record with no end.
+func endsOf(t *testing.T, root string) []string {
+	t.Helper()
+	var ends []string
+	for _, id := range recorded(t, root) {
+		data, err := os.ReadFile(filepath.Join(runsDir(t, root), id, "events.jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		end := "none"
+		for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+			var ev struct {
+				Type string `json:"type"`
+				Data struct {
+					State    string  `json:"state"`
+					Reason   string  `json:"reason"`
+					ExitCode float64 `json:"exit_code"`
+				} `json:"data"`
+			}
+			if json.Unmarshal([]byte(line), &ev) == nil && ev.Type == "dev.qory.run.exited" {
+				end = fmt.Sprintf("%s/%s/%v", ev.Data.State, ev.Data.Reason, ev.Data.ExitCode)
+			}
+		}
+		ends = append(ends, end)
+	}
+	return ends
+}
+
+// repeated is n copies of s.
+func repeated(s string, n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = s
+	}
+	return out
 }
 
 // tempDir is a temporary directory with its symlinks resolved, so it reads the way git
@@ -291,6 +351,19 @@ func runIn(t *testing.T, in string, args ...string) (string, error) {
 	root := cmd.Root()
 	root.SetArgs(args)
 	root.SetIn(strings.NewReader(in))
+	root.SetOut(&out)
+	root.SetErr(&out)
+	err := root.Execute()
+	return out.String(), err
+}
+
+// runReading is [run] with stdin as the command's standard input.
+func runReading(t *testing.T, stdin io.Reader, args ...string) (string, error) {
+	t.Helper()
+	var out output
+	root := cmd.Root()
+	root.SetArgs(args)
+	root.SetIn(stdin)
 	root.SetOut(&out)
 	root.SetErr(&out)
 	err := root.Execute()

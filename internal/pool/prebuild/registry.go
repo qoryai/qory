@@ -8,12 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net"
-	"net/http"
+	"os/exec"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/qoryai/qory/internal/pool/child"
+	"github.com/qoryai/qory/internal/pool/explore"
 )
 
 // The media types of a manifest the size is read from, and of an index of manifests,
@@ -24,9 +25,6 @@ const (
 	mediaDockerList     = "application/vnd.docker.distribution.manifest.list.v2+json"
 	mediaOCIIndex       = "application/vnd.oci.image.index.v1+json"
 )
-
-// accepted is the Accept header of a manifest's GET: every type above.
-var accepted = strings.Join([]string{mediaOCIManifest, mediaDockerManifest, mediaOCIIndex, mediaDockerList}, ", ")
 
 // attestationType is the annotation Docker's builds mark an attestation's manifest in
 // an index with, and attestationManifest its value: such a manifest is no image.
@@ -42,8 +40,15 @@ const maxManifest = 4 << 20
 // maxSize is the largest size the contract takes, 2^53-1.
 const maxSize = 1<<53 - 1
 
-// registryTimeout bounds each GET of a manifest.
-const registryTimeout = 30 * time.Second
+// manifestTimeout bounds each docker buildx imagetools inspect of a manifest: 30
+// seconds. A test shortens it.
+var manifestTimeout = 30 * time.Second
+
+// The words of a manifest's read. Each is one format string.
+const (
+	textNoImagetools = "check that docker is on the PATH every command of qory run gets: docker buildx imagetools inspect could not be started: %w"
+	textNotInspected = "check that docker buildx is installed and that docker reaches the registry %s: docker buildx imagetools inspect --raw of the pushed image failed: %s"
+)
 
 // digestShape is a digest of the SHA-256 of a content: sha256: and 64 lower-case
 // hexadecimal digits.
@@ -73,7 +78,8 @@ type entry struct {
 	Annotations map[string]string `json:"annotations"`
 }
 
-// manifest is a manifest or an index, as a registry answers its GET.
+// manifest is a manifest or an index, as docker buildx imagetools inspect --raw prints
+// it.
 type manifest struct {
 	MediaType string       `json:"mediaType"`
 	Config    *descriptor  `json:"config"`
@@ -82,37 +88,24 @@ type manifest struct {
 }
 
 // registryOf is the host of a registry name, such as localhost:5001 of
-// localhost:5001/qory-env, and the rest, the repository's path before the image's
-// name. The first segment is a host when it has a dot or a colon, or is localhost.
-func registryOf(name string) (host, path string, err error) {
+// localhost:5001/qory-env. The first segment is a host when it has a dot or a colon,
+// or is localhost, and a path follows it.
+func registryOf(name string) (string, error) {
 	host, path, ok := strings.Cut(name, "/")
 	if !ok || path == "" || !(strings.ContainsAny(host, ".:") || host == "localhost") {
-		return "", "", fmt.Errorf("%w: the registry's name starts with no host", errRegistry)
+		return "", fmt.Errorf("%w: the registry's name starts with no host", errRegistry)
 	}
-	return host, path, nil
+	return host, nil
 }
 
-// loopback reports whether host, with its port or without, is this machine: a
-// registry there is reached over http, as the engine reaches it; any other over https.
-func loopback(host string) bool {
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
-	}
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(strings.Trim(host, "[]"))
-	return ip != nil && ip.IsLoopback()
-}
-
-// imageSize is the size of the image pushed as repo@digest to the registry at host,
-// read from its manifest: its config's size and its layers' sizes added up. The
-// manifest is read from GET /v2/<repo>/manifests/<digest>, and its bytes must have that
-// digest. When the digest names an index, the image is its one manifest of the
-// platform want, an attestation's manifest left out; none, or more than one, is a
-// failure. A variant want leaves empty takes any.
-func imageSize(ctx context.Context, client *http.Client, host, repo, digest string, want platform) (int64, error) {
-	m, err := getManifest(ctx, client, host, repo, digest)
+// imageSize is the size of the image pushed as name@digest, read from its manifest:
+// its config's size and its layers' sizes added up, the sizes in the registry,
+// compressed. Docker reads the manifest from the registry, with the settings in
+// $HOME/.docker, and its bytes must have that digest. When the manifest of the digest
+// is an index, the image is its one manifest of the platform want, an attestation's manifest left
+// out; none, or more than one, is a failure. A variant want leaves empty takes any.
+func (s Settings) imageSize(ctx context.Context, runID, state, name, digest string, want platform) (int64, error) {
+	m, err := s.readManifest(ctx, runID, state, name, digest)
 	if err != nil {
 		return 0, err
 	}
@@ -129,7 +122,7 @@ func imageSize(ctx context.Context, client *http.Client, host, repo, digest stri
 		if len(picked) != 1 {
 			return 0, fmt.Errorf("%w: the index names %d manifests of %s/%s, not one", errRegistry, len(picked), want.OS, want.Architecture)
 		}
-		if m, err = getManifest(ctx, client, host, repo, picked[0].Digest); err != nil {
+		if m, err = s.readManifest(ctx, runID, state, name, picked[0].Digest); err != nil {
 			return 0, err
 		}
 		if m.MediaType != mediaOCIManifest && m.MediaType != mediaDockerManifest {
@@ -152,36 +145,44 @@ func imageSize(ctx context.Context, client *http.Client, host, repo, digest stri
 	return size, nil
 }
 
-// getManifest is the manifest or index digest names in repo at host, its bytes checked
-// against the digest, and its media type the one it names, or the answer's
-// Content-Type when it names none.
-func getManifest(ctx context.Context, client *http.Client, host, repo, digest string) (manifest, error) {
+// readManifest is the manifest or index of digest under name, as docker buildx
+// imagetools inspect --raw prints it, the bytes the registry stores: they are checked
+// against the digest. Docker runs as the prebuild's other docker commands do, and its
+// error lines go to the log. When ctx ends during the read, the error is
+// [textStoppedPush], as for a stop during the push. A manifest that has no media type,
+// which the OCI image specification allows, is taken as an OCI index when it lists
+// manifests, else as an OCI image's manifest.
+func (s Settings) readManifest(ctx context.Context, runID, state, name, digest string) (manifest, error) {
 	if !digestShape.MatchString(digest) {
 		return manifest{}, fmt.Errorf("%w: a manifest's digest is not sha256: and 64 lower-case hexadecimal digits", errRegistry)
 	}
-	scheme := "https"
-	if loopback(host) {
-		scheme = "http"
+	docker, err := s.docker()
+	if err != nil {
+		return manifest{}, fmt.Errorf(textNoImagetools, err)
 	}
-	ctx, cancel := context.WithTimeout(ctx, registryTimeout)
+	readCtx, cancel := context.WithTimeout(ctx, manifestTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, scheme+"://"+host+"/v2/"+repo+"/manifests/"+digest, nil)
-	if err != nil {
-		return manifest{}, fmt.Errorf("%w: %v", errRegistry, err)
+	cmd := exec.CommandContext(readCtx, docker, "buildx", "imagetools", "inspect", "--raw", name+"@"+digest)
+	cmd.Dir = s.poolDir()
+	cmd.Env = child.Env(s.RunConfig, state, explore.RunsDir(s.State))
+	var stdout bytes.Buffer
+	cmd.Stdout = &limited{w: &stdout, n: maxManifest + 1}
+	errOut := s.lines(runID)
+	cmd.Stderr = errOut
+	err = cmd.Run()
+	errOut.Flush()
+	switch {
+	case err != nil && ctx.Err() != nil:
+		return manifest{}, fmt.Errorf(textStoppedPush, context.Cause(ctx))
+	case err != nil:
+		cause := err.Error()
+		if errors.Is(readCtx.Err(), context.DeadlineExceeded) {
+			cause = "it ran past its time limit of " + manifestTimeout.String()
+		}
+		host, _ := registryOf(name)
+		return manifest{}, fmt.Errorf(textNotInspected, host, cause)
 	}
-	req.Header.Set("Accept", accepted)
-	res, err := client.Do(req)
-	if err != nil {
-		return manifest{}, fmt.Errorf("%w: it could not be reached", errRegistry)
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		return manifest{}, fmt.Errorf("%w: it answered %d", errRegistry, res.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(res.Body, maxManifest+1))
-	if err != nil {
-		return manifest{}, fmt.Errorf("%w: its answer could not be read", errRegistry)
-	}
+	body := stdout.Bytes()
 	if len(body) > maxManifest {
 		return manifest{}, fmt.Errorf("%w: the manifest is larger than %d bytes", errRegistry, maxManifest)
 	}
@@ -195,12 +196,10 @@ func getManifest(ctx context.Context, client *http.Client, host, repo, digest st
 		return manifest{}, fmt.Errorf("%w: the manifest is not JSON", errRegistry)
 	}
 	if m.MediaType == "" {
-		m.MediaType, _, _ = strings.Cut(res.Header.Get("Content-Type"), ";")
-		m.MediaType = strings.TrimSpace(m.MediaType)
+		m.MediaType = mediaOCIManifest
+		if m.Manifests != nil {
+			m.MediaType = mediaOCIIndex
+		}
 	}
 	return m, nil
 }
-
-// noRedirect is a client's CheckRedirect that follows none: the answer is the
-// redirect's, which is not a 200.
-func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }

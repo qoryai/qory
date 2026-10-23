@@ -51,7 +51,7 @@ var wrapsAgentEnv = func(claudeDispatched, walled bool) bool { return claudeDisp
 // means; against them, the boundary is the wall. The verb's words, before the launch's,
 // hold no -p, --print or --settings, so Forager reads the launch's arguments as before.
 // It returns what removes the folder once the run is over.
-func wrapAgentEnv(spec *session.Spec, report func(string)) (func(), error) {
+func wrapAgentEnv(spec *runSpec, report func(string)) (func(), error) {
 	d, ok := spec.Wall.(*wall.Docker)
 	if !ok {
 		return func() {}, nil
@@ -105,7 +105,7 @@ func wrapAgentEnv(spec *session.Spec, report func(string)) (func(), error) {
 // which Forager sets to the start key's endpoint or to a passed value its endpoint rule
 // keeps, or unsets, and the harness's fixed values; and ca, the names the wall sets
 // only when the run has an authority.
-func keptNames(spec *session.Spec, d *wall.Docker) (always, ca []string) {
+func keptNames(spec *runSpec, d *wall.Docker) (always, ca []string) {
 	ca = d.CAEnv
 	if ca == nil {
 		ca = wall.DefaultCAEnv
@@ -149,8 +149,10 @@ func writeKept(file string, always, ca []string) error {
 }
 
 // newAgentEnv builds the hidden agent-env verb, what a dispatched walled run of Claude
-// Code starts the agent through: it reads the kept names from the file its first
-// argument names, removes from its environment every [preparation.Dropped] name the file
+// Code starts the agent through, after the setup commands when they run inside the wall:
+// it first makes the agent's home fresh, [preparation.FreshHome], and fails on anything
+// the image or the setup commands put there; it then reads the kept names from the file
+// its first argument names, removes from its environment every [preparation.Dropped] name the file
 // does not keep, but a prefixed name holding the gateway's placeholder, and executes the
 // launch after -- with its arguments unchanged. It parses no flag. It prints nothing; on
 // a failure it prints one line that names no value, and the agent does not start.
@@ -162,7 +164,13 @@ func newAgentEnv() *cobra.Command {
 		Annotations:        map[string]string{inWall: "agent-env"},
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path, argv, env, err := agentEnvLaunch(args, os.Environ())
+			// Last before the agent: its home, made fresh.
+			err := preparation.FreshHome(os.Getenv)
+			var path string
+			var argv, env []string
+			if err == nil {
+				path, argv, env, err = agentEnvLaunch(args, os.Environ())
+			}
 			if err == nil {
 				err = syscall.Exec(path, argv, env)
 			}

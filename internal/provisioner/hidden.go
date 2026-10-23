@@ -10,24 +10,24 @@ import (
 // hiddenText is how a [Hidden] prints, logs and marshals.
 const hiddenText = "[hidden]"
 
-// Hidden holds the bytes of a secret, the run key a handover answers with, and keeps
+// Hidden has the bytes of a secret, such as the run code of a claim's answer, and keeps
 // them out of every log, error and printout: it prints as [hidden] whatever the verb,
-// and logs and marshals as [hidden] too. It holds the bytes behind two pointers, so a
+// and logs and marshals as [hidden] too. It keeps the bytes behind two pointers, so a
 // Hidden inside another value, even in a field fmt cannot call its methods on, prints
 // as an address, never as the bytes: fmt follows one pointer to a slice when it reports
 // a verb the field does not take, and no pointer to a pointer. A printer that follows
 // pointers by reflection would show them. Copies of a Hidden share the bytes, and
-// [Hidden.Clear] clears them for every copy. The zero Hidden holds nothing.
+// [Hidden.Clear] clears them for every copy. The zero Hidden has no bytes.
 type Hidden struct{ p **[]byte }
 
-// Hide is a Hidden that holds b, which it takes: the caller keeps no other copy and
-// clears the bytes with [Hidden.Clear] once they are used.
+// Hide is a Hidden of b, which it takes: the caller keeps no other copy and clears the
+// bytes with [Hidden.Clear] once they are used.
 func Hide(b []byte) Hidden {
 	p := &b
 	return Hidden{&p}
 }
 
-// Len is the number of bytes held, 0 once cleared.
+// Len is the number of bytes kept, 0 once cleared.
 func (h Hidden) Len() int {
 	if h.p == nil {
 		return 0
@@ -35,8 +35,8 @@ func (h Hidden) Len() int {
 	return len(**h.p)
 }
 
-// WriteTo writes the bytes held to w, the one way they leave the Hidden: to the pipe a
-// run reads its run key from.
+// WriteTo writes the bytes kept to w, the one way they leave the Hidden: to the file or
+// the pipe a run reads its secret from.
 func (h Hidden) WriteTo(w io.Writer) (int64, error) {
 	if h.p == nil {
 		return 0, nil
@@ -45,7 +45,7 @@ func (h Hidden) WriteTo(w io.Writer) (int64, error) {
 	return int64(n), err
 }
 
-// Clear overwrites the bytes held with zeros and drops them, for this Hidden and every
+// Clear overwrites the bytes kept with zeros and drops them, for this Hidden and every
 // copy of it.
 func (h Hidden) Clear() {
 	if h.p == nil {

@@ -396,6 +396,9 @@ func WritePlugin(res *compose.Result, dir, manifestDir string, extra map[string]
 			continue
 		}
 		data, err := readSource(res, e)
+		if errors.Is(err, errLeftOut) {
+			continue
+		}
 		if err != nil {
 			return err
 		}
@@ -835,7 +838,7 @@ func linkFiles(res *compose.Result, p Runtime, dir string) error {
 			return fmt.Errorf("files/%s from module %s: %w", accesskey.ShownName(e.Name, false), accesskey.ShownName(e.Module, false), exports.HideError(err))
 		}
 		if m, copied := moduleOf(res, e.Module); copied {
-			if err := copyEntry(m, e.Path, root, name, nil); err != nil {
+			if err := copyEntry(m, e.Path, root, name, nil, leftOut(res, m)); err != nil {
 				return err
 			}
 			continue
@@ -1777,10 +1780,27 @@ func heldElsewhere(root, line string) (bool, error) {
 	return false, nil
 }
 
+// leftOut is the absolute paths in the module m that the stack's only or exclude left out,
+// which a copy of m leaves out too, for a module of a walled run, see
+// [compose.Module.Walled]. It is nil for any other module, whose copy keeps them.
+func leftOut(res *compose.Result, m compose.Module) []string {
+	if !m.Walled {
+		return nil
+	}
+	var leave []string
+	for _, x := range res.Excludes {
+		if x.Module == m.Name && x.Path != "" {
+			leave = append(leave, x.Path)
+		}
+	}
+	return leave
+}
+
 // linkModules writes one symlink per module at dir/modules/<name>, pointing at the module's
 // directory, so a settings fragment or a hook reaches a module's other files as
 // $QORY_HARNESS_HOME/modules/<name>/<path>. A module the home holds a copy of, see
-// [compose.Module.Copy], is copied there instead, without its .git.
+// [compose.Module.Copy], is copied there instead, without its .git, and for a walled run
+// without what the stack's only or exclude left out of it, see [leftOut].
 func linkModules(res *compose.Result, dir string) error {
 	modules := filepath.Join(dir, "modules")
 	if err := os.MkdirAll(modules, 0o755); err != nil {
@@ -1794,7 +1814,7 @@ func linkModules(res *compose.Result, dir string) error {
 			if err != nil {
 				return err
 			}
-			if err := copyModule(l, root, l.Name); err != nil {
+			if err := copyModule(l, root, l.Name, leftOut(res, l)); err != nil {
 				return err
 			}
 			continue

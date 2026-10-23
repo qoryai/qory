@@ -1,4 +1,4 @@
-name: Pre-release image
+name: Pre-release images
 
 # Run only by pushing a commit to the branch prerelease, which nothing else pushes to.
 # Never on a push to any other branch, a pull request or a schedule. Each run costs
@@ -26,7 +26,19 @@ concurrency:
 # image takes it by that digest, as ghcr.io/qoryai/qory-prerelease@sha256:<digest>; the
 # tag is for people to read.
 #
-# ghcr.io/qoryai/qory-prerelease stays private: it is never made public.
+# It then builds two more images of the same commit, each published and tagged the same
+# way, with its index digest in the summary:
+#
+# - images/agent, the image a walled run of Claude Code runs in, to
+#   ghcr.io/qoryai/qory-agent-prerelease. Its build runs programs for the image's
+#   platform, so each platform builds on a runner of that platform, with nothing under
+#   emulation. qory image check, with the binary from the first image, checks each
+#   platform's image before one index joins the two.
+# - images/gateway, FROM the first image by its digest, with qory gateway as the entry
+#   point, to ghcr.io/qoryai/qory-gateway-prerelease.
+#
+# ghcr.io/qoryai/qory-prerelease, ghcr.io/qoryai/qory-agent-prerelease and
+# ghcr.io/qoryai/qory-gateway-prerelease stay private: they are never made public.
 #
 # The build reads only the pushed sources: a go.mod that replaces a module with a local
 # path fails it, as that path is not in the checkout.
@@ -35,9 +47,16 @@ concurrency:
 # on GitHub.
 env:
   IMAGE: ghcr.io/qoryai/qory-prerelease
+  AGENT_IMAGE: ghcr.io/qoryai/qory-agent-prerelease
+  GATEWAY_IMAGE: ghcr.io/qoryai/qory-gateway-prerelease
   # Docker Hub's official golang:1.27 under the same digest as the Dockerfile's default,
   # copied to qoryai's public package and pulled with the job's token.
   GO_IMAGE: ghcr.io/qoryai/ci-images:golang-1.27@sha256:e432b43af23a9328d56a7c499be0476810aa344acbcf65fc7c455d4ff5a40602
+  # The agent image's bases, Docker Hub's official Debian and Node under the same digests
+  # as images/agent/Dockerfile's defaults, copied to the same package, as images.yml
+  # builds it.
+  FETCH_IMAGE: ghcr.io/qoryai/ci-images:debian-trixie-20260918-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
+  NODE_IMAGE: ghcr.io/qoryai/ci-images:node-24.21.0-trixie-slim@sha256:8ec5d7557396cfe32d21c3f9c13072355ceab22b584578ca4bb28af31120cffe
 
 jobs:
   image:
@@ -48,6 +67,10 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      sha: ${{ steps.commit.outputs.sha }}
+      short: ${{ steps.commit.outputs.short }}
     steps:
       # Every commit and tag, so go stamps the version after the last tag as a source
       # build does, and no token in .git/config, as .git is in the build's context.
@@ -137,3 +160,221 @@ jobs:
             echo "Tagged \`${IMAGE}:sha-${SHORT}\`, for people to read."
           } >> "$GITHUB_STEP_SUMMARY"
           echo "::notice::Published ${IMAGE}:sha-${SHORT}, ${IMAGE}@${DIGEST}"
+
+  # One job per platform, on a runner of that platform; the two differ only in name,
+  # runs-on and PLATFORM, and share their steps.
+  agent-amd64:
+    name: Build and check the agent image for amd64
+    needs: image
+    runs-on: ubuntu-latest
+    permissions: &agent-permissions
+      contents: read
+      packages: write
+    env:
+      PLATFORM: linux/amd64
+    outputs: &agent-outputs
+      digest: ${{ steps.build.outputs.digest }}
+    steps: &agent-steps
+      # images/agent alone is the build's context, so one commit is enough.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=ghcr.io/qoryai/ci-images:buildkit-buildx-stable-1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+
+      # The binary the image job checked, for this runner's platform: qory image check
+      # runs it as the probe inside the image, as the wall does.
+      - name: Take qory from the image
+        env:
+          DIGEST: ${{ needs.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          id="$(docker create --platform "$PLATFORM" "${IMAGE}@${DIGEST}")"
+          docker cp "$id:/qory/qory" "$RUNNER_TEMP/qory"
+          docker rm "$id" > /dev/null
+          "$RUNNER_TEMP/qory" version
+
+      # This platform's image, pushed by digest alone: no tag points to it until it is
+      # checked and joined with the other platform's.
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: images/agent
+          platforms: ${{ env.PLATFORM }}
+          outputs: type=image,name=${{ env.AGENT_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          provenance: false
+          sbom: false
+          build-args: |
+            FETCH_IMAGE=${{ env.FETCH_IMAGE }}
+            NODE_IMAGE=${{ env.NODE_IMAGE }}
+          labels: |
+            org.opencontainers.image.revision=${{ needs.image.outputs.sha }}
+          cache-from: type=gha,scope=agent-${{ runner.arch }}
+          cache-to: type=gha,mode=max,scope=agent-${{ runner.arch }}
+
+      # The check images.yml runs, on the image pushed: a configuration directory with no
+      # forager.yaml leaves every setting its default.
+      - name: Check the agent image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          XDG_CONFIG_HOME: ${{ runner.temp }}/config
+        run: |
+          set -euo pipefail
+          docker pull --platform "$PLATFORM" "${AGENT_IMAGE}@${DIGEST}"
+          "$RUNNER_TEMP/qory" image check "${AGENT_IMAGE}@${DIGEST}"
+
+  agent-arm64:
+    name: Build and check the agent image for arm64
+    needs: image
+    runs-on: ubuntu-24.04-arm
+    permissions: *agent-permissions
+    env:
+      PLATFORM: linux/arm64
+    outputs: *agent-outputs
+    steps: *agent-steps
+
+  agent:
+    name: Publish the agent image
+    needs: [image, agent-amd64, agent-arm64]
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # One index of the two images checked, tagged sha-<7>; an index that lists any other
+      # image, or not both, fails the run.
+      - name: Tag the agent image
+        env:
+          AMD64: ${{ needs.agent-amd64.outputs.digest }}
+          ARM64: ${{ needs.agent-arm64.outputs.digest }}
+          SHA: ${{ needs.image.outputs.sha }}
+          SHORT: ${{ needs.image.outputs.short }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create --tag "${AGENT_IMAGE}:sha-${SHORT}" "${AGENT_IMAGE}@${AMD64}" "${AGENT_IMAGE}@${ARM64}"
+          docker buildx imagetools inspect --raw "${AGENT_IMAGE}:sha-${SHORT}" > index.json
+          listed="$(jq -r '[.manifests[].digest] | sort | join(" ")' index.json)"
+          checked="$(printf '%s\n' "$AMD64" "$ARM64" | sort | paste -sd ' ')"
+          [ "$listed" = "$checked" ] || {
+            echo "${AGENT_IMAGE}:sha-${SHORT} lists ${listed:-no image}, not the images checked, ${checked}" >&2; exit 1; }
+          docker buildx imagetools inspect "${AGENT_IMAGE}:sha-${SHORT}" | tee inspect.txt
+          digest="$(awk '/^Digest:/ { print $2; exit }' inspect.txt)"
+          [ -n "$digest" ] || { echo "${AGENT_IMAGE}:sha-${SHORT} has no digest" >&2; exit 1; }
+          {
+            echo "## Pre-release agent image"
+            echo
+            echo "Built from \`${SHA}\` for linux/amd64 and linux/arm64, and checked by qory image check for each. Run it by the index digest:"
+            echo
+            echo '```'
+            echo "${AGENT_IMAGE}@${digest}"
+            echo '```'
+            echo
+            echo "Tagged \`${AGENT_IMAGE}:sha-${SHORT}\`, for people to read."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::Published ${AGENT_IMAGE}:sha-${SHORT}, ${AGENT_IMAGE}@${digest}"
+
+  gateway:
+    name: Build and publish the gateway image
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      # images/gateway alone is the build's context, so one commit is enough.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=ghcr.io/qoryai/ci-images:buildkit-buildx-stable-1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+
+      # Both platforms in one image index, pushed by digest alone, FROM the qory image of
+      # this run by its digest. The build only copies files for the image's platform, so
+      # nothing runs under emulation.
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: images/gateway
+          platforms: linux/amd64,linux/arm64
+          outputs: type=image,name=${{ env.GATEWAY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          provenance: false
+          sbom: false
+          build-args: |
+            QORY_IMAGE=${{ env.IMAGE }}@${{ needs.image.outputs.digest }}
+            GO_IMAGE=${{ env.GO_IMAGE }}
+          labels: |
+            org.opencontainers.image.revision=${{ needs.image.outputs.sha }}
+
+      # The image for this runner's platform, started as a consumer starts it: as the user
+      # 65532, with qory gateway as the entry point, whose help exits 0; qory version must
+      # print the pushed commit, not dirty; and HOME must be 65532's, mode 0700.
+      - name: Check the gateway image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          SHA: ${{ needs.image.outputs.sha }}
+        run: |
+          set -euo pipefail
+          ref="${GATEWAY_IMAGE}@${DIGEST}"
+          docker pull --platform linux/amd64 "$ref"
+          user="$(docker image inspect --format '{{.Config.User}}' "$ref")"
+          [ "$user" = 65532:65532 ] || { echo "the gateway image runs as ${user:-root}, not 65532:65532" >&2; exit 1; }
+          entrypoint="$(docker image inspect --format '{{json .Config.Entrypoint}}' "$ref")"
+          [ "$entrypoint" = '["/qory/qory","gateway"]' ] || {
+            echo "the gateway image's entry point is ${entrypoint}, not [\"/qory/qory\",\"gateway\"]" >&2; exit 1; }
+          docker run --rm --network none "$ref" --help
+          stamp="$(docker run --rm --network none --entrypoint /qory/qory "$ref" version --json | jq -r '.commit + (if .dirty then " (dirty)" else "" end)')"
+          [ "$stamp" = "${SHA:0:12}" ] || { echo "qory version prints the commit ${stamp:-none}, not ${SHA:0:12}" >&2; exit 1; }
+          id="$(docker create --platform linux/amd64 "$ref")"
+          home="$(docker export "$id" | tar -tvf - --numeric-owner | awk '$6 == "home/gateway/" { print $1, $2 }')"
+          docker rm "$id" > /dev/null
+          [ "$home" = "drwx------ 65532/65532" ] || { echo "/home/gateway is ${home:-missing}, not drwx------ 65532/65532" >&2; exit 1; }
+
+      # sha-<7> points to the image index pushed above, under the same digest; a tag that
+      # points to another digest fails the run.
+      - name: Tag the gateway image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          SHA: ${{ needs.image.outputs.sha }}
+          SHORT: ${{ needs.image.outputs.short }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create --tag "${GATEWAY_IMAGE}:sha-${SHORT}" "${GATEWAY_IMAGE}@${DIGEST}"
+          docker buildx imagetools inspect "${GATEWAY_IMAGE}:sha-${SHORT}" | tee inspect.txt
+          tagged="$(awk '/^Digest:/ { print $2; exit }' inspect.txt)"
+          [ "$tagged" = "$DIGEST" ] || {
+            echo "${GATEWAY_IMAGE}:sha-${SHORT} points to ${tagged:-no digest}, not the image pushed, ${DIGEST}" >&2; exit 1; }
+          {
+            echo "## Pre-release gateway image"
+            echo
+            echo "Built from \`${SHA}\` for linux/amd64 and linux/arm64, with \`qory gateway\` as the entry point. Run it by the index digest:"
+            echo
+            echo '```'
+            echo "${GATEWAY_IMAGE}@${DIGEST}"
+            echo '```'
+            echo
+            echo "Tagged \`${GATEWAY_IMAGE}:sha-${SHORT}\`, for people to read."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::Published ${GATEWAY_IMAGE}:sha-${SHORT}, ${GATEWAY_IMAGE}@${DIGEST}"

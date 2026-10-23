@@ -171,11 +171,12 @@ func TestComposeOutsideTheCheckoutLeavesItUntouched(t *testing.T) {
 		t.Error("the remove changed the checkout")
 	}
 	clean(t, root)
-	// With the report gone the home is read as a root again, and the process stands
-	// in no checkout, so there is nothing to find.
-	if _, err = run(t, "harness", "remove", "--home", home); err == nil || !strings.Contains(err.Error(), "is not inside a git working tree") {
-		t.Errorf("second remove: %v", err)
+	// With the report gone the home is read as a directory of homes again, outside the
+	// folder the process stands in, and it contains no home of that folder.
+	if out, err = run(t, "harness", "remove", "--home", home); err != nil {
+		t.Errorf("second remove: %v\n%s", err, out)
 	}
+	wants(t, out, "nothing composed here")
 }
 
 // TestHomeFromTheConfiguration is harness.home in the user's file: every compose of the
