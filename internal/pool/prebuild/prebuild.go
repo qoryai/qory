@@ -102,8 +102,8 @@ const (
 	textClosedBefore   = "check the run's record in Qory Apiary: the gateway closed the run as %s before qory run closed it"
 	textNoRecord       = "check that this machine can write qory run's state directory: the run opened and made no record"
 	textNotReported    = "update qory: the build's result could not be written to the run: %v"
-	textPlaceSecret    = "ask Qory Apiary's operator: the run's %s contains qak_, qrk_ or qecr_, which start a secret, and qory writes no image with them to dev.qory.run.built"
-	textPlaceCase      = "ask Qory Apiary's operator: the run's %s has upper-case letters, and qory writes images to dev.qory.run.built by lower-case references alone"
+	textPlaceSecret    = "ask Qory Apiary's instance admin: the run's %s contains qak_, qrk_ or qecr_, which start a secret, and qory writes no image with them to dev.qory.run.built"
+	textPlaceCase      = "ask Qory Apiary's instance admin: the run's %s has upper-case letters, and qory writes images to dev.qory.run.built by lower-case references alone"
 	textUndelivered    = "check that this machine reaches the run's gateway: %s of the run did not reach it; %s/undelivered contains them"
 )
 
@@ -499,7 +499,7 @@ func checkRun(s Settings, r Run) (string, error) {
 		}
 	}
 	if (r.EnvironmentDestination == "") == (r.EnvironmentImage == "") {
-		return "", errors.New("ask Qory Apiary's operator: the run has both or neither of environment_destination and environment_image, and a prebuild takes one")
+		return "", errors.New("ask Qory Apiary's instance admin: the run has both or neither of environment_destination and environment_image, and a prebuild takes one")
 	}
 	// Each image the run reports goes into dev.qory.run.built, which takes a lower-case
 	// reference pinned by digest, of at most 255 characters before the digest, with no
@@ -524,9 +524,9 @@ func checkRun(s Settings, r Run) (string, error) {
 		case strings.ToLower(d.value) != d.value:
 			return "", fmt.Errorf(textPlaceCase, d.member)
 		case !place && !policy.ImageReference(image):
-			return "", errors.New("ask Qory Apiary's operator: the run's environment_image is not an image pinned by digest, NAME@sha256: and 64 hexadecimal digits with no tag, NAME at most 255 characters")
+			return "", errors.New("ask Qory Apiary's instance admin: the run's environment_image is not an image pinned by digest, NAME@sha256: and 64 hexadecimal digits with no tag, NAME at most 255 characters")
 		case place && (noRegistry != nil || !destinationShape.MatchString(d.value) || !policy.ImageReference(image)):
-			return "", fmt.Errorf("ask Qory Apiary's operator: the run's %s is not a place at a registry, a host and a path of at most 255 characters with no tag and no digest", d.member)
+			return "", fmt.Errorf("ask Qory Apiary's instance admin: the run's %s is not a place at a registry, a host and a path of at most 255 characters with no tag and no digest", d.member)
 		}
 	}
 	if !pinnedShape.MatchString(s.AgentImage) {

@@ -95,7 +95,7 @@ func TestARunCodeTakesNoStackRuntimeOrArguments(t *testing.T) {
 // opens, with a line that starts with its fix and ends "; the code is used": exit 2 for
 // an answer with no documents, which Forager refuses, and exit 1 for the rest.
 func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
-	const checks = "update qory, or ask Qory Apiary's operator: the response to the run code does not pass qory's checks: "
+	const checks = "update qory, or ask Qory Apiary's instance admin: the response to the run code does not pass qory's checks: "
 	const broken = checks + "it breaks documents.schema.json; the code is used"
 	preDocs, err := fs.ReadFile(contracts.RunFS, "fixtures/documents/prebuild.json")
 	if err != nil {

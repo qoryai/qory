@@ -1354,10 +1354,10 @@ func TestLaunchRefused(t *testing.T) {
 // prebuild takes, its fix first.
 func TestLaunchRefusedPlaces(t *testing.T) {
 	const (
-		notAPlace = "ask Qory Apiary's operator: the run's %s is not a place at a registry, a host and a path of at most 255 characters with no tag and no digest"
-		upper     = "ask Qory Apiary's operator: the run's %s has upper-case letters, and qory writes images to dev.qory.run.built by lower-case references alone"
-		secret    = "ask Qory Apiary's operator: the run's %s contains qak_, qrk_ or qecr_, which start a secret, and qory writes no image with them to dev.qory.run.built"
-		notPinned = "ask Qory Apiary's operator: the run's environment_image is not an image pinned by digest, NAME@sha256: and 64 hexadecimal digits with no tag, NAME at most 255 characters"
+		notAPlace = "ask Qory Apiary's instance admin: the run's %s is not a place at a registry, a host and a path of at most 255 characters with no tag and no digest"
+		upper     = "ask Qory Apiary's instance admin: the run's %s has upper-case letters, and qory writes images to dev.qory.run.built by lower-case references alone"
+		secret    = "ask Qory Apiary's instance admin: the run's %s contains qak_, qrk_ or qecr_, which start a secret, and qory writes no image with them to dev.qory.run.built"
+		notPinned = "ask Qory Apiary's instance admin: the run's environment_image is not an image pinned by digest, NAME@sha256: and 64 hexadecimal digits with no tag, NAME at most 255 characters"
 	)
 	digest := "@sha256:" + strings.Repeat("a", 64)
 	fromImage := func(image string) func(*prebuild.Run) {
@@ -1375,7 +1375,7 @@ func TestLaunchRefusedPlaces(t *testing.T) {
 		{"upper-case path", func(r *prebuild.Run) { r.EnvironmentDestination = "registry.example.com/Environments/x" }, fmt.Sprintf(upper, "environment_destination")},
 		{"qak_", func(r *prebuild.Run) { r.ImageDestination = "registry.example.com/qak_x" }, fmt.Sprintf(secret, "image_destination")},
 		{"qecr_", func(r *prebuild.Run) { r.EnvironmentDestination = "registry.example.com/qecr_x" }, fmt.Sprintf(secret, "environment_destination")},
-		{"both", func(r *prebuild.Run) { r.EnvironmentImage = testEnvImage }, "ask Qory Apiary's operator: the run has both or neither of environment_destination and environment_image, and a prebuild takes one"},
+		{"both", func(r *prebuild.Run) { r.EnvironmentImage = testEnvImage }, "ask Qory Apiary's instance admin: the run has both or neither of environment_destination and environment_image, and a prebuild takes one"},
 		{"environment image by tag", fromImage("r.example/env:1"), notPinned},
 		{"environment image with tag and digest", fromImage("r.example/env:1" + digest), notPinned},
 		{"environment image upper-case host", fromImage("Registry.example.com/env" + digest), fmt.Sprintf(upper, "environment_image")},
@@ -1403,7 +1403,7 @@ func TestLaunchRefusedPlaces(t *testing.T) {
 // contract's documents.schema.json accepts, hyphens inside a host's label included: the
 // check passes. A place that image_place refuses is not a place at a registry.
 func TestCheckRunTakesTheContractsPlaces(t *testing.T) {
-	const notAPlace = "ask Qory Apiary's operator: the run's %s is not a place at a registry, a host and a path of at most 255 characters with no tag and no digest"
+	const notAPlace = "ask Qory Apiary's instance admin: the run's %s is not a place at a registry, a host and a path of at most 255 characters with no tag and no digest"
 	e := newEnv(t)
 	for _, place := range []string{
 		"xn--bcher-kva.example.com/targets/x",

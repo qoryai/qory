@@ -92,7 +92,7 @@ func codeDocumentsOf(documents json.RawMessage) (contracts.Documents, error) {
 	doc, err := provisioner.ReadDocuments(documents)
 	switch {
 	case err != nil:
-		return doc, fmt.Errorf("update qory, or ask Qory Apiary's operator: the response to the run code does not pass qory's checks: %v%s", err, codeUsed)
+		return doc, fmt.Errorf("update qory, or ask Qory Apiary's instance admin: the response to the run code does not pass qory's checks: %v%s", err, codeUsed)
 	case doc.Step != provisioner.StepExplore && doc.Step != provisioner.StepPrebuild:
 		return doc, fmt.Errorf("update qory: the response to the run code is for the step %s, and qory runs a run code's run for the steps explore and prebuild only%s", doc.Step, codeUsed)
 	}
@@ -126,7 +126,7 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 func (r *codeRun) apply(cmd *cobra.Command) error {
 	for _, s := range r.settings {
 		if err := cmd.Flags().Set(s.Flag, s.Value); err != nil {
-			return fmt.Errorf("update qory, or ask Qory Apiary's operator: the response to the run code sets --%s to a value that qory run does not take: %w%s", s.Flag, exports.HideValueError(err, s.Value), codeUsed)
+			return fmt.Errorf("update qory, or ask Qory Apiary's instance admin: the response to the run code sets --%s to a value that qory run does not take: %w%s", s.Flag, exports.HideValueError(err, s.Value), codeUsed)
 		}
 	}
 	return nil

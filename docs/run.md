@@ -1278,8 +1278,8 @@ Each of these errors stops the run before the code is sent, exit 2:
 
 These stop it after the redemption, exit 1. The code is used, so each needs a new one:
 
-- `update qory, or ask Qory Apiary's operator: the response to the run code does not pass
-  qory's checks: <reason>; the code is used`, where `<reason>` is a check that failed,
+- `update qory, or ask Qory Apiary's instance admin: the response to the run code does not
+  pass qory's checks: <reason>; the code is used`, where `<reason>` is a check that failed,
   such as `it breaks documents.schema.json`, and contains no value of the response
   but a member's name, an id, a revision or a byte count
 - `update qory: the response to the run code is for the step <step>, and qory runs a run
