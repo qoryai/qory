@@ -184,14 +184,10 @@ func addSources(p *stack.Stack, n *source.Named) error {
 		if l.Name != "" {
 			module = n.Module(l.Name)
 		}
-		if _, rest, ok := strings.Cut(l.Source.Git, "://"); ok {
-			// Up to the first /, a ? or # before an @ included: url.Parse ends the
-			// authority at a ? or #, while another URL parser may read what is before the
-			// @ as a user.
-			authority, _, _ := strings.Cut(rest, "/")
+		if strings.Contains(l.Source.Git, "://") {
 			u, err := url.Parse(l.Source.Git)
 			switch {
-			case strings.Contains(authority, "@") || err == nil && u.User != nil:
+			case stack.AtBeforePath(l.Source.Git) || err == nil && u.User != nil:
 				return fmt.Errorf("remove the user name and password from the source of %s in %s: a named stack's sources are fetched with no credential", module, n.Phrase())
 			case err != nil:
 				return fmt.Errorf("correct the URL in the source of %s in %s: qory could not read it as a URL", module, n.Phrase())

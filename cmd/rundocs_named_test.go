@@ -333,7 +333,7 @@ func TestARunCodeOfANamedStackThatFailsShowsNoAddress(t *testing.T) {
 		{"the workflow is not in the harness", namedStack{change: func(d map[string]any) { d["workflow"] = "deploy" }}, 1,
 			[]string{"add a skill or command deploy to the stack hello, or set another workflow in Qory Apiary: the composed harness has no skill or command deploy; the code is used"}},
 		{"the host proxy does not open", namedStack{nowhere: func(n *cmd.Nowhere) { n.ProxyErr = errors.New("the run is closed") }}, 1,
-			[]string{"qory run: take the work item in again in Qory Apiary: the run's host proxy, through which qory fetches the run's code, did not open: the run is closed; the code is used\n"}},
+			[]string{"qory run: take the work item in again in Qory Apiary: the run's host proxy, through which qory fetches the run's repositories and git sources, did not open: the run is closed; the code is used\n"}},
 		{"the stack proxy does not open", namedStack{nowhere: func(n *cmd.Nowhere) { n.StackProxyErr = errors.New("the run is closed") }}, 1,
 			[]string{"qory run: take the work item in again in Qory Apiary: the run's stack proxy, through which qory fetches the stack hello, did not open: the run is closed; the code is used\n"}},
 	} {

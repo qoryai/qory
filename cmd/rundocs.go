@@ -146,6 +146,11 @@ func namedStackOf(doc contracts.Documents) (*source.Named, error) {
 		return nil, fmt.Errorf("ask the instance admin of Qory Apiary to set the address of the stack %s in Qory Apiary's list of stacks: the response to the run code sets the stack %s by its name and has no address for it%s", name, name, codeUsed)
 	}
 	unreadable := fmt.Errorf("set the address of the stack %s in Qory Apiary's list of stacks as %s: qory could not read the address as a stack reference%s", name, stack.ReferenceForm, codeUsed)
+	user := fmt.Errorf("set the address of the stack %s in Qory Apiary's list of stacks without a user name or password: the address has a user part, and qory fetches a named stack with no credential%s", name, codeUsed)
+	// The schema of the documents allows no @ there; this check does not depend on it.
+	if stack.AtBeforePath(doc.StackReference) {
+		return nil, user
+	}
 	ref, ok, err := stack.ParseReference(doc.StackReference)
 	if err != nil || !ok {
 		return nil, unreadable
@@ -155,7 +160,7 @@ func namedStackOf(doc contracts.Documents) (*source.Named, error) {
 		return nil, unreadable
 	}
 	if u.User != nil {
-		return nil, fmt.Errorf("set the address of the stack %s in Qory Apiary's list of stacks without a user name or password: the address has a user part, and qory fetches a named stack with no credential%s", name, codeUsed)
+		return nil, user
 	}
 	return source.NewNamed(doc.Stack, doc.StackReference, ref), nil
 }
@@ -177,18 +182,20 @@ type givenMount struct {
 	from string
 }
 
-// cacheMounted stops, as input, a walled run of a named stack whose agent's container
+// reportExposed stops, as input, a walled run of a named stack whose agent's container
 // would get a harness report, which contains the stack's address: a mount of given, or
 // the checkout at root, mounted writable, that is, contains or lies inside qory's folder
 // in the cache directory, <cache>/qory, where qory writes the home and harness report of
-// each run with a run key or a run code and no --home or harness.home; or one that is or
-// contains report, this run's harness report, beside its home. The home, mounted
-// read-only, passes: report is beside it. The paths are compared as Forager compares a
-// mount, by [session.Overlap]: by file through links and in any letter case on a disk
-// that ignores case. A stack reference passes, and so does the cache folder when the
-// lookup of the cache directory fails, as qory then writes no home under it. It runs
-// before anything is fetched or written; each error ends with [codeUsed].
-func (r *codeRun) cacheMounted(root, report string, given []givenMount) error {
+// each run with a run key or a run code and no --home or harness.home; one that is or
+// contains report, this run's harness report, beside its home; or the home, mounted
+// read-only, when it is or contains <cache>/qory. A home that lies inside it, as the
+// default one under <cache>/qory/homes does, passes: report is beside it, and the other
+// runs' reports are not inside it. The paths are compared as Forager compares a mount,
+// by [session.Overlap]: by file through links and in any letter case on a disk that
+// ignores case. A stack reference passes, and so does the cache folder when the lookup
+// of the cache directory fails, as qory then writes no home under it. It runs before
+// anything is fetched or written; each error ends with [codeUsed].
+func (r *codeRun) reportExposed(root, home, report string, given []givenMount) error {
 	if r.named == nil {
 		return nil
 	}
@@ -220,6 +227,13 @@ func (r *codeRun) cacheMounted(root, report string, given []givenMount) error {
 	}
 	if how := overlap(root, report); how == "is" || how == "contains" {
 		return input(fmt.Errorf("start the run in a checkout that does not contain %s: the checkout %s is mounted into the agent's container, and %s is the harness report of this run%s", shown(report), shown(root), shown(report), codeUsed))
+	}
+	if how := overlap(home, cache); how == "is" || how == "contains" {
+		where := "other than"
+		if how == "contains" {
+			where = "that does not contain"
+		}
+		return input(fmt.Errorf("set --home or harness.home to a folder %s %s: the home %s is mounted read-only into the agent's container, and qory writes the harness report of each run with a run key or a run code that has no --home or harness.home under %s%s", where, shown(cache), shown(home), shown(cache), codeUsed))
 	}
 	return nil
 }

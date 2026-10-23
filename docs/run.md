@@ -54,7 +54,14 @@ stops when a mount of `wall.mounts` or `--mount`, or the checkout:
 - is or contains the harness report of this run, beside the home that `--home` or
   `harness.home` sets.
 
-The home passes: the report is beside it, not inside. qory compares each path through
+It stops as well when the home, which `--home` or `harness.home` can set, is or contains
+`qory` in your cache directory, with `set --home or harness.home to a folder that does
+not contain <folder>: the home <home> is mounted read-only into the agent's container,
+and qory writes the harness report of each run with a run key or a run code that has no
+--home or harness.home under <folder>; the code is used`, and `to a folder other than
+<folder>` for a home that is the folder. A home that lies inside it, as the default
+under `qory/homes` does, passes, as does a home elsewhere: this run's report is beside
+the home, not inside. qory compares each path through
 links, and in any letter case on a disk that ignores case, as macOS does by default. The
 code is used, so the run needs a new one:
 
@@ -1333,7 +1340,8 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
   used`
 - `set the address of the stack <name> in Qory Apiary's list of stacks without a user
   name or password: the address has a user part, and qory fetches a named stack with no
-  credential; the code is used`, before anything is fetched
+  credential; the code is used`, before anything is fetched, for an address whose URL has
+  a user part or an `@` between `://` and the first `/` after it
 - `set the runtime claude for the workspace in Qory Apiary, then take the work item in
   again: qory starts a run code's workflow on claude alone, and the response to the run
   code sets the runtime <name>; the code is used`
@@ -1341,8 +1349,9 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
   workflow in Qory Apiary: the composed harness has no skill or command <workflow>; the
   code is used`, after the compose, with `the stack <name>` for a stack by its name
 - `take the work item in again in Qory Apiary: the run's host proxy, through which qory
-  fetches the run's code, did not open: <error>; the code is used`, where a run without a
-  run code prints `run again: the run's host proxy, …: <error>`
+  fetches the run's repositories and git sources, did not open: <error>; the code is
+  used`, where a run without a run code prints `run again: the run's host proxy, through
+  which qory fetches the run's code, did not open: <error>`
 
 #### A named stack
 

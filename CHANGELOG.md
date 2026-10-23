@@ -93,7 +93,8 @@ release may change what an existing document does, and states it under Upgrading
   run: fetched the stack core at <commit> in 0.4s`, a file of the stack by its path from
   the stack's folder, such as `modules/world/qory-module.yaml in the stack core`, and
   none of git's output. The stack's clones are in folders of `<run>/sources` named by a
-  hash of the URL. An address with a user part stops the run before the fetch, exit 1,
+  hash of the URL. An address with a user part or an `@` between `://` and the first `/`
+  after it stops the run before the fetch, exit 1,
   and a module source in the stack's file with a user part or an `@` between `://` and
   the first `/` after it, or with a URL that qory cannot read, stops it before the
   modules are fetched, exit 2. Until now, qory stopped every run of a stack set by its
@@ -170,10 +171,13 @@ release may change what an existing document does, and states it under Upgrading
   `qory` in your cache directory: `~/.cache/qory` on Linux, or `$XDG_CACHE_HOME/qory`
   when that is set, and `~/Library/Caches/qory` on macOS. It stops as well when one of
   them is or contains the harness report of this run, `<home>-report.json`, beside the
-  home that `--home` or `harness.home` sets. The read-only mount of the home passes.
-  qory compares each path through links, and in any letter case on a disk that ignores
-  case. The line starts `remove <path> from --mount: …`, or `start the run in a checkout
-  that does not contain <path>: …` for the checkout. Under that folder qory writes the
+  home that `--home` or `harness.home` sets, and when the home, mounted read-only, is or
+  contains `qory` in your cache directory. A home that lies inside that folder, as the
+  default one does, passes. qory compares each path through links, and in any letter
+  case on a disk that ignores case. The line starts `remove <path> from --mount: …`,
+  `start the run in a checkout that does not contain <path>: …` for the checkout, or
+  `set --home or harness.home to a folder that does not contain <path>: …` for the
+  home. Under that folder qory writes the
   home and the harness report of each run with a run key or a run code that has no
   `--home` or `harness.home`, and a report contains the stack's address.
 - A run from a control plane fetches its repositories on this machine, through the run's

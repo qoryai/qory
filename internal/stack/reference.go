@@ -12,6 +12,15 @@ import (
 // ReferenceForm is the form of a stack reference, as an error line prints it.
 const ReferenceForm = "<https URL>#<ref>:<folder>"
 
+// AtBeforePath reports whether u, a URL with "://", has an @ between "://" and the first
+// / after it, a ? or # before the @ included: url.Parse ends the authority at a ? or #,
+// while another URL parser may read what is before the @ as a user.
+func AtBeforePath(u string) bool {
+	_, rest, ok := strings.Cut(u, "://")
+	authority, _, _ := strings.Cut(rest, "/")
+	return ok && strings.Contains(authority, "@")
+}
+
 // ParseReference reads value, what -f is set to, as a stack reference: a folder of a git
 // repository at a ref, written <https URL>#<ref>:<folder>, such as
 // https://github.com/example-org/harness#v1.2.0:stacks/web. The folder is the one that
