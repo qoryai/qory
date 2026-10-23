@@ -418,6 +418,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if err := fromCode.apply(cmd); err != nil {
 					return err
 				}
+				if spec.Wall != nil {
+					if err := fromCode.cacheMounted(spec.given); err != nil {
+						return err
+					}
+				}
 				runtime, composing.file = fromCode.runtime, fromCode.stack
 				// A run whose harness is hidden composes a home with no link, which Forager
 				// reads to mask the harness's text in the session's log and events.
@@ -1023,6 +1028,9 @@ type runSpec struct {
 	// setupWhere is where a walled run's setup commands run, wall.setup:
 	// [config.SetupOutside] or [config.SetupInside]; empty without a wall.
 	setupWhere string
+	// given are the mounts of a walled run that wall.mounts and --mount add, in
+	// spec.Mounts too; none without a wall.
+	given []givenMount
 }
 
 // openedRun is a run open at its gateway, as qory run uses it: a [*session.Run], as
@@ -1541,6 +1549,7 @@ func enclose(spec *runSpec, r *config.Forager, o wallOptions, selected string, f
 	var more []wall.Mount
 	for _, m := range section.Mounts {
 		more = append(more, wall.Mount{Path: m.Path, ReadOnly: m.ReadOnly})
+		spec.given = append(spec.given, givenMount{path: m.Path, from: "wall.mounts in " + config.ForagerFileName})
 	}
 	for _, v := range o.mounts {
 		m, err := config.ParseMount(v)
@@ -1551,6 +1560,7 @@ func enclose(spec *runSpec, r *config.Forager, o wallOptions, selected string, f
 			return input(fmt.Errorf("--mount: %w", exports.HideError(err)))
 		}
 		more = append(more, wall.Mount{Path: m.Path, ReadOnly: m.ReadOnly})
+		spec.given = append(spec.given, givenMount{path: m.Path, from: "--mount"})
 	}
 	helper, err := wallHelper(section, exe)
 	if err != nil {

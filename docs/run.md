@@ -42,6 +42,18 @@ wall or not, before the run opens and before anything is written:
 set --home to a folder outside /work/app: /work/app/.qory/harness is inside /work/app, and a run with a run key writes no harness into the folder it runs in
 ```
 
+A walled run from a run code whose stack is a stack name stops with exit 2, before
+anything is fetched or composed, when a mount of `wall.mounts` or `--mount` is, contains
+or lies inside `qory` in your cache directory. qory compares the mount through links,
+and in any letter case on a disk that ignores case, as macOS does by default.
+Under that folder qory writes the home and the harness report, `<home>-report.json`, of
+each run with a run key or a run code that has no `--home` or `harness.home`, and the
+agent's container has every mount. The code is used, so the run needs a new one:
+
+```text
+remove /home/dev/.cache from --mount: it contains /home/dev/.cache/qory, where qory writes the harness report of each run with a run key or a run code that has no --home or harness.home, and a walled run of a named stack mounts no part of /home/dev/.cache/qory; the code is used
+```
+
 Given a run key, `qory run` composes under four rules, so that a branch of the checkout
 does not pull files of this machine into the harness or set the machine's settings of the
 compose:

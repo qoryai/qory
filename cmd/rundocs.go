@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/forager/session"
 	"github.com/qoryai/integrations/contracts"
 	"github.com/spf13/cobra"
 
@@ -127,6 +128,42 @@ func (r *codeRun) apply(cmd *cobra.Command) error {
 	for _, s := range r.settings {
 		if err := cmd.Flags().Set(s.Flag, s.Value); err != nil {
 			return fmt.Errorf("update qory, or ask Qory Apiary's instance admin: the response to the run code sets --%s to a value that qory run does not take: %w%s", s.Flag, exports.HideValueError(err, s.Value), codeUsed)
+		}
+	}
+	return nil
+}
+
+// namedStack reports whether r's stack is a stack name, not a stack reference.
+func (r *codeRun) namedStack() bool { return !strings.HasPrefix(r.stack, stackReferencePrefix) }
+
+// givenMount is a mount of a walled run that wall.mounts in forager.yaml or --mount
+// adds; from is which of the two adds it, as an error prints it.
+type givenMount struct {
+	path string
+	from string
+}
+
+// cacheMounted stops, as input, a walled run of a named stack with a mount of given that
+// is, contains or lies inside qory's folder in the cache directory, <cache>/qory: qory
+// writes the home and harness report of each run with a run key or a run code and no
+// --home or harness.home under it, and the agent's container has every mount. The
+// mount and the folder are compared as Forager compares a mount, by [session.Overlap]:
+// by file through links and in any letter case on a disk that ignores case. A stack
+// reference passes, and so does a failed lookup of the cache directory, under which
+// qory then writes no home. It runs before anything is fetched or composed; its error
+// ends with [codeUsed].
+func (r *codeRun) cacheMounted(given []givenMount) error {
+	if !r.namedStack() {
+		return nil
+	}
+	base, err := os.UserCacheDir()
+	if err != nil {
+		return nil
+	}
+	cache := filepath.Join(base, "qory")
+	for _, m := range given {
+		if how := session.Overlap(m.path, cache); how != "" {
+			return input(fmt.Errorf("remove %s from %s: it %s %s, where qory writes the harness report of each run with a run key or a run code that has no --home or harness.home, and a walled run of a named stack mounts no part of %s%s", exports.Value(m.path, false), m.from, how, exports.Value(cache, false), exports.Value(cache, false), codeUsed))
 		}
 	}
 	return nil
