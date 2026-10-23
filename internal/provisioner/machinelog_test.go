@@ -18,7 +18,7 @@ import (
 
 // hiddenLine is the text that replaces a machine log's line with what looks like a
 // secret.
-const hiddenLine = "[hidden: the line contained what looks like an access key secret, a run key or a run code]"
+const hiddenLine = "[hidden: the line contained what looks like an access key secret, a run key, a run code or an enrolment code]"
 
 // machineLogOf is the machine log the fake recorded for the dispatch id, and the body
 // of the last request.
@@ -113,20 +113,21 @@ func TestAMachineLogIsCutToItsBounds(t *testing.T) {
 }
 
 // TestAMachineLogIsCleaned uploads a log with lines that contain an access key secret,
-// a run key and a run code in any case, a U+0000 and a run of 3 bytes that are not
-// UTF-8: each such line is replaced with a fixed text, the U+0000 with U+FFFD, and the
-// run of bytes with one U+FFFD.
+// a run key and a run code in any case, an enrolment code of each prefix, qecn_, qecp_,
+// qecg_ and qeci_, in mixed case, a U+0000 and a run of 3 bytes that are not UTF-8: each
+// such line is replaced with a fixed text, the U+0000 with U+FFFD, and the run of bytes
+// with one U+FFFD.
 func TestAMachineLogIsCleaned(t *testing.T) {
 	srv, c, _, _ := setup(t)
 	cl := claimed(t, srv, c, provisionertest.Run{})
-	log := "start\nkey qak_abc\nrun key QRK_abc.def\ncode qecr_ABC\na\x00b\nc\xff\xfe\xfdd\nend"
+	log := "start\nkey qak_abc\nrun key QRK_abc.def\ncode qecr_ABC\nn QeCn_A\np qECP_A\ng QecG_A\ni qEcI_A\na\x00b\nc\xff\xfe\xfdd\nend"
 	if err := c.MachineLog(context.Background(), cl.DispatchID, log, false); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := machineLogOf(t, srv, cl.DispatchID)
 	hidden := hiddenLine + "\n"
 	r := string(utf8.RuneError)
-	if want := "start\n" + hidden + hidden + hidden + "a" + r + "b\nc" + r + "d\nend"; got.Log != want || got.Truncated {
+	if want := "start\n" + strings.Repeat(hidden, 7) + "a" + r + "b\nc" + r + "d\nend"; got.Log != want || got.Truncated {
 		t.Errorf("sent %q, want %q", got.Log, want)
 	}
 }
@@ -136,7 +137,7 @@ func TestAMachineLogIsCleaned(t *testing.T) {
 // at its start and at its end, around lines that JSON escapes to more than a mebibyte.
 // The body sent is within the request's bound, truncated is set, the log is the end of
 // the log with each such line replaced, and no request and no line the client logged
-// contains qak_, qrk_ or qecr_ in any case, or a secret.
+// contains qak_, qrk_, qecr_, qecn_, qecp_, qecg_ or qeci_ in any case, or a secret.
 func TestAMachineLogOverItsBoundHasNoSecret(t *testing.T) {
 	srv, c, _, log := setup(t)
 	run := srv.Offer(provisionertest.Run{})[0]

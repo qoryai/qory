@@ -125,10 +125,11 @@ func TestHideNameHidesEveryWordWithASecret(t *testing.T) {
 
 // TestADecoderPrefixWithASecretIsLeftOut is a decoder error that qory's words wrap,
 // when those words contain an access key secret: the refusal leaves the words out, as
-// it leaves out the decoder's message.
+// it leaves out the decoder's message. A decoder message with an enrolment code, in
+// mixed case, is left out too.
 func TestADecoderPrefixWithASecretIsLeftOut(t *testing.T) {
 	isolate(t)
-	const cannotRead = "qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key or a run code, so qory does not print it."
+	const cannotRead = "qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code or an enrolment code, so qory does not print it."
 	inner := errors.New("yaml: cannot decode !!str `qak_y` as a !!int")
 	for _, c := range []struct {
 		err  error
@@ -136,6 +137,7 @@ func TestADecoderPrefixWithASecretIsLeftOut(t *testing.T) {
 	}{
 		{fmt.Errorf("qak_x is one name: %w", inner), "f.yaml: " + cannotRead},
 		{fmt.Errorf("one name: %w", inner), "f.yaml: one name: " + cannotRead},
+		{fmt.Errorf("one name: %w", errors.New("yaml: cannot decode !!str `QeCg_y` as a !!int")), "f.yaml: one name: " + cannotRead},
 	} {
 		if err := exports.DecodeError("f.yaml", c.err); err == nil || err.Error() != c.want {
 			t.Errorf("%v, want %q", err, c.want)

@@ -1356,7 +1356,7 @@ func TestLaunchRefusedPlaces(t *testing.T) {
 	const (
 		notAPlace = "ask Qory Apiary's instance admin: the run's %s is not a place at a registry, a host and a path of at most 255 characters with no tag and no digest"
 		upper     = "ask Qory Apiary's instance admin: the run's %s has upper-case letters, and qory writes images to dev.qory.run.built by lower-case references alone"
-		secret    = "ask Qory Apiary's instance admin: the run's %s contains qak_, qrk_ or qecr_, which start a secret, and qory writes no image with them to dev.qory.run.built"
+		secret    = "ask Qory Apiary's instance admin: the run's %s contains qak_, qrk_, qecr_, qecn_, qecp_, qecg_ or qeci_, which start a secret, and qory writes no image with them to dev.qory.run.built"
 		notPinned = "ask Qory Apiary's instance admin: the run's environment_image is not an image pinned by digest, NAME@sha256: and 64 hexadecimal digits with no tag, NAME at most 255 characters"
 	)
 	digest := "@sha256:" + strings.Repeat("a", 64)
@@ -1380,6 +1380,10 @@ func TestLaunchRefusedPlaces(t *testing.T) {
 		{"environment image with tag and digest", fromImage("r.example/env:1" + digest), notPinned},
 		{"environment image upper-case host", fromImage("Registry.example.com/env" + digest), fmt.Sprintf(upper, "environment_image")},
 		{"environment image qrk_", fromImage("registry.example.com/qrk_env" + digest), fmt.Sprintf(secret, "environment_image")},
+		{"QeCn_", func(r *prebuild.Run) { r.ImageDestination = "registry.example.com/QeCn_x" }, fmt.Sprintf(secret, "image_destination")},
+		{"qECP_", func(r *prebuild.Run) { r.EnvironmentDestination = "registry.example.com/qECP_x" }, fmt.Sprintf(secret, "environment_destination")},
+		{"environment image QecG_", fromImage("registry.example.com/QecG_env" + digest), fmt.Sprintf(secret, "environment_image")},
+		{"qEcI_", func(r *prebuild.Run) { r.ImageDestination = "registry.example.com/qEcI_x" }, fmt.Sprintf(secret, "image_destination")},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEnv(t)

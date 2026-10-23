@@ -1,10 +1,24 @@
 package cmd
 
 import (
+	"errors"
 	"os"
 	"strconv"
 	"testing"
 )
+
+// TestHiddenRunSecretsHidesAnEnrolmentCode is an error whose text contains an enrolment
+// code, qecn_, qecp_, qecg_ or qeci_ in mixed case: its text is the enrolment code's
+// phrase, and it unwraps to the error.
+func TestHiddenRunSecretsHidesAnEnrolmentCode(t *testing.T) {
+	for _, prefix := range []string{"QeCn_", "qECP_", "QecG_", "qEcI_"} {
+		inner := errors.New("dial tcp: lookup " + prefix + "x.example: no such host")
+		err := hiddenRunSecrets(inner)
+		if err == nil || err.Error() != "(a value that contains an enrolment code)" || !errors.Is(err, inner) {
+			t.Errorf("%s: %v", prefix, err)
+		}
+	}
+}
 
 // TestSameGateway is the comparison of a run key's gateway URL with --gateway: the host
 // in any letter case, the port 443 when the URL has none, and a slash after the host,

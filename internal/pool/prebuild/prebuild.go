@@ -102,7 +102,7 @@ const (
 	textClosedBefore   = "check the run's record in Qory Apiary: the gateway closed the run as %s before qory run closed it"
 	textNoRecord       = "check that this machine can write qory run's state directory: the run opened and made no record"
 	textNotReported    = "update qory: the build's result could not be written to the run: %v"
-	textPlaceSecret    = "ask Qory Apiary's instance admin: the run's %s contains qak_, qrk_ or qecr_, which start a secret, and qory writes no image with them to dev.qory.run.built"
+	textPlaceSecret    = "ask Qory Apiary's instance admin: the run's %s contains qak_, qrk_, qecr_, qecn_, qecp_, qecg_ or qeci_, which start a secret, and qory writes no image with them to dev.qory.run.built"
 	textPlaceCase      = "ask Qory Apiary's instance admin: the run's %s has upper-case letters, and qory writes images to dev.qory.run.built by lower-case references alone"
 	textUndelivered    = "check that this machine reaches the run's gateway: %s of the run did not reach it; %s/undelivered contains them"
 )
@@ -503,8 +503,8 @@ func checkRun(s Settings, r Run) (string, error) {
 	}
 	// Each image the run reports goes into dev.qory.run.built, which takes a lower-case
 	// reference pinned by digest, of at most 255 characters before the digest, with no
-	// qak_, qrk_ or qecr_ in it: a value that the event cannot take stops the run here,
-	// before anything is built or pushed.
+	// qak_, qrk_, qecr_, qecn_, qecp_, qecg_ or qeci_ in it: a value that the event
+	// cannot take stops the run here, before anything is built or pushed.
 	places := []struct{ member, value string }{{"image_destination", r.ImageDestination}}
 	if r.EnvironmentDestination != "" {
 		places = append(places, struct{ member, value string }{"environment_destination", r.EnvironmentDestination})

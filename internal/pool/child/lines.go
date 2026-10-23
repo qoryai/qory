@@ -10,20 +10,20 @@ import (
 const maxLine = 16 << 10
 
 // lookahead is how many bytes after a part of a long line are read with it: one fewer
-// than qecr_, the longest of qak_, qrk_ and qecr_, so what starts a secret across the
-// split is seen in the part before it.
+// than qecr_, which is as long as the longest of qak_, qrk_, qecr_, qecn_, qecp_, qecg_
+// and qeci_, so what starts a secret across the split is seen in the part before it.
 const lookahead = len("qecr_") - 1
 
 // withheld takes the place of a line that holds what starts a secret.
 const withheld = "(a line that contains a secret, left out)"
 
 // LineWriter passes what a command writes on, one line at a time, each after a prefix.
-// A line that contains what starts an access key secret, a run key or a run code, qak_,
-// qrk_ or qecr_ in any case, as [ContainsSecret] checks, is never passed on: a fixed
-// line takes its place. A line longer than [maxLine] is passed on in parts, each read
-// with the [lookahead] bytes after it; once a part contains what starts a secret, it and
-// every later part of the line are left out, so no piece of the secret is passed on on
-// either side of a split.
+// A line that contains what starts an access key secret, a run key, a run code or an
+// enrolment code, qak_, qrk_, qecr_, qecn_, qecp_, qecg_ or qeci_ in any case, as
+// [ContainsSecret] checks, is never passed on: a fixed line takes its place. A line
+// longer than [maxLine] is passed on in parts, each read with the [lookahead] bytes
+// after it; once a part contains what starts a secret, it and every later part of the
+// line are left out, so no piece of the secret is passed on on either side of a split.
 type LineWriter struct {
 	mu     sync.Mutex
 	prefix string

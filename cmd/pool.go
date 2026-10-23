@@ -77,8 +77,8 @@ access key does not reach the run, and each run reports its outcome to Qory Apia
 While a run runs, the pool sends dispatched every 60 s. It stops the run when Qory
 Apiary ends the dispatch or the claim's max_lifetime_minutes pass. Once the run ends,
 the pool uploads the run's output as the dispatch's machine log: at most the last
-768 KiB, with each line that contains qak_, qrk_ or qecr_ replaced. It releases a claim
-that sets a machine type, and a claim it could not start.
+768 KiB, with each line that contains qak_, qrk_, qecr_, qecn_, qecp_, qecg_ or qeci_
+replaced. It releases a claim that sets a machine type, and a claim it could not start.
 The pool section of forager.yaml sets it: runs, registry, run_config. SIGINT or SIGTERM
 stops it: it claims no new run, stops the runs it started, and exits 0.`,
 		Hidden: true,

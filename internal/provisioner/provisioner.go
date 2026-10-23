@@ -15,7 +15,8 @@
 //
 // The run code a claim's answer contains is read into a [Hidden], which prints, logs
 // and marshals as [hidden], and no string ever contains it. No error and no line the
-// client logs contains the access key's secret, a run key or a run code.
+// client logs contains the access key's secret, a run key, a run code or an enrolment
+// code.
 package provisioner
 
 import (

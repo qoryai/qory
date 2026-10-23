@@ -13,10 +13,11 @@ import (
 const hiddenText = "[hidden]"
 
 // SafeHandler is h, but a record's message, and each of its values and those of the
-// handler's attributes, that contains what starts an access key secret, a run key or a
-// run code, qak_, qrk_ or qecr_ in any case, as [child.ContainsSecret] checks, is
-// written as [hidden]. A value is checked as the handler would
-// write it: a group's members one by one, and any other value by its text.
+// handler's attributes, that contains what starts an access key secret, a run key, a
+// run code or an enrolment code, qak_, qrk_, qecr_, qecn_, qecp_, qecg_ or qeci_ in any
+// case, as [child.ContainsSecret] checks, is written as [hidden]. A value is checked as
+// the handler would write it: a group's members one by one, and any other value by its
+// text.
 func SafeHandler(h slog.Handler) slog.Handler { return safeHandler{h} }
 
 type safeHandler struct{ h slog.Handler }

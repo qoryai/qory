@@ -89,11 +89,20 @@ release may change what an existing document does, and states it under Upgrading
   it stops the run when Qory Apiary ends the dispatch or the claim's
   `max_lifetime_minutes` pass. Once the run ends, the pool uploads the run's output as
   the dispatch's machine log, once: at most the last 768 KiB, with each line that
-  contains `qak_`, `qrk_` or `qecr_` replaced. If the upload fails, the pool logs a line,
-  and the run's end does not change. The pool section of
-  `forager.yaml` takes `runs`, `registry` and `run_config`. With `prebuilds`,
+  contains `qak_`, `qrk_`, `qecr_`, `qecn_`, `qecp_`, `qecg_` or `qeci_` replaced. If the
+  upload fails, the pool logs a line, and the run's end does not change. The pool section
+  of `forager.yaml` takes `runs`, `registry` and `run_config`. With `prebuilds`,
   `harness_ref` or `harness_path` in it, qory stops with `<file>: line <n>: key "<key>"
   is not one forager.yaml reads`.
+- qory treats an enrolment code, `qecn_`, `qecp_`, `qecg_` or `qeci_` in any letter case,
+  as a secret, as it treats `qak_`, `qrk_` and `qecr_`. Where qory prints a phrase in
+  place of a value or a name that contains one of those, it prints "(a value that
+  contains an enrolment code)" or "(a name that contains an enrolment code)" for one that
+  contains an enrolment code and none of the other three: in the rows of `qory config`,
+  the refusals and the compose output among them. The log of `qory run pool` writes
+  `[hidden]` in place of a message or value that contains one, the pool leaves out a
+  line of a run's output that contains one, and it sends Qory Apiary no request that
+  contains one.
 - A run from a run code whose documents have the step `prebuild` builds the image of the
   run's target in `qory run`, on a machine without an access key, in two steps:
   the environment image from the development container configuration, tagged
@@ -327,8 +336,8 @@ release may change what an existing document does, and states it under Upgrading
   anchor name contains such a secret is refused as "the value is a YAML alias" at its
   line, and a key of an `exclude` or `only` block as "the name at line N". A refusal of
   the YAML decoder that contains such a secret keeps the words qory writes in front of it,
-  as for `target.runtime`, unless those words contain one too. A name without such a
-  secret prints as before.
+  as for `target.runtime`, unless those words contain one too. A name that contains none
+  of `qak_`, `qrk_`, `qecr_`, `qecn_`, `qecp_`, `qecg_` and `qeci_` prints as before.
 - qory prints "(a value that contains an access key secret)" or "(a value that contains
   a run key)" in place of a value that contains `qak_` or `qrk_`, in any letter case: an
   env value, a `harness.launch` command, a `worktree.run.add` or `worktree.run.remove`

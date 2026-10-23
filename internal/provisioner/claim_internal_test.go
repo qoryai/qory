@@ -169,9 +169,10 @@ func TestAClaimOfAnotherRevisionStartsWithItsFix(t *testing.T) {
 }
 
 // TestARunCodeIsASecret checks that what the client checks for secrets finds a run code
-// in any case, beside an access key secret and a run key.
+// in any case, beside an access key secret, a run key and an enrolment code, qecn_,
+// qecp_, qecg_ or qeci_ in mixed case.
 func TestARunCodeIsASecret(t *testing.T) {
-	for _, s := range []string{testCode, "the code QECR_x", "qak_x", "qrk_x"} {
+	for _, s := range []string{testCode, "the code QECR_x", "qak_x", "qrk_x", "the code QeCn_x", "qECP_x", "a QecG_x", "qEcI_x"} {
 		if !containsSecret(s) || shown(s) != hiddenText {
 			t.Errorf("%q is not taken for a secret", s)
 		}

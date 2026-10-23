@@ -119,7 +119,9 @@ func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 		{"prebuild with no wall", preDocs, "set wall.image, pinned by its digest, wall.user and wall.helper in forager.yaml: a prebuild from a run code builds with them; the code is used"},
 		{"no stack", codeDocuments(t, func(d map[string]any) { delete(d, "stack"); delete(d, "workflow"); delete(d, "harness_hidden") }),
 			"set a stack for the workspace in Qory Apiary, then take the work item in again: the response to the run code has no stack and no workflow; the code is used"},
-		{"a stack by its name", codeDocuments(t, func(d map[string]any) { d["stack"] = "core" }),
+		{"a stack by its name", codeDocuments(t, func(d map[string]any) {
+			d["stack"], d["stack_reference"] = "core", "https://code.example.com/team/stacks#main:core"
+		}),
 			"update qory: the response to the run code sets the stack core by its name, and this qory takes a stack reference (url#ref:path) alone; the code is used"},
 		{"another runtime", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": "codex"} }),
 			"set the runtime claude for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow on claude alone, and the response to the run code sets the runtime codex; the code is used"},
