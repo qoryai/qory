@@ -93,10 +93,10 @@ release may change what an existing document does, and states it under Upgrading
   run: fetched the stack core at <commit> in 0.4s`, a file of the stack by its path from
   the stack's folder, such as `modules/world/qory-module.yaml in the stack core`, and
   none of git's output. The stack's clones are in folders of `<run>/sources` named by a
-  hash of the URL. An address with a user part or an `@` between `://` and the first `/`
-  after it stops the run before the fetch, exit 1,
-  and a module source in the stack's file with a user part or an `@` between `://` and
-  the first `/` after it, or with a URL that qory cannot read, stops it before the
+  hash of the URL. An address with a user part, an `@` between `://` and the first `/`
+  after it, or a host with a character outside ASCII once its percent-encodings are
+  decoded stops the run before the fetch, exit 1, and a module source in the stack's
+  file with one of them, or with a URL that qory cannot read, stops it before the
   modules are fetched, exit 2. Until now, qory stopped every run of a stack set by its
   name.
 - `qory run pool` starts each dispatch it claims with `qory run --run-code-file /dev/fd/3
@@ -166,20 +166,24 @@ release may change what an existing document does, and states it under Upgrading
   the one of a walled run of Claude Code with a run key on a home inside the folder,
   which came after the compose. A run without a run key composes as before.
 - A walled run from a run code whose stack is a stack name stops with exit 2, before
-  anything is fetched or written, when a mount of `wall.mounts` in `forager.yaml` or of
-  `--mount`, or the checkout, mounted writable, is, contains or lies inside
-  `qory` in your cache directory: `~/.cache/qory` on Linux, or `$XDG_CACHE_HOME/qory`
-  when that is set, and `~/Library/Caches/qory` on macOS. It stops as well when one of
-  them is or contains the harness report of this run, `<home>-report.json`, beside the
-  home that `--home` or `harness.home` sets, and when the home, mounted read-only, is or
-  contains `qory` in your cache directory. A home that lies inside that folder, as the
-  default one does, passes. qory compares each path through links, and in any letter
-  case on a disk that ignores case. The line starts `remove <path> from --mount: …`,
-  `start the run in a checkout that does not contain <path>: …` for the checkout, or
-  `set --home or harness.home to a folder that does not contain <path>: …` for the
-  home. Under that folder qory writes the
-  home and the harness report of each run with a run key or a run code that has no
-  `--home` or `harness.home`, and a report contains the stack's address.
+  the stack is fetched and before the run writes its inputs, home or report, when a
+  mount of `wall.mounts` in `forager.yaml` or of `--mount`, the checkout or the working
+  folder, both mounted writable, is, contains or lies inside `qory` in your cache
+  directory: `~/.cache/qory` on Linux, or `$XDG_CACHE_HOME/qory` when that is set, and
+  `~/Library/Caches/qory` on macOS. It stops as well when one of them is or contains
+  the harness report of this run, `<home>-report.json`, beside the home that `--home` or
+  `harness.home` sets, and when the home, mounted read-only, is or contains `qory` in
+  your cache directory. A home that lies inside that folder, as the default one does,
+  passes. qory compares each path through links, and in any letter case on a disk that
+  ignores case. The line starts `remove <path> from --mount: …` for a mount, `start the
+  run in a checkout that does not contain <path>: …` or `start the run in a checkout
+  outside <path>: …` for the checkout, `run qory from a folder that does not contain
+  <path>: …` or `run qory from a folder outside <path>: …` for the working folder, and
+  `set --home or harness.home to a folder that does not contain <path>: …` or `set
+  --home or harness.home to a folder other than <path>: …` for the home. Under that
+  folder qory writes the home and the harness report of each run with a run key or a
+  run code that has no `--home` or `harness.home`, and a report contains the stack's
+  address.
 - A run from a control plane fetches its repositories on this machine, through the run's
   gateway, once the run is open and before the compose, and prints `qory run: fetched
   <owner>/<name> at <commit> in <seconds>s`. Before, `qory run prepare` cloned them inside

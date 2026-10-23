@@ -420,7 +420,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return err
 				}
 				if spec.Wall != nil {
-					if err := fromCode.reportExposed(at.root, at.home, at.report, spec.given); err != nil {
+					if err := fromCode.reportExposed(at.root, cwd, at.home, at.report, spec.given); err != nil {
 						return err
 					}
 				}
@@ -1108,7 +1108,10 @@ func (r foragerRun) HostProxy() (hostProxy, error) {
 }
 
 // StackProxy is [session.Run.StackProxy]: its ProxyURL, and its Close. Its CABundle is
-// empty: the stack proxy passes the machine's authorities alone.
+// empty: the stack proxy passes the machine's authorities alone, and [proxygit.Env]
+// drops SSL_CERT_FILE and GIT_SSL_*. So a named stack's host needs a certificate that
+// the run machine's system trust store accepts. For a private CA, the instance admin
+// adds the CA to the machine's image.
 func (r foragerRun) StackProxy() (hostProxy, error) {
 	h, err := r.Run.StackProxy()
 	if err != nil {

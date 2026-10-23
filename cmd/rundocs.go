@@ -136,9 +136,10 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 }
 
 // namedStackOf is the named stack of doc, documents whose stack is a stack name: the
-// name, and the address of stack_reference, checked before anything is fetched. An
-// address that is not a stack reference, or whose URL has a user part, stops the run
-// with a line that shows neither the address nor the user part. Each error is exit 1
+// name, and the address of stack_reference, checked before the stack is fetched. An
+// address that is not a stack reference, whose URL has a user part or an @ before its
+// path, or whose host has a character outside ASCII, stops the run with a line that
+// shows neither the address nor the user part. Each error is exit 1
 // and ends with [codeUsed].
 func namedStackOf(doc contracts.Documents) (*source.Named, error) {
 	name := accesskey.ShownName(doc.Stack, false)
@@ -162,6 +163,9 @@ func namedStackOf(doc contracts.Documents) (*source.Named, error) {
 	if u.User != nil {
 		return nil, user
 	}
+	if stack.NonASCIIHost(ref.Git) {
+		return nil, fmt.Errorf("write the host in the address of the stack %s in Qory Apiary's list of stacks in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @%s", name, codeUsed)
+	}
 	return source.NewNamed(doc.Stack, doc.StackReference, ref), nil
 }
 
@@ -183,19 +187,21 @@ type givenMount struct {
 }
 
 // reportExposed stops, as input, a walled run of a named stack whose agent's container
-// would get a harness report, which contains the stack's address: a mount of given, or
-// the checkout at root, mounted writable, that is, contains or lies inside qory's folder
-// in the cache directory, <cache>/qory, where qory writes the home and harness report of
-// each run with a run key or a run code and no --home or harness.home; one that is or
-// contains report, this run's harness report, beside its home; or the home, mounted
-// read-only, when it is or contains <cache>/qory. A home that lies inside it, as the
-// default one under <cache>/qory/homes does, passes: report is beside it, and the other
-// runs' reports are not inside it. The paths are compared as Forager compares a mount,
-// by [session.Overlap]: by file through links and in any letter case on a disk that
-// ignores case. A stack reference passes, and so does the cache folder when the lookup
-// of the cache directory fails, as qory then writes no home under it. It runs before
-// anything is fetched or written; each error ends with [codeUsed].
-func (r *codeRun) reportExposed(root, home, report string, given []givenMount) error {
+// would get a harness report, which contains the stack's address. The container gets
+// each mount of given, the checkout at root and the working folder cwd, both writable,
+// and the home, read-only. The run stops when a mount of given, the checkout or the
+// working folder is, contains or lies inside qory's folder in the cache directory,
+// <cache>/qory, where qory writes the home and harness report of each run with a run
+// key or a run code and no --home or harness.home; when one of them is or contains
+// report, this run's harness report, beside its home; and when the home is or contains
+// <cache>/qory. A home that lies inside it, as the default one under <cache>/qory/homes
+// does, passes: report is beside it, and the other runs' reports are not inside it. The
+// paths are compared as Forager compares a mount, by [session.Overlap]: by file through
+// links and in any letter case on a disk that ignores case. A stack reference passes,
+// and so does the cache folder when the lookup of the cache directory fails, as qory
+// then writes no home under it. It runs before the stack is fetched and before the run
+// writes its inputs, home or report; each error ends with [codeUsed].
+func (r *codeRun) reportExposed(root, cwd, home, report string, given []givenMount) error {
 	if r.named == nil {
 		return nil
 	}
@@ -227,6 +233,16 @@ func (r *codeRun) reportExposed(root, home, report string, given []givenMount) e
 	}
 	if how := overlap(root, report); how == "is" || how == "contains" {
 		return input(fmt.Errorf("start the run in a checkout that does not contain %s: the checkout %s is mounted into the agent's container, and %s is the harness report of this run%s", shown(report), shown(root), shown(report), codeUsed))
+	}
+	if how := overlap(cwd, cache); how != "" {
+		where := "outside"
+		if how == "contains" {
+			where = "that does not contain"
+		}
+		return input(fmt.Errorf("run qory from a folder %s %s: the working folder %s is mounted into the agent's container, and qory writes the harness report of each run with a run key or a run code that has no --home or harness.home under %s%s", where, shown(cache), shown(cwd), shown(cache), codeUsed))
+	}
+	if how := overlap(cwd, report); how == "is" || how == "contains" {
+		return input(fmt.Errorf("run qory from a folder that does not contain %s: the working folder %s is mounted into the agent's container, and %s is the harness report of this run%s", shown(report), shown(cwd), shown(report), codeUsed))
 	}
 	if how := overlap(home, cache); how == "is" || how == "contains" {
 		where := "other than"

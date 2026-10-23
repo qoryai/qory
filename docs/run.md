@@ -42,11 +42,12 @@ wall or not, before the run opens and before anything is written:
 set --home to a folder outside /work/app: /work/app/.qory/harness is inside /work/app, and a run with a run key writes no harness into the folder it runs in
 ```
 
-A walled run from a run code whose stack is a stack name stops with exit 2, before
-anything is fetched or written, when the agent's container would get a harness report,
-`<home>-report.json`, which contains the stack's address. The container gets each mount
-of `wall.mounts` and `--mount`, the checkout, writable, and the home, read-only. The run
-stops when a mount of `wall.mounts` or `--mount`, or the checkout:
+A walled run from a run code whose stack is a stack name stops with exit 2, before the
+stack is fetched and before the run writes its inputs, home or report, when the agent's
+container would get a harness report, `<home>-report.json`, which contains the stack's
+address. The container gets each mount of `wall.mounts` and `--mount`, the checkout and
+the working folder, both writable, and the home, read-only. The run stops when a mount
+of `wall.mounts` or `--mount`, the checkout or the working folder:
 
 - is, contains or lies inside `qory` in your cache directory, where qory writes the home
   and the harness report of each run with a run key or a run code that has no `--home`
@@ -54,30 +55,39 @@ stops when a mount of `wall.mounts` or `--mount`, or the checkout:
 - is or contains the harness report of this run, beside the home that `--home` or
   `harness.home` sets.
 
-It stops as well when the home, which `--home` or `harness.home` can set, is or contains
-`qory` in your cache directory, with `set --home or harness.home to a folder that does
-not contain <folder>: the home <home> is mounted read-only into the agent's container,
-and qory writes the harness report of each run with a run key or a run code that has no
---home or harness.home under <folder>; the code is used`, and `to a folder other than
-<folder>` for a home that is the folder. A home that lies inside it, as the default
-under `qory/homes` does, passes, as does a home elsewhere: this run's report is beside
-the home, not inside. qory compares each path through
-links, and in any letter case on a disk that ignores case, as macOS does by default. The
-code is used, so the run needs a new one:
+It stops as well when the home is or contains `qory` in your cache directory. A home
+that lies inside that folder, as the default under `qory/homes` does, passes, and so
+does a home elsewhere: this run's report is beside the home, not inside. qory compares
+each path through links, and in any letter case on a disk that ignores case, as macOS
+does by default. The code is used, so the run needs a new one:
 
 ```text
 remove /home/dev/.cache from --mount: it contains /home/dev/.cache/qory, where qory writes the harness report of each run with a run key or a run code that has no --home or harness.home, and the agent's container has every mount; the code is used
 remove /srv/qory-homes from --mount: it contains /srv/qory-homes/app-1a2b3c4d-report.json, the harness report of this run, and the agent's container has every mount; the code is used
 start the run in a checkout that does not contain /home/dev/.cache/qory: the checkout /home/dev is mounted into the agent's container, and qory writes the harness report of each run with a run key or a run code that has no --home or harness.home under /home/dev/.cache/qory; the code is used
+run qory from a folder that does not contain /home/dev/.cache/qory: the working folder /home/dev is mounted into the agent's container, and qory writes the harness report of each run with a run key or a run code that has no --home or harness.home under /home/dev/.cache/qory; the code is used
 ```
 
-For a checkout that is or lies inside `qory` in your cache directory, the line starts
-`start the run in a checkout outside <folder>: …`. A checkout that contains the report,
-such as through a path in another letter case, stops with `start the run in a checkout
-that does not contain <report>: the checkout <folder> is mounted into the agent's
-container, and <report> is the harness report of this run; the code is used`. A home
-inside the checkout, by its path or its links, stops the run earlier, with `set --home
-to a folder outside <folder>: …`.
+The other lines of this stop start:
+
+- `start the run in a checkout outside <folder>: …` and `run qory from a folder outside
+  <folder>: …`, for a checkout or a working folder that is or lies inside `qory` in
+  your cache directory;
+- `start the run in a checkout that does not contain <report>: the checkout <folder> is
+  mounted into the agent's container, and <report> is the harness report of this run;
+  the code is used`, and `run qory from a folder that does not contain <report>: the
+  working folder <folder> is mounted …`, for one that contains the report. For the
+  checkout, this takes a path in another letter case: a home inside the checkout, by its
+  path or its links, stops the run earlier, with `set --home to a folder outside
+  <folder>: …`;
+- `set --home or harness.home to a folder that does not contain <folder>: the home
+  <home> is mounted read-only into the agent's container, and qory writes the harness
+  report of each run with a run key or a run code that has no --home or harness.home
+  under <folder>; the code is used`, and `set --home or harness.home to a folder other
+  than <folder>: …` for a home that is the folder.
+
+The working folder lies outside the checkout when `--home` names a composed home whose
+report lists another checkout.
 
 Given a run key, `qory run` composes under four rules, so that a branch of the checkout
 does not pull files of this machine into the harness or set the machine's settings of the
@@ -1340,8 +1350,13 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
   used`
 - `set the address of the stack <name> in Qory Apiary's list of stacks without a user
   name or password: the address has a user part, and qory fetches a named stack with no
-  credential; the code is used`, before anything is fetched, for an address whose URL has
-  a user part or an `@` between `://` and the first `/` after it
+  credential; the code is used`, before the stack is fetched, for an address whose URL
+  has a user part or an `@` between `://` and the first `/` after it
+- `write the host in the address of the stack <name> in Qory Apiary's list of stacks in
+  ASCII, with the xn-- form for an international name: the host has a character outside
+  ASCII, which git may map to another, such as a fullwidth @ to @; the code is used`,
+  before the stack is fetched, for a host that has a character outside ASCII once its
+  percent-encodings are decoded
 - `set the runtime claude for the workspace in Qory Apiary, then take the work item in
   again: qory starts a run code's workflow on claude alone, and the response to the run
   code sets the runtime <name>; the code is used`
@@ -1388,7 +1403,7 @@ clone's `.git/config` and `FETCH_HEAD`, and in the compose report beside the hom
 `<home>-report.json`. Behind a wall, the agent's container gets neither: Forager stops
 a run with a mount that is, contains or lies inside qory's state directory, which
 contains `<run>/sources`, before the agent starts, and qory stops a run whose mounts
-would include a harness report before anything is fetched, as [What `qory run`
+would include a harness report before the stack is fetched, as [What `qory run`
 does](#what-qory-run-does) describes.
 
 These stop the run during the compose, each with the stack or the module by its name:
@@ -1400,6 +1415,11 @@ These stop the run during the compose, each with the stack or the module by its 
   and `the source of modules[<n>]` for a module listed without a name
 - `correct the URL in the source of the module <module> in the stack <name>: qory could
   not read it as a URL`, exit 2, before any module is fetched
+- `write the host in the source of the module <module> in the stack <name> in ASCII,
+  with the xn-- form for an international name: the host has a character outside ASCII,
+  which git may map to another, such as a fullwidth @ to @`, exit 2, before any module
+  is fetched, for a host that has a character outside ASCII once its percent-encodings
+  are decoded
 - `add the host of <source> to gateway.stack_hosts in forager.yaml, or check its address
   in Qory Apiary's list of stacks: the fetch of <source> through the run's stack proxy
   failed: <cause>`, exit 1, with `check its source in the stack's files` for a module,

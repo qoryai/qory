@@ -172,9 +172,9 @@ func LoadReference(ref stack.Source, opts Options) (*stack.Stack, source.Resolve
 // addSources records each git source of p, a named stack's file, with n, so a text
 // shows the module's name in place of its URL from the start of the compose, before the
 // module is fetched. A URL with a scheme that has a user part, a user name or a
-// password, or an @ between :// and the first / after it, and one that url.Parse cannot
-// read, stop the compose before any module is fetched, with an error that shows the
-// module's name and no part of the URL.
+// password, or an @ between :// and the first / after it, one that url.Parse cannot
+// read, and one whose host has a character outside ASCII, stop the compose before any
+// module is fetched, with an error that shows the module's name and no part of the URL.
 func addSources(p *stack.Stack, n *source.Named) error {
 	for i, l := range p.Modules {
 		if l.Source.Git == "" {
@@ -191,6 +191,8 @@ func addSources(p *stack.Stack, n *source.Named) error {
 				return fmt.Errorf("remove the user name and password from the source of %s in %s: a named stack's sources are fetched with no credential", module, n.Phrase())
 			case err != nil:
 				return fmt.Errorf("correct the URL in the source of %s in %s: qory could not read it as a URL", module, n.Phrase())
+			case stack.NonASCIIHost(l.Source.Git):
+				return fmt.Errorf("write the host in the source of %s in %s in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @", module, n.Phrase())
 			}
 		}
 		n.Add(l.Source, n.Module(l.Name))

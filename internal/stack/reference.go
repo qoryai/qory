@@ -21,6 +21,24 @@ func AtBeforePath(u string) bool {
 	return ok && strings.Contains(authority, "@")
 }
 
+// NonASCIIHost reports whether u parses as a URL whose host, its percent-encodings
+// decoded, has a byte of 0x80 or above. Such a host can pass [AtBeforePath] and
+// url.Parse with no user, while curl built with IDN maps a fullwidth @ or : in it to an
+// ASCII one, and so reads a user part.
+func NonASCIIHost(u string) bool {
+	p, err := url.Parse(u)
+	if err != nil {
+		return false
+	}
+	host := p.Hostname()
+	for i := 0; i < len(host); i++ {
+		if host[i] >= 0x80 {
+			return true
+		}
+	}
+	return false
+}
+
 // ParseReference reads value, what -f is set to, as a stack reference: a folder of a git
 // repository at a ref, written <https URL>#<ref>:<folder>, such as
 // https://github.com/example-org/harness#v1.2.0:stacks/web. The folder is the one that

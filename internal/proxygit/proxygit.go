@@ -107,9 +107,6 @@ func Env(env []string, p *Proxy) []string {
 		return out
 	}
 	config := [][2]string{{"http.proxy", p.URL}, {"http.proxyAuthMethod", "basic"}}
-	// A named stack's host needs a certificate that the run machine's system trust store
-	// accepts: git checks it through the stack proxy, and qory sets no CA bundle for that
-	// proxy. For a private CA, the instance admin adds the CA to the machine's image.
 	if p.CABundle != "" {
 		config = append(config, [2]string{"http.sslCAInfo", p.CABundle})
 	}

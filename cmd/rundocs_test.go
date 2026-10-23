@@ -136,6 +136,9 @@ func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 		{"a stack address with an @ after a port", codeDocuments(t, func(d map[string]any) {
 			d["stack"], d["stack_reference"] = "core", "https://code.example.com:443@evil.example/team/stacks#release-7:core"
 		}), broken},
+		{"a stack address with an encoded fullwidth : and @ in its host", codeDocuments(t, func(d map[string]any) {
+			d["stack"], d["stack_reference"] = "core", "https://u%EF%BC%9Ap%EF%BC%A0code.example.com/team/stacks#main:core"
+		}), "write the host in the address of the stack core in Qory Apiary's list of stacks in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @; the code is used"},
 		{"another runtime", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": "codex"} }),
 			"set the runtime claude for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow on claude alone, and the response to the run code sets the runtime codex; the code is used"},
 	} {

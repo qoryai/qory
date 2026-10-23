@@ -29,7 +29,7 @@ func TestARunCodesTimeLimitLineNamesWhereTheLimitIsSet(t *testing.T) {
 // TestAWalledRunOfANamedStackWithAMountOfQorysCacheFolderStops is a walled run from a run
 // code whose stack is a name, with a mount from wall.mounts or --mount: a mount that is
 // qory's folder in the cache directory, contains it, lies inside it, or is a link to it
-// or to a folder above it stops the run, exit 2, before anything is fetched; qory
+// or to a folder above it stops the run, exit 2, before the stack is fetched; qory
 // writes the harness reports of runs from a run code there. Another mount, and a run of
 // a stack reference, pass.
 func TestAWalledRunOfANamedStackWithAMountOfQorysCacheFolderStops(t *testing.T) {
@@ -61,19 +61,19 @@ func TestAWalledRunOfANamedStackWithAMountOfQorysCacheFolderStops(t *testing.T) 
 		{cache, "is"}, {base, "contains"}, {filepath.Dir(base), "contains"}, {inside, "lies inside"}, {link, "is"}, {above, "contains"},
 	} {
 		for _, from := range []string{"wall.mounts in forager.yaml", "--mount"} {
-			err := named.reportExposed(root, home, report, []givenMount{{path: other, from: "--mount"}, {path: c.path, from: from}})
+			err := named.reportExposed(root, root, home, report, []givenMount{{path: other, from: "--mount"}, {path: c.path, from: from}})
 			want := "remove " + c.path + " from " + from + ": it " + c.how + " " + cache + ", where qory writes the harness report of each run with a run key or a run code that has no --home or harness.home, and the agent's container has every mount; the code is used"
 			if err == nil || err.Error() != want {
 				t.Errorf("the mount %s from %s: got %v\nwant %s", c.path, from, err, want)
 			} else if code := ExitCode(err); code != 2 {
 				t.Errorf("the mount %s from %s: exit %d, want 2", c.path, from, code)
 			}
-			if err := reference.reportExposed(root, home, report, []givenMount{{path: c.path, from: from}}); err != nil {
+			if err := reference.reportExposed(root, root, home, report, []givenMount{{path: c.path, from: from}}); err != nil {
 				t.Errorf("a stack reference with the mount %s: %v, want none", c.path, err)
 			}
 		}
 	}
-	if err := named.reportExposed(root, home, report, []givenMount{{path: other, from: "--mount"}, {path: filepath.Join(base, "other"), from: "--mount"}}); err != nil {
+	if err := named.reportExposed(root, root, home, report, []givenMount{{path: other, from: "--mount"}, {path: filepath.Join(base, "other"), from: "--mount"}}); err != nil {
 		t.Errorf("mounts outside %s: %v, want none", cache, err)
 	}
 }
@@ -122,7 +122,7 @@ func TestAMountInAnotherLetterCaseOfQorysCacheFolderStops(t *testing.T) {
 	for _, c := range []struct{ path, how string }{
 		{upper, "contains"}, {filepath.Join(upper, "QORY"), "is"}, {filepath.Join(upper, "Qory", "Homes"), "lies inside"},
 	} {
-		err := named.reportExposed(t.TempDir(), filepath.Join(t.TempDir(), "app-1a2b3c4d"), filepath.Join(t.TempDir(), "app-1a2b3c4d-report.json"), []givenMount{{path: c.path, from: "--mount"}})
+		err := named.reportExposed(t.TempDir(), t.TempDir(), filepath.Join(t.TempDir(), "app-1a2b3c4d"), filepath.Join(t.TempDir(), "app-1a2b3c4d-report.json"), []givenMount{{path: c.path, from: "--mount"}})
 		want := "remove " + c.path + " from --mount: it " + c.how + " " + cache + ", where qory writes the harness report of each run with a run key or a run code that has no --home or harness.home, and the agent's container has every mount; the code is used"
 		if err == nil || err.Error() != want {
 			t.Errorf("the mount %s: got %v\nwant %s", c.path, err, want)
@@ -150,7 +150,7 @@ func upperBase(path string) string {
 // whose stack is a name and whose home --home or harness.home sets outside qory's cache
 // folder, with a mount from wall.mounts or --mount that is the harness report beside
 // the home or contains it, directly, through a link or in another letter case: the run
-// stops, exit 2, before anything is fetched. The home itself, a sibling folder and a
+// stops, exit 2, before the stack is fetched. The home itself, a sibling folder and a
 // run of a stack reference pass.
 func TestAWalledRunOfANamedStackWithAMountOfItsReportStops(t *testing.T) {
 	isolate(t)
@@ -178,14 +178,14 @@ func TestAWalledRunOfANamedStackWithAMountOfItsReportStops(t *testing.T) {
 	}
 	for _, c := range cases {
 		for _, from := range []string{"wall.mounts in forager.yaml", "--mount"} {
-			err := named.reportExposed(root, home, report, []givenMount{{path: other + "-none", from: "--mount"}, {path: c.path, from: from}})
+			err := named.reportExposed(root, root, home, report, []givenMount{{path: other + "-none", from: "--mount"}, {path: c.path, from: from}})
 			want := "remove " + c.path + " from " + from + ": it " + c.how + " " + report + ", the harness report of this run, and the agent's container has every mount; the code is used"
 			if err == nil || err.Error() != want {
 				t.Errorf("the mount %s from %s: got %v\nwant %s", c.path, from, err, want)
 			} else if code := ExitCode(err); code != 2 {
 				t.Errorf("the mount %s from %s: exit %d, want 2", c.path, from, code)
 			}
-			if err := reference.reportExposed(root, home, report, []givenMount{{path: c.path, from: from}}); err != nil {
+			if err := reference.reportExposed(root, root, home, report, []givenMount{{path: c.path, from: from}}); err != nil {
 				t.Errorf("a stack reference with the mount %s: %v, want none", c.path, err)
 			}
 		}
@@ -194,7 +194,7 @@ func TestAWalledRunOfANamedStackWithAMountOfItsReportStops(t *testing.T) {
 	if err := os.MkdirAll(sibling, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := named.reportExposed(root, home, report, []givenMount{{path: home, from: "--mount"}, {path: sibling, from: "--mount"}}); err != nil {
+	if err := named.reportExposed(root, root, home, report, []givenMount{{path: home, from: "--mount"}, {path: sibling, from: "--mount"}}); err != nil {
 		t.Errorf("the home and a folder beside the report: %v, want none", err)
 	}
 }
@@ -203,7 +203,7 @@ func TestAWalledRunOfANamedStackWithAMountOfItsReportStops(t *testing.T) {
 // run code whose stack is a name, in a checkout that contains qory's cache folder, such
 // as ~ on Linux, lies inside it, or contains the harness report beside the home,
 // directly, through a link or in another letter case: the checkout is mounted writable
-// into the agent's container, so the run stops, exit 2, before anything is fetched. A
+// into the agent's container, so the run stops, exit 2, before the stack is fetched. A
 // run of a stack reference passes, and so does a checkout beside the folder.
 func TestAWalledRunOfANamedStackInACheckoutThatExposesAReportStops(t *testing.T) {
 	isolate(t)
@@ -253,7 +253,7 @@ func TestAWalledRunOfANamedStackInACheckoutThatExposesAReportStops(t *testing.T)
 		reported = append(reported, ofReport(upper))
 	}
 	for _, c := range cases {
-		check := func(r *codeRun, rep string) error { return r.reportExposed(c.root, runHome, rep, nil) }
+		check := func(r *codeRun, rep string) error { return r.reportExposed(c.root, c.root, runHome, rep, nil) }
 		if err := check(named, report); err == nil || err.Error() != c.want || ExitCode(err) != 2 {
 			t.Errorf("the checkout %s: got %v (exit %d)\nwant %s", c.root, err, ExitCode(err), c.want)
 		}
@@ -262,11 +262,11 @@ func TestAWalledRunOfANamedStackInACheckoutThatExposesAReportStops(t *testing.T)
 		}
 	}
 	for _, c := range reported {
-		if err := named.reportExposed(c.root, runHome, withReport, nil); err == nil || err.Error() != c.want || ExitCode(err) != 2 {
+		if err := named.reportExposed(c.root, c.root, runHome, withReport, nil); err == nil || err.Error() != c.want || ExitCode(err) != 2 {
 			t.Errorf("the checkout %s: got %v (exit %d)\nwant %s", c.root, err, ExitCode(err), c.want)
 		}
 	}
-	if err := named.reportExposed(filepath.Join(base, "other"), runHome, report, nil); err != nil {
+	if err := named.reportExposed(filepath.Join(base, "other"), filepath.Join(base, "other"), runHome, report, nil); err != nil {
 		t.Errorf("a checkout beside %s: %v, want none", cache, err)
 	}
 }
@@ -327,7 +327,7 @@ func TestANamedStackRunsFromItsAddress(t *testing.T) {
 // its name with an address qory does not fetch: none, one that is not a stack
 // reference, one whose URL does not parse, and one whose URL has a user name, with a
 // password or without. Each stops
-// the run before anything is fetched, with a line that starts with its fix and shows
+// the run before the stack is fetched, with a line that starts with its fix and shows
 // neither the address nor the user part.
 func TestANamedStackWhoseAddressHasAUserPartStops(t *testing.T) {
 	const unreadable = "set the address of the stack core in Qory Apiary's list of stacks as <https URL>#<ref>:<folder>: qory could not read the address as a stack reference; the code is used"
@@ -371,11 +371,107 @@ func TestANamedStacksAddressWithAnAtBeforeItsPathStops(t *testing.T) {
 	}
 }
 
+// TestAWalledRunOfANamedStackFromAWorkingFolderThatExposesAReportStops is a walled run
+// from a run code whose stack is a name, from a working folder outside the checkout, as
+// --home sets when it names a composed home whose report lists another checkout: a
+// working folder that contains qory's cache folder, such as ~ on Linux, lies inside
+// it, or contains this run's harness report, directly, through a link or in another
+// letter case, stops the run, exit 2, before the stack is fetched: Forager mounts the
+// working folder writable. A run of a stack reference passes, and so does a working
+// folder beside the cache folder.
+func TestAWalledRunOfANamedStackFromAWorkingFolderThatExposesAReportStops(t *testing.T) {
+	isolate(t)
+	base, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache := filepath.Join(base, "qory")
+	inside := filepath.Join(cache, "work", "app")
+	if err := os.MkdirAll(inside, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	userHome := os.Getenv("HOME")
+	links := t.TempDir()
+	linkHome := filepath.Join(links, "home")
+	if err := os.Symlink(userHome, linkHome); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	report := filepath.Join(t.TempDir(), "homes", "app-1a2b3c4d-report.json")
+	runHome := strings.TrimSuffix(report, "-report.json")
+	named, reference := codeRunOfStack(t, "example"), codeRunOfStack(t, exampleStackReference)
+	type cwdCase struct{ cwd, want string }
+	inCache := func(cwd, where string) cwdCase {
+		return cwdCase{cwd, "run qory from a folder " + where + " " + cache + ": the working folder " + cwd + " is mounted into the agent's container, and qory writes the harness report of each run with a run key or a run code that has no --home or harness.home under " + cache + "; the code is used"}
+	}
+	cases := []cwdCase{
+		inCache(userHome, "that does not contain"), inCache(linkHome, "that does not contain"),
+		inCache(cache, "outside"), inCache(inside, "outside"),
+	}
+	if upper := upperBase(userHome); upper != "" {
+		cases = append(cases, inCache(upper, "that does not contain"))
+	}
+	for _, c := range cases {
+		if err := named.reportExposed(root, c.cwd, runHome, report, nil); err == nil || err.Error() != c.want || ExitCode(err) != 2 {
+			t.Errorf("the working folder %s: got %v (exit %d)\nwant %s", c.cwd, err, ExitCode(err), c.want)
+		}
+		if err := reference.reportExposed(root, c.cwd, runHome, report, nil); err != nil {
+			t.Errorf("a stack reference from the working folder %s: %v, want none", c.cwd, err)
+		}
+	}
+	work := t.TempDir()
+	withReport := filepath.Join(work, "homes", "app-1a2b3c4d-report.json")
+	if err := os.MkdirAll(filepath.Dir(withReport), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	linkWork := filepath.Join(links, "work")
+	if err := os.Symlink(work, linkWork); err != nil {
+		t.Fatal(err)
+	}
+	reported := []string{work, linkWork}
+	if upper := upperBase(work); upper != "" {
+		reported = append(reported, upper)
+	}
+	for _, cwd := range reported {
+		want := "run qory from a folder that does not contain " + withReport + ": the working folder " + cwd + " is mounted into the agent's container, and " + withReport + " is the harness report of this run; the code is used"
+		if err := named.reportExposed(root, cwd, runHome, withReport, nil); err == nil || err.Error() != want || ExitCode(err) != 2 {
+			t.Errorf("the working folder %s: got %v (exit %d)\nwant %s", cwd, err, ExitCode(err), want)
+		}
+	}
+	if err := named.reportExposed(root, filepath.Join(base, "other"), runHome, report, nil); err != nil {
+		t.Errorf("a working folder beside %s: %v, want none", cache, err)
+	}
+}
+
+// TestANamedStacksAddressWithAHostOutsideASCIIStops is namedStackOf for an address whose
+// host, its percent-encodings decoded, has a character outside ASCII, such as a
+// fullwidth : and @, which curl built with IDN maps to a user part: it stops with a line
+// that starts with its fix and shows no part of the address. A host in the xn-- form
+// passes.
+func TestANamedStacksAddressWithAHostOutsideASCIIStops(t *testing.T) {
+	const want = "write the host in the address of the stack core in Qory Apiary's list of stacks in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @; the code is used"
+	for _, address := range []string{
+		"https://u%EF%BC%9Ap%EF%BC%A0code.example.com/team/stacks#main:core",
+		"https://u：p＠code.example.com/team/stacks#main:core",
+		"https://u﹫code.example.com/team/stacks#main:core",
+		"https://code.example.com%EF%BC%8F.evil.example/team/stacks#main:core",
+		"https://evil.example％40code.example.com/team/stacks#main:core",
+	} {
+		_, err := namedStackOf(contracts.Documents{Stack: "core", StackReference: address})
+		if err == nil || err.Error() != want {
+			t.Errorf("%s: %v\nwant %s", address, err, want)
+		}
+	}
+	if _, err := namedStackOf(contracts.Documents{Stack: "core", StackReference: "https://xn--bcher-kva.example/team/stacks#main:core"}); err != nil {
+		t.Errorf("a host in the xn-- form: %v", err)
+	}
+}
+
 // TestAWalledRunOfANamedStackWithAHomeThatContainsQorysCacheFolderStops is a walled run
 // from a run code whose stack is a name, with a home that is or contains qory's cache
 // folder, directly, through a link or in another letter case: the home is mounted
 // read-only, and the folder contains other runs' harness reports, so the run stops,
-// exit 2, before anything is fetched. The default home under <cache>/qory/homes and a
+// exit 2, before the stack is fetched. The default home under <cache>/qory/homes and a
 // run of a stack reference pass.
 func TestAWalledRunOfANamedStackWithAHomeThatContainsQorysCacheFolderStops(t *testing.T) {
 	isolate(t)
@@ -402,16 +498,16 @@ func TestAWalledRunOfANamedStackWithAHomeThatContainsQorysCacheFolderStops(t *te
 	}
 	for _, c := range cases {
 		report := c.home + "-report.json"
-		err := named.reportExposed(root, c.home, report, nil)
+		err := named.reportExposed(root, root, c.home, report, nil)
 		want := "set --home or harness.home to a folder " + c.where + " " + cache + ": the home " + c.home + " is mounted read-only into the agent's container, and qory writes the harness report of each run with a run key or a run code that has no --home or harness.home under " + cache + "; the code is used"
 		if err == nil || err.Error() != want || ExitCode(err) != 2 {
 			t.Errorf("the home %s: got %v (exit %d)\nwant %s", c.home, err, ExitCode(err), want)
 		}
-		if err := reference.reportExposed(root, c.home, report, nil); err != nil {
+		if err := reference.reportExposed(root, root, c.home, report, nil); err != nil {
 			t.Errorf("a stack reference with the home %s: %v, want none", c.home, err)
 		}
 	}
-	if err := named.reportExposed(root, defaultHome, defaultHome+"-report.json", nil); err != nil {
+	if err := named.reportExposed(root, root, defaultHome, defaultHome+"-report.json", nil); err != nil {
 		t.Errorf("the default home %s: %v, want none", defaultHome, err)
 	}
 }

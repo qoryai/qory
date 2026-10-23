@@ -14,6 +14,7 @@ import (
 	"github.com/qoryai/forager/session"
 
 	"github.com/qoryai/qory/cmd"
+	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/proxygit/proxygittest"
 )
 
@@ -93,6 +94,10 @@ func withTools(url, ref string) func(string) string {
 // userPart is the line of a module of the stack hello, more, whose source has a user
 // part.
 const userPart = "remove the user name and password from the source of the module more in the stack hello: a named stack's sources are fetched with no credential"
+
+// nonASCII is the line of a module of the stack hello, more, whose source has a host
+// with a character outside ASCII.
+const nonASCII = "write the host in the source of the module more in the stack hello in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @"
 
 // thenMore is a stack file that lists the module tools, at [toolsURL], then the module
 // more at url.
@@ -324,6 +329,14 @@ func TestARunCodeOfANamedStackThatFailsShowsNoAddress(t *testing.T) {
 			[]string{userPart}},
 		{"a module's source has an @ after a port", namedStack{stack: thenMore("https://" + proxygittest.Host + ":443@evil.example/example-org/more.git"), tools: toolsModule()}, cmd.ExitInput,
 			[]string{userPart}},
+		{"a module's source has a fullwidth : and @ in its host", namedStack{stack: thenMore("https://u：p＠" + proxygittest.Host + "/example-org/more.git"), tools: toolsModule()}, cmd.ExitInput,
+			[]string{nonASCII}},
+		{"a module's source has a small @ in its host", namedStack{stack: thenMore("https://u﹫" + proxygittest.Host + "/example-org/more.git"), tools: toolsModule()}, cmd.ExitInput,
+			[]string{nonASCII}},
+		{"a module's source has an encoded fullwidth / in its host", namedStack{stack: thenMore("https://" + proxygittest.Host + "%EF%BC%8F.evil.example/example-org/more.git"), tools: toolsModule()}, cmd.ExitInput,
+			[]string{nonASCII}},
+		{"a module's source has a fullwidth % in its host", namedStack{stack: thenMore("https://evil.example％40" + proxygittest.Host + "/example-org/more.git"), tools: toolsModule()}, cmd.ExitInput,
+			[]string{nonASCII}},
 		{"a module's source does not parse", namedStack{stack: thenMore("https://" + proxygittest.Host + "%40evil.example/example-org/more.git"), tools: toolsModule()}, cmd.ExitInput,
 			[]string{"correct the URL in the source of the module more in the stack hello: qory could not read it as a URL"}},
 		{"two modules ship one skill", namedStack{stack: withTools(tools, toolsRef), tools: map[string]string{
@@ -339,7 +352,7 @@ func TestARunCodeOfANamedStackThatFailsShowsNoAddress(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r := c.n.run(t)
-			r.addresses = append(r.addresses, "reader", "s3cret", "p%zzw", "p w", "evil.example", "example-org/more")
+			r.addresses = append(r.addresses, "reader", "s3cret", "p%zzw", "p w", "evil.example", "example-org/more", "＠", "﹫")
 			if r.joined || cmd.ExitCode(r.err) != c.exit {
 				t.Fatalf("%v (exit %d), want exit %d before the join\n%s", r.err, cmd.ExitCode(r.err), c.exit, r.out)
 			}
@@ -477,6 +490,55 @@ func TestAWalledRunOfANamedStackThatMountsTheFolderOfItsHomeStops(t *testing.T) 
 	}
 	if entries, _ := os.ReadDir(homes); len(entries) != 0 {
 		t.Errorf("the run wrote into %s: %v", homes, entries)
+	}
+	r.noAddress(t)
+}
+
+// TestAWalledRunOfANamedStackFromTheCacheDirectoryStops is a walled run from a run code
+// whose documents set the stack hello by its name, started in the cache directory with
+// --home set to a composed home whose report lists a checkout elsewhere: the checkout
+// is the report's, and the working folder, which the agent's container gets writable,
+// contains qory's cache folder, so the run stops, exit 2, with the line of the working
+// folder, before it opens the run's stack proxy, fetches anything or runs a command of
+// the wall.
+func TestAWalledRunOfANamedStackFromTheCacheDirectoryStops(t *testing.T) {
+	docker, log := fakeDocker(t)
+	helper := staticELF(t)
+	var cache, cwd string
+	r := namedStack{before: func() []string {
+		root, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		base, err := os.UserCacheDir()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cache = filepath.Join(base, "qory")
+		if err := os.MkdirAll(cache, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		home := filepath.Join(t.TempDir(), checkout.Key(root))
+		if err := os.MkdirAll(home, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, home+"-report.json", `{"checkout": "`+root+`"}`+"\n")
+		writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "wall:\n  adapter: docker\n  command: "+docker+"\n  helper: "+helper+"\n  user: \"1000:1000\"\n  image: example.com/agent:1\n")
+		t.Chdir(base)
+		if cwd, err = os.Getwd(); err != nil {
+			t.Fatal(err)
+		}
+		return []string{"--home", home}
+	}}.run(t)
+	want := "run qory from a folder that does not contain " + cache + ": the working folder " + cwd + " is mounted into the agent's container, and qory writes the harness report of each run with a run key or a run code that has no --home or harness.home under " + cache + "; the code is used"
+	if r.err == nil || r.err.Error() != want || cmd.ExitCode(r.err) != cmd.ExitInput {
+		t.Fatalf("%v (exit %d), want %q, exit %d\n%s", r.err, cmd.ExitCode(r.err), want, cmd.ExitInput, r.out)
+	}
+	if slices.Contains(r.calls, "stack proxy") || r.server.Tunnels() != 0 || strings.Contains(r.out, "fetched") {
+		t.Errorf("the run fetched before it stopped: the calls %q, %d tunnels\n%s", r.calls, r.server.Tunnels(), r.out)
+	}
+	if data, err := os.ReadFile(log); err == nil {
+		t.Errorf("the wall ran a command:\n%s", data)
 	}
 	r.noAddress(t)
 }
