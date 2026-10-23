@@ -420,7 +420,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return err
 				}
 				if spec.Wall != nil {
-					if err := fromCode.cacheMounted(spec.given); err != nil {
+					if err := fromCode.cacheMounted(at.root, at.report, spec.given); err != nil {
 						return err
 					}
 				}

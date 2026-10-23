@@ -43,16 +43,30 @@ set --home to a folder outside /work/app: /work/app/.qory/harness is inside /wor
 ```
 
 A walled run from a run code whose stack is a stack name stops with exit 2, before
-anything is fetched or composed, when a mount of `wall.mounts` or `--mount` is, contains
-or lies inside `qory` in your cache directory. qory compares the mount through links,
-and in any letter case on a disk that ignores case, as macOS does by default.
-Under that folder qory writes the home and the harness report, `<home>-report.json`, of
-each run with a run key or a run code that has no `--home` or `harness.home`, and the
-agent's container has every mount. The code is used, so the run needs a new one:
+anything is fetched or written, when the agent's container would get a harness report,
+`<home>-report.json`, which contains the stack's address. The container gets each mount
+of `wall.mounts` and `--mount`, the checkout, writable, and the home, read-only. The run
+stops when a mount of `wall.mounts` or `--mount`, or the checkout:
+
+- is, contains or lies inside `qory` in your cache directory, where qory writes the home
+  and the harness report of each run with a run key or a run code that has no `--home`
+  or `harness.home`;
+- is or contains the harness report of this run, beside the home that `--home` or
+  `harness.home` sets.
+
+The home passes: the report is beside it, not inside. qory compares each path through
+links, and in any letter case on a disk that ignores case, as macOS does by default. The
+code is used, so the run needs a new one:
 
 ```text
 remove /home/dev/.cache from --mount: it contains /home/dev/.cache/qory, where qory writes the harness report of each run with a run key or a run code that has no --home or harness.home, and the agent's container has every mount; the code is used
+remove /srv/qory-homes from --mount: it contains /srv/qory-homes/app-1a2b3c4d-report.json, the harness report of this run, and the agent's container has every mount; the code is used
+start the run in a checkout that does not contain /home/dev/.cache/qory: the checkout /home/dev is mounted into the agent's container, and qory writes the harness report of each run with a run key or a run code that has no --home or harness.home under /home/dev/.cache/qory; the code is used
+start the run in a checkout that does not contain /work/app/homes/app-1a2b3c4d-report.json: the checkout /work/app is mounted into the agent's container, and /work/app/homes/app-1a2b3c4d-report.json is the harness report of this run; the code is used
 ```
+
+For a checkout that is or lies inside `qory` in your cache directory, the line starts
+`start the run in a checkout outside <folder>: …`.
 
 Given a run key, `qory run` composes under four rules, so that a branch of the checkout
 does not pull files of this machine into the harness or set the machine's settings of the
@@ -1355,7 +1369,11 @@ When the checkout's `qory.yaml` composes on the stack and the stack's file has n
 its folder. The clones are in folders of `<run>/sources` named by a hash of the
 URL. The address is still in files on the machine that qory's user can read: in each
 clone's `.git/config` and `FETCH_HEAD`, and in the compose report beside the home,
-`<home>-report.json`.
+`<home>-report.json`. Behind a wall, the agent's container gets neither: Forager stops
+a run with a mount that is, contains or lies inside qory's state directory, which
+contains `<run>/sources`, before the agent starts, and qory stops a run whose mounts
+would include a harness report before anything is fetched, as [What `qory run`
+does](#what-qory-run-does) describes.
 
 These stop the run during the compose, each with the stack or the module by its name:
 

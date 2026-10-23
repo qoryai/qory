@@ -177,28 +177,49 @@ type givenMount struct {
 	from string
 }
 
-// cacheMounted stops, as input, a walled run of a named stack with a mount of given that
-// is, contains or lies inside qory's folder in the cache directory, <cache>/qory: qory
-// writes the home and harness report of each run with a run key or a run code and no
-// --home or harness.home under it, and the agent's container has every mount. The
-// mount and the folder are compared as Forager compares a mount, by [session.Overlap]:
-// by file through links and in any letter case on a disk that ignores case. A stack
-// reference passes, and so does a failed lookup of the cache directory, under which
-// qory then writes no home. It runs before anything is fetched or composed; its error
-// ends with [codeUsed].
-func (r *codeRun) cacheMounted(given []givenMount) error {
+// cacheMounted stops, as input, a walled run of a named stack whose agent's container
+// would get a harness report, which contains the stack's address: a mount of given, or
+// the checkout at root, mounted writable, that is, contains or lies inside qory's folder
+// in the cache directory, <cache>/qory, where qory writes the home and harness report of
+// each run with a run key or a run code and no --home or harness.home; or one that is or
+// contains report, this run's harness report, beside its home. The home, mounted
+// read-only, passes: report is beside it. The paths are compared as Forager compares a
+// mount, by [session.Overlap]: by file through links and in any letter case on a disk
+// that ignores case. A stack reference passes, and so does the cache folder when the
+// lookup of the cache directory fails, as qory then writes no home under it. It runs
+// before anything is fetched or written; each error ends with [codeUsed].
+func (r *codeRun) cacheMounted(root, report string, given []givenMount) error {
 	if r.named == nil {
 		return nil
 	}
-	base, err := os.UserCacheDir()
-	if err != nil {
-		return nil
+	cache := ""
+	if base, err := os.UserCacheDir(); err == nil {
+		cache = filepath.Join(base, "qory")
 	}
-	cache := filepath.Join(base, "qory")
-	for _, m := range given {
-		if how := session.Overlap(m.path, cache); how != "" {
-			return input(fmt.Errorf("remove %s from %s: it %s %s, where qory writes the harness report of each run with a run key or a run code that has no --home or harness.home, and the agent's container has every mount%s", exports.Value(m.path, false), m.from, how, exports.Value(cache, false), codeUsed))
+	shown := func(p string) string { return exports.Value(p, false) }
+	overlap := func(mount, path string) string {
+		if path == "" {
+			return ""
 		}
+		return session.Overlap(mount, path)
+	}
+	for _, m := range given {
+		if how := overlap(m.path, cache); how != "" {
+			return input(fmt.Errorf("remove %s from %s: it %s %s, where qory writes the harness report of each run with a run key or a run code that has no --home or harness.home, and the agent's container has every mount%s", shown(m.path), m.from, how, shown(cache), codeUsed))
+		}
+		if how := overlap(m.path, report); how == "is" || how == "contains" {
+			return input(fmt.Errorf("remove %s from %s: it %s %s, the harness report of this run, and the agent's container has every mount%s", shown(m.path), m.from, how, shown(report), codeUsed))
+		}
+	}
+	if how := overlap(root, cache); how != "" {
+		where := "outside"
+		if how == "contains" {
+			where = "that does not contain"
+		}
+		return input(fmt.Errorf("start the run in a checkout %s %s: the checkout %s is mounted into the agent's container, and qory writes the harness report of each run with a run key or a run code that has no --home or harness.home under %s%s", where, shown(cache), shown(root), shown(cache), codeUsed))
+	}
+	if how := overlap(root, report); how == "is" || how == "contains" {
+		return input(fmt.Errorf("start the run in a checkout that does not contain %s: the checkout %s is mounted into the agent's container, and %s is the harness report of this run%s", shown(report), shown(root), shown(report), codeUsed))
 	}
 	return nil
 }

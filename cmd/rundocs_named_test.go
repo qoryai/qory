@@ -431,6 +431,44 @@ func TestANamedStackWithNoNameInItsFileIsTheBaseByItsName(t *testing.T) {
 	r.noAddress(t)
 }
 
+// TestAWalledRunOfANamedStackThatMountsTheFolderOfItsHomeStops is a walled run from a
+// run code whose documents set the stack hello by its name, with --home set to a folder
+// outside qory's cache folder and that folder mounted by --mount: the folder contains
+// the harness report beside the home, so the run stops, exit 2, with the line of the
+// guard of the report, before it opens the run's stack proxy, fetches anything or runs
+// a command of the wall.
+func TestAWalledRunOfANamedStackThatMountsTheFolderOfItsHomeStops(t *testing.T) {
+	docker, log := fakeDocker(t)
+	helper := staticELF(t)
+	homes := filepath.Join(t.TempDir(), "homes")
+	r := namedStack{before: func() []string {
+		if err := os.MkdirAll(homes, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "wall:\n  adapter: docker\n  command: "+docker+"\n  helper: "+helper+"\n  user: \"1000:1000\"\n  image: example.com/agent:1\n")
+		return []string{"--home", homes, "--mount", homes}
+	}}.run(t)
+	// The home is under homes with its links resolved, so the report is too.
+	real, err := filepath.EvalSymlinks(homes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix, suffix := "remove "+homes+" from --mount: it contains "+real+string(filepath.Separator), "-report.json, the harness report of this run, and the agent's container has every mount; the code is used"
+	if r.err == nil || !strings.HasPrefix(r.err.Error(), prefix) || !strings.HasSuffix(r.err.Error(), suffix) || cmd.ExitCode(r.err) != cmd.ExitInput {
+		t.Fatalf("%v (exit %d), want %q…%q, exit %d\n%s", r.err, cmd.ExitCode(r.err), prefix, suffix, cmd.ExitInput, r.out)
+	}
+	if slices.Contains(r.calls, "stack proxy") || r.server.Tunnels() != 0 || strings.Contains(r.out, "fetched") {
+		t.Errorf("the run fetched before it stopped: the calls %q, %d tunnels\n%s", r.calls, r.server.Tunnels(), r.out)
+	}
+	if data, err := os.ReadFile(log); err == nil {
+		t.Errorf("the wall ran a command:\n%s", data)
+	}
+	if entries, _ := os.ReadDir(homes); len(entries) != 0 {
+		t.Errorf("the run wrote into %s: %v", homes, entries)
+	}
+	r.noAddress(t)
+}
+
 // TestAWalledRunOfANamedStackThatMountsQorysCacheFolderStops is a walled run from a run
 // code whose documents set the stack hello by its name, with qory's folder in the cache
 // directory mounted by --mount or by wall.mounts in forager.yaml: the run stops, exit 2,
