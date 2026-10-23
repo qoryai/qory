@@ -4,18 +4,18 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/qoryai/forager/accesskey"
-
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/pool/child"
 )
 
-// hiddenText takes the place of a logged message or value that holds what starts a
+// hiddenText takes the place of a logged message or value that contains what starts a
 // secret.
 const hiddenText = "[hidden]"
 
 // SafeHandler is h, but a record's message, and each of its values and those of the
-// handler's attributes, that holds what starts an access key secret or a run key, qak_
-// or qrk_ in any case, is written as [hidden]. A value is checked as the handler would
+// handler's attributes, that contains what starts an access key secret, a run key or a
+// run code, qak_, qrk_ or qecr_ in any case, as [child.ContainsSecret] checks, is
+// written as [hidden]. A value is checked as the handler would
 // write it: a group's members one by one, and any other value by its text.
 func SafeHandler(h slog.Handler) slog.Handler { return safeHandler{h} }
 
@@ -27,7 +27,7 @@ func (s safeHandler) Enabled(ctx context.Context, l slog.Level) bool { return s.
 // Handle writes r through h, its message and values as [SafeHandler] says.
 func (s safeHandler) Handle(ctx context.Context, r slog.Record) error {
 	msg := r.Message
-	if accesskey.ContainsSecret(msg) {
+	if child.ContainsSecret(msg) {
 		msg = hiddenText
 	}
 	out := slog.NewRecord(r.Time, r.Level, msg, r.PC)
@@ -47,9 +47,9 @@ func (s safeHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	return safeHandler{s.h.WithAttrs(safe)}
 }
 
-// WithGroup is h with the group name, [hidden] when it holds what starts a secret.
+// WithGroup is h with the group name, [hidden] when it contains what starts a secret.
 func (s safeHandler) WithGroup(name string) slog.Handler {
-	if accesskey.ContainsSecret(name) {
+	if child.ContainsSecret(name) {
 		name = hiddenText
 	}
 	return safeHandler{s.h.WithGroup(name)}
@@ -57,7 +57,7 @@ func (s safeHandler) WithGroup(name string) slog.Handler {
 
 // safeAttr is a with its key and value as [SafeHandler] writes them.
 func safeAttr(a slog.Attr) slog.Attr {
-	if accesskey.ContainsSecret(a.Key) {
+	if child.ContainsSecret(a.Key) {
 		a.Key = hiddenText
 	}
 	v := a.Value.Resolve()
@@ -69,7 +69,7 @@ func safeAttr(a slog.Attr) slog.Attr {
 		}
 		return slog.Attr{Key: a.Key, Value: slog.GroupValue(safe...)}
 	}
-	if accesskey.ContainsSecret(v.String()) {
+	if child.ContainsSecret(v.String()) {
 		return slog.String(a.Key, hiddenText)
 	}
 	return slog.Attr{Key: a.Key, Value: v}

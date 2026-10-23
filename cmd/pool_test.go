@@ -19,35 +19,34 @@ import (
 // The help of qory run pool, as it was approved.
 const (
 	poolShort = "Claim this pool's runs from Qory Apiary and run them on this machine"
-	poolLong  = "Run this machine as a node pool's program, until it is stopped. It claims the pool's runs from Qory Apiary with the pool's access key, starts each with qory run in a container, and says how each ended. The pool section of forager.yaml sets it: runs, prebuilds, registry, harness_ref or harness_path, run_config. SIGINT or SIGTERM stops it: it claims no new run, stops the runs it started, and exits 0."
+	poolLong  = "Run this machine as a node pool's program, until it is stopped. It claims the pool's dispatches from Qory Apiary with the pool's access key, and starts each with the command that runs on a machine a provisioner creates: qory run --run-code-file /dev/fd/3 --gateway <gateway_url>, with the run code in a file that no name links to. The pool's access key does not reach the run, and each run reports its outcome to Qory Apiary. While a run runs, the pool sends dispatched every 60 s. It stops the run when Qory Apiary ends the dispatch or the claim's max_lifetime_minutes pass. Once the run ends, the pool uploads the run's output as the dispatch's machine log: at most the last 768 KiB, with each line that contains qak_, qrk_ or qecr_ replaced. It releases a claim that sets a machine type, and a claim it could not start. The pool section of forager.yaml sets it: runs, registry, run_config. SIGINT or SIGTERM stops it: it claims no new run, stops the runs it started, and exits 0."
 )
 
-// poolMachine is a pool's machine: its server, its harness checkout, the runs'
-// configuration directory, the pool's folder and forager.yaml.
+// poolMachine is a pool's machine: its server, the runs' configuration directory, the
+// pool's folder and forager.yaml.
 type poolMachine struct {
-	srv           *fakeServer
-	harness, runs string
-	state, file   string
+	srv         *fakeServer
+	runs        string
+	state, file string
 }
 
 // newPoolMachine makes a pool's machine in the environment [emptyDir] sets: a server
-// whose discovery names a node pool, forager.yaml naming it with the pool section lines,
-// the secret beside it, a harness checkout holding the explore-an-item module and a runs'
-// configuration directory whose forager.yaml has a wall alone. lines may name {harness}
-// and {runs}, their paths; nil lines are a pool section of the harness's path.
+// whose discovery is of a node pool, forager.yaml with its URL and the pool section
+// lines, the secret beside it, and a runs' configuration directory whose forager.yaml has
+// a wall alone. lines may contain {runs}, its path; nil lines are a pool section of the
+// registry and the runs' directory.
 func newPoolMachine(t *testing.T, lines ...string) *poolMachine {
 	t.Helper()
 	emptyDir(t)
-	m := &poolMachine{srv: newFakeServer(t, ""), harness: tempDir(t), runs: tempDir(t)}
+	m := &poolMachine{srv: newFakeServer(t, ""), runs: tempDir(t)}
 	m.srv.node = testPool
-	writeFile(t, filepath.Join(m.harness, "harness", "explore-an-item", "qory-module.yaml"), "apiVersion: qory.dev/v1alpha1\nname: explore-an-item\n")
 	writeFile(t, filepath.Join(m.runs, "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\nwall:\n  adapter: docker\n  image: "+agentImage+"\n  images_allow: [localhost:5001/qory-env/]\n")
 	if lines == nil {
-		lines = []string{"registry: localhost:5001/qory-env", "harness_path: {harness}", "run_config: {runs}"}
+		lines = []string{"registry: localhost:5001/qory-env", "run_config: {runs}"}
 	}
 	section := "pool:\n"
 	for _, l := range lines {
-		section += "  " + strings.NewReplacer("{harness}", m.harness, "{runs}", m.runs).Replace(l) + "\n"
+		section += "  " + strings.ReplaceAll(l, "{runs}", m.runs) + "\n"
 	}
 	serverFile(t, m.srv, section)
 	m.state = filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "pool")
@@ -134,7 +133,7 @@ func TestRunPoolStartsWithThePoolsSettings(t *testing.T) {
 		t.Fatalf("the loop started %d times", len(got))
 	}
 	s := got[0]
-	if s.File != m.file || s.Pool.Runs != 1 || s.Pool.Prebuilds != 1 || s.Pool.Registry != "localhost:5001/qory-env" || s.Pool.HarnessPath != m.harness || s.Pool.RunConfig != m.runs {
+	if s.File != m.file || s.Pool.Runs != 1 || s.Pool.Registry != "localhost:5001/qory-env" || s.Pool.RunConfig != m.runs {
 		t.Errorf("the loop got %s and the pool section %+v", s.File, s.Pool)
 	}
 	if s.Runs == nil || s.Runs.File != filepath.Join(m.runs, "qory", "forager.yaml") || s.Runs.Wall == nil || s.Runs.Wall.Image != agentImage {
@@ -168,15 +167,15 @@ func TestRunPoolStartsWithThePoolsSettings(t *testing.T) {
 		noKeyIn(t, m.srv.key, path, content)
 	}
 
-	// Set, runs and prebuilds are the file's; an entry of wall.images_allow without its
-	// slash covers pool.registry too.
-	m = newPoolMachine(t, "runs: 3", "prebuilds: 2", "registry: localhost:5001/qory-env", "harness_ref: v1.2.3", "run_config: {runs}")
+	// Set, runs is the file's; an entry of wall.images_allow without its slash covers
+	// pool.registry too.
+	m = newPoolMachine(t, "runs: 3", "registry: localhost:5001/qory-env", "run_config: {runs}")
 	writeFile(t, filepath.Join(m.runs, "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\nwall:\n  adapter: docker\n  image: "+agentImage+"\n  images_allow: [localhost:5001/qory-env]\n")
 	got = nil
 	if _, err := run(t, "run", "pool"); err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Pool.Runs != 3 || got[0].Pool.Prebuilds != 2 || got[0].Pool.HarnessRef != "v1.2.3" || got[0].Pool.HarnessPath != "" {
+	if len(got) != 1 || got[0].Pool.Runs != 3 {
 		t.Errorf("the loop got %+v", got)
 	}
 }
@@ -272,9 +271,8 @@ const (
 const agentImage = "registry.example.com/agent@sha256:1111111111111111111111111111111111111111111111111111111111111111"
 
 // TestRunPoolRefusesWhatItCannotRunBy refuses, as input, before the loop starts and with
-// no secret in what it prints: forager.yaml without a pool section or a server, a
-// harness_path that is no folder or holds no explore-an-item module, a run_config whose
-// qory folder holds an access key or no forager.yaml, whose forager.yaml has a gateway
+// no secret in what it prints: forager.yaml without a pool section or a server, a pool
+// section with a key that earlier releases read, a run_config whose qory folder holds an access key or no forager.yaml, whose forager.yaml has a gateway
 // section or does not read, sets no wall, a wall with no image, a wall.image not pinned
 // by its digest, by an upper-case one or with a tag, or whose wall.images_allow does not
 // cover pool.registry, a run_config that is no folder, and an access key that is not a
@@ -290,36 +288,22 @@ func TestRunPoolRefusesWhatItCannotRunBy(t *testing.T) {
 			serverFile(t, m.srv, "")
 		}, func(m *poolMachine) string { return m.file + " has no pool section" }},
 		{"no server", nil, func(t *testing.T, m *poolMachine) {
-			writeFile(t, m.file, "apiVersion: qory.dev/v1alpha1\npool:\n  registry: localhost:5001/qory-env\n  harness_path: "+m.harness+"\n  run_config: "+m.runs+"\n")
+			writeFile(t, m.file, "apiVersion: qory.dev/v1alpha1\npool:\n  registry: localhost:5001/qory-env\n  run_config: "+m.runs+"\n")
 		}, func(*poolMachine) string { return "forager.yaml defines no server to claim the pool's runs from" }},
-		{"a relative run_config", []string{"registry: localhost:5001/qory-env", "harness_path: {harness}", "run_config: runs"}, nil,
+		{"a relative run_config", []string{"registry: localhost:5001/qory-env", "run_config: runs"}, nil,
 			func(m *poolMachine) string { return m.file + ": pool.run_config is not an absolute path" }},
-		{"neither harness", []string{"registry: localhost:5001/qory-env", "run_config: {runs}"}, nil,
+		{"prebuilds", []string{"registry: localhost:5001/qory-env", "prebuilds: 1", "run_config: {runs}"}, nil,
 			func(m *poolMachine) string {
-				return m.file + ": the pool section needs exactly one of harness_ref and harness_path"
+				return m.file + ": line 9: key \"prebuilds\" is not one forager.yaml reads"
 			}},
-		{"a harness_path that is not there", nil, func(t *testing.T, m *poolMachine) {
-			if err := os.RemoveAll(m.harness); err != nil {
-				t.Fatal(err)
-			}
-		}, func(m *poolMachine) string {
-			return m.file + ": pool.harness_path is " + m.harness + ", which is not a folder"
-		}},
-		{"a harness_path that is a file", nil, func(t *testing.T, m *poolMachine) {
-			if err := os.RemoveAll(m.harness); err != nil {
-				t.Fatal(err)
-			}
-			writeFile(t, m.harness, "not a folder\n")
-		}, func(m *poolMachine) string {
-			return m.file + ": pool.harness_path is " + m.harness + ", which is not a folder"
-		}},
-		{"a harness_path without the module", nil, func(t *testing.T, m *poolMachine) {
-			if err := os.Remove(filepath.Join(m.harness, "harness", "explore-an-item", "qory-module.yaml")); err != nil {
-				t.Fatal(err)
-			}
-		}, func(m *poolMachine) string {
-			return m.file + ": pool.harness_path is " + m.harness + ", which holds no harness/explore-an-item/qory-module.yaml"
-		}},
+		{"harness_ref", []string{"registry: localhost:5001/qory-env", "harness_ref: v1.2.3", "run_config: {runs}"}, nil,
+			func(m *poolMachine) string {
+				return m.file + ": line 9: key \"harness_ref\" is not one forager.yaml reads"
+			}},
+		{"harness_path", []string{"registry: localhost:5001/qory-env", "harness_path: /src/qory-github", "run_config: {runs}"}, nil,
+			func(m *poolMachine) string {
+				return m.file + ": line 9: key \"harness_path\" is not one forager.yaml reads"
+			}},
 		{"an access key in run_config", nil, func(t *testing.T, m *poolMachine) {
 			if err := foragerdir.Dir(filepath.Join(m.runs, "qory")).WriteSecret(newKey(t)); err != nil {
 				t.Fatal(err)
@@ -333,7 +317,7 @@ func TestRunPoolRefusesWhatItCannotRunBy(t *testing.T) {
 			return m.file + ": pool.run_config is " + m.runs + ", which holds an access key; the runs' directory holds none"
 		}},
 		{"run_config is the pool's", nil, func(t *testing.T, m *poolMachine) {
-			serverFile(t, m.srv, "pool:\n  registry: localhost:5001/qory-env\n  harness_path: "+m.harness+"\n  run_config: "+filepath.Dir(string(configDir()))+"\n")
+			serverFile(t, m.srv, "pool:\n  registry: localhost:5001/qory-env\n  run_config: "+filepath.Dir(string(configDir()))+"\n")
 		}, func(m *poolMachine) string {
 			return m.file + ": pool.run_config is " + filepath.Dir(string(configDir())) + ", which holds an access key; the runs' directory holds none"
 		}},
@@ -438,7 +422,7 @@ func TestRunPoolRefusesGatewayServerVia(t *testing.T) {
 		file  func(m *poolMachine) string
 	}{
 		{"in the pool's forager.yaml", func(t *testing.T, m *poolMachine) {
-			serverFile(t, m.srv, via+"pool:\n  registry: localhost:5001/qory-env\n  harness_path: "+m.harness+"\n  run_config: "+m.runs+"\n")
+			serverFile(t, m.srv, via+"pool:\n  registry: localhost:5001/qory-env\n  run_config: "+m.runs+"\n")
 		}, func(m *poolMachine) string { return m.file }},
 		{"in run_config's forager.yaml", func(t *testing.T, m *poolMachine) {
 			writeFile(t, filepath.Join(m.runs, "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\ngateway:\n  server:\n    url: https://apiary.example.com\n"+via+

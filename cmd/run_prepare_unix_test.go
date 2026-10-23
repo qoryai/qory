@@ -24,97 +24,14 @@ import (
 	"github.com/qoryai/qory/cmd"
 )
 
-// TestRunPrepareStopsGitOnSIGTERM sends SIGTERM to qory run prepare alone, as Forager's
-// preparation script does, while git waits on a proxy that never answers: the verb
-// ends git's whole process group, git-remote-https among them, so the proxy's
-// connection closes, and the verb exits within seconds with one line that says git was
-// stopped.
-func TestRunPrepareStopsGitOnSIGTERM(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git is not installed")
-	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-	conns := make(chan net.Conn, 4)
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			conns <- c
-		}
-	}()
-	dir := t.TempDir()
-	if out, err := exec.Command("git", "init", "--quiet", dir).CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v\n%s", err, out)
-	}
-	proxy := "http://" + ln.Addr().String()
-	var stderr bytes.Buffer
-	c := exec.Command(os.Args[0], "-test.run=^$")
-	c.Dir = dir
-	c.Stderr = &stderr
-	c.Env = append(os.Environ(),
-		"QORY_TEST_PREPARE=1",
-		"QORY_RUN_SYSTEM=git.example.com",
-		"QORY_RUN_REPOSITORIES=acme/shop",
-		"HTTPS_PROXY="+proxy, "https_proxy="+proxy, "ALL_PROXY=", "all_proxy=",
-		"NO_PROXY=", "no_proxy=",
-		"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1",
-	)
-	if err := c.Start(); err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan error, 1)
-	go func() { done <- c.Wait() }()
-	t.Cleanup(func() { _ = c.Process.Kill() })
-
-	var held net.Conn
-	select {
-	case held = <-conns:
-		defer held.Close()
-	case err := <-done:
-		t.Fatalf("qory run prepare exited before git reached the proxy: %v\n%s", err, stderr.String())
-	case <-time.After(30 * time.Second):
-		t.Fatalf("git did not reach the proxy\n%s", stderr.String())
-	}
-	if err := c.Process.Signal(syscall.SIGTERM); err != nil {
-		t.Fatal(err)
-	}
-	start := time.Now()
-	select {
-	case err := <-done:
-		if err == nil {
-			t.Error("qory run prepare exited 0 after SIGTERM")
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatalf("qory run prepare still runs 10s after SIGTERM\n%s", stderr.String())
-	}
-	if took := time.Since(start); took > 5*time.Second {
-		t.Errorf("qory run prepare took %s to stop", took)
-	}
-	want := "qory run prepare: acme/shop could not be fetched from git.example.com: git ls-remote was stopped before it finished\n"
-	if got := stderr.String(); got != want {
-		t.Errorf("printed %q, want %q", got, want)
-	}
-	// The connection git-remote-https held is closed once what git sent is read: no
-	// process of git's is left.
-	_ = held.SetReadDeadline(time.Now().Add(5 * time.Second))
-	if _, err := io.Copy(io.Discard, held); err != nil && !strings.Contains(err.Error(), "reset") {
-		t.Errorf("the proxy's connection is still open after the verb exited: %v", err)
-	}
-}
-
 // prepareRemote makes the working directory an empty git working tree, in the
 // environment [emptyDir] sets, and the repository acme/shop on example.com with
 // README.md and files in a second commit on main: a bare repository under a folder it
-// returns, which [gitServer] serves to qory run prepare, and which the test's gits
-// reach through a url rewrite in the test's global configuration, which qory run
-// prepare does not read. The variables name acme/shop, and the image's copy is looked
-// for where there is none.
+// returns, which [gitServer] serves, and which the test's gits reach through a url
+// rewrite in the test's global configuration, which qory run prepare does not read. The
+// variables name acme/shop, and the image's copy is looked for where there is none.
+// [fetchedOnHost] then fetches acme/shop into the working directory, as qory run does
+// before the session joins.
 func prepareRemote(t *testing.T, files map[string]string) (dir, base string) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
@@ -203,6 +120,18 @@ func gitServer(t *testing.T, base string) {
 	t.Setenv("GIT_SSL_CAINFO", ca)
 }
 
+// fetchedOnHost fetches the head of main of acme/shop into dir, the working directory
+// [prepareRemote] made, at depth one, checked out as main tracking origin, as qory run
+// fetches the run's repository on this machine before the session joins. The file of
+// the start commands' output goes into a temporary folder of the test's.
+func fetchedOnHost(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("TMPDIR", tempDir(t))
+	runGit(t, dir, "remote", "add", "origin", "https://example.com/acme/shop.git")
+	runGit(t, dir, "fetch", "--quiet", "--depth", "1", "origin", "+refs/heads/main:refs/remotes/origin/main")
+	runGit(t, dir, "checkout", "--quiet", "-b", "main", "--track", "origin/main")
+}
+
 // pushNewer pushes a commit to acme/shop that adds newer.txt, and returns it.
 func pushNewer(t *testing.T) string {
 	t.Helper()
@@ -217,6 +146,19 @@ func pushNewer(t *testing.T) string {
 
 // prepareTimes are the times in the lines of qory run prepare.
 var prepareTimes = regexp.MustCompile(`(?m) in [0-9]+\.[0-9]s$`)
+
+// setupLogs matches the path in the line of qory run prepare that names the file of the
+// start commands' output.
+var setupLogs = regexp.MustCompile(`(?m)^qory run prepare: \S*/qory-setup-[0-9]+\.log in the container that runs the setup contains`)
+
+// setupLogLine is that line, with LOG in place of the path, as [shownPrepare] has it.
+const setupLogLine = "qory run prepare: LOG in the container that runs the setup contains the start commands' output, and what a program they leave running writes later\n"
+
+// shownPrepare is out, the lines of qory run prepare, with X in place of each time and
+// LOG in place of the path of the file of the start commands' output.
+func shownPrepare(out string) string {
+	return setupLogs.ReplaceAllString(prepareTimes.ReplaceAllString(out, " in Xs"), "qory run prepare: LOG in the container that runs the setup contains")
+}
 
 // imageCopy makes the image's copy of acme/shop: a clone at depth one, with an ignored
 // dependency, an untracked file, hooks and a file system monitor that write to marker,
@@ -248,11 +190,12 @@ func imageCopy(t *testing.T, marker string) string {
 	return seed
 }
 
-// TestRunPrepareStartsFromTheImagesCopy is a run in a prebuilt image: qory run prepare
-// copies the working tree of the image's copy, fetches into the runner's repository and
-// checks out the run's commit over the files, keeping the untracked and ignored ones,
-// takes none of the copy's .git, its hooks and configuration among it, then runs postCreateCommand and postStartCommand with the working
-// folder's variables and the environment, and prints a line for each step with times.
+// TestRunPrepareStartsFromTheImagesCopy is a run in a prebuilt image, whose working
+// folder qory run fetched the run's commit into: qory run prepare adds the untracked and
+// ignored files of the image's copy, keeps the fetched files, takes none of the copy's
+// .git, its hooks and configuration among it, then runs postCreateCommand and
+// postStartCommand with the working folder's variables and the environment, and prints
+// a line for each step with times.
 func TestRunPrepareStartsFromTheImagesCopy(t *testing.T) {
 	dir, _ := prepareRemote(t, map[string]string{
 		".gitignore": "deps/\n",
@@ -268,17 +211,17 @@ func TestRunPrepareStartsFromTheImagesCopy(t *testing.T) {
 	marker := filepath.Join(tempDir(t), "ran")
 	imageCopy(t, marker)
 	head := pushNewer(t)
+	fetchedOnHost(t, dir)
 	t.Setenv("GIVEN", "given")
 	out, err := run(t, "run", "prepare")
 	if err != nil {
 		t.Fatalf("qory run prepare: %v\n%s", err, out)
 	}
-	want := "qory run prepare: copied the working tree of acme/shop from the image\n" +
-		"qory run prepare: fetched acme/shop in Xs\n" +
+	want := "qory run prepare: added from the image's copy the files that the commit of acme/shop does not track\n" +
 		"create " + filepath.Base(dir) + " given container container-remote\nlib.js\n" +
 		"start " + dir + "\n" +
-		"qory run prepare: ran postCreateCommand and postStartCommand in Xs\n"
-	if got := prepareTimes.ReplaceAllString(out, " in Xs"); got != want {
+		"qory run prepare: ran postCreateCommand and postStartCommand in Xs\n" + setupLogLine
+	if got := shownPrepare(out); got != want {
 		t.Errorf("printed %q, want %q", got, want)
 	}
 	if got := gitOut(t, dir, "rev-parse", "HEAD"); got != head {
@@ -319,6 +262,7 @@ func TestRunPrepareStartsFromTheImagesCopy(t *testing.T) {
 func TestRunPrepareRefusesACopyOfAnotherRepository(t *testing.T) {
 	dir, _ := prepareRemote(t, nil)
 	seed := imageCopy(t, filepath.Join(tempDir(t), "ran"))
+	fetchedOnHost(t, dir)
 	runGit(t, seed, "remote", "set-url", "origin", "https://example.com/acme/other.git")
 	out, err := run(t, "run", "prepare")
 	want := "qory run prepare: the image's copy in " + seed + " is not of acme/shop: its origin is not https://example.com/acme/shop\n"
@@ -328,23 +272,10 @@ func TestRunPrepareRefusesACopyOfAnotherRepository(t *testing.T) {
 	if cmd.ExitCode(err) == 0 {
 		t.Error("qory run prepare exited 0")
 	}
-	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
-		t.Errorf("the working folder holds %d entries", len(entries))
-	}
-}
-
-// TestRunPrepareRefusesAGitFile is a working folder whose .git is a file, as a
-// worktree's is: one line and an exit that is not 0.
-func TestRunPrepareRefusesAGitFile(t *testing.T) {
-	dir, _ := prepareRemote(t, nil)
-	if err := os.RemoveAll(filepath.Join(dir, ".git")); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(dir, ".git"), "gitdir: /nonexistent/worktrees/shop\n")
-	out, err := run(t, "run", "prepare")
-	want := "qory run prepare: the working folder's .git is a file or a link, which points at a repository elsewhere; the run's repository is fetched only into an empty git working tree\n"
-	if out != want || cmd.ExitCode(err) == 0 {
-		t.Errorf("printed %q, exit %d; want %q", out, cmd.ExitCode(err), want)
+	for _, name := range []string{"notes.txt", "deps"} {
+		if _, err := os.Lstat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Errorf("the copy's %s was added: %v", name, err)
+		}
 	}
 }
 
@@ -354,8 +285,9 @@ func TestRunPrepareSaysWhichCommandFailed(t *testing.T) {
 	dir, _ := prepareRemote(t, map[string]string{
 		".devcontainer.json": `{"postCreateCommand": ["sh", "-c", "exit 7"], "postStartCommand": "touch started"}`,
 	})
+	fetchedOnHost(t, dir)
 	out, err := run(t, "run", "prepare")
-	want := "qory run prepare: fetched acme/shop in Xs\nqory run prepare: postCreateCommand exited with status 7\n"
+	want := "qory run prepare: postCreateCommand exited with status 7\n"
 	if got := prepareTimes.ReplaceAllString(out, " in Xs"); got != want {
 		t.Errorf("printed %q, want %q", got, want)
 	}
@@ -368,40 +300,38 @@ func TestRunPrepareSaysWhichCommandFailed(t *testing.T) {
 }
 
 // TestRunPrepareLeavesAServiceRunning runs qory run prepare as a separate process, its
-// stdout and stderr files, with a postStartCommand that leaves a service running, which
-// writes to its stdout after the verb exited, beside a step that does nothing: the verb
-// exits 0 at once, not after the grace, and the service keeps running and writing, to
-// the verb's stderr. Nothing reaches the verb's stdout.
+// stdout and stderr pipes, as docker exec and the setup runner give it, with a
+// postStartCommand that leaves a service running, which writes after the verb exited,
+// beside a step that does nothing: the verb exits 0 at once, its pipes closed, not after
+// the grace, and the service keeps running and writing, to the file of the start
+// commands' output in the temporary folder, which the verb's last line names. Nothing
+// reaches the verb's stdout.
 func TestRunPrepareLeavesAServiceRunning(t *testing.T) {
 	dir, _ := prepareRemote(t, map[string]string{
 		".devcontainer.json": `{"postStartCommand": {"serve": "(sleep 1; echo serving; exec sleep 60) & echo $! > pid", "note": "true"}}`,
 	})
-	files := tempDir(t)
-	stdout, err := os.Create(filepath.Join(files, "stdout"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer stdout.Close()
-	stderr, err := os.Create(filepath.Join(files, "stderr"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer stderr.Close()
+	fetchedOnHost(t, dir)
+	tmp := tempDir(t)
+	var stdout, stderr bytes.Buffer
 	c := exec.Command(os.Args[0], "-test.run=^$")
 	c.Dir = dir
-	c.Stdout, c.Stderr = stdout, stderr
-	c.Env = append(os.Environ(), "QORY_TEST_PREPARE=1", "QORY_TEST_PREPARE_SEED="+filepath.Join(tempDir(t), "seed"))
+	c.Stdout, c.Stderr = &stdout, &stderr
+	c.Env = append(os.Environ(), "QORY_TEST_PREPARE=1", "QORY_TEST_PREPARE_SEED="+filepath.Join(tempDir(t), "seed"), "TMPDIR="+tmp)
 	start := time.Now()
-	err = c.Run()
-	printed, _ := os.ReadFile(stderr.Name())
+	err := c.Run()
 	if err != nil {
-		t.Fatalf("qory run prepare: %v\n%s", err, printed)
+		t.Fatalf("qory run prepare: %v\n%s", err, stderr.String())
 	}
 	if took := time.Since(start); took > 4*time.Second {
 		t.Errorf("qory run prepare took %s, held by the service", took)
 	}
-	if !regexp.MustCompile(`\nqory run prepare: ran postStartCommand in [0-9]+\.[0-9]s\n`).Match(printed) {
-		t.Errorf("printed %q", printed)
+	printed := stderr.String()
+	if want := "qory run prepare: ran postStartCommand in Xs\n" + setupLogLine; !strings.HasSuffix(shownPrepare(printed), want) {
+		t.Errorf("printed %q, want it to end with %q", printed, want)
+	}
+	logs, _ := filepath.Glob(filepath.Join(tmp, "qory-setup-*.log"))
+	if len(logs) != 1 || !strings.Contains(printed, logs[0]) {
+		t.Fatalf("the files of the output: %v\n%s", logs, printed)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "pid"))
 	if err != nil {
@@ -414,7 +344,7 @@ func TestRunPrepareLeavesAServiceRunning(t *testing.T) {
 	defer syscall.Kill(pid, syscall.SIGKILL)
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if got, _ := os.ReadFile(stderr.Name()); strings.HasSuffix(string(got), "s\nserving\n") {
+		if got, _ := os.ReadFile(logs[0]); strings.HasSuffix(string(got), "serving\n") {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -425,17 +355,18 @@ func TestRunPrepareLeavesAServiceRunning(t *testing.T) {
 	if err := syscall.Kill(pid, 0); err != nil {
 		t.Errorf("the service stopped: %v", err)
 	}
-	if got, _ := os.ReadFile(stdout.Name()); len(got) != 0 {
-		t.Errorf("the verb's stdout holds %q", got)
+	if strings.Contains(printed, "serving") || stdout.Len() != 0 {
+		t.Errorf("the verb's stdout holds %q, its stderr %q", stdout.String(), printed)
 	}
 }
 
 // TestRunPrepareWritesTheCommandsToStderr is a start command that writes to its stdout
 // and its stderr: both reach the verb's stderr, in order, and nothing its stdout.
 func TestRunPrepareWritesTheCommandsToStderr(t *testing.T) {
-	prepareRemote(t, map[string]string{
+	dir, _ := prepareRemote(t, map[string]string{
 		".devcontainer.json": `{"postCreateCommand": "echo to stdout; echo to stderr >&2"}`,
 	})
+	fetchedOnHost(t, dir)
 	var stdout, stderr bytes.Buffer
 	root := cmd.Root()
 	root.SetArgs([]string{"run", "prepare"})
@@ -444,8 +375,8 @@ func TestRunPrepareWritesTheCommandsToStderr(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("qory run prepare: %v\n%s", err, stderr.String())
 	}
-	want := "qory run prepare: fetched acme/shop in Xs\nto stdout\nto stderr\nqory run prepare: ran postCreateCommand in Xs\n"
-	if got := prepareTimes.ReplaceAllString(stderr.String(), " in Xs"); got != want {
+	want := "to stdout\nto stderr\nqory run prepare: ran postCreateCommand in Xs\n" + setupLogLine
+	if got := shownPrepare(stderr.String()); got != want {
 		t.Errorf("stderr %q, want %q", got, want)
 	}
 	if stdout.Len() != 0 {
@@ -460,12 +391,12 @@ func TestRunPrepareRunsNoConfigurationOfTheCopy(t *testing.T) {
 	dir, _ := prepareRemote(t, nil)
 	seed := imageCopy(t, filepath.Join(tempDir(t), "ran"))
 	writeFile(t, filepath.Join(seed, ".devcontainer.json"), `{"postCreateCommand": "touch ran"}`)
+	fetchedOnHost(t, dir)
 	out, err := run(t, "run", "prepare")
 	if err != nil {
 		t.Fatalf("qory run prepare: %v\n%s", err, out)
 	}
-	want := "qory run prepare: copied the working tree of acme/shop from the image\n" +
-		"qory run prepare: fetched acme/shop in Xs\n" +
+	want := "qory run prepare: added from the image's copy the files that the commit of acme/shop does not track\n" +
 		"qory run prepare: .devcontainer.json is not in the run's commit; no start command runs from it\n"
 	if got := prepareTimes.ReplaceAllString(out, " in Xs"); got != want {
 		t.Errorf("printed %q, want %q", got, want)

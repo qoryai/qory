@@ -97,7 +97,7 @@ func TestCopyRefusesALinkOutOfTheModule(t *testing.T) {
 	write(t, filepath.Join(outside, "x"), "secret\n")
 	symlink(t, filepath.Join(outside, "x"), filepath.Join(m.Dir, "skills", "deploy", "run.sh"))
 	err = render.CopyEntry(m, filepath.Join(m.Dir, "skills", "deploy"), filepath.Join(t.TempDir(), "deploy"))
-	wantError(t, err, "module app: skills/deploy/run.sh links to "+filepath.Join(outside, "x")+", outside the module")
+	wantError(t, err, "module app: Remove the link skills/deploy/run.sh or point it inside the module. It links to "+filepath.Join(outside, "x")+", outside the module, and qory copies only the module's files into the home.")
 }
 
 // TestCopyFollowsALinkInsideTheModule is a skill whose script and whose directory of
@@ -158,8 +158,9 @@ func TestCopyRefusesAFIFO(t *testing.T) {
 }
 
 // TestCopyOfAModuleStopsAt10000Entries is a module of 10,001 files, directories and
-// links, one more than the most qory copies, and the same module with one file fewer,
-// which is copied whole without its .git.
+// links, one more than the most qory copies, refused with the fix for a module in the
+// checkout and for a module of a walled run or of a hidden harness, and the same module
+// with one file fewer, which is copied whole without its .git.
 func TestCopyOfAModuleStopsAt10000Entries(t *testing.T) {
 	m := appModule(t)
 	// skills, skills/deploy and SKILL.md are three entries; data and its files are the
@@ -168,6 +169,13 @@ func TestCopyOfAModuleStopsAt10000Entries(t *testing.T) {
 	write(t, filepath.Join(m.Dir, ".git", "HEAD"), "ref: refs/heads/main\n")
 	err := render.CopyModule(m, filepath.Join(t.TempDir(), "app"))
 	wantError(t, err, "module app: Move the module out of the checkout, or ship fewer files. It contains more than 10,000 files, directories and links, the most qory copies into the home.")
+	m.Walled = true
+	err = render.CopyModule(m, filepath.Join(t.TempDir(), "app"))
+	wantError(t, err, "module app: Ship fewer files. It contains more than 10,000 files, directories and links, the most qory copies into the home.")
+	m.Walled, m.Hidden = false, true
+	err = render.CopyModule(m, filepath.Join(t.TempDir(), "app"))
+	wantError(t, err, "module app: Ship fewer files. It contains more than 10,000 files, directories and links, the most qory copies into the home.")
+	m.Hidden = false
 
 	if err := os.Remove(filepath.Join(m.Dir, "data", "f00000")); err != nil {
 		t.Fatal(err)
@@ -186,6 +194,7 @@ func TestCopyOfAModuleStopsAt10000Entries(t *testing.T) {
 
 // TestPluginStopsAt10000Entries is two modules whose skills put 10,001 files, directories
 // and links under a plugin directory, one more than a walled Claude Code launch takes,
+// refused with the fix for a home with a module in the checkout and for a walled run's,
 // and the same plugin with one file fewer.
 func TestPluginStopsAt10000Entries(t *testing.T) {
 	plugin := t.TempDir()
@@ -206,11 +215,12 @@ func TestPluginStopsAt10000Entries(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	wantError(t, render.CheckPluginSize(plugin), "Move a module out of the checkout, or ship fewer files. claude/plugin contains more than 10,000 files, directories and links, the most a walled Claude Code run takes.")
+	wantError(t, render.CheckPluginSize(plugin, false), "Move a module out of the checkout, or ship fewer files. claude/plugin contains more than 10,000 files, directories and links, the most a walled Claude Code run takes.")
+	wantError(t, render.CheckPluginSize(plugin, true), "Ship fewer files in the modules. claude/plugin contains more than 10,000 files, directories and links, the most a Claude Code run behind a wall or with a hidden harness takes.")
 	if err := os.Remove(filepath.Join(plugin, "skills", "b", "f00000")); err != nil {
 		t.Fatal(err)
 	}
-	if err := render.CheckPluginSize(plugin); err != nil {
+	if err := render.CheckPluginSize(plugin, true); err != nil {
 		t.Errorf("a plugin of 10,000 entries: %v", err)
 	}
 }
@@ -372,7 +382,7 @@ func TestPluginCountFollowsALink(t *testing.T) {
 	fill(t, filepath.Join(linked, "big"), 5_000)
 	fill(t, filepath.Join(linked, "small"), 3_000)
 	symlink(t, filepath.Join(linked, "big"), filepath.Join(plugin, "skills", "linked"))
-	wantError(t, render.CheckPluginSize(plugin), "Move a module out of the checkout, or ship fewer files. claude/plugin contains more than 10,000 files, directories and links, the most a walled Claude Code run takes.")
+	wantError(t, render.CheckPluginSize(plugin, false), "Move a module out of the checkout, or ship fewer files. claude/plugin contains more than 10,000 files, directories and links, the most a walled Claude Code run takes.")
 
 	if err := os.Remove(filepath.Join(plugin, "skills", "linked")); err != nil {
 		t.Fatal(err)
@@ -380,7 +390,7 @@ func TestPluginCountFollowsALink(t *testing.T) {
 	symlink(t, filepath.Join(linked, "small"), filepath.Join(plugin, "skills", "linked"))
 	symlink(t, filepath.Join(linked, "small"), filepath.Join(plugin, "skills", "again"))
 	symlink(t, filepath.Join(plugin, "skills", "copied"), filepath.Join(plugin, "skills", "back"))
-	if err := render.CheckPluginSize(plugin); err != nil {
+	if err := render.CheckPluginSize(plugin, true); err != nil {
 		t.Errorf("a plugin of 9,005 entries: %v", err)
 	}
 }
@@ -406,10 +416,18 @@ func TestCopyOfAModuleSkipsALinkThatLeadsNowhere(t *testing.T) {
 	}
 
 	symlink(t, "../../nowhere-outside", filepath.Join(m.Dir, "scripts", "out"))
-	if err := render.CopyModule(m, filepath.Join(t.TempDir(), "app")); err == nil {
-		t.Error("the copy of the module took a link to nothing outside it")
-	}
+	wantError(t, render.CopyModule(m, filepath.Join(t.TempDir(), "app")), "module app: Remove the link scripts/out or point it inside the module. It points out of the module, and qory copies only the module's files into the home.")
 	if err := os.Remove(filepath.Join(m.Dir, "scripts", "out")); err != nil {
+		t.Fatal(err)
+	}
+	// An absolute link to a missing file inside the module fails in the root as a link
+	// out of it does, but it leads nowhere inside the module, and the line does not say
+	// it points out.
+	symlink(t, filepath.Join(m.Dir, "scripts", "missing.sh"), filepath.Join(m.Dir, "scripts", "abs"))
+	if err := render.CopyModule(m, filepath.Join(t.TempDir(), "app")); err == nil || strings.Contains(err.Error(), "points out of the module") {
+		t.Errorf("an absolute link to nothing inside the module: %v", err)
+	}
+	if err := os.Remove(filepath.Join(m.Dir, "scripts", "abs")); err != nil {
 		t.Fatal(err)
 	}
 	symlink(t, "missing.sh", filepath.Join(m.Dir, "skills", "deploy", "dangle"))
@@ -486,13 +504,16 @@ func sparse(t *testing.T, path string, size int64) {
 }
 
 // TestCopyRefusesAFileOver64MiB is a module with a file one byte over 64 MiB: the copy of
-// the module is refused, and so are the copy of a skill and the read of an agent that
-// large, whose Markdown a copy edits.
+// the module is refused, for a module in the checkout and for a walled run's, and so are
+// the copy of a skill and the read of an agent that large, whose Markdown a copy edits.
 func TestCopyRefusesAFileOver64MiB(t *testing.T) {
 	m := appModule(t)
 	sparse(t, filepath.Join(m.Dir, "scripts", "big.bin"), 64<<20+1)
 	wantError(t, render.CopyModule(m, filepath.Join(t.TempDir(), "app")),
 		"module app: Move the module out of the checkout, or ship scripts/big.bin under 64 MiB. It is larger than 64 MiB, the most qory copies into the home.")
+	m.Walled = true
+	wantError(t, render.CopyModule(m, filepath.Join(t.TempDir(), "app")),
+		"module app: Ship scripts/big.bin under 64 MiB. It is larger than 64 MiB, the most qory copies into the home.")
 
 	m = appModule(t)
 	sparse(t, filepath.Join(m.Dir, "skills", "deploy", "notes.md"), 64<<20+1)
@@ -542,7 +563,8 @@ func writtenBytes(t *testing.T, dir string) int64 {
 
 // TestCopyStopsAtTheModulesTotal is a module of two files of 600 KiB with the total a copy
 // writes lowered to 1 MiB: the copy of the module, and of an entry holding both files, is
-// refused, and neither writes more than 1 MiB. A module of 900 KiB is copied.
+// refused, and neither writes more than 1 MiB; a walled run's copy is refused with its
+// fix. A module of 900 KiB is copied.
 func TestCopyStopsAtTheModulesTotal(t *testing.T) {
 	render.SetMaxModuleBytes(t, 1<<20)
 	const want = "module app: Move the module out of the checkout, or ship fewer files. Its files add up to more than 1 GiB, the most qory copies into the home."
@@ -560,6 +582,8 @@ func TestCopyStopsAtTheModulesTotal(t *testing.T) {
 	if n := writtenBytes(t, entry); n > 1<<20 {
 		t.Errorf("the copy of the entry wrote %d bytes", n)
 	}
+	m.Walled = true
+	wantError(t, render.CopyModule(m, filepath.Join(t.TempDir(), "app")), "module app: Ship fewer files. Its files add up to more than 1 GiB, the most qory copies into the home.")
 
 	m = appModule(t)
 	write(t, filepath.Join(m.Dir, "skills", "deploy", "a.bin"), strings.Repeat("x", 900<<10))

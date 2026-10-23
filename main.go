@@ -12,9 +12,11 @@ import (
 	"github.com/qoryai/qory/internal/ui"
 )
 
-// example is the hello example, carried in the binary so that qory harness init can write it.
+// example is the hello example, carried in the binary so that qory setup example can write
+// it. The qory-stack.yaml beside its qory.yaml is left out: a folder with both does not
+// compose, and the stack file is there for a run that takes the folder by reference.
 //
-//go:embed examples/hello
+//go:embed examples/hello/qory.yaml examples/hello/README.md examples/hello/modules
 var example embed.FS
 
 // hardenProcess denies core dumps of this process and debugger attaches to it. A test

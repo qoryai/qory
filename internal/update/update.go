@@ -80,7 +80,7 @@ func (s Site) Latest(ctx context.Context) (string, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("GitHub answered %s for the latest release of %s", resp.Status, Repo)
+		return "", fmt.Errorf("GitHub returned %s for the latest release of %s", resp.Status, Repo)
 	}
 	var release struct {
 		Tag string `json:"tag_name"`

@@ -128,7 +128,7 @@ func TestHideNameHidesEveryWordWithASecret(t *testing.T) {
 // it leaves out the decoder's message.
 func TestADecoderPrefixWithASecretIsLeftOut(t *testing.T) {
 	isolate(t)
-	const cannotRead = "qory cannot read the value here. The YAML decoder's message contains an access key secret or a run key, so qory does not print it."
+	const cannotRead = "qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key or a run code, so qory does not print it."
 	inner := errors.New("yaml: cannot decode !!str `qak_y` as a !!int")
 	for _, c := range []struct {
 		err  error

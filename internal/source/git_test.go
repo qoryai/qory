@@ -95,8 +95,9 @@ func refsFile(t *testing.T, cache, ref string) string {
 	return matches[0]
 }
 
-// TestResolveGitPinsTheRefToItsCommit fetches a tag and reports the commit as the pin, with
-// the module's directory inside the clone.
+// TestResolveGitPinsTheRefToItsCommit fetches a tag and reports the commit as the pin, 12
+// characters of it, and in full as the commit, with the module's directory inside the
+// clone.
 func TestResolveGitPinsTheRefToItsCommit(t *testing.T) {
 	url, first, _ := remote(t)
 	src := stack.Source{Git: url, Ref: "v1", Path: "modules/core"}
@@ -106,6 +107,9 @@ func TestResolveGitPinsTheRefToItsCommit(t *testing.T) {
 	}
 	if got.Pin != short(first) || got.Dirty {
 		t.Errorf("pin %q dirty %v, want %s clean", got.Pin, got.Dirty, short(first))
+	}
+	if got.Commit != first {
+		t.Errorf("commit %q, want %s", got.Commit, first)
 	}
 	data, err := os.ReadFile(filepath.Join(got.Dir, "AGENTS.md"))
 	if err != nil || string(data) != "# Core v1\n" {

@@ -36,7 +36,7 @@ func TestRunPrepareFailsInOneLine(t *testing.T) {
 	t.Setenv("QORY_RUN_SYSTEM", "github.com")
 	t.Setenv("QORY_RUN_REPOSITORIES", "acme/shop,other/lib")
 	out, err := run(t, "run", "prepare")
-	want := "qory run prepare: QORY_RUN_REPOSITORIES entry 2 is of owner other, not acme; on github.com the repositories of a run are of one owner\n"
+	want := "qory run: list in QORY_RUN_REPOSITORIES only repositories of owner acme: entry 2 is of owner other, and on github.com the repositories of a run are of one owner\n"
 	if out != want {
 		t.Errorf("printed %q, want %q", out, want)
 	}

@@ -51,14 +51,14 @@ func TestReadRefusesAPathThatLeavesTheModule(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range []struct{ link, target, want string }{
-		{"AGENTS.md", filepath.Join(outside, "secret"), "module core: AGENTS.md links to "},
-		{"agents/reviewer.md", filepath.Join(outside, "secret"), "module core: agents/reviewer links to "},
-		{"hooks/guard.sh", filepath.Join(outside, "secret"), "module core: hooks/guard.sh links to "},
-		{"skills/s", filepath.Join(outside, "skill"), "module core: skills/s links to "},
-		{"skills/ok/notes.md", filepath.Join(outside, "secret"), "module core: skills/ok/notes.md links to "},
-		{"skills/ok/lib/helper.py", filepath.Join(outside, "secret"), "module core: skills/ok/lib/helper.py links to "},
-		{"skills/ok/vendor", outside, "module core: skills/ok/vendor links to "},
-		{"settings/claude/settings.json", filepath.Join(outside, "secret"), "module core: settings/claude/settings.json links to "},
+		{"AGENTS.md", filepath.Join(outside, "secret"), "module core: Remove the link AGENTS.md or point it inside the module. It links to "},
+		{"agents/reviewer.md", filepath.Join(outside, "secret"), "module core: Remove the link agents/reviewer or point it inside the module. It links to "},
+		{"hooks/guard.sh", filepath.Join(outside, "secret"), "module core: Remove the link hooks/guard.sh or point it inside the module. It links to "},
+		{"skills/s", filepath.Join(outside, "skill"), "module core: Remove the link skills/s or point it inside the module. It links to "},
+		{"skills/ok/notes.md", filepath.Join(outside, "secret"), "module core: Remove the link skills/ok/notes.md or point it inside the module. It links to "},
+		{"skills/ok/lib/helper.py", filepath.Join(outside, "secret"), "module core: Remove the link skills/ok/lib/helper.py or point it inside the module. It links to "},
+		{"skills/ok/vendor", outside, "module core: Remove the link skills/ok/vendor or point it inside the module. It links to "},
+		{"settings/claude/settings.json", filepath.Join(outside, "secret"), "module core: Remove the link settings/claude/settings.json or point it inside the module. It links to "},
 	} {
 		dir := tree(t, map[string]string{"skills/ok/SKILL.md": "# ok\n"})
 		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, c.link)), 0o755); err != nil {
@@ -68,7 +68,7 @@ func TestReadRefusesAPathThatLeavesTheModule(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err := Read("core", dir, nil, "")
-		if err == nil || !strings.HasPrefix(err.Error(), c.want) || !strings.HasSuffix(err.Error(), ", outside the module") {
+		if err == nil || !strings.HasPrefix(err.Error(), c.want) || !strings.HasSuffix(err.Error(), ", outside the module, and qory reads only the module's files.") {
 			t.Errorf("%s: error %v, want it to start with %q", c.link, err, c.want)
 		}
 	}

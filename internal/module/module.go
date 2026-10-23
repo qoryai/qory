@@ -484,10 +484,16 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 	l.Entries = append(l.Entries, files...)
 	for i, e := range l.Entries {
 		if err := inside(abs, e.Path); err != nil {
+			if out := linkOut(shown, exports.HidePath(e.Kind+"/"+e.Name), err); out != nil {
+				return nil, out
+			}
 			return nil, fmt.Errorf("module %s: %s %w", shown, exports.HidePath(e.Kind+"/"+e.Name), err)
 		}
 		if e.Kind == "skills" {
 			if err := insideAll(abs, e.Path); err != nil {
+				if out := linkOut(shown, exports.HidePath("skills/"+e.Name), err); out != nil {
+					return nil, out
+				}
 				return nil, fmt.Errorf("module %s: %s/%w", shown, exports.HidePath("skills/"+e.Name), err)
 			}
 		}
@@ -540,6 +546,9 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 		for _, file := range slices.Sorted(maps.Keys(files)) {
 			path := files[file]
 			if err := inside(abs, path); err != nil {
+				if out := linkOut(shown, exports.HidePath("settings/"+runtime+"/"+file), err); out != nil {
+					return nil, out
+				}
 				return nil, fmt.Errorf("module %s: %s %w", shown, exports.HidePath("settings/"+runtime+"/"+file), err)
 			}
 			data, err := readFile(path)
@@ -554,6 +563,9 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 	if _, err := os.Stat(filepath.Join(abs, InstructionsName)); err == nil {
 		l.Instructions = filepath.Join(abs, InstructionsName)
 		if err := inside(abs, l.Instructions); err != nil {
+			if out := linkOut(shown, InstructionsName, err); out != nil {
+				return nil, out
+			}
 			return nil, fmt.Errorf("module %s: %s %w", shown, InstructionsName, err)
 		}
 		data, err := readFile(l.Instructions)
@@ -580,7 +592,7 @@ func ReadThrough(root *os.Root, dir, realDir string) func(path string) ([]byte, 
 		}
 		rel, err := filepath.Rel(abs, path)
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-			return nil, fmt.Errorf("%s lies outside the module", exports.HidePath(path))
+			return nil, fmt.Errorf("Move %s inside the module. It lies outside the module, and qory reads only the module's files.", exports.HidePath(path))
 		}
 		inner, err := ResolveIn(root, realDir, rel)
 		if err != nil {
@@ -676,9 +688,32 @@ func inside(root, path string) error {
 		return exports.HideError(err)
 	}
 	if real != realRoot && !strings.HasPrefix(real, realRoot+string(filepath.Separator)) {
-		return fmt.Errorf("links to %s, outside the module", exports.HidePath(real))
+		return &outsideError{real: exports.HidePath(real)}
 	}
 	return nil
+}
+
+// outsideError is the refusal of [inside]: real, the path with every link resolved,
+// lies outside the module. under is the path below a skill's directory that
+// [insideAll] found, or "".
+type outsideError struct {
+	real  string
+	under string
+}
+
+func (e *outsideError) Error() string { return "links to " + e.real + ", outside the module" }
+
+// linkOut is the refusal of the entry shown as name in the module shown when err is an
+// [outsideError], with its fix first, and nil for any other err.
+func linkOut(shown, name string, err error) error {
+	var out *outsideError
+	if !errors.As(err, &out) {
+		return nil
+	}
+	if out.under != "" {
+		name += "/" + out.under
+	}
+	return fmt.Errorf("module %s: Remove the link %s or point it inside the module. It links to %s, outside the module, and qory reads only the module's files.", shown, name, out.real)
 }
 
 // insideAll walks the skill directory at dir and checks every file and directory in it
@@ -699,6 +734,9 @@ func insideAll(root, dir string) error {
 			rel, relErr := filepath.Rel(dir, path)
 			if relErr != nil {
 				rel = path
+			}
+			if out, ok := err.(*outsideError); ok {
+				return &outsideError{real: out.real, under: exports.HidePath(filepath.ToSlash(rel))}
 			}
 			return fmt.Errorf("%s %w", exports.HidePath(filepath.ToSlash(rel)), err)
 		}

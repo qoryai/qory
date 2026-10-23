@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strconv"
@@ -417,6 +418,33 @@ func events(t *testing.T, root string) (string, map[string][]map[string]any) {
 	return dir, byType
 }
 
+// firstSession is the directory of the run's first session in the run directory dir,
+// sessions/1, where Forager writes that session's files, such as the copy of Claude
+// Code's settings with its hooks.
+func firstSession(dir string) string { return filepath.Join(dir, "sessions", "1") }
+
+// sessionStarted is the data of the one session's dev.qory.session.started, which
+// has the runtime, its command, its arguments and, behind a wall, the image.
+func sessionStarted(t *testing.T, evs map[string][]map[string]any) map[string]any {
+	t.Helper()
+	started := evs["dev.qory.session.started"]
+	if len(started) != 1 {
+		t.Fatalf("session.started %v", started)
+	}
+	return started[0]
+}
+
+// sessionApplied is the dev.qory.run.policy_applied of the one session, with the
+// variables it got: the run's open records one before it, with none.
+func sessionApplied(t *testing.T, evs map[string][]map[string]any) map[string]any {
+	t.Helper()
+	applied := evs["dev.qory.run.policy_applied"]
+	if len(applied) != 2 {
+		t.Fatalf("run.policy_applied %v, want the open's and the session's", applied)
+	}
+	return applied[1]
+}
+
 // TestRunRecordsTheSession runs the composed runtime through Forager: the launch
 // spec is the template with the configuration over it plus the arguments after --, the
 // runtime sees the proxy, the socket and the launch's variables, the policy in the configuration directory is
@@ -441,15 +469,17 @@ func TestRunRecordsTheSession(t *testing.T) {
 	if !strings.HasSuffix(out, "\nqory run: the record is in "+dir+"\n") {
 		t.Errorf("the last line does not name the record %s:\n%s", dir, out)
 	}
+	if session := sessionStarted(t, evs); session["command"] != script || session["interactive"] != false {
+		t.Errorf("session.started %v", session)
+	}
 	started := evs["dev.qory.run.started"]
-	if len(started) != 1 || started[0]["command"] != script || started[0]["interactive"] != false {
-		t.Errorf("run.started %v", started)
+	if len(started) != 1 {
+		t.Fatalf("run.started %v", started)
 	}
 	if labels, _ := started[0]["labels"].(map[string]any); len(labels) != 2 || labels["forge"] != "git.example.com" || labels["repository"] != "acme/app" {
 		t.Errorf("the labels from the origin remote: %v", started[0]["labels"])
 	}
-	applied := evs["dev.qory.run.policy_applied"]
-	if len(applied) != 1 || applied[0]["mode"] != "enforce" || applied[0]["source"] != "config" {
+	if applied := sessionApplied(t, evs); applied["mode"] != "enforce" || applied["source"] != "config" {
 		t.Errorf("run.policy_applied %v", applied)
 	}
 	exited := evs["dev.qory.run.exited"]
@@ -463,7 +493,7 @@ func TestRunRecordsTheSession(t *testing.T) {
 	if err != nil || !strings.Contains(string(log), "hello from ") {
 		t.Errorf("output.log: %v\n%s", err, log)
 	}
-	settings, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	settings, err := os.ReadFile(filepath.Join(firstSession(dir), "settings.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -507,24 +537,20 @@ func TestRunExitsZeroQuietly(t *testing.T) {
 		}
 	}
 	_, evs := events(t, root)
-	if applied := evs["dev.qory.run.policy_applied"]; len(applied) != 1 || applied[0]["mode"] != "observe" || applied[0]["source"] != "none" {
+	if applied := sessionApplied(t, evs); applied["mode"] != "observe" || applied["source"] != "none" {
 		t.Errorf("run.policy_applied %v", applied)
 	}
 }
 
-// TestRunRefusesWhatItCannotStart is the runs that never start: a runtime the harness
-// is not composed for, two runtimes named, a forager.yaml that does not read, and no
-// composed harness at all; none of them leaves a record.
+// TestRunRefusesWhatItCannotStart is the runs that never start: a runtime qory cannot
+// compose for, two runtimes named, a forager.yaml that does not read, and a stack that
+// does not read. All but the runtime leave no record: qory stops each of them before the
+// run opens. The runtime is checked by the compose, after the open, so its run's record says
+// it failed with no session started.
 func TestRunRefusesWhatItCannotStart(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
-	if _, err := run(t, "run"); err == nil || !strings.Contains(err.Error(), "run qory harness compose") {
-		t.Errorf("nothing composed: %v", err)
-	}
 	composedForFake(t, root, fakeRuntime(t))
-	if _, err := run(t, "run", "codex"); cmd.ExitCode(err) != cmd.ExitInput {
-		t.Errorf("not composed for codex: %v", err)
-	}
 	if _, err := run(t, "run", "claude", "codex"); cmd.ExitCode(err) != cmd.ExitInput {
 		t.Errorf("two runtimes: %v", err)
 	}
@@ -532,8 +558,25 @@ func TestRunRefusesWhatItCannotStart(t *testing.T) {
 	if _, err := run(t, "run"); err == nil || !strings.Contains(err.Error(), `forager.yaml: gateway.egress.mode is not observe or enforce`) {
 		t.Errorf("unreadable forager.yaml: %v", err)
 	}
+	if err := os.Remove(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml")); err != nil {
+		t.Fatal(err)
+	}
 	if ids := recorded(t, root); len(ids) != 0 {
-		t.Error("a run that did not start left a record")
+		t.Errorf("a run refused before its open left records %v", ids)
+	}
+	if _, err := run(t, "run", "no-such-runtime"); cmd.ExitCode(err) != cmd.ExitInput {
+		t.Errorf("a runtime qory does not know: %v", err)
+	}
+	if ends := endsOf(t, root); !slices.Equal(ends, []string{"failed/no_session/-1"}) {
+		t.Errorf("the run of a runtime qory does not know ended %v", ends)
+	}
+	clearRuns(t, root)
+	configure(t, root, []string{"no-such-key: 1"}, nil)
+	if _, err := run(t, "run", "claude"); cmd.ExitCode(err) != cmd.ExitInput {
+		t.Errorf("a stack that does not read: %v", err)
+	}
+	if ids := recorded(t, root); len(ids) != 0 {
+		t.Errorf("a run refused before its open left records %v", ids)
 	}
 }
 
@@ -788,6 +831,11 @@ esac
 	return script, log
 }
 
+// containerRun matches a docker run in the fake docker's log: the start of the agent's
+// container or of the setup container. The relay's container starts as the run opens,
+// with docker create and start.
+var containerRun = regexp.MustCompile(`(?m)^run `)
+
 // passingWall is a wall section whose docker is a program that stands in for it and
 // runs the agent's container on this machine: the runtime's entrypoint, with its
 // arguments, the variables of the container's environment file and PATH alone, and
@@ -799,7 +847,7 @@ esac
 // place of qory's Linux build inside, which this machine does not have at its path; the
 // program after its -- starts through the script again, without the hook's variable.
 // The run's preparation script runs as it is, with a program that exits 0 in place of
-// qory's Linux build inside. A run on a machine that holds an access key needs a wall;
+// each setup command, which runs through qory's Linux build inside. A run on a machine that holds an access key needs a wall;
 // this one lets such a run reach its runtime as an unwalled run would.
 func passingWall(t *testing.T) string {
 	t.Helper()
@@ -841,7 +889,7 @@ if [ "$1" = `+wall.HelperPath+` ] && [ "$2" = run ] && [ "$3" = exec ]; then
 	QORY_TEST_EXEC=1 exec '`+bin+`' -test.run='^$' -- "$@"
 fi
 if [ "$1" = /bin/sh ] && [ "${2##*/}" = `+session.PreparationScript+` ]; then
-	sed "s|'`+wall.HelperPath+`' 'run' 'prepare'|true|" "$2" > `+prepared+`
+	sed "s|^setup .*|true|" "$2" > `+prepared+`
 	shift 2
 	exec /bin/sh `+prepared+` "$@"
 fi
@@ -963,8 +1011,7 @@ func TestRunBehindAWall(t *testing.T) {
 		"src="+helper+",dst=/qory/qory,readonly",
 		"--mount type=bind,src="+root+",dst="+root+" ",
 		"--entrypoint /qory/qory example.com/agent:2 run exec --unset ",
-		" -- /bin/sh "+runsDir(t, root),
-		"/"+session.PreparationScript+" claude --settings "+runsDir(t, root),
+		" -- claude --settings "+runsDir(t, root),
 		" -p hi",
 		"env: MODEL_KEY=not-a-real-key", "env: FLAG_NAMED=goes in", "env: HTTPS_PROXY=http://qory-proxy:3128",
 		"network rm",
@@ -979,12 +1026,15 @@ func TestRunBehindAWall(t *testing.T) {
 		t.Error("a value of the environment is on a command line")
 	}
 	dir, evs := events(t, root)
-	if started := evs["dev.qory.run.started"]; len(started) != 1 || started[0]["wall"] != "docker" || started[0]["image"] != "example.com/agent:2" {
+	if started := evs["dev.qory.run.started"]; len(started) != 1 || started[0]["wall"] != "docker" {
 		t.Errorf("run.started %v", started)
-	} else if got := fmt.Sprint(started[0]["preparation"]); got != "["+wall.HelperPath+" run prepare]" {
-		t.Errorf("a walled run's preparation is %s, want qory run prepare from the qory inside", got)
 	}
-	settings, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if session := sessionStarted(t, evs); session["image"] != "example.com/agent:2" {
+		t.Errorf("session.started %v", session)
+	} else if session["preparation"] != nil || session["setup_commands"] != nil {
+		t.Errorf("a walled run whose run configuration lists no repositories has setup: %v", session)
+	}
+	settings, err := os.ReadFile(filepath.Join(firstSession(dir), "settings.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1008,8 +1058,8 @@ func TestRunBehindAWall(t *testing.T) {
 	if out, err := run(t, "run", "claude", "--wall", "none"); cmd.ExitCode(err) != 3 {
 		t.Fatalf("--wall none: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
-	if _, evs := events(t, root); evs["dev.qory.run.started"][0]["wall"] != nil || evs["dev.qory.run.started"][0]["preparation"] != nil {
-		t.Errorf("--wall none still walled or prepared: %v", evs["dev.qory.run.started"])
+	if _, evs := events(t, root); evs["dev.qory.run.started"][0]["wall"] != nil || sessionStarted(t, evs)["preparation"] != nil {
+		t.Errorf("--wall none still walled or prepared: %v", evs)
 	}
 }
 
@@ -1053,10 +1103,10 @@ harness:
 	lacks(t, string(data), "SHARED_NAME=from-launch")
 	_, evs := events(t, root)
 	for _, applied := range [][]map[string]any{evs["dev.qory.run.policy_applied"], srv.byType()["dev.qory.run.policy_applied"]} {
-		if len(applied) != 1 {
-			t.Fatalf("run.policy_applied %v", applied)
+		if len(applied) != 2 {
+			t.Fatalf("run.policy_applied %v, want the open's and the session's", applied)
 		}
-		got, _ := json.Marshal(applied[0]["variables"])
+		got, _ := json.Marshal(applied[1]["variables"])
 		if want := `[{"from":"harness","lost":[],"name":"A"},{"from":"harness","lost":[],"name":"B"},{"from":"apiary","lost":[{"from":"run","why":"overridden"}],"name":"LOG_LEVEL"},{"from":"apiary","lost":[],"name":"SERVER_ONLY"},{"from":"apiary","lost":[{"from":"harness","why":"overridden"}],"name":"SHARED_NAME"}]`; string(got) != want {
 			t.Errorf("run.policy_applied variables %s, want %s", got, want)
 		}
@@ -1064,17 +1114,18 @@ harness:
 }
 
 // TestRunRefusesAMountOfAnIntegrationsSettingFile is a walled run whose policy selects
-// an integration with a <name>_file setting: a mount that is or contains that file is
-// refused by Forager before anything starts, as one that holds one of Forager's
-// files, in either mode, and so is one that holds a link on the way to it, named as the
-// link. A refused run starts no container.
+// an integration with a <name>_file setting: a mount that is or contains that file
+// stops the run before the session starts, as one that holds one of Forager's files, in
+// either mode, and so does one that holds a link on the way to it, named as the link. A refused run starts no container, and its record says it failed.
 func TestRunRefusesAMountOfAnIntegrationsSettingFile(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, "claude")
 	docker, log := fakeDocker(t)
 	program := filepath.Join(tempDir(t), "bin", "acme-tracker")
-	writeFile(t, program, "#!/bin/sh\ntest \"$1\" = describe || exit 64\necho '{\"version\": 1, \"name\": \"tracker\", \"title\": \"Tracker\", \"program_version\": \"0.3.0\", \"settings\": {\"type\": \"object\"}, \"roles\": {\"credential\": {\"argument\": \"[A-Z]+\", \"hosts\": [\"tracker.acme.example\"]}}}'\n")
+	// The program describes, and answers any other call with a token: the run's open
+	// takes the credential before the session's mounts are checked.
+	writeFile(t, program, "#!/bin/sh\ntest \"$1\" = describe || { echo '{\"version\": 1, \"token\": \"not-a-real-token\", \"apply\": [{\"hosts\": [\"tracker.acme.example\"], \"scheme\": \"bearer\"}]}'; exit 0; }\necho '{\"version\": 1, \"name\": \"tracker\", \"title\": \"Tracker\", \"program_version\": \"0.3.0\", \"settings\": {\"type\": \"object\"}, \"roles\": {\"credential\": {\"argument\": \"[A-Z]+\", \"hosts\": [\"tracker.acme.example\"]}}}'\n")
 	if err := os.Chmod(program, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1103,14 +1154,14 @@ func TestRunRefusesAMountOfAnIntegrationsSettingFile(t *testing.T) {
 		if err == nil || cmd.ExitCode(err) != 1 || err.Error() != c.want {
 			t.Errorf("token_file %s, --mount %s: %v (exit %d), want %q\n%s", c.setting, c.mount, err, cmd.ExitCode(err), c.want, out)
 		}
-		lacks(t, out, "the record is in")
+		wants(t, out, "the record is in")
 	}
-	if ids := recorded(t, root); len(ids) != 0 {
-		t.Errorf("a refused run left a record: %v", ids)
+	if ends := endsOf(t, root); !slices.Equal(ends, repeated("failed//-1", 5)) {
+		t.Errorf("the refused runs ended %v", ends)
 	}
 	if _, err := os.Stat(log); err == nil {
 		data, _ := os.ReadFile(log)
-		if strings.Contains(string(data), " run ") {
+		if containerRun.Match(data) {
 			t.Errorf("a container was started:\n%s", data)
 		}
 	}
@@ -1118,14 +1169,14 @@ func TestRunRefusesAMountOfAnIntegrationsSettingFile(t *testing.T) {
 
 // TestRunRefusesAMountOfForagersFiles is a walled run with a mount of the home,
 // which contains qory's configuration directory, and one of that directory itself:
-// Forager refuses both before anything starts, and qory says the agent could read the
+// Forager stops both runs before the session starts, and qory says the agent could read the
 // access key, with how the mount and the directory stand to each other. Without
 // access-key-secret in the directory, it says the agent could change one of
 // Forager's files, or read it through a read-only mount. A mount of a directory Forager keeps its own files in, the tools'
 // sockets, says so, in either mode, and one of qory's state directory says the agent could change the
 // run records, or read them through a read-only mount, as does the workspace when the
-// state directory lies in the checkout. A run refused so has no record, and no line
-// names one.
+// state directory lies in the checkout. A run refused so has a record that says it
+// failed, and its last line names the record.
 func TestRunRefusesAMountOfForagersFiles(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -1160,19 +1211,23 @@ func TestRunRefusesAMountOfForagersFiles(t *testing.T) {
 		if err == nil || cmd.ExitCode(err) != 1 || !strings.HasPrefix(err.Error(), c.want) || !strings.HasSuffix(err.Error(), c.ending) || c.ending == "" && err.Error() != c.want {
 			t.Errorf("--mount %s: %v (exit %d), want %q ... %q\n%s", c.mount, err, cmd.ExitCode(err), c.want, c.ending, out)
 		}
-		lacks(t, out, "inside the container", "the record is in")
+		lacks(t, out, "inside the container")
+		wants(t, out, "the record is in")
+	}
+	if ends := endsOf(t, root); !slices.Equal(ends, repeated("failed//-1", 8)) {
+		t.Errorf("the refused runs ended %v", ends)
 	}
 	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
 	want := "the workspace " + root + " contains " + filepath.Join(root, "state", "qory") + ", which holds qory's run records; the agent could change them, so the run does not start. Mount a narrower path (mount_contains_forager_files)"
 	if out, err := run(t, "run", "claude"); err == nil || err.Error() != want {
 		t.Errorf("the state directory in the checkout: %v, want %q\n%s", err, want, out)
 	}
-	if ids := recorded(t, root); len(ids) != 0 {
-		t.Errorf("a refused run left a record: %v", ids)
+	if ends := endsOf(t, root); !slices.Equal(ends, []string{"failed//-1"}) {
+		t.Errorf("the refused run ended %v", ends)
 	}
 	if _, err := os.Stat(log); err == nil {
 		data, _ := os.ReadFile(log)
-		if strings.Contains(string(data), " run ") {
+		if containerRun.Match(data) {
 			t.Errorf("a container was started:\n%s", data)
 		}
 	}
@@ -1214,7 +1269,7 @@ func TestRunRefusesAMountOfALinkOnTheWayToTheRecords(t *testing.T) {
 	}
 	if _, err := os.Stat(log); err == nil {
 		data, _ := os.ReadFile(log)
-		if strings.Contains(string(data), " run ") {
+		if containerRun.Match(data) {
 			t.Errorf("a container was started:\n%s", data)
 		}
 	}
@@ -1256,7 +1311,7 @@ func TestRunRefusesAMountOfAnotherModeInside(t *testing.T) {
 	}
 	if _, err := os.Stat(log); err == nil {
 		data, _ := os.ReadFile(log)
-		if strings.Contains(string(data), " run ") {
+		if containerRun.Match(data) {
 			t.Errorf("a container was started:\n%s", data)
 		}
 	}
@@ -1308,7 +1363,7 @@ func TestRunRefusesAMountOfWhereAConfigLinkLeads(t *testing.T) {
 	}
 	if _, err := os.Stat(log); err == nil {
 		data, _ := os.ReadFile(log)
-		if strings.Contains(string(data), " run ") {
+		if containerRun.Match(data) {
 			t.Errorf("a container was started:\n%s", data)
 		}
 	}
@@ -1361,7 +1416,7 @@ func TestRunRefusesAMountOfALinkOnTheWayToAConfigFile(t *testing.T) {
 	}
 	if _, err := os.Stat(log); err == nil {
 		data, _ := os.ReadFile(log)
-		if strings.Contains(string(data), " run ") {
+		if containerRun.Match(data) {
 			t.Errorf("a container was started:\n%s", data)
 		}
 	}
@@ -1410,7 +1465,7 @@ func TestRunRefusesAMountOfALinkToTheConfigDir(t *testing.T) {
 	}
 	if _, err := os.Stat(log); err == nil {
 		data, _ := os.ReadFile(log)
-		if strings.Contains(string(data), " run ") {
+		if containerRun.Match(data) {
 			t.Errorf("a container was started:\n%s", data)
 		}
 	}
@@ -1442,7 +1497,7 @@ func TestRunTakesEnvWithoutAWall(t *testing.T) {
 		"FLAG_NAMED=goes in CORE_SCRIPTS=/elsewhere\n")
 	lacks(t, out, "FLAG_NAMED from --env", "CORE_SCRIPTS from --env")
 	_, evs := events(t, root)
-	got, _ := json.Marshal(evs["dev.qory.run.policy_applied"][0]["variables"])
+	got, _ := json.Marshal(sessionApplied(t, evs)["variables"])
 	if want := `[{"from":"run","lost":[{"from":"harness","why":"overridden"},{"from":"shell","why":"overridden"}],"name":"CORE_SCRIPTS"},{"from":"run","lost":[{"from":"shell","why":"overridden"}],"name":"FLAG_NAMED"},{"from":"shell","lost":[{"from":"run","why":"denied"}],"name":"PATH"}]`; string(got) != want {
 		t.Errorf("run.policy_applied variables %s, want %s", got, want)
 	}
@@ -1551,7 +1606,7 @@ harness:
 	if egress := evs["dev.qory.run.egress"]; len(egress) != 2 || egress[0]["decision"] != "allowed" || egress[1]["decision"] != "denied" || egress[1]["rule"] != "wall:own-address" {
 		t.Errorf("run.egress %v", egress)
 	}
-	if runtime.GOOS == "linux" && len(evs["dev.qory.session.ended"]) != 1 {
+	if runtime.GOOS == "linux" && len(evs["dev.qory.runtime.ended"]) != 1 {
 		t.Errorf("the hook did not reach Forager: %v", evs)
 	}
 }
@@ -1593,12 +1648,12 @@ func TestRunIsNamedLimitedAndUnderItsOwnPolicy(t *testing.T) {
 	setVariables()
 	t.Setenv("QORY_SERVER_SECRET", "a-workspace-secret")
 	const id = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f"
-	out, err := run(t, "run", "--local", "--policy", policy, "--run-id", id, "--label", "run_key=queue/1234", "--label", "issue=77", "--label", "repository=acme/shop", "--timeout", "300ms", "--stop-grace", "2s")
+	out, err := run(t, "run", "--local", "--policy", policy, "--run-id", id, "--label", "run_key=queue/1234", "--label", "issue=77", "--label", "repository=acme/shop", "--timeout", "3s", "--stop-grace", "2s")
 	if cmd.ExitCode(err) != 124 {
 		t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
 	// The time limit is said once, in qory's line: the session's own line is left out.
-	wants(t, out, "✗ the run was cancelled: it reached the time limit of 300ms, and claude was stopped\n")
+	wants(t, out, "✗ the run was cancelled: it reached the time limit of 3s, and claude was stopped\n")
 	lacks(t, out, "stopped at the limit")
 	dir, evs := events(t, root)
 	if filepath.Base(dir) != id {
@@ -1635,8 +1690,8 @@ func TestRunReportsToTheServer(t *testing.T) {
 	}
 	wants(t, out, "claude exited 0")
 	_, evs := events(t, root)
-	applied := evs["dev.qory.run.policy_applied"]
-	if allow, _ := applied[0]["allow"].([]any); len(applied) != 1 || applied[0]["source"] != "fetched" || applied[0]["mode"] != "enforce" || len(allow) != 1 || allow[0] != "api.example" || applied[0]["url"] != srv.URL+receiver.DefaultRunPath || applied[0]["run_configuration"] != digest(`{"version":1,"security_policy":`+srv.policy+`}`) {
+	applied := sessionApplied(t, evs)
+	if allow, _ := applied["allow"].([]any); applied["source"] != "fetched" || applied["mode"] != "enforce" || len(allow) != 1 || allow[0] != "api.example" || applied["url"] != srv.URL+receiver.DefaultRunPath || applied["run_configuration"] != digest(`{"version":1,"security_policy":`+srv.policy+`}`) {
 		t.Errorf("run.policy_applied %v", applied)
 	}
 	if srv.refused != 0 || strings.Join(srv.registered, " ") != "forge=git.example.com&issue=77&repository=acme%2Fapp" {
@@ -1674,7 +1729,7 @@ func TestRunReportsToTheServer(t *testing.T) {
 	if started := got["dev.qory.run.started"]; len(started) != 1 || started[0]["labels"].(map[string]any)["issue"] != "77" || started[0]["labels"].(map[string]any)["repository"] != "acme/app" {
 		t.Errorf("the server's run.started: %v", started)
 	}
-	if len(got["dev.qory.run.exited"]) != 1 || len(got["dev.qory.run.policy_applied"]) != 1 {
+	if len(got["dev.qory.run.exited"]) != 1 || len(got["dev.qory.run.policy_applied"]) != 2 {
 		t.Errorf("the server's events: %v", got)
 	}
 
@@ -2031,20 +2086,19 @@ harness:
 	if out, err := run(t, "harness", "compose", "--runtime", "codex", "--no-links"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	out, err := run(t, "run", "--headless")
+	out, err := run(t, "run", "codex", "--headless")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	wants(t, out, "codex exited 0")
 	dir, evs := events(t, root)
-	started := evs["dev.qory.run.started"]
-	if len(started) != 1 || started[0]["runtime"] != "codex" || started[0]["runtime_version"] != nil {
-		t.Errorf("run.started %v", started)
+	if started := sessionStarted(t, evs); started["runtime"] != "codex" || started["runtime_version"] != nil {
+		t.Errorf("session.started %v", started)
 	}
-	if len(evs["dev.qory.session.result"]) != 0 || len(evs["dev.qory.run.exited"]) != 1 {
+	if len(evs["dev.qory.runtime.result"]) != 0 || len(evs["dev.qory.run.exited"]) != 1 {
 		t.Errorf("a bare runtime's events: %v", evs)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "settings.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(firstSession(dir), "settings.json")); !os.IsNotExist(err) {
 		t.Error("Claude Code's settings were written for another runtime")
 	}
 	if err := os.RemoveAll(runsDir(t, root)); err != nil {
@@ -2060,23 +2114,23 @@ stop: {signal: SIGHUP}
 rules:
   - source: output
     match: {kind: done}
-    type: dev.qory.session.result
+    type: dev.qory.runtime.result
     data: {session_id: session, outcome: text, is_error: ok}
 `)
 	t.Setenv("QORY_TEST_WAIT", "1")
 	// A short grace: the runtime's sleep holds its output open until the grace ends, 10s by default.
-	out, err = run(t, "run", "--headless", "--timeout", "500ms", "--stop-grace", "1s")
+	out, err = run(t, "run", "codex", "--headless", "--timeout", "500ms", "--stop-grace", "1s")
 	if cmd.ExitCode(err) != 124 {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	_, evs = events(t, root)
-	if started := evs["dev.qory.run.started"]; len(started) != 1 || started[0]["runtime_version"] != "0.9" {
-		t.Errorf("run.started %v", started)
+	if started := sessionStarted(t, evs); started["runtime_version"] != "0.9" {
+		t.Errorf("session.started %v", started)
 	}
-	if result := evs["dev.qory.session.result"]; len(result) != 1 || result[0]["outcome"] != "all good" {
-		t.Errorf("session.result %v", result)
+	if result := evs["dev.qory.runtime.result"]; len(result) != 1 || result[0]["outcome"] != "all good" {
+		t.Errorf("runtime.result %v", result)
 	}
-	if exited := evs["dev.qory.run.exited"]; len(exited) != 1 || exited[0]["exit_code"] != float64(7) {
+	if exited := evs["dev.qory.session.exited"]; len(exited) != 1 || exited[0]["exit_code"] != float64(7) {
 		t.Errorf("the descriptor's signal did not ask it to leave: %v", exited)
 	}
 }

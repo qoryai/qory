@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -95,12 +97,40 @@ type engine struct {
 	log io.Writer
 }
 
+// lookPath is the program name as run starts it: name when it contains a path
+// separator, else the first executable regular file of that name in an absolute entry
+// of the PATH of env, the programs' environment, not of this process's. ok is false
+// when no entry contains one.
+func (e engine) lookPath(name string) (string, bool) {
+	if strings.ContainsRune(name, os.PathSeparator) {
+		return name, true
+	}
+	path := ""
+	for _, kv := range e.env {
+		if v, ok := strings.CutPrefix(kv, "PATH="); ok {
+			path = v
+		}
+	}
+	for _, dir := range filepath.SplitList(path) {
+		if !filepath.IsAbs(dir) {
+			continue
+		}
+		p := filepath.Join(dir, name)
+		if info, err := os.Stat(p); err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0 {
+			return p, true
+		}
+	}
+	return "", false
+}
+
 // failed is a program that did not succeed: its name and first argument, then the
-// status it exited with and the last line it wrote on its standard error.
+// status it exited with and the last line it wrote on its standard error, cut to one
+// printable line in last, and as written in raw.
 type failed struct {
 	what string
 	code int
 	last string
+	raw  string
 }
 
 // Error names the program, its status and its last line.
@@ -115,7 +145,11 @@ func (f *failed) Error() string {
 // output. When ctx ends, the program's group gets SIGTERM, and SIGKILL [grace] later;
 // run then returns ctx's error.
 func (e engine) run(ctx context.Context, stdin io.Reader, stdout io.Writer, name string, args ...string) error {
-	c := exec.CommandContext(ctx, name, args...)
+	path, ok := e.lookPath(name)
+	if !ok {
+		return fmt.Errorf("no %s command on the PATH", name)
+	}
+	c := exec.CommandContext(ctx, path, args...)
 	c.Env = append([]string{}, e.env...)
 	c.Stdin = stdin
 	c.Stdout = stdout
@@ -141,7 +175,7 @@ func (e engine) run(ctx context.Context, stdin io.Reader, stdout io.Writer, name
 	}
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
-		return &failed{what: what, code: ee.ExitCode(), last: tail.String()}
+		return &failed{what: what, code: ee.ExitCode(), last: tail.String(), raw: tail.rawLine()}
 	}
 	if errors.Is(err, exec.ErrNotFound) {
 		return fmt.Errorf("no %s command on the PATH", name)
@@ -168,8 +202,8 @@ func (e engine) clean(ctx context.Context, args ...string) {
 // lastLine keeps the last line written to it that holds more than spaces, cut to one
 // printable line.
 type lastLine struct {
-	buf  []byte
-	last string
+	buf       []byte
+	last, raw string
 }
 
 // Write keeps p's last complete line, and the rest for the next write.
@@ -181,7 +215,7 @@ func (l *lastLine) Write(p []byte) (int, error) {
 			break
 		}
 		if line := strings.TrimSpace(string(l.buf[:i])); line != "" {
-			l.last = line
+			l.last, l.raw = line, strings.TrimSuffix(string(l.buf[:i]), "\r")
 		}
 		l.buf = l.buf[i+1:]
 	}
@@ -198,6 +232,15 @@ func (l *lastLine) String() string {
 		return integration.Printable(hidden(line))
 	}
 	return integration.Printable(hidden(l.last))
+}
+
+// rawLine is the last line as the program wrote it, of at most 64 KiB, with no cut:
+// what a program's error is matched against.
+func (l *lastLine) rawLine() string {
+	if strings.TrimSpace(string(l.buf)) != "" {
+		return string(l.buf)
+	}
+	return l.raw
 }
 
 // hidden is a line a program wrote with a URL's password as (hidden) and each word with

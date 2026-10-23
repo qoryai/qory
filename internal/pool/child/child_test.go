@@ -18,8 +18,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/qoryai/forager/accesskey"
-
 	"github.com/qoryai/qory/internal/pool/child"
 )
 
@@ -30,6 +28,9 @@ const fakeArg = "fake-child"
 type script struct {
 	// Key is the key it expects on descriptor 3; empty expects descriptor 3 closed.
 	Key string
+	// Code is the run code it expects in the file of descriptor 3, which no name links
+	// to.
+	Code string
 	// Exit is the status it exits with.
 	Exit int
 	// Mode is "", exit at once; "block", wait for SIGTERM and exit 1; "ignore", ignore
@@ -49,7 +50,10 @@ type report struct {
 	KeyLen    int
 	FD3Pipe   bool
 	StdinNull bool
-	Problems  []string
+	// CodeOK reports whether descriptor 3 is a regular file that no name links to, and
+	// contains the script's Code.
+	CodeOK   bool
+	Problems []string
 }
 
 // fd3Pipe reports whether descriptor 3 is open and a pipe, as the key's is. The fake
@@ -86,6 +90,13 @@ func fake(file string, fd3 bool) int {
 		}
 	}
 	rep.FD3Pipe = fd3
+	if s.Code != "" {
+		var st syscall.Stat_t
+		if syscall.Fstat(child.KeyFD, &st) == nil && st.Mode&syscall.S_IFMT == syscall.S_IFREG && st.Nlink == 0 {
+			b, _ := io.ReadAll(os.NewFile(uintptr(child.KeyFD), "code"))
+			rep.CodeOK = string(b) == s.Code
+		}
+	}
 	if s.Key != "" && rep.FD3Pipe {
 		got := make(chan []byte, 1)
 		go func() {
@@ -100,8 +111,8 @@ func fake(file string, fd3 bool) int {
 		}
 	}
 	for _, a := range os.Args {
-		if accesskey.ContainsSecret(a) {
-			rep.Problems = append(rep.Problems, "an argument holds a secret")
+		if child.ContainsSecret(a) {
+			rep.Problems = append(rep.Problems, "an argument contains a secret")
 		}
 	}
 	out, _ := json.Marshal(rep)
@@ -154,8 +165,11 @@ func (h *holder) wasCleared() bool {
 	return h.cleared > 0 && bytes.Equal(h.b, make([]byte, len(h.b)))
 }
 
-// testKey is a run key's shape, with no meaning.
-const testKey = "qrk_eyJ0ZXN0IjoidGhlIHBvb2wncyBjaGlsZCJ9.c2lnbmF0dXJlLW9mLW5vdGhpbmc"
+// testKey is a run key's shape, with no meaning, and testCode a run code's.
+const (
+	testKey  = "qrk_eyJ0ZXN0IjoidGhlIHBvb2wncyBjaGlsZCJ9.c2lnbmF0dXJlLW9mLW5vdGhpbmc"
+	testCode = "qecr_0123456789abcdefghjkmnpqrs.0123456789abcdefghjkmnpqrstvwxyz0"
+)
 
 // lines collects the lines a LineWriter passes on.
 type lines struct {
@@ -206,7 +220,7 @@ func start(t *testing.T, ctx context.Context, dir string, s script, key child.Se
 func noKey(t *testing.T, texts ...string) {
 	t.Helper()
 	for _, s := range texts {
-		if strings.Contains(s, testKey) || strings.Contains(s, testKey[4:20]) || accesskey.ContainsSecret(s) {
+		if strings.Contains(s, testKey) || strings.Contains(s, testKey[4:20]) || strings.Contains(s, testCode[5:20]) || child.ContainsSecret(s) {
 			t.Errorf("a secret is in %q", s)
 		}
 	}
@@ -325,6 +339,61 @@ func TestArgumentWithSecretRefused(t *testing.T) {
 	noKey(t, err.Error())
 }
 
+// TestRunCodeThroughAnUnlinkedFile passes the run code as descriptor 3: a file opened
+// for reading and unlinked, which the command reads to its end. Started is called once
+// the command started, and the file is closed once Run returns.
+func TestRunCodeThroughAnUnlinkedFile(t *testing.T) {
+	dir := t.TempDir()
+	name := filepath.Join(dir, "code")
+	if err := os.WriteFile(name, []byte(testCode), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(name); err != nil {
+		t.Fatal(err)
+	}
+	started := 0
+	res, err, rep, _ := start(t, context.Background(), dir, script{Code: testCode}, nil, 0, func(c *child.Command) {
+		c.File, c.Started = f, func() { started++ }
+		c.Args = append(c.Args, "--run-code-file", "/dev/fd/3")
+	})
+	if err != nil || res != (child.Result{}) {
+		t.Fatal(res, err)
+	}
+	if !rep.CodeOK || rep.FD3Pipe || len(rep.Problems) > 0 {
+		t.Errorf("report %+v", rep)
+	}
+	if started != 1 {
+		t.Errorf("Started was called %d times, want 1", started)
+	}
+	if err := f.Close(); !errors.Is(err, os.ErrClosed) {
+		t.Errorf("the file was not closed: %v", err)
+	}
+}
+
+// TestArgumentWithARunCodeRefused starts no command whose argument contains a run code,
+// in any case, and closes the file it was given.
+func TestArgumentWithARunCodeRefused(t *testing.T) {
+	for _, code := range []string{testCode, strings.ToUpper(testCode)} {
+		f, err := os.Open(os.DevNull)
+		if err != nil {
+			t.Fatal(err)
+		}
+		started := false
+		_, err = child.Run(context.Background(), child.Command{Path: os.Args[0], Args: []string{fakeArg, code}, ConfigHome: t.TempDir(), File: f, Started: func() { started = true }})
+		if err == nil || started {
+			t.Fatal("an argument with a run code was passed")
+		}
+		if err := f.Close(); !errors.Is(err, os.ErrClosed) {
+			t.Errorf("the file was not closed: %v", err)
+		}
+		noKey(t, err.Error())
+	}
+}
+
 func TestStartFailureClearsKey(t *testing.T) {
 	h := &holder{b: []byte(testKey)}
 	_, err := child.Run(context.Background(), child.Command{Path: filepath.Join(t.TempDir(), "none"), ConfigHome: t.TempDir(), Key: h})
@@ -408,53 +477,75 @@ func TestLineWriter(t *testing.T) {
 	var got lines
 	w := child.NewLineWriter("x: ", got.add)
 	io.WriteString(w, "one\ntw")
-	io.WriteString(w, "o\r\nthe key "+testKey+" here\nQRK_upper\n")
+	io.WriteString(w, "o\r\nthe key "+testKey+" here\nQRK_upper\nthe code "+testCode+"\nQECR_upper\n")
 	io.WriteString(w, strings.Repeat("a", 20<<10))
 	io.WriteString(w, "\nlast")
 	w.Flush()
 	all := got.get()
-	want := []string{"x: one", "x: two", "x: (a line that holds a secret, left out)", "x: (a line that holds a secret, left out)", "x: " + strings.Repeat("a", 16<<10), "x: " + strings.Repeat("a", 4<<10), "x: last"}
+	left := "x: (a line that contains a secret, left out)"
+	want := []string{"x: one", "x: two", left, left, left, left, "x: " + strings.Repeat("a", 16<<10), "x: " + strings.Repeat("a", 4<<10), "x: last"}
 	if !slices.Equal(all, want) {
 		t.Errorf("lines %q", all)
 	}
 	noKey(t, all...)
 }
 
-// TestLineWriterKeyAcrossTheSplit puts a run key across the 16 KiB split of a long line,
-// at every offset from before its start to past its end, in one write and a byte at a
-// time: every part of the line is passed on as dots alone or left out, so no piece of
-// the key is passed on, and the next line is passed on as it is.
+// TestLineWriterKeyAcrossTheSplit puts a run key, then a run code, across the 16 KiB
+// split of a long line, at every offset from before its start to past its end, in one
+// write and a byte at a time: every part of the line is passed on as dots alone or left
+// out, so no piece of the key or the code is passed on, and the next line is passed on
+// as it is.
 func TestLineWriterKeyAcrossTheSplit(t *testing.T) {
 	const split = 16 << 10
-	for off := -2; off <= len(testKey)+2; off++ {
-		for _, bytewise := range []bool{false, true} {
-			var got lines
-			w := child.NewLineWriter("x: ", got.add)
-			text := strings.Repeat(".", split-off) + testKey + strings.Repeat(".", 20<<10) + "\nafter\n"
-			if bytewise {
-				for i := range len(text) {
-					io.WriteString(w, text[i:i+1])
+	for _, testKey := range []string{testKey, testCode} {
+		for off := -2; off <= len(testKey)+2; off++ {
+			for _, bytewise := range []bool{false, true} {
+				var got lines
+				w := child.NewLineWriter("x: ", got.add)
+				text := strings.Repeat(".", split-off) + testKey + strings.Repeat(".", 20<<10) + "\nafter\n"
+				if bytewise {
+					for i := range len(text) {
+						io.WriteString(w, text[i:i+1])
+					}
+				} else {
+					io.WriteString(w, text)
 				}
-			} else {
-				io.WriteString(w, text)
-			}
-			w.Flush()
-			all := got.get()
-			withheld := 0
-			for _, l := range all {
-				switch body := strings.TrimPrefix(l, "x: "); {
-				case body == "(a line that holds a secret, left out)":
-					withheld++
-				case body == "after", strings.Trim(body, ".") == "":
-				default:
-					t.Fatalf("offset %d, a byte at a time %v: a part of the key was passed on, at the end of %q", off, bytewise, body[max(0, len(body)-24):])
+				w.Flush()
+				all := got.get()
+				withheld := 0
+				for _, l := range all {
+					switch body := strings.TrimPrefix(l, "x: "); {
+					case body == "(a line that contains a secret, left out)":
+						withheld++
+					case body == "after", strings.Trim(body, ".") == "":
+					default:
+						t.Fatalf("offset %d, a byte at a time %v: a part of the key was passed on, at the end of %q", off, bytewise, body[max(0, len(body)-24):])
+					}
 				}
-			}
-			if withheld == 0 || all[len(all)-1] != "x: after" {
-				t.Errorf("offset %d, a byte at a time %v: lines %d, %d left out, last %q", off, bytewise, len(all), withheld, all[len(all)-1])
+				if withheld == 0 || all[len(all)-1] != "x: after" {
+					t.Errorf("offset %d, a byte at a time %v: lines %d, %d left out, last %q", off, bytewise, len(all), withheld, all[len(all)-1])
+				}
 			}
 		}
 	}
+}
+
+// TestLineWriterRunCodeOnThePartsLastByte puts a run code whose q is the last byte of
+// the first 16 KiB part of a long line: the part is read with the 4 bytes after it,
+// qecr_ whole, so it and the rest of the line are left out. With 3 bytes, the part
+// would show qecr and the next would start with ecr_, and the code would be passed on.
+func TestLineWriterRunCodeOnThePartsLastByte(t *testing.T) {
+	const split = 16 << 10
+	var got lines
+	w := child.NewLineWriter("x: ", got.add)
+	io.WriteString(w, strings.Repeat(".", split-1)+testCode+strings.Repeat(".", 20<<10)+"\nafter\n")
+	w.Flush()
+	all := got.get()
+	left := "x: (a line that contains a secret, left out)"
+	if len(all) < 2 || all[len(all)-1] != "x: after" || slices.ContainsFunc(all[:len(all)-1], func(l string) bool { return l != left }) {
+		t.Errorf("lines %d, starting %.80q", len(all), all)
+	}
+	noKey(t, all...)
 }
 
 func TestEnv(t *testing.T) {

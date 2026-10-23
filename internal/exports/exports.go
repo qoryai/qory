@@ -386,7 +386,7 @@ func hideDefinedTwice(text string) string {
 
 // cannotRead is what a refusal says in place of the decoder's message when that message
 // contains an access key secret or a run key.
-const cannotRead = "qory cannot read the value here. The YAML decoder's message contains an access key secret or a run key, so qory does not print it."
+const cannotRead = "qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key or a run code, so qory does not print it."
 
 // withoutSecrets is err, a decode error of the file at path whose text contains an
 // access key secret or a run key, said without them. Each of the decoder's refusals of

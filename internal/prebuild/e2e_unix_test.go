@@ -39,7 +39,7 @@ func docker(t *testing.T, args ...string) string {
 
 // TestBuildWithDocker builds a tiny development container on this machine's engine with
 // the reference devcontainer command: an alpine image whose onCreateCommand writes a
-// file. The image keeps the file under /qory/seed, the wall user's; it has the agent
+// file, with the environment image kept apart and then removed. The image keeps the file under /qory/seed, the wall user's; it has the agent
 // image's /qory/agent, from an image pushed to a registry run for the test, its user is
 // the wall user, its working folder /workspace, empty, and it has nothing at
 // /qory/hooks. It runs only with QORY_TEST_DOCKER=1, docker and the devcontainer
@@ -132,13 +132,21 @@ func TestBuildWithDocker(t *testing.T) {
 	tag := "qory-test-prebuilt:" + id
 	t.Cleanup(func() { _ = exec.Command("docker", "image", "rm", "--force", tag).Run() })
 	var out, log bytes.Buffer
-	err := prebuild.Build(t.Context(), prebuild.Options{
+	res, err := prebuild.Build(t.Context(), prebuild.Options{
 		Repository: repo, AgentImage: agent, User: "1234:2345", Tag: tag,
 		Helper: helper, SeedArgs: []string{"run", "seed"}, Env: append(os.Environ(), "DOCKER_CONFIG="+dockerConfigWithProxy), Out: &out, Log: &log,
 	})
 	t.Logf("lines:\n%s", out.String())
 	if err != nil {
 		t.Fatalf("Build: %v\n%s", err, log.String())
+	}
+	// The image form keeps the environment image apart, for the caller to push or
+	// remove.
+	if res.Environment == "" || res.Target != tag || res.Base != "alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc" {
+		t.Errorf("the result is %+v", res)
+	}
+	if res.Environment != "" {
+		docker(t, "image", "rm", res.Environment)
 	}
 
 	var cfg struct {
@@ -183,7 +191,7 @@ func TestBuildWithDocker(t *testing.T) {
 	refusedTag := "qory-test-prebuilt:" + id + "-managed"
 	t.Cleanup(func() { _ = exec.Command("docker", "image", "rm", "--force", refusedTag).Run() })
 	out.Reset()
-	err = prebuild.Build(t.Context(), prebuild.Options{
+	_, err = prebuild.Build(t.Context(), prebuild.Options{
 		Repository: managed, AgentImage: agent, User: "1234:2345", Tag: refusedTag,
 		Helper: helper, SeedArgs: []string{"run", "seed"}, Env: append(os.Environ(), "DOCKER_CONFIG="+dockerConfigWithProxy), Out: &out, Log: &log,
 	})
@@ -215,7 +223,7 @@ func TestBuildWithDocker(t *testing.T) {
 	escapeTag := "qory-test-prebuilt:" + id + "-escape"
 	t.Cleanup(func() { _ = exec.Command("docker", "image", "rm", "--force", escapeTag).Run() })
 	out.Reset()
-	err = prebuild.Build(t.Context(), prebuild.Options{
+	_, err = prebuild.Build(t.Context(), prebuild.Options{
 		Repository: escape, AgentImage: agent, User: "1234:2345", Tag: escapeTag,
 		Helper: helper, SeedArgs: []string{"run", "seed"}, Env: append(os.Environ(), "DOCKER_CONFIG="+dockerConfigWithProxy), Out: &out, Log: &log,
 	})

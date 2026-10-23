@@ -8,9 +8,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/qoryai/qory/internal/proxygit"
 )
 
 // needGit skips a test that runs git when the machine has none, and keeps the user's
@@ -65,13 +68,19 @@ func remote(t *testing.T, base, path, branch string, files map[string]string) {
 	setBase(t, base)
 }
 
-// setBase points the fetches at the repositories under base, over file://.
+// setBase points the fetches at the repositories under base, over file://, which the
+// fetches then take beside https.
 func setBase(t *testing.T, base string) {
 	t.Helper()
-	old := baseURL
+	old, oldProtocols := baseURL, protocols
 	baseURL = "file://" + filepath.ToSlash(base)
-	t.Cleanup(func() { baseURL = old })
+	protocols = append(slices.Clone(protocols), "-c", "protocol.file.allow=always")
+	t.Cleanup(func() { baseURL, protocols = old, oldProtocols })
 }
+
+// testProxy is the host proxy of the tests that fetch over file://, which git reaches
+// with no proxy: its port takes no connection.
+var testProxy = proxygit.Proxy{URL: "http://qory:test-proxy-password@127.0.0.1:9"}
 
 func write(t *testing.T, path, content string) {
 	t.Helper()
@@ -104,26 +113,33 @@ func env(system, repositories string) func(string) string {
 	}
 }
 
-// times are the times in the lines of the preparation.
-var times = regexp.MustCompile(` in [0-9]+\.[0-9]s$`)
+// times are the times in the lines of the preparation, and commits the commits.
+var (
+	times   = regexp.MustCompile(` in [0-9]+\.[0-9]s$`)
+	commits = regexp.MustCompile(` at [0-9a-f]{12}( |$)`)
+)
 
-// prepare is [Run] with no image's copy, which returns what Run printed, its lines
-// trimmed and joined by newlines, each time in them as Xs, and "" when it fetched
-// nothing.
+// prepare is [Run] through [testProxy], which returns what Run printed, its lines
+// trimmed and joined by newlines, each time in them as Xs and each commit as C, and ""
+// when it fetched nothing.
 func prepare(ctx context.Context, dir string, getenv func(string) string) (string, error) {
 	return prepareFrom(ctx, dir, "", getenv)
 }
 
-// prepareFrom is [prepare] with seed, the image's copy.
+// prepareFrom is [prepare], then, with seed set, [Prepare] with seed, the image's copy,
+// as qory run prepare runs it once qory run fetched; the lines are Run's, then Prepare's.
 func prepareFrom(ctx context.Context, dir, seed string, getenv func(string) string) (string, error) {
 	var report strings.Builder
-	fetched, err := Run(ctx, dir, seed, getenv, &report)
+	fetched, err := Run(ctx, dir, os.Environ(), getenv, testProxy, &report)
 	if err == nil && fetched != (report.Len() > 0) {
 		return "", fmt.Errorf("Run reports fetched %v and printed %q", fetched, report.String())
 	}
+	if err == nil && seed != "" {
+		_, err = Prepare(ctx, dir, seed, getenv, &report)
+	}
 	lines := strings.Split(strings.TrimSuffix(report.String(), "\n"), "\n")
 	for i, line := range lines {
-		lines[i] = times.ReplaceAllString(line, " in Xs")
+		lines[i] = commits.ReplaceAllString(times.ReplaceAllString(line, " in Xs"), " at C$1")
 	}
 	return strings.Join(lines, "\n"), err
 }
@@ -151,38 +167,38 @@ func TestRefusesTheListInWords(t *testing.T) {
 	for _, c := range []struct {
 		system, list, want string
 	}{
-		{"", "acme/shop", "qory run prepare: QORY_RUN_REPOSITORIES is set but QORY_RUN_SYSTEM is not; both name where the code is"},
-		{"GitHub.com", "acme/shop", "qory run prepare: QORY_RUN_SYSTEM is not a host name"},
-		{"github.com.", "acme/shop,other/lib", "qory run prepare: QORY_RUN_SYSTEM is not a host name"},
-		{"git.example.com/acme", "acme/shop", "qory run prepare: QORY_RUN_SYSTEM is not a host name"},
-		{"https://git.example.com", "acme/shop", "qory run prepare: QORY_RUN_SYSTEM is not a host name"},
-		{strings.Repeat("a", 254), "acme/shop", "qory run prepare: QORY_RUN_SYSTEM is not a host name"},
-		{"git.example.com", "acme/shop,acme/lib" + strings.Repeat(",acme/x", 35), "qory run prepare: QORY_RUN_REPOSITORIES is more than 256 bytes"},
-		{"git.example.com", "acme/shop,", "qory run prepare: QORY_RUN_REPOSITORIES entry 2 is not a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
-		{"git.example.com", ",acme/shop", "qory run prepare: QORY_RUN_REPOSITORIES entry 1 is not a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
-		{"git.example.com", "acme/shop,,acme/lib", "qory run prepare: QORY_RUN_REPOSITORIES entry 2 is not a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
-		{"git.example.com", "acme/shop, acme/lib", "qory run prepare: QORY_RUN_REPOSITORIES entry 2 is not a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
-		{"git.example.com", "acme/../shop", "qory run prepare: QORY_RUN_REPOSITORIES entry 1 is not a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
-		{"git.example.com", "acme/./shop", "qory run prepare: QORY_RUN_REPOSITORIES entry 1 is not a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
-		{"git.example.com", "/acme/shop", "qory run prepare: QORY_RUN_REPOSITORIES entry 1 is not a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
-		{"git.example.com", "acme/shop/", "qory run prepare: QORY_RUN_REPOSITORIES entry 1 is not a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
-		{"git.example.com", "acme/shop:x", "qory run prepare: QORY_RUN_REPOSITORIES entry 1 is not a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
-		{"git.example.com", long, "qory run prepare: QORY_RUN_REPOSITORIES entry 1 is not a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
-		{"git.example.com", "acme/shop,acme/lib,acme/shop", "qory run prepare: QORY_RUN_REPOSITORIES names acme/shop twice"},
-		{"github.com", "acme/shop,Acme/Shop", "qory run prepare: QORY_RUN_REPOSITORIES names Acme/Shop twice"},
-		{"github.com", "acme/shop,other/lib", "qory run prepare: QORY_RUN_REPOSITORIES entry 2 is of owner other, not acme; on github.com the repositories of a run are of one owner"},
-		{"github.com", "acme/shop/x", "qory run prepare: QORY_RUN_REPOSITORIES entry 1 is not owner/name, the form of a repository on github.com"},
-		{"git.example.com", "acme/.git", "qory run prepare: QORY_RUN_REPOSITORIES entry 1 is not a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
-		{"git.example.com", "acme/shop,acme/lib/.GIT", "qory run prepare: QORY_RUN_REPOSITORIES entry 2 is not a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
-		{"git.example.com", ".Git/shop", "qory run prepare: QORY_RUN_REPOSITORIES entry 1 is not a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
-		{"git.example.com", "acme/.git/x", "qory run prepare: QORY_RUN_REPOSITORIES entry 1 is not a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
-		{"github.com", "acme/.git", "qory run prepare: QORY_RUN_REPOSITORIES entry 1 is not a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
-		{"git.example.com", "shop,group/app,group/app/sub", "qory run prepare: QORY_RUN_REPOSITORIES entry 3, group/app/sub, is inside entry 2, group/app; a repository is not cloned inside another"},
-		{"git.example.com", "shop,group/app/sub,group/app", "qory run prepare: QORY_RUN_REPOSITORIES entry 2, group/app/sub, is inside entry 3, group/app; a repository is not cloned inside another"},
-		{"git.example.com", "group/a,group/b,group/b/c/d,group", "qory run prepare: QORY_RUN_REPOSITORIES entry 3, group/b/c/d, is inside entry 2, group/b; a repository is not cloned inside another"},
-		{"git.example.com", "group/lib,group,group/lib/x", "qory run prepare: QORY_RUN_REPOSITORIES entry 3, group/lib/x, is inside entry 2, group; a repository is not cloned inside another"},
-		{"git.example.com", "acme/shop,Group/app,group/app/sub,Group/app/x", "qory run prepare: QORY_RUN_REPOSITORIES entry 4, Group/app/x, is inside entry 2, Group/app; a repository is not cloned inside another"},
-		{"github.com", "acme/shop,lib", "qory run prepare: QORY_RUN_REPOSITORIES entry 2 is not owner/name, the form of a repository on github.com"},
+		{"", "acme/shop", "qory run: set QORY_RUN_SYSTEM beside QORY_RUN_REPOSITORIES in the run configuration: QORY_RUN_SYSTEM is the host of the repositories QORY_RUN_REPOSITORIES lists, and it is not set"},
+		{"GitHub.com", "acme/shop", "qory run: set QORY_RUN_SYSTEM to a host name, such as github.com"},
+		{"github.com.", "acme/shop,other/lib", "qory run: set QORY_RUN_SYSTEM to a host name, such as github.com"},
+		{"git.example.com/acme", "acme/shop", "qory run: set QORY_RUN_SYSTEM to a host name, such as github.com"},
+		{"https://git.example.com", "acme/shop", "qory run: set QORY_RUN_SYSTEM to a host name, such as github.com"},
+		{strings.Repeat("a", 254), "acme/shop", "qory run: set QORY_RUN_SYSTEM to a host name, such as github.com"},
+		{"git.example.com", "acme/shop,acme/lib" + strings.Repeat(",acme/x", 35), "qory run: shorten QORY_RUN_REPOSITORIES to 256 bytes or fewer"},
+		{"git.example.com", "acme/shop,", "qory run: make entry 2 of QORY_RUN_REPOSITORIES a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
+		{"git.example.com", ",acme/shop", "qory run: make entry 1 of QORY_RUN_REPOSITORIES a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
+		{"git.example.com", "acme/shop,,acme/lib", "qory run: make entry 2 of QORY_RUN_REPOSITORIES a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
+		{"git.example.com", "acme/shop, acme/lib", "qory run: make entry 2 of QORY_RUN_REPOSITORIES a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
+		{"git.example.com", "acme/../shop", "qory run: make entry 1 of QORY_RUN_REPOSITORIES a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
+		{"git.example.com", "acme/./shop", "qory run: make entry 1 of QORY_RUN_REPOSITORIES a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
+		{"git.example.com", "/acme/shop", "qory run: make entry 1 of QORY_RUN_REPOSITORIES a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
+		{"git.example.com", "acme/shop/", "qory run: make entry 1 of QORY_RUN_REPOSITORIES a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
+		{"git.example.com", "acme/shop:x", "qory run: make entry 1 of QORY_RUN_REPOSITORIES a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
+		{"git.example.com", long, "qory run: make entry 1 of QORY_RUN_REPOSITORIES a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
+		{"git.example.com", "acme/shop,acme/lib,acme/shop", "qory run: list acme/shop once in QORY_RUN_REPOSITORIES, which lists it twice"},
+		{"github.com", "acme/shop,Acme/Shop", "qory run: list Acme/Shop once in QORY_RUN_REPOSITORIES, which lists it twice"},
+		{"github.com", "acme/shop,other/lib", "qory run: list in QORY_RUN_REPOSITORIES only repositories of owner acme: entry 2 is of owner other, and on github.com the repositories of a run are of one owner"},
+		{"github.com", "acme/shop/x", "qory run: write entry 1 of QORY_RUN_REPOSITORIES as owner/name, the form of a repository on github.com"},
+		{"git.example.com", "acme/.git", "qory run: make entry 1 of QORY_RUN_REPOSITORIES a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
+		{"git.example.com", "acme/shop,acme/lib/.GIT", "qory run: make entry 2 of QORY_RUN_REPOSITORIES a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
+		{"git.example.com", ".Git/shop", "qory run: make entry 1 of QORY_RUN_REPOSITORIES a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
+		{"git.example.com", "acme/.git/x", "qory run: make entry 1 of QORY_RUN_REPOSITORIES a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
+		{"github.com", "acme/.git", "qory run: make entry 1 of QORY_RUN_REPOSITORIES a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"},
+		{"git.example.com", "shop,group/app,group/app/sub", "qory run: remove entry 3, group/app/sub, or entry 2, group/app, from QORY_RUN_REPOSITORIES: the first is inside the second, and a repository is not cloned inside another"},
+		{"git.example.com", "shop,group/app/sub,group/app", "qory run: remove entry 2, group/app/sub, or entry 3, group/app, from QORY_RUN_REPOSITORIES: the first is inside the second, and a repository is not cloned inside another"},
+		{"git.example.com", "group/a,group/b,group/b/c/d,group", "qory run: remove entry 3, group/b/c/d, or entry 2, group/b, from QORY_RUN_REPOSITORIES: the first is inside the second, and a repository is not cloned inside another"},
+		{"git.example.com", "group/lib,group,group/lib/x", "qory run: remove entry 3, group/lib/x, or entry 2, group, from QORY_RUN_REPOSITORIES: the first is inside the second, and a repository is not cloned inside another"},
+		{"git.example.com", "acme/shop,Group/app,group/app/sub,Group/app/x", "qory run: remove entry 4, Group/app/x, or entry 2, Group/app, from QORY_RUN_REPOSITORIES: the first is inside the second, and a repository is not cloned inside another"},
+		{"github.com", "acme/shop,lib", "qory run: write entry 2 of QORY_RUN_REPOSITORIES as owner/name, the form of a repository on github.com"},
 	} {
 		line, err := prepare(context.Background(), t.TempDir(), env(c.system, c.list))
 		if err == nil || err.Error() != c.want {
@@ -227,7 +243,7 @@ func TestFetchesTheRunRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if line != "qory run prepare: fetched acme/shop in Xs" {
+	if line != "qory run: fetched acme/shop at C in Xs" {
 		t.Errorf("the line is %q", line)
 	}
 	if got := run(t, dir, "remote", "get-url", "origin"); got != baseURL+"/acme/shop.git" {
@@ -283,8 +299,8 @@ func TestClonesTheFurtherRepositories(t *testing.T) {
 	for _, c := range []struct {
 		list, want string
 	}{
-		{"acme/shop,acme/lib", "qory run prepare: fetched acme/shop and 1 further repository in Xs"},
-		{"acme/shop,acme/lib,acme/docs", "qory run prepare: fetched acme/shop and 2 further repositories in Xs"},
+		{"acme/shop,acme/lib", "qory run: fetched acme/shop at C and 1 further repository in Xs"},
+		{"acme/shop,acme/lib,acme/docs", "qory run: fetched acme/shop at C and 2 further repositories in Xs"},
 	} {
 		dir := emptyFolder(t)
 		exclude := filepath.Join(dir, ".git", "info", "exclude")
@@ -338,7 +354,7 @@ func TestKeepsQoryRepositories(t *testing.T) {
 	remote(t, base, "acme/lib", "main", nil)
 	dir := emptyFolder(t)
 	_, err := prepare(context.Background(), dir, env("github.com", "acme/shop,acme/lib"))
-	want := "qory run prepare: acme/shop has .qory/repositories already, which qory keeps for the further repositories; nothing is cloned over it"
+	want := "qory run: remove .qory/repositories from the working folder of acme/shop: qory clones the further repositories there, and nothing is cloned over it"
 	if err == nil || err.Error() != want {
 		t.Fatalf("%v, want %s", err, want)
 	}
@@ -357,8 +373,8 @@ func TestRefusesAFolderThatIsNotEmpty(t *testing.T) {
 	needGit(t)
 	base := t.TempDir()
 	remote(t, base, "acme/shop", "main", nil)
-	notEmpty := "qory run prepare: the working folder holds files already; the run's repository is fetched only into an empty git working tree"
-	notTree := "qory run prepare: the working folder is not a git working tree without commits; the run's repository is fetched only into an empty git working tree"
+	notEmpty := "qory run: start the run in an empty git working tree: the working folder contains files already, and the run's repository is fetched only into an empty one"
+	notTree := "qory run: start the run in a git working tree without commits: the working folder is not one, and the run's repository is fetched only into an empty git working tree"
 
 	withFile := emptyFolder(t)
 	write(t, filepath.Join(withFile, "notes.txt"), "notes\n")
@@ -396,7 +412,7 @@ func TestSaysWhatCouldNotBeFetched(t *testing.T) {
 		{"acme/shop,acme/missing", "acme/missing"},
 	} {
 		_, err := prepare(context.Background(), emptyFolder(t), env("git.example.com", c.list))
-		prefix := "qory run prepare: " + c.path + " could not be fetched from git.example.com: "
+		prefix := "qory run: add a credential for git.example.com that reads " + c.path + " to the run configuration, then run again. The fetch of " + c.path + " through the run's gateway failed: "
 		if err == nil || !strings.HasPrefix(err.Error(), prefix) || len(err.Error()) == len(prefix) || strings.Contains(err.Error(), "\n") {
 			t.Errorf("%s: %v, want one line starting %q and git's words", c.list, err, prefix)
 		}
@@ -451,8 +467,8 @@ func bareFrom(t *testing.T, base, path, work string) {
 // has it already; nothing is cloned, through the link or beside it.
 func TestRefusesAQoryThatIsNoFolder(t *testing.T) {
 	needGit(t)
-	notDir := "qory run prepare: acme/shop has .qory as a file or a link, where qory keeps the further repositories in a folder; nothing is cloned over it"
-	kept := "qory run prepare: acme/shop has .qory/repositories already, which qory keeps for the further repositories; nothing is cloned over it"
+	notDir := "qory run: remove .qory from the working folder of acme/shop: it is a file or a link, where qory clones the further repositories into a folder, and nothing is cloned over it"
+	kept := "qory run: remove .qory/repositories from the working folder of acme/shop: qory clones the further repositories there, and nothing is cloned over it"
 	outside := t.TempDir()
 	for _, c := range []struct {
 		name  string
@@ -501,7 +517,7 @@ func TestSaysWhenGitCannotReadTheFolder(t *testing.T) {
 	dir := emptyFolder(t)
 	t.Setenv("PATH", t.TempDir())
 	_, err := prepare(context.Background(), dir, env("git.example.com", "acme/shop"))
-	want := `qory run prepare: git could not read the working folder: exec: "git": executable file not found in $PATH`
+	want := `qory run: check that git on this machine can read the working folder, then run again. git failed: exec: "git": executable file not found in $PATH`
 	if err == nil || err.Error() != want {
 		t.Errorf("git missing: %v, want %s", err, want)
 	}
@@ -516,7 +532,7 @@ func TestRefusesARemoteAlready(t *testing.T) {
 	dir := emptyFolder(t)
 	run(t, dir, "remote", "add", "origin", "https://git.example.com/acme/other.git")
 	_, err := prepare(context.Background(), dir, env("git.example.com", "acme/shop"))
-	want := "qory run prepare: the working folder's repository has a remote already; the run's repository is fetched only into an empty git working tree"
+	want := "qory run: start the run in a git working tree with no remote: the working folder's repository has a remote already, and the run's repository is fetched only into an empty git working tree"
 	if err == nil || err.Error() != want {
 		t.Errorf("%v, want %s", err, want)
 	}
@@ -534,7 +550,7 @@ func TestRefusesARemoteAlready(t *testing.T) {
 // starts with a dash names a branch qory does not fetch. Nothing is fetched.
 func TestSaysWhyTheDefaultBranchCannotBeFetched(t *testing.T) {
 	needGit(t)
-	prefix := "qory run prepare: acme/shop could not be fetched from git.example.com: "
+	prefix := "qory run: give acme/shop on git.example.com a default branch with a commit, then run again. The fetch through the run's gateway failed: "
 	for _, c := range []struct {
 		name  string
 		setup func(base string)
@@ -581,11 +597,12 @@ func TestTellsARefusedBranchNameFromAFailedCheck(t *testing.T) {
 	base := t.TempDir()
 	remote(t, base, "acme/shop", "main", nil)
 	shortLimit(t, "check-ref-format", 2*time.Second)
-	prefix := "qory run prepare: acme/shop could not be fetched from git.example.com: "
+	noBranch := "qory run: give acme/shop on git.example.com a default branch with a commit, then run again. The fetch through the run's gateway failed: "
+	notReached := "qory run: check that the run's policy allows git.example.com and that git.example.com is reachable, then run again. The fetch of acme/shop through the run's gateway failed: "
 	for _, c := range []struct{ name, check, want string }{
-		{"refused", "exit 1", "the default branch the remote names, main, is not a branch name qory fetches"},
-		{"failed", "echo 'fatal: the check failed' >&2; exit 128", "fatal: the check failed"},
-		{"stopped", "exec sleep 30", "git check-ref-format ran past 2s and was stopped"},
+		{"refused", "exit 1", noBranch + "the default branch the remote names, main, is not a branch name qory fetches"},
+		{"failed", "echo 'fatal: the check failed' >&2; exit 128", notReached + "fatal: the check failed"},
+		{"stopped", "exec sleep 30", notReached + "git check-ref-format ran past 2s and was stopped"},
 	} {
 		bin := t.TempDir()
 		write(t, filepath.Join(bin, "git"), "#!/bin/sh\nfor a; do [ \"$a\" = check-ref-format ] && { "+c.check+"; }; done\nexec "+gitPath+" \"$@\"\n")
@@ -595,8 +612,8 @@ func TestTellsARefusedBranchNameFromAFailedCheck(t *testing.T) {
 		dir := emptyFolder(t)
 		t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 		start := time.Now()
-		if _, err := prepare(context.Background(), dir, env("git.example.com", "acme/shop")); err == nil || err.Error() != prefix+c.want {
-			t.Errorf("%s: %v, want %s", c.name, err, prefix+c.want)
+		if _, err := prepare(context.Background(), dir, env("git.example.com", "acme/shop")); err == nil || err.Error() != c.want {
+			t.Errorf("%s: %v, want %s", c.name, err, c.want)
 		}
 		if took := time.Since(start); took > 10*time.Second {
 			t.Errorf("%s: returned after %s", c.name, took)
@@ -643,7 +660,7 @@ func shortLimit(t *testing.T, subcommand string, limit time.Duration) func() {
 }
 
 // stalled is an https address that accepts connections and never answers, with no
-// proxy on the way to it.
+// proxy on the way to it; a test makes it the host proxy, too.
 func stalled(t *testing.T) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -681,10 +698,12 @@ func TestStopsAStalledGit(t *testing.T) {
 	needGit(t)
 	restore := shortLimit(t, "ls-remote", 2*time.Second)
 	baseURL = stalled(t)
-	t.Cleanup(func() { baseURL = "" })
+	proxy := testProxy
+	testProxy.URL = "http://qory:test-proxy-password@" + strings.TrimPrefix(baseURL, "https://")
+	t.Cleanup(func() { baseURL, testProxy = "", proxy })
 	start := time.Now()
 	_, err := prepare(context.Background(), emptyFolder(t), env("git.example.com", "acme/shop"))
-	want := "qory run prepare: acme/shop could not be fetched from git.example.com: git ls-remote ran past 2s and was stopped"
+	want := "qory run: check that the run's policy allows git.example.com and that git.example.com is reachable, then run again. The fetch of acme/shop through the run's gateway failed: git ls-remote ran past 2s and was stopped"
 	if err == nil || err.Error() != want {
 		t.Errorf("at the limit: %v, want %s", err, want)
 	}
@@ -697,7 +716,7 @@ func TestStopsAStalledGit(t *testing.T) {
 	defer cancel()
 	start = time.Now()
 	_, err = prepare(ctx, emptyFolder(t), env("git.example.com", "acme/shop"))
-	want = "qory run prepare: acme/shop could not be fetched from git.example.com: git ls-remote was stopped before it finished"
+	want = "qory run: check that the run's policy allows git.example.com and that git.example.com is reachable, then run again. The fetch of acme/shop through the run's gateway failed: git ls-remote was stopped before it finished"
 	if err == nil || err.Error() != want {
 		t.Errorf("the caller's end: %v, want %s", err, want)
 	}
@@ -728,8 +747,8 @@ func hostile(t *testing.T, gitDir, marker string) {
 }
 
 // TestRunsNoHookAndNoMonitor is a working folder whose repository has hooks and a file
-// system monitor: the run's repository and a further one are fetched and checked out,
-// and none of them runs.
+// system monitor: the fetch stops on the monitor's key, and once it is gone, the run's
+// repository and a further one are fetched and checked out, and no hook runs.
 func TestRunsNoHookAndNoMonitor(t *testing.T) {
 	needGit(t)
 	base := t.TempDir()
@@ -738,6 +757,13 @@ func TestRunsNoHookAndNoMonitor(t *testing.T) {
 	dir := emptyFolder(t)
 	marker := filepath.Join(t.TempDir(), "ran")
 	hostile(t, filepath.Join(dir, ".git"), marker)
+	// The monitor is a key of the repository's configuration, which git init does not
+	// write: nothing is fetched until it is gone.
+	want := "qory run: start the run in a new empty git working tree, or remove core.fsmonitor from .git/config, then run again. "
+	if _, err := prepare(context.Background(), dir, env("github.com", "acme/shop,acme/lib")); err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Fatalf("a monitor in the configuration: %v, want %s…", err, want)
+	}
+	run(t, dir, "config", "--unset", "core.fsmonitor")
 	if _, err := prepare(context.Background(), dir, env("github.com", "acme/shop,acme/lib")); err != nil {
 		t.Fatal(err)
 	}
@@ -757,7 +783,7 @@ func TestRefusesAGitFile(t *testing.T) {
 	needGit(t)
 	base := t.TempDir()
 	remote(t, base, "acme/shop", "main", nil)
-	want := "qory run prepare: the working folder's .git is a file or a link, which points at a repository elsewhere; the run's repository is fetched only into an empty git working tree"
+	want := "qory run: start the run in a git working tree whose .git is a folder: the working folder's .git is a file or a link, which points at a repository elsewhere"
 	separate := t.TempDir()
 	worktree := filepath.Join(t.TempDir(), "worktree")
 	run(t, separate, "init", "--quiet", "--separate-git-dir", filepath.Join(t.TempDir(), "git"), "-b", "main")

@@ -37,6 +37,8 @@ type Module struct {
 	// Pin is what the source resolved to: "working-tree" for a path, the commit for a git
 	// source.
 	Pin string
+	// Commit is the full commit id a git source resolved to, "" for a path source.
+	Commit string
 	// Ref is the git source's ref as the stack writes it, "" for a path source.
 	Ref string
 	// Previous is the pin the last compose recorded for the source, when this compose
@@ -63,11 +65,19 @@ type Module struct {
 	// an only leaves it as it is: a module composed at all declares.
 	Egress []string
 	// Copy marks a module whose directory lies in the checkout, as written or with every
-	// link resolved, composed into a home outside the checkout: the home contains copies
-	// of its files in place of links to them, so a walled run, which can write the
-	// checkout, cannot change what the runtime loads. The compose sets it, once per
-	// module, as [Options.Copies] decides.
+	// link resolved, composed into a home outside the checkout, and every module of a
+	// walled run or of a run whose harness is hidden: the home contains copies of its
+	// files in place of links to them, so a walled run, which can write the checkout,
+	// cannot change what the runtime loads, and reads a module whose directory the
+	// container does not see, and the home of a hidden harness contains no link. The
+	// compose sets it, once per module, as [Options.Copies] decides.
 	Copy bool
+	// Walled marks a module marked Copy for a walled run, see [Options.Walled], which
+	// copies it wherever its directory lies.
+	Walled bool
+	// Hidden marks a module marked Copy for a run whose harness is hidden, see
+	// [Options.Hidden], which copies it wherever its directory lies.
+	Hidden bool
 	// Root is the directory of a module marked Copy, opened before the compose read the
 	// manifest; nil for any other module, or when the directory could not be opened. The
 	// compose reads the bytes of the manifest, AGENTS.md, the settings fragments, the MCP
@@ -118,6 +128,9 @@ type Exclude struct {
 	Kind string
 	// Name is the dropped entry's name.
 	Name string
+	// Path is the absolute path of the dropped entry, AGENTS.md or settings fragment in
+	// the module, which a copy of the module leaves out; "" for an exported variable.
+	Path string
 }
 
 // Result is a composed stack: what a renderer writes and what the report records.
@@ -181,6 +194,9 @@ type Options struct {
 	// Memo is shared by every git source of one compose, the base stack's included, so one
 	// URL at one ref lands on one commit; nil makes one for the modules of this call.
 	Memo *source.Memo
+	// Git, when set, fetches every git source through a run's host proxy, see
+	// [source.Git]; nil fetches with the person's git.
+	Git *source.Git
 	// Env are the configuration's variables, written over what the modules export.
 	Env map[string]string
 	// Base is the base stack [LoadBase] resolved, recorded in the result and enforced on
@@ -194,6 +210,11 @@ type Options struct {
 	// holds none. The compose opens such a module's directory before it reads the
 	// manifest, see [Module.Root]. Close the result after the build with [Result.Close].
 	Copies func(dir string) bool
+	// Walled is set for the compose of a walled run, whose Copies copies every module.
+	Walled bool
+	// Hidden is set for the compose of a run whose harness is hidden, whose Copies copies
+	// every module as well, so the home contains no link.
+	Hidden bool
 }
 
 // beforeManifest and afterManifest, when a test sets them, run with each module's
@@ -242,7 +263,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		if pl.Name == "" {
 			who = "module at " + ps.Shown()
 		}
-		so := source.Options{Pin: opts.Pins[ps.String()], Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Memo: opts.Memo}
+		so := source.Options{Pin: opts.Pins[ps.String()], Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Memo: opts.Memo, Git: opts.Git}
 		if pl.Base && opts.Base != nil && ps.Git != "" && ps.Git == p.Extends.Git && ps.Ref == p.Extends.Ref {
 			// A base module in the base's own clone was fetched with the base this compose:
 			// it has the base's pin, the memo puts it on the base's commit, and no update
@@ -302,7 +323,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		if err != nil {
 			return nil, err
 		}
-		rl := Module{Name: name, Description: m.Description, Dir: l.Dir, Source: ps.String(), Pin: src.Pin, Ref: ps.Ref, Previous: src.Previous, Warning: src.Warning, Dirty: src.Dirty, Variant: variant, Link: pl.Link, Base: pl.Base, RetiredAPIVersion: m.RetiredAPIVersion, Egress: m.Egress, Copy: copied, Root: root, RealDir: realDir, DirInfo: rootInfo}
+		rl := Module{Name: name, Description: m.Description, Dir: l.Dir, Source: ps.String(), Pin: src.Pin, Commit: src.Commit, Ref: ps.Ref, Previous: src.Previous, Warning: src.Warning, Dirty: src.Dirty, Variant: variant, Link: pl.Link, Base: pl.Base, RetiredAPIVersion: m.RetiredAPIVersion, Egress: m.Egress, Copy: copied, Walled: copied && opts.Walled, Hidden: copied && opts.Hidden, Root: root, RealDir: realDir, DirInfo: rootInfo}
 		requires[name] = needs(l, m.Requires, res.Bind)
 		// The selection comes first, so that what the base allows and what the module
 		// exports are checked on what the module contributes, not on what it ships.
@@ -773,7 +794,7 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 		key := e.Kind + "/" + e.Name
 		_, isPulled := pulled[key]
 		if (named[key] || isPulled) != only {
-			res.Excludes = append(res.Excludes, Exclude{Module: l.Name, Kind: e.Kind, Name: e.Name})
+			res.Excludes = append(res.Excludes, Exclude{Module: l.Name, Kind: e.Kind, Name: e.Name, Path: e.Path})
 			continue
 		}
 		kept = append(kept, e)
@@ -784,7 +805,7 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 		return nil, nil, fmt.Errorf("module %s: %s instructions selects nothing the module ships; it has no %s", shown(l.Name), block, module.InstructionsName)
 	}
 	if l.Instructions != "" && sel.Instructions != only {
-		res.Excludes = append(res.Excludes, Exclude{Module: l.Name, Kind: "instructions", Name: module.InstructionsName})
+		res.Excludes = append(res.Excludes, Exclude{Module: l.Name, Kind: "instructions", Name: module.InstructionsName, Path: l.Instructions})
 		l.Instructions = ""
 	}
 	// The settings fragments, named as <runtime>/<file>.
@@ -808,11 +829,12 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 			continue
 		}
 		runtime, file, _ := strings.Cut(name, "/")
+		path := l.Settings[runtime][file]
 		delete(l.Settings[runtime], file)
 		if len(l.Settings[runtime]) == 0 {
 			delete(l.Settings, runtime)
 		}
-		res.Excludes = append(res.Excludes, Exclude{Module: l.Name, Kind: "settings", Name: name})
+		res.Excludes = append(res.Excludes, Exclude{Module: l.Name, Kind: "settings", Name: name, Path: path})
 	}
 	// The exported variables.
 	if sel.Env.All && len(env) == 0 {

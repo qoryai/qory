@@ -27,3 +27,15 @@ codex                                    # then: greet me
 Codex reads `AGENTS.override.md` and `.agents/skills`, so the greeting is there. It has no
 place for commands, so `/hello` is a Claude Code thing and the compose reports which entry
 it skipped.
+
+## The same stack by reference
+
+In the qory repository, this folder also has a `qory-stack.yaml` with the same two
+modules. A run takes the folder by reference, at a commit of the repository:
+
+```sh
+qory run claude -f https://github.com/qoryai/qory#<commit>:examples/hello -- -p "/hello"
+```
+
+`qory setup example` does not write that file: a folder contains a `qory-stack.yaml` or a
+`qory.yaml` that lists modules, not both.

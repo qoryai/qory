@@ -18,9 +18,39 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- `-f` on `qory harness compose`, `qory run` and `qory worktree add` takes a stack by
+  reference, `<https URL>#<ref>:<folder>`: qory fetches the folder as it fetches a git
+  module and composes its `qory-stack.yaml`. `examples/hello` has one, so a run takes it
+  with `-f https://github.com/qoryai/qory#<commit>:examples/hello`.
+- Start a run on a machine that a provisioner creates with `qory run --run-code-file <file>
+  --gateway <https URL>`: qory redeems the one-use run code (`qecr_…`) in the file through
+  the gateway for the run's run key and documents, and runs with that key, which stays in
+  memory. The documents set the stack, the workflow, the runtime, the model settings and
+  the inputs: qory composes the stack and starts the skill or command named like the
+  workflow, with the path of the inputs.
+- A run from a run code whose documents set `harness_hidden: true` composes a home with
+  copies of every module's files in place of links, as a walled run does, and sets
+  Forager's `HarnessHidden`. Forager then masks text that matches at least 3
+  consecutive lines or 200 characters of a harness file, in the session's log and
+  events. A link that leads out of a module stops the run, exit 1. See A hidden harness
+  in `docs/run.md` for what is not masked and Forager's limits.
+- Give a workflow of a stack a time limit with `workflows.<name>.time_limit` in its
+  `qory-stack.yaml`, such as `workflows: {example: {time_limit: 45m}}`. A run from a run
+  code takes its time limit from Qory Apiary's `run_settings.time_limit_minutes`, else
+  from its workflow's `time_limit`, else 3 hours.
+- See the fetch and the compose of `qory run` as steps in the run's record, each with
+  its lines and its end: a failed step ends `failed` with the exit status of `qory run`,
+  after its error line.
+- Run the main agent at an effort value with `--effort` on `qory harness compose` and
+  `qory run`, or `harness.effort` in your `qory.yaml`. qory passes the value as you
+  wrote it, in the place the runtime's descriptor in Forager lists for the effort, and
+  only a value the descriptor lists: for Claude Code, its `--effort` flag, with `low`,
+  `medium`, `high`, `xhigh` or `max`.
 - Map a tier to a model id for agents whose `model` is `${qory:light}`, `${qory:fast}` or
   `${qory:thinking}`, with `--tier`, `harness.tiers` in your `qory.yaml`, or
   `harness.tiers` in the repository's `qory.yaml`.
+- Give the agents of a tier an effort value with `--tier-effort <tier>=<effort>` on
+  `qory harness compose` and `qory run`, beside `--tier <tier>=<model id>`.
 - `gateway.selects` in forager.yaml: when a run's policy selects no credentials, `qory
   gateway` selects them for a run, with a wall or without, by the run's labels, such as
   the GitHub credential for the repositories the run's `repository` label names, one or
@@ -28,6 +58,9 @@ release may change what an existing document does, and states it under Upgrading
 - `wall.images_allow` in forager.yaml: where a run's image may come from when the run's
   policy names one by a reference pinned by digest, a list of the prefixes of the
   references the machine runs. Without it, such a run is refused.
+- `wall.setup` in forager.yaml: where the setup of a walled run from a control plane
+  runs, `outside`, the default, in a separate container of the run's image on the wall's
+  network, or `inside`, in the agent's container before the agent.
 - `gateway.run_limits` in forager.yaml: the most connections each run has open through
   the gateway at once, the requests it sends a second, and the requests it sends at once
   after a pause; 256, 50 and 200 unless set. A request past a limit gets `429 Too Many
@@ -40,9 +73,105 @@ release may change what an existing document does, and states it under Upgrading
 - When to run without a wall, in `docs/run.md`: without a wall for an agent you start
   yourself on your machine; with a wall for a run that nobody watches, such as one that a
   work item or a schedule starts.
+- `images/gateway`, an image that runs `qory gateway` as the user 65532, with no shell.
+  A push to the branch `prerelease` publishes it, and the `agent` image, to private
+  packages beside qory's, tagged `sha-<the commit's first 7 characters>`.
 
 ### Changed
 
+- `qory run pool` starts each dispatch it claims with `qory run --run-code-file /dev/fd/3
+  --gateway <gateway_url>`, as a machine that a provisioner creates does, and each run
+  reports its outcome itself. While the run runs, the pool sends dispatched every 60 s;
+  it stops the run when Qory Apiary ends the dispatch or the claim's
+  `max_lifetime_minutes` pass. Once the run ends, the pool uploads the run's output as
+  the dispatch's machine log, once: at most the last 768 KiB, with each line that
+  contains `qak_`, `qrk_` or `qecr_` replaced. If the upload fails, the pool logs a line,
+  and the run's end does not change. The pool section of
+  `forager.yaml` takes `runs`, `registry` and `run_config`. With `prebuilds`,
+  `harness_ref` or `harness_path` in it, qory stops with `<file>: line <n>: key "<key>"
+  is not one forager.yaml reads`.
+- A run from a run code whose documents have the step `prebuild` builds the image of the
+  run's target in `qory run`, on a machine without an access key, in two steps:
+  the environment image from the development container configuration, tagged
+  `<environment_destination>:<run id>`, then the target image from it, with the agent
+  added, tagged `<image_destination>:<run id>`. qory pushes the
+  environment image, when the build keeps one apart and the documents set no
+  `environment_image`, then the target image. It writes the run's `dev.qory.run.built`
+  with the target image by digest; with the environment image by digest when qory
+  pushed one or the build started from `environment_image`; and with the base image by
+  digest when the build resolved the image its target step starts from. Then it closes
+  the run. The build pulls the base image by digest first, with `prebuild: pulled the
+  base image <name>@sha256:<digest> in <n>s`.
+  An environment image or standard image that the build starts from must not set access
+  to the host in its `devcontainer.metadata` label, nor the variables that change what
+  the agent does. When the documents' `environment_image` is not in its registry, qory
+  closes the run as failed with the reason `image_missing`. The build takes `wall.image`,
+  pinned by its digest, `wall.user` and `wall.helper` from `forager.yaml`; without them,
+  qory stops with `set wall.image, pinned by its digest, wall.user and wall.helper in
+  forager.yaml: a prebuild from a run code builds with them; the code is used`.
+- `qory run` composes the harness before the agent starts, as `qory harness compose`
+  does, into the same home, and takes its `-f`/`--file`, `--model` and `--tier`. It prints
+  `qory run: composed <n> entries from <m> modules for <runtime>` on stderr. You no longer
+  run `qory harness compose` before `qory run`.
+- `qory run` opens the run at its gateway before it composes the harness, and closes the
+  run with the run's outcome once the session ends. `--timeout` counts from the open, so
+  it covers the compose and the session. A compose that fails closes the run as failed
+  with no session started (`no_session`), and qory prints the path of the run's record
+  after the error line. A signal or the time limit before the agent starts cancels the
+  run, exit 1 or 124.
+- The record's `dev.qory.session.started` lists the harness's git sources, each with the
+  full commit the compose used.
+- Given a run key, `qory run` reads a module or a stack that a file in the checkout lists
+  by a path only from inside the checkout, every link resolved, and fetches the git
+  sources of those files over https only. It reads no `git` or `env` key of the checkout's
+  `qory.yaml`, and no machine key under `harness` such as `model` or `launch`. It reads no
+  harness report of an earlier compose either. A source that breaks a rule stops the run
+  with exit 2.
+- With a run key or a run code, `qory run` composes the harness outside the folder it
+  runs in, into a home under `qory/homes` in your cache directory, such as
+  `~/.cache/qory/homes/<name>-<hash>`, unless `--home` or `harness.home` in your
+  `qory.yaml` sets another. The compose writes nothing into the folder: no `.qory/harness`, no
+  link and no line in `.git/info/exclude`, in a folder that is not a git working tree as
+  well. A home inside the folder stops the run with exit 2 before anything is written,
+  behind a wall or not: `set --home to a folder outside <dir>: …`. This stop replaces
+  the one of a walled run of Claude Code with a run key on a home inside the folder,
+  which came after the compose. A run without a run key composes as before.
+- A run from a control plane fetches its repositories on this machine, through the run's
+  gateway, once the run is open and before the compose, and prints `qory run: fetched
+  <owner>/<name> at <commit> in <seconds>s`. Before, `qory run prepare` cloned them inside
+  the wall; it now adds the image's copy to the fetched working folder and runs the
+  start commands. Each git source of the compose is fetched over https through the same
+  gateway into the run's directory, with a line `qory run: fetched <url>#<ref> at <commit>
+  in <seconds>s`. No fetch reads this machine's git configuration or credentials. A failed
+  fetch stops the run before the agent starts, with exit 1, or 2 for a ref the remote
+  does not have and a git source that is not https. Before the fetch, qory stops on a
+  working folder whose git configuration has a key git init does not write, such as a
+  filter, `remote.origin.proxy` or `http.sslVerify`, whose `.git` has a link or
+  alternates, or that a walled run used and changed. A walled run that starts in the
+  working folder waits until the fetch and the checkout end. The lines of the fetch start
+  with `qory run:`, where they started with `qory run prepare:`, and each error line
+  starts with its fix.
+- The setup of a walled run from a control plane whose run configuration lists
+  repositories, which adds a prebuilt image's copy and runs the repository's
+  `postCreateCommand` and `postStartCommand`, is one `setup` step of the run's record,
+  `prepare`, with its lines and its exit status. It runs in a separate container of the
+  run's image, which runs until the run closes, unless `wall.setup` is `inside`; outside,
+  its lines go to the record alone. Before, it ran in the agent's container before the
+  agent, as no step. Outside, the setup container gets the agent's variables, from the
+  server's run configuration, `--env`, `wall.env` and the harness's defaults, with the
+  agent's deny lists and placeholders; a variable of `wall.env` or `--env` that Forager
+  reserves or that is a placeholder fails the run before the setup, with `leave <names>
+  out of wall.env and --env, then run again: …` when no harness value sets that name
+  too, and with Forager's refusal when one does. Outside, a setup command that exits
+  otherwise than 0 fails the run before the agent starts, with `qory run: Fix prepare:
+  setup step <n> exited with <status>.` and exit 1. Inside, the session ends with the
+  command's exit status, and `qory run` prints `claude exited <status>` and exits with
+  it.
+  `dev.qory.session.started` contains `setup_commands`, the names of the session's setup
+  commands, in place of `preparation`.
+- `qory run agent-env` makes the agent's home of a dispatched walled run of Claude Code,
+  after the setup, and its error lines start with the fix, such as `qory run agent-env:
+  remove /tmp/qory-agent-home from the image and from the setup commands: …`.
 - Behind a wall, and for every run through a separate gateway, the gateway reaches the
   gateway's machine and a private network address, such as `10.0.0.5`, only for a host
   that `gateway.egress.allow` of the gateway's `forager.yaml` lists by name, and that the
@@ -89,24 +218,24 @@ release may change what an existing document does, and states it under Upgrading
 - `qory run` given a run key starts Claude Code with `--setting-sources user`,
   `--strict-mcp-config`, and the harness's MCP list or an empty one. Behind a wall,
   Claude Code's `CLAUDE_CONFIG_DIR` is an empty folder qory makes after the commands the
-  repository's configuration runs, and the run is refused when the image has
-  `/etc/claude-code` or the harness home is inside the checkout.
-- `qory run` given a run key reads no `harness`, `git` or `env` key of the checkout's
-  `qory.yaml`. Behind a wall, its Claude Code gets none of the image's values of the
-  variables named `ANTHROPIC_*`, `CLAUDE_*`, `QORY_*`, `MCP_*` and `OTEL_*`, of
-  `NODE_OPTIONS`, `NODE_PATH`, `LD_PRELOAD`, `LD_AUDIT`, `BASH_ENV` and `ENV`, of the proxy
-  variables, and of `SSL_CERT_FILE`, `SSL_CERT_DIR` and `NODE_EXTRA_CA_CERTS`; the values
-  Forager, the wall and the server set stay, and so does a value of `ANTHROPIC_*`,
-  `CLAUDE_*`, `QORY_*`, `MCP_*` or `OTEL_*` that is the gateway's placeholder. These
-  checks guard against what the image and the repository's files leave in place, not
-  against a repository that acts against them: the image's programs and the repository's
-  commands run as the agent's user in the agent's container. Against a hostile repository,
-  the boundary is the wall: the container reaches out only through the gateway, which
-  holds the credentials and starts the tools of `gateway.tools` outside it. The run's
-  record is written outside the container, and what Forager and the gateway record there,
-  the run's start and end and its egress, cannot be changed from inside it; the hook
-  events come from inside, so a program left running there can send hook events Claude
-  Code did not make.
+  repository's configuration runs, and the run stops when the image has
+  `/etc/claude-code`.
+- `qory run` given a run key reads no `git` or `env` key of the checkout's `qory.yaml`,
+  and no machine key under `harness` such as `model` or `launch`. Behind a wall, its
+  Claude Code gets none of the image's values of the variables named `ANTHROPIC_*`,
+  `CLAUDE_*`, `QORY_*`, `MCP_*` and `OTEL_*`, of `NODE_OPTIONS`, `NODE_PATH`,
+  `LD_PRELOAD`, `LD_AUDIT`, `BASH_ENV` and `ENV`, of the proxy variables, and of
+  `SSL_CERT_FILE`, `SSL_CERT_DIR` and `NODE_EXTRA_CA_CERTS`; the values Forager, the wall
+  and the server set stay, and so does a value of `ANTHROPIC_*`, `CLAUDE_*`, `QORY_*`,
+  `MCP_*` or `OTEL_*` that is the gateway's placeholder. These checks guard against what
+  the image and the repository's files leave in place, not against a repository that acts
+  against them: the image's programs and the repository's commands run as the agent's user
+  in the agent's container. Against a hostile repository, the boundary is the wall: the
+  container reaches out only through the gateway, which holds the credentials and starts
+  the tools of `gateway.tools` outside it. The run's record is written outside the
+  container, and what Forager and the gateway record there, the run's start and end and
+  its egress, cannot be changed from inside it; the hook events come from inside, so a
+  program left running there can send hook events Claude Code did not make.
 - Behind a wall, the runtime's variables that nothing sets for the run are unset in the
   container. Its declared and reserved variables were empty before. The names it denies,
   such as Claude Code's `ANTHROPIC_BASE_URL`, `CLAUDE_CONFIG_DIR`,
@@ -136,9 +265,19 @@ release may change what an existing document does, and states it under Upgrading
   `auth`, and the endpoint as its model endpoint. A credential without `format` whose
   `placeholders` list a variable Claude Code reads its key from, such as
   `CLAUDE_CODE_OAUTH_TOKEN`, stops the run, `run_configuration_invalid`.
+- `qory harness compose`, `inspect`, `launch` and `remove`, and `qory run`, work in a
+  folder that is not a git working tree when the home is outside the folder, under
+  `--home` or `harness.home`. Nothing is written into the folder. With the home inside
+  such a folder, they stop with exit 2 and the line `set --home or harness.home to a
+  folder outside <folder>, or run git init in <folder>: a home inside a folder needs a
+  git working tree there, and <folder> is not one`.
 
 ### Fixed
 
+- A walled run gets the skills and other files of its modules. The home linked to the
+  folders of modules outside the checkout, which are not mounted in the container; behind
+  a wall, it contains copies of the files that the stack selects, without what `only` or
+  `exclude` leaves out.
 - A pin's public key that is one valid Ed25519 key and contains `qak_` or `qrk_`, in any
   letter case, after its first character is no longer refused as a secret, in
   `gateway.server.apiary_public_key` of forager.yaml and in `QORY_APIARY_PUBLIC_KEY`. A
@@ -192,6 +331,12 @@ release may change what an existing document does, and states it under Upgrading
   A git URL with a password in its user part prints as `https://user:(hidden)@host/…`.
   `qory harness launch` and its `--json` line print the values as written, since a person
   copies that line to run it.
+
+### Security
+
+- qory builds with Go 1.27.3, whose `crypto/x509` returns an error for the intermediate
+  certificates that Go no longer trusts (GO-2026-6809, CVE-2026-111943). go.mod requires
+  Go 1.27.3, and `agent-go` and `agent-go-docker` have Go 1.27.3 in place of 1.27.1.
 
 ## [0.13.0] - 2026-10-13
 

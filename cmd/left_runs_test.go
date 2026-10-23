@@ -248,3 +248,23 @@ func TestAPlaceAGoingRunBindsIsNotRecordedForANewRun(t *testing.T) {
 		r.Release()
 	}
 }
+
+// TestTheRunThisProcessOpensDoesNotHoldThePlace leaves the entry of a walled run whose
+// container is running, with a writable bind of a recorded checkout. In the process
+// that opens that run, as qory run does before its compose, git in the checkout runs:
+// the entry is that run's. Once the process has set back the run before, qory stops
+// git there again with the line that the checkout is in use.
+func TestTheRunThisProcessOpensDoesNotHoldThePlace(t *testing.T) {
+	root := newCheckout(t)
+	recordCheckout(t, root)
+	leftRun(t, "running", leftBind{root, true})
+	restore := places.SetThisRun(leftID)
+	_, err := run(t, "config")
+	restore()
+	if err != nil {
+		t.Errorf("git in a place of the run this process opens: %v", err)
+	}
+	if _, err := run(t, "config"); err == nil || err.Error() != inUseLine(root) {
+		t.Errorf("git in a place of another run: %v", err)
+	}
+}

@@ -10,8 +10,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -24,12 +22,12 @@ import (
 	"time"
 
 	"github.com/qoryai/forager/accesskey"
-	"github.com/qoryai/integrations/contracts"
+	"github.com/qoryai/forager/session"
 
-	"github.com/qoryai/qory/internal/pool/child"
 	"github.com/qoryai/qory/internal/pool/explore"
 	"github.com/qoryai/qory/internal/pool/prebuild"
-	"github.com/qoryai/qory/internal/provisioner"
+	devimage "github.com/qoryai/qory/internal/prebuild"
+	"github.com/qoryai/qory/internal/proxygit"
 )
 
 // The fakes' script and reports are in the runs' configuration directory, the one
@@ -37,28 +35,50 @@ import (
 const (
 	scriptFile = "fake.json"
 	readyFile  = "ready"
+	askedFile  = "asked"
 )
 
-// script is what the fake qory and the fake docker do.
+// script is what the fakes do: the open, the fetch and the build, in this process, and
+// docker, a program.
 type script struct {
-	// RunID is the run whose record qory run --fetch-only makes, with Record.
-	RunID string
-	// KeySum is the SHA-256 of the key qory run expects on descriptor 3.
-	KeySum string
-	// Fetch is qory run --fetch-only's exit status; Record makes it make the run's
-	// record; Head is what it leaves in work/.git: "branch", a loose ref, "packed", a
-	// packed ref, "detached", or "garbage"; Commit is the id it leaves.
-	Fetch  int
+	// Open is the open's end: "" opens the run, "fail" refuses it, "block" waits for
+	// its context. Record makes the open make the run's record.
+	Open   string
 	Record bool
+	// Fetch is the fetch's end: "" fetches, leaving Head and Commit in work/.git;
+	// "fail" fails; "none" fetches nothing, as for a run configuration that lists no
+	// repository; "block" waits for its context, which "limit" does too at a time limit
+	// of 50 ms. HostProxy "fail" makes the host proxy fail to open.
+	Fetch     string
+	HostProxy string
+	// Head is what the fetch leaves in work/.git: "branch", a loose ref, "packed", a
+	// packed ref, "detached", or "garbage"; Commit is the id it leaves.
 	Head   string
 	Commit string
-	// Build is qory run prebuild's exit status, Push docker push's.
-	Build, Push int
+	// Close is the close's end: "" closes the run, "fail" fails, "gateway" finds it
+	// closed by the gateway, failed, and "undelivered" closes it with one event the
+	// gateway did not accept.
+	Close string
+	// Build is the build's end: "" builds, "none" finds no configuration, "fail"
+	// fails, "refused" refuses, "limit" reaches its limit, "block" waits for its
+	// context, "missing" finds no environment image in its registry, "unreachable"
+	// reaches no registry for the environment image.
+	Build string
+	// EnvironmentImage is the run's environment image, "" for none.
+	EnvironmentImage string
+	// Push is docker push's exit status; Block "push" makes it wait for SIGTERM and
+	// exit 1, and Block "manifest" makes docker buildx imagetools inspect wait so.
+	Push  int
+	Block string
 	// Inspect is what docker image inspect prints.
 	Inspect string
-	// Block is the step that waits for SIGTERM and exits 1, as qory run does: "fetch",
-	// "build" or "push".
-	Block string
+	// Manifests are what docker buildx imagetools inspect --raw prints of each digest:
+	// the bytes of its manifest. A digest not in it is not found, and exits 1.
+	Manifests map[string]string
+	// Environment is the environment image the fake build keeps apart, "" for none,
+	// and Base the base image it reports.
+	Environment string
+	Base        string
 }
 
 // report is what a fake saw, written to report-<step>.json.
@@ -67,14 +87,13 @@ type report struct {
 	Args     []string
 	Dir      string
 	FD3Pipe  bool
-	KeyOK    bool
 	Problems []string
 }
 
-// fd3Pipe reports whether descriptor 3 is open and a pipe, as the key's is.
+// fd3Pipe reports whether descriptor 3 is open and a pipe, as a key's would be.
 func fd3Pipe() bool {
 	var st syscall.Stat_t
-	return syscall.Fstat(child.KeyFD, &st) == nil && st.Mode&syscall.S_IFMT == syscall.S_IFIFO
+	return syscall.Fstat(3, &st) == nil && st.Mode&syscall.S_IFMT == syscall.S_IFIFO
 }
 
 func TestMain(m *testing.M) {
@@ -82,8 +101,8 @@ func TestMain(m *testing.M) {
 		switch os.Args[1] {
 		case "init":
 			os.Exit(fakeGit())
-		case "run", "push", "image":
-			os.Exit(fake(fd3Pipe()))
+		case "push", "image", "buildx":
+			os.Exit(fakeDocker(fd3Pipe()))
 		}
 	}
 	os.Exit(m.Run())
@@ -97,34 +116,45 @@ func fakeGit() int {
 	return 0
 }
 
-// stepOf is the step a fake's arguments are.
+// stepOf is the step a fake docker's arguments are.
 func stepOf(args []string) string {
 	switch {
-	case len(args) > 1 && args[0] == "run" && args[1] == "--fetch-only":
-		return "fetch"
-	case len(args) > 1 && args[0] == "run" && args[1] == "prebuild":
-		return "build"
 	case len(args) > 0 && args[0] == "push":
 		return "push"
 	case len(args) > 1 && args[0] == "image" && args[1] == "inspect":
 		return "inspect"
 	case len(args) > 1 && args[0] == "image" && args[1] == "rm":
 		return "rm"
+	case len(args) > 2 && args[0] == "buildx" && args[1] == "imagetools" && args[2] == "inspect":
+		return "manifest"
 	}
 	return "unknown"
 }
 
-// fake is qory run --fetch-only, qory run prebuild, docker push, docker image inspect or
-// docker image rm, as the script in $XDG_CONFIG_HOME says.
-func fake(fd3 bool) int {
+// readScript is the script in dir.
+func readScript(dir string) (script, error) {
+	var s script
+	b, err := os.ReadFile(filepath.Join(dir, scriptFile))
+	if err != nil {
+		return s, err
+	}
+	return s, json.Unmarshal(b, &s)
+}
+
+// writeReport writes rep as the report of step in dir.
+func writeReport(dir, step string, rep report) error {
+	out, _ := json.Marshal(rep)
+	return os.WriteFile(filepath.Join(dir, "report-"+step+".json"), out, 0o600)
+}
+
+// fakeDocker is docker push, docker image inspect, docker buildx imagetools inspect or
+// docker image rm, as the script in $XDG_CONFIG_HOME sets it. Each reference that
+// docker buildx imagetools inspect is run with is appended to the file asked there.
+func fakeDocker(fd3 bool) int {
 	config := os.Getenv("XDG_CONFIG_HOME")
-	b, err := os.ReadFile(filepath.Join(config, scriptFile))
+	s, err := readScript(config)
 	if err != nil {
 		return 90
-	}
-	var s script
-	if err := json.Unmarshal(b, &s); err != nil {
-		return 91
 	}
 	step := stepOf(os.Args[1:])
 	cwd, _ := os.Getwd()
@@ -141,41 +171,43 @@ func fake(fd3 bool) int {
 	}
 	code := 0
 	switch step {
-	case "fetch":
-		code = s.Fetch
-		if fd3 {
-			got := make(chan []byte, 1)
-			go func() {
-				k, _ := io.ReadAll(os.NewFile(uintptr(child.KeyFD), "key"))
-				got <- k
-			}()
-			select {
-			case k := <-got:
-				rep.KeyOK = sum(k) == s.KeySum
-			case <-time.After(5 * time.Second):
-				rep.Problems = append(rep.Problems, "descriptor 3 never reached its end")
-			}
-		}
-		if s.Record {
-			if err := os.MkdirAll(fakeRecord(cwd, s.RunID), 0o700); err != nil {
-				return 94
-			}
-		}
-		if err := writeHead(filepath.Join(cwd, ".git"), s.Head, s.Commit); err != nil {
-			return 95
-		}
-	case "build":
-		code = s.Build
 	case "push":
 		code = s.Push
 	case "inspect":
 		fmt.Println(s.Inspect)
+	case "manifest":
+		ref := os.Args[len(os.Args)-1]
+		f, err := os.OpenFile(filepath.Join(config, askedFile), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err != nil {
+			return 93
+		}
+		fmt.Fprintln(f, ref)
+		f.Close()
+		_, digest, _ := strings.Cut(ref, "@")
+		if body, ok := s.Manifests[digest]; ok {
+			fmt.Print(body)
+		} else {
+			fmt.Fprintf(os.Stderr, "ERROR: %s: not found\n", ref)
+			code = 1
+		}
 	}
-	out, _ := json.Marshal(rep)
-	if err := os.WriteFile(filepath.Join(config, "report-"+step+".json"), out, 0o600); err != nil {
+	if err := writeReport(config, step, rep); err != nil {
 		return 92
 	}
-	if step != "inspect" {
+	// Each tag docker image rm and docker push ran with is appended to the file removed
+	// or pushed.
+	for file, at := range map[string]string{"removed": "rm", "pushed": "push"} {
+		if step != at {
+			continue
+		}
+		f, err := os.OpenFile(filepath.Join(config, file), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err != nil {
+			return 92
+		}
+		fmt.Fprintln(f, os.Args[len(os.Args)-1])
+		f.Close()
+	}
+	if step != "inspect" && step != "manifest" {
 		fmt.Println(step, "says hello")
 		fmt.Fprintln(os.Stderr, step, "warns")
 	}
@@ -219,15 +251,160 @@ func sum(b []byte) string {
 	return hex.EncodeToString(s[:])
 }
 
-// fakeRecord is the folder of the record of the run runID started in cwd, as qory run's
-// documentation says it, computed apart from the launcher's.
-func fakeRecord(cwd, runID string) string {
-	state := filepath.Join(os.Getenv("HOME"), ".local", "state", "qory")
-	if base := os.Getenv("XDG_STATE_HOME"); filepath.IsAbs(base) {
-		state = filepath.Join(base, "qory")
+// fakeProxy is the host proxy's URL that the fake run returns, with a password.
+const fakeProxy = "http://qory:hostproxypassword@127.0.0.1:9"
+
+// fakeRun is a run the fake open opened: it records the host proxy's start, the
+// build's result Built was called with, and the close's outcome.
+type fakeRun struct {
+	e       *env
+	proxies int
+	closed  []session.Outcome
+	// built is how many builds had started at each close.
+	built []int
+	// reported is each result Built was called with, and reportedOpen whether the run
+	// was open at each call.
+	reported     []session.Built
+	reportedOpen []bool
+}
+
+func (r *fakeRun) Built(b session.Built) error {
+	r.reported = append(r.reported, b)
+	r.reportedOpen = append(r.reportedOpen, len(r.closed) == 0)
+	return r.e.reportErr
+}
+
+func (r *fakeRun) HostProxy() (session.HostProxy, error) {
+	if r.e.script.HostProxy == "fail" {
+		return session.HostProxy{}, errors.New("listen tcp 127.0.0.1:0: no port")
 	}
-	real, _ := filepath.EvalSymlinks(cwd)
-	return filepath.Join(state, "runs", filepath.Base(real)+"-"+sum([]byte(real))[:12], runID)
+	r.proxies++
+	return session.HostProxy{ProxyURL: fakeProxy, CABundle: "/run/ca-bundle.pem"}, nil
+}
+
+func (r *fakeRun) System() string       { return "github.com" }
+func (r *fakeRun) Repositories() string { return "acme/shop" }
+
+func (r *fakeRun) Close(_ context.Context, out session.Outcome) (*session.Closed, error) {
+	r.closed = append(r.closed, out)
+	r.e.mu.Lock()
+	r.built = append(r.built, len(r.e.built))
+	r.e.mu.Unlock()
+	switch r.e.script.Close {
+	case "fail":
+		return nil, errors.New("the run is closed already")
+	case "gateway":
+		return &session.Closed{State: "failed", RunClosed: true}, nil
+	case "undelivered":
+		return &session.Closed{State: out.State, Reason: out.Reason, ExitCode: out.ExitCode, Undelivered: 1}, nil
+	}
+	return &session.Closed{State: out.State, Reason: out.Reason, ExitCode: out.ExitCode}, nil
+}
+
+// open is the fake open, in this process: it checks the spec, then does what the
+// script is set to.
+func (e *env) open(ctx context.Context, spec session.OpenSpec) (prebuild.Opened, error) {
+	e.mu.Lock()
+	e.specs = append(e.specs, spec)
+	e.mu.Unlock()
+	if err := writeReport(e.settings.RunConfig, "fetch", report{Args: []string{"open"}}); err != nil {
+		return nil, err
+	}
+	if e.script.Record {
+		if err := os.MkdirAll(filepath.Join(spec.RunsDir, spec.RunID), 0o700); err != nil {
+			return nil, err
+		}
+	}
+	switch e.script.Open {
+	case "fail":
+		return nil, errors.New("the gateway refused the run request: run_not_found")
+	case "block":
+		e.ready()
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	e.run = &fakeRun{e: e}
+	return e.run, nil
+}
+
+// fetch is the fake fetch, in this process.
+func (e *env) fetch(ctx context.Context, dir string, base []string, getenv func(string) string, p proxygit.Proxy, out io.Writer) (bool, error) {
+	e.mu.Lock()
+	e.fetched = append(e.fetched, fetched{dir: dir, base: base, system: getenv("QORY_RUN_SYSTEM"), list: getenv("QORY_RUN_REPOSITORIES"), proxy: p})
+	e.mu.Unlock()
+	switch e.script.Fetch {
+	case "fail":
+		return false, errors.New("qory run: add a credential for github.com that reads acme/shop to the run configuration, then run again. The fetch of acme/shop through the run's gateway failed: fatal: could not read from " + p.URL)
+	case "none":
+		return false, nil
+	case "block", "limit":
+		e.ready()
+		<-ctx.Done()
+		return false, errors.New("qory run: git fetch was stopped")
+	}
+	if err := writeHead(filepath.Join(dir, ".git"), e.script.Head, e.script.Commit); err != nil {
+		return false, err
+	}
+	fmt.Fprintln(out, "qory run: fetched acme/shop at 8c9d0e1f2a3b in 0.1s")
+	return true, nil
+}
+
+// build is the fake build, in this process.
+func (e *env) build(ctx context.Context, o devimage.Options) (devimage.Result, error) {
+	e.mu.Lock()
+	e.built = append(e.built, o)
+	e.mu.Unlock()
+	if err := writeReport(e.settings.RunConfig, "build", report{Env: o.Env, Args: []string{"build"}}); err != nil {
+		return devimage.Result{}, err
+	}
+	fmt.Fprintln(o.Out, "prebuild: built "+o.Tag+" in 1.0s: 123 B")
+	fmt.Fprintln(o.Log, "build warns")
+	switch e.script.Build {
+	case "none":
+		return devimage.Result{}, devimage.ErrNoConfiguration
+	case "fail":
+		return devimage.Result{}, errors.New("devcontainer build did not build the image: exit 1")
+	case "refused":
+		return devimage.Result{}, &devimage.RefusedError{Err: errors.New("set wall.user to uid:gid, two numbers, neither of them 0")}
+	case "limit":
+		return devimage.Result{}, devimage.ErrLimit
+	case "missing":
+		return devimage.Result{}, pullError{why: "Error response from daemon: manifest for r.example/env:1 not found: manifest unknown: manifest unknown", missing: true}
+	case "unreachable":
+		return devimage.Result{}, pullError{why: `Error response from daemon: Get "https://r.example/v2/": dial tcp: lookup r.example: no such host`}
+	case "block":
+		e.ready()
+		<-ctx.Done()
+		return devimage.Result{}, devimage.ErrStopped
+	}
+	return devimage.Result{Target: o.Tag, Environment: e.script.Environment, Base: e.script.Base}, nil
+}
+
+// pullError is the fake build's failed pull of the environment image, as the build
+// returns it: [devimage.ErrImageMissing] when missing is set.
+type pullError struct {
+	why     string
+	missing bool
+}
+
+// Error is the build's text of the pull.
+func (e pullError) Error() string {
+	return "check that the Docker engine reaches the registry of r.example/env:1: docker pull exited with an error: " + e.why
+}
+
+// Is reports whether target is [devimage.ErrImageMissing], for a missing image.
+func (e pullError) Is(target error) bool { return e.missing && target == devimage.ErrImageMissing }
+
+// ready marks that a fake waits for its context.
+func (e *env) ready() {
+	os.WriteFile(filepath.Join(e.settings.RunConfig, readyFile), nil, 0o600)
+}
+
+// fetched is what the fake fetch was given.
+type fetched struct {
+	dir, system, list string
+	base              []string
+	proxy             proxygit.Proxy
 }
 
 // testKey is a run key's shape, with no meaning.
@@ -245,11 +422,22 @@ const testInputs = `{"version":1,"environment_ref":"3f2a1b0c9d8e"}`
 // testAgent is the agent image, pinned by digest.
 const testAgent = "ghcr.io/qoryai/agent@sha256:1111111111111111111111111111111111111111111111111111111111111111"
 
-// testTarget is the run's target.
-var testTarget = contracts.Target{System: "github.com", Path: "acme/shop"}
+// testDestination and testEnvironmentDestination are the run's image_destination and
+// environment_destination.
+const (
+	testDestination            = "localhost:5001/targets/0123456789abcdef"
+	testEnvironmentDestination = "localhost:5001/environments/0123456789abcdef"
+)
 
-// testName is the target's images' name: sha256("github.com/acme/shop"), 16 digits.
-var testName = sum([]byte("github.com/acme/shop"))[:16]
+// testTag and testEnvironmentTag are the tags of the target image and of the
+// environment image.
+const (
+	testTag            = testDestination + ":" + testRunID
+	testEnvironmentTag = testEnvironmentDestination + ":" + testRunID
+)
+
+// testBase is a base image the build reports.
+const testBase = "registry.example.com/base@sha256:2222222222222222222222222222222222222222222222222222222222222222"
 
 // holder is a key holder, as the provisioner client's.
 type holder struct {
@@ -260,55 +448,31 @@ type holder struct {
 func (h *holder) Bytes() []byte { return h.b }
 func (h *holder) Clear()        { clear(h.b); h.cleared++ }
 
-// registry is a fake registry: it serves the manifests it holds by digest.
-type registry struct {
-	mu        sync.Mutex
-	manifests map[string]served
-	gets      []string
-	srv       *httptest.Server
-}
-
-// served is a manifest's bytes and Content-Type.
-type served struct {
-	body, mediaType string
-}
-
-// put holds body under its digest, or under digest when that is set, and returns the
-// digest it is served at.
-func (r *registry) put(body, mediaType, digest string) string {
+// put makes docker buildx imagetools inspect --raw print body for its digest, or for
+// digest when that is set, and returns the digest it prints body for.
+func (e *env) put(body, digest string) string {
 	if digest == "" {
 		digest = "sha256:" + sum([]byte(body))
 	}
-	r.mu.Lock()
-	r.manifests[digest] = served{body, mediaType}
-	r.mu.Unlock()
+	if e.script.Manifests == nil {
+		e.script.Manifests = map[string]string{}
+	}
+	e.script.Manifests[digest] = body
 	return digest
 }
 
-func newRegistry(t *testing.T) *registry {
-	r := &registry{manifests: map[string]served{}}
-	r.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		r.mu.Lock()
-		r.gets = append(r.gets, req.URL.Path)
-		r.mu.Unlock()
-		prefix := "/v2/qory-env/" + testName + "/manifests/"
-		digest, ok := strings.CutPrefix(req.URL.Path, prefix)
-		r.mu.Lock()
-		m, have := r.manifests[digest]
-		r.mu.Unlock()
-		if !ok || !have || !strings.Contains(req.Header.Get("Accept"), "application/vnd.oci.image.manifest.v1+json") {
-			http.NotFound(w, req)
-			return
-		}
-		w.Header().Set("Content-Type", m.mediaType)
-		io.WriteString(w, m.body)
-	}))
-	t.Cleanup(r.srv.Close)
-	return r
+// asked is each reference docker buildx imagetools inspect ran with, in order.
+func (e *env) asked(t *testing.T) []string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(e.settings.RunConfig, askedFile))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Fields(string(b))
 }
-
-// host is the registry's host and port.
-func (r *registry) host() string { return strings.TrimPrefix(r.srv.URL, "http://") }
 
 // manifestOf is an image manifest whose config and layers have the sizes given.
 func manifestOf(mediaType string, config int64, layers ...int64) string {
@@ -326,14 +490,19 @@ func manifestOf(mediaType string, config int64, layers ...int64) string {
 // env is one launch's directories, fakes and log.
 type env struct {
 	settings  prebuild.Settings
-	reg       *registry
 	home      string
 	elsewhere string
 	script    script
 	mu        sync.Mutex
 	logs      []string
-	reported  []provisioner.Image
+	// reportErr is what the fake run's Built returns.
 	reportErr error
+	// specs are the open's specs, run the run it opened, fetched what the fetch was
+	// given, and built the build's options.
+	specs   []session.OpenSpec
+	run     *fakeRun
+	fetched []fetched
+	built   []devimage.Options
 }
 
 func (e *env) log(line string) { e.mu.Lock(); e.logs = append(e.logs, line); e.mu.Unlock() }
@@ -344,21 +513,23 @@ func (e *env) lines() []string {
 	return slices.Clone(e.logs)
 }
 
-// newEnv is a launch's directories, with HOME at one of them, a registry holding an
-// image manifest of 100 + 20 + 3 bytes, and a script whose digest is that manifest's:
-// a run that succeeds. The program's environment holds what no command may get.
+// newEnv is a launch's directories, with HOME at one of them, and a script whose
+// digest is that of an image manifest of 100 + 20 + 3 bytes, which docker buildx
+// imagetools inspect prints: a run that succeeds. The program's environment holds what
+// no command may get.
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := &env{home: filepath.Join(root, "home"), elsewhere: filepath.Join(root, "elsewhere"), reg: newRegistry(t)}
+	e := &env{home: filepath.Join(root, "home"), elsewhere: filepath.Join(root, "elsewhere")}
 	e.settings = prebuild.Settings{
 		State: filepath.Join(root, "state"), RunConfig: filepath.Join(root, "runconfig"),
-		Registry: e.reg.host() + "/qory-env", AgentImage: testAgent, User: "1000:1000", Helper: "/opt/qory/qory-linux",
-		Qory: os.Args[0], Git: os.Args[0], Docker: os.Args[0], Log: e.log, Grace: time.Second,
+		AgentImage: testAgent, User: "1000:1000", Helper: "/opt/qory/qory-linux",
+		Git: os.Args[0], Docker: os.Args[0], Log: e.log, Grace: time.Second, Version: "qory 0.0.0-test",
 	}
+	e.settings.Open, e.settings.Fetch, e.settings.Build = e.open, e.fetch, e.build
 	for _, d := range []string{e.home, e.settings.RunConfig} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatal(err)
@@ -369,17 +540,17 @@ func newEnv(t *testing.T) *env {
 	t.Setenv("QORY_ACCESS_KEY_SECRET", "qak_notakey")
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
 	t.Setenv("XDG_STATE_HOME", e.elsewhere)
-	digest := e.reg.put(manifestOf("application/vnd.oci.image.manifest.v1+json", 100, 20, 3), "application/vnd.oci.image.manifest.v1+json", "")
-	e.script = script{RunID: testRunID, KeySum: sum([]byte(testKey)), Record: true, Head: "branch", Commit: testCommit}
+	e.script = script{Record: true, Head: "branch", Commit: testCommit}
+	digest := e.put(manifestOf("application/vnd.oci.image.manifest.v1+json", 100, 20, 3), "")
 	e.inspect(digest, "linux", "arm64", "")
 	return e
 }
 
 // inspect makes docker image inspect name the image in the registry by digest, of the
-// platform given.
+// platform given, under the image_destination and the environment_destination alike.
 func (e *env) inspect(digest, os, arch, variant string) {
 	b, _ := json.Marshal(map[string]any{
-		"repo_digests": []string{"elsewhere.example.com/other@sha256:" + strings.Repeat("e", 64), e.settings.Registry + "/" + testName + "@" + digest},
+		"repo_digests": []string{"elsewhere.example.com/other@sha256:" + strings.Repeat("e", 64), testDestination + "@" + digest, testEnvironmentDestination + "@" + digest},
 		"os":           os, "architecture": arch, "variant": variant,
 	})
 	e.script.Inspect = string(b)
@@ -389,11 +560,20 @@ func (e *env) inspect(digest, os, arch, variant string) {
 // is set.
 func (e *env) launch(t *testing.T, stop bool) (prebuild.Result, error) {
 	t.Helper()
+	return e.launchIn(t, context.Background(), stop)
+}
+
+// launchIn is launch with a ctx under parent.
+func (e *env) launchIn(t *testing.T, parent context.Context, stop bool) (prebuild.Result, error) {
+	t.Helper()
 	b, _ := json.Marshal(e.script)
 	if err := os.WriteFile(filepath.Join(e.settings.RunConfig, scriptFile), b, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	if e.script.Fetch == "limit" {
+		defer prebuild.SetFetchTimeout(50 * time.Millisecond)()
+	}
+	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	if stop {
 		go func() {
@@ -408,19 +588,47 @@ func (e *env) launch(t *testing.T, stop bool) (prebuild.Result, error) {
 		}()
 	}
 	h := &holder{b: []byte(testKey)}
-	res, err := prebuild.Launch(ctx, e.settings, prebuild.Run{
-		RunID: testRunID, Target: testTarget, Key: h, Inputs: []byte(testInputs),
-		Report: func(_ context.Context, img provisioner.Image) error {
-			e.mu.Lock()
-			defer e.mu.Unlock()
-			e.reported = append(e.reported, img)
-			return e.reportErr
-		},
-	})
+	res, err := prebuild.Launch(ctx, e.settings, testRun(h, e.script.EnvironmentImage))
 	if h.cleared == 0 || !bytes.Equal(h.b, make([]byte, len(testKey))) {
 		t.Error("the key's holder was not cleared")
 	}
 	return res, err
+}
+
+// testRun is the test's run with the key's holder h: with the environment_destination,
+// or with environment_image envImage when that is set.
+func testRun(h *holder, envImage string) prebuild.Run {
+	r := prebuild.Run{RunID: testRunID, Key: h, Inputs: []byte(testInputs), ImageDestination: testDestination, EnvironmentImage: envImage}
+	if envImage == "" {
+		r.EnvironmentDestination = testEnvironmentDestination
+	}
+	return r
+}
+
+// tags is each tag in the file name, removed or pushed, in order.
+func (e *env) tags(t *testing.T, name string) []string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(e.settings.RunConfig, name))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal(err)
+	}
+	return strings.Fields(string(b))
+}
+
+// closed is the outcomes the fake run closed with, nil when it did not open.
+func (e *env) closed() []session.Outcome {
+	if e.run == nil {
+		return nil
+	}
+	return e.run.closed
+}
+
+// reported is what the fake run's Built was called with.
+func (e *env) reported() []session.Built {
+	if e.run == nil {
+		return nil
+	}
+	return e.run.reported
 }
 
 // report is a fake's report of the step, ok false when it did not run.
@@ -440,7 +648,7 @@ func (e *env) report(t *testing.T, step string) (report, bool) {
 // steps is the steps that ran, in the order of the pipeline.
 func (e *env) steps(t *testing.T) []string {
 	var ran []string
-	for _, s := range []string{"fetch", "build", "push", "inspect", "rm"} {
+	for _, s := range []string{"fetch", "build", "push", "inspect", "manifest", "rm"} {
 		if _, ok := e.report(t, s); ok {
 			ran = append(ran, s)
 		}
@@ -448,28 +656,28 @@ func (e *env) steps(t *testing.T) []string {
 	return ran
 }
 
-// noLeak fails when the key, or what starts a secret, is in a log line, in err, in a
-// command's arguments or environment, or in a file under the launch's directories, and
-// when the run directory is left.
+// noLeak fails when the key, what starts a secret or the host proxy's password is in a
+// log line, in err, in a command's arguments or environment, or in a file under the
+// launch's directories, and when the run directory is left.
 func (e *env) noLeak(t *testing.T, err error) {
 	t.Helper()
 	texts := e.lines()
 	if err != nil {
 		texts = append(texts, err.Error())
 	}
-	for _, step := range []string{"fetch", "build", "push", "inspect", "rm"} {
+	for _, step := range []string{"fetch", "build", "push", "inspect", "manifest", "rm"} {
 		if r, ok := e.report(t, step); ok {
 			texts = append(append(texts, r.Args...), r.Env...)
 			for _, p := range r.Problems {
 				t.Errorf("%s: %s", step, p)
 			}
-			if step != "fetch" && r.FD3Pipe {
+			if r.FD3Pipe {
 				t.Errorf("%s got a descriptor 3", step)
 			}
 		}
 	}
 	for _, s := range texts {
-		if strings.Contains(s, testKey[4:24]) || accesskey.ContainsSecret(s) {
+		if strings.Contains(s, testKey[4:24]) || accesskey.ContainsSecret(s) || strings.Contains(s, "hostproxypassword") {
 			t.Errorf("a secret is in %q", s)
 		}
 	}
@@ -496,103 +704,141 @@ func (e *env) noLeak(t *testing.T, err error) {
 	}
 }
 
-// The endings of the table.
+// The outcomes the run closes with.
 var (
-	succeeded  = explore.Ending{Post: true, State: "succeeded"}
-	notStarted = explore.Ending{Release: true, ReleaseReason: "the run could not be started on this machine"}
+	closedSucceeded = session.Outcome{State: "succeeded", ExitCode: -1}
+	closedFailed    = session.Outcome{State: "failed", ExitCode: -1}
+	closedTimeout   = session.Outcome{State: "cancelled", Reason: "timeout", ExitCode: 124}
+	closedStopped   = session.Outcome{State: "cancelled", Reason: "interrupted", ExitCode: -1}
+	// closedImageMissing is the close Forager's Run.Close takes for an image not in its
+	// registry: failed, image_missing and -1, in a run no session joined.
+	closedImageMissing = session.Outcome{State: "failed", Reason: "image_missing", ExitCode: -1}
 )
 
-// releasedFailed is released with retry false for reason, posted failed with code.
-func releasedFailed(reason, code string) explore.Ending {
-	return explore.Ending{Post: true, State: "failed", Reason: code, Release: true, ReleaseReason: reason}
-}
+// testEnvImage is a run's environment image, by digest.
+const testEnvImage = "r.example/env@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
-// releasedOnly is released with retry false for reason, and not posted.
-func releasedOnly(reason string) explore.Ending {
-	return explore.Ending{Release: true, ReleaseReason: reason}
-}
-
-const (
-	t10 = "the pool program stopped during the build"
-	t11 = "the code could not be fetched"
-	t12 = "the repository has no development container configuration"
-	t13 = "the environment could not be built"
-	t14 = "the image could not be stored in the registry"
-)
-
+// TestLaunchRows follows each end of a prebuild: whether it failed, the steps that ran,
+// the outcome the run closed with, none when it did not open, and whether Built was
+// called, with the run open.
 func TestLaunchRows(t *testing.T) {
+	all := []string{"fetch", "build", "push", "inspect", "manifest", "rm"}
+	noManifest := []string{"fetch", "build", "push", "inspect", "rm"}
+	built := []string{"fetch", "build", "rm"}
 	for _, c := range []struct {
-		name  string
-		edit  func(*env)
-		stop  bool
-		want  explore.Ending
-		steps []string
+		name     string
+		edit     func(*env)
+		stop     bool
+		failed   bool
+		steps    []string
+		closed   []session.Outcome
+		reported bool
 	}{
-		{"succeeded", func(*env) {}, false, succeeded, []string{"fetch", "build", "push", "inspect", "rm"}},
-		{"fetch failed", func(e *env) { e.script.Fetch = 1 }, false, releasedFailed(t11, ""), []string{"fetch"}},
-		{"fetch failed, no record", func(e *env) { e.script.Fetch, e.script.Record = 2, false }, false, releasedOnly(t11), []string{"fetch"}},
-		{"fetch at its time limit", func(e *env) { e.script.Fetch = 124 }, false, releasedFailed(t11, "time_limit"), []string{"fetch"}},
-		{"fetch exit 0, no record", func(e *env) { e.script.Record = false }, false, releasedOnly(t11), []string{"fetch"}},
-		{"no commit", func(e *env) { e.script.Head = "garbage" }, false, releasedFailed(t11, ""), []string{"fetch"}},
-		{"packed ref", func(e *env) { e.script.Head = "packed" }, false, succeeded, []string{"fetch", "build", "push", "inspect", "rm"}},
-		{"no configuration", func(e *env) { e.script.Build = 7 }, false, releasedFailed(t12, ""), []string{"fetch", "build", "rm"}},
-		{"build failed", func(e *env) { e.script.Build = 1 }, false, releasedFailed(t13, ""), []string{"fetch", "build", "rm"}},
-		{"build refused", func(e *env) { e.script.Build = 2 }, false, releasedFailed(t13, ""), []string{"fetch", "build", "rm"}},
-		{"build at its time limit", func(e *env) { e.script.Build = 124 }, false, releasedFailed(t13, "time_limit"), []string{"fetch", "build", "rm"}},
-		{"push failed", func(e *env) { e.script.Push = 1 }, false, releasedFailed(t14, ""), []string{"fetch", "build", "push", "rm"}},
+		{"succeeded", func(*env) {}, false, false, all, []session.Outcome{closedSucceeded}, true},
+		{"open refused", func(e *env) { e.script.Open, e.script.Record = "fail", false }, false, true, []string{"fetch"}, nil, false},
+		{"open refused after its record", func(e *env) { e.script.Open = "fail" }, false, true, []string{"fetch"}, nil, false},
+		{"open made no record", func(e *env) { e.script.Record = false }, false, true, []string{"fetch"}, []session.Outcome{closedFailed}, false},
+		{"host proxy did not open", func(e *env) { e.script.HostProxy = "fail" }, false, true, []string{"fetch"}, []session.Outcome{closedFailed}, false},
+		{"fetch failed", func(e *env) { e.script.Fetch = "fail" }, false, true, []string{"fetch"}, []session.Outcome{closedFailed}, false},
+		{"no repository listed", func(e *env) { e.script.Fetch = "none" }, false, true, []string{"fetch"}, []session.Outcome{closedFailed}, false},
+		{"fetch at its time limit", func(e *env) { e.script.Fetch = "limit" }, false, true, []string{"fetch"}, []session.Outcome{closedTimeout}, false},
+		{"close failed", func(e *env) { e.script.Close = "fail" }, false, true, all, []session.Outcome{closedSucceeded}, true},
+		{"gateway closed the run", func(e *env) { e.script.Close = "gateway" }, false, true, all, []session.Outcome{closedSucceeded}, true},
+		{"no commit", func(e *env) { e.script.Head = "garbage" }, false, true, []string{"fetch"}, []session.Outcome{closedFailed}, false},
+		{"packed ref", func(e *env) { e.script.Head = "packed" }, false, false, all, []session.Outcome{closedSucceeded}, true},
+		{"no configuration", func(e *env) { e.script.Build = "none" }, false, true, built, []session.Outcome{closedFailed}, false},
+		{"build failed", func(e *env) { e.script.Build = "fail" }, false, true, built, []session.Outcome{closedFailed}, false},
+		{"build refused", func(e *env) { e.script.Build = "refused" }, false, true, built, []session.Outcome{closedFailed}, false},
+		{"build at its time limit", func(e *env) { e.script.Build = "limit" }, false, true, built, []session.Outcome{closedFailed}, false},
+		{"built from an environment image", func(e *env) { e.script.EnvironmentImage = testEnvImage }, false, false, all, []session.Outcome{closedSucceeded}, true},
+		{"environment image not in its registry", func(e *env) { e.script.EnvironmentImage, e.script.Build = testEnvImage, "missing" }, false, true, built, []session.Outcome{closedImageMissing}, false},
+		{"environment image's registry unreachable", func(e *env) { e.script.EnvironmentImage, e.script.Build = testEnvImage, "unreachable" }, false, true, built, []session.Outcome{closedFailed}, false},
+		{"stopped during the build from an environment image", func(e *env) { e.script.EnvironmentImage, e.script.Build = testEnvImage, "block" }, true, true, built, []session.Outcome{closedStopped}, false},
+		{"push failed", func(e *env) { e.script.Push = 1 }, false, true, []string{"fetch", "build", "push", "rm"}, []session.Outcome{closedFailed}, false},
 		{"no digest in the registry", func(e *env) {
 			e.script.Inspect = `{"repo_digests":["elsewhere.example.com/x@sha256:` + strings.Repeat("e", 64) + `"],"os":"linux","architecture":"arm64","variant":""}`
-		}, false, releasedFailed(t14, ""), []string{"fetch", "build", "push", "inspect", "rm"}},
-		{"digest not of the shape", func(e *env) { e.inspect("sha256:ABC", "linux", "arm64", "") }, false, releasedFailed(t14, ""), []string{"fetch", "build", "push", "inspect", "rm"}},
-		{"manifest not in the registry", func(e *env) { e.inspect("sha256:"+strings.Repeat("0", 64), "linux", "arm64", "") }, false, releasedFailed(t14, ""), []string{"fetch", "build", "push", "inspect", "rm"}},
+		}, false, true, noManifest, []session.Outcome{closedFailed}, false},
+		{"digest not of the shape", func(e *env) { e.inspect("sha256:ABC", "linux", "arm64", "") }, false, true, noManifest, []session.Outcome{closedFailed}, false},
+		{"manifest not in the registry", func(e *env) { e.inspect("sha256:"+strings.Repeat("0", 64), "linux", "arm64", "") }, false, true, all, []session.Outcome{closedFailed}, false},
 		{"manifest's bytes not of its digest", func(e *env) {
-			d := e.reg.put(manifestOf("", 1, 1), "application/vnd.oci.image.manifest.v1+json", "sha256:"+strings.Repeat("a", 64))
+			d := e.put(manifestOf("", 1, 1), "sha256:"+strings.Repeat("a", 64))
 			e.inspect(d, "linux", "arm64", "")
-		}, false, releasedFailed(t14, ""), []string{"fetch", "build", "push", "inspect", "rm"}},
-		{"prebuilt refused", func(e *env) { e.reportErr = errors.New("prebuilt for dp_x: Qory Apiary answered 409 run_mismatch") }, false, releasedFailed(t14, ""), []string{"fetch", "build", "push", "inspect", "rm"}},
-		{"stopped during the fetch", func(e *env) { e.script.Block = "fetch" }, true, releasedFailed(t10, "pool_stopped"), []string{"fetch"}},
-		{"stopped during the fetch, no record", func(e *env) { e.script.Block, e.script.Record = "fetch", false }, true, releasedOnly(t10), []string{"fetch"}},
-		{"stopped during the build", func(e *env) { e.script.Block = "build" }, true, releasedFailed(t10, "pool_stopped"), []string{"fetch", "build", "rm"}},
-		{"stopped during the push", func(e *env) { e.script.Block = "push" }, true, releasedFailed(t10, "pool_stopped"), []string{"fetch", "build", "push", "rm"}},
+		}, false, true, all, []session.Outcome{closedFailed}, false},
+		{"built refused", func(e *env) { e.reportErr = errors.New("write the build's result once per run") }, false, true, all, []session.Outcome{closedFailed}, true},
+		{"stopped during the open", func(e *env) { e.script.Open, e.script.Record = "block", false }, true, true, []string{"fetch"}, nil, false},
+		{"stopped during the fetch", func(e *env) { e.script.Fetch = "block" }, true, true, []string{"fetch"}, []session.Outcome{closedStopped}, false},
+		{"stopped during the build", func(e *env) { e.script.Build = "block" }, true, true, built, []session.Outcome{closedStopped}, false},
+		{"stopped during the push", func(e *env) { e.script.Block = "push" }, true, true, []string{"fetch", "build", "push", "rm"}, []session.Outcome{closedStopped}, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEnv(t)
 			c.edit(e)
-			res, err := e.launch(t, c.stop)
-			if (err == nil) != (c.want == succeeded) {
-				t.Errorf("err %v", err)
-			}
-			if res.Ending != c.want {
-				t.Errorf("ending %+v, want %+v", res.Ending, c.want)
-			}
-			if res.Ending.Retry {
-				t.Error("released with retry true after the handover")
+			_, err := e.launch(t, c.stop)
+			if (err != nil) != c.failed {
+				t.Errorf("err %v, want failed %v", err, c.failed)
 			}
 			if got := e.steps(t); !slices.Equal(got, c.steps) {
 				t.Errorf("steps %q, want %q", got, c.steps)
 			}
-			wantReports := 0
-			if slices.Contains(c.steps, "inspect") && (c.want == succeeded || strings.HasPrefix(c.name, "prebuilt")) {
-				wantReports = 1
+			if !slices.Equal(e.closed(), c.closed) {
+				t.Errorf("the run closed with %+v, want %+v", e.closed(), c.closed)
 			}
-			if len(e.reported) != wantReports {
-				t.Errorf("prebuilt sent %d times, want %d", len(e.reported), wantReports)
+			// The run closes once the build ended, when one started.
+			if e.run != nil && len(e.run.built) == 1 && (e.run.built[0] == 1) != slices.Contains(c.steps, "build") {
+				t.Errorf("the run closed with %d builds started", e.run.built[0])
+			}
+			if e.script.EnvironmentImage != "" && (len(e.built) != 1 || e.built[0].EnvironmentImage != testEnvImage) {
+				t.Errorf("the build was given %+v", e.built)
+			}
+			if got := len(e.reported()); got != map[bool]int{true: 1}[c.reported] {
+				t.Errorf("Built called %d times, want %v", got, c.reported)
+			}
+			if e.run != nil && slices.Contains(e.run.reportedOpen, false) {
+				t.Error("Built was called on a closed run")
 			}
 			e.noLeak(t, err)
 		})
 	}
 }
 
+// TestLaunchFetchErrors gives the error of each failed fetch step without qory run's
+// prefix, its fix first, and with the host proxy's password hidden.
+func TestLaunchFetchErrors(t *testing.T) {
+	for _, c := range []struct {
+		edit func(*env)
+		want string
+	}{
+		{func(e *env) { e.script.Open, e.script.Record = "fail", false }, "check that this machine reaches the run's gateway: the run did not open there: the gateway refused the run request: run_not_found"},
+		{func(e *env) { e.script.HostProxy = "fail" }, "check that qory run can listen on a port of 127.0.0.1: the run's host proxy, through which qory run fetches the run's code, did not open: listen tcp 127.0.0.1:0: no port"},
+		{func(e *env) { e.script.Fetch = "none" }, "list the run's repositories in QORY_RUN_REPOSITORIES in the run configuration: a prebuild fetches them, and the variable is empty"},
+		{func(e *env) { e.script.Close = "fail" }, "update qory: the run could not be closed: the run is closed already"},
+		{func(e *env) { e.script.Close = "gateway" }, "check the run's record in Qory Apiary: the gateway closed the run as failed before qory run closed it"},
+	} {
+		e := newEnv(t)
+		c.edit(e)
+		if _, err := e.launch(t, false); err == nil || err.Error() != c.want {
+			t.Errorf("%v, want %q", err, c.want)
+		}
+	}
+	e := newEnv(t)
+	e.script.Fetch = "fail"
+	_, err := e.launch(t, false)
+	if err == nil || !strings.HasPrefix(err.Error(), "add a credential for github.com that reads acme/shop") {
+		t.Errorf("%v, want the fetch's line without its prefix", err)
+	}
+	e.noLeak(t, err)
+}
+
 func TestLaunchDigestNotOfTheShape(t *testing.T) {
 	for _, d := range []string{"sha256:ABC", "sha256:" + strings.Repeat("a", 63) + "/x", "sha512:" + strings.Repeat("a", 64)} {
 		e := newEnv(t)
 		e.inspect(d, "linux", "arm64", "")
-		res, err := e.launch(t, false)
-		if err == nil || res.Ending != releasedFailed(t14, "") {
-			t.Errorf("%s: ending %+v, err %v", d, res.Ending, err)
+		_, err := e.launch(t, false)
+		if err == nil || !slices.Equal(e.closed(), []session.Outcome{closedFailed}) {
+			t.Errorf("%s: closed %+v, err %v", d, e.closed(), err)
 		}
-		if len(e.reg.gets) != 0 {
-			t.Errorf("%s: the registry was asked for %q", d, e.reg.gets)
+		if got := e.asked(t); len(got) != 0 {
+			t.Errorf("%s: docker buildx imagetools inspect ran with %q", d, got)
 		}
 	}
 	e := newEnv(t)
@@ -607,9 +853,9 @@ func TestLaunchStoppedBeforeItStarted(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	h := &holder{b: []byte(testKey)}
-	res, err := prebuild.Launch(ctx, e.settings, prebuild.Run{RunID: testRunID, Target: testTarget, Key: h, Inputs: []byte(testInputs)})
-	if err == nil || res.Ending != releasedOnly(t10) {
-		t.Errorf("ending %+v, err %v", res.Ending, err)
+	res, err := prebuild.Launch(ctx, e.settings, testRun(h, ""))
+	if err == nil || res.Record || e.run != nil {
+		t.Errorf("result %+v, opened %v, err %v", res, e.run != nil, err)
 	}
 	if h.cleared == 0 {
 		t.Error("the key's holder was not cleared")
@@ -621,9 +867,9 @@ func TestLaunchStoppedBeforeItStarted(t *testing.T) {
 }
 
 // TestHostProgramsByNameAreFoundOnTheCleanedPATH finds git, when Git is not set, and
-// qory and docker, when each is a name alone, on the PATH every command gets: with an
-// empty file of each name in an entry in the runs folder alone, none is found, the
-// launch fails with exec's error at that program's step, and no later step runs.
+// docker, when it is a name alone, on the PATH every command gets: with an empty file of
+// each name in an entry in the runs folder alone, none is found, the launch fails with
+// exec's error at that program's step, and no later step runs.
 func TestHostProgramsByNameAreFoundOnTheCleanedPATH(t *testing.T) {
 	for _, c := range []struct {
 		name, want string
@@ -631,7 +877,6 @@ func TestHostProgramsByNameAreFoundOnTheCleanedPATH(t *testing.T) {
 		ran        []string
 	}{
 		{"git", "git init: ", func(s *prebuild.Settings) { s.Git = "" }, nil},
-		{"qory", "qory run could not be started: ", func(s *prebuild.Settings) { s.Qory = "qory" }, nil},
 		{"docker", "docker push could not be started: ", func(s *prebuild.Settings) { s.Docker = "docker" }, []string{"fetch", "build"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -641,7 +886,7 @@ func TestHostProgramsByNameAreFoundOnTheCleanedPATH(t *testing.T) {
 			if err := os.MkdirAll(hostbin, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			for _, n := range []string{"git", "qory", "docker"} {
+			for _, n := range []string{"git", "docker"} {
 				if err := os.WriteFile(filepath.Join(hostbin, n), nil, 0o700); err != nil {
 					t.Fatal(err)
 				}
@@ -651,7 +896,7 @@ func TestHostProgramsByNameAreFoundOnTheCleanedPATH(t *testing.T) {
 			if !errors.Is(err, exec.ErrNotFound) || !strings.HasPrefix(err.Error(), c.want) {
 				t.Errorf("%v, want exec.ErrNotFound after %q", err, c.want)
 			}
-			for _, step := range []string{"fetch", "build", "push", "inspect"} {
+			for _, step := range []string{"fetch", "build", "push", "inspect", "manifest"} {
 				if _, ran := e.report(t, step); ran != slices.Contains(c.ran, step) {
 					t.Errorf("%s ran %v", step, ran)
 				}
@@ -660,12 +905,54 @@ func TestHostProgramsByNameAreFoundOnTheCleanedPATH(t *testing.T) {
 	}
 }
 
-// TestLaunchCommands runs each step's command with its arguments, in its folder, with
-// the allowed environment: the docker commands in the pool's folder, outside every run
-// directory, and every command with a PATH that has no entry in the pool's runs folder,
-// the others kept as written.
+// TestTheFetchRunsNoGitFromTheRunsFolder runs the fetch of [preparation.Run] with a
+// git in an entry of the runs folder first on the pool's PATH, where a walled run could
+// write it: that git does not run, because the fetch's git starts from the environment
+// of the pool's commands, and the fetch through the closed proxy port fails after
+// git on the cleaned PATH ran.
+func TestTheFetchRunsNoGitFromTheRunsFolder(t *testing.T) {
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("no git on this machine")
+	}
+	e := newEnv(t)
+	e.settings.Fetch, e.settings.Git = nil, ""
+	hostbin := filepath.Join(explore.RunsDir(e.settings.State), "hostbin")
+	if err := os.MkdirAll(hostbin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ran := filepath.Join(e.home, "planted-git-ran")
+	planted := "#!/bin/sh\necho ran >> '" + ran + "'\nexec '" + git + "' \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(hostbin, "git"), []byte(planted), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sep := string(os.PathListSeparator)
+	t.Setenv("PATH", strings.Join([]string{hostbin, filepath.Dir(git), "/usr/bin", "/bin"}, sep))
+	// The fetch's hold on work is in the records of walled runs under the pool's
+	// XDG_STATE_HOME.
+	t.Setenv("XDG_STATE_HOME", filepath.Join(e.home, "pool-state"))
+	_, err = e.launch(t, false)
+	if _, statErr := os.Stat(ran); statErr == nil {
+		t.Error("the git in the runs folder ran")
+	}
+	if err == nil || !slices.Equal(e.closed(), []session.Outcome{closedFailed}) || len(e.built) != 0 {
+		t.Errorf("%v, closed %+v: want the fetch through the closed proxy port to fail", err, e.closed())
+	}
+	if !strings.Contains(err.Error(), "acme/shop") {
+		t.Errorf("%v, want the fetch's line for acme/shop", err)
+	}
+	e.noLeak(t, err)
+}
+
+// TestLaunchCommands runs the fetch and the build in this process, and docker with its
+// arguments, in the pool's folder, outside every run directory: the run opens at the
+// gateway of its run key, with no wall and its record in the run's state, the fetch
+// goes into work through the run's host proxy, and the fetch and the build get the
+// allowed environment, with a PATH that has no entry in the pool's runs folder, as every
+// docker command does.
 func TestLaunchCommands(t *testing.T) {
 	t.Setenv("DOCKER_CONTEXT", "orbstack")
+	t.Setenv("CI", "true")
 	e := newEnv(t)
 	runs := explore.RunsDir(e.settings.State)
 	sep := string(os.PathListSeparator)
@@ -677,16 +964,43 @@ func TestLaunchCommands(t *testing.T) {
 	pool := filepath.Join(e.settings.State, "pool")
 	dir := explore.Dir(e.settings.State, testRunID)
 	work, state := filepath.Join(dir, "work"), filepath.Join(dir, "state")
-	tag := e.settings.Registry + "/" + testName + ":" + testRunID
+	tag := testTag
+	digest := "sha256:" + sum([]byte(manifestOf("application/vnd.oci.image.manifest.v1+json", 100, 20, 3)))
+	if len(e.specs) != 1 {
+		t.Fatalf("opened %d times", len(e.specs))
+	}
+	spec := e.specs[0]
+	gw, ok := spec.Gateway.(session.RemoteGateway)
+	if !ok || gw.RunKey != testKey || spec.Wall != nil || spec.RunID != testRunID || spec.ForagerVersion != "qory 0.0.0-test" ||
+		spec.RunsDir != filepath.Join(state, "qory", "runs", "work-"+sum([]byte(work))[:12]) || len(spec.Labels) != 0 || spec.About != nil {
+		t.Errorf("the open's spec: run %s, wall %v, runs %s, version %s, by run key %v", spec.RunID, spec.Wall, spec.RunsDir, spec.ForagerVersion, ok && gw.RunKey == testKey)
+	}
+	if !res.Record {
+		t.Error("no record")
+	}
+	if len(e.fetched) != 1 || e.fetched[0].dir != work || e.fetched[0].system != "github.com" || e.fetched[0].list != "acme/shop" ||
+		e.fetched[0].proxy != (proxygit.Proxy{URL: fakeProxy, CABundle: "/run/ca-bundle.pem"}) || e.run.proxies != 1 {
+		t.Errorf("the fetch was given %+v", e.fetched)
+	}
+	if len(e.built) != 1 {
+		t.Fatalf("built %d times", len(e.built))
+	}
+	o := e.built[0]
+	if !slices.Equal(e.fetched[0].base, o.Env) {
+		t.Errorf("the fetch starts git from\n%q\nwant the build's environment\n%q", e.fetched[0].base, o.Env)
+	}
+	if o.Repository != work || o.AgentImage != testAgent || o.User != "1000:1000" || o.Tag != tag || o.Helper != "/opt/qory/qory-linux" || !slices.Equal(o.SeedArgs, []string{"run", "seed"}) ||
+		o.EnvironmentTag != testEnvironmentTag || o.EnvironmentImage != "" {
+		t.Errorf("the build's options %+v", o)
+	}
 	for _, c := range []struct {
 		step string
 		args []string
 		dir  string
 	}{
-		{"fetch", []string{"run", "--fetch-only", "--run-key-fd", "3", "--wall", "docker", "--timeout", "15m"}, work},
-		{"build", []string{"run", "prebuild", "--repository", work, "--agent-image", testAgent, "--user", "1000:1000", "--tag", tag, "--helper", "/opt/qory/qory-linux"}, dir},
 		{"push", []string{"push", tag}, pool},
 		{"inspect", []string{"image", "inspect", "--format", `{"repo_digests":{{json .RepoDigests}},"os":{{json .Os}},"architecture":{{json .Architecture}},"variant":{{json .Variant}}}`, tag}, pool},
+		{"manifest", []string{"buildx", "imagetools", "inspect", "--raw", testDestination + "@" + digest}, pool},
 		{"rm", []string{"image", "rm", tag}, pool},
 	} {
 		r, ok := e.report(t, c.step)
@@ -700,34 +1014,109 @@ func TestLaunchCommands(t *testing.T) {
 		if r.Dir != c.dir {
 			t.Errorf("%s ran in %s, want %s", c.step, r.Dir, c.dir)
 		}
-		if (c.step == "fetch") != r.FD3Pipe || (c.step == "fetch") != r.KeyOK {
-			t.Errorf("%s: descriptor 3 a pipe %v, the key %v", c.step, r.FD3Pipe, r.KeyOK)
-		}
+	}
+	for _, step := range []string{"build", "push", "inspect", "manifest", "rm"} {
+		r, _ := e.report(t, step)
 		for _, kv := range r.Env {
 			n := kv[:strings.IndexByte(kv, '=')]
 			if !slices.Contains([]string{"PATH", "HOME", "TMPDIR", "LANG", "DOCKER_HOST", "DOCKER_CONTEXT", "XDG_CONFIG_HOME", "XDG_STATE_HOME"}, n) {
-				t.Errorf("%s got %s", c.step, n)
+				t.Errorf("%s got %s", step, n)
 			}
 		}
 		for _, want := range []string{"XDG_CONFIG_HOME=" + e.settings.RunConfig, "XDG_STATE_HOME=" + state, "DOCKER_CONTEXT=orbstack", "PATH=/usr/bin" + sep + "/bin"} {
 			if !slices.Contains(r.Env, want) {
-				t.Errorf("%s's environment has no %s: %q", c.step, want, r.Env)
+				t.Errorf("%s's environment has no %s: %q", step, want, r.Env)
 			}
 		}
 	}
-	digest := "sha256:" + sum([]byte(manifestOf("application/vnd.oci.image.manifest.v1+json", 100, 20, 3)))
-	want := provisioner.Image{Image: e.settings.Registry + "/" + testName + "@" + digest, Size: 123, EnvironmentRef: "3f2a1b0c9d8e", Commit: testCommit}
-	if res.Image != want || !slices.Equal(e.reported, []provisioner.Image{want}) {
-		t.Errorf("image %+v, reported %+v, want %+v", res.Image, e.reported, want)
+	want := session.Built{Image: testDestination + "@" + digest, Size: 123, EnvironmentRef: "3f2a1b0c9d8e", Commit: testCommit}
+	if res.Image != want || !slices.Equal(e.reported(), []session.Built{want}) {
+		t.Errorf("image %+v, reported %+v, want %+v", res.Image, e.reported(), want)
 	}
-	if !slices.Equal(e.reg.gets, []string{"/v2/qory-env/" + testName + "/manifests/" + digest}) {
-		t.Errorf("the registry was asked for %q", e.reg.gets)
+	if got := e.tags(t, "pushed"); !slices.Equal(got, []string{tag}) {
+		t.Errorf("docker push pushed %q, want the target image alone, since the build kept no environment image", got)
+	}
+	if got := e.asked(t); !slices.Equal(got, []string{testDestination + "@" + digest}) {
+		t.Errorf("docker buildx imagetools inspect ran with %q", got)
 	}
 	lines := e.lines()
-	for _, want := range []string{testRunID + ": fetch says hello", testRunID + ": fetch warns", testRunID + ": build says hello", testRunID + ": push warns"} {
+	for _, want := range []string{testRunID + ": fetched acme/shop at 8c9d0e1f2a3b in 0.1s", testRunID + ": prebuild: built " + tag + " in 1.0s: 123 B", testRunID + ": build warns", testRunID + ": push warns"} {
 		if !slices.Contains(lines, want) {
 			t.Errorf("no log line %q in %q", want, lines)
 		}
+	}
+	e.noLeak(t, err)
+}
+
+// TestLaunchPushesTheEnvironmentImage is a build that keeps an environment image apart,
+// tagged <environment_destination>:<run_id>: the launch pushes it, then the target image
+// at <image_destination>:<run_id>, writes dev.qory.run.built with both by digest and the
+// base image, and removes both local tags.
+func TestLaunchPushesTheEnvironmentImage(t *testing.T) {
+	e := newEnv(t)
+	e.script.Environment, e.script.Base = testEnvironmentTag, testBase
+	res, err := e.launch(t, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Built != (devimage.Result{Target: testTag, Environment: testEnvironmentTag, Base: testBase}) {
+		t.Errorf("the result's build is %+v", res.Built)
+	}
+	if got := e.tags(t, "pushed"); !slices.Equal(got, []string{testEnvironmentTag, testTag}) {
+		t.Errorf("docker push pushed %q, want the environment image, then the target image", got)
+	}
+	digest := "sha256:" + sum([]byte(manifestOf("application/vnd.oci.image.manifest.v1+json", 100, 20, 3)))
+	want := session.Built{
+		Image: testDestination + "@" + digest, Size: 123, Commit: testCommit, EnvironmentRef: "3f2a1b0c9d8e",
+		EnvironmentImage: testEnvironmentDestination + "@" + digest, Base: testBase,
+	}
+	if !slices.Equal(e.reported(), []session.Built{want}) {
+		t.Errorf("Built with %+v, want %+v", e.reported(), want)
+	}
+	if !slices.Equal(e.closed(), []session.Outcome{closedSucceeded}) {
+		t.Errorf("the run closed with %+v", e.closed())
+	}
+	if got := e.tags(t, "removed"); !slices.Equal(got, []string{testEnvironmentTag, testTag}) {
+		t.Errorf("docker image rm removed %q", got)
+	}
+	e.noLeak(t, err)
+}
+
+// TestLaunchFromAnEnvironmentImagePushesNoEnvironmentImage is a run with
+// environment_image: the build starts from it with no environment tag, the launch
+// pushes the target image alone, and dev.qory.run.built has environment_image as the
+// run set it.
+func TestLaunchFromAnEnvironmentImagePushesNoEnvironmentImage(t *testing.T) {
+	e := newEnv(t)
+	e.script.EnvironmentImage = testEnvImage
+	if _, err := e.launch(t, false); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.built) != 1 || e.built[0].EnvironmentImage != testEnvImage || e.built[0].EnvironmentTag != "" || e.built[0].Tag != testTag {
+		t.Errorf("the build was given %+v", e.built)
+	}
+	if got := e.tags(t, "pushed"); !slices.Equal(got, []string{testTag}) {
+		t.Errorf("docker push pushed %q, want the target image alone", got)
+	}
+	if r := e.reported(); len(r) != 1 || r[0].EnvironmentImage != testEnvImage || r[0].Base != "" {
+		t.Errorf("Built with %+v", r)
+	}
+}
+
+// TestLaunchEnvironmentPushFails is a push of the environment image that fails: the
+// target image is not pushed, nothing is reported, and the run closes failed.
+func TestLaunchEnvironmentPushFails(t *testing.T) {
+	e := newEnv(t)
+	e.script.Environment, e.script.Push = testEnvironmentTag, 1
+	_, err := e.launch(t, false)
+	if err == nil || err.Error() != "docker push exited 1" {
+		t.Errorf("%v, want docker push's exit", err)
+	}
+	if got := e.tags(t, "pushed"); !slices.Equal(got, []string{testEnvironmentTag}) {
+		t.Errorf("docker push pushed %q", got)
+	}
+	if len(e.reported()) != 0 || !slices.Equal(e.closed(), []session.Outcome{closedFailed}) {
+		t.Errorf("reported %+v, closed %+v", e.reported(), e.closed())
 	}
 	e.noLeak(t, err)
 }
@@ -741,62 +1130,157 @@ func TestLaunchIndex(t *testing.T) {
 		size    int64
 	}{
 		{"one image and its attestation", func(e *env) []string {
-			img := e.reg.put(manifestOf(oci, 10, 5), oci, "")
-			att := e.reg.put(manifestOf(oci, 1, 1), oci, "")
+			img := e.put(manifestOf(oci, 10, 5), "")
+			att := e.put(manifestOf(oci, 1, 1), "")
 			return []string{
 				`{"mediaType":"` + oci + `","digest":"` + img + `","size":1,"platform":{"os":"linux","architecture":"arm64","variant":"v8"}}`,
 				`{"mediaType":"` + oci + `","digest":"` + att + `","size":1,"platform":{"os":"unknown","architecture":"unknown"},"annotations":{"vnd.docker.reference.type":"attestation-manifest"}}`,
 			}
 		}, "", 15},
 		{"the platform's image among two", func(e *env) []string {
-			amd := e.reg.put(manifestOf(oci, 30, 30), oci, "")
-			arm := e.reg.put(manifestOf(oci, 7, 7), oci, "")
+			amd := e.put(manifestOf(oci, 30, 30), "")
+			arm := e.put(manifestOf(oci, 7, 7), "")
 			return []string{
 				`{"mediaType":"` + oci + `","digest":"` + amd + `","size":1,"platform":{"os":"linux","architecture":"amd64"}}`,
 				`{"mediaType":"` + oci + `","digest":"` + arm + `","size":1,"platform":{"os":"linux","architecture":"arm64","variant":"v8"}}`,
 			}
 		}, "v8", 14},
 		{"the platform's image among two, no variant", func(e *env) []string {
-			amd := e.reg.put(manifestOf(oci, 30, 30), oci, "")
-			arm := e.reg.put(manifestOf(oci, 8, 8), oci, "")
+			amd := e.put(manifestOf(oci, 30, 30), "")
+			arm := e.put(manifestOf(oci, 8, 8), "")
 			return []string{
 				`{"mediaType":"` + oci + `","digest":"` + amd + `","size":1,"platform":{"os":"linux","architecture":"amd64"}}`,
 				`{"mediaType":"` + oci + `","digest":"` + arm + `","size":1,"platform":{"os":"linux","architecture":"arm64"}}`,
 			}
 		}, "", 16},
 		{"an attestation of the platform", func(e *env) []string {
-			att := e.reg.put(manifestOf(oci, 1, 1), oci, "")
+			att := e.put(manifestOf(oci, 1, 1), "")
 			return []string{`{"mediaType":"` + oci + `","digest":"` + att + `","size":1,"platform":{"os":"linux","architecture":"arm64"},"annotations":{"vnd.docker.reference.type":"attestation-manifest"}}`}
 		}, "", 0},
 		{"two of the platform", func(e *env) []string {
-			a := e.reg.put(manifestOf(oci, 1, 2), oci, "")
-			b := e.reg.put(manifestOf(oci, 3, 4), oci, "")
+			a := e.put(manifestOf(oci, 1, 2), "")
+			b := e.put(manifestOf(oci, 3, 4), "")
 			return []string{
 				`{"mediaType":"` + oci + `","digest":"` + a + `","size":1,"platform":{"os":"linux","architecture":"arm64"}}`,
 				`{"mediaType":"` + oci + `","digest":"` + b + `","size":1,"platform":{"os":"linux","architecture":"arm64"}}`,
 			}
 		}, "", 0},
 		{"another variant", func(e *env) []string {
-			a := e.reg.put(manifestOf(oci, 1, 2), oci, "")
+			a := e.put(manifestOf(oci, 1, 2), "")
 			return []string{`{"mediaType":"` + oci + `","digest":"` + a + `","size":1,"platform":{"os":"linux","architecture":"arm64","variant":"v7"}}`}
 		}, "v8", 0},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEnv(t)
-			idx := e.reg.put(`{"schemaVersion":2,"mediaType":"`+index+`","manifests":[`+strings.Join(c.entries(e), ",")+`]}`, index, "")
+			idx := e.put(`{"schemaVersion":2,"mediaType":"`+index+`","manifests":[`+strings.Join(c.entries(e), ",")+`]}`, "")
 			e.inspect(idx, "linux", "arm64", c.variant)
 			res, err := e.launch(t, false)
 			if c.size == 0 {
-				if err == nil || res.Ending != releasedFailed(t14, "") {
-					t.Errorf("ending %+v, err %v", res.Ending, err)
+				if err == nil || !slices.Equal(e.closed(), []session.Outcome{closedFailed}) {
+					t.Errorf("closed %+v, err %v", e.closed(), err)
 				}
 				return
 			}
-			if err != nil || res.Image.Size != c.size || res.Image.Image != e.settings.Registry+"/"+testName+"@"+idx {
+			if err != nil || res.Image.Size != c.size || res.Image.Image != testDestination+"@"+idx {
 				t.Errorf("image %+v, err %v; want size %d of the index's digest", res.Image, err, c.size)
+			}
+			if got := e.asked(t); len(got) != 2 || got[0] != testDestination+"@"+idx {
+				t.Errorf("docker buildx imagetools inspect ran with %q; want the index, then its manifest", got)
 			}
 		})
 	}
+}
+
+// TestLaunchNoMediaType reads a manifest and an index that have no media type, as the
+// OCI image specification allows: one that lists manifests is an index, any other an
+// image's manifest.
+func TestLaunchNoMediaType(t *testing.T) {
+	e := newEnv(t)
+	e.inspect(e.put(manifestOf("", 4, 5, 6), ""), "linux", "arm64", "")
+	if res, err := e.launch(t, false); err != nil || res.Image.Size != 15 {
+		t.Errorf("a manifest: size %d, err %v; want 15", res.Image.Size, err)
+	}
+	e = newEnv(t)
+	img := e.put(manifestOf("", 2, 3), "")
+	idx := e.put(`{"schemaVersion":2,"manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"`+img+`","size":1,"platform":{"os":"linux","architecture":"arm64"}}]}`, "")
+	e.inspect(idx, "linux", "arm64", "")
+	if res, err := e.launch(t, false); err != nil || res.Image.Size != 5 {
+		t.Errorf("an index: size %d, err %v; want 5", res.Image.Size, err)
+	}
+}
+
+// TestLaunchStoppedDuringTheManifestRead stops the pool program while docker buildx
+// imagetools inspect runs, by a cancel and by the end of the launch's deadline: the
+// error is a stop during the push, not a fix for docker, and the run closes cancelled.
+func TestLaunchStoppedDuringTheManifestRead(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		stop bool
+		ctx  func() (context.Context, context.CancelFunc)
+	}{
+		{"cancelled", true, func() (context.Context, context.CancelFunc) { return context.WithCancel(context.Background()) }},
+		{"deadline", false, func() (context.Context, context.CancelFunc) {
+			return context.WithTimeout(context.Background(), 5*time.Second)
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.script.Block = "manifest"
+			ctx, cancel := c.ctx()
+			defer cancel()
+			_, err := e.launchIn(t, ctx, c.stop)
+			if err == nil || !strings.HasPrefix(err.Error(), "start the run again with a new run code: the run was cancelled during the push: ") {
+				t.Errorf("%v, want the stop during the push", err)
+			}
+			if !slices.Equal(e.closed(), []session.Outcome{closedStopped}) || len(e.reported()) != 0 {
+				t.Errorf("closed %+v, reported %+v", e.closed(), e.reported())
+			}
+			if got := e.asked(t); len(got) != 1 {
+				t.Errorf("docker buildx imagetools inspect ran with %q; want one read", got)
+			}
+			e.noLeak(t, err)
+		})
+	}
+}
+
+// TestLaunchManifestReadAtItsTimeLimit fails the store when docker buildx imagetools
+// inspect runs past the read's time limit, while the launch goes on: the error starts
+// with its fix, then the limit.
+func TestLaunchManifestReadAtItsTimeLimit(t *testing.T) {
+	defer prebuild.SetManifestTimeout(200 * time.Millisecond)()
+	e := newEnv(t)
+	e.script.Block = "manifest"
+	_, err := e.launch(t, false)
+	want := "check that docker buildx is installed and that docker reaches the registry localhost:5001: docker buildx imagetools inspect --raw of the pushed image failed: it ran past its time limit of 200ms"
+	if err == nil || err.Error() != want {
+		t.Errorf("%v, want %q", err, want)
+	}
+	if !slices.Equal(e.closed(), []session.Outcome{closedFailed}) {
+		t.Errorf("closed %+v", e.closed())
+	}
+	e.noLeak(t, err)
+}
+
+// TestLaunchManifestNotRead fails the store when docker buildx imagetools inspect
+// exits 1: the error starts with its fix, then the registry's host and how the command
+// ended, and docker's error line is in the log.
+func TestLaunchManifestNotRead(t *testing.T) {
+	e := newEnv(t)
+	missing := "sha256:" + strings.Repeat("0", 64)
+	e.inspect(missing, "linux", "arm64", "")
+	_, err := e.launch(t, false)
+	want := "check that docker buildx is installed and that docker reaches the registry localhost:5001: docker buildx imagetools inspect --raw of the pushed image failed: exit status 1"
+	if err == nil || err.Error() != want {
+		t.Errorf("%v, want %q", err, want)
+	}
+	if !slices.Equal(e.closed(), []session.Outcome{closedFailed}) || len(e.reported()) != 0 {
+		t.Errorf("closed %+v, reported %+v", e.closed(), e.reported())
+	}
+	line := testRunID + ": ERROR: " + testDestination + "@" + missing + ": not found"
+	if !slices.Contains(e.lines(), line) {
+		t.Errorf("no log line %q in %q", line, e.lines())
+	}
+	e.noLeak(t, err)
 }
 
 func TestLaunchRefused(t *testing.T) {
@@ -805,12 +1289,17 @@ func TestLaunchRefused(t *testing.T) {
 		edit func(*prebuild.Settings, *prebuild.Run)
 	}{
 		{"run id", func(_ *prebuild.Settings, r *prebuild.Run) { r.RunID = "../escape" }},
-		{"no target", func(_ *prebuild.Settings, r *prebuild.Run) { r.Target = contracts.Target{} }},
-		{"a target's system that is no host", func(_ *prebuild.Settings, r *prebuild.Run) { r.Target.System = "GitHub.com/x" }},
 		{"relative state", func(s *prebuild.Settings, _ *prebuild.Run) { s.State = "state" }},
 		{"relative run config", func(s *prebuild.Settings, _ *prebuild.Run) { s.RunConfig = "runconfig" }},
-		{"registry with a tag", func(s *prebuild.Settings, _ *prebuild.Run) { s.Registry += ":1" }},
-		{"registry with no host", func(s *prebuild.Settings, _ *prebuild.Run) { s.Registry = "qory/env" }},
+		{"image destination with a tag", func(_ *prebuild.Settings, r *prebuild.Run) { r.ImageDestination += ":1" }},
+		{"image destination with no host", func(_ *prebuild.Settings, r *prebuild.Run) { r.ImageDestination = "qory/env" }},
+		{"no image destination", func(_ *prebuild.Settings, r *prebuild.Run) { r.ImageDestination = "" }},
+		{"environment destination with a digest", func(_ *prebuild.Settings, r *prebuild.Run) { r.EnvironmentDestination = testEnvImage }},
+		{"both environment members", func(_ *prebuild.Settings, r *prebuild.Run) { r.EnvironmentImage = testEnvImage }},
+		{"neither environment member", func(_ *prebuild.Settings, r *prebuild.Run) { r.EnvironmentDestination = "" }},
+		{"environment image by tag", func(_ *prebuild.Settings, r *prebuild.Run) {
+			r.EnvironmentDestination, r.EnvironmentImage = "", "r.example/env:1"
+		}},
 		{"agent image by tag", func(s *prebuild.Settings, _ *prebuild.Run) { s.AgentImage = "ghcr.io/qoryai/agent:1" }},
 		{"no user", func(s *prebuild.Settings, _ *prebuild.Run) { s.User = "" }},
 		{"no helper", func(s *prebuild.Settings, _ *prebuild.Run) { s.Helper = "" }},
@@ -838,14 +1327,14 @@ func TestLaunchRefused(t *testing.T) {
 			b, _ := json.Marshal(e.script)
 			os.WriteFile(filepath.Join(e.settings.RunConfig, scriptFile), b, 0o600)
 			h := &holder{b: []byte(testKey)}
-			r := prebuild.Run{RunID: testRunID, Target: testTarget, Key: h, Inputs: []byte(testInputs)}
+			r := testRun(h, "")
 			c.edit(&e.settings, &r)
 			res, err := prebuild.Launch(context.Background(), e.settings, r)
 			if err == nil {
 				t.Fatal("launched")
 			}
-			if res.Dir != "" || res.Record || res.Ending != notStarted {
-				t.Errorf("result %+v", res)
+			if res.Dir != "" || res.Record || e.run != nil {
+				t.Errorf("result %+v, opened %v", res, e.run != nil)
 			}
 			if h.cleared == 0 {
 				t.Error("the key's holder was not cleared")
@@ -861,6 +1350,133 @@ func TestLaunchRefused(t *testing.T) {
 	}
 }
 
+// TestLaunchRefusedPlaces gives the error of a run whose places at the registry no
+// prebuild takes, its fix first.
+func TestLaunchRefusedPlaces(t *testing.T) {
+	const (
+		notAPlace = "ask Qory Apiary's operator: the run's %s is not a place at a registry, a host and a path of at most 255 characters with no tag and no digest"
+		upper     = "ask Qory Apiary's operator: the run's %s has upper-case letters, and qory writes images to dev.qory.run.built by lower-case references alone"
+		secret    = "ask Qory Apiary's operator: the run's %s contains qak_, qrk_ or qecr_, which start a secret, and qory writes no image with them to dev.qory.run.built"
+		notPinned = "ask Qory Apiary's operator: the run's environment_image is not an image pinned by digest, NAME@sha256: and 64 hexadecimal digits with no tag, NAME at most 255 characters"
+	)
+	digest := "@sha256:" + strings.Repeat("a", 64)
+	fromImage := func(image string) func(*prebuild.Run) {
+		return func(r *prebuild.Run) { r.EnvironmentDestination, r.EnvironmentImage = "", image }
+	}
+	for _, c := range []struct {
+		name string
+		edit func(*prebuild.Run)
+		want string
+	}{
+		{"no registry host", func(r *prebuild.Run) { r.ImageDestination = "qory/env" }, fmt.Sprintf(notAPlace, "image_destination")},
+		{"a tag", func(r *prebuild.Run) { r.EnvironmentDestination += ":1" }, fmt.Sprintf(notAPlace, "environment_destination")},
+		{"too long", func(r *prebuild.Run) { r.ImageDestination = "registry.example.com/" + strings.Repeat("a", 240) }, fmt.Sprintf(notAPlace, "image_destination")},
+		{"upper-case host", func(r *prebuild.Run) { r.ImageDestination = "Registry.Example.com/targets/x" }, fmt.Sprintf(upper, "image_destination")},
+		{"upper-case path", func(r *prebuild.Run) { r.EnvironmentDestination = "registry.example.com/Environments/x" }, fmt.Sprintf(upper, "environment_destination")},
+		{"qak_", func(r *prebuild.Run) { r.ImageDestination = "registry.example.com/qak_x" }, fmt.Sprintf(secret, "image_destination")},
+		{"qecr_", func(r *prebuild.Run) { r.EnvironmentDestination = "registry.example.com/qecr_x" }, fmt.Sprintf(secret, "environment_destination")},
+		{"both", func(r *prebuild.Run) { r.EnvironmentImage = testEnvImage }, "ask Qory Apiary's operator: the run has both or neither of environment_destination and environment_image, and a prebuild takes one"},
+		{"environment image by tag", fromImage("r.example/env:1"), notPinned},
+		{"environment image with tag and digest", fromImage("r.example/env:1" + digest), notPinned},
+		{"environment image upper-case host", fromImage("Registry.example.com/env" + digest), fmt.Sprintf(upper, "environment_image")},
+		{"environment image qrk_", fromImage("registry.example.com/qrk_env" + digest), fmt.Sprintf(secret, "environment_image")},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			r := testRun(&holder{b: []byte(testKey)}, "")
+			c.edit(&r)
+			if _, err := prebuild.Launch(context.Background(), e.settings, r); err == nil || err.Error() != c.want {
+				t.Errorf("%v, want %q", err, c.want)
+			}
+			if len(e.specs) != 0 {
+				t.Error("the run opened")
+			}
+			if _, err := os.Stat(e.settings.State); !os.IsNotExist(err) {
+				t.Errorf("the state directory is there: %v", err)
+			}
+		})
+	}
+}
+
+// TestCheckRunTakesTheContractsPlaces is a run whose image_destination and
+// environment_destination are each a lower-case place that image_place of the run
+// contract's documents.schema.json accepts, hyphens inside a host's label included: the
+// check passes. A place that image_place refuses is not a place at a registry.
+func TestCheckRunTakesTheContractsPlaces(t *testing.T) {
+	const notAPlace = "ask Qory Apiary's operator: the run's %s is not a place at a registry, a host and a path of at most 255 characters with no tag and no digest"
+	e := newEnv(t)
+	for _, place := range []string{
+		"xn--bcher-kva.example.com/targets/x",
+		"my--registry.example.com/targets/x",
+		"my-registry.example.com:5000/targets/x",
+		"registry.example.com/a.b/c_d/e__f/g-h/i---j",
+		"registry:5000/env",
+		"localhost/env",
+		"localhost:5000/env",
+		"registry.example.com/" + strings.Repeat("a", 234),
+	} {
+		for _, member := range []string{"image_destination", "environment_destination"} {
+			r := testRun(&holder{b: []byte(testKey)}, "")
+			if member == "image_destination" {
+				r.ImageDestination = place
+			} else {
+				r.EnvironmentDestination = place
+			}
+			if _, err := prebuild.CheckRun(e.settings, r); err != nil {
+				t.Errorf("%s %s: %v", member, place, err)
+			}
+		}
+	}
+	for _, place := range []string{
+		"-registry.example.com/env",
+		"registry-.example.com/env",
+		"registry..example.com/env",
+		"reg_istry.example.com/env",
+		"registry.example.com:123456/env",
+		"registry.example.com:/env",
+		"localhost.:5000/env",
+		"registry/env",
+		"registry.example.com/env-",
+		"registry.example.com/a___b",
+	} {
+		r := testRun(&holder{b: []byte(testKey)}, "")
+		r.ImageDestination = place
+		if _, err := prebuild.CheckRun(e.settings, r); err == nil || err.Error() != fmt.Sprintf(notAPlace, "image_destination") {
+			t.Errorf("%s: %v, want %q", place, err, fmt.Sprintf(notAPlace, "image_destination"))
+		}
+	}
+}
+
+// TestLaunchUndelivered is a prebuild whose close leaves one event the gateway did not
+// accept, on a run the gateway did not close: Launch returns the line that starts with
+// the fix and contains the path of the record's undelivered/, and leaves the run
+// directory, with the record, in place. The local tags go.
+func TestLaunchUndelivered(t *testing.T) {
+	e := newEnv(t)
+	e.script.Close = "undelivered"
+	res, err := e.launch(t, false)
+	record := filepath.Join(explore.Dir(e.settings.State, testRunID), "state")
+	want := "check that this machine reaches the run's gateway: 1 event of the run did not reach it; "
+	if err == nil || !strings.HasPrefix(err.Error(), want) || !strings.HasSuffix(err.Error(), "/undelivered contains them") || !strings.Contains(err.Error(), record) {
+		t.Fatalf("%v, want %q, the record under %s", err, want, record)
+	}
+	if !res.Record {
+		t.Error("the result has no record")
+	}
+	if len(e.reported()) != 1 || !slices.Equal(e.closed(), []session.Outcome{closedSucceeded}) {
+		t.Errorf("Built %d times, closed with %+v", len(e.reported()), e.closed())
+	}
+	if _, statErr := os.Stat(explore.Dir(e.settings.State, testRunID)); statErr != nil {
+		t.Errorf("the run directory is gone: %v", statErr)
+	}
+	if got := e.tags(t, "removed"); !slices.Equal(got, []string{testTag}) {
+		t.Errorf("docker image rm removed %q", got)
+	}
+	if accesskey.ContainsSecret(err.Error()) || strings.Contains(err.Error(), testKey[4:24]) {
+		t.Errorf("a secret is in %q", err)
+	}
+}
+
 func TestEnvironmentRef(t *testing.T) {
 	ref, err := prebuild.EnvironmentRef([]byte(` {"environment_ref":"a b","version":1} `))
 	if err != nil || ref != "a b" {
@@ -870,38 +1486,4 @@ func TestEnvironmentRef(t *testing.T) {
 	if err != nil || ref != strings.Repeat("é", 200) {
 		t.Errorf("200 characters refused: %v", err)
 	}
-}
-
-func TestName(t *testing.T) {
-	if got := prebuild.Name(testTarget); got != testName || len(got) != 16 {
-		t.Errorf("Name %s, want %s", got, testName)
-	}
-	if prebuild.Name(contracts.Target{System: "github.com/acme", Path: "shop"}) != testName {
-		t.Error("the name is not of system/path")
-	}
-	if prebuild.Name(contracts.Target{System: "gitlab.com", Path: "acme/shop"}) == testName {
-		t.Error("two targets have one name")
-	}
-}
-
-func TestLauncher(t *testing.T) {
-	e := newEnv(t)
-	e.script.Build = 1
-	b, _ := json.Marshal(e.script)
-	os.WriteFile(filepath.Join(e.settings.RunConfig, scriptFile), b, 0o600)
-	h := &holder{b: []byte(testKey)}
-	got := prebuild.Launcher(e.settings)(context.Background(), testRunID, testTarget, h, []byte(testInputs), func(context.Context, provisioner.Image) error {
-		t.Error("a build that failed was reported")
-		return nil
-	})
-	if got != releasedFailed(t13, "") {
-		t.Errorf("ending %+v", got)
-	}
-	if !slices.Contains(e.lines(), testRunID+": qory run prebuild exited 1") {
-		t.Errorf("the failure was not logged: %q", e.lines())
-	}
-	if h.cleared == 0 {
-		t.Error("the key's holder was not cleared")
-	}
-	e.noLeak(t, nil)
 }

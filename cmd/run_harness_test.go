@@ -65,17 +65,18 @@ func TestRunTakesAModuleExportAsADefault(t *testing.T) {
 	wants(t, string(data), "env: CORE_SCRIPTS=/elsewhere\n", "env: LOG_DIR=from-server\n", "env: CODEX_HOME="+home+"/codex\n")
 	lacks(t, string(data), "DOCKER_HOST=", "/not-the-template", "LOG_DIR="+home)
 	_, evs := events(t, root)
-	got, _ := json.Marshal(evs["dev.qory.run.policy_applied"][0]["variables"])
+	got, _ := json.Marshal(sessionApplied(t, evs)["variables"])
 	if want := `[{"from":"fixed","lost":[{"from":"run","why":"fixed"}],"name":"CODEX_HOME"},{"from":"run","lost":[{"from":"harness","why":"overridden"}],"name":"CORE_SCRIPTS"},{"lost":[{"from":"harness","why":"denied"}],"name":"DOCKER_HOST"},{"from":"apiary","lost":[{"from":"harness","why":"overridden"}],"name":"LOG_DIR"}]`; string(got) != want {
 		t.Errorf("run.policy_applied variables %s, want %s", got, want)
 	}
 }
 
-// TestRunFixesNoNameTheReportMarks is a report in the checkout that marks two variables
-// fixed: TOOL_PRELOAD, a name no template sets, and CODEX_HOME, the template's own, with a
-// value of its own. Neither mark fixes anything: --env sets TOOL_PRELOAD over the
-// report's value, and CODEX_HOME is the template's, which --env does not replace.
-func TestRunFixesNoNameTheReportMarks(t *testing.T) {
+// TestRunComposesOverTheReportsMarks is a report in the checkout that marks two variables
+// fixed: TOOL_PRELOAD, a name no template sets, and CODEX_HOME, the template's, with a
+// value of its own. The run composes before it starts, which writes the report again
+// without the marks: --env sets TOOL_PRELOAD, and CODEX_HOME is the template's, which
+// --env does not replace.
+func TestRunComposesOverTheReportsMarks(t *testing.T) {
 	script := filepath.Join(t.TempDir(), "fake-runtime")
 	writeFile(t, script, "#!/bin/sh\necho \"TOOL_PRELOAD=$TOOL_PRELOAD CODEX_HOME=$CODEX_HOME\"\n")
 	if err := os.Chmod(script, 0o755); err != nil {
@@ -101,10 +102,19 @@ func TestRunFixesNoNameTheReportMarks(t *testing.T) {
 	}
 	wants(t, out, "TOOL_PRELOAD=from-env CODEX_HOME="+home+"/codex\n", "qory run: CODEX_HOME from --env is not used: the harness sets it\n")
 	lacks(t, out, "TOOL_PRELOAD from --env", "/forged")
+	again, err := report.Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range again.LaunchEnv["codex"] {
+		if v.Name == "TOOL_PRELOAD" || v.Value == "/forged" {
+			t.Errorf("the report the run composed has %+v", v)
+		}
+	}
 	_, evs := events(t, root)
-	got, _ := json.Marshal(evs["dev.qory.run.policy_applied"][0]["variables"])
-	if !strings.Contains(string(got), `{"from":"run","lost":[{"from":"harness","why":"overridden"},{"from":"shell","why":"overridden"}],"name":"TOOL_PRELOAD"}`) {
-		t.Errorf("run.policy_applied variables %s: TOOL_PRELOAD is not the run's over the report's default", got)
+	got, _ := json.Marshal(sessionApplied(t, evs)["variables"])
+	if !strings.Contains(string(got), `{"from":"run","lost":[{"from":"shell","why":"overridden"}],"name":"TOOL_PRELOAD"}`) {
+		t.Errorf("run.policy_applied variables %s: TOOL_PRELOAD is not the run's", got)
 	}
 }
 
@@ -129,12 +139,12 @@ func startedNothing(t *testing.T, root, log string) {
 	}
 }
 
-// TestRunRefusesAReportNamingAnotherHome is a report in the checkout that names another
-// home, as a repository could commit or a walled agent write: the run computes the home
-// itself, refuses before the wall runs anything, and says to compose again. --home that
-// names the composed home, with a report naming another checkout, is refused too. A
-// compose writes the report again, and the run then mounts the home it computes.
-func TestRunRefusesAReportNamingAnotherHome(t *testing.T) {
+// TestRunComposesOverAReportNamingAnotherHome is a report in the checkout that contains
+// another home, as a repository could commit or a walled agent write: the run composes
+// before it starts, which writes the report again, and mounts the home it computes.
+// --home set to the composed home, with a report for another checkout, is refused
+// before the wall runs anything, since the run would mount that checkout.
+func TestRunComposesOverAReportNamingAnotherHome(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, "claude")
@@ -150,19 +160,35 @@ func TestRunRefusesAReportNamingAnotherHome(t *testing.T) {
 	if err := report.Write(path, rep); err != nil {
 		t.Fatal(err)
 	}
-	_, err = run(t, "run", "claude")
-	want := "the harness report .qory/harness-report.json names the home " + forged + ", and this checkout's home is " + home + "; a run uses only the home qory computes, so the run does not start. Run qory harness compose again"
-	if cmd.ExitCode(err) != cmd.ExitInput || err.Error() != want {
-		t.Errorf("a report naming another home: %v (exit %d), want %q", err, cmd.ExitCode(err), want)
+	if out, err := run(t, "run", "claude"); cmd.ExitCode(err) != 4 {
+		t.Fatalf("a report naming another home: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
-	startedNothing(t, root, log)
+	if rep, err := report.Read(path); err != nil || rep.Home != home {
+		t.Errorf("the run left the report naming the home %q (%v), want %s", rep.Home, err, home)
+	}
+	data, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lacks(t, string(data), forged)
+	if err := os.Remove(log); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range recorded(t, root) {
+		if err := os.RemoveAll(filepath.Join(runsDir(t, root), id)); err != nil {
+			t.Fatal(err)
+		}
+	}
 
-	rep.Home, rep.Checkout = home, os.Getenv("HOME")
+	if rep, err = report.Read(path); err != nil {
+		t.Fatal(err)
+	}
+	rep.Checkout = os.Getenv("HOME")
 	if err := report.Write(path, rep); err != nil {
 		t.Fatal(err)
 	}
 	_, err = run(t, "run", "claude", "--home", home)
-	want = "the harness report " + path + " names the checkout " + os.Getenv("HOME") + ", and " + home + " is not that checkout's home; a run uses only its checkout's home, so the run does not start. Run qory harness compose again"
+	want := "remove the harness report " + path + ", or give --home the home of the checkout " + os.Getenv("HOME") + ". The report is for that checkout, and " + home + " is not its home; a run uses only its checkout's home, so the run does not start"
 	if cmd.ExitCode(err) != cmd.ExitInput || err.Error() != want {
 		t.Errorf("--home with a report naming another checkout: %v (exit %d), want %q", err, cmd.ExitCode(err), want)
 	}
@@ -173,7 +199,7 @@ func TestRunRefusesAReportNamingAnotherHome(t *testing.T) {
 	if cmd.ExitCode(err) != 4 {
 		t.Fatalf("run after a compose: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
-	data, err := os.ReadFile(log)
+	data, err = os.ReadFile(log)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -487,7 +487,7 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 		if dir.HasNewSecret() {
 			// A key the server answered for another code may be active: it stays.
 			if staged, err := dir.ReadNewSecret(); err == nil && answeredFor(dir, staged.PublicKey()) {
-				return fmt.Errorf("%s holds the new key of an enrolment the server answered for another code: run that command again to finish it", dir.Path(foragerdir.NewSecretFile))
+				return fmt.Errorf("%s holds the new key of an enrolment the server returned for another code: run that command again to finish it", dir.Path(foragerdir.NewSecretFile))
 			}
 			moved, err := dir.MoveNewAside(now)
 			if err != nil {

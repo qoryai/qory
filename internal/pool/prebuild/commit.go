@@ -29,9 +29,9 @@ var refSegment = regexp.MustCompile(`^[A-Za-z0-9_+=,@-][A-Za-z0-9._+=,@-]*$`)
 // errNotCommit is every refusal of [Commit]: the reason is in its text after it.
 var errNotCommit = errors.New("the fetched repository names no commit")
 
-// Commit is the commit HEAD names in the git working tree work: what qory run prepare
-// checked out, read from the files of work/.git alone, with no git run, since a walled
-// run wrote them. HEAD is a commit id, or "ref: " and a ref under refs/, which is
+// Commit is the commit that HEAD of the git working tree work is set to, directly or
+// through a ref: what the fetch checked out, read from the files of work/.git alone,
+// with no git run. HEAD is a commit id, or "ref: " and a ref under refs/, which is
 // read as a loose ref, work/.git/<ref>, or else from work/.git/packed-refs. Every file and
 // folder on the way, .git among them, must be what it is, not a link, and stay inside
 // work; each file is read up to a bound; and the id must be 40 lower-case hexadecimal

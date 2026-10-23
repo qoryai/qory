@@ -1,0 +1,15 @@
+# The hello example as a stack, so a run can take this folder by reference:
+#
+#   qory run claude -f https://github.com/qoryai/qory#<commit>:examples/hello -- -p "/hello"
+#
+# The same two modules as qory.yaml beside it. qory setup example does not write this
+# file: a folder contains a qory-stack.yaml or a qory.yaml that lists modules, not both.
+apiVersion: qory.dev/v1alpha1
+name: hello
+modules:
+  - name: hello
+    source: {path: modules/hello}
+    exclude:
+      skills: [greet]   # both modules ship a greet skill; the world module's is kept
+  - name: world
+    source: {path: modules/world}

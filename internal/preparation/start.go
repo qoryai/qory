@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/qoryai/forager/accesskey"
@@ -36,6 +37,8 @@ const (
 	textTrackedNotDir  = "qory run prepare: %s is not a folder; the development container configuration is read only from files and folders of the repository"
 	textTrackedNotFile = "qory run prepare: %s is not a regular file; the development container configuration is read only from a regular file"
 	textTrackedTooBig  = "qory run prepare: %s is more than 1 MiB; a development container configuration is a few kilobytes"
+	// textLog is the file [StartLogged] gives the start commands as their output.
+	textLog = "qory run prepare: %s in the container that runs the setup contains the start commands' output, and what a program they leave running writes later"
 )
 
 // Start runs the start commands of the development container configuration of the
@@ -61,47 +64,59 @@ const (
 // and in how long together. When ctx ends, the commands stop as [devcontainer.Run]
 // stops them.
 func Start(ctx context.Context, dir string, environ []string, output io.Writer) error {
+	ran, err := start(ctx, dir, environ, output, output)
+	if ran != "" {
+		fmt.Fprintln(output, ran)
+	}
+	return err
+}
+
+// start is [Start] with notes, where the lines about the configuration go, apart from
+// output, the commands' stdout and stderr. It returns the line that says which commands
+// ran, and in how long, "" when none ran or one failed, for the caller to print.
+func start(ctx context.Context, dir string, environ []string, notes, output io.Writer) (string, error) {
 	dir, err := filepath.Abs(dir)
 	if err != nil {
-		return local(err)
+		return "", localIn(err)
 	}
-	cfg, err := trackedConfig(ctx, dir, output)
+	cfg, err := trackedConfig(ctx, dir, notes)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if cfg == nil {
-		return nil
+		return "", nil
 	}
 	vars := devcontainer.Vars{WorkspaceFolder: dir, WorkspaceFolderBasename: filepath.Base(dir), Env: environ}
 	containerEnv, err := expandEnv("containerEnv", cfg.ContainerEnv, vars)
 	if err != nil {
-		return err
+		return "", err
 	}
 	vars.Env = setEnv(environ, containerEnv)
 	remoteEnv, err := expandEnv("remoteEnv", cfg.RemoteEnv, vars)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if err := checkNames("remoteEnv", cfg.RemoteUnset); err != nil {
-		return err
+		return "", err
 	}
 	env := slices.DeleteFunc(setEnv(vars.Env, remoteEnv), func(kv string) bool {
 		name, _, _ := strings.Cut(kv, "=")
 		return slices.Contains(cfg.RemoteUnset, name)
 	})
 	var commands []devcontainer.Command
-	for _, c := range []devcontainer.Command{cfg.PostCreate, cfg.PostStart} {
+	for _, member := range Members {
+		c := lifecycle(cfg, member)
 		if c.Empty() {
 			continue
 		}
 		expanded, err := c.Expand(vars)
 		if err != nil {
-			return fmt.Errorf(textStart, err)
+			return "", fmt.Errorf(textStart, err)
 		}
 		commands = append(commands, expanded)
 	}
 	if len(commands) == 0 {
-		return nil
+		return "", nil
 	}
 	var took time.Duration
 	var ran []string
@@ -109,12 +124,92 @@ func Start(ctx context.Context, dir string, environ []string, output io.Writer) 
 		d, err := devcontainer.Run(ctx, c, dir, env, output, output)
 		took += d
 		if err != nil {
-			return fmt.Errorf(textStart, err)
+			return "", fmt.Errorf(textStart, err)
 		}
 		ran = append(ran, c.Member)
 	}
-	fmt.Fprintf(output, textRan+"\n", strings.Join(ran, " and "), seconds(took))
-	return nil
+	return fmt.Sprintf(textRan, strings.Join(ran, " and "), seconds(took)), nil
+}
+
+// logPoll is how often [StartLogged] reads what the start commands wrote to their file.
+const logPoll = 50 * time.Millisecond
+
+// StartLogged is [Start] with a new file in the temporary folder as the start commands'
+// stdout and stderr, which it copies to output as the commands write it, until they end.
+// A program a command leaves running, such as a service a postStartCommand starts, keeps
+// writing to the file and holds no pipe of output open, so a setup step whose output is
+// a pipe, docker exec's in the setup container or the runner's inside the wall, ends
+// when StartLogged returns. When the commands ran, or wrote to the file before one
+// failed, the file stays and StartLogged prints [textLog] for it on output, after the line
+// that says which commands ran; otherwise it removes the file.
+func StartLogged(ctx context.Context, dir string, environ []string, output io.Writer) error {
+	f, err := os.CreateTemp("", "qory-setup-*.log")
+	if err != nil {
+		return localIn(err)
+	}
+	defer f.Close()
+	r, err := os.Open(f.Name())
+	if err != nil {
+		os.Remove(f.Name())
+		return localIn(err)
+	}
+	defer r.Close()
+	// The lines about the configuration and the commands' output reach output one write
+	// at a time.
+	var mu sync.Mutex
+	output = &lockedWriter{mu: &mu, w: output}
+	done := make(chan struct{})
+	copied := make(chan struct{})
+	go func() {
+		defer close(copied)
+		buf := make([]byte, 32*1024)
+		for {
+			n, _ := r.Read(buf)
+			if n > 0 {
+				output.Write(buf[:n])
+				continue
+			}
+			select {
+			case <-done:
+				return
+			case <-time.After(logPoll):
+			}
+		}
+	}()
+	ran, err := start(ctx, dir, environ, output, f)
+	// What the commands wrote up to here is copied; a program they left running may
+	// write more, which stays in the file.
+	end, _ := f.Seek(0, io.SeekCurrent)
+	close(done)
+	<-copied
+	if at, _ := r.Seek(0, io.SeekCurrent); at < end {
+		io.CopyN(output, r, end-at)
+	}
+	if ran != "" {
+		fmt.Fprintln(output, ran)
+	}
+	if end == 0 && ran == "" {
+		os.Remove(f.Name())
+		return err
+	}
+	fmt.Fprintf(output, textLog+"\n", integration.Printable(f.Name()))
+	return err
+}
+
+// Members are the lifecycle commands [Start] runs, in their order: the two a prebuilt
+// image's build leaves to the run.
+var Members = []string{"postCreateCommand", "postStartCommand"}
+
+// lifecycle is the lifecycle command of cfg that member names, one of [Members]; any
+// other name is a command that runs nothing.
+func lifecycle(cfg *devcontainer.Config, member string) devcontainer.Command {
+	switch member {
+	case cfg.PostCreate.Member:
+		return cfg.PostCreate
+	case cfg.PostStart.Member:
+		return cfg.PostStart
+	}
+	return devcontainer.Command{Member: member}
 }
 
 // expandEnv is the variables of vars replaced in each value of env, the member member,
@@ -176,14 +271,14 @@ func trackedConfig(ctx context.Context, dir string, output io.Writer) (*devconta
 		}
 		size, err := git(ctx, dir, "cat-file", "-s", oid)
 		if err != nil {
-			return nil, gitFailed(err)
+			return nil, gitFailedIn(err)
 		}
 		if n, err := strconv.ParseInt(strings.TrimSpace(size), 10, 64); err != nil || n > devcontainer.MaxSize {
 			return nil, fmt.Errorf(textTrackedTooBig, place)
 		}
 		data, err := git(ctx, dir, "cat-file", "blob", oid)
 		if err != nil {
-			return nil, gitFailed(err)
+			return nil, gitFailedIn(err)
 		}
 		cfg, err := devcontainer.Parse(place, []byte(data))
 		if err != nil {
@@ -204,7 +299,7 @@ func trackedFile(ctx context.Context, dir, place string) (string, error) {
 		at := strings.Join(segments[:i+1], "/")
 		out, err := git(ctx, dir, "ls-tree", "-z", "HEAD", "--", at)
 		if err != nil {
-			return "", gitFailed(err)
+			return "", gitFailedIn(err)
 		}
 		mode, kind, oid, found := "", "", "", false
 		for _, entry := range strings.Split(out, "\x00") {
@@ -240,4 +335,17 @@ func checkNames(member string, names []string) error {
 		}
 	}
 	return nil
+}
+
+// lockedWriter is w with each write under mu.
+type lockedWriter struct {
+	mu *sync.Mutex
+	w  io.Writer
+}
+
+// Write writes p to w under the lock.
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
 }

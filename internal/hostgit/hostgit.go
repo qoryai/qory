@@ -50,6 +50,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/qoryai/qory/internal/places"
@@ -95,6 +96,31 @@ var quiet = []string{"GIT_PAGER=cat", "GIT_EDITOR=:", "GIT_SEQUENCE_EDITOR=:"}
 // starts with no PATH takes a default one, which may end in the working folder. When
 // qory cannot read the records, the PATH is /usr/bin:/bin.
 func Env() []string { return envFrom(os.Environ()) }
+
+// baseKey is the key of the environment [WithBase] adds to a context.
+type baseKey struct{}
+
+// WithBase returns ctx with base as the environment that every git started with it
+// starts from, in place of this process's: [Ready], [Hold] and [Command], and the
+// checks they run, take base as [Env] takes this process's. A pool that fetches a run's
+// code in its process sets the environment of its commands, whose PATH lists no entry
+// in the folder walled runs write to.
+func WithBase(ctx context.Context, base []string) context.Context {
+	return context.WithValue(ctx, baseKey{}, slices.Clone(base))
+}
+
+// Base is the environment that a git started with ctx starts from: the one [WithBase]
+// set, or this process's.
+func Base(ctx context.Context) []string {
+	if base, ok := ctx.Value(baseKey{}).([]string); ok {
+		return base
+	}
+	return os.Environ()
+}
+
+// envOf is [Env] for a git started with ctx: [Base] of ctx in place of this process's
+// environment.
+func envOf(ctx context.Context) []string { return envFrom(Base(ctx)) }
 
 // envFrom is [Env] with base in place of this process's environment.
 func envFrom(base []string) []string {
@@ -205,10 +231,10 @@ func (c *Cmd) CombinedOutput() ([]byte, error) {
 func (c *Cmd) Release() { c.hold.Release() }
 
 // command is git with the flags and environment of [Command], without the check: the
-// git [gitIn] finds on the PATH of [Env], never one on this process's PATH that Env
-// leaves out.
+// git [gitIn] finds on the PATH of [Env], made from [Base] of ctx, never one on that
+// PATH that Env leaves out.
 func command(ctx context.Context, dir string, args ...string) *exec.Cmd {
-	return commandIn(ctx, dir, Env(), args...)
+	return commandIn(ctx, dir, envOf(ctx), args...)
 }
 
 // commandIn is [command] with env, which [envFrom] made, in place of [Env]. Every git

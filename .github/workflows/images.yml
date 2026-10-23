@@ -1,6 +1,7 @@
 name: Images
 
-# The agent's images are built here, and not published. A change to them, to the check
+# The agent's images are built here; this workflow publishes none of them, and
+# prerelease.yml publishes agent to a private package. A change to them, to the check
 # and what it reads, or to the Forager module whose descriptor names the version of claude,
 # builds all four and checks them with the qory of the same commit.
 on:

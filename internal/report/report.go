@@ -44,8 +44,9 @@ type Module struct {
 	// the stack sets none.
 	Link string `json:"link,omitempty"`
 	// Copied marks a module whose directory lies in the checkout, composed into a home
-	// outside it: the home contains copies of its files in place of links to them, so an
-	// edit to the module reaches the home on the next compose. Absent otherwise.
+	// outside it, and every module of a walled run: the home contains copies of its files
+	// in place of links to them, so an edit to the module reaches the home on the next
+	// compose. Absent otherwise.
 	Copied bool `json:"copied,omitempty"`
 	// Base marks a module of the base stack, when a checkout's qory.yaml extends one.
 	Base bool `json:"base,omitempty"`
@@ -142,6 +143,10 @@ type Target struct {
 	// Model is the model written into the runtime's settings, absent when the stack
 	// sets none.
 	Model string `json:"model,omitempty"`
+	// Effort is the effort value the main agent runs at, absent when the compose has
+	// none. A launch passes it in the place the runtime's descriptor lists, such as the flag
+	// --effort for claude.
+	Effort string `json:"effort,omitempty"`
 }
 
 // Worktree is what the report contains of the configuration's worktree section.
@@ -317,7 +322,7 @@ func New(res *compose.Result, name, checkout, home string) Report {
 		Stack:       name,
 		Description: res.Stack.Description,
 		File:        res.Stack.File,
-		Target:      Target{Runtimes: Runtimes(res.Stack.Target.Runtimes), Model: res.Stack.Target.Model},
+		Target:      Target{Runtimes: Runtimes(res.Stack.Target.Runtimes), Model: res.Stack.Target.Model, Effort: res.Stack.Target.Effort},
 		Checkout:    checkout,
 		Home:        home,
 		Modules:     []Module{},
@@ -428,6 +433,9 @@ func (r Report) PrintBody(w io.Writer) error {
 	fields = append(fields, [2]string{"checkout", ui.Short(r.Checkout, "")}, [2]string{"home", ui.Short(r.Home, r.Checkout)})
 	if r.Links != "" {
 		fields = append(fields, [2]string{"links", r.Links})
+	}
+	if r.Target.Effort != "" {
+		fields = append(fields, [2]string{"effort", exports.Value(r.Target.Effort, false)})
 	}
 	if r.Worktree != nil && r.Worktree.Base != nil {
 		b := r.Worktree.Base

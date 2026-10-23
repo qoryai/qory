@@ -104,6 +104,7 @@ var foragerKeys = []struct{ body, key string }{
 	{"wall: {adapter: docker, shm_size: %s}\n", "wall.shm_size"},
 	{"wall: {adapter: docker, ca_env: %s}\n", "wall.ca_env"},
 	{"wall: {adapter: docker, ca_env: [X, %s]}\n", "wall.ca_env[1]"},
+	{"wall: {adapter: docker, setup: %s}\n", "wall.setup"},
 	{"webhook: %s\n", "webhook"},
 }
 

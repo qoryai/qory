@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/forager/session"
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/acting"
@@ -106,27 +107,45 @@ func reportFor(home string) string { return home + "-report.json" }
 // it is for, so a verb runs from either side of the pair; else from the checkout the
 // process stands in and its configuration.
 func locate(o homeOptions) (places, config.Config, error) {
-	return locateWith(o, configFor)
+	return locateWith(o, configFor, nil)
 }
 
-// locateWith is [locate] with load reading the checkout's configuration.
-func locateWith(o homeOptions, load func(root string) (config.Config, error)) (places, config.Config, error) {
+// locateWith is [locate] with load reading the checkout's configuration. check, when
+// not nil, is called with the checkout's root and the home before any other check of
+// the home: the home --home names with its report, or the one [configuredHome] sets.
+func locateWith(o homeOptions, load func(root string) (config.Config, error), check func(root, home string) error) (places, config.Config, error) {
 	at, ok, err := placesFromReport(o)
 	if err != nil {
 		return at, config.Config{}, err
 	}
-	root := at.root
-	if !ok {
-		if root, err = locateRoot(""); err != nil {
+	root, git := at.root, true
+	if ok {
+		if check != nil {
+			if err := check(at.root, at.home); err != nil {
+				return places{}, config.Config{}, err
+			}
+		}
+		if err := reportedNeedsGit(at); err != nil {
 			return places{}, config.Config{}, err
 		}
+	} else if root, git, err = locateRoot(""); err != nil {
+		return places{}, config.Config{}, err
 	}
 	conf, err := load(root)
 	if err != nil {
 		return places{}, conf, err
 	}
 	if !ok {
-		at, err = placesFor(root, conf, o)
+		if check != nil {
+			home, err := configuredHome(root, conf, o)
+			if err != nil {
+				return places{}, conf, err
+			}
+			if err := check(root, home); err != nil {
+				return places{}, conf, err
+			}
+		}
+		at, err = placesIn(root, git, conf, o)
 	}
 	return at, conf, err
 }
@@ -166,27 +185,91 @@ func placesFromReport(o homeOptions) (places, bool, error) {
 	return at, true, nil
 }
 
-// locateRoot finds the checkout holding dir, "" for the working directory. It fails
-// outside a git working tree, which is deliberate: qory composes for a checkout, and
-// links into it and excludes what it wrote through git when the home is inside it.
-func locateRoot(dir string) (string, error) {
+// locateRoot finds the checkout holding dir, "" for the working directory, and reports
+// whether it is a git working tree. Outside one, the checkout is dir itself with its
+// links resolved, as git resolves its top level, and [homeNeedsGit] stops the verb
+// unless the home is outside the folder.
+func locateRoot(dir string) (string, bool, error) {
 	if dir == "" {
 		cwd, err := os.Getwd()
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
 		dir = cwd
 	}
 	root, err := checkout.Root(dir)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	if file, err := checkout.ExcludeFile(root); err != nil {
-		return "", err
-	} else if file == "" {
-		return "", input(fmt.Errorf("%s is not inside a git working tree; qory composes for a checkout", root))
+	git, err := workingTree(root)
+	if err != nil {
+		return "", false, err
 	}
-	return root, nil
+	if !git {
+		if real, err := filepath.EvalSymlinks(root); err == nil {
+			root = real
+		}
+	}
+	return root, git, nil
+}
+
+// workingTree reports whether root is in a git working tree: whether git finds an
+// exclude file for it.
+func workingTree(root string) (bool, error) {
+	file, err := checkout.ExcludeFile(root)
+	return file != "", err
+}
+
+// placesIn is [placesFor] for the checkout at root, git false when root is not a git
+// working tree. Outside git, a home inside the folder, by its path or with its links
+// resolved, stops the verb before any check of placesFor, with [needsGit]'s line, and so
+// does a home that placesFor puts inside it.
+func placesIn(root string, git bool, conf config.Config, o homeOptions) (places, error) {
+	if !git {
+		home, err := configuredHome(root, conf, o)
+		if err != nil {
+			return places{}, err
+		}
+		if within(root, home) || within(root, realPath(home)) {
+			return places{}, needsGit(root)
+		}
+	}
+	at, err := placesFor(root, conf, o)
+	if err != nil {
+		return at, err
+	}
+	return at, homeNeedsGit(at, git)
+}
+
+// reportedNeedsGit is [homeNeedsGit] for places read from a report beside --home: the
+// checkout the report is for has to be a git working tree when the home is inside it.
+// For a home outside it, git does not run.
+func reportedNeedsGit(at places) error {
+	if homeNeedsGit(at, false) == nil {
+		return nil
+	}
+	git, err := workingTree(at.root)
+	if err != nil {
+		return err
+	}
+	return homeNeedsGit(at, git)
+}
+
+// homeNeedsGit stops a verb in a folder that is not a git working tree, git false, unless
+// the home is outside the folder, its links resolved: a home inside it is written into
+// .qory, linked into the folder and excluded through git, and a folder outside git has no
+// exclude file. A home outside writes nothing into the folder.
+func homeNeedsGit(at places, git bool) error {
+	if git || at.dir == "" && !at.links && !within(at.root, realPath(at.home)) {
+		return nil
+	}
+	return needsGit(at.root)
+}
+
+// needsGit is the error for a home inside the folder at root, which is not a git working
+// tree.
+func needsGit(root string) error {
+	return input(fmt.Errorf("set --home or harness.home to a folder outside %[1]s, or run git init in %[1]s: a home inside a folder needs a git working tree there, and %[1]s is not one", exports.Value(root, false)))
 }
 
 // configFor reads the configuration a verb other than compose works with for the
@@ -216,23 +299,10 @@ func configFor(root string) (config.Config, error) {
 // checkout gets no links: harness.links: checkout is refused there. Inside, the links are
 // written unless harness.links: none or --no-links.
 func placesFor(root string, conf config.Config, o homeOptions) (places, error) {
-	var home string
-	switch {
-	case o.home != "":
-		abs, err := filepath.Abs(o.home)
-		if err != nil {
-			return places{}, err
-		}
-		home = abs
-	case conf.Home != "":
-		home = conf.Home
-	default:
-		home = config.DefaultHome
+	home, err := configuredHome(root, conf, o)
+	if err != nil {
+		return places{}, err
 	}
-	if !filepath.IsAbs(home) {
-		home = filepath.Join(root, home)
-	}
-	home = filepath.Clean(home)
 	if !within(root, home) {
 		// The root's own symlinks are resolved so the tree stands where the directory
 		// really is; the home under it is qory's own and is checked by the build.
@@ -254,6 +324,28 @@ func placesFor(root string, conf config.Config, o homeOptions) (places, error) {
 		return places{}, &render.ForeignPathError{Path: qdir, Target: target}
 	}
 	return places{root: root, dir: qdir, home: home, report: reportFor(home), links: !o.noLinks && conf.Links != config.LinksNone}, nil
+}
+
+// configuredHome is the home that --home, else harness.home, else [config.DefaultHome]
+// sets for the checkout at root: absolute and clean, a relative value under root.
+func configuredHome(root string, conf config.Config, o homeOptions) (string, error) {
+	var home string
+	switch {
+	case o.home != "":
+		abs, err := filepath.Abs(o.home)
+		if err != nil {
+			return "", err
+		}
+		home = abs
+	case conf.Home != "":
+		home = conf.Home
+	default:
+		home = config.DefaultHome
+	}
+	if !filepath.IsAbs(home) {
+		home = filepath.Join(root, home)
+	}
+	return filepath.Clean(home), nil
 }
 
 // placesAt is the places of the checkout at root under its configuration and no flags,
@@ -290,7 +382,9 @@ func homeFlags(c *cobra.Command, o *homeOptions) {
 // checkout whose own document extends a stack, is that document's base in place of what
 // extends names, and the document may leave extends out altogether: a runner that holds
 // the stack tree supplies the base, and the checkout's file carries only what is the
-// repository's own.
+// repository's own. -f also takes a stack reference, <https URL>#<ref>:<folder>: the
+// folder is fetched as a git module is, see [compose.LoadReference], and its
+// qory-stack.yaml is the stack -f selects.
 //
 // Writing is four steps in a fixed order: [render.Build] renders the home tree,
 // [render.LinkInto] links it into the checkout, [render.LinkModules] writes the module
@@ -307,8 +401,8 @@ func homeFlags(c *cobra.Command, o *homeOptions) {
 // flags have their standing value in qory.yaml, and a flag set on the command line, such
 // as --force=false, wins over the file.
 func newCompose(use string, aliases ...string) *cobra.Command {
-	var file, runtime, model string
-	var tiers []string
+	var shared composeOptions
+	var runtime string
 	var dryRun, check, force, update bool
 	var h homeOptions
 	c := &cobra.Command{
@@ -322,8 +416,9 @@ When two modules provide the same entry, compose refuses until the stack picks o
 
 With --home, or harness.home in qory.yaml, the tree goes outside the checkout, one home
 per checkout. The checkout then gets nothing. qory harness launch prints how an agent
-reads such a home. --no-links writes the tree to .qory/harness, with no link and no
-exclude line.
+reads such a home. A folder that is not a git working tree composes only with such a
+home. --no-links writes the tree to .qory/harness with no link; compose still writes the
+/.qory exclude line.
 
 --verbose prints each entry and the module it came from.
 
@@ -335,7 +430,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/harness.md`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			defer buzzing(cmd)()
-			o := composeOptions{file: file, runtime: runtime, model: model, tiers: tiers, dryRun: dryRun, check: check, verbose: verbose(cmd), homeOptions: h}
+			o := shared
+			o.runtime, o.dryRun, o.check, o.verbose, o.homeOptions = runtime, dryRun, check, verbose(cmd), h
 			if cmd.Flags().Changed("force") {
 				if check {
 					return input(errors.New("--check writes nothing, so --force has nothing to replace"))
@@ -348,17 +444,27 @@ More: https://github.com/qoryai/qory/blob/main/docs/harness.md`,
 			return runCompose(cmd.OutOrStdout(), cmd.ErrOrStderr(), o)
 		},
 	}
-	c.Flags().StringVarP(&file, "file", "f", "", "the qory-stack.yaml, qory.yaml or harness.yaml to compose instead of the one found; when the checkout's document extends a stack, this one is its base")
+	composeFlags(c, &shared)
 	c.Flags().StringVar(&runtime, "runtime", "", "render for these runtimes instead of target.runtime, comma separated ("+strings.Join(render.Names(), ", ")+"; qory.yaml: runtime)")
-	c.Flags().StringVar(&model, "model", "", "write this model instead of target.model (qory.yaml: model)")
-	c.Flags().StringArrayVar(&tiers, "tier", nil, "map a tier to a model id for each agent whose model is ${qory:<tier>}, as <tier>=<model id>; repeat it for each tier (tiers: light, fast, thinking; qory.yaml: harness.tiers)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the report and write nothing")
 	c.Flags().BoolVar(&check, "check", false, "compare the home with the stack and modules, write nothing, and exit 6 when a file, a link or a launch variable differs; the checkout's links and the rest of the report are not compared")
 	c.Flags().BoolVar(&force, "force", false, "replace a tracked, unmodified file where a link goes; git checkout -- restores it (qory.yaml: force)")
 	c.Flags().BoolVar(&update, "update", false, "fetch every git source again, not the cached clone (qory.yaml: update)")
 	homeFlags(c, &h)
-	c.Flags().BoolVar(&h.noLinks, "no-links", false, "write no link and no exclude line into the checkout; harness launch prints how an agent reads the home (qory.yaml: harness.links: none)")
+	c.Flags().BoolVar(&h.noLinks, "no-links", false, "write no link into the checkout; with the home at .qory/harness, compose still writes the /.qory exclude line; harness launch prints how an agent reads the home (qory.yaml: harness.links: none)")
 	return c
+}
+
+// composeFlags adds the flags that set what a compose builds to c, into o: -f, --model,
+// --effort, --tier and --tier-effort. qory harness compose and qory run both call it, so the flags mean the same
+// on both. Each later compose flag that qory run takes too is added here, for both
+// commands.
+func composeFlags(c *cobra.Command, o *composeOptions) {
+	c.Flags().StringVarP(&o.file, "file", "f", "", "the qory-stack.yaml, qory.yaml or harness.yaml to compose instead of the one found, or a stack's folder in a git repository as <https URL>#<ref>:<folder>; when the checkout's document extends a stack, this one is its base")
+	c.Flags().StringVar(&o.model, "model", "", "write this model instead of target.model (qory.yaml: model)")
+	c.Flags().StringVar(&o.effort, "effort", "", "run the main agent at this effort value, one of the values the runtime's descriptor lists, such as high (qory.yaml: harness.effort)")
+	c.Flags().StringArrayVar(&o.tiers, "tier", nil, "map a tier to a model id for each agent whose model is ${qory:<tier>}, as <tier>=<model id>; repeat it for each tier (tiers: light, fast, thinking; qory.yaml: harness.tiers)")
+	c.Flags().StringArrayVar(&o.tierEfforts, "tier-effort", nil, "set the effort value for each agent whose model is ${qory:<tier>}, as <tier>=<effort>, beside --tier <tier>=<model id>; repeat it for each tier")
 }
 
 // composeOptions is what one compose is told: the checkout to compose, "" for the working
@@ -368,12 +474,36 @@ type composeOptions struct {
 	dir            string
 	file           string
 	runtime, model string
+	effort         string   // the value of --effort
 	tiers          []string // the values of --tier, each <tier>=<model id>
+	tierEfforts    []string // the values of --tier-effort, each <tier>=<effort>
 	dryRun         bool
 	check          bool
 	verbose        bool
 	force, update  *bool
 	homeOptions
+	// at, when set, is the places the compose writes, which qory run located for the
+	// session it starts, in place of the ones the compose would locate.
+	at *places
+	// run marks the compose of a qory run: no title, and the warnings kept for the run to
+	// print on its stderr.
+	run bool
+	// inCheckout is set for a run given a run key: every path source that a file inside
+	// the checkout lists resolves inside the checkout, every git source it lists is an
+	// https URL, the compose reads no git or env key of the checkout's qory.yaml and no
+	// machine key under harness, such as model or launch, and it starts as if there were
+	// no report.
+	inCheckout bool
+	// walled is set for a run behind a wall: the home contains copies of every module's
+	// files, see [copies].
+	walled bool
+	// hidden is set for a run whose documents set harness_hidden: the home contains
+	// copies of every module's files, as for a walled run, so it contains no link.
+	hidden bool
+	// git, when set, fetches every git source through a run's host proxy, into cache, the
+	// run's cache: the compose of a run from a control plane, see [source.Git].
+	git   *source.Git
+	cache string
 }
 
 // staleError is what a --check returns when the home does not match what the stack and
@@ -425,6 +555,7 @@ func runCheck(out io.Writer, pr *prepared) error {
 		return input(err)
 	}
 	differences = append(differences, envDifferences(env, pr.previous.LaunchEnv)...)
+	differences = append(differences, effortDifference(pr.rep.Target.Effort, pr.previous.Target.Effort)...)
 	rows := [][2]string{{"home", exports.Value(ui.Short(pr.at.home, pr.at.root), false)}}
 	if len(differences) == 0 {
 		u.Success("up to date")
@@ -499,6 +630,7 @@ type prepared struct {
 	force    bool
 	cache    string      // where git sources are fetched, so a check compares a link into a clone by what it holds
 	rows     [][2]string // the rows every outcome prints after its own: skipped keys, unchecked ranges
+	warnings []string    // the warnings printed, one per git source whose remote could not be reached
 	u        *ui.UI
 }
 
@@ -506,24 +638,44 @@ type prepared struct {
 // composes the worktree it made. out gets the rows, errOut the collision text. With
 // check set it compares instead of writing, see [runCheck].
 func runCompose(out, errOut io.Writer, o composeOptions) error {
+	_, err := composeHome(out, errOut, o)
+	return err
+}
+
+// composed is what a compose that wrote the home hands back: the report it wrote, the
+// runtimes it composed for, and the warnings it printed, for qory run's line.
+type composed struct {
+	rep      report.Report
+	targets  []render.Runtime
+	warnings []string
+	// harness is the git sources the compose resolved, with their commits, as
+	// [harnessSources] lists them.
+	harness []session.HarnessSource
+	// workflows are the composed stack's workflows, nil for none.
+	workflows map[string]stack.Workflow
+}
+
+// composeHome is [runCompose] returning what it composed; nil after a check or a dry
+// run, which write nothing.
+func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 	pr, err := prepare(out, errOut, o)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer pr.res.Close()
 	if o.check {
-		return runCheck(out, pr)
+		return nil, runCheck(out, pr)
 	}
 	at, res, rep, previous, targets, force, u := pr.at, pr.res, pr.rep, pr.previous, pr.targets, pr.force, pr.u
 	skippedConfig := pr.rows
 	if o.dryRun {
 		if err := rep.PrintBody(out); err != nil {
-			return err
+			return nil, err
 		}
 		u.Blank()
 		u.Success("dry run: nothing written")
 		u.Fields(skippedConfig)
-		return nil
+		return nil, nil
 	}
 	// A checkout can be composed for several runtimes at once, and can have been
 	// composed for others before. The home is one tree that a build replaces
@@ -537,10 +689,10 @@ func runCompose(out, errOut io.Writer, o composeOptions) error {
 		rep.Target.Runtimes = append(rep.Target.Runtimes, rt.Name())
 	}
 	if rep.LaunchEnv, err = launchEnv(res, all, pr.launch); err != nil {
-		return input(err)
+		return nil, input(err)
 	}
 	if err := render.Build(res, at.home, all...); err != nil {
-		return err
+		return nil, err
 	}
 	// What the compose wrote, the home and its report, is what the record of a place
 	// they lie in holds from here on, a compose that stopped on the way included.
@@ -548,7 +700,14 @@ func runCompose(out, errOut io.Writer, o composeOptions) error {
 	if recordErr := recordHarness(at); err == nil {
 		err = recordErr
 	}
-	return err
+	if err != nil {
+		return nil, err
+	}
+	var workflows map[string]stack.Workflow
+	if res.Stack != nil {
+		workflows = res.Stack.Workflows
+	}
+	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res), workflows: workflows}, nil
 }
 
 // launchEnv is, per runtime with a launch template, the variables the harness sets when
@@ -595,7 +754,7 @@ func allRuntimes(home string, targets []render.Runtime) []render.Runtime {
 // --runtime and --model flags, looks every runtime up, prints the title, composes, and
 // builds the report. A collision is printed on errOut and comes back marked reported.
 func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) {
-	flagTiers, err := tierFlags(o.tiers)
+	flagTiers, err := tierFlags(o.tiers, o.tierEfforts)
 	if err != nil {
 		return nil, input(err)
 	}
@@ -605,33 +764,110 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	if err != nil {
 		return nil, err
 	}
-	root := at.root
-	if !located {
-		if root, err = locateRoot(o.dir); err != nil {
+	if located && o.at == nil {
+		if err := reportedNeedsGit(at); err != nil {
 			return nil, err
 		}
 	}
+	if o.at != nil {
+		at, located = *o.at, true
+	}
+	root, git := at.root, true
+	if !located {
+		if root, git, err = locateRoot(o.dir); err != nil {
+			return nil, err
+		}
+	}
+	if o.inCheckout {
+		if err := configInCheckout(root); err != nil {
+			return nil, input(err)
+		}
+	}
 	file := o.file
+	ref, byRef, err := stack.ParseReference(o.file)
+	if err != nil {
+		return nil, input(err)
+	}
 	if file == "" {
 		if file, err = config.DiscoverStack(root); err != nil {
 			return nil, input(err)
 		}
 	}
-	p, err := config.LoadStack(file)
-	if err != nil {
+	retired := newRetiredRows(root)
+	// Every document with a qory key is checked against the running qory as it is
+	// read, before anything is fetched or written: the configuration files, the stack,
+	// and the base once extends has resolved it.
+	checks := newQoryChecks(root)
+	// A checkout that extends a closed base says what it composes the base for in
+	// its document's target, and the harness, git and env keys of its own
+	// qory.yaml are not read: the runner's configuration is the only one that
+	// stands over the document.
+	// A run given a run key reads them from no checkout's qory.yaml either, as
+	// [locateRun] does, so the repository a dispatched run works on sets no git or env
+	// key and no machine key under harness, such as model or launch.
+	var conf config.Config
+	loadConf := func(extends bool) (err error) {
+		if conf, err = config.Load(root, !extends && !o.inCheckout); err != nil {
+			return input(err)
+		}
+		return nil
+	}
+	checkConf := func() error {
+		for _, r := range conf.Qory {
+			if err := checks.check(r.File, "the file", r.Qory); err != nil {
+				return err
+			}
+		}
+		for _, r := range conf.Retired {
+			retired.add(r.File, r.APIVersion)
+		}
+		return nil
+	}
+	update := false
+	updateFrom := func() {
+		update = conf.Update
+		if o.update != nil {
+			update = *o.update
+		}
+	}
+	memo := source.NewMemo()
+	var p *stack.Stack
+	var fetched source.Resolved
+	if byRef {
+		// A stack reference is fetched before the stack is read, so the configuration
+		// that sets how git fetches is read first: the keys of the checkout's qory.yaml are
+		// left out when its document composes on the stack, as under extends.
+		doc, err := config.Document(root)
+		if err != nil {
+			return nil, input(err)
+		}
+		if err := loadConf(doc != ""); err != nil {
+			return nil, err
+		}
+		if err := checkConf(); err != nil {
+			return nil, err
+		}
+		updateFrom()
+		fetchOpts := compose.Options{Update: update, Cache: conf.Git.Cache, Timeout: conf.Git.Timeout, Memo: memo}
+		if o.git != nil {
+			fetchOpts.Git, fetchOpts.Cache = o.git, o.cache
+		}
+		if p, fetched, err = compose.LoadReference(ref, fetchOpts); err != nil {
+			return nil, composeError(err)
+		}
+	} else if p, err = config.LoadStack(file); err != nil {
 		return nil, input(err)
 	}
-	retired := newRetiredRows(root)
 	retired.add(p.File, p.RetiredAPIVersion)
 	// A stack named with -f, in a checkout whose own document extends one, is that
 	// document's base, in place of what extends names: the document composes on it,
 	// its modules appended and its extensions over the base's. That is how a runner
 	// holding the stack tree supplies the base, and the checkout's file need name no
 	// version, ref or URL of it. A checkout without a document composes the stack
-	// alone, as it always has.
+	// alone, as it always has. A stack reference is a stack, whatever its folder.
 	var base *stack.Stack
 	var named stack.Source
-	if o.file != "" && !config.IsDocument(file) {
+	if byRef || o.file != "" && !config.IsDocument(file) {
 		doc, err := config.Document(root)
 		if err != nil {
 			return nil, input(err)
@@ -644,51 +880,41 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 			retired.add(p.File, p.RetiredAPIVersion)
 		}
 	}
-	// A checkout that extends a closed base says what it composes the base for in
-	// its document's target, and the harness, git and env keys of its own
-	// qory.yaml are not read: the runner's configuration is the only one that
-	// stands over the document.
 	extends := p.Extends.Path != "" || p.Extends.Git != ""
 	doc := p
-	conf, err := config.Load(root, !extends)
-	if err != nil {
-		return nil, input(err)
+	if !byRef {
+		if err := loadConf(extends); err != nil {
+			return nil, err
+		}
+		updateFrom()
 	}
 	if !located {
-		if at, err = placesFor(root, conf, o.homeOptions); err != nil {
+		if at, err = placesIn(root, git, conf, o.homeOptions); err != nil {
 			return nil, err
 		}
 	}
-	// Every document with a qory key is checked against the running qory as it is
-	// read, before anything is fetched or written: the configuration files, the stack,
-	// and the base once extends has resolved it.
-	checks := newQoryChecks(root)
-	for _, r := range conf.Qory {
-		if err := checks.check(r.File, "the file", r.Qory); err != nil {
+	if !byRef {
+		if err := checkConf(); err != nil {
 			return nil, err
 		}
-	}
-	for _, r := range conf.Retired {
-		retired.add(r.File, r.APIVersion)
 	}
 	if err := checks.check(p.File, "the stack", p.Qory); err != nil {
 		return nil, err
 	}
-	force, update := conf.Force, conf.Update
+	force := conf.Force
 	if o.force != nil {
 		force = *o.force
-	}
-	if o.update != nil {
-		update = *o.update
 	}
 	// The last report pins each git module, and the base, to the commit it was
 	// composed from: a tag stays there, a branch takes the remote's commit and keeps
 	// the pin only offline, and an edited ref resolves anew. The memo puts every
 	// source at one URL and ref, the base included, on one commit for this compose.
 	previous, _ := report.Read(at.report)
-	if checkHarness(at) != nil {
+	if checkHarness(at) != nil || o.inCheckout {
 		// A report in a recorded place that is not the one the last compose wrote
 		// pins, replaces and links nothing: the compose starts as if there were none.
+		// Neither does any report for a run given a run key: a branch of the
+		// repository can commit one into the checkout.
 		previous = report.Report{}
 	}
 	pins := map[string]string{}
@@ -697,18 +923,42 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 			pins[l.Source] = l.Pin
 		}
 	}
-	opts := compose.Options{Update: update, Pins: pins, Cache: conf.Git.Cache, Timeout: conf.Git.Timeout, Env: conf.Env, Memo: source.NewMemo(), Tiers: resolveTiers(flagTiers, conf), Copies: copies(at)}
+	opts := compose.Options{Update: update, Pins: pins, Cache: conf.Git.Cache, Timeout: conf.Git.Timeout, Env: conf.Env, Memo: memo, Tiers: resolveTiers(flagTiers, conf), Copies: copies(at, o.walled || o.hidden), Walled: o.walled, Hidden: o.hidden}
+	if o.git != nil {
+		opts.Git, opts.Cache = o.git, o.cache
+	}
 	var basePin string
 	if previous.Base != nil && previous.Base.Source == p.Extends.String() {
 		basePin = previous.Base.Pin
 	}
+	// A run given a run key reads no folder outside the checkout that a file in the
+	// checkout lists, and fetches its git sources over https only: the stack it extends
+	// is checked before it is read, and the modules once the base's modules are beside
+	// them.
+	var docIn bool
+	if o.inCheckout {
+		if docIn, err = extendsInCheckout(doc, base, root, o.file == "" || base != nil); err != nil {
+			return nil, input(err)
+		}
+	}
 	if base != nil {
 		p, opts.Base, err = compose.ExtendOn(p, base, source.WorkingTree)
+		if err == nil && byRef {
+			// The base is the reference, as the report records it, on the commit it
+			// resolved to.
+			b := opts.Base
+			b.Source, b.Pin, b.Commit, b.Ref, b.Warning = ref.String(), fetched.Pin, fetched.Commit, ref.Ref, fetched.Warning
+		}
 	} else {
 		p, opts.Base, err = compose.LoadBase(p, basePin, opts)
 	}
 	if err != nil {
 		return nil, composeError(err)
+	}
+	if o.inCheckout {
+		if err := modulesInCheckout(p, doc, base, root, docIn); err != nil {
+			return nil, input(err)
+		}
 	}
 	if opts.Base != nil {
 		if err := checks.check(p.File, "the base stack "+shownBase(opts.Base), opts.Base.Qory); err != nil {
@@ -721,7 +971,8 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	if err := mainModelTier(p, conf, o.model); err != nil {
 		return nil, input(err)
 	}
-	if err := applyTarget(p, opts.Base, conf, o.runtime, o.model); err != nil {
+	effort, effortFrom := runEffort(o.effort, conf, at.root)
+	if err := applyTarget(p, opts.Base, conf, o.runtime, o.model, effort); err != nil {
 		return nil, input(err)
 	}
 	// Every targeted runtime is looked up before anything is composed, so an
@@ -734,6 +985,10 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 		}
 		targets = append(targets, rt)
 	}
+	effortRows, err := checkRunEffort(effort, effortFrom, targets)
+	if err != nil {
+		return nil, input(err)
+	}
 	name := p.Name
 	if name == "" {
 		if name, err = checkout.RepoKey(at.root); err != nil {
@@ -741,8 +996,12 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 		}
 	}
 	u := ui.New(out)
-	// The runtimes passed render.Lookup above, so each is a runtime qory knows.
-	u.Title(accesskey.ShownName(name, false), strings.TrimSpace(p.Target.Runtimes.String()+" "+exports.Value(p.Target.Model, false)))
+	// The runtimes passed render.Lookup above, so each is a runtime qory knows. qory run
+	// prints no title: it prints the lines that start with "qory run:", and its errors
+	// under qory's title.
+	if !o.run {
+		u.Title(accesskey.ShownName(name, false), strings.TrimSpace(p.Target.Runtimes.String()+" "+exports.Value(p.Target.Model, false)))
+	}
 	res, err := compose.ComposeWith(p, opts)
 	var collision *compose.CollisionError
 	switch {
@@ -772,7 +1031,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	if err != nil {
 		return nil, input(err)
 	}
-	moved := resolvedRows(res, u)
+	moved, warnings := resolvedRows(res, u)
 	for _, m := range res.Modules {
 		retired.add("module "+accesskey.ShownName(m.Name, false), m.RetiredAPIVersion)
 	}
@@ -809,7 +1068,11 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 		if named.Path != "" || named.Git != "" {
 			what = "(set by -f, in place of extends " + named.Shown() + ")"
 		}
-		skippedConfig = append(skippedConfig, [2]string{"base", exports.HidePath(ui.Short(base.File, at.root)) + "  " + what})
+		from := exports.HidePath(ui.Short(base.File, at.root))
+		if byRef {
+			from = ref.Shown()
+		}
+		skippedConfig = append(skippedConfig, [2]string{"base", from + "  " + what})
 	}
 	if own, _ := config.FileIn(at.root); extends && own != "" {
 		skippedConfig = append(skippedConfig, ownFileRows(own, doc, conf)...)
@@ -817,24 +1080,33 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	if baseErr != nil {
 		skippedConfig = append(skippedConfig, [2]string{"skipped", "worktree.base  (" + exports.HideValueError(baseErr, conf.Worktree.Base).Error() + "; the report lists no base)"})
 	}
+	skippedConfig = append(skippedConfig, effortRows...)
 	skippedConfig = append(skippedConfig, tierRows(res, all, at.root)...)
 	skippedConfig = append(skippedConfig, envRows...)
 	skippedConfig = append(skippedConfig, checks.rows...)
 	skippedConfig = append(skippedConfig, retired.rows...)
-	cache := conf.Git.Cache
+	cache := opts.Cache
 	if cache == "" {
 		cache, _ = source.CacheDir()
 	}
-	return &prepared{at: at, res: res, rep: rep, previous: previous, targets: targets, launch: conf.Launch, force: force, cache: cache, rows: skippedConfig, u: u}, nil
+	return &prepared{at: at, res: res, rep: rep, previous: previous, targets: targets, launch: conf.Launch, force: force, cache: cache, rows: skippedConfig, warnings: warnings, u: u}, nil
 }
 
-// copies decides, for the compose, whether the home contains copies of a module's files:
-// when the home is outside the checkout and the module's directory lies in the
-// checkout, as written or with every link resolved, against the checkout root as given
-// and resolved. A walled run can write the checkout, so a link from the home into it
-// would let the run change what the runtime loads. A home inside the checkout keeps its
-// links: a walled run does not take such a home, and a copy there would end live editing.
-func copies(at places) func(dir string) bool {
+// copies decides, for the compose, whether the home contains copies of a module's files.
+// With all set, every module is copied. A walled run copies every module: the container
+// sees no module outside the checkout, whether a folder of this machine or a git source
+// fetched into qory's cache or the run directory, at the path a link leads to. A run
+// whose harness is hidden copies every module too: Forager masks the text of the home's
+// files and fails the join on a link in the home. Otherwise, the home contains copies
+// when it is outside the checkout and the module's directory lies in the checkout, as
+// written or with every link resolved, against the checkout root as given and resolved: a
+// walled run can write the checkout, so a link from the home into it would let the run
+// change what the runtime loads. A home inside the checkout then keeps its links, since
+// a copy there would end live editing.
+func copies(at places, all bool) func(dir string) bool {
+	if all {
+		return func(string) bool { return true }
+	}
 	if at.dir != "" {
 		return nil
 	}
@@ -864,8 +1136,8 @@ func resolved(path string) string {
 // resolvedRows prints a warning for each git source whose remote could not be reached, one
 // per URL and ref, and returns a row for the base and each module whose source resolved
 // to another commit than the last compose recorded, such as a branch that moved: the
-// name, the ref, and the old and new pins.
-func resolvedRows(res *compose.Result, u *ui.UI) [][2]string {
+// name, the ref, and the old and new pins. It returns the warnings too.
+func resolvedRows(res *compose.Result, u *ui.UI) ([][2]string, []string) {
 	var rows [][2]string
 	var warnings []string
 	if b := res.Base; b != nil {
@@ -887,7 +1159,7 @@ func resolvedRows(res *compose.Result, u *ui.UI) [][2]string {
 	for _, w := range warnings {
 		u.Warn("%s", w)
 	}
-	return rows
+	return rows, warnings
 }
 
 // ownFileRows are the rows for the checkout's own qory.yaml under extends: what the
@@ -1095,10 +1367,10 @@ func launchHint(rt render.Runtime) string {
 }
 
 // applyTarget puts the configuration's runtime and model, then the --runtime and --model
-// flags, over the document's target, and checks the result: a runtime from one of the
-// three, and, under a base stack that says what it is written for in extending.target,
-// a target inside that, whichever of the three set it.
-func applyTarget(p *stack.Stack, base *compose.Base, conf config.Config, runtime, model string) error {
+// flags, over the document's target, with the effort of the compose, and checks the
+// result: a runtime from one of the three, and, under a base stack that lists what it is
+// written for in extending.target, a target inside that, whichever of the three set it.
+func applyTarget(p *stack.Stack, base *compose.Base, conf config.Config, runtime, model, effort string) error {
 	want := p.Target
 	if conf.Runtime != nil {
 		want.Runtimes = conf.Runtime
@@ -1115,6 +1387,7 @@ func applyTarget(p *stack.Stack, base *compose.Base, conf config.Config, runtime
 	if model != "" {
 		want.Model = model
 	}
+	want.Effort = effort
 	if err := want.Runtimes.Validate(); err != nil {
 		if len(want.Runtimes) == 0 && base != nil {
 			return fmt.Errorf("target.runtime is required; the base stack %s defines no target, so the document sets one beside extends, or the configuration or --runtime does", shownBase(base))
@@ -1325,7 +1598,7 @@ func explainForeign(err error, root, file string, replaced []string, force bool)
 	}
 	command := "qory harness compose"
 	if file != "" {
-		command += " -f " + file
+		command += " -f " + exports.URL(file)
 	}
 	command += " --force"
 	switch {

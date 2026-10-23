@@ -26,6 +26,23 @@
       "description": "Values qory copies into the report and does not read: keys of the author's choosing, each a value of any shape.",
       "type": "object"
     },
+    "workflows": {
+      "description": "The settings of each workflow the stack starts, by the workflow's name: a run that Qory Apiary dispatches starts the skill or command of that name.",
+      "type": "object",
+      "propertyNames": {"pattern": "^[a-z][a-z0-9-]{0,63}$"},
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "time_limit": {
+            "description": "How long a dispatched run of the workflow may run, counted from the run's open, as a duration: 7h or 45m. The run's run_settings.time_limit_minutes, when Qory Apiary sets it, applies instead. A workflow without it runs for at most 3 hours.",
+            "type": "string",
+            "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$",
+            "not": {"pattern": "^([0.]+(ns|us|ms|s|m|h))+$"}
+          }
+        }
+      }
+    },
     "extending": {
       "description": "What a module of a checkout extending this stack may ship.",
       "type": "object",

@@ -48,8 +48,10 @@ package claude
 
 import (
 	"path/filepath"
+	"slices"
 
 	"github.com/qoryai/qory/internal/compose"
+	"github.com/qoryai/qory/internal/modelplace"
 	"github.com/qoryai/qory/internal/render"
 )
 
@@ -191,7 +193,7 @@ func renderPlugin(res *compose.Result, dir string) error {
 		return err
 	}
 	if render.Copies(res) {
-		return render.CheckPluginSize(dir)
+		return render.CheckPluginSize(dir, slices.ContainsFunc(res.Modules, func(m compose.Module) bool { return m.Walled || m.Hidden }))
 	}
 	return nil
 }
@@ -205,8 +207,16 @@ var ModelVariables = []string{
 }
 
 // AgentEfforts are the effort values a Claude Code agent file takes in its effort
-// frontmatter. The effortLevel setting does not take max; an agent file does.
-func (claude) AgentEfforts() []string { return []string{"low", "medium", "high", "xhigh", "max"} }
+// frontmatter, as the agent place of the effort in Forager's descriptor for the runtime
+// lists them; nil when the descriptor has none. The effortLevel setting does not take
+// max; an agent file does.
+func (claude) AgentEfforts() []string {
+	p, ok := modelplace.AgentEffort(Runtime)
+	if !ok {
+		return nil
+	}
+	return p.Values
+}
 
 // Egress is the host Claude Code's program reaches for the model: the API. The
 // telemetry and the MCP proxy hosts it also tries are not declared; a policy that does

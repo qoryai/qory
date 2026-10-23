@@ -1,7 +1,7 @@
 // Package agentenv names the environment variables that change what the agent does
 // beyond what its run sets: its runtime's and qory's settings, its telemetry, its tool
-// servers, and what a program or a shell loads before it starts. qory run prebuild
-// refuses an image or a development container configuration that sets one, and a
+// servers, and what a program or a shell loads before it starts. A pool's prebuild
+// stops on an image or a development container configuration that sets one, and a
 // dispatched walled run of Claude Code drops the image's values of them, but for the
 // gateway's placeholders. Both guard against the values an image or a configuration
 // leaves in place, not against a program of the image or a command of the repository,

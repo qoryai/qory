@@ -158,7 +158,7 @@ func TestARunKeyReadsNoMachineKeyOfTheCheckout(t *testing.T) {
 	}
 	t.Chdir(root)
 
-	_, person, err := locateRun(homeOptions{}, nil)
+	_, person, err := locateRun(homeOptions{}, false, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestARunKeyReadsNoMachineKeyOfTheCheckout(t *testing.T) {
 		t.Errorf("without a run key the checkout's keys are not read: %+v, env %v", person.Launch, person.Env)
 	}
 
-	_, keyed, err := locateRun(homeOptions{}, &runKey{})
+	_, keyed, err := locateRun(homeOptions{}, true, true)
 	if err != nil {
 		t.Fatal(err)
 	}

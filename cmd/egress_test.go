@@ -41,17 +41,14 @@ func TestDeclaredEgressReachesTheRun(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	_, evs := events(t, root)
-	applied := evs["dev.qory.run.policy_applied"]
-	if len(applied) != 1 {
-		t.Fatalf("policy_applied %v", applied)
-	}
-	if got := list(applied[0]["harness_hosts"]); got != "*.github.com api.anthropic.com api.example.com registry.npmjs.org" {
+	applied := sessionApplied(t, evs)
+	if got := list(applied["harness_hosts"]); got != "*.github.com api.anthropic.com api.example.com registry.npmjs.org" {
 		t.Errorf("harness_hosts %q", got)
 	}
-	if got := list(applied[0]["allow"]); got != "api.anthropic.com *.example.com other.example.org" {
+	if got := list(applied["allow"]); got != "api.anthropic.com *.example.com other.example.org" {
 		t.Errorf("allow %q, want the policy's own list", got)
 	}
-	if _, old := applied[0]["declared"]; old {
+	if _, old := applied["declared"]; old {
 		t.Error("policy_applied still carries declared")
 	}
 }
@@ -77,8 +74,8 @@ func TestAnEmptyDeclarationStillHasTheRuntime(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	_, evs := events(t, root)
-	applied := evs["dev.qory.run.policy_applied"]
-	if len(applied) != 1 || list(applied[0]["allow"]) != "api.anthropic.com *.example.com" || list(applied[0]["harness_hosts"]) != "api.anthropic.com" {
+	applied := sessionApplied(t, evs)
+	if list(applied["allow"]) != "api.anthropic.com *.example.com" || list(applied["harness_hosts"]) != "api.anthropic.com" {
 		t.Errorf("policy_applied %v", applied)
 	}
 }

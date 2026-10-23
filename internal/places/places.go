@@ -31,6 +31,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -737,19 +738,45 @@ func InUse(ctx context.Context, h *Hold, path string) (bool, error) {
 	h.mu.Lock()
 	h.locks = append(h.locks, l)
 	h.mu.Unlock()
-	return Going(ctx, path)
+	return Going(ctx, path, ThisRun())
 }
 
-// Going reports whether a walled run still going binds the place at path, absolute,
-// writable, by Forager's registry of walled runs, see [session.RunsBinding], without the
-// place's lock: for a caller that holds it, see [Starting]. An engine the registry
-// cannot ask about an earlier run is its refusal, see [Unreachable].
-func Going(ctx context.Context, path string) (bool, error) {
+// thisRun is the id of the walled run this process opened, which [InUse] leaves out:
+// the run's open lists it in Forager's registry of walled runs before its compose runs
+// git in places it may bind. It is "" while the process has opened none.
+var thisRun atomic.Value
+
+// ThisRun is the id of the walled run [InUse] leaves out, "" for none.
+func ThisRun() string {
+	id, _ := thisRun.Load().(string)
+	return id
+}
+
+// SetThisRun makes [InUse] leave out the walled run id, which this process opened, and
+// returns what sets back the run before.
+func SetThisRun(id string) (restore func()) {
+	before := ThisRun()
+	thisRun.Store(id)
+	return func() { thisRun.Store(before) }
+}
+
+// Going reports whether a walled run still going, other than the run except, binds the
+// place at path, absolute, writable, by Forager's registry of walled runs, see
+// [session.RunsBinding], without the place's lock: for a caller that holds it, see
+// [Starting]. The run except is the caller's run, which its open lists in the registry
+// before it starts at the place; "" leaves no run out. An engine the registry cannot
+// ask about an earlier run is its refusal, see [Unreachable].
+func Going(ctx context.Context, path, except string) (bool, error) {
 	runs, err := session.RunsBinding(ctx, nil, path)
 	if err != nil {
 		return false, err
 	}
-	return len(runs) > 0, nil
+	for _, r := range runs {
+		if r.RunID != except {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // Unreachable reports whether err is the engine_unreachable refusal of Forager's

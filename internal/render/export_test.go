@@ -15,7 +15,7 @@ func CopyModule(m compose.Module, dst string) error {
 		return err
 	}
 	defer out.Close()
-	return copyModule(m, out, filepath.Base(dst))
+	return copyModule(m, out, filepath.Base(dst), nil)
 }
 
 // CopyEntry is [copyEntry] for the tests: the file or directory at path in m copied to
@@ -26,12 +26,12 @@ func CopyEntry(m compose.Module, path, dst string) error {
 		return err
 	}
 	defer out.Close()
-	return copyEntry(m, path, out, filepath.Base(dst), nil)
+	return copyEntry(m, path, out, filepath.Base(dst), nil, nil)
 }
 
 // ReadEntry is [readEntry] for the tests, outside a build.
 func ReadEntry(m compose.Module, path string) ([]byte, error) {
-	return readEntry(m, path)
+	return readEntry(m, path, nil)
 }
 
 // SetMaxModuleBytes sets the most bytes one copy writes to n until the test ends.

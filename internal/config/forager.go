@@ -323,6 +323,14 @@ type ForagerTool struct {
 // WallDocker is the one wall adapter there is.
 const WallDocker = "docker"
 
+// Where a walled run's setup commands run, wall.setup: in a separate container of the
+// run's image on the wall's network, the default, or in the agent's container before
+// the agent starts.
+const (
+	SetupOutside = "outside"
+	SetupInside  = "inside"
+)
+
 // ForagerWall is the wall section: the container every run on this machine starts the
 // runtime in, with no route out except to the gateway's proxy.
 type ForagerWall struct {
@@ -337,7 +345,7 @@ type ForagerWall struct {
 	// selects among them by name.
 	Images []ForagerImage
 	// ImagesAllow are the prefixes of the references pinned by digest a run's policy may
-	// name its image by, Forager's Spec.ImagesAllow; nil allows no reference. A list
+	// name its image by, Forager's OpenSpec.ImagesAllow; nil allows no reference. A list
 	// needs a default image, Image or --image.
 	ImagesAllow []string
 	// Command is the program the adapter runs, such as podman; empty means docker.
@@ -367,6 +375,9 @@ type ForagerWall struct {
 	// the gateway makes an authority for the run: in the container, or on this machine
 	// for a run without a wall. Nil means Forager's defaults.
 	CAEnv []string
+	// Setup is where the setup commands of a run run, [SetupOutside] or [SetupInside];
+	// empty means outside.
+	Setup string
 }
 
 // ForagerMount is one file or directory of this machine a walled run sees, at the same
@@ -467,6 +478,7 @@ type foragerFile struct {
 		PIDs    *int      `yaml:"pids_limit"`
 		ShmSize *string   `yaml:"shm_size"`
 		CAEnv   yaml.Node `yaml:"ca_env,omitempty"`
+		Setup   *string   `yaml:"setup"`
 
 		// ImagesAllow is read as a node, so an entry that is not a string is refused
 		// by its index.
@@ -781,6 +793,12 @@ func LoadForagerIn(dir string) (*Forager, error) {
 		}
 		if w.ShmSize != nil {
 			r.Wall.ShmSize = *w.ShmSize
+		}
+		if w.Setup != nil {
+			if *w.Setup != SetupOutside && *w.Setup != SetupInside {
+				return nil, fmt.Errorf("%s: set wall.setup to %s or %s, or remove it for %s: it is %s", path, SetupOutside, SetupInside, SetupOutside, exports.Value(*w.Setup, true))
+			}
+			r.Wall.Setup = *w.Setup
 		}
 		notCAEnv := func(i, _ int) error {
 			return fmt.Errorf("%s: wall.ca_env[%d] is not a variable's name", path, i)
@@ -1877,6 +1895,9 @@ func (r *Forager) Rows() []Row {
 		}
 		if r.Wall.PIDs > 0 {
 			rows = append(rows, Row{"wall.pids_limit", strconv.Itoa(r.Wall.PIDs), origin})
+		}
+		if r.Wall.Setup != "" {
+			rows = append(rows, Row{"wall.setup", r.Wall.Setup, origin})
 		}
 	} else {
 		rows = append(rows, Row{"wall.adapter", "(none)", Default})

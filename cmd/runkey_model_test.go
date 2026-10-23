@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/qoryai/forager/session"
+
 	"github.com/qoryai/qory/cmd"
 )
 
@@ -21,13 +23,15 @@ func modelCredentialLine(name, from string) string {
 // or wall.env names a variable Claude Code reads a model key from, as its descriptor's
 // model.keys lists, ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_AUTH_TOKEN:
 // --env by the name and as NAME=value, and wall.env, the run key by QORY_RUN_KEY and by
-// --run-key-fd. Each stops the run with an input error that names the variable and never
-// its value, before the gateway's address is reached, a container starts or anything is
-// recorded.
+// --run-key-fd. Each stops the run, opened and composed, with an input error that names
+// the variable and never its value, before the join and before a container starts; the
+// run closes failed with no session. The runs are opened nowhere ([cmd.OpenNowhere]).
 func TestARunKeyTakesNoModelCredentialPassedIn(t *testing.T) {
 	root := runKeyCheckout(t)
 	gw := newKeyedGateway(t)
 	key := mintRunKey(t, keyRunID, gw.url())
+	closes, restore := cmd.OpenNowhere()
+	defer restore()
 	docker, log := fakeDocker(t)
 	file := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml")
 	wallSection := "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: " + docker + "\n  helper: " + staticELF(t) + "\n  user: \"1000:1000\"\n"
@@ -79,17 +83,23 @@ func TestARunKeyTakesNoModelCredentialPassedIn(t *testing.T) {
 			if err != nil {
 				all += err.Error()
 			}
-			lacks(t, all, modelKeyValue, key[4:40], "qory run: through the gateway", "hello from")
+			lacks(t, all, modelKeyValue, key[4:40], "hello from")
 		})
 	}
 	if _, n := gw.received(); n != 0 {
-		t.Error("a refused run reached the gateway's address")
+		t.Errorf("%d connections reached the gateway of a run opened nowhere", n)
+	}
+	for _, o := range closes() {
+		if (keyRun{closes: []session.Outcome{o}}).stoppedBeforeJoin() {
+			continue
+		}
+		t.Errorf("a run closed with %v, want failed before the join", o)
+	}
+	if n := len(closes()); n != 8 {
+		t.Errorf("%d runs closed, want 8", n)
 	}
 	if _, err := os.Stat(log); !os.IsNotExist(err) {
 		t.Errorf("a refused run ran docker: %v", err)
-	}
-	if ids := recorded(t, root); len(ids) != 0 {
-		t.Errorf("a refused run left records %v", ids)
 	}
 	for _, dir := range []string{root, filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory"), filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory")} {
 		noValueUnder(t, dir, modelKeyValue)

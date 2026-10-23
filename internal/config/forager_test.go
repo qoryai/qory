@@ -147,7 +147,7 @@ wall:
 // default when the file names none.
 func TestForagerFileReadsTheWall(t *testing.T) {
 	hermetic(t)
-	path := foragerFile(t, "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: podman\n  helper: /opt/qory/qory-linux\n  env: [ANTHROPIC_API_KEY, GH_TOKEN]\n  user: \"1000:1000\"\n  mounts: [/srv/data:ro, /srv/cache]\n  cpus: \"3.5\"\n  memory: 14g\n  pids_limit: 4096\n  shm_size: 2g\n  ca_env: [SSL_CERT_FILE, MY_TOOLS_CA]\nsession:\n  run:\n    timeout: 5h30m\n    stop_signal: SIGINT\n    stop_grace: 30s\ngateway:\n  credentials:\n    product:\n      adapter: [/opt/adapters/git-host, --repo, \"${argument}\"]\n      argument: \"[a-z0-9-]+/[a-z0-9-]+\"\n      hosts: [\"*.example.com\"]\n      placeholders: [GIT_HOST_TOKEN]\n    model:\n      env: MODEL_TOKEN\n      hosts: [api.model.example]\n      auth: {scheme: header, header: X-Api-Key}\n")
+	path := foragerFile(t, "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: podman\n  helper: /opt/qory/qory-linux\n  env: [ANTHROPIC_API_KEY, GH_TOKEN]\n  user: \"1000:1000\"\n  mounts: [/srv/data:ro, /srv/cache]\n  cpus: \"3.5\"\n  memory: 14g\n  pids_limit: 4096\n  shm_size: 2g\n  ca_env: [SSL_CERT_FILE, MY_TOOLS_CA]\n  setup: inside\nsession:\n  run:\n    timeout: 5h30m\n    stop_signal: SIGINT\n    stop_grace: 30s\ngateway:\n  credentials:\n    product:\n      adapter: [/opt/adapters/git-host, --repo, \"${argument}\"]\n      argument: \"[a-z0-9-]+/[a-z0-9-]+\"\n      hosts: [\"*.example.com\"]\n      placeholders: [GIT_HOST_TOKEN]\n    model:\n      env: MODEL_TOKEN\n      hosts: [api.model.example]\n      auth: {scheme: header, header: X-Api-Key}\n")
 	c, err := config.Load(t.TempDir(), true)
 	if err != nil {
 		t.Fatal(err)
@@ -163,10 +163,13 @@ func TestForagerFileReadsTheWall(t *testing.T) {
 	for key, want := range map[string]string{"wall.adapter": "docker", "wall.image": "example.com/agent:1 (a reference)", "wall.env": "ANTHROPIC_API_KEY, GH_TOKEN", "wall.command": "podman", "wall.helper": "/opt/qory/qory-linux",
 		"wall.mounts": "/srv/data:ro, /srv/cache", "wall.cpus": "3.5", "wall.memory": "14g", "wall.pids_limit": "4096", "wall.shm_size": "2g",
 		"session.run.timeout": "5h30m0s", "session.run.stop_grace": "30s", "session.run.stop_signal": "SIGINT", "wall.ca_env": "SSL_CERT_FILE, MY_TOOLS_CA",
-		"gateway.credentials.product": "adapter /opt/adapters/git-host", "gateway.credentials.model": "env MODEL_TOKEN"} {
+		"wall.setup": "inside", "gateway.credentials.product": "adapter /opt/adapters/git-host", "gateway.credentials.model": "env MODEL_TOKEN"} {
 		if rows[key].Value != want || rows[key].Origin != path {
 			t.Errorf("%s: %+v, want %q from %s", key, rows[key], want, path)
 		}
+	}
+	if w.Setup != config.SetupInside {
+		t.Errorf("wall.setup read as %q, want inside", w.Setup)
 	}
 	foragerFile(t, "gateway: {egress: {mode: observe}}\n")
 	c, err = config.Load(t.TempDir(), true)
@@ -177,6 +180,35 @@ func TestForagerFileReadsTheWall(t *testing.T) {
 		if row.Key == "wall.adapter" && (row.Value != "(none)" || row.Origin != config.Default) {
 			t.Errorf("no wall listed as %+v", row)
 		}
+	}
+}
+
+// TestWallSetupIsOutsideOrInside reads wall.setup: absent, it is empty, which a run reads
+// as outside, and listed by no row; outside and inside are read as written; any other
+// value is refused with the fix first and the value quoted.
+func TestWallSetupIsOutsideOrInside(t *testing.T) {
+	hermetic(t)
+	foragerFile(t, "wall:\n  adapter: docker\n")
+	r, err := config.LoadForager()
+	if err != nil || r.Wall.Setup != "" {
+		t.Fatalf("absent: %+v, %v", r, err)
+	}
+	for _, row := range r.Rows() {
+		if row.Key == "wall.setup" {
+			t.Errorf("absent: listed as %+v", row)
+		}
+	}
+	for _, v := range []string{config.SetupOutside, config.SetupInside} {
+		foragerFile(t, "wall:\n  adapter: docker\n  setup: "+v+"\n")
+		if r, err := config.LoadForager(); err != nil || r.Wall.Setup != v {
+			t.Errorf("%s: %+v, %v", v, r, err)
+		}
+	}
+	path := foragerFile(t, "wall:\n  adapter: docker\n  setup: Outside\n")
+	_, err = config.LoadForager()
+	want := path + `: set wall.setup to outside or inside, or remove it for outside: it is "Outside"`
+	if err == nil || err.Error() != want {
+		t.Errorf("Outside: %v, want %s", err, want)
 	}
 }
 

@@ -99,7 +99,7 @@ func TestMountRefusedSaysHowTheMountStands(t *testing.T) {
 	refusal := func(mount, path string) error {
 		return fmt.Errorf("wrapped: %w", &session.Refusal{Code: "mount_contains_forager_files", Names: []string{mount, path}})
 	}
-	at := func(foragerDir string) passed { return passed{foragerDir: foragerDir, spec: &session.Spec{}} }
+	at := func(foragerDir string) passed { return passed{foragerDir: foragerDir, spec: &runSpec{}} }
 	if got, want := mountRefused(refusal(inner, dir), at(dir)).Error(), "the mount "+inner+" lies inside "+dir+", which holds one of Forager's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"; got != want {
 		t.Errorf("lies inside, no access key: %q, want %q", got, want)
 	}
@@ -128,7 +128,7 @@ func TestMountRefusedSaysHowTheMountStands(t *testing.T) {
 		{false, "the mount " + parent + " contains " + dir + ", which leads to one of Forager's files; the agent could point it elsewhere, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
 		{true, "the mount " + parent + " contains " + dir + ", which leads to one of Forager's files, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
 	} {
-		p := passed{foragerDir: dir, spec: &session.Spec{Mounts: []wall.Mount{{Path: parent, ReadOnly: c.readOnly}}}, own: ownFiles{links: map[string]string{place: dir}}}
+		p := passed{foragerDir: dir, spec: &runSpec{SessionSpec: session.SessionSpec{Mounts: []wall.Mount{{Path: parent, ReadOnly: c.readOnly}}}}, own: ownFiles{links: map[string]string{place: dir}}}
 		if got := mountRefused(refusal(parent, place), p).Error(); got != c.want {
 			t.Errorf("a link's place, read-only %v: %q, want %q", c.readOnly, got, c.want)
 		}
@@ -145,7 +145,7 @@ func TestMountRefusedSaysHowTheMountStands(t *testing.T) {
 		{dir, dir, "the mount " + dir + " is " + dir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
 		{parent, dir, "the mount " + parent + " contains " + dir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
 	} {
-		p := passed{foragerDir: dir, spec: &session.Spec{Mounts: []wall.Mount{{Path: c.mount, ReadOnly: true}}}}
+		p := passed{foragerDir: dir, spec: &runSpec{SessionSpec: session.SessionSpec{Mounts: []wall.Mount{{Path: c.mount, ReadOnly: true}}}}}
 		if got := mountRefused(refusal(c.mount, c.path), p).Error(); got != c.want {
 			t.Errorf("read-only %s of %s: %q, want %q", c.mount, c.path, got, c.want)
 		}
@@ -153,7 +153,7 @@ func TestMountRefusedSaysHowTheMountStands(t *testing.T) {
 	// The same refusals of the workspace: the checkout root as Mounts holds it, and the
 	// working directory.
 	root := filepath.Dir(dir)
-	ws := passed{foragerDir: dir, root: root, spec: &session.Spec{Mounts: []wall.Mount{{Path: root}}, Dir: inner}}
+	ws := passed{foragerDir: dir, root: root, spec: &runSpec{SessionSpec: session.SessionSpec{Mounts: []wall.Mount{{Path: root}}, Dir: inner}}}
 	if got, want := mountRefused(refusal(root, dir), ws).Error(), "the workspace "+root+" contains "+dir+", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_forager_files)"; got != want {
 		t.Errorf("the workspace's root: %q, want %q", got, want)
 	}
@@ -164,7 +164,7 @@ func TestMountRefusedSaysHowTheMountStands(t *testing.T) {
 		t.Errorf("another mount beside the workspace: %q, want %q", got, want)
 	}
 	// The root is the workspace only as Mounts holds it.
-	if got := mountRefused(refusal(root, dir), passed{foragerDir: dir, root: root, spec: &session.Spec{}}).Error(); !strings.HasPrefix(got, "the mount "+root+" ") {
+	if got := mountRefused(refusal(root, dir), passed{foragerDir: dir, root: root, spec: &runSpec{}}).Error(); !strings.HasPrefix(got, "the mount "+root+" ") {
 		t.Errorf("a root Mounts does not hold: %q", got)
 	}
 	var ref *session.Refusal
@@ -196,7 +196,7 @@ func TestMountRefusedNamesTheRunRecords(t *testing.T) {
 	root := filepath.Join(home, "app")
 	link := filepath.Join(home, "linked", "state")
 	place := linkPlace(link)
-	p := passed{stateDir: state, root: root, spec: &session.Spec{RunsDir: runs, Mounts: []wall.Mount{{Path: root}, {Path: home, ReadOnly: true}, {Path: filepath.Join(state, "runs")}, {Path: filepath.Dir(link), ReadOnly: true}}, Dir: root},
+	p := passed{stateDir: state, root: root, spec: &runSpec{OpenSpec: session.OpenSpec{RunsDir: runs}, SessionSpec: session.SessionSpec{Mounts: []wall.Mount{{Path: root}, {Path: home, ReadOnly: true}, {Path: filepath.Join(state, "runs")}, {Path: filepath.Dir(link), ReadOnly: true}}, Dir: root}},
 		own: ownFiles{links: map[string]string{place: link}, records: map[string]bool{place: true}}}
 	for _, c := range []struct{ mount, path, want, what string }{
 		{home, state, "the mount " + home + " contains " + state, "read"},
@@ -226,7 +226,7 @@ func TestMountRefusedNamesTheRunRecords(t *testing.T) {
 		}
 	}
 	// A runs directory inside the workspace, as XDG_STATE_HOME in the checkout makes it.
-	inside := passed{stateDir: filepath.Join(root, "state", "qory"), root: root, spec: &session.Spec{RunsDir: filepath.Join(root, "state", "qory", "runs", "app-0123456789ab"), Mounts: []wall.Mount{{Path: root}}, Dir: root}}
+	inside := passed{stateDir: filepath.Join(root, "state", "qory"), root: root, spec: &runSpec{OpenSpec: session.OpenSpec{RunsDir: filepath.Join(root, "state", "qory", "runs", "app-0123456789ab")}, SessionSpec: session.SessionSpec{Mounts: []wall.Mount{{Path: root}}, Dir: root}}}
 	want := "the workspace " + root + " contains " + inside.stateDir + ", which holds qory's run records; the agent could change them, so the run does not start. Mount a narrower path (mount_contains_forager_files)"
 	if err := mountRefused(&session.Refusal{Code: "mount_contains_forager_files", Names: []string{root, inside.stateDir}}, inside); err == nil || err.Error() != want {
 		t.Errorf("the state directory in the workspace: %v, want %q", err, want)
@@ -241,7 +241,7 @@ func TestMountRefusedNamesTheRunRecords(t *testing.T) {
 func TestMountRefusedSaysTheModes(t *testing.T) {
 	root, sibling := t.TempDir(), t.TempDir()
 	sub, docs := filepath.Join(root, "vendor"), filepath.Join(sibling, "docs")
-	spec := &session.Spec{Dir: filepath.Join(sibling, "work"), Mounts: []wall.Mount{{Path: root}, {Path: sub, ReadOnly: true}, {Path: sibling, ReadOnly: true}, {Path: docs}, {Path: root, ReadOnly: true}}}
+	spec := &runSpec{SessionSpec: session.SessionSpec{Dir: filepath.Join(sibling, "work"), Mounts: []wall.Mount{{Path: root}, {Path: sub, ReadOnly: true}, {Path: sibling, ReadOnly: true}, {Path: docs}, {Path: root, ReadOnly: true}}}}
 	p := passed{root: root, spec: spec}
 	for _, c := range []struct{ inner, outer, want string }{
 		{sub, root, "the mount " + sub + " (read-only) lies inside " + root + ", which is writable"},
@@ -256,21 +256,21 @@ func TestMountRefusedSaysTheModes(t *testing.T) {
 		}
 	}
 	// The workspace, writable, the same as a read-only mount: Forager counts it last.
-	ro := passed{root: root, spec: &session.Spec{Dir: sub, Mounts: []wall.Mount{{Path: sub, ReadOnly: true}}}}
+	ro := passed{root: root, spec: &runSpec{SessionSpec: session.SessionSpec{Dir: sub, Mounts: []wall.Mount{{Path: sub, ReadOnly: true}}}}}
 	want := "the mount " + sub + " (writable) lies inside " + sub + ", which is read-only: a part of a mount can't have another mode, so the run does not start. Give both the same mode, or leave " + sub + " out (mount_mode_conflict)"
 	if err := mountRefused(&session.Refusal{Code: "mount_mode_conflict", Names: []string{sub, sub}}, ro); err == nil || err.Error() != want {
 		t.Errorf("the workspace as a read-only mount: %v, want %q", err, want)
 	}
 	// The run started at the root, which the person passed read-only too: Forager
 	// refuses the read-only entry, the first of the other mode.
-	rootRO := passed{root: root, spec: &session.Spec{Dir: root, Mounts: []wall.Mount{{Path: root}, {Path: root, ReadOnly: true}}}}
+	rootRO := passed{root: root, spec: &runSpec{SessionSpec: session.SessionSpec{Dir: root, Mounts: []wall.Mount{{Path: root}, {Path: root, ReadOnly: true}}}}}
 	want = "the mount " + root + " (read-only) lies inside " + root + ", which is writable: a part of a mount can't have another mode, so the run does not start. Give both the same mode, or leave " + root + " out (mount_mode_conflict)"
 	if err := mountRefused(&session.Refusal{Code: "mount_mode_conflict", Names: []string{root, root}}, rootRO); err == nil || err.Error() != want {
 		t.Errorf("the root passed read-only too: %v, want %q", err, want)
 	}
 	// A writable mount inside a checkout passed read-only too: the inner's one mode
 	// decides, and the outer is the other one.
-	both := passed{root: root, spec: &session.Spec{Dir: root, Mounts: []wall.Mount{{Path: root}, {Path: sub}, {Path: root, ReadOnly: true}}}}
+	both := passed{root: root, spec: &runSpec{SessionSpec: session.SessionSpec{Dir: root, Mounts: []wall.Mount{{Path: root}, {Path: sub}, {Path: root, ReadOnly: true}}}}}
 	want = "the mount " + sub + " (writable) lies inside " + root + ", which is read-only: a part of a mount can't have another mode, so the run does not start. Give both the same mode, or leave " + sub + " out (mount_mode_conflict)"
 	if err := mountRefused(&session.Refusal{Code: "mount_mode_conflict", Names: []string{sub, root}}, both); err == nil || err.Error() != want {
 		t.Errorf("a writable mount in a checkout passed with both modes: %v, want %q", err, want)
@@ -291,26 +291,26 @@ func TestMountRefusedNamesTheLinkOnTheWay(t *testing.T) {
 	tail := ", which a walled agent can change, so the run does not start. List the link's target itself (mount_through_link)"
 	for _, c := range []struct {
 		name               string
-		spec               *session.Spec
+		spec               *runSpec
 		place, link, outer string
 		want               string
 	}{
-		{"a mount inside the workspace", &session.Spec{Dir: root, Mounts: []wall.Mount{{Path: root}, {Path: vendor + "/lib"}}},
+		{"a mount inside the workspace", &runSpec{SessionSpec: session.SessionSpec{Dir: root, Mounts: []wall.Mount{{Path: root}, {Path: vendor + "/lib"}}}},
 			vendor + "/lib", vendor, root,
 			"the mount " + vendor + "/lib is reached through the link " + vendor + " inside the workspace " + root + tail},
-		{"the workspace inside a mount", &session.Spec{Dir: work, Mounts: []wall.Mount{{Path: root}, {Path: shared}}},
+		{"the workspace inside a mount", &runSpec{SessionSpec: session.SessionSpec{Dir: work, Mounts: []wall.Mount{{Path: root}, {Path: shared}}}},
 			work, filepath.Join(shared, "current"), shared,
 			"the workspace " + work + " is reached through the link " + filepath.Join(shared, "current") + " inside the mount " + shared + tail},
-		{"a read-only place", &session.Spec{Dir: root, Mounts: []wall.Mount{{Path: root}, {Path: vendor, ReadOnly: true}}},
+		{"a read-only place", &runSpec{SessionSpec: session.SessionSpec{Dir: root, Mounts: []wall.Mount{{Path: root}, {Path: vendor, ReadOnly: true}}}},
 			vendor, filepath.Join(root, "third_party"), root,
 			"the mount " + vendor + " is reached through the link " + filepath.Join(root, "third_party") + " inside the workspace " + root + tail},
-		{"the place is the link", &session.Spec{Dir: root, Mounts: []wall.Mount{{Path: root}, {Path: vendor}}},
+		{"the place is the link", &runSpec{SessionSpec: session.SessionSpec{Dir: root, Mounts: []wall.Mount{{Path: root}, {Path: vendor}}}},
 			vendor, vendor, root,
 			"the mount " + vendor + " is a link inside the workspace " + root + tail},
-		{"the place is the link, passed unclean", &session.Spec{Dir: root, Mounts: []wall.Mount{{Path: root}, {Path: root + "//vendor/"}}},
+		{"the place is the link, passed unclean", &runSpec{SessionSpec: session.SessionSpec{Dir: root, Mounts: []wall.Mount{{Path: root}, {Path: root + "//vendor/"}}}},
 			root + "//vendor/", vendor, root,
 			"the mount " + root + "//vendor/ is a link inside the workspace " + root + tail},
-		{"the workspace is the link", &session.Spec{Dir: work, Mounts: []wall.Mount{{Path: root}, {Path: shared}}},
+		{"the workspace is the link", &runSpec{SessionSpec: session.SessionSpec{Dir: work, Mounts: []wall.Mount{{Path: root}, {Path: shared}}}},
 			work, work, shared,
 			"the workspace " + work + " is a link inside the mount " + shared + tail},
 	} {
@@ -325,7 +325,7 @@ func TestMountRefusedNamesTheLinkOnTheWay(t *testing.T) {
 	odd := filepath.Join(root, "ven\u202edor")
 	oddLink := filepath.Join(root, "third\u200b_party")
 	oddUsed := filepath.Join(t.TempDir(), "used\x1b[2J")
-	p := passed{root: root, spec: &session.Spec{Dir: root, Mounts: []wall.Mount{{Path: root}, {Path: odd}}}}
+	p := passed{root: root, spec: &runSpec{SessionSpec: session.SessionSpec{Dir: root, Mounts: []wall.Mount{{Path: root}, {Path: odd}}}}}
 	for _, c := range []struct{ name, place, link, outer, want string }{
 		{"a mount and a link", odd, oddLink, root, "the mount " + strconv.Quote(odd) + " is reached through the link " + strconv.Quote(oddLink) + " inside the workspace " + root + tail},
 		{"the mount is the link", odd, odd, root, "the mount " + strconv.Quote(odd) + " is a link inside the workspace " + root + tail},
@@ -336,7 +336,7 @@ func TestMountRefusedNamesTheLinkOnTheWay(t *testing.T) {
 			t.Errorf("%s: %v, want %q", c.name, err, c.want)
 		}
 	}
-	p = passed{root: root, spec: &session.Spec{Dir: root, Mounts: []wall.Mount{{Path: root}}}}
+	p = passed{root: root, spec: &runSpec{SessionSpec: session.SessionSpec{Dir: root, Mounts: []wall.Mount{{Path: root}}}}}
 	for _, names := range [][]string{{vendor, root}, {vendor, vendor, root, root}} {
 		if err := mountRefused(&session.Refusal{Code: "mount_through_link", Names: names}, p); err != nil {
 			t.Errorf("%d names: %v", len(names), err)
@@ -377,7 +377,7 @@ func TestMountRefusedNamesTheRunStillGoing(t *testing.T) {
 		// Paths Overlap no longer relates.
 		{"/srv/app", plain, "/elsewhere/app", "the mount " + plain + " overlaps /elsewhere/app" + tail},
 	} {
-		p := passed{root: c.root, spec: &session.Spec{Mounts: []wall.Mount{{Path: c.root}, {Path: c.path}}, Dir: c.root}}
+		p := passed{root: c.root, spec: &runSpec{SessionSpec: session.SessionSpec{Mounts: []wall.Mount{{Path: c.root}, {Path: c.path}}, Dir: c.root}}}
 		err := mountRefused(&session.Refusal{Code: "mount_shared_with_run", Names: []string{c.path, other, c.otherPath}}, p)
 		want := c.want + " (mount_shared_with_run)"
 		if err == nil || err.Error() != want {
@@ -389,7 +389,7 @@ func TestMountRefusedNamesTheRunStillGoing(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(runs, "x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	p := passed{root: checkout, spec: &session.Spec{RunsDir: runs, Mounts: []wall.Mount{{Path: checkout}}, Dir: checkout}}
+	p := passed{root: checkout, spec: &runSpec{OpenSpec: session.OpenSpec{RunsDir: runs}, SessionSpec: session.SessionSpec{Mounts: []wall.Mount{{Path: checkout}}, Dir: checkout}}}
 	for _, c := range []struct{ otherPath, how string }{
 		{filepath.Dir(runs), "lie inside"},
 		{runs, "is"},
@@ -745,11 +745,11 @@ func TestUserHomeNeedsAConfigurationDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = userHome(places{root: root}, conf)
+	err = userHome(places{root: root}, conf, false)
 	if want := "no configuration directory: set HOME or XDG_CONFIG_HOME"; err == nil || err.Error() != want || ExitCode(err) != ExitCode(errors.New("")) {
 		t.Errorf("no configuration directory: %v (exit %d), want %q", err, ExitCode(err), want)
 	}
-	if err := userHome(places{root: root}, config.Defaults()); err != nil {
+	if err := userHome(places{root: root}, config.Defaults(), false); err != nil {
 		t.Errorf("a home no file sets: %v", err)
 	}
 }
@@ -762,7 +762,7 @@ func TestUserHomeNeedsAConfigurationDirectory(t *testing.T) {
 // of that run no longer exists. Any other number of names falls through to Forager's own words.
 func TestEngineUnreachableIsWorded(t *testing.T) {
 	const id = "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f"
-	p := passed{spec: &session.Spec{}}
+	p := passed{spec: &runSpec{}}
 	err := mountRefused(&session.Refusal{Code: "engine_unreachable", Names: []string{id}}, p)
 	if want := "The check for a container of an earlier walled run failed, so the run does not start (engine_unreachable)"; err == nil || err.Error() != want {
 		t.Errorf("engine_unreachable: %v, want %q", err, want)

@@ -21,9 +21,10 @@
 # cross-compiles for the platform asked for, TARGETOS and TARGETARCH, so nothing runs
 # under emulation.
 
-# Docker Hub's official golang:1.27, the image CI tests in, by the digest of its image
-# index, which names an image for each platform.
-ARG GO_IMAGE=public.ecr.aws/docker/library/golang:1.27@sha256:e432b43af23a9328d56a7c499be0476810aa344acbcf65fc7c455d4ff5a40602
+# Docker Hub's official golang image of Go 1.27.3, the release go.mod requires, by the
+# digest of its image index, which lists an image for each platform. The image sets
+# GOTOOLCHAIN=local, so go builds only with the Go 1.27.3 in it.
+ARG GO_IMAGE=public.ecr.aws/docker/library/golang:1.27.3@sha256:f24164268fc1e741bbdc0066dbadcf1c8426c5a8489f0729c02c3905a53032fd
 
 FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS build
 ARG TARGETOS
