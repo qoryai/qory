@@ -26,13 +26,13 @@ func TestARunCodesTimeLimitLineNamesWhereTheLimitIsSet(t *testing.T) {
 	}
 }
 
-// TestAWalledRunOfANamedStackMountsNothingOfQorysCacheFolder is a walled run from a run
+// TestAWalledRunOfANamedStackWithAMountOfQorysCacheFolderStops is a walled run from a run
 // code whose stack is a name, with a mount from wall.mounts or --mount: a mount that is
 // qory's folder in the cache directory, contains it, lies inside it, or is a link to it
 // or to a folder above it stops the run, exit 2, before anything is fetched; qory
 // writes the harness reports of runs from a run code there. Another mount, and a run of
 // a stack reference, pass.
-func TestAWalledRunOfANamedStackMountsNothingOfQorysCacheFolder(t *testing.T) {
+func TestAWalledRunOfANamedStackWithAMountOfQorysCacheFolderStops(t *testing.T) {
 	isolate(t)
 	base, err := os.UserCacheDir()
 	if err != nil {
@@ -60,7 +60,7 @@ func TestAWalledRunOfANamedStackMountsNothingOfQorysCacheFolder(t *testing.T) {
 	} {
 		for _, from := range []string{"wall.mounts in forager.yaml", "--mount"} {
 			err := named.cacheMounted([]givenMount{{path: other, from: "--mount"}, {path: c.path, from: from}})
-			want := "remove " + c.path + " from " + from + ": it " + c.how + " " + cache + ", where qory writes the harness report of each run with a run key or a run code that has no --home or harness.home, and a walled run of a named stack mounts no part of " + cache + "; the code is used"
+			want := "remove " + c.path + " from " + from + ": it " + c.how + " " + cache + ", where qory writes the harness report of each run with a run key or a run code that has no --home or harness.home, and the agent's container has every mount; the code is used"
 			if err == nil || err.Error() != want {
 				t.Errorf("the mount %s from %s: got %v\nwant %s", c.path, from, err, want)
 			} else if code := ExitCode(err); code != 2 {
@@ -121,7 +121,7 @@ func TestAMountInAnotherLetterCaseOfQorysCacheFolderStops(t *testing.T) {
 		{upper, "contains"}, {filepath.Join(upper, "QORY"), "is"}, {filepath.Join(upper, "Qory", "Homes"), "lies inside"},
 	} {
 		err := named.cacheMounted([]givenMount{{path: c.path, from: "--mount"}})
-		want := "remove " + c.path + " from --mount: it " + c.how + " " + cache + ", where qory writes the harness report of each run with a run key or a run code that has no --home or harness.home, and a walled run of a named stack mounts no part of " + cache + "; the code is used"
+		want := "remove " + c.path + " from --mount: it " + c.how + " " + cache + ", where qory writes the harness report of each run with a run key or a run code that has no --home or harness.home, and the agent's container has every mount; the code is used"
 		if err == nil || err.Error() != want {
 			t.Errorf("the mount %s: got %v\nwant %s", c.path, err, want)
 		}

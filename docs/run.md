@@ -51,7 +51,7 @@ each run with a run key or a run code that has no `--home` or `harness.home`, an
 agent's container has every mount. The code is used, so the run needs a new one:
 
 ```text
-remove /home/dev/.cache from --mount: it contains /home/dev/.cache/qory, where qory writes the harness report of each run with a run key or a run code that has no --home or harness.home, and a walled run of a named stack mounts no part of /home/dev/.cache/qory; the code is used
+remove /home/dev/.cache from --mount: it contains /home/dev/.cache/qory, where qory writes the harness report of each run with a run key or a run code that has no --home or harness.home, and the agent's container has every mount; the code is used
 ```
 
 Given a run key, `qory run` composes under four rules, so that a branch of the checkout

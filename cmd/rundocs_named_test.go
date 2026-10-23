@@ -460,7 +460,7 @@ func TestAWalledRunOfANamedStackThatMountsQorysCacheFolderStops(t *testing.T) {
 				writeFile(t, file, wall+"  mounts: [\""+cache+"\"]\n")
 				return nil
 			}}.run(t)
-			want := "remove " + cache + " from " + from + ": it is " + cache + ", where qory writes the harness report of each run with a run key or a run code that has no --home or harness.home, and a walled run of a named stack mounts no part of " + cache + "; the code is used"
+			want := "remove " + cache + " from " + from + ": it is " + cache + ", where qory writes the harness report of each run with a run key or a run code that has no --home or harness.home, and the agent's container has every mount; the code is used"
 			if r.err == nil || r.err.Error() != want || cmd.ExitCode(r.err) != cmd.ExitInput {
 				t.Fatalf("%v (exit %d), want %q, exit %d\n%s", r.err, cmd.ExitCode(r.err), want, cmd.ExitInput, r.out)
 			}

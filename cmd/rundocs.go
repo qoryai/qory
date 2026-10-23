@@ -197,7 +197,7 @@ func (r *codeRun) cacheMounted(given []givenMount) error {
 	cache := filepath.Join(base, "qory")
 	for _, m := range given {
 		if how := session.Overlap(m.path, cache); how != "" {
-			return input(fmt.Errorf("remove %s from %s: it %s %s, where qory writes the harness report of each run with a run key or a run code that has no --home or harness.home, and a walled run of a named stack mounts no part of %s%s", exports.Value(m.path, false), m.from, how, exports.Value(cache, false), exports.Value(cache, false), codeUsed))
+			return input(fmt.Errorf("remove %s from %s: it %s %s, where qory writes the harness report of each run with a run key or a run code that has no --home or harness.home, and the agent's container has every mount%s", exports.Value(m.path, false), m.from, how, exports.Value(cache, false), codeUsed))
 		}
 	}
 	return nil
