@@ -172,9 +172,9 @@ func LoadReference(ref stack.Source, opts Options) (*stack.Stack, source.Resolve
 // addSources records each git source of p, a named stack's file, with n, so a text
 // shows the module's name in place of its URL from the start of the compose, before the
 // module is fetched. A URL with a scheme that has a user part, a user name or a
-// password, or an @ in the part before its path, and one that url.Parse cannot read,
-// stop the compose before any module is fetched, with an error that shows the module's
-// name and no part of the URL.
+// password, or an @ between :// and the first / after it, and one that url.Parse cannot
+// read, stop the compose before any module is fetched, with an error that shows the
+// module's name and no part of the URL.
 func addSources(p *stack.Stack, n *source.Named) error {
 	for i, l := range p.Modules {
 		if l.Source.Git == "" {
@@ -185,9 +185,10 @@ func addSources(p *stack.Stack, n *source.Named) error {
 			module = n.Module(l.Name)
 		}
 		if _, rest, ok := strings.Cut(l.Source.Git, "://"); ok {
+			// Up to the first /, a ? or # before an @ included: url.Parse ends the
+			// authority at a ? or #, while another URL parser may read what is before the
+			// @ as a user.
 			authority, _, _ := strings.Cut(rest, "/")
-			authority, _, _ = strings.Cut(authority, "?")
-			authority, _, _ = strings.Cut(authority, "#")
 			u, err := url.Parse(l.Source.Git)
 			switch {
 			case strings.Contains(authority, "@") || err == nil && u.User != nil:

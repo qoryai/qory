@@ -94,9 +94,10 @@ release may change what an existing document does, and states it under Upgrading
   the stack's folder, such as `modules/world/qory-module.yaml in the stack core`, and
   none of git's output. The stack's clones are in folders of `<run>/sources` named by a
   hash of the URL. An address with a user part stops the run before the fetch, exit 1,
-  and a module source in the stack's file with a user part, or with a URL that qory
-  cannot read, stops it before the modules are fetched, exit 2. Until now, qory stopped
-  every run of a stack set by its name.
+  and a module source in the stack's file with a user part or an `@` between `://` and
+  the first `/` after it, or with a URL that qory cannot read, stops it before the
+  modules are fetched, exit 2. Until now, qory stopped every run of a stack set by its
+  name.
 - `qory run pool` starts each dispatch it claims with `qory run --run-code-file /dev/fd/3
   --gateway <gateway_url>`, as a machine that a provisioner creates does, and each run
   reports its outcome itself. While the run runs, the pool sends dispatched every 60 s;

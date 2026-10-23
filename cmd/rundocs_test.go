@@ -91,7 +91,8 @@ func TestARunCodeTakesNoStackRuntimeOrArguments(t *testing.T) {
 // TestARunCodeWhoseAnswerQoryDoesNotRunStops is a redemption whose documents qory does
 // not run: none, documents that break the schema, a step other than explore and
 // prebuild, a prebuild on a machine whose forager.yaml has no wall, no stack, a stack
-// by its name without its address, and another runtime than claude. Each stops the run after the one redemption, before it
+// by its name without its address or with an @ before the path of its address, which
+// the schema does not allow, and another runtime than claude. Each stops the run after the one redemption, before it
 // opens, with a line that starts with its fix and ends "; the code is used": exit 2 for
 // an answer with no documents, which Forager refuses, and exit 1 for the rest.
 func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
@@ -120,6 +121,21 @@ func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 		{"no stack", codeDocuments(t, func(d map[string]any) { delete(d, "stack"); delete(d, "workflow"); delete(d, "harness_hidden") }),
 			"set a stack for the workspace in Qory Apiary, then take the work item in again: the response to the run code has no stack and no workflow; the code is used"},
 		{"a stack by its name without its address", codeDocuments(t, func(d map[string]any) { d["stack"] = "core" }), broken},
+		{"a stack address with an @ after ?", codeDocuments(t, func(d map[string]any) {
+			d["stack"], d["stack_reference"] = "core", "https://code.example.com?@evil.example/team/stacks#release-7:core"
+		}), broken},
+		{"a stack address with an @ after #", codeDocuments(t, func(d map[string]any) {
+			d["stack"], d["stack_reference"] = "core", "https://code.example.com#@evil.example/team/stacks#release-7:core"
+		}), broken},
+		{"a stack address with an @ after %3F", codeDocuments(t, func(d map[string]any) {
+			d["stack"], d["stack_reference"] = "core", "https://code.example.com%3F@evil.example/team/stacks#release-7:core"
+		}), broken},
+		{"a stack address with an @ after a backslash", codeDocuments(t, func(d map[string]any) {
+			d["stack"], d["stack_reference"] = "core", "https://code.example.com\\@evil.example/team/stacks#release-7:core"
+		}), broken},
+		{"a stack address with an @ after a port", codeDocuments(t, func(d map[string]any) {
+			d["stack"], d["stack_reference"] = "core", "https://code.example.com:443@evil.example/team/stacks#release-7:core"
+		}), broken},
 		{"another runtime", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": "codex"} }),
 			"set the runtime claude for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow on claude alone, and the response to the run code sets the runtime codex; the code is used"},
 	} {

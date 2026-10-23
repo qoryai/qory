@@ -1387,7 +1387,8 @@ These stop the run during the compose, each with the stack or the module by its 
 - `remove the user name and password from the source of the module <module> in the
   stack <name>: a named stack's sources are fetched with no credential`, exit 2, before
   any module is fetched, for a module source in the stack's file whose URL has a user
-  part, and `the source of modules[<n>]` for a module listed without a name
+  part or an `@` between `://` and the first `/` after it, whatever comes before the `@`,
+  and `the source of modules[<n>]` for a module listed without a name
 - `correct the URL in the source of the module <module> in the stack <name>: qory could
   not read it as a URL`, exit 2, before any module is fetched
 - `add the host of <source> to gateway.stack_hosts in forager.yaml, or check its address
