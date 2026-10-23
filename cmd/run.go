@@ -46,6 +46,7 @@ import (
 	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
+	"github.com/qoryai/qory/internal/source"
 	"github.com/qoryai/qory/internal/stack"
 	"github.com/qoryai/qory/internal/ui"
 )
@@ -601,6 +602,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// claudeDispatched is true for a dispatched run of Claude Code.
 			prepareLaunch := func(w io.Writer) (claudeDispatched bool, err error) {
 				harness, workflows, err := composeForRun(w, composing, at, runtime, dispatched, walled)
+				if err != nil && composing.git != nil && composing.git.Named != nil {
+					return false, namedComposeError(err, composing.git.Named, fromCode.reference(), composing.checkoutGit.Proxy)
+				}
 				if err != nil && composing.git != nil {
 					return false, proxyComposeError(err, composing.git.Proxy)
 				}
@@ -699,8 +703,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// or the run was opened with a run key, the run's host proxy opens: the run's
 			// repositories are fetched through it into the working folder, and the compose of
 			// a run opened with a run key fetches its git sources through it, into the run's
-			// cache. The host proxy closes before the session joins; Join closes it too. A
-			// run with no control plane opens none, and composes with the person's git.
+			// cache. The compose of a named stack opens the run's stack proxy as well, and
+			// fetches the stack and every git source it lists through it, with lines that
+			// show names in place of addresses; the git sources the checkout's document lists
+			// stay on the host proxy. Both close before the session joins; Join closes them
+			// too. A run with no control plane opens neither, and composes with the person's
+			// git.
 			hostWork := func() error {
 				stopped := func() bool {
 					return ctx.Err() != nil || timeout > 0 && time.Since(opened) >= timeout
@@ -748,6 +756,18 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						}
 						composing.git = proxyGit(*h, w)
 						composing.cache = filepath.Join(run.Dir(), runSources)
+					}
+					if remote && fromCode != nil && fromCode.named != nil {
+						lines := &namedLines{w: w, n: fromCode.named}
+						defer lines.flush()
+						w = lines
+						s, err := run.StackProxy()
+						if err != nil {
+							return &runLineError{noStackProxy(fromCode.named, err)}
+						}
+						defer s.close()
+						composing.checkoutGit = proxyGit(*h, w)
+						composing.git = stackGit(s, w, fromCode.named)
 					}
 					var err error
 					claudeDispatched, err = prepareLaunch(w)
@@ -1044,6 +1064,9 @@ type openedRun interface {
 	StartStep(kind, name string) (hostStep, error)
 	// HostProxy starts the run's host proxy, for the fetches on this machine.
 	HostProxy() (hostProxy, error)
+	// StackProxy starts the run's stack proxy, for the fetch of a named stack on this
+	// machine, before the run's first Join.
+	StackProxy() (hostProxy, error)
 	// AgentEnv is the environment a session of spec gets, NAME=value sorted by name,
 	// resolved as Join resolves it; qory run gives it to the setup container outside.
 	AgentEnv(spec session.SessionSpec) ([]string, error)
@@ -1078,6 +1101,16 @@ func (r foragerRun) StartStep(kind, name string) (hostStep, error) {
 // HostProxy is [session.Run.HostProxy]: its ProxyURL and CABundle, and its Close.
 func (r foragerRun) HostProxy() (hostProxy, error) {
 	h, err := r.Run.HostProxy()
+	if err != nil {
+		return hostProxy{}, err
+	}
+	return hostProxy{proxy: proxygit.Proxy{URL: h.ProxyURL, CABundle: h.CABundle}, close: h.Close}, nil
+}
+
+// StackProxy is [session.Run.StackProxy]: its ProxyURL, and its Close. Its CABundle is
+// empty: the stack proxy passes the machine's authorities alone.
+func (r foragerRun) StackProxy() (hostProxy, error) {
+	h, err := r.Run.StackProxy()
 	if err != nil {
 		return hostProxy{}, err
 	}
@@ -3110,17 +3143,23 @@ func composeForRun(stderr io.Writer, o composeOptions, at places, runtime string
 // harnessSources is the harness's git sources a compose resolved, each with the full
 // commit it used, as the session records them: the stack res extends, when it is a git
 // source, then each module's git source in stack order, each source once. A source is
-// as the report writes it, the password of a URL's user part printed as (hidden). Path
+// as the report writes it, the password of a URL's user part printed as (hidden); in
+// the compose of a named stack, n, a source of the stack is its name, such as stack
+// core or module tools, as [source.Named.Of] has it, once per name and commit. Path
 // sources have no commit and are left out; nil when no source is a git source.
-func harnessSources(res *compose.Result) []session.HarnessSource {
+func harnessSources(res *compose.Result, n *source.Named) []session.HarnessSource {
 	var out []session.HarnessSource
 	seen := map[string]bool{}
 	add := func(src, commit string) {
+		key := src
+		if phrase, ok := namedOf(n, src); ok {
+			src, key = strings.TrimPrefix(phrase, "the "), phrase+"@"+commit
+		}
 		src = exports.HideURLs(src)
-		if commit == "" || seen[src] {
+		if commit == "" || seen[key] {
 			return
 		}
-		seen[src] = true
+		seen[key] = true
 		out = append(out, session.HarnessSource{Source: src, Commit: commit})
 	}
 	if res.Base != nil {
@@ -3130,4 +3169,14 @@ func harnessSources(res *compose.Result) []session.HarnessSource {
 		add(m.Source, m.Commit)
 	}
 	return out
+}
+
+// namedOf is the phrase of src, a git source as a compose's result has it, in the
+// compose of the named stack n, as [source.Named.Of] has it; ok is false for no named
+// stack and for a source not of the stack.
+func namedOf(n *source.Named, src string) (string, bool) {
+	if n == nil {
+		return "", false
+	}
+	return n.Of(src)
 }

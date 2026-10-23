@@ -1217,8 +1217,10 @@ qory checks the documents as the run contract's `documents.schema.json`, and, fo
 step explore, checks that `inputs.domain` and `inputs.work_item.id` match the domain and
 the work item. Then a run of the step explore:
 
-- composes the stack as `-f <url>#<ref>:<path>` does, fetching it through the run's
-  host proxy;
+- composes the stack: a stack by reference, `<url>#<ref>:<path>`, as `-f` does,
+  fetching it through the run's host proxy; a stack by its name from the address in
+  `stack_reference`, through the run's stack proxy (see [A named
+  stack](#a-named-stack));
 - when `harness_hidden` is `true`, composes a home that contains no link, and has
   Forager mask text that matches the home's files in the session's log and events
   (see [A hidden harness](#a-hidden-harness));
@@ -1234,7 +1236,8 @@ the work item. Then a run of the step explore:
 - takes its time limit as [Time limits](#time-limits) says.
 
 So the command line sets none of these. After the redemption, qory prints `qory run: the
-run <run id> starts the workflow <workflow> of <url>#<ref>:<path> on claude`.
+run <run id> starts the workflow <workflow> of <url>#<ref>:<path> on claude`, or `… of the
+stack <name> on claude` for a stack by its name.
 
 A run of the step prebuild builds the image that the runs of its target start from. It
 runs in `qory run`'s process, with no wall and no agent:
@@ -1304,14 +1307,81 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
   the code was redeemed
 - `set a stack for the workspace in Qory Apiary, then take the work item in again: the
   response to the run code has no stack and no workflow; the code is used`
-- `update qory: the response to the run code sets the stack <name> by its name, and this
-  qory takes a stack reference (url#ref:path) alone; the code is used`
+- `ask the instance admin of Qory Apiary to set the address of the stack <name> in Qory
+  Apiary's list of stacks: the response to the run code sets the stack <name> by its name
+  and has no address for it; the code is used`
+- `set the address of the stack <name> in Qory Apiary's list of stacks as <https
+  URL>#<ref>:<folder>: qory could not read the address as a stack reference; the code is
+  used`
+- `set the address of the stack <name> in Qory Apiary's list of stacks without a user
+  name or password: the address has a user part, and qory fetches a named stack with no
+  credential; the code is used`, before anything is fetched
 - `set the runtime claude for the workspace in Qory Apiary, then take the work item in
   again: qory starts a run code's workflow on claude alone, and the response to the run
   code sets the runtime <name>; the code is used`
 - `add a skill or command <workflow> to the stack <url>#<ref>:<path>, or set another
   workflow in Qory Apiary: the composed harness has no skill or command <workflow>; the
-  code is used`, after the compose
+  code is used`, after the compose, with `the stack <name>` for a stack by its name
+
+#### A named stack
+
+The documents set the stack by its name, such as `core`, when the workspace in Qory
+Apiary uses a stack of Qory Apiary's list of stacks. Then `stack_reference` is set to the
+stack's address, `<https URL>#<ref>:<folder>`, which Qory Apiary takes from that list.
+
+qory fetches the stack and every module that its file lists from another repository
+through the run's stack proxy. The stack proxy is a proxy of the run's gateway that
+passes the hosts of `gateway.stack_hosts` in the gateway's `forager.yaml` alone, with no
+rule of the run's policy and no credential. So list the host of each of those
+repositories in `gateway.stack_hosts`. qory opens the stack proxy for the compose and
+closes it before the session joins. The modules that the checkout's `qory.yaml` lists,
+when it composes on the stack, are fetched through the run's host proxy, as for a stack
+by reference, and their errors are the ones of a stack by reference.
+
+Each line, each event of the run's record and each error shows the stack's name and the
+module's name in place of a URL, a ref and the stack's folder:
+
+- `qory run: fetched the stack <name> at <commit> in <n>s`, and `qory run: fetched the
+  module <module> at <commit> in <n>s` for a module from another repository;
+- `harness "stack <name>" at <commit>` and `harness "module <module>" at <commit>` in
+  Forager's line `session <n> starts on this machine: …`;
+- a file of the stack as its path from the stack's folder, such as
+  `modules/world/qory-module.yaml in the stack <name>`, a file of a module's repository
+  as `<path> in the module <module>`, and no path in `<run>/sources`;
+- none of git's output, which can contain the URL.
+
+When the checkout's `qory.yaml` composes on the stack and the stack's file has no
+`name`, the compose report records the base by the stack's name in the documents, not by
+its folder. The clones are in folders of `<run>/sources` named by a hash of the
+URL. The address is still in files on the machine that qory's user can read: in each
+clone's `.git/config` and `FETCH_HEAD`, and in the compose report beside the home,
+`<home>-report.json`.
+
+These stop the run during the compose, each with the stack or the module by its name:
+
+- `remove the user name and password from the source of the module <module> in the
+  stack <name>: a named stack's sources are fetched with no credential`, exit 2, before
+  any module is fetched, for a module source in the stack's file whose URL has a user
+  part, and `the source of modules[<n>]` for a module listed without a name
+- `correct the URL in the source of the module <module> in the stack <name>: qory could
+  not read it as a URL`, exit 2, before any module is fetched
+- `add the host of <source> to gateway.stack_hosts in forager.yaml, or check its address
+  in Qory Apiary's list of stacks: the fetch of <source> through the run's stack proxy
+  failed: <cause>`, exit 1, with `check its source in the stack's files` for a module,
+  where `<cause>` is the status the stack proxy or the host returned, such as `the stack
+  proxy returned 403, as it does for a host that gateway.stack_hosts does not list`, or
+  git's exit status
+- `take the work item in again in Qory Apiary: the run's stack proxy returned 407 Proxy
+  Authentication Required to the password Forager set for the run, so the fetch of
+  <source> failed; the code is used`, exit 1
+- `set the address of the stack <name> in Qory Apiary's list of stacks to a branch, tag
+  or commit its repository has: the repository of the stack <name> has no branch or tag by
+  the ref it is set to`, exit 2, and `set the ref of the module <module> to …` for a
+  module
+- `use an https URL for the module <module>: a named stack fetches its sources only over
+  https, through the run's stack proxy`, exit 2
+- `take the work item in again in Qory Apiary: the run's stack proxy, through which qory
+  fetches the stack <name>, did not open: <error>; the code is used`, exit 1
 
 #### A hidden harness
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,8 @@ import (
 	"github.com/qoryai/qory/internal/provisioner"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
+	"github.com/qoryai/qory/internal/source"
+	"github.com/qoryai/qory/internal/stack"
 )
 
 // A run from a run code takes everything but the run key from the documents of Qory
@@ -70,11 +73,13 @@ func fromAnswerOnly(cmd *cobra.Command, runtime string, extra []string) error {
 // code, checked: the runtime and the compose flags its run settings map to, the stack as
 // -f takes it, the workflow, the inputs as the documents have them, the run settings'
 // time_limit_minutes, 0 for none, and harness_hidden, which the documents set exactly
-// when they set the stack.
+// when they set the stack. named is set for a stack the documents set by its name, whose
+// address, stack_reference, is the stack -f takes and is shown in no text.
 type codeRun struct {
 	runtime  string
 	settings []provisioner.Setting
 	stack    string
+	named    *source.Named
 	workflow string
 	inputs   []byte
 	minutes  int
@@ -106,8 +111,15 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	switch {
 	case doc.Stack == "":
 		return nil, errors.New("set a stack for the workspace in Qory Apiary, then take the work item in again: the response to the run code has no stack and no workflow" + codeUsed)
-	case !strings.HasPrefix(doc.Stack, stackReferencePrefix):
-		return nil, fmt.Errorf("update qory: the response to the run code sets the stack %s by its name, and this qory takes a stack reference (url#ref:path) alone%s", doc.Stack, codeUsed)
+	}
+	stackFile := doc.Stack
+	var named *source.Named
+	if !strings.HasPrefix(doc.Stack, stackReferencePrefix) {
+		var err error
+		if named, err = namedStackOf(doc); err != nil {
+			return nil, err
+		}
+		stackFile = doc.StackReference
 	}
 	var minutes int
 	if doc.RunSettings != nil {
@@ -118,9 +130,34 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 		return nil, fmt.Errorf("set the runtime claude for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow on claude alone, and the response to the run code sets the runtime %s%s", accesskey.ShownName(runtime, false), codeUsed)
 	}
 	return &codeRun{
-		runtime: runtime, settings: settings, workflow: doc.Workflow, inputs: doc.Inputs, minutes: minutes, stack: doc.Stack,
+		runtime: runtime, settings: settings, workflow: doc.Workflow, inputs: doc.Inputs, minutes: minutes, stack: stackFile, named: named,
 		hidden: doc.HarnessHidden != nil && *doc.HarnessHidden,
 	}, nil
+}
+
+// namedStackOf is the named stack of doc, documents whose stack is a stack name: the
+// name, and the address of stack_reference, checked before anything is fetched. An
+// address that is not a stack reference, or whose URL has a user part, stops the run
+// with a line that shows neither the address nor the user part. Each error is exit 1
+// and ends with [codeUsed].
+func namedStackOf(doc contracts.Documents) (*source.Named, error) {
+	name := accesskey.ShownName(doc.Stack, false)
+	if doc.StackReference == "" {
+		return nil, fmt.Errorf("ask the instance admin of Qory Apiary to set the address of the stack %s in Qory Apiary's list of stacks: the response to the run code sets the stack %s by its name and has no address for it%s", name, name, codeUsed)
+	}
+	unreadable := fmt.Errorf("set the address of the stack %s in Qory Apiary's list of stacks as %s: qory could not read the address as a stack reference%s", name, stack.ReferenceForm, codeUsed)
+	ref, ok, err := stack.ParseReference(doc.StackReference)
+	if err != nil || !ok {
+		return nil, unreadable
+	}
+	u, err := url.Parse(ref.Git)
+	if err != nil {
+		return nil, unreadable
+	}
+	if u.User != nil {
+		return nil, fmt.Errorf("set the address of the stack %s in Qory Apiary's list of stacks without a user name or password: the address has a user part, and qory fetches a named stack with no credential%s", name, codeUsed)
+	}
+	return source.NewNamed(doc.Stack, doc.StackReference, ref), nil
 }
 
 // apply sets the compose flags of r on cmd, as a person sets them on qory run.
@@ -132,9 +169,6 @@ func (r *codeRun) apply(cmd *cobra.Command) error {
 	}
 	return nil
 }
-
-// namedStack reports whether r's stack is a stack name, not a stack reference.
-func (r *codeRun) namedStack() bool { return !strings.HasPrefix(r.stack, stackReferencePrefix) }
 
 // givenMount is a mount of a walled run that wall.mounts in forager.yaml or --mount
 // adds; from is which of the two adds it, as an error prints it.
@@ -153,7 +187,7 @@ type givenMount struct {
 // qory then writes no home. It runs before anything is fetched or composed; its error
 // ends with [codeUsed].
 func (r *codeRun) cacheMounted(given []givenMount) error {
-	if !r.namedStack() {
+	if r.named == nil {
 		return nil
 	}
 	base, err := os.UserCacheDir()
@@ -169,8 +203,30 @@ func (r *codeRun) cacheMounted(given []givenMount) error {
 	return nil
 }
 
-// shownStack is r's stack as a line prints it: the URL as [exports.URL] prints it.
-func (r *codeRun) shownStack() string { return exports.URL(r.stack) }
+// shownStack is r's stack as a line prints it after "the stack": the name of a named
+// stack, and otherwise the reference as [exports.URL] prints it.
+func (r *codeRun) shownStack() string {
+	if r.named != nil {
+		return accesskey.ShownName(r.named.Stack, false)
+	}
+	return exports.URL(r.stack)
+}
+
+// reference is r's stack as -f takes it, read as a stack reference; the zero source for
+// a stack that is not one.
+func (r *codeRun) reference() stack.Source {
+	ref, _, _ := stack.ParseReference(r.stack)
+	return ref
+}
+
+// stackOf is r's stack as the start line prints it after "of": the stack core for a
+// named stack, and otherwise the reference as [exports.URL] prints it.
+func (r *codeRun) stackOf() string {
+	if r.named != nil {
+		return r.named.Phrase()
+	}
+	return exports.URL(r.stack)
+}
 
 // timedOutLine is the line of a run from a run code whose time limit, limit, came before
 // the runtime started: [timedOutBeforeJoin] for a run that cannot take --timeout.
@@ -180,7 +236,7 @@ func (r *codeRun) timedOutLine(limit time.Duration, runtime string) string {
 
 // startLine is the line qory run prints once the answer to the run code is read.
 func (r *codeRun) startLine(runID string) string {
-	return fmt.Sprintf("qory run: the run %s starts the workflow %s of %s on %s", runID, r.workflow, r.shownStack(), r.runtime)
+	return fmt.Sprintf("qory run: the run %s starts the workflow %s of %s on %s", runID, r.workflow, r.stackOf(), r.runtime)
 }
 
 // writeInputs writes r's inputs, unchanged, to inputs.json, mode 0600, in a new folder

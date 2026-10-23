@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -8,7 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/qoryai/integrations/contracts"
+
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/report"
 )
 
 // TestARunCodesTimeLimitLineNamesWhereTheLimitIsSet is the line of a run from a run code
@@ -47,10 +51,9 @@ func TestAWalledRunOfANamedStackMountsNothingOfQorysCacheFolder(t *testing.T) {
 	if err := os.Symlink(filepath.Dir(base), above); err != nil {
 		t.Fatal(err)
 	}
-	named := &codeRun{stack: "example"}
-	reference := &codeRun{stack: "https://code.example.com/team/stacks#4b8e2f1a9c7d3e5b0a6f8c2d4e1b9a7c5f3d0e2b:stacks/example"}
-	if !named.namedStack() || reference.namedStack() {
-		t.Fatalf("namedStack: %v for a name and %v for a reference, want true and false", named.namedStack(), reference.namedStack())
+	named, reference := codeRunOfStack(t, "example"), codeRunOfStack(t, exampleStackReference)
+	if named.named == nil || named.stack != exampleStackReference || reference.named != nil {
+		t.Fatalf("the name runs %q, named %+v; the reference is named %+v", named.stack, named.named, reference.named)
 	}
 	for _, c := range []struct{ path, how string }{
 		{cache, "is"}, {base, "contains"}, {filepath.Dir(base), "contains"}, {inside, "lies inside"}, {link, "is"}, {above, "contains"},
@@ -71,6 +74,25 @@ func TestAWalledRunOfANamedStackMountsNothingOfQorysCacheFolder(t *testing.T) {
 	if err := named.cacheMounted([]givenMount{{path: other, from: "--mount"}, {path: filepath.Join(base, "other"), from: "--mount"}}); err != nil {
 		t.Errorf("mounts outside %s: %v, want none", cache, err)
 	}
+}
+
+// exampleStackReference is the address of the named stack example in the tests of the
+// guard of qory's cache folder.
+const exampleStackReference = "https://code.example.com/team/stacks#4b8e2f1a9c7d3e5b0a6f8c2d4e1b9a7c5f3d0e2b:stacks/example"
+
+// codeRunOfStack is the run of documents whose stack is stack, as [codeRunOf] reads
+// them: for a stack name, stack_reference is set to [exampleStackReference].
+func codeRunOfStack(t *testing.T, stack string) *codeRun {
+	t.Helper()
+	doc := contracts.Documents{Stack: stack, Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}}
+	if !strings.HasPrefix(stack, stackReferencePrefix) {
+		doc.StackReference = exampleStackReference
+	}
+	r, err := codeRunOf(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
 }
 
 // TestAMountInAnotherLetterCaseOfQorysCacheFolderStops is a mount of a folder above
@@ -94,7 +116,7 @@ func TestAMountInAnotherLetterCaseOfQorysCacheFolderStops(t *testing.T) {
 	if _, err := os.Stat(upper); err != nil {
 		t.Skipf("the disk of %s keeps letter case apart: %v", base, err)
 	}
-	named := &codeRun{stack: "example"}
+	named := codeRunOfStack(t, "example")
 	for _, c := range []struct{ path, how string }{
 		{upper, "contains"}, {filepath.Join(upper, "QORY"), "is"}, {filepath.Join(upper, "Qory", "Homes"), "lies inside"},
 	} {
@@ -127,5 +149,59 @@ func TestEncloseListsTheMountsOfWallMountsAndMount(t *testing.T) {
 	}
 	if unwalled.given != nil {
 		t.Errorf("without a wall, given %v, want none", unwalled.given)
+	}
+}
+
+// TestANamedStackRunsFromItsAddress is documents that set the stack core by its name,
+// with its address in stack_reference: the run composes the address, and its start,
+// time limit and missing-workflow lines show the stack's name and no part of the
+// address.
+func TestANamedStackRunsFromItsAddress(t *testing.T) {
+	const address = "https://code.example.com/team/stacks#release-7:stacks/core"
+	r, err := codeRunOf(contracts.Documents{Stack: "core", StackReference: address, Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.stack != address || r.named == nil || r.named.Stack != "core" {
+		t.Fatalf("the stack is %q, named %+v", r.stack, r.named)
+	}
+	if ref := r.reference(); ref.Git != "https://code.example.com/team/stacks" || ref.Ref != "release-7" || ref.Path != "stacks/core" {
+		t.Errorf("the reference is %+v", ref)
+	}
+	_, missing := r.workflowArgs("claude", report.Report{}, t.TempDir())
+	for _, c := range []struct{ got, want string }{
+		{r.startLine("run_1"), "qory run: the run run_1 starts the workflow example of the stack core on claude"},
+		{r.timedOutLine(45*time.Minute, "claude"), "set a longer time_limit_minutes in Qory Apiary, or a longer workflows.example.time_limit in the stack core: the run was cancelled at its time limit of 45m0s, before claude started"},
+		{fmt.Sprint(missing), "add a skill or command example to the stack core, or set another workflow in Qory Apiary: the composed harness has no skill or command example; the code is used"},
+	} {
+		if c.got != c.want {
+			t.Errorf("got  %q\nwant %q", c.got, c.want)
+		}
+	}
+}
+
+// TestANamedStackWhoseAddressHasAUserPartStops is documents that set the stack core by
+// its name with an address qory does not fetch: none, one that is not a stack
+// reference, one whose URL does not parse, and one whose URL has a user name, with a
+// password or without. Each stops
+// the run before anything is fetched, with a line that starts with its fix and shows
+// neither the address nor the user part.
+func TestANamedStackWhoseAddressHasAUserPartStops(t *testing.T) {
+	const unreadable = "set the address of the stack core in Qory Apiary's list of stacks as <https URL>#<ref>:<folder>: qory could not read the address as a stack reference; the code is used"
+	const user = "set the address of the stack core in Qory Apiary's list of stacks without a user name or password: the address has a user part, and qory fetches a named stack with no credential; the code is used"
+	for _, c := range []struct{ address, want string }{
+		{"", "ask the instance admin of Qory Apiary to set the address of the stack core in Qory Apiary's list of stacks: the response to the run code sets the stack core by its name and has no address for it; the code is used"},
+		{"https://code.example.com/team/stacks#release-7", unreadable},
+		{"https://code.example.com/team/st%zzacks#release-7:core", unreadable},
+		{"https://deploy-user:s3cret-token@code.example.com/team/stacks#release-7:core", user},
+		{"https://deploy-user@code.example.com/team/stacks#release-7:core", user},
+	} {
+		_, err := codeRunOf(contracts.Documents{Stack: "core", StackReference: c.address, Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}})
+		if err == nil || err.Error() != c.want {
+			t.Errorf("%s: %v\nwant %s", c.address, err, c.want)
+		}
+		if err != nil && (strings.Contains(err.Error(), "code.example.com") || strings.Contains(err.Error(), "deploy-user") || strings.Contains(err.Error(), "s3cret")) {
+			t.Errorf("the line shows the address: %v", err)
+		}
 	}
 }

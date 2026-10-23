@@ -91,7 +91,7 @@ func TestARunCodeTakesNoStackRuntimeOrArguments(t *testing.T) {
 // TestARunCodeWhoseAnswerQoryDoesNotRunStops is a redemption whose documents qory does
 // not run: none, documents that break the schema, a step other than explore and
 // prebuild, a prebuild on a machine whose forager.yaml has no wall, no stack, a stack
-// by its name, and another runtime than claude. Each stops the run after the one redemption, before it
+// by its name without its address, and another runtime than claude. Each stops the run after the one redemption, before it
 // opens, with a line that starts with its fix and ends "; the code is used": exit 2 for
 // an answer with no documents, which Forager refuses, and exit 1 for the rest.
 func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
@@ -119,10 +119,7 @@ func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 		{"prebuild with no wall", preDocs, "set wall.image, pinned by its digest, wall.user and wall.helper in forager.yaml: a prebuild from a run code builds with them; the code is used"},
 		{"no stack", codeDocuments(t, func(d map[string]any) { delete(d, "stack"); delete(d, "workflow"); delete(d, "harness_hidden") }),
 			"set a stack for the workspace in Qory Apiary, then take the work item in again: the response to the run code has no stack and no workflow; the code is used"},
-		{"a stack by its name", codeDocuments(t, func(d map[string]any) {
-			d["stack"], d["stack_reference"] = "core", "https://code.example.com/team/stacks#main:core"
-		}),
-			"update qory: the response to the run code sets the stack core by its name, and this qory takes a stack reference (url#ref:path) alone; the code is used"},
+		{"a stack by its name without its address", codeDocuments(t, func(d map[string]any) { d["stack"] = "core" }), broken},
 		{"another runtime", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": "codex"} }),
 			"set the runtime claude for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow on claude alone, and the response to the run code sets the runtime codex; the code is used"},
 	} {
@@ -154,7 +151,8 @@ func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 // codeRun is what a run from a run code came to, opened nowhere: its output and error,
 // the run's spec at the open, the session's spec at the join, the inputs.json and the
 // modes the join found, the folder of the inputs, the URL of the stack's repository,
-// which the output has as <url>, and the stack's commit in the documents.
+// which the output has as <url>, the stack's commit in the documents, and the calls the
+// run got.
 type codeRun struct {
 	out      string
 	err      error
@@ -166,6 +164,7 @@ type codeRun struct {
 	inputDir string
 	url      string
 	commit   string
+	calls    []string
 }
 
 // runFromCode runs qory run from a run code whose documents start the workflow of the
@@ -230,7 +229,7 @@ func runFromCodeGiven(t *testing.T, before func(code string) []string, args []st
 	if before != nil {
 		args = append(slices.Clip(args), before(g.code())...)
 	}
-	_, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{
+	_, calls, restore := cmd.OpenNowhereWith(cmd.Nowhere{
 		System: proxygittest.Host, Proxy: h.server.Proxy.URL, CABundle: h.server.Proxy.CABundle, Dir: h.runDir,
 		OnOpen: func(s session.OpenSpec) { r.open = s },
 	})
@@ -241,6 +240,7 @@ func runFromCodeGiven(t *testing.T, before func(code string) []string, args []st
 		file, stdin := given(g.code())
 		r.out, r.err = runReading(t, stdin, append([]string{"run", "--run-code-file", file, "--gateway", g.URL}, args...)...)
 	}
+	r.calls = calls()
 	r.out, r.url = strings.ReplaceAll(r.out, url, "<url>"), url
 	return r
 }

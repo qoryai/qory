@@ -501,9 +501,21 @@ type composeOptions struct {
 	// copies of every module's files, as for a walled run, so it contains no link.
 	hidden bool
 	// git, when set, fetches every git source through a run's host proxy, into cache, the
-	// run's cache: the compose of a run from a control plane, see [source.Git].
-	git   *source.Git
-	cache string
+	// run's cache: the compose of a run from a control plane, see [source.Git]. With a
+	// [source.Named], git fetches through the run's stack proxy, and checkoutGit, through
+	// the run's host proxy, fetches the git sources of the checkout's document when the
+	// document composes on the named stack; see [compose.Options.CheckoutGit].
+	git         *source.Git
+	checkoutGit *source.Git
+	cache       string
+}
+
+// named is the named stack o composes, see [source.Named]; nil for any other compose.
+func (o composeOptions) named() *source.Named {
+	if o.git == nil {
+		return nil
+	}
+	return o.git.Named
 }
 
 // staleError is what a --check returns when the home does not match what the stack and
@@ -707,7 +719,7 @@ func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 	if res.Stack != nil {
 		workflows = res.Stack.Workflows
 	}
-	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res), workflows: workflows}, nil
+	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows}, nil
 }
 
 // launchEnv is, per runtime with a launch template, the variables the harness sets when
@@ -927,6 +939,9 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	if o.git != nil {
 		opts.Git, opts.Cache = o.git, o.cache
 	}
+	if base != nil {
+		opts.CheckoutGit = o.checkoutGit
+	}
 	var basePin string
 	if previous.Base != nil && previous.Base.Source == p.Extends.String() {
 		basePin = previous.Base.Pin
@@ -943,6 +958,11 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	}
 	if base != nil {
 		p, opts.Base, err = compose.ExtendOn(p, base, source.WorkingTree)
+		if n := o.named(); err == nil && n != nil && base.Name == "" {
+			// A named stack's folder is part of its address: a stack file with no name
+			// takes the stack's name, not its folder's.
+			opts.Base.Name = n.Stack
+		}
 		if err == nil && byRef {
 			// The base is the reference, as the report records it, on the commit it
 			// resolved to.
@@ -1006,7 +1026,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	var collision *compose.CollisionError
 	switch {
 	case errors.As(err, &collision):
-		printCollision(ui.New(errOut), collision)
+		printCollision(ui.New(errOut), collision, o.named())
 		return nil, reported(err)
 	case err != nil:
 		return nil, composeError(err)
@@ -1641,12 +1661,16 @@ func flagRefuses(force bool) string {
 
 // printCollision prints what happened, the modules involved, and the stack lines that
 // resolve it by keeping the last module that ships each entry.
-func printCollision(u *ui.UI, e *compose.CollisionError) {
+func printCollision(u *ui.UI, e *compose.CollisionError, n *source.Named) {
 	for _, c := range e.Collisions {
 		u.Fail(fmt.Errorf("%s is provided by %d modules", accesskey.ShownName(c.Kind+"/"+c.Name, false), len(c.Modules)))
 		var rows [][]string
 		for _, l := range c.Modules {
-			rows = append(rows, []string{accesskey.ShownName(l, false), exports.URL(e.Sources[l]), e.Pins[l]})
+			from := exports.URL(e.Sources[l])
+			if phrase, ok := namedOf(n, e.Sources[l]); ok {
+				from = phrase
+			}
+			rows = append(rows, []string{accesskey.ShownName(l, false), from, e.Pins[l]})
 		}
 		u.Table(rows)
 		if c.Base != "" {

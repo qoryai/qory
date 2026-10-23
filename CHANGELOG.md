@@ -83,6 +83,20 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- A run from a run code whose documents set the stack by its name composes the stack at
+  the address in `stack_reference`, which Qory Apiary sets from its list of stacks. qory
+  fetches the stack and every module its file lists from another repository through the
+  run's stack proxy, which passes only the hosts of `gateway.stack_hosts` in
+  `forager.yaml`; the modules that the checkout's `qory.yaml` lists stay on the run's
+  host proxy. A line, an event of the run's record and an error show the stack's name
+  and the module's name in place of a URL, a ref and the stack's folder, such as `qory
+  run: fetched the stack core at <commit> in 0.4s`, a file of the stack by its path from
+  the stack's folder, such as `modules/world/qory-module.yaml in the stack core`, and
+  none of git's output. The stack's clones are in folders of `<run>/sources` named by a
+  hash of the URL. An address with a user part stops the run before the fetch, exit 1,
+  and a module source in the stack's file with a user part, or with a URL that qory
+  cannot read, stops it before the modules are fetched, exit 2. Until now, qory stopped
+  every run of a stack set by its name.
 - `qory run pool` starts each dispatch it claims with `qory run --run-code-file /dev/fd/3
   --gateway <gateway_url>`, as a machine that a provisioner creates does, and each run
   reports its outcome itself. While the run runs, the pool sends dispatched every 60 s;
@@ -295,6 +309,11 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Fixed
 
+- A stack by reference and each git module that the compose of a run from a control
+  plane fetches through the run's host proxy go through that proxy, under the run's
+  policy. Until now, the configuration of a git repository in a source's folder of the
+  run's cache, or in a folder above the run's folder, could send git's lookup of the ref
+  to another proxy or URL.
 - A walled run gets the skills and other files of its modules. The home linked to the
   folders of modules outside the checkout, which are not mounted in the container; behind
   a wall, it contains copies of the files that the stack selects, without what `only` or

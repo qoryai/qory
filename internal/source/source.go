@@ -78,10 +78,17 @@ type FetchError struct {
 	Output string
 	// Err is the error running git returned.
 	Err error
+	// Name is the source as a text of a named stack shows it, see [Named]; "" for a
+	// source of no named stack.
+	Name string
 }
 
-// Error returns the source and quotes git.
+// Error returns the source and quotes git; for a named stack's source, the source's
+// name and not git's output, which can contain the URL.
 func (e *FetchError) Error() string {
+	if e.Name != "" {
+		return "the fetch of " + e.Name + " failed"
+	}
 	msg := strings.TrimSpace(e.Output)
 	if msg == "" {
 		msg = e.Err.Error()
@@ -101,10 +108,17 @@ type GoneError struct {
 	URL string
 	// Ref is the ref as the stack writes it.
 	Ref string
+	// Name is the source as a text of a named stack shows it, see [Named]; "" for a
+	// source of no named stack.
+	Name string
 }
 
-// Error names the remote and the ref and says how to keep what was composed.
+// Error contains the remote, the ref and how to keep what was composed; for a named
+// stack's source, the source's name in place of the URL and the ref.
 func (e *GoneError) Error() string {
+	if e.Name != "" {
+		return "the repository of " + e.Name + " has no branch or tag by the ref it is set to"
+	}
 	return fmt.Sprintf("%s has no branch or tag %s; to keep the old harness, set ref to a commit id", exports.URL(e.URL), exports.Value(e.Ref, false))
 }
 
@@ -116,10 +130,19 @@ type SchemeError struct {
 	// File is the file that lists the source, as a line prints it; "" when the line
 	// names none.
 	File string
+	// Name is the source as a text of a named stack shows it, see [Named]; "" for a
+	// source of no named stack.
+	Name string
 }
 
-// Error is the line [HTTPSFix] makes for the URL and the file.
-func (e *SchemeError) Error() string { return HTTPSFix(e.URL, e.File) }
+// Error is the line [HTTPSFix] makes for the URL and the file; for a named stack's
+// source, the line with the source's name in place of the URL.
+func (e *SchemeError) Error() string {
+	if e.Name != "" {
+		return "use an https URL for " + e.Name + ": a named stack fetches its sources only over https, through the run's stack proxy"
+	}
+	return HTTPSFix(e.URL, e.File)
+}
 
 // HTTPSFix is "" for a git source git fetches over https, an https URL with a host, and
 // otherwise the line a run from a control plane stops with for it: use an https URL for
@@ -206,8 +229,12 @@ type Git struct {
 	// Proxy is the run's host proxy.
 	Proxy proxygit.Proxy
 	// Fetched, when set, is called once per URL and ref that a resolve asked the remote
-	// for, with the full commit it resolved to and how long the lookup and the fetch took.
-	Fetched func(url, ref, commit string, took time.Duration)
+	// for, with [Options.Name] of that resolve, the full commit it resolved to and how
+	// long the lookup and the fetch took.
+	Fetched func(url, ref, name, commit string, took time.Duration)
+	// Named, when set, is the named stack this compose fetches the sources of, whose
+	// addresses no text shows; see [Named].
+	Named *Named
 }
 
 // Memo remembers what each git source resolved to during one compose, by URL and ref, so
@@ -271,6 +298,9 @@ type Options struct {
 	// Git, when set, fetches every git source through a run's host proxy, see [Git]; nil
 	// fetches with the person's git, as [hostgit.Command] runs it.
 	Git *Git
+	// Name is the source as a text of a named stack shows it, such as the stack core or
+	// the module tools, read when Git has a [Named]; see [Named].
+	Name string
 }
 
 // Resolve turns a source into a directory and its pin. A relative path resolves against
@@ -484,9 +514,17 @@ func CacheDir() (string, error) {
 // stays as it was when the branch moves on. [commitOf] says which commit the ref is now;
 // the memo answers for a URL and ref resolved earlier in the same compose.
 func resolveGit(s stack.Source, opts Options) (Resolved, error) {
+	n := named(opts)
+	if n != nil {
+		n.Add(s, shownAs(s, opts))
+	}
 	if opts.Git != nil {
 		if HTTPSFix(s.Git, "") != "" {
-			return Resolved{}, &SchemeError{URL: s.Git}
+			e := &SchemeError{URL: s.Git}
+			if n != nil {
+				e.Name = shownAs(s, opts)
+			}
+			return Resolved{}, e
 		}
 	}
 	cache := opts.Cache
@@ -496,7 +534,7 @@ func resolveGit(s stack.Source, opts Options) (Resolved, error) {
 			return Resolved{}, err
 		}
 	}
-	dir := filepath.Join(cache, cacheName(s.Git))
+	dir := filepath.Join(cache, folderName(s.Git, opts))
 	got, ok := opts.Memo.get(s.Git, s.Ref)
 	if !ok || !cloned(filepath.Join(dir, got.commit)) {
 		var err error
@@ -504,19 +542,23 @@ func resolveGit(s stack.Source, opts Options) (Resolved, error) {
 		if got, err = commitOf(dir, s, opts); err != nil {
 			// The cache directory is named after the URL, so an error of a file
 			// under it prints the URL's secret unless it is hidden.
-			return Resolved{}, exports.HideError(err)
+			return Resolved{}, exports.HideError(namedFetch(err, s, opts))
 		}
 		opts.Memo.put(s.Git, s.Ref, got)
 		if opts.Git != nil && opts.Git.Fetched != nil {
-			opts.Git.Fetched(s.Git, s.Ref, got.commit, time.Since(start))
+			opts.Git.Fetched(s.Git, s.Ref, opts.Name, got.commit, time.Since(start))
 		}
 	}
 	commit := got.commit
 	var err error
 	clone := filepath.Join(dir, commit)
 	module, sub := clone, s.Path
+	where := at(s)
+	if n != nil {
+		where = shownAs(s, opts)
+	}
 	if s.Module != "" || s.Stack != "" {
-		if sub, err = exported(clone, at(s), s); err != nil {
+		if sub, err = exported(clone, where, s); err != nil {
 			return Resolved{}, exports.HideError(err)
 		}
 	}
@@ -525,7 +567,12 @@ func resolveGit(s stack.Source, opts Options) (Resolved, error) {
 	}
 	info, err := os.Stat(module)
 	if errors.Is(err, os.ErrNotExist) && s.Path == "" && sub != "" {
-		return Resolved{}, fmt.Errorf("%s exports %s at %s, which is not there", at(s), exportName(s), exports.Value(sub, false))
+		return Resolved{}, fmt.Errorf("%s exports %s at %s, which is not there", where, exportName(s), exports.Value(sub, false))
+	}
+	// The path of a named stack's source, the stack's folder among them, is not shown:
+	// the folder is part of the stack's address.
+	if errors.Is(err, os.ErrNotExist) && n != nil {
+		return Resolved{}, fmt.Errorf("the repository of %s has no folder at the path it is set to", where)
 	}
 	if errors.Is(err, os.ErrNotExist) {
 		return Resolved{}, fmt.Errorf("%s has no %s at %s", exports.URL(s.Git), exports.Value(sub, false), exports.Value(s.Ref, false))
@@ -533,8 +580,11 @@ func resolveGit(s stack.Source, opts Options) (Resolved, error) {
 	if err != nil {
 		return Resolved{}, exports.HideError(err)
 	}
+	if !info.IsDir() && n != nil {
+		return Resolved{}, fmt.Errorf("the path of %s is not a directory in its repository", where)
+	}
 	if !info.IsDir() {
-		return Resolved{}, fmt.Errorf("%s is not a directory in %s", exports.Value(sub, false), at(s))
+		return Resolved{}, fmt.Errorf("%s is not a directory in %s", exports.Value(sub, false), where)
 	}
 	// A path inside the clone may be a symlink the repository contains; the module it
 	// points to must still be inside the clone.
@@ -546,8 +596,11 @@ func resolveGit(s stack.Source, opts Options) (Resolved, error) {
 	if err != nil {
 		return Resolved{}, exports.HideError(err)
 	}
+	if real != base && !strings.HasPrefix(real, base+string(filepath.Separator)) && n != nil {
+		return Resolved{}, fmt.Errorf("the path of %s links outside its repository", where)
+	}
 	if real != base && !strings.HasPrefix(real, base+string(filepath.Separator)) {
-		return Resolved{}, fmt.Errorf("%s in %s links outside the repository", exports.Value(sub, false), at(s))
+		return Resolved{}, fmt.Errorf("%s in %s links outside the repository", exports.Value(sub, false), where)
 	}
 	r := Resolved{Dir: module, Pin: commit[:12], Commit: strings.ToLower(commit), Warning: got.warning}
 	if opts.Pin != "" && !strings.HasPrefix(commit, opts.Pin) {
@@ -595,7 +648,7 @@ var abbreviated = regexp.MustCompile(`^[0-9a-fA-F]{4,}$`)
 // except for a ref of unknown kind that may be an abbreviated commit id, which is read
 // from the cache or fetched as it is.
 func commitOf(dir string, s stack.Source, opts Options) (memoEntry, error) {
-	refFile := filepath.Join(dir, "refs", cacheName(s.Ref))
+	refFile := filepath.Join(dir, "refs", folderName(s.Ref, opts))
 	if commitID.MatchString(s.Ref) && !opts.Update {
 		if id := strings.ToLower(s.Ref); cloned(filepath.Join(dir, id)) {
 			return memoEntry{commit: id}, nil
@@ -629,7 +682,11 @@ func commitOf(dir string, s stack.Source, opts Options) (memoEntry, error) {
 	found, err := lsRemote(dir, s, opts, names...)
 	if err != nil {
 		if cached != "" {
-			return memoEntry{commit: cached, warning: fmt.Sprintf("%s#%s: could not reach the remote; kept %s", exports.URL(s.Git), exports.Value(s.Ref, false), cached[:12])}, nil
+			warning := fmt.Sprintf("%s#%s: could not reach the remote; kept %s", exports.URL(s.Git), exports.Value(s.Ref, false), cached[:12])
+			if named(opts) != nil {
+				warning = fmt.Sprintf("%s: could not reach its repository; kept %s", shownAs(s, opts), cached[:12])
+			}
+			return memoEntry{commit: cached, warning: warning}, nil
 		}
 		return memoEntry{}, err
 	}
@@ -701,7 +758,19 @@ func lsRemote(dir string, s stack.Source, opts Options, names ...string) (map[st
 			args = append(args, n)
 		}
 	}
-	out, err := git(dir, opts, args...)
+	in := dir
+	if opts.Git != nil {
+		// Through a run's proxy, git runs in a new empty folder of dir, and
+		// [git] sets dir as the ceiling, so no repository's configuration applies to the
+		// lookup, not even one at dir/.git.
+		tmp, err := os.MkdirTemp(dir, "ls-remote-")
+		if err != nil {
+			return nil, err
+		}
+		defer os.RemoveAll(tmp)
+		in = tmp
+	}
+	out, err := git(in, opts, args...)
 	if hostgit.Refused(err) {
 		return nil, err
 	}
@@ -863,6 +932,34 @@ func fetch(dir string, s stack.Source, ref string, opts Options) (string, error)
 	return commit, nil
 }
 
+// namedFetch is err, an error of the resolve of s with opts, with the source's name
+// set on a [*FetchError] or a [*GoneError] of a named stack's source, so its text shows
+// neither the URL nor the ref nor git's output.
+func namedFetch(err error, s stack.Source, opts Options) error {
+	if named(opts) == nil {
+		return err
+	}
+	var fetch *FetchError
+	var gone *GoneError
+	switch {
+	case errors.As(err, &fetch):
+		fetch.Name = shownAs(s, opts)
+	case errors.As(err, &gone):
+		gone.Name = shownAs(s, opts)
+	}
+	return err
+}
+
+// folderName is the name of the cache folder of v, a source's URL, or of its refs file,
+// v its ref: [hashedName] for a named stack's source, see [Named], and [cacheName]
+// otherwise.
+func folderName(v string, opts Options) string {
+	if named(opts) != nil {
+		return hashedName(v)
+	}
+	return cacheName(v)
+}
+
 // unsafe matches every character a cache directory name may not carry.
 var unsafe = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
@@ -887,8 +984,9 @@ func cacheName(v string) string {
 //
 // With opts.Git set, git is the one [hostgit.Unchecked] finds, with the options of
 // [proxygit.Hardened] and [proxygit.HTTPSOnly] and the environment [proxygit.Env]
-// makes for the run's host proxy; its folder is one of the run's cache, which nothing
-// but this compose writes. The output has the proxy's password hidden.
+// makes for the run's proxy, the host proxy or the stack proxy, and with
+// GIT_CEILING_DIRECTORIES set to dir's parent; its folder is one of the run's cache,
+// which nothing but this compose writes. The output has the proxy's password hidden.
 func git(dir string, opts Options, args ...string) ([]byte, error) {
 	timeout := opts.Timeout
 	ctx, cancel := context.Background(), func() {}
@@ -903,7 +1001,10 @@ func git(dir string, opts Options, args ...string) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		cmd.Env = proxygit.Env(cmd.Env, p)
+		// dir is a clone being fetched or, for ls-remote, a new empty folder: git looks
+		// for a repository no higher than dir, so the configuration of a repository
+		// above it sets no proxy, URL or header.
+		cmd.Env = append(proxygit.Env(cmd.Env, p), "GIT_CEILING_DIRECTORIES="+filepath.Dir(dir))
 		out, err := cmd.CombinedOutput()
 		out = []byte(proxygit.Hide(string(out), p))
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {

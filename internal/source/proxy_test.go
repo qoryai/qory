@@ -2,9 +2,11 @@ package source_test
 
 import (
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,7 +25,7 @@ func TestResolveGitThroughTheHostProxy(t *testing.T) {
 	commit := s.Repository(t, "acme/harness", "main", map[string]string{"modules/core/AGENTS.md": "# Core\n"})
 	cache := t.TempDir()
 	var fetched []string
-	g := &source.Git{Proxy: s.Proxy, Fetched: func(url, ref, c string, took time.Duration) {
+	g := &source.Git{Proxy: s.Proxy, Fetched: func(url, ref, _, c string, took time.Duration) {
 		fetched = append(fetched, url+"#"+ref+" "+c)
 	}}
 	memo := source.NewMemo()
@@ -101,4 +103,111 @@ func TestResolveGitThroughTheHostProxyFails(t *testing.T) {
 	if line := source.HTTPSFix("https://example.com/acme/harness", "qory.yaml"); line != "" {
 		t.Errorf("an https URL: %s", line)
 	}
+}
+
+// TestAProxiedFetchReadsNoRepositoryAboveTheCache resolves a source through the proxy,
+// a named stack's and a stack's by reference, with the cache in a git repository whose
+// configuration sends the host to another proxy: every request goes through the proxy
+// given, and none to the other.
+func TestAProxiedFetchReadsNoRepositoryAboveTheCache(t *testing.T) {
+	hermetic(t)
+	s := proxygittest.Start(t)
+	s.Repository(t, "example-org/stacks", "main", map[string]string{"core/qory-stack.yaml": "name: core\n"})
+	addr, reached := otherProxy(t)
+	for _, named := range []bool{true, false} {
+		parent := t.TempDir()
+		sendElsewhere(t, parent, addr)
+		cache := filepath.Join(parent, "cache")
+		src, opts := proxiedSource(s, cache, named)
+		before := s.Tunnels()
+		if _, err := source.Resolve("", src, opts); err != nil {
+			t.Fatalf("named %v: %v", named, err)
+		}
+		if s.Tunnels() == before {
+			t.Errorf("named %v: no request went through the proxy", named)
+		}
+	}
+	if n := reached.Load(); n != 0 {
+		t.Errorf("%d connections went to the proxy of the repository above the cache", n)
+	}
+}
+
+// TestAProxiedFetchReadsNoRepositoryInTheSourcesFolder resolves a source through the
+// proxy, a named stack's and a stack's by reference, then makes the source's folder in
+// the cache a git repository whose configuration sends the host to another proxy, and
+// resolves it again: the lookup of the ref goes through the proxy given, and none to
+// the other.
+func TestAProxiedFetchReadsNoRepositoryInTheSourcesFolder(t *testing.T) {
+	hermetic(t)
+	s := proxygittest.Start(t)
+	s.Repository(t, "example-org/stacks", "main", map[string]string{"core/qory-stack.yaml": "name: core\n"})
+	addr, reached := otherProxy(t)
+	for _, named := range []bool{true, false} {
+		cache := t.TempDir()
+		src, opts := proxiedSource(s, cache, named)
+		if _, err := source.Resolve("", src, opts); err != nil {
+			t.Fatalf("named %v: %v", named, err)
+		}
+		folders, err := os.ReadDir(cache)
+		if err != nil || len(folders) != 1 {
+			t.Fatalf("named %v: the cache has %v (%v)", named, folders, err)
+		}
+		sendElsewhere(t, filepath.Join(cache, folders[0].Name()), addr)
+		before := s.Tunnels()
+		if _, err := source.Resolve("", src, opts); err != nil {
+			t.Fatalf("named %v, again: %v", named, err)
+		}
+		if s.Tunnels() == before {
+			t.Errorf("named %v: the second lookup went through no proxy given", named)
+		}
+	}
+	if n := reached.Load(); n != 0 {
+		t.Errorf("%d connections went to the proxy of the repository in the source's folder", n)
+	}
+}
+
+// otherProxy is a listener that closes each connection, and the count of connections it
+// took.
+func otherProxy(t *testing.T) (string, *atomic.Int32) {
+	t.Helper()
+	other, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { other.Close() })
+	var reached atomic.Int32
+	go func() {
+		for {
+			c, err := other.Accept()
+			if err != nil {
+				return
+			}
+			reached.Add(1)
+			c.Close()
+		}
+	}()
+	return other.Addr().String(), &reached
+}
+
+// sendElsewhere makes dir a git repository whose configuration sends the test's host to
+// the proxy at addr, and its URLs to another host.
+func sendElsewhere(t *testing.T, dir, addr string) {
+	t.Helper()
+	run(t, dir, "init", "--quiet")
+	run(t, dir, "config", "http.https://"+proxygittest.Host+"/.proxy", "http://"+addr)
+	run(t, dir, "config", "url.https://elsewhere.example/.insteadOf", "https://"+proxygittest.Host+"/")
+}
+
+// proxiedSource is the folder core of example-org/stacks on s at main, resolved
+// through s's proxy into cache: as the named stack core when named is true, and
+// otherwise as a stack by reference.
+func proxiedSource(s *proxygittest.Server, cache string, named bool) (stack.Source, source.Options) {
+	g := &source.Git{Proxy: s.Proxy}
+	opts := source.Options{Cache: cache, Git: g}
+	src := stack.Source{Git: s.URL("example-org/stacks"), Ref: "main", Path: "core"}
+	if named {
+		n := source.NewNamed("core", src.String(), src)
+		g.Named, opts.Name = n, n.Phrase()
+	}
+	return src, opts
 }
