@@ -1340,6 +1340,9 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
 - `add a skill or command <workflow> to the stack <url>#<ref>:<path>, or set another
   workflow in Qory Apiary: the composed harness has no skill or command <workflow>; the
   code is used`, after the compose, with `the stack <name>` for a stack by its name
+- `take the work item in again in Qory Apiary: the run's host proxy, through which qory
+  fetches the run's code, did not open: <error>; the code is used`, where a run without a
+  run code prints `run again: the run's host proxy, …: <error>`
 
 #### A named stack
 

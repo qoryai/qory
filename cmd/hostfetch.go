@@ -39,10 +39,20 @@ func (e *runLineError) Unwrap() error { return e.err }
 // error after it.
 const textNoHostProxy = "run again: the run's host proxy, through which qory fetches the run's code, did not open: %s"
 
+// textNoHostProxyFromCode is [textNoHostProxy] for a run from a run code. The code is
+// used by then, so the run starts again only from the new run code that taking the work
+// item in again makes, as for [textNoStackProxy].
+const textNoHostProxyFromCode = "take the work item in again in Qory Apiary: the run's host proxy, through which qory fetches the run's code, did not open: %s" + codeUsed
+
 // noHostProxy is [textNoHostProxy] for err, HostProxy's error, made printable with every
-// URL's password and every secret hidden.
-func noHostProxy(err error) error {
-	return fmt.Errorf(textNoHostProxy, integration.Printable(exports.HideURLError(err).Error()))
+// URL's password and every secret hidden; [textNoHostProxyFromCode] for a run from a run
+// code, fromCode.
+func noHostProxy(err error, fromCode bool) error {
+	text := textNoHostProxy
+	if fromCode {
+		text = textNoHostProxyFromCode
+	}
+	return fmt.Errorf(text, integration.Printable(exports.HideURLError(err).Error()))
 }
 
 // textNoStackProxy is the line of a run of a named stack whose stack proxy did not open,

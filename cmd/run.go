@@ -717,7 +717,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				openProxy := func() error {
 					p, err := run.HostProxy()
 					if err != nil {
-						return &runLineError{noHostProxy(err)}
+						return &runLineError{noHostProxy(err, code != nil)}
 					}
 					h = &p
 					return nil
