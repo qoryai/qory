@@ -62,11 +62,15 @@ code is used, so the run needs a new one:
 remove /home/dev/.cache from --mount: it contains /home/dev/.cache/qory, where qory writes the harness report of each run with a run key or a run code that has no --home or harness.home, and the agent's container has every mount; the code is used
 remove /srv/qory-homes from --mount: it contains /srv/qory-homes/app-1a2b3c4d-report.json, the harness report of this run, and the agent's container has every mount; the code is used
 start the run in a checkout that does not contain /home/dev/.cache/qory: the checkout /home/dev is mounted into the agent's container, and qory writes the harness report of each run with a run key or a run code that has no --home or harness.home under /home/dev/.cache/qory; the code is used
-start the run in a checkout that does not contain /work/app/homes/app-1a2b3c4d-report.json: the checkout /work/app is mounted into the agent's container, and /work/app/homes/app-1a2b3c4d-report.json is the harness report of this run; the code is used
 ```
 
 For a checkout that is or lies inside `qory` in your cache directory, the line starts
-`start the run in a checkout outside <folder>: …`.
+`start the run in a checkout outside <folder>: …`. A checkout that contains the report,
+such as through a path in another letter case, stops with `start the run in a checkout
+that does not contain <report>: the checkout <folder> is mounted into the agent's
+container, and <report> is the harness report of this run; the code is used`. A home
+inside the checkout, by its path or its links, stops the run earlier, with `set --home
+to a folder outside <folder>: …`.
 
 Given a run key, `qory run` composes under four rules, so that a branch of the checkout
 does not pull files of this machine into the harness or set the machine's settings of the
