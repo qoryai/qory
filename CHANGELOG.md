@@ -66,6 +66,10 @@ release may change what an existing document does, and states it under Upgrading
   after a pause; 256, 50 and 200 unless set. A request past a limit gets `429 Too Many
   Requests`. `qory gateway`, and a `qory run` with no separate gateway, apply them, and
   `qory config` lists them.
+- `gateway.stack_hosts` in forager.yaml: the hosts that each run's stack proxy
+  reaches, each a lower-case host name, an IPv4 address or a `*.` suffix; none unless
+  set, and with none the stack proxy reaches no host. `qory gateway`, and a `qory run`
+  with no separate gateway, apply them, and `qory config` lists them.
 - `gateway.lock_memory` in forager.yaml: on Linux, `true` keeps the memory of the gateway
   out of swap, in `qory gateway` and in a `qory run` with no separate gateway. It needs
   the locked-memory limit `RLIMIT_MEMLOCK` at unlimited, or the capability

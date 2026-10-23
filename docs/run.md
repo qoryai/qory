@@ -369,6 +369,7 @@ gateway:
     connections: 256                      # open at once, 1 to 65536
     requests_per_second: 50               # 1 to 10000
     burst: 200                            # requests at once after a pause, 1 to 100000
+  stack_hosts: [git.example.com]          # the hosts each run's stack proxy reaches; optional
   lock_memory: true        # Linux only: keep the gateway's memory out of swap; optional
 session:
   instance:                # optional
@@ -490,6 +491,43 @@ gateway:
 
 `qory gateway` applies the same limits to each run it serves. A `qory run` through a
 separate gateway gets that gateway's limits.
+
+## Hosts of the stack proxy
+
+`gateway.stack_hosts` in `forager.yaml` lists the hosts that each run's stack proxy
+reaches. The stack proxy is a proxy of each run on the gateway, apart from the run's
+proxy, and is open until the run's session starts.
+
+```yaml
+# ~/.config/qory/forager.yaml
+gateway:
+  stack_hosts: [git.example.com, "*.example.org"]
+```
+
+- Each entry is a lower-case host name, an IPv4 address or a `*.` suffix, as in
+  `gateway.egress.allow`, with no port, path or scheme. The stack proxy reaches a listed
+  host on any port.
+- Empty or left out, the stack proxy reaches no host.
+- The stack proxy allows a listed host without the run's policy: a listed host that the
+  policy denies is allowed too. The stack proxy sets no credential.
+- Behind a wall or through a separate gateway, the stack proxy reaches the gateway's
+  machine or a private network address only for a host that `gateway.stack_hosts` lists
+  by name and the allow list of the gateway's policy lists by name: `gateway.egress.allow`,
+  or for `qory run --policy`, that file's allow list as `gateway.egress` narrows it. A
+  `*.` pattern in either list opens no such address. The stack proxy never reaches a
+  link-local or cloud metadata address.
+- The stack proxy counts its connections and requests at the limits of
+  `gateway.run_limits`, apart from the run's proxy.
+- An entry of another form stops every qory command that reads `forager.yaml`, with the
+  fix, such as `set gateway.stack_hosts[0] to a lower-case host name, an IPv4 address or
+  a *. suffix, such as git.example.com; no port, path or scheme`.
+- The record has no `dev.qory.run.egress` for the stack proxy. The gateway prints one
+  line on standard error for each request the stack proxy allows or denies, except for
+  a request denied at a run limit: of those, it prints at most one line a second per
+  limit.
+
+`qory gateway` applies the list of its `forager.yaml` to each run it serves. A `qory run`
+through a separate gateway gets that gateway's list.
 
 ## A run's variables
 

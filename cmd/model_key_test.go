@@ -21,7 +21,8 @@ const modelKey = "  credentials:\n    model:\n      env: MODEL_TOKEN\n      form
 
 // TestGatewayHandsForagerTheModelKeyAndTheLimits is qory gateway handing the gateway it
 // starts a model key of forager.yaml, with its format, endpoint, auth and key prefixes,
-// and gateway.lock_memory and gateway.run_limits as the file sets them.
+// and gateway.lock_memory, gateway.run_limits and gateway.stack_hosts as the file sets
+// them.
 func TestGatewayHandsForagerTheModelKeyAndTheLimits(t *testing.T) {
 	emptyDir(t)
 	var got gateway.Config
@@ -34,10 +35,11 @@ func TestGatewayHandsForagerTheModelKeyAndTheLimits(t *testing.T) {
 		name, yaml string
 		lock       bool
 		limits     gateway.RunLimits
+		hosts      []string
 	}{
-		{"set", "  lock_memory: true\n  run_limits: {connections: 12, requests_per_second: 34, burst: 56}\n", true, gateway.RunLimits{Connections: 12, RequestsPerSecond: 34, Burst: 56}},
-		{"one limit", "  run_limits: {burst: 1}\n", false, gateway.RunLimits{Burst: 1}},
-		{"left out", "", false, gateway.RunLimits{}},
+		{"set", "  lock_memory: true\n  run_limits: {connections: 12, requests_per_second: 34, burst: 56}\n  stack_hosts: [git.example.com, \"*.example.org\", 192.0.2.10]\n", true, gateway.RunLimits{Connections: 12, RequestsPerSecond: 34, Burst: 56}, []string{"git.example.com", "*.example.org", "192.0.2.10"}},
+		{"one limit", "  run_limits: {burst: 1}\n", false, gateway.RunLimits{Burst: 1}, nil},
+		{"left out", "", false, gateway.RunLimits{}, nil},
 	} {
 		got = gateway.Config{}
 		serverFile(t, newGatewayServer(t), "  listen: 127.0.0.1:0\n"+gatewayTLS+modelKey+c.yaml)
@@ -48,6 +50,9 @@ func TestGatewayHandsForagerTheModelKeyAndTheLimits(t *testing.T) {
 		}
 		if got.LockMemory != c.lock || got.RunLimits != c.limits {
 			t.Errorf("%s: lock_memory %v and run_limits %+v, want %v and %+v", c.name, got.LockMemory, got.RunLimits, c.lock, c.limits)
+		}
+		if !slices.Equal(got.StackHosts, c.hosts) {
+			t.Errorf("%s: stack_hosts %q, want %q", c.name, got.StackHosts, c.hosts)
 		}
 		if len(got.Credentials) != 1 {
 			t.Fatalf("%s: credentials %+v, want the model key", c.name, got.Credentials)
@@ -133,9 +138,10 @@ func TestARunPassesTheMemoryLock(t *testing.T) {
 }
 
 // TestARunHandsForagerTheLimits is qory run with no separate gateway handing the gateway
-// it starts gateway.lock_memory and gateway.run_limits as forager.yaml sets them, and
-// zero values when the file leaves them out. The test stops the run where the gateway
-// would start, so no memory is locked, on Linux either, and the runtime does not start.
+// it starts gateway.lock_memory, gateway.run_limits and gateway.stack_hosts as
+// forager.yaml sets them, and zero values when the file leaves them out. The test stops
+// the run where the gateway would start, so no memory is locked, on Linux either, and
+// the runtime does not start.
 func TestARunHandsForagerTheLimits(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -151,10 +157,11 @@ func TestARunHandsForagerTheLimits(t *testing.T) {
 		name, yaml string
 		lock       bool
 		limits     gateway.RunLimits
+		hosts      []string
 	}{
-		{"set", "  lock_memory: true\n  run_limits: {connections: 12, requests_per_second: 34, burst: 56}\n", true, gateway.RunLimits{Connections: 12, RequestsPerSecond: 34, Burst: 56}},
-		{"one limit", "  run_limits: {requests_per_second: 7}\n", false, gateway.RunLimits{RequestsPerSecond: 7}},
-		{"left out", "  egress: {mode: observe}\n", false, gateway.RunLimits{}},
+		{"set", "  lock_memory: true\n  run_limits: {connections: 12, requests_per_second: 34, burst: 56}\n  stack_hosts: [git.example.com, \"*.example.org\"]\n", true, gateway.RunLimits{Connections: 12, RequestsPerSecond: 34, Burst: 56}, []string{"git.example.com", "*.example.org"}},
+		{"one limit", "  run_limits: {requests_per_second: 7}\n", false, gateway.RunLimits{RequestsPerSecond: 7}, nil},
+		{"left out, stack_hosts empty", "  egress: {mode: observe}\n  stack_hosts: []\n", false, gateway.RunLimits{}, nil},
 	} {
 		got = gateway.Config{}
 		writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\ngateway:\n"+c.yaml)
@@ -164,6 +171,9 @@ func TestARunHandsForagerTheLimits(t *testing.T) {
 		}
 		if got.LockMemory != c.lock || got.RunLimits != c.limits {
 			t.Errorf("%s: lock_memory %v and run_limits %+v, want %v and %+v", c.name, got.LockMemory, got.RunLimits, c.lock, c.limits)
+		}
+		if !slices.Equal(got.StackHosts, c.hosts) {
+			t.Errorf("%s: stack_hosts %q, want %q", c.name, got.StackHosts, c.hosts)
 		}
 		lacks(t, out, "claude exited")
 	}

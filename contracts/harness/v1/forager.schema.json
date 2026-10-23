@@ -410,6 +410,15 @@
               "maximum": 100000
             }
           }
+        },
+        "stack_hosts": {
+          "description": "The hosts the stack proxy of each run on the gateway reaches, in egress.allow's grammar: a lower-case host name, an IPv4 address in canonical form or a *. suffix. The stack proxy is open until the run's session starts, and allows a listed host without the run's policy. Behind a wall or through a separate gateway, it reaches the gateway's machine or a private network address only for a host that this list and the allow list of the gateway's policy both list by name, and never a link-local or cloud metadata address. Absent or empty means the stack proxy reaches no host.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$",
+            "$ref": "#/$defs/hostForm"
+          }
         }
       }
     },

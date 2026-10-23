@@ -42,6 +42,7 @@ gateway:
 | `gateway.selects` | The credentials the gateway selects for a run, with a wall or without, when the server's policy selects none, each by name, with the label of the run's registration whose value is the argument, and the forge the run's `forge` label must name. On github.com the label's value is one repository or several of one owner, separated by commas with no space, such as `acme/shop,acme/lib`; a run whose label is missing, empty or of another form gets no credential from the entry. A value that lists repositories of several owners, or one repository twice, has that form, and the `github` integration mints no token for it: the run does not start. qory gateway alone reads it. |
 | `gateway.server`, `gateway.egress`, `gateway.egress.paths`, `gateway.credentials`, `gateway.tools`, `gateway.integrations` | As for `qory run`: see [forager.yaml](run.md#forageryaml). |
 | `gateway.run_limits` | The limits of each run the gateway serves: see [Limits of each run](run.md#limits-of-each-run). |
+| `gateway.stack_hosts` | The hosts each run's stack proxy reaches: see [Hosts of the stack proxy](run.md#hosts-of-the-stack-proxy). |
 | `gateway.lock_memory` | On Linux, `true` keeps the gateway's memory out of swap: see [Keep the gateway's memory out of swap](run.md#keep-the-gateways-memory-out-of-swap). |
 
 A path in `gateway.tls` is relative to the directory of `forager.yaml`, unless it is

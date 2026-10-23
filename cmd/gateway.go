@@ -132,6 +132,7 @@ More: ` + gatewayDocs,
 				Heartbeat:    runHeartbeat,
 				LockMemory:   r.LockMemory,
 				RunLimits:    gatewayRunLimits(r),
+				StackHosts:   r.StackHosts,
 			}
 			gw.Server.AccessKey, gw.Server.InstanceID, gw.Server.InstanceName = id.key.key, id.instanceID, id.instanceName
 			if r.TLS != nil {

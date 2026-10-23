@@ -481,7 +481,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 			}
 			if r := conf.Forager; r != nil && !remote {
-				gw.LockMemory, gw.RunLimits = r.LockMemory, gatewayRunLimits(r)
+				gw.LockMemory, gw.RunLimits, gw.StackHosts = r.LockMemory, gatewayRunLimits(r), r.StackHosts
 				e, err := expansion(r, pol, server != nil && !local, at.root, cwd, spec.Mounts)
 				if err != nil {
 					return err

@@ -100,6 +100,10 @@ type Forager struct {
 	LockMemory bool
 	// RunLimits is gateway.run_limits: the limits of each run on the gateway.
 	RunLimits ForagerRunLimits
+	// StackHosts is gateway.stack_hosts, in the file's order: the hosts the stack proxy
+	// of each run on the gateway reaches, as Forager's gateway.Config.StackHosts. Each is
+	// an entry Forager reads in a policy's egress.allow. Nil when the file sets none.
+	StackHosts []string
 	// Pool is the pool section, nil when the file has none: what qory run pool runs by.
 	// No other command reads it.
 	Pool     *ForagerPool
@@ -516,6 +520,9 @@ type gatewaySection struct {
 		RequestsPerSecond *int `yaml:"requests_per_second"`
 		Burst             *int `yaml:"burst"`
 	} `yaml:"run_limits,omitempty"`
+	// StackHosts is read as a node, so an entry that is not a string stops the load
+	// with its index.
+	StackHosts yaml.Node `yaml:"stack_hosts,omitempty"`
 }
 
 // selectsSection is gateway.selects as written.
@@ -720,6 +727,11 @@ func LoadForagerIn(dir string) (*Forager, error) {
 				return nil, fmt.Errorf("%s: set gateway.run_limits.%s to a number from 1 to %d, or remove it for the default of %d", path, lim.key, lim.most, lim.normal)
 			}
 			*f.out = *f.in
+		}
+	}
+	if g.StackHosts.Kind != 0 {
+		if r.StackHosts, err = readStackHosts(path, &g.StackHosts); err != nil {
+			return nil, err
 		}
 	}
 	if sel := g.Selects; sel != nil {
@@ -1553,6 +1565,32 @@ func readPaths(path string, node *yaml.Node) (map[string][]string, error) {
 	return out, nil
 }
 
+// readStackHosts reads gateway.stack_hosts, a list of hosts, each read as an entry of a
+// policy's egress.allow, as Forager's gateway.Start reads an entry of StackHosts: a
+// lower-case host name, an IPv4 address in canonical form or a *. suffix. An empty list
+// is none. An entry that is not a string stops the load with its line and its index; a
+// string that Forager does not take, with its index. Neither error contains the value.
+func readStackHosts(path string, node *yaml.Node) ([]string, error) {
+	fix := func(i int) string {
+		return fmt.Sprintf("set gateway.stack_hosts[%d] to a lower-case host name, an IPv4 address or a *. suffix, such as git.example.com; no port, path or scheme", i)
+	}
+	hosts, err := stringList(path, "gateway.stack_hosts", node, func(i, line int) error {
+		return (&fault{line, fix(i)}).error(path)
+	})
+	if err != nil {
+		return nil, err
+	}
+	for i, host := range hosts {
+		if !policyHost("allow", host) {
+			return nil, (&fault{0, fix(i)}).error(path)
+		}
+	}
+	if len(hosts) == 0 {
+		return nil, nil
+	}
+	return hosts, nil
+}
+
 // notAPolicyHost is what a refusal of a host of gateway.egress.allow or deny says is
 // wrong with it.
 const notAPolicyHost = "is not a lower-case host name or a *. suffix, or it ends in a number and is not an IPv4 address in canonical form; no port, path or scheme"
@@ -1734,9 +1772,9 @@ func loopback(host string) bool {
 // defaults with [Default] when there is no file or a section is absent. A name that
 // contains an access key secret or a run key is printed as [accesskey.ShownName]
 // prints it, and a value the file sets as [exports.Value] prints it. The egress hosts,
-// the server's and the via's URLs, the access key id, the instance name and the
-// certificate's SHA-256 are printed as they are: each is refused when it could contain
-// qak_ or qrk_.
+// the stack hosts, the server's and the via's URLs, the access key id, the instance
+// name and the certificate's SHA-256 are printed as they are: each is refused when it
+// could contain qak_ or qrk_.
 func (r *Forager) Rows() []Row {
 	origin := Default
 	if r != nil {
@@ -1795,6 +1833,11 @@ func (r *Forager) Rows() []Row {
 		} else {
 			rows = append(rows, Row{"gateway.run_limits." + lim.key, strconv.Itoa(lim.normal), Default})
 		}
+	}
+	if r != nil && len(r.StackHosts) > 0 {
+		rows = append(rows, Row{"gateway.stack_hosts", listOrNone(r.StackHosts), origin})
+	} else {
+		rows = append(rows, Row{"gateway.stack_hosts", "(none)", Default})
 	}
 	if r != nil && r.InstanceName != "" {
 		rows = append(rows, Row{"session.instance.name", r.InstanceName, origin})
