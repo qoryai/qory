@@ -334,9 +334,9 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Security
 
-- qory builds with Go 1.27.3, whose `crypto/x509` no longer accepts the compromised
-  intermediate certificates of CVE-2026-111943. go.mod requires Go 1.27.3, and `agent-go`
-  and `agent-go-docker` have Go 1.27.3 in place of 1.27.1.
+- qory builds with Go 1.27.3, whose `crypto/x509` returns an error for the intermediate
+  certificates that Go no longer trusts (GO-2026-6809, CVE-2026-111943). go.mod requires
+  Go 1.27.3, and `agent-go` and `agent-go-docker` have Go 1.27.3 in place of 1.27.1.
 
 ## [0.13.0] - 2026-10-13
 
