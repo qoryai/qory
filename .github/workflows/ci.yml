@@ -20,15 +20,11 @@ jobs:
     name: ${{ github.event_name == 'pull_request' && github.head_ref == 'next' && github.event.pull_request.head.repo.full_name == github.repository && 'Go tests · checked by the push run' || 'Go tests' }}
     if: github.event_name != 'pull_request' || github.head_ref != 'next' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
-    env:
-      # The image below has go1.27.2, and go.mod requires go1.27.3. Remove this line once
-      # the image's digest is that of a go1.27.3 image.
-      GOTOOLCHAIN: go1.27.3
     container:
       # Docker Hub's official golang:1.27, copied by digest to qoryai's public package,
       # and pulled with the job's token. The container has no docker command and no
       # engine, so the tests that start containers skip here.
-      image: ghcr.io/qoryai/ci-images:golang-1.27@sha256:e432b43af23a9328d56a7c499be0476810aa344acbcf65fc7c455d4ff5a40602
+      image: ghcr.io/qoryai/ci-images:golang-1.27@sha256:f24164268fc1e741bbdc0066dbadcf1c8426c5a8489f0729c02c3905a53032fd
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
