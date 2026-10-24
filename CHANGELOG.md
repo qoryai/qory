@@ -175,15 +175,15 @@ release may change what an existing document does, and states it under Upgrading
   `harness.home` sets, and when the home, mounted read-only, is or contains `qory` in
   your cache directory. A home that lies inside that folder, as the default one does,
   passes. qory compares each path through links, and in any letter case on a disk that
-  ignores case. The line starts `remove <path> from --mount: …` or
-  `remove <path> from wall.mounts in forager.yaml: …` for a mount, `start the run in a checkout that does not contain <path>: …` or `start the run in a checkout
-  outside <path>: …` for the checkout, `run qory from a folder that does not contain
-  <path>: …` or `run qory from a folder outside <path>: …` for the working folder, and
-  `set --home or harness.home to a folder that does not contain <path>: …` or `set
-  --home or harness.home to a folder other than <path>: …` for the home. Under that
-  folder qory writes the home and the harness report of each run with a run key or a
-  run code that has no `--home` or `harness.home`, and a report contains the stack's
-  address.
+  ignores case. The line starts `remove <path> from --mount: …` or `remove <path> from
+  wall.mounts in forager.yaml: …` for a mount, `start the run in a checkout that does
+  not contain <path>: …` or `start the run in a checkout outside <path>: …` for the
+  checkout, `run qory from a folder that does not contain <path>: …` or `run qory from a
+  folder outside <path>: …` for the working folder, and `set --home or harness.home to a
+  folder that does not contain <path>: …` or `set --home or harness.home to a folder
+  other than <path>: …` for the home. Under that folder qory writes the home and the
+  harness report of each run with a run key or a run code that has no `--home` or
+  `harness.home`, and a report contains the stack's address.
 - A run from a control plane fetches its repositories on this machine, through the run's
   gateway, once the run is open and before the compose, and prints `qory run: fetched
   <owner>/<name> at <commit> in <seconds>s`. Before, `qory run prepare` cloned them inside
