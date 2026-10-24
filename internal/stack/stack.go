@@ -425,7 +425,17 @@ type Workflow struct {
 	// TimeLimit is TimeLimitText read as a duration, above zero, or 0 when the workflow
 	// sets none. It is set as the stack is validated.
 	TimeLimit time.Duration `yaml:"-"`
+	// Access is access as written, the access level the workflow declares for what a
+	// dispatched run of the workflow works on: read or write, "" when the workflow sets
+	// none. [Stack.AccessOf] reads "" as read.
+	Access string `yaml:"access,omitempty"`
 }
+
+// The access levels a workflow declares, see [Workflow.Access].
+const (
+	AccessRead  = "read"
+	AccessWrite = "write"
+)
 
 // workflowName is a workflow's name, as the provisioner contract's workflow is.
 var workflowName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
@@ -434,6 +444,16 @@ var workflowName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 // workflow or the workflow sets none.
 func (p *Stack) TimeLimitOf(name string) time.Duration {
 	return p.Workflows[name].TimeLimit
+}
+
+// AccessOf is the access level the workflow name declares, [AccessRead] or
+// [AccessWrite]; [AccessRead] when the stack has no such workflow or the workflow sets
+// none.
+func (p *Stack) AccessOf(name string) string {
+	if a := p.Workflows[name].Access; a != "" {
+		return a
+	}
+	return AccessRead
 }
 
 // Dir returns the directory that contains the stack file. A module's relative path source
@@ -636,6 +656,9 @@ func (p *Stack) validate(compose bool) error {
 			return fmt.Errorf("name the workflow %s with a lower-case letter, then up to 63 lower-case letters, digits and hyphens: workflows lists it", accesskey.ShownName(name, true))
 		}
 		w := p.Workflows[name]
+		if w.Access != "" && w.Access != AccessRead && w.Access != AccessWrite {
+			return fmt.Errorf("set workflows.%s.access to read or write: %s is neither", name, exports.Value(w.Access, true))
+		}
 		if w.TimeLimitText == "" {
 			continue
 		}

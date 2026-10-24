@@ -1,0 +1,9 @@
+apiVersion: qory.dev/v1alpha1
+name: core
+modules:
+  - name: core
+    source: {path: modules/core}
+extending: {}
+workflows:
+  fix:
+    access: admin

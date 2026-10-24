@@ -38,6 +38,9 @@ release may change what an existing document does, and states it under Upgrading
   `qory-stack.yaml`, such as `workflows: {example: {time_limit: 45m}}`. A run from a run
   code takes its time limit from Qory Apiary's `run_settings.time_limit_minutes`, else
   from its workflow's `time_limit`, else 3 hours.
+- Declare a workflow's access level with `workflows.<name>.access` in its
+  `qory-stack.yaml`, `read` or `write`, and `read` when left out. qory stops on any
+  other value and grants no permission from it.
 - See the fetch and the compose of `qory run` as steps in the run's record, each with
   its lines and its end: a failed step ends `failed` with the exit status of `qory run`,
   after its error line.
