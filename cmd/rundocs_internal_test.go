@@ -445,9 +445,9 @@ func TestAWalledRunOfANamedStackFromAWorkingFolderThatExposesAReportStops(t *tes
 
 // TestANamedStacksAddressWithAHostOutsideASCIIStops is namedStackOf for an address whose
 // host, its percent-encodings decoded, has a character outside ASCII, such as a
-// fullwidth : and @, which curl built with IDN maps to a user part: it stops with a line
-// that starts with its fix and shows no part of the address. A host in the xn-- form
-// passes.
+// fullwidth : and @, which curl built with IDN maps to ASCII, so that the host curl sends
+// to the proxy has a user part: it stops with a line that starts with its fix and shows
+// no part of the address. A host in the xn-- form passes.
 func TestANamedStacksAddressWithAHostOutsideASCIIStops(t *testing.T) {
 	const want = "write the host in the address of the stack core in Qory Apiary's list of stacks in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @; the code is used"
 	for _, address := range []string{

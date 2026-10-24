@@ -70,15 +70,17 @@ run qory from a folder that does not contain /home/dev/.cache/qory: the working 
 
 The other lines of this stop start:
 
+- `remove <path> from wall.mounts in forager.yaml: …`, for a mount of `wall.mounts`,
+  with the rest as for `--mount`;
 - `start the run in a checkout outside <folder>: …` and `run qory from a folder outside
   <folder>: …`, for a checkout or a working folder that is or lies inside `qory` in
   your cache directory;
 - `start the run in a checkout that does not contain <report>: the checkout <folder> is
   mounted into the agent's container, and <report> is the harness report of this run;
   the code is used`, and `run qory from a folder that does not contain <report>: the
-  working folder <folder> is mounted …`, for one that contains the report. For the
-  checkout, this takes a path in another letter case: a home inside the checkout, by its
-  path or its links, stops the run earlier, with `set --home to a folder outside
+  working folder <folder> is mounted …`, for one that contains the report. For either,
+  this takes a path in another letter case: a home inside the checkout or the working
+  folder, by its path or its links, stops the run earlier, with `set --home to a folder outside
   <folder>: …`;
 - `set --home or harness.home to a folder that does not contain <folder>: the home
   <home> is mounted read-only into the agent's container, and qory writes the harness

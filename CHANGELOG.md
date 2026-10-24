@@ -175,8 +175,8 @@ release may change what an existing document does, and states it under Upgrading
   `harness.home` sets, and when the home, mounted read-only, is or contains `qory` in
   your cache directory. A home that lies inside that folder, as the default one does,
   passes. qory compares each path through links, and in any letter case on a disk that
-  ignores case. The line starts `remove <path> from --mount: …` for a mount, `start the
-  run in a checkout that does not contain <path>: …` or `start the run in a checkout
+  ignores case. The line starts `remove <path> from --mount: …` or
+  `remove <path> from wall.mounts in forager.yaml: …` for a mount, `start the run in a checkout that does not contain <path>: …` or `start the run in a checkout
   outside <path>: …` for the checkout, `run qory from a folder that does not contain
   <path>: …` or `run qory from a folder outside <path>: …` for the working folder, and
   `set --home or harness.home to a folder that does not contain <path>: …` or `set

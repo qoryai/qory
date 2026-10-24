@@ -24,7 +24,8 @@ func AtBeforePath(u string) bool {
 // NonASCIIHost reports whether u parses as a URL whose host, its percent-encodings
 // decoded, has a byte of 0x80 or above. Such a host can pass [AtBeforePath] and
 // url.Parse with no user, while curl built with IDN maps a fullwidth @ or : in it to an
-// ASCII one, and so reads a user part.
+// ASCII one, so the host that curl sends to the proxy has a user part. It returns false
+// for a URL that does not parse: each caller stops such a URL before it calls this.
 func NonASCIIHost(u string) bool {
 	p, err := url.Parse(u)
 	if err != nil {
