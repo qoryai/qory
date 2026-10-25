@@ -107,6 +107,71 @@ secret is read from `--access-key-secret-fd`, else `QORY_ACCESS_KEY_SECRET`, els
 `access-key-secret` beside `forager.yaml`: see
 [The access key and the instance](run.md#the-access-key-and-the-instance).
 
+### Enrol from the code file of Qory Apiary
+
+On an instance's gateway, Qory Apiary writes the gateway's enrolment code into a file, and
+`qory gateway` enrols from it, with no command typed by a person. Set
+`gateway.server.enrolment_code_file` to that file, relative to the directory of
+`forager.yaml` unless absolute:
+
+```yaml
+gateway:
+  server:
+    url: https://apiary.example
+    enrolment_code_file: /run/qory/enrolment/code
+```
+
+When `qory gateway` starts with no access key, from neither `--access-key-secret-fd`,
+`QORY_ACCESS_KEY_SECRET` nor `access-key-secret`:
+
+1. If the file is not there yet, it prints once: `qory gateway: waiting for the
+   enrolment code at /run/qory/enrolment/code; Qory Apiary writes it once this gateway
+   is installed`, and looks again every 2 seconds until the file exists. SIGINT or
+   SIGTERM stops it, and it exits 0.
+2. It reads the file only when the path has no link in it, the file is a regular file,
+   and only root and the user running qory may write the file and each folder above it.
+   A folder that root owns with the sticky bit set, such as `/tmp`, passes, since no
+   other user may replace a file in it.
+   The file contains the code, `qecg_…`, and at most one newline after it.
+3. It enrols with the code against `gateway.server.url`, as `qory access-key enrol` does,
+   and prints one line: `qory gateway: enrolled the access key ak_… (fingerprint …) with
+   the code in /run/qory/enrolment/code; the secret is in <dir>/access-key-secret`.
+4. It starts as it does with a key it had.
+
+With an access key, `qory gateway` ignores the setting. qory never writes or removes the
+file: Qory Apiary deletes it once the key is live. No line or error contains the code.
+When the enrolment does not complete, `qory gateway` exits with the error that `qory
+access-key enrol` prints; started again within the code's 15 minutes, it retries with the
+same key.
+
+For a file outside these rules, it stops, exit 2, with one of these errors:
+
+- `set gateway.server.enrolment_code_file to a path with no link in it, such as <path>:
+  <file> leads through a link`
+- `set gateway.server.enrolment_code_file to the file itself, not a link: <file> is a link`
+- `set gateway.server.enrolment_code_file to a regular file: <file> is not one`
+- `make root or the user running qory the owner of <path>: it is owned by <user>, and
+  only root and the user running qory may write gateway.server.enrolment_code_file and
+  its folders, except a folder that root owns with the sticky bit set`
+- `remove the group's write permission from <path>: the group <group> may write it, and
+  only root and the user running qory may write gateway.server.enrolment_code_file and
+  its folders, except a folder that root owns with the sticky bit set`, for any group,
+  root's included
+- `remove the write permission of other users from <path>: every user may write it, and
+  only root and the user running qory may write gateway.server.enrolment_code_file and
+  its folders, except a folder that root owns with the sticky bit set`
+- `write the gateway's enrolment code (qecg_…) into <file>: the file is empty`
+- `write only the gateway's enrolment code into <file>, with at most one newline after
+  it: the file contains more`, for anything else in the file, or more than 1 KiB
+- `write a gateway's enrolment code (qecg_…) into <file>: the file does not contain an
+  enrolment code of Qory Apiary`, and for a code of another kind, `… the file contains
+  the enrolment code of an access key of kind <kind>`
+- `set gateway.server.enrolment_code_file to a file that qory can read: <file>: <err>`
+
+`qory run`, `qory run pool`, `qory run register` and `qory run end` stop when the setting
+is there, exit 2: `remove gateway.server.enrolment_code_file from <file>: qory gateway alone enrols
+from it, and qory run does not`.
+
 ## Running it
 
 Before it listens, `qory gateway` describes every integration `gateway.integrations`

@@ -13,7 +13,28 @@ import (
 // each of links, a link itself, to its owner alone, as the system names its users and
 // groups.
 func ownersOnly(chains, links []string) error {
-	n := names{
+	n := systemNames()
+	euid := uint32(os.Geteuid())
+	for _, p := range chains {
+		if err := chainTrusted(p, lstatOwner, euid, n); err != nil {
+			return err
+		}
+	}
+	for _, l := range links {
+		o, err := lstatOwner(l)
+		if err != nil {
+			return err
+		}
+		if err := ownedBy(l, "a link ", o, euid, n); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// systemNames is [names] as the system names its users and groups.
+func systemNames() names {
+	return names{
 		User: func(uid uint32) string {
 			if u, err := user.LookupId(strconv.FormatUint(uint64(uid), 10)); err == nil {
 				return u.Username
@@ -35,23 +56,13 @@ func ownersOnly(chains, links []string) error {
 			return uint32(gid), err == nil
 		},
 	}
-	euid := uint32(os.Geteuid())
-	for _, p := range chains {
-		if err := chainTrusted(p, lstatOwner, euid, n); err != nil {
-			return err
-		}
-	}
-	for _, l := range links {
-		o, err := lstatOwner(l)
-		if err != nil {
-			return err
-		}
-		if err := ownedBy(l, "a link ", o, euid, n); err != nil {
-			return err
-		}
-	}
-	return nil
 }
+
+// noGroupWrite returns an error for path, or a folder above it up to /, that its group
+// may write, each read without following a link, unless it is a folder root owns with
+// the sticky bit set. The error is the one [trusted] returns for a group, with the
+// group's name from the system.
+func noGroupWrite(path string) error { return groupWriteChain(path, lstatOwner, systemNames()) }
 
 // lstatOwner reads a path's owner, group and mode, of a link itself and not its target.
 func lstatOwner(path string) (fileOwner, error) {

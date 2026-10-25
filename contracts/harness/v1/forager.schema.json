@@ -128,6 +128,11 @@
                   "pattern": "^[A-Za-z0-9+/]{43}=$"
                 }
               }
+            },
+            "enrolment_code_file": {
+              "description": "Optional, for qory gateway alone: the file Qory Apiary writes the gateway's enrolment code (qecg_) into, relative to forager.yaml's directory unless absolute. When qory gateway starts with no access key, it waits until the file exists, enrols with the code and writes access-key-secret. The path has no link in it, the file is regular, and only root and the user running qory may write it and its folders; a folder that root owns with the sticky bit set, such as /tmp, passes, since no other user may replace a file in it. qory never writes or removes it. qory run, qory run pool, qory run register and qory run end stop with an error when it is set.",
+              "type": "string",
+              "minLength": 1
             }
           }
         },

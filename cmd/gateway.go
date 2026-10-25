@@ -54,6 +54,9 @@ The gateway section of ` + config.ForagerFileName + ` in ~/.config/qory sets it:
   credentials   secrets the gateway sets on requests; the agents never have them
   integrations  programs that supply such secrets
 
+When it has no access key and gateway.server.enrolment_code_file is set, it waits until
+that file exists, enrols with the enrolment code Qory Apiary wrote there, and starts.
+
 ` + gatewayMachinesHelp + `
 
 SIGINT or SIGTERM stops it: it takes no new run, sends what it holds, and exits 0.
@@ -104,6 +107,19 @@ More: ` + gatewayDocs,
 				return input(err)
 			}
 			stderr := cmd.ErrOrStderr()
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			// A gateway with no access key enrols from the code Qory Apiary writes, when
+			// gateway.server.enrolment_code_file is set.
+			r, stopped, err := enrolAtStart(ctx, r, fdKey, stderr)
+			if err != nil {
+				return err
+			}
+			if stopped {
+				fmt.Fprintln(stderr, "qory gateway: stopping")
+				ui.New(stderr).Success("the gateway stopped")
+				return nil
+			}
 			id, err := identify(r, stderr, verbGateway, fdKey)
 			if err != nil {
 				return err
@@ -116,8 +132,6 @@ More: ` + gatewayDocs,
 			if err := makePrivateDir(state, dir); err != nil {
 				return err
 			}
-			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
-			defer stop()
 			gw := gateway.Config{
 				Server:  gatewayServer(r.Server),
 				Policy:  machinePolicy(r),

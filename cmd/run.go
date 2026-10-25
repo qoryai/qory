@@ -171,6 +171,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if err != nil {
 				return err
 			}
+			if err := enrolmentCodeFileFor(conf.Forager, "qory run"); err != nil {
+				return err
+			}
 			if remote {
 				var given []string
 				for _, f := range registrationFlags {

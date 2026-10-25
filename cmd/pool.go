@@ -140,6 +140,9 @@ func loadPool() (*poolSettings, error) {
 	if err := directly(r); err != nil {
 		return nil, err
 	}
+	if err := enrolmentCodeFileFor(r, "qory run pool"); err != nil {
+		return nil, err
+	}
 	if r.Pool == nil {
 		return nil, input(fmt.Errorf("%s has no pool section", r.File))
 	}

@@ -79,6 +79,13 @@ release may change what an existing document does, and states it under Upgrading
 - `images/gateway`, an image that runs `qory gateway` as the user 65532, with no shell.
   A push to the branch `prerelease` publishes it, and the `agent` image, to private
   packages beside qory's, tagged `sha-<the commit's first 7 characters>`.
+- `gateway.server.enrolment_code_file` in forager.yaml: a `qory gateway` with no access
+  key waits until that file exists, enrols with the gateway's enrolment code (`qecg_…`)
+  that Qory Apiary wrote there, as `qory access-key enrol` does, and starts. qory reads
+  the file only when no user other than root and the one running qory may write it or
+  its folders; a folder that root owns with the sticky bit set, such as `/tmp`, passes,
+  since no other user may replace a file in it. qory never writes or removes the file. `qory run`, `qory run pool`, `qory run
+  register` and `qory run end` stop with an error when the setting is there.
 
 ### Changed
 

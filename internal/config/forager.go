@@ -431,6 +431,10 @@ type ForagerServer struct {
 	// Via is gateway.server.via, the gateway this machine reaches the server through;
 	// nil when the file sets none, and the server is reached directly.
 	Via *ForagerVia
+	// EnrolmentCodeFile is gateway.server.enrolment_code_file as written, "" when the
+	// file sets none: the file qory gateway reads its enrolment code from when it has no
+	// access key. [Forager.Path] resolves it.
+	EnrolmentCodeFile string
 }
 
 // EnvOrigin starts the origin of a value read from a variable: "$" and its name.
@@ -488,6 +492,8 @@ type gatewaySection struct {
 		Secret    yaml.Node   `yaml:"secret,omitempty"`
 		AccessKey yaml.Node   `yaml:"access_key,omitempty"`
 		Via       *viaSection `yaml:"via,omitempty"`
+		// EnrolmentCodeFile is read by qory gateway alone.
+		EnrolmentCodeFile *string `yaml:"enrolment_code_file"`
 	} `yaml:"server,omitempty"`
 	Credentials  yaml.Node `yaml:"credentials,omitempty"`
 	Tools        yaml.Node `yaml:"tools,omitempty"`
@@ -626,6 +632,12 @@ func LoadForagerIn(dir string) (*Forager, error) {
 			if r.Server.Via, err = readVia(path, w.Via); err != nil {
 				return nil, err
 			}
+		}
+		if f := w.EnrolmentCodeFile; f != nil {
+			if *f == "" {
+				return nil, fmt.Errorf("%s: set gateway.server.enrolment_code_file to the path of the gateway's enrolment code, or remove it: the value is empty", path)
+			}
+			r.Server.EnrolmentCodeFile = *f
 		}
 	}
 	if in := ses.Instance; in != nil && in.Name != nil {
@@ -1766,6 +1778,9 @@ func (r *Forager) Rows() []Row {
 			rows = append(rows, Row{"gateway.server.apiary_public_key", "(none: qory access-key enrol writes it)", Default})
 		}
 		rows = append(rows, viaRows(r.Server.Via, origin)...)
+		if r.Server.EnrolmentCodeFile != "" {
+			rows = append(rows, Row{"gateway.server.enrolment_code_file", exports.Value(r.Server.EnrolmentCodeFile, false), origin})
+		}
 	} else {
 		rows = append(rows, Row{"gateway.server.url", "(none)", Default})
 	}

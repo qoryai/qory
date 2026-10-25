@@ -377,8 +377,9 @@ One optional file defines what Forager does on this machine:
 repository cannot set it. It has three sections beside `apiVersion`: `gateway`, the
 proxy's policy, the server, the credentials, the tools, the integrations and the limits of
 each run; `session`, this instance and what applies to every run; and `wall`, the
-container. `gateway.listen` and `gateway.tls` are `qory gateway`'s: `qory run` does not use
-them. See [the gateway as a service](gateway.md).
+container. `gateway.listen`, `gateway.tls` and `gateway.server.enrolment_code_file` are
+`qory gateway`'s: `qory run` does not use them, and stops with an error when
+`gateway.server.enrolment_code_file` is set. See [the gateway as a service](gateway.md).
 
 `gateway.server.via` reaches the server through a gateway, on a machine whose node goes
 through one; a runner whose starter registers its runs needs no such setting: see
