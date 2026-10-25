@@ -1,6 +1,7 @@
 package compose
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -22,13 +23,73 @@ func NameSources(p *stack.Stack, n *source.Named) {
 	}
 }
 
+// CheckBase is [CheckAddresses] for the git source of the stack p extends, before it is
+// fetched: a URL with a scheme that has a user part or an @ before its path, that
+// url.Parse cannot read, or whose host has a character outside ASCII. Each error shows
+// the base as "the base of <harness>" and no part of the URL. A source with no scheme
+// passes here: the rule of https sources stops it.
+func CheckBase(p *stack.Stack, harness string) error {
+	base := "the base of " + harness
+	switch addressFault(p.Extends.Git) {
+	case faultUser:
+		return fmt.Errorf("remove the user name and password from the URL of %s: the run's stack proxy sets the harness credentials of the run configuration, and qory sends no credential in a URL", base)
+	case faultParse:
+		return fmt.Errorf("correct the URL of %s: qory could not read it as a URL", base)
+	case faultHost:
+		return fmt.Errorf("write the host in the URL of %s in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @", base)
+	}
+	return nil
+}
+
+// CheckReference is [CheckBase] for ref, the stack reference that -f is set to, before
+// it is fetched. Each error shows -f and no part of the URL.
+func CheckReference(ref stack.Source) error {
+	switch addressFault(ref.Git) {
+	case faultUser:
+		return errors.New("remove the user name and password from the URL in -f: the run's stack proxy sets the harness credentials of the run configuration, and qory sends no credential in a URL")
+	case faultParse:
+		return errors.New("correct the URL in -f: qory could not read it as a URL")
+	case faultHost:
+		return errors.New("write the host of the URL in -f in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @")
+	}
+	return nil
+}
+
+// The faults of a git URL that [CheckBase] and [CheckReference] stop.
+const (
+	faultNone = iota
+	faultUser
+	faultParse
+	faultHost
+)
+
+// addressFault is the fault of git, a git URL: faultUser for a URL with a scheme that
+// has a user part or an @ before its path, faultParse for one that url.Parse cannot
+// read, faultHost for one whose host has a character outside ASCII, and faultNone for
+// any other, a source with no scheme among them.
+func addressFault(git string) int {
+	if !strings.Contains(git, "://") {
+		return faultNone
+	}
+	u, err := url.Parse(git)
+	switch {
+	case stack.AtBeforePath(git) || err == nil && u.User != nil:
+		return faultUser
+	case err != nil:
+		return faultParse
+	case stack.NonASCIIHost(git):
+		return faultHost
+	}
+	return faultNone
+}
+
 // CheckAddresses stops p, a stack whose modules a run fetches through its stack proxy,
-// which sets no credential, before any module is fetched: a module whose git URL with a
-// scheme has a user part, a user name or a password, or an @ between :// and the first
-// / after it; one that url.Parse cannot read; and one whose host has a character outside
-// ASCII. Each error shows the module's name and no part of the URL. harness is the
-// harness as a text shows it, such as the workspace's harness: a module of the base is
-// in the base of the harness.
+// which sets the run configuration's harness credentials, before any module is
+// fetched: a module whose git URL with a scheme has a user part, a user name or a
+// password, or an @ between :// and the first / after it; one that url.Parse cannot
+// read; and one whose host has a character outside ASCII. Each error shows the module's
+// name and no part of the URL. harness is the harness as a text shows it, such as the
+// workspace's harness: a module of the base is in the base of the harness.
 func CheckAddresses(p *stack.Stack, harness string) error {
 	for i, l := range p.Modules {
 		if !strings.Contains(l.Source.Git, "://") {
@@ -45,7 +106,7 @@ func CheckAddresses(p *stack.Stack, harness string) error {
 		u, err := url.Parse(l.Source.Git)
 		switch {
 		case stack.AtBeforePath(l.Source.Git) || err == nil && u.User != nil:
-			return fmt.Errorf("remove the user name and password from the source of %s in %s: the run's stack proxy fetches the harness with no credential", module, in)
+			return fmt.Errorf("remove the user name and password from the source of %s in %s: the run's stack proxy sets the harness credentials of the run configuration, and qory sends no credential in a URL", module, in)
 		case err != nil:
 			return fmt.Errorf("correct the URL in the source of %s in %s: qory could not read it as a URL", module, in)
 		case stack.NonASCIIHost(l.Source.Git):

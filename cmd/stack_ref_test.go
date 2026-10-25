@@ -203,12 +203,12 @@ func TestRunTakesAStackReference(t *testing.T) {
 	}
 }
 
-// TestARunWithARunKeyFetchesAStackReferenceThroughTheHostProxy is qory run given a run
-// key, with -f set to a reference: the folder is fetched through the run's host proxy
-// into the run's directory, with one line, and the modules of the fetched stack come
-// from the same fetch. A git source the fetched stack lists that is not https stops the
-// run with exit 2 before git runs.
-func TestARunWithARunKeyFetchesAStackReferenceThroughTheHostProxy(t *testing.T) {
+// TestARunWithARunKeyFetchesAStackReferenceThroughTheStackProxy is qory run given a run
+// key, with -f set to a reference: the folder is fetched through the run's stack proxy
+// into the run's directory, and nothing through the host proxy, with one line, and the
+// modules of the fetched stack come from the same fetch. A git source the fetched stack
+// lists that is not https stops the run with exit 2 before git runs.
+func TestARunWithARunKeyFetchesAStackReferenceThroughTheStackProxy(t *testing.T) {
 	files := helloFiles(t)
 	h := newHostFetch(t, "", "main")
 	commit := h.server.Repository(t, "example-org/hello", "main", files)
@@ -222,8 +222,8 @@ func TestARunWithARunKeyFetchesAStackReferenceThroughTheHostProxy(t *testing.T) 
 	if !want.MatchString(got) || strings.Count(got, "qory run: fetched") != 1 {
 		t.Errorf("the lines:\n%s\nwant one fetch line for the reference, then the compose line", got)
 	}
-	if h.server.Tunnels() == 0 {
-		t.Error("no fetch went through the host proxy")
+	if h.server.StackTunnels() == 0 || h.server.Tunnels() != 0 {
+		t.Errorf("%d fetches went through the stack proxy and %d through the host proxy, want some and none", h.server.StackTunnels(), h.server.Tunnels())
 	}
 	if entries, err := os.ReadDir(filepath.Join(h.runDir, "sources")); err != nil || len(entries) == 0 {
 		t.Errorf("the run directory's sources: %v, %v", entries, err)
@@ -241,6 +241,39 @@ func TestARunWithARunKeyFetchesAStackReferenceThroughTheHostProxy(t *testing.T) 
 	wants(t, out, "qory run: use an https URL for git@github.com:example-org/extra.git, such as https://github.com/example-org/extra. ")
 }
 
+// TestARunKeyStopsAStackReferenceWithAnAddressFault is qory run given a run key, with -f
+// set to a reference whose URL has a user part, an @ before its path, or a host with a
+// character outside ASCII: the run stops with exit 2 and an error that starts with the
+// fix in -f, before anything is fetched, and no line shows the user part.
+func TestARunKeyStopsAStackReferenceWithAnAddressFault(t *testing.T) {
+	const user = "remove the user name and password from the URL in -f: the run's stack proxy sets the harness credentials of the run configuration, and qory sends no credential in a URL"
+	files := helloFiles(t)
+	for _, c := range []struct{ name, url, want string }{
+		{"a user part", "https://reader:s3cret@" + proxygittest.Host + "/example-org/hello.git", user},
+		{"an @ after a port", "https://" + proxygittest.Host + ":443@evil.example/example-org/hello.git", user},
+		{"a fullwidth @ in the host", "https://u＠" + proxygittest.Host + "/example-org/hello.git",
+			"write the host of the URL in -f in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHostFetch(t, "", "main")
+			h.server.Repository(t, "example-org/hello", "main", files)
+			out, err, n := h.runRef(t, c.url+"#main:examples/hello")
+			if err == nil || err.Error() != c.want || cmd.ExitCode(err) != cmd.ExitInput || !n.stoppedBeforeJoin() {
+				t.Fatalf("%v (exit %d), want %q, exit 2 before the join\n%s", err, cmd.ExitCode(err), c.want, out)
+			}
+			if h.server.StackTunnels() != 0 || h.server.Tunnels() != 0 || strings.Contains(out, "fetched") {
+				t.Errorf("the run fetched before it stopped: %d and %d tunnels\n%s", h.server.StackTunnels(), h.server.Tunnels(), out)
+			}
+			for _, secret := range []string{"reader", "s3cret"} {
+				if strings.Contains(out, secret) || strings.Contains(err.Error(), secret) {
+					t.Errorf("the output or the error shows %q:\n%s", secret, out)
+				}
+			}
+			h.noPassword(t, out)
+		})
+	}
+}
+
 // runRef is [hostFetch.run] with no repositories and -f set to ref.
 func (h *hostFetch) runRef(t *testing.T, ref string) (string, error, keyRun) {
 	t.Helper()
@@ -249,6 +282,7 @@ func (h *hostFetch) runRef(t *testing.T, ref string) (string, error, keyRun) {
 	t.Setenv("QORY_RUN_KEY", "")
 	closes, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{
 		System: proxygittest.Host, Proxy: h.server.Proxy.URL, CABundle: h.server.Proxy.CABundle, Dir: h.runDir,
+		StackProxy: h.server.Stack.URL, StackCABundle: h.server.Stack.CABundle,
 	})
 	defer restore()
 	out, err := run(t, "run", "claude", "--run-key-fd", descriptor(t, key), "-f", ref)

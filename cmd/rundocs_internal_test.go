@@ -448,7 +448,7 @@ func TestARunCodesLinesShowTheHarnessByItsPhrase(t *testing.T) {
 // shows no part of the URL while the harness is hidden. A host in the xn-- form passes.
 func TestAHarnessDocumentWithASourceQoryDoesNotFetchStops(t *testing.T) {
 	const settings = " of the harness in the workspace's settings in Qory Apiary"
-	const user = "remove the user name and password from the URL of the module tools" + settings + ": the run's stack proxy fetches the harness with no credential; the code is used"
+	const user = "remove the user name and password from the URL of the module tools" + settings + ": the run's stack proxy sets the harness credentials of the run configuration, and qory sends no credential in a URL; the code is used"
 	const ascii = "write the host in the URL of the module tools" + settings + " in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @; the code is used"
 	withModule := func(git string) *contracts.HarnessDocument {
 		return &contracts.HarnessDocument{Harness: contracts.HarnessSection{

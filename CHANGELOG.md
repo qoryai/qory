@@ -101,23 +101,38 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- A run with a run key or a run code fetches every git source of its harness through
+  the run's stack proxy: the stack, its modules, and the modules of the checkout's file,
+  also when the checkout's file is the whole harness. The run's host proxy, with the
+  run's credentials, fetches only the run's repositories, and closes before the compose.
+  A harness source on a host that neither `gateway.stack_hosts` nor the run
+  configuration's `stack_hosts` lists stops the run, exit 1, with `check that <url> has
+  the branch, tag or commit <ref> and that gateway.stack_hosts in the gateway's
+  forager.yaml or the run configuration's stack_hosts lists <host>, …`, or `add the host
+  of <source> to gateway.stack_hosts in the gateway's forager.yaml or to the run
+  configuration's stack_hosts, …` when the harness is hidden. A URL of the checkout's
+  `extends`, of a module of its harness, or of a stack reference in `-f` with a user
+  part, an `@` before its path, a host with a character outside ASCII, or a URL that
+  qory cannot read stops the run before the source is fetched, exit 2. The stack proxy
+  sets the run configuration's harness credentials, those with `purpose: harness`, so
+  give the run configuration one for a private harness repository.
 - A run from a run code whose documents contain a harness writes it to `harness.yaml` in
   the run's folder and composes it in place of the checkout's file. qory fetches the
   stack it extends and every module from another repository through the run's stack
-  proxy, which passes only the hosts of `gateway.stack_hosts` in `forager.yaml`. A source
-  of the document that is not https, has a user part or an `@` between `://` and the
-  first `/` after it, has a host with a character outside ASCII once its
-  percent-encodings are decoded, has a URL that qory cannot read, or has a path that is
-  absolute, the repository's root or leads out of it stops the run before anything is
-  fetched, exit 2, with a line that starts `set <source> of the harness in the
-  workspace's settings in Qory Apiary …` or another fix there. A module source in the
-  stack's file whose URL has a user part, an `@` before its path, a host with a character
-  outside ASCII, or a URL that qory cannot read stops the run before the modules are
-  fetched, exit 2; one that is not https stops it, exit 2, when qory comes to fetch it.
-  When the documents contain no harness and the checkout has no `qory.yaml` or
-  `harness.yaml`, the run stops with exit 1: `take the work item in again in Qory
-  Apiary: the run's documents contain no harness and the checkout has no qory.yaml or
-  harness.yaml; the code is used`.
+  proxy, which passes only the hosts of `gateway.stack_hosts` in `forager.yaml` and of
+  the run configuration's `stack_hosts`. A source of the document that is not https,
+  has a user part or an `@` between `://` and the first `/` after it, has a host with a
+  character outside ASCII once its percent-encodings are decoded, has a URL
+  that qory cannot read, or has a path that is absolute, the repository's root or leads
+  out of it stops the run before anything is fetched, exit 2, with a line that starts
+  `set <source> of the harness in the workspace's settings in Qory Apiary …` or another
+  fix there. A module source in the stack's file whose URL has a user part, an `@`
+  before its path, a host with a character outside ASCII, or a URL that qory cannot
+  read stops the run before the modules are fetched, exit 2; one that is not https
+  stops it, exit 2, when qory comes to fetch it. When the documents contain no harness
+  and the checkout has no `qory.yaml` or `harness.yaml`, the run stops with exit 1:
+  `take the work item in again in Qory Apiary: the run's documents contain no harness
+  and the checkout has no qory.yaml or harness.yaml; the code is used`.
 - When the documents of a run from a run code set `harness_hidden` to true, a line, an
   event of the run's record and an error show every harness source by a phrase and each
   module by its name, in place of a URL, a ref and a folder, for the documents' harness

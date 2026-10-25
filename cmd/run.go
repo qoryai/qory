@@ -603,10 +603,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			prepareLaunch := func(w io.Writer) (claudeDispatched bool, err error) {
 				harness, workflows, err := composeForRun(w, composing, at, runtime, dispatched, walled)
 				if err != nil && composing.git != nil && composing.git.Named != nil {
-					return false, namedComposeError(err, composing.git.Named, composing.checkedAs != "")
+					return false, namedComposeError(err, composing.git.Named)
 				}
 				if err != nil && composing.git != nil {
-					return false, proxyComposeError(err, composing.git.Proxy, composing.checkedAs != "")
+					return false, proxyComposeError(err, composing.git.Proxy)
 				}
 				if err != nil {
 					return false, err
@@ -700,41 +700,30 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// hostWork is the run's work on this machine before its session joins, in two
 			// steps of the run's record: the fetch, when the run configuration lists
 			// repositories, and the compose. When the run configuration lists repositories,
-			// or the run was opened with a run key, the run's host proxy opens: the run's
-			// repositories are fetched through it into the working folder, and the compose of
-			// a run opened with a run key fetches its git sources through it, into the run's
-			// cache. The compose of a run from a run code whose documents contain a harness
-			// document opens the run's stack proxy in place of the host proxy, and fetches
-			// every git source of the harness through it. A run whose harness is hidden
-			// prints lines that show names in place of addresses. Both proxies close before
-			// the session joins; Join closes them too. A run with no control plane opens
-			// neither, and composes with the person's git. A run from a run code whose
-			// documents set target_version fetches the target's repository at that commit, and
-			// stops before the compose when the run configuration lists no repository while
-			// the target is on its system.
+			// the run's host proxy opens, the run's repositories are fetched through it into
+			// the working folder, under the run's policy and credentials, and it closes. The
+			// compose of a run opened with a run key or a run code opens the run's stack
+			// proxy, and fetches every git source of the harness through it, into the run's
+			// cache: the base, its modules and the modules the checkout's file lists. So no
+			// harness source is fetched with a credential of the run's work. A run whose
+			// harness is hidden prints lines that show names in place of addresses. Both
+			// proxies close before the session joins; Join closes them too. A run with no
+			// control plane opens neither, and composes with the person's git. A run from a
+			// run code whose documents set target_version fetches the target's repository at
+			// that commit, and stops before the compose when the run configuration lists no
+			// repository while the target is on its system.
 			hostWork := func() error {
 				stopped := func() bool {
 					return ctx.Err() != nil || timeout > 0 && time.Since(opened) >= timeout
 				}
-				var h *hostProxy
-				openProxy := func() error {
-					p, err := run.HostProxy()
-					if err != nil {
-						return &runLineError{noHostProxy(err, code != nil)}
-					}
-					h = &p
-					return nil
-				}
-				defer func() {
-					if h != nil {
-						h.close()
-					}
-				}()
 				if run.Repositories() != "" {
 					err := inStep(run, stderr, event.StepFetch, fetchStepName(runValues(run)), stopped, func(w io.Writer) error {
-						if err := openProxy(); err != nil {
-							return err
+						h, err := run.HostProxy()
+						if err != nil {
+							return &runLineError{noHostProxy(err, code != nil)}
 						}
+						// The host proxy closes with the fetch, before the compose starts.
+						defer h.close()
 						fetchCtx, cancel := ctx, func() {}
 						if timeout > 0 {
 							fetchCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
@@ -765,29 +754,26 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						}
 					}
 					if remote {
-						var p hostProxy
+						harness := runHarness
+						if fromCode != nil {
+							harness = fromCode.phrase()
+						}
 						if fromCode != nil && fromCode.harness != nil {
 							file, err := fromCode.writeHarness(run.Dir())
 							if err != nil {
 								return err
 							}
-							s, err := run.StackProxy()
-							if err != nil {
-								return &runLineError{noStackProxy(fromCode.phrase(), err)}
-							}
-							defer s.close()
-							p, composing.file, composing.checkedAs = s, file, fromCode.phrase()
-						} else {
-							if h == nil {
-								if err := openProxy(); err != nil {
-									return err
-								}
-							}
-							p = *h
+							composing.file = file
 						}
-						composing.git = proxyGit(p, w)
+						s, err := run.StackProxy()
+						if err != nil {
+							return &runLineError{noStackProxy(harness, err, code != nil)}
+						}
+						defer s.close()
+						composing.checkedAs = harness
+						composing.git = proxyGit(s, w)
 						if n != nil {
-							composing.git = namedGit(p, w, n)
+							composing.git = namedGit(s, w, n)
 						}
 						composing.cache = filepath.Join(run.Dir(), runSources)
 					}
@@ -1074,10 +1060,11 @@ type openedRun interface {
 	Close(ctx context.Context, out session.Outcome) (*session.Closed, error)
 	// StartStep starts a step of the run's host work, of kind fetch or compose.
 	StartStep(kind, name string) (hostStep, error)
-	// HostProxy starts the run's host proxy, for the fetches on this machine.
+	// HostProxy starts the run's host proxy, for the fetch of the run's repositories on
+	// this machine.
 	HostProxy() (hostProxy, error)
-	// StackProxy starts the run's stack proxy, for the fetch of the workspace's harness
-	// on this machine, before the run's first Join.
+	// StackProxy starts the run's stack proxy, for the fetch of the run's harness on this
+	// machine, before the run's first Join.
 	StackProxy() (hostProxy, error)
 	// AgentEnv is the environment a session of spec gets, NAME=value sorted by name,
 	// resolved as Join resolves it; qory run gives it to the setup container outside.
@@ -1091,8 +1078,8 @@ type openedRun interface {
 	Dir() string
 }
 
-// hostProxy is the run's host proxy as qory run uses it: the proxy git fetches through,
-// and what ends it.
+// hostProxy is the run's host proxy or stack proxy as qory run uses it: the proxy git
+// fetches through, and what ends it.
 type hostProxy struct {
 	proxy proxygit.Proxy
 	close func() error
@@ -1119,11 +1106,12 @@ func (r foragerRun) HostProxy() (hostProxy, error) {
 	return hostProxy{proxy: proxygit.Proxy{URL: h.ProxyURL, CABundle: h.CABundle}, close: h.Close}, nil
 }
 
-// StackProxy is [session.Run.StackProxy]: its ProxyURL, and its Close. Its CABundle is
-// empty: the stack proxy passes the machine's authorities alone, and [proxygit.Env]
-// drops SSL_CERT_FILE and GIT_SSL_*. So the host of a harness source fetched through it
-// needs a certificate that the run machine's system trust store accepts. For a private
-// CA, the instance admin adds the CA to the machine's image.
+// StackProxy is [session.Run.StackProxy]: its ProxyURL and CABundle, and its Close, as
+// for [foragerRun.HostProxy]. git gets the proxy and the bundle through [proxygit.Env],
+// which drops SSL_CERT_FILE and GIT_SSL_*; with no CABundle, git trusts the run
+// machine's system trust store alone. git does not get the NO_PROXY of the forwarder's
+// Env: with it, git would reach a source on 127.0.0.1 or localhost directly, past the
+// stack proxy.
 func (r foragerRun) StackProxy() (hostProxy, error) {
 	h, err := r.Run.StackProxy()
 	if err != nil {

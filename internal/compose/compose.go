@@ -194,7 +194,7 @@ type Options struct {
 	// Memo is shared by every git source of one compose, the base stack's included, so one
 	// URL at one ref lands on one commit; nil makes one for the modules of this call.
 	Memo *source.Memo
-	// Git, when set, fetches every git source through a run's host proxy, see
+	// Git, when set, fetches every git source through a run's stack proxy, see
 	// [source.Git]; nil fetches with the person's git.
 	Git *source.Git
 	// Env are the configuration's variables, written over what the modules export.

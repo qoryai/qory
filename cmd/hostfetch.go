@@ -19,9 +19,11 @@ import (
 
 // runSources is the folder of the run directory that the compose of a run from a
 // control plane fetches its git sources into: the run's cache, which starts empty, so
-// every source is fetched through this run's host proxy, under its policy and
-// credentials.
+// every source is fetched through this run's stack proxy.
 const runSources = "sources"
+
+// runHarness is the harness of a run given a run key, as a text shows it.
+const runHarness = "the run's harness"
 
 // runLineError is an error qory run prints as one line, "qory run: <text>", with no
 // title and no mark before it. Its text has no prefix; it unwraps to the error it
@@ -40,8 +42,8 @@ const textNoHostProxy = "run again: the run's host proxy, through which qory fet
 
 // textNoHostProxyFromCode is [textNoHostProxy] for a run from a run code. The code is
 // used by then, so the run starts again only from the new run code that taking the work
-// item in again makes, as for [textNoStackProxy].
-const textNoHostProxyFromCode = "take the work item in again in Qory Apiary: the run's host proxy, through which qory fetches the run's repositories and git sources, did not open: %s" + codeUsed
+// item in again makes, as for [textNoStackProxyFromCode].
+const textNoHostProxyFromCode = "take the work item in again in Qory Apiary: the run's host proxy, through which qory fetches the run's repositories, did not open: %s" + codeUsed
 
 // noHostProxy is [textNoHostProxy] for err, HostProxy's error, made printable with every
 // URL's password and every secret hidden; [textNoHostProxyFromCode] for a run from a run
@@ -54,16 +56,24 @@ func noHostProxy(err error, fromCode bool) error {
 	return fmt.Errorf(text, integration.Printable(exports.HideURLError(err).Error()))
 }
 
-// textNoStackProxy is the line of a run whose stack proxy did not open, with the harness
-// and Forager's error after it. The run code is used by then, so the run starts again
-// only from the new run code that taking the work item in again makes.
-const textNoStackProxy = "take the work item in again in Qory Apiary: the run's stack proxy, through which qory fetches %s, did not open: %s" + codeUsed
+// textNoStackProxy is the line of a run given a run key whose stack proxy did not open,
+// with the harness and Forager's error after it.
+const textNoStackProxy = "run again: the run's stack proxy, through which qory fetches %s, did not open: %s"
+
+// textNoStackProxyFromCode is [textNoStackProxy] for a run from a run code. The code is
+// used by then, so the run starts again only from the new run code that taking the work
+// item in again makes.
+const textNoStackProxyFromCode = "take the work item in again in Qory Apiary: the run's stack proxy, through which qory fetches %s, did not open: %s" + codeUsed
 
 // noStackProxy is [textNoStackProxy] for harness, the harness as a text shows it, and
 // err, StackProxy's error, made printable with every URL's password and every secret
-// hidden.
-func noStackProxy(harness string, err error) error {
-	return fmt.Errorf(textNoStackProxy, harness, integration.Printable(exports.HideURLError(err).Error()))
+// hidden; [textNoStackProxyFromCode] for a run from a run code, fromCode.
+func noStackProxy(harness string, err error, fromCode bool) error {
+	text := textNoStackProxy
+	if fromCode {
+		text = textNoStackProxyFromCode
+	}
+	return fmt.Errorf(text, harness, integration.Printable(exports.HideURLError(err).Error()))
 }
 
 // runValues is getenv for [preparation.Run]: the server's values of the run's system and
@@ -81,7 +91,7 @@ func runValues(run openedRun) func(string) string {
 }
 
 // proxyGit is how the compose of a run from a control plane fetches its git sources:
-// through the run's host proxy h, with a line on stderr for each URL and ref it
+// through the run's stack proxy h, with a line on stderr for each URL and ref it
 // fetched, its commit and how long the fetch took.
 func proxyGit(h hostProxy, stderr io.Writer) *source.Git {
 	return &source.Git{Proxy: h.proxy, Fetched: func(src, ref, _, commit string, took time.Duration) {
@@ -93,9 +103,9 @@ func proxyGit(h hostProxy, stderr io.Writer) *source.Git {
 }
 
 // namedGit is how the compose of a harness whose addresses no text shows, n, fetches its
-// git sources: through the run's proxy h, the host proxy or the stack proxy, into
-// folders named by a hash, with a line on stderr for each source it fetched, by the
-// source's name, its commit and how long the fetch took; see [source.Named].
+// git sources: through the run's stack proxy h, into folders named by a hash, with a
+// line on stderr for each source it fetched, by the source's name, its commit and how
+// long the fetch took; see [source.Named].
 func namedGit(h hostProxy, stderr io.Writer, n *source.Named) *source.Git {
 	return &source.Git{Proxy: h.proxy, Named: n, Fetched: func(_, _, name, commit string, took time.Duration) {
 		if len(commit) > 12 {
@@ -110,16 +120,12 @@ func namedGit(h hostProxy, stderr io.Writer, n *source.Named) *source.Git {
 // repository does not have, each an input error; a git source that could not be
 // fetched, a failure of the fetch, with its cause and no output of git; anything else
 // with every address and every path of a source's folder replaced by the source's
-// name, as [source.Named.Hide] replaces them. stack is set when the compose fetched
-// through the run's stack proxy, and unset for the run's host proxy.
-func namedComposeError(err error, n *source.Named, stack bool) error {
+// name, as [source.Named.Hide] replaces them. The compose fetched through the run's
+// stack proxy.
+func namedComposeError(err error, n *source.Named) error {
 	var scheme *source.SchemeError
 	var gone *source.GoneError
 	var fetch *source.FetchError
-	proxy := "host proxy"
-	if stack {
-		proxy = "stack proxy"
-	}
 	switch {
 	case errors.As(err, &scheme):
 		if scheme.Name == "" {
@@ -136,12 +142,9 @@ func namedComposeError(err error, n *source.Named, stack bool) error {
 		return &runLineError{input(fmt.Errorf("set the ref of %s to a branch, tag or commit its repository has: %w", gone.Name, n.HideError(gone)))}
 	case errors.As(err, &fetch):
 		if m := connectStatus.FindStringSubmatch(fetch.Output); m != nil && m[1] == "407" {
-			return &runLineError{fmt.Errorf("take the work item in again in Qory Apiary: the run's %s returned 407 Proxy Authentication Required to the password Forager set for the run, so the fetch of %s failed%s", proxy, fetch.Name, codeUsed)}
+			return &runLineError{fmt.Errorf("take the work item in again in Qory Apiary: the run's stack proxy returned 407 Proxy Authentication Required to the password Forager set for the run, so the fetch of %s failed%s", fetch.Name, codeUsed)}
 		}
-		if stack {
-			return &runLineError{fmt.Errorf("add the host of %s to gateway.stack_hosts in forager.yaml, or check its source: the fetch of %s through the run's stack proxy failed: %s", fetch.Name, fetch.Name, namedFetchCause(fetch, stack))}
-		}
-		return &runLineError{fmt.Errorf("check that the run's policy allows the host of %s and, for a private repository, that the run configuration has a credential that reads it: the fetch of %s through the run's host proxy failed: %s", fetch.Name, fetch.Name, namedFetchCause(fetch, stack))}
+		return &runLineError{fmt.Errorf("add the host of %s to gateway.stack_hosts in the gateway's forager.yaml or to the run configuration's stack_hosts, and, for a private repository, add a harness credential for %s to the run configuration, or check its source: the fetch of %s through the run's stack proxy failed: %s", fetch.Name, fetch.Name, fetch.Name, namedFetchCause(fetch))}
 	}
 	return n.HideError(err)
 }
@@ -157,21 +160,18 @@ var (
 
 // namedFetchCause is the cause of fetch, a failed fetch of a source whose address no
 // text shows, in words that contain no part of git's output, which can contain the URL:
-// the status the run's proxy, the stack proxy when stack is set and else the host
-// proxy, or the host returned, the time a git ran past, or git's exit status.
-func namedFetchCause(fetch *source.FetchError, stack bool) string {
+// the status the run's stack proxy or the host returned, the time a git ran past, or
+// git's exit status.
+func namedFetchCause(fetch *source.FetchError) string {
 	text := ""
 	if fetch.Err != nil {
 		text = fetch.Err.Error()
 	}
 	if m := connectStatus.FindStringSubmatch(fetch.Output); m != nil {
-		switch {
-		case stack && m[1] == "403":
-			return "the stack proxy returned 403, as it does for a host that gateway.stack_hosts does not list"
-		case stack:
-			return "the stack proxy returned " + m[1]
+		if m[1] == "403" {
+			return "the stack proxy returned 403, as it does for a host that neither list of stack hosts contains, and for a host of the run configuration's stack_hosts that the gateway's policy denies or has path rules for"
 		}
-		return "the host proxy returned " + m[1]
+		return "the stack proxy returned " + m[1]
 	}
 	if m := httpStatus.FindStringSubmatch(fetch.Output); m != nil {
 		return "the repository's host returned " + m[1]
@@ -231,10 +231,9 @@ func (l *namedLines) flush() {
 // proxyComposeError is err, a compose's error in a run from a control plane, as the line
 // qory run prints: a git source that is not https, as [source.HTTPSFix] words it, and a
 // ref the remote does not have, each an input error; a git source that could not be
-// fetched, a failure of the fetch; anything else as it is. p is the run's proxy, whose
-// password no line contains: the stack proxy when stack is set, and else the host
-// proxy.
-func proxyComposeError(err error, p proxygit.Proxy, stack bool) error {
+// fetched, a failure of the fetch; anything else as it is. p is the run's stack proxy,
+// whose password no line contains.
+func proxyComposeError(err error, p proxygit.Proxy) error {
 	var scheme *source.SchemeError
 	var gone *source.GoneError
 	var fetch *source.FetchError
@@ -243,31 +242,26 @@ func proxyComposeError(err error, p proxygit.Proxy, stack bool) error {
 		return &runLineError{input(scheme)}
 	case errors.As(err, &gone):
 		cause := fmt.Errorf("%s has no branch or tag %s", exports.URL(gone.URL), exports.Value(gone.Ref, false))
-		return &runLineError{input(errors.New(checkSource(gone.URL, gone.Ref, cause, stack)))}
+		return &runLineError{input(errors.New(checkSource(gone.URL, gone.Ref, cause)))}
 	case errors.As(err, &fetch):
 		line := firstGitLine(fetch.Output)
 		if line == "" && fetch.Err != nil {
 			line = fetch.Err.Error()
 		}
-		return &runLineError{errors.New(checkSource(fetch.URL, fetch.Ref, errors.New(proxygit.Hide(line, &p)), stack))}
+		return &runLineError{errors.New(checkSource(fetch.URL, fetch.Ref, errors.New(proxygit.Hide(line, &p))))}
 	}
 	return err
 }
 
 // checkSource is the line for a git source, src at ref, that the fetch through the run's
-// gateway could not fetch, with cause, git's line or what the remote lacks, made
-// printable with every URL's password and every secret hidden: through the run's stack
-// proxy when stack is set, and else through its host proxy.
-func checkSource(src, ref string, cause error, stack bool) string {
+// stack proxy could not fetch, with cause, git's line or what the remote lacks, made
+// printable with every URL's password and every secret hidden.
+func checkSource(src, ref string, cause error) string {
 	host := "its host"
 	if u, err := url.Parse(src); err == nil && u.Hostname() != "" {
 		host = integration.Printable(exports.Value(u.Hostname(), false))
 	}
-	if stack {
-		return fmt.Sprintf("check that %s has the branch, tag or commit %s and that gateway.stack_hosts in forager.yaml lists %s. The fetch through the run's stack proxy failed: %s",
-			exports.URL(src), exports.Value(ref, false), host, integration.Printable(exports.HideURLError(cause).Error()))
-	}
-	return fmt.Sprintf("check that %s has the branch, tag or commit %s, that the run's policy allows %s and, for a private repository, that the run configuration has a credential that reads it. The fetch failed: %s",
+	return fmt.Sprintf("check that %s has the branch, tag or commit %s and that gateway.stack_hosts in the gateway's forager.yaml or the run configuration's stack_hosts lists %s, and, for a private repository, that the run configuration has a harness credential whose hosts and paths include the repository. The fetch through the run's stack proxy failed: %s",
 		exports.URL(src), exports.Value(ref, false), host, integration.Printable(exports.HideURLError(cause).Error()))
 }
 

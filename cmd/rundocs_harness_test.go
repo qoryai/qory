@@ -120,7 +120,7 @@ func withTools(url, ref string) func(string) string {
 }
 
 // userPart is the line of a module of the base, more, whose source has a user part.
-const userPart = "remove the user name and password from the source of the module more in " + workspaceBase + ": the run's stack proxy fetches the harness with no credential"
+const userPart = "remove the user name and password from the source of the module more in " + workspaceBase + ": the run's stack proxy sets the harness credentials of the run configuration, and qory sends no credential in a URL"
 
 // nonASCII is the line of a module of the base, more, whose source has a host with a
 // character outside ASCII.
@@ -185,7 +185,6 @@ func (c codeHarness) run(t *testing.T) harnessRun {
 		OnStep: func(e cmd.StepEvent) { r.events = append(r.events, e) },
 	}
 	if c.checkout {
-		nowhere.Proxy, nowhere.CABundle, nowhere.StackProxy, nowhere.StackCABundle = h.server.Proxy.URL, h.server.Proxy.CABundle, deadProxy, ""
 		doc, err := json.Marshal(map[string]any{"harness": section})
 		if err != nil {
 			t.Fatal(err)
@@ -360,7 +359,7 @@ func TestARunCodesShownHarnessDocumentWithAGoneRefShowsIt(t *testing.T) {
 	if r.joined || cmd.ExitCode(r.err) != cmd.ExitInput {
 		t.Fatalf("%v (exit %d), want exit 2 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
-	wants(t, r.out, "qory run: check that "+r.url+" has the branch, tag or commit stacks-gone and that gateway.stack_hosts in forager.yaml lists "+proxygittest.Host+". The fetch through the run's stack proxy failed: "+r.url+" has no branch or tag stacks-gone\n")
+	wants(t, r.out, "qory run: check that "+r.url+" has the branch, tag or commit stacks-gone and that gateway.stack_hosts in the gateway's forager.yaml or the run configuration's stack_hosts lists "+proxygittest.Host+", and, for a private repository, that the run configuration has a harness credential whose hosts and paths include the repository. The fetch through the run's stack proxy failed: "+r.url+" has no branch or tag stacks-gone\n")
 }
 
 // TestARunCodesHarnessDocumentWithASourceQoryDoesNotFetchStops is a run from a run code
@@ -380,7 +379,7 @@ func TestARunCodesHarnessDocumentWithASourceQoryDoesNotFetchStops(t *testing.T) 
 	module := func(git string) []map[string]any {
 		return []map[string]any{{"name": "more", "source": map[string]any{"git": git, "ref": "main"}}}
 	}
-	userLine := "remove the user name and password from the URL of the module more" + settings + ": the run's stack proxy fetches the harness with no credential; the code is used"
+	userLine := "remove the user name and password from the URL of the module more" + settings + ": the run's stack proxy sets the harness credentials of the run configuration, and qory sends no credential in a URL; the code is used"
 	host := proxygittest.Host
 	for _, c := range []struct {
 		name string
@@ -453,7 +452,7 @@ func TestARunCodeOfAHiddenHarnessThatFailsShowsNoAddress(t *testing.T) {
 			n.StackProxy = strings.Replace(n.StackProxy, proxygittest.Password, "another-password", 1)
 		}}, 1, []string{"qory run: take the work item in again in Qory Apiary: the run's stack proxy returned 407 Proxy Authentication Required to the password Forager set for the run, so the fetch of " + workspaceBase + " failed; the code is used\n"}},
 		{"the stack proxy returns 403 for a module's host", codeHarness{stack: withTools("https://other.test/example-org/tools.git", toolsRef)}, 1,
-			[]string{"qory run: add the host of the module tools to gateway.stack_hosts in forager.yaml, or check its source: the fetch of the module tools through the run's stack proxy failed: the stack proxy returned 403, as it does for a host that gateway.stack_hosts does not list\n"}},
+			[]string{"qory run: add the host of the module tools to gateway.stack_hosts in the gateway's forager.yaml or to the run configuration's stack_hosts, and, for a private repository, add a harness credential for the module tools to the run configuration, or check its source: the fetch of the module tools through the run's stack proxy failed: the stack proxy returned 403, as it does for a host that neither list of stack hosts contains, and for a host of the run configuration's stack_hosts that the gateway's policy denies or has path rules for\n"}},
 		{"a module's ref is gone", codeHarness{stack: withTools(tools, "tools-gone"), tools: toolsModule()}, cmd.ExitInput,
 			[]string{"qory run: set the ref of the module tools to a branch, tag or commit its repository has: the repository of the module tools has no branch or tag by the ref it is set to\n"}},
 		{"a module's manifest does not parse", codeHarness{files: map[string]string{"examples/hello/modules/world/qory-module.yaml": "apiVersion: [\n"}}, cmd.ExitInput,
@@ -506,9 +505,10 @@ func TestARunCodeOfAHiddenHarnessThatFailsShowsNoAddress(t *testing.T) {
 // TestARunCodeWithoutAHarnessDocumentComposesTheCheckoutsFile is a run from a run code
 // whose documents contain no harness document, in a checkout whose qory.yaml extends a
 // stack of another repository, which sets the workflow's time limit: qory composes the
-// checkout's file, fetches the base through the run's host proxy, opens no stack proxy
-// and writes no harness.yaml. With the harness hidden, every line, event and spec shows
-// the base by its name; with it shown, the fetch line shows the URL and the ref.
+// checkout's file, fetches the base through the run's stack proxy, which it closes
+// before the join, opens no host proxy and writes no harness.yaml. With the harness
+// hidden, every line, event and spec shows the base by its name; with it shown, the
+// fetch line shows the URL and the ref.
 func TestARunCodeWithoutAHarnessDocumentComposesTheCheckoutsFile(t *testing.T) {
 	for _, shown := range []bool{false, true} {
 		t.Run(fmt.Sprintf("shown %v", shown), func(t *testing.T) {
@@ -521,8 +521,9 @@ func TestARunCodeWithoutAHarnessDocumentComposesTheCheckoutsFile(t *testing.T) {
 				fetched = "qory run: fetched " + r.url + "#" + namedRef + " at " + r.commit[:12] + " in "
 			}
 			wants(t, r.out, "qory run: the run "+keyRunID+" starts the workflow hello of the checkout's harness on claude\n", fetched, "qory run: composed ")
-			if slices.Contains(r.calls, "stack proxy") || !slices.Contains(r.calls, "host proxy") || r.server.Tunnels() == 0 {
-				t.Errorf("the calls %q, %d tunnels", r.calls, r.server.Tunnels())
+			stack := slices.Index(r.calls, "stack proxy")
+			if stack < 0 || slices.Index(r.calls, "stack proxy closed") < stack || slices.Index(r.calls, "join") < slices.Index(r.calls, "stack proxy closed") || slices.Contains(r.calls, "host proxy") || r.server.Tunnels() == 0 {
+				t.Errorf("the calls %q, %d tunnels, want the stack proxy opened and closed before the join, and no host proxy", r.calls, r.server.Tunnels())
 			}
 			r.noHarnessFile(t)
 			if r.spec.Timeout <= 5*time.Hour-time.Minute || r.spec.Timeout > 5*time.Hour {
@@ -543,9 +544,9 @@ func TestARunCodeWithoutAHarnessDocumentComposesTheCheckoutsFile(t *testing.T) {
 // TestARunCodeOfAHiddenCheckoutHarnessThatFailsShowsNoAddress is a run from a run code
 // whose documents contain no harness document and hide the harness, in a checkout whose
 // qory.yaml extends a stack whose ref is gone or whose folder is not there, whose fetch
-// the run's host proxy denies, or that lists a module whose ref is gone or whose URL is
-// not https: each stops with a line of the host proxy that shows the names, and no
-// line, step event or error shows an address.
+// the run's stack proxy denies, or that lists a module whose ref is gone or whose URL is
+// not https: each stops with a line that shows the names, and no line, step event or
+// error shows an address or a fix of the host proxy.
 func TestARunCodeOfAHiddenCheckoutHarnessThatFailsShowsNoAddress(t *testing.T) {
 	for _, c := range []struct {
 		name string
@@ -557,24 +558,30 @@ func TestARunCodeOfAHiddenCheckoutHarnessThatFailsShowsNoAddress(t *testing.T) {
 			"qory run: set the ref of " + checkoutBase + " to a branch, tag or commit its repository has: the repository of " + checkoutBase + " has no branch or tag by the ref it is set to\n"},
 		{"the base's folder is not there", codeHarness{document: func(s string) string { return strings.Replace(s, "examples/hello", "examples/none", 1) }}, cmd.ExitInput,
 			"check " + checkoutBase + ": the repository of " + checkoutBase + " has no folder at the path it is set to"},
-		{"the host proxy returns 407", codeHarness{nowhere: func(n *cmd.Nowhere) {
-			n.Proxy = strings.Replace(n.Proxy, proxygittest.Password, "another-password", 1)
-		}}, 1, "qory run: take the work item in again in Qory Apiary: the run's host proxy returned 407 Proxy Authentication Required to the password Forager set for the run, so the fetch of " + checkoutBase + " failed; the code is used\n"},
+		{"the stack proxy returns 407", codeHarness{nowhere: func(n *cmd.Nowhere) {
+			n.StackProxy = strings.Replace(n.StackProxy, proxygittest.Password, "another-password", 1)
+		}}, 1, "qory run: take the work item in again in Qory Apiary: the run's stack proxy returned 407 Proxy Authentication Required to the password Forager set for the run, so the fetch of " + checkoutBase + " failed; the code is used\n"},
 		{"a module's ref is gone", codeHarness{modules: []map[string]any{{"name": "tools", "source": map[string]any{"git": toolsURL, "ref": "tools-gone", "path": "modules/tools"}}}, tools: toolsModule()}, cmd.ExitInput,
 			"qory run: set the ref of the module tools to a branch, tag or commit its repository has: the repository of the module tools has no branch or tag by the ref it is set to\n"},
 		{"a module's source is not https", codeHarness{modules: []map[string]any{{"name": "tools", "source": map[string]any{"git": "git@" + proxygittest.Host + ":example-org/tools.git", "ref": toolsRef}}}}, cmd.ExitInput,
 			"qory run: use an https URL for the module tools: a run from a control plane fetches git sources only over https\n"},
+		{"the stack proxy returns 403 for a module's host", codeHarness{modules: []map[string]any{{"name": "tools", "source": map[string]any{"git": "https://other.test/example-org/tools.git", "ref": toolsRef, "path": "modules/tools"}}}}, 1,
+			"qory run: add the host of the module tools to gateway.stack_hosts in the gateway's forager.yaml or to the run configuration's stack_hosts, and, for a private repository, add a harness credential for the module tools to the run configuration, or check its source: the fetch of the module tools through the run's stack proxy failed: the stack proxy returned 403, as it does for a host that neither list of stack hosts contains, and for a host of the run configuration's stack_hosts that the gateway's policy denies or has path rules for\n"},
+		{"the base's URL has a user part", codeHarness{document: func(s string) string { return strings.Replace(s, "https://", "https://reader:s3cret@", 1) }}, cmd.ExitInput,
+			"remove the user name and password from the URL of " + checkoutBase + ": the run's stack proxy sets the harness credentials of the run configuration, and qory sends no credential in a URL"},
+		{"the base's host has a character outside ASCII", codeHarness{document: func(s string) string { return strings.Replace(s, "https://", "https://u＠", 1) }}, cmd.ExitInput,
+			"write the host in the URL of " + checkoutBase + " in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			c.c.checkout = true
 			r := c.c.run(t)
-			r.addresses = append(r.addresses, "stacks-gone", "tools-gone", "examples/none")
+			r.addresses = append(r.addresses, "stacks-gone", "tools-gone", "examples/none", "reader", "s3cret", "＠")
 			if r.joined || cmd.ExitCode(r.err) != c.exit {
 				t.Fatalf("%v (exit %d), want exit %d before the join\n%s", r.err, cmd.ExitCode(r.err), c.exit, r.out)
 			}
 			wants(t, r.out+r.err.Error(), c.want)
-			if strings.Contains(r.out, "stack_hosts") || strings.Contains(r.out, "the stack proxy") {
-				t.Errorf("the line has a fix of the stack proxy:\n%s", r.out)
+			if strings.Contains(r.out, "host proxy") || strings.Contains(r.out, "run's policy") {
+				t.Errorf("the line has a fix of the host proxy:\n%s", r.out)
 			}
 			r.noAddress(t)
 		})

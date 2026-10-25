@@ -199,7 +199,7 @@ func sourceChecked(what, git, folder string, hidden bool) error {
 		u, err := url.Parse(git)
 		switch {
 		case stack.AtBeforePath(git) || err == nil && u.User != nil:
-			return input(fmt.Errorf("remove the user name and password from the URL of %s: the run's stack proxy fetches the harness with no credential%s", what, codeUsed))
+			return input(fmt.Errorf("remove the user name and password from the URL of %s: the run's stack proxy sets the harness credentials of the run configuration, and qory sends no credential in a URL%s", what, codeUsed))
 		case err != nil:
 			return input(fmt.Errorf("correct the URL of %s: qory could not read it as a URL%s", what, codeUsed))
 		case stack.NonASCIIHost(git):

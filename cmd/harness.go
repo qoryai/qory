@@ -500,15 +500,16 @@ type composeOptions struct {
 	// hidden is set for a run whose documents set harness_hidden: the home contains
 	// copies of every module's files, as for a walled run, so it contains no link.
 	hidden bool
-	// git, when set, fetches every git source through a run's host proxy or stack proxy,
-	// into cache, the run's cache: the compose of a run from a control plane, see
-	// [source.Git]. With a [source.Named], no text shows the address of a git source.
+	// git, when set, fetches every git source through a run's stack proxy, into cache, the
+	// run's cache: the compose of a run from a control plane, see [source.Git]. With a
+	// [source.Named], no text shows the address of a git source.
 	git   *source.Git
 	cache string
 	// checkedAs, when set, is the harness as a text shows it, such as the workspace's
-	// harness, for a compose whose git goes through the run's stack proxy, which sets no
-	// credential: [compose.CheckAddresses] checks the modules' URLs once the base is
-	// read, before any module is fetched.
+	// harness, for a compose whose git goes through the run's stack proxy, which sets
+	// the run configuration's harness credentials: [compose.CheckBase] checks the URL of the base before it is fetched,
+	// and [compose.CheckAddresses] the modules' URLs once the base is read, before any
+	// module is fetched.
 	checkedAs string
 }
 
@@ -867,6 +868,11 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 		if o.git != nil {
 			fetchOpts.Git, fetchOpts.Cache = o.git, o.cache
 		}
+		if o.checkedAs != "" {
+			if err := compose.CheckReference(ref); err != nil {
+				return nil, input(err)
+			}
+		}
 		if p, fetched, err = compose.LoadReference(ref, fetchOpts); err != nil {
 			return nil, composeError(err)
 		}
@@ -960,6 +966,11 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 			return nil, input(err)
 		}
 	}
+	if o.checkedAs != "" && base == nil {
+		if err := compose.CheckBase(doc, o.checkedAs); err != nil {
+			return nil, input(err)
+		}
+	}
 	if base != nil {
 		p, opts.Base, err = compose.ExtendOn(p, base, source.WorkingTree)
 		if err == nil && byRef {
@@ -977,13 +988,15 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	if n != nil {
 		compose.NameSources(p, n)
 	}
-	if o.checkedAs != "" {
-		if err := compose.CheckAddresses(p, o.checkedAs); err != nil {
+	// The rule of a run given a run key comes first, so a source that is not https gets
+	// the fix of https before the fix of its user part.
+	if o.inCheckout {
+		if err := modulesInCheckout(p, doc, base, root, docIn); err != nil {
 			return nil, input(err)
 		}
 	}
-	if o.inCheckout {
-		if err := modulesInCheckout(p, doc, base, root, docIn); err != nil {
+	if o.checkedAs != "" {
+		if err := compose.CheckAddresses(p, o.checkedAs); err != nil {
 			return nil, input(err)
 		}
 	}

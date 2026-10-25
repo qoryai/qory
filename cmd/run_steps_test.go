@@ -26,6 +26,7 @@ func (h *hostFetch) runSteps(t *testing.T, repositories string, proxyErr error) 
 	closes, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{
 		System: proxygittest.Host, Repositories: repositories,
 		Proxy: h.server.Proxy.URL, CABundle: h.server.Proxy.CABundle, Dir: h.runDir,
+		StackProxy: h.server.Stack.URL, StackCABundle: h.server.Stack.CABundle,
 		ProxyErr: proxyErr,
 		OnStep: func(e cmd.StepEvent) {
 			mu.Lock()
@@ -144,7 +145,7 @@ func TestAFailedComposeStepHasTheErrorLine(t *testing.T) {
 	if cmd.ExitCode(err) != 2 || !n.stoppedBeforeJoin() {
 		t.Fatalf("%v (exit %d), want exit 2 before the join\n%s", err, cmd.ExitCode(err), out)
 	}
-	line := "qory run: check that " + h.server.URL("acme/harness") + " has the branch, tag or commit gone, that the run's policy allows git.test and, for a private repository, that the run configuration has a credential that reads it. The fetch failed: " + h.server.URL("acme/harness") + " has no branch or tag gone\n"
+	line := "qory run: check that " + h.server.URL("acme/harness") + " has the branch, tag or commit gone and that gateway.stack_hosts in the gateway's forager.yaml or the run configuration's stack_hosts lists git.test, and, for a private repository, that the run configuration has a harness credential whose hosts and paths include the repository. The fetch through the run's stack proxy failed: " + h.server.URL("acme/harness") + " has no branch or tag gone\n"
 	wants(t, out, "\n"+line)
 	got := shownSteps(steps)
 	if len(got) < 5 || got[0] != "1 started fetch: fetch git.test/acme/shop" || got[2] != "1 exited succeeded 0" || got[3] != "2 started compose: compose the harness for claude" {

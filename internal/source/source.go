@@ -139,7 +139,7 @@ func (e *GoneError) Error() string {
 }
 
 // SchemeError is a git source that is not an https URL, in a compose that fetches
-// through a run's host proxy, see [Git]: git does not run for it.
+// through a run's stack proxy, see [Git]: git does not run for it.
 type SchemeError struct {
 	// URL is the git URL as the stack writes it.
 	URL string
@@ -238,11 +238,11 @@ func httpsOf(rest, sep string) string {
 }
 
 // Git is how a compose of a run from a control plane fetches its git sources: on this
-// machine through the run's host proxy, over https alone, with the git [proxygit] sets
+// machine through the run's stack proxy, over https alone, with the git [proxygit] sets
 // up, which reads no configuration of the person's or the system's and no credential of
 // this machine. A source that is not an https URL is a [*SchemeError], before git runs.
 type Git struct {
-	// Proxy is the run's host proxy.
+	// Proxy is the run's stack proxy.
 	Proxy proxygit.Proxy
 	// Fetched, when set, is called once per URL and ref that a resolve asked the remote
 	// for, with [Options.Name] of that resolve, the full commit it resolved to and how
@@ -311,7 +311,7 @@ type Options struct {
 	// Memo is shared by every source of one compose, so one URL at one ref resolves once,
 	// to one commit; nil resolves each source on its own.
 	Memo *Memo
-	// Git, when set, fetches every git source through a run's host proxy, see [Git]; nil
+	// Git, when set, fetches every git source through a run's stack proxy, see [Git]; nil
 	// fetches with the person's git, as [hostgit.Command] runs it.
 	Git *Git
 	// Name is the source as a text of a [Named] compose shows it, such as the base of the
@@ -1035,9 +1035,8 @@ func cacheName(v string) string {
 //
 // With opts.Git set, git is the one [hostgit.Unchecked] finds, with the options of
 // [proxygit.Hardened] and [proxygit.HTTPSOnly] and the environment [proxygit.Env]
-// makes for the run's proxy, the host proxy or the stack proxy, and with
-// GIT_CEILING_DIRECTORIES set to dir's parent; its folder is one of the run's cache,
-// which nothing but this compose writes. The output has the proxy's password hidden.
+// makes for the run's stack proxy, and with GIT_CEILING_DIRECTORIES set to dir's
+// parent; its folder is one of the run's cache, which nothing but this compose writes. The output has the proxy's password hidden.
 func git(dir string, opts Options, args ...string) ([]byte, error) {
 	timeout := opts.Timeout
 	ctx, cancel := context.Background(), func() {}

@@ -1,9 +1,11 @@
-// Package proxygittest serves git repositories over https on this machine, behind a
-// stand-in for a run's host proxy, for the tests of the fetches through it. The
-// repositories are at https://git.test/<path>.git, a host no resolver knows, so a git
-// reaches them only through the proxy, which takes only CONNECT requests with the
-// proxy's password and leads only to the server. The server's certificate is from a
-// certificate authority the test makes, which the CA bundle file contains.
+// Package proxygittest serves git repositories over https on this machine, behind
+// stand-ins for a run's host proxy and stack proxy, for the tests of the fetches through
+// them. The repositories are at https://git.test/<path>.git, a host that no resolver
+// resolves, so a git reaches them only through a proxy, which takes only CONNECT
+// requests with the proxy's password and leads only to the server. The server's
+// certificate is from a certificate authority the test makes, which the CA bundle file
+// contains. [Server.Require] and [Server.StackSets] stand in for a private repository
+// and a run configuration's harness credential.
 package proxygittest
 
 import (
@@ -45,10 +47,60 @@ type Server struct {
 	// Proxy is the host proxy as a fetch uses it: its URL with [Password], and the CA
 	// bundle.
 	Proxy proxygit.Proxy
+	// Stack is a second stand-in proxy to the same server, for a run's stack proxy, with
+	// the same password and CA bundle as Proxy and a count of its tunnels apart from
+	// Proxy's: [Server.StackTunnels].
+	Stack proxygit.Proxy
 
-	mu      sync.Mutex
-	tunnels int
-	denied  int
+	mu           sync.Mutex
+	tunnels      int
+	stackTunnels int
+	denied       int
+	required     *Credential
+	stackSets    *Credential
+	gitAuth      int
+}
+
+// Credential is a basic credential for the repositories whose path starts with Prefix,
+// such as private/ for private/harness.git.
+type Credential struct {
+	Prefix, Username, Password string
+}
+
+// header is the Authorization header of c.
+func (c *Credential) header() string {
+	return "Basic " + base64.StdEncoding.EncodeToString([]byte(c.Username+":"+c.Password))
+}
+
+// covers is true for a request whose path is in a repository under c's prefix.
+func (c *Credential) covers(path string) bool {
+	return c != nil && strings.HasPrefix(path, "/"+c.Prefix)
+}
+
+// Require makes the server return 401 to each request for a repository under c.Prefix
+// that does not have c in its Authorization header.
+func (s *Server) Require(c Credential) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.required = &c
+}
+
+// StackSets makes the stand-in stack proxy, [Server.Stack], read each request it leads
+// to the server, as a run's stack proxy does on the host of a harness credential, with
+// the server's certificate, and set c on the requests for a repository under c.Prefix.
+// Other requests pass with no Authorization header.
+func (s *Server) StackSets(c Credential) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stackSets = &c
+}
+
+// GitAuthorizations is how many requests reached the server, or the stand-in stack
+// proxy that [Server.StackSets] set up, with an Authorization header from git.
+func (s *Server) GitAuthorizations() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.gitAuth
 }
 
 // Start serves the repositories under a new folder, [Server.Root], until the test ends.
@@ -73,30 +125,103 @@ func Start(t *testing.T) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := &http.Server{
-		Handler:   &cgi.Handler{Path: backend, Env: []string{"GIT_PROJECT_ROOT=" + s.Root, "GIT_HTTP_EXPORT_ALL=1", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull}, Stderr: io.Discard},
-		TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}},
-	}
-	go srv.ServeTLS(ln, "", "")
-	t.Cleanup(func() { srv.Close() })
-	proxy, err := net.Listen("tcp", "127.0.0.1:0")
+	git := &cgi.Handler{Path: backend, Env: []string{"GIT_PROJECT_ROOT=" + s.Root, "GIT_HTTP_EXPORT_ALL=1", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull}, Stderr: io.Discard}
+	server := s.serve(ln, cert, func(w http.ResponseWriter, r *http.Request) {
+		s.countGitAuthorization(r)
+		s.check(git, w, r)
+	})
+	t.Cleanup(func() { server.Close() })
+	// reader is the part of the stand-in stack proxy that reads the requests and sets
+	// the credential of [Server.StackSets].
+	rl, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { proxy.Close() })
-	go s.serveProxy(proxy, ln.Addr().String())
-	s.Proxy = proxygit.Proxy{URL: "http://qory:" + Password + "@" + proxy.Addr().String(), CABundle: bundle}
+	reader := s.serve(rl, cert, func(w http.ResponseWriter, r *http.Request) {
+		s.countGitAuthorization(r)
+		r.Header.Del("Authorization")
+		s.mu.Lock()
+		c := s.stackSets
+		s.mu.Unlock()
+		if c.covers(r.URL.Path) {
+			r.Header.Set("Authorization", c.header())
+		}
+		s.check(git, w, r)
+	})
+	t.Cleanup(func() { reader.Close() })
+	direct := func() string { return ln.Addr().String() }
+	stack := func() string {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.stackSets != nil {
+			return rl.Addr().String()
+		}
+		return ln.Addr().String()
+	}
+	for _, p := range []struct {
+		to      *proxygit.Proxy
+		tunnels *int
+		addr    func() string
+	}{{&s.Proxy, &s.tunnels, direct}, {&s.Stack, &s.stackTunnels, stack}} {
+		proxy, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { proxy.Close() })
+		go s.serveProxy(proxy, p.addr, p.tunnels)
+		*p.to = proxygit.Proxy{URL: "http://qory:" + Password + "@" + proxy.Addr().String(), CABundle: bundle}
+	}
 	return s
+}
+
+// serve serves handler over https on ln with cert until the server is closed.
+func (s *Server) serve(ln net.Listener, cert tls.Certificate, handler http.HandlerFunc) *http.Server {
+	srv := &http.Server{Handler: handler, TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}}}
+	go srv.ServeTLS(ln, "", "")
+	return srv
+}
+
+// countGitAuthorization counts r when it has an Authorization header, which only git
+// sets before the stand-in stack proxy reads the request.
+func (s *Server) countGitAuthorization(r *http.Request) {
+	if r.Header.Get("Authorization") == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.gitAuth++
+}
+
+// check serves r with git, or returns 401 when r is for a repository under the prefix
+// of [Server.Require] without its credential.
+func (s *Server) check(git http.Handler, w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	c := s.required
+	s.mu.Unlock()
+	if c.covers(r.URL.Path) && r.Header.Get("Authorization") != c.header() {
+		w.Header().Set("WWW-Authenticate", `Basic realm="git"`)
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	git.ServeHTTP(w, r)
 }
 
 // URL is the https URL of the repository at path.
 func (s *Server) URL(path string) string { return "https://" + Host + "/" + path + ".git" }
 
-// Tunnels is how many connections the proxy led to the server.
+// Tunnels is how many connections the proxy, [Server.Proxy], led to the server.
 func (s *Server) Tunnels() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.tunnels
+}
+
+// StackTunnels is how many connections the second proxy, [Server.Stack], led to the
+// server.
+func (s *Server) StackTunnels() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stackTunnels
 }
 
 // Denied is how many requests the proxy answered with no tunnel.
@@ -107,8 +232,9 @@ func (s *Server) Denied() int {
 }
 
 // serveProxy answers each connection of ln: a CONNECT to [Host]:443 with the password
-// is led to the server at addr, and any other request gets a 407 or a 403.
-func (s *Server) serveProxy(ln net.Listener, addr string) {
+// is led to the server at the address addr returns, counted in tunnels, and any other
+// request gets a 407 or a 403.
+func (s *Server) serveProxy(ln net.Listener, addr func() string, tunnels *int) {
 	want := "Basic " + base64.StdEncoding.EncodeToString([]byte("qory:"+Password))
 	for {
 		c, err := ln.Accept()
@@ -132,13 +258,13 @@ func (s *Server) serveProxy(ln net.Listener, addr string) {
 				io.WriteString(c, "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
 				return
 			}
-			up, err := net.Dial("tcp", addr)
+			up, err := net.Dial("tcp", addr())
 			if err != nil {
 				return
 			}
 			defer up.Close()
 			s.mu.Lock()
-			s.tunnels++
+			*tunnels++
 			s.mu.Unlock()
 			io.WriteString(c, "HTTP/1.1 200 Connection established\r\n\r\n")
 			done := make(chan struct{}, 2)
