@@ -185,9 +185,9 @@ Its modules listed by a path are read from the fetched tree at the same commit. 
 reference whose URL has a user part or an `@` between `://` and the first `/` after it
 stops the run with exit 2 before anything is fetched: `remove the user name and password
 from the URL in -f: the run's stack proxy sets the harness credentials of the run
-configuration, and qory sends no credential in a URL`. One whose host has a character
-outside ASCII stops it the same way: `write the host of the URL in -f in ASCII, …`. This
-run composes the hello example at a commit of the qory repository:
+configuration, so a source's URL needs none`. One whose host has a character outside
+ASCII stops it the same way: `write the host of the URL in -f in ASCII, …`. This run
+composes the hello example at a commit of the qory repository:
 
 ```sh
 qory run claude -f https://github.com/qoryai/qory#<commit>:examples/hello --wall docker -- -p "/hello"
@@ -595,7 +595,7 @@ gateway:
 - The stack proxy sets no credential of `gateway.credentials` and no credential of the
   run's work. It sets only the run configuration's harness credentials, those with
   `purpose: harness`, on their hosts and paths, and passes the hosts' other paths with
-  no value.
+  no credential.
 - Behind a wall or through a separate gateway, the stack proxy reaches the gateway's
   machine or a private network address only for a host that `gateway.stack_hosts` lists
   by name and the allow list of the gateway's policy lists by name: `gateway.egress.allow`,
@@ -1476,8 +1476,8 @@ the run opens and before anything is fetched. `<source>` is `extends`, `the modu
 
 - `remove the user name and password from the URL of <source> of the harness in the
   workspace's settings in Qory Apiary: the run's stack proxy sets the harness
-  credentials of the run configuration, and qory sends no credential in a URL; the code
-  is used`, for a URL that has a user part or an `@` between `://` and the first `/`
+  credentials of the run configuration, so a source's URL needs none; the code is
+  used`, for a URL that has a user part or an `@` between `://` and the first `/`
   after it, whatever comes before the `@`
 - `correct the URL of <source> of the harness in the workspace's settings in Qory Apiary:
   qory could not read it as a URL; the code is used`
@@ -1504,17 +1504,17 @@ shows its addresses, so the fifth line applies to it. In place of the sixth, it 
 open: <error>`:
 
 - `remove the user name and password from the URL of the base of the checkout's harness:
-  the run's stack proxy sets the harness credentials of the run configuration, and qory
-  sends no credential in a URL`, exit 2, before the base is fetched, for a checkout's
-  file whose `extends` has a URL with a user part or an `@` between `://` and the first
-  `/` after it; `correct the URL of the base of …: qory could not read it as a URL` and
+  the run's stack proxy sets the harness credentials of the run configuration, so a
+  source's URL needs none`, exit 2, before the base is fetched, for a checkout's file
+  whose `extends` has a URL with a user part or an `@` between `://` and the first `/`
+  after it; `correct the URL of the base of …: qory could not read it as a URL` and
   `write the host in the URL of the base of … in ASCII, …` for the other two checks of a
   module source below
 - `remove the user name and password from the source of the module <module> in the base
   of the workspace's harness: the run's stack proxy sets the harness credentials of the
-  run configuration, and qory sends no credential in a URL`, exit 2, before any module
-  is fetched, for a module source in the stack's file whose URL has a user part or an
-  `@` between `://` and the first `/` after it, and `the source of modules[<n>]` for a
+  run configuration, so a source's URL needs none`, exit 2, before any module is
+  fetched, for a module source in the stack's file whose URL has a user part or an `@`
+  between `://` and the first `/` after it, and `the source of modules[<n>]` for a
   module listed without a name
 - `correct the URL in the source of the module <module> in the base of the workspace's
   harness: qory could not read it as a URL`, exit 2, before any module is fetched
@@ -1580,10 +1580,11 @@ These stop a run whose harness is hidden during the compose, each with the sourc
 phrase:
 
 - `add the host of <source> to gateway.stack_hosts in the gateway's forager.yaml or to
-  the run configuration's stack_hosts, and, for a private repository, add a harness
-  credential for <source> to the run configuration, or check its source: the fetch of
-  <source> through the run's stack proxy failed: <cause>`, exit 1, where `<cause>` is the status the stack
-  proxy or the host returned, such as `the stack proxy returned 403, as it does for a
+  the stack_hosts of the run configuration that Qory Apiary sends, and, for a private
+  repository, a harness credential for <source> to that run configuration, then take
+  the work item in again: the fetch of <source> through the run's stack proxy failed:
+  <cause>; the code is used`, exit 1, where `<cause>` is the status the stack proxy or
+  the host returned, such as `the stack proxy returned 403, as it does for a
   host that neither list of stack hosts contains, and for a host of the run
   configuration's stack_hosts that the gateway's policy denies or has path rules for`,
   or git's exit status

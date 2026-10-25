@@ -120,7 +120,7 @@ func withTools(url, ref string) func(string) string {
 }
 
 // userPart is the line of a module of the base, more, whose source has a user part.
-const userPart = "remove the user name and password from the source of the module more in " + workspaceBase + ": the run's stack proxy sets the harness credentials of the run configuration, and qory sends no credential in a URL"
+const userPart = "remove the user name and password from the source of the module more in " + workspaceBase + ": the run's stack proxy sets the harness credentials of the run configuration, so a source's URL needs none"
 
 // nonASCII is the line of a module of the base, more, whose source has a host with a
 // character outside ASCII.
@@ -379,7 +379,7 @@ func TestARunCodesHarnessDocumentWithASourceQoryDoesNotFetchStops(t *testing.T) 
 	module := func(git string) []map[string]any {
 		return []map[string]any{{"name": "more", "source": map[string]any{"git": git, "ref": "main"}}}
 	}
-	userLine := "remove the user name and password from the URL of the module more" + settings + ": the run's stack proxy sets the harness credentials of the run configuration, and qory sends no credential in a URL; the code is used"
+	userLine := "remove the user name and password from the URL of the module more" + settings + ": the run's stack proxy sets the harness credentials of the run configuration, so a source's URL needs none; the code is used"
 	host := proxygittest.Host
 	for _, c := range []struct {
 		name string
@@ -452,7 +452,7 @@ func TestARunCodeOfAHiddenHarnessThatFailsShowsNoAddress(t *testing.T) {
 			n.StackProxy = strings.Replace(n.StackProxy, proxygittest.Password, "another-password", 1)
 		}}, 1, []string{"qory run: take the work item in again in Qory Apiary: the run's stack proxy returned 407 Proxy Authentication Required to the password Forager set for the run, so the fetch of " + workspaceBase + " failed; the code is used\n"}},
 		{"the stack proxy returns 403 for a module's host", codeHarness{stack: withTools("https://other.test/example-org/tools.git", toolsRef)}, 1,
-			[]string{"qory run: add the host of the module tools to gateway.stack_hosts in the gateway's forager.yaml or to the run configuration's stack_hosts, and, for a private repository, add a harness credential for the module tools to the run configuration, or check its source: the fetch of the module tools through the run's stack proxy failed: the stack proxy returned 403, as it does for a host that neither list of stack hosts contains, and for a host of the run configuration's stack_hosts that the gateway's policy denies or has path rules for\n"}},
+			[]string{"qory run: add the host of the module tools to gateway.stack_hosts in the gateway's forager.yaml or to the stack_hosts of the run configuration that Qory Apiary sends, and, for a private repository, a harness credential for the module tools to that run configuration, then take the work item in again: the fetch of the module tools through the run's stack proxy failed: the stack proxy returned 403, as it does for a host that neither list of stack hosts contains, and for a host of the run configuration's stack_hosts that the gateway's policy denies or has path rules for; the code is used\n"}},
 		{"a module's ref is gone", codeHarness{stack: withTools(tools, "tools-gone"), tools: toolsModule()}, cmd.ExitInput,
 			[]string{"qory run: set the ref of the module tools to a branch, tag or commit its repository has: the repository of the module tools has no branch or tag by the ref it is set to\n"}},
 		{"a module's manifest does not parse", codeHarness{files: map[string]string{"examples/hello/modules/world/qory-module.yaml": "apiVersion: [\n"}}, cmd.ExitInput,
@@ -566,9 +566,9 @@ func TestARunCodeOfAHiddenCheckoutHarnessThatFailsShowsNoAddress(t *testing.T) {
 		{"a module's source is not https", codeHarness{modules: []map[string]any{{"name": "tools", "source": map[string]any{"git": "git@" + proxygittest.Host + ":example-org/tools.git", "ref": toolsRef}}}}, cmd.ExitInput,
 			"qory run: use an https URL for the module tools: a run from a control plane fetches git sources only over https\n"},
 		{"the stack proxy returns 403 for a module's host", codeHarness{modules: []map[string]any{{"name": "tools", "source": map[string]any{"git": "https://other.test/example-org/tools.git", "ref": toolsRef, "path": "modules/tools"}}}}, 1,
-			"qory run: add the host of the module tools to gateway.stack_hosts in the gateway's forager.yaml or to the run configuration's stack_hosts, and, for a private repository, add a harness credential for the module tools to the run configuration, or check its source: the fetch of the module tools through the run's stack proxy failed: the stack proxy returned 403, as it does for a host that neither list of stack hosts contains, and for a host of the run configuration's stack_hosts that the gateway's policy denies or has path rules for\n"},
+			"qory run: add the host of the module tools to gateway.stack_hosts in the gateway's forager.yaml or to the stack_hosts of the run configuration that Qory Apiary sends, and, for a private repository, a harness credential for the module tools to that run configuration, then take the work item in again: the fetch of the module tools through the run's stack proxy failed: the stack proxy returned 403, as it does for a host that neither list of stack hosts contains, and for a host of the run configuration's stack_hosts that the gateway's policy denies or has path rules for; the code is used\n"},
 		{"the base's URL has a user part", codeHarness{document: func(s string) string { return strings.Replace(s, "https://", "https://reader:s3cret@", 1) }}, cmd.ExitInput,
-			"remove the user name and password from the URL of " + checkoutBase + ": the run's stack proxy sets the harness credentials of the run configuration, and qory sends no credential in a URL"},
+			"remove the user name and password from the URL of " + checkoutBase + ": the run's stack proxy sets the harness credentials of the run configuration, so a source's URL needs none"},
 		{"the base's host has a character outside ASCII", codeHarness{document: func(s string) string { return strings.Replace(s, "https://", "https://u＠", 1) }}, cmd.ExitInput,
 			"write the host in the URL of " + checkoutBase + " in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @"},
 	} {

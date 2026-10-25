@@ -246,7 +246,7 @@ func TestARunWithARunKeyFetchesAStackReferenceThroughTheStackProxy(t *testing.T)
 // character outside ASCII: the run stops with exit 2 and an error that starts with the
 // fix in -f, before anything is fetched, and no line shows the user part.
 func TestARunKeyStopsAStackReferenceWithAnAddressFault(t *testing.T) {
-	const user = "remove the user name and password from the URL in -f: the run's stack proxy sets the harness credentials of the run configuration, and qory sends no credential in a URL"
+	const user = "remove the user name and password from the URL in -f: the run's stack proxy sets the harness credentials of the run configuration, so a source's URL needs none"
 	files := helloFiles(t)
 	for _, c := range []struct{ name, url, want string }{
 		{"a user part", "https://reader:s3cret@" + proxygittest.Host + "/example-org/hello.git", user},

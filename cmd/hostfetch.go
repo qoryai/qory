@@ -144,7 +144,7 @@ func namedComposeError(err error, n *source.Named) error {
 		if m := connectStatus.FindStringSubmatch(fetch.Output); m != nil && m[1] == "407" {
 			return &runLineError{fmt.Errorf("take the work item in again in Qory Apiary: the run's stack proxy returned 407 Proxy Authentication Required to the password Forager set for the run, so the fetch of %s failed%s", fetch.Name, codeUsed)}
 		}
-		return &runLineError{fmt.Errorf("add the host of %s to gateway.stack_hosts in the gateway's forager.yaml or to the run configuration's stack_hosts, and, for a private repository, add a harness credential for %s to the run configuration, or check its source: the fetch of %s through the run's stack proxy failed: %s", fetch.Name, fetch.Name, fetch.Name, namedFetchCause(fetch))}
+		return &runLineError{fmt.Errorf("add the host of %s to gateway.stack_hosts in the gateway's forager.yaml or to the stack_hosts of the run configuration that Qory Apiary sends, and, for a private repository, a harness credential for %s to that run configuration, then take the work item in again: the fetch of %s through the run's stack proxy failed: %s%s", fetch.Name, fetch.Name, fetch.Name, namedFetchCause(fetch), codeUsed)}
 	}
 	return n.HideError(err)
 }

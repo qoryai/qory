@@ -101,21 +101,22 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
-- A run with a run key or a run code fetches every git source of its harness through
-  the run's stack proxy: the stack, its modules, and the modules of the checkout's file,
+- A run with a run key or a run code fetches every git source of its harness through the
+  run's stack proxy: the stack, its modules, and the modules of the checkout's file,
   also when the checkout's file is the whole harness. The run's host proxy, with the
   run's credentials, fetches only the run's repositories, and closes before the compose.
   A harness source on a host that neither `gateway.stack_hosts` nor the run
   configuration's `stack_hosts` lists stops the run, exit 1, with `check that <url> has
   the branch, tag or commit <ref> and that gateway.stack_hosts in the gateway's
   forager.yaml or the run configuration's stack_hosts lists <host>, …`, or `add the host
-  of <source> to gateway.stack_hosts in the gateway's forager.yaml or to the run
-  configuration's stack_hosts, …` when the harness is hidden. A URL of the checkout's
-  `extends`, of a module of its harness, or of a stack reference in `-f` with a user
-  part, an `@` before its path, a host with a character outside ASCII, or a URL that
-  qory cannot read stops the run before the source is fetched, exit 2. The stack proxy
-  sets the run configuration's harness credentials, those with `purpose: harness`, so
-  give the run configuration one for a private harness repository.
+  of <source> to gateway.stack_hosts in the gateway's forager.yaml or to the stack_hosts
+  of the run configuration that Qory Apiary sends, …` when the harness is hidden. A URL
+  of the checkout's `extends`, of a module of its harness, or of a stack reference in
+  `-f` with a user part, an `@` before its path, a host with a character outside ASCII,
+  or a URL that qory cannot read stops the run before the source is fetched, exit 2. The
+  stack proxy sets the harness credentials, those with `purpose: harness`, of the run
+  configuration that Qory Apiary sends, so add a harness credential for a private
+  harness repository to that run configuration.
 - A run from a run code whose documents contain a harness writes it to `harness.yaml` in
   the run's folder and composes it in place of the checkout's file. qory fetches the
   stack it extends and every module from another repository through the run's stack

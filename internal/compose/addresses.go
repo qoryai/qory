@@ -32,7 +32,7 @@ func CheckBase(p *stack.Stack, harness string) error {
 	base := "the base of " + harness
 	switch addressFault(p.Extends.Git) {
 	case faultUser:
-		return fmt.Errorf("remove the user name and password from the URL of %s: the run's stack proxy sets the harness credentials of the run configuration, and qory sends no credential in a URL", base)
+		return fmt.Errorf("remove the user name and password from the URL of %s: the run's stack proxy sets the harness credentials of the run configuration, so a source's URL needs none", base)
 	case faultParse:
 		return fmt.Errorf("correct the URL of %s: qory could not read it as a URL", base)
 	case faultHost:
@@ -46,7 +46,7 @@ func CheckBase(p *stack.Stack, harness string) error {
 func CheckReference(ref stack.Source) error {
 	switch addressFault(ref.Git) {
 	case faultUser:
-		return errors.New("remove the user name and password from the URL in -f: the run's stack proxy sets the harness credentials of the run configuration, and qory sends no credential in a URL")
+		return errors.New("remove the user name and password from the URL in -f: the run's stack proxy sets the harness credentials of the run configuration, so a source's URL needs none")
 	case faultParse:
 		return errors.New("correct the URL in -f: qory could not read it as a URL")
 	case faultHost:
@@ -106,7 +106,7 @@ func CheckAddresses(p *stack.Stack, harness string) error {
 		u, err := url.Parse(l.Source.Git)
 		switch {
 		case stack.AtBeforePath(l.Source.Git) || err == nil && u.User != nil:
-			return fmt.Errorf("remove the user name and password from the source of %s in %s: the run's stack proxy sets the harness credentials of the run configuration, and qory sends no credential in a URL", module, in)
+			return fmt.Errorf("remove the user name and password from the source of %s in %s: the run's stack proxy sets the harness credentials of the run configuration, so a source's URL needs none", module, in)
 		case err != nil:
 			return fmt.Errorf("correct the URL in the source of %s in %s: qory could not read it as a URL", module, in)
 		case stack.NonASCIIHost(l.Source.Git):
