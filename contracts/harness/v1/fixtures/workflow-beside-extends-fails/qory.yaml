@@ -1,0 +1,8 @@
+apiVersion: qory.dev/v1alpha1
+harness:
+  extends: {path: stack}
+  target:
+    runtime: claude
+  workflows:
+    fix:
+      access: write

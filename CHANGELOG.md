@@ -113,9 +113,22 @@ release may change what an existing document does, and states it under Upgrading
   list; a version that is not a commit id; and a commit that the server does not have or
   does not serve by its id. A target on another system, or a run with no
   `QORY_RUN_SYSTEM`, does not use `target_version`.
+- The harness section of a `qory.yaml` that defines a stack, without `extends`, may list
+  `workflows`, with the keys and checks of a `qory-stack.yaml`: `time_limit` and
+  `access`. A section that extends a stack takes the base's workflows, and one that also
+  lists `workflows` stops with exit 2, `remove workflows or extends: a harness section
+  that extends a stack takes the workflows of its base`.
+- A run from a run code composes a harness document with no `extends`, which defines a
+  stack, for the run's runtime: `run_settings.runtime`, or `claude` when the documents
+  have no run settings. The `workflows.<name>.time_limit` of that stack applies to the
+  run, as a base's does.
 
 ### Changed
 
+- The line of a run from a run code whose time limit came before the runtime started
+  contains `the workspace's harness` for a harness document that defines a stack, and `the
+  checkout's harness or the base it extends` for a run whose documents contain no
+  harness, in place of `the base of the checkout's harness, when it has one`.
 - A run with a run key or a run code fetches every git source of its harness through the
   run's stack proxy: the stack, its modules, and the modules of the checkout's file,
   also when the checkout's file is the whole harness. The run's host proxy, with the

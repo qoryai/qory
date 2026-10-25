@@ -75,6 +75,9 @@ type codeHarness struct {
 	// before, when not nil, runs once the run's environment is set, and returns further
 	// arguments of qory run.
 	before func() []string
+	// defines, when not nil, is the workflows of a harness document with no extends that
+	// defines a stack of one module, hello, from the folder of the base's repository.
+	defines map[string]any
 }
 
 // harnessRun is what a [codeHarness] run came to: the output with its error, the run's
@@ -162,6 +165,12 @@ func (c codeHarness) run(t *testing.T) harnessRun {
 	r.url = h.server.URL("example-org/hello")
 	r.addresses = []string{r.url, strings.TrimSuffix(r.url, ".git"), "example-org/hello", "example-org/tools", "other.test", namedRef, toolsRef, string(filepath.Separator) + "sources" + string(filepath.Separator)}
 	section := map[string]any{"extends": map[string]any{"git": r.url, "ref": namedRef, "path": folder}}
+	if c.defines != nil {
+		section = map[string]any{
+			"modules":   []map[string]any{{"name": "hello", "source": map[string]any{"git": r.url, "ref": namedRef, "path": folder + "/modules/hello"}}},
+			"workflows": c.defines,
+		}
+	}
 	if c.modules != nil {
 		section["modules"] = c.modules
 	}
@@ -330,6 +339,41 @@ func TestARunCodeComposesTheWorkspacesHarnessThroughTheStackProxy(t *testing.T) 
 		t.Errorf("the time limit left is %v, want 5h less the time before the join", r.spec.Timeout)
 	}
 	r.noAddress(t)
+}
+
+// TestARunCodeComposesAHarnessDocumentThatDefinesAStack is a run from a run code whose
+// documents contain a harness document with no extends, which defines a stack of the
+// module hello and its workflow hello, with a time_limit of 4h. qory composes it for
+// run_settings.runtime, or for claude, the default runtime, when the documents have no
+// run settings, though the document has no target. The workflow's time_limit is the
+// session's time limit, and no text shows an address.
+func TestARunCodeComposesAHarnessDocumentThatDefinesAStack(t *testing.T) {
+	for name, settings := range map[string]any{"run settings": map[string]any{"runtime": "claude"}, "no run settings": nil} {
+		t.Run(name, func(t *testing.T) {
+			r := codeHarness{
+				defines: map[string]any{"hello": map[string]any{"time_limit": "4h", "access": "write"}},
+				change: func(d map[string]any) {
+					if settings != nil {
+						d["run_settings"] = settings
+					}
+				},
+			}.run(t)
+			if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
+				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+			}
+			wants(t, r.out,
+				"qory run: the run "+keyRunID+" starts the workflow hello of "+workspaceHarness+" on claude\n",
+				"qory run: fetched the module hello at "+r.commit[:12]+" in ",
+				"qory run: composed ")
+			if want := []session.HarnessSource{{Source: "module hello", Commit: r.commit}}; !slices.Equal(r.spec.Harness, want) {
+				t.Errorf("the harness list is %+v, want %+v", r.spec.Harness, want)
+			}
+			if r.spec.Timeout <= 4*time.Hour-time.Minute || r.spec.Timeout > 4*time.Hour {
+				t.Errorf("the time limit left is %v, want 4h less the time before the join", r.spec.Timeout)
+			}
+			r.noAddress(t)
+		})
+	}
 }
 
 // TestARunCodesShownHarnessDocumentShowsAddresses is a run from a run code whose

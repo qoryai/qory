@@ -395,8 +395,8 @@ type Stack struct {
 	Extensions map[string]any `yaml:"extensions,omitempty"`
 	// Workflows are the settings of the workflows the stack starts, by name: a
 	// dispatched run starts the skill or command of a workflow's name. A stack file sets
-	// them; the harness section of a checkout's qory.yaml has no such key, and [Extend]
-	// takes the base's.
+	// them, and so does the harness section of a checkout's qory.yaml that defines a
+	// stack; a section that extends a stack sets none, and [Extend] takes the base's.
 	Workflows map[string]Workflow `yaml:"workflows,omitempty"`
 
 	// RetiredAPIVersion is the apiVersion the file declared when it is a retired
@@ -577,14 +577,14 @@ func (p *Stack) extends() bool {
 }
 
 // validate checks the whole document before a caller sees it, so a document that reaches
-// the compose is known to contain what the compose requires: a runtime for a checkout's
-// own stack, a base for a document that extends one and no target for a stack file, at
-// least one module unless the document extends a stack, each with a name or a source, no
-// name twice, excludes and onlys over known kinds and parts, an exclude beside an only
-// that lists entries the only does not, links that are one path segment and listed once,
-// extensions that are maps, and an extending block over known kinds without hooks and
-// servers. Whether a source contains a module, and whether its manifest defines the name
-// the entry sets, is the compose's check.
+// the compose is known to contain what the compose requires: a runtime for a stack that
+// a checkout's qory.yaml defines, a base and no workflows for a document that extends
+// one, no target for a stack file, at least one module unless the document extends a
+// stack, each with a name or a source, no name twice, excludes and onlys over known
+// kinds and parts, an exclude beside an only that lists entries the only does not, links
+// that are one path segment and listed once, extensions that are maps, and an extending
+// block over known kinds without hooks and servers. Whether a source contains a module,
+// and whether its manifest defines the name the entry sets, is the compose's check.
 func (p *Stack) validate(compose bool) error {
 	current, err := exports.ResolveAPIVersion(p.APIVersion)
 	if err != nil {
@@ -604,6 +604,9 @@ func (p *Stack) validate(compose bool) error {
 		}
 		if p.Extending != nil {
 			return errors.New("extending is the base stack's; a harness section that extends a stack does not set it")
+		}
+		if p.extends() && len(p.Workflows) > 0 {
+			return errors.New("remove workflows or extends: a harness section that extends a stack takes the workflows of its base")
 		}
 		// A document extending a stack may leave the runtime to the machine's
 		// configuration or the flag; its own stack names one.

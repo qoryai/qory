@@ -133,6 +133,8 @@ harness:
   modules:
     - name: app
       source: {path: ./harness}
+  workflows:                     # optional; the same keys as in a qory-stack.yaml
+    example: {access: write}
 ```
 
 ```yaml
@@ -147,8 +149,11 @@ harness:
 ```
 
 The section takes `name`, `description`, `modules`, `bind` and `extensions` as a stack
-does, and `target`, which a stack does not; never `extending`, since a stack to be
-extended is a `qory-stack.yaml`. A section extends a stack or defines one. A stack it
+does, `workflows` when it defines a stack, and `target`, which a stack does not; never
+`extending`, since a stack to be extended is a `qory-stack.yaml`. A section extends a
+stack or defines one. A section that extends a stack takes the base's `workflows`; one
+that also lists `workflows` is refused with status 2, `remove workflows or extends: a
+harness section that extends a stack takes the workflows of its base`. A stack it
 defines requires `target`: `runtime`, the program that runs the harness, one of the
 runtimes in §Runtimes or a list of them to compose for at once, and `model`, optional,
 written into the settings of every targeted runtime that has a project-level place for
@@ -185,7 +190,7 @@ schema is [config.schema.json](config.schema.json).
 | `modules[].link` | no | a name at the checkout root, one path segment, linked to the module's directory in the composed tree, so a permission rule or a script refers to the module's files by a checkout-relative path: `harness/scripts/check.sh`. A hard link (§Rendering), each name used once across the modules |
 | `bind` | no | the entry that fills each role a document references (§References): `<kind>/<role>` to the name of an entry of that kind, `agents/coder: rails-coder`. The kind is `agents`, `skills` or `commands`. A checkout extending a stack adds to the base's bindings and may rebind a role of the base's |
 | `extensions` | no | a map of keys the author chooses, each a value of any shape, a scalar, a list or a map of any depth; written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it |
-| `workflows` | no | the settings of each workflow of the stack, by its name: a lower-case letter, then up to 63 lower-case letters, digits and hyphens. A run that Qory Apiary dispatches from a run code starts the skill or command named like its workflow (docs/run.md, §The run key from a run code). The harness section of a `qory.yaml` has no `workflows`; a checkout extending a stack takes the base's |
+| `workflows` | no | the settings of each workflow of the stack, by its name: a lower-case letter, then up to 63 lower-case letters, digits and hyphens. A run that Qory Apiary dispatches from a run code starts the skill or command named like its workflow (docs/run.md, §The run key from a run code). The harness section of a `qory.yaml` that defines a stack lists them with the same keys and checks; a section that extends a stack takes the base's and lists none |
 | `workflows.<name>.time_limit` | no | how long a dispatched run of the workflow may run, counted from the run's open, as a Go duration above zero, such as `7h`, `45m` or `1h30m`; qory stops with an error on any other value: `set workflows.<name>.time_limit to a duration above zero, such as 7h or 45m: <value> is not one`. The run's `run_settings.time_limit_minutes`, when Qory Apiary sets it, applies instead, and a workflow without it runs for at most 3 hours |
 | `workflows.<name>.access` | no | the access level the workflow declares for what a dispatched run of it works on, `read` or `write`, and `read` when left out; qory stops with an error on any other value: `set workflows.<name>.access to read or write: <value> is neither`. qory checks the value, does not change it and grants no permission from it |
 | `extending` | no | what a module of a checkout extending this stack may ship: `kinds`, `instructions`, `settings`, `files` (§Extending a stack). A base without the block cannot be extended |

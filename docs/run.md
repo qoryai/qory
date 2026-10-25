@@ -223,8 +223,9 @@ When the run ends, qory says how, and its exit status goes with it:
   A run from a run code, which takes no `--timeout`, prints `✗ set a longer
   time_limit_minutes in Qory Apiary, or a longer workflows.<workflow>.time_limit in the
   base of the workspace's harness: the run was cancelled at its time limit of <d>, before
-  <runtime> started` instead, with `the base of the checkout's harness, when it has one`
-  for a run whose documents contain no harness (see [What the run takes from the
+  <runtime> started` instead. The line contains `the workspace's harness` for a harness
+  that defines a stack, and `the checkout's harness or the base it extends` for a run
+  whose documents contain no harness (see [What the run takes from the
   response](#what-the-run-takes-from-the-response)).
 - `✗ the run failed: its events could not be recorded, and <runtime> was stopped`: the
   gateway could not take an event the session sent, exit 1.
@@ -557,9 +558,9 @@ not start after it.
 
 A run from a run code takes its limit from elsewhere, in this order:
 `run_settings.time_limit_minutes` in Qory Apiary's response to the code, then
-`workflows.<name>.time_limit` of the run's workflow in the `qory-stack.yaml` of the stack
-that the harness extends, then 3 hours. A checkout's `qory.yaml` that extends no stack
-has no workflows. `--timeout` stops it with exit 2, and `session.run.timeout` does not
+`workflows.<name>.time_limit` of the run's workflow in the stack that the harness
+defines, or in the `qory-stack.yaml` of the stack that it extends, then 3 hours.
+`--timeout` stops it with exit 2, and `session.run.timeout` does not
 apply to it (see [The run key from a run code](#the-run-key-from-a-run-code)).
 
 ### How the runtime is stopped
@@ -1478,15 +1479,20 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
 #### The run's harness
 
 The documents contain the harness, a harness document like a checkout's `harness.yaml`,
-when the workspace in Qory Apiary sets one. Its `extends` and the source of each of its
-modules are git sources, which `documents.schema.json` requires. A harness with no
-`extends`, or a source with no `git` address, fails that schema, and the run stops after
-the redemption with exit 1 and the line `update qory, or ask Qory Apiary's instance
-admin: …`.
+when the workspace in Qory Apiary sets one. The harness extends a stack, under
+`extends`, or defines one: with no `extends`, it lists at least one module and may list
+`workflows`, as a `qory-stack.yaml` does. It has no `target`: qory composes a stack it
+defines for the run's runtime, `run_settings.runtime`, or `claude` when the documents
+have no run settings. Its `extends` and the source of each of its modules are git
+sources, which `documents.schema.json` requires. A source with no `git` address, a
+harness with no `extends` and no module, or `workflows` beside `extends` fails that
+schema, and the run stops after the redemption with exit 1 and the line `update qory, or
+ask Qory Apiary's instance admin: …`.
 
 When the documents contain a harness, qory writes it to `harness.yaml`, mode 0600, in
 the run's folder, and composes that file in place of the checkout's `qory.yaml` or
-`harness.yaml`. qory fetches the stack that the harness extends, and every module that
+`harness.yaml`, with `target.runtime` set to the run's runtime for a harness that
+defines a stack. qory fetches the stack that the harness extends, and every module that
 the harness or the stack's file lists from another repository, through the run's stack
 proxy. The stack proxy is a proxy of the run's gateway that passes the hosts of
 `gateway.stack_hosts` in the gateway's `forager.yaml` and of the run configuration's

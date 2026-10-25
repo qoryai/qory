@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,19 +18,26 @@ import (
 
 // TestARunCodesTimeLimitLineNamesWhereTheLimitIsSet is the line of a run from a run code
 // whose time limit came before the runtime started: its fix is a longer limit in Qory
-// Apiary or in the workflows of the harness's base, never --timeout, which such a run
-// does not take. The harness is the workspace's for a run with a harness document, and
-// the checkout's for one without.
+// Apiary or in the workflows of the harness, never --timeout, which such a run does not
+// take. The workflows are in the base of a harness document with extends, in a harness
+// document that defines a stack, and in the checkout's harness or its base for a run
+// without a harness document.
 func TestARunCodesTimeLimitLineNamesWhereTheLimitIsSet(t *testing.T) {
-	for harness, want := range map[string]string{
-		"{}\n": "set a longer time_limit_minutes in Qory Apiary, or a longer workflows.example.time_limit in the base of the workspace's harness: the run was cancelled at its time limit of 45m0s, before claude started",
-		"":     "set a longer time_limit_minutes in Qory Apiary, or a longer workflows.example.time_limit in the base of the checkout's harness, when it has one: the run was cancelled at its time limit of 45m0s, before claude started",
+	const line = "set a longer time_limit_minutes in Qory Apiary, or a longer workflows.example.time_limit in %s: the run was cancelled at its time limit of 45m0s, before claude started"
+	for _, c := range []struct {
+		harness string
+		defines bool
+		where   string
+	}{
+		{"{}\n", false, "the base of the workspace's harness"},
+		{"{}\n", true, "the workspace's harness"},
+		{"", false, "the checkout's harness or the base it extends"},
 	} {
-		r := &codeRun{workflow: "example"}
-		if harness != "" {
-			r.harness = []byte(harness)
+		r := &codeRun{workflow: "example", defines: c.defines}
+		if c.harness != "" {
+			r.harness = []byte(c.harness)
 		}
-		if got := r.timedOutLine(45*time.Minute, "claude"); got != want {
+		if got, want := r.timedOutLine(45*time.Minute, "claude"), fmt.Sprintf(line, c.where); got != want {
 			t.Errorf("got  %q\nwant %q", got, want)
 		}
 	}
@@ -416,7 +424,7 @@ func TestAWalledRunFromARunCodeWithAHomeThatContainsQorysCacheFolderStops(t *tes
 // start and missing-workflow lines show the workspace's harness for a run with a harness
 // document, and the checkout's harness for one without, hidden or shown.
 func TestARunCodesLinesShowTheHarnessByItsPhrase(t *testing.T) {
-	doc := &contracts.HarnessDocument{Harness: contracts.HarnessSection{Extends: contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7", Path: "stacks/core"}}}
+	doc := &contracts.HarnessDocument{Harness: contracts.HarnessSection{Extends: &contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7", Path: "stacks/core"}}}
 	for _, hidden := range []bool{true, false} {
 		for harness, phrase := range map[*contracts.HarnessDocument]string{doc: "the workspace's harness", nil: "the checkout's harness"} {
 			r, err := codeRunOf(contracts.Documents{Harness: harness, Workflow: "example", HarnessHidden: &hidden, RunSettings: &contracts.RunSettings{Runtime: "claude"}})
@@ -452,7 +460,7 @@ func TestAHarnessDocumentWithASourceQoryDoesNotFetchStops(t *testing.T) {
 	const ascii = "write the host in the URL of the module tools" + settings + " in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @; the code is used"
 	withModule := func(git string) *contracts.HarnessDocument {
 		return &contracts.HarnessDocument{Harness: contracts.HarnessSection{
-			Extends: contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7", Path: "stacks/core"},
+			Extends: &contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7", Path: "stacks/core"},
 			Modules: []contracts.HarnessModule{{Name: "tools", Source: contracts.HarnessSource{Git: git, Ref: "main"}}},
 		}}
 	}
@@ -488,5 +496,50 @@ func TestAHarnessDocumentWithASourceQoryDoesNotFetchStops(t *testing.T) {
 	}
 	if err := harnessChecked(withModule("http://code.example.com/team/tools.git"), false); err == nil || err.Error() != "set the module tools"+settings+" to an https source: http://code.example.com/team/tools.git is not an https URL with a host, and qory fetches a harness only over https; the code is used" {
 		t.Errorf("an http module of a shown harness: %v", err)
+	}
+}
+
+// TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime is a harness document
+// with no extends, whose section defines a stack with workflows: harnessChecked checks
+// its modules and no base, and qory writes it with target.runtime set to the run's
+// runtime, run_settings.runtime or the default runtime when the documents have no run
+// settings, the workflows as the documents have them.
+func TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime(t *testing.T) {
+	defined := func(git string) *contracts.HarnessDocument {
+		return &contracts.HarnessDocument{Harness: contracts.HarnessSection{
+			Modules:   []contracts.HarnessModule{{Name: "tools", Source: contracts.HarnessSource{Git: git, Ref: "main"}}},
+			Workflows: map[string]contracts.HarnessWorkflow{"example": {Access: "write", TimeLimit: "45m"}},
+		}}
+	}
+	if err := harnessChecked(defined("https://code.example.com/team/tools.git"), true); err != nil {
+		t.Errorf("a stack the document defines: %v", err)
+	}
+	if err := harnessChecked(defined(""), true); err == nil || !strings.HasPrefix(err.Error(), "set the module tools of the harness in the workspace's settings in Qory Apiary to an https source") {
+		t.Errorf("a module in a folder: %v", err)
+	}
+	for _, settings := range []*contracts.RunSettings{{Runtime: "claude"}, nil} {
+		r, err := codeRunOf(contracts.Documents{Harness: defined("https://code.example.com/team/tools.git"), Workflow: "example", RunSettings: settings})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var doc struct {
+			Harness struct {
+				Extends   *json.RawMessage                     `json:"extends"`
+				Target    struct{ Runtime string }             `json:"target"`
+				Modules   []contracts.HarnessModule            `json:"modules"`
+				Workflows map[string]contracts.HarnessWorkflow `json:"workflows"`
+			} `json:"harness"`
+		}
+		if err := json.Unmarshal(r.harness, &doc); err != nil {
+			t.Fatal(err)
+		}
+		h := doc.Harness
+		if !r.defines || h.Extends != nil || h.Target.Runtime != "claude" || len(h.Modules) != 1 || h.Workflows["example"] != (contracts.HarnessWorkflow{Access: "write", TimeLimit: "45m"}) {
+			t.Errorf("run settings %+v: defines %v, harness.yaml has:\n%s", settings, r.defines, r.harness)
+		}
+	}
+	r, err := codeRunOf(contracts.Documents{Harness: &contracts.HarnessDocument{Harness: contracts.HarnessSection{Extends: &contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7"}}}, Workflow: "example"})
+	if err != nil || r.defines || strings.Contains(string(r.harness), "target") {
+		t.Errorf("a document with extends: %v, defines %v, harness.yaml has:\n%s", err, r != nil && r.defines, r.harness)
 	}
 }

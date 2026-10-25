@@ -15,7 +15,7 @@ import (
 
 // TestSchemas validates every fixture document against the contract's schemas: a
 // qory.yaml that composes passes config.schema.json, one refused for its apiVersion, a
-// kind or its qory key fails it,
+// kind, its qory key or its workflows fails it,
 // every module manifest passes module.schema.json, every MCP server file passes
 // mcp.schema.json unless the fixture expects it refused, and the stack a fixture extends,
 // stack/qory-stack.yaml, passes stack.schema.json unless the fixture expects it refused.
@@ -40,7 +40,8 @@ func TestSchemas(t *testing.T) {
 	dirs, _ := filepath.Glob(filepath.Join(fixtures, "*"))
 	for _, dir := range dirs {
 		errText, _ := os.ReadFile(filepath.Join(dir, "expected", "error.txt"))
-		wantInvalid := strings.Contains(string(errText), "apiVersion") || strings.Contains(string(errText), "kind ") || strings.Contains(string(errText), "qory \"")
+		wantInvalid := strings.Contains(string(errText), "apiVersion") || strings.Contains(string(errText), "kind ") || strings.Contains(string(errText), "qory \"") ||
+			strings.HasPrefix(string(errText), "qory.yaml: ") && strings.Contains(string(errText), "workflows")
 		err := composeSchema.Validate(document(t, filepath.Join(dir, "qory.yaml")))
 		if wantInvalid && err == nil {
 			t.Errorf("%s: the document passed the schema; want a failure", dir)

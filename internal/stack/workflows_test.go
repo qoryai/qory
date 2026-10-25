@@ -132,3 +132,42 @@ func TestTheSchemaTakesTheWorkflows(t *testing.T) {
 		}
 	}
 }
+
+// TestNewComposeReadsTheWorkflowsOfADefinedStack is the harness section of a checkout's
+// qory.yaml that defines a stack, with a target and modules: it may list workflows,
+// read and checked as a stack file's are, with the same errors.
+func TestNewComposeReadsTheWorkflowsOfADefinedStack(t *testing.T) {
+	defined := func(w map[string]Workflow) *Stack {
+		return &Stack{Target: Target{Runtimes: Runtimes{"claude"}}, Modules: []Module{{Name: "app"}}, Workflows: w}
+	}
+	p, err := compose(t, defined(map[string]Workflow{"fix": {Access: AccessWrite, TimeLimitText: "45m"}, "review": {}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.AccessOf("fix") != AccessWrite || p.TimeLimitOf("fix") != 45*time.Minute || p.AccessOf("review") != AccessRead || p.TimeLimitOf("review") != 0 {
+		t.Errorf("workflows %+v", p.Workflows)
+	}
+	for _, c := range []struct {
+		w    Workflow
+		want string
+	}{
+		{Workflow{Access: "admin"}, `set workflows.fix.access to read or write: "admin" is neither`},
+		{Workflow{TimeLimitText: "7 hours"}, `set workflows.fix.time_limit to a duration above zero, such as 7h or 45m: "7 hours" is not one`},
+		{Workflow{TimeLimitText: "0s"}, `set workflows.fix.time_limit to a duration above zero, such as 7h or 45m: "0s" is not one`},
+	} {
+		if _, err := compose(t, defined(map[string]Workflow{"fix": c.w})); err == nil || !strings.HasSuffix(err.Error(), ": "+c.want) {
+			t.Errorf("%+v: %v, want %q", c.w, err, c.want)
+		}
+	}
+}
+
+// TestNewComposeRefusesWorkflowsBesideExtends is the harness section of a checkout's
+// qory.yaml that extends a stack and lists workflows: it is refused, since the section
+// takes the workflows of its base.
+func TestNewComposeRefusesWorkflowsBesideExtends(t *testing.T) {
+	const want = "remove workflows or extends: a harness section that extends a stack takes the workflows of its base"
+	_, err := compose(t, &Stack{Extends: Source{Path: "../base"}, Modules: []Module{{Name: "app"}}, Workflows: map[string]Workflow{"fix": {Access: AccessWrite}}})
+	if err == nil || !strings.HasSuffix(err.Error(), ": "+want) {
+		t.Errorf("%v, want %q", err, want)
+	}
+}

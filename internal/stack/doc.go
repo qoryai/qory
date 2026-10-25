@@ -21,8 +21,8 @@
 //
 // [Load] refuses an unknown field, a second document in the file, an apiVersion other
 // than [APIVersion] or a retired spelling of it, a stack with a target or with extends, a
-// checkout's qory.yaml with an extending block, or without extends and without
-// target.runtime, an empty module list, a module without a name or with a name that is
+// checkout's qory.yaml with an extending block, with extends and workflows, or without
+// extends and without target.runtime, an empty module list, a module without a name or with a name that is
 // not one path segment, two modules with the same name, a path source without its path, a
 // git source without its ref or with a path leaving the repository, a ref without a git
 // source, a source that selects both a path inside a git repository and an export, or

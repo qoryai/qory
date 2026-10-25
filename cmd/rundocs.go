@@ -85,8 +85,10 @@ type codeRun struct {
 	settings []provisioner.Setting
 	// harness is the documents' harness document as JSON, which qory composes in place of
 	// the checkout's file; nil when the documents contain none, and the run composes the
-	// checkout's qory.yaml or harness.yaml.
+	// checkout's qory.yaml or harness.yaml. defines is set when the harness section has
+	// no extends and defines a stack.
 	harness  []byte
+	defines  bool
 	named    *source.Named
 	workflow string
 	inputs   []byte
@@ -132,17 +134,6 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 		return nil, errors.New("set a workflow for the workspace in Qory Apiary, then take the work item in again: the response to the run code has no workflow" + codeUsed)
 	}
 	hidden := doc.HarnessHidden != nil && *doc.HarnessHidden
-	var harness []byte
-	if doc.Harness != nil {
-		if err := harnessChecked(doc.Harness, hidden); err != nil {
-			return nil, err
-		}
-		var err error
-		if harness, err = json.MarshalIndent(doc.Harness, "", "  "); err != nil {
-			return nil, fmt.Errorf("update qory: qory could not write the harness of the response to the run code: %v%s", err, codeUsed)
-		}
-		harness = append(harness, '\n')
-	}
 	var minutes int
 	if doc.RunSettings != nil {
 		minutes = doc.RunSettings.TimeLimitMinutes
@@ -151,15 +142,50 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if !isClaude(runtime) {
 		return nil, fmt.Errorf("set the runtime claude for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow on claude alone, and the response to the run code sets the runtime %s%s", accesskey.ShownName(runtime, false), codeUsed)
 	}
+	var harness []byte
+	defines := doc.Harness != nil && doc.Harness.Harness.Extends == nil
+	if doc.Harness != nil {
+		if err := harnessChecked(doc.Harness, hidden); err != nil {
+			return nil, err
+		}
+		var written any = doc.Harness
+		if defines {
+			written = definedHarness{Harness: definedSection{HarnessSection: doc.Harness.Harness, Target: definedTarget{Runtime: runtime}}}
+		}
+		var err error
+		if harness, err = json.MarshalIndent(written, "", "  "); err != nil {
+			return nil, fmt.Errorf("update qory: qory could not write the harness of the response to the run code: %v%s", err, codeUsed)
+		}
+		harness = append(harness, '\n')
+	}
 	var target preparation.Target
 	if doc.Target != nil {
 		target = preparation.Target{System: doc.Target.System, Path: doc.Target.Path, Version: doc.TargetVersion}
 	}
-	r := &codeRun{runtime: runtime, settings: settings, harness: harness, workflow: doc.Workflow, inputs: doc.Inputs, minutes: minutes, hidden: hidden, target: target}
+	r := &codeRun{runtime: runtime, settings: settings, harness: harness, defines: defines, workflow: doc.Workflow, inputs: doc.Inputs, minutes: minutes, hidden: hidden, target: target}
 	if hidden {
 		r.named = source.NewNamed(r.phrase())
 	}
 	return r, nil
+}
+
+// definedHarness is a harness document whose section defines a stack, as qory writes it
+// to [harnessFile]: the section with target.runtime set to the run's runtime. The
+// documents' section has no target, and the compose of a stack that a section defines
+// requires one; the run's runtime is the one the compose takes, as --runtime sets it.
+type definedHarness struct {
+	Harness definedSection `json:"harness"`
+}
+
+// definedSection is the section of a [definedHarness].
+type definedSection struct {
+	contracts.HarnessSection
+	Target definedTarget `json:"target"`
+}
+
+// definedTarget is the target of a [definedSection].
+type definedTarget struct {
+	Runtime string `json:"runtime"`
 }
 
 // harnessChecked stops h, the documents' harness document, before anything is fetched,
@@ -173,8 +199,10 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 // of a URL that is not https shows the URL, and only when the harness is not hidden:
 // then an scp form such as git@host:path shows with its user.
 func harnessChecked(h *contracts.HarnessDocument, hidden bool) error {
-	if err := sourceChecked("extends", h.Harness.Extends.Git, h.Harness.Extends.Path, hidden); err != nil {
-		return err
+	if b := h.Harness.Extends; b != nil {
+		if err := sourceChecked("extends", b.Git, b.Path, hidden); err != nil {
+			return err
+		}
 	}
 	for i, m := range h.Harness.Modules {
 		what := fmt.Sprintf("modules[%d]", i)
@@ -355,16 +383,19 @@ func (r *codeRun) fetchTarget() preparation.Target {
 }
 
 // timedOutLine is the line of a run from a run code whose time limit, limit, came before
-// the runtime started: [timedOutBeforeJoin] for a run that cannot take --timeout. A
-// harness document always extends a stack; the checkout's file may extend none, and
-// then only Qory Apiary sets the limit, since the harness section of a qory.yaml has no
-// workflows.
+// the runtime started: [timedOutBeforeJoin] for a run that cannot take --timeout. The
+// workflows are in the stack the harness defines, or in the base it extends: a harness
+// document does one of the two, and defines is set when it defines a stack. The
+// checkout's file may do either, so its line lists both.
 func (r *codeRun) timedOutLine(limit time.Duration, runtime string) string {
-	base := "the base of " + r.phrase()
-	if r.harness == nil {
-		base += ", when it has one"
+	where := "the base of " + r.phrase()
+	switch {
+	case r.harness == nil:
+		where = r.phrase() + " or the base it extends"
+	case r.defines:
+		where = r.phrase()
 	}
-	return fmt.Sprintf("set a longer time_limit_minutes in Qory Apiary, or a longer workflows.%s.time_limit in %s: the run was cancelled at its time limit of %s, before %s started", r.workflow, base, limit, agentName(runtime))
+	return fmt.Sprintf("set a longer time_limit_minutes in Qory Apiary, or a longer workflows.%s.time_limit in %s: the run was cancelled at its time limit of %s, before %s started", r.workflow, where, limit, agentName(runtime))
 }
 
 // startLine is the line qory run prints once the answer to the run code is read.
