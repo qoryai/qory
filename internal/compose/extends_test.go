@@ -1,7 +1,10 @@
 package compose_test
 
 import (
+	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/qoryai/qory/internal/compose"
@@ -44,5 +47,53 @@ func TestExtendKeepsTheDocumentsTarget(t *testing.T) {
 	}
 	if len(res.Entries) != 1 || res.Entries[0].Module != "a" {
 		t.Errorf("entries = %+v, want the base's command alone", res.Entries)
+	}
+}
+
+// TestLoadBaseStopsABaseLinkedOutOfItsClone is a checkout's qory.yaml that extends a
+// git base whose qory-stack.yaml, or whose repository's qory.yaml, is a link to a file
+// outside the repository: the base is not read, and the error shows the base by its
+// address, since the harness is shown.
+func TestLoadBaseStopsABaseLinkedOutOfItsClone(t *testing.T) {
+	for _, c := range []struct{ link, want string }{
+		{"stacks/web/" + stack.FileName, ": qory-stack.yaml links outside the repository"},
+		{config.FileName, ": qory.yaml at the root of its repository links outside the repository"},
+	} {
+		t.Run(c.link, func(t *testing.T) {
+			isolateAll(t)
+			outside := filepath.Join(t.TempDir(), "elsewhere.yaml")
+			if err := os.WriteFile(outside, []byte("apiVersion: qory.dev/v1alpha1\nname: elsewhere\nextending: {}\nmodules:\n  - name: core\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			url := gitRepo(t, "", map[string]string{
+				"stacks/web/" + stack.FileName:  "apiVersion: qory.dev/v1alpha1\nname: web\nextending: {}\nmodules:\n  - name: core\n",
+				"modules/core/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: core\n",
+			})
+			dir := strings.TrimPrefix(url, "file://")
+			if err := os.Remove(filepath.Join(dir, filepath.FromSlash(c.link))); err != nil && !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(outside, filepath.Join(dir, filepath.FromSlash(c.link))); err != nil {
+				t.Fatal(err)
+			}
+			for _, args := range [][]string{{"add", "-A"}, {"-c", "user.name=Tester", "-c", "user.email=tester@example.com", "commit", "-q", "-m", "link"}} {
+				cmd := exec.Command("git", args...)
+				cmd.Dir = dir
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("git: %v\n%s", err, out)
+				}
+			}
+			checkout := writeTree(t, map[string]string{
+				config.FileName: "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {git: \"" + url + "\", ref: main, path: stacks/web}\n",
+			})
+			p, err := config.Compose(filepath.Join(checkout, config.FileName))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _, err = compose.LoadBase(p, "", compose.Options{Cache: t.TempDir()})
+			if want := "extends " + url + "#main:stacks/web" + c.want; err == nil || err.Error() != want {
+				t.Fatalf("got %v\nwant %s", err, want)
+			}
+		})
 	}
 }

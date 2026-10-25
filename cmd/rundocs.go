@@ -15,6 +15,7 @@ import (
 	"github.com/qoryai/integrations/contracts"
 	"github.com/spf13/cobra"
 
+	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/provisioner"
 	"github.com/qoryai/qory/internal/render"
@@ -24,10 +25,12 @@ import (
 )
 
 // A run from a run code takes everything but the run key from the documents of Qory
-// Apiary's signed answer to the code: the stack it composes, the workflow it starts, the
-// runtime and the compose flags, the inputs and the time limit. The documents are
-// run/v1 documents.schema.json, checked as [provisioner.ReadDocuments] describes. So the
-// person who starts the run gives none of them.
+// Apiary's signed answer to the code: the harness it composes, the workflow it starts,
+// the runtime and the compose flags, the inputs and the time limit. The harness is the
+// workspace's harness document when the documents contain one, and otherwise the
+// checkout's qory.yaml or harness.yaml. The documents are run/v1 documents.schema.json,
+// checked as [provisioner.ReadDocuments] describes. So the person who starts the run
+// gives none of them.
 
 // codeUsed ends each line of a run from a run code that stops after the redemption: the
 // one-use code cannot be redeemed again.
@@ -56,7 +59,7 @@ func fromAnswerOnly(cmd *cobra.Command, runtime string, extra []string) error {
 	}
 	switch {
 	case changed("file"):
-		return input(errors.New("leave out -f: a run from a run code takes its stack from Qory Apiary's response to the code"))
+		return input(errors.New("leave out -f: a run from a run code composes the harness in Qory Apiary's response to the code, or the checkout's qory.yaml or harness.yaml"))
 	case runtime != "":
 		return input(fmt.Errorf("leave out the runtime %s: a run from a run code takes its runtime from Qory Apiary's response to the code", accesskey.ShownName(runtime, false)))
 	case changed("model", "effort", "tier", "tier-effort"):
@@ -70,15 +73,17 @@ func fromAnswerOnly(cmd *cobra.Command, runtime string, extra []string) error {
 }
 
 // codeRun is what a run from a run code takes from the documents of the answer to the
-// code, checked: the runtime and the compose flags its run settings map to, the stack as
-// -f takes it, the workflow, the inputs as the documents have them, the run settings'
-// time_limit_minutes, 0 for none, and harness_hidden, which the documents set exactly
-// when they set the stack. named is set for a stack the documents set by its name, whose
-// address, stack_reference, is the stack -f takes and is shown in no text.
+// code, checked: the runtime and the compose flags its run settings map to, the
+// harness document, the workflow, the inputs as the documents have them, the run
+// settings' time_limit_minutes, 0 for none, and harness_hidden. named is set when
+// harness_hidden is true: no text of the run shows the address of a harness source.
 type codeRun struct {
 	runtime  string
 	settings []provisioner.Setting
-	stack    string
+	// harness is the documents' harness document as JSON, which qory composes in place of
+	// the checkout's file; nil when the documents contain none, and the run composes the
+	// checkout's qory.yaml or harness.yaml.
+	harness  []byte
 	named    *source.Named
 	workflow string
 	inputs   []byte
@@ -86,10 +91,20 @@ type codeRun struct {
 	hidden   bool
 }
 
-// stackReferencePrefix starts a stack reference, url#ref:path, whose url is https. A
-// stack name, the other form of the documents' stack, is a lower-case letter, then
-// lower-case letters, digits and hyphens, so it never starts so.
-const stackReferencePrefix = "https://"
+// The harness of a run from a run code as a text shows it: the documents' harness
+// document, from the workspace's settings in Qory Apiary, or the checkout's qory.yaml or
+// harness.yaml.
+const (
+	workspaceHarness = "the workspace's harness"
+	checkoutHarness  = "the checkout's harness"
+)
+
+// inSettings is where the harness document of the documents is set.
+const inSettings = "of the harness in the workspace's settings in Qory Apiary"
+
+// harnessFile is the file in the run directory that qory writes the documents' harness
+// document to, mode 0600, and composes as -f does.
+const harnessFile = "harness.yaml"
 
 // codeDocumentsOf reads documents, the documents of the answer to a run code, for a
 // step qory runs: explore, which [codeRunOf] reads further, or prebuild, which
@@ -106,20 +121,23 @@ func codeDocumentsOf(documents json.RawMessage) (contracts.Documents, error) {
 }
 
 // codeRunOf reads doc, the documents of the answer to a run code for the step explore.
-// Each error is exit 1 and ends with [codeUsed].
+// Each error ends with [codeUsed]: a source of the harness document that qory does not
+// fetch is an input error, see [harnessChecked], and every other error is exit 1.
 func codeRunOf(doc contracts.Documents) (*codeRun, error) {
-	switch {
-	case doc.Stack == "":
-		return nil, errors.New("set a stack for the workspace in Qory Apiary, then take the work item in again: the response to the run code has no stack and no workflow" + codeUsed)
+	if doc.Workflow == "" {
+		return nil, errors.New("set a workflow for the workspace in Qory Apiary, then take the work item in again: the response to the run code has no workflow" + codeUsed)
 	}
-	stackFile := doc.Stack
-	var named *source.Named
-	if !strings.HasPrefix(doc.Stack, stackReferencePrefix) {
-		var err error
-		if named, err = namedStackOf(doc); err != nil {
+	hidden := doc.HarnessHidden != nil && *doc.HarnessHidden
+	var harness []byte
+	if doc.Harness != nil {
+		if err := harnessChecked(doc.Harness, hidden); err != nil {
 			return nil, err
 		}
-		stackFile = doc.StackReference
+		var err error
+		if harness, err = json.MarshalIndent(doc.Harness, "", "  "); err != nil {
+			return nil, fmt.Errorf("update qory: qory could not write the harness of the response to the run code: %v%s", err, codeUsed)
+		}
+		harness = append(harness, '\n')
 	}
 	var minutes int
 	if doc.RunSettings != nil {
@@ -129,44 +147,109 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if !isClaude(runtime) {
 		return nil, fmt.Errorf("set the runtime claude for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow on claude alone, and the response to the run code sets the runtime %s%s", accesskey.ShownName(runtime, false), codeUsed)
 	}
-	return &codeRun{
-		runtime: runtime, settings: settings, workflow: doc.Workflow, inputs: doc.Inputs, minutes: minutes, stack: stackFile, named: named,
-		hidden: doc.HarnessHidden != nil && *doc.HarnessHidden,
-	}, nil
+	r := &codeRun{runtime: runtime, settings: settings, harness: harness, workflow: doc.Workflow, inputs: doc.Inputs, minutes: minutes, hidden: hidden}
+	if hidden {
+		r.named = source.NewNamed(r.phrase())
+	}
+	return r, nil
 }
 
-// namedStackOf is the named stack of doc, documents whose stack is a stack name: the
-// name, and the address of stack_reference, checked before the stack is fetched. An
-// address that is not a stack reference, whose URL has a user part or an @ before its
-// path, or whose host has a character outside ASCII, stops the run with a line that
-// shows neither the address nor the user part. Each error is exit 1
-// and ends with [codeUsed].
-func namedStackOf(doc contracts.Documents) (*source.Named, error) {
-	name := accesskey.ShownName(doc.Stack, false)
-	if doc.StackReference == "" {
-		return nil, fmt.Errorf("ask the instance admin of Qory Apiary to set the address of the stack %s in Qory Apiary's list of stacks: the response to the run code sets the stack %s by its name and has no address for it%s", name, name, codeUsed)
+// harnessChecked stops h, the documents' harness document, before anything is fetched,
+// when a source of it is one that qory does not fetch: a folder, {path}; a URL with a
+// scheme that has a user part, a user name or a password, or an @ between :// and the
+// first / after it; one that url.Parse cannot read; one whose host has a character
+// outside ASCII; one that is not https; and a path that is absolute, the repository's
+// root, or leads out of the repository. The schema of the documents allows no folder;
+// this check does not depend on it. Each error is an input error and starts with the
+// fix in the workspace's settings in Qory Apiary. No error shows a path. Only the error
+// of a URL that is not https shows the URL, and only when the harness is not hidden:
+// then an scp form such as git@host:path shows with its user.
+func harnessChecked(h *contracts.HarnessDocument, hidden bool) error {
+	if err := sourceChecked("extends", h.Harness.Extends.Git, h.Harness.Extends.Path, hidden); err != nil {
+		return err
 	}
-	unreadable := fmt.Errorf("set the address of the stack %s in Qory Apiary's list of stacks as %s: qory could not read the address as a stack reference%s", name, stack.ReferenceForm, codeUsed)
-	user := fmt.Errorf("set the address of the stack %s in Qory Apiary's list of stacks without a user name or password: the address has a user part, and qory fetches a named stack with no credential%s", name, codeUsed)
-	// The schema of the documents allows no @ there; this check does not depend on it.
-	if stack.AtBeforePath(doc.StackReference) {
-		return nil, user
+	for i, m := range h.Harness.Modules {
+		what := fmt.Sprintf("modules[%d]", i)
+		if m.Name != "" {
+			what = "the module " + accesskey.ShownName(m.Name, false)
+		}
+		if err := sourceChecked(what, m.Source.Git, m.Source.Path, hidden); err != nil {
+			return err
+		}
 	}
-	ref, ok, err := stack.ParseReference(doc.StackReference)
-	if err != nil || !ok {
-		return nil, unreadable
+	return nil
+}
+
+// sourceChecked is [harnessChecked] for one source, what, such as extends or the module
+// tools, whose git URL is git and whose path in its repository is folder.
+func sourceChecked(what, git, folder string, hidden bool) error {
+	what += " " + inSettings
+	if git == "" {
+		return input(fmt.Errorf("set %s to an https source: it is a folder, and a run from a run code reads no folder of this machine%s", what, codeUsed))
 	}
-	u, err := url.Parse(ref.Git)
+	if strings.Contains(git, "://") {
+		u, err := url.Parse(git)
+		switch {
+		case stack.AtBeforePath(git) || err == nil && u.User != nil:
+			return input(fmt.Errorf("remove the user name and password from the URL of %s: the run's stack proxy fetches the harness with no credential%s", what, codeUsed))
+		case err != nil:
+			return input(fmt.Errorf("correct the URL of %s: qory could not read it as a URL%s", what, codeUsed))
+		case stack.NonASCIIHost(git):
+			return input(fmt.Errorf("write the host in the URL of %s in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @%s", what, codeUsed))
+		}
+	}
+	if source.HTTPSFix(git, "") != "" {
+		cause := "its URL is not an https URL with a host"
+		if !hidden {
+			cause = exports.URL(git) + " is not an https URL with a host"
+		}
+		return input(fmt.Errorf("set %s to an https source: %s, and qory fetches a harness only over https%s", what, cause, codeUsed))
+	}
+	if clean := filepath.Clean(folder); folder != "" && (filepath.IsAbs(clean) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator))) {
+		return input(fmt.Errorf("set the path of %s to a folder inside its repository: the path is absolute, the repository's root, or leads out of the repository%s", what, codeUsed))
+	}
+	return nil
+}
+
+// phrase is r's harness as a text shows it: [workspaceHarness] for a harness document,
+// [checkoutHarness] for the checkout's file.
+func (r *codeRun) phrase() string {
+	if r.harness != nil {
+		return workspaceHarness
+	}
+	return checkoutHarness
+}
+
+// writeHarness writes r's harness document to [harnessFile], mode 0600, in dir, the run
+// directory, and returns the file's path.
+func (r *codeRun) writeHarness(dir string) (string, error) {
+	file := filepath.Join(dir, harnessFile)
+	f, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err == nil {
+		_, err = f.Write(r.harness)
+		if closeErr := f.Close(); err == nil {
+			err = closeErr
+		}
+	}
 	if err != nil {
-		return nil, unreadable
+		return "", fmt.Errorf("check the run's folder %s: qory run could not write the workspace's harness there: %w%s", exports.Value(dir, false), exports.HideError(err), codeUsed)
 	}
-	if u.User != nil {
-		return nil, user
+	return file, nil
+}
+
+// noHarness stops r, a run whose documents contain no harness document, in a checkout at
+// root that has no qory.yaml or harness.yaml, before anything is fetched. Qory Apiary
+// sends a run that composes a harness either a harness document or the version of a
+// target whose harness file it read, so this stop is a guard.
+func (r *codeRun) noHarness(root string) error {
+	if r.harness != nil {
+		return nil
 	}
-	if stack.NonASCIIHost(ref.Git) {
-		return nil, fmt.Errorf("write the host in the address of the stack %s in Qory Apiary's list of stacks in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @%s", name, codeUsed)
+	if file, err := config.FileIn(root); err != nil || file != "" {
+		// A checkout with both names gets the compose's error.
+		return nil
 	}
-	return source.NewNamed(doc.Stack, doc.StackReference, ref), nil
+	return &runLineError{errors.New("take the work item in again in Qory Apiary: the run's documents contain no harness and the checkout has no qory.yaml or harness.yaml" + codeUsed)}
 }
 
 // apply sets the compose flags of r on cmd, as a person sets them on qory run.
@@ -186,25 +269,24 @@ type givenMount struct {
 	from string
 }
 
-// reportExposed stops, as input, a walled run of a named stack whose agent's container
-// would get a harness report, which contains the stack's address. The container gets
-// each mount of given, the checkout at root and the working folder cwd, both writable,
-// and the home, read-only. The run stops when a mount of given, the checkout or the
-// working folder is, contains or lies inside qory's folder in the cache directory,
-// <cache>/qory, where qory writes the home and harness report of each run with a run
-// key or a run code and no --home or harness.home; when one of them is or contains
-// report, this run's harness report, beside its home; and when the home is or contains
-// <cache>/qory. A home that lies inside it, as the default one under <cache>/qory/homes
-// does, passes: report is beside it, and the other runs' reports are not inside it. The
-// paths are compared as Forager compares a mount, by [session.Overlap]: by file through
-// links and in any letter case on a disk that ignores case. A stack reference passes,
-// and so does the cache folder when the lookup of the cache directory fails, as qory
-// then writes no home under it. It runs before the stack is fetched and before the run
-// writes its inputs, home or report; each error ends with [codeUsed].
+// reportExposed stops, as input, a walled run from a run code whose agent's container
+// would get a harness report, which contains the address of each harness source. It
+// stops a run whose harness is shown as well: through <cache>/qory, such a run would
+// read the reports of the runs on this machine whose harness is hidden. The container
+// gets each mount of given, the checkout at root and the working folder cwd, both
+// writable, and the home, read-only. The run stops when a mount of given, the checkout
+// or the working folder is, contains or lies inside qory's folder in the cache
+// directory, <cache>/qory, where qory writes the home and harness report of each run
+// with a run key or a run code and no --home or harness.home; when one of them is or
+// contains report, this run's harness report, beside its home; and when the home is or
+// contains <cache>/qory. A home that lies inside it, as the default one under
+// <cache>/qory/homes does, passes: report is beside it, and the other runs' reports are
+// not inside it. The paths are compared as Forager compares a mount, by
+// [session.Overlap]: by file through links and in any letter case on a disk that
+// ignores case. The cache folder passes when the lookup of the cache directory fails,
+// as qory then writes no home under it. It runs before the harness is fetched and
+// before the run writes its inputs, home or report; each error ends with [codeUsed].
 func (r *codeRun) reportExposed(root, cwd, home, report string, given []givenMount) error {
-	if r.named == nil {
-		return nil
-	}
 	cache := ""
 	if base, err := os.UserCacheDir(); err == nil {
 		cache = filepath.Join(base, "qory")
@@ -254,40 +336,22 @@ func (r *codeRun) reportExposed(root, cwd, home, report string, given []givenMou
 	return nil
 }
 
-// shownStack is r's stack as a line prints it after "the stack": the name of a named
-// stack, and otherwise the reference as [exports.URL] prints it.
-func (r *codeRun) shownStack() string {
-	if r.named != nil {
-		return accesskey.ShownName(r.named.Stack, false)
-	}
-	return exports.URL(r.stack)
-}
-
-// reference is r's stack as -f takes it, read as a stack reference; the zero source for
-// a stack that is not one.
-func (r *codeRun) reference() stack.Source {
-	ref, _, _ := stack.ParseReference(r.stack)
-	return ref
-}
-
-// stackOf is r's stack as the start line prints it after "of": the stack core for a
-// named stack, and otherwise the reference as [exports.URL] prints it.
-func (r *codeRun) stackOf() string {
-	if r.named != nil {
-		return r.named.Phrase()
-	}
-	return exports.URL(r.stack)
-}
-
 // timedOutLine is the line of a run from a run code whose time limit, limit, came before
-// the runtime started: [timedOutBeforeJoin] for a run that cannot take --timeout.
+// the runtime started: [timedOutBeforeJoin] for a run that cannot take --timeout. A
+// harness document always extends a stack; the checkout's file may extend none, and
+// then only Qory Apiary sets the limit, since the harness section of a qory.yaml has no
+// workflows.
 func (r *codeRun) timedOutLine(limit time.Duration, runtime string) string {
-	return fmt.Sprintf("set a longer time_limit_minutes in Qory Apiary, or a longer workflows.%s.time_limit in the stack %s: the run was cancelled at its time limit of %s, before %s started", r.workflow, r.shownStack(), limit, agentName(runtime))
+	base := "the base of " + r.phrase()
+	if r.harness == nil {
+		base += ", when it has one"
+	}
+	return fmt.Sprintf("set a longer time_limit_minutes in Qory Apiary, or a longer workflows.%s.time_limit in %s: the run was cancelled at its time limit of %s, before %s started", r.workflow, base, limit, agentName(runtime))
 }
 
 // startLine is the line qory run prints once the answer to the run code is read.
 func (r *codeRun) startLine(runID string) string {
-	return fmt.Sprintf("qory run: the run %s starts the workflow %s of %s on %s", runID, r.workflow, r.stackOf(), r.runtime)
+	return fmt.Sprintf("qory run: the run %s starts the workflow %s of %s on %s", runID, r.workflow, r.phrase(), r.runtime)
 }
 
 // writeInputs writes r's inputs, unchanged, to inputs.json, mode 0600, in a new folder
@@ -334,7 +398,7 @@ func (r *codeRun) workflowArgs(name string, rep report.Report, in string) ([]str
 		registered, ok = addresses["commands"][r.workflow]
 	}
 	if !ok {
-		return nil, fmt.Errorf("add a skill or command %s to the stack %s, or set another workflow in Qory Apiary: the composed harness has no skill or command %s%s", r.workflow, r.shownStack(), r.workflow, codeUsed)
+		return nil, fmt.Errorf("add a skill or command %s to %s, or set another workflow in Qory Apiary: the composed harness has no skill or command %s%s", r.workflow, r.phrase(), r.workflow, codeUsed)
 	}
 	prompt := "/" + registered + " " + filepath.Join(in, inputsFile)
 	return []string{"--output-format", "stream-json", "--verbose", "--add-dir", in, "-p", prompt}, nil

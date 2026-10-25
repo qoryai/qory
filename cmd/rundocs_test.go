@@ -25,11 +25,11 @@ import (
 )
 
 // codeDocuments are the documents of an answer to a run code: the contract's run/v1
-// documents fixture explore-stack-reference.json, a stack reference and the workflow
-// hello among them, with change applied to its members.
+// documents fixture explore-workflow.json, the workflow hello, harness_hidden true and
+// a target_version among them, with change applied to its members.
 func codeDocuments(t *testing.T, change func(map[string]any)) json.RawMessage {
 	t.Helper()
-	b, err := fs.ReadFile(contracts.RunFS, "fixtures/documents/explore-stack-reference.json")
+	b, err := fs.ReadFile(contracts.RunFS, "fixtures/documents/explore-workflow.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestARunCodeTakesNoStackRuntimeOrArguments(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"-f", "https://code.example.com/acme/stacks#main:hello"}, "leave out -f: a run from a run code takes its stack from Qory Apiary's response to the code"},
+		{[]string{"-f", "https://code.example.com/acme/stacks#main:hello"}, "leave out -f: a run from a run code composes the harness in Qory Apiary's response to the code, or the checkout's qory.yaml or harness.yaml"},
 		{[]string{"claude"}, "leave out the runtime claude: a run from a run code takes its runtime from Qory Apiary's response to the code"},
 		{[]string{"--model", "example-large"}, from},
 		{[]string{"--effort", "high"}, from},
@@ -89,12 +89,12 @@ func TestARunCodeTakesNoStackRuntimeOrArguments(t *testing.T) {
 }
 
 // TestARunCodeWhoseAnswerQoryDoesNotRunStops is a redemption whose documents qory does
-// not run: none, documents that break the schema, a step other than explore and
-// prebuild, a prebuild on a machine whose forager.yaml has no wall, no stack, a stack
-// by its name without its address or with an @ before the path of its address, which
-// the schema does not allow, and another runtime than claude. Each stops the run after the one redemption, before it
-// opens, with a line that starts with its fix and ends "; the code is used": exit 2 for
-// an answer with no documents, which Forager refuses, and exit 1 for the rest.
+// not run: none, documents that break the schema, a stack or a stack_reference, which
+// the schema does not allow, a step other than explore and prebuild, a prebuild on a
+// machine whose forager.yaml has no wall, no workflow, and another runtime than claude.
+// Each stops the run after the one redemption, before it opens, with a line that starts
+// with its fix and ends "; the code is used": exit 2 for an answer with no documents,
+// which Forager refuses, and exit 1 for the rest.
 func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 	const checks = "update qory, or ask Qory Apiary's instance admin: the response to the run code does not pass qory's checks: "
 	const broken = checks + "it breaks documents.schema.json; the code is used"
@@ -118,27 +118,12 @@ func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 		{"another step", json.RawMessage(`{"step":"triage","domain":"software","inputs":{"version":1}}`),
 			"update qory: the response to the run code is for the step triage, and qory runs a run code's run for the steps explore and prebuild only; the code is used"},
 		{"prebuild with no wall", preDocs, "set wall.image, pinned by its digest, wall.user and wall.helper in forager.yaml: a prebuild from a run code builds with them; the code is used"},
-		{"no stack", codeDocuments(t, func(d map[string]any) { delete(d, "stack"); delete(d, "workflow"); delete(d, "harness_hidden") }),
-			"set a stack for the workspace in Qory Apiary, then take the work item in again: the response to the run code has no stack and no workflow; the code is used"},
-		{"a stack by its name without its address", codeDocuments(t, func(d map[string]any) { d["stack"] = "core" }), broken},
-		{"a stack address with an @ after ?", codeDocuments(t, func(d map[string]any) {
-			d["stack"], d["stack_reference"] = "core", "https://code.example.com?@evil.example/team/stacks#release-7:core"
+		{"no workflow", codeDocuments(t, func(d map[string]any) { delete(d, "workflow"); delete(d, "harness_hidden") }),
+			"set a workflow for the workspace in Qory Apiary, then take the work item in again: the response to the run code has no workflow; the code is used"},
+		{"a stack", codeDocuments(t, func(d map[string]any) { d["stack"] = "core" }), broken},
+		{"a stack reference", codeDocuments(t, func(d map[string]any) {
+			d["stack"], d["stack_reference"] = "core", "https://code.example.com/team/stacks#release-7:core"
 		}), broken},
-		{"a stack address with an @ after #", codeDocuments(t, func(d map[string]any) {
-			d["stack"], d["stack_reference"] = "core", "https://code.example.com#@evil.example/team/stacks#release-7:core"
-		}), broken},
-		{"a stack address with an @ after %3F", codeDocuments(t, func(d map[string]any) {
-			d["stack"], d["stack_reference"] = "core", "https://code.example.com%3F@evil.example/team/stacks#release-7:core"
-		}), broken},
-		{"a stack address with an @ after a backslash", codeDocuments(t, func(d map[string]any) {
-			d["stack"], d["stack_reference"] = "core", "https://code.example.com\\@evil.example/team/stacks#release-7:core"
-		}), broken},
-		{"a stack address with an @ after a port", codeDocuments(t, func(d map[string]any) {
-			d["stack"], d["stack_reference"] = "core", "https://code.example.com:443@evil.example/team/stacks#release-7:core"
-		}), broken},
-		{"a stack address with an encoded fullwidth : and @ in its host", codeDocuments(t, func(d map[string]any) {
-			d["stack"], d["stack_reference"] = "core", "https://u%EF%BC%9Ap%EF%BC%A0code.example.com/team/stacks#main:core"
-		}), "write the host in the address of the stack core in Qory Apiary's list of stacks in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @; the code is used"},
 		{"another runtime", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": "codex"} }),
 			"set the runtime claude for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow on claude alone, and the response to the run code sets the runtime codex; the code is used"},
 	} {
@@ -186,9 +171,10 @@ type codeRun struct {
 	calls    []string
 }
 
-// runFromCode runs qory run from a run code whose documents start the workflow of the
-// stack examples/hello of a repository the host proxy serves, with the stack file
-// changed by stackFile and the documents by change, and opens the run nowhere.
+// runFromCode runs qory run from a run code whose documents start the workflow of a
+// harness document that extends the stack examples/hello of a repository that the
+// run's stack proxy serves, with the stack file changed by stackFile and the documents
+// by change, and opens the run nowhere.
 func runFromCode(t *testing.T, stackFile func(string) string, change func(map[string]any)) codeRun {
 	t.Helper()
 	return runFromCodeWith(t, nil, nil, stackFile, change)
@@ -220,12 +206,13 @@ func runFromCodeGiven(t *testing.T, before func(code string) []string, args []st
 	if stackFile != nil {
 		files["examples/hello/qory-stack.yaml"] = stackFile(files["examples/hello/qory-stack.yaml"])
 	}
+	files["examples/hello/qory-stack.yaml"] += extendable
 	h := newHostFetch(t, "", "main")
 	commit := h.server.RepositoryWithLinks(t, "example-org/hello", "main", files, links)
 	url := h.server.URL("example-org/hello")
 	g := newCodeRelay(t)
 	g.documents = codeDocuments(t, func(d map[string]any) {
-		d["stack"] = url + "#" + commit + ":examples/hello"
+		d["harness"] = map[string]any{"harness": map[string]any{"extends": map[string]any{"git": url, "ref": commit, "path": "examples/hello"}}}
 		if change != nil {
 			change(d)
 		}
@@ -250,6 +237,7 @@ func runFromCodeGiven(t *testing.T, before func(code string) []string, args []st
 	}
 	_, calls, restore := cmd.OpenNowhereWith(cmd.Nowhere{
 		System: proxygittest.Host, Proxy: h.server.Proxy.URL, CABundle: h.server.Proxy.CABundle, Dir: h.runDir,
+		StackProxy: h.server.Proxy.URL, StackCABundle: h.server.Proxy.CABundle,
 		OnOpen: func(s session.OpenSpec) { r.open = s },
 	})
 	defer restore()
@@ -264,9 +252,10 @@ func runFromCodeGiven(t *testing.T, before func(code string) []string, args []st
 	return r
 }
 
-// TestARunCodeStartsItsWorkflow is a run from a run code whose answer sets the stack
-// examples/hello at a commit, the workflow hello and a model: qory composes the fetched
-// stack with the model, prints which workflow of which stack starts, and starts the
+// TestARunCodeStartsItsWorkflow is a run from a run code whose answer contains a harness
+// document that extends the stack examples/hello at a commit, the workflow hello and a
+// model: qory composes the fetched harness with the model, prints which workflow of
+// which harness starts, and starts the
 // command hello, by the name Claude Code registers it under, with the path of
 // inputs.json, which contains the documents' inputs as they came, mode 0600 in a folder
 // of mode 0700, which the agent may read and qory removes once the run ends. The
@@ -285,9 +274,7 @@ func TestARunCodeStartsItsWorkflow(t *testing.T) {
 	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
-	wants(t, r.out, "qory run: the run "+keyRunID+" starts the workflow hello of <url>#")
-	wants(t, r.out, ":examples/hello on claude\n", "qory run: composed ")
-	wants(t, r.out, "qory run: the run "+keyRunID+" starts the workflow hello of <url>#"+r.commit+":examples/hello on claude\n")
+	wants(t, r.out, "qory run: the run "+keyRunID+" starts the workflow hello of the workspace's harness on claude\n", "qory run: composed ")
 	if r.inputDir == "" {
 		t.Fatalf("no --add-dir in %q", r.spec.Args)
 	}
@@ -313,7 +300,7 @@ func TestARunCodeStartsItsWorkflow(t *testing.T) {
 }
 
 // TestARunCodeWithoutAWorkflowTimeLimitRunsThreeHours is a run from a run code whose
-// stack sets no time_limit for its workflow: the session's time limit is 3 hours.
+// base sets no time_limit for its workflow: the session's time limit is 3 hours.
 func TestARunCodeWithoutAWorkflowTimeLimitRunsThreeHours(t *testing.T) {
 	r := runFromCode(t, nil, nil)
 	if !r.joined {
@@ -324,15 +311,15 @@ func TestARunCodeWithoutAWorkflowTimeLimitRunsThreeHours(t *testing.T) {
 	}
 }
 
-// TestARunCodeWhoseStackHasNoWorkflowStops is a run from a run code whose workflow is no
-// skill or command of the composed harness: the run stops before the session joins,
+// TestARunCodeWhoseHarnessHasNoWorkflowStops is a run from a run code whose workflow is
+// no skill or command of the composed harness: the run stops before the session joins,
 // exit 1, with a line that starts with its fix.
-func TestARunCodeWhoseStackHasNoWorkflowStops(t *testing.T) {
+func TestARunCodeWhoseHarnessHasNoWorkflowStops(t *testing.T) {
 	r := runFromCode(t, nil, func(d map[string]any) { d["workflow"] = "deploy" })
 	if r.joined || cmd.ExitCode(r.err) != 1 {
 		t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
-	wants(t, r.out+strings.ReplaceAll(r.err.Error(), r.url, "<url>"), "add a skill or command deploy to the stack <url>#", ":examples/hello, or set another workflow in Qory Apiary: the composed harness has no skill or command deploy; the code is used")
+	wants(t, r.out+r.err.Error(), "add a skill or command deploy to the workspace's harness, or set another workflow in Qory Apiary: the composed harness has no skill or command deploy; the code is used")
 }
 
 // TestAWalledRunCodeMountsItsInputsReadOnly is a walled run from a run code: the folder

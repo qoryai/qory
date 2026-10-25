@@ -197,10 +197,6 @@ type Options struct {
 	// Git, when set, fetches every git source through a run's host proxy, see
 	// [source.Git]; nil fetches with the person's git.
 	Git *source.Git
-	// CheckoutGit, when set, fetches the git sources of the modules that are not the
-	// base's in place of Git: the modules of the checkout's document, when a named stack,
-	// which Git fetches, is the base the document composes on.
-	CheckoutGit *source.Git
 	// Env are the configuration's variables, written over what the modules export.
 	Env map[string]string
 	// Base is the base stack [LoadBase] resolved, recorded in the result and enforced on
@@ -267,13 +263,9 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		if pl.Name == "" {
 			who = "module at " + ps.Shown()
 		}
-		git := opts.Git
-		if opts.CheckoutGit != nil && !pl.Base {
-			git = opts.CheckoutGit
-		}
-		so := source.Options{Pin: opts.Pins[ps.String()], Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Memo: opts.Memo, Git: git}
-		if git != nil && git.Named != nil {
-			so.Name = git.Named.Module(pl.Name)
+		so := source.Options{Pin: opts.Pins[ps.String()], Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Memo: opts.Memo, Git: opts.Git}
+		if opts.Git != nil && opts.Git.Named != nil {
+			so.Name = opts.Git.Named.Module(pl.Name)
 		}
 		if pl.Base && opts.Base != nil && ps.Git != "" && ps.Git == p.Extends.Git && ps.Ref == p.Extends.Ref {
 			// A base module in the base's own clone was fetched with the base this compose:

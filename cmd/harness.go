@@ -500,17 +500,20 @@ type composeOptions struct {
 	// hidden is set for a run whose documents set harness_hidden: the home contains
 	// copies of every module's files, as for a walled run, so it contains no link.
 	hidden bool
-	// git, when set, fetches every git source through a run's host proxy, into cache, the
-	// run's cache: the compose of a run from a control plane, see [source.Git]. With a
-	// [source.Named], git fetches through the run's stack proxy, and checkoutGit, through
-	// the run's host proxy, fetches the git sources of the checkout's document when the
-	// document composes on the named stack; see [compose.Options.CheckoutGit].
-	git         *source.Git
-	checkoutGit *source.Git
-	cache       string
+	// git, when set, fetches every git source through a run's host proxy or stack proxy,
+	// into cache, the run's cache: the compose of a run from a control plane, see
+	// [source.Git]. With a [source.Named], no text shows the address of a git source.
+	git   *source.Git
+	cache string
+	// checkedAs, when set, is the harness as a text shows it, such as the workspace's
+	// harness, for a compose whose git goes through the run's stack proxy, which sets no
+	// credential: [compose.CheckAddresses] checks the modules' URLs once the base is
+	// read, before any module is fetched.
+	checkedAs string
 }
 
-// named is the named stack o composes, see [source.Named]; nil for any other compose.
+// named is the harness o composes with no address shown, see [source.Named]; nil for any
+// other compose.
 func (o composeOptions) named() *source.Named {
 	if o.git == nil {
 		return nil
@@ -939,9 +942,6 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	if o.git != nil {
 		opts.Git, opts.Cache = o.git, o.cache
 	}
-	if base != nil {
-		opts.CheckoutGit = o.checkoutGit
-	}
 	var basePin string
 	if previous.Base != nil && previous.Base.Source == p.Extends.String() {
 		basePin = previous.Base.Pin
@@ -951,6 +951,10 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	// is checked before it is read, and the modules once the base's modules are beside
 	// them.
 	var docIn bool
+	n := o.named()
+	if n != nil {
+		compose.NameSources(doc, n)
+	}
 	if o.inCheckout {
 		if docIn, err = extendsInCheckout(doc, base, root, o.file == "" || base != nil); err != nil {
 			return nil, input(err)
@@ -958,11 +962,6 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	}
 	if base != nil {
 		p, opts.Base, err = compose.ExtendOn(p, base, source.WorkingTree)
-		if n := o.named(); err == nil && n != nil && base.Name == "" {
-			// A named stack's folder is part of its address: a stack file with no name
-			// takes the stack's name, not its folder's.
-			opts.Base.Name = n.Stack
-		}
 		if err == nil && byRef {
 			// The base is the reference, as the report records it, on the commit it
 			// resolved to.
@@ -974,6 +973,14 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	}
 	if err != nil {
 		return nil, composeError(err)
+	}
+	if n != nil {
+		compose.NameSources(p, n)
+	}
+	if o.checkedAs != "" {
+		if err := compose.CheckAddresses(p, o.checkedAs); err != nil {
+			return nil, input(err)
+		}
 	}
 	if o.inCheckout {
 		if err := modulesInCheckout(p, doc, base, root, docIn); err != nil {

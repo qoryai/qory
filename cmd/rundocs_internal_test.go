@@ -17,22 +17,31 @@ import (
 
 // TestARunCodesTimeLimitLineNamesWhereTheLimitIsSet is the line of a run from a run code
 // whose time limit came before the runtime started: its fix is a longer limit in Qory
-// Apiary or in the workflow, never --timeout, which such a run does not take.
+// Apiary or in the workflows of the harness's base, never --timeout, which such a run
+// does not take. The harness is the workspace's for a run with a harness document, and
+// the checkout's for one without.
 func TestARunCodesTimeLimitLineNamesWhereTheLimitIsSet(t *testing.T) {
-	r := &codeRun{workflow: "example", stack: "https://code.example.com/acme/stacks#4b8e2f1a9c7d3e5b0a6f8c2d4e1b9a7c5f3d0e2b:stacks/example"}
-	want := "set a longer time_limit_minutes in Qory Apiary, or a longer workflows.example.time_limit in the stack https://code.example.com/acme/stacks#4b8e2f1a9c7d3e5b0a6f8c2d4e1b9a7c5f3d0e2b:stacks/example: the run was cancelled at its time limit of 45m0s, before claude started"
-	if got := r.timedOutLine(45*time.Minute, "claude"); got != want {
-		t.Errorf("got  %q\nwant %q", got, want)
+	for harness, want := range map[string]string{
+		"{}\n": "set a longer time_limit_minutes in Qory Apiary, or a longer workflows.example.time_limit in the base of the workspace's harness: the run was cancelled at its time limit of 45m0s, before claude started",
+		"":     "set a longer time_limit_minutes in Qory Apiary, or a longer workflows.example.time_limit in the base of the checkout's harness, when it has one: the run was cancelled at its time limit of 45m0s, before claude started",
+	} {
+		r := &codeRun{workflow: "example"}
+		if harness != "" {
+			r.harness = []byte(harness)
+		}
+		if got := r.timedOutLine(45*time.Minute, "claude"); got != want {
+			t.Errorf("got  %q\nwant %q", got, want)
+		}
 	}
 }
 
-// TestAWalledRunOfANamedStackWithAMountOfQorysCacheFolderStops is a walled run from a run
-// code whose stack is a name, with a mount from wall.mounts or --mount: a mount that is
-// qory's folder in the cache directory, contains it, lies inside it, or is a link to it
-// or to a folder above it stops the run, exit 2, before the stack is fetched; qory
-// writes the harness reports of runs from a run code there. Another mount, and a run of
-// a stack reference, pass.
-func TestAWalledRunOfANamedStackWithAMountOfQorysCacheFolderStops(t *testing.T) {
+// TestAWalledRunFromARunCodeWithAMountOfQorysCacheFolderStops is a walled run from a
+// run code, its harness hidden or shown, with a mount from wall.mounts or --mount: a
+// mount that is qory's folder in the cache directory, contains it, lies inside it, or
+// is a link to it or to a folder above it stops the run, exit 2, before the harness is
+// fetched; qory writes the harness reports of runs from a run code there. Another mount
+// passes.
+func TestAWalledRunFromARunCodeWithAMountOfQorysCacheFolderStops(t *testing.T) {
 	isolate(t)
 	base, err := os.UserCacheDir()
 	if err != nil {
@@ -53,9 +62,9 @@ func TestAWalledRunOfANamedStackWithAMountOfQorysCacheFolderStops(t *testing.T) 
 	}
 	// The home is the default one, which lies inside the cache folder and passes.
 	root, home, report := t.TempDir(), inside, inside+"-report.json"
-	named, reference := codeRunOfStack(t, "example"), codeRunOfStack(t, exampleStackReference)
-	if named.named == nil || named.stack != exampleStackReference || reference.named != nil {
-		t.Fatalf("the name runs %q, named %+v; the reference is named %+v", named.stack, named.named, reference.named)
+	named, reference := codeRunHidden(t, true), codeRunHidden(t, false)
+	if named.named == nil || reference.named != nil {
+		t.Fatalf("the hidden harness is named %+v; the shown one %+v", named.named, reference.named)
 	}
 	for _, c := range []struct{ path, how string }{
 		{cache, "is"}, {base, "contains"}, {filepath.Dir(base), "contains"}, {inside, "lies inside"}, {link, "is"}, {above, "contains"},
@@ -68,8 +77,8 @@ func TestAWalledRunOfANamedStackWithAMountOfQorysCacheFolderStops(t *testing.T) 
 			} else if code := ExitCode(err); code != 2 {
 				t.Errorf("the mount %s from %s: exit %d, want 2", c.path, from, code)
 			}
-			if err := reference.reportExposed(root, root, home, report, []givenMount{{path: c.path, from: from}}); err != nil {
-				t.Errorf("a stack reference with the mount %s: %v, want none", c.path, err)
+			if got, want := reference.reportExposed(root, root, home, report, []givenMount{{path: c.path, from: from}}), named.reportExposed(root, root, home, report, []givenMount{{path: c.path, from: from}}); got == nil || got.Error() != want.Error() {
+				t.Errorf("a shown harness with the mount %s: %v, want %v", c.path, got, want)
 			}
 		}
 	}
@@ -78,19 +87,11 @@ func TestAWalledRunOfANamedStackWithAMountOfQorysCacheFolderStops(t *testing.T) 
 	}
 }
 
-// exampleStackReference is the address of the named stack example in the tests of the
-// guard of qory's cache folder.
-const exampleStackReference = "https://code.example.com/team/stacks#4b8e2f1a9c7d3e5b0a6f8c2d4e1b9a7c5f3d0e2b:stacks/example"
-
-// codeRunOfStack is the run of documents whose stack is stack, as [codeRunOf] reads
-// them: for a stack name, stack_reference is set to [exampleStackReference].
-func codeRunOfStack(t *testing.T, stack string) *codeRun {
+// codeRunHidden is the run of documents with the workflow example and harness_hidden
+// set to hidden, as [codeRunOf] reads them.
+func codeRunHidden(t *testing.T, hidden bool) *codeRun {
 	t.Helper()
-	doc := contracts.Documents{Stack: stack, Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}}
-	if !strings.HasPrefix(stack, stackReferencePrefix) {
-		doc.StackReference = exampleStackReference
-	}
-	r, err := codeRunOf(doc)
+	r, err := codeRunOf(contracts.Documents{Workflow: "example", HarnessHidden: &hidden, RunSettings: &contracts.RunSettings{Runtime: "claude"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +119,7 @@ func TestAMountInAnotherLetterCaseOfQorysCacheFolderStops(t *testing.T) {
 	if _, err := os.Stat(upper); err != nil {
 		t.Skipf("the disk of %s keeps letter case apart: %v", base, err)
 	}
-	named := codeRunOfStack(t, "example")
+	named := codeRunHidden(t, true)
 	for _, c := range []struct{ path, how string }{
 		{upper, "contains"}, {filepath.Join(upper, "QORY"), "is"}, {filepath.Join(upper, "Qory", "Homes"), "lies inside"},
 	} {
@@ -146,13 +147,13 @@ func upperBase(path string) string {
 	return ""
 }
 
-// TestAWalledRunOfANamedStackWithAMountOfItsReportStops is a walled run from a run code
-// whose stack is a name and whose home --home or harness.home sets outside qory's cache
-// folder, with a mount from wall.mounts or --mount that is the harness report beside
-// the home or contains it, directly, through a link or in another letter case: the run
-// stops, exit 2, before the stack is fetched. The home itself, a sibling folder and a
-// run of a stack reference pass.
-func TestAWalledRunOfANamedStackWithAMountOfItsReportStops(t *testing.T) {
+// TestAWalledRunFromARunCodeWithAMountOfItsReportStops is a walled run from a run code,
+// its harness hidden or shown, whose home --home or harness.home sets outside qory's
+// cache folder, with a mount from wall.mounts or --mount that is the harness report
+// beside the home or contains it, directly, through a link or in another letter case:
+// the run stops, exit 2, before the harness is fetched. The home itself and a sibling
+// folder pass.
+func TestAWalledRunFromARunCodeWithAMountOfItsReportStops(t *testing.T) {
 	isolate(t)
 	homes := filepath.Join(t.TempDir(), "homes")
 	home := filepath.Join(homes, "app-1a2b3c4d")
@@ -169,7 +170,7 @@ func TestAWalledRunOfANamedStackWithAMountOfItsReportStops(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	named, reference := codeRunOfStack(t, "example"), codeRunOfStack(t, exampleStackReference)
+	named, reference := codeRunHidden(t, true), codeRunHidden(t, false)
 	cases := []struct{ path, how string }{
 		{homes, "contains"}, {filepath.Dir(homes), "contains"}, {report, "is"}, {link, "contains"},
 	}
@@ -185,8 +186,8 @@ func TestAWalledRunOfANamedStackWithAMountOfItsReportStops(t *testing.T) {
 			} else if code := ExitCode(err); code != 2 {
 				t.Errorf("the mount %s from %s: exit %d, want 2", c.path, from, code)
 			}
-			if err := reference.reportExposed(root, root, home, report, []givenMount{{path: c.path, from: from}}); err != nil {
-				t.Errorf("a stack reference with the mount %s: %v, want none", c.path, err)
+			if got, want := reference.reportExposed(root, root, home, report, []givenMount{{path: c.path, from: from}}), named.reportExposed(root, root, home, report, []givenMount{{path: c.path, from: from}}); got == nil || got.Error() != want.Error() {
+				t.Errorf("a shown harness with the mount %s: %v, want %v", c.path, got, want)
 			}
 		}
 	}
@@ -199,13 +200,13 @@ func TestAWalledRunOfANamedStackWithAMountOfItsReportStops(t *testing.T) {
 	}
 }
 
-// TestAWalledRunOfANamedStackInACheckoutThatExposesAReportStops is a walled run from a
-// run code whose stack is a name, in a checkout that contains qory's cache folder, such
-// as ~ on Linux, lies inside it, or contains the harness report beside the home,
-// directly, through a link or in another letter case: the checkout is mounted writable
-// into the agent's container, so the run stops, exit 2, before the stack is fetched. A
-// run of a stack reference passes, and so does a checkout beside the folder.
-func TestAWalledRunOfANamedStackInACheckoutThatExposesAReportStops(t *testing.T) {
+// TestAWalledRunFromARunCodeInACheckoutThatExposesAReportStops is a walled run from a
+// run code, its harness hidden or shown, in a checkout that contains qory's cache
+// folder, such as ~ on Linux, lies inside it, or contains the harness report beside the
+// home, directly, through a link or in another letter case: the checkout is mounted
+// writable into the agent's container, so the run stops, exit 2, before the harness is
+// fetched. A checkout beside the folder passes.
+func TestAWalledRunFromARunCodeInACheckoutThatExposesAReportStops(t *testing.T) {
 	isolate(t)
 	base, err := os.UserCacheDir()
 	if err != nil {
@@ -224,7 +225,7 @@ func TestAWalledRunOfANamedStackInACheckoutThatExposesAReportStops(t *testing.T)
 	}
 	report := filepath.Join(t.TempDir(), "homes", "app-1a2b3c4d-report.json")
 	runHome := strings.TrimSuffix(report, "-report.json")
-	named, reference := codeRunOfStack(t, "example"), codeRunOfStack(t, exampleStackReference)
+	named, reference := codeRunHidden(t, true), codeRunHidden(t, false)
 	type checkoutCase struct{ root, want string }
 	inCache := func(root, where string) checkoutCase {
 		return checkoutCase{root, "start the run in a checkout " + where + " " + cache + ": the checkout " + root + " is mounted into the agent's container, and qory writes the harness report of each run with a run key or a run code that has no --home or harness.home under " + cache + "; the code is used"}
@@ -257,8 +258,8 @@ func TestAWalledRunOfANamedStackInACheckoutThatExposesAReportStops(t *testing.T)
 		if err := check(named, report); err == nil || err.Error() != c.want || ExitCode(err) != 2 {
 			t.Errorf("the checkout %s: got %v (exit %d)\nwant %s", c.root, err, ExitCode(err), c.want)
 		}
-		if err := check(reference, report); err != nil {
-			t.Errorf("a stack reference in the checkout %s: %v, want none", c.root, err)
+		if got, want := check(reference, report), check(named, report); got == nil || got.Error() != want.Error() {
+			t.Errorf("a shown harness in the checkout %s: %v, want %v", c.root, got, want)
 		}
 	}
 	for _, c := range reported {
@@ -295,91 +296,14 @@ func TestEncloseListsTheMountsOfWallMountsAndMount(t *testing.T) {
 	}
 }
 
-// TestANamedStackRunsFromItsAddress is documents that set the stack core by its name,
-// with its address in stack_reference: the run composes the address, and its start,
-// time limit and missing-workflow lines show the stack's name and no part of the
-// address.
-func TestANamedStackRunsFromItsAddress(t *testing.T) {
-	const address = "https://code.example.com/team/stacks#release-7:stacks/core"
-	r, err := codeRunOf(contracts.Documents{Stack: "core", StackReference: address, Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.stack != address || r.named == nil || r.named.Stack != "core" {
-		t.Fatalf("the stack is %q, named %+v", r.stack, r.named)
-	}
-	if ref := r.reference(); ref.Git != "https://code.example.com/team/stacks" || ref.Ref != "release-7" || ref.Path != "stacks/core" {
-		t.Errorf("the reference is %+v", ref)
-	}
-	_, missing := r.workflowArgs("claude", report.Report{}, t.TempDir())
-	for _, c := range []struct{ got, want string }{
-		{r.startLine("run_1"), "qory run: the run run_1 starts the workflow example of the stack core on claude"},
-		{r.timedOutLine(45*time.Minute, "claude"), "set a longer time_limit_minutes in Qory Apiary, or a longer workflows.example.time_limit in the stack core: the run was cancelled at its time limit of 45m0s, before claude started"},
-		{fmt.Sprint(missing), "add a skill or command example to the stack core, or set another workflow in Qory Apiary: the composed harness has no skill or command example; the code is used"},
-	} {
-		if c.got != c.want {
-			t.Errorf("got  %q\nwant %q", c.got, c.want)
-		}
-	}
-}
-
-// TestANamedStackWhoseAddressHasAUserPartStops is documents that set the stack core by
-// its name with an address qory does not fetch: none, one that is not a stack
-// reference, one whose URL does not parse, and one whose URL has a user name, with a
-// password or without. Each stops
-// the run before the stack is fetched, with a line that starts with its fix and shows
-// neither the address nor the user part.
-func TestANamedStackWhoseAddressHasAUserPartStops(t *testing.T) {
-	const unreadable = "set the address of the stack core in Qory Apiary's list of stacks as <https URL>#<ref>:<folder>: qory could not read the address as a stack reference; the code is used"
-	const user = "set the address of the stack core in Qory Apiary's list of stacks without a user name or password: the address has a user part, and qory fetches a named stack with no credential; the code is used"
-	for _, c := range []struct{ address, want string }{
-		{"", "ask the instance admin of Qory Apiary to set the address of the stack core in Qory Apiary's list of stacks: the response to the run code sets the stack core by its name and has no address for it; the code is used"},
-		{"https://code.example.com/team/stacks#release-7", unreadable},
-		{"https://code.example.com/team/st%zzacks#release-7:core", unreadable},
-		{"https://deploy-user:s3cret-token@code.example.com/team/stacks#release-7:core", user},
-		{"https://deploy-user@code.example.com/team/stacks#release-7:core", user},
-	} {
-		_, err := codeRunOf(contracts.Documents{Stack: "core", StackReference: c.address, Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}})
-		if err == nil || err.Error() != c.want {
-			t.Errorf("%s: %v\nwant %s", c.address, err, c.want)
-		}
-		if err != nil && (strings.Contains(err.Error(), "code.example.com") || strings.Contains(err.Error(), "deploy-user") || strings.Contains(err.Error(), "s3cret")) {
-			t.Errorf("the line shows the address: %v", err)
-		}
-	}
-}
-
-// TestANamedStacksAddressWithAnAtBeforeItsPathStops is namedStackOf for an address with
-// an @ between :// and the first / after it, whatever comes before the @: each stops
-// with the line of a user part, without the documents' schema, which allows no @ there.
-func TestANamedStacksAddressWithAnAtBeforeItsPathStops(t *testing.T) {
-	const user = "set the address of the stack core in Qory Apiary's list of stacks without a user name or password: the address has a user part, and qory fetches a named stack with no credential; the code is used"
-	for _, address := range []string{
-		"https://code.example.com?@evil.example/team/stacks#release-7:core",
-		"https://code.example.com#@evil.example/team/stacks#release-7:core",
-		"https://code.example.com%3F@evil.example/team/stacks#release-7:core",
-		`https://code.example.com\@evil.example/team/stacks#release-7:core`,
-		"https://code.example.com:443@evil.example/team/stacks#release-7:core",
-	} {
-		_, err := namedStackOf(contracts.Documents{Stack: "core", StackReference: address})
-		if err == nil || err.Error() != user {
-			t.Errorf("%s: %v\nwant %s", address, err, user)
-		}
-	}
-	if _, err := namedStackOf(contracts.Documents{Stack: "core", StackReference: "https://code.example.com/team/stacks#release-7:core"}); err != nil {
-		t.Errorf("an address without an @: %v", err)
-	}
-}
-
-// TestAWalledRunOfANamedStackFromAWorkingFolderThatExposesAReportStops is a walled run
-// from a run code whose stack is a name, from a working folder outside the checkout, as
-// --home sets when it names a composed home whose report lists another checkout: a
-// working folder that contains qory's cache folder, such as ~ on Linux, lies inside
-// it, or contains this run's harness report, directly, through a link or in another
-// letter case, stops the run, exit 2, before the stack is fetched: Forager mounts the
-// working folder writable. A run of a stack reference passes, and so does a working
-// folder beside the cache folder.
-func TestAWalledRunOfANamedStackFromAWorkingFolderThatExposesAReportStops(t *testing.T) {
+// TestAWalledRunFromARunCodeFromAWorkingFolderThatExposesAReportStops is a walled run
+// from a run code, its harness hidden or shown, from a working folder outside the
+// checkout, as --home sets when it names a composed home whose report lists another
+// checkout: a working folder that contains qory's cache folder, such as ~ on Linux,
+// lies inside it, or contains this run's harness report, directly, through a link or in
+// another letter case, stops the run, exit 2, before the harness is fetched: Forager
+// mounts the working folder writable. A working folder beside the cache folder passes.
+func TestAWalledRunFromARunCodeFromAWorkingFolderThatExposesAReportStops(t *testing.T) {
 	isolate(t)
 	base, err := os.UserCacheDir()
 	if err != nil {
@@ -399,7 +323,7 @@ func TestAWalledRunOfANamedStackFromAWorkingFolderThatExposesAReportStops(t *tes
 	root := t.TempDir()
 	report := filepath.Join(t.TempDir(), "homes", "app-1a2b3c4d-report.json")
 	runHome := strings.TrimSuffix(report, "-report.json")
-	named, reference := codeRunOfStack(t, "example"), codeRunOfStack(t, exampleStackReference)
+	named, reference := codeRunHidden(t, true), codeRunHidden(t, false)
 	type cwdCase struct{ cwd, want string }
 	inCache := func(cwd, where string) cwdCase {
 		return cwdCase{cwd, "run qory from a folder " + where + " " + cache + ": the working folder " + cwd + " is mounted into the agent's container, and qory writes the harness report of each run with a run key or a run code that has no --home or harness.home under " + cache + "; the code is used"}
@@ -415,8 +339,8 @@ func TestAWalledRunOfANamedStackFromAWorkingFolderThatExposesAReportStops(t *tes
 		if err := named.reportExposed(root, c.cwd, runHome, report, nil); err == nil || err.Error() != c.want || ExitCode(err) != 2 {
 			t.Errorf("the working folder %s: got %v (exit %d)\nwant %s", c.cwd, err, ExitCode(err), c.want)
 		}
-		if err := reference.reportExposed(root, c.cwd, runHome, report, nil); err != nil {
-			t.Errorf("a stack reference from the working folder %s: %v, want none", c.cwd, err)
+		if got, want := reference.reportExposed(root, c.cwd, runHome, report, nil), named.reportExposed(root, c.cwd, runHome, report, nil); got == nil || got.Error() != want.Error() {
+			t.Errorf("a shown harness from the working folder %s: %v, want %v", c.cwd, got, want)
 		}
 	}
 	work := t.TempDir()
@@ -443,37 +367,13 @@ func TestAWalledRunOfANamedStackFromAWorkingFolderThatExposesAReportStops(t *tes
 	}
 }
 
-// TestANamedStacksAddressWithAHostOutsideASCIIStops is namedStackOf for an address whose
-// host, its percent-encodings decoded, has a character outside ASCII, such as a
-// fullwidth : and @, which curl built with IDN maps to ASCII, so that the host curl sends
-// to the proxy has a user part: it stops with a line that starts with its fix and shows
-// no part of the address. A host in the xn-- form passes.
-func TestANamedStacksAddressWithAHostOutsideASCIIStops(t *testing.T) {
-	const want = "write the host in the address of the stack core in Qory Apiary's list of stacks in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @; the code is used"
-	for _, address := range []string{
-		"https://u%EF%BC%9Ap%EF%BC%A0code.example.com/team/stacks#main:core",
-		"https://u：p＠code.example.com/team/stacks#main:core",
-		"https://u﹫code.example.com/team/stacks#main:core",
-		"https://code.example.com%EF%BC%8F.evil.example/team/stacks#main:core",
-		"https://evil.example％40code.example.com/team/stacks#main:core",
-	} {
-		_, err := namedStackOf(contracts.Documents{Stack: "core", StackReference: address})
-		if err == nil || err.Error() != want {
-			t.Errorf("%s: %v\nwant %s", address, err, want)
-		}
-	}
-	if _, err := namedStackOf(contracts.Documents{Stack: "core", StackReference: "https://xn--bcher-kva.example/team/stacks#main:core"}); err != nil {
-		t.Errorf("a host in the xn-- form: %v", err)
-	}
-}
-
-// TestAWalledRunOfANamedStackWithAHomeThatContainsQorysCacheFolderStops is a walled run
-// from a run code whose stack is a name, with a home that is or contains qory's cache
-// folder, directly, through a link or in another letter case: the home is mounted
+// TestAWalledRunFromARunCodeWithAHomeThatContainsQorysCacheFolderStops is a walled run
+// from a run code, its harness hidden or shown, with a home that is or contains qory's
+// cache folder, directly, through a link or in another letter case: the home is mounted
 // read-only, and the folder contains other runs' harness reports, so the run stops,
-// exit 2, before the stack is fetched. The default home under <cache>/qory/homes and a
-// run of a stack reference pass.
-func TestAWalledRunOfANamedStackWithAHomeThatContainsQorysCacheFolderStops(t *testing.T) {
+// exit 2, before the harness is fetched. The default home under <cache>/qory/homes
+// passes.
+func TestAWalledRunFromARunCodeWithAHomeThatContainsQorysCacheFolderStops(t *testing.T) {
 	isolate(t)
 	base, err := os.UserCacheDir()
 	if err != nil {
@@ -489,7 +389,7 @@ func TestAWalledRunOfANamedStackWithAHomeThatContainsQorysCacheFolderStops(t *te
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	named, reference := codeRunOfStack(t, "example"), codeRunOfStack(t, exampleStackReference)
+	named, reference := codeRunHidden(t, true), codeRunHidden(t, false)
 	cases := []struct{ home, where string }{
 		{cache, "other than"}, {base, "that does not contain"}, {filepath.Dir(base), "that does not contain"}, {link, "that does not contain"},
 	}
@@ -503,11 +403,90 @@ func TestAWalledRunOfANamedStackWithAHomeThatContainsQorysCacheFolderStops(t *te
 		if err == nil || err.Error() != want || ExitCode(err) != 2 {
 			t.Errorf("the home %s: got %v (exit %d)\nwant %s", c.home, err, ExitCode(err), want)
 		}
-		if err := reference.reportExposed(root, root, c.home, report, nil); err != nil {
-			t.Errorf("a stack reference with the home %s: %v, want none", c.home, err)
+		if got, want := reference.reportExposed(root, root, c.home, report, nil), named.reportExposed(root, root, c.home, report, nil); got == nil || got.Error() != want.Error() {
+			t.Errorf("a shown harness with the home %s: %v, want %v", c.home, got, want)
 		}
 	}
 	if err := named.reportExposed(root, root, defaultHome, defaultHome+"-report.json", nil); err != nil {
 		t.Errorf("the default home %s: %v, want none", defaultHome, err)
+	}
+}
+
+// TestARunCodesLinesShowTheHarnessByItsPhrase is documents with the workflow example: the
+// start and missing-workflow lines show the workspace's harness for a run with a harness
+// document, and the checkout's harness for one without, hidden or shown.
+func TestARunCodesLinesShowTheHarnessByItsPhrase(t *testing.T) {
+	doc := &contracts.HarnessDocument{Harness: contracts.HarnessSection{Extends: contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7", Path: "stacks/core"}}}
+	for _, hidden := range []bool{true, false} {
+		for harness, phrase := range map[*contracts.HarnessDocument]string{doc: "the workspace's harness", nil: "the checkout's harness"} {
+			r, err := codeRunOf(contracts.Documents{Harness: harness, Workflow: "example", HarnessHidden: &hidden, RunSettings: &contracts.RunSettings{Runtime: "claude"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (r.named != nil) != hidden || (r.harness != nil) != (harness != nil) {
+				t.Errorf("hidden %v: named %+v, harness %q", hidden, r.named, r.harness)
+			}
+			_, missing := r.workflowArgs("claude", report.Report{}, "")
+			for _, c := range []struct{ got, want string }{
+				{r.startLine("run_1"), "qory run: the run run_1 starts the workflow example of " + phrase + " on claude"},
+				{fmt.Sprint(missing), "add a skill or command example to " + phrase + ", or set another workflow in Qory Apiary: the composed harness has no skill or command example; the code is used"},
+			} {
+				if c.got != c.want {
+					t.Errorf("hidden %v: got  %q\nwant %q", hidden, c.got, c.want)
+				}
+			}
+		}
+	}
+}
+
+// TestAHarnessDocumentWithASourceQoryDoesNotFetchStops is harnessChecked for a harness
+// document with a source qory does not fetch: a folder, which the schema does not
+// allow; a URL with a user part, or an @ before its path, in each form that hides it;
+// one whose host, its percent-encodings decoded, has a character outside ASCII, such as
+// a fullwidth : and @, which curl built with IDN maps to ASCII; one url.Parse cannot
+// read; and one that is not https. Each is an input error that starts with its fix and
+// shows no part of the URL while the harness is hidden. A host in the xn-- form passes.
+func TestAHarnessDocumentWithASourceQoryDoesNotFetchStops(t *testing.T) {
+	const settings = " of the harness in the workspace's settings in Qory Apiary"
+	const user = "remove the user name and password from the URL of the module tools" + settings + ": the run's stack proxy fetches the harness with no credential; the code is used"
+	const ascii = "write the host in the URL of the module tools" + settings + " in ASCII, with the xn-- form for an international name: the host has a character outside ASCII, which git may map to another, such as a fullwidth @ to @; the code is used"
+	withModule := func(git string) *contracts.HarnessDocument {
+		return &contracts.HarnessDocument{Harness: contracts.HarnessSection{
+			Extends: contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7", Path: "stacks/core"},
+			Modules: []contracts.HarnessModule{{Name: "tools", Source: contracts.HarnessSource{Git: git, Ref: "main"}}},
+		}}
+	}
+	for git, want := range map[string]string{
+		"": "set the module tools" + settings + " to an https source: it is a folder, and a run from a run code reads no folder of this machine; the code is used",
+		"https://deploy-user:s3cret-token@code.example.com/team/tools.git": user,
+		"https://deploy-user@code.example.com/team/tools.git":              user,
+		"https://code.example.com?@evil.example/team/tools.git":            user,
+		"https://code.example.com#@evil.example/team/tools.git":            user,
+		"https://code.example.com%3F@evil.example/team/tools.git":          user,
+		`https://code.example.com\@evil.example/team/tools.git`:            user,
+		"https://code.example.com:443@evil.example/team/tools.git":         user,
+		"https://u%EF%BC%9Ap%EF%BC%A0code.example.com/team/tools.git":      ascii,
+		"https://u：p＠code.example.com/team/tools.git":                      ascii,
+		"https://u﹫code.example.com/team/tools.git":                        ascii,
+		"https://code.example.com%EF%BC%8F.evil.example/team/tools.git":    ascii,
+		"https://evil.example％40code.example.com/team/tools.git":           ascii,
+		"https://code.example.com%40evil.example/team/tools.git":           "correct the URL of the module tools" + settings + ": qory could not read it as a URL; the code is used",
+		"git@code.example.com:team/tools.git":                              "set the module tools" + settings + " to an https source: its URL is not an https URL with a host, and qory fetches a harness only over https; the code is used",
+	} {
+		err := harnessChecked(withModule(git), true)
+		if err == nil || err.Error() != want || ExitCode(err) != 2 {
+			t.Errorf("%s: %v (exit %d)\nwant %s", git, err, ExitCode(err), want)
+		}
+	}
+	if err := harnessChecked(withModule("https://xn--bcher-kva.example/team/tools.git"), true); err != nil {
+		t.Errorf("a host in the xn-- form: %v", err)
+	}
+	extends := withModule("https://code.example.com/team/tools.git")
+	extends.Harness.Extends.Git = ""
+	if err := harnessChecked(extends, true); err == nil || err.Error() != "set extends"+settings+" to an https source: it is a folder, and a run from a run code reads no folder of this machine; the code is used" {
+		t.Errorf("a base in a folder: %v", err)
+	}
+	if err := harnessChecked(withModule("http://code.example.com/team/tools.git"), false); err == nil || err.Error() != "set the module tools"+settings+" to an https source: http://code.example.com/team/tools.git is not an https URL with a host, and qory fetches a harness only over https; the code is used" {
+		t.Errorf("an http module of a shown harness: %v", err)
 	}
 }

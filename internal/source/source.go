@@ -64,6 +64,22 @@ type Resolved struct {
 	// to another commit, so a caller can show that a branch moved; "" when the commit is
 	// the same or there was no pin.
 	Previous string
+	// Clone is the directory of a git source's clone, its links resolved, which contains
+	// Dir; "" for a path source.
+	Clone string
+}
+
+// LinksOut reports whether file, a file in clone, a directory with its links resolved,
+// is a link that leads outside clone. A file that does not exist does not.
+func LinksOut(clone, file string) (bool, error) {
+	real, err := filepath.EvalSymlinks(file)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, exports.HideError(err)
+	}
+	return real != clone && !strings.HasPrefix(real, clone+string(filepath.Separator)), nil
 }
 
 // FetchError is a git source that could not be fetched: the remote is unreachable, the
@@ -78,13 +94,13 @@ type FetchError struct {
 	Output string
 	// Err is the error running git returned.
 	Err error
-	// Name is the source as a text of a named stack shows it, see [Named]; "" for a
-	// source of no named stack.
+	// Name is the source as a text of a [Named] compose shows it; "" for a source whose
+	// address shows.
 	Name string
 }
 
-// Error returns the source and quotes git; for a named stack's source, the source's
-// name and not git's output, which can contain the URL.
+// Error returns the source and quotes git; for a source of a [Named] compose, the
+// source's name and not git's output, which can contain the URL.
 func (e *FetchError) Error() string {
 	if e.Name != "" {
 		return "the fetch of " + e.Name + " failed"
@@ -108,8 +124,8 @@ type GoneError struct {
 	URL string
 	// Ref is the ref as the stack writes it.
 	Ref string
-	// Name is the source as a text of a named stack shows it, see [Named]; "" for a
-	// source of no named stack.
+	// Name is the source as a text of a [Named] compose shows it; "" for a source whose
+	// address shows.
 	Name string
 }
 
@@ -130,16 +146,16 @@ type SchemeError struct {
 	// File is the file that lists the source, as a line prints it; "" when the line
 	// names none.
 	File string
-	// Name is the source as a text of a named stack shows it, see [Named]; "" for a
-	// source of no named stack.
+	// Name is the source as a text of a [Named] compose shows it; "" for a source whose
+	// address shows.
 	Name string
 }
 
-// Error is the line [HTTPSFix] makes for the URL and the file; for a named stack's
-// source, the line with the source's name in place of the URL.
+// Error is the line [HTTPSFix] makes for the URL and the file; for a source of a
+// [Named] compose, the line with the source's name in place of the URL.
 func (e *SchemeError) Error() string {
 	if e.Name != "" {
-		return "use an https URL for " + e.Name + ": a named stack fetches its sources only over https, through the run's stack proxy"
+		return "use an https URL for " + e.Name + ": a run from a control plane fetches git sources only over https"
 	}
 	return HTTPSFix(e.URL, e.File)
 }
@@ -232,7 +248,7 @@ type Git struct {
 	// for, with [Options.Name] of that resolve, the full commit it resolved to and how
 	// long the lookup and the fetch took.
 	Fetched func(url, ref, name, commit string, took time.Duration)
-	// Named, when set, is the named stack this compose fetches the sources of, whose
+	// Named, when set, is the harness this compose fetches the sources of, whose
 	// addresses no text shows; see [Named].
 	Named *Named
 }
@@ -298,8 +314,8 @@ type Options struct {
 	// Git, when set, fetches every git source through a run's host proxy, see [Git]; nil
 	// fetches with the person's git, as [hostgit.Command] runs it.
 	Git *Git
-	// Name is the source as a text of a named stack shows it, such as the stack core or
-	// the module tools, read when Git has a [Named]; see [Named].
+	// Name is the source as a text of a [Named] compose shows it, such as the base of the
+	// workspace's harness or the module tools, read when Git has a [Named].
 	Name string
 }
 
@@ -472,6 +488,28 @@ func exported(repo, where string, s stack.Source) (string, error) {
 	return rel, nil
 }
 
+// configInClone stops a clone, base with its links resolved, whose qory.yaml, under
+// either of its names, is a link that leads outside it. where is the source as a message
+// prints it; hidden is set for a source of a [Named] compose, whose message shows no
+// file name of the repository's folders.
+func configInClone(base, where string, hidden bool) error {
+	file, err := exports.File(base)
+	if err != nil || file == "" {
+		// A clone with both names is an error the reader of the file reports.
+		return nil
+	}
+	out, err := LinksOut(base, file)
+	switch {
+	case err != nil:
+		return err
+	case out && hidden:
+		return fmt.Errorf("the qory.yaml of the repository of %s links outside its repository", where)
+	case out:
+		return fmt.Errorf("%s in %s links outside the repository", filepath.Base(file), where)
+	}
+	return nil
+}
+
 // exportName is the export a source selects, for a message: "module core" or "stack
 // nextjs".
 func exportName(s stack.Source) string {
@@ -557,20 +595,37 @@ func resolveGit(s stack.Source, opts Options) (Resolved, error) {
 	if n != nil {
 		where = shownAs(s, opts)
 	}
+	base, err := filepath.EvalSymlinks(clone)
+	if err != nil {
+		return Resolved{}, exports.HideError(err)
+	}
 	if s.Module != "" || s.Stack != "" {
+		// The clone's qory.yaml, which lists the exports, may be a link the repository
+		// contains; the file it leads to must still be inside the clone.
+		if err := configInClone(base, where, n != nil); err != nil {
+			return Resolved{}, err
+		}
 		if sub, err = exported(clone, where, s); err != nil {
 			return Resolved{}, exports.HideError(err)
+		}
+		if n != nil {
+			// The export's folder is part of the source's address: a path in it shows
+			// from that folder, in the source's phrase.
+			n.Add(stack.Source{Git: s.Git, Ref: s.Ref, Path: filepath.ToSlash(sub)}, where)
 		}
 	}
 	if sub != "" {
 		module = filepath.Join(clone, sub)
 	}
 	info, err := os.Stat(module)
+	if errors.Is(err, os.ErrNotExist) && s.Path == "" && sub != "" && n != nil {
+		return Resolved{}, fmt.Errorf("%s exports %s at a folder that is not there", where, exportName(s))
+	}
 	if errors.Is(err, os.ErrNotExist) && s.Path == "" && sub != "" {
 		return Resolved{}, fmt.Errorf("%s exports %s at %s, which is not there", where, exportName(s), exports.Value(sub, false))
 	}
-	// The path of a named stack's source, the stack's folder among them, is not shown:
-	// the folder is part of the stack's address.
+	// The path of a source of a [Named] compose is not shown: the folder is part of the
+	// source's address.
 	if errors.Is(err, os.ErrNotExist) && n != nil {
 		return Resolved{}, fmt.Errorf("the repository of %s has no folder at the path it is set to", where)
 	}
@@ -592,17 +647,13 @@ func resolveGit(s stack.Source, opts Options) (Resolved, error) {
 	if err != nil {
 		return Resolved{}, exports.HideError(err)
 	}
-	base, err := filepath.EvalSymlinks(clone)
-	if err != nil {
-		return Resolved{}, exports.HideError(err)
-	}
 	if real != base && !strings.HasPrefix(real, base+string(filepath.Separator)) && n != nil {
 		return Resolved{}, fmt.Errorf("the path of %s links outside its repository", where)
 	}
 	if real != base && !strings.HasPrefix(real, base+string(filepath.Separator)) {
 		return Resolved{}, fmt.Errorf("%s in %s links outside the repository", exports.Value(sub, false), where)
 	}
-	r := Resolved{Dir: module, Pin: commit[:12], Commit: strings.ToLower(commit), Warning: got.warning}
+	r := Resolved{Dir: module, Pin: commit[:12], Commit: strings.ToLower(commit), Warning: got.warning, Clone: base}
 	if opts.Pin != "" && !strings.HasPrefix(commit, opts.Pin) {
 		r.Previous = opts.Pin
 	}
@@ -933,8 +984,8 @@ func fetch(dir string, s stack.Source, ref string, opts Options) (string, error)
 }
 
 // namedFetch is err, an error of the resolve of s with opts, with the source's name
-// set on a [*FetchError] or a [*GoneError] of a named stack's source, so its text shows
-// neither the URL nor the ref nor git's output.
+// set on a [*FetchError] or a [*GoneError] of a source of a [Named] compose, so its text
+// shows neither the URL nor the ref nor git's output.
 func namedFetch(err error, s stack.Source, opts Options) error {
 	if named(opts) == nil {
 		return err
@@ -951,7 +1002,7 @@ func namedFetch(err error, s stack.Source, opts Options) error {
 }
 
 // folderName is the name of the cache folder of v, a source's URL, or of its refs file,
-// v its ref: [hashedName] for a named stack's source, see [Named], and [cacheName]
+// v its ref: [hashedName] for a source of a [Named] compose, and [cacheName]
 // otherwise.
 func folderName(v string, opts Options) string {
 	if named(opts) != nil {

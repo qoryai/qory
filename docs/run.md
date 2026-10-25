@@ -42,12 +42,14 @@ wall or not, before the run opens and before anything is written:
 set --home to a folder outside /work/app: /work/app/.qory/harness is inside /work/app, and a run with a run key writes no harness into the folder it runs in
 ```
 
-A walled run from a run code whose stack is a stack name stops with exit 2, before the
-stack is fetched and before the run writes its inputs, home or report, when the agent's
-container would get a harness report, `<home>-report.json`, which contains the stack's
-address. The container gets each mount of `wall.mounts` and `--mount`, the checkout and
-the working folder, both writable, and the home, read-only. The run stops when a mount
-of `wall.mounts` or `--mount`, the checkout or the working folder:
+A walled run from a run code stops with exit 2, before the harness is fetched and before
+the run writes its inputs, home or report, when the agent's container would get a
+harness report, `<home>-report.json`, which contains the harness's addresses. This applies
+when `harness_hidden` is `false` too: through `qory` in your cache directory, such a run
+would read the reports of the runs on this machine whose harness is hidden. The
+container gets each mount of `wall.mounts` and `--mount`, the checkout and the working
+folder, both writable, and the home, read-only. The run stops when a mount of
+`wall.mounts` or `--mount`, the checkout or the working folder:
 
 - is, contains or lies inside `qory` in your cache directory, where qory writes the home
   and the harness report of each run with a run key or a run code that has no `--home`
@@ -195,8 +197,10 @@ When the run ends, qory says how, and its exit status goes with it:
   of the run's repositories, and when the compose failed after the limit.
   A run from a run code, which takes no `--timeout`, prints `✗ set a longer
   time_limit_minutes in Qory Apiary, or a longer workflows.<workflow>.time_limit in the
-  stack <url>#<ref>:<path>: the run was cancelled at its time limit of <d>, before
-  <runtime> started` instead.
+  base of the workspace's harness: the run was cancelled at its time limit of <d>, before
+  <runtime> started` instead, with `the base of the checkout's harness, when it has one`
+  for a run whose documents contain no harness (see [What the run takes from the
+  response](#what-the-run-takes-from-the-response)).
 - `✗ the run failed: its events could not be recorded, and <runtime> was stopped`: the
   gateway could not take an event the session sent, exit 1.
 - `✗ the run was lost: it lost contact with the gateway for 1m30s, and <runtime> was
@@ -490,11 +494,12 @@ not start after it.
 
 `--timeout 0` lifts the limit `forager.yaml` sets.
 
-A run from a run code takes its limit from elsewhere, in this order: `run_settings.time_limit_minutes`
-in Qory Apiary's response to the code, then `workflows.<name>.time_limit` of the run's
-workflow in the stack's `qory-stack.yaml`, then 3 hours. `--timeout` stops it with exit 2,
-and `session.run.timeout` does not apply to it (see
-[The run key from a run code](#the-run-key-from-a-run-code)).
+A run from a run code takes its limit from elsewhere, in this order:
+`run_settings.time_limit_minutes` in Qory Apiary's response to the code, then
+`workflows.<name>.time_limit` of the run's workflow in the `qory-stack.yaml` of the stack
+that the harness extends, then 3 hours. A checkout's `qory.yaml` that extends no stack
+has no workflows. `--timeout` stops it with exit 2, and `session.run.timeout` does not
+apply to it (see [The run key from a run code](#the-run-key-from-a-run-code)).
 
 ### How the runtime is stopped
 
@@ -1247,16 +1252,15 @@ No error contains the code or the run key.
 
 Qory Apiary's signed response to the code contains the run's documents beside the run key:
 the step, the domain and the inputs; for the step explore, the work item, the run
-settings, the stack, the workflow and `harness_hidden`; for the step prebuild, the target
+settings, the harness, the workflow and `harness_hidden`; for the step prebuild, the target
 and the places of its images at a registry. qory runs the steps explore and prebuild.
 qory checks the documents as the run contract's `documents.schema.json`, and, for the
 step explore, checks that `inputs.domain` and `inputs.work_item.id` match the domain and
 the work item. Then a run of the step explore:
 
-- composes the stack: a stack by reference, `<url>#<ref>:<path>`, as `-f` does,
-  fetching it through the run's host proxy; a stack by its name from the address in
-  `stack_reference`, through the run's stack proxy (see [A named
-  stack](#a-named-stack));
+- composes the harness that the documents contain, through the run's stack proxy, or,
+  when they contain none, the checkout's `qory.yaml` or `harness.yaml`, through the run's
+  host proxy (see [The run's harness](#the-runs-harness));
 - when `harness_hidden` is `true`, composes a home that contains no link, and has
   Forager mask text that matches the home's files in the session's log and events
   (see [A hidden harness](#a-hidden-harness));
@@ -1272,8 +1276,9 @@ the work item. Then a run of the step explore:
 - takes its time limit as [Time limits](#time-limits) says.
 
 So the command line sets none of these. After the redemption, qory prints `qory run: the
-run <run id> starts the workflow <workflow> of <url>#<ref>:<path> on claude`, or `… of the
-stack <name> on claude` for a stack by its name.
+run <run id> starts the workflow <workflow> of the workspace's harness on claude` for a
+run whose documents contain a harness, or `… of the checkout's harness on claude` for one
+whose documents contain none.
 
 A run of the step prebuild builds the image that the runs of its target start from. It
 runs in `qory run`'s process, with no wall and no agent:
@@ -1316,8 +1321,8 @@ other case.
 
 Each of these errors stops the run before the code is sent, exit 2:
 
-- `leave out -f: a run from a run code takes its stack from Qory Apiary's response to the
-  code`
+- `leave out -f: a run from a run code composes the harness in Qory Apiary's response to
+  the code, or the checkout's qory.yaml or harness.yaml`
 - `leave out the runtime <name>: a run from a run code takes its runtime from Qory
   Apiary's response to the code`
 - `leave out --model, --effort, --tier and --tier-effort: a run from a run code takes them
@@ -1341,103 +1346,163 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
   <path>, and a prebuild runs the target's build commands without a wall; the code is
   used`, when a file with an access key's secret appeared beside `forager.yaml` while
   the code was redeemed
-- `set a stack for the workspace in Qory Apiary, then take the work item in again: the
-  response to the run code has no stack and no workflow; the code is used`
-- `ask the instance admin of Qory Apiary to set the address of the stack <name> in Qory
-  Apiary's list of stacks: the response to the run code sets the stack <name> by its name
-  and has no address for it; the code is used`
-- `set the address of the stack <name> in Qory Apiary's list of stacks as <https
-  URL>#<ref>:<folder>: qory could not read the address as a stack reference; the code is
-  used`
-- `set the address of the stack <name> in Qory Apiary's list of stacks without a user
-  name or password: the address has a user part, and qory fetches a named stack with no
-  credential; the code is used`, before the stack is fetched, for an address whose URL
-  has a user part or an `@` between `://` and the first `/` after it
-- `write the host in the address of the stack <name> in Qory Apiary's list of stacks in
-  ASCII, with the xn-- form for an international name: the host has a character outside
-  ASCII, which git may map to another, such as a fullwidth @ to @; the code is used`,
-  before the stack is fetched, for a host that has a character outside ASCII once its
-  percent-encodings are decoded
+- `set a workflow for the workspace in Qory Apiary, then take the work item in again: the
+  response to the run code has no workflow; the code is used`
 - `set the runtime claude for the workspace in Qory Apiary, then take the work item in
   again: qory starts a run code's workflow on claude alone, and the response to the run
   code sets the runtime <name>; the code is used`
-- `add a skill or command <workflow> to the stack <url>#<ref>:<path>, or set another
-  workflow in Qory Apiary: the composed harness has no skill or command <workflow>; the
-  code is used`, after the compose, with `the stack <name>` for a stack by its name
+- `add a skill or command <workflow> to <harness>, or set another workflow in Qory
+  Apiary: the composed harness has no skill or command <workflow>; the code is used`,
+  after the compose, where `<harness>` is `the workspace's harness` or `the checkout's
+  harness`
 - `take the work item in again in Qory Apiary: the run's host proxy, through which qory
   fetches the run's repositories and git sources, did not open: <error>; the code is
   used`, where a run without a run code prints `run again: the run's host proxy, through
   which qory fetches the run's code, did not open: <error>`
 
-#### A named stack
+#### The run's harness
 
-The documents set the stack by its name, such as `core`, when the workspace in Qory
-Apiary uses a stack of Qory Apiary's list of stacks. Then `stack_reference` is set to the
-stack's address, `<https URL>#<ref>:<folder>`, which Qory Apiary takes from that list.
+The documents contain the harness, a harness document like a checkout's `harness.yaml`,
+when the workspace in Qory Apiary sets one. Its `extends` and the source of each of its
+modules are git sources, which `documents.schema.json` requires. A harness with no
+`extends`, or a source with no `git` address, fails that schema, and the run stops after
+the redemption with exit 1 and the line `update qory, or ask Qory Apiary's instance
+admin: …`.
 
-qory fetches the stack and every module that its file lists from another repository
-through the run's stack proxy. The stack proxy is a proxy of the run's gateway that
-passes the hosts of `gateway.stack_hosts` in the gateway's `forager.yaml` alone, with no
-rule of the run's policy and no credential. So list the host of each of those
-repositories in `gateway.stack_hosts`. qory opens the stack proxy for the compose and
-closes it before the session joins. The modules that the checkout's `qory.yaml` lists,
-when it composes on the stack, are fetched through the run's host proxy, as for a stack
-by reference, and their errors are the ones of a stack by reference.
+When the documents contain a harness, qory writes it to `harness.yaml`, mode 0600, in
+the run's folder, and composes that file in place of the checkout's `qory.yaml` or
+`harness.yaml`. qory fetches the stack that the harness extends, and every module that
+the harness or the stack's file lists from another repository, through the run's stack
+proxy. The stack proxy is a proxy of the run's gateway that passes the hosts of
+`gateway.stack_hosts` in the gateway's `forager.yaml` alone, with no rule of the run's
+policy and no credential. So list the host of each of those repositories in
+`gateway.stack_hosts`. qory opens the stack proxy for the compose and closes it before
+the session joins.
 
-Each line, each event of the run's record and each error shows the stack's name and the
-module's name in place of a URL, a ref and the stack's folder:
+When the documents contain no harness, qory composes the checkout's `qory.yaml` or
+`harness.yaml`, as a run without a run code does, and fetches its git sources through the
+run's host proxy. When the checkout has neither file, the run stops with exit 1, before
+anything is fetched:
 
-- `qory run: fetched the stack <name> at <commit> in <n>s`, and `qory run: fetched the
-  module <module> at <commit> in <n>s` for a module from another repository;
-- `harness "stack <name>" at <commit>` and `harness "module <module>" at <commit>` in
+- `take the work item in again in Qory Apiary: the run's documents contain no harness and
+  the checkout has no qory.yaml or harness.yaml; the code is used`
+
+These stop a run whose documents contain a harness after the redemption, exit 2, before
+the run opens and before anything is fetched. `<source>` is `extends`, `the module
+<module>`, or `modules[<n>]` for a module listed without a name:
+
+- `remove the user name and password from the URL of <source> of the harness in the
+  workspace's settings in Qory Apiary: the run's stack proxy fetches the harness with no
+  credential; the code is used`, for a URL that has a user part or an `@` between `://`
+  and the first `/` after it, whatever comes before the `@`
+- `correct the URL of <source> of the harness in the workspace's settings in Qory Apiary:
+  qory could not read it as a URL; the code is used`
+- `write the host in the URL of <source> of the harness in the workspace's settings in
+  Qory Apiary in ASCII, with the xn-- form for an international name: the host has a
+  character outside ASCII, which git may map to another, such as a fullwidth @ to @; the
+  code is used`, for a host that has a character outside ASCII once its
+  percent-encodings are decoded
+- `set <source> of the harness in the workspace's settings in Qory Apiary to an https
+  source: <url> is not an https URL with a host, and qory fetches a harness only over
+  https; the code is used`, with `its URL` in place of `<url>` when `harness_hidden` is
+  `true`
+- `set the path of <source> of the harness in the workspace's settings in Qory Apiary to
+  a folder inside its repository: the path is absolute, the repository's root, or leads
+  out of the repository; the code is used`
+
+These stop it during the compose, each with the source as the lines show it:
+
+- `remove the user name and password from the source of the module <module> in the base
+  of the workspace's harness: the run's stack proxy fetches the harness with no
+  credential`, exit 2, before any module is fetched, for a module source in the stack's
+  file whose URL has a user part or an `@` between `://` and the first `/` after it, and
+  `the source of modules[<n>]` for a module listed without a name
+- `correct the URL in the source of the module <module> in the base of the workspace's
+  harness: qory could not read it as a URL`, exit 2, before any module is fetched
+- `write the host in the source of the module <module> in the base of the workspace's
+  harness in ASCII, with the xn-- form for an international name: the host has a
+  character outside ASCII, which git may map to another, such as a fullwidth @ to @`,
+  exit 2, before any module is fetched
+- `check that <url> has the branch, tag or commit <ref> and that gateway.stack_hosts in
+  forager.yaml lists <host>. The fetch through the run's stack proxy failed: <cause>`,
+  when `harness_hidden` is `false`: exit 2 when the repository has no branch or tag
+  `<ref>`, with `<url> has no branch or tag <ref>` as the cause, and exit 1 when the
+  fetch failed, as it does for a commit that the repository does not have
+- `take the work item in again in Qory Apiary: the run's stack proxy, through which qory
+  fetches the workspace's harness, did not open: <error>; the code is used`, exit 1
+- `check the run's folder <folder>: qory run could not write the workspace's harness
+  there: <error>; the code is used`, exit 1
+
+The stack file of a git base, the `qory.yaml` of the base's repository, and the
+`qory.yaml` of a repository that lists the exports a source selects may be links that
+the repository contains. When such a link leads outside the clone, qory stops with
+exit 2 before it reads the file, for a run from a run code and for any other run:
+
+- `check the folder of <base>: its qory-stack.yaml links outside its repository`, where
+  `<base>` is `the base of the workspace's harness` or `the base of the checkout's
+  harness`, and `extends <url>#<ref>:<path>: qory-stack.yaml links outside the
+  repository` when the harness is shown
+- `check <base>: the qory.yaml of its repository links outside its repository`, and
+  `extends <url>#<ref>:<path>: qory.yaml at the root of its repository links outside the
+  repository` when the harness is shown
+- `the qory.yaml of the repository of <source> links outside its repository`, and
+  `qory.yaml in <url> at <ref> links outside the repository` when the harness is shown
+
+When `harness_hidden` is `true`, every harness source counts as hidden: the documents'
+harness, the checkout's file, the stack either one extends, and every module they list.
+Each line, each event of the run's record and each error then shows the source by a
+phrase and the module by its name, in place of a URL, a ref and a folder:
+
+- `qory run: fetched the base of <harness> at <commit> in <n>s`, where `<harness>` is
+  `the workspace's harness` or `the checkout's harness`, and `qory run: fetched the module
+  <module> at <commit> in <n>s` for a module from another repository;
+- `harness "base of <harness>" at <commit>` and `harness "module <module>" at <commit>` in
   Forager's line `session <n> starts on this machine: …`;
-- a file of the stack as its path from the stack's folder, such as
-  `modules/world/qory-module.yaml in the stack <name>`, a file of a module's repository
-  as `<path> in the module <module>`, and no path in `<run>/sources`;
+- a file of the stack as its path from the stack's folder, such as `README.md in the base
+  of the workspace's harness`, a file of a module as `<path> in the module <module>`, and
+  no path in `<run>/sources`;
 - none of git's output, which can contain the URL.
 
-When the checkout's `qory.yaml` composes on the stack and the stack's file has no
-`name`, the compose report records the base by the stack's name in the documents, not by
-its folder. The clones are in folders of `<run>/sources` named by a hash of the
-URL. The address is still in files on the machine that qory's user can read: in each
-clone's `.git/config` and `FETCH_HEAD`, and in the compose report beside the home,
-`<home>-report.json`. Behind a wall, the agent's container gets neither: Forager stops
-a run with a mount that is, contains or lies inside qory's state directory, which
-contains `<run>/sources`, before the agent starts, and qory stops a run whose mounts
-would include a harness report before the stack is fetched, as [What `qory run`
-does](#what-qory-run-does) describes.
+When the stack that the harness extends has no `name`, the compose report records the
+base as `base`, not by its folder. The clones are in folders of `<run>/sources` named by a
+hash of the URL. The addresses are still in files on the machine that qory's user can
+read: in each clone's `.git/config` and `FETCH_HEAD`, in the run's `harness.yaml`, and in
+the compose report beside the home, `<home>-report.json`. Behind a wall, the agent's
+container gets none of them: Forager stops a run with a mount that is, contains or lies
+inside qory's state directory, which contains the run's folder, before the agent starts,
+and qory stops a run whose mounts would include a harness report before the harness is
+fetched, as [What `qory run` does](#what-qory-run-does) describes.
 
-These stop the run during the compose, each with the stack or the module by its name:
+These stop a run whose harness is hidden during the compose, each with the source by its
+phrase:
 
-- `remove the user name and password from the source of the module <module> in the
-  stack <name>: a named stack's sources are fetched with no credential`, exit 2, before
-  any module is fetched, for a module source in the stack's file whose URL has a user
-  part or an `@` between `://` and the first `/` after it, whatever comes before the `@`,
-  and `the source of modules[<n>]` for a module listed without a name
-- `correct the URL in the source of the module <module> in the stack <name>: qory could
-  not read it as a URL`, exit 2, before any module is fetched
-- `write the host in the source of the module <module> in the stack <name> in ASCII,
-  with the xn-- form for an international name: the host has a character outside ASCII,
-  which git may map to another, such as a fullwidth @ to @`, exit 2, before any module
-  is fetched, for a host that has a character outside ASCII once its percent-encodings
-  are decoded
-- `add the host of <source> to gateway.stack_hosts in forager.yaml, or check its address
-  in Qory Apiary's list of stacks: the fetch of <source> through the run's stack proxy
-  failed: <cause>`, exit 1, with `check its source in the stack's files` for a module,
-  where `<cause>` is the status the stack proxy or the host returned, such as `the stack
-  proxy returned 403, as it does for a host that gateway.stack_hosts does not list`, or
-  git's exit status
+- `add the host of <source> to gateway.stack_hosts in forager.yaml, or check its source:
+  the fetch of <source> through the run's stack proxy failed: <cause>`, exit 1, where
+  `<cause>` is the status the stack proxy or the host returned, such as `the stack proxy
+  returned 403, as it does for a host that gateway.stack_hosts does not list`, or git's
+  exit status
+- `check that the run's policy allows the host of <source> and, for a private
+  repository, that the run configuration has a credential that reads it: the fetch of
+  <source> through the run's host proxy failed: <cause>`, exit 1, for a source of the
+  checkout's file
 - `take the work item in again in Qory Apiary: the run's stack proxy returned 407 Proxy
   Authentication Required to the password Forager set for the run, so the fetch of
-  <source> failed; the code is used`, exit 1
-- `set the address of the stack <name> in Qory Apiary's list of stacks to a branch, tag
-  or commit its repository has: the repository of the stack <name> has no branch or tag by
-  the ref it is set to`, exit 2, and `set the ref of the module <module> to …` for a
-  module
-- `use an https URL for the module <module>: a named stack fetches its sources only over
-  https, through the run's stack proxy`, exit 2
-- `take the work item in again in Qory Apiary: the run's stack proxy, through which qory
-  fetches the stack <name>, did not open: <error>; the code is used`, exit 1
+  <source> failed; the code is used`, exit 1, and `the run's host proxy` for a source of
+  the checkout's file
+- `set the ref of <source> to a branch, tag or commit its repository has: the repository
+  of <source> has no branch or tag by the ref it is set to`, exit 2
+- `use an https URL for <source>: a run from a control plane fetches git sources only
+  over https`, exit 2
+- `<source> exports <export> at a folder that is not there`, exit 2
+- `module <module>: source.path is not a directory inside the repository`, exit 2, for a
+  module of the stack's file or of the checkout's file whose path is absolute, the
+  repository's root, or leads out of it
+- `qory.yaml in <source>: exports.dir <stacks or modules> is not a directory inside the
+  repository`, exit 2, for an `exports.dir` that is absolute or leads out of its
+  repository
+
+When `harness_hidden` is `false`, the lines and errors show the addresses, as for any
+harness.
 
 #### A hidden harness
 

@@ -59,10 +59,11 @@ func TestParseReferenceErrors(t *testing.T) {
 	}
 }
 
-// TestAtBeforePathAndNonASCIIHost is the two checks of a named stack's URLs: an @
-// between :// and the first / after it, whatever comes before it, and a host with a
-// character outside ASCII once its percent-encodings are decoded. A host in the xn--
-// form, a port and an @ in the path pass both.
+// TestAtBeforePathAndNonASCIIHost is the two checks of a harness's URLs that a run
+// fetches through its stack proxy: an @ between :// and the first / after it, whatever
+// comes before it, and a host with a character outside ASCII once its
+// percent-encodings are decoded. A host in the xn-- form, a port and an @ in the path
+// pass both.
 func TestAtBeforePathAndNonASCIIHost(t *testing.T) {
 	for _, c := range []struct {
 		url          string

@@ -138,7 +138,7 @@ func TestARunCodeWithAHiddenHarnessStopsOnALinkOutOfAModule(t *testing.T) {
 	if r.joined || cmd.ExitCode(r.err) != 1 {
 		t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
-	wants(t, r.err.Error(), "module hello: Remove the link README.md or point it inside the module. It links to ", "/examples/hello/README.md, outside the module, and qory copies only the module's files into the home.")
+	wants(t, r.err.Error(), "module hello: Remove the link README.md or point it inside the module. It links to README.md in the base of the workspace's harness, outside the module, and qory copies only the module's files into the home.")
 }
 
 // TestARunCodeWithAHiddenHarnessStopsAtAPluginOf10000 is a run from a run code whose

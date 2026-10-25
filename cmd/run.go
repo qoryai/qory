@@ -379,9 +379,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if err := makeRunsDir(state, spec.RunsDir); err != nil {
 				return err
 			}
-			// A run from a run code takes its stack, runtime, compose flags, inputs and time
-			// limit from the documents of the answer to the code; its workflow's time_limit
-			// is known once the stack is composed, see prepareLaunch.
+			// A run from a run code takes its harness, runtime, compose flags, inputs and
+			// time limit from the documents of the answer to the code; its workflow's
+			// time_limit is known once the harness is composed, see prepareLaunch.
 			var fromCode *codeRun
 			var in string
 			if code != nil {
@@ -424,7 +424,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						return err
 					}
 				}
-				runtime, composing.file = fromCode.runtime, fromCode.stack
+				runtime = fromCode.runtime
 				// A run whose harness is hidden composes a home with no link, which Forager
 				// reads to mask the harness's text in the session's log and events.
 				composing.hidden, spec.HarnessHidden = fromCode.hidden, fromCode.hidden
@@ -603,10 +603,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			prepareLaunch := func(w io.Writer) (claudeDispatched bool, err error) {
 				harness, workflows, err := composeForRun(w, composing, at, runtime, dispatched, walled)
 				if err != nil && composing.git != nil && composing.git.Named != nil {
-					return false, namedComposeError(err, composing.git.Named, fromCode.reference(), composing.checkoutGit.Proxy)
+					return false, namedComposeError(err, composing.git.Named, composing.checkedAs != "")
 				}
 				if err != nil && composing.git != nil {
-					return false, proxyComposeError(err, composing.git.Proxy)
+					return false, proxyComposeError(err, composing.git.Proxy, composing.checkedAs != "")
 				}
 				if err != nil {
 					return false, err
@@ -703,12 +703,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// or the run was opened with a run key, the run's host proxy opens: the run's
 			// repositories are fetched through it into the working folder, and the compose of
 			// a run opened with a run key fetches its git sources through it, into the run's
-			// cache. The compose of a named stack opens the run's stack proxy as well, and
-			// fetches the stack and every git source it lists through it, with lines that
-			// show names in place of addresses; the git sources the checkout's document lists
-			// stay on the host proxy. Both close before the session joins; Join closes them
-			// too. A run with no control plane opens neither, and composes with the person's
-			// git.
+			// cache. The compose of a run from a run code whose documents contain a harness
+			// document opens the run's stack proxy in place of the host proxy, and fetches
+			// every git source of the harness through it. A run whose harness is hidden
+			// prints lines that show names in place of addresses. Both proxies close before
+			// the session joins; Join closes them too. A run with no control plane opens
+			// neither, and composes with the person's git.
 			hostWork := func() error {
 				stopped := func() bool {
 					return ctx.Err() != nil || timeout > 0 && time.Since(opened) >= timeout
@@ -748,26 +748,43 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				var claudeDispatched bool
 				err := inStep(run, stderr, event.StepCompose, composeStepName(runtime), stopped, func(w io.Writer) error {
+					var n *source.Named
+					if fromCode != nil {
+						if err := fromCode.noHarness(at.root); err != nil {
+							return err
+						}
+						if n = fromCode.named; n != nil {
+							lines := &namedLines{w: w, n: n}
+							defer lines.flush()
+							w = lines
+						}
+					}
 					if remote {
-						if h == nil {
-							if err := openProxy(); err != nil {
+						var p hostProxy
+						if fromCode != nil && fromCode.harness != nil {
+							file, err := fromCode.writeHarness(run.Dir())
+							if err != nil {
 								return err
 							}
+							s, err := run.StackProxy()
+							if err != nil {
+								return &runLineError{noStackProxy(fromCode.phrase(), err)}
+							}
+							defer s.close()
+							p, composing.file, composing.checkedAs = s, file, fromCode.phrase()
+						} else {
+							if h == nil {
+								if err := openProxy(); err != nil {
+									return err
+								}
+							}
+							p = *h
 						}
-						composing.git = proxyGit(*h, w)
+						composing.git = proxyGit(p, w)
+						if n != nil {
+							composing.git = namedGit(p, w, n)
+						}
 						composing.cache = filepath.Join(run.Dir(), runSources)
-					}
-					if remote && fromCode != nil && fromCode.named != nil {
-						lines := &namedLines{w: w, n: fromCode.named}
-						defer lines.flush()
-						w = lines
-						s, err := run.StackProxy()
-						if err != nil {
-							return &runLineError{noStackProxy(fromCode.named, err)}
-						}
-						defer s.close()
-						composing.checkoutGit = proxyGit(*h, w)
-						composing.git = stackGit(s, w, fromCode.named)
 					}
 					var err error
 					claudeDispatched, err = prepareLaunch(w)
@@ -1054,8 +1071,8 @@ type openedRun interface {
 	StartStep(kind, name string) (hostStep, error)
 	// HostProxy starts the run's host proxy, for the fetches on this machine.
 	HostProxy() (hostProxy, error)
-	// StackProxy starts the run's stack proxy, for the fetch of a named stack on this
-	// machine, before the run's first Join.
+	// StackProxy starts the run's stack proxy, for the fetch of the workspace's harness
+	// on this machine, before the run's first Join.
 	StackProxy() (hostProxy, error)
 	// AgentEnv is the environment a session of spec gets, NAME=value sorted by name,
 	// resolved as Join resolves it; qory run gives it to the setup container outside.
@@ -1099,9 +1116,9 @@ func (r foragerRun) HostProxy() (hostProxy, error) {
 
 // StackProxy is [session.Run.StackProxy]: its ProxyURL, and its Close. Its CABundle is
 // empty: the stack proxy passes the machine's authorities alone, and [proxygit.Env]
-// drops SSL_CERT_FILE and GIT_SSL_*. So a named stack's host needs a certificate that
-// the run machine's system trust store accepts. For a private CA, the instance admin
-// adds the CA to the machine's image.
+// drops SSL_CERT_FILE and GIT_SSL_*. So the host of a harness source fetched through it
+// needs a certificate that the run machine's system trust store accepts. For a private
+// CA, the instance admin adds the CA to the machine's image.
 func (r foragerRun) StackProxy() (hostProxy, error) {
 	h, err := r.Run.StackProxy()
 	if err != nil {
@@ -3137,9 +3154,10 @@ func composeForRun(stderr io.Writer, o composeOptions, at places, runtime string
 // commit it used, as the session records them: the stack res extends, when it is a git
 // source, then each module's git source in stack order, each source once. A source is
 // as the report writes it, the password of a URL's user part printed as (hidden); in
-// the compose of a named stack, n, a source of the stack is its name, such as stack
-// core or module tools, as [source.Named.Of] has it, once per name and commit. Path
-// sources have no commit and are left out; nil when no source is a git source.
+// the compose of a harness whose addresses no text shows, n, a source is its name, such
+// as base of the workspace's harness or module tools, as [source.Named.Of] has it, once
+// per name and commit. Path sources have no commit and are left out; nil when no source
+// is a git source.
 func harnessSources(res *compose.Result, n *source.Named) []session.HarnessSource {
 	var out []session.HarnessSource
 	seen := map[string]bool{}
@@ -3165,8 +3183,8 @@ func harnessSources(res *compose.Result, n *source.Named) []session.HarnessSourc
 }
 
 // namedOf is the phrase of src, a git source as a compose's result has it, in the
-// compose of the named stack n, as [source.Named.Of] has it; ok is false for no named
-// stack and for a source not of the stack.
+// compose n of a harness whose addresses no text shows, as [source.Named.Of] has it; ok
+// is false for n nil and for a source not recorded.
 func namedOf(n *source.Named, src string) (string, bool) {
 	if n == nil {
 		return "", false

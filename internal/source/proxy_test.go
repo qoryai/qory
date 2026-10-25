@@ -106,9 +106,9 @@ func TestResolveGitThroughTheHostProxyFails(t *testing.T) {
 }
 
 // TestAProxiedFetchReadsNoRepositoryAboveTheCache resolves a source through the proxy,
-// a named stack's and a stack's by reference, with the cache in a git repository whose
-// configuration sends the host to another proxy: every request goes through the proxy
-// given, and none to the other.
+// as a source whose address no text shows and as one whose address shows, with the
+// cache in a git repository whose configuration sends the host to another proxy: every
+// request goes through the proxy given, and none to the other.
 func TestAProxiedFetchReadsNoRepositoryAboveTheCache(t *testing.T) {
 	hermetic(t)
 	s := proxygittest.Start(t)
@@ -133,10 +133,10 @@ func TestAProxiedFetchReadsNoRepositoryAboveTheCache(t *testing.T) {
 }
 
 // TestAProxiedFetchReadsNoRepositoryInTheSourcesFolder resolves a source through the
-// proxy, a named stack's and a stack's by reference, then makes the source's folder in
-// the cache a git repository whose configuration sends the host to another proxy, and
-// resolves it again: the lookup of the ref goes through the proxy given, and none to
-// the other.
+// proxy, as a source whose address no text shows and as one whose address shows, then
+// makes the source's folder in the cache a git repository whose configuration sends the
+// host to another proxy, and resolves it again: the lookup of the ref goes through the
+// proxy given, and none to the other.
 func TestAProxiedFetchReadsNoRepositoryInTheSourcesFolder(t *testing.T) {
 	hermetic(t)
 	s := proxygittest.Start(t)
@@ -199,15 +199,15 @@ func sendElsewhere(t *testing.T, dir, addr string) {
 }
 
 // proxiedSource is the folder core of example-org/stacks on s at main, resolved
-// through s's proxy into cache: as the named stack core when named is true, and
-// otherwise as a stack by reference.
+// through s's proxy into cache: as the base of a harness whose addresses no text shows
+// when named is true, and otherwise with its address shown.
 func proxiedSource(s *proxygittest.Server, cache string, named bool) (stack.Source, source.Options) {
 	g := &source.Git{Proxy: s.Proxy}
 	opts := source.Options{Cache: cache, Git: g}
 	src := stack.Source{Git: s.URL("example-org/stacks"), Ref: "main", Path: "core"}
 	if named {
-		n := source.NewNamed("core", src.String(), src)
-		g.Named, opts.Name = n, n.Phrase()
+		n := source.NewNamed("the workspace's harness")
+		g.Named, opts.Name = n, n.Base()
 	}
 	return src, opts
 }

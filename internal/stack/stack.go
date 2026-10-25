@@ -792,10 +792,42 @@ func (s Source) validate() error {
 	if s.Path != "" {
 		clean := filepath.Clean(s.Path)
 		if filepath.IsAbs(clean) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-			return fmt.Errorf("source.path %s is not a directory inside the repository", exports.Value(s.Path, true))
+			return &SourcePathError{Path: s.Path}
 		}
 	}
 	return nil
+}
+
+// SourcePathError is a git source's source.path that is not a directory inside the
+// repository: an absolute path, the repository's root, or a path that leads out of it.
+// Path is the path as written.
+type SourcePathError struct{ Path string }
+
+func (e *SourcePathError) Error() string {
+	return fmt.Sprintf("source.path %s is not a directory inside the repository", exports.Value(e.Path, true))
+}
+
+// Hidden is the error's text without the path, for a harness whose folders no text
+// shows.
+func (e *SourcePathError) Hidden() string {
+	return "source.path is not a directory inside the repository"
+}
+
+// BaseExtendsError is a base stack, read from File, that extends another stack,
+// Extends: a stack does not extend another.
+type BaseExtendsError struct {
+	File    string
+	Extends Source
+}
+
+func (e *BaseExtendsError) Error() string {
+	return fmt.Sprintf("%s extends %s, and a stack does not extend another", exports.HidePath(e.File), e.Extends.Shown())
+}
+
+// Hidden is the error's text with the stack the base extends left out, for a harness
+// whose addresses no text shows.
+func (e *BaseExtendsError) Hidden() string {
+	return fmt.Sprintf("%s extends another stack, and a stack does not extend another", exports.HidePath(e.File))
 }
 
 // segment reports whether name is one plain path segment: no separator of either kind, no
@@ -876,7 +908,7 @@ func FileAllowed(name string, prefixes []string) bool {
 // p's.
 func Extend(base, p *Stack) (*Stack, error) {
 	if base.Extends.Path != "" || base.Extends.Git != "" {
-		return nil, fmt.Errorf("%s extends %s, and a stack does not extend another", exports.HidePath(base.File), base.Extends.Shown())
+		return nil, &BaseExtendsError{File: base.File, Extends: base.Extends}
 	}
 	if base.Extending == nil {
 		return nil, fmt.Errorf("the stack at %s is closed: it declares no extending block, so nothing may extend it", exports.HidePath(base.File))
