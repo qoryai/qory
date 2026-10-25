@@ -695,6 +695,11 @@ func OnBase(path, base string) (*stack.Stack, stack.Source, error) {
 	if !f.Harness.composes() {
 		return nil, stack.Source{}, fmt.Errorf("%s: the harness section lists no modules, no stack to extend and no extensions", path)
 	}
+	// The stack -f selects is the base, so the document composes as one that extends a
+	// stack, and the base's workflows apply; the document's extends may be absent.
+	if len(f.Harness.Workflows) > 0 {
+		return nil, stack.Source{}, fmt.Errorf("remove workflows from %s or leave out -f: -f selects the base, and its workflows apply", filepath.Base(path))
+	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, stack.Source{}, err

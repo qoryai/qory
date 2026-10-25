@@ -103,3 +103,25 @@ func TestOnBaseRefusesWhatIsNoDocument(t *testing.T) {
 		}
 	}
 }
+
+// TestOnBaseRefusesWorkflows is a document that lists workflows, composed on the stack
+// -f selects: the stack is the base, whose workflows apply, so the document is refused
+// with the fix in its file's name, whether it defines a stack or extends one.
+func TestOnBaseRefusesWorkflows(t *testing.T) {
+	tmp := t.TempDir()
+	base := filepath.Join(tmp, "tree", stack.FileName)
+	writeRaw(t, base, stackDoc)
+	for _, name := range []string{"qory.yaml", "harness.yaml"} {
+		path := filepath.Join(tmp, "app-"+name, name)
+		for _, body := range []string{
+			"harness:\n  target: {runtime: claude}\n  modules:\n    - name: app\n  workflows:\n    fix: {access: write}\n",
+			"harness:\n  extends: {path: ../tree}\n  workflows:\n    fix: {time_limit: 45m}\n",
+		} {
+			writeRaw(t, path, body)
+			want := "remove workflows from " + name + " or leave out -f: -f selects the base, and its workflows apply"
+			if _, _, err := config.OnBase(path, base); err == nil || err.Error() != want {
+				t.Errorf("%s %q: err = %v, want %q", name, body, err, want)
+			}
+		}
+	}
+}
