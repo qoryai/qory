@@ -374,10 +374,10 @@ release may change what an existing document does, and states it under Upgrading
   link: `qory.yaml in <url> at <ref> links outside the repository`. Until now, qory read
   the file the link leads to, which could be any file on the machine.
 - A stack by reference and each git module that the compose of a run from a control
-  plane fetches through the run's host proxy go through that proxy, under the run's
-  policy. Until now, the configuration of a git repository in a source's folder of the
-  run's cache, or in a folder above the run's folder, could send git's lookup of the ref
-  to another proxy or URL.
+  plane fetches go through the run's stack proxy, under its rules. Until now, the
+  configuration of a git repository in a source's folder of the run's cache, or in a
+  folder above the run's folder, could send git's lookup of the ref to another proxy or
+  URL.
 - A walled run gets the skills and other files of its modules. The home linked to the
   folders of modules outside the checkout, which are not mounted in the container; behind
   a wall, it contains copies of the files that the stack selects, without what `only` or
