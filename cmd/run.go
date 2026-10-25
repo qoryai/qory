@@ -501,7 +501,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			// The files the settings name are known once the integrations are described.
 			runner, named := runnerFiles()
-			own := foragerFiles(foragerDir, state, spec.RunsDir, append(settingFiles(conf.Forager), runner...), named)
+			files := settingFiles(conf.Forager)
+			// The engine proxy file contains the password of the engine's proxy setting: a
+			// place of the run's that covers it stops the run, as one of Forager's files.
+			if r := conf.Forager; r != nil && r.Wall != nil && r.Wall.EngineProxyFile != "" {
+				files = append(files, r.Wall.EngineProxyFile)
+			}
+			own := foragerFiles(foragerDir, state, spec.RunsDir, append(files, runner...), named)
 			spec.ForagerFiles = own.files
 			record := filepath.Join(spec.RunsDir, spec.RunID)
 			u := ui.New(stderr)
@@ -810,10 +816,24 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				return err
 			}
+			// imageWork fetches the image of a walled run, see [fetchImage], within the
+			// run's time limit, once the harness is composed and before the setup, so the
+			// setup and the join start from the image the step fetched.
+			imageWork := func() error {
+				imageCtx, cancel := ctx, func() {}
+				if timeout > 0 {
+					imageCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+				}
+				defer cancel()
+				return fetchImage(imageCtx, run, spec.EngineProxy, code != nil)
+			}
 			// A run stopped or out of time before its session joins prepares nothing more.
 			var prepErr error
 			if ctx.Err() == nil && (timeout == 0 || time.Since(opened) < timeout) {
 				prepErr = hostWork()
+				if prepErr == nil && walled {
+					prepErr = imageWork()
+				}
 				if prepErr == nil && walled && run.Repositories() != "" {
 					prepErr = setupWork()
 				}
@@ -843,8 +863,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				said("the record is in " + record)
 				return reported(&exitError{code: exitTimeout})
 			case prepErr != nil:
-				// A run no session joined is failed with no_session.
-				closeRun(session.Outcome{State: event.StateFailed, ExitCode: -1})
+				// A run no session joined is failed with no_session, or with the refusal of
+				// its image as the reason.
+				out := session.Outcome{State: event.StateFailed, ExitCode: -1}
+				var image *imageRefusedError
+				if errors.As(prepErr, &image) {
+					out.Reason = image.code
+				}
+				closeRun(out)
 				lines.done(nil)
 				var line *runLineError
 				if errors.As(prepErr, &line) {
@@ -1057,6 +1083,9 @@ type openedRun interface {
 	Join(ctx context.Context, spec session.SessionSpec) (*session.Result, error)
 	// Setup runs the run's setup commands in the setup container, before the join.
 	Setup(ctx context.Context, spec session.SetupSpec) error
+	// FetchImage fetches a walled run's image by reference as the run's image step,
+	// before the first join; see [fetchImage].
+	FetchImage(ctx context.Context) error
 	Close(ctx context.Context, out session.Outcome) (*session.Closed, error)
 	// StartStep starts a step of the run's host work, of kind fetch or compose.
 	StartStep(kind, name string) (hostStep, error)
@@ -1526,10 +1555,17 @@ const wallOff = "none"
 // image needs no default unless wall.images_allow lists prefixes. fromServer says the
 // server's run configuration is the policy; it arrives once the run starts, and may
 // select no image, so such a run needs a default.
+//
+// forager.yaml's machine goes to Forager with a wall or without, and a walled run gets
+// the engine proxy that wall.engine_proxy_file contains, see [readEngineProxy]; without
+// the key, it gets none.
 func enclose(spec *runSpec, r *config.Forager, o wallOptions, selected string, fromServer bool, exe, root, home string) error {
 	var section config.ForagerWall
 	if r != nil && r.Wall != nil {
 		section = *r.Wall
+	}
+	if r != nil {
+		spec.Machine = r.Machine
 	}
 	name := o.name
 	if name == "" {
@@ -1618,6 +1654,11 @@ func enclose(spec *runSpec, r *config.Forager, o wallOptions, selected string, f
 	}
 	if fromServer {
 		spec.OpenSpec.Setup = setupWhere(spec.setupWhere)
+	}
+	if section.EngineProxyFile != "" {
+		if spec.EngineProxy, err = readEngineProxy(section.EngineProxyFile); err != nil {
+			return err
+		}
 	}
 	spec.Mounts = []wall.Mount{{Path: root}}
 	if !reallyWithin(root, home) {

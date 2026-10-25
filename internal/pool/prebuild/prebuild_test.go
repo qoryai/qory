@@ -528,6 +528,7 @@ func newEnv(t *testing.T) *env {
 		State: filepath.Join(root, "state"), RunConfig: filepath.Join(root, "runconfig"),
 		AgentImage: testAgent, User: "1000:1000", Helper: "/opt/qory/qory-linux",
 		Git: os.Args[0], Docker: os.Args[0], Log: e.log, Grace: time.Second, Version: "qory 0.0.0-test",
+		Machine: "aws-ec2",
 	}
 	e.settings.Open, e.settings.Fetch, e.settings.Build = e.open, e.fetch, e.build
 	for _, d := range []string{e.home, e.settings.RunConfig} {
@@ -946,7 +947,8 @@ func TestTheFetchRunsNoGitFromTheRunsFolder(t *testing.T) {
 
 // TestLaunchCommands runs the fetch and the build in this process, and docker with its
 // arguments, in the pool's folder, outside every run directory: the run opens at the
-// gateway of its run key, with no wall and its record in the run's state, the fetch
+// gateway of its run key, with no wall, the machine of Settings, and its record in the
+// run's state, the fetch
 // goes into work through the run's host proxy, and the fetch and the build get the
 // allowed environment, with a PATH that has no entry in the pool's runs folder, as every
 // docker command does.
@@ -972,8 +974,8 @@ func TestLaunchCommands(t *testing.T) {
 	spec := e.specs[0]
 	gw, ok := spec.Gateway.(session.RemoteGateway)
 	if !ok || gw.RunKey != testKey || spec.Wall != nil || spec.RunID != testRunID || spec.ForagerVersion != "qory 0.0.0-test" ||
-		spec.RunsDir != filepath.Join(state, "qory", "runs", "work-"+sum([]byte(work))[:12]) || len(spec.Labels) != 0 || spec.About != nil {
-		t.Errorf("the open's spec: run %s, wall %v, runs %s, version %s, by run key %v", spec.RunID, spec.Wall, spec.RunsDir, spec.ForagerVersion, ok && gw.RunKey == testKey)
+		spec.RunsDir != filepath.Join(state, "qory", "runs", "work-"+sum([]byte(work))[:12]) || len(spec.Labels) != 0 || spec.About != nil || spec.Machine != "aws-ec2" {
+		t.Errorf("the open's spec: run %s, wall %v, runs %s, version %s, machine %q, by run key %v", spec.RunID, spec.Wall, spec.RunsDir, spec.ForagerVersion, spec.Machine, ok && gw.RunKey == testKey)
 	}
 	if !res.Record {
 		t.Error("no record")

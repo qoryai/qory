@@ -286,11 +286,41 @@ how it ended:
 2. The compose, `compose the harness for claude`, or `compose the harness` when you name
    no runtime. The step ends once `qory run` has read the agent's launch from the
    composed home.
+3. For a walled run whose policy names its image by a reference pinned by digest, the
+   image step, named after the reference. Forager pulls the image, unless the engine
+   holds it by that digest, and checks that its user is not root. With
+   `wall.engine_proxy_file`, the pull goes through the run's proxy: see [The
+   wall](#the-wall). The setup and the agent then start from that image.
 
 Forager's steps of the session's start come next, such as `join session 1`. Each line
-the fetch or the compose prints on stderr is in that step's lines too. A step that fails
-ends `failed` with the exit status of `qory run`, and its last line is the error line. A
-step that fails once the run is stopped, or out of time, ends `cancelled`.
+the fetch or the compose prints on stderr is in that step's lines too. A fetch or a
+compose that fails ends `failed` with the exit status of `qory run`, and its last line is
+the error line. An image step that fails ends `failed` with -1, and its last line is
+Forager's error. A step that fails once the run is stopped, or out of time, ends
+`cancelled`.
+
+An image step that fails ends the run before the agent starts, and `qory run` exits 1
+with one line, the fix first. An image its registry does not have closes the run
+`failed` with the reason `image_missing`, and an image whose user is root, or a user
+that cannot be checked for root, with `image_user_root`:
+
+```
+qory run: push the image to its registry, or select another image in the run's policy: the image <reference> is not in its registry (image_missing)
+qory run: set USER in the image to a user other than root that its /etc/passwd lists, or select another image in the run's policy: <Forager's reason> (image_user_root)
+```
+
+Any other failure closes the run `failed` with `no_session`:
+
+```
+qory run: run again: the fetch of the run's image failed: <Forager's error>
+```
+
+For a run from a run code, the code is used by then. Each refusal line ends with `; the
+code is used`, and any other failure says:
+
+```
+qory run: take the work item in again in Qory Apiary: the fetch of the run's image failed: <Forager's error>; the code is used
+```
 
 `qory run resend` sends a finished run's record to the server again: after a Forager process
 that died, or a server that was away. See [Resending a run's record](#resending-a-runs-record).
@@ -471,6 +501,12 @@ machine or a private network address, such as `10.0.0.5`, only for a host that
 rule covers the gateway's machine, and the list that counts is `gateway.egress.allow` of the
 gateway's `forager.yaml`. See [The gateway's machine and private
 addresses](gateway.md#the-gateways-machine-and-private-addresses).
+
+`machine`, beside `apiVersion`, is the adapter that made this machine, such as `aws-ec2`,
+or `none`: 1 to 64 of a-z, 0-9 and -, the first a letter. `qory run` passes it to Forager,
+which reports it as `machine` in `dev.qory.run.started`; without it, `run.started` has no
+`machine`. Any other value stops every command that reads `forager.yaml`. `qory config`
+lists it.
 
 ## Runtimes
 
@@ -2683,6 +2719,18 @@ What to know:
 - **Git in a worktree.** In a git worktree, the repository's data lives in the main
   checkout, outside the worktree. So git inside the container works there only with that
   directory mounted. A clone works as it is.
+- **The engine proxy.** `wall.engine_proxy_file` is the absolute path of a file that
+  contains the container engine's proxy setting. The machine's start unit writes it as
+  one line, `{"version": 1, "address": "127.0.0.1:3129", "password": "<43 characters of
+  base64url>"}`, and the machine's Docker daemon has the same proxy and password in
+  `daemon.json`. With the key, the image step of a walled run pulls the image through the
+  run's proxy, under the run's policy; without it, the engine pulls over the machine's
+  network. `qory run` reads the file before the run opens, and stops with exit 2 unless
+  the file is a regular file and not a link, belongs to the user `qory run` runs as, has
+  mode `0400` or `0600`, has at most 4 KiB, and contains exactly those three members:
+  `version` 1, `address` a loopback IP address and a port, and `password` 43 characters
+  of base64url with no padding. No line, event or record contains the password, and
+  `qory config` lists the path alone.
 - **Limits.** `--cpus`, `--memory`, `--pids-limit` and `--shm-size`, or the keys of those
   names under `wall`, limit what the container uses. Sizes are written the way Docker
   writes them: a number and `b`, `k`, `m` or `g`, in either case. So `14g` is 14 GB and

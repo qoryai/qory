@@ -1,6 +1,7 @@
 package cmd_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -171,6 +172,10 @@ type codeRun struct {
 	calls    []string
 }
 
+// codeFetchImage is the FetchImage of each run [runFromCodeGiven] opens; nil is one
+// that succeeds. A test sets it.
+var codeFetchImage func(context.Context) error
+
 // runFromCode runs qory run from a run code whose documents start the workflow of a
 // harness document that extends the stack examples/hello of a repository that the
 // run's stack proxy serves, with the stack file changed by stackFile and the documents
@@ -238,7 +243,8 @@ func runFromCodeGiven(t *testing.T, before func(code string) []string, args []st
 	_, calls, restore := cmd.OpenNowhereWith(cmd.Nowhere{
 		System: proxygittest.Host, Proxy: h.server.Proxy.URL, CABundle: h.server.Proxy.CABundle, Dir: h.runDir,
 		StackProxy: h.server.Proxy.URL, StackCABundle: h.server.Proxy.CABundle,
-		OnOpen: func(s session.OpenSpec) { r.open = s },
+		OnOpen:     func(s session.OpenSpec) { r.open = s },
+		FetchImage: codeFetchImage,
 	})
 	defer restore()
 	if given == nil {

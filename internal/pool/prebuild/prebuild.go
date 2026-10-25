@@ -159,6 +159,9 @@ type Settings struct {
 	AgentImage, User, Helper string
 	// Version is the version the run's events report, qory's.
 	Version string
+	// Machine is machine of forager.yaml, the adapter that made the machine, which
+	// run.started reports; empty leaves it out.
+	Machine string
 	// Open opens the run at its gateway; nil is [session.Open]. A test replaces it.
 	Open func(ctx context.Context, spec session.OpenSpec) (Opened, error)
 	// Fetch fetches the run's repositories, as [preparation.Run]; nil is
@@ -413,7 +416,7 @@ func (s Settings) fetch(ctx context.Context, r Run, work, state, record string) 
 	}
 	run, err := open(fetchCtx, session.OpenSpec{
 		Gateway: session.RemoteGateway{RunKey: string(r.Key.Bytes())}, RunsDir: runs, ForagerVersion: s.Version, RunID: r.RunID,
-		Report: func(line string) { s.log(r.RunID, line) },
+		Machine: s.Machine, Report: func(line string) { s.log(r.RunID, line) },
 	})
 	if err != nil {
 		return nil, out, fmt.Errorf(textNotOpened, integration.Printable(exports.HideURLError(err).Error()))

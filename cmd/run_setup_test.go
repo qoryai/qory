@@ -98,7 +98,7 @@ func TestAWalledRunSetsUpOutsideWithTheJoinsPlaces(t *testing.T) {
 			if !errors.Is(r.err, cmd.ErrJoinedNowhere) || len(r.agents) != 1 || len(r.setups) != 1 || len(r.joins) != 1 {
 				t.Fatalf("%d AgentEnvs, %d setups, %d joins, %v (exit %d)\n%s", len(r.agents), len(r.setups), len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
 			}
-			if want := []string{"host proxy", "host proxy closed", "stack proxy", "stack proxy closed", "agent env", "setup", "join"}; !slices.Equal(r.calls, want) {
+			if want := []string{"host proxy", "host proxy closed", "stack proxy", "stack proxy closed", "fetch image", "agent env", "setup", "join"}; !slices.Equal(r.calls, want) {
 				t.Errorf("the calls: %v, want %v", r.calls, want)
 			}
 			s, j := r.setups[0], r.joins[0]
@@ -140,7 +140,7 @@ func TestAWalledRunSetsUpInsideTheWall(t *testing.T) {
 	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || len(r.joins) != 1 {
 		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
 	}
-	if want := []string{"host proxy", "host proxy closed", "stack proxy", "stack proxy closed", "join"}; !slices.Equal(r.calls, want) || len(r.setups) != 0 {
+	if want := []string{"host proxy", "host proxy closed", "stack proxy", "stack proxy closed", "fetch image", "join"}; !slices.Equal(r.calls, want) || len(r.setups) != 0 {
 		t.Errorf("the calls: %v, want %v", r.calls, want)
 	}
 	j := r.joins[0]

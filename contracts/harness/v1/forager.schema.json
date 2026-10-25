@@ -9,6 +9,11 @@
     "apiVersion": {
       "const": "qory.dev/v1alpha1"
     },
+    "machine": {
+      "description": "The adapter that made this machine, such as aws-ec2, or none. qory run passes it to Forager, which reports it as machine in dev.qory.run.started. Default unset: dev.qory.run.started has no machine.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,63}$"
+    },
     "gateway": {
       "description": "The gateway's sections: the egress policy, the server, the credentials, the tools, the integrations, the memory lock and the run limits; and for qory gateway, listen and tls.",
       "type": "object",
@@ -578,6 +583,11 @@
             "outside",
             "inside"
           ]
+        },
+        "engine_proxy_file": {
+          "description": "The absolute path of the file that contains the container engine's proxy setting, which the machine's start unit writes: one JSON object, {\"version\": 1, \"address\": \"127.0.0.1:3129\", \"password\": \"<43 characters of base64url>\"}, owned by the user qory runs as, mode 0400 or 0600. A walled run's image is then pulled through the run's proxy. Default none: the engine pulls over the machine's network.",
+          "type": "string",
+          "pattern": "^/"
         }
       }
     },

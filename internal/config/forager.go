@@ -99,6 +99,10 @@ type Forager struct {
 	// of each run on the gateway reaches, as Forager's gateway.Config.StackHosts. Each is
 	// an entry Forager reads in a policy's egress.allow. Nil when the file sets none.
 	StackHosts []string
+	// Machine is machine, the adapter that made this machine, such as aws-ec2, or none;
+	// empty when the file sets none. qory run passes it to Forager, which reports it in
+	// dev.qory.run.started.
+	Machine string
 	// Pool is the pool section, nil when the file has none: what qory run pool runs by.
 	// No other command reads it.
 	Pool     *ForagerPool
@@ -367,6 +371,10 @@ type ForagerWall struct {
 	// Setup is where the setup commands of a run run, [SetupOutside] or [SetupInside];
 	// empty means outside.
 	Setup string
+	// EngineProxyFile is the absolute path of the file that has the address and the
+	// password of the container engine's proxy setting; empty when the file sets none.
+	// qory run reads it as a walled run starts. qory never prints the file's contents.
+	EngineProxyFile string
 }
 
 // ForagerMount is one file or directory of this machine a walled run sees, at the same
@@ -437,6 +445,9 @@ type ForagerServer struct {
 	EnrolmentCodeFile string
 }
 
+// machineShape is the form of machine, as Forager checks OpenSpec.Machine.
+var machineShape = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
+
 // EnvOrigin starts the origin of a value read from a variable: "$" and its name.
 const EnvOrigin = "$"
 
@@ -449,7 +460,8 @@ type pinEntry struct {
 // foragerFile is forager.yaml as written: the gateway's sections, the session's, the
 // wall's and the pool's.
 type foragerFile struct {
-	APIVersion string `yaml:"apiVersion"`
+	APIVersion string  `yaml:"apiVersion"`
+	Machine    *string `yaml:"machine"`
 	// Webhook is the section qory 0.10.0 replaced with server, read only to refuse it
 	// by name instead of as a key the file does not read.
 	Webhook yaml.Node       `yaml:"webhook,omitempty"`
@@ -472,6 +484,8 @@ type foragerFile struct {
 		ShmSize *string   `yaml:"shm_size"`
 		CAEnv   yaml.Node `yaml:"ca_env,omitempty"`
 		Setup   *string   `yaml:"setup"`
+		// EngineProxyFile is read as a path alone; qory run reads the file.
+		EngineProxyFile *string `yaml:"engine_proxy_file"`
 
 		// ImagesAllow is read as a node, so an entry that is not a string is refused
 		// by its index.
@@ -597,6 +611,12 @@ func LoadForagerIn(dir string) (*Forager, error) {
 		return nil, fmt.Errorf("%s: apiVersion is not one this qory reads; versions: %s", path, exports.APIVersion)
 	}
 	r := &Forager{File: path, Gateway: f.Gateway != nil, GatewayKeys: gatewayKeys(data)}
+	if f.Machine != nil {
+		if !machineShape.MatchString(*f.Machine) {
+			return nil, fmt.Errorf("%s: set machine to 1 to 64 of a-z, 0-9 and -, the first a letter, such as aws-ec2 or none, or remove it: it is %s", path, exports.Value(*f.Machine, true))
+		}
+		r.Machine = *f.Machine
+	}
 	g, ses := f.Gateway, f.Session
 	if g == nil {
 		g = &gatewaySection{}
@@ -785,6 +805,12 @@ func LoadForagerIn(dir string) (*Forager, error) {
 				return nil, fmt.Errorf("%s: set wall.setup to %s or %s, or remove it for %s: it is %s", path, SetupOutside, SetupInside, SetupOutside, exports.Value(*w.Setup, true))
 			}
 			r.Wall.Setup = *w.Setup
+		}
+		if p := w.EngineProxyFile; p != nil {
+			if !filepath.IsAbs(*p) {
+				return nil, fmt.Errorf("%s: set wall.engine_proxy_file to an absolute path, or remove it: it is %s", path, exports.Value(*p, true))
+			}
+			r.Wall.EngineProxyFile = *p
 		}
 		notCAEnv := func(i, _ int) error {
 			return fmt.Errorf("%s: wall.ca_env[%d] is not a variable's name", path, i)
@@ -1866,6 +1892,9 @@ func (r *Forager) Rows() []Row {
 			rows = append(rows, Row{"gateway.integrations." + accesskey.ShownName(in.Key, false), program, origin})
 		}
 	}
+	if r != nil && r.Machine != "" {
+		rows = append(rows, Row{"machine", r.Machine, origin})
+	}
 	if r != nil && r.Wall != nil {
 		rows = append(rows,
 			Row{"wall.adapter", r.Wall.Adapter, origin},
@@ -1911,6 +1940,10 @@ func (r *Forager) Rows() []Row {
 		}
 		if r.Wall.Setup != "" {
 			rows = append(rows, Row{"wall.setup", r.Wall.Setup, origin})
+		}
+		// The path alone: the file's contents are never read here.
+		if r.Wall.EngineProxyFile != "" {
+			rows = append(rows, Row{"wall.engine_proxy_file", exports.Value(r.Wall.EngineProxyFile, false), origin})
 		}
 	} else {
 		rows = append(rows, Row{"wall.adapter", "(none)", Default})

@@ -58,6 +58,21 @@ release may change what an existing document does, and states it under Upgrading
 - `wall.images_allow` in forager.yaml: where a run's image may come from when the run's
   policy names one by a reference pinned by digest, a list of the prefixes of the
   references the machine runs. Without it, such a run is refused.
+- `machine` in forager.yaml: the adapter that made the machine, such as `aws-ec2`, or
+  `none`. `qory run` passes it to Forager, which reports it as `machine` in
+  `dev.qory.run.started`, and `qory config` lists it.
+- `wall.engine_proxy_file` in forager.yaml: the path of the file with the address and the
+  password of the container engine's proxy setting, which the machine's start unit
+  writes. The image step of a walled run then pulls the image through the run's proxy.
+  `qory run` stops with exit 2 on a link, a file of another user, a mode other than
+  `0400` or `0600`, or a file of another shape; no line contains the password, and
+  `qory config` lists the path alone.
+- A walled run whose policy names its image by a reference pinned by digest fetches the
+  image in an `image` step of the run's record, after the compose and before the setup
+  and the agent; Forager pulls it unless the engine holds it by that digest. An image its
+  registry does not have closes the run `failed` with `image_missing`, and an image whose
+  user is root with `image_user_root`; `qory run` exits 1 with a line that starts with
+  the fix.
 - `wall.setup` in forager.yaml: where the setup of a walled run from a control plane
   runs, `outside`, the default, in a separate container of the run's image on the wall's
   network, or `inside`, in the agent's container before the agent.

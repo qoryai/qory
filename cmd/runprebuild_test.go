@@ -71,15 +71,15 @@ func prebuildFromCode(t *testing.T, documents json.RawMessage, wall string, err 
 
 // TestARunCodeForAPrebuildRunsTheBuild is a run code whose documents have step
 // prebuild, with and without environment_image, on a machine whose forager.yaml sets
-// the wall's image by digest, user and helper: qory run says which gateway the run goes
+// machine and the wall's image by digest, user and helper: qory run says which gateway the run goes
 // through, and runs the prebuild once with the documents' run, inputs and places, the
-// run key, and the wall settings, with qory's state and configuration directories,
+// run key, the machine and the wall settings, with qory's state and configuration directories,
 // while it holds the run's lock file, marked unwalled. Its end is qory run's: exit 0,
 // or exit 1 with its error.
 func TestARunCodeForAPrebuildRunsTheBuild(t *testing.T) {
 	docker, _ := fakeDocker(t)
 	helper := staticELF(t)
-	wall := "wall:\n  adapter: docker\n  image: " + prebuildAgent + "\n  images_allow: [registry.example.com/agents/]\n  command: " + docker + "\n  helper: " + helper + "\n  user: \"1000:1000\"\n"
+	wall := "machine: aws-ec2\nwall:\n  adapter: docker\n  image: " + prebuildAgent + "\n  images_allow: [registry.example.com/agents/]\n  command: " + docker + "\n  helper: " + helper + "\n  user: \"1000:1000\"\n"
 	for _, name := range []string{"prebuild.json", "prebuild-environment-image.json"} {
 		t.Run(name, func(t *testing.T) {
 			documents := prebuildDocuments(t, name)
@@ -102,7 +102,7 @@ func TestARunCodeForAPrebuildRunsTheBuild(t *testing.T) {
 			}
 			s := got.settings
 			config, state := os.Getenv("XDG_CONFIG_HOME"), filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory")
-			if s.AgentImage != prebuildAgent || s.User != "1000:1000" || s.Helper != helper || s.RunConfig != config || s.State != state || s.Version == "" || s.Log == nil {
+			if s.AgentImage != prebuildAgent || s.User != "1000:1000" || s.Helper != helper || s.RunConfig != config || s.State != state || s.Version == "" || s.Log == nil || s.Machine != "aws-ec2" {
 				t.Errorf("the prebuild's settings are %+v", s)
 			}
 			if got.lock != "unwalled\n" {

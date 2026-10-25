@@ -125,7 +125,8 @@ func OpenNowhere() (outcomes func() []session.Outcome, restore func()) {
 // none, OnStep, which,
 // when not nil, gets each event of the run's host steps, as Forager writes them,
 // Setup, which, when not nil, gets the spec of the run's Setup and returns its error,
-// OnOpen, which, when not nil, gets the spec of each open, and AgentEnv, which, when
+// OnOpen, which, when not nil, gets the spec of each open, FetchImage, which, when not
+// nil, is the run's FetchImage, and AgentEnv, which, when
 // not nil, gets the spec of the run's AgentEnv and returns its result. With AgentEnv
 // nil, AgentEnv returns System and Repositories, each when set, as QORY_RUN_SYSTEM and
 // QORY_RUN_REPOSITORIES, sorted by name.
@@ -141,6 +142,7 @@ type Nowhere struct {
 	Setup                func(session.SetupSpec) error
 	AgentEnv             func(session.SessionSpec) ([]string, error)
 	OnOpen               func(session.OpenSpec)
+	FetchImage           func(context.Context) error
 }
 
 // StepEvent is one event of a host step of a run [OpenNowhereWith] opened: Type is
@@ -156,7 +158,7 @@ type StepEvent struct {
 // is n.Dir, or a new temporary folder, which restore removes. Besides the outcomes, it
 // returns the calls the runs got, in order: "host proxy" for each HostProxy, "host
 // proxy closed" for each close of one, "stack proxy" and "stack proxy closed" for each
-// StackProxy and close of one, "setup" and "join".
+// StackProxy and close of one, "fetch image", "setup" and "join".
 func OpenNowhereWith(n Nowhere) (outcomes func() []session.Outcome, calls func() []string, restore func()) {
 	before := openRun
 	var mu sync.Mutex
@@ -235,6 +237,17 @@ func (n *nowhere) Setup(_ context.Context, spec session.SetupSpec) error {
 	n.note("setup")
 	if n.values.Setup != nil {
 		return n.values.Setup(spec)
+	}
+	return nil
+}
+
+func (n *nowhere) FetchImage(ctx context.Context) error {
+	if n.open != nil {
+		return fmt.Errorf("exit step %d before the image's fetch", n.open.n)
+	}
+	n.note("fetch image")
+	if n.values.FetchImage != nil {
+		return n.values.FetchImage(ctx)
 	}
 	return nil
 }
