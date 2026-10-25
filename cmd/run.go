@@ -46,6 +46,7 @@ import (
 	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
+	"github.com/qoryai/qory/internal/source"
 	"github.com/qoryai/qory/internal/stack"
 	"github.com/qoryai/qory/internal/ui"
 )
@@ -170,7 +171,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if err != nil {
 				return err
 			}
-			if err := selectsInRun(conf.Forager); err != nil {
+			if err := enrolmentCodeFileFor(conf.Forager, "qory run"); err != nil {
 				return err
 			}
 			if remote {
@@ -378,9 +379,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if err := makeRunsDir(state, spec.RunsDir); err != nil {
 				return err
 			}
-			// A run from a run code takes its stack, runtime, compose flags, inputs and time
-			// limit from the documents of the answer to the code; its workflow's time_limit
-			// is known once the stack is composed, see prepareLaunch.
+			// A run from a run code takes its harness, runtime, compose flags, inputs and
+			// time limit from the documents of the answer to the code; its workflow's
+			// time_limit is known once the harness is composed, see prepareLaunch.
 			var fromCode *codeRun
 			var in string
 			if code != nil {
@@ -418,7 +419,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if err := fromCode.apply(cmd); err != nil {
 					return err
 				}
-				runtime, composing.file = fromCode.runtime, fromCode.stack
+				if spec.Wall != nil {
+					if err := fromCode.reportExposed(at.root, cwd, at.home, at.report, spec.given); err != nil {
+						return err
+					}
+				}
+				runtime = fromCode.runtime
 				// A run whose harness is hidden composes a home with no link, which Forager
 				// reads to mask the harness's text in the session's log and events.
 				composing.hidden, spec.HarnessHidden = fromCode.hidden, fromCode.hidden
@@ -481,7 +487,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 			}
 			if r := conf.Forager; r != nil && !remote {
-				gw.LockMemory, gw.RunLimits = r.LockMemory, gatewayRunLimits(r)
+				gw.LockMemory, gw.RunLimits, gw.StackHosts = r.LockMemory, gatewayRunLimits(r), r.StackHosts
 				e, err := expansion(r, pol, server != nil && !local, at.root, cwd, spec.Mounts)
 				if err != nil {
 					return err
@@ -495,7 +501,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			// The files the settings name are known once the integrations are described.
 			runner, named := runnerFiles()
-			own := foragerFiles(foragerDir, state, spec.RunsDir, append(settingFiles(conf.Forager), runner...), named)
+			files := settingFiles(conf.Forager)
+			// The engine proxy file contains the password of the engine's proxy setting: a
+			// place of the run's that covers it stops the run, as one of Forager's files.
+			if r := conf.Forager; r != nil && r.Wall != nil && r.Wall.EngineProxyFile != "" {
+				files = append(files, r.Wall.EngineProxyFile)
+			}
+			own := foragerFiles(foragerDir, state, spec.RunsDir, append(files, runner...), named)
 			spec.ForagerFiles = own.files
 			record := filepath.Join(spec.RunsDir, spec.RunID)
 			u := ui.New(stderr)
@@ -596,6 +608,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// claudeDispatched is true for a dispatched run of Claude Code.
 			prepareLaunch := func(w io.Writer) (claudeDispatched bool, err error) {
 				harness, workflows, err := composeForRun(w, composing, at, runtime, dispatched, walled)
+				if err != nil && composing.git != nil && composing.git.Named != nil {
+					return false, namedComposeError(err, composing.git.Named)
+				}
 				if err != nil && composing.git != nil {
 					return false, proxyComposeError(err, composing.git.Proxy)
 				}
@@ -691,40 +706,36 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// hostWork is the run's work on this machine before its session joins, in two
 			// steps of the run's record: the fetch, when the run configuration lists
 			// repositories, and the compose. When the run configuration lists repositories,
-			// or the run was opened with a run key, the run's host proxy opens: the run's
-			// repositories are fetched through it into the working folder, and the compose of
-			// a run opened with a run key fetches its git sources through it, into the run's
-			// cache. The host proxy closes before the session joins; Join closes it too. A
-			// run with no control plane opens none, and composes with the person's git.
+			// the run's host proxy opens, the run's repositories are fetched through it into
+			// the working folder, under the run's policy and credentials, and it closes. The
+			// compose of a run opened with a run key or a run code opens the run's stack
+			// proxy, and fetches every git source of the harness through it, into the run's
+			// cache: the base, its modules and the modules the checkout's file lists. So no
+			// harness source is fetched with a credential of the run's work. A run whose
+			// harness is hidden prints lines that show names in place of addresses. Both
+			// proxies close before the session joins; Join closes them too. A run with no
+			// control plane opens neither, and composes with the person's git. A run from a
+			// run code whose documents set target_version fetches the target's repository at
+			// that commit, and stops before the compose when the run configuration lists no
+			// repository while the target is on its system.
 			hostWork := func() error {
 				stopped := func() bool {
 					return ctx.Err() != nil || timeout > 0 && time.Since(opened) >= timeout
 				}
-				var h *hostProxy
-				openProxy := func() error {
-					p, err := run.HostProxy()
-					if err != nil {
-						return &runLineError{noHostProxy(err)}
-					}
-					h = &p
-					return nil
-				}
-				defer func() {
-					if h != nil {
-						h.close()
-					}
-				}()
 				if run.Repositories() != "" {
 					err := inStep(run, stderr, event.StepFetch, fetchStepName(runValues(run)), stopped, func(w io.Writer) error {
-						if err := openProxy(); err != nil {
-							return err
+						h, err := run.HostProxy()
+						if err != nil {
+							return &runLineError{noHostProxy(err, code != nil)}
 						}
+						// The host proxy closes with the fetch, before the compose starts.
+						defer h.close()
 						fetchCtx, cancel := ctx, func() {}
 						if timeout > 0 {
 							fetchCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
 						}
 						defer cancel()
-						if _, err := preparation.Run(fetchCtx, cwd, os.Environ(), runValues(run), h.proxy, w); err != nil {
+						if _, err := preparation.RunAt(fetchCtx, cwd, os.Environ(), runValues(run), fromCode.fetchTarget(), h.proxy, w); err != nil {
 							return &runLineError{err}
 						}
 						return nil
@@ -732,16 +743,44 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					if err != nil {
 						return err
 					}
+				} else if err := preparation.Unlisted(runValues(run), fromCode.fetchTarget()); err != nil {
+					return &runLineError{err}
 				}
 				var claudeDispatched bool
 				err := inStep(run, stderr, event.StepCompose, composeStepName(runtime), stopped, func(w io.Writer) error {
+					var n *source.Named
+					if fromCode != nil {
+						if err := fromCode.noHarness(at.root); err != nil {
+							return err
+						}
+						if n = fromCode.named; n != nil {
+							lines := &namedLines{w: w, n: n}
+							defer lines.flush()
+							w = lines
+						}
+					}
 					if remote {
-						if h == nil {
-							if err := openProxy(); err != nil {
+						harness := runHarness
+						if fromCode != nil {
+							harness = fromCode.phrase()
+						}
+						if fromCode != nil && fromCode.harness != nil {
+							file, err := fromCode.writeHarness(run.Dir())
+							if err != nil {
 								return err
 							}
+							composing.file = file
 						}
-						composing.git = proxyGit(*h, w)
+						s, err := run.StackProxy()
+						if err != nil {
+							return &runLineError{noStackProxy(harness, err, code != nil)}
+						}
+						defer s.close()
+						composing.checkedAs = harness
+						composing.git = proxyGit(s, w)
+						if n != nil {
+							composing.git = namedGit(s, w, n)
+						}
 						composing.cache = filepath.Join(run.Dir(), runSources)
 					}
 					var err error
@@ -777,10 +816,24 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				return err
 			}
+			// imageWork fetches the image of a walled run, see [fetchImage], within the
+			// run's time limit, once the harness is composed and before the setup, so the
+			// setup and the join start from the image the step fetched.
+			imageWork := func() error {
+				imageCtx, cancel := ctx, func() {}
+				if timeout > 0 {
+					imageCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+				}
+				defer cancel()
+				return fetchImage(imageCtx, run, spec.EngineProxy, code != nil)
+			}
 			// A run stopped or out of time before its session joins prepares nothing more.
 			var prepErr error
 			if ctx.Err() == nil && (timeout == 0 || time.Since(opened) < timeout) {
 				prepErr = hostWork()
+				if prepErr == nil && walled {
+					prepErr = imageWork()
+				}
 				if prepErr == nil && walled && run.Repositories() != "" {
 					prepErr = setupWork()
 				}
@@ -810,8 +863,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				said("the record is in " + record)
 				return reported(&exitError{code: exitTimeout})
 			case prepErr != nil:
-				// A run no session joined is failed with no_session.
-				closeRun(session.Outcome{State: event.StateFailed, ExitCode: -1})
+				// A run no session joined is failed with no_session, or with the refusal of
+				// its image as the reason.
+				out := session.Outcome{State: event.StateFailed, ExitCode: -1}
+				var image *imageRefusedError
+				if errors.As(prepErr, &image) {
+					out.Reason = image.code
+				}
+				closeRun(out)
 				lines.done(nil)
 				var line *runLineError
 				if errors.As(prepErr, &line) {
@@ -898,16 +957,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	composeFlags(c, &composing)
 	c.AddCommand(newResend(), newRegister(), newEnd(), newForward(), newRelay(), newNest(), newPrepare(), newAgentEnv(), newExec(), newHold(), newSetupCommand(), newSeed(), newPool())
 	return c
-}
-
-// selectsInRun refuses, as input, gateway.selects in r for qory run, written with
-// entries or without: qory gateway alone reads it, and a run qory run starts takes its
-// credentials from its policy.
-func selectsInRun(r *config.Forager) error {
-	if r == nil || !slices.Contains(r.GatewayKeys, "selects") {
-		return nil
-	}
-	return input(errors.New(config.ForagerFileName + ": gateway.selects is read by qory gateway alone; a run qory run starts takes its credentials from its policy: remove gateway.selects"))
 }
 
 // machinePolicy is the policy forager.yaml's gateway.egress sets for every run of the
@@ -1023,6 +1072,9 @@ type runSpec struct {
 	// setupWhere is where a walled run's setup commands run, wall.setup:
 	// [config.SetupOutside] or [config.SetupInside]; empty without a wall.
 	setupWhere string
+	// given are the mounts of a walled run that wall.mounts and --mount add, in
+	// spec.Mounts too; none without a wall.
+	given []givenMount
 }
 
 // openedRun is a run open at its gateway, as qory run uses it: a [*session.Run], as
@@ -1031,11 +1083,18 @@ type openedRun interface {
 	Join(ctx context.Context, spec session.SessionSpec) (*session.Result, error)
 	// Setup runs the run's setup commands in the setup container, before the join.
 	Setup(ctx context.Context, spec session.SetupSpec) error
+	// FetchImage fetches a walled run's image by reference as the run's image step,
+	// before the first join; see [fetchImage].
+	FetchImage(ctx context.Context) error
 	Close(ctx context.Context, out session.Outcome) (*session.Closed, error)
 	// StartStep starts a step of the run's host work, of kind fetch or compose.
 	StartStep(kind, name string) (hostStep, error)
-	// HostProxy starts the run's host proxy, for the fetches on this machine.
+	// HostProxy starts the run's host proxy, for the fetch of the run's repositories on
+	// this machine.
 	HostProxy() (hostProxy, error)
+	// StackProxy starts the run's stack proxy, for the fetch of the run's harness on this
+	// machine, before the run's first Join.
+	StackProxy() (hostProxy, error)
 	// AgentEnv is the environment a session of spec gets, NAME=value sorted by name,
 	// resolved as Join resolves it; qory run gives it to the setup container outside.
 	AgentEnv(spec session.SessionSpec) ([]string, error)
@@ -1048,8 +1107,8 @@ type openedRun interface {
 	Dir() string
 }
 
-// hostProxy is the run's host proxy as qory run uses it: the proxy git fetches through,
-// and what ends it.
+// hostProxy is the run's host proxy or stack proxy as qory run uses it: the proxy git
+// fetches through, and what ends it.
 type hostProxy struct {
 	proxy proxygit.Proxy
 	close func() error
@@ -1070,6 +1129,20 @@ func (r foragerRun) StartStep(kind, name string) (hostStep, error) {
 // HostProxy is [session.Run.HostProxy]: its ProxyURL and CABundle, and its Close.
 func (r foragerRun) HostProxy() (hostProxy, error) {
 	h, err := r.Run.HostProxy()
+	if err != nil {
+		return hostProxy{}, err
+	}
+	return hostProxy{proxy: proxygit.Proxy{URL: h.ProxyURL, CABundle: h.CABundle}, close: h.Close}, nil
+}
+
+// StackProxy is [session.Run.StackProxy]: its ProxyURL and CABundle, and its Close, as
+// for [foragerRun.HostProxy]. git gets the proxy and the bundle through [proxygit.Env],
+// which drops SSL_CERT_FILE and GIT_SSL_*; with no CABundle, git trusts the run
+// machine's system trust store alone. git does not get the NO_PROXY of the forwarder's
+// Env: with it, git would reach a source on 127.0.0.1 or localhost directly, past the
+// stack proxy.
+func (r foragerRun) StackProxy() (hostProxy, error) {
+	h, err := r.Run.StackProxy()
 	if err != nil {
 		return hostProxy{}, err
 	}
@@ -1482,10 +1555,17 @@ const wallOff = "none"
 // image needs no default unless wall.images_allow lists prefixes. fromServer says the
 // server's run configuration is the policy; it arrives once the run starts, and may
 // select no image, so such a run needs a default.
+//
+// forager.yaml's machine goes to Forager with a wall or without, and a walled run gets
+// the engine proxy that wall.engine_proxy_file contains, see [readEngineProxy]; without
+// the key, it gets none.
 func enclose(spec *runSpec, r *config.Forager, o wallOptions, selected string, fromServer bool, exe, root, home string) error {
 	var section config.ForagerWall
 	if r != nil && r.Wall != nil {
 		section = *r.Wall
+	}
+	if r != nil {
+		spec.Machine = r.Machine
 	}
 	name := o.name
 	if name == "" {
@@ -1541,6 +1621,7 @@ func enclose(spec *runSpec, r *config.Forager, o wallOptions, selected string, f
 	var more []wall.Mount
 	for _, m := range section.Mounts {
 		more = append(more, wall.Mount{Path: m.Path, ReadOnly: m.ReadOnly})
+		spec.given = append(spec.given, givenMount{path: m.Path, from: "wall.mounts in " + config.ForagerFileName})
 	}
 	for _, v := range o.mounts {
 		m, err := config.ParseMount(v)
@@ -1551,6 +1632,7 @@ func enclose(spec *runSpec, r *config.Forager, o wallOptions, selected string, f
 			return input(fmt.Errorf("--mount: %w", exports.HideError(err)))
 		}
 		more = append(more, wall.Mount{Path: m.Path, ReadOnly: m.ReadOnly})
+		spec.given = append(spec.given, givenMount{path: m.Path, from: "--mount"})
 	}
 	helper, err := wallHelper(section, exe)
 	if err != nil {
@@ -1572,6 +1654,11 @@ func enclose(spec *runSpec, r *config.Forager, o wallOptions, selected string, f
 	}
 	if fromServer {
 		spec.OpenSpec.Setup = setupWhere(spec.setupWhere)
+	}
+	if section.EngineProxyFile != "" {
+		if spec.EngineProxy, err = readEngineProxy(section.EngineProxyFile); err != nil {
+			return err
+		}
 	}
 	spec.Mounts = []wall.Mount{{Path: root}}
 	if !reallyWithin(root, home) {
@@ -3100,17 +3187,24 @@ func composeForRun(stderr io.Writer, o composeOptions, at places, runtime string
 // harnessSources is the harness's git sources a compose resolved, each with the full
 // commit it used, as the session records them: the stack res extends, when it is a git
 // source, then each module's git source in stack order, each source once. A source is
-// as the report writes it, the password of a URL's user part printed as (hidden). Path
-// sources have no commit and are left out; nil when no source is a git source.
-func harnessSources(res *compose.Result) []session.HarnessSource {
+// as the report writes it, the password of a URL's user part printed as (hidden); in
+// the compose of a harness whose addresses no text shows, n, a source is its name, such
+// as base of the workspace's harness or module tools, as [source.Named.Of] has it, once
+// per name and commit. Path sources have no commit and are left out; nil when no source
+// is a git source.
+func harnessSources(res *compose.Result, n *source.Named) []session.HarnessSource {
 	var out []session.HarnessSource
 	seen := map[string]bool{}
 	add := func(src, commit string) {
+		key := src
+		if phrase, ok := namedOf(n, src); ok {
+			src, key = strings.TrimPrefix(phrase, "the "), phrase+"@"+commit
+		}
 		src = exports.HideURLs(src)
-		if commit == "" || seen[src] {
+		if commit == "" || seen[key] {
 			return
 		}
-		seen[src] = true
+		seen[key] = true
 		out = append(out, session.HarnessSource{Source: src, Commit: commit})
 	}
 	if res.Base != nil {
@@ -3120,4 +3214,14 @@ func harnessSources(res *compose.Result) []session.HarnessSource {
 		add(m.Source, m.Commit)
 	}
 	return out
+}
+
+// namedOf is the phrase of src, a git source as a compose's result has it, in the
+// compose n of a harness whose addresses no text shows, as [source.Named.Of] has it; ok
+// is false for n nil and for a source not recorded.
+func namedOf(n *source.Named, src string) (string, bool) {
+	if n == nil {
+		return "", false
+	}
+	return n.Of(src)
 }

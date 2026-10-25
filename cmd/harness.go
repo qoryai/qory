@@ -500,10 +500,26 @@ type composeOptions struct {
 	// hidden is set for a run whose documents set harness_hidden: the home contains
 	// copies of every module's files, as for a walled run, so it contains no link.
 	hidden bool
-	// git, when set, fetches every git source through a run's host proxy, into cache, the
-	// run's cache: the compose of a run from a control plane, see [source.Git].
+	// git, when set, fetches every git source through a run's stack proxy, into cache, the
+	// run's cache: the compose of a run from a control plane, see [source.Git]. With a
+	// [source.Named], no text shows the address of a git source.
 	git   *source.Git
 	cache string
+	// checkedAs, when set, is the harness as a text shows it, such as the workspace's
+	// harness, for a compose whose git goes through the run's stack proxy, which sets
+	// the run configuration's harness credentials: [compose.CheckBase] checks the URL of the base before it is fetched,
+	// and [compose.CheckAddresses] the modules' URLs once the base is read, before any
+	// module is fetched.
+	checkedAs string
+}
+
+// named is the harness o composes with no address shown, see [source.Named]; nil for any
+// other compose.
+func (o composeOptions) named() *source.Named {
+	if o.git == nil {
+		return nil
+	}
+	return o.git.Named
 }
 
 // staleError is what a --check returns when the home does not match what the stack and
@@ -707,7 +723,7 @@ func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 	if res.Stack != nil {
 		workflows = res.Stack.Workflows
 	}
-	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res), workflows: workflows}, nil
+	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows}, nil
 }
 
 // launchEnv is, per runtime with a launch template, the variables the harness sets when
@@ -852,6 +868,11 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 		if o.git != nil {
 			fetchOpts.Git, fetchOpts.Cache = o.git, o.cache
 		}
+		if o.checkedAs != "" {
+			if err := compose.CheckReference(ref); err != nil {
+				return nil, input(err)
+			}
+		}
 		if p, fetched, err = compose.LoadReference(ref, fetchOpts); err != nil {
 			return nil, composeError(err)
 		}
@@ -936,8 +957,17 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	// is checked before it is read, and the modules once the base's modules are beside
 	// them.
 	var docIn bool
+	n := o.named()
+	if n != nil {
+		compose.NameSources(doc, n)
+	}
 	if o.inCheckout {
 		if docIn, err = extendsInCheckout(doc, base, root, o.file == "" || base != nil); err != nil {
+			return nil, input(err)
+		}
+	}
+	if o.checkedAs != "" && base == nil {
+		if err := compose.CheckBase(doc, o.checkedAs); err != nil {
 			return nil, input(err)
 		}
 	}
@@ -955,8 +985,18 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	if err != nil {
 		return nil, composeError(err)
 	}
+	if n != nil {
+		compose.NameSources(p, n)
+	}
+	// The rule of a run given a run key comes first, so a source that is not https gets
+	// the fix of https before the fix of its user part.
 	if o.inCheckout {
 		if err := modulesInCheckout(p, doc, base, root, docIn); err != nil {
+			return nil, input(err)
+		}
+	}
+	if o.checkedAs != "" {
+		if err := compose.CheckAddresses(p, o.checkedAs); err != nil {
 			return nil, input(err)
 		}
 	}
@@ -1006,7 +1046,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	var collision *compose.CollisionError
 	switch {
 	case errors.As(err, &collision):
-		printCollision(ui.New(errOut), collision)
+		printCollision(ui.New(errOut), collision, o.named())
 		return nil, reported(err)
 	case err != nil:
 		return nil, composeError(err)
@@ -1641,12 +1681,16 @@ func flagRefuses(force bool) string {
 
 // printCollision prints what happened, the modules involved, and the stack lines that
 // resolve it by keeping the last module that ships each entry.
-func printCollision(u *ui.UI, e *compose.CollisionError) {
+func printCollision(u *ui.UI, e *compose.CollisionError, n *source.Named) {
 	for _, c := range e.Collisions {
 		u.Fail(fmt.Errorf("%s is provided by %d modules", accesskey.ShownName(c.Kind+"/"+c.Name, false), len(c.Modules)))
 		var rows [][]string
 		for _, l := range c.Modules {
-			rows = append(rows, []string{accesskey.ShownName(l, false), exports.URL(e.Sources[l]), e.Pins[l]})
+			from := exports.URL(e.Sources[l])
+			if phrase, ok := namedOf(n, e.Sources[l]); ok {
+				from = phrase
+			}
+			rows = append(rows, []string{accesskey.ShownName(l, false), from, e.Pins[l]})
 		}
 		u.Table(rows)
 		if c.Base != "" {

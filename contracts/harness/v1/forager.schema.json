@@ -2,15 +2,20 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://qory.dev/contracts/harness/v1/forager.schema.json",
   "title": "forager.yaml",
-  "description": "The machine's forager.yaml, under the user's configuration directory alone: what qory run does on this machine. gateway holds the run policy's egress section, the server document, the credentials, the tools, the integrations and selects; session holds the instance and what applies to every run; wall is the container the runtime is started in. egress and server follow the Forager contract's grammar, https://qory.dev/contracts/forager/v1/, and wall is that contract's wall.",
+  "description": "The machine's forager.yaml, under the user's configuration directory alone: what qory run does on this machine. gateway holds the run policy's egress section, the server document, the credentials, the tools and the integrations; session holds the instance and what applies to every run; wall is the container the runtime is started in. egress and server follow the Forager contract's grammar, https://qory.dev/contracts/forager/v1/, and wall is that contract's wall.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
     "apiVersion": {
       "const": "qory.dev/v1alpha1"
     },
+    "machine": {
+      "description": "The adapter that made this machine, such as aws-ec2, or none. qory run passes it to Forager, which reports it as machine in dev.qory.run.started. Default unset: dev.qory.run.started has no machine.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,63}$"
+    },
     "gateway": {
-      "description": "The gateway's sections: the egress policy, the server, the credentials, the tools, the integrations, the memory lock and the run limits; and for qory gateway, listen, tls and selects.",
+      "description": "The gateway's sections: the egress policy, the server, the credentials, the tools, the integrations, the memory lock and the run limits; and for qory gateway, listen and tls.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -128,6 +133,11 @@
                   "pattern": "^[A-Za-z0-9+/]{43}=$"
                 }
               }
+            },
+            "enrolment_code_file": {
+              "description": "Optional, for qory gateway alone: the file Qory Apiary writes the gateway's enrolment code (qecg_) into, relative to forager.yaml's directory unless absolute. When qory gateway starts with no access key, it waits until the file exists, enrols with the code and writes access-key-secret. The path has no link in it, the file is regular, and only root and the user running qory may write it and its folders; a folder that root owns with the sticky bit set, such as /tmp, passes, since no other user may replace a file in it. qory never writes or removes it. qory run, qory run pool, qory run register and qory run end stop with an error when it is set.",
+              "type": "string",
+              "minLength": 1
             }
           }
         },
@@ -350,38 +360,6 @@
             }
           }
         },
-        "selects": {
-          "description": "The credentials the gateway selects for a run, with a wall or without, when the server's policy selects none, each by name, with the label of the run's registration whose value is the argument, and the forge the run's forge label must name. On github.com the label's value is one repository or several of one owner, separated by commas with no space, such as acme/shop,acme/lib; a run whose label is missing, empty or of another form gets no credential from the entry. A value that lists repositories of several owners, or one repository twice, has that form, and the github integration mints no token for it: the run does not start. qory gateway alone reads it.",
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "credentials": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "name"
-                ],
-                "properties": {
-                  "name": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "argument_label": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "forge": {
-                    "enum": [
-                      "github.com"
-                    ]
-                  }
-                }
-              }
-            }
-          }
-        },
         "lock_memory": {
           "description": "On Linux, true locks every page of the gateway's process in memory, so that no key it holds is written to swap. It needs RLIMIT_MEMLOCK unlimited, or the capability CAP_IPC_LOCK. On any other system, true stops the gateway. The default is false.",
           "type": "boolean"
@@ -409,6 +387,15 @@
               "minimum": 1,
               "maximum": 100000
             }
+          }
+        },
+        "stack_hosts": {
+          "description": "The hosts the stack proxy of each run on the gateway reaches, in egress.allow's grammar: a lower-case host name, an IPv4 address in canonical form or a *. suffix. The stack proxy is open until the run's session starts, and allows a listed host without the run's policy. Behind a wall or through a separate gateway, it reaches the gateway's machine or a private network address only for a host that this list and the allow list of the gateway's policy both list by name, and never a link-local or cloud metadata address. Absent or empty means the stack proxy reaches no host.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$",
+            "$ref": "#/$defs/hostForm"
           }
         }
       }
@@ -596,6 +583,11 @@
             "outside",
             "inside"
           ]
+        },
+        "engine_proxy_file": {
+          "description": "The absolute path of the file that contains the container engine's proxy setting, which the machine's start unit writes: one JSON object, {\"version\": 1, \"address\": \"127.0.0.1:3129\", \"password\": \"<43 characters of base64url>\"}, owned by the user qory runs as, mode 0400 or 0600. A walled run's image is then pulled through the run's proxy. Default none: the engine pulls over the machine's network.",
+          "type": "string",
+          "pattern": "^/"
         }
       }
     },

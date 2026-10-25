@@ -114,6 +114,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#for-a-starter`,
 			if err != nil {
 				return err
 			}
+			if err := enrolmentCodeFileFor(r, "qory run register"); err != nil {
+				return err
+			}
 			key, err := signingKey(r, fdKey)
 			if err != nil {
 				return err
@@ -371,6 +374,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#how-a-run-ends-there`
 			}
 			r, err := starterServer("send the outcome to")
 			if err != nil {
+				return err
+			}
+			if err := enrolmentCodeFileFor(r, "qory run end"); err != nil {
 				return err
 			}
 			key, err := signingKey(r, fdKey)

@@ -70,8 +70,8 @@ func (k *heldRunKey) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, "[hi
 // runCodePrebuild runs the prebuild that doc, the documents of the answer to a run code
 // for the step prebuild, sets, as the run runID with the run key key: [prebuild.Launch]
 // with qory's state directory state, the configuration directory user, as
-// [config.UserDir] returns it, and wall.image, wall.user and wall.helper of r. Its
-// lines go to stderr after "qory run: ". Each error is exit 1.
+// [config.UserDir] returns it, and machine, wall.image, wall.user and wall.helper of r.
+// Its lines go to stderr after "qory run: ". Each error is exit 1.
 func runCodePrebuild(ctx context.Context, stderr io.Writer, r *config.Forager, state, user string, key *runKey, doc contracts.Documents, runID string) error {
 	var w *config.ForagerWall
 	if r != nil {
@@ -83,7 +83,7 @@ func runCodePrebuild(ctx context.Context, stderr io.Writer, r *config.Forager, s
 	fmt.Fprintln(stderr, throughGatewayLine(key, runID))
 	_, err := launchPrebuild(ctx, prebuild.Settings{
 		State: state, RunConfig: filepath.Dir(user), AgentImage: w.Image, User: w.User, Helper: w.Helper, Version: build().title(),
-		Log: func(line string) { fmt.Fprintln(stderr, "qory run:", line) },
+		Machine: r.Machine, Log: func(line string) { fmt.Fprintln(stderr, "qory run:", line) },
 	}, prebuild.Run{
 		RunID: runID, Key: &heldRunKey{b: []byte(key.value)}, Inputs: doc.Inputs,
 		ImageDestination: doc.ImageDestination, EnvironmentDestination: doc.EnvironmentDestination, EnvironmentImage: doc.EnvironmentImage,

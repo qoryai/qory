@@ -68,20 +68,20 @@ func TestNoCoreDumps(t *testing.T) {
 }
 
 // TestSafeHandlerHidesSecrets writes a message, a value, a key, a group's member and a
-// handler's attribute that contains what starts a secret, qak_, qrk_ or qecr_ in any
-// case, as [hidden], and leaves the rest.
+// handler's attribute that contains what starts a secret, qak_, qrk_, qecr_, qecn_,
+// qecp_, qecg_ or qeci_ in any case, as [hidden], and leaves the rest.
 func TestSafeHandlerHidesSecrets(t *testing.T) {
-	for _, prefix := range []string{"qrk_", "QECR_"} {
+	for _, prefix := range []string{"qrk_", "QECR_", "QeCn_", "qECP_", "QecG_", "qEcI_"} {
 		var buf bytes.Buffer
 		log := slog.New(pool.SafeHandler(slog.NewJSONHandler(&buf, nil))).With(slog.String("with", "QAK_x"))
-		log.Info("a line with "+prefix+"a.b", slog.String("plain", "dp_0000000000000000"), slog.String("v", "x qecr_a.b"),
+		log.Info("a line with "+prefix+"a.b", slog.String("plain", "dp_0000000000000000"), slog.String("v", "x qecr_a.b"), slog.String("p", "x "+prefix+"a"),
 			slog.Any("err", errorText("Qrk_a")), slog.Group("g", slog.String("m", "qak_y"), slog.String("c", "Qecr_z"), slog.Int("n", 1)), slog.String(prefix+"key", "1"))
 		var m map[string]any
 		if err := json.Unmarshal(buf.Bytes(), &m); err != nil {
 			t.Fatal(err)
 		}
 		g, _ := m["g"].(map[string]any)
-		if m["msg"] != "[hidden]" || m["plain"] != "dp_0000000000000000" || m["v"] != "[hidden]" || m["err"] != "[hidden]" ||
+		if m["msg"] != "[hidden]" || m["plain"] != "dp_0000000000000000" || m["v"] != "[hidden]" || m["p"] != "[hidden]" || m["err"] != "[hidden]" ||
 			m["with"] != "[hidden]" || g["m"] != "[hidden]" || g["c"] != "[hidden]" || g["n"] != float64(1) || m["[hidden]"] != "1" {
 			t.Errorf("the line is %s", buf.String())
 		}

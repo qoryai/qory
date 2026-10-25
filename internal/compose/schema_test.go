@@ -15,12 +15,17 @@ import (
 
 // TestSchemas validates every fixture document against the contract's schemas: a
 // qory.yaml that composes passes config.schema.json, one refused for its apiVersion, a
-// kind or its qory key fails it,
-// every module manifest passes module.schema.json, and every MCP server file passes
-// mcp.schema.json unless the fixture expects it refused.
+// kind, its qory key or its workflows fails it,
+// every module manifest passes module.schema.json, every MCP server file passes
+// mcp.schema.json unless the fixture expects it refused, and the stack a fixture extends,
+// stack/qory-stack.yaml, passes stack.schema.json unless the fixture expects it refused.
 func TestSchemas(t *testing.T) {
 	c := jsonschema.NewCompiler()
 	composeSchema, err := c.Compile("../../contracts/harness/v1/config.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stackSchema, err := c.Compile("../../contracts/harness/v1/stack.schema.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +40,8 @@ func TestSchemas(t *testing.T) {
 	dirs, _ := filepath.Glob(filepath.Join(fixtures, "*"))
 	for _, dir := range dirs {
 		errText, _ := os.ReadFile(filepath.Join(dir, "expected", "error.txt"))
-		wantInvalid := strings.Contains(string(errText), "apiVersion") || strings.Contains(string(errText), "kind ") || strings.Contains(string(errText), "qory \"")
+		wantInvalid := strings.Contains(string(errText), "apiVersion") || strings.Contains(string(errText), "kind ") || strings.Contains(string(errText), "qory \"") ||
+			strings.HasPrefix(string(errText), "qory.yaml: ") && strings.Contains(string(errText), "workflows")
 		err := composeSchema.Validate(document(t, filepath.Join(dir, "qory.yaml")))
 		if wantInvalid && err == nil {
 			t.Errorf("%s: the document passed the schema; want a failure", dir)
@@ -43,7 +49,19 @@ func TestSchemas(t *testing.T) {
 		if !wantInvalid && err != nil {
 			t.Errorf("%s: the document failed the schema: %v", dir, err)
 		}
+		if f := filepath.Join(dir, "stack", "qory-stack.yaml"); fileExists(f) {
+			wantBadStack := strings.HasPrefix(string(errText), "stack/qory-stack.yaml: ")
+			err := stackSchema.Validate(document(t, f))
+			if wantBadStack && err == nil {
+				t.Errorf("%s passed the schema; want a failure", f)
+			}
+			if !wantBadStack && err != nil {
+				t.Errorf("%s: %v", f, err)
+			}
+		}
 		manifests, _ := filepath.Glob(filepath.Join(dir, "modules", "*", "qory-module.yaml"))
+		more, _ := filepath.Glob(filepath.Join(dir, "stack", "modules", "*", "qory-module.yaml"))
+		manifests = append(manifests, more...)
 		for _, m := range manifests {
 			if err := moduleSchema.Validate(document(t, m)); err != nil {
 				t.Errorf("%s: %v", m, err)
@@ -213,6 +231,12 @@ func TestComposeSchemaKnowsExtends(t *testing.T) {
 			t.Errorf("%s: valid=%v, err=%v", c.body, c.valid, err)
 		}
 	}
+}
+
+// fileExists reports whether path is there.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func document(t *testing.T, path string) any {

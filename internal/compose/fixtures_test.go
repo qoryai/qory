@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -17,8 +19,9 @@ import (
 
 const fixtures = "../../contracts/harness/v1/fixtures"
 
-// TestFixtures runs every fixture: the document in its qory.yaml composes to the expected
-// entries, settings and instructions, or fails with the expected error text.
+// TestFixtures runs every fixture: the document in its qory.yaml, on the stack it
+// extends when it extends one, composes to the expected entries, settings, instructions
+// and workflow access levels, or fails with the expected error text.
 func TestFixtures(t *testing.T) {
 	dirs, err := filepath.Glob(filepath.Join(fixtures, "*"))
 	if err != nil || len(dirs) == 0 {
@@ -36,7 +39,10 @@ func TestFixtures(t *testing.T) {
 				if err == nil {
 					t.Fatalf("composed without error; want:\n%s", want)
 				}
-				if got := err.Error(); got != strings.TrimRight(string(want), "\n") {
+				// A file of a stack the document extends is in the error by its absolute
+				// path; the expected text has it relative to the fixture.
+				got := strings.ReplaceAll(err.Error(), dir+string(filepath.Separator), "")
+				if got != strings.TrimRight(string(want), "\n") {
 					t.Fatalf("error:\n%s\nwant:\n%s", got, want)
 				}
 				return
@@ -124,6 +130,15 @@ func TestFixtures(t *testing.T) {
 			if _, err := os.Stat("expected/egress.txt"); err == nil || declared {
 				expectText(t, "expected/egress.txt", b.String())
 			}
+			// expected/access.txt is the access level of each workflow of the stack, as
+			// a dispatched run reads it, when the stack has any workflows.
+			b.Reset()
+			for _, name := range slices.Sorted(maps.Keys(res.Stack.Workflows)) {
+				fmt.Fprintf(&b, "%s %s\n", name, res.Stack.AccessOf(name))
+			}
+			if _, err := os.Stat("expected/access.txt"); err == nil || b.Len() > 0 {
+				expectText(t, "expected/access.txt", b.String())
+			}
 		})
 	}
 }
@@ -133,7 +148,11 @@ func load() (*compose.Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	return compose.Compose(p)
+	merged, base, err := compose.LoadBase(p, "", compose.Options{})
+	if err != nil {
+		return nil, err
+	}
+	return compose.ComposeWith(merged, compose.Options{Base: base})
 }
 
 func expectText(t *testing.T, path, got string) {

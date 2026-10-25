@@ -398,12 +398,15 @@ type harnessSection struct {
 	Modules     []stack.Module           `yaml:"modules,omitempty"`
 	Bind        map[string]string        `yaml:"bind,omitempty"`
 	Extensions  map[string]any           `yaml:"extensions,omitempty"`
+	// Workflows are the workflows of the stack the section defines, as a stack file
+	// sets them; a section that extends a stack takes the base's and sets none.
+	Workflows map[string]stack.Workflow `yaml:"workflows,omitempty"`
 }
 
 // composes reports whether the section carries a compose document: modules, extends,
-// bindings or extensions. A section of machine keys alone is not a document.
+// bindings, extensions or workflows. A section of machine keys alone is not a document.
 func (h *harnessSection) composes() bool {
-	return h != nil && (len(h.Modules) > 0 || h.extends() || len(h.Bind) > 0 || len(h.Extensions) > 0)
+	return h != nil && (len(h.Modules) > 0 || h.extends() || len(h.Bind) > 0 || len(h.Extensions) > 0 || len(h.Workflows) > 0)
 }
 
 // extends reports whether the section names a stack to extend, by directory or by export.
@@ -692,6 +695,11 @@ func OnBase(path, base string) (*stack.Stack, stack.Source, error) {
 	if !f.Harness.composes() {
 		return nil, stack.Source{}, fmt.Errorf("%s: the harness section lists no modules, no stack to extend and no extensions", path)
 	}
+	// The stack -f selects is the base, so the document composes as one that extends a
+	// stack, and the base's workflows apply; the document's extends may be absent.
+	if len(f.Harness.Workflows) > 0 {
+		return nil, stack.Source{}, fmt.Errorf("remove workflows from %s or leave out -f: -f selects the base, and its workflows apply", filepath.Base(path))
+	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, stack.Source{}, err
@@ -714,7 +722,7 @@ func OnBase(path, base string) (*stack.Stack, stack.Source, error) {
 // document is the file's harness section as the stack it holds, before validation.
 func (f file) document() *stack.Stack {
 	h := f.Harness
-	return &stack.Stack{APIVersion: f.APIVersion, RetiredAPIVersion: f.retired, Qory: f.Qory, Name: h.Name, Description: h.Description, Extends: h.Extends, Target: h.Target, Modules: h.Modules, Bind: h.Bind, Extensions: h.Extensions}
+	return &stack.Stack{APIVersion: f.APIVersion, RetiredAPIVersion: f.retired, Qory: f.Qory, Name: h.Name, Description: h.Description, Extends: h.Extends, Target: h.Target, Modules: h.Modules, Bind: h.Bind, Extensions: h.Extensions, Workflows: h.Workflows}
 }
 
 // ErrRelativeConfigHome is the refusal of an XDG_CONFIG_HOME that is no absolute path,

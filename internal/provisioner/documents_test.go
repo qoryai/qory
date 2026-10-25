@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io/fs"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -50,8 +51,8 @@ func noValue(t *testing.T, name string, err error) {
 }
 
 // TestEveryDocumentsFixtureIsRead reads each of the contract's documents fixtures: each
-// is read with its step, its domain, its stack as written, its run settings as sent,
-// and its inputs as the documents' bytes.
+// is read with its step, its domain, its workflow and harness as written, its run
+// settings as sent, and its inputs as the documents' bytes.
 func TestEveryDocumentsFixtureIsRead(t *testing.T) {
 	names, err := fs.Glob(contracts.RunFS, "fixtures/documents/*.json")
 	if err != nil || len(names) < 18 {
@@ -77,7 +78,7 @@ func TestEveryDocumentsFixtureIsRead(t *testing.T) {
 			if err := json.Unmarshal(raw, &settings); err != nil {
 				t.Fatal(err)
 			}
-			if doc.Step != want.Step || doc.Domain != want.Domain || doc.Stack != want.Stack || doc.Workflow != want.Workflow ||
+			if doc.Step != want.Step || doc.Domain != want.Domain || doc.Workflow != want.Workflow || !reflect.DeepEqual(doc.Harness, want.Harness) ||
 				(doc.Target == nil) != (doc.Access == "") || doc.ImageDestination != want.ImageDestination {
 				t.Errorf("read %+v", doc)
 			}
@@ -96,7 +97,7 @@ func TestEveryDocumentsFixtureIsRead(t *testing.T) {
 	if err != nil || doc.RunSettings == nil || doc.RunSettings.TimeLimitMinutes != 90 {
 		t.Errorf("the time limit: %+v %v", doc.RunSettings, err)
 	}
-	spaced := append([]byte(" \n"), documentsOf(t, "explore-stack.json", nil)...)
+	spaced := append([]byte(" \n"), documentsOf(t, "explore-workflow.json", nil)...)
 	if _, err := provisioner.ReadDocuments(spaced); err != nil {
 		t.Errorf("documents after white space: %v", err)
 	}
@@ -144,16 +145,16 @@ func TestBrokenDocumentsAreRefused(t *testing.T) {
 		{"null", json.RawMessage(`null`), ""},
 		{"empty", json.RawMessage(``), ""},
 		{"no member", json.RawMessage(`{}`), broken},
-		{"a run key", documentsOf(t, "explore-stack.json", func(d map[string]any) { d["run_key"] = "qrk_a.b" }), "it contains a run_key member"},
-		{"a run code", documentsOf(t, "explore-stack.json", func(d map[string]any) { d["run_code"] = "qecr_x" }), "it contains a run_code member"},
-		{"a member the schema does not define", documentsOf(t, "explore-stack.json", func(d map[string]any) { d["prompt"] = "x" }), broken},
-		{"a run id", documentsOf(t, "explore-stack.json", func(d map[string]any) { d["run_id"] = "0192f0c1-7d4e-7a2b-8c3d-4e5f6a7b8c9d" }), broken},
-		{"a stack without a workflow", documentsOf(t, "explore-stack.json", func(d map[string]any) { delete(d, "workflow") }), broken},
-		{"another domain in inputs", documentsOf(t, "explore-stack.json", func(d map[string]any) { inputs(d)["domain"] = "marketing" }), "its inputs.domain is not its domain"},
-		{"another work item in inputs", documentsOf(t, "explore-stack.json", func(d map[string]any) {
+		{"a run key", documentsOf(t, "explore-workflow.json", func(d map[string]any) { d["run_key"] = "qrk_a.b" }), "it contains a run_key member"},
+		{"a run code", documentsOf(t, "explore-workflow.json", func(d map[string]any) { d["run_code"] = "qecr_x" }), "it contains a run_code member"},
+		{"a member the schema does not define", documentsOf(t, "explore-workflow.json", func(d map[string]any) { d["prompt"] = "x" }), broken},
+		{"a run id", documentsOf(t, "explore-workflow.json", func(d map[string]any) { d["run_id"] = "0192f0c1-7d4e-7a2b-8c3d-4e5f6a7b8c9d" }), broken},
+		{"harness_hidden without a workflow", documentsOf(t, "explore-workflow.json", func(d map[string]any) { delete(d, "workflow") }), broken},
+		{"another domain in inputs", documentsOf(t, "explore-workflow.json", func(d map[string]any) { inputs(d)["domain"] = "marketing" }), "its inputs.domain is not its domain"},
+		{"another work item in inputs", documentsOf(t, "explore-workflow.json", func(d map[string]any) {
 			inputs(d)["work_item"].(map[string]any)["id"] = "wi_0000000000"
 		}), "its inputs.work_item.id is not its work item's id"},
-		{"no work item in inputs", documentsOf(t, "explore-stack.json", func(d map[string]any) { delete(inputs(d), "work_item") }), "its inputs.work_item.id is not its work item's id"},
+		{"no work item in inputs", documentsOf(t, "explore-workflow.json", func(d map[string]any) { delete(inputs(d), "work_item") }), "its inputs.work_item.id is not its work item's id"},
 		{"inputs too large", documentsOf(t, "explore-without-target.json", func(d map[string]any) {
 			inputs(d)["x"] = strings.Repeat("a", contracts.MaxInputs)
 		}), "its inputs are larger than 786432 bytes"},

@@ -113,6 +113,7 @@ extensions:                      # optional; copied into the report, not read
 workflows:                       # optional; the settings of the workflows a dispatched run starts
   example:
     time_limit: 45m              # optional; a duration, such as 45m or 7h
+    access: write                # optional; read or write, read when left out
 ```
 
 A stack has no `target`: it is delivered to be extended, and the checkout extending it
@@ -132,6 +133,8 @@ harness:
   modules:
     - name: app
       source: {path: ./harness}
+  workflows:                     # optional; the same keys as in a qory-stack.yaml
+    example: {access: write}
 ```
 
 ```yaml
@@ -146,8 +149,11 @@ harness:
 ```
 
 The section takes `name`, `description`, `modules`, `bind` and `extensions` as a stack
-does, and `target`, which a stack does not; never `extending`, since a stack to be
-extended is a `qory-stack.yaml`. A section extends a stack or defines one. A stack it
+does, `workflows` when it defines a stack, and `target`, which a stack does not; never
+`extending`, since a stack to be extended is a `qory-stack.yaml`. A section extends a
+stack or defines one. A section that extends a stack takes the base's `workflows`; one
+that also lists `workflows` is refused with status 2, `remove workflows or extends: a
+harness section that extends a stack takes the workflows of its base`. A stack it
 defines requires `target`: `runtime`, the program that runs the harness, one of the
 runtimes in §Runtimes or a list of them to compose for at once, and `model`, optional,
 written into the settings of every targeted runtime that has a project-level place for
@@ -184,8 +190,9 @@ schema is [config.schema.json](config.schema.json).
 | `modules[].link` | no | a name at the checkout root, one path segment, linked to the module's directory in the composed tree, so a permission rule or a script refers to the module's files by a checkout-relative path: `harness/scripts/check.sh`. A hard link (§Rendering), each name used once across the modules |
 | `bind` | no | the entry that fills each role a document references (§References): `<kind>/<role>` to the name of an entry of that kind, `agents/coder: rails-coder`. The kind is `agents`, `skills` or `commands`. A checkout extending a stack adds to the base's bindings and may rebind a role of the base's |
 | `extensions` | no | a map of keys the author chooses, each a value of any shape, a scalar, a list or a map of any depth; written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it |
-| `workflows` | no | the settings of each workflow of the stack, by its name: a lower-case letter, then up to 63 lower-case letters, digits and hyphens. A run that Qory Apiary dispatches from a run code starts the skill or command named like its workflow (docs/run.md, §The run key from a run code). The harness section of a `qory.yaml` has no `workflows`; a checkout extending a stack takes the base's |
+| `workflows` | no | the settings of each workflow of the stack, by its name: a lower-case letter, then up to 63 lower-case letters, digits and hyphens. A run that Qory Apiary dispatches from a run code starts the skill or command named like its workflow (docs/run.md, §The run key from a run code). The harness section of a `qory.yaml` that defines a stack lists them with the same keys and checks; a section that extends a stack takes the base's and lists none |
 | `workflows.<name>.time_limit` | no | how long a dispatched run of the workflow may run, counted from the run's open, as a Go duration above zero, such as `7h`, `45m` or `1h30m`; qory stops with an error on any other value: `set workflows.<name>.time_limit to a duration above zero, such as 7h or 45m: <value> is not one`. The run's `run_settings.time_limit_minutes`, when Qory Apiary sets it, applies instead, and a workflow without it runs for at most 3 hours |
+| `workflows.<name>.access` | no | the access level the workflow declares for what a dispatched run of it works on, `read` or `write`, and `read` when left out; qory stops with an error on any other value: `set workflows.<name>.access to read or write: <value> is neither`. qory checks the value, does not change it and grants no permission from it |
 | `extending` | no | what a module of a checkout extending this stack may ship: `kinds`, `instructions`, `settings`, `files` (§Extending a stack). A base without the block cannot be extended |
 | `extending.target` | no | the runtimes and the models the stack is written for, `runtime` and `model`, each one name or a list, one of the two at least. A checkout's resolved target outside either list fails the compose; listed models make the model required, since a target without one runs whatever the runtime defaults to, which is a model the stack did not list. Left out, every target is accepted, a model left out included (§Extending a stack) |
 
@@ -952,7 +959,7 @@ the document under `harness` is (§Extending a stack).
 nowhere else: it has no counterpart in a repository or an ancestor directory, so a
 checkout cannot set the policy the agent runs under, which server the run reports to or
 what the agent is enclosed in. Its sections follow Forager's parts: `gateway` holds
-`egress`, `server`, `credentials`, `tools`, `integrations` and `selects`; `session` holds
+`egress`, `server`, `credentials`, `tools` and `integrations`; `session` holds
 `instance` and `run`; `wall` is the wall. `gateway.egress` and `gateway.server` are the
 Forager contract's objects, `https://qory.dev/contracts/forager/v1/`, in that contract's
 grammar; `qory run` passes them to Forager as they are, `gateway.server` with the access
@@ -1009,9 +1016,9 @@ wall:                            # the container the runtime starts in; absent: 
 | `gateway.server.via.url` | none | the gateway: an https URL of a host and an optional port, with nothing after. Required in `gateway.server.via` |
 | `gateway.server.via.ca_file` | none: the system's roots | a PEM file of the authorities the gateway's certificate chains to, in place of the system's roots, relative to the directory of `forager.yaml` unless absolute |
 | `gateway.server.via.certificate_sha256` | none | the SHA-256 of the gateway certificate's public key, in standard base64 with padding; with it, only a certificate with that key is accepted, and its chain is still checked |
+| `gateway.server.enrolment_code_file` | none | `qory gateway`'s alone: the file Qory Apiary writes the gateway's enrolment code (`qecg_…`) into, relative to the directory of `forager.yaml` unless absolute. When `qory gateway` starts with no access key, it waits until the file exists, enrols with the code as `qory access-key enrol` does, and starts. See [docs/gateway.md](../../../docs/gateway.md#the-access-key) |
 | `gateway.listen` | none | The address qory gateway listens on for the runs of other machines, host:port. qory run never listens on it: it starts a gateway itself on a loopback port for each run. `--listen` wins over it |
 | `gateway.tls.certificate`, `gateway.tls.key` | none | the certificate and key `qory gateway` serves the other machines with, files in PEM, relative to the directory of `forager.yaml` unless absolute; both or neither. `qory gateway` needs them, whatever address it listens on: a gateway serves other machines. `qory config` lists the paths as written and never what the key file holds |
-| `gateway.selects` | none | The credentials the gateway selects for a run, with a wall or without, when the server's policy selects none, each by name, with the label of the run's registration whose value is the argument, and the forge the run's `forge` label must name. On github.com the label's value is one repository or several of one owner, separated by commas with no space, such as `acme/shop,acme/lib`; a run whose label is missing, empty or of another form gets no credential from the entry. A value that lists repositories of several owners, or one repository twice, has that form, and the `github` integration mints no token for it: the run does not start. qory gateway alone reads it. |
 | `session.instance.name` | the host name, or its first label when the whole does not fit | this instance's display name on the server, and the name an enrolled key gets: 1 to 64 of `A-Z`, `a-z`, `0-9`, dot, underscore and dash, starting with a letter or a digit. The instance's id is made by qory and kept in the file `instance-id` beside `forager.yaml` |
 | `wall.adapter` | none | `docker`, the one there is. With it set, every `qory run` starts the runtime in a container with no route out except to the gateway's proxy; `--wall none` runs once without it, `--wall docker` once with it |
 | `wall.image` | none | the container's image when the run's policy selects none, which contains the runtime and the project's toolchain: the name of one of `wall.images`, or a reference. A name `wall.images` defines is read as that image first; `--image` sets another for one run, read the same way, and a policy's selection wins over both. qory builds none, and a wall without an image is refused unless the run's `--policy` selects one and `wall.images_allow` is not set; a machine that reports to a server sets it, because the server's run configuration arrives once the run starts and may select none |

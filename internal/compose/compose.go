@@ -194,7 +194,7 @@ type Options struct {
 	// Memo is shared by every git source of one compose, the base stack's included, so one
 	// URL at one ref lands on one commit; nil makes one for the modules of this call.
 	Memo *source.Memo
-	// Git, when set, fetches every git source through a run's host proxy, see
+	// Git, when set, fetches every git source through a run's stack proxy, see
 	// [source.Git]; nil fetches with the person's git.
 	Git *source.Git
 	// Env are the configuration's variables, written over what the modules export.
@@ -264,6 +264,9 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			who = "module at " + ps.Shown()
 		}
 		so := source.Options{Pin: opts.Pins[ps.String()], Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Memo: opts.Memo, Git: opts.Git}
+		if opts.Git != nil && opts.Git.Named != nil {
+			so.Name = opts.Git.Named.Module(pl.Name)
+		}
 		if pl.Base && opts.Base != nil && ps.Git != "" && ps.Git == p.Extends.Git && ps.Ref == p.Extends.Ref {
 			// A base module in the base's own clone was fetched with the base this compose:
 			// it has the base's pin, the memo puts it on the base's commit, and no update

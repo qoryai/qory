@@ -76,6 +76,25 @@ func TestARunCodePrintsAsAPhrase(t *testing.T) {
 	}
 }
 
+// TestAnEnrolmentCodePrintsAsAPhrase is a value, a git URL and a text that contain an
+// enrolment code, qecn_, qecp_, qecg_ or qeci_ in mixed case, as written or
+// percent-encoded: each prints the enrolment code's phrase in its place.
+func TestAnEnrolmentCodePrintsAsAPhrase(t *testing.T) {
+	const phrase = "(a value that contains an enrolment code)"
+	for _, prefix := range []string{"QeCn_", "qECP_", "QecG_", "qEcI_"} {
+		v := prefix + "0123456789ABCDEFGHJKMNPQRS.AAAAAAAAAAAAAAAAAAAAAA"
+		if got := exports.Value("code "+v, true); got != phrase {
+			t.Errorf("Value(%s) = %q, want %q", prefix, got, phrase)
+		}
+		if got := exports.URL("https://git.example/h.git?c=%71" + prefix[1:] + "x"); got != phrase {
+			t.Errorf("URL with %s = %q, want %q", prefix, got, phrase)
+		}
+		if got, want := exports.HideValues("enrolling "+v+": failed"), "enrolling "+phrase+": failed"; got != want {
+			t.Errorf("HideValues = %q, want %q", got, want)
+		}
+	}
+}
+
 // TestAGitURLPrintsWithoutItsPassword is a git URL with a password in its user part, one
 // with a user alone, one with a secret, and one with neither.
 func TestAGitURLPrintsWithoutItsPassword(t *testing.T) {

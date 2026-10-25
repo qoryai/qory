@@ -528,6 +528,7 @@ func newEnv(t *testing.T) *env {
 		State: filepath.Join(root, "state"), RunConfig: filepath.Join(root, "runconfig"),
 		AgentImage: testAgent, User: "1000:1000", Helper: "/opt/qory/qory-linux",
 		Git: os.Args[0], Docker: os.Args[0], Log: e.log, Grace: time.Second, Version: "qory 0.0.0-test",
+		Machine: "aws-ec2",
 	}
 	e.settings.Open, e.settings.Fetch, e.settings.Build = e.open, e.fetch, e.build
 	for _, d := range []string{e.home, e.settings.RunConfig} {
@@ -946,7 +947,8 @@ func TestTheFetchRunsNoGitFromTheRunsFolder(t *testing.T) {
 
 // TestLaunchCommands runs the fetch and the build in this process, and docker with its
 // arguments, in the pool's folder, outside every run directory: the run opens at the
-// gateway of its run key, with no wall and its record in the run's state, the fetch
+// gateway of its run key, with no wall, the machine of Settings, and its record in the
+// run's state, the fetch
 // goes into work through the run's host proxy, and the fetch and the build get the
 // allowed environment, with a PATH that has no entry in the pool's runs folder, as every
 // docker command does.
@@ -972,8 +974,8 @@ func TestLaunchCommands(t *testing.T) {
 	spec := e.specs[0]
 	gw, ok := spec.Gateway.(session.RemoteGateway)
 	if !ok || gw.RunKey != testKey || spec.Wall != nil || spec.RunID != testRunID || spec.ForagerVersion != "qory 0.0.0-test" ||
-		spec.RunsDir != filepath.Join(state, "qory", "runs", "work-"+sum([]byte(work))[:12]) || len(spec.Labels) != 0 || spec.About != nil {
-		t.Errorf("the open's spec: run %s, wall %v, runs %s, version %s, by run key %v", spec.RunID, spec.Wall, spec.RunsDir, spec.ForagerVersion, ok && gw.RunKey == testKey)
+		spec.RunsDir != filepath.Join(state, "qory", "runs", "work-"+sum([]byte(work))[:12]) || len(spec.Labels) != 0 || spec.About != nil || spec.Machine != "aws-ec2" {
+		t.Errorf("the open's spec: run %s, wall %v, runs %s, version %s, machine %q, by run key %v", spec.RunID, spec.Wall, spec.RunsDir, spec.ForagerVersion, spec.Machine, ok && gw.RunKey == testKey)
 	}
 	if !res.Record {
 		t.Error("no record")
@@ -1354,10 +1356,10 @@ func TestLaunchRefused(t *testing.T) {
 // prebuild takes, its fix first.
 func TestLaunchRefusedPlaces(t *testing.T) {
 	const (
-		notAPlace = "ask Qory Apiary's operator: the run's %s is not a place at a registry, a host and a path of at most 255 characters with no tag and no digest"
-		upper     = "ask Qory Apiary's operator: the run's %s has upper-case letters, and qory writes images to dev.qory.run.built by lower-case references alone"
-		secret    = "ask Qory Apiary's operator: the run's %s contains qak_, qrk_ or qecr_, which start a secret, and qory writes no image with them to dev.qory.run.built"
-		notPinned = "ask Qory Apiary's operator: the run's environment_image is not an image pinned by digest, NAME@sha256: and 64 hexadecimal digits with no tag, NAME at most 255 characters"
+		notAPlace = "ask Qory Apiary's instance admin: the run's %s is not a place at a registry, a host and a path of at most 255 characters with no tag and no digest"
+		upper     = "ask Qory Apiary's instance admin: the run's %s has upper-case letters, and qory writes images to dev.qory.run.built by lower-case references alone"
+		secret    = "ask Qory Apiary's instance admin: the run's %s contains qak_, qrk_, qecr_, qecn_, qecp_, qecg_ or qeci_, which start a secret, and qory writes no image with them to dev.qory.run.built"
+		notPinned = "ask Qory Apiary's instance admin: the run's environment_image is not an image pinned by digest, NAME@sha256: and 64 hexadecimal digits with no tag, NAME at most 255 characters"
 	)
 	digest := "@sha256:" + strings.Repeat("a", 64)
 	fromImage := func(image string) func(*prebuild.Run) {
@@ -1375,11 +1377,15 @@ func TestLaunchRefusedPlaces(t *testing.T) {
 		{"upper-case path", func(r *prebuild.Run) { r.EnvironmentDestination = "registry.example.com/Environments/x" }, fmt.Sprintf(upper, "environment_destination")},
 		{"qak_", func(r *prebuild.Run) { r.ImageDestination = "registry.example.com/qak_x" }, fmt.Sprintf(secret, "image_destination")},
 		{"qecr_", func(r *prebuild.Run) { r.EnvironmentDestination = "registry.example.com/qecr_x" }, fmt.Sprintf(secret, "environment_destination")},
-		{"both", func(r *prebuild.Run) { r.EnvironmentImage = testEnvImage }, "ask Qory Apiary's operator: the run has both or neither of environment_destination and environment_image, and a prebuild takes one"},
+		{"both", func(r *prebuild.Run) { r.EnvironmentImage = testEnvImage }, "ask Qory Apiary's instance admin: the run has both or neither of environment_destination and environment_image, and a prebuild takes one"},
 		{"environment image by tag", fromImage("r.example/env:1"), notPinned},
 		{"environment image with tag and digest", fromImage("r.example/env:1" + digest), notPinned},
 		{"environment image upper-case host", fromImage("Registry.example.com/env" + digest), fmt.Sprintf(upper, "environment_image")},
 		{"environment image qrk_", fromImage("registry.example.com/qrk_env" + digest), fmt.Sprintf(secret, "environment_image")},
+		{"QeCn_", func(r *prebuild.Run) { r.ImageDestination = "registry.example.com/QeCn_x" }, fmt.Sprintf(secret, "image_destination")},
+		{"qECP_", func(r *prebuild.Run) { r.EnvironmentDestination = "registry.example.com/qECP_x" }, fmt.Sprintf(secret, "environment_destination")},
+		{"environment image QecG_", fromImage("registry.example.com/QecG_env" + digest), fmt.Sprintf(secret, "environment_image")},
+		{"qEcI_", func(r *prebuild.Run) { r.ImageDestination = "registry.example.com/qEcI_x" }, fmt.Sprintf(secret, "image_destination")},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEnv(t)
@@ -1403,7 +1409,7 @@ func TestLaunchRefusedPlaces(t *testing.T) {
 // contract's documents.schema.json accepts, hyphens inside a host's label included: the
 // check passes. A place that image_place refuses is not a place at a registry.
 func TestCheckRunTakesTheContractsPlaces(t *testing.T) {
-	const notAPlace = "ask Qory Apiary's operator: the run's %s is not a place at a registry, a host and a path of at most 255 characters with no tag and no digest"
+	const notAPlace = "ask Qory Apiary's instance admin: the run's %s is not a place at a registry, a host and a path of at most 255 characters with no tag and no digest"
 	e := newEnv(t)
 	for _, place := range []string{
 		"xn--bcher-kva.example.com/targets/x",

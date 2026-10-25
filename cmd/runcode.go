@@ -435,8 +435,9 @@ func sameGateway(a, b string) bool {
 }
 
 // hiddenRunSecrets is err, or, when its text contains what starts an access key
-// secret, a run key or a run code, qak_, qrk_ or qecr_ in any letter case, an error
-// whose text is [accesskey.ShownError]'s phrase in its place. It unwraps to err.
+// secret, a run key, a run code or an enrolment code, qak_, qrk_, qecr_, qecn_, qecp_,
+// qecg_ or qeci_ in any letter case, an error whose text is [accesskey.ShownError]'s
+// phrase in its place. It unwraps to err.
 func hiddenRunSecrets(err error) error {
 	return accesskey.ShownError(err)
 }

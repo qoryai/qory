@@ -102,8 +102,8 @@ const (
 	textClosedBefore   = "check the run's record in Qory Apiary: the gateway closed the run as %s before qory run closed it"
 	textNoRecord       = "check that this machine can write qory run's state directory: the run opened and made no record"
 	textNotReported    = "update qory: the build's result could not be written to the run: %v"
-	textPlaceSecret    = "ask Qory Apiary's operator: the run's %s contains qak_, qrk_ or qecr_, which start a secret, and qory writes no image with them to dev.qory.run.built"
-	textPlaceCase      = "ask Qory Apiary's operator: the run's %s has upper-case letters, and qory writes images to dev.qory.run.built by lower-case references alone"
+	textPlaceSecret    = "ask Qory Apiary's instance admin: the run's %s contains qak_, qrk_, qecr_, qecn_, qecp_, qecg_ or qeci_, which start a secret, and qory writes no image with them to dev.qory.run.built"
+	textPlaceCase      = "ask Qory Apiary's instance admin: the run's %s has upper-case letters, and qory writes images to dev.qory.run.built by lower-case references alone"
 	textUndelivered    = "check that this machine reaches the run's gateway: %s of the run did not reach it; %s/undelivered contains them"
 )
 
@@ -159,6 +159,9 @@ type Settings struct {
 	AgentImage, User, Helper string
 	// Version is the version the run's events report, qory's.
 	Version string
+	// Machine is machine of forager.yaml, the adapter that made the machine, which
+	// run.started reports; empty leaves it out.
+	Machine string
 	// Open opens the run at its gateway; nil is [session.Open]. A test replaces it.
 	Open func(ctx context.Context, spec session.OpenSpec) (Opened, error)
 	// Fetch fetches the run's repositories, as [preparation.Run]; nil is
@@ -413,7 +416,7 @@ func (s Settings) fetch(ctx context.Context, r Run, work, state, record string) 
 	}
 	run, err := open(fetchCtx, session.OpenSpec{
 		Gateway: session.RemoteGateway{RunKey: string(r.Key.Bytes())}, RunsDir: runs, ForagerVersion: s.Version, RunID: r.RunID,
-		Report: func(line string) { s.log(r.RunID, line) },
+		Machine: s.Machine, Report: func(line string) { s.log(r.RunID, line) },
 	})
 	if err != nil {
 		return nil, out, fmt.Errorf(textNotOpened, integration.Printable(exports.HideURLError(err).Error()))
@@ -499,12 +502,12 @@ func checkRun(s Settings, r Run) (string, error) {
 		}
 	}
 	if (r.EnvironmentDestination == "") == (r.EnvironmentImage == "") {
-		return "", errors.New("ask Qory Apiary's operator: the run has both or neither of environment_destination and environment_image, and a prebuild takes one")
+		return "", errors.New("ask Qory Apiary's instance admin: the run has both or neither of environment_destination and environment_image, and a prebuild takes one")
 	}
 	// Each image the run reports goes into dev.qory.run.built, which takes a lower-case
 	// reference pinned by digest, of at most 255 characters before the digest, with no
-	// qak_, qrk_ or qecr_ in it: a value that the event cannot take stops the run here,
-	// before anything is built or pushed.
+	// qak_, qrk_, qecr_, qecn_, qecp_, qecg_ or qeci_ in it: a value that the event
+	// cannot take stops the run here, before anything is built or pushed.
 	places := []struct{ member, value string }{{"image_destination", r.ImageDestination}}
 	if r.EnvironmentDestination != "" {
 		places = append(places, struct{ member, value string }{"environment_destination", r.EnvironmentDestination})
@@ -524,9 +527,9 @@ func checkRun(s Settings, r Run) (string, error) {
 		case strings.ToLower(d.value) != d.value:
 			return "", fmt.Errorf(textPlaceCase, d.member)
 		case !place && !policy.ImageReference(image):
-			return "", errors.New("ask Qory Apiary's operator: the run's environment_image is not an image pinned by digest, NAME@sha256: and 64 hexadecimal digits with no tag, NAME at most 255 characters")
+			return "", errors.New("ask Qory Apiary's instance admin: the run's environment_image is not an image pinned by digest, NAME@sha256: and 64 hexadecimal digits with no tag, NAME at most 255 characters")
 		case place && (noRegistry != nil || !destinationShape.MatchString(d.value) || !policy.ImageReference(image)):
-			return "", fmt.Errorf("ask Qory Apiary's operator: the run's %s is not a place at a registry, a host and a path of at most 255 characters with no tag and no digest", d.member)
+			return "", fmt.Errorf("ask Qory Apiary's instance admin: the run's %s is not a place at a registry, a host and a path of at most 255 characters with no tag and no digest", d.member)
 		}
 	}
 	if !pinnedShape.MatchString(s.AgentImage) {

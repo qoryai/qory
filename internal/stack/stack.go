@@ -395,8 +395,8 @@ type Stack struct {
 	Extensions map[string]any `yaml:"extensions,omitempty"`
 	// Workflows are the settings of the workflows the stack starts, by name: a
 	// dispatched run starts the skill or command of a workflow's name. A stack file sets
-	// them; the harness section of a checkout's qory.yaml has no such key, and [Extend]
-	// takes the base's.
+	// them, and so does the harness section of a checkout's qory.yaml that defines a
+	// stack; a section that extends a stack sets none, and [Extend] takes the base's.
 	Workflows map[string]Workflow `yaml:"workflows,omitempty"`
 
 	// RetiredAPIVersion is the apiVersion the file declared when it is a retired
@@ -425,7 +425,17 @@ type Workflow struct {
 	// TimeLimit is TimeLimitText read as a duration, above zero, or 0 when the workflow
 	// sets none. It is set as the stack is validated.
 	TimeLimit time.Duration `yaml:"-"`
+	// Access is access as written, the access level the workflow declares for what a
+	// dispatched run of the workflow works on: read or write, "" when the workflow sets
+	// none. [Stack.AccessOf] reads "" as read.
+	Access string `yaml:"access,omitempty"`
 }
+
+// The access levels a workflow declares, see [Workflow.Access].
+const (
+	AccessRead  = "read"
+	AccessWrite = "write"
+)
 
 // workflowName is a workflow's name, as the provisioner contract's workflow is.
 var workflowName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
@@ -434,6 +444,16 @@ var workflowName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 // workflow or the workflow sets none.
 func (p *Stack) TimeLimitOf(name string) time.Duration {
 	return p.Workflows[name].TimeLimit
+}
+
+// AccessOf is the access level the workflow name declares, [AccessRead] or
+// [AccessWrite]; [AccessRead] when the stack has no such workflow or the workflow sets
+// none.
+func (p *Stack) AccessOf(name string) string {
+	if a := p.Workflows[name].Access; a != "" {
+		return a
+	}
+	return AccessRead
 }
 
 // Dir returns the directory that contains the stack file. A module's relative path source
@@ -557,14 +577,14 @@ func (p *Stack) extends() bool {
 }
 
 // validate checks the whole document before a caller sees it, so a document that reaches
-// the compose is known to contain what the compose requires: a runtime for a checkout's
-// own stack, a base for a document that extends one and no target for a stack file, at
-// least one module unless the document extends a stack, each with a name or a source, no
-// name twice, excludes and onlys over known kinds and parts, an exclude beside an only
-// that lists entries the only does not, links that are one path segment and listed once,
-// extensions that are maps, and an extending block over known kinds without hooks and
-// servers. Whether a source contains a module, and whether its manifest defines the name
-// the entry sets, is the compose's check.
+// the compose is known to contain what the compose requires: a runtime for a stack that
+// a checkout's qory.yaml defines, a base and no workflows for a document that extends
+// one, no target for a stack file, at least one module unless the document extends a
+// stack, each with a name or a source, no name twice, excludes and onlys over known
+// kinds and parts, an exclude beside an only that lists entries the only does not, links
+// that are one path segment and listed once, extensions that are maps, and an extending
+// block over known kinds without hooks and servers. Whether a source contains a module,
+// and whether its manifest defines the name the entry sets, is the compose's check.
 func (p *Stack) validate(compose bool) error {
 	current, err := exports.ResolveAPIVersion(p.APIVersion)
 	if err != nil {
@@ -584,6 +604,9 @@ func (p *Stack) validate(compose bool) error {
 		}
 		if p.Extending != nil {
 			return errors.New("extending is the base stack's; a harness section that extends a stack does not set it")
+		}
+		if p.extends() && len(p.Workflows) > 0 {
+			return errors.New("remove workflows or extends: a harness section that extends a stack takes the workflows of its base")
 		}
 		// A document extending a stack may leave the runtime to the machine's
 		// configuration or the flag; its own stack names one.
@@ -636,6 +659,9 @@ func (p *Stack) validate(compose bool) error {
 			return fmt.Errorf("name the workflow %s with a lower-case letter, then up to 63 lower-case letters, digits and hyphens: workflows lists it", accesskey.ShownName(name, true))
 		}
 		w := p.Workflows[name]
+		if w.Access != "" && w.Access != AccessRead && w.Access != AccessWrite {
+			return fmt.Errorf("set workflows.%s.access to read or write: %s is neither", name, exports.Value(w.Access, true))
+		}
 		if w.TimeLimitText == "" {
 			continue
 		}
@@ -769,10 +795,42 @@ func (s Source) validate() error {
 	if s.Path != "" {
 		clean := filepath.Clean(s.Path)
 		if filepath.IsAbs(clean) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-			return fmt.Errorf("source.path %s is not a directory inside the repository", exports.Value(s.Path, true))
+			return &SourcePathError{Path: s.Path}
 		}
 	}
 	return nil
+}
+
+// SourcePathError is a git source's source.path that is not a directory inside the
+// repository: an absolute path, the repository's root, or a path that leads out of it.
+// Path is the path as written.
+type SourcePathError struct{ Path string }
+
+func (e *SourcePathError) Error() string {
+	return fmt.Sprintf("source.path %s is not a directory inside the repository", exports.Value(e.Path, true))
+}
+
+// Hidden is the error's text without the path, for a harness whose folders no text
+// shows.
+func (e *SourcePathError) Hidden() string {
+	return "source.path is not a directory inside the repository"
+}
+
+// BaseExtendsError is a base stack, read from File, that extends another stack,
+// Extends: a stack does not extend another.
+type BaseExtendsError struct {
+	File    string
+	Extends Source
+}
+
+func (e *BaseExtendsError) Error() string {
+	return fmt.Sprintf("%s extends %s, and a stack does not extend another", exports.HidePath(e.File), e.Extends.Shown())
+}
+
+// Hidden is the error's text with the stack the base extends left out, for a harness
+// whose addresses no text shows.
+func (e *BaseExtendsError) Hidden() string {
+	return fmt.Sprintf("%s extends another stack, and a stack does not extend another", exports.HidePath(e.File))
 }
 
 // segment reports whether name is one plain path segment: no separator of either kind, no
@@ -853,7 +911,7 @@ func FileAllowed(name string, prefixes []string) bool {
 // p's.
 func Extend(base, p *Stack) (*Stack, error) {
 	if base.Extends.Path != "" || base.Extends.Git != "" {
-		return nil, fmt.Errorf("%s extends %s, and a stack does not extend another", exports.HidePath(base.File), base.Extends.Shown())
+		return nil, &BaseExtendsError{File: base.File, Extends: base.Extends}
 	}
 	if base.Extending == nil {
 		return nil, fmt.Errorf("the stack at %s is closed: it declares no extending block, so nothing may extend it", exports.HidePath(base.File))

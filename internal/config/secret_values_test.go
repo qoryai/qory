@@ -188,10 +188,10 @@ func TestAHomeRefusalPrintsAPhraseForASecret(t *testing.T) {
 // TestTheForagerRowsPrintAPhraseForAValueWithASecret is the rows qory config prints for
 // a forager.yaml whose values contain an access key secret or a run key: an egress
 // path, gateway.listen, the TLS paths, a credential's file and adapter, a tool's command
-// and the hosts it serves, a selected credential's label and forge, the default image as
-// a reference, an image's reference and runtime, wall.images_allow, the wall's command,
-// helper, user, mounts and limits, and the via's CA file. Each such value is the value
-// phrase, each such name the name phrase, and a plain value prints as before.
+// and the hosts it serves, the default image as a reference, an image's reference and
+// runtime, wall.images_allow, the wall's command, helper, user, mounts and limits, and
+// the via's CA file. Each such value is the value phrase, each such name the name
+// phrase, and a plain value prints as before.
 func TestTheForagerRowsPrintAPhraseForAValueWithASecret(t *testing.T) {
 	isolate(t)
 	foragerFile(t, `gateway:
@@ -208,9 +208,6 @@ func TestTheForagerRowsPrintAPhraseForAValueWithASecret(t *testing.T) {
     a: {adapter: [/opt/qrk_a, x], hosts: [api.model.example]}
   tools:
     t: {command: [/opt/qak_t], serves: [qrk_s.example, a.example]}
-  selects:
-    credentials:
-      - {name: a, argument_label: qak_label, forge: qrk_forge}
 wall:
   adapter: docker
   image: example/qak_i:1
@@ -234,47 +231,30 @@ wall:
 		got[row.Key] = row.Value
 	}
 	for key, value := range map[string]string{
-		"gateway.egress.paths":          "api.example " + accessKeyValue + ", /plain",
-		"gateway.listen":                accessKeyValue,
-		"gateway.tls.certificate":       accessKeyValue,
-		"gateway.tls.key":               runKeyValue,
-		"gateway.server.via.ca_file":    accessKeyValue,
-		"gateway.credentials.f":         "file " + accessKeyValue,
-		"gateway.credentials.a":         "adapter " + runKeyValue,
-		"gateway.tools.t":               accessKeyValue + ", serves " + runKeyPhrase + ", a.example",
-		"gateway.selects.credentials.a": "argument_label " + accessKeyPhrase + ", forge " + runKeyValue,
-		"wall.image":                    accessKeyValue + " (a reference)",
-		"wall.images.img":               accessKeyValue + ", runtime " + runKeyValue,
-		"wall.images_allow":             accessKeyValue + ", registry.example/plain/",
-		"wall.command":                  accessKeyValue,
-		"wall.helper":                   runKeyValue,
-		"wall.user":                     accessKeyValue,
-		"wall.mounts":                   accessKeyValue + ":ro, /data/plain",
-		"wall.cpus":                     accessKeyValue,
-		"wall.memory":                   runKeyValue,
-		"wall.shm_size":                 accessKeyValue,
+		"gateway.egress.paths":       "api.example " + accessKeyValue + ", /plain",
+		"gateway.listen":             accessKeyValue,
+		"gateway.tls.certificate":    accessKeyValue,
+		"gateway.tls.key":            runKeyValue,
+		"gateway.server.via.ca_file": accessKeyValue,
+		"gateway.credentials.f":      "file " + accessKeyValue,
+		"gateway.credentials.a":      "adapter " + runKeyValue,
+		"gateway.tools.t":            accessKeyValue + ", serves " + runKeyPhrase + ", a.example",
+		"wall.image":                 accessKeyValue + " (a reference)",
+		"wall.images.img":            accessKeyValue + ", runtime " + runKeyValue,
+		"wall.images_allow":          accessKeyValue + ", registry.example/plain/",
+		"wall.command":               accessKeyValue,
+		"wall.helper":                runKeyValue,
+		"wall.user":                  accessKeyValue,
+		"wall.mounts":                accessKeyValue + ":ro, /data/plain",
+		"wall.cpus":                  accessKeyValue,
+		"wall.memory":                runKeyValue,
+		"wall.shm_size":              accessKeyValue,
 	} {
 		if got[key] != value {
 			t.Errorf("row %s = %q, want %q", key, got[key], value)
 		}
 	}
 	noSecret(t, rows)
-}
-
-// TestASelectedForgeWithASecretIsAPhrase is an entry of gateway.selects whose forge
-// contains an access key secret: the refusal of a forge qory does not know prints the
-// value phrase in place of the forge.
-func TestASelectedForgeWithASecretIsAPhrase(t *testing.T) {
-	isolate(t)
-	foragerFile(t, "gateway:\n  credentials:\n    a:\n      adapter: [/opt/adapters/a, \"${argument}\"]\n      argument: \"[a-z]+\"\n      hosts: [api.github.com]\n  selects:\n    credentials:\n      - {name: a, argument_label: repository, forge: qak_forge.example}\n")
-	r, err := config.LoadForager()
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "forager.yaml: gateway.selects.credentials: a: forge " + accessKeyValue + " is not one qory knows the repository form of; use github.com"
-	if _, err := r.Selections(); err == nil || err.Error() != want {
-		t.Errorf("%v, want %q", err, want)
-	}
 }
 
 // TestAMountWithASecretIsAPhrase is a --mount value that contains an access key secret

@@ -60,7 +60,14 @@ func TestEgressGrammarIsTheForagersOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := policy.(map[string]any)["properties"].(map[string]any)["egress"].(map[string]any)["properties"].(map[string]any)["allow"].(map[string]any)["items"].(map[string]any)["pattern"].(string)
+	doc := policy.(map[string]any)
+	items := doc["properties"].(map[string]any)["egress"].(map[string]any)["properties"].(map[string]any)["allow"].(map[string]any)["items"].(map[string]any)
+	// Forager's schema may define the entry once, under $defs, for egress.allow and for
+	// a run configuration's stack_hosts.
+	if ref, ok := items["$ref"].(string); ok {
+		items = doc["$defs"].(map[string]any)[strings.TrimPrefix(ref, "#/$defs/")].(map[string]any)
+	}
+	want := items["pattern"].(string)
 	data, err := os.ReadFile(filepath.Join("..", "..", "contracts", "harness", "v1", "module.schema.json"))
 	if err != nil {
 		t.Fatal(err)

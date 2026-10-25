@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -209,6 +210,81 @@ func TestWallSetupIsOutsideOrInside(t *testing.T) {
 	want := path + `: set wall.setup to outside or inside, or remove it for outside: it is "Outside"`
 	if err == nil || err.Error() != want {
 		t.Errorf("Outside: %v, want %s", err, want)
+	}
+}
+
+// TestMachineIsAnAdaptersName reads machine: absent, it is empty and listed by no row;
+// aws-ec2, none and a name of 64 characters are read as written and listed with the file
+// as origin; an empty value, one with a capital, one that starts with a digit, one with
+// an underscore and one of 65 characters stop the load with the fix first and the value
+// quoted.
+func TestMachineIsAnAdaptersName(t *testing.T) {
+	hermetic(t)
+	foragerFile(t, "apiVersion: qory.dev/v1alpha1\n")
+	r, err := config.LoadForager()
+	if err != nil || r.Machine != "" {
+		t.Fatalf("absent: %+v, %v", r, err)
+	}
+	for _, row := range r.Rows() {
+		if row.Key == "machine" {
+			t.Errorf("absent: listed as %+v", row)
+		}
+	}
+	for _, v := range []string{"aws-ec2", "none", "a" + strings.Repeat("0", 63)} {
+		path := foragerFile(t, "machine: "+v+"\n")
+		r, err := config.LoadForager()
+		if err != nil || r.Machine != v {
+			t.Errorf("%s: %+v, %v", v, r, err)
+			continue
+		}
+		if !slices.Contains(r.Rows(), config.Row{Key: "machine", Value: v, Origin: path}) {
+			t.Errorf("%s: no machine row in %+v", v, r.Rows())
+		}
+	}
+	for _, v := range []string{`""`, "AWS-ec2", "2cloud", "aws_ec2", "a" + strings.Repeat("0", 64)} {
+		path := foragerFile(t, "machine: "+v+"\n")
+		_, err := config.LoadForager()
+		shown := v
+		if v != `""` {
+			shown = `"` + v + `"`
+		}
+		want := path + ": set machine to 1 to 64 of a-z, 0-9 and -, the first a letter, such as aws-ec2 or none, or remove it: it is " + shown
+		if err == nil || err.Error() != want {
+			t.Errorf("%s: %v, want %s", v, err, want)
+		}
+	}
+}
+
+// TestWallEngineProxyFileIsAnAbsolutePath reads wall.engine_proxy_file: absent, it is
+// empty and listed by no row; an absolute path is read as written, without the file
+// being read, and listed as the path; a relative path and an empty one stop the load
+// with the fix first and the value quoted.
+func TestWallEngineProxyFileIsAnAbsolutePath(t *testing.T) {
+	hermetic(t)
+	foragerFile(t, "wall:\n  adapter: docker\n")
+	r, err := config.LoadForager()
+	if err != nil || r.Wall.EngineProxyFile != "" {
+		t.Fatalf("absent: %+v, %v", r, err)
+	}
+	for _, row := range r.Rows() {
+		if row.Key == "wall.engine_proxy_file" {
+			t.Errorf("absent: listed as %+v", row)
+		}
+	}
+	path := foragerFile(t, "wall:\n  adapter: docker\n  engine_proxy_file: /etc/qory/engine-proxy.json\n")
+	if r, err = config.LoadForager(); err != nil || r.Wall.EngineProxyFile != "/etc/qory/engine-proxy.json" {
+		t.Fatalf("absolute: %+v, %v", r, err)
+	}
+	if !slices.Contains(r.Rows(), config.Row{Key: "wall.engine_proxy_file", Value: "/etc/qory/engine-proxy.json", Origin: path}) {
+		t.Errorf("no wall.engine_proxy_file row in %+v", r.Rows())
+	}
+	for v, shown := range map[string]string{"etc/qory/engine-proxy.json": `"etc/qory/engine-proxy.json"`, `""`: `""`} {
+		path := foragerFile(t, "wall:\n  adapter: docker\n  engine_proxy_file: "+v+"\n")
+		_, err := config.LoadForager()
+		want := path + ": set wall.engine_proxy_file to an absolute path, or remove it: it is " + shown
+		if err == nil || err.Error() != want {
+			t.Errorf("%s: %v, want %s", v, err, want)
+		}
 	}
 }
 
@@ -462,6 +538,36 @@ func TestForagerFileRefusesAMistake(t *testing.T) {
 		_, err := config.Load(t.TempDir(), true)
 		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.HasPrefix(err.Error(), path) {
 			t.Errorf("%q: error %v, want one naming the file and %q", c.body, err, c.want)
+		}
+	}
+}
+
+// TestForagerFileStopsOnGatewaySelects is a gateway.selects, which forager.yaml no
+// longer has, in each form it may be written: the load stops with the fix first, and
+// the error contains none of its values. A file with it fails forager.schema.json too.
+func TestForagerFileStopsOnGatewaySelects(t *testing.T) {
+	hermetic(t)
+	schema, err := jsonschema.NewCompiler().Compile(filepath.Join("..", "..", "contracts", "harness", "v1", "forager.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{
+		"gateway:\n  selects:\n    credentials:\n      - {name: secret-name-value, argument_label: secret-label-value, forge: github.com}\n",
+		"gateway:\n  selects: {}\n",
+		"gateway:\n  selects:\n",
+		"gateway:\n  selects: [secret-list-value]\n",
+	} {
+		path := foragerFile(t, body)
+		_, err := config.LoadForager()
+		if want := "remove gateway.selects from " + path + ": a run's policy selects its credentials"; err == nil || err.Error() != want {
+			t.Errorf("%q: error %v, want %q", body, err, want)
+		}
+		var doc any
+		if err := yaml.Unmarshal([]byte(body), &doc); err != nil {
+			t.Fatal(err)
+		}
+		if schema.Validate(doc) == nil {
+			t.Errorf("%q: the schema takes gateway.selects", body)
 		}
 	}
 }

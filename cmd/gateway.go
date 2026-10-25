@@ -53,8 +53,9 @@ The gateway section of ` + config.ForagerFileName + ` in ~/.config/qory sets it:
   egress        the hosts a run may reach; it narrows Qory Apiary's policy
   credentials   secrets the gateway sets on requests; the agents never have them
   integrations  programs that supply such secrets
-  selects       the credentials it selects for a run, with a wall or without, when
-                the server's policy selects none
+
+When it has no access key and gateway.server.enrolment_code_file is set, it waits until
+that file exists, enrols with the enrolment code Qory Apiary wrote there, and starts.
 
 ` + gatewayMachinesHelp + `
 
@@ -106,6 +107,19 @@ More: ` + gatewayDocs,
 				return input(err)
 			}
 			stderr := cmd.ErrOrStderr()
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			// A gateway with no access key enrols from the code Qory Apiary writes, when
+			// gateway.server.enrolment_code_file is set.
+			r, stopped, err := enrolAtStart(ctx, r, fdKey, stderr)
+			if err != nil {
+				return err
+			}
+			if stopped {
+				fmt.Fprintln(stderr, "qory gateway: stopping")
+				ui.New(stderr).Success("the gateway stopped")
+				return nil
+			}
 			id, err := identify(r, stderr, verbGateway, fdKey)
 			if err != nil {
 				return err
@@ -118,8 +132,6 @@ More: ` + gatewayDocs,
 			if err := makePrivateDir(state, dir); err != nil {
 				return err
 			}
-			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
-			defer stop()
 			gw := gateway.Config{
 				Server:  gatewayServer(r.Server),
 				Policy:  machinePolicy(r),
@@ -132,6 +144,7 @@ More: ` + gatewayDocs,
 				Heartbeat:    runHeartbeat,
 				LockMemory:   r.LockMemory,
 				RunLimits:    gatewayRunLimits(r),
+				StackHosts:   r.StackHosts,
 			}
 			gw.Server.AccessKey, gw.Server.InstanceID, gw.Server.InstanceName = id.key.key, id.instanceID, id.instanceName
 			if r.TLS != nil {
@@ -158,11 +171,6 @@ More: ` + gatewayDocs,
 			}
 			if gw.Tools, err = machineTools(r, e.Workspace); err != nil {
 				return err
-			}
-			// The credentials gateway.selects names are checked against the ones the
-			// integrations define too, so only once they are described.
-			if gw.Selects, err = r.Selections(); err != nil {
-				return input(err)
 			}
 			g, err := startGateway(ctx, gw)
 			if err != nil {

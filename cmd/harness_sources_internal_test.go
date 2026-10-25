@@ -32,11 +32,11 @@ func TestHarnessSourcesListsTheGitSources(t *testing.T) {
 		{Source: "https://user:(hidden)@git.example/org/tools#v2:mods/lint", Commit: b},
 		{Source: "https://git.example/org/more#" + c, Commit: c},
 	}
-	if got := harnessSources(res); !slices.Equal(got, want) {
+	if got := harnessSources(res, nil); !slices.Equal(got, want) {
 		t.Errorf("the list is %v\nwant %v", got, want)
 	}
 	paths := &compose.Result{Base: &compose.Base{Source: "../base", Pin: "working-tree"}, Modules: []compose.Module{{Source: "./local", Pin: "working-tree"}}}
-	if got := harnessSources(paths); got != nil {
+	if got := harnessSources(paths, nil); got != nil {
 		t.Errorf("a compose of paths lists %v", got)
 	}
 }

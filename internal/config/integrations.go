@@ -529,14 +529,14 @@ func trusted(path string, o fileOwner, euid uint32, n names) error {
 	}
 	perm := o.Mode.Perm()
 	if perm&0o002 != 0 {
-		return fmt.Errorf("%s may be written by every user; qory runs a program only root and its owner may change", path)
+		return &untrusted{path: path, every: true}
 	}
 	if perm&0o020 != 0 {
 		group := n.Group(o.GID)
 		primary, ok := n.Primary(o.UID)
 		own := group != "" && group == n.User(o.UID) && ok && primary == o.GID
 		if o.GID != 0 && group != "wheel" && group != "admin" && !own {
-			return fmt.Errorf("%s may be written by the group %s, which is neither root's, wheel, admin nor its owner's primary group named as the owner", path, named(group, o.GID))
+			return &untrusted{path: path, group: named(group, o.GID)}
 		}
 	}
 	return nil
@@ -546,9 +546,28 @@ func trusted(path string, o fileOwner, euid uint32, n names) error {
 // running qory owns.
 func ownedBy(path, what string, o fileOwner, euid uint32, n names) error {
 	if o.UID != 0 && o.UID != euid {
-		return fmt.Errorf("%s is %sowned by %s, neither root nor the user running qory", path, what, named(n.User(o.UID), o.UID))
+		return &untrusted{path: path, what: what, owner: named(n.User(o.UID), o.UID)}
 	}
 	return nil
+}
+
+// untrusted is the error of [trusted] or [ownedBy] for path, a link when what is "a
+// link ": the owner, named, when neither root nor the user running qory owns it; else
+// the group, named, that may write it; else every is set, every user may write it. Its
+// text is the error for an integration's program.
+type untrusted struct {
+	path, what, owner, group string
+	every                    bool
+}
+
+func (e *untrusted) Error() string {
+	switch {
+	case e.owner != "":
+		return fmt.Sprintf("%s is %sowned by %s, neither root nor the user running qory", e.path, e.what, e.owner)
+	case e.group != "":
+		return fmt.Sprintf("%s may be written by the group %s, which is neither root's, wheel, admin nor its owner's primary group named as the owner", e.path, e.group)
+	}
+	return fmt.Sprintf("%s may be written by every user; qory runs a program only root and its owner may change", e.path)
 }
 
 // named is a user's or a group's name, with its id beside it, or the id alone.

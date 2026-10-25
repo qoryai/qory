@@ -356,7 +356,7 @@ func TestADecoderRefusalWithASecretKeepsTheOtherReasons(t *testing.T) {
 	path := filepath.Join(root, "harness.yaml")
 	writeRaw(t, path, "harness:\n  model: [x]\n  force: qak_x\n")
 	_, err := config.Document(root)
-	if want := path + ": yaml: unmarshal errors:\n  line 2: cannot unmarshal !!seq into string\n  line 3: qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key or a run code, so qory does not print it."; err == nil || err.Error() != want {
+	if want := path + ": yaml: unmarshal errors:\n  line 2: cannot unmarshal !!seq into string\n  line 3: qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code or an enrolment code, so qory does not print it."; err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}
 }
@@ -379,7 +379,7 @@ func TestARefusalIsPlacedByTheLineAtItsStart(t *testing.T) {
 	path := filepath.Join(root, "harness.yaml")
 	writeRaw(t, path, "harness:\n  force: !line%2099:%20field%20qak_x 1\n")
 	_, err := config.Document(root)
-	want := path + ": line 2: qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key or a run code, so qory does not print it."
+	want := path + ": line 2: qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code or an enrolment code, so qory does not print it."
 	if err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}
@@ -437,35 +437,8 @@ func TestAnIntegrationKeyWithASecretIsLeftOutOfExpand(t *testing.T) {
 	}
 }
 
-// TestASelectedNameWithASecretIsLeftOutOfItsRefusal is an entry of gateway.selects
-// whose name contains an access key secret or a run key, refused for each reason: no
-// credential has the name, the credential takes no argument and the entry gives one,
-// the credential takes an argument and the entry gives no forge, and the forge is not
-// one qory knows. Each refusal prints the phrase in place of the name.
-func TestASelectedNameWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
-	isolate(t)
-	const credentials = "  credentials:\n    qak_env:\n      env: MODEL_TOKEN\n      hosts: [api.model.example]\n      auth: {scheme: bearer}\n    qrk_adapter:\n      adapter: [/opt/adapters/a, \"${argument}\"]\n      argument: \"[a-z]+\"\n      hosts: [api.github.com]\n"
-	const at = "forager.yaml: gateway.selects.credentials: "
-	for _, c := range []struct{ entry, want string }{
-		{"{name: qak_x}", at + accessKeyPhrase + " is no credential that gateway.credentials or gateway.integrations defines"},
-		{"{name: QRK_ab}", at + runKeyPhrase + " is no credential that gateway.credentials or gateway.integrations defines"},
-		{"{name: qak_env, forge: github.com}", at + accessKeyPhrase + " takes no argument, so argument_label and forge do not apply"},
-		{"{name: qrk_adapter, argument_label: repository}", at + runKeyPhrase + " needs argument_label and forge"},
-		{"{name: qrk_adapter, argument_label: repository, forge: gitlab.example}", at + runKeyPhrase + ": forge gitlab.example is not one qory knows the repository form of; use github.com"},
-	} {
-		foragerFile(t, "gateway:\n"+credentials+"  selects:\n    credentials:\n      - "+c.entry+"\n")
-		r, err := config.LoadForager()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := r.Selections(); err == nil || err.Error() != c.want {
-			t.Errorf("%s: %v, want %q", c.entry, err, c.want)
-		}
-	}
-}
-
 // TestTheForagerRowsLeaveOutANameWithASecret is the rows qory config prints for a
-// forager.yaml whose credential, tool, integration, selected credential, image and
+// forager.yaml whose credential, tool, integration, image and
 // wall variables have names that contain an access key secret or a run key: each name
 // is the phrase, in the row's key and in its value. Plain names print as before.
 func TestTheForagerRowsLeaveOutANameWithASecret(t *testing.T) {
@@ -481,9 +454,6 @@ func TestTheForagerRowsLeaveOutANameWithASecret(t *testing.T) {
     qak_c: {}
     qrk_i: {}
     plain: {}
-  selects:
-    credentials:
-      - {name: qak_c}
 wall:
   adapter: docker
   image: qak_img
@@ -500,17 +470,16 @@ wall:
 		got[row.Key] = row.Value
 	}
 	for key, value := range map[string]string{
-		"gateway.credentials." + accessKeyPhrase:         "env MODEL_TOKEN",
-		"gateway.credentials.plain":                      "env PLAIN_TOKEN",
-		"gateway.credentials.secret_env":                 "env " + runKeyPhrase,
-		"gateway.tools." + runKeyPhrase:                  "/opt/tool, serves a.example",
-		"gateway.integrations." + accessKeyPhrase:        accessKeyPhrase + ", shadowed by gateway.credentials." + accessKeyPhrase,
-		"gateway.integrations." + runKeyPhrase:           runKeyPhrase,
-		"gateway.integrations.plain":                     "qory-plain, shadowed by gateway.credentials.plain",
-		"gateway.selects.credentials." + accessKeyPhrase: "(no argument)",
-		"wall.image":  accessKeyPhrase + " (wall.images." + accessKeyPhrase + ")",
-		"wall.env":    accessKeyPhrase + ", PLAIN_E",
-		"wall.ca_env": runKeyPhrase,
+		"gateway.credentials." + accessKeyPhrase:  "env MODEL_TOKEN",
+		"gateway.credentials.plain":               "env PLAIN_TOKEN",
+		"gateway.credentials.secret_env":          "env " + runKeyPhrase,
+		"gateway.tools." + runKeyPhrase:           "/opt/tool, serves a.example",
+		"gateway.integrations." + accessKeyPhrase: accessKeyPhrase + ", shadowed by gateway.credentials." + accessKeyPhrase,
+		"gateway.integrations." + runKeyPhrase:    runKeyPhrase,
+		"gateway.integrations.plain":              "qory-plain, shadowed by gateway.credentials.plain",
+		"wall.image":                              accessKeyPhrase + " (wall.images." + accessKeyPhrase + ")",
+		"wall.env":                                accessKeyPhrase + ", PLAIN_E",
+		"wall.ca_env":                             runKeyPhrase,
 	} {
 		if got[key] != value {
 			t.Errorf("row %s = %q, want %q", key, got[key], value)

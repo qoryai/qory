@@ -140,6 +140,20 @@ func (d *Dirs) UnmarshalYAML(n *yaml.Node) error {
 	return nil
 }
 
+// DirError is a directory of exports.dir, Dir, for the exports Key, stacks or modules,
+// that is absolute or outside the repository.
+type DirError struct{ Key, Dir string }
+
+func (e *DirError) Error() string {
+	return fmt.Sprintf("exports.dir %s %s is not a directory inside the repository", e.Key, Value(e.Dir, true))
+}
+
+// Hidden is the error's text without the directory, for a harness whose folders no text
+// shows.
+func (e *DirError) Hidden() string {
+	return "exports.dir " + e.Key + " is not a directory inside the repository"
+}
+
 // Section is the exports key as written. A configuration reader embeds it, so a
 // misspelled key inside it is refused with the rest of the file; [Section.Validate]
 // checks what the decoder cannot.
@@ -166,7 +180,7 @@ func (s *Section) Validate() error {
 			}
 			clean := filepath.Clean(d.dir)
 			if filepath.IsAbs(d.dir) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-				return fmt.Errorf("exports.dir %s %s is not a directory inside the repository", d.key, Value(d.dir, true))
+				return &DirError{Key: d.key, Dir: d.dir}
 			}
 		}
 	}
@@ -385,8 +399,8 @@ func hideDefinedTwice(text string) string {
 }
 
 // cannotRead is what a refusal says in place of the decoder's message when that message
-// contains an access key secret or a run key.
-const cannotRead = "qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key or a run code, so qory does not print it."
+// contains an access key secret, a run key, a run code or an enrolment code.
+const cannotRead = "qory cannot read the value here. The YAML decoder's message contains an access key secret, a run key, a run code or an enrolment code, so qory does not print it."
 
 // withoutSecrets is err, a decode error of the file at path whose text contains an
 // access key secret or a run key, said without them. Each of the decoder's refusals of

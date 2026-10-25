@@ -58,3 +58,36 @@ func TestParseReferenceErrors(t *testing.T) {
 		}
 	}
 }
+
+// TestAtBeforePathAndNonASCIIHost is the two checks of a harness's URLs that a run
+// fetches through its stack proxy: an @ between :// and the first / after it, whatever
+// comes before it, and a host with a character outside ASCII once its
+// percent-encodings are decoded. A host in the xn-- form, a port and an @ in the path
+// pass both.
+func TestAtBeforePathAndNonASCIIHost(t *testing.T) {
+	for _, c := range []struct {
+		url          string
+		at, nonASCII bool
+	}{
+		{"https://git.test/team/x", false, false},
+		{"https://git.test:443/team/x@main", false, false},
+		{"https://xn--bcher-kva.example/team/x", false, false},
+		{"https://git.test?@evil.example/x", true, false},
+		{"https://git.test#@evil.example/x", true, false},
+		{"https://git.test%3F@evil.example/x", true, false},
+		{`https://git.test\@evil.example/x`, true, false},
+		{"https://git.test:443@evil.example/x", true, false},
+		{"https://u%EF%BC%9Ap%EF%BC%A0git.test/x", false, true},
+		{"https://u：p＠git.test/x", false, true},
+		{"https://u﹫git.test/x", false, true},
+		{"https://git.test%EF%BC%8F.evil.example/x", false, true},
+		{"https://evil.example％40git.test/x", false, true},
+	} {
+		if got := stack.AtBeforePath(c.url); got != c.at {
+			t.Errorf("AtBeforePath(%q) = %v, want %v", c.url, got, c.at)
+		}
+		if got := stack.NonASCIIHost(c.url); got != c.nonASCII {
+			t.Errorf("NonASCIIHost(%q) = %v, want %v", c.url, got, c.nonASCII)
+		}
+	}
+}

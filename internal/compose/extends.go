@@ -48,6 +48,10 @@ type Base struct {
 	RetiredAPIVersion string
 }
 
+// NamedBase is the name the report records for the base of a [source.Named] compose
+// whose stack file has no name.
+const NamedBase = "base"
+
 // String returns the base for a message, <name>@<pin>.
 func (b *Base) String() string { return shown(b.Name) + "@" + b.Pin }
 
@@ -61,32 +65,87 @@ func (b *Base) String() string { return shown(b.Name) + "@" + b.Pin }
 // A git source that cannot be fetched is a [*source.FetchError] whose message reports
 // that the stack is not reachable from here, because a base is usually reachable from the
 // machine that runs the harness and not from every laptop.
+//
+// With a [source.Named] in opts.Git, each error shows the base as [source.Named.Base]
+// does, and a base whose file has no name is recorded as [NamedBase], not by its
+// folder, which is part of its address.
 func LoadBase(p *stack.Stack, pin string, opts Options) (*stack.Stack, *Base, error) {
 	if p.Extends.Path == "" && p.Extends.Git == "" {
 		return p, nil, nil
 	}
-	src, err := source.Resolve(p.Dir(), p.Extends, source.Options{Pin: pin, Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Memo: opts.Memo, Git: opts.Git})
-	var fetch *source.FetchError
-	if errors.As(err, &fetch) {
-		return nil, nil, fmt.Errorf("the stack %s is not reachable from here: %w", p.Extends.Shown(), err)
+	so := source.Options{Pin: pin, Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Memo: opts.Memo, Git: opts.Git}
+	var named *source.Named
+	if opts.Git != nil && opts.Git.Named != nil {
+		named = opts.Git.Named
+		so.Name = named.Base()
 	}
-	if err != nil {
+	src, err := source.Resolve(p.Dir(), p.Extends, so)
+	var fetch *source.FetchError
+	switch {
+	case errors.As(err, &fetch):
+		return nil, nil, fmt.Errorf("the stack %s is not reachable from here: %w", p.Extends.Shown(), err)
+	case err != nil && named != nil:
+		return nil, nil, fmt.Errorf("check %s: %w", named.Base(), exports.HideError(err))
+	case err != nil:
 		return nil, nil, fmt.Errorf("extends %s: %w", p.Extends.Shown(), exports.HideError(err))
 	}
 	file := filepath.Join(src.Dir, stack.FileName)
-	base, err := stack.Load(file)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil, fmt.Errorf("extends %s: %s contains no %s", p.Extends.Shown(), exports.Value(src.Dir, false), stack.FileName)
+	if err := baseInClone(p, src, file, named); err != nil {
+		return nil, nil, err
 	}
-	if err != nil {
+	base, err := stack.Load(file)
+	switch {
+	case errors.Is(err, os.ErrNotExist) && named != nil:
+		return nil, nil, fmt.Errorf("check the folder of %s: its repository has no %s there", named.Base(), stack.FileName)
+	case errors.Is(err, os.ErrNotExist):
+		return nil, nil, fmt.Errorf("extends %s: %s contains no %s", p.Extends.Shown(), exports.Value(src.Dir, false), stack.FileName)
+	case err != nil:
 		return nil, nil, exports.HideError(err)
 	}
 	merged, b, err := ExtendOn(p, base, src.Pin)
 	if err != nil {
 		return nil, nil, err
 	}
+	if named != nil && base.Name == "" {
+		b.Name = NamedBase
+	}
 	b.Ref, b.Commit, b.Previous, b.Warning = p.Extends.Ref, src.Commit, src.Previous, src.Warning
 	return merged, b, nil
+}
+
+// baseInClone stops a git base, src, whose stack file, file, or whose repository's
+// qory.yaml, which [stack.Load] reads at the root of the clone, is a link that leads
+// outside the clone: the file it leads to could be any file on this machine. With named
+// set, the error shows the base by its phrase and no folder. A base read by a path is
+// not checked.
+func baseInClone(p *stack.Stack, src source.Resolved, file string, named *source.Named) error {
+	if src.Clone == "" {
+		return nil
+	}
+	out, err := source.LinksOut(src.Clone, file)
+	switch {
+	case err != nil:
+		return err
+	case out && named != nil:
+		return fmt.Errorf("check the folder of %s: its %s links outside its repository", named.Base(), stack.FileName)
+	case out:
+		return fmt.Errorf("extends %s: %s links outside the repository", p.Extends.Shown(), stack.FileName)
+	}
+	config, err := exports.File(src.Clone)
+	if err != nil || config == "" {
+		// A clone with both names is an error the reader of the file reports.
+		return nil
+	}
+	out, err = source.LinksOut(src.Clone, config)
+	switch {
+	case err != nil:
+		return err
+	case out && named != nil:
+		return fmt.Errorf("check %s: the qory.yaml of its repository links outside its repository", named.Base())
+	case out:
+		return fmt.Errorf("extends %s: %s at the root of its repository links outside the repository", p.Extends.Shown(), filepath.Base(config))
+	}
+	return nil
 }
 
 // ExtendOn returns the stack the checkout's document p composes on base, a stack the

@@ -287,10 +287,11 @@ func schema(name string) (*jsonschema.Schema, error) {
 }
 
 // errSecretInRequest is a request whose bytes contain what looks like a secret.
-var errSecretInRequest = errors.New("ask Qory Apiary's operator: the request contains what looks like an access key secret, a run key or a run code, so it is not sent")
+var errSecretInRequest = errors.New("ask Qory Apiary's instance admin: the request contains what looks like an access key secret, a run key, a run code or an enrolment code, so it is not sent")
 
-// containsSecret reports whether s contains what looks like an access key secret or a
-// run key, as accesskey.ContainsSecret reports, or a run code, qecr_ in any case.
+// containsSecret reports whether s contains what looks like an access key secret, a run
+// key, a run code or an enrolment code, qak_, qrk_, qecr_, qecn_, qecp_, qecg_ or qeci_
+// in any case, as accesskey.ContainsSecret reports.
 func containsSecret(s string) bool {
 	return accesskey.ContainsSecret(s) || strings.Contains(strings.ToLower(s), accesskey.CodePrefixRun)
 }

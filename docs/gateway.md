@@ -39,9 +39,9 @@ gateway:
 |---|---|
 | `gateway.listen` | The address qory gateway listens on for the runs of other machines, host:port. qory run never listens on it: it starts a gateway itself on a loopback port for each run. |
 | `gateway.tls.certificate`, `gateway.tls.key` | The certificate and key the gateway serves the other machines with, files in PEM. The address speaks TLS 1.3 alone. `qory gateway` needs them, whatever address it listens on: a gateway serves other machines. |
-| `gateway.selects` | The credentials the gateway selects for a run, with a wall or without, when the server's policy selects none, each by name, with the label of the run's registration whose value is the argument, and the forge the run's `forge` label must name. On github.com the label's value is one repository or several of one owner, separated by commas with no space, such as `acme/shop,acme/lib`; a run whose label is missing, empty or of another form gets no credential from the entry. A value that lists repositories of several owners, or one repository twice, has that form, and the `github` integration mints no token for it: the run does not start. qory gateway alone reads it. |
 | `gateway.server`, `gateway.egress`, `gateway.egress.paths`, `gateway.credentials`, `gateway.tools`, `gateway.integrations` | As for `qory run`: see [forager.yaml](run.md#forageryaml). |
 | `gateway.run_limits` | The limits of each run the gateway serves: see [Limits of each run](run.md#limits-of-each-run). |
+| `gateway.stack_hosts` | The hosts each run's stack proxy reaches: see [Hosts of the stack proxy](run.md#hosts-of-the-stack-proxy). |
 | `gateway.lock_memory` | On Linux, `true` keeps the gateway's memory out of swap: see [Keep the gateway's memory out of swap](run.md#keep-the-gateways-memory-out-of-swap). |
 
 A path in `gateway.tls` is relative to the directory of `forager.yaml`, unless it is
@@ -93,30 +93,6 @@ the gateway over https alone, so a gateway that serves them has `gateway.tls`. S
 runs on those machines, run them with a wall: see [When to run without a
 wall](run.md#when-to-run-without-a-wall).
 
-A run's policy, from Qory Apiary, selects its credentials. When it selects none, the gateway
-selects them for a run, with a wall or without, with `gateway.selects`. An entry names a credential this file
-defines; for one that takes an argument, it also names the label whose value is the
-argument, and the forge the run's `forge` label must name:
-
-```yaml
-gateway:
-  selects:
-    credentials:
-      - {name: github, argument_label: repository, forge: github.com}
-      - {name: model}
-```
-
-Where an entry names a label, the label's value is the credential's argument. On github.com
-it is one repository or several of one owner, separated by commas with no space, such as
-`acme/shop` or `acme/shop,acme/lib`, and the `github` integration's token covers those
-repositories and no others. A run without the label or the `forge` label, with another
-forge, or whose value is empty or of another form, gets no credential from the entry, and
-`qory gateway` prints why on its standard error; the run still gets the entries it
-satisfies. A value that lists repositories of several owners, or one repository twice, has
-that form, but the `github` integration mints no token for it, and the run does not start.
-`qory run` refuses `gateway.selects`: a run it starts with a gateway on the same machine
-takes its credentials from its policy.
-
 For a starter or a machine with a separate access key that reaches Qory Apiary only through it, the
 gateway passes on enrolment, the server's configuration, registrations and outcomes,
 unchanged, and nothing else. They set `gateway.server.via`: see [A machine with a separate access
@@ -130,6 +106,71 @@ gateway's page in Qory Apiary, with `qory access-key enrol` on the gateway's mac
 secret is read from `--access-key-secret-fd`, else `QORY_ACCESS_KEY_SECRET`, else the file
 `access-key-secret` beside `forager.yaml`: see
 [The access key and the instance](run.md#the-access-key-and-the-instance).
+
+### Enrol from the code file of Qory Apiary
+
+On an instance's gateway, Qory Apiary writes the gateway's enrolment code into a file, and
+`qory gateway` enrols from it, with no command typed by a person. Set
+`gateway.server.enrolment_code_file` to that file, relative to the directory of
+`forager.yaml` unless absolute:
+
+```yaml
+gateway:
+  server:
+    url: https://apiary.example
+    enrolment_code_file: /run/qory/enrolment/code
+```
+
+When `qory gateway` starts with no access key, from neither `--access-key-secret-fd`,
+`QORY_ACCESS_KEY_SECRET` nor `access-key-secret`:
+
+1. If the file is not there yet, it prints once: `qory gateway: waiting for the
+   enrolment code at /run/qory/enrolment/code; Qory Apiary writes it once this gateway
+   is installed`, and looks again every 2 seconds until the file exists. SIGINT or
+   SIGTERM stops it, and it exits 0.
+2. It reads the file only when the path has no link in it, the file is a regular file,
+   and only root and the user running qory may write the file and each folder above it.
+   A folder that root owns with the sticky bit set, such as `/tmp`, passes, since no
+   other user may replace a file in it.
+   The file contains the code, `qecg_…`, and at most one newline after it.
+3. It enrols with the code against `gateway.server.url`, as `qory access-key enrol` does,
+   and prints one line: `qory gateway: enrolled the access key ak_… (fingerprint …) with
+   the code in /run/qory/enrolment/code; the secret is in <dir>/access-key-secret`.
+4. It starts as it does with a key it had.
+
+With an access key, `qory gateway` ignores the setting. qory never writes or removes the
+file: Qory Apiary deletes it once the key is live. No line or error contains the code.
+When the enrolment does not complete, `qory gateway` exits with the error that `qory
+access-key enrol` prints; started again within the code's 15 minutes, it retries with the
+same key.
+
+For a file outside these rules, it stops, exit 2, with one of these errors:
+
+- `set gateway.server.enrolment_code_file to a path with no link in it, such as <path>:
+  <file> leads through a link`
+- `set gateway.server.enrolment_code_file to the file itself, not a link: <file> is a link`
+- `set gateway.server.enrolment_code_file to a regular file: <file> is not one`
+- `make root or the user running qory the owner of <path>: it is owned by <user>, and
+  only root and the user running qory may write gateway.server.enrolment_code_file and
+  its folders, except a folder that root owns with the sticky bit set`
+- `remove the group's write permission from <path>: the group <group> may write it, and
+  only root and the user running qory may write gateway.server.enrolment_code_file and
+  its folders, except a folder that root owns with the sticky bit set`, for any group,
+  root's included
+- `remove the write permission of other users from <path>: every user may write it, and
+  only root and the user running qory may write gateway.server.enrolment_code_file and
+  its folders, except a folder that root owns with the sticky bit set`
+- `write the gateway's enrolment code (qecg_…) into <file>: the file is empty`
+- `write only the gateway's enrolment code into <file>, with at most one newline after
+  it: the file contains more`, for anything else in the file, or more than 1 KiB
+- `write a gateway's enrolment code (qecg_…) into <file>: the file does not contain an
+  enrolment code of Qory Apiary`, and for a code of another kind, `… the file contains
+  the enrolment code of an access key of kind <kind>`
+- `set gateway.server.enrolment_code_file to a file that qory can read: <file>: <err>`
+
+`qory run`, `qory run pool`, `qory run register` and `qory run end` stop when the setting
+is there, exit 2: `remove gateway.server.enrolment_code_file from <file>: qory gateway alone enrols
+from it, and qory run does not`.
 
 ## Running it
 

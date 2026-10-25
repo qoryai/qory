@@ -39,6 +39,10 @@
             "type": "string",
             "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$",
             "not": {"pattern": "^([0.]+(ns|us|ms|s|m|h))+$"}
+          },
+          "access": {
+            "description": "The access level the workflow declares for what a dispatched run of it works on: read or write. Left out, it is read. qory checks the value and grants no permission from it.",
+            "enum": ["read", "write"]
           }
         }
       }

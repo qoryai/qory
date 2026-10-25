@@ -561,6 +561,25 @@ func TestResolveGitRefusesAPathThatLeavesTheClone(t *testing.T) {
 	}
 }
 
+// TestResolveGitRefusesAnExportListLinkedOutOfTheClone is a repository whose qory.yaml,
+// which lists the export a source selects, is a link to a file outside the repository:
+// the source is refused, and the export is not read from that file.
+func TestResolveGitRefusesAnExportListLinkedOutOfTheClone(t *testing.T) {
+	url, _, _ := remote(t)
+	dir := strings.TrimPrefix(url, "file://")
+	outside := filepath.Join(t.TempDir(), "qory.yaml")
+	write(t, outside, "apiVersion: qory.dev/v1alpha1\nexports:\n  modules: [core]\n")
+	if err := os.Symlink(outside, filepath.Join(dir, "qory.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	run(t, dir, "add", "-A")
+	run(t, dir, "commit", "-q", "-m", "link")
+	_, err := source.Resolve("/nowhere", stack.Source{Git: url, Ref: "main", Module: "core"}, source.Options{})
+	if want := "qory.yaml in " + url + " at main links outside the repository"; err == nil || err.Error() != want {
+		t.Errorf("err = %v, want %s", err, want)
+	}
+}
+
 // TestResolveStopsAGitCommandAtTheTimeout is a fetch with a timeout already over: git is
 // stopped, and the error is a FetchError that names the time given.
 func TestResolveStopsAGitCommandAtTheTimeout(t *testing.T) {

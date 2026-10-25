@@ -165,10 +165,12 @@ func (h *holder) wasCleared() bool {
 	return h.cleared > 0 && bytes.Equal(h.b, make([]byte, len(h.b)))
 }
 
-// testKey is a run key's shape, with no meaning, and testCode a run code's.
+// testKey is a run key's shape, with no meaning, testCode a run code's, and
+// testEnrolment an enrolment code's, with its prefix in mixed case.
 const (
-	testKey  = "qrk_eyJ0ZXN0IjoidGhlIHBvb2wncyBjaGlsZCJ9.c2lnbmF0dXJlLW9mLW5vdGhpbmc"
-	testCode = "qecr_0123456789abcdefghjkmnpqrs.0123456789abcdefghjkmnpqrstvwxyz0"
+	testKey       = "qrk_eyJ0ZXN0IjoidGhlIHBvb2wncyBjaGlsZCJ9.c2lnbmF0dXJlLW9mLW5vdGhpbmc"
+	testCode      = "qecr_0123456789abcdefghjkmnpqrs.0123456789abcdefghjkmnpqrstvwxyz0"
+	testEnrolment = "QeCp_0123456789ABCDEFGHJKMNPQRS.0123456789abcdefghjkmnpqrstvwxyz0"
 )
 
 // lines collects the lines a LineWriter passes on.
@@ -478,26 +480,27 @@ func TestLineWriter(t *testing.T) {
 	w := child.NewLineWriter("x: ", got.add)
 	io.WriteString(w, "one\ntw")
 	io.WriteString(w, "o\r\nthe key "+testKey+" here\nQRK_upper\nthe code "+testCode+"\nQECR_upper\n")
+	io.WriteString(w, "n QeCn_x\np qECP_x\ng QecG_x\ni qEcI_x\n")
 	io.WriteString(w, strings.Repeat("a", 20<<10))
 	io.WriteString(w, "\nlast")
 	w.Flush()
 	all := got.get()
 	left := "x: (a line that contains a secret, left out)"
-	want := []string{"x: one", "x: two", left, left, left, left, "x: " + strings.Repeat("a", 16<<10), "x: " + strings.Repeat("a", 4<<10), "x: last"}
+	want := []string{"x: one", "x: two", left, left, left, left, left, left, left, left, "x: " + strings.Repeat("a", 16<<10), "x: " + strings.Repeat("a", 4<<10), "x: last"}
 	if !slices.Equal(all, want) {
 		t.Errorf("lines %q", all)
 	}
 	noKey(t, all...)
 }
 
-// TestLineWriterKeyAcrossTheSplit puts a run key, then a run code, across the 16 KiB
-// split of a long line, at every offset from before its start to past its end, in one
-// write and a byte at a time: every part of the line is passed on as dots alone or left
-// out, so no piece of the key or the code is passed on, and the next line is passed on
-// as it is.
+// TestLineWriterKeyAcrossTheSplit puts a run key, a run code, then an enrolment code,
+// across the 16 KiB split of a long line, at every offset from before its start to past
+// its end, in one write and a byte at a time: every part of the line is passed on as
+// dots alone or left out, so no piece of the key or the code is passed on, and the next
+// line is passed on as it is.
 func TestLineWriterKeyAcrossTheSplit(t *testing.T) {
 	const split = 16 << 10
-	for _, testKey := range []string{testKey, testCode} {
+	for _, testKey := range []string{testKey, testCode, testEnrolment} {
 		for off := -2; off <= len(testKey)+2; off++ {
 			for _, bytewise := range []bool{false, true} {
 				var got lines

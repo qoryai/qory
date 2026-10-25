@@ -50,3 +50,20 @@ func TestEnvDropsTheTransportsOfTheEnvironment(t *testing.T) {
 		t.Errorf("with GIT_ALLOW_PROTOCOL kept, git did not clone, so the test shows nothing: %v\n%s", err, out)
 	}
 }
+
+// TestEnvWithAProxyDropsNoProxy is an environment with NO_PROXY and no_proxy set to the
+// loopback names, as the Env of Forager's forwarder sets them: with a proxy, Env drops
+// both, since git reaches a host that NO_PROXY lists directly, past the run's proxy;
+// with no proxy, Env keeps them.
+func TestEnvWithAProxyDropsNoProxy(t *testing.T) {
+	env := []string{"PATH=" + os.Getenv("PATH"), "NO_PROXY=localhost,127.0.0.1,::1", "no_proxy=localhost,127.0.0.1,::1"}
+	noProxy := func(kv string) bool {
+		return strings.HasPrefix(kv, "NO_PROXY=") || strings.HasPrefix(kv, "no_proxy=")
+	}
+	if got := proxygit.Env(env, &proxygit.Proxy{URL: "http://qory:password@127.0.0.1:9"}); slices.ContainsFunc(got, noProxy) {
+		t.Errorf("with a proxy, %v keeps NO_PROXY", got)
+	}
+	if got := proxygit.Env(env, nil); !slices.Contains(got, env[1]) || !slices.Contains(got, env[2]) {
+		t.Errorf("with no proxy, %v drops NO_PROXY", got)
+	}
+}

@@ -4,10 +4,11 @@
 // repository first.
 //
 // [Run] fetches on this machine, as qory run does once the run is open: the run's
-// repository into the working folder, an empty git working tree, and each further one
-// under .qory/repositories, every request through the run's host proxy, which adds what
-// a host needs, so no token is on the machine or in git's configuration. Every fetch is
-// at depth one, over https alone, with no credential helper and no prompt, as package
+// repository into the working folder, an empty git working tree, at the head of its
+// default branch, or at a commit with [RunAt], and each further one under
+// .qory/repositories, every request through the run's host proxy, which adds what a
+// host needs, so no token is on the machine or in git's configuration. Every fetch is at
+// depth one, over https alone, with no credential helper and no prompt, as package
 // [proxygit] sets git up.
 //
 // In a container of the run's image, the setup container or the agent's, qory run prepare
@@ -38,7 +39,6 @@ import (
 	"time"
 
 	"github.com/qoryai/qory/internal/checkout"
-	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/integration"
@@ -55,6 +55,9 @@ const (
 	// repository first.
 	EnvRepositories = "QORY_RUN_REPOSITORIES"
 )
+
+// ForgeGitHub is the one forge whose repository form qory knows: github.com.
+const ForgeGitHub = "github.com"
 
 // The words of the fetch qory run does. Each is one format string.
 const (
@@ -89,6 +92,11 @@ const (
 	textFetched        = "qory run: fetched %s at %s in %s"
 	textFetchedOne     = "qory run: fetched %s at %s and 1 further repository in %s"
 	textFetchedMany    = "qory run: fetched %s at %s and %d further repositories in %s"
+	textNoCommit       = "qory run: take the work item in again in Qory Apiary: the commit %[1]s that the run's documents set is not on %[2]s on %[3]s. The fetch through the run's gateway failed: %[4]s; the code is used"
+	textNoFetchByID    = "qory run: let %[3]s serve a fetch of a commit by its id, such as with git's uploadpack.allowReachableSHA1InWant, then take the work item in again in Qory Apiary: %[3]s does not serve the commit %[1]s of %[2]s by its id, or does not have it. The fetch through the run's gateway failed: %[4]s; the code is used"
+	textTargetLater    = "qory run: report this run to the instance admin of Qory Apiary: the run's documents set the target %s, but the run configuration lists it after another repository; the target must be the first repository of the run configuration; the code is used"
+	textTargetMissing  = "qory run: report this run to the instance admin of Qory Apiary: the run's documents set the target %s, but the run configuration does not list it; the target must be the first repository of the run configuration; the code is used"
+	textNotCommitID    = "qory run: ask Qory Apiary's instance admin to check the adapter of the target: the run's documents set the target version %s, and qory fetches a target at a version only when the version is a commit id of 40 or 64 hex digits; the code is used"
 	// textNoDefault, textNoCommits, textNotBranch, textStopped and textCut stand for
 	// git's line in [textNotFetched] and [textGitFailed]: a remote with refs that names
 	// no default branch, a remote with no refs at all, a default branch that is no
@@ -137,7 +145,8 @@ var (
 var baseURL = ""
 
 // Run fetches the repositories getenv names into dir, the working folder, on this
-// machine through the run's host proxy p, and reports whether it fetched them. With
+// machine through the run's host proxy p, and reports whether it fetched them, the run's
+// repository at the head of its default branch, as [RunAt] does with no commit. With
 // [EnvRepositories] unset or empty it does nothing and returns false. The list is
 // checked whole before any fetch. Once every repository is fetched, it prints on report
 // the line that says what it fetched, the run's repository's commit, and in how long.
@@ -145,15 +154,54 @@ var baseURL = ""
 // Every git it runs starts from base, as [hostgit.WithBase] has it: qory run gives this
 // process's environment, and a pool the environment of its commands.
 func Run(ctx context.Context, dir string, base []string, getenv func(string) string, p proxygit.Proxy, report io.Writer) (bool, error) {
+	return RunAt(ctx, dir, base, getenv, Target{}, p, report)
+}
+
+// Target is the target of a run's documents, the place a change would go, and the
+// version of it that the documents set: a run code's target.system, target.path and
+// target_version.
+type Target struct {
+	System, Path, Version string
+}
+
+// RunAt is [Run] with the target's repository fetched at at.Version, when at sets a
+// version and at.System is [EnvSystem]. The version is the commit at which Qory Apiary
+// checked the target for a harness file. A control plane lists the target's path first,
+// so the target is the run's repository: an at.Path that is a later entry of the list,
+// as [targetIn] finds it, stops RunAt with [textTargetLater], one the list does not
+// contain, or an empty list as [Unlisted] checks it, with [textTargetMissing], and a
+// version that is not a full commit id, as [CommitID] checks it, with
+// [textNotCommitID], each before any fetch. The commit is fetched by its id, at depth
+// one, and checked out as a local branch with the name of the remote's default branch,
+// with no upstream, so the working folder is at the commit. A remote that does not have
+// the commit, or serves no fetch of a commit by its id, stops the fetch with
+// [textNoCommit] or [textNoFetchByID]. The further repositories are fetched at the head
+// of their default branches. A version of a target on another system, which is not one
+// of the run's repositories, is not used.
+func RunAt(ctx context.Context, dir string, base []string, getenv func(string) string, at Target, p proxygit.Proxy, report io.Writer) (bool, error) {
 	ctx = hostgit.WithBase(ctx, base)
 	list := getenv(EnvRepositories)
 	if list == "" {
-		return false, nil
+		return false, Unlisted(getenv, at)
 	}
 	system := getenv(EnvSystem)
 	paths, err := Check(system, list)
 	if err != nil {
 		return false, err
+	}
+	commit := ""
+	if at.Version != "" && at.System == system {
+		shown := integration.Printable(exports.Value(at.Path, false))
+		switch i := targetIn(system, paths, at.Path); {
+		case i < 0:
+			return false, fmt.Errorf(textTargetMissing, shown)
+		case i > 0:
+			return false, fmt.Errorf(textTargetLater, shown)
+		}
+		if !CommitID(at.Version) {
+			return false, fmt.Errorf(textNotCommitID, integration.Printable(exports.Value(at.Version, false)))
+		}
+		commit = strings.ToLower(at.Version)
 	}
 	if dir, err = filepath.Abs(dir); err != nil {
 		return false, local(err)
@@ -168,16 +216,17 @@ func Run(ctx context.Context, dir string, base []string, getenv func(string) str
 	defer hold.Release()
 	start := time.Now()
 	first := integration.Printable(exports.Value(paths[0], false))
-	if err := fetchRun(ctx, g, dir, system, paths[0]); err != nil {
+	if err := fetchRun(ctx, g, dir, system, paths[0], commit); err != nil {
 		return false, err
 	}
 	head, err := g(ctx, dir, "rev-parse", "HEAD")
 	if err != nil {
 		return false, notFetched(paths[0], system, err)
 	}
-	commit := strings.TrimSpace(head)
-	if len(commit) > 12 {
-		commit = commit[:12]
+	// The line shows the commit HEAD is at, which is commit when it is set.
+	shown := strings.TrimSpace(head)
+	if len(shown) > 12 {
+		shown = shown[:12]
 	}
 	further := paths[1:]
 	if len(further) > 0 {
@@ -197,13 +246,35 @@ func Run(ctx context.Context, dir string, base []string, getenv func(string) str
 	took := seconds(time.Since(start))
 	switch len(further) {
 	case 0:
-		fmt.Fprintf(report, textFetched+"\n", first, commit, took)
+		fmt.Fprintf(report, textFetched+"\n", first, shown, took)
 	case 1:
-		fmt.Fprintf(report, textFetchedOne+"\n", first, commit, took)
+		fmt.Fprintf(report, textFetchedOne+"\n", first, shown, took)
 	default:
-		fmt.Fprintf(report, textFetchedMany+"\n", first, commit, len(further), took)
+		fmt.Fprintf(report, textFetchedMany+"\n", first, shown, len(further), took)
 	}
 	return true, nil
+}
+
+// Unlisted stops a run whose [EnvRepositories] is unset or empty while at sets a version
+// of a target on [EnvSystem]: a control plane lists that target first, so the list does
+// not contain it, and the error is [textTargetMissing]. It returns nil for a list that is
+// set, for no version, and for a target on another system or with [EnvSystem] unset.
+func Unlisted(getenv func(string) string, at Target) error {
+	if getenv(EnvRepositories) != "" || at.Version == "" {
+		return nil
+	}
+	if system := getenv(EnvSystem); system == "" || at.System != system {
+		return nil
+	}
+	return fmt.Errorf(textTargetMissing, integration.Printable(exports.Value(at.Path, false)))
+}
+
+// targetIn is the index in paths, the entries of [EnvRepositories] on system, of path,
+// the target's path in a run's documents, and -1 when no entry is path. The entries and
+// the path compare as [sameRepository] compares them: on github.com in any case.
+func targetIn(system string, paths []string, path string) int {
+	github := system == ForgeGitHub
+	return slices.IndexFunc(paths, func(p string) bool { return sameRepository(github, p, path) })
 }
 
 // seconds is d as the lines of the preparation give a time: seconds with one decimal
@@ -217,9 +288,8 @@ func seconds(d time.Duration) string {
 // list of more than [maxList] bytes, an entry that is not a path of [segment]s joined by
 // slashes, of 1 to [maxPath] characters with no ., .. or .git segment, an entry given
 // twice, and an entry inside another, the first such pair in entry order. On github.com
-// every entry is owner/name, and of the first entry's owner; that is checked here
-// because the selects pattern cannot say it. A list Check returns is one the URLs and
-// the folders are built from.
+// every entry is owner/name, and of the first entry's owner. A list Check returns is
+// one the URLs and the folders are built from.
 func Check(system, list string) ([]string, error) {
 	if system == "" {
 		return nil, fmt.Errorf(textNoSystem, EnvRepositories, EnvSystem)
@@ -231,7 +301,7 @@ func Check(system, list string) ([]string, error) {
 		return nil, fmt.Errorf(textTooLong, EnvRepositories)
 	}
 	paths := strings.Split(list, ",")
-	github := system == config.ForgeGitHub
+	github := system == ForgeGitHub
 	for i, p := range paths {
 		if !repositoryPath(p) {
 			return nil, fmt.Errorf(textNotPath, EnvRepositories, i+1)
@@ -373,8 +443,11 @@ func emptyTree(ctx context.Context, git gitRunner, dir string) (hold *places.Hol
 
 // fetchRun fetches the run's repository into dir with git: origin is its URL, and the
 // remote's default branch is fetched at depth one and checked out as the local branch of
-// its name, tracking origin.
-func fetchRun(ctx context.Context, git gitRunner, dir, system, path string) error {
+// its name, tracking origin. With commit set, the commit is fetched by its id at depth
+// one in place of the branch, into no ref but FETCH_HEAD, and checked out as the local
+// branch of the default branch's name with no upstream; no remote-tracking ref is
+// written, since the remote's branch may be at another commit.
+func fetchRun(ctx context.Context, git gitRunner, dir, system, path, commit string) error {
 	if _, err := git(ctx, dir, "remote", "add", "--", "origin", repoURL(system, path)); err != nil {
 		return notFetched(path, system, err)
 	}
@@ -409,6 +482,15 @@ func fetchRun(ctx context.Context, git gitRunner, dir, system, path string) erro
 			return notFetched(path, system, notBranch)
 		}
 		return notFetched(path, system, err)
+	}
+	if commit != "" {
+		if _, err := git(ctx, dir, "fetch", "--quiet", "--depth", "1", "origin", "--", commit); err != nil {
+			return notAtCommit(path, system, commit, err)
+		}
+		if _, err := git(ctx, dir, "checkout", "--quiet", "-b", branch, commit); err != nil {
+			return notFetched(path, system, err)
+		}
+		return nil
 	}
 	refspec := "+refs/heads/" + branch + ":refs/remotes/origin/" + branch
 	if _, err := git(ctx, dir, "fetch", "--quiet", "--depth", "1", "origin", "--", refspec); err != nil {
@@ -653,6 +735,45 @@ func notFetched(path, system string, err error) error {
 	}
 	return fmt.Errorf(textNotReached, host, shown, cause)
 }
+
+// notAtCommit is the line for a fetch of commit of path on system that failed with err:
+// [textNoCommit] when git's line is that the remote does not have the commit,
+// [textNoFetchByID] when it is that the remote serves no fetch of an object it did not
+// list, which a server that has no setting such as uploadpack.allowReachableSHA1InWant
+// returns over git's protocol version 0 or 1 for any commit, and [notFetched] for any
+// other failure. The commit shows as its first twelve characters.
+func notAtCommit(path, system, commit string, err error) error {
+	var ge *gitError
+	if !errors.As(err, &ge) {
+		return notFetched(path, system, err)
+	}
+	text := textNoCommit
+	switch {
+	case notOurRef.MatchString(ge.line):
+	case unadvertised.MatchString(ge.line):
+		text = textNoFetchByID
+	default:
+		return notFetched(path, system, err)
+	}
+	shown := integration.Printable(exports.Value(path, false))
+	host := integration.Printable(exports.Value(system, false))
+	cause := integration.Printable(exports.HideURLError(err).Error())
+	return fmt.Errorf(text, commit[:12], shown, host, cause)
+}
+
+// notOurRef and unadvertised match git's lines for a fetch of a commit by its id: a
+// remote that does not have the commit, and one that serves no fetch of a commit it did
+// not list.
+var (
+	notOurRef    = regexp.MustCompile(`(?i)not our ref`)
+	unadvertised = regexp.MustCompile(`(?i)does not allow request for unadvertised object`)
+)
+
+// CommitID reports whether v is a full commit id: forty hex characters for SHA-1, or
+// sixty-four for SHA-256, in either case.
+func CommitID(v string) bool { return commitID.MatchString(v) }
+
+var commitID = regexp.MustCompile(`^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$`)
 
 // answered matches git's line for a host that answered a fetch: that it needs a
 // credential, that the credential it got does not read the repository, or that it has

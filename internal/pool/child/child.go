@@ -40,8 +40,9 @@ import (
 // first of ExtraFiles, the one after standard error.
 const KeyFD = 3
 
-// ContainsSecret reports whether v contains what starts an access key secret, a run key
-// or a run code: qak_, qrk_ or qecr_, in any case, as [accesskey.ContainsSecret] checks.
+// ContainsSecret reports whether v contains what starts an access key secret, a run
+// key, a run code or an enrolment code: qak_, qrk_, qecr_, qecn_, qecp_, qecg_ or
+// qeci_, in any case, as [accesskey.ContainsSecret] checks.
 func ContainsSecret(v string) bool {
 	return accesskey.ContainsSecret(v) || strings.Contains(strings.ToLower(v), accesskey.CodePrefixRun)
 }

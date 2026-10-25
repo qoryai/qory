@@ -1,8 +1,9 @@
 // Package proxygit is the environment and the options of a git that fetches on this
-// machine through a run's host proxy: the loopback forwarder Forager starts for the run,
-// with a password, which the gateway behind it adds each token to. qory fetches a run's
-// repositories and the git sources of its harness that way in a run from a control
-// plane, so no token is on this machine.
+// machine through a run's host proxy or stack proxy: a loopback forwarder Forager starts
+// for the run, with a password. qory fetches a run's repositories through the host
+// proxy, which the gateway behind it adds each token to, and the git sources of its
+// harness through the stack proxy, in a run from a control plane, so no token is on
+// this machine.
 //
 // Such a git reads no configuration of the person's or the system's, no credential
 // helper, no .netrc and no proxy or certificate setting of this process's environment.
@@ -20,7 +21,7 @@ import (
 	"strings"
 )
 
-// Proxy is the run's host proxy as a git on this machine uses it.
+// Proxy is the run's host proxy or stack proxy as a git on this machine uses it.
 type Proxy struct {
 	// URL is the forwarder's URL with its password, http://qory:<password>@127.0.0.1:<port>.
 	URL string

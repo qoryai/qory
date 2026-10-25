@@ -68,6 +68,14 @@ func TestMain(m *testing.M) {
 		fmt.Printf("stdin=%t err=%v fd3=%s\n", fromStdin, err, state)
 		os.Exit(0)
 	}
+	// A test that needs a request through a run's engine proxy, as the engine's pull
+	// sends it, starts this binary with QORY_TEST_ENGINE_PULL set and, after --, the
+	// proxy's URL with its password, the URL to request and the file to write the
+	// results into.
+	if os.Getenv("QORY_TEST_ENGINE_PULL") == "1" {
+		args := os.Args[slices.Index(os.Args, "--")+1:]
+		os.Exit(enginePull(args[0], args[1], args[2]))
+	}
 	cmd.ShortenSocketGrace(10 * time.Millisecond)
 	os.Exit(m.Run())
 }

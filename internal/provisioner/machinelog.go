@@ -16,7 +16,7 @@ const MaxLog = 768 << 10
 
 // hiddenLine replaces each line of a machine log that contains what looks like a
 // secret.
-const hiddenLine = "[hidden: the line contained what looks like an access key secret, a run key or a run code]"
+const hiddenLine = "[hidden: the line contained what looks like an access key secret, a run key, a run code or an enrolment code]"
 
 // MachineLog sends POST /v1/dispatches/<dispatchID>/machine-log,
 // machine-log.schema.json: the log of the machine the pool started for the dispatch,
@@ -37,7 +37,8 @@ func (c *Client) MachineLog(ctx context.Context, dispatchID, log string, truncat
 
 // fitMachineLog is log as a machine log sends it: each U+0000 replaced by U+FFFD, each
 // run of bytes that is not UTF-8 replaced by one U+FFFD, and each line that contains
-// what looks like a secret, qak_, qrk_ or qecr_ in any case, replaced by a fixed text.
+// what looks like a secret, qak_, qrk_, qecr_, qecn_, qecp_, qecg_ or qeci_ in any
+// case, replaced by a fixed text.
 // Of that, it keeps the last part such that the log is at most [MaxLog] bytes and the
 // request's body at most contracts.MaxRequest bytes, as json.Marshal writes it. It
 // steps back one whole character at a time, so the part starts at a character. When it

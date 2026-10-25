@@ -89,17 +89,20 @@ type Forager struct {
 	// TLS is gateway.tls, the certificate and key qory gateway serves Listen with; nil
 	// when the file sets none.
 	TLS *ForagerTLS
-	// Selects is gateway.selects.credentials, in the file's order: the credentials qory
-	// gateway selects for a run, with a wall or without, when the server's policy
-	// selects none. qory run refuses it. [Forager.Selections] checks it against the
-	// credentials once the integrations are described.
-	Selects []ForagerSelect
 	// LockMemory is gateway.lock_memory: on Linux, the gateway locks every page of its
 	// process in memory, so that no key it holds is written to swap. False when the file
 	// does not set it.
 	LockMemory bool
 	// RunLimits is gateway.run_limits: the limits of each run on the gateway.
 	RunLimits ForagerRunLimits
+	// StackHosts is gateway.stack_hosts, in the file's order: the hosts the stack proxy
+	// of each run on the gateway reaches, as Forager's gateway.Config.StackHosts. Each is
+	// an entry Forager reads in a policy's egress.allow. Nil when the file sets none.
+	StackHosts []string
+	// Machine is machine, the adapter that made this machine, such as aws-ec2, or none;
+	// empty when the file sets none. qory run passes it to Forager, which reports it in
+	// dev.qory.run.started.
+	Machine string
 	// Pool is the pool section, nil when the file has none: what qory run pool runs by.
 	// No other command reads it.
 	Pool     *ForagerPool
@@ -125,16 +128,6 @@ var runLimits = []struct {
 	{"connections", 65536, 256},
 	{"requests_per_second", 10000, 50},
 	{"burst", 100000, 200},
-}
-
-// ForagerSelect is one entry of gateway.selects.credentials, as the file writes it: the
-// credential's name, and for one that takes an argument, the label of the run's
-// registration whose value is the argument and the forge the run's forge label must
-// name; both empty for one that takes none.
-type ForagerSelect struct {
-	Name          string
-	ArgumentLabel string
-	Forge         string
 }
 
 // ForagerTLS is gateway.tls: the files of the certificate and its key, as the file
@@ -378,6 +371,10 @@ type ForagerWall struct {
 	// Setup is where the setup commands of a run run, [SetupOutside] or [SetupInside];
 	// empty means outside.
 	Setup string
+	// EngineProxyFile is the absolute path of the file that has the address and the
+	// password of the container engine's proxy setting; empty when the file sets none.
+	// qory run reads it as a walled run starts. qory never prints the file's contents.
+	EngineProxyFile string
 }
 
 // ForagerMount is one file or directory of this machine a walled run sees, at the same
@@ -442,7 +439,14 @@ type ForagerServer struct {
 	// Via is gateway.server.via, the gateway this machine reaches the server through;
 	// nil when the file sets none, and the server is reached directly.
 	Via *ForagerVia
+	// EnrolmentCodeFile is gateway.server.enrolment_code_file as written, "" when the
+	// file sets none: the file qory gateway reads its enrolment code from when it has no
+	// access key. [Forager.Path] resolves it.
+	EnrolmentCodeFile string
 }
+
+// machineShape is the form of machine, as Forager checks OpenSpec.Machine.
+var machineShape = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 
 // EnvOrigin starts the origin of a value read from a variable: "$" and its name.
 const EnvOrigin = "$"
@@ -456,7 +460,8 @@ type pinEntry struct {
 // foragerFile is forager.yaml as written: the gateway's sections, the session's, the
 // wall's and the pool's.
 type foragerFile struct {
-	APIVersion string `yaml:"apiVersion"`
+	APIVersion string  `yaml:"apiVersion"`
+	Machine    *string `yaml:"machine"`
 	// Webhook is the section qory 0.10.0 replaced with server, read only to refuse it
 	// by name instead of as a key the file does not read.
 	Webhook yaml.Node       `yaml:"webhook,omitempty"`
@@ -479,6 +484,8 @@ type foragerFile struct {
 		ShmSize *string   `yaml:"shm_size"`
 		CAEnv   yaml.Node `yaml:"ca_env,omitempty"`
 		Setup   *string   `yaml:"setup"`
+		// EngineProxyFile is read as a path alone; qory run reads the file.
+		EngineProxyFile *string `yaml:"engine_proxy_file"`
 
 		// ImagesAllow is read as a node, so an entry that is not a string is refused
 		// by its index.
@@ -499,6 +506,8 @@ type gatewaySection struct {
 		Secret    yaml.Node   `yaml:"secret,omitempty"`
 		AccessKey yaml.Node   `yaml:"access_key,omitempty"`
 		Via       *viaSection `yaml:"via,omitempty"`
+		// EnrolmentCodeFile is read by qory gateway alone.
+		EnrolmentCodeFile *string `yaml:"enrolment_code_file"`
 	} `yaml:"server,omitempty"`
 	Credentials  yaml.Node `yaml:"credentials,omitempty"`
 	Tools        yaml.Node `yaml:"tools,omitempty"`
@@ -508,7 +517,8 @@ type gatewaySection struct {
 		Certificate *string `yaml:"certificate"`
 		Key         *string `yaml:"key"`
 	} `yaml:"tls,omitempty"`
-	Selects *selectsSection `yaml:"selects,omitempty"`
+	// Selects is read only to stop a file that still sets it.
+	Selects yaml.Node `yaml:"selects,omitempty"`
 	// LockMemory and RunLimits are given to Forager's gateway as they are.
 	LockMemory *bool `yaml:"lock_memory"`
 	RunLimits  *struct {
@@ -516,18 +526,9 @@ type gatewaySection struct {
 		RequestsPerSecond *int `yaml:"requests_per_second"`
 		Burst             *int `yaml:"burst"`
 	} `yaml:"run_limits,omitempty"`
-}
-
-// selectsSection is gateway.selects as written.
-type selectsSection struct {
-	Credentials []selectEntry `yaml:"credentials"`
-}
-
-// selectEntry is one entry of gateway.selects.credentials as written.
-type selectEntry struct {
-	Name          *string `yaml:"name"`
-	ArgumentLabel *string `yaml:"argument_label"`
-	Forge         *string `yaml:"forge"`
+	// StackHosts is read as a node, so an entry that is not a string stops the load
+	// with its index.
+	StackHosts yaml.Node `yaml:"stack_hosts,omitempty"`
 }
 
 // egressSection is gateway.egress as written.
@@ -610,6 +611,12 @@ func LoadForagerIn(dir string) (*Forager, error) {
 		return nil, fmt.Errorf("%s: apiVersion is not one this qory reads; versions: %s", path, exports.APIVersion)
 	}
 	r := &Forager{File: path, Gateway: f.Gateway != nil, GatewayKeys: gatewayKeys(data)}
+	if f.Machine != nil {
+		if !machineShape.MatchString(*f.Machine) {
+			return nil, fmt.Errorf("%s: set machine to 1 to 64 of a-z, 0-9 and -, the first a letter, such as aws-ec2 or none, or remove it: it is %s", path, exports.Value(*f.Machine, true))
+		}
+		r.Machine = *f.Machine
+	}
 	g, ses := f.Gateway, f.Session
 	if g == nil {
 		g = &gatewaySection{}
@@ -645,6 +652,12 @@ func LoadForagerIn(dir string) (*Forager, error) {
 			if r.Server.Via, err = readVia(path, w.Via); err != nil {
 				return nil, err
 			}
+		}
+		if f := w.EnrolmentCodeFile; f != nil {
+			if *f == "" {
+				return nil, fmt.Errorf("%s: set gateway.server.enrolment_code_file to the path of the gateway's enrolment code, or remove it: the value is empty", path)
+			}
+			r.Server.EnrolmentCodeFile = *f
 		}
 	}
 	if in := ses.Instance; in != nil && in.Name != nil {
@@ -722,20 +735,13 @@ func LoadForagerIn(dir string) (*Forager, error) {
 			*f.out = *f.in
 		}
 	}
-	if sel := g.Selects; sel != nil {
-		for i, e := range sel.Credentials {
-			if e.Name == nil || *e.Name == "" {
-				return nil, fmt.Errorf("%s: gateway.selects.credentials[%d].name is required", path, i)
-			}
-			s := ForagerSelect{Name: *e.Name}
-			if e.ArgumentLabel != nil {
-				s.ArgumentLabel = *e.ArgumentLabel
-			}
-			if e.Forge != nil {
-				s.Forge = *e.Forge
-			}
-			r.Selects = append(r.Selects, s)
+	if g.StackHosts.Kind != 0 {
+		if r.StackHosts, err = readStackHosts(path, &g.StackHosts); err != nil {
+			return nil, err
 		}
+	}
+	if g.Selects.Kind != 0 {
+		return nil, fmt.Errorf("remove gateway.selects from %s: a run's policy selects its credentials", path)
 	}
 	if w := f.Wall; w != nil {
 		if w.Adapter == nil || *w.Adapter != WallDocker {
@@ -799,6 +805,12 @@ func LoadForagerIn(dir string) (*Forager, error) {
 				return nil, fmt.Errorf("%s: set wall.setup to %s or %s, or remove it for %s: it is %s", path, SetupOutside, SetupInside, SetupOutside, exports.Value(*w.Setup, true))
 			}
 			r.Wall.Setup = *w.Setup
+		}
+		if p := w.EngineProxyFile; p != nil {
+			if !filepath.IsAbs(*p) {
+				return nil, fmt.Errorf("%s: set wall.engine_proxy_file to an absolute path, or remove it: it is %s", path, exports.Value(*p, true))
+			}
+			r.Wall.EngineProxyFile = *p
 		}
 		notCAEnv := func(i, _ int) error {
 			return fmt.Errorf("%s: wall.ca_env[%d] is not a variable's name", path, i)
@@ -1553,6 +1565,32 @@ func readPaths(path string, node *yaml.Node) (map[string][]string, error) {
 	return out, nil
 }
 
+// readStackHosts reads gateway.stack_hosts, a list of hosts, each read as an entry of a
+// policy's egress.allow, as Forager's gateway.Start reads an entry of StackHosts: a
+// lower-case host name, an IPv4 address in canonical form or a *. suffix. An empty list
+// is none. An entry that is not a string stops the load with its line and its index; a
+// string that Forager does not take, with its index. Neither error contains the value.
+func readStackHosts(path string, node *yaml.Node) ([]string, error) {
+	fix := func(i int) string {
+		return fmt.Sprintf("set gateway.stack_hosts[%d] to a lower-case host name, an IPv4 address or a *. suffix, such as git.example.com; no port, path or scheme", i)
+	}
+	hosts, err := stringList(path, "gateway.stack_hosts", node, func(i, line int) error {
+		return (&fault{line, fix(i)}).error(path)
+	})
+	if err != nil {
+		return nil, err
+	}
+	for i, host := range hosts {
+		if !policyHost("allow", host) {
+			return nil, (&fault{0, fix(i)}).error(path)
+		}
+	}
+	if len(hosts) == 0 {
+		return nil, nil
+	}
+	return hosts, nil
+}
+
 // notAPolicyHost is what a refusal of a host of gateway.egress.allow or deny says is
 // wrong with it.
 const notAPolicyHost = "is not a lower-case host name or a *. suffix, or it ends in a number and is not an IPv4 address in canonical form; no port, path or scheme"
@@ -1734,9 +1772,9 @@ func loopback(host string) bool {
 // defaults with [Default] when there is no file or a section is absent. A name that
 // contains an access key secret or a run key is printed as [accesskey.ShownName]
 // prints it, and a value the file sets as [exports.Value] prints it. The egress hosts,
-// the server's and the via's URLs, the access key id, the instance name and the
-// certificate's SHA-256 are printed as they are: each is refused when it could contain
-// qak_ or qrk_.
+// the stack hosts, the server's and the via's URLs, the access key id, the instance
+// name and the certificate's SHA-256 are printed as they are: each is refused when it
+// could contain qak_ or qrk_.
 func (r *Forager) Rows() []Row {
 	origin := Default
 	if r != nil {
@@ -1766,6 +1804,9 @@ func (r *Forager) Rows() []Row {
 			rows = append(rows, Row{"gateway.server.apiary_public_key", "(none: qory access-key enrol writes it)", Default})
 		}
 		rows = append(rows, viaRows(r.Server.Via, origin)...)
+		if r.Server.EnrolmentCodeFile != "" {
+			rows = append(rows, Row{"gateway.server.enrolment_code_file", exports.Value(r.Server.EnrolmentCodeFile, false), origin})
+		}
 	} else {
 		rows = append(rows, Row{"gateway.server.url", "(none)", Default})
 	}
@@ -1795,6 +1836,11 @@ func (r *Forager) Rows() []Row {
 		} else {
 			rows = append(rows, Row{"gateway.run_limits." + lim.key, strconv.Itoa(lim.normal), Default})
 		}
+	}
+	if r != nil && len(r.StackHosts) > 0 {
+		rows = append(rows, Row{"gateway.stack_hosts", listOrNone(r.StackHosts), origin})
+	} else {
+		rows = append(rows, Row{"gateway.stack_hosts", "(none)", Default})
 	}
 	if r != nil && r.InstanceName != "" {
 		rows = append(rows, Row{"session.instance.name", r.InstanceName, origin})
@@ -1845,13 +1891,9 @@ func (r *Forager) Rows() []Row {
 			}
 			rows = append(rows, Row{"gateway.integrations." + accesskey.ShownName(in.Key, false), program, origin})
 		}
-		for _, sel := range r.Selects {
-			value := "(no argument)"
-			if sel.ArgumentLabel != "" || sel.Forge != "" {
-				value = "argument_label " + orNone(accesskey.ShownName(sel.ArgumentLabel, false)) + ", forge " + orNone(exports.Value(sel.Forge, false))
-			}
-			rows = append(rows, Row{"gateway.selects.credentials." + accesskey.ShownName(sel.Name, false), value, origin})
-		}
+	}
+	if r != nil && r.Machine != "" {
+		rows = append(rows, Row{"machine", r.Machine, origin})
 	}
 	if r != nil && r.Wall != nil {
 		rows = append(rows,
@@ -1898,6 +1940,10 @@ func (r *Forager) Rows() []Row {
 		}
 		if r.Wall.Setup != "" {
 			rows = append(rows, Row{"wall.setup", r.Wall.Setup, origin})
+		}
+		// The path alone: the file's contents are never read here.
+		if r.Wall.EngineProxyFile != "" {
+			rows = append(rows, Row{"wall.engine_proxy_file", exports.Value(r.Wall.EngineProxyFile, false), origin})
 		}
 	} else {
 		rows = append(rows, Row{"wall.adapter", "(none)", Default})
