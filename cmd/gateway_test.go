@@ -419,6 +419,25 @@ func TestGatewayRefusesRunCredentials(t *testing.T) {
 	}
 }
 
+// TestCommandsStopOnGatewaySelects is a gateway.selects, which forager.yaml no longer
+// has: qory gateway, qory run and qory config stop on it as input, with the fix first,
+// and the error contains none of its values.
+func TestCommandsStopOnGatewaySelects(t *testing.T) {
+	emptyDir(t)
+	serverFile(t, newFakeServer(t, ""), "  listen: 127.0.0.1:0\n  selects:\n    credentials:\n      - {name: secret-name-value, argument_label: secret-label-value, forge: github.com}\n")
+	want := "remove gateway.selects from " + foragerFile() + ": a run's policy selects its credentials"
+	for _, args := range [][]string{{"gateway"}, {"run"}, {"run", "--local"}, {"config"}} {
+		out, err := run(t, args...)
+		if err == nil || err.Error() != want {
+			t.Errorf("%v: error %v, want %q", args, err, want)
+		}
+		if code := cmd.ExitCode(err); code != cmd.ExitInput {
+			t.Errorf("%v: exit %d, want %d", args, code, cmd.ExitInput)
+		}
+		lacks(t, out, "secret-", "listening on")
+	}
+}
+
 // TestGatewayRefusesSecretFilesOthersMayRead is the TLS key checked as
 // access-key-secret is, before the gateway listens: a key the group or others may read
 // and a key in a directory others may read are each refused, and no refusal holds what

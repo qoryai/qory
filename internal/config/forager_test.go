@@ -466,6 +466,36 @@ func TestForagerFileRefusesAMistake(t *testing.T) {
 	}
 }
 
+// TestForagerFileStopsOnGatewaySelects is a gateway.selects, which forager.yaml no
+// longer has, in each form it may be written: the load stops with the fix first, and
+// the error contains none of its values. A file with it fails forager.schema.json too.
+func TestForagerFileStopsOnGatewaySelects(t *testing.T) {
+	hermetic(t)
+	schema, err := jsonschema.NewCompiler().Compile(filepath.Join("..", "..", "contracts", "harness", "v1", "forager.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{
+		"gateway:\n  selects:\n    credentials:\n      - {name: secret-name-value, argument_label: secret-label-value, forge: github.com}\n",
+		"gateway:\n  selects: {}\n",
+		"gateway:\n  selects:\n",
+		"gateway:\n  selects: [secret-list-value]\n",
+	} {
+		path := foragerFile(t, body)
+		_, err := config.LoadForager()
+		if want := "remove gateway.selects from " + path + ": a run's policy selects its credentials"; err == nil || err.Error() != want {
+			t.Errorf("%q: error %v, want %q", body, err, want)
+		}
+		var doc any
+		if err := yaml.Unmarshal([]byte(body), &doc); err != nil {
+			t.Fatal(err)
+		}
+		if schema.Validate(doc) == nil {
+			t.Errorf("%q: the schema takes gateway.selects", body)
+		}
+	}
+}
+
 // TestTheForagerSchemaTakesTheServerSection holds forager.schema.json to what the reader
 // takes of gateway.server and session.instance: url, access_key_id and the pin, each of the last two
 // optional since the environment may hold it, and session.instance.name; the workspace access

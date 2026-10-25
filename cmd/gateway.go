@@ -53,8 +53,6 @@ The gateway section of ` + config.ForagerFileName + ` in ~/.config/qory sets it:
   egress        the hosts a run may reach; it narrows Qory Apiary's policy
   credentials   secrets the gateway sets on requests; the agents never have them
   integrations  programs that supply such secrets
-  selects       the credentials it selects for a run, with a wall or without, when
-                the server's policy selects none
 
 ` + gatewayMachinesHelp + `
 
@@ -159,11 +157,6 @@ More: ` + gatewayDocs,
 			}
 			if gw.Tools, err = machineTools(r, e.Workspace); err != nil {
 				return err
-			}
-			// The credentials gateway.selects names are checked against the ones the
-			// integrations define too, so only once they are described.
-			if gw.Selects, err = r.Selections(); err != nil {
-				return input(err)
 			}
 			g, err := startGateway(ctx, gw)
 			if err != nil {

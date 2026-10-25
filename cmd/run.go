@@ -171,9 +171,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if err != nil {
 				return err
 			}
-			if err := selectsInRun(conf.Forager); err != nil {
-				return err
-			}
 			if remote {
 				var given []string
 				for _, f := range registrationFlags {
@@ -923,16 +920,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	composeFlags(c, &composing)
 	c.AddCommand(newResend(), newRegister(), newEnd(), newForward(), newRelay(), newNest(), newPrepare(), newAgentEnv(), newExec(), newHold(), newSetupCommand(), newSeed(), newPool())
 	return c
-}
-
-// selectsInRun refuses, as input, gateway.selects in r for qory run, written with
-// entries or without: qory gateway alone reads it, and a run qory run starts takes its
-// credentials from its policy.
-func selectsInRun(r *config.Forager) error {
-	if r == nil || !slices.Contains(r.GatewayKeys, "selects") {
-		return nil
-	}
-	return input(errors.New(config.ForagerFileName + ": gateway.selects is read by qory gateway alone; a run qory run starts takes its credentials from its policy: remove gateway.selects"))
 }
 
 // machinePolicy is the policy forager.yaml's gateway.egress sets for every run of the

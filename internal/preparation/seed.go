@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/qoryai/qory/internal/checkout"
-	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/integration"
 )
@@ -132,7 +131,7 @@ func checkOrigin(ctx context.Context, dir, seed, system, path string) error {
 			urls = append(urls, value)
 		}
 	}
-	if len(urls) != 1 || !sameOrigin(system == config.ForgeGitHub, urls[0], system, path) {
+	if len(urls) != 1 || !sameOrigin(system == ForgeGitHub, urls[0], system, path) {
 		want := strings.TrimSuffix(repoURL(system, path), ".git")
 		return fmt.Errorf(textSeedOrigin, seed, integration.Printable(exports.Value(path, false)), exports.URL(want))
 	}

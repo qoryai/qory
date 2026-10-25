@@ -38,7 +38,6 @@ import (
 	"time"
 
 	"github.com/qoryai/qory/internal/checkout"
-	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/integration"
@@ -55,6 +54,9 @@ const (
 	// repository first.
 	EnvRepositories = "QORY_RUN_REPOSITORIES"
 )
+
+// ForgeGitHub is the one forge whose repository form qory knows: github.com.
+const ForgeGitHub = "github.com"
 
 // The words of the fetch qory run does. Each is one format string.
 const (
@@ -217,9 +219,8 @@ func seconds(d time.Duration) string {
 // list of more than [maxList] bytes, an entry that is not a path of [segment]s joined by
 // slashes, of 1 to [maxPath] characters with no ., .. or .git segment, an entry given
 // twice, and an entry inside another, the first such pair in entry order. On github.com
-// every entry is owner/name, and of the first entry's owner; that is checked here
-// because the selects pattern cannot say it. A list Check returns is one the URLs and
-// the folders are built from.
+// every entry is owner/name, and of the first entry's owner. A list Check returns is
+// one the URLs and the folders are built from.
 func Check(system, list string) ([]string, error) {
 	if system == "" {
 		return nil, fmt.Errorf(textNoSystem, EnvRepositories, EnvSystem)
@@ -231,7 +232,7 @@ func Check(system, list string) ([]string, error) {
 		return nil, fmt.Errorf(textTooLong, EnvRepositories)
 	}
 	paths := strings.Split(list, ",")
-	github := system == config.ForgeGitHub
+	github := system == ForgeGitHub
 	for i, p := range paths {
 		if !repositoryPath(p) {
 			return nil, fmt.Errorf(textNotPath, EnvRepositories, i+1)

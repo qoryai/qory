@@ -54,10 +54,6 @@ release may change what an existing document does, and states it under Upgrading
   `harness.tiers` in the repository's `qory.yaml`.
 - Give the agents of a tier an effort value with `--tier-effort <tier>=<effort>` on
   `qory harness compose` and `qory run`, beside `--tier <tier>=<model id>`.
-- `gateway.selects` in forager.yaml: when a run's policy selects no credentials, `qory
-  gateway` selects them for a run, with a wall or without, by the run's labels, such as
-  the GitHub credential for the repositories the run's `repository` label names, one or
-  several of one owner, separated by commas. `qory run` refuses it.
 - `wall.images_allow` in forager.yaml: where a run's image may come from when the run's
   policy names one by a reference pinned by digest, a list of the prefixes of the
   references the machine runs. Without it, such a run is refused.
@@ -355,7 +351,7 @@ release may change what an existing document does, and states it under Upgrading
   or "(a name that contains a run key)" in place of a name that contains such a secret, in
   these refusals: of an integration, from a program not on the PATH to a credential the
   program defines; of a credential or a tool that Forager refuses for `qory run` or `qory
-  gateway`; of a `gateway.selects` entry; of a key of `env`, `variants` or a `requires`
+  gateway`; of a key of `env`, `variants` or a `requires`
   item in qory-module.yaml, an entry `requires` lists, and the variant `variants.default`
   selects; of a variant; of a module's files, of the variant it has for a runtime, and of
   the source, `exclude`, `only` or `link` of its entry in qory-stack.yaml, by the module's
@@ -366,7 +362,7 @@ release may change what an existing document does, and states it under Upgrading
   Forager quotes among them. `qory run` and `qory gateway` print the phrase in their line
   about an integration and in their line about a credential that `gateway.credentials`
   shadows. `qory config` prints it in that second line, and in its rows of credentials and
-  the variables they read, tools, integrations, selected credentials, images,
+  the variables they read, tools, integrations, images,
   `wall.image`, `wall.env` and `wall.ca_env`. An alias in qory.yaml or harness.yaml whose
   anchor name contains such a secret is refused as "the value is a YAML alias" at its
   line, and a key of an `exclude` or `only` block as "the name at line N". A refusal of

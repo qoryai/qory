@@ -89,11 +89,6 @@ type Forager struct {
 	// TLS is gateway.tls, the certificate and key qory gateway serves Listen with; nil
 	// when the file sets none.
 	TLS *ForagerTLS
-	// Selects is gateway.selects.credentials, in the file's order: the credentials qory
-	// gateway selects for a run, with a wall or without, when the server's policy
-	// selects none. qory run refuses it. [Forager.Selections] checks it against the
-	// credentials once the integrations are described.
-	Selects []ForagerSelect
 	// LockMemory is gateway.lock_memory: on Linux, the gateway locks every page of its
 	// process in memory, so that no key it holds is written to swap. False when the file
 	// does not set it.
@@ -129,16 +124,6 @@ var runLimits = []struct {
 	{"connections", 65536, 256},
 	{"requests_per_second", 10000, 50},
 	{"burst", 100000, 200},
-}
-
-// ForagerSelect is one entry of gateway.selects.credentials, as the file writes it: the
-// credential's name, and for one that takes an argument, the label of the run's
-// registration whose value is the argument and the forge the run's forge label must
-// name; both empty for one that takes none.
-type ForagerSelect struct {
-	Name          string
-	ArgumentLabel string
-	Forge         string
 }
 
 // ForagerTLS is gateway.tls: the files of the certificate and its key, as the file
@@ -512,7 +497,8 @@ type gatewaySection struct {
 		Certificate *string `yaml:"certificate"`
 		Key         *string `yaml:"key"`
 	} `yaml:"tls,omitempty"`
-	Selects *selectsSection `yaml:"selects,omitempty"`
+	// Selects is read only to stop a file that still sets it.
+	Selects yaml.Node `yaml:"selects,omitempty"`
 	// LockMemory and RunLimits are given to Forager's gateway as they are.
 	LockMemory *bool `yaml:"lock_memory"`
 	RunLimits  *struct {
@@ -523,18 +509,6 @@ type gatewaySection struct {
 	// StackHosts is read as a node, so an entry that is not a string stops the load
 	// with its index.
 	StackHosts yaml.Node `yaml:"stack_hosts,omitempty"`
-}
-
-// selectsSection is gateway.selects as written.
-type selectsSection struct {
-	Credentials []selectEntry `yaml:"credentials"`
-}
-
-// selectEntry is one entry of gateway.selects.credentials as written.
-type selectEntry struct {
-	Name          *string `yaml:"name"`
-	ArgumentLabel *string `yaml:"argument_label"`
-	Forge         *string `yaml:"forge"`
 }
 
 // egressSection is gateway.egress as written.
@@ -734,20 +708,8 @@ func LoadForagerIn(dir string) (*Forager, error) {
 			return nil, err
 		}
 	}
-	if sel := g.Selects; sel != nil {
-		for i, e := range sel.Credentials {
-			if e.Name == nil || *e.Name == "" {
-				return nil, fmt.Errorf("%s: gateway.selects.credentials[%d].name is required", path, i)
-			}
-			s := ForagerSelect{Name: *e.Name}
-			if e.ArgumentLabel != nil {
-				s.ArgumentLabel = *e.ArgumentLabel
-			}
-			if e.Forge != nil {
-				s.Forge = *e.Forge
-			}
-			r.Selects = append(r.Selects, s)
-		}
+	if g.Selects.Kind != 0 {
+		return nil, fmt.Errorf("remove gateway.selects from %s: a run's policy selects its credentials", path)
 	}
 	if w := f.Wall; w != nil {
 		if w.Adapter == nil || *w.Adapter != WallDocker {
@@ -1887,13 +1849,6 @@ func (r *Forager) Rows() []Row {
 				program += ", shadowed by gateway.credentials." + accesskey.ShownName(in.Key, false)
 			}
 			rows = append(rows, Row{"gateway.integrations." + accesskey.ShownName(in.Key, false), program, origin})
-		}
-		for _, sel := range r.Selects {
-			value := "(no argument)"
-			if sel.ArgumentLabel != "" || sel.Forge != "" {
-				value = "argument_label " + orNone(accesskey.ShownName(sel.ArgumentLabel, false)) + ", forge " + orNone(exports.Value(sel.Forge, false))
-			}
-			rows = append(rows, Row{"gateway.selects.credentials." + accesskey.ShownName(sel.Name, false), value, origin})
 		}
 	}
 	if r != nil && r.Wall != nil {
