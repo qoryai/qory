@@ -708,7 +708,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// every git source of the harness through it. A run whose harness is hidden
 			// prints lines that show names in place of addresses. Both proxies close before
 			// the session joins; Join closes them too. A run with no control plane opens
-			// neither, and composes with the person's git.
+			// neither, and composes with the person's git. A run from a run code whose
+			// documents set target_version fetches the target's repository at that commit, and
+			// stops before the compose when the run configuration lists no repository while
+			// the target is on its system.
 			hostWork := func() error {
 				stopped := func() bool {
 					return ctx.Err() != nil || timeout > 0 && time.Since(opened) >= timeout
@@ -737,7 +740,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 							fetchCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
 						}
 						defer cancel()
-						if _, err := preparation.Run(fetchCtx, cwd, os.Environ(), runValues(run), h.proxy, w); err != nil {
+						if _, err := preparation.RunAt(fetchCtx, cwd, os.Environ(), runValues(run), fromCode.fetchTarget(), h.proxy, w); err != nil {
 							return &runLineError{err}
 						}
 						return nil
@@ -745,6 +748,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					if err != nil {
 						return err
 					}
+				} else if err := preparation.Unlisted(runValues(run), fromCode.fetchTarget()); err != nil {
+					return &runLineError{err}
 				}
 				var claudeDispatched bool
 				err := inStep(run, stderr, event.StepCompose, composeStepName(runtime), stopped, func(w io.Writer) error {

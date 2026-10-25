@@ -17,6 +17,7 @@ import (
 
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/provisioner"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
@@ -77,6 +78,8 @@ func fromAnswerOnly(cmd *cobra.Command, runtime string, extra []string) error {
 // harness document, the workflow, the inputs as the documents have them, the run
 // settings' time_limit_minutes, 0 for none, and harness_hidden. named is set when
 // harness_hidden is true: no text of the run shows the address of a harness source.
+// target is the documents' target and target_version, which the fetch uses for the
+// target's repository.
 type codeRun struct {
 	runtime  string
 	settings []provisioner.Setting
@@ -89,6 +92,7 @@ type codeRun struct {
 	inputs   []byte
 	minutes  int
 	hidden   bool
+	target   preparation.Target
 }
 
 // The harness of a run from a run code as a text shows it: the documents' harness
@@ -147,7 +151,11 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if !isClaude(runtime) {
 		return nil, fmt.Errorf("set the runtime claude for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow on claude alone, and the response to the run code sets the runtime %s%s", accesskey.ShownName(runtime, false), codeUsed)
 	}
-	r := &codeRun{runtime: runtime, settings: settings, harness: harness, workflow: doc.Workflow, inputs: doc.Inputs, minutes: minutes, hidden: hidden}
+	var target preparation.Target
+	if doc.Target != nil {
+		target = preparation.Target{System: doc.Target.System, Path: doc.Target.Path, Version: doc.TargetVersion}
+	}
+	r := &codeRun{runtime: runtime, settings: settings, harness: harness, workflow: doc.Workflow, inputs: doc.Inputs, minutes: minutes, hidden: hidden, target: target}
 	if hidden {
 		r.named = source.NewNamed(r.phrase())
 	}
@@ -334,6 +342,16 @@ func (r *codeRun) reportExposed(root, cwd, home, report string, given []givenMou
 		return input(fmt.Errorf("set --home or harness.home to a folder %s %s: the home %s is mounted read-only into the agent's container, and qory writes the harness report of each run with a run key or a run code that has no --home or harness.home under %s%s", where, shown(cache), shown(home), shown(cache), codeUsed))
 	}
 	return nil
+}
+
+// fetchTarget is the target the fetch of the run's repositories takes, as
+// [preparation.RunAt] uses it: r's target and target_version, and none for a nil r, a
+// run not from a run code.
+func (r *codeRun) fetchTarget() preparation.Target {
+	if r == nil {
+		return preparation.Target{}
+	}
+	return r.target
 }
 
 // timedOutLine is the line of a run from a run code whose time limit, limit, came before

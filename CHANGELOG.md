@@ -85,8 +85,19 @@ release may change what an existing document does, and states it under Upgrading
   that Qory Apiary wrote there, as `qory access-key enrol` does, and starts. qory reads
   the file only when no user other than root and the one running qory may write it or
   its folders; a folder that root owns with the sticky bit set, such as `/tmp`, passes,
-  since no other user may replace a file in it. qory never writes or removes the file. `qory run`, `qory run pool`, `qory run
-  register` and `qory run end` stop with an error when the setting is there.
+  since no other user may replace a file in it. qory never writes or removes the file.
+  `qory run`, `qory run pool`, `qory run register` and `qory run end` stop with an error
+  when the setting is there.
+- A run from a run code whose documents set `target_version` fetches the target's
+  repository, the first entry of `QORY_RUN_REPOSITORIES`, at that commit, by its id, in
+  place of the head of its default branch, onto a local branch with the default branch's
+  name and no upstream. When the documents contain no harness document, the compose reads
+  the checkout's `qory.yaml` or `harness.yaml` as Qory Apiary checked it. Each of these
+  stops the run before the compose, exit 1: a target on the run's system that is a later
+  entry of `QORY_RUN_REPOSITORIES`, that the list does not contain, or with an empty
+  list; a version that is not a commit id; and a commit that the server does not have or
+  does not serve by its id. A target on another system, or a run with no
+  `QORY_RUN_SYSTEM`, does not use `target_version`.
 
 ### Changed
 

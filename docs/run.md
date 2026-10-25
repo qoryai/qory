@@ -129,6 +129,9 @@ qory run: fetched https://github.com/example-org/harness#main at 1dfbefcbbe51 in
 qory run: composed 12 entries from 1 module for claude
 ```
 
+A run from a run code whose documents set `target_version` fetches the target's
+repository at that commit: see [What the run takes from the response](#what-the-run-takes-from-the-response).
+
 A fetch that fails stops the run before the agent starts, and the run's record shows it
 as failed with no session, `no_session`. The line starts with the fix: add a credential
 for a repository the host does not let the run read, check that the run's policy allows a
@@ -1279,6 +1282,47 @@ So the command line sets none of these. After the redemption, qory prints `qory 
 run <run id> starts the workflow <workflow> of the workspace's harness on claude` for a
 run whose documents contain a harness, or `… of the checkout's harness on claude` for one
 whose documents contain none.
+
+The documents of a run with a target may set `target_version`: the version at which Qory
+Apiary checked the target for a harness file. When the target's `system` is
+`QORY_RUN_SYSTEM`, the target is the run's repository: Qory Apiary lists the target's
+`path` first in `QORY_RUN_REPOSITORIES`, compared in any letter case on github.com. qory
+fetches that repository at the version, which must be a full commit id, by its id, in
+place of the head of its default branch. The fetch goes through the run's gateway at
+depth one, and the working folder is on a local branch with the default branch's name,
+at that commit, with no upstream, so a bare `git push` or `git pull` has no upstream to
+use. The fetch line shows the commit: `qory run: fetched example-org/shop at
+4b8e2f1a9c7d in 1.4s`. When the documents contain no harness document, the compose reads
+the checkout's `qory.yaml` or `harness.yaml` as that commit has it. The further
+repositories are fetched at the head of their default branches.
+
+When the target is on another system than `QORY_RUN_SYSTEM`, or `QORY_RUN_SYSTEM` is
+not set, qory does not use `target_version`.
+
+Each of these stops the run before the compose, exit 1, and the run's record shows the
+run as failed with no session. `<commit>` is the commit's first 12 characters:
+
+- `report this run to the instance admin of Qory Apiary: the run's documents set the
+  target <path>, but the run configuration lists it after another repository; the target
+  must be the first repository of the run configuration; the code is used`, before any
+  fetch
+- `report this run to the instance admin of Qory Apiary: the run's documents set the
+  target <path>, but the run configuration does not list it; the target must be the
+  first repository of the run configuration; the code is used`, before any fetch, also
+  when the run configuration lists no repository
+- `ask Qory Apiary's instance admin to check the adapter of the target: the run's
+  documents set the target version <version>, and qory fetches a target at a version
+  only when the version is a commit id of 40 or 64 hex digits; the code is used`, before
+  any fetch
+- `take the work item in again in Qory Apiary: the commit <commit> that the run's
+  documents set is not on <path> on <host>. The fetch through the run's gateway failed:
+  <git's line>; the code is used`
+- `let <host> serve a fetch of a commit by its id, such as with git's
+  uploadpack.allowReachableSHA1InWant, then take the work item in again in Qory Apiary:
+  <host> does not serve the commit <commit> of <path> by its id, or does not have it. …`,
+  from a server that git reaches over git's protocol version 0 or 1 and that does not
+  allow a fetch of a commit it does not list. Over protocol version 2, which git uses by
+  default, git's server needs no such setting.
 
 A run of the step prebuild builds the image that the runs of its target start from. It
 runs in `qory run`'s process, with no wall and no agent:
