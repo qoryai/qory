@@ -42,5 +42,6 @@ qory run claude -f https://github.com/qoryai/qory#<commit>:examples/hello -- -p 
 
 A run from a run code whose workflow is `hello` starts the command with the path of the
 run's inputs: `/harness:hello <in>/inputs.json`. When that file has `instruction.text`,
-Claude writes it after the list of modules, under `You asked:`, and answers it. Without
-it, Claude greets as above.
+Claude writes it after the list of modules, under `You asked:`, and answers it. Claude
+then stops, with or without `instruction.text`: the greet skill's "Next" section, which
+tells a person at a terminal what to try, is left out of a run.

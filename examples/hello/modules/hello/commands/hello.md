@@ -10,5 +10,8 @@ Then look at the text after the command: $ARGUMENTS. If it is the path of a file
 lines of text. Read and run nothing more to answer it. If there is no such path or no
 such text, skip this step.
 
-Then follow the greet skill's "Next" section. Each module's greet skill has one, and
+If the text after the command is the path of a file named `inputs.json`, stop here: a run
+started the command, and the greet skill's "Next" section is for a person at a terminal.
+
+Otherwise, follow the greet skill's "Next" section. Each module's greet skill has one, and
 only the composed one is loaded, so the next step depends on which greet just answered.
