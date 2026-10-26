@@ -12,6 +12,7 @@ import (
 	"github.com/qoryai/forager/session/runtimes/catalog"
 
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/preparation"
 )
 
 // TestRunStartedHasSetupForARunFromAControlPlane holds enclose to setting
@@ -57,7 +58,7 @@ func setupSpecOf(t *testing.T, where string, wallEnv, flagEnv []string, harness 
 	if err := enclose(&spec, r, wallOptions{env: flagEnv}, "", true, "/usr/local/bin/qory", t.TempDir(), t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
-	spec.Runtime, spec.LaunchFixed = rt, withAgentHome(nil)
+	spec.Runtime, spec.LaunchFixed = rt, withAgentHome(nil, preparation.EnvAgentHome)
 	if harness != nil {
 		harness(&spec)
 	}

@@ -64,8 +64,9 @@ type Target struct {
 	// Helper is the path on this machine of qory's static Linux build for the engine's
 	// architecture, the probe.
 	Helper string
-	// Claude is the version claude --version must report; empty takes any.
-	Claude string
+	// Runtimes are the runtimes the probe checks the image for, by Name and Version;
+	// the probe finds each runtime's program and package in its build.
+	Runtimes []Runtime
 }
 
 // stream runs one docker command within its limit, its standard output to stdout.
@@ -217,8 +218,10 @@ func (e Engine) probe(ctx context.Context, t Target) []Check {
 		"--mount", "type=bind,src=" + t.Helper + ",dst=" + wall.HelperPath + ",readonly",
 		"--entrypoint", wall.HelperPath, t.Ref}
 	args = append(args, ProbeArgs...)
-	if t.Claude != "" {
-		args = append(args, "--claude-version", t.Claude)
+	names := make([]string, len(t.Runtimes))
+	for i, rt := range t.Runtimes {
+		names[i] = rt.Name
+		args = append(args, rt.Name+"="+rt.Version)
 	}
 	out, errOut, err := e.run(ctx, ProbeWait, args...)
 	var rep Report
@@ -235,7 +238,7 @@ func (e Engine) probe(ctx context.Context, t Target) []Check {
 	}
 	checks := rep.Checks
 	var lacks []string
-	for _, name := range ProbeChecks {
+	for _, name := range ProbeChecks(names) {
 		if !slices.ContainsFunc(checks, func(c Check) bool { return c.Name == name }) {
 			lacks = append(lacks, name)
 		}

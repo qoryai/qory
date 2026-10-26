@@ -15,6 +15,7 @@ import (
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/image"
+	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/ui"
 )
 
@@ -61,7 +62,7 @@ network, and qory's Linux build checks from inside:
   - HOME is a directory that user writes in
   - the system's authorities are where the wall reads them
   - /bin/sh is there, for the runtime's hooks and the session's API-key approval
-  - claude is the version Forager's descriptor is written against
+  - each runtime Forager describes is the version its descriptor is written against
   - git and gh run
   - dockerd, for nested Docker, and what it runs
 
@@ -118,9 +119,19 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#qorys-images`,
 			if err != nil {
 				return input(err)
 			}
-			rt, err := catalog.Lookup("claude", filepath.Join(user, DescriptorsDir))
+			listed, err := foragerRuntimes()
 			if err != nil {
-				return input(err)
+				return err
+			}
+			// Each runtime of Forager's list, at the version in its descriptor, a
+			// descriptor in the machine's runtimes folder first, as a run reads it.
+			probed := make([]image.Runtime, len(listed))
+			for i, name := range listed {
+				rt, err := catalog.Lookup(name, filepath.Join(user, DescriptorsDir))
+				if err != nil {
+					return input(err)
+				}
+				probed[i] = image.Runtime{Name: name, Version: rt.Version()}
 			}
 			engine := image.Engine{Command: section.Command}
 			platform, err := engine.Platform(cmd.Context())
@@ -134,11 +145,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#qorys-images`,
 
 			u := ui.New(cmd.OutOrStdout())
 			u.Title("qory image check", "engine "+platform)
-			claude := rt.Version() + ", Forager's descriptor's"
-			if rt.Version() == "" {
-				claude = "any version; Forager's descriptor names none"
+			fields := [][2]string{{"probe", exports.Value(ui.Short(helper, ""), false) + ", " + arch}}
+			for _, rt := range probed {
+				version := rt.Version + ", Forager's descriptor's"
+				if rt.Version == "" {
+					version = "any version; Forager's descriptor names none"
+				}
+				fields = append(fields, [2]string{rt.Name, version})
 			}
-			u.Fields([][2]string{{"probe", exports.Value(ui.Short(helper, ""), false) + ", " + arch}, {"claude", claude}})
+			u.Fields(fields)
 			var failed []string
 			for i, ref := range refs {
 				u.Blank()
@@ -147,7 +162,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#qorys-images`,
 				} else {
 					u.Heading(shownImage(names[i], ref) + " (" + exports.Value(ref, false) + ")")
 				}
-				checks := engine.Check(cmd.Context(), platform, image.Target{Ref: ref, Helper: helper, Claude: rt.Version()})
+				checks := engine.Check(cmd.Context(), platform, image.Target{Ref: ref, Helper: helper, Runtimes: probed})
 				var facts [][2]string
 				for _, c := range checks {
 					switch c.Result {
@@ -207,24 +222,44 @@ func imageRef(section config.ForagerWall, name string) string {
 
 // newImageProbe builds the hidden probe verb, what qory image check runs as the entry
 // point of a container of the image: it checks the image from inside, as the user the
-// container runs as, and prints an [image.Report] as JSON on its standard output. It
+// container runs as, for each runtime its arguments list as <name>=<version>, an empty
+// version taking any, and prints an [image.Report] as JSON on its standard output. It
 // fails only when it cannot print.
 func newImageProbe() *cobra.Command {
-	var claude string
-	c := &cobra.Command{
-		Use:    "probe",
+	return &cobra.Command{
+		Use:    "probe [runtime=version...]",
 		Short:  "Check the image this runs in, from inside, and print the report as JSON",
 		Hidden: true,
-		Args:   noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p := image.Probe{
-				Root:   "/",
-				Claude: claude,
-				User:   fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
+				Root:     "/",
+				Runtimes: probeRuntimes(args),
+				User:     fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
 			}
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(p.Report(cmd.Context()))
 		},
 	}
-	c.Flags().StringVar(&claude, "claude-version", "", "the version claude --version must report")
-	return c
+}
+
+// probeRuntimes are the runtimes of the probe's arguments, each <name>=<version>, with
+// the program each one's launch template starts and its [render.Installer] package. A
+// runtime this qory does not render, or renders with no launch template, has no
+// program, and its line fails.
+func probeRuntimes(args []string) []image.Runtime {
+	out := make([]image.Runtime, len(args))
+	for i, a := range args {
+		name, version, _ := strings.Cut(a, "=")
+		out[i] = image.Runtime{Name: name, Version: version}
+		rt, err := render.Lookup(name)
+		if err != nil {
+			continue
+		}
+		if l, ok := rt.(render.Launcher); ok {
+			out[i].Command = l.Template().Command
+		}
+		if in, ok := rt.(render.Installer); ok && version != "" {
+			out[i].Install = in.Install(version)
+		}
+	}
+	return out
 }

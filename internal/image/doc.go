@@ -14,7 +14,7 @@
 // no network, and qory's Linux build mounted where the wall mounts its helper, as the
 // entry point. From inside, [Probe] is what that build runs, as the hidden verb qory image
 // probe: it checks what the agent's user finds, HOME, the authorities, the shell and the
-// programs, and prints a [Report], one JSON document, which the outside reads back and
+// programs, each runtime's among them, and prints a [Report], one JSON document, which the outside reads back and
 // fails when it lacks one of [ProbeChecks]. The two are the same release of qory, so the
 // report's format is not a contract.
 //

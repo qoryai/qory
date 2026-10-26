@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -31,7 +32,7 @@ const (
 // Check is one line of a check's result.
 type Check struct {
 	// Name is what the line is about, one word: image, home, reference, files, probe, or
-	// one of [ProbeChecks].
+	// one of [ProbeChecks], a runtime's name among them.
 	Name string `json:"name"`
 	// Result is [Pass], [Fail] or [Info].
 	Result string `json:"result"`
@@ -57,13 +58,33 @@ const ReportVersion = 1
 type Report struct {
 	// Version is [ReportVersion].
 	Version int `json:"version"`
-	// Checks are the probe's lines, one of each of [ProbeChecks], in that order.
+	// Checks are the probe's lines, one of each of [ProbeChecks] for the runtimes it
+	// checked, in that order.
 	Checks []Check `json:"checks"`
 }
 
-// ProbeChecks name the lines a [Report] holds, in the order they print. A report that
-// lacks one did not check it, and the outside counts that as a failure.
-var ProbeChecks = []string{"home", "authorities", "shell", "claude", "git", "gh", "docker"}
+// ProbeChecks are the names of the lines a [Report] of a probe for runtimes contains, in
+// the order they print: one line per runtime after shell. A report that lacks one did
+// not check it, and the outside counts that as a failure.
+func ProbeChecks(runtimes []string) []string {
+	return slices.Concat([]string{"home", "authorities", "shell"}, runtimes, []string{"git", "gh", "docker"})
+}
+
+// Runtime is one runtime the probe checks the image for: its program on the image's
+// PATH, at the version Forager's descriptor is written against.
+type Runtime struct {
+	// Name is the runtime's name, the name of its line.
+	Name string
+	// Command is the program the runtime's launch starts, as found on the PATH; empty
+	// for a runtime this qory does not render, whose line fails.
+	Command string
+	// Version is the version <Command> --version must report, Forager's descriptor's
+	// runtime_version; empty takes any.
+	Version string
+	// Install is the package at Version that a failed line has as its fix, such as
+	// @anthropic-ai/claude-code@2.1.273; empty for a runtime with no package.
+	Install string
+}
 
 // Bundles are where the wall reads an image's authorities, the first that holds a
 // certificate: Debian and Alpine, Red Hat, OpenSUSE, and OpenSSL's default. The wall's own
@@ -93,9 +114,8 @@ type Probe struct {
 	// Exec runs a program of the image, by its path under Root, and returns what it
 	// printed on both streams. Nil runs it with [ProgramWait] as its limit.
 	Exec func(ctx context.Context, program string, args ...string) ([]byte, error)
-	// Claude is the version claude --version must report, Forager's descriptor's
-	// runtime_version; empty takes any.
-	Claude string
+	// Runtimes are the runtimes to check, Forager's list in its order.
+	Runtimes []Runtime
 	// User is the user the probe runs as, uid:gid, as the lines name it.
 	User string
 }
@@ -106,7 +126,10 @@ func (p Probe) Report(ctx context.Context) Report {
 	if p.Env == nil {
 		p.Env = os.Getenv
 	}
-	checks := []Check{p.home(), p.authorities(), p.shell(), p.claude(ctx)}
+	checks := []Check{p.home(), p.authorities(), p.shell()}
+	for _, rt := range p.Runtimes {
+		checks = append(checks, p.runtime(ctx, rt))
+	}
 	for _, name := range []string{"git", "gh"} {
 		checks = append(checks, p.program(ctx, name))
 	}
@@ -181,24 +204,31 @@ func (p Probe) shell() Check {
 // "2.1.273 (Claude Code)".
 var version = regexp.MustCompile(`\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?`)
 
-// claude checks that claude is on the image's PATH, where the wall's launch finds it,
-// and reports the version Forager's descriptor is written against.
-func (p Probe) claude(ctx context.Context) Check {
-	out, where, err := p.run(ctx, "claude", "--version")
+// runtime checks that rt's program is on the image's PATH, where the wall's launch
+// finds it, and reports the version Forager's descriptor is written against.
+func (p Probe) runtime(ctx context.Context, rt Runtime) Check {
+	if rt.Command == "" {
+		return Check{rt.Name, Fail, "qory's Linux build renders no runtime " + rt.Name + "; set wall.helper to the Linux build of this qory"}
+	}
+	out, where, err := p.run(ctx, rt.Command, "--version")
 	if err != nil {
-		return Check{"claude", Fail, err.Error()}
+		return Check{rt.Name, Fail, err.Error()}
 	}
 	got := version.FindString(out)
-	if p.Claude != "" && got != p.Claude {
+	if rt.Version != "" && got != rt.Version {
 		if got == "" {
 			got = strconv.Quote(out)
 		}
-		return Check{"claude", Fail, fmt.Sprintf("claude at %s is %s, and Forager's descriptor is written against %s; install @anthropic-ai/claude-code@%s", exports.Value(where, false), got, p.Claude, p.Claude)}
+		fix := "install that version"
+		if rt.Install != "" {
+			fix = "install " + rt.Install
+		}
+		return Check{rt.Name, Fail, fmt.Sprintf("%s at %s is %s, and Forager's descriptor is written against %s; %s", rt.Command, exports.Value(where, false), got, rt.Version, fix)}
 	}
-	if p.Claude == "" {
-		return Check{"claude", Pass, fmt.Sprintf("claude at %s is %s", exports.Value(where, false), got)}
+	if rt.Version == "" {
+		return Check{rt.Name, Pass, fmt.Sprintf("%s at %s is %s", rt.Command, exports.Value(where, false), got)}
 	}
-	return Check{"claude", Pass, fmt.Sprintf("claude at %s is %s, the version Forager's descriptor is written against", exports.Value(where, false), got)}
+	return Check{rt.Name, Pass, fmt.Sprintf("%s at %s is %s, the version Forager's descriptor is written against", rt.Command, exports.Value(where, false), got)}
 }
 
 // program checks that a program is on the image's PATH and answers --version.

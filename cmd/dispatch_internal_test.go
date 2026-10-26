@@ -8,9 +8,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/render/claude"
 )
+
+// claudeRuntime is Claude Code's definition, as the registry has it.
+func claudeRuntime(t *testing.T) render.Runtime {
+	t.Helper()
+	rt, err := render.Lookup(claude.Runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rt
+}
 
 // claudeLaunch is Claude Code's launch template resolved against a home that holds the
 // files it names, mcp.json only when withMCP says so.
@@ -49,7 +60,7 @@ func claudeLaunch(t *testing.T, withMCP bool) (render.Launch, string) {
 // gets an empty one, so the run still has no server outside the harness.
 func TestADispatchedLaunchLoadsTheHarnessAlone(t *testing.T) {
 	l, dir := claudeLaunch(t, true)
-	got := dispatchedArgs(claude.Runtime, l.Args)
+	got := dispatchedArgs(claudeRuntime(t), l.Args)
 	want := []string{
 		"--plugin-dir", dir + "/plugin",
 		"--settings", dir + "/settings.json",
@@ -65,7 +76,7 @@ func TestADispatchedLaunchLoadsTheHarnessAlone(t *testing.T) {
 	if slices.Contains(l.Args, "--mcp-config") {
 		t.Fatalf("the template names mcp.json, which the home does not hold: %q", l.Args)
 	}
-	got = dispatchedArgs(claude.Runtime, l.Args)
+	got = dispatchedArgs(claudeRuntime(t), l.Args)
 	want = []string{
 		"--plugin-dir", dir + "/plugin",
 		"--settings", dir + "/settings.json",
@@ -86,7 +97,7 @@ func TestADispatchedLaunchKeepsNoOtherSettingSources(t *testing.T) {
 	for _, c := range []struct{ args, want []string }{
 		{
 			[]string{"--settings", "s.json", "--setting-sources", "user,project,local"},
-			slices.Concat([]string{"--settings", "s.json", "--mcp-config", emptyMCP}, tail),
+			slices.Concat([]string{"--settings", "s.json", "--mcp-config", `{"mcpServers":{}}`}, tail),
 		},
 		{
 			[]string{"--setting-sources=project", "--strict-mcp-config", "--mcp-config=m.json"},
@@ -98,10 +109,10 @@ func TestADispatchedLaunchKeepsNoOtherSettingSources(t *testing.T) {
 		},
 		{
 			nil,
-			slices.Concat([]string{"--mcp-config", emptyMCP}, tail),
+			slices.Concat([]string{"--mcp-config", `{"mcpServers":{}}`}, tail),
 		},
 	} {
-		got := dispatchedArgs(claude.Runtime, c.args)
+		got := dispatchedArgs(claudeRuntime(t), c.args)
 		if !slices.Equal(got, c.want) {
 			t.Errorf("%q:\n got %q\nwant %q", c.args, got, c.want)
 		}
@@ -112,7 +123,11 @@ func TestADispatchedLaunchKeepsNoOtherSettingSources(t *testing.T) {
 // its arguments are not Claude Code's, and stay as the launch gives them.
 func TestADispatchedLaunchOfAnotherRuntimeIsAsGiven(t *testing.T) {
 	args := []string{"--config", "c.toml"}
-	if got := dispatchedArgs("codex", args); !slices.Equal(got, args) {
+	rt, err := render.Lookup("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := dispatchedArgs(rt, args); !slices.Equal(got, args) {
 		t.Errorf("got %q, want %q", got, args)
 	}
 }
@@ -122,7 +137,7 @@ func TestADispatchedLaunchOfAnotherRuntimeIsAsGiven(t *testing.T) {
 // the launch's list of fixed variables unchanged.
 func TestTheAgentHomeIsAFixedVariable(t *testing.T) {
 	fixed := []string{"CODEX_HOME=/h/codex", "CLAUDE_CONFIG_DIR=/elsewhere"}
-	got := withAgentHome(fixed)
+	got := withAgentHome(fixed, preparation.EnvAgentHome)
 	want := []string{"CLAUDE_CONFIG_DIR=/tmp/qory-agent-home", "CODEX_HOME=/h/codex"}
 	if !slices.Equal(got, want) {
 		t.Errorf("got %q, want %q", got, want)
@@ -130,7 +145,7 @@ func TestTheAgentHomeIsAFixedVariable(t *testing.T) {
 	if fixed[1] != "CLAUDE_CONFIG_DIR=/elsewhere" {
 		t.Error("the launch's list changed")
 	}
-	if got := withAgentHome(nil); len(got) != 1 || !strings.HasPrefix(got[0], "CLAUDE_CONFIG_DIR=") {
+	if got := withAgentHome(nil, preparation.EnvAgentHome); len(got) != 1 || !strings.HasPrefix(got[0], "CLAUDE_CONFIG_DIR=") {
 		t.Errorf("with no fixed variable: %q", got)
 	}
 }

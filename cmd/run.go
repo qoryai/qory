@@ -189,10 +189,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return relabelLocal()
 			}
 			// A run given a run key is a dispatched run, which Qory Apiary started against
-			// a repository this machine does not trust: Claude Code starts without the
-			// checkout's settings, with no MCP server but those --mcp-config names, see
-			// [dispatchedArgs]. It is decided here, before a run through via is given the
-			// run key it registers.
+			// a repository this machine does not trust: a runtime that is a
+			// [render.Dispatcher] starts with its dispatched arguments, Claude Code without
+			// the checkout's settings and with no MCP server but those of --mcp-config,
+			// see [dispatchedArgs]. It is decided here, before a run through via is given
+			// the run key it registers.
 			dispatched := remote
 			// The run composes its harness once the run is open, before its session joins.
 			if err := checkoutsHome(at); err != nil {
@@ -605,8 +606,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			name := ""
 			// prepareLaunch composes the harness into the home the session starts on and
 			// makes the session's launch from it, writing the compose's lines to w;
-			// claudeDispatched is true for a dispatched run of Claude Code.
-			prepareLaunch := func(w io.Writer) (claudeDispatched bool, err error) {
+			// freshHome is true for a dispatched walled run of a runtime that is a
+			// [render.AgentHomer], whose agent starts on a new, empty configuration
+			// directory.
+			prepareLaunch := func(w io.Writer) (freshHome bool, err error) {
 				harness, workflows, err := composeForRun(w, composing, at, runtime, dispatched, walled)
 				if err != nil && composing.git != nil && composing.git.Named != nil {
 					return false, namedComposeError(err, composing.git.Named)
@@ -625,7 +628,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if name, launch, err = resolveLaunch(rep, conf, runtime, at.home); err != nil {
 					return false, err
 				}
-				claudeDispatched = dispatched && isClaude(name)
+				renderer, err := render.Lookup(name)
+				if err != nil {
+					return false, input(err)
+				}
 				if fromCode != nil {
 					if extra, err = fromCode.workflowArgs(name, rep, in); err != nil {
 						return false, err
@@ -634,13 +640,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					timeout = provisioner.TimeLimit(fromCode.minutes, workflows[fromCode.workflow].TimeLimit)
 				}
 				if dispatched {
-					launch.Args = dispatchedArgs(name, launch.Args)
+					launch.Args = dispatchedArgs(renderer, launch.Args)
 				}
-				// Claude Code's settings go to Forager as their JSON, which qory read from the
+				// A runtime's settings go to Forager as their JSON, which qory read from the
 				// home itself, after the home's check: Forager reads no file of the home.
 				launchArgs := append(append([]string{}, launch.Args...), extra...)
-				if isClaude(name) {
-					if launchArgs, err = inlineSettings(launch.Args, extra, at.home); err != nil {
+				if s, ok := renderer.(render.SettingsInliner); ok {
+					if launchArgs, err = inlineSettings(s.SettingsFlag(), launch.Args, extra, at.home); err != nil {
 						return false, err
 					}
 				}
@@ -662,15 +668,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				spec.Runtime, spec.Command, spec.Args, spec.Declared, spec.Harness = rt, launch.Command, launchArgs, rep.Hosts(), harness
 				spec.LaunchFixed, spec.LaunchDefaults, spec.HarnessHome = launch.Fixed, launch.Defaults, launch.HarnessHome
-				if claudeDispatched && walled {
-					spec.LaunchFixed = withAgentHome(spec.LaunchFixed)
+				if h, ok := renderer.(render.AgentHomer); ok && dispatched && walled {
+					spec.LaunchFixed, freshHome = withAgentHome(spec.LaunchFixed, h.AgentHomeVariable()), true
 				}
-				return claudeDispatched, nil
+				return freshHome, nil
 			}
 			// prepareSession makes the rest of the session's spec once its launch is made:
 			// for a walled run the record of each place the container may write.
-			prepareSession := func(claudeDispatched bool) error {
-				if wrapsAgentEnv(claudeDispatched, walled) {
+			prepareSession := func(freshHome bool) error {
+				if wrapsAgentEnv(freshHome, walled) {
 					done, err := wrapAgentEnv(&spec, said)
 					if err != nil {
 						return err
@@ -746,7 +752,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				} else if err := preparation.Unlisted(runValues(run), fromCode.fetchTarget()); err != nil {
 					return &runLineError{err}
 				}
-				var claudeDispatched bool
+				var freshHome bool
 				err := inStep(run, stderr, event.StepCompose, composeStepName(runtime), stopped, func(w io.Writer) error {
 					var n *source.Named
 					if fromCode != nil {
@@ -784,13 +790,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						composing.cache = filepath.Join(run.Dir(), runSources)
 					}
 					var err error
-					claudeDispatched, err = prepareLaunch(w)
+					freshHome, err = prepareLaunch(w)
 					return err
 				})
 				if err != nil {
 					return err
 				}
-				return prepareSession(claudeDispatched)
+				return prepareSession(freshHome)
 			}
 			// setupWork runs the setup of a walled run whose run configuration lists
 			// repositories, see [runSetup], within the run's time limit. A setup command that

@@ -139,8 +139,12 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 		minutes = doc.RunSettings.TimeLimitMinutes
 	}
 	runtime, settings := provisioner.Settings(doc.RunSettings)
-	if !isClaude(runtime) {
-		return nil, fmt.Errorf("set the runtime claude for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow on claude alone, and the response to the run code sets the runtime %s%s", accesskey.ShownName(runtime, false), codeUsed)
+	// A runtime this qory does not render stops at the compose, with the list of those
+	// it does.
+	if rt, err := render.Lookup(runtime); err == nil {
+		if _, ok := rt.(render.Headless); !ok {
+			return nil, noHeadless(runtime)
+		}
 	}
 	var harness []byte
 	defines := doc.Harness != nil && doc.Harness.Harness.Extends == nil
@@ -432,25 +436,42 @@ func (r *codeRun) writeInputs() (string, func(), error) {
 }
 
 // workflowArgs are the arguments after -- that start r's workflow on the runtime name,
-// as the harness rep was composed for it, with the inputs in the folder in: Claude
-// Code's JSON lines, in/ added to its folders, and the prompt that invokes the skill or
-// command named like the workflow, by the name the runtime registers it under, with
-// the path of inputs.json. A harness with no such skill or command stops the run.
+// as the harness rep was composed for it, with the inputs in the folder in: the
+// runtime's headless start, see [render.Headless], with the prompt that invokes the
+// skill or command named like the workflow, by the name the runtime registers it
+// under, with the path of inputs.json. A runtime with no headless start, and a harness
+// with no such skill or command, stop the run.
 func (r *codeRun) workflowArgs(name string, rep report.Report, in string) ([]string, error) {
 	rt, err := render.Lookup(name)
 	if err != nil {
 		return nil, input(err)
 	}
+	h, ok := rt.(render.Headless)
+	if !ok {
+		return nil, noHeadless(name)
+	}
 	addresses := render.Addresses(entryKeys(rep), rep.Bind, render.AddressOf(rt), rt.Skips())
-	registered, ok := addresses["skills"][r.workflow]
-	if !ok {
-		registered, ok = addresses["commands"][r.workflow]
+	var found []string
+	for _, kind := range []string{"skills", "commands"} {
+		registered, ok := addresses[kind][r.workflow]
+		if !ok {
+			continue
+		}
+		if args, ok := h.HeadlessArgs(kind, registered, filepath.Join(in, inputsFile), in); ok {
+			return args, nil
+		}
+		found = append(found, kind)
 	}
-	if !ok {
-		return nil, fmt.Errorf("add a skill or command %s to %s, or set another workflow in Qory Apiary: the composed harness has no skill or command %s%s", r.workflow, r.phrase(), r.workflow, codeUsed)
+	if len(found) > 0 {
+		return nil, fmt.Errorf("add a command %s to %s, or set another runtime in Qory Apiary: %s runs no skill by its name from a headless start%s", r.workflow, r.phrase(), accesskey.ShownName(name, false), codeUsed)
 	}
-	prompt := "/" + registered + " " + filepath.Join(in, inputsFile)
-	return []string{"--output-format", "stream-json", "--verbose", "--add-dir", in, "-p", prompt}, nil
+	return nil, fmt.Errorf("add a skill or command %s to %s, or set another workflow in Qory Apiary: the composed harness has no skill or command %s%s", r.workflow, r.phrase(), r.workflow, codeUsed)
+}
+
+// noHeadless is the error of a run from a run code on the runtime name, which has no
+// headless start, see [render.Headless]. It is exit 1 and ends with [codeUsed].
+func noHeadless(name string) error {
+	return fmt.Errorf("set another runtime for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow with a runtime's headless start, and has none for %s%s", accesskey.ShownName(name, false), codeUsed)
 }
 
 // entryKeys are rep's entries as <kind>/<name>, the form [render.Addresses] takes.

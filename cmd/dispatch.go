@@ -10,55 +10,29 @@ import (
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/preparation"
-	"github.com/qoryai/qory/internal/render/claude"
+	"github.com/qoryai/qory/internal/render"
 )
 
-// emptyMCP is the MCP list a dispatched run of Claude Code is given when the harness has
-// none: no server.
-const emptyMCP = `{"mcpServers":{}}`
-
-// dispatchedArgs are the launch arguments of a dispatched run, one given a run key: for
-// Claude Code, the launch's with --strict-mcp-config, so Claude Code loads no MCP server
-// but those --mcp-config names, --mcp-config with the harness's list, or an empty one
-// when the harness has none, and --setting-sources user, which replaces any other value
-// of it, so no settings of the checkout's .claude are read. The flags go before the
-// arguments given after --, and the last is one that takes a single value, so
-// --mcp-config, which takes several, never takes a word of those. Another runtime's
-// arguments are as given.
-func dispatchedArgs(runtime string, args []string) []string {
-	if !isClaude(runtime) {
-		return args
+// dispatchedArgs are the launch arguments of a dispatched run of rt, one given a run
+// key: the runtime's [render.Dispatcher] arguments, and args as given for a runtime that
+// is none.
+func dispatchedArgs(rt render.Runtime, args []string) []string {
+	if d, ok := rt.(render.Dispatcher); ok {
+		return d.DispatchedArgs(args)
 	}
-	out := make([]string, 0, len(args)+5)
-	hasMCP := false
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		switch {
-		case a == "--strict-mcp-config", strings.HasPrefix(a, "--setting-sources="):
-			continue
-		case a == "--setting-sources":
-			i++
-			continue
-		case a == "--mcp-config", strings.HasPrefix(a, "--mcp-config="):
-			hasMCP = true
-		}
-		out = append(out, a)
-	}
-	if !hasMCP {
-		out = append(out, "--mcp-config", emptyMCP)
-	}
-	return append(out, "--strict-mcp-config", "--setting-sources", "user")
+	return args
 }
 
-// withAgentHome is the fixed variables of a dispatched walled run of Claude Code, with
-// CLAUDE_CONFIG_DIR pointing at [preparation.AgentHome], which qory run agent-env makes
-// new and empty as the last step before the agent starts. A fixed value wins over every
-// other source, and the runtime's deny list leaves it in.
-func withAgentHome(fixed []string) []string {
+// withAgentHome is the fixed variables of a dispatched walled run of a runtime that is a
+// [render.AgentHomer], with its variable, name, pointing at [preparation.AgentHome],
+// which qory run agent-env makes new and empty as the last step before the agent starts
+// when name is [preparation.EnvAgentHome], Claude Code's.
+// A fixed value wins over every other source, and the runtime's deny list leaves it in.
+func withAgentHome(fixed []string, name string) []string {
 	out := slices.DeleteFunc(slices.Clone(fixed), func(kv string) bool {
-		return strings.HasPrefix(kv, preparation.EnvAgentHome+"=")
+		return strings.HasPrefix(kv, name+"=")
 	})
-	out = append(out, preparation.EnvAgentHome+"="+preparation.AgentHome)
+	out = append(out, name+"="+preparation.AgentHome)
 	slices.Sort(out)
 	return out
 }
@@ -101,10 +75,6 @@ func withRunKeyHome(root string, conf config.Config) (config.Config, error) {
 	conf.Home = homes
 	return conf, nil
 }
-
-// isClaude reports whether runtime is Claude Code, the one runtime a dispatched run
-// starts otherwise than a person's.
-func isClaude(runtime string) bool { return runtime == claude.Runtime }
 
 // locateRun is [locate] for qory run and qory run resend: given a run key or a run code,
 // keyed, the checkout's qory.yaml sets no machine key, harness.launch and env among

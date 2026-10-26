@@ -98,11 +98,12 @@ func TestImageCheckChecksTheMachinesImage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	wants(t, out, "claude  "+rt.Version()+", Forager's descriptor's")
 	data, err := os.ReadFile(log)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, string(data), "create --pull never --network none --entrypoint /qory/qory example.com/agent:1\nexport c0ffee\nrm --force --volumes c0ffee\n", "run --rm --pull never --network none --user 65532:65532 --cap-drop ALL --security-opt no-new-privileges --init --mount type=bind,src="+helper+",dst=/qory/qory,readonly --entrypoint /qory/qory example.com/agent:1 image probe --claude-version "+rt.Version()+"\n")
+	wants(t, string(data), "create --pull never --network none --entrypoint /qory/qory example.com/agent:1\nexport c0ffee\nrm --force --volumes c0ffee\n", "run --rm --pull never --network none --user 65532:65532 --cap-drop ALL --security-opt no-new-privileges --init --mount type=bind,src="+helper+",dst=/qory/qory,readonly --entrypoint /qory/qory example.com/agent:1 image probe claude="+rt.Version()+"\n")
 }
 
 // TestImageCheckFailsWhenOneImageFails checks three images, one the engine does not hold

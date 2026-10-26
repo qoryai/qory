@@ -29,6 +29,9 @@ release may change what an existing document does, and states it under Upgrading
   and the inputs: qory composes the documents' harness, or the checkout's `qory.yaml` or
   `harness.yaml` when they contain none, and starts the skill or command named like the
   workflow, with the path of the inputs.
+- A run from a run code starts its workflow on each runtime with a headless start:
+  `claude`, `codex`, `gemini`, `opencode` and `cursor`; `qory image check` checks each
+  runtime of Forager's `runtimes.json`.
 - A run from a run code whose documents set `harness_hidden: true` composes a home with
   copies of every module's files in place of links, as a walled run does, and sets
   Forager's `HarnessHidden`. Forager then masks text that matches at least 3
