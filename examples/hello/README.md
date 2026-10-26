@@ -39,3 +39,9 @@ qory run claude -f https://github.com/qoryai/qory#<commit>:examples/hello -- -p 
 
 `qory setup example` does not write that file: a folder contains a `qory-stack.yaml` or a
 `qory.yaml` that lists modules, not both.
+
+A run from a run code whose workflow is `hello` starts the command with the path of the
+run's inputs: `/harness:hello <in>/inputs.json`. When that file has `instruction.text`,
+Claude writes it after the list of modules, under `You asked:`, and answers it. Claude
+then stops, with or without `instruction.text`: the greet skill's "Next" section, with
+steps for a person at a terminal, is left out of a run.
