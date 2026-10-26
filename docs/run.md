@@ -1358,8 +1358,8 @@ the work item. Then a run of the step explore:
   | `opencode` | `run --format json --command <name> <in>/inputs.json` | a command |
   | `cursor` | `--print --output-format stream-json --add-dir <in> "/<name> <in>/inputs.json"` | a skill |
 
-  `amp`, `copilot` and `goose` have no headless start, so a run from a run code does not
-  start on them;
+  `amp`, `copilot`, `goose` and `any` have no headless start, so a run from a run code
+  does not start on them;
 - takes its time limit as [Time limits](#time-limits) says.
 
 So the command line sets none of these. After the redemption, qory prints `qory run: the
@@ -1485,7 +1485,10 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
   harness`
 - `add a command <workflow> to <harness>, or set another runtime in Qory Apiary:
   <runtime> runs no skill by its name from a headless start; the code is used`, after the
-  compose, for a workflow that is a skill on `gemini` or `opencode`
+  compose, for a workflow that is only a skill on `gemini` or `opencode`
+- `add a skill <workflow> to <harness>, or set another runtime in Qory Apiary: <runtime>
+  runs no command by its name from a headless start; the code is used`, after the
+  compose, for a workflow that is only a command on `codex` or `cursor`
 - `take the work item in again in Qory Apiary: the run's host proxy, through which qory
   fetches the run's repositories, did not open: <error>; the code is used`, where a run
   without a run code prints `run again: the run's host proxy, through which qory fetches
@@ -2845,9 +2848,8 @@ one fails.
   that `HOME` takes a file from that user, the authorities are where the wall reads
   them, `/bin/sh` is there for the runtime's hooks and the session's API-key approval,
   each runtime of Forager's runtime list, `runtimes.json`, is on the `PATH` at the
-  version its descriptor is written against, and `git` and `gh` run. The list has
-  `claude` alone. It reports whether `dockerd` is in a system directory, and checks that what
-  the daemon runs is there too.
+  version its descriptor is written against, and `git` and `gh` run. It reports whether
+  `dockerd` is in a system directory, and checks that what the daemon runs is there too.
 
 The Linux build is the one the wall uses: `wall.helper`, for your engine's architecture,
 or on Linux the `qory` you run when `wall.helper` is not set.

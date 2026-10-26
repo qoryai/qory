@@ -547,7 +547,8 @@ func TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime(t *testing
 // TestARunCodesWorkflowStartsOnEachRuntimesHeadlessStart is workflowArgs for a harness
 // with the skill or the command example, on each runtime: the runtime's headless start,
 // with the prompt that invokes the entry by its registered name; a runtime that runs
-// that kind by no name, and one with no headless start, stop the run.
+// that kind by no name, in either direction, one with no headless start, and one this
+// qory does not render, stop the run.
 func TestARunCodesWorkflowStartsOnEachRuntimesHeadlessStart(t *testing.T) {
 	r, err := codeRunOf(contracts.Documents{Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}})
 	if err != nil {
@@ -581,6 +582,8 @@ func TestARunCodesWorkflowStartsOnEachRuntimesHeadlessStart(t *testing.T) {
 	}{
 		{"gemini", skill, "add a command example to the checkout's harness, or set another runtime in Qory Apiary: gemini runs no skill by its name from a headless start; the code is used"},
 		{"opencode", skill, "add a command example to the checkout's harness, or set another runtime in Qory Apiary: opencode runs no skill by its name from a headless start; the code is used"},
+		{"codex", command, "add a skill example to the checkout's harness, or set another runtime in Qory Apiary: codex runs no command by its name from a headless start; the code is used"},
+		{"cursor", command, "add a skill example to the checkout's harness, or set another runtime in Qory Apiary: cursor runs no command by its name from a headless start; the code is used"},
 		{"amp", skill, "set another runtime for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow with a runtime's headless start, and has none for amp; the code is used"},
 		{"copilot", skill, "set another runtime for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow with a runtime's headless start, and has none for copilot; the code is used"},
 	} {
@@ -588,7 +591,7 @@ func TestARunCodesWorkflowStartsOnEachRuntimesHeadlessStart(t *testing.T) {
 			t.Errorf("%s: got %v\nwant %s", c.runtime, err, c.want)
 		}
 	}
-	for _, runtime := range []string{"goose", "amp", "copilot"} {
+	for _, runtime := range []string{"goose", "amp", "copilot", "any", "example"} {
 		_, err := codeRunOf(contracts.Documents{Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: runtime}})
 		if want := noHeadless(runtime); err == nil || err.Error() != want.Error() {
 			t.Errorf("%s: codeRunOf got %v, want %v", runtime, err, want)

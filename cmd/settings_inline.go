@@ -36,7 +36,7 @@ func settingsAt(flag string, args []string) (int, string) {
 	return -1, ""
 }
 
-// setsSettings reports whether args hold flag, such as --settings, anywhere: alone,
+// setsSettings reports whether args contain flag, such as --settings, anywhere: alone,
 // before a value or as --settings=value. A --settings with no value after it is the
 // flag all the same, and would take whatever Forager puts after it as its value.
 func setsSettings(flag string, args []string) bool {

@@ -185,8 +185,9 @@ func TestProbeRefusesAnotherClaude(t *testing.T) {
 
 // TestProbeChecksEachRuntimeByItsProgram has a runtime whose program has another name
 // than the runtime, one with no package, and one this build does not render: each line
-// is named after the runtime, the program is the one looked up and run, a version that
-// differs asks for that version, and the runtime with no program fails.
+// has the runtime's name, the program is the one looked up and run, the line of a
+// version that differs has the fix "install that version", and the runtime with no
+// program fails.
 func TestProbeChecksEachRuntimeByItsProgram(t *testing.T) {
 	files := agentFiles()
 	files["usr/local/bin/cursor-agent"] = ""
@@ -200,7 +201,7 @@ func TestProbeChecksEachRuntimeByItsProgram(t *testing.T) {
 	r := p.Report(context.Background())
 	checks := byName(r)
 	want(t, checks, "cursor", image.Fail, "cursor-agent at /usr/local/bin/cursor-agent is ", "written against 2026.09.11; install that version")
-	want(t, checks, "example", image.Fail, "qory's Linux build renders no runtime example; set wall.helper to the Linux build of this qory")
+	want(t, checks, "example", image.Fail, "set wall.helper to the Linux build of this qory: the probe's build renders no runtime example")
 	if _, ok := checks["claude"]; ok {
 		t.Error("the probe checked claude, which no argument lists")
 	}

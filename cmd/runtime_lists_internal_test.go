@@ -8,8 +8,8 @@ import (
 	"github.com/qoryai/qory/internal/render"
 )
 
-// runsBare are the runtimes qory starts that Forager's runtimes.json does not list yet:
-// Forager runs each as a bare runtime until its descriptor lands there.
+// runsBare are the runtimes qory starts that are not in Forager's runtimes.json: Forager
+// runs each as a bare runtime until its descriptor is added there.
 var runsBare = []string{"codex", "gemini", "opencode", "amp", "cursor", "copilot"}
 
 // listsDiffer are the lines on which listed, the runtimes of Forager's runtimes.json,
@@ -19,15 +19,15 @@ func listsDiffer(listed, starts, bare []string) []string {
 	var lines []string
 	for _, name := range listed {
 		if !slices.Contains(starts, name) {
-			lines = append(lines, "add a render package with a launch template for "+name+" under internal/render: Forager's runtimes.json lists it")
+			lines = append(lines, "add a render package with a launch template for "+name+" under internal/render: it is in Forager's runtimes.json")
 		}
 		if slices.Contains(bare, name) {
-			lines = append(lines, "delete "+name+" from runsBare: Forager's runtimes.json lists it")
+			lines = append(lines, "delete "+name+" from runsBare: it is in Forager's runtimes.json")
 		}
 	}
 	for _, name := range starts {
 		if !slices.Contains(listed, name) && !slices.Contains(bare, name) {
-			lines = append(lines, "add a descriptor for "+name+" to Forager, or add "+name+" to runsBare: qory starts it, and Forager's runtimes.json does not list it")
+			lines = append(lines, "add a descriptor for "+name+" to Forager, or add "+name+" to runsBare: qory starts it, and it is not in Forager's runtimes.json")
 		}
 	}
 	for _, name := range bare {
@@ -52,8 +52,8 @@ func launchers() []string {
 }
 
 // TestForagerAndQoryListTheSameRuntimes compares Forager's runtimes.json, at the pinned
-// Forager module, with the runtimes qory starts: each listed runtime has a render
-// package with a launch template, and each runtime qory starts is listed or in
+// Forager module, with the runtimes qory starts: each runtime in the list has a render
+// package with a launch template, and each runtime qory starts is in the list or in
 // [runsBare]. any and goose have no launch template and are left out.
 func TestForagerAndQoryListTheSameRuntimes(t *testing.T) {
 	listed, err := foragerRuntimes()
@@ -61,7 +61,7 @@ func TestForagerAndQoryListTheSameRuntimes(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(listed) == 0 {
-		t.Fatal("Forager's runtimes.json lists no runtime")
+		t.Fatal("Forager's runtimes.json has no runtime")
 	}
 	for _, line := range listsDiffer(listed, launchers(), runsBare) {
 		t.Error(line)
@@ -69,14 +69,14 @@ func TestForagerAndQoryListTheSameRuntimes(t *testing.T) {
 }
 
 // TestTheRuntimeListsDifferInEitherDirection is [listsDiffer] on lists that disagree:
-// a listed runtime qory does not start, a runtime qory starts that is not listed, a
-// bare runtime that is listed, and a bare runtime qory does not start.
+// a runtime in the list that qory does not start, a runtime qory starts that is not in
+// the list, a bare runtime that is in it, and a bare runtime qory does not start.
 func TestTheRuntimeListsDifferInEitherDirection(t *testing.T) {
 	got := listsDiffer([]string{"claude", "codex", "example"}, []string{"claude", "codex", "gemini"}, []string{"codex", "old"})
 	want := []string{
-		"delete codex from runsBare: Forager's runtimes.json lists it",
-		"add a render package with a launch template for example under internal/render: Forager's runtimes.json lists it",
-		"add a descriptor for gemini to Forager, or add gemini to runsBare: qory starts it, and Forager's runtimes.json does not list it",
+		"delete codex from runsBare: it is in Forager's runtimes.json",
+		"add a render package with a launch template for example under internal/render: it is in Forager's runtimes.json",
+		"add a descriptor for gemini to Forager, or add gemini to runsBare: qory starts it, and it is not in Forager's runtimes.json",
 		"delete old from runsBare: qory starts no runtime old",
 	}
 	if !slices.Equal(got, want) {

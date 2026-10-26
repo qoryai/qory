@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -139,12 +140,11 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 		minutes = doc.RunSettings.TimeLimitMinutes
 	}
 	runtime, settings := provisioner.Settings(doc.RunSettings)
-	// A runtime this qory does not render stops at the compose, with the list of those
-	// it does.
-	if rt, err := render.Lookup(runtime); err == nil {
-		if _, ok := rt.(render.Headless); !ok {
-			return nil, noHeadless(runtime)
-		}
+	// A runtime this qory does not render has no headless start either.
+	if rt, err := render.Lookup(runtime); err != nil {
+		return nil, noHeadless(runtime)
+	} else if _, ok := rt.(render.Headless); !ok {
+		return nil, noHeadless(runtime)
 	}
 	var harness []byte
 	defines := doc.Harness != nil && doc.Harness.Harness.Extends == nil
@@ -439,8 +439,9 @@ func (r *codeRun) writeInputs() (string, func(), error) {
 // as the harness rep was composed for it, with the inputs in the folder in: the
 // runtime's headless start, see [render.Headless], with the prompt that invokes the
 // skill or command named like the workflow, by the name the runtime registers it
-// under, with the path of inputs.json. A runtime with no headless start, and a harness
-// with no such skill or command, stop the run.
+// under, with the path of inputs.json. A runtime with no headless start, a workflow that
+// is only of a kind the runtime renders or invokes by no name, and a harness with no
+// such skill or command, stop the run.
 func (r *codeRun) workflowArgs(name string, rep report.Report, in string) ([]string, error) {
 	rt, err := render.Lookup(name)
 	if err != nil {
@@ -450,20 +451,28 @@ func (r *codeRun) workflowArgs(name string, rep report.Report, in string) ([]str
 	if !ok {
 		return nil, noHeadless(name)
 	}
-	addresses := render.Addresses(entryKeys(rep), rep.Bind, render.AddressOf(rt), rt.Skips())
+	// Every kind, the skipped ones too, so a workflow of a kind the runtime does not
+	// render gets the line with the kind it does invoke.
+	addresses := render.Addresses(entryKeys(rep), rep.Bind, render.AddressOf(rt), nil)
 	var found []string
 	for _, kind := range []string{"skills", "commands"} {
 		registered, ok := addresses[kind][r.workflow]
 		if !ok {
 			continue
 		}
-		if args, ok := h.HeadlessArgs(kind, registered, filepath.Join(in, inputsFile), in); ok {
-			return args, nil
+		if !slices.Contains(rt.Skips(), kind) {
+			if args, ok := h.HeadlessArgs(kind, registered, filepath.Join(in, inputsFile), in); ok {
+				return args, nil
+			}
 		}
 		found = append(found, kind)
 	}
 	if len(found) > 0 {
-		return nil, fmt.Errorf("add a command %s to %s, or set another runtime in Qory Apiary: %s runs no skill by its name from a headless start%s", r.workflow, r.phrase(), accesskey.ShownName(name, false), codeUsed)
+		add, runsNo := "command", "skill"
+		if found[0] == "commands" {
+			add, runsNo = "skill", "command"
+		}
+		return nil, fmt.Errorf("add a %s %s to %s, or set another runtime in Qory Apiary: %s runs no %s by its name from a headless start%s", add, r.workflow, r.phrase(), accesskey.ShownName(name, false), runsNo, codeUsed)
 	}
 	return nil, fmt.Errorf("add a skill or command %s to %s, or set another workflow in Qory Apiary: the composed harness has no skill or command %s%s", r.workflow, r.phrase(), r.workflow, codeUsed)
 }

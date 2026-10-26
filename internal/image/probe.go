@@ -208,7 +208,7 @@ var version = regexp.MustCompile(`\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?`)
 // finds it, and reports the version Forager's descriptor is written against.
 func (p Probe) runtime(ctx context.Context, rt Runtime) Check {
 	if rt.Command == "" {
-		return Check{rt.Name, Fail, "qory's Linux build renders no runtime " + rt.Name + "; set wall.helper to the Linux build of this qory"}
+		return Check{rt.Name, Fail, "set wall.helper to the Linux build of this qory: the probe's build renders no runtime " + rt.Name}
 	}
 	out, where, err := p.run(ctx, rt.Command, "--version")
 	if err != nil {
