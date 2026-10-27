@@ -104,7 +104,7 @@ func TestFlagsAndLabelsPrintNoSecret(t *testing.T) {
 		t.Errorf("labels %q, want %q", got, want)
 	}
 	wantsText(t, homeInFolder("/work/qak_app", "/work/qak_app/homes"), "set --home to a folder outside "+value+": "+value+" is inside "+value+", and a run with a run key writes no harness into the folder it runs in")
-	_, err = inlineSettings([]string{"claude", "--settings", "/elsewhere/qak_settings.json"}, nil, "/work/home")
+	_, err = inlineSettings("--settings", []string{"claude", "--settings", "/elsewhere/qak_settings.json"}, nil, "/work/home")
 	if err == nil || !strings.HasPrefix(err.Error(), "the Claude Code settings "+value+" lie outside the harness's home /work/home") {
 		t.Errorf("err = %v", err)
 	}

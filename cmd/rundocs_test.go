@@ -92,7 +92,8 @@ func TestARunCodeTakesNoStackRuntimeOrArguments(t *testing.T) {
 // TestARunCodeWhoseAnswerQoryDoesNotRunStops is a redemption whose documents qory does
 // not run: none, documents that break the schema, a stack or a stack_reference, which
 // the schema does not allow, a step other than explore and prebuild, a prebuild on a
-// machine whose forager.yaml has no wall, no workflow, and another runtime than claude.
+// machine whose forager.yaml has no wall, no workflow, a runtime with no headless start,
+// and a runtime qory does not render.
 // Each stops the run after the one redemption, before it opens, with a line that starts
 // with its fix and ends "; the code is used": exit 2 for an answer with no documents,
 // which Forager refuses, and exit 1 for the rest.
@@ -125,8 +126,10 @@ func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 		{"a stack reference", codeDocuments(t, func(d map[string]any) {
 			d["stack"], d["stack_reference"] = "core", "https://code.example.com/team/stacks#release-7:core"
 		}), broken},
-		{"another runtime", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": "codex"} }),
-			"set the runtime claude for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow on claude alone, and the response to the run code sets the runtime codex; the code is used"},
+		{"a runtime with no headless start", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": "goose"} }),
+			"set another runtime for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow with a runtime's headless start, and has none for goose; the code is used"},
+		{"a runtime qory does not render", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": "example"} }),
+			"set another runtime for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow with a runtime's headless start, and has none for example; the code is used"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			root := runKeyCheckout(t)

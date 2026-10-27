@@ -543,3 +543,58 @@ func TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime(t *testing
 		t.Errorf("a document with extends: %v, defines %v, harness.yaml has:\n%s", err, r != nil && r.defines, r.harness)
 	}
 }
+
+// TestARunCodesWorkflowStartsOnEachRuntimesHeadlessStart is workflowArgs for a harness
+// with the skill or the command example, on each runtime: the runtime's headless start,
+// with the prompt that invokes the entry by its registered name; a runtime that runs
+// that kind by no name, in either direction, one with no headless start, and one this
+// qory does not render, stop the run.
+func TestARunCodesWorkflowStartsOnEachRuntimesHeadlessStart(t *testing.T) {
+	r, err := codeRunOf(contracts.Documents{Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const in = "/in"
+	const file = "/in/inputs.json"
+	skill := report.Report{Entries: []report.Entry{{Kind: "skills", Name: "example"}}}
+	command := report.Report{Entries: []report.Entry{{Kind: "commands", Name: "example"}}}
+	for _, c := range []struct {
+		runtime string
+		rep     report.Report
+		want    []string
+	}{
+		{"claude", skill, []string{"--output-format", "stream-json", "--verbose", "--add-dir", in, "-p", "/harness:example " + file}},
+		{"claude", command, []string{"--output-format", "stream-json", "--verbose", "--add-dir", in, "-p", "/harness:example " + file}},
+		{"codex", skill, []string{"exec", "--json", "--add-dir", in, "$example " + file}},
+		{"gemini", command, []string{"--output-format", "stream-json", "--include-directories", in, "-p", "/example " + file}},
+		{"opencode", command, []string{"run", "--format", "json", "--command", "example", file}},
+		{"cursor", skill, []string{"--print", "--output-format", "stream-json", "--add-dir", in, "/example " + file}},
+	} {
+		got, err := r.workflowArgs(c.runtime, c.rep, in)
+		if err != nil || !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: got %q, %v\nwant %q", c.runtime, got, err, c.want)
+		}
+	}
+	for _, c := range []struct {
+		runtime string
+		rep     report.Report
+		want    string
+	}{
+		{"gemini", skill, "add a command example to the checkout's harness, or set another runtime in Qory Apiary: gemini runs no skill by its name from a headless start; the code is used"},
+		{"opencode", skill, "add a command example to the checkout's harness, or set another runtime in Qory Apiary: opencode runs no skill by its name from a headless start; the code is used"},
+		{"codex", command, "add a skill example to the checkout's harness, or set another runtime in Qory Apiary: codex runs no command by its name from a headless start; the code is used"},
+		{"cursor", command, "add a skill example to the checkout's harness, or set another runtime in Qory Apiary: cursor runs no command by its name from a headless start; the code is used"},
+		{"amp", skill, "set another runtime for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow with a runtime's headless start, and has none for amp; the code is used"},
+		{"copilot", skill, "set another runtime for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow with a runtime's headless start, and has none for copilot; the code is used"},
+	} {
+		if _, err := r.workflowArgs(c.runtime, c.rep, in); err == nil || err.Error() != c.want {
+			t.Errorf("%s: got %v\nwant %s", c.runtime, err, c.want)
+		}
+	}
+	for _, runtime := range []string{"goose", "amp", "copilot", "any", "example"} {
+		_, err := codeRunOf(contracts.Documents{Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: runtime}})
+		if want := noHeadless(runtime); err == nil || err.Error() != want.Error() {
+			t.Errorf("%s: codeRunOf got %v, want %v", runtime, err, want)
+		}
+	}
+}

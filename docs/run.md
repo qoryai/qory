@@ -1345,9 +1345,21 @@ the work item. Then a run of the step explore:
 - writes the inputs, unchanged, to `inputs.json`, mode 0600, in a folder `in/`, mode
   0700, of a new temporary folder, which qory removes when the run ends. Behind a wall,
   `in/` is mounted read-only at the same path;
-- starts Claude Code with `--output-format stream-json --verbose --add-dir <in>` and the
-  prompt `/<name> <in>/inputs.json`, where `<name>` is the name Claude Code registers the
-  skill or command of the workflow's name under, such as `harness:hello`;
+- starts the runtime with its headless start: the arguments that run one prompt with no
+  terminal, write the session's output to stdout and exit. The prompt invokes the skill
+  or command of the workflow's name by the name the runtime registers it under, with
+  `<in>/inputs.json` after it. Each runtime's start, after its launch's arguments:
+
+  | Runtime | Headless start | Invokes |
+  |---|---|---|
+  | `claude` | `--output-format stream-json --verbose --add-dir <in> -p "/<name> <in>/inputs.json"`, where `<name>` is such as `harness:hello` | a skill or a command |
+  | `codex` | `exec --json --add-dir <in> "$<name> <in>/inputs.json"` | a skill |
+  | `gemini` | `--output-format stream-json --include-directories <in> -p "/<name> <in>/inputs.json"` | a command |
+  | `opencode` | `run --format json --command <name> <in>/inputs.json` | a command |
+  | `cursor` | `--print --output-format stream-json --add-dir <in> "/<name> <in>/inputs.json"` | a skill |
+
+  `amp`, `copilot`, `goose` and `any` have no headless start, so a run from a run code
+  does not start on them;
 - takes its time limit as [Time limits](#time-limits) says.
 
 So the command line sets none of these. After the redemption, qory prints `qory run: the
@@ -1464,13 +1476,19 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
   the code was redeemed
 - `set a workflow for the workspace in Qory Apiary, then take the work item in again: the
   response to the run code has no workflow; the code is used`
-- `set the runtime claude for the workspace in Qory Apiary, then take the work item in
-  again: qory starts a run code's workflow on claude alone, and the response to the run
-  code sets the runtime <name>; the code is used`
+- `set another runtime for the workspace in Qory Apiary, then take the work item in
+  again: qory starts a run code's workflow with a runtime's headless start, and has none
+  for <runtime>; the code is used`, before anything is fetched
 - `add a skill or command <workflow> to <harness>, or set another workflow in Qory
   Apiary: the composed harness has no skill or command <workflow>; the code is used`,
   after the compose, where `<harness>` is `the workspace's harness` or `the checkout's
   harness`
+- `add a command <workflow> to <harness>, or set another runtime in Qory Apiary:
+  <runtime> runs no skill by its name from a headless start; the code is used`, after the
+  compose, for a workflow that is only a skill on `gemini` or `opencode`
+- `add a skill <workflow> to <harness>, or set another runtime in Qory Apiary: <runtime>
+  runs no command by its name from a headless start; the code is used`, after the
+  compose, for a workflow that is only a command on `codex` or `cursor`
 - `take the work item in again in Qory Apiary: the run's host proxy, through which qory
   fetches the run's repositories, did not open: <error>; the code is used`, where a run
   without a run code prints `run again: the run's host proxy, through which qory fetches
@@ -2829,9 +2847,9 @@ one fails.
   does not know, with no capability and no network. `qory`'s Linux build then checks
   that `HOME` takes a file from that user, the authorities are where the wall reads
   them, `/bin/sh` is there for the runtime's hooks and the session's API-key approval,
-  `claude` is the version Forager's descriptor is written against, and `git` and
-  `gh` run. It reports whether `dockerd` is in a system directory, and checks that what
-  the daemon runs is there too.
+  each runtime of Forager's runtime list, `runtimes.json`, is on the `PATH` at the
+  version its descriptor is written against, and `git` and `gh` run. It reports whether
+  `dockerd` is in a system directory, and checks that what the daemon runs is there too.
 
 The Linux build is the one the wall uses: `wall.helper`, for your engine's architecture,
 or on Linux the `qory` you run when `wall.helper` is not set.

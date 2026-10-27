@@ -187,6 +187,49 @@ type EnvSetter interface {
 	EnvAt() (file string, path []string)
 }
 
+// Headless is a [Launcher] whose program runs one prompt with no terminal, writes the
+// session's output to stdout and exits: how a run from a run code starts its workflow.
+// A runtime that does not implement it has no headless start, and such a run of it
+// stops before anything is fetched.
+type Headless interface {
+	// HeadlessArgs are the arguments after the launch's that run the skill or command of
+	// kind, skills or commands, registered as name, with arg after it, and exit, with in,
+	// a folder outside the checkout, readable to the program when it has a flag for that.
+	// False for a kind the program runs by no name from a headless start.
+	HeadlessArgs(kind, name, arg, in string) ([]string, bool)
+}
+
+// Dispatcher is a [Launcher] whose launch arguments differ on a dispatched run, one
+// given a run key, which works on a repository this machine does not trust. A runtime
+// that does not implement it starts a dispatched run with the launch's arguments.
+type Dispatcher interface {
+	// DispatchedArgs are args, the launch's arguments, as a dispatched run passes them.
+	DispatchedArgs(args []string) []string
+}
+
+// SettingsInliner is a [Launcher] whose settings file a run passes to Forager as its
+// JSON, read from the home by qory, after the home's check: Forager reads no file of
+// the home. The flag takes a file or the JSON itself.
+type SettingsInliner interface {
+	// SettingsFlag is the launch's flag for the settings, such as --settings.
+	SettingsFlag() string
+}
+
+// AgentHomer is a [Launcher] whose program reads its configuration directory from a
+// variable. A dispatched walled run sets the variable to a new, empty folder inside the
+// container, so nothing the image has there reaches the agent.
+type AgentHomer interface {
+	// AgentHomeVariable is the variable, such as CLAUDE_CONFIG_DIR.
+	AgentHomeVariable() string
+}
+
+// Installer is a [Launcher] whose program installs at a version from one package, the
+// one qory image check names when an image has another version.
+type Installer interface {
+	// Install is the package at version, such as @anthropic-ai/claude-code@2.1.273.
+	Install(version string) string
+}
+
 // LaunchEnv is the variables the harness sets when the runtime's program starts, beside
 // the launch template's and QORY_HARNESS_HOME, see [compose.Result.LaunchEnv], with
 // override the configuration's harness.launch.<runtime>, nil when it has none. A variable

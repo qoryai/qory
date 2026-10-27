@@ -77,6 +77,15 @@ func goodVersions() *versions {
 	}}
 }
 
+// claudeAt is Claude Code as the probe checks it, at version, empty for any.
+func claudeAt(version string) []image.Runtime {
+	rt := image.Runtime{Name: "claude", Command: "claude", Version: version}
+	if version != "" {
+		rt.Install = "@anthropic-ai/claude-code@" + version
+	}
+	return []image.Runtime{rt}
+}
+
 // env is an environment of the image's.
 func env(vars map[string]string) func(string) string {
 	return func(name string) string { return vars[name] }
@@ -115,7 +124,7 @@ func want(t *testing.T, checks map[string]image.Check, name, result string, carr
 func TestProbePassesAnImageWithWhatTheWallNeeds(t *testing.T) {
 	root := imageRoot(t, agentFiles())
 	v := goodVersions()
-	p := image.Probe{Root: root, Env: env(map[string]string{"HOME": "/home/agent", "PATH": "relative:/usr/local/bin:/usr/bin:/bin"}), Exec: v.exec, Claude: "2.1.273", User: "65532:65532"}
+	p := image.Probe{Root: root, Env: env(map[string]string{"HOME": "/home/agent", "PATH": "relative:/usr/local/bin:/usr/bin:/bin"}), Exec: v.exec, Runtimes: claudeAt("2.1.273"), User: "65532:65532"}
 	r := p.Report(context.Background())
 	if r.Version != image.ReportVersion {
 		t.Errorf("report version %d", r.Version)
@@ -144,7 +153,7 @@ func TestProbePassesAnImageWithWhatTheWallNeeds(t *testing.T) {
 // says what to add.
 func TestProbeNamesWhatAnImageLacks(t *testing.T) {
 	root := imageRoot(t, map[string]string{"usr/bin/git": "", "etc/ssl/cert.pem": "no certificate here\n"})
-	p := image.Probe{Root: root, Env: env(map[string]string{"PATH": "/usr/bin"}), Exec: (&versions{}).exec, Claude: "2.1.273", User: "65532:65532"}
+	p := image.Probe{Root: root, Env: env(map[string]string{"PATH": "/usr/bin"}), Exec: (&versions{}).exec, Runtimes: claudeAt("2.1.273"), User: "65532:65532"}
 	checks := byName(p.Report(context.Background()))
 	want(t, checks, "home", image.Fail, "HOME is not set", "ENV HOME=")
 	want(t, checks, "authorities", image.Fail, "no bundle of authorities", "ca-certificates")
@@ -168,10 +177,34 @@ func TestProbeRefusesAnotherClaude(t *testing.T) {
 	root := imageRoot(t, agentFiles())
 	v := goodVersions()
 	v.lines["claude"] = "2.1.270 (Claude Code)"
-	p := image.Probe{Root: root, Env: env(map[string]string{"HOME": "/home/agent", "PATH": "/usr/local/bin:/usr/bin"}), Exec: v.exec, Claude: "2.1.273"}
-	want(t, byName(p.Report(context.Background())), "claude", image.Fail, "is 2.1.270", "written against 2.1.273", "@anthropic-ai/claude-code@2.1.273")
-	p.Claude = ""
+	p := image.Probe{Root: root, Env: env(map[string]string{"HOME": "/home/agent", "PATH": "/usr/local/bin:/usr/bin"}), Exec: v.exec, Runtimes: claudeAt("2.1.273")}
+	want(t, byName(p.Report(context.Background())), "claude", image.Fail, "claude at /usr/local/bin/claude is 2.1.270, and Forager's descriptor is written against 2.1.273; install @anthropic-ai/claude-code@2.1.273")
+	p.Runtimes = claudeAt("")
 	want(t, byName(p.Report(context.Background())), "claude", image.Pass, "is 2.1.270")
+}
+
+// TestProbeChecksEachRuntimeByItsProgram has a runtime whose program has another name
+// than the runtime, one with no package, and one this build does not render: each line
+// has the runtime's name, the program is the one looked up and run, the line of a
+// version that differs has the fix "install that version", and the runtime with no
+// program fails.
+func TestProbeChecksEachRuntimeByItsProgram(t *testing.T) {
+	files := agentFiles()
+	files["usr/local/bin/cursor-agent"] = ""
+	root := imageRoot(t, files)
+	v := goodVersions()
+	v.lines["cursor-agent"] = "2026.09.10-fd3934a"
+	p := image.Probe{Root: root, Env: env(map[string]string{"HOME": "/home/agent", "PATH": "/usr/local/bin:/usr/bin"}), Exec: v.exec, Runtimes: []image.Runtime{
+		{Name: "cursor", Command: "cursor-agent", Version: "2026.09.11"},
+		{Name: "example"},
+	}}
+	r := p.Report(context.Background())
+	checks := byName(r)
+	want(t, checks, "cursor", image.Fail, "cursor-agent at /usr/local/bin/cursor-agent is ", "written against 2026.09.11; install that version")
+	want(t, checks, "example", image.Fail, "set wall.helper to the Linux build of this qory: the probe's build renders no runtime example")
+	if _, ok := checks["claude"]; ok {
+		t.Error("the probe checked claude, which no argument lists")
+	}
 }
 
 // TestProbeSaysWhetherTheImageCarriesADocker puts dockerd in a system directory, with
@@ -209,12 +242,12 @@ func TestProbeSaysWhetherTheImageCarriesADocker(t *testing.T) {
 // TestProbeReportsEveryCheck has the report hold one line for each of the checks the
 // outside counts on, in their order.
 func TestProbeReportsEveryCheck(t *testing.T) {
-	p := image.Probe{Root: imageRoot(t, agentFiles()), Env: env(nil), Exec: goodVersions().exec}
+	p := image.Probe{Root: imageRoot(t, agentFiles()), Env: env(nil), Exec: goodVersions().exec, Runtimes: claudeAt("")}
 	var names []string
 	for _, c := range p.Report(context.Background()).Checks {
 		names = append(names, c.Name)
 	}
-	if strings.Join(names, " ") != strings.Join(image.ProbeChecks, " ") {
-		t.Errorf("lines %v, want %v", names, image.ProbeChecks)
+	if want := "home authorities shell claude git gh docker"; strings.Join(names, " ") != want || strings.Join(image.ProbeChecks([]string{"claude"}), " ") != want {
+		t.Errorf("lines %v, want %s", names, want)
 	}
 }

@@ -10,6 +10,8 @@ import (
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/session/runtimes/catalog"
 	"github.com/qoryai/forager/wall"
+
+	"github.com/qoryai/qory/internal/preparation"
 )
 
 // TestTheAgentEnvKeepsTheNamesForagerSets is a dispatched walled run of Claude Code
@@ -27,7 +29,7 @@ func TestTheAgentEnvKeepsTheNamesForagerSets(t *testing.T) {
 		t.Fatal(err)
 	}
 	var said []string
-	spec := runSpec{OpenSpec: session.OpenSpec{Wall: &wall.Docker{}}, SessionSpec: session.SessionSpec{Runtime: rt, Command: "sh", Args: []string{"--settings", "/h/claude/settings.json", "-p", "two words"}, HarnessHome: "/h", LaunchFixed: withAgentHome(nil), Mounts: []wall.Mount{{Path: "/work"}}}}
+	spec := runSpec{OpenSpec: session.OpenSpec{Wall: &wall.Docker{}}, SessionSpec: session.SessionSpec{Runtime: rt, Command: "sh", Args: []string{"--settings", "/h/claude/settings.json", "-p", "two words"}, HarnessHome: "/h", LaunchFixed: withAgentHome(nil, preparation.EnvAgentHome), Mounts: []wall.Mount{{Path: "/work"}}}}
 	done, err := wrapAgentEnv(&spec, func(line string) { said = append(said, line) })
 	if err != nil {
 		t.Fatal(err)
@@ -117,7 +119,7 @@ func TestTheAgentEnvKeepsTheStartKeysEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	spec := runSpec{OpenSpec: session.OpenSpec{Wall: &wall.Docker{}}, SessionSpec: session.SessionSpec{Runtime: rt, Command: "sh", Args: []string{"-p", "two words"}, HarnessHome: "/h", LaunchFixed: withAgentHome(nil)}}
+	spec := runSpec{OpenSpec: session.OpenSpec{Wall: &wall.Docker{}}, SessionSpec: session.SessionSpec{Runtime: rt, Command: "sh", Args: []string{"-p", "two words"}, HarnessHome: "/h", LaunchFixed: withAgentHome(nil, preparation.EnvAgentHome)}}
 	done, err := wrapAgentEnv(&spec, func(line string) { t.Errorf("said %q", line) })
 	if err != nil {
 		t.Fatal(err)

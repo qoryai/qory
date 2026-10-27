@@ -124,7 +124,7 @@ func TestEngineChecksTheImageAsTheWallRunsAnAgent(t *testing.T) {
 	if err != nil || platform != "linux/arm64" {
 		t.Fatalf("platform %q, %v", platform, err)
 	}
-	checks := e.Check(context.Background(), platform, image.Target{Ref: "example.com/agent:1", Helper: "/opt/qory/qory-linux", Claude: "2.1.273"})
+	checks := e.Check(context.Background(), platform, image.Target{Ref: "example.com/agent:1", Helper: "/opt/qory/qory-linux", Runtimes: []image.Runtime{{Name: "claude", Version: "2.1.273"}}})
 	if got := lineNames(checks); got != "image pass, home pass, reference info, files pass, home pass, authorities pass, shell pass, claude pass, git pass, gh pass, docker info" {
 		t.Errorf("lines %s", got)
 	}
@@ -138,7 +138,7 @@ func TestEngineChecksTheImageAsTheWallRunsAnAgent(t *testing.T) {
 		"podman create --pull never --network none --entrypoint /qory/qory example.com/agent:1",
 		"podman export c0ffee",
 		"podman rm --force --volumes c0ffee",
-		"podman run --rm --pull never --network none --user 65532:65532 --cap-drop ALL --security-opt no-new-privileges --init --mount type=bind,src=/opt/qory/qory-linux,dst=/qory/qory,readonly --entrypoint /qory/qory example.com/agent:1 image probe --claude-version 2.1.273",
+		"podman run --rm --pull never --network none --user 65532:65532 --cap-drop ALL --security-opt no-new-privileges --init --mount type=bind,src=/opt/qory/qory-linux,dst=/qory/qory,readonly --entrypoint /qory/qory example.com/agent:1 image probe claude=2.1.273",
 	} {
 		if !strings.Contains(strings.Join(f.lines, "\n")+"\n", want+"\n") {
 			t.Errorf("did not run %s; ran:\n%s", want, strings.Join(f.lines, "\n"))
@@ -231,7 +231,7 @@ func TestEngineSaysWhyTheProbeDidNotRun(t *testing.T) {
 		t.Errorf("a probe that printed nonsense: %+v", last)
 	}
 	f.report = `{"version":1,"checks":[{"name":"home","result":"pass","detail":"HOME"},{"name":"shell","result":"maybe","detail":"/bin/sh"}]}`
-	checks = e.Check(context.Background(), "linux/arm64", image.Target{Ref: "a:1", Helper: "/q"})
+	checks = e.Check(context.Background(), "linux/arm64", image.Target{Ref: "a:1", Helper: "/q", Runtimes: []image.Runtime{{Name: "claude"}}})
 	if !image.Failed(checks) {
 		t.Errorf("a report that lacks checks passed: %+v", checks)
 	}

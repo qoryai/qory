@@ -26,8 +26,9 @@ var agentEnvArgs = []string{"run", "agent-env"}
 const keptFile = "kept"
 
 // wrapsAgentEnv reports whether a run starts its agent through the agent-env verb: a
-// dispatched run of Claude Code behind a wall. A test replaces it.
-var wrapsAgentEnv = func(claudeDispatched, walled bool) bool { return claudeDispatched && walled }
+// dispatched run behind a wall whose agent starts on a fresh home, that of a runtime
+// that is a [render.AgentHomer]. A test replaces it.
+var wrapsAgentEnv = func(freshHome, walled bool) bool { return freshHome && walled }
 
 // wrapAgentEnv starts the agent of a walled run through the agent-env verb, which
 // removes the image's values of the [preparation.Dropped] names, keeping the ones
