@@ -410,9 +410,11 @@ func (r *codeRun) startLine(runID string) string {
 // writeInputs writes r's inputs, unchanged, to inputs.json, mode 0600, in a new folder
 // in/, mode 0700, of a new temporary folder, and returns in/, links resolved, and what
 // removes the temporary folder. in/ is outside the state directory, which holds the run
-// records that no mount may reach.
+// records that no mount may reach. The temporary folder begins with qory-inputs-:
+// Forager reserves the qory-run-, qory-tool-, qory-wall- and qory-link- folders of the
+// system's temporary directory, and the wall stops a run that mounts one.
 func (r *codeRun) writeInputs() (string, func(), error) {
-	top, err := os.MkdirTemp("", "qory-run-")
+	top, err := os.MkdirTemp("", "qory-inputs-")
 	if err != nil {
 		return "", func() {}, err
 	}
