@@ -46,6 +46,9 @@ type script struct {
 	Quiet bool
 	Say   []string
 	Bulk  int
+	// Compose makes it write the file harness.md into a home under its --home, named
+	// as qory run names a checkout's home, as a compose does.
+	Compose bool
 }
 
 // bulkOutput is n lines of 100 characters and a line feed each, numbered from 0, then
@@ -67,6 +70,8 @@ type report struct {
 	Dir  string
 	// DirEntries is how many entries its folder had when it started.
 	DirEntries int
+	// HomeMode is the mode of the folder its HOME names, 0 when there is none.
+	HomeMode os.FileMode
 	// FD3File reports whether descriptor 3 was a regular file, mode 0600, that no name
 	// links to, open for reading alone.
 	FD3File bool
@@ -74,11 +79,55 @@ type report struct {
 }
 
 func TestMain(m *testing.M) {
+	if len(os.Args) > 2 && os.Args[1] == "run" && os.Args[2] == "--rm" {
+		os.Exit(fakeProbe())
+	}
 	if len(os.Args) > 1 && os.Args[1] == "run" {
 		os.Exit(fakeQory())
 	}
 	os.Exit(m.Run())
 }
+
+// The fake docker's script for the check of the cloud metadata service, and its report,
+// in the runs' configuration directory.
+const (
+	probeFile   = "probe.json"
+	probeReport = "report-probe.json"
+)
+
+// probeScript is what the fake docker run of the check does: it prints Say, line by
+// line, and exits Exit. With no script, it prints nothing and exits 0.
+type probeScript struct {
+	Exit int
+	Say  []string
+}
+
+// fakeProbe is docker run --rm of the check, as the script in $XDG_CONFIG_HOME sets it.
+// It writes its arguments and environment to [probeReport], as [report] has them.
+func fakeProbe() int {
+	config := os.Getenv("XDG_CONFIG_HOME")
+	rep := report{Env: os.Environ(), Args: os.Args[1:]}
+	if info, err := os.Stat(os.Getenv("HOME")); err == nil && info.IsDir() {
+		rep.HomeMode = info.Mode().Perm()
+	}
+	out, _ := json.Marshal(rep)
+	if err := os.WriteFile(filepath.Join(config, probeReport), out, 0o600); err != nil {
+		return 92
+	}
+	var s probeScript
+	if b, err := os.ReadFile(filepath.Join(config, probeFile)); err == nil {
+		if err := json.Unmarshal(b, &s); err != nil {
+			return 91
+		}
+	}
+	for _, line := range s.Say {
+		fmt.Println(line)
+	}
+	return s.Exit
+}
+
+// probeImage is the agent's image the harness's check runs, pinned by its digest.
+const probeImage = "registry.example.com/agent@sha256:2222222222222222222222222222222222222222222222222222222222222222"
 
 // fakeQory is qory run, as the script in $XDG_CONFIG_HOME sets it. It prints the run
 // code it read, which the pool's log must leave out.
@@ -98,6 +147,9 @@ func fakeQory() int {
 	entries, _ := os.ReadDir(cwd)
 	id := filepath.Base(filepath.Dir(cwd))
 	rep := report{Env: os.Environ(), Args: os.Args[1:], Dir: cwd, DirEntries: len(entries)}
+	if info, err := os.Stat(os.Getenv("HOME")); err == nil && info.IsDir() {
+		rep.HomeMode = info.Mode().Perm()
+	}
 	var code []byte
 	if fd3 {
 		f := os.NewFile(uintptr(child.KeyFD), "code")
@@ -109,6 +161,11 @@ func fakeQory() int {
 	out, _ := json.Marshal(rep)
 	if err := os.WriteFile(filepath.Join(config, "report-"+id+".json"), out, 0o600); err != nil {
 		return 92
+	}
+	if s.Compose {
+		if err := composeHome(os.Args[1:], cwd); err != nil {
+			return 93
+		}
 	}
 	if !s.Quiet {
 		fmt.Println("hello")
@@ -136,6 +193,20 @@ func fakeQory() int {
 			return s.Exit
 		}
 	}
+}
+
+// composeHome writes harness.md into <--home>/<checkout>-x, the home of the checkout at
+// root under the --home of args, as a compose of qory run does.
+func composeHome(args []string, root string) error {
+	i := slices.Index(args, "--home")
+	if i < 0 || i+1 >= len(args) {
+		return errors.New("no --home")
+	}
+	home := filepath.Join(args[i+1], filepath.Base(root)+"-x")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(home, "harness.md"), []byte("composed\n"), 0o600)
 }
 
 // sum is the SHA-256 of b, in hex.
@@ -341,11 +412,12 @@ func newHarness(t *testing.T, runs int) *harness {
 	log := slog.New(slog.NewJSONHandler(h.log, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	c.Log = log
 	h.pool = &pool.Pool{
-		Settings: pool.Settings{Runs: runs, State: h.state, RunConfig: h.runConfig, Qory: os.Args[0], Grace: 2 * time.Second},
-		Client:   c,
-		Log:      log,
-		Now:      h.clk.Now,
-		Sleep:    h.sleep,
+		Settings: pool.Settings{Runs: runs, State: h.state, RunConfig: h.runConfig, Qory: os.Args[0], Grace: 2 * time.Second,
+			Probe: pool.Probe{Docker: os.Args[0], Image: probeImage, User: "1000:1000"}},
+		Client: c,
+		Log:    log,
+		Now:    h.clk.Now,
+		Sleep:  h.sleep,
 	}
 	if err := os.MkdirAll(h.runConfig, 0o700); err != nil {
 		t.Fatal(err)
@@ -400,6 +472,15 @@ func (h *harness) setSleep(f func(ctx context.Context, d time.Duration) error) {
 	h.mu.Lock()
 	h.onSleep = f
 	h.mu.Unlock()
+}
+
+// probe sets what the fake docker run of the check does.
+func (h *harness) probe(s probeScript) {
+	h.t.Helper()
+	b, _ := json.Marshal(s)
+	if err := os.WriteFile(filepath.Join(h.runConfig, probeFile), b, 0o600); err != nil {
+		h.t.Fatal(err)
+	}
 }
 
 // script sets what the fake qory run does.

@@ -38,7 +38,8 @@ func (e *imageRefusedError) Error() string { return e.text }
 
 // fetchImage fetches the image of a walled run before its first join, as the run's image
 // step: [session.Run.FetchImage], which writes no step for an image the machine
-// defines, and pulls no image the engine holds by its digest. With proxy, the pull goes
+// defines, checks the image's manifest at its registry through the run's proxy, and
+// pulls the image, also one the engine holds by its digest. With proxy, the pull goes
 // through the run's proxy. A refusal of the image, image_missing or image_user_root, is
 // an [*imageRefusedError] as a [*runLineError]; any other error is a [*runLineError] of
 // [textNoImage], or [textNoImageFromCode] for a run from a run code, fromCode, whose

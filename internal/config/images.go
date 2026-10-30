@@ -144,6 +144,22 @@ func readImagesAllow(path string, node *yaml.Node) ([]string, error) {
 	return allow, nil
 }
 
+// readPrebuildImage reads wall.prebuild_image, the name of the entry of images, the
+// wall.images the file defines, that a prebuild from a run code runs in: an entry with
+// docker: true, which [readImages] has checked has a runtime. The refusal starts with
+// the fix and quotes the name.
+func readPrebuildImage(path, name string, images []ForagerImage) (string, error) {
+	shown := accesskey.ShownName(name, true)
+	i := slices.IndexFunc(images, func(i ForagerImage) bool { return i.Name == name })
+	switch {
+	case i < 0:
+		return "", fmt.Errorf("%s: set wall.prebuild_image to a name of wall.images: wall.images defines no image %s", path, shown)
+	case !images[i].Docker:
+		return "", fmt.Errorf("%s: set docker: true and a runtime, such as sysbox-runc, on wall.images.%s, or name another image in wall.prebuild_image: a prebuild builds in the image's nested Docker", path, accesskey.ShownName(name, false))
+	}
+	return name, nil
+}
+
 // Defines reports whether the wall section defines an image of that name: one a policy
 // may select, and one wall.image and --image read as that image before a reference.
 func (w *ForagerWall) Defines(name string) bool {

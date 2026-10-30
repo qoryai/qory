@@ -6,12 +6,13 @@ Check an image the wall runs the agent in
 
 Check an image the wall runs the agent in.
 
-Four are defined under images/ in qory's repository, for linux/amd64 and linux/arm64:
+Five are defined under images/ in qory's repository, for linux/amd64 and linux/arm64:
 
   agent             Claude Code, git and gh
   agent-docker      agent, and nested Docker: a Docker daemon inside the wall, separate from the machine's
   agent-go          agent, and Go
   agent-go-docker   agent-docker, and Go
+  prebuild          agent-docker, the devcontainer command and buildx: the image a prebuild runs in behind its wall
 
 They are not published for you to pull. Build them from a checkout of qory at the commit qory version
 prints, build yours FROM one of them, and check it with qory image check.

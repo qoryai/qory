@@ -4,6 +4,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/statusfd"
 	"github.com/qoryai/qory/internal/ui"
 )
 
@@ -44,6 +45,7 @@ func Root() *cobra.Command {
   worktree    give each branch a separate worktree, ready to work
   run         run the agent behind a proxy: recorded; behind a wall, fenced, no tokens inside
   access-key  make the key this machine signs its runs to the server with
+  apiary      debug runs on a Qory Apiary server
 
 It serves Claude Code, Codex, Gemini CLI, OpenCode, Cursor, Copilot CLI, Amp, Goose, and
 any tool that reads AGENTS.md.
@@ -63,14 +65,21 @@ More: https://github.com/qoryai/qory`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		// The server's variables are read into memory and removed from the environment
-		// before any command starts anything, so nothing qory starts inherits them. No
+		// before any command starts anything, so nothing qory starts inherits them. qory
+		// run alone starts writing to the status descriptor that main claimed, when main
+		// has not started it already. No
 		// command of the tree sets a PersistentPreRun of its own, which would replace
 		// this one.
-		PersistentPreRun: func(*cobra.Command, []string) { config.TakeServerVariables() },
+		PersistentPreRun: func(c *cobra.Command, _ []string) {
+			config.TakeServerVariables()
+			if c.CommandPath() == "qory run" {
+				statusfd.Setup(c.ErrOrStderr())
+			}
+		},
 	}
 	// The completion script is qory setup completion, and setup shell loads it.
 	root.CompletionOptions.DisableDefaultCmd = true
-	root.AddCommand(newVersion(), newUpdate(), newSetup(), newHarness(), newWorktree(), newConfig(), newRun(), newGateway(), newImage(), newAccessKeyCommand())
+	root.AddCommand(newVersion(), newUpdate(), newSetup(), newHarness(), newWorktree(), newConfig(), newRun(), newGateway(), newImage(), newAccessKeyCommand(), newApiary())
 	root.AddCommand(shortcuts()...)
 	root.AddCommand(worktreeShortcuts()...)
 	root.PersistentFlags().BoolP("verbose", "v", false, "print more of what the command does; each command's help lists what")
@@ -115,4 +124,12 @@ func noArgs(cmd *cobra.Command, args []string) error {
 // reports whether the command printed the failure itself, [ExitCode] which status it gets.
 func Execute() error {
 	return Root().Execute()
+}
+
+// RunsQoryRun reports whether args, the arguments after the program's name, start qory
+// run itself, and not one of its subcommands, before cobra parses a flag: the main package
+// starts the writes to the status descriptor then, so an error of the flags reaches it.
+func RunsQoryRun(args []string) bool {
+	c, _, err := Root().Find(args)
+	return err == nil && c.CommandPath() == "qory run"
 }

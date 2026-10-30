@@ -14,6 +14,7 @@ import (
 	"github.com/qoryai/qory/internal/integration"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/proxygit"
+	"github.com/qoryai/qory/internal/secretmask"
 	"github.com/qoryai/qory/internal/source"
 )
 
@@ -26,12 +27,13 @@ const runSources = "sources"
 const runHarness = "the run's harness"
 
 // runLineError is an error qory run prints as one line, "qory run: <text>", with no
-// title and no mark before it. Its text has no prefix; it unwraps to the error it
-// carries, so [ExitCode] reads that error's status.
+// title and no mark before it. Its text has no prefix, and each value of the run's mask
+// list, [secretmask.Default], is replaced with ***; it unwraps to the error under it,
+// so [ExitCode] reads that error's status.
 type runLineError struct{ err error }
 
 func (e *runLineError) Error() string {
-	return strings.TrimPrefix(e.err.Error(), "qory run: ")
+	return secretmask.Default().Replace(strings.TrimPrefix(e.err.Error(), "qory run: "))
 }
 
 func (e *runLineError) Unwrap() error { return e.err }
@@ -92,14 +94,25 @@ func runValues(run openedRun) func(string) string {
 
 // proxyGit is how the compose of a run from a control plane fetches its git sources:
 // through the run's stack proxy h, with a line on stderr for each URL and ref it
-// fetched, its commit and how long the fetch took.
+// fetched, its commit and how long the fetch took. The query values of each source's
+// URL join the run's mask list before the fetch, so neither that line nor an error of
+// the fetch prints them.
 func proxyGit(h hostProxy, stderr io.Writer) *source.Git {
-	return &source.Git{Proxy: h.proxy, Fetched: func(src, ref, _, commit string, took time.Duration) {
+	return &source.Git{Proxy: h.proxy, Fetching: maskQuery, Fetched: func(src, ref, _, commit string, took time.Duration) {
 		if len(commit) > 12 {
 			commit = commit[:12]
 		}
-		fmt.Fprintf(stderr, "qory run: fetched %s#%s at %s in %.1fs\n", exports.URL(src), exports.Value(ref, false), commit, took.Seconds())
+		fetchedLine(stderr, fmt.Sprintf("qory run: fetched %s#%s at %s in %.1fs", exports.URL(src), exports.Value(ref, false), commit, took.Seconds()))
 	}}
+}
+
+// maskQuery adds the query values of src, a git source's URL, to the run's mask list.
+func maskQuery(src string) { secretmask.Default().AddQuery(src) }
+
+// fetchedLine prints line, a fetch line of qory run, on stderr, masked: the compose's
+// step, whose lines stderr writes, also writes it to the status descriptor.
+func fetchedLine(stderr io.Writer, line string) {
+	fmt.Fprintln(stderr, secretmask.Default().Replace(line))
 }
 
 // namedGit is how the compose of a harness whose addresses no text shows, n, fetches its
@@ -107,11 +120,11 @@ func proxyGit(h hostProxy, stderr io.Writer) *source.Git {
 // line on stderr for each source it fetched, by the source's name, its commit and how
 // long the fetch took; see [source.Named].
 func namedGit(h hostProxy, stderr io.Writer, n *source.Named) *source.Git {
-	return &source.Git{Proxy: h.proxy, Named: n, Fetched: func(_, _, name, commit string, took time.Duration) {
+	return &source.Git{Proxy: h.proxy, Named: n, Fetching: maskQuery, Fetched: func(_, _, name, commit string, took time.Duration) {
 		if len(commit) > 12 {
 			commit = commit[:12]
 		}
-		fmt.Fprintf(stderr, "qory run: fetched %s at %s in %.1fs\n", name, commit, took.Seconds())
+		fetchedLine(stderr, fmt.Sprintf("qory run: fetched %s at %s in %.1fs", name, commit, took.Seconds()))
 	}}
 }
 

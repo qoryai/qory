@@ -19,6 +19,7 @@ import (
 
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/foragerdir"
+	"github.com/qoryai/qory/internal/secretmask"
 )
 
 // machineDir is the directory of forager.yaml: everything qory keeps for its server. It
@@ -151,8 +152,9 @@ func identify(r *config.Forager, report io.Writer, verb string, fd *accesskey.Ke
 
 // signingKey reads the access key a command signs its requests to forager.yaml's
 // server, r's, with: its id, which the server section or QORY_ACCESS_KEY_ID holds, and
-// its secret, the one read from --access-key-secret-fd when fd is not nil. Each refusal
-// is input, and none contains the secret.
+// its secret, the one read from --access-key-secret-fd when fd is not nil. The secret
+// joins the process's mask list, [secretmask.Default]. Each refusal is input, and none
+// contains the secret.
 func signingKey(r *config.Forager, fd *accesskey.Key) (*accessKey, error) {
 	dir, err := machineDir()
 	if err != nil {
@@ -168,6 +170,7 @@ func signingKey(r *config.Forager, fd *accesskey.Key) (*accessKey, error) {
 	if key == nil {
 		return nil, input(fmt.Errorf("no access key secret for the server %s: qory access-key enrol makes one, or set %s", r.Server.URL, accesskey.EnvSecret))
 	}
+	secretmask.Default().Add(key.key.Secret())
 	return key, nil
 }
 

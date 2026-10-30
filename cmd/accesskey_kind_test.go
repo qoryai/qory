@@ -13,6 +13,7 @@ import (
 
 	"github.com/qoryai/forager/accesskey"
 
+	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/foragerdir"
 )
 
@@ -413,7 +414,12 @@ func TestEnrolRefusesAnIntegrationsCode(t *testing.T) {
 	writeFile(t, foragerFile(), commentedForager)
 	code := "qec_" + strings.TrimPrefix(srv.code(1, false), accesskey.CodePrefixNode)
 	_, err := run(t, "access-key", "enrol", srv.URL, code)
-	if want := "use an enrolment code of the form qec[npgir]_ and 26 characters, then a dot and a fingerprint"; err == nil || err.Error() != want {
+	// The error comes from Forager, whose list of prefixes grows with each kind of key.
+	_, formErr := accesskey.NormaliseCode(code)
+	if formErr == nil || !strings.HasPrefix(formErr.Error(), "use an enrolment code of the form qec[") {
+		t.Fatalf("Forager's error for a qec_ code: %v", formErr)
+	}
+	if want := formErr.Error(); err == nil || err.Error() != want {
 		t.Errorf("a qec_ code: %v, want %q", err, want)
 	}
 	if n := len(srv.sent()); n != 0 {
@@ -421,5 +427,50 @@ func TestEnrolRefusesAnIntegrationsCode(t *testing.T) {
 	}
 	if exists(configDir().Path(foragerdir.NewSecretFile)) || exists(configDir().Path(foragerdir.PendingFile)) {
 		t.Error("a qec_ code: a key was made")
+	}
+}
+
+// TestEnrolStopsAtADiagnosticsCode is a qecd_ code given to qory access-key enrol: the
+// command stops with an error whose first line points to qory apiary enrol, before a key
+// is made, anything is written or anything is sent, and the code is not printed.
+func TestEnrolStopsAtADiagnosticsCode(t *testing.T) {
+	emptyDir(t)
+	srv := newEnrolServer(t)
+	srv.kind = "diagnostics"
+	writeFile(t, foragerFile(), commentedForager)
+	dir := configDir()
+	before := snapshot(t, string(dir))
+	code := srv.code(1, false)
+	out, errOut, err := runSplit(t, "", "access-key", "enrol", srv.URL, code)
+	if err == nil {
+		t.Fatal("enrol with a diagnostics code succeeded")
+	}
+	if want := "Run `qory apiary enrol <server> <code>` with this code: "; !strings.HasPrefix(firstLine(err.Error()), want) {
+		t.Errorf("first line %q does not start with %q", firstLine(err.Error()), want)
+	}
+	if cmd.ExitCode(err) != cmd.ExitInput {
+		t.Errorf("exit %d", cmd.ExitCode(err))
+	}
+	if out != "" || errOut != "" {
+		t.Errorf("printed\n%s%s", out, errOut)
+	}
+	normal, _ := accesskey.NormaliseCode(code)
+	if strings.Contains(err.Error(), code) || strings.Contains(err.Error(), normal[:strings.Index(normal, ".")]) {
+		t.Errorf("the error contains the code: %v", err)
+	}
+	if n := len(srv.sent()); n != 0 {
+		t.Errorf("%d requests reached the server", n)
+	}
+	after := snapshot(t, string(dir))
+	for p, v := range after {
+		if before[p] != v {
+			t.Errorf("%s changed", p)
+		}
+	}
+	if len(after) != len(before) {
+		t.Errorf("files before %v, after %v", before, after)
+	}
+	if got := readForagerFile(t); got != commentedForager {
+		t.Errorf("forager.yaml changed:\n%s", got)
 	}
 }

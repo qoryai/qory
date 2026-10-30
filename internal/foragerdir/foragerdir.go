@@ -67,6 +67,10 @@ const PendingFor = 15 * time.Minute
 // 47 characters.
 const maxSecretFile = 4 << 10
 
+// secretSize is the limit of the files this package reads, in the words of the error for
+// a larger file.
+const secretSize = "an access key secret"
+
 // Dir is the directory of forager.yaml.
 type Dir string
 
@@ -213,8 +217,9 @@ func ParseSecret(b []byte) (*accesskey.Key, error) {
 
 // readPrivate reads a file the effective user owns, regular and not a link, that grants
 // nothing to the group or to others, comparing the owner and the mode before it reads,
-// and reading at most limit bytes.
-func readPrivate(path string, limit int64) ([]byte, error) {
+// and reading at most limit bytes. For a larger file it returns the error "<path> is
+// larger than <size>", where size describes the limit: "an access key secret".
+func readPrivate(path string, limit int64, size string) ([]byte, error) {
 	f, err := os.OpenFile(path, os.O_RDONLY|noFollow|nonBlock, 0)
 	if err != nil {
 		if isLink(path) {
@@ -235,7 +240,7 @@ func readPrivate(path string, limit int64) ([]byte, error) {
 		return nil, err
 	}
 	if int64(len(b)) > limit {
-		return nil, fmt.Errorf("%s is larger than an access key secret", path)
+		return nil, fmt.Errorf("%s is larger than %s", path, size)
 	}
 	return b, nil
 }
@@ -457,7 +462,7 @@ func (d Dir) WritePending(code string, key accesskey.PublicKey, now time.Time) e
 // is key, and is younger than [PendingFor] at now. A record of another code or another
 // key, or one without a key's fingerprint, is none.
 func (d Dir) Pending(code string, key accesskey.PublicKey, now time.Time) bool {
-	b, err := readPrivate(d.Path(PendingFile), 1024)
+	b, err := readPrivate(d.Path(PendingFile), 1024, secretSize)
 	if err != nil {
 		return false
 	}
@@ -489,19 +494,39 @@ const maxAnswerFile = 128 << 10
 var ErrNoAnswer = errors.New("no " + AnswerFile)
 
 // WriteAnswer replaces enrolment-answer with b, mode 0600, in one rename.
-func (d Dir) WriteAnswer(b []byte) error {
-	tmp := d.Path(AnswerFile + ".tmp")
+func (d Dir) WriteAnswer(b []byte) error { return d.ReplaceFile(AnswerFile, b) }
+
+// ReplaceFile replaces the file name of the directory with b, mode 0600, in one rename:
+// b goes to name.tmp, created with O_CREAT|O_EXCL|O_NOFOLLOW and synced, which then
+// takes the place of name, and the directory is synced. A name.tmp left by a write that
+// stopped is removed first.
+func (d Dir) ReplaceFile(name string, b []byte) error {
+	tmp := d.Path(name + ".tmp")
 	if err := os.Remove(tmp); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
 	if err := create(tmp, 0o600, b); err != nil {
 		return fmt.Errorf("write %s: %w", tmp, err)
 	}
-	if err := os.Rename(tmp, d.Path(AnswerFile)); err != nil {
+	if err := os.Rename(tmp, d.Path(name)); err != nil {
 		os.Remove(tmp)
 		return err
 	}
 	return d.sync()
+}
+
+// ReadFile reads the file name of the directory by the rules of [Dir.ReadSecret], at most
+// limit bytes. For a larger file it returns the error "<path> is larger than <size>".
+// A directory with no such file is an error that matches [fs.ErrNotExist].
+func (d Dir) ReadFile(name string, limit int64, size string) ([]byte, error) {
+	path := d.Path(name)
+	if _, err := os.Lstat(path); err != nil {
+		return nil, err
+	}
+	if err := d.Check(); err != nil {
+		return nil, err
+	}
+	return readPrivate(path, limit, size)
 }
 
 // ReadAnswer reads enrolment-answer by the rules of [Dir.ReadSecret]. A directory with
@@ -514,7 +539,7 @@ func (d Dir) ReadAnswer() ([]byte, error) {
 	if err := d.Check(); err != nil {
 		return nil, err
 	}
-	return readPrivate(path, maxAnswerFile)
+	return readPrivate(path, maxAnswerFile, secretSize)
 }
 
 // RemoveAnswer removes enrolment-answer.
@@ -541,7 +566,7 @@ func (d Dir) readKeyFile(name string) (*accesskey.Key, error) {
 	if err := d.Check(); err != nil {
 		return nil, err
 	}
-	b, err := readPrivate(path, maxSecretFile)
+	b, err := readPrivate(path, maxSecretFile, secretSize)
 	if err != nil {
 		return nil, err
 	}

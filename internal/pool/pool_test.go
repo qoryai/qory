@@ -38,8 +38,9 @@ const (
 var allowed = []string{"PATH", "HOME", "TMPDIR", "LANG", "DOCKER_HOST", "DOCKER_CONTEXT", "XDG_CONFIG_HOME", "XDG_STATE_HOME"}
 
 // TestADispatchRunsQoryRun is one dispatch, from its claim to the end of its qory run:
-// claim, dispatched, then qory run --run-code-file /dev/fd/3 --gateway <gateway_url> in
-// an empty work/ of the dispatch's folder, with the run code in a file, mode 0600, open
+// claim, dispatched, then qory run --run-code-file /dev/fd/3 --gateway <gateway_url>
+// --home <dispatch's folder>/home in an empty work/ of the dispatch's folder, with HOME
+// home-user/ of that folder, mode 0700, with the run code in a file, mode 0600, open
 // for reading alone, that no name links to, and the allow-listed environment alone. The
 // pool releases nothing and posts no outcome; the dispatch's folder and the code's file
 // are gone, and the journal is empty. qory run's line with the run code is left out.
@@ -62,13 +63,13 @@ func TestADispatchRunsQoryRun(t *testing.T) {
 	if !ok {
 		t.Fatal("qory run did not run")
 	}
-	if want := []string{"run", "--run-code-file", "/dev/fd/3", "--gateway", provisionertest.GatewayURL}; !slices.Equal(rep.Args, want) {
+	dir := filepath.Join(h.state, "runs", d.ID)
+	if want := []string{"run", "--run-code-file", "/dev/fd/3", "--gateway", provisionertest.GatewayURL, "--home", filepath.Join(dir, "home")}; !slices.Equal(rep.Args, want) {
 		t.Errorf("qory run's arguments are %q, want %q", rep.Args, want)
 	}
 	if !rep.FD3File || rep.CodeSum != sum([]byte(d.Run.RunCode)) {
 		t.Errorf("descriptor 3 is a file that no name links to, open for reading alone, %v; it contains the run code %v", rep.FD3File, rep.CodeSum == sum([]byte(d.Run.RunCode)))
 	}
-	dir := filepath.Join(h.state, "runs", d.ID)
 	if rep.Dir != filepath.Join(dir, "work") || rep.DirEntries != 0 {
 		t.Errorf("qory run ran in %s, with %d entries, want the empty %s", rep.Dir, rep.DirEntries, filepath.Join(dir, "work"))
 	}
@@ -77,10 +78,13 @@ func TestADispatchRunsQoryRun(t *testing.T) {
 			t.Errorf("qory run got %s", name)
 		}
 	}
-	for _, want := range []string{"XDG_CONFIG_HOME=" + h.runConfig, "XDG_STATE_HOME=" + filepath.Join(dir, "state")} {
+	for _, want := range []string{"XDG_CONFIG_HOME=" + h.runConfig, "XDG_STATE_HOME=" + filepath.Join(dir, "state"), "HOME=" + filepath.Join(dir, "home-user")} {
 		if !slices.Contains(rep.Env, want) {
 			t.Errorf("qory run did not get %s: %q", want, rep.Env)
 		}
+	}
+	if rep.HomeMode != 0o700 {
+		t.Errorf("qory run's HOME has the mode %v, want 0700", rep.HomeMode)
 	}
 	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("the dispatch's folder is still there: %v", err)
@@ -101,6 +105,38 @@ func TestADispatchRunsQoryRun(t *testing.T) {
 	}
 	if m := h.log.with(lineStarted); len(m) == 1 && m[0]["dispatch_id"] != d.ID {
 		t.Errorf("the start's line is %v", m[0])
+	}
+}
+
+// TestADispatchsHarnessHomeGoesWithItsFolder is a qory run that composes its harness
+// under its --home: the home is in the dispatch's folder, outside work/, while qory run
+// runs, and gone with the folder once it ended.
+func TestADispatchsHarnessHomeGoesWithItsFolder(t *testing.T) {
+	h := newHarness(t, 1)
+	h.script(script{Block: true, Compose: true})
+	h.srv.Offer(provisionertest.Run{})
+	h.start()
+	h.waitFor("the dispatch", func() bool { return len(h.srv.Dispatches()) == 1 })
+	d := h.only()
+	h.ready(d.ID)
+	dir := filepath.Join(h.state, "runs", d.ID)
+	home := filepath.Join(dir, "home", "work-x")
+	if _, err := os.Stat(filepath.Join(home, "harness.md")); err != nil {
+		t.Errorf("the harness is not in the dispatch's folder: %v", err)
+	}
+	if rel, err := filepath.Rel(filepath.Join(dir, "work"), home); err == nil && !strings.HasPrefix(rel, "..") {
+		t.Errorf("the home %s is inside work/", home)
+	}
+	h.letGo(d.ID)
+	h.settled(1)
+	if err := h.stop(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(home); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the home is still there: %v", err)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the dispatch's folder is still there: %v", err)
 	}
 }
 

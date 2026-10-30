@@ -1189,3 +1189,68 @@ func TestBuildPinsBuildKit(t *testing.T) {
 		})
 	}
 }
+
+// TestBuildBehindAWallPassesTheWallsProxies is a build behind a wall, whose docker
+// configuration has the run's proxies, as the wall's nested Docker writes it, and whose
+// bundle of authorities is in SSL_CERT_FILE and NODE_EXTRA_CA_CERTS: devcontainer build
+// reads a docker configuration with the proxies, so docker passes them to the build's
+// steps; every other docker command reads one without them, so docker create puts none
+// in the commands' container; and that container gets the proxies' variables and the
+// bundle, in both cases, from a folder bound read-only at /qory/proxy. A proxy with a
+// user is left out, with its line. A build that is not walled binds no such folder.
+func TestBuildBehindAWallPassesTheWallsProxies(t *testing.T) {
+	f := newFakes(t)
+	original := originalDockerConfig(t, `{"proxies":{"default":{"httpProxy":"http://172.30.0.1:3128","httpsProxy":"http://agent:`+secret+`@172.30.0.1:3128","noProxy":"localhost"}}}`)
+	t.Setenv("DOCKER_CONFIG", original)
+	bundle := filepath.Join(t.TempDir(), "ca-bundle.pem")
+	if err := os.WriteFile(bundle, []byte("-----BEGIN CERTIFICATE-----\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SSL_CERT_FILE", bundle)
+	t.Setenv("NODE_EXTRA_CA_CERTS", bundle)
+	f.set(t, "build.sh", `cat "$DOCKER_CONFIG/config.json" > `+f.dir+`/build-docker-config.json
+`)
+	f.set(t, "start.sh", `src=$(grep '^create' `+f.dir+`/docker.log | sed -n 's/.*source=\([^,]*\),target=\/qory\/proxy,readonly.*/\1/p')
+cat "$src/env" > `+f.dir+`/proxy-env
+cat "$src/ca.pem" > `+f.dir+`/proxy-ca
+`)
+	var out, log bytes.Buffer
+	o := options(t, repository(t, shopConfig), &out, &log)
+	o.Env, o.Walled, o.CABundle = os.Environ(), true, bundle
+	if _, err := prebuild.Build(t.Context(), o); err != nil {
+		t.Fatalf("Build: %v\n%s", err, out.String())
+	}
+	var built map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(f.read("build-docker-config.json")), &built); err != nil || built["proxies"] == nil {
+		t.Errorf("devcontainer build read %q: %v", f.read("build-docker-config.json"), err)
+	}
+	if strings.Contains(f.read("docker-config.json"), "proxies") {
+		t.Errorf("docker read %q", f.read("docker-config.json"))
+	}
+	wantEnv := "HTTP_PROXY=http://172.30.0.1:3128\nhttp_proxy=http://172.30.0.1:3128\nNO_PROXY=localhost\nno_proxy=localhost\n"
+	got := f.read("proxy-env")
+	if !strings.HasPrefix(got, wantEnv) || !strings.Contains(got, "SSL_CERT_FILE=/qory/proxy/ca.pem\n") || !strings.Contains(got, "NODE_EXTRA_CA_CERTS=/qory/proxy/ca.pem\n") ||
+		strings.Contains(got, "HTTPS_PROXY") || strings.Contains(got, secret) {
+		t.Errorf("the commands' proxy file is %q", got)
+	}
+	if f.read("proxy-ca") != "-----BEGIN CERTIFICATE-----\n" {
+		t.Errorf("the commands' bundle is %q", f.read("proxy-ca"))
+	}
+	if !strings.Contains(out.String(), "prebuild: HTTPS_PROXY holds an @") || strings.Contains(out.String()+log.String(), secret) {
+		t.Errorf("printed\n%s", out.String())
+	}
+	for _, l := range f.calls("docker") {
+		if strings.HasPrefix(l, "create") && (strings.Contains(l, "HTTP") || strings.Contains(l, "172.30.0.1")) {
+			t.Errorf("docker %s", l)
+		}
+	}
+	// Not walled: no folder is bound.
+	f = newFakes(t)
+	t.Setenv("DOCKER_CONFIG", original)
+	if _, err := prebuild.Build(t.Context(), options(t, repository(t, shopConfig), io.Discard, io.Discard)); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if f.called("docker", "create") && strings.Contains(strings.Join(f.calls("docker"), "\n"), "/qory/proxy") {
+		t.Error("a build that is not walled bound the proxy's folder")
+	}
+}

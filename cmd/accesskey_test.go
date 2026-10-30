@@ -103,10 +103,10 @@ func (s *enrolServer) keys() string {
 }
 
 // answer is the 201 for an access key of kind: the node nd_0123456789abcdef, the node
-// pool np_0123456789abcdef, the gateway ng_0123456789abcdef or the integration
-// na_0123456789abcdef, of the kind "adapter".
+// pool np_0123456789abcdef, the gateway ng_0123456789abcdef, the integration
+// na_0123456789abcdef, of the kind "adapter", or the diagnostics key dg_0123456789abcdef.
 func (s *enrolServer) answer(kind string) []byte {
-	id := map[string]string{"node": "nd_", "pool": "np_", "gateway": "ng_", "adapter": "na_"}[kind] + "0123456789abcdef"
+	id := map[string]string{"node": "nd_", "pool": "np_", "gateway": "ng_", "adapter": "na_", "diagnostics": "dg_"}[kind] + "0123456789abcdef"
 	return []byte(`{"version":1,"access_key_id":"ak_0123456789abcdef","node_id":"` + id + `","node_kind":"` + kind + `","stored_secrets":false,"apiary_public_key":` + s.keys() + `}`)
 }
 
@@ -123,7 +123,7 @@ func (s *enrolServer) refusal(code string, names ...string) {
 // code is an enrolment code of the server for a key of kind, in groups, carrying the
 // signer's fingerprint, and the next key's too when both is set.
 func (s *enrolServer) code(n byte, both bool) string {
-	prefix := map[string]string{"node": accesskey.CodePrefixNode, "pool": accesskey.CodePrefixPool, "gateway": accesskey.CodePrefixGateway, "adapter": accesskey.CodePrefixAdapter}[s.kind]
+	prefix := map[string]string{"node": accesskey.CodePrefixNode, "pool": accesskey.CodePrefixPool, "gateway": accesskey.CodePrefixGateway, "adapter": accesskey.CodePrefixAdapter, "diagnostics": accesskey.CodePrefixDiagnostics}[s.kind]
 	c := prefix + "F1XT-0RE0-0000-0000-0000-0000-0" + string('0'+n) + "." + s.signer.Fingerprint()
 	if both {
 		c += "." + s.next.Fingerprint()

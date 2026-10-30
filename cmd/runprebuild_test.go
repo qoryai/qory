@@ -8,9 +8,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
+	"slices"
 	"testing"
 
+	foragerwall "github.com/qoryai/forager/wall"
 	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/cmd"
@@ -20,6 +21,10 @@ import (
 
 // prebuildAgent is a wall.image pinned by its digest.
 const prebuildAgent = "registry.example.com/agents/qory@sha256:1111111111111111111111111111111111111111111111111111111111111111"
+
+// prebuildImages are wall.images with the image a prebuild runs in, and
+// wall.prebuild_image naming it, as lines of the wall section.
+const prebuildImages = "  images:\n    prebuild: {ref: registry.example.com/agents/prebuild@sha256:3333333333333333333333333333333333333333333333333333333333333333, runtime: sysbox-runc, docker: true}\n    go: {ref: registry.example.com/agents/go:1}\n  prebuild_image: prebuild\n"
 
 // prebuildDocuments is the contract's run/v1 documents fixture name, of the step
 // prebuild.
@@ -71,15 +76,17 @@ func prebuildFromCode(t *testing.T, documents json.RawMessage, wall string, err 
 
 // TestARunCodeForAPrebuildRunsTheBuild is a run code whose documents have step
 // prebuild, with and without environment_image, on a machine whose forager.yaml sets
-// machine and the wall's image by digest, user and helper: qory run says which gateway the run goes
-// through, and runs the prebuild once with the documents' run, inputs and places, the
-// run key, the machine and the wall settings, with qory's state and configuration directories,
-// while it holds the run's lock file, marked unwalled. Its end is qory run's: exit 0,
-// or exit 1 with its error.
+// machine, pool.registry and the wall's image by digest, user, helper and prebuild image:
+// qory run says which gateway the run goes through, and runs the prebuild once with the
+// documents' run, inputs and places, the run key, the machine, the registry and the wall
+// settings, the wall's helper among them, with the image of wall.prebuild_image as its
+// one image and qory's state and configuration directories, while it holds the run's
+// lock file, marked unwalled. No model key of forager.yaml reaches it. Its end is qory
+// run's: exit 0, or exit 1 with its error.
 func TestARunCodeForAPrebuildRunsTheBuild(t *testing.T) {
 	docker, _ := fakeDocker(t)
 	helper := staticELF(t)
-	wall := "machine: aws-ec2\nwall:\n  adapter: docker\n  image: " + prebuildAgent + "\n  images_allow: [registry.example.com/agents/]\n  command: " + docker + "\n  helper: " + helper + "\n  user: \"1000:1000\"\n"
+	wall := "machine: aws-ec2\npool:\n  registry: registry.example.com/targets\n  run_config: /srv/pool/runs\nwall:\n  adapter: docker\n  image: " + prebuildAgent + "\n  images_allow: [registry.example.com/agents/]\n  command: " + docker + "\n  helper: " + helper + "\n  user: \"1000:1000\"\n  cpus: \"2\"\n  ca_env: [NODE_EXTRA_CA_CERTS]\n" + prebuildImages
 	for _, name := range []string{"prebuild.json", "prebuild-environment-image.json"} {
 		t.Run(name, func(t *testing.T) {
 			documents := prebuildDocuments(t, name)
@@ -102,8 +109,17 @@ func TestARunCodeForAPrebuildRunsTheBuild(t *testing.T) {
 			}
 			s := got.settings
 			config, state := os.Getenv("XDG_CONFIG_HOME"), filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory")
-			if s.AgentImage != prebuildAgent || s.User != "1000:1000" || s.Helper != helper || s.RunConfig != config || s.State != state || s.Version == "" || s.Log == nil || s.Machine != "aws-ec2" {
+			if s.AgentImage != prebuildAgent || s.User != "1000:1000" || s.RunConfig != config || s.State != state || s.Version == "" || s.Log == nil || s.Machine != "aws-ec2" ||
+				s.Registry != "registry.example.com/targets" {
 				t.Errorf("the prebuild's settings are %+v", s)
+			}
+			d, ok := s.Wall.(*foragerwall.Docker)
+			if !ok || d.Helper != helper || d.User != "1000:1000" || d.Command != docker || !slices.Equal(d.CAEnv, []string{"NODE_EXTRA_CA_CERTS"}) {
+				t.Errorf("the prebuild's wall is %#v", s.Wall)
+			}
+			if s.Image != "prebuild" || len(s.Images) != 1 || s.Images[0].Name != "prebuild" || !s.Images[0].Docker || s.Images[0].Runtime != "sysbox-runc" ||
+				!slices.Equal(s.CAEnv, []string{"NODE_EXTRA_CA_CERTS"}) || len(s.Exec) == 0 || s.Exec[0] != "/qory/qory" || s.Limits.CPUs != "2" {
+				t.Errorf("the prebuild's image %q of %+v, CA %q, exec %q, limits %+v", s.Image, s.Images, s.CAEnv, s.Exec, s.Limits)
 			}
 			if got.lock != "unwalled\n" {
 				t.Errorf("the run's lock file contained %q during the prebuild, want unwalled", got.lock)
@@ -122,22 +138,18 @@ func TestARunCodeForAPrebuildRunsTheBuild(t *testing.T) {
 
 // TestARunCodeForAPrebuildNeedsTheWallSettings is a prebuild from a run code on a
 // machine whose forager.yaml lacks a setting the build takes: wall.image pinned by its
-// digest, wall.user or wall.helper. qory run stops after the redemption with the line
-// that names the three, exit 1, and runs no prebuild. A wall with no helper stops a run
-// before the redemption on any system but Linux, so that case runs on Linux alone.
+// digest, wall.user or wall.prebuild_image. qory run stops after the redemption with the
+// line that names the three, exit 1, and runs no prebuild.
 func TestARunCodeForAPrebuildNeedsTheWallSettings(t *testing.T) {
-	const want = "set wall.image, pinned by its digest, wall.user and wall.helper in forager.yaml: a prebuild from a run code builds with them; the code is used"
+	const want = "set wall.image, pinned by its digest, wall.user and wall.prebuild_image in forager.yaml: a prebuild from a run code builds with them; the code is used"
 	docker, _ := fakeDocker(t)
 	helper := staticELF(t)
 	for _, c := range []struct{ name, wall string }{
-		{"image by tag", "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: " + docker + "\n  helper: " + helper + "\n  user: \"1000:1000\"\n"},
-		{"no user", "wall:\n  adapter: docker\n  image: " + prebuildAgent + "\n  images_allow: [registry.example.com/agents/]\n  command: " + docker + "\n  helper: " + helper + "\n"},
-		{"no helper", "wall:\n  adapter: docker\n  image: " + prebuildAgent + "\n  images_allow: [registry.example.com/agents/]\n  command: " + docker + "\n  user: \"1000:1000\"\n"},
+		{"image by tag", "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: " + docker + "\n  helper: " + helper + "\n  user: \"1000:1000\"\n" + prebuildImages},
+		{"no user", "wall:\n  adapter: docker\n  image: " + prebuildAgent + "\n  images_allow: [registry.example.com/agents/]\n  command: " + docker + "\n  helper: " + helper + "\n" + prebuildImages},
+		{"no prebuild image", "wall:\n  adapter: docker\n  image: " + prebuildAgent + "\n  images_allow: [registry.example.com/agents/]\n  command: " + docker + "\n  helper: " + helper + "\n  user: \"1000:1000\"\n"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			if c.name == "no helper" && runtime.GOOS != "linux" {
-				t.Skip("a wall with no helper stops the run before the redemption here")
-			}
 			got, out, err, _ := prebuildFromCode(t, prebuildDocuments(t, "prebuild.json"), c.wall, nil)
 			if err == nil || err.Error() != want || cmd.ExitCode(err) != 1 {
 				t.Errorf("%v (exit %d), want %q, exit 1\n%s", err, cmd.ExitCode(err), want, out)
@@ -155,11 +167,11 @@ func TestARunCodeForAPrebuildNeedsTheWallSettings(t *testing.T) {
 // after the redemption with the line that starts with the fix and contains the file's
 // path, exit 1, runs no prebuild, and prints no secret.
 func TestARunCodeForAPrebuildNeedsAMachineWithoutAnAccessKey(t *testing.T) {
-	const want = "run the prebuild on a machine without an access key: this machine has an access key in %s, and a prebuild runs the target's build commands without a wall; the code is used"
+	const want = "run the prebuild on a machine without an access key: this machine has an access key in %s, and a prebuild fetches the target's code with git on this machine, outside the wall; the code is used"
 	const secret = "qak_0123456789abcdef0123456789abcdef"
 	docker, _ := fakeDocker(t)
 	helper := staticELF(t)
-	wall := "wall:\n  adapter: docker\n  image: " + prebuildAgent + "\n  images_allow: [registry.example.com/agents/]\n  command: " + docker + "\n  helper: " + helper + "\n  user: \"1000:1000\"\n"
+	wall := "wall:\n  adapter: docker\n  image: " + prebuildAgent + "\n  images_allow: [registry.example.com/agents/]\n  command: " + docker + "\n  helper: " + helper + "\n  user: \"1000:1000\"\n" + prebuildImages
 	var file string
 	got, out, err, _ := prebuildFromCode(t, prebuildDocuments(t, "prebuild.json"), wall, nil, func(g *codeRelay) {
 		file = filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", foragerdir.SecretFile)

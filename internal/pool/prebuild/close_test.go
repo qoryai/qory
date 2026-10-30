@@ -17,12 +17,18 @@ import (
 )
 
 // closing is a run open at a gateway in this process, which records each close and
-// what Forager's Run.Close returned for it.
+// what Forager's Run.Close returned for it. Its join is the fake join of e: no wall runs
+// in a test.
 type closing struct {
 	*session.Run
+	e      *env
 	outs   []session.Outcome
 	closed []*session.Closed
 	errs   []error
+}
+
+func (c *closing) Join(ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
+	return c.e.join(ctx, spec)
 }
 
 func (c *closing) Close(ctx context.Context, out session.Outcome) (*session.Closed, error) {
@@ -64,8 +70,10 @@ func (e *events) of(t *testing.T, typ string) []map[string]any {
 	return got
 }
 
-// throughGateway makes e's launch open its run at a gateway in this process, and
-// returns the gateway's events and what returns the run once it is open.
+// throughGateway makes e's launch open its run at a gateway in this process, with no
+// wall, and returns the gateway's events and what returns the run once it is open. The
+// gateway in this process applies no server's run configuration, so the run's policy is
+// taken as the server's.
 func throughGateway(t *testing.T, e *env) (*events, func() *closing) {
 	t.Helper()
 	evs := &events{}
@@ -78,14 +86,16 @@ func throughGateway(t *testing.T, e *env) (*events, func() *closing) {
 		defer cancel()
 		g.Close(ctx)
 	})
+	t.Cleanup(prebuild.SetPolicySource(func(string) string { return "fetched" }))
 	var run *closing
 	e.settings.Open = func(ctx context.Context, spec session.OpenSpec) (prebuild.Opened, error) {
 		spec.Gateway = session.LocalGateway(g.LocalLink())
+		spec.Wall, spec.Image, spec.Images, spec.CAEnv = nil, "", nil, nil
 		r, err := session.Open(ctx, spec)
 		if err != nil {
 			return nil, err
 		}
-		run = &closing{Run: r}
+		run = &closing{Run: r, e: e}
 		return run, nil
 	}
 	return evs, func() *closing { return run }

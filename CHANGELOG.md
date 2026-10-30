@@ -73,10 +73,11 @@ release may change what an existing document does, and states it under Upgrading
   `qory config` lists the path alone.
 - A walled run whose policy names its image by a reference pinned by digest fetches the
   image in an `image` step of the run's record, after the compose and before the setup
-  and the agent; Forager pulls it unless the engine holds it by that digest. An image its
-  registry does not have closes the run `failed` with `image_missing`, and an image whose
-  user is root with `image_user_root`; `qory run` exits 1 with a line that starts with
-  the fix.
+  and the agent. Forager requests the image's manifest from its registry through the
+  run's proxy, then the engine pulls the image, also when it holds it by that digest, so
+  the run's policy must allow the registry's host. An image its registry does not have
+  closes the run `failed` with `image_missing`, and an image whose user is root with
+  `image_user_root`; `qory run` exits 1 with a line that starts with the fix.
 - `wall.setup` in forager.yaml: where the setup of a walled run from a control plane
   runs, `outside`, the default, in a separate container of the run's image on the wall's
   network, or `inside`, in the agent's container before the agent.
@@ -126,9 +127,32 @@ release may change what an existing document does, and states it under Upgrading
   stack, for the run's runtime: `run_settings.runtime`, or `claude` when the documents
   have no run settings. The `workflows.<name>.time_limit` of that stack applies to the
   run, as a base's does.
+- `QORY_STATUS_FD=<n>` makes `qory run` also write qory's lines, masked, to the open
+  descriptor `<n>`: the `✓`, `✗` and `⚠` lines, every `qory run:` line, Forager's lines
+  among them, and the last error line, an error of the flags included, each only when
+  stderr shows it too, and none of the agent's output or of a prebuild's lines. The
+  lines there have no colour. qory removes the variable from its environment and marks
+  the descriptor close-on-exec. Linux and macOS only. See The run key from a run code in
+  `docs/run.md`.
+- Print a run's diagnostics document from Qory Apiary with `qory apiary run diagnose
+  <run id>`. qory signs the request with the diagnostics key in
+  `~/.config/qory/apiary/<host>/` and prints the document to stdout only after its
+  signature verifies under the server key pinned there. Pass `--server <url>` when keys
+  for several servers are on this computer. See `docs/apiary.md`.
+- Make and enrol that diagnostics key with `qory apiary enrol <server> <code>`, using a
+  `qecd_` code an instance admin issues under Instance settings > Diagnostics keys in
+  Qory Apiary. qory writes the key to `~/.config/qory/apiary/<host>/` and never to
+  `forager.yaml`. If the command stops after Qory Apiary enrolled the key, the same
+  command finishes the enrolment without sending the code again.
 
 ### Changed
 
+- With `wall.engine_proxy_file` set, a run's wall creates the agent's and the relay's
+  containers with `--pull=never`: a missing one of those images fails the run with
+  `Pull the image on this machine before you set the engine proxy: …`. Pull them, and
+  the image of `wall.prebuild_image`, on the host before a run; a missing prebuild image
+  fails the prebuild with the engine's error for the pull. See The engine proxy in
+  `docs/run.md`.
 - The line of a run from a run code whose time limit came before the runtime started
   contains `the workspace's harness` for a harness document that defines a stack, and `the
   checkout's harness or the base it extends` for a run whose documents contain no
@@ -194,23 +218,36 @@ release may change what an existing document does, and states it under Upgrading
   line of a run's output that contains one, and it sends Qory Apiary no request that
   contains one.
 - A run from a run code whose documents have the step `prebuild` builds the image of the
-  run's target in `qory run`, on a machine without an access key, in two steps:
-  the environment image from the development container configuration, tagged
-  `<environment_destination>:<run id>`, then the target image from it, with the agent
-  added, tagged `<image_destination>:<run id>`. qory pushes the
-  environment image, when the build keeps one apart and the documents set no
-  `environment_image`, then the target image. It writes the run's `dev.qory.run.built`
-  with the target image by digest; with the environment image by digest when qory
-  pushed one or the build started from `environment_image`; and with the base image by
-  digest when the build resolved the image its target step starts from. Then it closes
-  the run. The build pulls the base image by digest first, with `prebuild: pulled the
-  base image <name>@sha256:<digest> in <n>s`.
+  run's target behind the wall of its run, on a machine without an access key. qory
+  opens the run with the wall, in the image of `wall.images` that the new setting
+  `wall.prebuild_image` is set to, one with `docker: true` and a runtime such as
+  `sysbox-runc`; `images/prebuild` defines Qory's, `agent-docker` with the `devcontainer`
+  command 0.89.0 and Docker's `buildx` plugin. qory fetches the run's repositories on this
+  machine, then one session runs `qory run prebuild-step` behind the wall, which builds
+  on the wall's nested Docker in two steps: the environment image from the development
+  container configuration, tagged `<environment_destination>:<run id>`, then the target
+  image from it, with the agent added, tagged `<image_destination>:<run id>`. It pushes
+  the environment image, when the build keeps one apart and the documents set no
+  `environment_image`, then the target image, through the run's proxy with no login, and
+  writes the result to `out/result.json`. qory reads the result and writes the run's
+  `dev.qory.run.built` with the target image by digest; with the environment image by
+  digest when one was pushed or the build started from `environment_image`; and with the
+  base image by digest when the build resolved the image its target step starts from.
+  Then it closes the run. The build pulls the base image by digest first, with
+  `prebuild: pulled the base image <name>@sha256:<digest> in <n>s`. This machine's
+  Docker engine builds and keeps none of the images, and its registry logins are not
+  read. The build's steps get the run's proxy as Docker's predefined build arguments,
+  and the configuration's commands from a folder bound read-only at `/qory/proxy`, so
+  `ssh`, `git://`, UDP and a base image from a host outside the run's egress fail.
   An environment image or standard image that the build starts from must not set access
   to the host in its `devcontainer.metadata` label, nor the variables that change what
   the agent does. When the documents' `environment_image` is not in its registry, qory
-  closes the run as failed with the reason `image_missing`. The build takes `wall.image`,
-  pinned by its digest, `wall.user` and `wall.helper` from `forager.yaml`; without them,
-  qory stops with `set wall.image, pinned by its digest, wall.user and wall.helper in
+  closes the run as failed with the reason `image_missing`. qory stops a prebuild whose
+  policy is not the one of the run configuration Qory Apiary serves for the workspace,
+  before anything is fetched, and, when `forager.yaml` sets `pool.registry`, one whose
+  destinations are not under it. The build takes `wall.image`, pinned by its digest,
+  `wall.user` and `wall.prebuild_image` from `forager.yaml`; without them, qory stops with
+  `set wall.image, pinned by its digest, wall.user and wall.prebuild_image in
   forager.yaml: a prebuild from a run code builds with them; the code is used`.
 - `qory run` composes the harness before the agent starts, as `qory harness compose`
   does, into the same home, and takes its `-f`/`--file`, `--model` and `--tier`. It prints
@@ -398,6 +435,12 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Fixed
 
+- A walled run whose checkout or read-write mount is your home folder or qory's state
+  directory, or a folder that contains either, stops with exit 2 before anything starts,
+  as `start the walled run from a repository folder: its checkout <path> is your home
+  folder, …` or `mount a narrower folder: the mount <path> is your home folder, …`. Until
+  now, the run recorded the folder as a place it may write, and qory then stopped `git`
+  commands in every repository under the home folder.
 - A run from a run code mounts its inputs from a `qory-inputs-` folder, so the wall no
   longer stops the run as it mounts a folder that Forager reserves for its record
   sockets.
@@ -476,6 +519,50 @@ release may change what an existing document does, and states it under Upgrading
 - qory builds with Go 1.27.3, whose `crypto/x509` returns an error for the intermediate
   certificates that Go no longer trusts (GO-2026-6809, CVE-2026-111943). go.mod requires
   Go 1.27.3, and `agent-go` and `agent-go-docker` have Go 1.27.3 in place of 1.27.1.
+- `qory run pool` starts each run with `--home <the run's folder>/home`, so the run
+  composes its harness in the run's folder, outside `work/`, and the pool removes the
+  harness with the folder once the run ends. Before, the harness home of a pool's run
+  stayed under `qory/homes` in the cache directory after the run.
+- Before its first claim, `qory run pool` runs one container from `wall.image` on the
+  engine's default bridge network, which tries `169.254.169.254:80` and
+  `[fd00:ec2::254]:80` for 2 seconds each. If either connects, or the check cannot run,
+  the pool exits 1 and claims no run. Drop both addresses in the host's raw table, on
+  PREROUTING and OUTPUT, before Docker starts, and pull `wall.image` before the pool
+  starts: the check never pulls it. See Runs of a node pool in `docs/run.md`.
+- `qory run pool` gives each run an empty `HOME` in the run's folder, mode `0700`, which
+  it removes with the folder, so no run reads the registry logins, Docker settings or git
+  configuration under the pool user's `HOME`. It stops with exit 2 when the runs'
+  `forager.yaml` sets `wall.mounts`, which every run would see.
+- With `pool.runs` above 1, `qory run pool` stops with exit 2 unless the runs'
+  `forager.yaml` sets both `wall.pids_limit` and `wall.memory`.
+- `qory run pool` stops with exit 2 when the runs' `forager.yaml` sets no
+  `wall.engine_proxy_file`, so the engine pulls each run's image through the run's
+  gateway.
+- A walled run's image step holds an exclusive lock of `wall.engine_proxy_file`, waiting
+  for it within the run's time limit, so one run at a time pulls through the engine's
+  proxy. Replace the file only while no run is going.
+- `qory run` prints `***` in place of a URL's `X-Amz-Signature`, `X-Amz-Security-Token`,
+  `Signature`, `sig`, `token` or `access_token` value in its `qory run: fetched` lines,
+  in the errors of a fetch and in the last error line. A run given a run key or a run
+  code also prints `***` there in place of each query value of a harness source's URL.
+  See Secret values in qory's lines in `docs/run.md`.
+- `qory run` prints `***` in place of each value of `--env` and `wall.env`, the run
+  code, the run key, the access key's secret, `QORY_SERVER_SECRET`, the passwords of the
+  run's proxies and the values of an in-process gateway's credentials from `env` or
+  `file`, each of 8 bytes or more, and of each line of them. It masks its lines, the
+  lines of the fetch and of the compose, and their lines in the run's record. A value
+  split across two writes is masked whole. `qory run prepare`, `qory run prebuild-step`
+  and `qory run pool` mask a URL's signature or token in their output, and `qory run
+  pool` also the access key's secret. See Secret values in qory's lines in
+  `docs/run.md`.
+- `qory run` also prints `***` in place of a whole key of a shape that Forager lists,
+  such as one that starts with `ghp_`, `sk-ant-` or `AKIA`. It gives its mask list to
+  Forager's session, which masks with it the agent's output, on pipes and on a terminal,
+  the output of the setup commands, and the run's record and events, and adds the
+  server's variables.
+- A walled run given a run key stops with exit 2 when `--env` or `wall.env` passes a forge
+  token's variable of Forager's deny list, such as `GH_TOKEN`: `remove GH_TOKEN from
+  --env: a walled run given a run key takes a forge token only through the gateway`.
 
 ## [0.13.0] - 2026-10-13
 

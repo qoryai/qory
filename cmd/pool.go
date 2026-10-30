@@ -72,8 +72,12 @@ func newPool() *cobra.Command {
 		Long: `Run this machine as a node pool's program, until it is stopped. It claims the pool's
 dispatches from Qory Apiary with the pool's access key, and starts each with the command
 that runs on a machine a provisioner creates: qory run --run-code-file /dev/fd/3
---gateway <gateway_url>, with the run code in a file that no name links to. The pool's
-access key does not reach the run, and each run reports its outcome to Qory Apiary.
+--gateway <gateway_url>, with the run code in a file that no name links to, and with
+--home <the run's folder>/home, which the pool removes with the run's folder once the
+run ends. The pool's access key does not reach the run, and each run reports its outcome
+to Qory Apiary. Before its first claim, it runs one container from wall.image on the
+engine's default bridge network, and exits 1 when the container connects to the cloud
+metadata service, 169.254.169.254:80 or [fd00:ec2::254]:80, or the check cannot run.
 While a run runs, the pool sends dispatched every 60 s. It stops the run when Qory
 Apiary ends the dispatch or the claim's max_lifetime_minutes pass. Once the run ends,
 the pool uploads the run's output as the dispatch's machine log: at most the last
@@ -125,9 +129,10 @@ stops it: it claims no new run, stops the runs it started, and exits 0.`,
 // loadPool reads forager.yaml, which must define a server and a pool section, and checks
 // the pool section's run_config: a directory a run given a run key starts with,
 // as [behindGateway] has it: its qory folder holds no access key, and its forager.yaml,
-// which is read, has no gateway section, and has a wall section whose wall.image is pinned
-// by its digest and whose wall.images_allow covers the images the builds push under
-// pool.registry. Neither forager.yaml sets gateway.server.via, as [directly] has it.
+// which is read, has no gateway section, and has a wall section that sets no wall.mounts,
+// whose wall.image is pinned by its digest and whose wall.images_allow covers the images
+// the builds push under pool.registry, that sets wall.engine_proxy_file, and, with
+// pool.runs above 1, both wall.pids_limit and wall.memory. Neither forager.yaml sets gateway.server.via, as [directly] has it.
 // Each refusal is input.
 func loadPool() (*poolSettings, error) {
 	r, err := config.LoadForager()
@@ -175,6 +180,9 @@ func loadPool() (*poolSettings, error) {
 	if runs.Wall == nil {
 		return nil, input(fmt.Errorf("%s: pool.run_config is %s, whose forager.yaml sets no wall; each run starts behind the wall it sets", r.File, p.RunConfig))
 	}
+	if len(runs.Wall.Mounts) > 0 {
+		return nil, input(fmt.Errorf("remove wall.mounts from %s: every run of the pool would see the paths it lists, so the runs would share them", runs.File))
+	}
 	if runs.Wall.Image == "" {
 		return nil, input(fmt.Errorf("%s: pool.run_config is %s, whose forager.yaml's wall sets no image; give it one pinned by its digest, name@sha256: and 64 lower-case hexadecimal digits", r.File, p.RunConfig))
 	}
@@ -183,6 +191,12 @@ func loadPool() (*poolSettings, error) {
 	}
 	if _, ok := policy.ImageAllowed(runs.Wall.ImagesAllow, p.Registry+"/x"+poolSampleDigest); !ok {
 		return nil, input(fmt.Errorf("%s: pool.run_config is %s, whose forager.yaml's wall.images_allow does not cover pool.registry; a run could not start the image built for it", r.File, p.RunConfig))
+	}
+	if p.Runs > 1 && (runs.Wall.PIDs == 0 || runs.Wall.Memory == "") {
+		return nil, input(fmt.Errorf("set wall.pids_limit and wall.memory in %s: with pool.runs above 1, runs share this machine, and a run without both limits can take the processes and memory the others need", runs.File))
+	}
+	if runs.Wall.EngineProxyFile == "" {
+		return nil, input(fmt.Errorf("set wall.engine_proxy_file in %s, as The engine proxy in docs/run.md shows: without it, the engine pulls each run's image over this machine's network, not through the run's gateway", runs.File))
 	}
 	return &poolSettings{Forager: r, Pool: p, Runs: runs}, nil
 }
@@ -262,16 +276,28 @@ func runPool(ctx context.Context, s *poolSettings, key *accesskey.Key, pin acces
 }
 
 // poolLoop is the loop [runPool] runs with s, key and pin, logging to log: it reaches the
-// server directly for every call. Each qory run it starts is this binary.
+// server directly for every call, and checks the cloud metadata service with the runs'
+// wall first, [poolProbe]. Each qory run it starts is this binary.
 func poolLoop(s *poolSettings, key *accesskey.Key, pin accesskey.Pin, log *slog.Logger) *pool.Pool {
 	return &pool.Pool{
-		Settings: pool.Settings{Runs: s.Pool.Runs, State: s.State, RunConfig: s.Pool.RunConfig},
+		Settings: pool.Settings{Runs: s.Pool.Runs, State: s.State, RunConfig: s.Pool.RunConfig, Probe: poolProbe(s.Runs)},
 		Client: &provisioner.Client{
 			URL: strings.TrimSuffix(s.Forager.Server.URL, "/"), KeyID: s.Forager.Server.AccessKeyID, Key: key, Pin: pin,
 			InstanceID: s.InstanceID, UserAgent: userAgent(), Log: log,
 		},
 		Log: log,
 	}
+}
+
+// poolProbe is the check of the cloud metadata service with the wall of the runs'
+// forager.yaml r: its command, its image, which [loadPool] requires pinned by its
+// digest, and its user. [loadPool] returns no settings whose r is nil or has no wall;
+// for such an r, the check has no image, and docker run fails.
+func poolProbe(r *config.Forager) pool.Probe {
+	if r == nil || r.Wall == nil {
+		return pool.Probe{}
+	}
+	return pool.Probe{Docker: r.Wall.Command, Image: r.Wall.Image, User: r.Wall.User}
 }
 
 // noCoreDumps turns core dumps off for qory run pool, first: [pool.NoCoreDumps]; a test

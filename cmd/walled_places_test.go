@@ -99,6 +99,281 @@ func TestAWalledRunRecordsItsPlacesBeforeTheSession(t *testing.T) {
 	}
 }
 
+// homeLine is the line of a walled run whose checkout at root relates to the home folder
+// by relation: "is your home folder", or "contains your home folder" and its path.
+func homeLine(root, relation string) string {
+	return "start the walled run from a repository folder: its checkout " + root + " " + relation + ", and a walled run may change any file in its checkout, so qory would stop running git in every repository under the checkout"
+}
+
+// stateLine is the line of a walled run whose checkout at root relates to qory's state
+// directory by relation: "is qory's state directory", or "contains qory's state
+// directory" and its path.
+func stateLine(root, relation string) string {
+	return "start the walled run from a repository folder: its checkout " + root + " " + relation + ", and a walled run may change any file in its checkout, the record of the places walled runs used among them"
+}
+
+// TestAWalledRunFromTheHomeFolderStopsFirst starts a walled run in a home folder that is
+// a git checkout: it exits 2 with the line, before any container starts and before any
+// place or run is recorded, and a repository under the home folder composes afterwards.
+func TestAWalledRunFromTheHomeFolderStopsFirst(t *testing.T) {
+	repo := newCheckout(t)
+	copyFixture(t, "two-modules", repo)
+	home := tempDir(t)
+	t.Setenv("HOME", home)
+	runGit(t, home, "init", "--quiet")
+	copyFixture(t, "two-modules", home)
+	composedForFake(t, repo, "claude")
+	log := walledSection(t)
+	t.Chdir(home)
+	if out, err := run(t, "harness", "compose", "--runtime", "claude", "--no-links"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err == nil || err.Error() != homeLine(home, "is your home folder") || cmd.ExitCode(err) != cmd.ExitInput {
+		t.Fatalf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	if data, err := os.ReadFile(log); err == nil && strings.Contains(string(data), "places: ") {
+		t.Errorf("a container started:\n%s", data)
+	}
+	if recs, err := places.Load(); err != nil || len(recs) != 0 {
+		t.Errorf("the stopped run left the records of places %+v, %v", recs, err)
+	}
+	if ids := recorded(t, home); len(ids) != 0 {
+		t.Errorf("the stopped run left records %v", ids)
+	}
+	t.Chdir(repo)
+	if out, err := run(t, "harness", "compose", "--runtime", "claude", "--no-links"); err != nil {
+		t.Errorf("a repository under the home folder: %v\n%s", err, out)
+	}
+}
+
+// TestAWalledRunCodeFromTheHomeFolderStopsFirst starts a walled run from a run code in a
+// home folder that is the checkout: it exits 2 with the line, and the code is not sent.
+func TestAWalledRunCodeFromTheHomeFolderStopsFirst(t *testing.T) {
+	root := runKeyCheckout(t)
+	walledSection(t)
+	// harness.home puts the composed harness outside the checkout. Its default, under the
+	// cache directory, is under HOME on macOS, and the check of a home inside the folder
+	// the run runs in would stop the run first.
+	user := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "qory.yaml")
+	data, err := os.ReadFile(user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, user, string(data)+"  home: "+filepath.Join(tempDir(t), "homes")+"\n")
+	t.Setenv("HOME", root)
+	g := newCodeRelay(t)
+	file := codeFile(t, g.code())
+	out, err := run(t, "run", "--run-code-file", file, "--gateway", g.URL)
+	if err == nil || err.Error() != homeLine(root, "is your home folder") || cmd.ExitCode(err) != cmd.ExitInput {
+		t.Fatalf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	if n := len(g.sent()); n != 0 {
+		t.Errorf("the stopped run sent the code %d times", n)
+	}
+}
+
+// TestAWalledRunUnderTheHomeFolderRuns starts a walled run in a repository under the
+// home folder: the run starts, and its checkout is recorded.
+func TestAWalledRunUnderTheHomeFolderRuns(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	t.Setenv("HOME", filepath.Dir(root))
+	composedForFake(t, root, "claude")
+	walledSection(t)
+	if out, err := run(t, "run", "claude", "--", "-p", "hi"); cmd.ExitCode(err) != 4 {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if r, err := places.Get(root); err != nil || r == nil || r.Kind != places.KindCheckout {
+		t.Errorf("the checkout's record %+v, %v", r, err)
+	}
+}
+
+// mountHomeLine is the line of a walled run whose read-write mount at path relates to
+// the home folder by relation: "is your home folder", or "contains your home folder" and
+// its path.
+func mountHomeLine(path, relation string) string {
+	return "mount a narrower folder: the mount " + path + " " + relation + ", and a walled run may change any file in a read-write mount, so qory would stop running git in every repository under the mount"
+}
+
+// mountStateLine is the line of a walled run whose read-write mount at path relates to
+// qory's state directory by relation: "is qory's state directory", or "contains qory's
+// state directory" and its path.
+func mountStateLine(path, relation string) string {
+	return "mount a narrower folder: the mount " + path + " " + relation + ", and a walled run may change any file in a read-write mount, the record of the places walled runs used among them"
+}
+
+// TestAWalledRunWithAMountOfTheHomeFolderStopsFirst runs behind the fake wall with a
+// read-write mount of the home folder: it exits 2 with the line, before any container
+// starts and before any place or run is recorded. A read-only mount of the home folder
+// passes that check, and is not recorded; Forager then stops the run with
+// mount_contains_forager_files. A read-write mount of a repository under the home folder
+// runs, and is recorded.
+func TestAWalledRunWithAMountOfTheHomeFolderStopsFirst(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, "claude")
+	log := walledSection(t)
+	home := tempDir(t)
+	t.Setenv("HOME", home)
+	repo := filepath.Join(home, "app")
+	if err := os.Mkdir(repo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "init", "--quiet")
+	out, err := run(t, "run", "claude", "--mount", home, "--", "-p", "hi")
+	if err == nil || err.Error() != mountHomeLine(home, "is your home folder") || cmd.ExitCode(err) != cmd.ExitInput {
+		t.Fatalf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	if data, err := os.ReadFile(log); err == nil && strings.Contains(string(data), "places: ") {
+		t.Errorf("a container started:\n%s", data)
+	}
+	if recs, err := places.Load(); err != nil || len(recs) != 0 {
+		t.Errorf("the stopped run left the records of places %+v, %v", recs, err)
+	}
+	if ids := recorded(t, root); len(ids) != 0 {
+		t.Errorf("the stopped run left records %v", ids)
+	}
+	if out, err := run(t, "run", "claude", "--mount", home+":ro", "--", "-p", "hi"); err == nil || cmd.ExitCode(err) != 1 || !strings.Contains(err.Error(), "(mount_contains_forager_files)") {
+		t.Fatalf("a read-only mount of the home folder: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	if r, err := places.Get(home); err != nil || r != nil {
+		t.Errorf("the read-only mount of the home folder is recorded: %+v, %v", r, err)
+	}
+	if out, err := run(t, "run", "claude", "--mount", repo, "--", "-p", "hi"); cmd.ExitCode(err) != 4 {
+		t.Fatalf("a mount of a repository under the home folder: %v\n%s", err, out)
+	}
+	if r, err := places.Get(repo); err != nil || r == nil || r.Kind != places.KindMount {
+		t.Errorf("the mount's record %+v, %v", r, err)
+	}
+}
+
+// TestWalledPlacesStopsAtTheHomeAndStateFolders checks the checkouts and the read-write
+// mounts a walled run stops at: the home folder, an ancestor of it, the root, a link to
+// the home folder, qory's state directory and an ancestor of it. A folder under the home
+// folder, a folder inside the state directory, and a read-only mount of the home folder
+// or the state directory pass.
+func TestWalledPlacesStopsAtTheHomeAndStateFolders(t *testing.T) {
+	emptyDir(t)
+	base := tempDir(t)
+	home := filepath.Join(base, "users", "me")
+	stateHome := filepath.Join(base, "state")
+	state := filepath.Join(stateHome, "qory")
+	link := filepath.Join(base, "link")
+	app := filepath.Join(home, "app")
+	inside := filepath.Join(state, "pool", "run")
+	for _, d := range []string{app, inside} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(home, link); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", stateHome)
+	for _, c := range []struct {
+		path            string
+		checkout, mount string
+	}{
+		{home, homeLine(home, "is your home folder"), mountHomeLine(home, "is your home folder")},
+		{filepath.Dir(home), homeLine(filepath.Dir(home), "contains your home folder "+home), mountHomeLine(filepath.Dir(home), "contains your home folder "+home)},
+		{"/", homeLine("/", "contains your home folder "+home), mountHomeLine("/", "contains your home folder "+home)},
+		{link, homeLine(link, "is your home folder"), mountHomeLine(link, "is your home folder")},
+		{state, stateLine(state, "is qory's state directory"), mountStateLine(state, "is qory's state directory")},
+		{stateHome, stateLine(stateHome, "contains qory's state directory "+state), mountStateLine(stateHome, "contains qory's state directory "+state)},
+		{app, "", ""},
+		{inside, "", ""},
+	} {
+		for _, k := range []struct {
+			what, want string
+			err        error
+		}{
+			{"checkout", c.checkout, cmd.WalledPlaces(c.path, nil)},
+			{"mount", c.mount, cmd.WalledPlaces(app, []wall.Mount{{Path: app}, {Path: c.path}})},
+			{"read-only mount", "", cmd.WalledPlaces(app, []wall.Mount{{Path: app}, {Path: c.path, ReadOnly: true}})},
+		} {
+			if k.want == "" {
+				if k.err != nil {
+					t.Errorf("%s %s: %v", k.what, c.path, k.err)
+				}
+				continue
+			}
+			if k.err == nil || k.err.Error() != k.want || cmd.ExitCode(k.err) != cmd.ExitInput {
+				t.Errorf("%s %s: %v (exit %d)\nwant %s", k.what, c.path, k.err, cmd.ExitCode(k.err), k.want)
+			}
+		}
+	}
+}
+
+// TestWalledPlacesResolvesALinkAboveAStateDirectoryNotThereYet sets XDG_STATE_HOME to a
+// folder below a link to the checkout, before the state directory exists: the checkout
+// contains it where the link leads, and the run stops.
+func TestWalledPlacesResolvesALinkAboveAStateDirectoryNotThereYet(t *testing.T) {
+	emptyDir(t)
+	root := tempDir(t)
+	link := filepath.Join(tempDir(t), "link")
+	if err := os.Symlink(root, link); err != nil {
+		t.Fatal(err)
+	}
+	stateHome := filepath.Join(link, "state")
+	t.Setenv("XDG_STATE_HOME", stateHome)
+	want := stateLine(root, "contains qory's state directory "+filepath.Join(stateHome, "qory"))
+	if err := cmd.WalledPlaces(root, nil); err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
+		t.Errorf("%v (exit %d)\nwant %s", err, cmd.ExitCode(err), want)
+	}
+}
+
+// TestWalledPlacesComparesALinkInsideAsWritten sets HOME, and then XDG_STATE_HOME, to a
+// link inside the checkout, and then inside a read-write mount, that leads out of it:
+// the folder lies in the place as written, and the run stops.
+func TestWalledPlacesComparesALinkInsideAsWritten(t *testing.T) {
+	emptyDir(t)
+	base := tempDir(t)
+	co, mnt, app, out := filepath.Join(base, "co"), filepath.Join(base, "mnt"), filepath.Join(base, "app"), filepath.Join(base, "out")
+	for _, d := range []string{co, mnt, app, out} {
+		if err := os.Mkdir(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, d := range []string{co, mnt} {
+		if err := os.Symlink(out, filepath.Join(d, "link")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stateHome := os.Getenv("XDG_STATE_HOME")
+	for _, c := range []struct {
+		home, state, want string
+		err               func() error
+	}{
+		{filepath.Join(co, "link"), stateHome, homeLine(co, "contains your home folder "+filepath.Join(co, "link")), func() error { return cmd.WalledPlaces(co, nil) }},
+		{filepath.Join(mnt, "link"), stateHome, mountHomeLine(mnt, "contains your home folder "+filepath.Join(mnt, "link")), func() error { return cmd.WalledPlaces(app, []wall.Mount{{Path: app}, {Path: mnt}}) }},
+		{out, filepath.Join(co, "link"), stateLine(co, "contains qory's state directory "+filepath.Join(co, "link", "qory")), func() error { return cmd.WalledPlaces(co, nil) }},
+		{out, filepath.Join(mnt, "link"), mountStateLine(mnt, "contains qory's state directory "+filepath.Join(mnt, "link", "qory")), func() error { return cmd.WalledPlaces(app, []wall.Mount{{Path: app}, {Path: mnt}}) }},
+	} {
+		t.Setenv("HOME", c.home)
+		t.Setenv("XDG_STATE_HOME", c.state)
+		if err := c.err(); err == nil || err.Error() != c.want || cmd.ExitCode(err) != cmd.ExitInput {
+			t.Errorf("HOME=%s XDG_STATE_HOME=%s: %v (exit %d)\nwant %s", c.home, c.state, err, cmd.ExitCode(err), c.want)
+		}
+	}
+}
+
+// TestWalledPlacesSkipsARelativeHome sets HOME to a relative path: it is not compared,
+// so a checkout that contains the folder the path leads to from the working folder
+// passes.
+func TestWalledPlacesSkipsARelativeHome(t *testing.T) {
+	dir := emptyDir(t)
+	if err := os.MkdirAll(filepath.Join(dir, "rel", "home"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_STATE_HOME", filepath.Join(tempDir(t), "state"))
+	t.Setenv("HOME", filepath.Join("rel", "home"))
+	if err := cmd.WalledPlaces(dir, nil); err != nil {
+		t.Error(err)
+	}
+}
+
 // TestEveryVerbStopsAtTheRefusal records the checkout, adds a key since, and has every
 // verb that runs git there stop with the approved line and exit 1 before it does
 // anything: the run starts no session and leaves no record of a run.

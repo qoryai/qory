@@ -256,6 +256,73 @@ The session runs on pipes instead, and `qory` reads the runtime's structured out
   Claude Code. With it the runtime has no interface anyway, so
   `qory run claude -- -p '…'` needs no flag.
 
+### Secret values in qory's lines
+
+`qory run` keeps a mask list of the run's secret values. As it reads each value, it adds
+the value to the list:
+
+- the value of each `--env` variable and of each `wall.env` variable;
+- the run code and the run key, from `--run-code-file`, `--run-key-fd`, `QORY_RUN_KEY`,
+  the answer to the run code, or the registration through `gateway.server.via`;
+- the values of `QORY_ACCESS_KEY_SECRET`, `QORY_SERVER_SECRET` and `QORY_RUN_KEY`, which
+  qory reads as it starts, in every run;
+- the access key's secret from `--access-key-secret-fd`, in every run, and from the
+  `access-key-secret` file when qory signs its requests to the server with it;
+- the password of the run's host proxy, of its stack proxy and of
+  `wall.engine_proxy_file`;
+- for a run given a run key or a run code, the query values of each harness source's URL,
+  before qory fetches the source through the stack proxy;
+- for a run whose gateway runs in the `qory run` process, the value of each credential of
+  `gateway.credentials` whose `env` or `file` qory can read.
+
+qory adds each line of a value with several lines too, without the spaces around it. It
+prints `***` in place of:
+
+- each value of the mask list, as it is, percent-encoded or JSON-escaped;
+- the value of a URL query parameter named `X-Amz-Signature`, `X-Amz-Security-Token`,
+  `Signature`, `sig`, `token` or `access_token`, its ASCII letters in any case;
+- a whole key of a shape that Forager's mask package lists, such as a GitHub token that
+  starts with `ghp_`, an Anthropic key that starts with `sk-ant-`, an AWS access key id
+  that starts with `AKIA`, or the token after `Bearer `.
+
+It does so in qory's lines and errors, in the last error line, in the lines of the fetch
+and of the compose, and in the lines that the fetch and the compose write into the run's
+record. A value split across two writes is replaced whole: qory keeps back the end of
+each write in which a value could start, until the next write or the end of the stream.
+`qory run prepare`, `qory run prebuild-step` and `qory
+run pool` mask their output too. Their mask lists contain no value of a run: there qory
+replaces a URL's signature or token and a key of a listed shape, and in `qory run pool`
+also the access key's secret.
+
+qory run gives the list to Forager's session, which masks with it the agent's output, on
+pipes and on a terminal, the output of the setup commands, the run's record,
+`output.log` and `events.jsonl`, its events and its lines. The session masks each of
+the agent's streams with a separate writer, so a value split across two writes of the
+agent is replaced whole, also when one of qory's lines comes between them. qory passes
+the session stdout and stderr as they are, so the agent's output is masked once. The
+session adds the server's variables and the passwords of the run's forwarders to the
+list, so qory masks those in its lines too; a forwarder's password prints as
+`qory-proxy-password`.
+
+A value of 8 bytes or more is masked wherever it appears, also where it is not secret:
+with `--env DEPLOY_TARGET` set to `production`, the agent's line `deploying to
+production` prints as `deploying to ***`.
+
+These are not masked:
+
+- a value that neither qory nor the session reads: a credential that an adapter or an
+  integration supplies, and the credentials of a separate gateway, which a run given a
+  run key goes through, unless the key has a listed shape;
+- a token or a key that the agent, a setup command or a build step reads from a file or
+  the network and then prints;
+- a value printed in another encoding, such as base64;
+- a value shorter than 8 bytes, since `***` would also replace ordinary text that contains
+  it, a value longer than 4096 bytes, and every value past the first 1024;
+- the parts of the run's record that Forager writes as they were given: the run's labels,
+  the policy applied, a build's images and commit, the reason of the runtime's exit, the
+  names of a refusal, and the setup script in the session's folder;
+- the lines of `qory run resend`, apart from its last error line.
+
 ## The record
 
 Each run is recorded on your machine, outside the checkout, in qory's state directory:
@@ -267,6 +334,16 @@ directory and the checkout's folder are mode 0700: only you can open them. The s
 directory also keeps, in `places`, the record of the places each walled run used. qory
 checks it before it runs git or acts on a qory file there; a qory started with another
 `HOME` or `XDG_STATE_HOME` does not see those records, so it does not check those places.
+
+A walled run records its checkout and each read-write mount, and the record stays after
+the run, so qory would afterwards check the git settings of every repository under them
+before it runs git there. A walled run whose checkout or read-write mount is your home
+folder or qory's state directory, or a folder that contains either, such as `/`, stops
+before anything starts, and `qory run` exits 2. For the checkout the line starts `start
+the walled run from a repository folder`: start the run in a repository's folder. For a
+mount it starts `mount a narrower folder`: mount one repository's folder in its place. A
+read-only mount is not recorded.
+
 qory names the run's folder when the run ends:
 
 ```
@@ -288,8 +365,15 @@ how it ended:
    no runtime. The step ends once `qory run` has read the agent's launch from the
    composed home.
 3. For a walled run whose policy names its image by a reference pinned by digest, the
-   image step, named after the reference. Forager pulls the image, unless the engine
-   holds it by that digest, and checks that its user is not root. With
+   image step, named after the reference. Forager first requests the image's manifest
+   from its registry through the run's proxy, with the run's credentials: a `HEAD` of
+   `/v2/<repository>/manifests/<digest>`, over https, or over http for a registry on
+   loopback. Then the engine runs `docker pull` of the image, also when it holds the
+   image by that digest, and Forager checks that the image's user is not root. The
+   run's policy must allow the registry's host; for a registry on your machine or a
+   private address, `gateway.egress.allow` of `forager.yaml` must list the host by name
+   too. A host the run's proxy denies fails the step with Forager's line `Allow <host>
+   in the node's policy, and in the server's policy for a run from a server.` With
    `wall.engine_proxy_file`, the pull goes through the run's proxy: see [The
    wall](#the-wall). The setup and the agent then start from that image.
 
@@ -1323,6 +1407,21 @@ These stop it with exit 1. The code may be unused, so each fix runs qory again w
 
 No error contains the code or the run key.
 
+A starter that shows qory's lines apart from the agent's output sets `QORY_STATUS_FD` to
+an open file descriptor above 2, as in `QORY_STATUS_FD=3 qory run … 3>&2 2>&1`. `qory run`
+then also writes each of its lines there, one line per write, masked as
+[Secret values in qory's lines](#secret-values-in-qorys-lines) describes: the lines that
+start with `✓`, `✗` or `⚠` and their continuations; every `qory run:` line, Forager's
+lines among them; and the last error line, an error of the flags included. Each of these
+lines goes there only when qory prints it on stderr too. The output of the programs that
+qory starts, the agent and git among them, does not go there, and neither do the lines of
+a prebuild, which contain the output of its build. As it starts, before it opens any
+file, every qory command removes `QORY_STATUS_FD` from its environment and marks the
+descriptor close-on-exec, so no program that it starts receives either. A value that is not a number, is 0, 1 or 2, or is not an
+open descriptor gets one line on stderr from `qory run`, which then writes its lines to
+stderr only. After a write to the descriptor fails, qory prints one line on stderr and
+writes nothing more there; the run goes on. The descriptor works on Linux and macOS only.
+
 #### What the run takes from the response
 
 Qory Apiary's signed response to the code contains the run's documents beside the run key:
@@ -1409,43 +1508,86 @@ run as failed with no session. `<commit>` is the commit's first 12 characters:
   default, git's server needs no such setting.
 
 A run of the step prebuild builds the image that the runs of its target start from. It
-runs in `qory run`'s process, with no wall and no agent:
+runs behind the wall of its run, in the image of `wall.images` that `wall.prebuild_image`
+is set to, with no agent:
 
-1. qory opens the run at its gateway, and fetches the run's repositories through the
-   run's host proxy into an empty working folder under `pool/runs/<run id>` in qory's
-   state directory.
-2. qory builds the development container configuration in two steps: the environment
-   image, tagged `<environment_destination>:<run id>`, then the target image from it,
-   with the agent added, tagged `<image_destination>:<run id>`. The build keeps the
-   environment image apart only when the image depends on the configuration's bytes
-   alone. When the documents set `environment_image`, the build starts the target image
-   from that image and builds no environment image.
-3. qory pushes the environment image, when the build kept one apart, then the target
-   image, with `docker push` and the settings in `$HOME/.docker`.
-4. qory writes the run's `dev.qory.run.built`: the target image by digest, its size, the
-   commit and the inputs' `environment_ref`. The event has the environment image by
-   digest when qory pushed one, or the build started from `environment_image`. It has
-   the base image by digest when the build resolved the image its target step starts
-   from, and none when the build started from `environment_image`, from scratch, or from
-   an image it cannot resolve before it builds. Then qory closes the run as succeeded,
-   and exits 0.
+1. qory opens the run at its gateway, with the wall. When the run's policy is not the
+   one of the run configuration Qory Apiary serves for the workspace, qory stops here with
+   `set a run configuration for the run's workspace in Qory Apiary: a prebuild runs under
+   its policy alone, and the run's policy is <source>`, where `<source>` is `the gateway's
+   machine's`, `none` or `not recorded`.
+2. qory fetches the run's repositories through the run's host proxy into an empty working
+   folder under `pool/runs/<run id>` in qory's state directory. git runs on this machine
+   for the fetch, outside the wall.
+3. One session joins the run, with qory's helper, `qory run prebuild-step`, as its
+   command, the working folder as its folder and a writable `out` folder beside it. The
+   session gets none of this machine's variables and no model key.
+4. Behind the wall, the helper builds the development container configuration on the
+   wall's nested Docker, in two steps: the environment image, tagged
+   `<environment_destination>:<run id>`, then the target image from it, with the agent
+   added, tagged `<image_destination>:<run id>`. The build keeps the environment image
+   apart only when the image depends on the configuration's bytes alone. When the
+   documents set `environment_image`, the build starts the target image from that image
+   and builds no environment image. The build's steps get the run's proxy as Docker's
+   predefined build arguments, `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`, which the
+   image does not keep. The configuration's commands get the proxy and the run's
+   authorities from a folder bound read-only at `/qory/proxy`, never from the
+   container's environment.
+5. The helper pushes the environment image, when the build kept one apart, then the
+   target image, with `docker push` through the run's proxy and a docker configuration
+   that has no login. It writes what it pushed to `out/result.json`.
+6. qory reads `out/result.json`: a regular file of at most 1 MiB, opened without
+   following a link, whose images are under `image_destination` and
+   `environment_destination`. Then qory writes the run's `dev.qory.run.built`: the target
+   image by digest, its size, the commit and the inputs' `environment_ref`. The event has
+   the environment image by digest when the helper pushed one, or the build started from
+   `environment_image`. It has the base image by digest when the build resolved the
+   image its target step starts from, and none when the build started from
+   `environment_image`, from scratch, or from an image it cannot resolve before it
+   builds. Then qory closes the run as succeeded, and exits 0.
 
-The build takes the agent image, the user and the helper from `wall.image`, pinned by its
-digest, `wall.user` and `wall.helper` in `forager.yaml`. After the redemption, qory prints
-`qory run: through the gateway <host>, run <run id>`, with `:<port>` after the host when
-the gateway's URL has a port. Then it prints each line of the fetch, the build and the
-pushes after `qory run: <run id>: `. When the registry of `environment_image` has no
-such image, qory closes the run as failed with the reason `image_missing`. A fetch past
-its 15 minutes closes the run as cancelled with the reason `timeout`, a signal as
-cancelled with the reason `interrupted`, and any other failure as failed. In each case
-qory exits 1. When events of the run did not reach the gateway at the close, qory keeps
-the run's folder under `pool/runs/<run id>`, the record and those events in it. After a
-prebuild that succeeded, qory exits 1 with `check that this machine reaches the run's
-gateway: <n> events of the run did not reach it; <record>/undelivered contains them`,
-with `1 event` for one. After a failure, qory prints that line as `qory run: <run id>:
-check that this machine reaches the run's gateway: …`, and exits 1 with the failure's
-error. qory removes the local tags when the run ends, and the run's folder in every
-other case.
+The build takes the agent image and the user from `wall.image`, pinned by its digest, and
+`wall.user` in `forager.yaml`. The wall's helper is `wall.helper`, or on Linux the `qory`
+you run. When `forager.yaml` sets `pool.registry`, qory stops a run whose
+`image_destination` or `environment_destination` is not under it, before anything is
+made, with `set pool.registry to the registry of Qory Apiary's QORY_REGISTRY, or ask its
+instance admin: the run's <member> is not under <registry>`.
+
+The nested Docker's images, its build cache and the container the configuration's
+commands ran in go with the wall when the run closes. This machine's Docker engine
+builds and keeps none of them, and its registry logins are not read. Each prebuild pulls
+and builds from the start.
+
+What the instance admin installs on the machine:
+
+- Linux, with [Sysbox](https://github.com/nestybox/sysbox) registered as `sysbox-runc`;
+- Docker Engine 28 or later;
+- a file with the machine's certificate authorities, which the wall joins with the run's
+  authorities;
+- [Qory's](#qorys-images) `prebuild` image, or one built FROM it, defined in
+  `wall.images` with `runtime: sysbox-runc` and `docker: true`, and named in
+  `wall.prebuild_image`.
+
+The nested containers reach the outside only through the run's proxy, so these build
+steps fail behind the wall:
+
+- `ssh`, `git://` and anything over UDP;
+- a pull of a base image, or of the `docker/dockerfile` frontend, from a host that is not
+  in the run's egress.
+
+After the redemption, qory prints `qory run: through the gateway <host>, run <run id>`,
+with `:<port>` after the host when the gateway's URL has a port. Then it prints each line
+of the fetch, and of the session behind the wall, after `qory run: <run id>: `. When the
+registry of `environment_image` has no such image, qory closes the run as failed with the
+reason `image_missing`. A fetch past its 15 minutes closes the run as cancelled with the
+reason `timeout`, a signal as cancelled with the reason `interrupted`, and any other
+failure as failed. In each case qory exits 1. When events of the run did not reach the
+gateway at the close, qory keeps the run's folder under `pool/runs/<run id>`, the record
+and those events in it. After a prebuild that succeeded, qory exits 1 with `check that
+this machine reaches the run's gateway: <n> events of the run did not reach it;
+<record>/undelivered contains them`, with `1 event` for one. After a failure, qory prints
+that line as `qory run: <run id>: check that this machine reaches the run's gateway: …`,
+and exits 1 with the failure's error. qory removes the run's folder in every other case.
 
 Each of these errors stops the run before the code is sent, exit 2:
 
@@ -1468,11 +1610,11 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
   but a member's name, an id, a revision or a byte count
 - `update qory: the response to the run code is for the step <step>, and qory runs a run
   code's run for the steps explore and prebuild only; the code is used`
-- `set wall.image, pinned by its digest, wall.user and wall.helper in forager.yaml: a
-  prebuild from a run code builds with them; the code is used`
+- `set wall.image, pinned by its digest, wall.user and wall.prebuild_image in
+  forager.yaml: a prebuild from a run code builds with them; the code is used`
 - `run the prebuild on a machine without an access key: this machine has an access key in
-  <path>, and a prebuild runs the target's build commands without a wall; the code is
-  used`, when a file with an access key's secret appeared beside `forager.yaml` while
+  <path>, and a prebuild fetches the target's code with git on this machine, outside the
+  wall; the code is used`, when a file with an access key's secret appeared beside `forager.yaml` while
   the code was redeemed
 - `set a workflow for the workspace in Qory Apiary, then take the work item in again: the
   response to the run code has no workflow; the code is used`
@@ -1725,6 +1867,128 @@ limits. Each error starts with its fix:
 When `harness_hidden` is `false`, the home of a run without a wall keeps its links to
 the modules, as the home of a run started without a run code does.
 
+### Runs of a node pool
+
+`qory run pool` runs a node pool's runs on this machine. It starts each run in `work/` of
+the run's folder, `pool/runs/<dispatch id>` in qory's state directory, with `qory run
+--run-code-file /dev/fd/3 --gateway <gateway_url> --home <the run's folder>/home`. The run
+composes its harness under `home/` of that folder, outside `work/`. Once the run ends,
+the pool removes the run's folder and the harness home in it, so no later run on the
+machine reads that harness.
+
+Each run's `HOME` is `home-user/` of the run's folder, mode `0700`, which the pool makes
+empty and removes with the folder. `XDG_CONFIG_HOME` stays `pool.run_config`. So a run
+reads none of these files under the `HOME` of the user the pool runs as:
+
+- the registry logins of `~/.docker/config.json`;
+- the Docker contexts of `~/.docker`: set `DOCKER_HOST` for an engine other than the
+  default;
+- the git configuration of `~/.gitconfig`.
+
+A run still reads `pool.run_config`, and the files that its `forager.yaml` names, also
+when they are under that `HOME`.
+
+The pool stops before its first claim when the runs' `forager.yaml` sets `wall.mounts`,
+since every run would see the paths it lists, with exit 2:
+
+```text
+remove wall.mounts from <pool.run_config>/qory/forager.yaml: every run of the pool would see the paths it lists, so the runs would share them
+```
+
+With `pool.runs` above 1, runs share the machine's processors, memory, disk and network
+at once. The pool stops before its first claim, with exit 2, unless the runs'
+`forager.yaml` sets both `wall.pids_limit` and `wall.memory` (see Limits in [The
+wall](#the-wall)):
+
+```text
+set wall.pids_limit and wall.memory in <pool.run_config>/qory/forager.yaml: with pool.runs above 1, runs share this machine, and a run without both limits can take the processes and memory the others need
+```
+
+The pool also stops before its first claim, with exit 2, when the runs' `forager.yaml`
+sets no `wall.engine_proxy_file`, so that the engine pulls each run's image through that
+run's gateway (see The engine proxy in [The wall](#the-wall)):
+
+```text
+set wall.engine_proxy_file in <pool.run_config>/qory/forager.yaml, as The engine proxy in docs/run.md shows: without it, the engine pulls each run's image over this machine's network, not through the run's gateway
+```
+
+Before its first claim, `qory run pool` checks that a container on the engine's default
+bridge network cannot reach `169.254.169.254` or `fd00:ec2::254`, the addresses of a cloud
+metadata service. It runs one container, removed when it ends, from `wall.image` of the
+runs' `forager.yaml`, on the default bridge network, as `wall.user`, with
+`--cap-drop ALL`, `--security-opt no-new-privileges` and `--pull never`, and its
+`docker` gets an empty `HOME`, as a run's does. The container
+tries a TCP connection to `169.254.169.254:80` and one to `[fd00:ec2::254]:80`, and gives
+up each after 2 seconds. The connection to `[fd00:ec2::254]:80` can succeed only when the
+Docker daemon enables IPv6 on the default bridge network; without IPv6, it fails whatever
+the host's rules are. If either connection succeeds within its 2 seconds, the pool exits 1
+and claims no run:
+
+```text
+drop 169.254.169.254 and fd00:ec2::254 in the raw table before Docker starts: a container on the default bridge network connected to 169.254.169.254:80, the cloud metadata service, so the pool claims no run
+```
+
+Add these rules on the host before Docker starts, such as from a unit that runs before
+`docker.service`:
+
+```sh
+iptables -w -t raw -I PREROUTING -d 169.254.169.254 -j DROP
+iptables -w -t raw -I OUTPUT -d 169.254.169.254 -j DROP
+ip6tables -w -t raw -I PREROUTING -d fd00:ec2::254 -j DROP
+ip6tables -w -t raw -I OUTPUT -d fd00:ec2::254 -j DROP
+```
+
+The raw table runs before the nat and filter rules that Docker writes. The PREROUTING
+rules match the packets that arrive from containers on a Docker bridge, and the OUTPUT
+rules match the packets that the host's processes send. The check runs once Docker runs,
+so it does not show whether the rules were in place before Docker started.
+
+If the check cannot run, the pool exits 1 and claims no run, with one of these errors:
+
+- `pull <wall.image> onto this machine, and check that the container engine runs: the
+  container that checks the cloud metadata service exited <status>: <docker's last
+  line>`. The check never pulls the image, so pull `wall.image` before the pool starts.
+- `install <program>, or set wall.command in the runs' forager.yaml: the start of
+  <program> for the check of the cloud metadata service failed: <error>`, where
+  `<program>` is `wall.command`, or `docker` when that is not set.
+- `check that the container engine runs: the check of the cloud metadata service did not
+  end within 2m0s`.
+
+#### What the runs of a pool share
+
+The runs of a pool on one machine share these:
+
+- **The kernel and the Docker engine.** Every run's containers, and a prebuild's nested
+  Docker inside its container, run on this machine's kernel and its Docker engine. An
+  escape from a container to the kernel or to the engine reaches every run on the
+  machine.
+- **The user.** Every run's `qory run` runs as the user the pool runs as, with a separate
+  `HOME`, `home-user/` of the run's folder under `pool/runs/<dispatch id>`. Every session
+  of a run runs in its container as `wall.user`.
+- **The machine's resources.** With `pool.runs` above 1, runs at the same time share the
+  processors, memory, disk and network bandwidth. `wall.pids_limit` and `wall.memory`
+  limit the processes and memory of the container each session of a run runs in. No
+  setting limits a run's disk or bandwidth, or the size of a prebuild's nested Docker.
+
+The runs of a pool share none of these:
+
+- **The run's folder**: its checkout, state, harness home and `HOME`. The pool removes the
+  folder when the run ends.
+- **A registry login.** A prebuild pushes its images from behind its wall, with `docker
+  push` through the run's proxy and a Docker configuration that has no login. When the
+  run's policy has a credential for the registry, the run's gateway sets it on the
+  requests the credential covers. No run reads `~/.docker/config.json` of the user the
+  pool runs as.
+- **A prebuild's nested Docker**: its images, its build cache and the container the
+  configuration's commands ran in. They go with the wall when the run closes, and this
+  machine's Docker engine holds none of them. The images a prebuild pushed stay in the
+  registry; qory deletes none of them.
+
+[Sysbox](https://github.com/nestybox/sysbox) runs on Linux only, and nested Docker needs
+Docker Engine 28 or later. A pool needs Sysbox for its prebuilds, which run in the image
+that `wall.prebuild_image` is set to, and for a run whose image sets `docker: true`. A pool
+whose runs use neither needs no Sysbox.
+
 ### A machine with a separate access key, behind a gateway
 
 A machine that holds its node's access key, and reaches Qory Apiary only through a
@@ -1836,6 +2100,10 @@ Before the agent starts, `qory run` given a run key stops the run with one of th
   only through the gateway; remove it from --env`, or `...; remove it from wall.env in
   forager.yaml`, for a variable the runtime reads its model key from: `ANTHROPIC_API_KEY`,
   `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_AUTH_TOKEN` for Claude Code
+- `remove <variable> from --env: a walled run given a run key takes a forge token only
+  through the gateway`, or `remove <variable> from wall.env in forager.yaml: ...`, for a
+  forge token's variable of Forager's deny list, such as `GH_TOKEN`, `GITHUB_TOKEN`,
+  `GITLAB_TOKEN` or `BITBUCKET_TOKEN`
 - `--run-key-fd <n>: the standard output and error carry no run key; name 0 for stdin, or
   a descriptor of 3 or above`, `--run-key-fd <n>: more than a run key`, and `--run-key-fd
   <n>: <err>` for a descriptor qory cannot read
@@ -2680,9 +2948,10 @@ What to know:
 - **What the container sees.** The checkout it was started in, the run's record directory,
   read-only, and for a run of Claude Code given a run key, the folder of the names of the
   variables its agent keeps, read-only; no other directory. `--mount <path>[:ro]` or `wall.mounts` shows it another one, at the same path as on your machine, such as a
-  sibling checkout the session reads. A socket is never mounted. A mount is refused
-  before the agent starts, `mount_contains_forager_files`, when it is, contains or lies
-  inside one of these:
+  sibling checkout the session reads. A socket is never mounted. A read-write mount that
+  is or contains your home folder or qory's state directory stops the run first, as [The
+  record](#the-record) describes. A mount is refused before the agent starts,
+  `mount_contains_forager_files`, when it is, contains or lies inside one of these:
   - this machine's qory configuration directory, which holds `forager.yaml`, the access
     key and the user `qory.yaml`;
   - a file qory reads from that directory and a link takes elsewhere: where the last
@@ -2715,18 +2984,22 @@ What to know:
   ```
 
   For a read-only mount of the state directory, it says `the agent could read them`
-  instead.
+  instead. A read-write mount that is or contains the state directory stops first, with
+  `mount a narrower folder: …`, so for a read-write mount this line appears only when the
+  mount lies inside the state directory.
 
   For a link on the way to the state directory, to a file of the configuration
   directory or to a `<name>_file` setting's file, it names the link, which leads to
   them:
 
   ```
-  qory run: the mount <host path> contains <link>, which leads to qory's run records; the agent could point it elsewhere, so the run does not start. Mount a narrower path
   qory run: the mount <host path> contains <link>, which leads to one of Forager's files; the agent could point it elsewhere, so the run does not start. Mount a narrower path
+  qory run: the mount <host path> contains <link>, which leads to qory's run records, so the run does not start. Mount a narrower path
   ```
 
-  For a read-only mount, it leaves out `; the agent could point it elsewhere`.
+  For a read-only mount, it leaves out `; the agent could point it elsewhere`. The second
+  line appears only for a read-only mount: a read-write mount that contains a link on the
+  way to the state directory stops first, with `mount a narrower folder: …`.
 
   When the path is the checkout or the working directory, it says `the workspace <path>`
   instead of `the mount <path>`.
@@ -2754,7 +3027,22 @@ What to know:
   mode `0400` or `0600`, has at most 4 KiB, and contains exactly those three members:
   `version` 1, `address` a loopback IP address and a port, and `password` 43 characters
   of base64url with no padding. No line, event or record contains the password, and
-  `qory config` lists the path alone.
+  `qory config` lists the path alone. A walled run's image step holds an exclusive lock
+  of the file, so one run at a time pulls through the engine's proxy; replace the file
+  only while no run is going, since a run that opened the old file does not exclude a run
+  that opens the new one.
+
+  Pull every image the machine defines on the host before a run, and before you set the
+  engine's proxy: the agent's image in `wall.images`, the image that Forager's relay
+  starts from, which is the machine's default image, and the image of
+  `wall.prebuild_image`. With `wall.engine_proxy_file` set, a run's wall creates the
+  agent's and the relay's containers with `--pull=never`, so the engine pulls only in a
+  run's image step. A run whose agent or relay image the engine does not have fails with
+  Forager's line `Pull the image on this machine before you set the engine proxy: the
+  engine has no image <image>, and under an engine proxy the wall pulls only in a run's
+  image step.` A prebuild whose image the engine does not have fails with the engine's
+  error for the pull, since the engine sends every pull to a run's proxy, which listens
+  only during that run's image step.
 - **Limits.** `--cpus`, `--memory`, `--pids-limit` and `--shm-size`, or the keys of those
   names under `wall`, limit what the container uses. Sizes are written the way Docker
   writes them: a number and `b`, `k`, `m` or `g`, in either case. So `14g` is 14 GB and
@@ -2775,8 +3063,8 @@ What to know:
 
 ### Qory's images
 
-`qory`'s repository defines four images for the agent under `images/`, for `linux/amd64`
-and `linux/arm64`. They are not published for you to pull: you build them, by hand as
+`qory`'s repository defines four images for the agent under `images/`, and one a prebuild
+runs in, for `linux/amd64` and `linux/arm64`. They are not published for you to pull: you build them, by hand as
 below, and a workflow of the repository builds and checks them on a change. Build them
 from a checkout of `qory` at the commit `qory version` prints, since each commit pins the
 runtime at the version the Forager it builds against is written for:
@@ -2789,6 +3077,7 @@ docker build -t qory-agent-docker --build-arg BASE=qory-agent images/agent-docke
 docker build -t qory-agent-go --build-arg BASE=qory-agent images/agent-go
 docker build -t qory-agent-go-docker --build-arg BASE=qory-agent-docker \
   --build-arg TITLE=agent-go-docker images/agent-go
+docker build -t qory-prebuild --build-arg BASE=qory-agent-docker images/prebuild
 ```
 
 | Image | What it holds |
@@ -2797,6 +3086,7 @@ docker build -t qory-agent-go-docker --build-arg BASE=qory-agent-docker \
 | `agent-docker` | `agent`, and Docker's daemon and command |
 | `agent-go` | `agent`, and Go |
 | `agent-go-docker` | `agent-docker`, and Go |
+| `prebuild` | `agent-docker`, the `devcontainer` command `@devcontainers/cli` 0.89.0, and Docker's `buildx` plugin: the image a prebuild runs in behind its wall |
 
 Every version and every download's sum is a build argument, with its default in the
 Dockerfile. A build checks each download against its sum, and installs Debian's packages

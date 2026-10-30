@@ -46,8 +46,10 @@ import (
 	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
+	"github.com/qoryai/qory/internal/secretmask"
 	"github.com/qoryai/qory/internal/source"
 	"github.com/qoryai/qory/internal/stack"
+	"github.com/qoryai/qory/internal/statusfd"
 	"github.com/qoryai/qory/internal/ui"
 )
 
@@ -131,6 +133,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// The run's mask list starts empty, and each secret value of the run joins it
+			// once qory run reads the value. qory's lines, and the agent's output on pipes,
+			// are masked with it; see [runStreams].
+			secretmask.SetDefault(secretmask.New())
+			maskServerSecrets()
+			streams := newRunStreams(cmd.OutOrStdout(), cmd.ErrOrStderr())
+			defer streams.flush()
 			// The access key's descriptor is read and closed first, whatever comes next, so
 			// nothing qory starts inherits it.
 			var fdKey *accesskey.Key
@@ -140,6 +149,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return err
 				}
 				fdKey = k
+				secretmask.Default().Add(k.Secret())
 			}
 			// A run code is read here and redeemed for the run key last before the run
 			// starts, once every check that can stop the run has passed, so that a run they
@@ -149,12 +159,18 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if err != nil {
 				return err
 			}
+			if code != nil {
+				secretmask.Default().Add(code.code)
+			}
 			// A run whose starter registered it, a run key being given, goes through the
 			// separate gateway its run key names: this machine starts no gateway of its own
 			// and holds no access key. The run key's descriptor is read and closed here.
 			key, err := givenRunKey(cmd.Flags().Changed(runKeyFDFlag), keyFD, stdin)
 			if err != nil {
 				return err
+			}
+			if key != nil {
+				secretmask.Default().Add(key.value)
 			}
 			if code != nil && code.stdin || key != nil && key.fromFD && keyFD == 0 {
 				// The run code or the run key took stdin, to its end: the agent gets none.
@@ -298,7 +314,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if err != nil {
 				return err
 			}
-			stderr := cmd.ErrOrStderr()
+			// qory's lines that no ui prints go to stderr and to the status descriptor; the
+			// ui writes to the descriptor itself, so it prints on streams.errOut.
+			stderr := io.Writer(streams.lines)
 			var id *serverIdentity
 			if server != nil && !local {
 				if id, err = identify(conf.Forager, stderr, "run", fdKey); err != nil {
@@ -314,14 +332,17 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					RunID:          runID,
 					Labels:         named,
 					About:          about,
+					// The session masks the run's record, events and lines with the run's
+					// mask list, and adds the server's variables to it.
+					Masker: secretmask.Default().Masker(),
 				},
 				SessionSpec: session.SessionSpec{
 					Env:         os.Environ(),
 					Dir:         cwd,
 					Interactive: !headless && isTerminal(stdin) && isTerminal(cmd.OutOrStdout()),
 					Stdin:       stdin,
-					Stdout:      cmd.OutOrStdout(),
-					Stderr:      stderr,
+					// Stdout and Stderr are set once the launch is known, see
+					// [runStreams.session].
 					Forwarder:   append([]string{exe}, forwardArgs...),
 					StopSignal:  stopSignal,
 					StopGrace:   grace,
@@ -352,6 +373,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if err := enclose(&spec, conf.Forager, o, selected, remote || server != nil && !local, exe, at.root, at.home); err != nil {
 				return err
 			}
+			maskVariables(spec.Variables.Run)
+			maskVariables(spec.Variables.Machine)
+			if spec.EngineProxy != nil {
+				secretmask.Default().Add(spec.EngineProxy.Password)
+			}
 			// QORY_RUN_KEY is in the environment qory started with, which an unwalled agent
 			// can read on macOS, and on Linux from the program that started qory, even once
 			// qory unset it.
@@ -360,6 +386,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			if spec.Wall == nil {
 				if err := unwalledHere(at.root, cwd); err != nil {
+					return err
+				}
+			}
+			// A walled run records its checkout and its read-write mounts, and the record
+			// stays after the run: the home folder or the state directory stops the run
+			// here, before a run code is redeemed or anything starts. The mounts added
+			// later are read-only.
+			if spec.Wall != nil {
+				if err := walledPlaces(at.root, spec.Mounts); err != nil {
 					return err
 				}
 			}
@@ -390,6 +425,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if key, documents, err = code.redeem(ctx, conf.Forager.InstanceNameOrDefault()); err != nil {
 					return err
 				}
+				secretmask.Default().Add(key.value)
 				if spec.RunID == "" {
 					spec.RunID = key.key.RunID
 				}
@@ -397,12 +433,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if doc, err = codeDocumentsOf(documents); err != nil {
 					return err
 				}
-				// A prebuild opens the run itself, with no wall and no session, and ends
-				// with the build. It starts as an unwalled run does: startRun stops it on
-				// a machine with an access key, and marks its lock file unwalled, so a
-				// command that makes a key exits with an error while the prebuild runs.
-				// prebuildKeyed stops it there first, with a line of a prebuild: the fix in
-				// startRun's line, a wall, does not apply to a prebuild.
+				// A prebuild opens the run itself, with the wall of wall.prebuild_image and
+				// one session behind it, which builds and pushes, and ends with the build.
+				// Its fetch runs git on this machine, outside the wall, so it starts as an
+				// unwalled run does: startRun stops it on a machine with an access key, and
+				// marks its lock file unwalled, so a command that makes a key exits with an
+				// error while the prebuild runs. prebuildKeyed stops it there first, with a
+				// line of a prebuild: the fix in startRun's line, a wall, does not apply to
+				// a prebuild.
 				if doc.Step == provisioner.StepPrebuild {
 					if err := prebuildKeyed(machine, id); err != nil {
 						return err
@@ -412,7 +450,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						return err
 					}
 					defer runLock.Release()
-					return runCodePrebuild(ctx, stderr, conf.Forager, state, user, key, doc, spec.RunID)
+					return runCodePrebuild(ctx, stderr, streams.errOut, conf.Forager, state, user, exe, key, doc, spec.RunID)
 				}
 				if fromCode, err = codeRunOf(doc); err != nil {
 					return err
@@ -465,6 +503,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if key, err = registerThroughVia(ctx, conf.Forager, id, spec.RunID, named, about, stderr); err != nil {
 					return err
 				}
+				secretmask.Default().Add(key.value)
 				// The server accepted the run.
 				keep.keep(said)
 				remote = true
@@ -496,6 +535,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if gw.Credentials, err = machineCredentials(ctx, r, e, "run", stderr); err != nil {
 					return err
 				}
+				maskCredentials(gw.Credentials)
 				if gw.Tools, err = machineTools(r, e.Workspace); err != nil {
 					return err
 				}
@@ -511,7 +551,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			own := foragerFiles(foragerDir, state, spec.RunsDir, append(files, runner...), named)
 			spec.ForagerFiles = own.files
 			record := filepath.Join(spec.RunsDir, spec.RunID)
-			u := ui.New(stderr)
+			u := ui.New(streams.errOut)
 			// Forager's lines that say what qory's own line says of the run's end are held
 			// back until qory knows whether it says it.
 			lines := runLines(func(line string) { fmt.Fprintln(stderr, "qory run:", line) }, spec.RunID)
@@ -573,7 +613,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				} else {
 					err = explain(err, id)
 				}
-				return withRecord(stderr, err, record)
+				return withRecord(streams.errOut, err, record)
 			}
 			run, err := openRun(ctx, spec.OpenSpec)
 			if err != nil {
@@ -654,8 +694,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if err != nil {
 					return false, input(err)
 				}
-				// A walled run given a run key takes the model's credential through the
-				// gateway its run key names alone, so neither --env nor wall.env passes it in.
+				// A walled run given a run key takes the model's credential and a forge token
+				// through the gateway its run key names alone, so neither --env nor wall.env
+				// passes them in.
 				// An unwalled one, whose run key came by --run-key-fd, is as before.
 				if dispatched && walled {
 					var wallEnv []string
@@ -729,11 +770,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return ctx.Err() != nil || timeout > 0 && time.Since(opened) >= timeout
 				}
 				if run.Repositories() != "" {
-					err := inStep(run, stderr, event.StepFetch, fetchStepName(runValues(run)), stopped, func(w io.Writer) error {
+					err := inStep(run, streams.errOut, event.StepFetch, fetchStepName(runValues(run)), stopped, func(w io.Writer) error {
 						h, err := run.HostProxy()
 						if err != nil {
 							return &runLineError{noHostProxy(err, code != nil)}
 						}
+						secretmask.Default().AddURLPassword(h.proxy.URL)
 						// The host proxy closes with the fetch, before the compose starts.
 						defer h.close()
 						fetchCtx, cancel := ctx, func() {}
@@ -753,7 +795,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return &runLineError{err}
 				}
 				var freshHome bool
-				err := inStep(run, stderr, event.StepCompose, composeStepName(runtime), stopped, func(w io.Writer) error {
+				err := inStep(run, streams.errOut, event.StepCompose, composeStepName(runtime), stopped, func(w io.Writer) error {
 					var n *source.Named
 					if fromCode != nil {
 						if err := fromCode.noHarness(at.root); err != nil {
@@ -781,6 +823,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						if err != nil {
 							return &runLineError{noStackProxy(harness, err, code != nil)}
 						}
+						secretmask.Default().AddURLPassword(s.proxy.URL)
 						defer s.close()
 						composing.checkedAs = harness
 						composing.git = proxyGit(s, w)
@@ -824,14 +867,18 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			// imageWork fetches the image of a walled run, see [fetchImage], within the
 			// run's time limit, once the harness is composed and before the setup, so the
-			// setup and the join start from the image the step fetched.
+			// setup and the join start from the image the step fetched. With an engine
+			// proxy, the step holds the engine lock, which it waits for within the time
+			// limit too: see [withEngineLock].
 			imageWork := func() error {
 				imageCtx, cancel := ctx, func() {}
 				if timeout > 0 {
 					imageCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
 				}
 				defer cancel()
-				return fetchImage(imageCtx, run, spec.EngineProxy, code != nil)
+				return withEngineLock(imageCtx, spec.engineProxyFile, code != nil, func() error {
+					return fetchImage(imageCtx, run, spec.EngineProxy, code != nil)
+				})
 			}
 			// A run stopped or out of time before its session joins prepares nothing more.
 			var prepErr error
@@ -890,9 +937,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					said("the record is in " + record)
 					return prepErr
 				}
-				return withRecord(stderr, prepErr, record)
+				return withRecord(streams.errOut, prepErr, record)
 			}
 			spec.Timeout = left
+			// Forager's session masks the runtime's output with the run's masker, on a
+			// terminal and on pipes.
+			spec.Stdout, spec.Stderr = streams.session()
 			res, err := joinSession(run, ctx, spec.SessionSpec)
 			closed := closeRun(sessionOutcome(res, err))
 			if err != nil {
@@ -961,7 +1011,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	c.Flags().StringVar(&o.limits.ShmSize, "shm-size", "", "the size of /dev/shm in the container, such as 2g ("+config.ForagerFileName+": wall.shm_size)")
 	homeFlags(c, &h)
 	composeFlags(c, &composing)
-	c.AddCommand(newResend(), newRegister(), newEnd(), newForward(), newRelay(), newNest(), newPrepare(), newAgentEnv(), newExec(), newHold(), newSetupCommand(), newSeed(), newPool())
+	c.AddCommand(newResend(), newRegister(), newEnd(), newForward(), newRelay(), newNest(), newPrepare(), newAgentEnv(), newExec(), newHold(), newSetupCommand(), newSeed(), newPrebuildStep(), newPool())
 	return c
 }
 
@@ -1081,6 +1131,9 @@ type runSpec struct {
 	// given are the mounts of a walled run that wall.mounts and --mount add, in
 	// spec.Mounts too; none without a wall.
 	given []givenMount
+	// engineProxyFile is wall.engine_proxy_file of a walled run with an engine proxy,
+	// whose engine lock the run holds around its image step: see [withEngineLock].
+	engineProxyFile string
 }
 
 // openedRun is a run open at its gateway, as qory run uses it: a [*session.Run], as
@@ -1231,6 +1284,9 @@ func withRecord(stderr io.Writer, err error, record string) error {
 	}
 	u.Fail(err)
 	fmt.Fprintln(stderr, "qory run: the record is in", record)
+	if statusfd.Shown(stderr) {
+		statusfd.Line("qory run: the record is in " + record)
+	}
 	return reported(err)
 }
 
@@ -1665,6 +1721,7 @@ func enclose(spec *runSpec, r *config.Forager, o wallOptions, selected string, f
 		if spec.EngineProxy, err = readEngineProxy(section.EngineProxyFile); err != nil {
 			return err
 		}
+		spec.engineProxyFile = section.EngineProxyFile
 	}
 	spec.Mounts = []wall.Mount{{Path: root}}
 	if !reallyWithin(root, home) {
@@ -2802,7 +2859,10 @@ func newPrepare() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			stderr := cmd.ErrOrStderr()
+			// Its lines and the start commands' output are masked with the process's mask
+			// list, which replaces the value of a URL's signature or token.
+			stderr := secretmask.Default().Writer(cmd.ErrOrStderr())
+			defer stderr.Flush()
 			listed, err := preparation.Prepare(ctx, ".", prepareSeed, os.Getenv, stderr)
 			if err == nil && listed {
 				err = preparation.StartLogged(ctx, ".", os.Environ(), stderr)

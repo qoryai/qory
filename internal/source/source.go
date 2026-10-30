@@ -37,6 +37,7 @@ import (
 	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/places"
 	"github.com/qoryai/qory/internal/proxygit"
+	"github.com/qoryai/qory/internal/secretmask"
 	"github.com/qoryai/qory/internal/stack"
 )
 
@@ -100,7 +101,9 @@ type FetchError struct {
 }
 
 // Error returns the source and quotes git; for a source of a [Named] compose, the
-// source's name and not git's output, which can contain the URL.
+// source's name and not git's output, which can contain the URL. Each value of the
+// process's [secretmask.Default] list and each signature or token in a URL's query is
+// printed as ***.
 func (e *FetchError) Error() string {
 	if e.Name != "" {
 		return "the fetch of " + e.Name + " failed"
@@ -109,7 +112,7 @@ func (e *FetchError) Error() string {
 	if msg == "" {
 		msg = e.Err.Error()
 	}
-	return fmt.Sprintf("fetching %s: %s", exports.URL(e.Source), exports.HideValues(exports.HideURLs(msg)))
+	return secretmask.Default().Replace(fmt.Sprintf("fetching %s: %s", exports.URL(e.Source), exports.HideValues(exports.HideURLs(msg))))
 }
 
 // Unwrap returns the error from running git.
@@ -130,12 +133,13 @@ type GoneError struct {
 }
 
 // Error contains the remote, the ref and how to keep what was composed; for a named
-// stack's source, the source's name in place of the URL and the ref.
+// stack's source, the source's name in place of the URL and the ref. It is masked as
+// [FetchError.Error] is.
 func (e *GoneError) Error() string {
 	if e.Name != "" {
 		return "the repository of " + e.Name + " has no branch or tag by the ref it is set to"
 	}
-	return fmt.Sprintf("%s has no branch or tag %s; to keep the old harness, set ref to a commit id", exports.URL(e.URL), exports.Value(e.Ref, false))
+	return secretmask.Default().Replace(fmt.Sprintf("%s has no branch or tag %s; to keep the old harness, set ref to a commit id", exports.URL(e.URL), exports.Value(e.Ref, false)))
 }
 
 // SchemeError is a git source that is not an https URL, in a compose that fetches
@@ -248,6 +252,10 @@ type Git struct {
 	// for, with [Options.Name] of that resolve, the full commit it resolved to and how
 	// long the lookup and the fetch took.
 	Fetched func(url, ref, name, commit string, took time.Duration)
+	// Fetching, when set, is called with the URL of each git source before a resolve
+	// contacts its remote, so a caller can mask what the URL contains in the lines and
+	// errors that follow.
+	Fetching func(url string)
 	// Named, when set, is the harness this compose fetches the sources of, whose
 	// addresses no text shows; see [Named].
 	Named *Named
@@ -577,6 +585,9 @@ func resolveGit(s stack.Source, opts Options) (Resolved, error) {
 	if !ok || !cloned(filepath.Join(dir, got.commit)) {
 		var err error
 		start := time.Now()
+		if opts.Git != nil && opts.Git.Fetching != nil {
+			opts.Git.Fetching(s.Git)
+		}
 		if got, err = commitOf(dir, s, opts); err != nil {
 			// The cache directory is named after the URL, so an error of a file
 			// under it prints the URL's secret unless it is hidden.

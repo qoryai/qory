@@ -18,6 +18,22 @@ func openEngineProxyFile(path string) (*os.File, error) {
 	return os.OpenFile(path, os.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 }
 
+// flockEngine takes an exclusive flock of f, an open engine proxy file, without waiting:
+// a lock another open file holds is [errEngineLocked]. Linux and the BSDs lock a file
+// opened for reading alone too.
+func flockEngine(f *os.File) error {
+	for {
+		err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+		switch {
+		case errors.Is(err, unix.EINTR):
+			continue
+		case errors.Is(err, unix.EWOULDBLOCK):
+			return errEngineLocked
+		}
+		return err
+	}
+}
+
 // engineProxyLink reports whether err is the open's refusal of a link at the path.
 func engineProxyLink(err error) bool { return errors.Is(err, unix.ELOOP) }
 

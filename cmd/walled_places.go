@@ -34,14 +34,101 @@ func writablePlaces(root string, mounts []wall.Mount) []struct{ path, kind strin
 	return out
 }
 
+// walledPlaces stops a walled run with an input error when its checkout at root, or one
+// of the read-write mounts of mounts, is the person's home folder or qory's state
+// directory, or an ancestor of either. A walled run records each of those places as one
+// it may write, and the record stays after the run: qory would then run no git unchecked
+// in any repository under the home folder, and the run could write the records under the
+// state directory. A read-only mount is not recorded, and is not compared. The paths are
+// compared as written, made absolute, and again with the links of their nearest existing
+// ancestor resolved, see [resolvedUp]: a home folder or a state directory reached through
+// a link inside the place lies in it as written, and one that does not exist yet, below
+// a link, lies in it where the link leads. A home folder that cannot be found, or that
+// is a relative path, and a state directory that cannot be found, are not compared.
+func walledPlaces(root string, mounts []wall.Mount) error {
+	for i, p := range writablePlaces(root, mounts) {
+		relation, home := reserved(p.path)
+		switch {
+		case relation == "":
+		case i == 0 && home:
+			return input(fmt.Errorf("start the walled run from a repository folder: its checkout %s %s, and a walled run may change any file in its checkout, so qory would stop running git in every repository under the checkout", hostgit.Shown(p.path), relation))
+		case i == 0:
+			return input(fmt.Errorf("start the walled run from a repository folder: its checkout %s %s, and a walled run may change any file in its checkout, the record of the places walled runs used among them", hostgit.Shown(p.path), relation))
+		case home:
+			return input(fmt.Errorf("mount a narrower folder: the mount %s %s, and a walled run may change any file in a read-write mount, so qory would stop running git in every repository under the mount", hostgit.Shown(p.path), relation))
+		default:
+			return input(fmt.Errorf("mount a narrower folder: the mount %s %s, and a walled run may change any file in a read-write mount, the record of the places walled runs used among them", hostgit.Shown(p.path), relation))
+		}
+	}
+	return nil
+}
+
+// reserved is how the folder at path relates to the home folder, home true, or else to
+// qory's state directory, when path is that folder or an ancestor of it: "is" and the
+// folder's description, or "contains", the description and the folder's path. It is ""
+// for a path that is neither. A relative HOME is not compared: resolved against the
+// working folder, it would change with it.
+func reserved(path string) (relation string, home bool) {
+	if dir, err := os.UserHomeDir(); err == nil && filepath.IsAbs(dir) && liesIn(dir, path) {
+		return contains(path, dir, "your home folder"), true
+	}
+	if dir, err := stateDir(); err == nil && liesIn(dir, path) {
+		return contains(path, dir, "qory's state directory"), false
+	}
+	return "", false
+}
+
+// liesIn reports whether dir is path or lies inside it, as written and made absolute, or
+// with the links of the nearest existing ancestor of each resolved, see [resolvedUp].
+func liesIn(dir, path string) bool {
+	a, errA := filepath.Abs(path)
+	b, errB := filepath.Abs(dir)
+	return errA == nil && errB == nil && within(a, b) || within(resolvedUp(path), resolvedUp(dir))
+}
+
+// contains is how the folder at path relates to the folder dir, called what: "is" and
+// what when path is dir, else "contains", what and dir.
+func contains(path, dir, what string) string {
+	if filepath.Clean(path) == filepath.Clean(dir) || resolvedUp(path) == resolvedUp(dir) {
+		return "is " + what
+	}
+	return "contains " + what + " " + hostgit.Shown(dir)
+}
+
+// resolvedUp is path made absolute, with its nearest existing ancestor, or path itself,
+// as [walled.Real] returns it, and the names below that ancestor as given: [walled.Real]
+// resolves no link in a path that does not exist.
+func resolvedUp(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	var rest []string
+	for dir := abs; ; dir = filepath.Dir(dir) {
+		if _, err := os.Stat(dir); err == nil {
+			slices.Reverse(rest)
+			return filepath.Join(append([]string{walled.Real(dir)}, rest...)...)
+		}
+		if filepath.Dir(dir) == dir {
+			return abs
+		}
+		rest = append(rest, filepath.Base(dir))
+	}
+}
+
 // recordPlaces holds every place the walled run of spec may write for the run that
 // starts, see [hostgit.Starting], until the returned hold is released, once the session
 // has registered the run. It refuses a place a walled run still going binds writable.
 // Under the hold it records each place: with [hostgit.Record], and with the
 // fingerprints of the qory files of the checkout at root and of its composed harness,
-// at, that lie in the place. A place recorded before keeps its fingerprints. On an error
-// nothing stays held.
+// at, that lie in the place. A place recorded before keeps its fingerprints. A checkout
+// or a read-write mount that is the home folder or the state directory, or an ancestor
+// of either, is the error of [walledPlaces], and nothing is held or recorded. On an
+// error nothing stays held.
 func recordPlaces(ctx context.Context, spec *runSpec, root string, at places) (*walled.Hold, error) {
+	if err := walledPlaces(root, spec.Mounts); err != nil {
+		return nil, err
+	}
 	files, err := qoryFiles(root)
 	if err != nil {
 		return nil, err

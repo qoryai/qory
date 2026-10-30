@@ -6,12 +6,14 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -227,11 +229,11 @@ const pinnedImage = "registry.example/agents/go@sha256:0123456789abcdef012345678
 
 // engineDocker is a program that stands in for docker, as [fakeDocker] does, and writes
 // every command line into the log it returns. It answers the image inspect of the
-// repository digests with pinnedImage when held or once pulled, and with no such image
+// repository digests with image when held or once pulled, and with no such image
 // otherwise; the image's config with the user 1000; and a pull by sending a request for
 // http://registry.example/v2/ through proxyURL, which [enginePull] writes the results of
 // into the file it returns.
-func engineDocker(t *testing.T, held bool, proxyURL string) (docker, log, pulled string) {
+func engineDocker(t *testing.T, image string, held bool, proxyURL string) (docker, log, pulled string) {
 	t.Helper()
 	bin, err := os.Executable()
 	if err != nil {
@@ -245,7 +247,7 @@ func engineDocker(t *testing.T, held bool, proxyURL string) (docker, log, pulled
 	if held {
 		writeFile(t, holds, "")
 	}
-	inspect := `test -e ` + holds + ` && { echo '["` + pinnedImage + `"]'; exit 0; }; echo "Error response from daemon: No such image: $5" >&2; exit 1`
+	inspect := `test -e ` + holds + ` && { echo '["` + image + `"]'; exit 0; }; echo "Error response from daemon: No such image: $5" >&2; exit 1`
 	docker = filepath.Join(dir, "docker")
 	writeFile(t, docker, `#!/bin/sh
 echo "$*" >> `+log+`
@@ -304,23 +306,76 @@ func imageSteps(evs map[string][]map[string]any) (names, states []string) {
 	return names, states
 }
 
+// manifestRegistry is a registry on this machine's loopback address, which Forager's
+// check of a run's image reaches over http: it answers a HEAD of the manifest of
+// agents/go at the digest of [pinnedImage] with 200 and that digest, and every other
+// request with 404. It returns the registry's host:port and what returns the path of
+// each request it got.
+func manifestRegistry(t *testing.T) (host string, got func() []string) {
+	t.Helper()
+	digest := pinnedImage[strings.Index(pinnedImage, "@")+1:]
+	var mu sync.Mutex
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		mu.Unlock()
+		if r.Method == http.MethodHead && r.URL.Path == "/v2/agents/go/manifests/"+digest {
+			w.Header().Set("Docker-Content-Digest", digest)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+	_, port, err := net.SplitHostPort(srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return "localhost:" + port, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(paths)
+	}
+}
+
+// localImage is a run's image on [manifestRegistry]: the image, pinned by the digest of
+// [pinnedImage]; the run's policy, which selects it and allows localhost; the lines of
+// forager.yaml after the wall's images, which allow its repository and open localhost
+// to the run's proxy; and what returns the requests the registry got.
+func localImage(t *testing.T) (image, policy, foragerLines string, requests func() []string) {
+	t.Helper()
+	registry, requests := manifestRegistry(t)
+	image = registry + "/agents/go" + pinnedImage[strings.Index(pinnedImage, "@"):]
+	policy = filepath.Join(t.TempDir(), "policy.yaml")
+	writeFile(t, policy, "version: 1\negress:\n  mode: observe\n  allow: [localhost]\nimage: "+image+"\n")
+	foragerLines = "  images_allow: [" + registry + "/agents/]\n"
+	return image, policy, foragerLines, requests
+}
+
+// localGateway is the gateway section of forager.yaml that opens localhost to the run's
+// proxy, for [localImage].
+const localGateway = "gateway:\n  egress:\n    mode: observe\n    allow: [localhost]\n"
+
 // TestAWalledRunPullsItsImageThroughTheEngineProxy is a walled run whose policy names its
-// image by a reference the engine does not hold, with wall.engine_proxy_file and machine
-// set, under Forager's session and the gateway qory run starts: after the compose, the
-// image step, named after the reference, pulls the image before the join; the pull's request
-// reaches the forwarder at the file's address with its password, and the gateway's
-// proxy, while one with another password gets no response; the join pulls no more;
-// run.started has the machine; and no file of the run's record, and no line, contains
-// the password.
+// image by a reference the engine does not hold, on a registry on this machine that
+// gateway.egress.allow and the run's policy list, with wall.engine_proxy_file and machine set, under
+// Forager's session and the gateway qory run starts: after the compose, the image step,
+// named after the reference, checks the image's manifest at its registry through the
+// run's proxy, once, and pulls the image before the join; the pull's request reaches the
+// forwarder at the file's address with its password, and the gateway's proxy, while one
+// with another password gets no response; the join pulls no more; run.started has the
+// machine; and no file of the run's record, and no line, contains the password.
 func TestAWalledRunPullsItsImageThroughTheEngineProxy(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, "claude")
+	image, policy, lines, requests := localImage(t)
 	addr := freeAddress(t)
-	docker, log, pulled := engineDocker(t, false, "http://qory:"+fetchPassword+"@"+addr)
+	docker, log, pulled := engineDocker(t, image, false, "http://qory:"+fetchPassword+"@"+addr)
 	file := writeEngineProxy(t, addr)
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), imagesSection(docker, staticELF(t))+"  images_allow: [registry.example/agents/]\n  engine_proxy_file: "+file+"\nmachine: aws-ec2\n")
-	out, err := run(t, "run", "claude", "--policy", imagePolicy(t, pinnedImage))
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), imagesSection(docker, staticELF(t))+lines+"  engine_proxy_file: "+file+"\nmachine: aws-ec2\n"+localGateway)
+	out, err := run(t, "run", "claude", "--policy", policy)
 	if cmd.ExitCode(err) != 4 {
 		t.Fatalf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
@@ -328,7 +383,10 @@ func TestAWalledRunPullsItsImageThroughTheEngineProxy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := strings.Count(string(data), "pull "+pinnedImage+"\n"); n != 1 {
+	if want := []string{"HEAD /v2/agents/go/manifests/" + pinnedImage[strings.Index(pinnedImage, "@")+1:]}; !slices.Equal(requests(), want) {
+		t.Errorf("the registry got %q, want %q", requests(), want)
+	}
+	if n := strings.Count(string(data), "pull "+image+"\n"); n != 1 {
 		t.Errorf("the image is pulled %d times, want once:\n%s", n, data)
 	}
 	results, err := os.ReadFile(pulled)
@@ -339,8 +397,8 @@ func TestAWalledRunPullsItsImageThroughTheEngineProxy(t *testing.T) {
 		t.Errorf("the requests through the engine proxy: %q", results)
 	}
 	dir, evs := events(t, root)
-	if names, states := imageSteps(evs); !slices.Equal(names, []string{pinnedImage}) || !slices.Equal(states, []string{"succeeded"}) {
-		t.Errorf("the image steps %q ended %q, want one of %s, succeeded", names, states, pinnedImage)
+	if names, states := imageSteps(evs); !slices.Equal(names, []string{image}) || !slices.Equal(states, []string{"succeeded"}) {
+		t.Errorf("the image steps %q ended %q, want one of %s, succeeded", names, states, image)
 	}
 	var kinds []string
 	for _, s := range evs["dev.qory.run.step_started"] {
@@ -367,16 +425,19 @@ func TestAWalledRunPullsItsImageThroughTheEngineProxy(t *testing.T) {
 }
 
 // TestAWalledRunStartsTheImageItsEngineHolds is a walled run whose policy names its
-// image by a reference the engine holds by that digest, with no engine proxy, under
-// Forager's session: nothing is pulled, the run's image step is the one Forager writes,
-// named after the reference and succeeded, and the agent's container starts.
+// image by a reference the engine holds by that digest, on a registry on this machine,
+// with no engine proxy, under Forager's session: the image's manifest is checked at its
+// registry once, the wall pulls the image once all the same, as Forager's pull does
+// for an image the engine holds, the run's image step is the one Forager writes, named
+// after the reference and succeeded, and the agent's container starts.
 func TestAWalledRunStartsTheImageItsEngineHolds(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, "claude")
-	docker, log, _ := engineDocker(t, true, "http://qory:"+fetchPassword+"@127.0.0.1:9")
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), imagesSection(docker, staticELF(t))+"  images_allow: [registry.example/agents/]\n")
-	out, err := run(t, "run", "claude", "--policy", imagePolicy(t, pinnedImage))
+	image, policy, lines, requests := localImage(t)
+	docker, log, _ := engineDocker(t, image, true, "http://qory:"+fetchPassword+"@127.0.0.1:9")
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), imagesSection(docker, staticELF(t))+lines+localGateway)
+	out, err := run(t, "run", "claude", "--policy", policy)
 	if cmd.ExitCode(err) != 4 {
 		t.Fatalf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
@@ -384,11 +445,16 @@ func TestAWalledRunStartsTheImageItsEngineHolds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lacks(t, string(data), "pull ")
-	wants(t, string(data), "image inspect --format {{json .RepoDigests}} "+pinnedImage+"\n")
+	if n := strings.Count(string(data), "pull "); n != 1 || !strings.Contains(string(data), "pull "+image+"\n") {
+		t.Errorf("the engine got %d pulls, want one of %s:\n%s", n, image, data)
+	}
+	wants(t, string(data), "image inspect --format {{json .RepoDigests}} "+image+"\n")
+	if want := []string{"HEAD /v2/agents/go/manifests/" + pinnedImage[strings.Index(pinnedImage, "@")+1:]}; !slices.Equal(requests(), want) {
+		t.Errorf("the registry got %q, want %q", requests(), want)
+	}
 	_, evs := events(t, root)
-	if names, states := imageSteps(evs); !slices.Equal(names, []string{pinnedImage}) || !slices.Equal(states, []string{"succeeded"}) {
-		t.Errorf("the image steps %q ended %q, want one of %s, succeeded", names, states, pinnedImage)
+	if names, states := imageSteps(evs); !slices.Equal(names, []string{image}) || !slices.Equal(states, []string{"succeeded"}) {
+		t.Errorf("the image steps %q ended %q, want one of %s, succeeded", names, states, image)
 	}
 	if started := evs["dev.qory.run.started"]; len(started) != 1 || started[0]["machine"] != nil {
 		t.Errorf("run.started is %v, want no machine", started)

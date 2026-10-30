@@ -5,42 +5,31 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/qoryai/qory/internal/pool/explore"
 )
 
-// TestDockerIsFoundOnTheCleanedPATH finds docker, when Docker is not set or is a name
-// alone, on the PATH every command gets: a file of that name in an entry in the pool's
-// runs folder, or linked into it, is passed over for the one in the next entry. Docker,
-// when it is a path, is taken as it is. No file is run.
-func TestDockerIsFoundOnTheCleanedPATH(t *testing.T) {
-	root, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := Settings{State: filepath.Join(root, "state")}
-	inRuns, kept := filepath.Join(explore.RunsDir(s.State), "0192f0c1", "bin"), filepath.Join(root, "bin")
-	for _, d := range []string{inRuns, kept} {
+// TestDockerIsFoundOnTheStepsPATH finds docker for the push on the PATH of the step's
+// environment, the session's, not on this process's: an entry with no docker, or one
+// that is not executable, is passed over. A name that no entry has stays a name.
+func TestDockerIsFoundOnTheStepsPATH(t *testing.T) {
+	root := t.TempDir()
+	empty, notExec, kept := filepath.Join(root, "empty"), filepath.Join(root, "noexec"), filepath.Join(root, "bin")
+	for _, d := range []string{empty, notExec, kept} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(d, "docker"), nil, 0o700); err != nil {
-			t.Fatal(err)
-		}
 	}
-	if err := os.Symlink(inRuns, filepath.Join(root, "link")); err != nil {
+	if err := os.WriteFile(filepath.Join(notExec, "docker"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", strings.Join([]string{filepath.Join(root, "link"), inRuns, kept}, string(os.PathListSeparator)))
-	if got, err := s.docker(); err != nil || got != filepath.Join(kept, "docker") {
-		t.Errorf("docker is %q, %v; want %q", got, err, filepath.Join(kept, "docker"))
+	if err := os.WriteFile(filepath.Join(kept, "docker"), nil, 0o700); err != nil {
+		t.Fatal(err)
 	}
-	s.Docker = "docker"
-	if got, err := s.docker(); err != nil || got != filepath.Join(kept, "docker") {
-		t.Errorf("docker by its name is %q, %v; want %q", got, err, filepath.Join(kept, "docker"))
+	t.Setenv("PATH", filepath.Join(root, "elsewhere"))
+	env := []string{"HOME=/home/x", "PATH=" + strings.Join([]string{empty, notExec, kept}, string(os.PathListSeparator))}
+	if got := lookIn("docker", env); got != filepath.Join(kept, "docker") {
+		t.Errorf("docker is %q, want %q", got, filepath.Join(kept, "docker"))
 	}
-	s.Docker = "/opt/docker/bin/docker"
-	if got, err := s.docker(); err != nil || got != s.Docker {
-		t.Errorf("docker is %q, %v; want %q", got, err, s.Docker)
+	if got := lookIn("podman", env); got != "podman" {
+		t.Errorf("podman is %q, want the name", got)
 	}
 }

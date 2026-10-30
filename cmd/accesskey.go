@@ -347,15 +347,19 @@ func enrol(ctx context.Context, out, errOut io.Writer, rawServer, rawCode string
 	if err != nil {
 		return input(err)
 	}
-	// The code's prefix names the kind of key it enrols. An integration's is refused
-	// before anything is made, written or sent: the server would enrol the key for the
-	// integration, active until revoked.
+	// The code's prefix shows the kind of key it enrols. At an integration's code or a
+	// diagnostics code, enrol stops with an input error before it makes a key, writes a
+	// file or sends a request: the server would enrol the key for the integration or as a
+	// diagnostics key, active until revoked.
 	kind, err := accesskey.CodeKind(code)
 	if err != nil {
 		return input(err)
 	}
 	if kind == "adapter" {
 		return input(errors.New("this code is for an integration: use a code made for this machine or its pool"))
+	}
+	if kind == kindDiagnostics {
+		return input(errors.New("Run `qory apiary enrol <server> <code>` with this code: it is a diagnostics enrolment code (qecd_), for a diagnostics key, which qory apiary enrol makes and stores apart from this machine's access key."))
 	}
 	if err := flagVia.check(); err != nil {
 		return err

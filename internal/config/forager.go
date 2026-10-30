@@ -341,6 +341,10 @@ type ForagerWall struct {
 	// name its image by, Forager's OpenSpec.ImagesAllow; nil allows no reference. A list
 	// needs a default image, Image or --image.
 	ImagesAllow []string
+	// PrebuildImage is the name of the entry of Images a prebuild from a run code runs
+	// in behind the wall: one with nested Docker, and so a runtime. Empty is none: such a
+	// prebuild stops before anything is fetched.
+	PrebuildImage string
 	// Command is the program the adapter runs, such as podman; empty means docker.
 	Command string
 	// Helper is the path of a static Linux build of qory, mounted into the container as
@@ -471,8 +475,10 @@ type foragerFile struct {
 		Adapter *string   `yaml:"adapter"`
 		Image   *string   `yaml:"image"`
 		Images  yaml.Node `yaml:"images,omitempty"`
-		Command *string   `yaml:"command"`
-		Helper  *string   `yaml:"helper"`
+		// PrebuildImage is read as a name of Images.
+		PrebuildImage *string `yaml:"prebuild_image"`
+		Command       *string `yaml:"command"`
+		Helper        *string `yaml:"helper"`
 		// Env, Mounts and CAEnv are read as nodes, so an entry that is not a string
 		// is refused by its index.
 		Env     yaml.Node `yaml:"env,omitempty"`
@@ -758,6 +764,11 @@ func LoadForagerIn(dir string) (*Forager, error) {
 		}
 		if r.Wall.ImagesAllow, err = readImagesAllow(path, &w.ImagesAllow); err != nil {
 			return nil, err
+		}
+		if w.PrebuildImage != nil {
+			if r.Wall.PrebuildImage, err = readPrebuildImage(path, *w.PrebuildImage, r.Wall.Images); err != nil {
+				return nil, err
+			}
 		}
 		if w.Command != nil {
 			r.Wall.Command = *w.Command
@@ -1905,6 +1916,9 @@ func (r *Forager) Rows() []Row {
 		}
 		if len(r.Wall.ImagesAllow) > 0 {
 			rows = append(rows, Row{"wall.images_allow", strings.Join(exports.Values(r.Wall.ImagesAllow), ", "), origin})
+		}
+		if r.Wall.PrebuildImage != "" {
+			rows = append(rows, Row{"wall.prebuild_image", accesskey.ShownName(r.Wall.PrebuildImage, false) + " (wall.images." + accesskey.ShownName(r.Wall.PrebuildImage, false) + ")", origin})
 		}
 		rows = append(rows, Row{"wall.env", listOrNone(shownNames(r.Wall.Env)), origin})
 		if r.Wall.Command != "" {

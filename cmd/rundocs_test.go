@@ -119,7 +119,7 @@ func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 			checks + "its inputs.domain is not its domain; the code is used"},
 		{"another step", json.RawMessage(`{"step":"triage","domain":"software","inputs":{"version":1}}`),
 			"update qory: the response to the run code is for the step triage, and qory runs a run code's run for the steps explore and prebuild only; the code is used"},
-		{"prebuild with no wall", preDocs, "set wall.image, pinned by its digest, wall.user and wall.helper in forager.yaml: a prebuild from a run code builds with them; the code is used"},
+		{"prebuild with no wall", preDocs, "set wall.image, pinned by its digest, wall.user and wall.prebuild_image in forager.yaml: a prebuild from a run code builds with them; the code is used"},
 		{"no workflow", codeDocuments(t, func(d map[string]any) { delete(d, "workflow"); delete(d, "harness_hidden") }),
 			"set a workflow for the workspace in Qory Apiary, then take the work item in again: the response to the run code has no workflow; the code is used"},
 		{"a stack", codeDocuments(t, func(d map[string]any) { d["stack"] = "core" }), broken},

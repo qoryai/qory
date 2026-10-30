@@ -77,7 +77,16 @@ const (
 	// HooksPath is where a run mounts its hook socket's folder; the image has nothing
 	// there.
 	HooksPath = "/qory/hooks"
+	// ProxyPath is where the seed step's container of a build behind a wall has the
+	// run's proxy, bound read-only: [ProxyFile], and ca.pem when the run has a bundle.
+	ProxyPath = "/qory/proxy"
+	// ProxyFile is the file in [ProxyPath] whose lines, NAME=value, the seed step's
+	// commands get in their environment: the proxy's variables, and the bundle's.
+	ProxyFile = "env"
 )
+
+// proxyBundle is the run's bundle of authorities in [ProxyPath].
+const proxyBundle = "ca.pem"
 
 // MaxSize is the largest image the build keeps, as docker image inspect reports its
 // size: 4 GiB.
@@ -138,6 +147,7 @@ const (
 	textConfigUnread = "docker image inspect printed a configuration that does not read"
 	textLimit        = "the build ran past its limit of 30 minutes and was stopped; what it started is removed"
 	textStopped      = "the build was stopped before it finished; what it started is removed"
+	textNoBundle     = "check the run's bundle of authorities behind the wall: the build could not read it: %s"
 )
 
 // The names of the labels and keys the build reads.
@@ -247,6 +257,19 @@ type Options struct {
 	// EnvironmentTag is the name of the environment image the build keeps apart; ""
 	// is <Name>:environment.
 	EnvironmentTag string
+
+	// Walled is true when the build runs behind the wall of its run, on the wall's nested
+	// Docker, whose containers reach the outside only through the run's proxy, set in the
+	// docker configuration of the folder DOCKER_CONFIG is set to. devcontainer build then
+	// reads a copy of the build's docker configuration with those proxies, so docker
+	// passes them to the build's steps as Docker's predefined build arguments, which the
+	// image does not keep. The seed step's container gets them, and CABundle, from a folder bound
+	// read-only at [ProxyPath], and never in its environment, which docker commit keeps.
+	Walled bool
+	// CABundle is the run's bundle of authorities behind the wall, "" for none. The seed
+	// step's commands get it as ca.pem in [ProxyPath], in each variable of Env that is
+	// set to CABundle.
+	CABundle string
 }
 
 // Result is what [Build] made.
@@ -309,6 +332,10 @@ type build struct {
 	images  []string
 	// created says the container may exist: docker create ran.
 	created bool
+	// buildEnv is the environment of devcontainer build, and proxyDir the folder bound
+	// at [ProxyPath] in the seed step's container, "" for none: [build.wallProxies].
+	buildEnv []string
+	proxyDir string
 
 	// up rewrites the definition's images, [upstream].
 	up upstream
@@ -416,7 +443,7 @@ func (b *build) run(ctx context.Context) error {
 	if err := b.writeConfig(); err != nil {
 		return err
 	}
-	config, original, err := dockerConfig(b.tmp, b.o.Env)
+	config, original, proxies, err := dockerConfig(b.tmp, b.o.Env)
 	if err != nil {
 		return err
 	}
@@ -426,6 +453,12 @@ func (b *build) run(ctx context.Context) error {
 	// where they are, in the original.
 	if lastValue(b.e.env, "DOCKER_CERT_PATH") == "" && original != "" {
 		b.e.env = withValue(b.e.env, "DOCKER_CERT_PATH", original)
+	}
+	b.buildEnv = b.e.env
+	if b.o.Walled && proxies != nil {
+		if err := b.wallProxies(config, original, proxies); err != nil {
+			return err
+		}
 	}
 	if err := b.checkPrograms(ctx); err != nil {
 		return err
@@ -807,7 +840,7 @@ func lastJSON(out []byte) []byte {
 func (b *build) buildBase(ctx context.Context, base string) error {
 	start := time.Now()
 	b.images = append(b.images, base)
-	out, err := b.e.output(ctx, "devcontainer", "build",
+	out, err := engine{env: b.buildEnv, log: b.e.log}.output(ctx, "devcontainer", "build",
 		"--workspace-folder", b.repo, "--config", b.configPath(),
 		"--image-name", base, "--no-lockfile", "--log-format", "text")
 	if err != nil {
@@ -982,8 +1015,11 @@ func (b *build) runCommands(ctx context.Context, top string) error {
 	args := []string{"create", "--name", b.name, "--pull", "never",
 		"--user", b.u.String(), "--workdir", Workspace,
 		"--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-		"--mount", mountArg(b.o.Helper),
-		"--entrypoint", wall.HelperPath, top}
+		"--mount", mountArg(b.o.Helper)}
+	if b.proxyDir != "" {
+		args = append(args, "--mount", "type=bind,source="+b.proxyDir+",target="+ProxyPath+",readonly")
+	}
+	args = append(args, "--entrypoint", wall.HelperPath, top)
 	b.created = true
 	if err := b.e.run(ctx, nil, io.Discard, "docker", append(args, b.o.SeedArgs...)...); err != nil {
 		return err
@@ -1019,6 +1055,67 @@ func (b *build) runCommands(ctx context.Context, top string) error {
 		return fmt.Errorf(textCommandsExit, f.code)
 	}
 	return err
+}
+
+// wallProxies sets what a build behind a wall reaches the outside with, from proxies,
+// the proxies member of the original docker configuration: the environment of
+// devcontainer build, with DOCKER_CONFIG at a copy of config, the build's docker
+// configuration in its folder, with the proxies, [buildConfig]; and the folder the seed
+// step's container gets at [ProxyPath], [ProxyFile] with the proxies' variables and the
+// variables of Env set to CABundle, then ca.pem, a copy of CABundle. The folder is in
+// the temporary folder, which the nested engine reads, and its files are mode 0644: the
+// seed step runs as the wall user, and they contain no password.
+func (b *build) wallProxies(config, original string, proxies json.RawMessage) error {
+	entries, withheld, err := proxyEntries(proxies)
+	if err != nil {
+		return err
+	}
+	for _, name := range withheld {
+		b.line(textProxyUser, name)
+	}
+	folder, err := buildConfig(b.tmp, config, original, proxies)
+	if err != nil {
+		return err
+	}
+	b.buildEnv = withValue(slices.Clone(b.e.env), "DOCKER_CONFIG", folder)
+	dir := filepath.Join(b.tmp, "proxy")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0o755); err != nil {
+		return err
+	}
+	if b.o.CABundle != "" {
+		data, err := os.ReadFile(b.o.CABundle)
+		if err != nil {
+			return fmt.Errorf(textNoBundle, integration.Printable(reason(err)))
+		}
+		if err := writePublic(filepath.Join(dir, proxyBundle), data); err != nil {
+			return err
+		}
+		for _, kv := range b.o.Env {
+			if name, value, ok := strings.Cut(kv, "="); ok && value == b.o.CABundle && !slices.ContainsFunc(entries, func(e string) bool { return strings.HasPrefix(e, name+"=") }) {
+				entries = append(entries, name+"="+path.Join(ProxyPath, proxyBundle))
+			}
+		}
+	}
+	var text strings.Builder
+	for _, e := range entries {
+		text.WriteString(e + "\n")
+	}
+	if err := writePublic(filepath.Join(dir, ProxyFile), []byte(text.String())); err != nil {
+		return err
+	}
+	b.proxyDir = dir
+	return nil
+}
+
+// writePublic writes data to the new file p, mode 0644 whatever the umask.
+func writePublic(p string, data []byte) error {
+	if err := os.WriteFile(p, data, 0o644); err != nil {
+		return err
+	}
+	return os.Chmod(p, 0o644)
 }
 
 // mountArg is the --mount value that mounts the helper read-only at

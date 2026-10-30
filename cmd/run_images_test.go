@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -244,7 +245,8 @@ func TestNestIsHiddenAndTakesItsArgumentsAsTheyAre(t *testing.T) {
 // TestARunsPolicyNamesAnImageByReference is a --policy that names its image by a
 // reference pinned by digest: qory leaves it to Forager. Without wall.images_allow,
 // Forager refuses it as the run starts, image_not_allowed, and the run is recorded;
-// under a prefix of the list, the wall fetches it. A list without a default image is
+// under a prefix of the list, the image's manifest is checked at its registry, a
+// registry on this machine, and the wall fetches it. A list without a default image is
 // refused as input before anything starts.
 func TestARunsPolicyNamesAnImageByReference(t *testing.T) {
 	root := newCheckout(t)
@@ -253,8 +255,7 @@ func TestARunsPolicyNamesAnImageByReference(t *testing.T) {
 	docker, log := fakeDocker(t)
 	helper := staticELF(t)
 	file := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml")
-	const ref = "registry.example/agents/go@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	policy := imagePolicy(t, ref)
+	ref, policy, allowed, requests := localImage(t)
 
 	writeFile(t, file, imagesSection(docker, helper))
 	out, err := run(t, "run", "--policy", policy)
@@ -276,7 +277,7 @@ func TestARunsPolicyNamesAnImageByReference(t *testing.T) {
 	if err := os.Remove(log); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, file, imagesSection(docker, helper)+"  images_allow: [registry.example/agents/]\n")
+	writeFile(t, file, imagesSection(docker, helper)+allowed+localGateway)
 	out, err = run(t, "run", "--policy", policy)
 	if err == nil || strings.Contains(err.Error(), "image_not_allowed") {
 		t.Errorf("under wall.images_allow: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
@@ -286,8 +287,11 @@ func TestARunsPolicyNamesAnImageByReference(t *testing.T) {
 		t.Fatal(err)
 	}
 	wants(t, string(data), "pull "+ref+"\n")
+	if want := []string{"HEAD /v2/agents/go/manifests/" + ref[strings.Index(ref, "@")+1:]}; !slices.Equal(requests(), want) {
+		t.Errorf("the registry got %q, want %q", requests(), want)
+	}
 
-	writeFile(t, file, strings.Replace(imagesSection(docker, helper), "  image: go\n", "", 1)+"  images_allow: [registry.example/agents/]\n")
+	writeFile(t, file, strings.Replace(imagesSection(docker, helper), "  image: go\n", "", 1)+allowed+localGateway)
 	_, err = run(t, "run", "--policy", policy)
 	want := "wall.images_allow in forager.yaml needs a default image, which an image by reference starts under: --image, or wall.image"
 	if err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {

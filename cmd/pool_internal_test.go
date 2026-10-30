@@ -102,15 +102,19 @@ func TestRunPoolRunsTheLoop(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stderr syncBuffer
+	docker := unreachedProbe(t)
 	s := &poolSettings{
 		Forager: &config.Forager{Server: &config.ForagerServer{URL: srv.URL + "/", AccessKeyID: provisionertest.KeyID, Pin: srv.Pin(),
 			Via: &config.ForagerVia{URL: via.URL}}},
-		Pool:  &config.ForagerPool{Runs: 2, Registry: "localhost:5001/qory-env", RunConfig: filepath.Join(root, "runs")},
-		Runs:  &config.Forager{Wall: &config.ForagerWall{Image: agentImageOf, User: "1000:1000", Helper: filepath.Join(root, "qory-linux")}},
+		Pool: &config.ForagerPool{Runs: 2, Registry: "localhost:5001/qory-env", RunConfig: filepath.Join(root, "runs")},
+		Runs: &config.Forager{Wall: &config.ForagerWall{Image: agentImageOf, User: "1000:1000", Helper: filepath.Join(root, "qory-linux"),
+			Command: docker}},
 		State: filepath.Join(root, "qory", "pool"), InstanceID: provisionertest.InstanceID, InstanceName: "pool-test", Stderr: &stderr,
 	}
 	p := poolLoop(s, srv.Pool, srv.Pin(), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if want := (pool.Settings{Runs: 2, State: s.State, RunConfig: s.Pool.RunConfig}); p.Settings != want {
+	want := pool.Settings{Runs: 2, State: s.State, RunConfig: s.Pool.RunConfig,
+		Probe: pool.Probe{Docker: docker, Image: agentImageOf, User: "1000:1000"}}
+	if p.Settings != want {
 		t.Errorf("the loop's settings are %+v, want %+v", p.Settings, want)
 	}
 	srv.Script(provisionertest.RouteDispatched, provisionertest.Reply{Status: 410, Code: "gone"})
@@ -154,6 +158,17 @@ func TestRunPoolRunsTheLoop(t *testing.T) {
 	if viaCalls != 0 {
 		t.Errorf("the gateway was sent %d requests", viaCalls)
 	}
+}
+
+// unreachedProbe is a docker program whose run of the pool's check of the cloud
+// metadata service exits 0, as when neither address connects.
+func unreachedProbe(t *testing.T) string {
+	t.Helper()
+	docker := filepath.Join(t.TempDir(), "docker")
+	if err := os.WriteFile(docker, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return docker
 }
 
 // agentImageOf is an agent's image pinned by its digest.

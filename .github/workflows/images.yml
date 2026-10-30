@@ -1,9 +1,9 @@
 name: Images
 
-# The agent's images are built here; this workflow publishes none of them, and
-# prerelease.yml publishes agent to a private package. A change to them, to the check
+# The agent's images and the prebuild's are built here; this workflow publishes none of
+# them, and prerelease.yml publishes agent and prebuild to private packages. A change to them, to the check
 # and what it reads, or to the Forager module whose descriptor names the version of claude,
-# builds all four and checks them with the qory of the same commit.
+# builds all five and checks them with the qory of the same commit.
 on:
   push:
     branches: [main]
@@ -65,12 +65,15 @@ jobs:
       - name: Build agent-go-docker
         run: docker build --platform linux/amd64 -t qory-agent-go-docker --build-arg BASE=qory-agent-docker --build-arg TITLE=agent-go-docker --build-arg FETCH_IMAGE="$FETCH_IMAGE" images/agent-go
 
+      - name: Build prebuild
+        run: docker build --platform linux/amd64 -t qory-prebuild --build-arg BASE=qory-agent-docker --build-arg FETCH_IMAGE="$FETCH_IMAGE" images/prebuild
+
       - name: Check them
         # On Linux the probe is qory itself, and a configuration directory with no
         # forager.yaml leaves every setting its default.
         env:
           XDG_CONFIG_HOME: ${{ runner.temp }}/config
-        run: '"$RUNNER_TEMP/qory" image check qory-agent qory-agent-docker qory-agent-go qory-agent-go-docker'
+        run: '"$RUNNER_TEMP/qory" image check qory-agent qory-agent-docker qory-agent-go qory-agent-go-docker qory-prebuild'
 
   arm64:
     name: Build the images for arm64
@@ -100,3 +103,6 @@ jobs:
 
       - name: Build agent-go-docker
         run: docker build --platform linux/arm64 -t qory-agent-go-docker --build-arg BASE=qory-agent-docker --build-arg TITLE=agent-go-docker --build-arg FETCH_IMAGE="$FETCH_IMAGE" images/agent-go
+
+      - name: Build prebuild
+        run: docker build --platform linux/arm64 -t qory-prebuild --build-arg BASE=qory-agent-docker --build-arg FETCH_IMAGE="$FETCH_IMAGE" images/prebuild

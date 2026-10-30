@@ -375,3 +375,56 @@ func TestSeedRefusesARelativeHome(t *testing.T) {
 		})
 	}
 }
+
+// TestSeedRunsTheCommandsThroughTheRunsProxy is a build behind a wall: the commands get
+// the variables of the proxy's file in the folder bound at the proxy's path, and the
+// configuration's values win over them. A file that is a link, too large or has a line
+// of another form stops the seed before any command runs.
+func TestSeedRunsTheCommandsThroughTheRunsProxy(t *testing.T) {
+	config := `{"image": "alpine", "containerEnv": {"NO_PROXY": "shop.example.com"}, "onCreateCommand": "echo \"$HTTPS_PROXY $https_proxy $NO_PROXY $SSL_CERT_FILE\" > created.txt"}`
+	p := seedPaths(t, config)
+	p.Proxy = filepath.Join(filepath.Dir(p.Seed), "proxy")
+	if err := os.MkdirAll(p.Proxy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "HTTPS_PROXY=http://172.30.0.1:3128\nhttps_proxy=http://172.30.0.1:3128\nNO_PROXY=localhost\nSSL_CERT_FILE=/qory/proxy/ca.pem\n"
+	if err := os.WriteFile(filepath.Join(p.Proxy, prebuild.ProxyFile), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, log bytes.Buffer
+	if err := prebuild.Seed(t.Context(), p, []string{"PATH=" + os.Getenv("PATH")}, &out, &log); err != nil {
+		t.Fatalf("Seed: %v\n%s", err, log.String())
+	}
+	created, _ := os.ReadFile(filepath.Join(p.Seed, "created.txt"))
+	if got := string(created); got != "http://172.30.0.1:3128 http://172.30.0.1:3128 shop.example.com /qory/proxy/ca.pem\n" {
+		t.Errorf("onCreateCommand saw %q", got)
+	}
+	const want = "check the run's proxy in /qory/proxy: it does not read as lines of NAME=value, and the commands do not run without it"
+	for name, write := range map[string]func(string) error{
+		"a line of another form": func(f string) error { return os.WriteFile(f, []byte("HTTPS_PROXY=x\nexport A=b\n"), 0o644) },
+		"too large":              func(f string) error { return os.WriteFile(f, bytes.Repeat([]byte("A=b\n"), 1<<14+1), 0o644) },
+		"a link": func(f string) error {
+			real := filepath.Join(t.TempDir(), "env")
+			if err := os.WriteFile(real, []byte("A=b\n"), 0o644); err != nil {
+				return err
+			}
+			return os.Symlink(real, f)
+		},
+	} {
+		p := seedPaths(t, `{"image": "alpine", "onCreateCommand": "touch created.txt"}`)
+		p.Proxy = filepath.Join(filepath.Dir(p.Seed), "proxy")
+		if err := os.MkdirAll(p.Proxy, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := write(filepath.Join(p.Proxy, prebuild.ProxyFile)); err != nil {
+			t.Fatal(err)
+		}
+		err := prebuild.Seed(t.Context(), p, []string{"PATH=" + os.Getenv("PATH")}, &bytes.Buffer{}, &bytes.Buffer{})
+		if err == nil || err.Error() != want {
+			t.Errorf("%s: %v, want %q", name, err, want)
+		}
+		if _, err := os.Stat(filepath.Join(p.Workspace, "created.txt")); err == nil {
+			t.Errorf("%s: a command ran", name)
+		}
+	}
+}
