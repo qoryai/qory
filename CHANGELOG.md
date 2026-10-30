@@ -398,6 +398,9 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Fixed
 
+- A run from a run code mounts its inputs from a `qory-inputs-` folder, so the wall no
+  longer stops the run as it mounts a folder that Forager reserves for its record
+  sockets.
 - A git base whose `qory-stack.yaml`, or whose repository's `qory.yaml`, is a link that
   leads outside its clone stops the compose with exit 2, as `extends <url>#<ref>:<path>:
   qory-stack.yaml links outside the repository` or `extends <url>#<ref>:<path>: qory.yaml
