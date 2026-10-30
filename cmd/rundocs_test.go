@@ -214,7 +214,7 @@ func runFromCodeGiven(t *testing.T, before func(code string) []string, args []st
 	if stackFile != nil {
 		files["examples/hello/qory-stack.yaml"] = stackFile(files["examples/hello/qory-stack.yaml"])
 	}
-	files["examples/hello/qory-stack.yaml"] += extendable
+	files["examples/hello/qory-stack.yaml"] = withExtendable(files["examples/hello/qory-stack.yaml"])
 	h := newHostFetch(t, "", "main")
 	commit := h.server.RepositoryWithLinks(t, "example-org/hello", "main", files, links)
 	url := h.server.URL("example-org/hello")

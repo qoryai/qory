@@ -34,10 +34,18 @@ const (
 	checkoutBase     = "the base of the checkout's harness"
 )
 
-// extendable is the block that a stack file ends with so that a harness may extend it,
-// as the harness document and the checkout's qory.yaml of these tests do, with modules
-// that ship an AGENTS.md.
+// extendable is the block that lets a harness extend a stack file with modules that ship
+// an AGENTS.md, as the harness document and the checkout's qory.yaml of these tests do.
 const extendable = "extending:\n  instructions: true\n"
+
+// withExtendable returns the stack file f with [extendable] in place of its empty
+// extending block, as examples/hello has one, or added at its end when it has none.
+func withExtendable(f string) string {
+	if strings.Contains(f, "\nextending: {}\n") {
+		return strings.Replace(f, "\nextending: {}\n", "\n"+extendable, 1)
+	}
+	return f + extendable
+}
 
 // deadProxy is a proxy URL that leads nowhere, for the proxy a run must not use.
 const deadProxy = "http://qory:nowhere@127.0.0.1:9"
@@ -152,7 +160,7 @@ func (c codeHarness) run(t *testing.T) harnessRun {
 	if c.stack != nil {
 		files[folder+"/qory-stack.yaml"] = c.stack(files[folder+"/qory-stack.yaml"])
 	}
-	files[folder+"/qory-stack.yaml"] += extendable
+	files[folder+"/qory-stack.yaml"] = withExtendable(files[folder+"/qory-stack.yaml"])
 	for name := range c.links {
 		delete(files, name)
 	}
