@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/qoryai/qory/internal/pool/child"
+	"github.com/qoryai/qory/internal/secretmask"
 )
 
 // fakeArg is the first argument that makes the test binary the fake command.
@@ -732,5 +733,57 @@ func TestStateHome(t *testing.T) {
 	}
 	if _, err := child.Run(context.Background(), child.Command{Path: os.Args[0], Args: []string{fakeArg, filepath.Join(dir, "none.json")}, ConfigHome: dir, StateHome: "state"}); err == nil {
 		t.Error("a relative state directory was taken")
+	}
+}
+
+// TestHome is a command given a Home: its HOME is that folder, once, in place of the
+// program's, and a relative one is not taken.
+func TestHome(t *testing.T) {
+	t.Setenv("HOME", "/home/pool")
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home-user")
+	_, err, rep, _ := start(t, context.Background(), dir, script{}, nil, 0, func(c *child.Command) { c.Home = home })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var set []string
+	for _, kv := range rep.Env {
+		if strings.HasPrefix(kv, "HOME=") {
+			set = append(set, kv)
+		}
+	}
+	if want := []string{"HOME=" + home}; !slices.Equal(set, want) {
+		t.Errorf("HOME %q, want %q", set, want)
+	}
+	// With Env, Home takes the place of the HOME in Env, and Env stays as it was.
+	env := []string{"HOME=/home/session", "LANG=C"}
+	_, err, rep, _ = start(t, context.Background(), dir, script{}, nil, 0, func(c *child.Command) { c.Env, c.Home = env, home })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"LANG=C", "HOME=" + home}; !slices.Equal(rep.Env, want) {
+		t.Errorf("the environment with Env and Home is %q, want %q", rep.Env, want)
+	}
+	if want := []string{"HOME=/home/session", "LANG=C"}; !slices.Equal(env, want) {
+		t.Errorf("Env became %q, want %q", env, want)
+	}
+	if _, err := child.Run(context.Background(), child.Command{Path: os.Args[0], Args: []string{fakeArg, filepath.Join(dir, "none.json")}, ConfigHome: dir, Home: "home"}); err == nil {
+		t.Error("a relative home folder was taken")
+	}
+}
+
+// TestOutputIsMaskedWithMask is a command that prints a value of Mask and a signed URL
+// on stdout and stderr: each line Output passes on has *** in their place.
+func TestOutputIsMaskedWithMask(t *testing.T) {
+	mask := secretmask.New()
+	mask.Add("child-secret-value")
+	_, err, _, got := start(t, context.Background(), t.TempDir(), script{Say: "pushed child-secret-value to https://blob.example/x?sig=abc123def"}, nil, 0,
+		func(c *child.Command) { c.Mask = mask })
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"p: pushed *** to https://blob.example/x?sig=***", "p: pushed *** to https://blob.example/x?sig=***"}
+	if !slices.Equal(got, want) {
+		t.Errorf("the lines are %q, want %q", got, want)
 	}
 }

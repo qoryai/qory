@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"syscall"
@@ -43,14 +44,56 @@ const (
 // other source of its settings. The image has nothing there, in any form.
 const ManagedSettingsPath = "/etc/claude-code"
 
-// SeedPaths are where the seed step works: [Workspace], [SeedPath], [HooksPath] and
-// [ManagedSettingsPath] in the container. A test sets others.
+// SeedPaths are where the seed step works: [Workspace], [SeedPath], [HooksPath],
+// [ManagedSettingsPath] and [ProxyPath] in the container. A test sets others.
 type SeedPaths struct {
-	Workspace, Seed, Hooks, ManagedSettings string
+	Workspace, Seed, Hooks, ManagedSettings, Proxy string
 }
 
 // ContainerPaths are the seed step's paths in the image's container.
-var ContainerPaths = SeedPaths{Workspace: Workspace, Seed: SeedPath, Hooks: HooksPath, ManagedSettings: ManagedSettingsPath}
+var ContainerPaths = SeedPaths{Workspace: Workspace, Seed: SeedPath, Hooks: HooksPath, ManagedSettings: ManagedSettingsPath, Proxy: ProxyPath}
+
+// maxProxyFile is the most bytes the seed step reads of [ProxyFile].
+const maxProxyFile = 64 << 10
+
+// proxyEntry is a line of [ProxyFile]: a variable's name and its value.
+var proxyEntry = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=[^\x00\n]*$`)
+
+// textProxyFile is a [ProxyFile] the seed step does not read.
+const textProxyFile = "check the run's proxy in " + ProxyPath + ": it does not read as lines of NAME=value, and the commands do not run without it"
+
+// proxyEnv is what a build behind a wall binds at p.Proxy for the commands: the lines of
+// its [ProxyFile], NAME=value, none when there is no such file. A file that is a link,
+// is not a regular file, is larger than [maxProxyFile] or has a line of another form is
+// refused.
+func proxyEnv(p SeedPaths) ([]string, error) {
+	if p.Proxy == "" {
+		return nil, nil
+	}
+	file := filepath.Join(p.Proxy, ProxyFile)
+	info, err := os.Lstat(file)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil, nil
+	case err != nil || !info.Mode().IsRegular() || info.Size() > maxProxyFile:
+		return nil, errors.New(textProxyFile)
+	}
+	data, err := os.ReadFile(file)
+	if err != nil || len(data) > maxProxyFile {
+		return nil, errors.New(textProxyFile)
+	}
+	var out []string
+	for _, line := range strings.Split(strings.TrimSuffix(string(data), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		if !proxyEntry.MatchString(line) {
+			return nil, errors.New(textProxyFile)
+		}
+		out = append(out, line)
+	}
+	return out, nil
+}
 
 // Seed is the step the build runs inside a container of the image, as the wall
 // user: it checks nothing is at the hooks' path or at the managed settings' path,
@@ -83,7 +126,14 @@ func Seed(ctx context.Context, p SeedPaths, env []string, out, log io.Writer) er
 	if cfg == nil {
 		return errors.New(textNoConfig)
 	}
-	vars := devcontainer.Vars{WorkspaceFolder: Workspace, WorkspaceFolderBasename: filepath.Base(Workspace), Env: slices.Clone(env)}
+	// Behind a wall the commands reach the outside through the run's proxy, which the
+	// container's environment does not set, so the image never keeps it: it comes from
+	// the folder bound at p.Proxy, and the configuration's values win over it.
+	proxied, err := proxyEnv(p)
+	if err != nil {
+		return err
+	}
+	vars := devcontainer.Vars{WorkspaceFolder: Workspace, WorkspaceFolderBasename: filepath.Base(Workspace), Env: append(slices.Clone(env), proxied...)}
 	for _, m := range []struct {
 		member string
 		values map[string]string

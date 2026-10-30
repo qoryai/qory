@@ -74,8 +74,8 @@ func TestRunTakesAModuleExportAsADefault(t *testing.T) {
 // TestRunComposesOverTheReportsMarks is a report in the checkout that marks two variables
 // fixed: TOOL_PRELOAD, a name no template sets, and CODEX_HOME, the template's, with a
 // value of its own. The run composes before it starts, which writes the report again
-// without the marks: --env sets TOOL_PRELOAD, and CODEX_HOME is the template's, which
-// --env does not replace.
+// without the marks: --env sets TOOL_PRELOAD, which qory run prints as ***, and
+// CODEX_HOME is the template's, which --env does not replace.
 func TestRunComposesOverTheReportsMarks(t *testing.T) {
 	script := filepath.Join(t.TempDir(), "fake-runtime")
 	writeFile(t, script, "#!/bin/sh\necho \"TOOL_PRELOAD=$TOOL_PRELOAD CODEX_HOME=$CODEX_HOME\"\n")
@@ -100,7 +100,7 @@ func TestRunComposesOverTheReportsMarks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "TOOL_PRELOAD=from-env CODEX_HOME="+home+"/codex\n", "qory run: CODEX_HOME from --env is not used: the harness sets it\n")
+	wants(t, out, "TOOL_PRELOAD=*** CODEX_HOME="+home+"/codex\n", "qory run: CODEX_HOME from --env is not used: the harness sets it\n")
 	lacks(t, out, "TOOL_PRELOAD from --env", "/forged")
 	again, err := report.Read(path)
 	if err != nil {

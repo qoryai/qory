@@ -14,6 +14,11 @@ func openEngineProxyFile(string) (*os.File, error) {
 	return nil, errors.New("wall.engine_proxy_file needs a unix system")
 }
 
+// flockEngine stops: [openEngineProxyFile] opens nothing outside unix.
+func flockEngine(*os.File) error {
+	return errors.New("wall.engine_proxy_file needs a unix system")
+}
+
 // engineProxyLink reports false: [openEngineProxyFile] opens nothing.
 func engineProxyLink(error) bool { return false }
 

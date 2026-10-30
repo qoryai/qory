@@ -39,3 +39,23 @@ func TestRunPrebuildAndFetchOnlyAreGone(t *testing.T) {
 		t.Errorf("qory run --fetch-only: %v, exit %d", err, cmd.ExitCode(err))
 	}
 }
+
+// TestRunPrebuildStepIsHidden is the verb a prebuild from a run code runs behind the
+// wall of its run: in the tree, hidden from the help and the command reference. A wrong
+// argument is an input error, before anything is built.
+func TestRunPrebuildStepIsHidden(t *testing.T) {
+	if c, _, _ := cmd.Root().Find([]string{"run", "prebuild-step"}); c == nil || c.Name() != "prebuild-step" || !c.Hidden {
+		t.Error("qory run prebuild-step is not a hidden verb")
+	}
+	out, err := run(t, "run", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lacks(t, out, "prebuild-step")
+	if _, err := run(t, "run", "prebuild-step", "--out", "relative"); err == nil || cmd.ExitCode(err) != cmd.ExitInput {
+		t.Errorf("a relative --out: %v, exit %d", err, cmd.ExitCode(err))
+	}
+	if _, err := run(t, "run", "prebuild-step", "--tag", "x"); err == nil || cmd.ExitCode(err) != cmd.ExitInput {
+		t.Errorf("an unknown flag: %v, exit %d", err, cmd.ExitCode(err))
+	}
+}

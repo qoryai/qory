@@ -506,6 +506,11 @@
             }
           }
         },
+        "prebuild_image": {
+          "description": "The name of the image of images a prebuild from a run code runs in, behind the wall of its run: one with docker true and a runtime, such as Qory's prebuild image under sysbox-runc. Default none: such a prebuild stops before anything is fetched.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}$"
+        },
         "images_allow": {
           "description": "Where a run's image may come from when the run's policy, the server's signed run configuration or --policy, names one by a reference pinned by digest: the prefixes of the references the machine runs, in lower case and up to a whole part of a reference, such as a registry, a name or a path ending in a slash, or a name and its @. An image by reference starts under the default image's runtime, so a list needs image or --image. Default none: a run whose policy names an image by reference is refused.",
           "type": "array",

@@ -14,6 +14,8 @@ import (
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/integration"
 	"github.com/qoryai/qory/internal/preparation"
+	"github.com/qoryai/qory/internal/secretmask"
+	"github.com/qoryai/qory/internal/statusfd"
 )
 
 // hostStep is a step of the run's host work as qory run writes it: a [*session.Step],
@@ -120,7 +122,9 @@ var escapes = regexp.MustCompile("\x1b\\[[0-9;?]*[ -/]*[@-~]")
 
 // stepLines is the writer of a step's lines: it writes each byte to stderr at once, and
 // each whole line into the step's log, one line per Log, so the run's masker masks every
-// password whole. err is the first error of the step's Log.
+// password whole. qory run's stderr masks what it gets. Each line that starts with
+// "qory run: ", one of qory's lines, also goes to the status descriptor, masked. err is
+// the first error of the step's Log.
 type stepLines struct {
 	stderr io.Writer
 	step   hostStep
@@ -138,6 +142,7 @@ func (w *stepLines) Write(p []byte) (int, error) {
 			break
 		}
 		w.log(w.buf[:i+1])
+		w.status(w.buf[:i])
 		w.buf = w.buf[i+1:]
 	}
 	return n, err
@@ -150,13 +155,26 @@ func (w *stepLines) Terminal() io.Writer { return w.stderr }
 func (w *stepLines) flush() {
 	if len(w.buf) > 0 {
 		w.log(w.buf)
+		w.status(w.buf)
 		w.buf = nil
 	}
 }
 
-// log writes line into the step's log, without the terminal's escape sequences.
+// status writes line to the status descriptor when it is one of qory's lines, which
+// start with "qory run: ", and stderr shows it, see [statusfd.Shown]. The output of a
+// program, such as git's, does not.
+func (w *stepLines) status(line []byte) {
+	text := string(escapes.ReplaceAll(bytes.TrimSuffix(line, []byte("\r")), nil))
+	if strings.HasPrefix(text, "qory run: ") && statusfd.Shown(w.stderr) {
+		statusfd.Line(text)
+	}
+}
+
+// log writes line into the step's log, without the terminal's escape sequences, and
+// with each value of the run's mask list, [secretmask.Default], replaced with ***.
 func (w *stepLines) log(line []byte) {
-	if err := w.step.Log(escapes.ReplaceAll(bytes.Clone(line), nil)); err != nil && w.err == nil {
+	masked := secretmask.Default().Replace(string(escapes.ReplaceAll(bytes.Clone(line), nil)))
+	if err := w.step.Log([]byte(masked)); err != nil && w.err == nil {
 		w.err = err
 	}
 }

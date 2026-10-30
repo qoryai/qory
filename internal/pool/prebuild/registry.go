@@ -12,9 +12,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-
-	"github.com/qoryai/qory/internal/pool/child"
-	"github.com/qoryai/qory/internal/pool/explore"
 )
 
 // The media types of a manifest the size is read from, and of an index of manifests,
@@ -46,8 +43,8 @@ var manifestTimeout = 30 * time.Second
 
 // The words of a manifest's read. Each is one format string.
 const (
-	textNoImagetools = "check that docker is on the PATH every command of qory run gets: docker buildx imagetools inspect could not be started: %w"
-	textNotInspected = "check that docker buildx is installed and that docker reaches the registry %s: docker buildx imagetools inspect --raw of the pushed image failed: %s"
+	textNoImagetools = "check that the prebuild image has docker on its PATH: docker buildx imagetools inspect could not be started: %w"
+	textNotInspected = "check that the prebuild image has docker buildx and that the run's egress reaches the registry %s: docker buildx imagetools inspect --raw of the pushed image failed: %s"
 )
 
 // digestShape is a digest of the SHA-256 of a content: sha256: and 64 lower-case
@@ -100,12 +97,13 @@ func registryOf(name string) (string, error) {
 
 // imageSize is the size of the image pushed as name@digest, read from its manifest:
 // its config's size and its layers' sizes added up, the sizes in the registry,
-// compressed. Docker reads the manifest from the registry, with the settings in
-// $HOME/.docker, and its bytes must have that digest. When the manifest of the digest
-// is an index, the image is its one manifest of the platform want, an attestation's manifest left
-// out; none, or more than one, is a failure. A variant want leaves empty takes any.
-func (s Settings) imageSize(ctx context.Context, runID, state, name, digest string, want platform) (int64, error) {
-	m, err := s.readManifest(ctx, runID, state, name, digest)
+// compressed. Docker reads the manifest from the registry through the run's proxy, with
+// the docker configuration of the push, which has no login, and its bytes must have that
+// digest. When the manifest of the digest is an index, the image is its one manifest of
+// the platform want, an attestation's manifest left out; none, or more than one, is a
+// failure. A variant want leaves empty takes any.
+func (p pusher) imageSize(ctx context.Context, name, digest string, want platform) (int64, error) {
+	m, err := p.readManifest(ctx, name, digest)
 	if err != nil {
 		return 0, err
 	}
@@ -122,7 +120,7 @@ func (s Settings) imageSize(ctx context.Context, runID, state, name, digest stri
 		if len(picked) != 1 {
 			return 0, fmt.Errorf("%w: the index names %d manifests of %s/%s, not one", errRegistry, len(picked), want.OS, want.Architecture)
 		}
-		if m, err = s.readManifest(ctx, runID, state, name, picked[0].Digest); err != nil {
+		if m, err = p.readManifest(ctx, name, picked[0].Digest); err != nil {
 			return 0, err
 		}
 		if m.MediaType != mediaOCIManifest && m.MediaType != mediaDockerManifest {
@@ -152,25 +150,25 @@ func (s Settings) imageSize(ctx context.Context, runID, state, name, digest stri
 // [textStoppedPush], as for a stop during the push. A manifest that has no media type,
 // which the OCI image specification allows, is taken as an OCI index when it lists
 // manifests, else as an OCI image's manifest.
-func (s Settings) readManifest(ctx context.Context, runID, state, name, digest string) (manifest, error) {
+func (p pusher) readManifest(ctx context.Context, name, digest string) (manifest, error) {
 	if !digestShape.MatchString(digest) {
 		return manifest{}, fmt.Errorf("%w: a manifest's digest is not sha256: and 64 lower-case hexadecimal digits", errRegistry)
 	}
-	docker, err := s.docker()
+	docker, err := exec.LookPath(p.docker)
 	if err != nil {
 		return manifest{}, fmt.Errorf(textNoImagetools, err)
 	}
 	readCtx, cancel := context.WithTimeout(ctx, manifestTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(readCtx, docker, "buildx", "imagetools", "inspect", "--raw", name+"@"+digest)
-	cmd.Dir = s.poolDir()
-	cmd.Env = child.Env(s.RunConfig, state, explore.RunsDir(s.State))
+	cmd.Dir = p.dir
+	cmd.Env = p.env
 	var stdout bytes.Buffer
 	cmd.Stdout = &limited{w: &stdout, n: maxManifest + 1}
-	errOut := s.lines(runID)
+	errOut, flush := maskedLines(p.lines())
 	cmd.Stderr = errOut
 	err = cmd.Run()
-	errOut.Flush()
+	flush()
 	switch {
 	case err != nil && ctx.Err() != nil:
 		return manifest{}, fmt.Errorf(textStoppedPush, context.Cause(ctx))

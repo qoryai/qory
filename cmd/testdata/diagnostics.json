@@ -1,0 +1,123 @@
+{
+  "version": 1,
+  "time": "2026-10-30T10:20:00Z",
+  "instance": {
+    "edition": "Qory Apiary",
+    "version": "0.0.0-example"
+  },
+  "run": {
+    "id": "rn_0123456789abcdef",
+    "state": "completed",
+    "exit_state": "completed",
+    "exit_code": 0,
+    "created_at": "2026-10-30T10:00:00Z",
+    "started_at": "2026-10-30T10:02:10Z",
+    "exited_at": "2026-10-30T10:15:42Z",
+    "organisation": {
+      "slug": "acme"
+    },
+    "workspace": {
+      "id": "ws_0123456789abcdef"
+    },
+    "step": "explore",
+    "workflow": "hello",
+    "work_item": "wi_example-1",
+    "target": {
+      "system": "forge.example.com",
+      "path": "acme/example"
+    },
+    "gateway": "ng_0123456789abcdef",
+    "variables": [
+      "EXAMPLE_API_KEY",
+      "LOG_LEVEL"
+    ]
+  },
+  "queue": {
+    "state": "handed_over"
+  },
+  "dispatches": [
+    {
+      "id": "dp_0123456789abcdef",
+      "pool": "np_0123456789abcdef",
+      "claimed_at": "2026-10-30T10:00:05Z",
+      "lease_until": "2026-10-30T10:10:05Z",
+      "dispatched_at": "2026-10-30T10:00:40Z",
+      "handed_over_at": "2026-10-30T10:00:40Z"
+    }
+  ],
+  "preparation": {
+    "steps": [
+      {
+        "number": 1,
+        "name": "Fetch the target",
+        "kind": "fetch",
+        "state": "succeeded",
+        "exit_code": 0,
+        "started_at": "2026-10-30T10:01:00Z",
+        "exited_at": "2026-10-30T10:01:04Z",
+        "duration_ms": 4120,
+        "output": {
+          "text": "Fetched acme/example at 0123abc.\n",
+          "truncated": false
+        }
+      },
+      {
+        "number": 2,
+        "name": "Compose the harness",
+        "kind": "compose",
+        "state": "succeeded",
+        "exit_code": 0,
+        "started_at": "2026-10-30T10:01:04Z",
+        "exited_at": "2026-10-30T10:01:30Z",
+        "duration_ms": 26003,
+        "output": {
+          "text": "Composed 3 modules.\n",
+          "truncated": false
+        }
+      },
+      {
+        "number": 3,
+        "name": "Set up the environment",
+        "kind": "setup",
+        "state": "succeeded",
+        "exit_code": 0,
+        "started_at": "2026-10-30T10:01:30Z",
+        "exited_at": "2026-10-30T10:02:08Z",
+        "duration_ms": 38211,
+        "output": {
+          "text": "Installed 12 packages.\n",
+          "truncated": false
+        }
+      }
+    ],
+    "session_started_at": "2026-10-30T10:02:10Z"
+  },
+  "events": [
+    {
+      "sequence": 1,
+      "type": "dev.qory.run.registered",
+      "time": "2026-10-30T10:00:41.250Z",
+      "data": {}
+    },
+    {
+      "sequence": 2,
+      "type": "dev.qory.session.started",
+      "time": "2026-10-30T10:02:10Z",
+      "data": {}
+    },
+    {
+      "sequence": 3,
+      "type": "dev.qory.run.exited",
+      "time": "2026-10-30T10:15:42Z",
+      "data": {
+        "state": "succeeded",
+        "exit_code": 0
+      }
+    }
+  ],
+  "events_omitted": 0,
+  "log": {
+    "text": "Reading the work item.\nDone.\n",
+    "truncated": false
+  }
+}

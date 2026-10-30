@@ -6,24 +6,31 @@
 // whose lease passed, is released. It writes the run code to a file, mode 0600, in the
 // pool's folder, opens the file for reading and unlinks it, so no file name leads to the
 // code. It sends dispatched, then starts qory run --run-code-file /dev/fd/3 --gateway
-// <gateway_url>, with the open file as descriptor 3, in an empty folder work/ of the
-// dispatch's folder <pool's folder>/runs/<dispatch_id>, with the environment of
-// [child.Env]: the pool's access key never reaches it. qory run redeems the code and
-// reports the run's outcome itself; the pool posts none. While qory run runs, the pool
-// sends dispatched again every [heartbeatEvery], and stops qory run once Qory Apiary
-// returns 410 gone or 409 lease_expired to it, or once the claim's max_lifetime_minutes
-// passed. Once qory run ends, the pool uploads its output as the dispatch's machine
-// log, once: its lines as the pool's log has them, at most the last 768 KiB, with each
-// line that contains what looks like a secret replaced. A dispatched dispatch is never
-// released: Qory Apiary returns 409 machine_exists to a release after dispatched.
+// <gateway_url> --home <dispatch's folder>/home, with the open file as descriptor 3, in
+// an empty folder work/ of the dispatch's folder <pool's folder>/runs/<dispatch_id>,
+// with the environment of [child.Env] and HOME set to home-user/ of the dispatch's
+// folder: the pool's access key never reaches it, and neither do the files under the
+// pool's HOME. The run's harness home is under home/, outside work/, so no later run
+// reads it: the pool removes both with the dispatch's folder. qory run redeems the code
+// and reports the run's outcome itself; the pool posts none. While qory run runs, the
+// pool sends dispatched again every [heartbeatEvery], and stops qory run once Qory
+// Apiary returns 410 gone or 409 lease_expired to it, or once the claim's
+// max_lifetime_minutes passed. Once qory run ends, the pool uploads its output as the
+// dispatch's machine log, once: its lines as the pool's log has them, at most the last
+// 768 KiB, with each line that contains what looks like a secret replaced. A dispatched
+// dispatch is never released: Qory Apiary returns 409 machine_exists to a release after
+// dispatched.
 //
 // A journal, <pool's folder>/dispatches, contains each live dispatch's id and phase,
 // claimed or dispatched, never a run code. The claimed entry is written and synced
-// before the request dispatched, and the dispatched entry after that request succeeds.
-// A release of an entry left at claimed after a dispatched that succeeded returns 409
-// machine_exists, and the pool drops the entry. The entry is removed once it ends.
-// When the program starts, before its first claim, each claimed entry it finds is
-// released and each dispatched entry is dropped, with the folders of both.
+// before the request dispatched, and the dispatched entry after that request succeeds. A
+// release of an entry left at claimed after a dispatched that succeeded returns 409
+// machine_exists, and the pool drops the entry. The entry is removed once it ends. When
+// the program starts, before its first claim, it runs the check of [Probe]: when a
+// container on the engine's default bridge network connects to the cloud metadata
+// service, or the check cannot run, Run returns its error and claims nothing. Then each
+// claimed entry it finds is released and each dispatched entry is dropped, with the
+// folders of both.
 //
 // When ctx ends, the pool stops: it claims no more, a claim being sent is given up, a
 // dispatch not yet dispatched is released, and each qory run is stopped as [child.Run]
@@ -44,6 +51,7 @@ import (
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/pool/child"
 	"github.com/qoryai/qory/internal/provisioner"
+	"github.com/qoryai/qory/internal/secretmask"
 )
 
 // The waits of the loop: a claim that failed is sent again after a wait that doubles
@@ -66,6 +74,15 @@ const (
 	codeFilePrefix = "runcode-"
 )
 
+// homeFolder is the folder of a dispatch's folder that its qory run composes the harness
+// under, as --home: one home per checkout under it, as qory run puts it.
+const homeFolder = "home"
+
+// userHomeFolder is the folder of a dispatch's folder that is its qory run's HOME, in
+// place of the pool program's: a run's docker and git read their registry logins and
+// configuration from it, not from the pool's HOME or another run's.
+const userHomeFolder = "home-user"
+
 // Settings are what the pool runs by.
 type Settings struct {
 	// Runs is how many dispatches may be live at once, at least 1.
@@ -81,6 +98,9 @@ type Settings struct {
 	// Grace is how long a qory run has after SIGTERM before it is killed; zero is
 	// [child.DefaultGrace].
 	Grace time.Duration
+	// Probe is the check of the cloud metadata service that runs before the first
+	// claim.
+	Probe Probe
 }
 
 // Pool is the pool program's loop and what it reaches the world through.
@@ -103,7 +123,8 @@ type Pool struct {
 
 // Run runs the pool until ctx ends, then stops it as the package describes, and returns
 // nil once every dispatch ended. Its error is for a pool that could not start: settings
-// it cannot run by, or a journal it cannot read, in which case no run is claimed.
+// it cannot run by, a journal it cannot read, or a check of [Probe] that failed or
+// connected to the cloud metadata service, in which case no run is claimed.
 func (p *Pool) Run(ctx context.Context) error {
 	s := p.Settings
 	switch {
@@ -134,6 +155,12 @@ func (p *Pool) Run(ctx context.Context) error {
 		return err
 	}
 	p.journal = j
+	// No claim is sent, and no claim the journal contains is released, before the check
+	// passed.
+	stopped, err := probe(ctx, s)
+	if err != nil || stopped {
+		return err
+	}
 	p.replay(ctx)
 	p.slots = make(chan struct{}, s.Runs)
 	p.claimLoop(ctx)
@@ -287,10 +314,11 @@ func (p *Pool) dispatchDir(id string) string {
 	return filepath.Join(p.Settings.State, runsFolder, id)
 }
 
-// prepare makes the dispatch's folder of c, mode 0700, with work/, empty, and state/,
-// qory run's XDG_STATE_HOME, and returns it with c's run code open for reading. The code
-// is written to a new file, mode 0600, in the pool's folder, which is opened for reading
-// and unlinked before prepare returns, on every path; c's run code is cleared.
+// prepare makes the dispatch's folder of c, mode 0700, with work/, empty, state/, qory
+// run's XDG_STATE_HOME, home/, its --home, and home-user/, its HOME, each mode 0700, and
+// returns it with c's run code open for reading. The code is written to a new file, mode
+// 0600, in the pool's folder, which is opened for reading and unlinked before prepare
+// returns, on every path; c's run code is cleared.
 func (p *Pool) prepare(c provisioner.Claimed) (string, *os.File, error) {
 	defer c.RunCode.Clear()
 	dir := p.dispatchDir(c.DispatchID)
@@ -300,7 +328,7 @@ func (p *Pool) prepare(c provisioner.Claimed) (string, *os.File, error) {
 	if err := os.RemoveAll(dir); err != nil {
 		return "", nil, err
 	}
-	for _, d := range []string{dir, filepath.Join(dir, "work"), filepath.Join(dir, "state")} {
+	for _, d := range []string{dir, filepath.Join(dir, "work"), filepath.Join(dir, "state"), filepath.Join(dir, homeFolder), filepath.Join(dir, userHomeFolder)} {
 		if err := os.Mkdir(d, 0o700); err != nil {
 			return "", nil, err
 		}
@@ -368,7 +396,9 @@ func (p *Pool) dispatched(stop, work context.Context, c provisioner.Claimed) boo
 // claim's max_lifetime_minutes passed, or once the heartbeat finds the dispatch ended.
 // Each line of its output goes to the pool's log, after the dispatch id, and is kept;
 // once qory run ended, or could not be started, the lines kept are uploaded as the
-// dispatch's machine log, on a context that does not end with stop.
+// dispatch's machine log, on a context that does not end with stop. The output is masked
+// first with the process's mask list, [secretmask.Default], which replaces the value of a
+// URL's signature or token.
 func (p *Pool) run(stop context.Context, c provisioner.Claimed, dir string, code *os.File) {
 	id := slog.String("dispatch_id", c.DispatchID)
 	var out outputTail
@@ -395,13 +425,15 @@ func (p *Pool) run(stop context.Context, c provisioner.Claimed, dir string, code
 	})
 	res, err := child.Run(ctx, child.Command{
 		Path:       p.Settings.Qory,
-		Args:       []string{"run", "--run-code-file", fmt.Sprintf("/dev/fd/%d", child.KeyFD), "--gateway", c.GatewayURL},
+		Args:       []string{"run", "--run-code-file", fmt.Sprintf("/dev/fd/%d", child.KeyFD), "--gateway", c.GatewayURL, "--home", filepath.Join(dir, homeFolder)},
 		Dir:        filepath.Join(dir, "work"),
 		ConfigHome: p.Settings.RunConfig,
 		StateHome:  filepath.Join(dir, "state"),
+		Home:       filepath.Join(dir, userHomeFolder),
 		Runs:       filepath.Join(p.Settings.State, runsFolder),
 		File:       code,
 		Output:     output,
+		Mask:       secretmask.Default(),
 		Grace:      p.Settings.Grace,
 		Started:    func() { p.log.Info(lineStarted, id) },
 	})

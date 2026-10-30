@@ -1,7 +1,8 @@
 // Package child starts a qory command for the pool program: qory run, or a step before
 // it such as qory harness compose. The command gets an environment built from an
 // allow-list, never a copy of the program's: PATH, cleaned as [CleanPath] has it so no
-// entry lands in the pool's runs folder, HOME, TMPDIR and LANG, XDG_CONFIG_HOME
+// entry lands in the pool's runs folder, HOME, the folder the caller names in its
+// place when it names one, TMPDIR and LANG, XDG_CONFIG_HOME
 // set to the runs' configuration directory, XDG_STATE_HOME set to the run's state
 // directory when the caller names one, and DOCKER_HOST and DOCKER_CONTEXT when they are
 // set. No QORY_* or ANTHROPIC_* variable, and no key, reaches it. Its standard input
@@ -26,6 +27,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -34,6 +36,7 @@ import (
 	"github.com/qoryai/forager/accesskey"
 
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/secretmask"
 )
 
 // KeyFD is the descriptor the command reads the run key or the run code from: the
@@ -174,9 +177,17 @@ type Command struct {
 	// StateHome, when set, is its XDG_STATE_HOME, an absolute directory: where qory
 	// keeps the run's record. Empty, the command gets no XDG_STATE_HOME.
 	StateHome string
+	// Home, when set, is its HOME, an absolute directory, in place of the program's
+	// HOME, or of the HOME in Env: a program that looks in $HOME, such as docker or git,
+	// reads this folder.
+	Home string
 	// Runs is the pool's runs folder, where walled runs write: no entry of the
 	// command's PATH lands in it, as [CleanPath] has it.
 	Runs string
+	// Env, when not nil, is the command's whole environment, in place of the one [Env]
+	// makes of ConfigHome, StateHome and Runs: for a command inside a wall, whose
+	// environment is the session's.
+	Env []string
 	// Key, when set, is written to the command's descriptor [KeyFD] and cleared, on
 	// every path. The caller passes --run-key-fd 3 among Args.
 	Key Secret
@@ -186,6 +197,10 @@ type Command struct {
 	// Output takes the command's standard output and error, both. It is a
 	// [LineWriter], which [Run] flushes once the command ended.
 	Output *LineWriter
+	// Mask, when set with Output, masks the output before Output gets it, as
+	// [secretmask.Set.Writer] masks a stream, a value split across two writes and across
+	// a cut of a long line included.
+	Mask *secretmask.Set
 	// Grace is how long the command has after SIGTERM before it is killed; zero is
 	// [DefaultGrace].
 	Grace time.Duration
@@ -225,6 +240,11 @@ func Run(ctx context.Context, c Command) (Result, error) {
 	if c.StateHome != "" && !filepath.IsAbs(c.StateHome) {
 		return Result{}, fmt.Errorf("the run's state directory %s is not an absolute path", exports.Value(c.StateHome, true))
 	}
+	// The pool names Home under its folder, which it checks is absolute first: no
+	// person reaches this check.
+	if c.Home != "" && !filepath.IsAbs(c.Home) {
+		return Result{}, fmt.Errorf("child.Command.Home %s is not an absolute path", exports.Value(c.Home, true))
+	}
 	path := c.Path
 	if path == "" {
 		exe, err := os.Executable()
@@ -244,12 +264,25 @@ func Run(ctx context.Context, c Command) (Result, error) {
 	cmd := exec.Command(path, c.Args...)
 	cmd.Dir = c.Dir
 	cmd.Env = Env(c.ConfigHome, c.StateHome, c.Runs)
+	if c.Env != nil {
+		cmd.Env = c.Env
+	}
+	if c.Home != "" {
+		cmd.Env = append(slices.DeleteFunc(slices.Clone(cmd.Env), func(kv string) bool { return strings.HasPrefix(kv, "HOME=") }), "HOME="+c.Home)
+	}
 	// A nil Stdin is the null device.
 	cmd.Stdin = nil
 	if c.Output != nil {
 		// One writer for both: exec copies them through one pipe.
 		cmd.Stdout, cmd.Stderr = c.Output, c.Output
 		defer c.Output.Flush()
+		if c.Mask != nil {
+			masked := c.Mask.Writer(c.Output)
+			cmd.Stdout, cmd.Stderr = masked, masked
+			// Deferred after Output's Flush, so it runs first: the bytes it kept back
+			// reach Output before Output writes its last line.
+			defer masked.Flush()
+		}
 	}
 	// After the command exits, what it started may hold its output open: exec waits
 	// that long for it, then closes the pipe.

@@ -12,6 +12,7 @@ import (
 
 	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/foragerdir"
+	"github.com/qoryai/qory/internal/secretmask"
 )
 
 // keptKeyGateway stands in for the address a run key names: each connection is closed
@@ -70,7 +71,8 @@ func (g *keptKeyGateway) seen() ([]os.FileMode, []string) {
 // with each target unchanged; it keeps the run key in run-keys/<run-id> beside
 // forager.yaml, mode 0600, while the session runs through the gateway the key names,
 // with no gateway of its own; and it removes the key once nothing of the run is left
-// to send. The key is in no output and in no file under the run records.
+// to send. The key is in no output and in no file under the run records, and it is in
+// the run's mask list.
 func TestAMachineBehindViaRegistersItsOwnRuns(t *testing.T) {
 	root := runKeyCheckout(t)
 	const id = "0192f0c1-7d4e-7a2b-8c3d-444444444444"
@@ -117,6 +119,9 @@ func TestAMachineBehindViaRegistersItsOwnRuns(t *testing.T) {
 	}
 	key := strings.TrimSpace(keys[0])
 	lacks(t, out+err.Error(), key, key[4:40])
+	if secretmask.Default().Replace(key) != "***" {
+		t.Error("the run key is not in the run's mask list")
+	}
 	noValueUnder(t, filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory"), key[4:40])
 	noValueUnder(t, root, key[4:40])
 	if _, err := os.Lstat(kept); !os.IsNotExist(err) {

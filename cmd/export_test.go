@@ -421,3 +421,8 @@ func SetLaunchPrebuild(f func(ctx context.Context, s prebuild.Settings, r prebui
 	launchPrebuild = f
 	return func() { launchPrebuild = before }
 }
+
+// WalledPlaces is the check of a walled run's checkout at root and of its read-write
+// mounts against the home folder and the state directory, which qory run makes before
+// the run starts anything.
+func WalledPlaces(root string, mounts []wall.Mount) error { return walledPlaces(root, mounts) }

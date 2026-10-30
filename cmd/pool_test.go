@@ -19,7 +19,7 @@ import (
 // The help of qory run pool, as it was approved.
 const (
 	poolShort = "Claim this pool's runs from Qory Apiary and run them on this machine"
-	poolLong  = "Run this machine as a node pool's program, until it is stopped. It claims the pool's dispatches from Qory Apiary with the pool's access key, and starts each with the command that runs on a machine a provisioner creates: qory run --run-code-file /dev/fd/3 --gateway <gateway_url>, with the run code in a file that no name links to. The pool's access key does not reach the run, and each run reports its outcome to Qory Apiary. While a run runs, the pool sends dispatched every 60 s. It stops the run when Qory Apiary ends the dispatch or the claim's max_lifetime_minutes pass. Once the run ends, the pool uploads the run's output as the dispatch's machine log: at most the last 768 KiB, with each line that contains qak_, qrk_, qecr_, qecn_, qecp_, qecg_ or qeci_ replaced. It releases a claim that sets a machine type, and a claim it could not start. The pool section of forager.yaml sets it: runs, registry, run_config. SIGINT or SIGTERM stops it: it claims no new run, stops the runs it started, and exits 0."
+	poolLong  = "Run this machine as a node pool's program, until it is stopped. It claims the pool's dispatches from Qory Apiary with the pool's access key, and starts each with the command that runs on a machine a provisioner creates: qory run --run-code-file /dev/fd/3 --gateway <gateway_url>, with the run code in a file that no name links to, and with --home <the run's folder>/home, which the pool removes with the run's folder once the run ends. The pool's access key does not reach the run, and each run reports its outcome to Qory Apiary. Before its first claim, it runs one container from wall.image on the engine's default bridge network, and exits 1 when the container connects to the cloud metadata service, 169.254.169.254:80 or [fd00:ec2::254]:80, or the check cannot run. While a run runs, the pool sends dispatched every 60 s. It stops the run when Qory Apiary ends the dispatch or the claim's max_lifetime_minutes pass. Once the run ends, the pool uploads the run's output as the dispatch's machine log: at most the last 768 KiB, with each line that contains qak_, qrk_, qecr_, qecn_, qecp_, qecg_ or qeci_ replaced. It releases a claim that sets a machine type, and a claim it could not start. The pool section of forager.yaml sets it: runs, registry, run_config. SIGINT or SIGTERM stops it: it claims no new run, stops the runs it started, and exits 0."
 )
 
 // poolMachine is a pool's machine: its server, the runs' configuration directory, the
@@ -40,7 +40,7 @@ func newPoolMachine(t *testing.T, lines ...string) *poolMachine {
 	emptyDir(t)
 	m := &poolMachine{srv: newFakeServer(t, ""), runs: tempDir(t)}
 	m.srv.node = testPool
-	writeFile(t, filepath.Join(m.runs, "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\nwall:\n  adapter: docker\n  image: "+agentImage+"\n  images_allow: [localhost:5001/qory-env/]\n")
+	writeFile(t, filepath.Join(m.runs, "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\nwall:\n  adapter: docker\n  image: "+agentImage+"\n  images_allow: [localhost:5001/qory-env/]\n  engine_proxy_file: "+engineProxyFile+"\n")
 	if lines == nil {
 		lines = []string{"registry: localhost:5001/qory-env", "run_config: {runs}"}
 	}
@@ -168,9 +168,9 @@ func TestRunPoolStartsWithThePoolsSettings(t *testing.T) {
 	}
 
 	// Set, runs is the file's; an entry of wall.images_allow without its slash covers
-	// pool.registry too.
+	// pool.registry too. With runs above 1, the wall sets both limits.
 	m = newPoolMachine(t, "runs: 3", "registry: localhost:5001/qory-env", "run_config: {runs}")
-	writeFile(t, filepath.Join(m.runs, "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\nwall:\n  adapter: docker\n  image: "+agentImage+"\n  images_allow: [localhost:5001/qory-env]\n")
+	writeFile(t, filepath.Join(m.runs, "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\nwall:\n  adapter: docker\n  image: "+agentImage+"\n  images_allow: [localhost:5001/qory-env]\n  pids_limit: 512\n  memory: 8g\n  engine_proxy_file: "+engineProxyFile+"\n")
 	got = nil
 	if _, err := run(t, "run", "pool"); err != nil {
 		t.Fatal(err)
@@ -267,16 +267,27 @@ const (
 	notPinned = ", whose forager.yaml's wall.image is not pinned by its digest, name@sha256: and 64 lower-case hexadecimal digits, with no tag"
 )
 
+// engineProxyFile is the runs' wall.engine_proxy_file. qory run pool does not read it.
+const engineProxyFile = "/etc/qory/engine-proxy.json"
+
+// noLimits is the refusal of a pool whose pool.runs is above 1 and whose runs' wall does
+// not set both wall.pids_limit and wall.memory.
+func noLimits(m *poolMachine) string {
+	return "set wall.pids_limit and wall.memory in " + filepath.Join(m.runs, "qory", "forager.yaml") + ": with pool.runs above 1, runs share this machine, and a run without both limits can take the processes and memory the others need"
+}
+
 // agentImage is the runs' wall.image, pinned by its digest.
 const agentImage = "registry.example.com/agent@sha256:1111111111111111111111111111111111111111111111111111111111111111"
 
 // TestRunPoolRefusesWhatItCannotRunBy refuses, as input, before the loop starts and with
 // no secret in what it prints: forager.yaml without a pool section or a server, a pool
 // section with a key that earlier releases read, a run_config whose qory folder holds an access key or no forager.yaml, whose forager.yaml has a gateway
-// section or does not read, sets no wall, a wall with no image, a wall.image not pinned
+// section or does not read, sets no wall, a wall with mounts, a wall with no image, a wall.image not pinned
 // by its digest, by an upper-case one or with a tag, or whose wall.images_allow does not
-// cover pool.registry, a run_config that is no folder, and an access key that is not a
-// node pool's.
+// cover pool.registry, a wall with no engine_proxy_file, pool.runs above 1 with a wall
+// that does not set both
+// wall.pids_limit and wall.memory, a run_config that is no folder, and an access key
+// that is not a node pool's.
 func TestRunPoolRefusesWhatItCannotRunBy(t *testing.T) {
 	for _, c := range []struct {
 		name  string
@@ -354,6 +365,23 @@ func TestRunPoolRefusesWhatItCannotRunBy(t *testing.T) {
 		{"run_config without a wall section", nil, func(t *testing.T, m *poolMachine) {
 			writeFile(t, filepath.Join(m.runs, "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\n")
 		}, func(m *poolMachine) string { return m.file + ": pool.run_config is " + m.runs + noWall }},
+		{"wall.mounts in run_config", nil, func(t *testing.T, m *poolMachine) {
+			writeFile(t, filepath.Join(m.runs, "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\nwall:\n  adapter: docker\n  image: "+agentImage+"\n  images_allow: [localhost:5001/qory-env/]\n  mounts: [\"/srv/shared:ro\"]\n")
+		}, func(m *poolMachine) string {
+			return "remove wall.mounts from " + filepath.Join(m.runs, "qory", "forager.yaml") + ": every run of the pool would see the paths it lists, so the runs would share them"
+		}},
+		{"runs above 1 with no limits", []string{"runs: 2", "registry: localhost:5001/qory-env", "run_config: {runs}"}, nil, noLimits},
+		{"runs above 1 with no pids_limit", []string{"runs: 2", "registry: localhost:5001/qory-env", "run_config: {runs}"}, func(t *testing.T, m *poolMachine) {
+			writeFile(t, filepath.Join(m.runs, "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\nwall:\n  adapter: docker\n  image: "+agentImage+"\n  images_allow: [localhost:5001/qory-env/]\n  memory: 8g\n")
+		}, noLimits},
+		{"runs above 1 with no memory", []string{"runs: 2", "registry: localhost:5001/qory-env", "run_config: {runs}"}, func(t *testing.T, m *poolMachine) {
+			writeFile(t, filepath.Join(m.runs, "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\nwall:\n  adapter: docker\n  image: "+agentImage+"\n  images_allow: [localhost:5001/qory-env/]\n  pids_limit: 512\n")
+		}, noLimits},
+		{"run_config without wall.engine_proxy_file", nil, func(t *testing.T, m *poolMachine) {
+			writeFile(t, filepath.Join(m.runs, "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\nwall:\n  adapter: docker\n  image: "+agentImage+"\n  images_allow: [localhost:5001/qory-env/]\n")
+		}, func(m *poolMachine) string {
+			return "set wall.engine_proxy_file in " + filepath.Join(m.runs, "qory", "forager.yaml") + ", as The engine proxy in docs/run.md shows: without it, the engine pulls each run's image over this machine's network, not through the run's gateway"
+		}},
 		{"a wall.image by its name", nil, func(t *testing.T, m *poolMachine) {
 			writeFile(t, filepath.Join(m.runs, "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\nwall:\n  adapter: docker\n  image: agent\n  images_allow: [localhost:5001/qory-env/]\n")
 		}, func(m *poolMachine) string { return m.file + ": pool.run_config is " + m.runs + notPinned }},

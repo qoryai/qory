@@ -151,6 +151,9 @@ func TestTheForagerSchemaTakesTheImages(t *testing.T) {
 		{wall + " {go: {ref: a, docker: \"yes\"}}\n", false},
 		{wall + " {go: {ref: a, docker: true}}\n", false},
 		{wall + " {go: {ref: a, privileged: true}}\n", false},
+		{"wall: {adapter: docker, prebuild_image: go-docker, images: {go-docker: {ref: a, runtime: sysbox-runc, docker: true}}}\n", true},
+		{"wall: {adapter: docker, prebuild_image: Go}\n", false},
+		{"wall: {adapter: docker, prebuild_image: [go]}\n", false},
 	} {
 		var doc any
 		if err := yaml.Unmarshal([]byte(c.body), &doc); err != nil {
@@ -158,6 +161,45 @@ func TestTheForagerSchemaTakesTheImages(t *testing.T) {
 		}
 		if err := schema.Validate(doc); (err == nil) != c.valid {
 			t.Errorf("%q: %v, want valid %v", c.body, err, c.valid)
+		}
+	}
+}
+
+// TestForagerFileReadsThePrebuildImage reads wall.prebuild_image, a name of wall.images
+// whose image has docker: true, and lists it with the image it names. A name wall.images
+// does not define, and an image without docker, are errors that contain the file and
+// start with the fix.
+func TestForagerFileReadsThePrebuildImage(t *testing.T) {
+	hermetic(t)
+	path := foragerFile(t, strings.Replace(imagesFile, "  image: go\n", "  image: go\n  prebuild_image: go-docker\n", 1))
+	c, err := config.Load(t.TempDir(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Forager.Wall.PrebuildImage != "go-docker" {
+		t.Errorf("wall.prebuild_image read as %q", c.Forager.Wall.PrebuildImage)
+	}
+	found := false
+	for _, row := range c.Rows() {
+		if row.Key == "wall.prebuild_image" {
+			found = true
+			if row.Value != "go-docker (wall.images.go-docker)" || row.Origin != path {
+				t.Errorf("the row is %+v", row)
+			}
+		}
+	}
+	if !found {
+		t.Error("no row wall.prebuild_image")
+	}
+	for _, c := range []struct{ name, want string }{
+		{"go-dokcer", ": set wall.prebuild_image to a name of wall.images: wall.images defines no image \"go-dokcer\""},
+		{"go", ": set docker: true and a runtime, such as sysbox-runc, on wall.images.go, or name another image in wall.prebuild_image: a prebuild builds in the image's nested Docker"},
+		{"plain.v2", ": set docker: true and a runtime, such as sysbox-runc, on wall.images.plain.v2"},
+	} {
+		path := foragerFile(t, strings.Replace(imagesFile, "  image: go\n", "  image: go\n  prebuild_image: "+c.name+"\n", 1))
+		_, err := config.Load(t.TempDir(), true)
+		if err == nil || !strings.HasPrefix(err.Error(), path+c.want) {
+			t.Errorf("%s: %v, want %q after the file", c.name, err, c.want)
 		}
 	}
 }

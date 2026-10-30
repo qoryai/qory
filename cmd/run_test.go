@@ -1174,9 +1174,10 @@ func TestRunRefusesAMountOfAnIntegrationsSettingFile(t *testing.T) {
 // access-key-secret in the directory, it says the agent could change one of
 // Forager's files, or read it through a read-only mount. A mount of a directory Forager keeps its own files in, the tools'
 // sockets, says so, in either mode, and one of qory's state directory says the agent could change the
-// run records, or read them through a read-only mount, as does the workspace when the
-// state directory lies in the checkout. A run refused so has a record that says it
-// failed, and its last line names the record.
+// run records, or read them through a read-only mount. A run refused so has a record
+// that shows it failed, and its last line contains the record's path. A checkout that
+// contains the state directory stops the run with exit 2 before the run opens, so the
+// run has no record.
 func TestRunRefusesAMountOfForagersFiles(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -1184,7 +1185,10 @@ func TestRunRefusesAMountOfForagersFiles(t *testing.T) {
 	docker, log := fakeDocker(t)
 	configDir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory")
 	writeFile(t, filepath.Join(configDir, "forager.yaml"), "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
+	// A read-write mount of the home folder or the state home stops the run before
+	// Forager reads the mounts, so the read-write mounts here lie inside them.
 	home := os.Getenv("HOME")
+	configHome := os.Getenv("XDG_CONFIG_HOME")
 	// The tools' sockets are made in the system's temporary directory: one apart from
 	// the home, so a mount of it holds Forager's files and not the access key.
 	tmp := tempDir(t)
@@ -1195,13 +1199,13 @@ func TestRunRefusesAMountOfForagersFiles(t *testing.T) {
 		secret              bool
 		mount, want, ending string
 	}{
-		{false, home, "the mount " + home + " contains " + configDir + ", which holds one of Forager's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_forager_files)", ""},
+		{false, configHome, "the mount " + configHome + " contains " + configDir + ", which holds one of Forager's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_forager_files)", ""},
 		{false, home + ":ro", "the mount " + home + " contains " + configDir + ", which holds one of Forager's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_forager_files)", ""},
-		{true, home, "the mount " + home + " contains " + configDir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_forager_files)", ""},
+		{true, configHome, "the mount " + configHome + " contains " + configDir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_forager_files)", ""},
 		{true, configDir + ":ro", "the mount " + configDir + " is " + configDir + ", which holds this machine's access key; the agent could read the key, so the run does not start. Mount a narrower path (mount_contains_forager_files)", ""},
 		{true, tmp, "the mount " + tmp + " contains " + filepath.Join(tmp, "qory-tool-"), ", which holds one of Forager's files; the agent could change it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
 		{true, tmp + ":ro", "the mount " + tmp + " contains " + filepath.Join(tmp, "qory-tool-"), ", which holds one of Forager's files; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
-		{true, stateHome, "the mount " + stateHome + " contains " + filepath.Join(stateHome, "qory") + ", which holds qory's run records; the agent could change them, so the run does not start. Mount a narrower path (mount_contains_forager_files)", ""},
+		{true, filepath.Join(stateHome, "qory", "runs"), "the mount " + filepath.Join(stateHome, "qory", "runs") + " lies inside " + filepath.Join(stateHome, "qory") + ", which holds qory's run records; the agent could change them, so the run does not start. Mount a narrower path (mount_contains_forager_files)", ""},
 		{true, filepath.Join(stateHome, "qory", "runs") + ":ro", "the mount " + filepath.Join(stateHome, "qory", "runs") + " lies inside " + filepath.Join(stateHome, "qory") + ", which holds qory's run records; the agent could read them, so the run does not start. Mount a narrower path (mount_contains_forager_files)", ""},
 	} {
 		if c.secret {
@@ -1218,12 +1222,12 @@ func TestRunRefusesAMountOfForagersFiles(t *testing.T) {
 		t.Errorf("the refused runs ended %v", ends)
 	}
 	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
-	want := "the workspace " + root + " contains " + filepath.Join(root, "state", "qory") + ", which holds qory's run records; the agent could change them, so the run does not start. Mount a narrower path (mount_contains_forager_files)"
-	if out, err := run(t, "run", "claude"); err == nil || err.Error() != want {
-		t.Errorf("the state directory in the checkout: %v, want %q\n%s", err, want, out)
+	want := "start the walled run from a repository folder: its checkout " + root + " contains qory's state directory " + filepath.Join(root, "state", "qory") + ", and a walled run may change any file in its checkout, the record of the places walled runs used among them"
+	if out, err := run(t, "run", "claude"); err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
+		t.Errorf("the state directory in the checkout: %v (exit %d), want %q\n%s", err, cmd.ExitCode(err), want, out)
 	}
-	if ends := endsOf(t, root); !slices.Equal(ends, []string{"failed//-1"}) {
-		t.Errorf("the refused run ended %v", ends)
+	if ids := recorded(t, root); len(ids) != 0 {
+		t.Errorf("the stopped run left records %v", ids)
 	}
 	if _, err := os.Stat(log); err == nil {
 		data, _ := os.ReadFile(log)
@@ -1234,10 +1238,11 @@ func TestRunRefusesAMountOfForagersFiles(t *testing.T) {
 }
 
 // TestRunRefusesAMountOfALinkOnTheWayToTheRecords is a walled run whose state home is
-// a link, and one whose state home lies under a link: a mount of the directory that
-// holds the link is refused before anything starts, since the agent could point it at
-// a directory of its own, and qory names the link as leading to the run records, which
-// a writable mount could point elsewhere.
+// a link, and one whose state home lies under a link. A read-write mount of the
+// directory that contains the link contains the state directory as written, and stops
+// the run with exit 2 before anything starts. Forager stops a read-only one
+// before anything starts, and the line contains the link's path, as leading to the run
+// records.
 func TestRunRefusesAMountOfALinkOnTheWayToTheRecords(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -1254,17 +1259,18 @@ func TestRunRefusesAMountOfALinkOnTheWayToTheRecords(t *testing.T) {
 	if err := os.Symlink(realAbove, user); err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range []struct{ state, mount, link, what string }{
-		{home, links, home, "; the agent could point it elsewhere"},
-		{home, links + ":ro", home, ""},
-		{filepath.Join(user, ".local", "state"), above, user, "; the agent could point it elsewhere"},
+	for _, c := range []struct {
+		state, mount, want string
+		exit               int
+	}{
+		{home, links, "mount a narrower folder: the mount " + links + " contains qory's state directory " + filepath.Join(home, "qory") + ", and a walled run may change any file in a read-write mount, the record of the places walled runs used among them", cmd.ExitInput},
+		{home, links + ":ro", "the mount " + links + " contains " + home + ", which leads to qory's run records, so the run does not start. Mount a narrower path (mount_contains_forager_files)", 1},
+		{filepath.Join(user, ".local", "state"), above, "mount a narrower folder: the mount " + above + " contains qory's state directory " + filepath.Join(user, ".local", "state", "qory") + ", and a walled run may change any file in a read-write mount, the record of the places walled runs used among them", cmd.ExitInput},
 	} {
 		t.Setenv("XDG_STATE_HOME", c.state)
-		mount, _, _ := strings.Cut(c.mount, ":")
-		want := "the mount " + mount + " contains " + c.link + ", which leads to qory's run records" + c.what + ", so the run does not start. Mount a narrower path (mount_contains_forager_files)"
 		out, err := run(t, "run", "claude", "--mount", c.mount)
-		if err == nil || cmd.ExitCode(err) != 1 || err.Error() != want {
-			t.Errorf("XDG_STATE_HOME=%s, --mount %s: %v (exit %d), want %q\n%s", c.state, c.mount, err, cmd.ExitCode(err), want, out)
+		if err == nil || cmd.ExitCode(err) != c.exit || err.Error() != c.want {
+			t.Errorf("XDG_STATE_HOME=%s, --mount %s: %v (exit %d), want %q\n%s", c.state, c.mount, err, cmd.ExitCode(err), c.want, out)
 		}
 	}
 	if _, err := os.Stat(log); err == nil {
@@ -1474,7 +1480,8 @@ func TestRunRefusesAMountOfALinkToTheConfigDir(t *testing.T) {
 // TestRunTakesEnvWithoutAWall is --env on a run without a wall: a value no other
 // source sets reaches the agent and is recorded as the run's, a value of a name a module
 // exports wins over the export, a default, and qory says that a value of a name no source
-// may set, PATH, is not used.
+// may set, PATH, is not used. qory run prints an --env value of 8 bytes or more as ***,
+// so the agent's line has *** where such a value reached it.
 func TestRunTakesEnvWithoutAWall(t *testing.T) {
 	root := newCheckout(t)
 	writeFile(t, filepath.Join(root, "modules", "core", "qory-module.yaml"), "apiVersion: qory.dev/v1alpha1\nname: core\nenv:\n  CORE_SCRIPTS: scripts\n")
@@ -1494,7 +1501,7 @@ func TestRunTakesEnvWithoutAWall(t *testing.T) {
 	}
 	wants(t, out,
 		"qory run: PATH from --env is not used: no source may set it\n",
-		"FLAG_NAMED=goes in CORE_SCRIPTS=/elsewhere\n")
+		"FLAG_NAMED=goes in CORE_SCRIPTS=***\n")
 	lacks(t, out, "FLAG_NAMED from --env", "CORE_SCRIPTS from --env")
 	_, evs := events(t, root)
 	got, _ := json.Marshal(sessionApplied(t, evs)["variables"])

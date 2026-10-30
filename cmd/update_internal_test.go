@@ -8,6 +8,7 @@ import (
 	"github.com/qoryai/forager/wall"
 
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/pool/prebuild"
 	"github.com/qoryai/qory/internal/ui"
 )
 
@@ -84,6 +85,7 @@ func TestNoUpdateCheckInsideTheWall(t *testing.T) {
 		append(slices.Clone(spec.SetupRunner[1:]), "1", "--", wall.HelperPath, "run", "prepare"),
 		d.HoldArgs,
 		append(slices.Clone(spec.Exec[1:]), "--unset", "CLAUDE_CONFIG_DIR", "--", "/bin/sh", "-c", "true"),
+		append(slices.Clone(prebuild.StepArgs), "--out", "/w/out", "--run-id", "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f"),
 	} {
 		if !walledVerb(args) {
 			t.Errorf("%v: not a verb the wall runs inside", args)

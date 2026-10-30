@@ -26,7 +26,7 @@ concurrency:
 # image takes it by that digest, as ghcr.io/qoryai/qory-prerelease@sha256:<digest>; the
 # tag is for people to read.
 #
-# It then builds two more images of the same commit, each published and tagged the same
+# It then builds three more images of the same commit, each published and tagged the same
 # way, with its index digest in the summary:
 #
 # - images/agent, the image a walled run of Claude Code runs in, to
@@ -36,9 +36,16 @@ concurrency:
 #   platform's image before one index joins the two.
 # - images/gateway, FROM the first image by its digest, with qory gateway as the entry
 #   point, to ghcr.io/qoryai/qory-gateway-prerelease.
+# - images/prebuild, the image a pool's prebuild runs in, to
+#   ghcr.io/qoryai/qory-prebuild-prerelease: FROM images/agent-docker, which is built
+#   FROM the agent image of this run by its digest and kept as an OCI layout on the
+#   runner, never pushed; the prebuild's build takes it by its digest. Each platform
+#   builds on a runner of that platform, and qory image check checks each platform's image
+#   before one index joins the two, as for the agent image.
 #
-# ghcr.io/qoryai/qory-prerelease, ghcr.io/qoryai/qory-agent-prerelease and
-# ghcr.io/qoryai/qory-gateway-prerelease stay private: they are never made public.
+# ghcr.io/qoryai/qory-prerelease, ghcr.io/qoryai/qory-agent-prerelease,
+# ghcr.io/qoryai/qory-gateway-prerelease and ghcr.io/qoryai/qory-prebuild-prerelease stay
+# private: they are never made public.
 #
 # The build reads only the pushed sources: a go.mod that replaces a module with a local
 # path fails it, as that path is not in the checkout.
@@ -49,6 +56,7 @@ env:
   IMAGE: ghcr.io/qoryai/qory-prerelease
   AGENT_IMAGE: ghcr.io/qoryai/qory-agent-prerelease
   GATEWAY_IMAGE: ghcr.io/qoryai/qory-gateway-prerelease
+  PREBUILD_IMAGE: ghcr.io/qoryai/qory-prebuild-prerelease
   # Docker Hub's official golang:1.27 under the same digest as the Dockerfile's default,
   # copied to qoryai's public package and pulled with the job's token.
   GO_IMAGE: ghcr.io/qoryai/ci-images:golang-1.27@sha256:f24164268fc1e741bbdc0066dbadcf1c8426c5a8489f0729c02c3905a53032fd
@@ -286,6 +294,145 @@ jobs:
             echo "Tagged \`${AGENT_IMAGE}:sha-${SHORT}\`, for people to read."
           } >> "$GITHUB_STEP_SUMMARY"
           echo "::notice::Published ${AGENT_IMAGE}:sha-${SHORT}, ${AGENT_IMAGE}@${digest}"
+
+  # One job per platform, as for the agent image, on the agent image that platform's job
+  # pushed.
+  prebuild-amd64:
+    name: Build and check the prebuild image for amd64
+    needs: [image, agent-amd64]
+    runs-on: ubuntu-latest
+    permissions: &prebuild-permissions
+      contents: read
+      packages: write
+    env:
+      PLATFORM: linux/amd64
+      AGENT_DIGEST: ${{ needs.agent-amd64.outputs.digest }}
+    outputs: &prebuild-outputs
+      digest: ${{ steps.build.outputs.digest }}
+    steps: &prebuild-steps
+      # images/agent-docker and images/prebuild are the builds' contexts.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=ghcr.io/qoryai/ci-images:buildkit-buildx-stable-1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+
+      - name: Take qory from the image
+        env:
+          DIGEST: ${{ needs.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          id="$(docker create --platform "$PLATFORM" "${IMAGE}@${DIGEST}")"
+          docker cp "$id:/qory/qory" "$RUNNER_TEMP/qory"
+          docker rm "$id" > /dev/null
+          "$RUNNER_TEMP/qory" version
+
+      # agent-docker FROM this platform's agent image by its digest, as an OCI layout on
+      # the runner: it is not pushed.
+      - name: Build agent-docker
+        id: agent-docker
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: images/agent-docker
+          platforms: ${{ env.PLATFORM }}
+          outputs: type=oci,dest=${{ runner.temp }}/agent-docker,tar=false
+          provenance: false
+          sbom: false
+          build-args: |
+            BASE=${{ env.AGENT_IMAGE }}@${{ env.AGENT_DIGEST }}
+            FETCH_IMAGE=${{ env.FETCH_IMAGE }}
+
+      # This platform's image, FROM agent-docker by its digest in the layout, pushed by
+      # digest alone: no tag points to it until it is checked and joined with the other
+      # platform's.
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: images/prebuild
+          platforms: ${{ env.PLATFORM }}
+          build-contexts: |
+            qory-agent-docker=oci-layout://${{ runner.temp }}/agent-docker@${{ steps.agent-docker.outputs.digest }}
+          outputs: type=image,name=${{ env.PREBUILD_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          provenance: false
+          sbom: false
+          build-args: |
+            BASE=qory-agent-docker
+            FETCH_IMAGE=${{ env.FETCH_IMAGE }}
+          labels: |
+            org.opencontainers.image.revision=${{ needs.image.outputs.sha }}
+
+      - name: Check the prebuild image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          XDG_CONFIG_HOME: ${{ runner.temp }}/config
+        run: |
+          set -euo pipefail
+          docker pull --platform "$PLATFORM" "${PREBUILD_IMAGE}@${DIGEST}"
+          "$RUNNER_TEMP/qory" image check "${PREBUILD_IMAGE}@${DIGEST}"
+
+  prebuild-arm64:
+    name: Build and check the prebuild image for arm64
+    needs: [image, agent-arm64]
+    runs-on: ubuntu-24.04-arm
+    permissions: *prebuild-permissions
+    env:
+      PLATFORM: linux/arm64
+      AGENT_DIGEST: ${{ needs.agent-arm64.outputs.digest }}
+    outputs: *prebuild-outputs
+    steps: *prebuild-steps
+
+  prebuild:
+    name: Publish the prebuild image
+    needs: [image, prebuild-amd64, prebuild-arm64]
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # One index of the two images checked, tagged sha-<7>, as for the agent image.
+      - name: Tag the prebuild image
+        env:
+          AMD64: ${{ needs.prebuild-amd64.outputs.digest }}
+          ARM64: ${{ needs.prebuild-arm64.outputs.digest }}
+          SHA: ${{ needs.image.outputs.sha }}
+          SHORT: ${{ needs.image.outputs.short }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create --tag "${PREBUILD_IMAGE}:sha-${SHORT}" "${PREBUILD_IMAGE}@${AMD64}" "${PREBUILD_IMAGE}@${ARM64}"
+          docker buildx imagetools inspect --raw "${PREBUILD_IMAGE}:sha-${SHORT}" > index.json
+          listed="$(jq -r '[.manifests[].digest] | sort | join(" ")' index.json)"
+          checked="$(printf '%s\n' "$AMD64" "$ARM64" | sort | paste -sd ' ')"
+          [ "$listed" = "$checked" ] || {
+            echo "${PREBUILD_IMAGE}:sha-${SHORT} lists ${listed:-no image}, not the images checked, ${checked}" >&2; exit 1; }
+          docker buildx imagetools inspect "${PREBUILD_IMAGE}:sha-${SHORT}" | tee inspect.txt
+          digest="$(awk '/^Digest:/ { print $2; exit }' inspect.txt)"
+          [ -n "$digest" ] || { echo "${PREBUILD_IMAGE}:sha-${SHORT} has no digest" >&2; exit 1; }
+          {
+            echo "## Pre-release prebuild image"
+            echo
+            echo "Built from \`${SHA}\` for linux/amd64 and linux/arm64, and checked by qory image check for each. Name it in wall.images by the index digest:"
+            echo
+            echo '```'
+            echo "${PREBUILD_IMAGE}@${digest}"
+            echo '```'
+            echo
+            echo "Tagged \`${PREBUILD_IMAGE}:sha-${SHORT}\`, for people to read."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::Published ${PREBUILD_IMAGE}:sha-${SHORT}, ${PREBUILD_IMAGE}@${digest}"
 
   gateway:
     name: Build and publish the gateway image

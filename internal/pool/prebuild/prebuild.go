@@ -1,48 +1,49 @@
 // Package prebuild runs a run of the step prebuild, for qory run once it redeemed a run
 // code whose documents have step prebuild: it builds the environment of the run's target
-// into images, pushes them to the places the documents set, and writes the run's
-// dev.qory.run.built. Each run gets a run directory, <state>/pool/runs/<run_id>, mode
-// 0700, holding:
+// into images behind the wall of the run, pushes them to the places the documents set,
+// and writes the run's dev.qory.run.built. Each run gets a run directory,
+// <state>/pool/runs/<run_id>, mode 0700, holding:
 //
 //	work/   an empty git working tree, into which the run's code is fetched
 //	state/  XDG_STATE_HOME of every command, mode 0700, and the folder of the run's record
+//	out/    where the step behind the wall writes its result, [ResultFile]
 //
-// The steps, in qory run's process:
+// The steps:
 //
-//  1. The fetch: the run opens at the gateway of its run key, with no wall, and its
-//     record in the folder that [explore.RecordDir] returns for work. Through the run's
-//     host proxy, [preparation.Run] fetches the run's repositories into work, as qory
-//     run does once a run is open. The run stays open until Launch returns. Whether the
-//     run started is whether the open made its record. The fetch has [fetchTimeout],
-//     counted from the open. Every git of the fetch starts from the environment of
-//     [child.Env], so git is found on its PATH.
-//  2. The commit: [Commit] reads it from work/.git, with no git run.
-//  3. The build: the build of internal/prebuild, of work, in its two steps. The target
-//     image is tagged <image_destination>:<run_id>, and the environment image the build
-//     keeps apart <environment_destination>:<run_id>. A run with environment_image
-//     builds the target image from it, and builds no environment image. Its programs get
-//     the environment of [child.Env], and are found on its PATH.
-//  4. The push: docker push of the environment image, when the build kept one apart,
-//     then of the target image, by docker from the PATH every command gets, run in
-//     <state>/pool, outside every run directory, as docker image inspect, docker buildx
-//     imagetools inspect and docker image rm are. qory sets no login and reads none:
-//     docker reaches the registry with the settings in $HOME/.docker. Each image is its
-//     tag's digest in the registry, from docker image inspect's RepoDigests. The target
-//     image's size is the sum of the config's and the layers' sizes of its manifest,
-//     which docker buildx imagetools inspect --raw reads from the registry.
-//  5. The report: [session.Run.Built] writes dev.qory.run.built with the target image,
-//     its size, the commit and the inputs' environment_ref; the environment image, by
-//     its digest, when the build kept one apart and it was pushed, or the build started
-//     from environment_image; and the base image, by its digest, when the build
-//     resolved the image its target step starts from. Then the run closes succeeded.
+//  1. The open: the run opens at the gateway of its run key, with the wall of
+//     [Settings.Wall] and the image [Settings.Image] is set to, and its record in the folder
+//     that [explore.RecordDir] returns for work. A run whose policy is not the one of the
+//     server's run configuration, as the record's dev.qory.run.policy_applied has it,
+//     stops here. The run stays open until Launch returns. Whether the run started is
+//     whether the open made its record.
+//  2. The fetch, in qory run's process: through the run's host proxy, [preparation.Run]
+//     fetches the run's repositories into work, as qory run does once a run is open. The
+//     fetch has [fetchTimeout], counted from the open. Every git of the fetch starts from
+//     the environment of [child.Env], so git is found on its PATH.
+//  3. The commit: [Commit] reads it from work/.git, with no git run.
+//  4. The step, behind the wall: one session joins the run, with the qory helper's
+//     [StepArgs] and the [Step] as its command, work as its working folder and out
+//     mounted writable. [RunStep] builds work on the wall's nested Docker and pushes the
+//     images through the run's proxy, with no login: the target image as
+//     <image_destination>:<run_id>, and the environment image the build keeps apart as
+//     <environment_destination>:<run_id>. A run with environment_image builds the target
+//     image from it, and builds no environment image. The session gets no variable of
+//     this machine's and no model key. Its lines go to the log.
+//  5. The report: Launch reads out/result.json, [readResult], and checks each image's
+//     name against the run's destinations, then [session.Run.Built] writes
+//     dev.qory.run.built with the target image, its size, the commit and the inputs'
+//     environment_ref; the environment image, by its digest, when the build kept one
+//     apart and it was pushed, or the build started from environment_image; and the base
+//     image, by its digest, when the build resolved the image its target step starts
+//     from. Then the run closes succeeded.
 //
-// The local tags, the target image's and the environment image's, are removed at the
-// end, and so is the run directory, unless events of the run did not reach its
-// gateway; the registry keeps the images.
+// The nested Docker's images and build cache go with the wall when the run closes; this
+// machine's Docker has none of them, and the registry keeps the images pushed. The run
+// directory is removed at the end, unless events of the run did not reach its gateway.
 package prebuild
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	jsonv2 "encoding/json/v2"
 	"errors"
@@ -52,6 +53,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -59,17 +61,20 @@ import (
 
 	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/event"
+	"github.com/qoryai/forager/mask"
 	"github.com/qoryai/forager/policy"
 	"github.com/qoryai/forager/refusal"
 	"github.com/qoryai/forager/session"
+	"github.com/qoryai/forager/sink"
+	"github.com/qoryai/forager/wall"
 
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/integration"
 	"github.com/qoryai/qory/internal/pool/child"
 	"github.com/qoryai/qory/internal/pool/explore"
-	devimage "github.com/qoryai/qory/internal/prebuild"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/proxygit"
+	"github.com/qoryai/qory/internal/secretmask"
 )
 
 // exitTimeout is the exit code of a run closed at its time limit.
@@ -105,6 +110,12 @@ const (
 	textPlaceSecret    = "ask Qory Apiary's instance admin: the run's %s contains qak_, qrk_, qecr_, qecn_, qecp_, qecg_ or qeci_, which start a secret, and qory writes no image with them to dev.qory.run.built"
 	textPlaceCase      = "ask Qory Apiary's instance admin: the run's %s has upper-case letters, and qory writes images to dev.qory.run.built by lower-case references alone"
 	textUndelivered    = "check that this machine reaches the run's gateway: %s of the run did not reach it; %s/undelivered contains them"
+	textNotServer      = "set a run configuration for the run's workspace in Qory Apiary: a prebuild runs under its policy alone, and the run's policy is %s"
+	textNotRegistry    = "set pool.registry to the registry of Qory Apiary's QORY_REGISTRY, or ask its instance admin: the run's %s is not under %s"
+	textNotJoined      = "check the wall and wall.prebuild_image in the run configuration's forager.yaml: the prebuild's session behind the wall did not start: %s"
+	textNoResult       = "check the prebuild's lines behind the wall: its result, out/" + ResultFile + ", could not be read: %s"
+	textStepExited     = "check the prebuild's lines behind the wall: the step %s and wrote no error"
+	textResultPlace    = "check the prebuild's lines behind the wall: its result has the image %s for the run's %s, which is %s"
 )
 
 // undeliveredError is a close that left n events of the run that its gateway did not
@@ -121,10 +132,6 @@ func (e *undeliveredError) Error() string {
 	}
 	return fmt.Sprintf(textUndelivered, events, exports.Value(e.record, false))
 }
-
-// cleanupTimeout bounds the removal of the local tag, which runs after ctx may have
-// ended.
-const cleanupTimeout = 30 * time.Second
 
 // maxInspect is the most bytes read of docker image inspect's answer.
 const maxInspect = 1 << 20
@@ -153,10 +160,23 @@ type Settings struct {
 	// RunConfig is the XDG_CONFIG_HOME of every command, an absolute directory: the
 	// configuration directory whose qory/forager.yaml sets the wall.
 	RunConfig string
-	// AgentImage, User and Helper are wall.image, pinned by digest, wall.user and
-	// wall.helper of RunConfig's forager.yaml: the build's agent image, the wall user
-	// the image runs as, and qory's Linux build that runs the seed step.
-	AgentImage, User, Helper string
+	// AgentImage and User are wall.image, pinned by digest, and wall.user of RunConfig's
+	// forager.yaml: the build's agent image, and the wall user the image runs as.
+	AgentImage, User string
+	// Wall is the wall the run opens with, its helper wall.helper; Image is the name of
+	// the image it starts, wall.prebuild_image, and Images that image's definition alone,
+	// so a policy that selects another image is refused. CAEnv is wall.ca_env, Exec the
+	// helper's exec verb behind the wall, and Limits the wall's limits, wall.cpus,
+	// wall.memory, wall.pids_limit and wall.shm_size.
+	Wall   wall.Wall
+	Image  string
+	Images []session.Image
+	CAEnv  []string
+	Exec   []string
+	Limits wall.Limits
+	// Registry is pool.registry, the image name the prebuild's images must be pushed
+	// under; empty checks no destination against it.
+	Registry string
 	// Version is the version the run's events report, qory's.
 	Version string
 	// Machine is machine of forager.yaml, the adapter that made the machine, which
@@ -167,21 +187,15 @@ type Settings struct {
 	// Fetch fetches the run's repositories, as [preparation.Run]; nil is
 	// preparation.Run. A test replaces it.
 	Fetch func(ctx context.Context, dir string, base []string, getenv func(string) string, p proxygit.Proxy, report io.Writer) (bool, error)
-	// Build builds the image, as [devimage.Build]; nil is devimage.Build. A test
-	// replaces it.
-	Build func(ctx context.Context, o devimage.Options) (devimage.Result, error)
 	// Git is the git binary that makes work an empty working tree; empty is git. A name
 	// with no path separator is found on the PATH every command gets, as
 	// [child.Program] has it.
 	Git string
-	// Docker is the docker binary; empty is docker. A name with no path separator is
-	// found on the PATH every command gets, as [child.Program] has it.
-	Docker string
 	// Log takes each line the commands write, after the run id, and each failure.
 	Log func(line string)
-	// Grace is how long a command has after SIGTERM before it is killed; zero is
-	// [child.DefaultGrace].
-	Grace time.Duration
+	// Masker is the run's mask list, OpenSpec.Masker of the run's session, which masks
+	// the run's record, events and lines with it; nil is Forager's default.
+	Masker *mask.Masker
 }
 
 // Run is one run of the step prebuild, as the documents of its run code set it.
@@ -210,6 +224,8 @@ type Run struct {
 // Opened is a run open at its gateway, as the prebuild uses it: a [*session.Run].
 type Opened interface {
 	HostProxy() (session.HostProxy, error)
+	// Join runs the step's session behind the wall, as [session.Run.Join].
+	Join(ctx context.Context, spec session.SessionSpec) (*session.Result, error)
 	// System and Repositories are the server's values of [preparation.EnvSystem] and
 	// [preparation.EnvRepositories], "" when it sets none.
 	System() string
@@ -227,14 +243,11 @@ type Result struct {
 	Record bool
 	// Image is what dev.qory.run.built was written with, or what was built so far.
 	Image session.Built
-	// Built is what the build made: the local references of the environment image and
-	// of the target image, and the base image by digest.
-	Built devimage.Result
 }
 
 // Launch runs the prebuild r, until it ends or ctx ends; at ctx's end the step running
-// is stopped. The error is why it did not succeed. Once the run is open, it closes once,
-// as Launch returns:
+// is stopped, behind the wall too. The error is why it did not succeed. Once the run is
+// open, it closes once, as Launch returns:
 //
 //	step                                     the run closes
 //	the fetch at its time limit              cancelled, timeout, 124
@@ -249,11 +262,15 @@ type Result struct {
 // accept, on a run the gateway did not close, is a failed close, and the run directory
 // stays, with the record's delivered.log and undelivered/, as qory run leaves the
 // checkout and the record of an explore run in that case. Otherwise the run directory is
-// removed before Launch returns. The local tags, once a build was started, are removed
-// in every case.
+// removed before Launch returns.
 func Launch(ctx context.Context, s Settings, r Run) (res Result, err error) {
 	if r.Key != nil {
 		defer r.Key.Clear()
+	}
+	// qory run sets both once it checked wall.prebuild_image, so no person reaches this
+	// check.
+	if s.Wall == nil || s.Image == "" {
+		return res, errors.New("the prebuild needs the wall and the image it runs in behind it")
 	}
 	envRef, err := checkRun(s, r)
 	if err != nil {
@@ -323,60 +340,22 @@ func Launch(ctx context.Context, s Settings, r Run) (res Result, err error) {
 	if res.Image.Commit, err = Commit(work); err != nil {
 		return res, err
 	}
-	// The build.
-	tag := r.ImageDestination + ":" + r.RunID
-	envTag := ""
-	if r.EnvironmentDestination != "" {
-		envTag = r.EnvironmentDestination + ":" + r.RunID
-	}
-	defer s.removeTag(ctx, r.RunID, state, tag)
-	build := s.Build
-	if build == nil {
-		build = devimage.Build
-	}
-	lines, log := s.lines(r.RunID), s.lines(r.RunID)
-	res.Built, err = build(ctx, devimage.Options{
-		Repository: work, AgentImage: s.AgentImage, User: s.User, Tag: tag, Helper: s.Helper, SeedArgs: devimage.SeedArgs,
-		EnvironmentImage: r.EnvironmentImage, EnvironmentTag: envTag,
-		Env: child.Env(s.RunConfig, state, explore.RunsDir(s.State)), Out: lines, Log: log,
-	})
-	lines.Flush()
-	log.Flush()
-	switch {
-	case ctx.Err() != nil:
-		return res, fmt.Errorf(textStoppedBuild, context.Cause(ctx))
-	case errors.Is(err, devimage.ErrImageMissing):
+	// The step, behind the wall.
+	got, err := s.step(ctx, run, r, dir)
+	if got.ImageMissing {
 		out = session.Outcome{State: event.StateFailed, Reason: refusal.ImageMissing, ExitCode: -1}
-		return res, fmt.Errorf(devimage.Prefix+"%w", err)
-	case errors.Is(err, devimage.ErrNoConfiguration), errors.Is(err, devimage.ErrLimit):
-		return res, err
-	case err != nil:
-		return res, fmt.Errorf(devimage.Prefix+"%w", err)
 	}
-	// The pushes, then what the registry holds, by docker from the cleaned PATH, in
-	// <State>/pool: the environment image the build kept apart, then the target image.
+	if err != nil {
+		return res, err
+	}
+	res.Image.Image = r.ImageDestination + "@" + got.Target.Digest
+	res.Image.Size = got.Target.Size
 	res.Image.EnvironmentImage = r.EnvironmentImage
-	if env := res.Built.Environment; env != "" {
-		defer s.removeTag(ctx, r.RunID, state, env)
-		if r.EnvironmentImage == "" {
-			if err = s.push(ctx, r.RunID, state, env); err != nil {
-				return res, err
-			}
-			digest, _, err := s.digest(ctx, r.RunID, state, env, r.EnvironmentDestination)
-			if err != nil {
-				return res, err
-			}
-			res.Image.EnvironmentImage = r.EnvironmentDestination + "@" + digest
-		}
+	if got.Environment != nil {
+		res.Image.EnvironmentImage = r.EnvironmentDestination + "@" + got.Environment.Digest
 	}
-	if err = s.push(ctx, r.RunID, state, tag); err != nil {
-		return res, err
-	}
-	if res.Image.Image, res.Image.Size, err = s.stored(ctx, r.RunID, state, tag, r.ImageDestination); err != nil {
-		return res, err
-	}
+	res.Image.Base = got.Base
 	// The report.
-	res.Image.Base = res.Built.Base
 	if err = run.Built(res.Image); err != nil {
 		return res, fmt.Errorf(textNotReported, err)
 	}
@@ -384,13 +363,102 @@ func Launch(ctx context.Context, s Settings, r Run) (res Result, err error) {
 	return res, nil
 }
 
-// fetch opens the run r at the gateway of its run key, with no wall and its record at
-// record, and fetches the run's repositories into work through the run's host proxy.
+// step runs the prebuild's step of r behind the wall of run, in one session: the qory
+// helper's [StepArgs] and [Step.Args], in dir/work, with dir/out, empty, mounted
+// writable, as places a walled run writes. The session gets no variable of this
+// machine's, none of the run's and no model key: the wall gives it the run's proxy and
+// bundle, and nothing else. Its output goes to the log. It returns the result the step
+// wrote, checked against r, and the error of a step that did not push.
+func (s Settings) step(ctx context.Context, run Opened, r Run, dir string) (stepResult, error) {
+	work, out := filepath.Join(dir, "work"), filepath.Join(dir, "out")
+	if err := os.Mkdir(out, 0o700); err != nil {
+		return stepResult{}, err
+	}
+	st := Step{
+		Out: out, RunID: r.RunID, ImageDestination: r.ImageDestination, EnvironmentDestination: r.EnvironmentDestination,
+		EnvironmentImage: r.EnvironmentImage, AgentImage: s.AgentImage, User: s.User,
+	}
+	// The session masks its output with s.Masker, so lines gets it as it is: a second
+	// pass would mask inside a placeholder, such as qory-proxy-password.
+	lines := s.lines(r.RunID)
+	joined, err := run.Join(ctx, session.SessionSpec{
+		Command: wall.HelperPath, Args: append(slices.Clone(StepArgs), st.Args()...), Dir: work,
+		Mounts: []wall.Mount{{Path: out}}, Written: []string{work, out},
+		ForagerFiles: []string{filepath.Join(s.RunConfig, "qory")},
+		Exec:         s.Exec, Limits: s.Limits,
+		Stdin: strings.NewReader(""), Stdout: lines, Stderr: lines,
+	})
+	lines.Flush()
+	if err != nil {
+		if ctx.Err() != nil {
+			return stepResult{}, fmt.Errorf(textStoppedBuild, context.Cause(ctx))
+		}
+		return stepResult{}, fmt.Errorf(textNotJoined, integration.Printable(exports.HideError(err).Error()))
+	}
+	got, readErr := readResult(out)
+	switch {
+	case ctx.Err() != nil && got.Stopped == stoppedPush:
+		return stepResult{}, fmt.Errorf(textStoppedPush, context.Cause(ctx))
+	case ctx.Err() != nil:
+		return stepResult{}, fmt.Errorf(textStoppedBuild, context.Cause(ctx))
+	case readErr != nil:
+		return stepResult{}, readErr
+	case got.Error != "":
+		return stepResult{ImageMissing: got.ImageMissing}, errors.New(shownError(got.Error))
+	case joined != nil && joined.ExitCode != 0:
+		return stepResult{}, fmt.Errorf(textStepExited, ended(child.Result{ExitCode: joined.ExitCode}))
+	}
+	return got, checkResult(got, r)
+}
+
+// checkResult returns an error for a result of the step that is not one of r: a target image that is
+// not under image_destination, an environment image that is not under
+// environment_destination, or one for a run that has environment_image, and a digest,
+// size or base image that dev.qory.run.built does not take.
+func checkResult(got stepResult, r Run) error {
+	if got.Target == nil {
+		return fmt.Errorf(textNoResult, "it has no target image")
+	}
+	images := []struct {
+		member, want string
+		image        *stepImage
+	}{{"image_destination", r.ImageDestination, got.Target}}
+	if got.Environment != nil {
+		images = append(images, struct {
+			member, want string
+			image        *stepImage
+		}{"environment_destination", r.EnvironmentDestination, got.Environment})
+	}
+	for _, i := range images {
+		switch {
+		case i.want == "":
+			return fmt.Errorf(textResultPlace, "an environment image", i.member, "not set")
+		case i.image.Name != i.want:
+			return fmt.Errorf(textResultPlace, integration.Printable(exports.Value(i.image.Name, true)), i.member, exports.Value(i.want, true))
+		case !digestShape.MatchString(i.image.Digest):
+			return fmt.Errorf(textNoResult, "a digest is not sha256: and 64 lower-case hexadecimal digits")
+		}
+	}
+	if got.Target.Size < 1 || got.Target.Size > maxSize {
+		return fmt.Errorf(textNoResult, "the target image's size is out of range")
+	}
+	if got.Environment != nil && got.Environment.Size != 0 {
+		return fmt.Errorf(textNoResult, "it has a size for the environment image")
+	}
+	if b := got.Base; b != "" && (!pinnedShape.MatchString(b) || !policy.ImageReference(b) || strings.ToLower(b) != b || accesskey.ContainsSecret(b)) {
+		return fmt.Errorf(textNoResult, "the base image is not pinned by digest")
+	}
+	return nil
+}
+
+// fetch opens the run r at the gateway of its run key, with the wall and its record at
+// record, checks that the run's policy is the server's run configuration's, and fetches the run's repositories into work through the run's host proxy.
 // It returns the run, open, for the caller to close, nil when it did not open, and the
 // outcome a fetch that failed closes it with: cancelled with timeout and 124 at
 // [fetchTimeout], counted from the open; cancelled with interrupted when ctx ended;
-// failed otherwise. The error is why the fetch did not succeed: the open, the host
-// proxy, the fetch, or a run configuration that lists no repository. No line and no
+// failed otherwise. The error is why the fetch did not succeed: the open, a policy that
+// is not the server's, the host proxy, the fetch, or a run configuration that lists no
+// repository. No line and no
 // error contains the host proxy's password. Every git of the fetch starts from the
 // environment of [child.Env] with XDG_STATE_HOME at state, as the build's programs do.
 func (s Settings) fetch(ctx context.Context, r Run, work, state, record string) (Opened, session.Outcome, error) {
@@ -416,10 +484,16 @@ func (s Settings) fetch(ctx context.Context, r Run, work, state, record string) 
 	}
 	run, err := open(fetchCtx, session.OpenSpec{
 		Gateway: session.RemoteGateway{RunKey: string(r.Key.Bytes())}, RunsDir: runs, ForagerVersion: s.Version, RunID: r.RunID,
-		Machine: s.Machine, Report: func(line string) { s.log(r.RunID, line) },
+		Machine: s.Machine, Masker: s.Masker, Report: func(line string) { s.log(r.RunID, line) },
+		Wall: s.Wall, Image: s.Image, Images: s.Images, CAEnv: s.CAEnv,
 	})
 	if err != nil {
 		return nil, out, fmt.Errorf(textNotOpened, integration.Printable(exports.HideURLError(err).Error()))
+	}
+	// The run's policy is the server's run configuration's, or nothing is fetched: the
+	// machine's policy has none of its rules for the registry.
+	if source := policySourceOf(record); source != policyFetched {
+		return run, out, fmt.Errorf(textNotServer, policyShown(source))
 	}
 	fetchErr := s.fetchThrough(fetchCtx, run, r.RunID, work, state)
 	switch {
@@ -477,10 +551,10 @@ func (s Settings) fetchThrough(ctx context.Context, run Opened, runID, work, sta
 	// The fetch's lines and errors start with qory run's prefix, which the prebuild's
 	// lines leave out: the run id comes first there.
 	log := s.logf()
-	lines := child.NewLineWriter("", func(line string) { log(runID + ": " + strings.TrimPrefix(line, fetchPrefix)) })
+	lines, flush := maskedLines(child.NewLineWriter("", func(line string) { log(runID + ": " + strings.TrimPrefix(line, fetchPrefix)) }))
 	p := proxygit.Proxy{URL: h.ProxyURL, CABundle: h.CABundle}
 	fetched, err := fetch(ctx, work, child.Env(s.RunConfig, state, explore.RunsDir(s.State)), values, p, lines)
-	lines.Flush()
+	flush()
 	switch {
 	case err != nil:
 		return errors.New(proxygit.Hide(strings.TrimPrefix(err.Error(), fetchPrefix), &p))
@@ -535,10 +609,65 @@ func checkRun(s Settings, r Run) (string, error) {
 	if !pinnedShape.MatchString(s.AgentImage) {
 		return "", errors.New("the agent image is not pinned by digest")
 	}
-	if s.User == "" || s.Helper == "" {
-		return "", errors.New("the wall's user and helper are both needed to build")
+	if s.User == "" {
+		return "", errors.New("the wall's user is needed to build")
+	}
+	if s.Registry != "" {
+		for _, d := range places {
+			if d.member != "environment_image" && d.value != s.Registry && !strings.HasPrefix(d.value, s.Registry+"/") {
+				return "", fmt.Errorf(textNotRegistry, d.member, exports.Value(s.Registry, true))
+			}
+		}
 	}
 	return EnvironmentRef(r.Inputs)
+}
+
+// policyFetched is the source of dev.qory.run.policy_applied of a run whose policy is
+// the server's run configuration.
+const policyFetched = "fetched"
+
+// maxRecordLine is the most bytes of a line of the run's record [policySource] reads.
+const maxRecordLine = 4 << 20
+
+// policySource is the source of the last dev.qory.run.policy_applied in the run's
+// record, session.jsonl in record, which the open wrote: "fetched" for the server's run
+// configuration, "config" for a policy the gateway's machine sets, "none" for none, and
+// "" when the record has none that reads.
+func policySource(record string) string {
+	f, err := os.Open(filepath.Join(record, sink.SessionFile))
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	source := ""
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64<<10), maxRecordLine)
+	for sc.Scan() {
+		var e struct {
+			Type string `json:"type"`
+			Data struct {
+				Source string `json:"source"`
+			} `json:"data"`
+		}
+		if jsonv2.Unmarshal(sc.Bytes(), &e) == nil && e.Type == event.PolicyApplied {
+			source = e.Data.Source
+		}
+	}
+	return source
+}
+
+// policySourceOf is [policySource]; a test replaces it.
+var policySourceOf = policySource
+
+// policyShown is a policy's source as [textNotServer] says it.
+func policyShown(source string) string {
+	switch source {
+	case "config":
+		return "the gateway's machine's"
+	case "none":
+		return "none"
+	}
+	return "not recorded"
 }
 
 // prebuildInputs is a prebuild's inputs: exactly version and environment_ref.
@@ -599,132 +728,25 @@ func makeDir(ctx context.Context, s Settings, runID string) (string, error) {
 	}
 	cmd := exec.CommandContext(ctx, git, "init", "--quiet", filepath.Join(dir, "work"))
 	cmd.Env = append(child.Env(s.RunConfig, state, explore.RunsDir(s.State)), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
-	out := s.lines(runID)
+	out, flush := maskedLines(s.lines(runID))
 	cmd.Stdout, cmd.Stderr = out, out
 	err = cmd.Run()
-	out.Flush()
+	flush()
 	if err != nil {
 		return dir, fmt.Errorf("git init: %w", err)
 	}
 	return dir, nil
 }
 
-// inspected is what docker image inspect prints of the image, as [inspectFormat] has it.
-type inspected struct {
-	RepoDigests  []string `json:"repo_digests"`
-	OS           string   `json:"os"`
-	Architecture string   `json:"architecture"`
-	Variant      string   `json:"variant"`
-}
-
-// digest is the digest of the image the push of tag stored under name, sha256:<hex>,
-// from docker image inspect's RepoDigests, and the image's platform.
-func (s Settings) digest(ctx context.Context, runID, state, tag, name string) (string, platform, error) {
-	docker, err := s.docker()
-	if err != nil {
-		return "", platform{}, fmt.Errorf("docker image inspect: %w", err)
+// maskedLines returns a writer that masks what it gets with the process's mask list,
+// [secretmask.Default], as a stream, and then writes it to w, and what flushes both. The
+// masking comes before w cuts a long line, so a value across the cut is masked whole.
+func maskedLines(w *child.LineWriter) (io.Writer, func()) {
+	m := secretmask.Default().Writer(w)
+	return m, func() {
+		m.Flush()
+		w.Flush()
 	}
-	cmd := exec.CommandContext(ctx, docker, "image", "inspect", "--format", inspectFormat, tag)
-	cmd.Dir = s.poolDir()
-	cmd.Env = child.Env(s.RunConfig, state, explore.RunsDir(s.State))
-	var stdout bytes.Buffer
-	cmd.Stdout = &limited{w: &stdout, n: maxInspect}
-	errOut := s.lines(runID)
-	cmd.Stderr = errOut
-	err = cmd.Run()
-	errOut.Flush()
-	if err != nil {
-		return "", platform{}, fmt.Errorf("docker image inspect: %w", err)
-	}
-	var got inspected
-	if err := jsonv2.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &got); err != nil {
-		return "", platform{}, errors.New("docker image inspect printed no image")
-	}
-	digest := ""
-	for _, d := range got.RepoDigests {
-		if rest, ok := strings.CutPrefix(d, name+"@"); ok {
-			if digest != "" && digest != rest {
-				return "", platform{}, errors.New("docker image inspect names the image in the registry twice")
-			}
-			digest = rest
-		}
-	}
-	if digest == "" {
-		return "", platform{}, errors.New("docker image inspect names no digest of the image in the registry")
-	}
-	return digest, platform{OS: got.OS, Architecture: got.Architecture, Variant: got.Variant}, nil
-}
-
-// stored is the image the push of tag stored, name@sha256:<digest> as [Settings.digest]
-// reads it, and its size, read from its manifest in the registry.
-func (s Settings) stored(ctx context.Context, runID, state, tag, name string) (string, int64, error) {
-	digest, p, err := s.digest(ctx, runID, state, tag, name)
-	if err != nil {
-		return "", 0, err
-	}
-	size, err := s.imageSize(ctx, runID, state, name, digest, p)
-	if err != nil {
-		return "", 0, err
-	}
-	return name + "@" + digest, size, nil
-}
-
-// push runs docker push of tag, by docker from the cleaned PATH, in <State>/pool, with
-// its lines after the run id. When ctx ends during it, the error is [textStoppedPush].
-func (s Settings) push(ctx context.Context, runID, state, tag string) error {
-	docker, err := s.docker()
-	pushed := child.Result{}
-	if err == nil {
-		pushed, err = child.Run(ctx, child.Command{
-			Path: docker, Args: []string{"push", tag},
-			Dir: s.poolDir(), ConfigHome: s.RunConfig, StateHome: state, Runs: explore.RunsDir(s.State), Output: s.lines(runID), Grace: s.Grace,
-		})
-	}
-	switch {
-	case ctx.Err() != nil:
-		return fmt.Errorf(textStoppedPush, context.Cause(ctx))
-	case err != nil:
-		return fmt.Errorf("docker push could not be started: %w", err)
-	case pushed != (child.Result{}):
-		return fmt.Errorf("docker push %s", ended(pushed))
-	}
-	return nil
-}
-
-// removeTag removes the local tag once the build was started, whatever came of it,
-// within [cleanupTimeout] even after ctx ended. The registry keeps the image.
-func (s Settings) removeTag(ctx context.Context, runID, state, tag string) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
-	defer cancel()
-	docker, err := s.docker()
-	if err != nil {
-		s.logError(runID, "the local tag of the image could not be removed: ", err)
-		return
-	}
-	var out bytes.Buffer
-	cmd := exec.CommandContext(ctx, docker, "image", "rm", tag)
-	cmd.Dir = s.poolDir()
-	cmd.Env = child.Env(s.RunConfig, state, explore.RunsDir(s.State))
-	cmd.Stdout, cmd.Stderr = io.Discard, &limited{w: &out, n: maxInspect}
-	if err := cmd.Run(); err != nil && !strings.Contains(out.String(), "No such image") {
-		s.logError(runID, "the local tag of the image could not be removed: ", err)
-	}
-}
-
-// docker is the docker binary: Docker, or docker, as [child.Program] has it on the PATH
-// every command gets, which no entry in <State>/pool/runs is on.
-func (s Settings) docker() (string, error) {
-	name := s.Docker
-	if name == "" {
-		name = "docker"
-	}
-	return child.Program(name, explore.RunsDir(s.State))
-}
-
-// poolDir is <State>/pool, the folder of the run directories' folder: where the docker
-// commands run, outside every run directory.
-func (s Settings) poolDir() string {
-	return filepath.Join(s.State, "pool")
 }
 
 // lines is the writer of a command's output: each line after the run id.

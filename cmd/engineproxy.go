@@ -46,25 +46,11 @@ var engineProxyUID = os.Getuid
 // JSON decoder's error texts are left out, since they can quote the file.
 func readEngineProxy(path string) (*session.EngineProxy, error) {
 	shown := exports.Value(path, false)
-	f, err := openEngineProxyFile(path)
+	f, info, err := openEngineProxy(path)
 	if err != nil {
-		if engineProxyLink(err) {
-			return nil, input(fmt.Errorf("set wall.engine_proxy_file to the file itself: %s is a link", shown))
-		}
-		var pe *fs.PathError
-		if errors.As(err, &pe) {
-			err = pe.Err
-		}
-		return nil, input(fmt.Errorf("check wall.engine_proxy_file: qory cannot open %s: %w", shown, err))
+		return nil, err
 	}
 	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
-		return nil, input(fmt.Errorf("check wall.engine_proxy_file: qory cannot read %s", shown))
-	}
-	if !info.Mode().IsRegular() {
-		return nil, input(fmt.Errorf("set wall.engine_proxy_file to a regular file: %s is not one", shown))
-	}
 	if uid, ok := fileOwner(info); !ok || uid != engineProxyUID() {
 		owner := "unknown"
 		if ok {
@@ -84,6 +70,34 @@ func readEngineProxy(path string) (*session.EngineProxy, error) {
 		return nil, input(fmt.Errorf("write only the engine proxy setting into %s: the file has more than %d bytes", shown, maxEngineProxyFile))
 	}
 	return engineProxyFrom(b, shown)
+}
+
+// openEngineProxy opens wall.engine_proxy_file at path for reading, without following a
+// link and without blocking, and returns it with what its descriptor's stat returned, a
+// regular file. Every refusal is input and contains the path.
+func openEngineProxy(path string) (*os.File, fs.FileInfo, error) {
+	shown := exports.Value(path, false)
+	f, err := openEngineProxyFile(path)
+	if err != nil {
+		if engineProxyLink(err) {
+			return nil, nil, input(fmt.Errorf("set wall.engine_proxy_file to the file itself: %s is a link", shown))
+		}
+		var pe *fs.PathError
+		if errors.As(err, &pe) {
+			err = pe.Err
+		}
+		return nil, nil, input(fmt.Errorf("check wall.engine_proxy_file: qory cannot open %s: %w", shown, err))
+	}
+	info, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, nil, input(fmt.Errorf("check wall.engine_proxy_file: qory cannot read %s", shown))
+	}
+	if !info.Mode().IsRegular() {
+		f.Close()
+		return nil, nil, input(fmt.Errorf("set wall.engine_proxy_file to a regular file: %s is not one", shown))
+	}
+	return f, info, nil
 }
 
 // engineProxyFrom reads the engine proxy file's bytes, b, as [readEngineProxy] does; shown

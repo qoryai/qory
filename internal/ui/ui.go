@@ -10,6 +10,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/term"
+
+	"github.com/qoryai/qory/internal/statusfd"
 )
 
 // UI writes styled text to one writer, and decides once, in [New], whether that writer
@@ -93,16 +95,22 @@ const (
 )
 
 // Success prints a line that starts with a check mark, then format with args applied to
-// it, as [fmt.Printf] does.
+// it, as [fmt.Printf] does. Like [UI.Warn] and [UI.Fail], it also writes the line,
+// without colour, to qory run's status descriptor when [statusfd.Setup] opened one and
+// the UI's writer goes to stderr, see [statusfd.Shown].
 func (u *UI) Success(format string, args ...any) {
-	fmt.Fprintf(u.w, "%s %s\n", u.ok.Render("✓"), fmt.Sprintf(format, args...))
+	text := fmt.Sprintf(format, args...)
+	fmt.Fprintf(u.w, "%s %s\n", u.ok.Render("✓"), text)
+	u.status("✓ " + text)
 }
 
 // Warn prints a line that starts with a warning sign, then format with args applied to
 // it, as [fmt.Printf] does: something the person should see that does not stop the
 // command.
 func (u *UI) Warn(format string, args ...any) {
-	fmt.Fprintf(u.w, "%s %s\n", u.yellow.Render("⚠"), fmt.Sprintf(format, args...))
+	text := fmt.Sprintf(format, args...)
+	fmt.Fprintf(u.w, "%s %s\n", u.yellow.Render("⚠"), text)
+	u.status("⚠ " + text)
 }
 
 // Fail prints err on a line that starts with a cross. A multi-line error keeps its lines
@@ -111,8 +119,19 @@ func (u *UI) Warn(format string, args ...any) {
 func (u *UI) Fail(err error) {
 	lines := strings.Split(err.Error(), "\n")
 	fmt.Fprintf(u.w, "%s %s\n", u.bad.Render("✗"), lines[0])
+	status := "✗ " + lines[0]
 	for _, line := range lines[1:] {
 		fmt.Fprintf(u.w, "  %s\n", line)
+		status += "\n  " + line
+	}
+	u.status(status)
+}
+
+// status writes text to the status descriptor when the UI's writer goes to stderr, so
+// the descriptor gets no line that stderr does not show.
+func (u *UI) status(text string) {
+	if statusfd.Shown(u.w) {
+		statusfd.Line(text)
 	}
 }
 

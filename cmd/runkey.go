@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/forager/contracts"
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/runkey"
 	"github.com/qoryai/forager/session"
@@ -264,25 +265,39 @@ func credentialVariables(rt runtimes.Runtime) []string {
 	return names
 }
 
-// modelCredentialPassed refuses, as input, a variable of the model's credential that a
-// walled run given a run key would pass to its agent: such a run takes the credential
-// through the gateway its run key names alone. The variables are [credentialVariables]
-// of rt. This machine holds no credentials section, so the runtime names them. env is
-// --env, each entry NAME or NAME=value, and wallEnv is wall.env. Names match exactly, as
-// in a Linux environment. The line names the variable, never a value.
+// textForgeTokenPassed is the line of a forge token's variable, %s, that %s, --env or
+// wall.env, passes to a walled run given a run key.
+const textForgeTokenPassed = "remove %s from %s: a walled run given a run key takes a forge token only through the gateway"
+
+// modelCredentialPassed returns an input error for a variable of the model's credential
+// or of a forge token that a walled run given a run key would pass to its agent: such a
+// run takes the credential through the gateway its run key names alone. The model's
+// variables are [credentialVariables] of rt: this machine holds no credentials section,
+// so the runtime lists them. The forge tokens' variables are the names of Forager's deny
+// list that [contracts.ForgeTokenNames] returns. env is --env, each entry NAME or
+// NAME=value, and wallEnv is wall.env. Names match exactly, as in a Linux environment.
+// The line contains the variable's name, never a value.
 func modelCredentialPassed(rt runtimes.Runtime, env, wallEnv []string) error {
 	names := credentialVariables(rt)
-	refused := func(name, from string) error {
-		return input(fmt.Errorf("qory run: %s is the model's credential, which a walled run given a run key takes only through the gateway; remove it from %s", name, from))
+	forge := contracts.ForgeTokenNames()
+	passed := func(name, from string) error {
+		switch {
+		case slices.Contains(forge, name):
+			return input(fmt.Errorf(textForgeTokenPassed, name, from))
+		case slices.Contains(names, name):
+			return input(fmt.Errorf("qory run: %s is the model's credential, which a walled run given a run key takes only through the gateway; remove it from %s", name, from))
+		}
+		return nil
 	}
 	for _, n := range env {
-		if name, _, _ := strings.Cut(n, "="); slices.Contains(names, name) {
-			return refused(name, "--env")
+		name, _, _ := strings.Cut(n, "=")
+		if err := passed(name, "--env"); err != nil {
+			return err
 		}
 	}
 	for _, name := range wallEnv {
-		if slices.Contains(names, name) {
-			return refused(name, "wall.env in "+config.ForagerFileName)
+		if err := passed(name, "wall.env in "+config.ForagerFileName); err != nil {
+			return err
 		}
 	}
 	return nil
