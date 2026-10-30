@@ -6,6 +6,9 @@
 # file: a folder contains a qory-stack.yaml or a qory.yaml that lists modules, not both.
 apiVersion: qory.dev/v1alpha1
 name: hello
+# A harness section may extend this stack, as a Qory Apiary test run's does. The block
+# lists nothing, so a module that the extending section adds may ship nothing.
+extending: {}
 modules:
   - name: hello
     source: {path: modules/hello}

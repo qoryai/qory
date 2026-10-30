@@ -21,7 +21,8 @@ release may change what an existing document does, and states it under Upgrading
 - `-f` on `qory harness compose`, `qory run` and `qory worktree add` takes a stack by
   reference, `<https URL>#<ref>:<folder>`: qory fetches the folder as it fetches a git
   module and composes its `qory-stack.yaml`. `examples/hello` has one, so a run takes it
-  with `-f https://github.com/qoryai/qory#<commit>:examples/hello`.
+  with `-f https://github.com/qoryai/qory#<commit>:examples/hello`. Its empty
+  `extending` block lets a harness section extend it.
 - Start a run on a machine that a provisioner creates with `qory run --run-code-file <file>
   --gateway <https URL>`: qory redeems the one-use run code (`qecr_…`) in the file through
   the gateway for the run's run key and documents, and runs with that key, which stays in
