@@ -47,7 +47,7 @@ rm) ;;
 run)
 	case "$*" in
 	*example.com/broken:1*) echo '{"version":1,"checks":[`+probeLines+`,{"name":"claude","result":"fail","detail":"no claude on the image PATH, /usr/bin"}]}' ;;
-	*) echo '{"version":1,"checks":[`+probeLines+`,{"name":"claude","result":"pass","detail":"claude at /usr/local/bin/claude is 2.1.273"}]}' ;;
+	*) echo '{"version":1,"checks":[`+probeLines+`,{"name":"claude","result":"pass","detail":"claude at /usr/local/bin/claude is 2.1.316"}]}' ;;
 	esac ;;
 *) exit 64 ;;
 esac

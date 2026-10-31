@@ -147,6 +147,7 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- The `agent` image contains Claude Code 2.1.316, up from 2.1.273.
 - With `wall.engine_proxy_file` set, a run's wall creates the agent's and the relay's
   containers with `--pull=never`: a missing one of those images fails the run with
   `Pull the image on this machine before you set the engine proxy: …`. Pull them, and

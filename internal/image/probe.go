@@ -82,7 +82,7 @@ type Runtime struct {
 	// runtime_version; empty takes any.
 	Version string
 	// Install is the package at Version that a failed line has as its fix, such as
-	// @anthropic-ai/claude-code@2.1.273; empty for a runtime with no package.
+	// @anthropic-ai/claude-code@2.1.316; empty for a runtime with no package.
 	Install string
 }
 
@@ -200,8 +200,8 @@ func (p Probe) shell() Check {
 	return Check{"shell", Pass, "/bin/sh runs the runtime's hooks and the API-key approval"}
 }
 
-// version is the first version number in what a program printed: 2.1.273 in
-// "2.1.273 (Claude Code)".
+// version is the first version number in what a program printed: 2.1.316 in
+// "2.1.316 (Claude Code)".
 var version = regexp.MustCompile(`\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?`)
 
 // runtime checks that rt's program is on the image's PATH, where the wall's launch

@@ -97,7 +97,7 @@ const passingReport = `{"version":1,"checks":[` +
 	`{"name":"home","result":"pass","detail":"HOME is /home/agent"},` +
 	`{"name":"authorities","result":"pass","detail":"the authorities"},` +
 	`{"name":"shell","result":"pass","detail":"/bin/sh"},` +
-	`{"name":"claude","result":"pass","detail":"claude 2.1.273"},` +
+	`{"name":"claude","result":"pass","detail":"claude 2.1.316"},` +
 	`{"name":"git","result":"pass","detail":"git version 2.47.3"},` +
 	`{"name":"gh","result":"pass","detail":"gh version 2.101.0"},` +
 	`{"name":"docker","result":"info","detail":"no dockerd"}]}`
@@ -124,7 +124,7 @@ func TestEngineChecksTheImageAsTheWallRunsAnAgent(t *testing.T) {
 	if err != nil || platform != "linux/arm64" {
 		t.Fatalf("platform %q, %v", platform, err)
 	}
-	checks := e.Check(context.Background(), platform, image.Target{Ref: "example.com/agent:1", Helper: "/opt/qory/qory-linux", Runtimes: []image.Runtime{{Name: "claude", Version: "2.1.273"}}})
+	checks := e.Check(context.Background(), platform, image.Target{Ref: "example.com/agent:1", Helper: "/opt/qory/qory-linux", Runtimes: []image.Runtime{{Name: "claude", Version: "2.1.316"}}})
 	if got := lineNames(checks); got != "image pass, home pass, reference info, files pass, home pass, authorities pass, shell pass, claude pass, git pass, gh pass, docker info" {
 		t.Errorf("lines %s", got)
 	}
@@ -138,7 +138,7 @@ func TestEngineChecksTheImageAsTheWallRunsAnAgent(t *testing.T) {
 		"podman create --pull never --network none --entrypoint /qory/qory example.com/agent:1",
 		"podman export c0ffee",
 		"podman rm --force --volumes c0ffee",
-		"podman run --rm --pull never --network none --user 65532:65532 --cap-drop ALL --security-opt no-new-privileges --init --mount type=bind,src=/opt/qory/qory-linux,dst=/qory/qory,readonly --entrypoint /qory/qory example.com/agent:1 image probe claude=2.1.273",
+		"podman run --rm --pull never --network none --user 65532:65532 --cap-drop ALL --security-opt no-new-privileges --init --mount type=bind,src=/opt/qory/qory-linux,dst=/qory/qory,readonly --entrypoint /qory/qory example.com/agent:1 image probe claude=2.1.316",
 	} {
 		if !strings.Contains(strings.Join(f.lines, "\n")+"\n", want+"\n") {
 			t.Errorf("did not run %s; ran:\n%s", want, strings.Join(f.lines, "\n"))

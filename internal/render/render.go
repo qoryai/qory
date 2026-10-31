@@ -226,7 +226,7 @@ type AgentHomer interface {
 // Installer is a [Launcher] whose program installs at a version from one package, the
 // one qory image check names when an image has another version.
 type Installer interface {
-	// Install is the package at version, such as @anthropic-ai/claude-code@2.1.273.
+	// Install is the package at version, such as @anthropic-ai/claude-code@2.1.316.
 	Install(version string) string
 }
 
