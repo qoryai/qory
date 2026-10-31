@@ -32,6 +32,7 @@ ARG GH_SHA256_ARM64=b57e8063f18862647c9d22727c32e9da1b963f8bf9db648fe123a6975695
 # build for each platform, @anthropic-ai/claude-code-linux-x64 and -linux-arm64.
 # Keep it at 2.1.257 or later: a harness module's settings use
 # permissions.blockReadsOutsideWorkingDirectories, which needs it.
+# Keep it at 2.1.280 or later: the model API requires that for claude-opus-5-5.
 ARG CLAUDE_CODE_VERSION=2.1.316
 ARG CLAUDE_CODE_SHA512=8b7069cf20e47023e7b1ad024a45a0c463eced632ccaa0e4c64a93d120f1c840b95cc2311267149a5b964471bd55278163c572bfe97d5f7e09bc9fc18f9e2705
 ARG CLAUDE_CODE_SHA512_AMD64=4500cce8ddbce488cd29c9a53d1ae26b2373a5390426b780c39fef054f95d11dea963910e73ebfa526f37155005ef6aca0e96fb9bd112266b7356bd2b9903c0a
