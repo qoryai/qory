@@ -16,7 +16,7 @@ const modelKeyValue = "model-key-value-0123456789abcdef"
 
 // modelCredentialLine is qory run's refusal of the variable name, which from names.
 func modelCredentialLine(name, from string) string {
-	return "qory run: " + name + " is the model's credential, which a walled run given a run key takes only through the gateway; remove it from " + from
+	return "remove " + name + " from " + from + ": a walled run given a run key takes the model's credential only through the gateway"
 }
 
 // TestARunKeyTakesNoModelCredentialPassedIn is a walled run given a run key whose --env

@@ -194,7 +194,9 @@ type Settings struct {
 	// Log takes each line the commands write, after the run id, and each failure.
 	Log func(line string)
 	// Masker is the run's mask list, OpenSpec.Masker of the run's session, which masks
-	// the run's record, events and lines with it; nil is Forager's default.
+	// the run's record, events and lines with it. It is required: qory does not mask the
+	// step's output again, so with nil, Forager's session makes a masker without qory's
+	// values, and those values stay unmasked.
 	Masker *mask.Masker
 }
 

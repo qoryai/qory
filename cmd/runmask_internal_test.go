@@ -81,6 +81,44 @@ func TestTheStreamsMaskQorysLinesAndLeaveTheSessionsAlone(t *testing.T) {
 	}
 }
 
+// TestACommandsStreamsMaskEveryLine is the streams of qory run resend, qory gateway, qory
+// run register and qory run end: they start a new mask list with the server's
+// variables, and a value the command adds, the run key that QORY_RUN_KEY held and a key
+// of a listed shape print as *** on stdout and on stderr, also split across two writes
+// at each byte. A forwarder's placeholder prints as it is, and so does a value of the
+// list before the command's.
+func TestACommandsStreamsMaskEveryLine(t *testing.T) {
+	before := emptyMaskList(t)
+	before.Add("value-of-another-list")
+	old := config.TakenServerVariables()
+	t.Cleanup(func() { config.SetServerVariables(old) })
+	const runKey = "qrk_run-key-value-for-the-test"
+	config.SetServerVariables(config.ServerVariables{RunKey: runKey})
+	var stdout, stderr strings.Builder
+	streams := newCommandStreams(&stdout, &stderr)
+	const value = "command-secret-value"
+	secretmask.Default().Add(value)
+	if secretmask.Default() == before {
+		t.Fatal("the command's mask list is the list before it")
+	}
+	placeholder := "http://qory:" + mask.ProxyPassword + "@127.0.0.1:3128"
+	text := "a " + value + " b " + runKey + " c ghp_0123456789abcdefghijABCDEFGHIJklmnop d " + placeholder + " e value-of-another-list\n"
+	for i := 0; i <= len(text); i++ {
+		for _, w := range []io.Writer{streams.out, streams.errOut} {
+			io.WriteString(w, text[:i])
+			io.WriteString(w, text[i:])
+		}
+	}
+	streams.flush()
+	want := strings.Repeat("a *** b *** c *** d "+placeholder+" e value-of-another-list\n", len(text)+1)
+	if stdout.String() != want {
+		t.Errorf("stdout got %q", stdout.String())
+	}
+	if stderr.String() != want {
+		t.Errorf("stderr got %q", stderr.String())
+	}
+}
+
 // loggedStep is a host step that keeps each line its Log got.
 type loggedStep struct {
 	mu    sync.Mutex

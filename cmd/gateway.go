@@ -18,6 +18,7 @@ import (
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/foragerdir"
+	"github.com/qoryai/qory/internal/secretmask"
 	"github.com/qoryai/qory/internal/ui"
 )
 
@@ -66,6 +67,10 @@ More: ` + gatewayDocs,
   qory gateway --listen 0.0.0.0:8443`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Every line of the gateway, Forager's among them, is masked with the
+			// gateway's mask list; each secret value joins it as qory reads the value.
+			streams := newCommandStreams(cmd.OutOrStdout(), cmd.ErrOrStderr())
+			defer streams.flush()
 			// The descriptor is read and closed first, whatever comes next, so nothing
 			// qory starts inherits it.
 			var fdKey *accesskey.Key
@@ -75,6 +80,7 @@ More: ` + gatewayDocs,
 					return err
 				}
 				fdKey = k
+				secretmask.Default().Add(k.Secret())
 			}
 			r, err := config.LoadForager()
 			if err != nil {
@@ -106,7 +112,7 @@ More: ` + gatewayDocs,
 			if err != nil {
 				return input(err)
 			}
-			stderr := cmd.ErrOrStderr()
+			stderr := streams.errOut
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			// A gateway with no access key enrols from the code Qory Apiary writes, when
@@ -169,6 +175,7 @@ More: ` + gatewayDocs,
 			if gw.Credentials, err = machineCredentials(ctx, r, e, "gateway", stderr); err != nil {
 				return err
 			}
+			maskCredentials(gw.Credentials)
 			if gw.Tools, err = machineTools(r, e.Workspace); err != nil {
 				return err
 			}
