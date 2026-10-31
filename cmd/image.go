@@ -63,7 +63,7 @@ network, and qory's Linux build checks from inside:
   - HOME is a directory that user writes in
   - the system's authorities are where the wall reads them
   - /bin/sh is there, for the runtime's hooks and the session's API-key approval
-  - each runtime Forager describes is the version its descriptor is written against
+  - each runtime Forager describes is the version its descriptor sets
   - git and gh run
   - dockerd, for nested Docker, and what it runs
 

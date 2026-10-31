@@ -147,6 +147,7 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- The `agent` image contains Claude Code 2.1.316, up from 2.1.273.
 - With `wall.engine_proxy_file` set, a run's wall creates the agent's and the relay's
   containers with `--pull=never`: a missing one of those images fails the run with
   `Pull the image on this machine before you set the engine proxy: …`. Pull them, and
@@ -356,7 +357,7 @@ release may change what an existing document does, and states it under Upgrading
   lies in the checkout, so a walled run cannot change them. An edit to such a module
   reaches the home on the next compose; until then `qory harness compose --check` exits
   6. The report marks the module `copied`.
-- Compose refuses a Claude Code settings `env` that sets one of 8 model or effort
+- Compose refuses a Claude Code settings `env` that sets one of 10 model or effort
   variables, such as `ANTHROPIC_MODEL`. It refuses them the same way in the
   configuration's `env`, in `harness.launch.claude.env` and in a module's `env` export.
 - A walled `qory run` given a run key does not start when `--env` or `wall.env` names a

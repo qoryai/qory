@@ -12,9 +12,9 @@ import (
 // a runtime with no launch template and one this qory does not render get no program,
 // and a runtime with no version gets no package.
 func TestTheProbeTakesEachRuntimesProgramFromItsDefinition(t *testing.T) {
-	got := probeRuntimes([]string{"claude=2.1.273", "cursor=", "goose=1.0.0", "example=1"})
+	got := probeRuntimes([]string{"claude=2.1.316", "cursor=", "goose=1.0.0", "example=1"})
 	want := []image.Runtime{
-		{Name: "claude", Command: "claude", Version: "2.1.273", Install: "@anthropic-ai/claude-code@2.1.273"},
+		{Name: "claude", Command: "claude", Version: "2.1.316", Install: "@anthropic-ai/claude-code@2.1.316"},
 		{Name: "cursor", Command: "cursor-agent"},
 		{Name: "goose", Version: "1.0.0"},
 		{Name: "example", Version: "1"},

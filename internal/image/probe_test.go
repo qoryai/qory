@@ -71,7 +71,7 @@ func (v *versions) exec(_ context.Context, program string, args ...string) ([]by
 // goodVersions are the answers of an image that has what the wall needs.
 func goodVersions() *versions {
 	return &versions{lines: map[string]string{
-		"claude": "2.1.273 (Claude Code)",
+		"claude": "2.1.316 (Claude Code)",
 		"git":    "git version 2.47.3",
 		"gh":     "gh version 2.101.0 (2026-09-15)\nhttps://github.com/cli/cli/releases/tag/v2.101.0",
 	}}
@@ -124,7 +124,7 @@ func want(t *testing.T, checks map[string]image.Check, name, result string, carr
 func TestProbePassesAnImageWithWhatTheWallNeeds(t *testing.T) {
 	root := imageRoot(t, agentFiles())
 	v := goodVersions()
-	p := image.Probe{Root: root, Env: env(map[string]string{"HOME": "/home/agent", "PATH": "relative:/usr/local/bin:/usr/bin:/bin"}), Exec: v.exec, Runtimes: claudeAt("2.1.273"), User: "65532:65532"}
+	p := image.Probe{Root: root, Env: env(map[string]string{"HOME": "/home/agent", "PATH": "relative:/usr/local/bin:/usr/bin:/bin"}), Exec: v.exec, Runtimes: claudeAt("2.1.316"), User: "65532:65532"}
 	r := p.Report(context.Background())
 	if r.Version != image.ReportVersion {
 		t.Errorf("report version %d", r.Version)
@@ -133,7 +133,7 @@ func TestProbePassesAnImageWithWhatTheWallNeeds(t *testing.T) {
 	want(t, checks, "home", image.Pass, "/home/agent", "65532:65532")
 	want(t, checks, "authorities", image.Pass, "/etc/ssl/certs/ca-certificates.crt", "2 certificates")
 	want(t, checks, "shell", image.Pass, "/bin/sh runs the runtime's hooks and the API-key approval")
-	want(t, checks, "claude", image.Pass, "/usr/local/bin/claude is 2.1.273")
+	want(t, checks, "claude", image.Pass, "/usr/local/bin/claude is 2.1.316")
 	want(t, checks, "git", image.Pass, "git version 2.47.3")
 	want(t, checks, "gh", image.Pass, "gh version 2.101.0 (2026-09-15)")
 	want(t, checks, "docker", image.Info, "no dockerd")
@@ -153,7 +153,7 @@ func TestProbePassesAnImageWithWhatTheWallNeeds(t *testing.T) {
 // says what to add.
 func TestProbeNamesWhatAnImageLacks(t *testing.T) {
 	root := imageRoot(t, map[string]string{"usr/bin/git": "", "etc/ssl/cert.pem": "no certificate here\n"})
-	p := image.Probe{Root: root, Env: env(map[string]string{"PATH": "/usr/bin"}), Exec: (&versions{}).exec, Runtimes: claudeAt("2.1.273"), User: "65532:65532"}
+	p := image.Probe{Root: root, Env: env(map[string]string{"PATH": "/usr/bin"}), Exec: (&versions{}).exec, Runtimes: claudeAt("2.1.316"), User: "65532:65532"}
 	checks := byName(p.Report(context.Background()))
 	want(t, checks, "home", image.Fail, "HOME is not set", "ENV HOME=")
 	want(t, checks, "authorities", image.Fail, "no bundle of authorities", "ca-certificates")
@@ -170,15 +170,15 @@ func TestProbeNamesWhatAnImageLacks(t *testing.T) {
 	}
 }
 
-// TestProbeRefusesAnotherClaude has claude report a version the descriptor is not
-// written against: the line fails and names the package to install; with no version
+// TestProbeRefusesAnotherClaude has claude report a version other than the one the
+// descriptor sets: the line fails and names the package to install; with no version
 // asked for, any passes.
 func TestProbeRefusesAnotherClaude(t *testing.T) {
 	root := imageRoot(t, agentFiles())
 	v := goodVersions()
 	v.lines["claude"] = "2.1.270 (Claude Code)"
-	p := image.Probe{Root: root, Env: env(map[string]string{"HOME": "/home/agent", "PATH": "/usr/local/bin:/usr/bin"}), Exec: v.exec, Runtimes: claudeAt("2.1.273")}
-	want(t, byName(p.Report(context.Background())), "claude", image.Fail, "claude at /usr/local/bin/claude is 2.1.270, and Forager's descriptor is written against 2.1.273; install @anthropic-ai/claude-code@2.1.273")
+	p := image.Probe{Root: root, Env: env(map[string]string{"HOME": "/home/agent", "PATH": "/usr/local/bin:/usr/bin"}), Exec: v.exec, Runtimes: claudeAt("2.1.316")}
+	want(t, byName(p.Report(context.Background())), "claude", image.Fail, "claude at /usr/local/bin/claude is 2.1.270, and Forager's descriptor sets 2.1.316; install @anthropic-ai/claude-code@2.1.316")
 	p.Runtimes = claudeAt("")
 	want(t, byName(p.Report(context.Background())), "claude", image.Pass, "is 2.1.270")
 }
@@ -200,7 +200,7 @@ func TestProbeChecksEachRuntimeByItsProgram(t *testing.T) {
 	}}
 	r := p.Report(context.Background())
 	checks := byName(r)
-	want(t, checks, "cursor", image.Fail, "cursor-agent at /usr/local/bin/cursor-agent is ", "written against 2026.09.11; install that version")
+	want(t, checks, "cursor", image.Fail, "cursor-agent at /usr/local/bin/cursor-agent is ", "descriptor sets 2026.09.11; install that version")
 	want(t, checks, "example", image.Fail, "set wall.helper to the Linux build of this qory: the probe's build renders no runtime example")
 	if _, ok := checks["claude"]; ok {
 		t.Error("the probe checked claude, which no argument lists")

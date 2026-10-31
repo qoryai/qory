@@ -10,11 +10,13 @@ import (
 	"github.com/qoryai/qory/cmd"
 )
 
-// modelVariables are the 8 variables Claude Code ranks above the model and effort qory
-// writes.
+// modelVariables are the variables a compose for claude refuses: Claude Code ranks them
+// above the model and effort qory writes, except that an agent file's effort ranks above
+// CLAUDE_CODE_SUBAGENT_EFFORT.
 var modelVariables = []string{
 	"ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
 	"ANTHROPIC_DEFAULT_FABLE_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "CLAUDE_CODE_EFFORT_LEVEL",
+	"CLAUDE_CODE_SUBAGENT_EFFORT", "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL",
 }
 
 // envModule writes the module core with the settings fragment and the manifest lines
@@ -49,7 +51,7 @@ func TestComposeRefusesAModelVariableFromEverySource(t *testing.T) {
 		"Remove env.ANTHROPIC_DEFAULT_SONNET_MODEL from .claude/settings.json in the checkout.",
 		"Remove env.ANTHROPIC_DEFAULT_OPUS_MODEL from .claude/settings.local.json in the checkout.",
 		"Remove env.CLAUDE_CODE_SUBAGENT_MODEL_FORCE from ~/.claude/settings.json.",
-		"Claude Code ranks these variables above the model and effort that qory writes into settings.json and the agent files.",
+		"Claude Code ranks these variables above the model and effort that qory writes into settings.json and the agent files, except CLAUDE_CODE_SUBAGENT_EFFORT: an agent file's effort ranks above it.",
 	}, "\n")
 	for _, args := range [][]string{{"harness", "compose", "--dry-run"}, {"harness", "compose"}} {
 		out, err := run(t, args...)
@@ -62,14 +64,14 @@ func TestComposeRefusesAModelVariableFromEverySource(t *testing.T) {
 	}
 }
 
-// TestComposeRefusesEachModelVariable refuses every one of the 8 names in a module's
+// TestComposeRefusesEachModelVariable refuses every name of modelVariables in a module's
 // settings fragment.
 func TestComposeRefusesEachModelVariable(t *testing.T) {
 	for _, name := range modelVariables {
 		root := tierCheckout(t)
 		envModule(t, root, "claude", `{"env": {"`+name+`": "x"}}`, "")
 		_, err := run(t, "harness", "compose")
-		want := "Remove env." + name + " from settings/claude/settings.json in module core.\nClaude Code ranks these variables above the model and effort that qory writes into settings.json and the agent files."
+		want := "Remove env." + name + " from settings/claude/settings.json in module core.\nClaude Code ranks these variables above the model and effort that qory writes into settings.json and the agent files, except CLAUDE_CODE_SUBAGENT_EFFORT: an agent file's effort ranks above it."
 		if cmd.ExitCode(err) != 2 || err == nil || err.Error() != want {
 			t.Errorf("%s: exit %d, err %v", name, cmd.ExitCode(err), err)
 		}
@@ -113,7 +115,7 @@ func TestComposeReadsTheUsersClaudeSettingsFromClaudeConfigDir(t *testing.T) {
 	writeFile(t, filepath.Join(os.Getenv("HOME"), ".claude", "settings.json"), `{"env": {"ANTHROPIC_MODEL": "ignored"}}`)
 	writeFile(t, filepath.Join(dir, "settings.json"), `{"env": {"CLAUDE_CODE_EFFORT_LEVEL": "max"}}`)
 	_, err := run(t, "harness", "compose")
-	want := "Remove env.CLAUDE_CODE_EFFORT_LEVEL from ~/claude-config/settings.json.\nClaude Code ranks these variables above the model and effort that qory writes into settings.json and the agent files."
+	want := "Remove env.CLAUDE_CODE_EFFORT_LEVEL from ~/claude-config/settings.json.\nClaude Code ranks these variables above the model and effort that qory writes into settings.json and the agent files, except CLAUDE_CODE_SUBAGENT_EFFORT: an agent file's effort ranks above it."
 	if err == nil || err.Error() != want {
 		t.Errorf("err %v\nwant %s", err, want)
 	}
@@ -617,7 +619,7 @@ func TestComposeStopsOnASettingsLinkThatDoesNotResolve(t *testing.T) {
 // harness.launch.claude.env: the compose refuses a model variable in its settings.json
 // and passes when it has none.
 func TestComposeChecksTheSettingsOfTheClaudeConfigDirTheLaunchSets(t *testing.T) {
-	const why = "\nClaude Code ranks these variables above the model and effort that qory writes into settings.json and the agent files."
+	const why = "\nClaude Code ranks these variables above the model and effort that qory writes into settings.json and the agent files, except CLAUDE_CODE_SUBAGENT_EFFORT: an agent file's effort ranks above it."
 	root := tierCheckout(t)
 	launchDir := filepath.Join(os.Getenv("HOME"), "claude-from-launch")
 	writeFile(t, filepath.Join(launchDir, "settings.json"), `{"env":{"ANTHROPIC_DEFAULT_HAIKU_MODEL":"h"}}`)

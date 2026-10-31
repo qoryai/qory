@@ -3094,7 +3094,7 @@ docker build -t qory-prebuild --build-arg BASE=qory-agent-docker images/prebuild
 
 | Image | What it holds |
 |---|---|
-| `agent` | Claude Code at the version Forager's descriptor is written against, `git`, `gh`, Node, the system's authorities |
+| `agent` | Claude Code at the version Forager's descriptor sets, `git`, `gh`, Node, the system's authorities |
 | `agent-docker` | `agent`, and Docker's daemon and command |
 | `agent-go` | `agent`, and Go |
 | `agent-go-docker` | `agent-docker`, and Go |
@@ -3150,7 +3150,7 @@ one fails.
   that `HOME` takes a file from that user, the authorities are where the wall reads
   them, `/bin/sh` is there for the runtime's hooks and the session's API-key approval,
   each runtime of Forager's runtime list, `runtimes.json`, is on the `PATH` at the
-  version its descriptor is written against, and `git` and `gh` run. It reports whether
+  version its descriptor sets, and `git` and `gh` run. It reports whether
   `dockerd` is in a system directory, and checks that what the daemon runs is there too.
 
 The Linux build is the one the wall uses: `wall.helper`, for your engine's architecture,
