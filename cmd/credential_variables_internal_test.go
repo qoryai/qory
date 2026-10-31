@@ -37,7 +37,7 @@ func TestCredentialVariablesReadTheModelKeys(t *testing.T) {
 			env, wallEnv []string
 			from         string
 		}{{[]string{v + "=x"}, nil, "--env"}, {nil, []string{v}, "wall.env in forager.yaml"}} {
-			want := "qory run: " + v + " is the model's credential, which a walled run given a run key takes only through the gateway; remove it from " + c.from
+			want := "remove " + v + " from " + c.from + ": a walled run given a run key takes the model's credential only through the gateway"
 			if err := modelCredentialPassed(rt, c.env, c.wallEnv); err == nil || err.Error() != want {
 				t.Errorf("%s from %s: %v, want %q", v, c.from, err, want)
 			}

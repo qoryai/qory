@@ -553,8 +553,11 @@ release may change what an existing document does, and states it under Upgrading
   lines of the fetch and of the compose, and their lines in the run's record. A value
   split across two writes is masked whole. `qory run prepare`, `qory run prebuild-step`
   and `qory run pool` mask a URL's signature or token in their output, and `qory run
-  pool` also the access key's secret. See Secret values in qory's lines in
-  `docs/run.md`.
+  pool` also the access key's secret. `qory run resend`, `qory gateway`, `qory run
+  register` and `qory run end` mask every line that they print in the same way, with the
+  server's variables, the access key's secret and the values that each command reads,
+  such as the run key that qory kept for `qory run resend`. See Secret values in qory's
+  lines in `docs/run.md`.
 - `qory run` also prints `***` in place of a whole key of a shape that Forager lists,
   such as one that starts with `ghp_`, `sk-ant-` or `AKIA`. It gives its mask list to
   Forager's session, which masks with it the agent's output, on pipes and on a terminal,

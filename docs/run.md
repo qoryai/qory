@@ -294,6 +294,19 @@ run pool` mask their output too. Their mask lists contain no value of a run: the
 replaces a URL's signature or token and a key of a listed shape, and in `qory run pool`
 also the access key's secret.
 
+`qory run resend`, `qory gateway`, `qory run register` and `qory run end` mask every line
+that they print, on stdout and on stderr, Forager's lines among them, in the same way. The
+mask list of each contains the values of `QORY_ACCESS_KEY_SECRET`, `QORY_SERVER_SECRET`
+and `QORY_RUN_KEY`, the access key's secret from `--access-key-secret-fd`, and from the
+`access-key-secret` file when qory signs its requests to the server with it, and the
+values that the command reads:
+
+- `qory run resend`: the run key from `--run-key-fd`, and the run key that qory kept for
+  a run registered through `gateway.server.via`;
+- `qory gateway`: the enrolment code from `gateway.server.enrolment_code_file`, and the
+  value of each credential of `gateway.credentials` whose `env` or `file` qory can read;
+- `qory run register`: the run key in the server's response.
+
 qory run gives the list to Forager's session, which masks with it the agent's output, on
 pipes and on a terminal, the output of the setup commands, the run's record,
 `output.log` and `events.jsonl`, its events and its lines. The session masks each of
@@ -320,8 +333,7 @@ These are not masked:
   it, a value longer than 4096 bytes, and every value past the first 1024;
 - the parts of the run's record that Forager writes as they were given: the run's labels,
   the policy applied, a build's images and commit, the reason of the runtime's exit, the
-  names of a refusal, and the setup script in the session's folder;
-- the lines of `qory run resend`, apart from its last error line.
+  names of a refusal, and the setup script in the session's folder.
 
 ## The record
 
@@ -2075,11 +2087,11 @@ then Forager's words and the code:
 Before the agent starts, `qory run` given a run key stops the run with one of these errors:
 
 - `--local runs with a gateway the run starts itself and no server, and a run key is given, by
-  QORY_RUN_KEY, --run-key-fd or --run-code-file: the run goes through the gateway its run
-  key names; give no run key to run --local`
+  QORY_RUN_KEY, --run-key-fd or --run-code-file: the run goes through the gateway that its
+  run key points to; give no run key to run --local`
 - `--policy is a run's policy file for a gateway the run starts itself, and a run key is
-  given, by QORY_RUN_KEY, --run-key-fd or --run-code-file: the gateway its run key names
-  takes the run's policy from the server`
+  given, by QORY_RUN_KEY, --run-key-fd or --run-code-file: the gateway that its run key
+  points to takes the run's policy from the server`
 - `<file> exists, and a run key is given, by QORY_RUN_KEY, --run-key-fd or --run-code-file:
   a machine whose runs a starter registers holds no access key; remove the file`, for
   `access-key-secret` or a key file beside it
@@ -2090,15 +2102,15 @@ Before the agent starts, `qory run` given a run key stops the run with one of th
 - `--access-key-secret-fd and a run key are both given: a machine whose runs a starter
   registers holds no access key; leave out --access-key-secret-fd`
 - `<file>: gateway: a run key is given, by QORY_RUN_KEY, --run-key-fd or --run-code-file, so
-  the run goes through the gateway its run key names, which holds the server, the policy
-  and the credentials, and this machine runs no gateway: remove the gateway section, or
-  give no run key`
+  the run goes through the gateway that its run key points to, which holds the server, the
+  policy, the credentials and the tools, and this machine runs no gateway: remove the
+  gateway section, or give no run key`
 - `--label`, `--kind`, `--title`, `--subject` and `--details`, as [The run key](#the-run-key)
   says
 - an unwalled run with `QORY_RUN_KEY` set, `run_key_needs_wall`
-- `qory run: <variable> is the model's credential, which a walled run given a run key takes
-  only through the gateway; remove it from --env`, or `...; remove it from wall.env in
-  forager.yaml`, for a variable the runtime reads its model key from: `ANTHROPIC_API_KEY`,
+- `remove <variable> from --env: a walled run given a run key takes the model's credential
+  only through the gateway`, or `remove <variable> from wall.env in forager.yaml: ...`, for
+  a variable the runtime reads its model key from: `ANTHROPIC_API_KEY`,
   `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_AUTH_TOKEN` for Claude Code
 - `remove <variable> from --env: a walled run given a run key takes a forge token only
   through the gateway`, or `remove <variable> from wall.env in forager.yaml: ...`, for a

@@ -16,6 +16,7 @@ import (
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/foragerdir"
+	"github.com/qoryai/qory/internal/secretmask"
 )
 
 // The gateway of an instance enrols with no step by a person. Qory Apiary writes the
@@ -48,7 +49,8 @@ var errNoCodeYet = errors.New("no enrolment code yet")
 // --print or --replace, and prints one result line, after "qory gateway:". It returns
 // forager.yaml read again once the enrolment wrote it, else r. stopped is true when ctx
 // ended before the key was enrolled. A secret that does not read is left to [identify],
-// which stops on it as it does without the setting. No line or error contains the code.
+// which stops on it as it does without the setting. No line or error contains the code,
+// and the code joins the process's mask list, [secretmask.Default].
 func enrolAtStart(ctx context.Context, r *config.Forager, fd *accesskey.Key, report io.Writer) (_ *config.Forager, stopped bool, _ error) {
 	if r.Server.EnrolmentCodeFile == "" || fd != nil {
 		return r, false, nil
@@ -65,6 +67,7 @@ func enrolAtStart(ctx context.Context, r *config.Forager, fd *accesskey.Key, rep
 	if err != nil || code == "" {
 		return nil, err == nil, err
 	}
+	secretmask.Default().Add(code)
 	// The lines enrol prints for a person at a terminal are left out: the result line
 	// follows. enrol's errors are returned unchanged.
 	if err := enrol(ctx, io.Discard, io.Discard, r.Server.URL, code, false, false, enrolVia{}); err != nil {

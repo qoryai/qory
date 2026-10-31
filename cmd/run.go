@@ -163,8 +163,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				secretmask.Default().Add(code.code)
 			}
 			// A run whose starter registered it, a run key being given, goes through the
-			// separate gateway its run key names: this machine starts no gateway of its own
-			// and holds no access key. The run key's descriptor is read and closed here.
+			// separate gateway that its run key points to: this machine starts no gateway
+			// for the run and has no access key. The run key's descriptor is read and
+			// closed here.
 			key, err := givenRunKey(cmd.Flags().Changed(runKeyFDFlag), keyFD, stdin)
 			if err != nil {
 				return err
@@ -493,9 +494,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 			}()
 			// A machine with its own access key and gateway.server.via registers the run
-			// itself, through via, and runs it through the gateway the run key names, as a
-			// run its starter registered does. The run key it keeps beside forager.yaml goes
-			// once nothing of the run is left to send.
+			// itself, through via, and runs it through the gateway that the run key points
+			// to, as a run its starter registered does. The run key it keeps beside
+			// forager.yaml goes once nothing of the run is left to send.
 			kept := runsThroughVia(conf.Forager, id)
 			said := func(line string) { fmt.Fprintln(stderr, "qory run:", line) }
 			switch {
@@ -560,9 +561,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// session joins, and the run closes with qory's outcome.
 			var g *gateway.Gateway
 			if remote {
-				// The gateway the run key names: the session reaches it over TLS and sends the
-				// run key on every request, once the connection is bound to a key the run
-				// key names.
+				// The gateway that the run key points to: the session reaches it over TLS and
+				// sends the run key on every request, once the connection is bound to the key
+				// in the run key.
 				spec.Gateway = key.remoteGateway()
 				fmt.Fprintln(stderr, throughGatewayLine(key, spec.RunID))
 				if fromCode != nil {
@@ -695,8 +696,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return false, input(err)
 				}
 				// A walled run given a run key takes the model's credential and a forge token
-				// through the gateway its run key names alone, so neither --env nor wall.env
-				// passes them in.
+				// only through the gateway that its run key points to, so neither --env nor
+				// wall.env passes them in.
 				// An unwalled one, whose run key came by --run-key-fd, is as before.
 				if dispatched && walled {
 					var wallEnv []string
@@ -964,7 +965,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// The gateway qory run started recorded the run's end after its runtime exited.
 				end.gateway = &gatewayEnd{state: delivery.State, reason: delivery.Reason, code: delivery.ClosedReason}
 			case closed != nil && closed.RunClosed:
-				// The gateway the run key names ended the run after its runtime exited.
+				// The gateway that the run key points to ended the run after its runtime exited.
 				end.gateway = &gatewayEnd{state: closed.State, reason: closed.Reason, code: closed.ClosedReason}
 			}
 			lines.done(func(kind int) bool {
@@ -2452,6 +2453,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
   qory run resend "$run_id" --wait 10m  # keep trying for ten minutes`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Every line of the resend, Forager's among them, is masked with the
+			// resend's mask list; each secret value joins it as qory reads the value.
+			streams := newCommandStreams(cmd.OutOrStdout(), cmd.ErrOrStderr())
+			defer streams.flush()
 			// As qory run reads it: the access key's descriptor first, and closed.
 			var fdKey *accesskey.Key
 			if cmd.Flags().Changed(secretFDFlag) {
@@ -2460,10 +2465,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 					return err
 				}
 				fdKey = k
+				secretmask.Default().Add(k.Secret())
 			}
 			key, err := givenRunKey(cmd.Flags().Changed(runKeyFDFlag), keyFD, cmd.InOrStdin())
 			if err != nil {
 				return err
+			}
+			if key != nil {
+				secretmask.Default().Add(key.value)
 			}
 			at, conf, err := locateRun(homeOptions{}, key != nil, false)
 			if err != nil {
@@ -2481,7 +2490,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#resending-a-runs-reco
 			if err != nil {
 				return err
 			}
-			stderr := cmd.ErrOrStderr()
+			stderr := streams.errOut
 			report := func(line string) { fmt.Fprintln(stderr, "qory run resend:", line) }
 			// A record its session made behind a separate gateway goes to that gateway,
 			// with the run key, or Forager says it is needed.

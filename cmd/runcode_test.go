@@ -228,7 +228,7 @@ func TestARunCodeNeedsItsGatewayAndNoRunKey(t *testing.T) {
 		{[]string{"run", "--run-code-file", file, "--gateway", g.URL}, key, "unset QORY_RUN_KEY, or leave out --run-code-file: a run takes its run key from one of them"},
 		{[]string{"run", "--gateway", g.URL}, key, "leave out --gateway: it goes with --run-code-file alone, and this run takes its run key from QORY_RUN_KEY"},
 		{[]string{"run", "--run-code-file", file, "--gateway", "http://" + g.host()}, "", "set --gateway to the gateway's https URL, a host and an optional port: --gateway for http://" + g.host() + " is not https: an https URL of a host and an optional port, with nothing after"},
-		{[]string{"run", "--run-code-file", file, "--gateway", g.URL, "--local"}, "", "--local runs with a gateway the run starts itself and no server, and a run key is given, by QORY_RUN_KEY, --run-key-fd or --run-code-file: the run goes through the gateway its run key names; give no run key to run --local"},
+		{[]string{"run", "--run-code-file", file, "--gateway", g.URL, "--local"}, "", "--local runs with a gateway the run starts itself and no server, and a run key is given, by QORY_RUN_KEY, --run-key-fd or --run-code-file: the run goes through the gateway that its run key points to; give no run key to run --local"},
 	} {
 		t.Setenv("QORY_RUN_KEY", c.envKey)
 		out, err := run(t, c.args...)

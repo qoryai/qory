@@ -15,6 +15,7 @@ import (
 
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/foragerdir"
+	"github.com/qoryai/qory/internal/secretmask"
 )
 
 // A machine with its own access key whose forager.yaml sets gateway.server.via reaches
@@ -103,7 +104,8 @@ func keptRunKeyNotWritten(runID string, err error) error {
 // keptRunKey is the run key qory kept for the run runID, registered through
 // gateway.server.via on this machine; nil when none is kept, or there is no directory of
 // forager.yaml. A kept key that is not a run key is said as qory says one in
-// QORY_RUN_KEY, without the key.
+// QORY_RUN_KEY, without the key. The kept value joins the process's mask list,
+// [secretmask.Default].
 func keptRunKey(runID string) (*runKey, error) {
 	dir, err := machineDir()
 	if err != nil || dir == "" {
@@ -117,6 +119,7 @@ func keptRunKey(runID string) (*runKey, error) {
 		return nil, err
 	}
 	v = strings.TrimSuffix(v, "\n")
+	secretmask.Default().Add(v)
 	k, err := runkey.Parse(v)
 	if err != nil {
 		return nil, fmt.Errorf("%s is not a run key: %s", dir.RunKeyPath(runID), runKeyReason(err))

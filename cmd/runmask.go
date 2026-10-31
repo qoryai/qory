@@ -112,3 +112,30 @@ func (s runStreams) flush() {
 func (s runStreams) session() (stdout, stderr io.Writer) {
 	return s.rawOut, s.rawErr
 }
+
+// commandStreams are the writers of a command that talks to the server or a gateway and
+// runs no session: qory run resend, qory gateway, qory run register and qory run end.
+// Each prints every line, Forager's lines among them, through out and errOut. Forager
+// does not mask those lines with this list, so qory masks each line as it is written; a
+// line Forager masked keeps its ***. Call flush when the command ends.
+type commandStreams struct {
+	// out and errOut are stdout and stderr, masked with the command's mask list.
+	out, errOut *secretmask.Writer
+}
+
+// newCommandStreams starts the command's mask list empty, adds the secrets of the
+// server's variables to it ([maskServerSecrets]), and returns stdout and stderr masked
+// with it, as qory run masks its lines. The command adds each other secret value to
+// [secretmask.Default] as it reads the value.
+func newCommandStreams(stdout, stderr io.Writer) commandStreams {
+	secretmask.SetDefault(secretmask.New())
+	maskServerSecrets()
+	list := secretmask.Default()
+	return commandStreams{out: list.Writer(stdout), errOut: list.Writer(stderr)}
+}
+
+// flush writes what each writer kept back.
+func (s commandStreams) flush() {
+	s.out.Flush()
+	s.errOut.Flush()
+}

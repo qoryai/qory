@@ -165,7 +165,8 @@ func runKeyNeedsWall() error {
 	})
 }
 
-// remoteGateway is the separate gateway the run key names, as the session reaches it.
+// remoteGateway is the separate gateway that the run key points to, as the session
+// reaches it.
 func (k *runKey) remoteGateway() session.RemoteGateway {
 	return session.RemoteGateway{RunKey: k.value}
 }
@@ -202,10 +203,10 @@ const runKeyGiven = "a run key is given, by QORY_RUN_KEY, --run-key-fd or --run-
 // refused after --policy: the run's starter chose the run's labels.
 func behindGateway(r *config.Forager, local, policy, relabel, keyFD bool, given []string) error {
 	if local {
-		return input(errors.New("--local runs with a gateway the run starts itself and no server, and " + runKeyGiven + ": the run goes through the gateway its run key names; give no run key to run --local"))
+		return input(errors.New("--local runs with a gateway the run starts itself and no server, and " + runKeyGiven + ": the run goes through the gateway that its run key points to; give no run key to run --local"))
 	}
 	if policy {
-		return input(errors.New("--policy is a run's policy file for a gateway the run starts itself, and " + runKeyGiven + ": the gateway its run key names takes the run's policy from the server"))
+		return input(errors.New("--policy is a run's policy file for a gateway the run starts itself, and " + runKeyGiven + ": the gateway that its run key points to takes the run's policy from the server"))
 	}
 	if relabel {
 		return relabelRunKey()
@@ -233,7 +234,7 @@ func behindGateway(r *config.Forager, local, policy, relabel, keyFD bool, given 
 		return input(fmt.Errorf("--%s and a run key are both given: a machine whose runs a starter registers holds no access key; leave out --%s", secretFDFlag, secretFDFlag))
 	}
 	if r != nil && r.Gateway {
-		return input(fmt.Errorf("%s: gateway: %s, so the run goes through the gateway its run key names, which holds the server, the policy, the credentials and the tools, and this machine runs no gateway: remove the gateway section, or give no run key", r.File, runKeyGiven))
+		return input(fmt.Errorf("%s: gateway: %s, so the run goes through the gateway that its run key points to, which holds the server, the policy, the credentials and the tools, and this machine runs no gateway: remove the gateway section, or give no run key", r.File, runKeyGiven))
 	}
 	if len(given) > 0 {
 		return input(registeredAlready(given))
@@ -269,14 +270,18 @@ func credentialVariables(rt runtimes.Runtime) []string {
 // wall.env, passes to a walled run given a run key.
 const textForgeTokenPassed = "remove %s from %s: a walled run given a run key takes a forge token only through the gateway"
 
+// textModelCredentialPassed is the line of a variable of the model's credential, %s,
+// that %s, --env or wall.env, passes to a walled run given a run key.
+const textModelCredentialPassed = "remove %s from %s: a walled run given a run key takes the model's credential only through the gateway"
+
 // modelCredentialPassed returns an input error for a variable of the model's credential
 // or of a forge token that a walled run given a run key would pass to its agent: such a
-// run takes the credential through the gateway its run key names alone. The model's
-// variables are [credentialVariables] of rt: this machine holds no credentials section,
-// so the runtime lists them. The forge tokens' variables are the names of Forager's deny
-// list that [contracts.ForgeTokenNames] returns. env is --env, each entry NAME or
-// NAME=value, and wallEnv is wall.env. Names match exactly, as in a Linux environment.
-// The line contains the variable's name, never a value.
+// run takes the credential only through the gateway that its run key points to. The
+// model's variables are [credentialVariables] of rt: forager.yaml on this machine has
+// no credentials section, so the runtime lists them. The forge tokens' variables are the
+// names of Forager's deny list that [contracts.ForgeTokenNames] returns. env is --env,
+// each entry NAME or NAME=value, and wallEnv is wall.env. Names match exactly, as in a
+// Linux environment. The line contains the variable's name, never a value.
 func modelCredentialPassed(rt runtimes.Runtime, env, wallEnv []string) error {
 	names := credentialVariables(rt)
 	forge := contracts.ForgeTokenNames()
@@ -285,7 +290,7 @@ func modelCredentialPassed(rt runtimes.Runtime, env, wallEnv []string) error {
 		case slices.Contains(forge, name):
 			return input(fmt.Errorf(textForgeTokenPassed, name, from))
 		case slices.Contains(names, name):
-			return input(fmt.Errorf("qory run: %s is the model's credential, which a walled run given a run key takes only through the gateway; remove it from %s", name, from))
+			return input(fmt.Errorf(textModelCredentialPassed, name, from))
 		}
 		return nil
 	}

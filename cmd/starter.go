@@ -21,6 +21,7 @@ import (
 
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/secretmask"
 	"github.com/qoryai/qory/internal/ui"
 )
 
@@ -67,6 +68,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#for-a-starter`,
 		Example: registerExamples,
 		Args:    noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Every line is masked with the command's mask list; each secret value joins
+			// it as qory reads the value.
+			streams := newCommandStreams(cmd.OutOrStdout(), cmd.ErrOrStderr())
+			defer streams.flush()
 			// The access key's descriptor is read and closed first, whatever comes next.
 			var fdKey *accesskey.Key
 			if cmd.Flags().Changed(secretFDFlag) {
@@ -75,6 +80,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#for-a-starter`,
 					return err
 				}
 				fdKey = k
+				secretmask.Default().Add(k.Secret())
 			}
 			out, err := runKeyOut(cmd.Flags().Changed(runKeyFDFlag), keyFD)
 			if err != nil {
@@ -125,7 +131,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#for-a-starter`,
 			if err != nil {
 				return input(err)
 			}
-			stderr := cmd.ErrOrStderr()
+			stderr := streams.errOut
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			client := serverClient(r, key.key, instanceID, r.InstanceNameOrDefault())
@@ -138,13 +144,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#for-a-starter`,
 			if err != nil {
 				return explainRegistration(err, id, runID, false)
 			}
+			secretmask.Default().Add(ans.RunKey)
 			k, err := runkey.Parse(ans.RunKey)
 			if err != nil {
 				// Forager read it as a run key of the run already.
 				return err
 			}
 			fmt.Fprintf(stderr, "qory %s: run %s, through the gateway %s, to start by %s\n", verbRegister, runID, gatewayHost(k.GatewayURL), k.AttachBy.UTC().Format(time.RFC3339))
-			return giveRunKey(cmd.OutOrStdout(), stderr, out, runID, ans.RunKey)
+			return giveRunKey(streams.out, stderr, out, runID, ans.RunKey)
 		},
 	}
 	c.Flags().StringVar(&runID, "run-id", "", "the run's id, a UUID in lower case (default a new one)")
@@ -356,6 +363,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#how-a-run-ends-there`
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			streams := newCommandStreams(cmd.OutOrStdout(), cmd.ErrOrStderr())
+			defer streams.flush()
 			var fdKey *accesskey.Key
 			if cmd.Flags().Changed(secretFDFlag) {
 				k, err := readSecretFD(secretFD)
@@ -363,6 +372,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#how-a-run-ends-there`
 					return err
 				}
 				fdKey = k
+				secretmask.Default().Add(k.Secret())
 			}
 			runID := args[0]
 			if err := session.CheckRunID(runID); err != nil {
@@ -383,7 +393,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#how-a-run-ends-there`
 			if err != nil {
 				return err
 			}
-			stderr := cmd.ErrOrStderr()
+			stderr := streams.errOut
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			// The outcome is signed as the run's own instance.
