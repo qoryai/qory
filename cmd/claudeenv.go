@@ -25,7 +25,7 @@ import (
 type modelVariablesError struct{ lines []string }
 
 func (e *modelVariablesError) Error() string {
-	return strings.Join(e.lines, "\n") + "\nClaude Code ranks these variables above the model and effort that qory writes into settings.json and the agent files."
+	return strings.Join(e.lines, "\n") + "\nClaude Code ranks these variables above the model and effort that qory writes into settings.json and the agent files, except CLAUDE_CODE_SUBAGENT_EFFORT: an agent file's effort ranks above it."
 }
 
 // checkModelVariables refuses every place that sets one of [claude.ModelVariables] for a

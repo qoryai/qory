@@ -200,8 +200,10 @@ func renderPlugin(res *compose.Result, dir string) error {
 
 // ModelVariables are the environment variables Claude Code ranks above the model and
 // effort qory writes: the main model, the aliases' models, the agents' model, the
-// workflow agents' model, the agents' effort and the effort. A compose for claude refuses
-// each place that sets one for the session.
+// workflow agents' model, the agents' effort and the effort. The exception is
+// CLAUDE_CODE_SUBAGENT_EFFORT: it replaces only the effort an agent inherits, and an
+// agent file's effort ranks above it. A compose for claude refuses each place that sets
+// one for the session.
 var ModelVariables = []string{
 	"ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
 	"ANTHROPIC_DEFAULT_FABLE_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "CLAUDE_CODE_EFFORT_LEVEL",
