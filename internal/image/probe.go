@@ -71,7 +71,7 @@ func ProbeChecks(runtimes []string) []string {
 }
 
 // Runtime is one runtime the probe checks the image for: its program on the image's
-// PATH, at the version Forager's descriptor is written against.
+// PATH, at the version Forager's descriptor sets.
 type Runtime struct {
 	// Name is the runtime's name, the name of its line.
 	Name string
@@ -205,7 +205,7 @@ func (p Probe) shell() Check {
 var version = regexp.MustCompile(`\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?`)
 
 // runtime checks that rt's program is on the image's PATH, where the wall's launch
-// finds it, and reports the version Forager's descriptor is written against.
+// finds it, and reports the version Forager's descriptor sets.
 func (p Probe) runtime(ctx context.Context, rt Runtime) Check {
 	if rt.Command == "" {
 		return Check{rt.Name, Fail, "set wall.helper to the Linux build of this qory: the probe's build renders no runtime " + rt.Name}
@@ -223,12 +223,12 @@ func (p Probe) runtime(ctx context.Context, rt Runtime) Check {
 		if rt.Install != "" {
 			fix = "install " + rt.Install
 		}
-		return Check{rt.Name, Fail, fmt.Sprintf("%s at %s is %s, and Forager's descriptor is written against %s; %s", rt.Command, exports.Value(where, false), got, rt.Version, fix)}
+		return Check{rt.Name, Fail, fmt.Sprintf("%s at %s is %s, and Forager's descriptor sets %s; %s", rt.Command, exports.Value(where, false), got, rt.Version, fix)}
 	}
 	if rt.Version == "" {
 		return Check{rt.Name, Pass, fmt.Sprintf("%s at %s is %s", rt.Command, exports.Value(where, false), got)}
 	}
-	return Check{rt.Name, Pass, fmt.Sprintf("%s at %s is %s, the version Forager's descriptor is written against", rt.Command, exports.Value(where, false), got)}
+	return Check{rt.Name, Pass, fmt.Sprintf("%s at %s is %s, the version Forager's descriptor sets", rt.Command, exports.Value(where, false), got)}
 }
 
 // program checks that a program is on the image's PATH and answers --version.

@@ -1,8 +1,7 @@
 # agent: the image the wall runs the agent in, the base every other agent image of
 # Qory's is built FROM. It holds what qory's harness launches and what an agent needs to
-# deliver its work: Claude Code at the version Forager's descriptor for it is written
-# against, git, the GitHub command, and the system's authorities where the wall reads
-# them. It runs as any user the machine gives it, with HOME a directory every user may
+# deliver its work: Claude Code at the version Forager's descriptor for it sets, git,
+# the GitHub command, and the system's authorities where the wall reads them. It runs as any user the machine gives it, with HOME a directory every user may
 # write, and holds no setuid or setgid program. It sets no entry point: the wall starts
 # the launch command, or qory's helper, itself.
 #
