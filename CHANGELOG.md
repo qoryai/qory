@@ -357,7 +357,7 @@ release may change what an existing document does, and states it under Upgrading
   lies in the checkout, so a walled run cannot change them. An edit to such a module
   reaches the home on the next compose; until then `qory harness compose --check` exits
   6. The report marks the module `copied`.
-- Compose refuses a Claude Code settings `env` that sets one of 8 model or effort
+- Compose refuses a Claude Code settings `env` that sets one of 10 model or effort
   variables, such as `ANTHROPIC_MODEL`. It refuses them the same way in the
   configuration's `env`, in `harness.launch.claude.env` and in a module's `env` export.
 - A walled `qory run` given a run key does not start when `--env` or `wall.env` names a

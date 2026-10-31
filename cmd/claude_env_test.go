@@ -10,11 +10,12 @@ import (
 	"github.com/qoryai/qory/cmd"
 )
 
-// modelVariables are the 8 variables Claude Code ranks above the model and effort qory
+// modelVariables are the 10 variables Claude Code ranks above the model and effort qory
 // writes.
 var modelVariables = []string{
 	"ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
 	"ANTHROPIC_DEFAULT_FABLE_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "CLAUDE_CODE_EFFORT_LEVEL",
+	"CLAUDE_CODE_SUBAGENT_EFFORT", "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL",
 }
 
 // envModule writes the module core with the settings fragment and the manifest lines
