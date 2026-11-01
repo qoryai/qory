@@ -499,7 +499,17 @@ func TestRunRecordsTheSession(t *testing.T) {
 	}
 	exe, _ := os.Executable()
 	wants(t, string(settings), exe+" run forward", "SessionEnd")
-	lacks(t, string(settings), "QORY_HARNESS_HOME", `"env"`)
+	lacks(t, string(settings), "QORY_HARNESS_HOME")
+	// The copy's env has only the fixed variables of Forager's Claude Code descriptor.
+	var copied struct {
+		Env map[string]string `json:"env"`
+	}
+	if err := json.Unmarshal(settings, &copied); err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]string{"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL": "1"}; !maps.Equal(copied.Env, want) {
+		t.Errorf("the settings copy's env is %v, want %v", copied.Env, want)
+	}
 	if !strings.Contains(string(settings), "\"timeout\"") {
 		t.Error("the hook has no timeout")
 	}
