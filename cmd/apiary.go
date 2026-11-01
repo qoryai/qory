@@ -54,8 +54,7 @@ var runIDShape = regexp.MustCompile(`^rn_[0-9a-hjkmnp-tv-z]{16}$`)
 // Apiary stores.
 var runNumberShape = regexp.MustCompile(`^[1-9][0-9]{0,18}$`)
 
-// runRef reports whether v names a run in a form Qory Apiary reads: a run number or a
-// run id.
+// runRef reports whether v is a run number or a run id in the form Qory Apiary reads.
 func runRef(v string) bool {
 	if runIDShape.MatchString(v) {
 		return true
@@ -157,8 +156,8 @@ More: ` + apiaryDocs,
 // diagnose prints the diagnostics document of the run runID, a run number or a run id,
 // to out: it reads the diagnostics key of the server --server selects, or of the one
 // server with a key, sends the signed GET and writes the body of a verified 200 as it
-// came, with a line ending after it when it has none. Nothing else goes to out. A response that does not
-// verify under the pinned key prints nothing.
+// came, with a line ending after it when it has none. Nothing else goes to out. A
+// response that does not verify under the pinned key prints nothing.
 func diagnose(ctx context.Context, out, report io.Writer, runID, serverURL string, serverGiven bool) error {
 	if !runRef(runID) {
 		return input(fmt.Errorf("Pass the run number from the run's page in Qory Apiary, digits alone such as 18342, or the run id, rn_ and 16 characters such as rn_0123456789abcdef: %s is neither.", exports.Value(runID, true)))
