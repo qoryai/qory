@@ -160,11 +160,13 @@ release may change what an existing document does, and states it under Upgrading
   `dev.qory.runtime.text` for each text and thinking block of the main
   conversation, `dev.qory.runtime.tool_result` for each tool result the
   model gets, and `dev.qory.runtime.tool_denied` for each tool call
-  denied without a prompt. `dev.qory.runtime.message` is gone. Each
-  event from Claude Code's output has `line`, its line number in the
-  session's output. A text or a tool result over 64 KiB is cut and has
-  `truncated: true`. `dev.qory.runtime.tool_started`, `tool_finished`
-  and `tool_failed` have `summary`, such as a Bash call's command.
+  denied without a prompt. Each event from Claude Code's output has
+  `line`, its line number in Claude Code's standard output. A text or a
+  tool result over 64 KiB is cut and has `truncated: true`. In every run
+  of Claude Code, `dev.qory.runtime.tool_started`, `tool_finished` and
+  `tool_failed` have `summary` for a built-in tool that Forager's
+  descriptor lists, such as a Bash call's command.
+  `dev.qory.runtime.message` is gone.
 - With `wall.engine_proxy_file` set, a run's wall creates the agent's and the relay's
   containers with `--pull=never`: a missing one of those images fails the run with
   `Pull the image on this machine before you set the engine proxy: …`. Pull them, and

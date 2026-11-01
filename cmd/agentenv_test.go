@@ -95,6 +95,7 @@ exec `+docker+` "$@"
 		"/settings.json -p hi",
 		"kept: HTTP_PROXY\n", "kept: QORY_RUN_ID\n", "kept: QORY_RUN_SOCKET\n", "kept: ANTHROPIC_API_KEY\n",
 		"kept: FLAG_NAMED\n", "kept: ca SSL_CERT_FILE\n",
+		"kept: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC\n", "kept: CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL\n",
 	)
 	var dir string
 	for _, f := range strings.Fields(lines) {
