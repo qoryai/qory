@@ -135,12 +135,11 @@ release may change what an existing document does, and states it under Upgrading
   the descriptor close-on-exec. Linux and macOS only. See The run key from a run code in
   `docs/run.md`.
 - Print a run's diagnostics document from Qory Apiary with `qory apiary run diagnose
-  <run number or id>`. qory signs the request with the diagnostics key in
-  `~/.config/qory/apiary/<host>/` and prints the document to stdout only after its
+  <run number or id>`: the run's number, such as `18342` from "Run 18342" on the run's
+  page in Qory Apiary, or its `rn_` id. qory signs the request with the diagnostics key
+  in `~/.config/qory/apiary/<host>/` and prints the document to stdout only after its
   signature verifies under the server key pinned there. Pass `--server <url>` when keys
   for several servers are on this computer. See `docs/apiary.md`.
-- `qory apiary run diagnose` takes a run's number, such as `18342` from "Run 18342" on
-  the run's page in Qory Apiary, as well as its `rn_` id.
 - Make and enrol that diagnostics key with `qory apiary enrol <server> <code>`, using a
   `qecd_` code an instance admin issues under Instance settings > Diagnostics keys in
   Qory Apiary. qory writes the key to `~/.config/qory/apiary/<host>/` and never to

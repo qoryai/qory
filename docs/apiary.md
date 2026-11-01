@@ -115,8 +115,8 @@ such as ``Run `chmod 600 <path>` ``.
 ## Run it
 
 1. Copy the run's number from the run's page in Qory Apiary: `18342` in "Run 18342",
-   which is also the last part of the page's address. The run id, `rn_` and 16
-   characters, which the Qory Apiary API gives, works too.
+   which is also the number after `/runs/` in the page's address. The run id, `rn_` and
+   16 characters, which the Qory Apiary API returns, works too.
 2. Run `qory apiary run diagnose <run number or id>`. With keys for several servers on
    this computer, add `--server <url>` to select one.
 
@@ -168,7 +168,7 @@ Each error's first line starts with the fix.
 | ``Run `qory apiary enrol <server> <code>` first: no diagnostics key in <dir>.`` | No server directory, or no key in it. |
 | ``Pass --server <url>: diagnostics keys for several servers are in <dir>: a, b.`` | Keys for more than one server are on this computer. |
 | ``Remove <dir>, then run `qory apiary enrol <server> <code>` again: <host> did not accept the diagnostics key <id> (401).`` | Qory Apiary has no such key, has revoked it, or this computer's clock is more than five minutes off. |
-| `Pass the run number from the run's page in Qory Apiary, digits alone such as 18342, or the run id, rn_ and 16 characters such as rn_0123456789abcdef: <value> is neither.` | The value is neither a run number nor a run id. Nothing was sent. |
+| `Pass a run number, such as 18342, or a run id, such as rn_0123456789abcdef: <value> is neither.` | The value is neither a run number nor a run id. Nothing was sent. |
 | `Check the run number or id: <host> has no run <run> (not_found).` | Qory Apiary has no run with that number or id. |
 | `Update qory to a release that works with <host>: the request was not accepted: unsupported_contract_version (400).` | Qory Apiary does not serve the contract version that this qory sends. |
 | `Check the run with the instance admin of <host>: the request was not accepted: <code> (<status>).` | Qory Apiary refused the request with another signed code. |

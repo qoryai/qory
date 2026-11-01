@@ -9,8 +9,8 @@ preparation of its machine, its last events and the end of its log, as one JSON
 document.
 
 Pass the run's number or its id. The number is the one on the run's page in Qory
-Apiary, 18342 in "Run 18342", and the last part of the page's address. The run id is
-the rn_ id that the Qory Apiary API gives.
+Apiary, 18342 in "Run 18342", and the number after /runs/ in the page's address. The
+run id is the rn_ id that the Qory Apiary API returns.
 
 qory signs the request with the diagnostics key in ~/.config/qory/apiary/<host>, and
 prints the document only after its signature verifies under the server key pinned

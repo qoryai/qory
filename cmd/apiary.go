@@ -46,7 +46,7 @@ const diagnosticsTimeout = 10 * time.Second
 // it.
 var diagnosticsClock = time.Now
 
-// runIDShape is a run id as the Qory Apiary API gives it.
+// runIDShape is a run id as the Qory Apiary API returns it.
 var runIDShape = regexp.MustCompile(`^rn_[0-9a-hjkmnp-tv-z]{16}$`)
 
 // runNumberShape is a run number as Qory Apiary reads it in an address: digits with no
@@ -121,8 +121,8 @@ preparation of its machine, its last events and the end of its log, as one JSON
 document.
 
 Pass the run's number or its id. The number is the one on the run's page in Qory
-Apiary, 18342 in "Run 18342", and the last part of the page's address. The run id is
-the rn_ id that the Qory Apiary API gives.
+Apiary, 18342 in "Run 18342", and the number after /runs/ in the page's address. The
+run id is the rn_ id that the Qory Apiary API returns.
 
 qory signs the request with the diagnostics key in ~/.config/qory/apiary/<host>, and
 prints the document only after its signature verifies under the server key pinned
@@ -160,7 +160,7 @@ More: ` + apiaryDocs,
 // response that does not verify under the pinned key prints nothing.
 func diagnose(ctx context.Context, out, report io.Writer, runID, serverURL string, serverGiven bool) error {
 	if !runRef(runID) {
-		return input(fmt.Errorf("Pass the run number from the run's page in Qory Apiary, digits alone such as 18342, or the run id, rn_ and 16 characters such as rn_0123456789abcdef: %s is neither.", exports.Value(runID, true)))
+		return input(fmt.Errorf("Pass a run number, such as 18342, or a run id, such as rn_0123456789abcdef: %s is neither.", exports.Value(runID, true)))
 	}
 	root, err := apiarydir.Root()
 	if err != nil {
@@ -235,10 +235,10 @@ type diagnosticsResponse struct {
 	body []byte
 }
 
-// fetchDiagnostics sends the GET for the diagnostics of runID as typed, signed with key as the
-// instance instance, as Forager's server client signs a GET: the timestamp in place of
-// a body. It follows no redirect and keeps no cookie, since Go copies a request's
-// headers to wherever a redirect points. It returns the body of a 200 whose signature
+// fetchDiagnostics sends the GET for the diagnostics of runID as typed, signed with key
+// as the instance instance, as Forager's server client signs a GET: the timestamp in
+// place of a body. It follows no redirect and keeps no cookie, since Go copies a
+// request's headers to wherever a redirect points. It returns the body of a 200 whose signature
 // verifies under the pinned key, bound to this request's signature; every other result
 // is an error whose first line is the fix. No error contains the secret, the signature
 // or a header of the request.

@@ -305,6 +305,7 @@ func TestApiaryDiagnoseStopsAtABadRun(t *testing.T) {
 	for _, run := range []string{
 		"rn_0123456789abcdeF", "rn_0123456789abcdei", "rn_0123", "wi_0123456789abcdef", "rn_0123456789abcdef0",
 		"018342", "0", "9223372036854775808", "99999999999999999999", "#5", "Run 5", "-5", "+5", "5 ", "",
+		"１８３４２", "5\n",
 	} {
 		// -- lets a value that starts with a dash reach the command as its argument.
 		out, _, err := runApart(t, "apiary", "run", "diagnose", "--", run)
@@ -314,7 +315,7 @@ func TestApiaryDiagnoseStopsAtABadRun(t *testing.T) {
 		if cmd.ExitCode(err) != cmd.ExitInput || out != "" {
 			t.Errorf("diagnose %q: exit %d, stdout %q", run, cmd.ExitCode(err), out)
 		}
-		wantIn(t, firstLine(err.Error()), "Pass the run number from the run's page in Qory Apiary, digits alone such as 18342, or the run id, rn_ and 16 characters such as rn_0123456789abcdef: ")
+		wantIn(t, firstLine(err.Error()), "Pass a run number, such as 18342, or a run id, such as rn_0123456789abcdef: ")
 	}
 	if s.received != 0 {
 		t.Errorf("a bad run reached the server %d times", s.received)
