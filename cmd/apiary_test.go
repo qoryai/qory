@@ -17,8 +17,12 @@ import (
 	"github.com/qoryai/qory/internal/apiarydir"
 )
 
-// diagnosticsRunID is the run of the diagnostics fixture.
-const diagnosticsRunID = "rn_0123456789abcdef"
+// diagnosticsRunID is the run of the diagnostics fixture, and diagnosticsRunNumber the
+// same run's number.
+const (
+	diagnosticsRunID     = "rn_0123456789abcdef"
+	diagnosticsRunNumber = "18342"
+)
 
 // diagnosticsFixture is the path of a diagnostics document of the diagnostics
 // contract's fixtures, resolved before any test changes the working directory. It is
@@ -44,6 +48,10 @@ type diagnosticsServer struct {
 	// requests counts the requests that verified, and headers keeps the last one's.
 	requests int
 	headers  http.Header
+	// received counts every request that reached the server, and path keeps the last
+	// one's path as sent.
+	received int
+	path     string
 }
 
 func newDiagnosticsServer(t *testing.T, client *accesskey.Key) *diagnosticsServer {
@@ -56,6 +64,8 @@ func newDiagnosticsServer(t *testing.T, client *accesskey.Key) *diagnosticsServe
 	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
+		s.received++
+		s.path = r.URL.EscapedPath()
 		sig := r.Header.Get(accesskey.HeaderSignature)
 		req := accesskey.Request{
 			AccessKeyID: r.Header.Get(accesskey.HeaderAccessKeyID),
@@ -69,7 +79,7 @@ func newDiagnosticsServer(t *testing.T, client *accesskey.Key) *diagnosticsServe
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		if r.URL.Path != "/v1/runs/"+diagnosticsRunID+"/diagnostics" {
+		if p := r.URL.Path; p != "/v1/runs/"+diagnosticsRunID+"/diagnostics" && p != "/v1/runs/"+diagnosticsRunNumber+"/diagnostics" {
 			s.respond(w, sig, http.StatusNotFound, []byte(`{"error":"not_found"}`))
 			return
 		}
@@ -166,18 +176,39 @@ func TestApiaryDiagnoseEndsTheDocumentWithALineEnding(t *testing.T) {
 	}
 }
 
+// TestApiaryDiagnoseTakesARunNumber is a run named by its number: qory sends the number
+// as typed on the path, and prints the document.
+func TestApiaryDiagnoseTakesARunNumber(t *testing.T) {
+	s, _ := diagnoseKeyed(t)
+	out, errOut, err := runApart(t, "apiary", "run", "diagnose", diagnosticsRunNumber)
+	if err != nil {
+		t.Fatalf("diagnose: %v\n%s", err, errOut)
+	}
+	if want := "/v1/runs/" + diagnosticsRunNumber + "/diagnostics"; s.path != want {
+		t.Errorf("path %q, want %q", s.path, want)
+	}
+	if out != string(s.body) || s.requests != 1 {
+		t.Errorf("%d verified requests, stdout:\n%s", s.requests, out)
+	}
+}
+
 func TestApiaryDiagnoseNotFound(t *testing.T) {
-	_, _ = diagnoseKeyed(t)
-	out, _, err := runApart(t, "apiary", "run", "diagnose", "rn_1123456789abcdef")
-	if err == nil {
-		t.Fatal("diagnose of a run the server does not have succeeded")
-	}
-	host := hostOf(t)
-	if want := "Check the run id: " + host + " has no run rn_1123456789abcdef (not_found)."; firstLine(err.Error()) != want {
-		t.Errorf("first line %q, want %q", firstLine(err.Error()), want)
-	}
-	if out != "" || cmd.ExitCode(err) != 1 {
-		t.Errorf("stdout %q, exit %d", out, cmd.ExitCode(err))
+	// The largest number Qory Apiary stores is sent, and is no run of the server.
+	for _, run := range []string{"rn_1123456789abcdef", "18343", "9223372036854775807"} {
+		s, _ := diagnoseKeyed(t)
+		out, _, err := runApart(t, "apiary", "run", "diagnose", run)
+		if err == nil {
+			t.Fatalf("diagnose of a run the server does not have, %s, succeeded", run)
+		}
+		if want := "Check the run number or id: " + hostOf(t) + " has no run " + run + " (not_found)."; firstLine(err.Error()) != want {
+			t.Errorf("first line %q, want %q", firstLine(err.Error()), want)
+		}
+		if out != "" || cmd.ExitCode(err) != 1 {
+			t.Errorf("%s: stdout %q, exit %d", run, out, cmd.ExitCode(err))
+		}
+		if want := "/v1/runs/" + run + "/diagnostics"; s.received != 1 || s.path != want {
+			t.Errorf("%s: %d requests, path %q, want one to %q", run, s.received, s.path, want)
+		}
 	}
 }
 
@@ -267,20 +298,42 @@ func TestApiaryDiagnoseStopsAtADocumentOverTheLimit(t *testing.T) {
 	wantIn(t, firstLine(err.Error()), "is not signed with the pinned server key")
 }
 
-func TestApiaryDiagnoseStopsAtABadRunID(t *testing.T) {
+// TestApiaryDiagnoseStopsAtABadRun is a value that is neither a run id nor a run number
+// in the form Qory Apiary reads: qory stops before any request.
+func TestApiaryDiagnoseStopsAtABadRun(t *testing.T) {
 	s, _ := diagnoseKeyed(t)
-	for _, id := range []string{"rn_0123456789abcdeF", "rn_0123456789abcdei", "rn_0123", "wi_0123456789abcdef", "rn_0123456789abcdef0"} {
-		out, _, err := runApart(t, "apiary", "run", "diagnose", id)
+	for _, run := range []string{
+		"rn_0123456789abcdeF", "rn_0123456789abcdei", "rn_0123", "wi_0123456789abcdef", "rn_0123456789abcdef0",
+		"018342", "0", "9223372036854775808", "99999999999999999999", "#5", "Run 5", "-5", "+5", "5 ", "",
+	} {
+		// -- lets a value that starts with a dash reach the command as its argument.
+		out, _, err := runApart(t, "apiary", "run", "diagnose", "--", run)
 		if err == nil {
-			t.Fatalf("diagnose %s succeeded", id)
+			t.Fatalf("diagnose %q succeeded", run)
 		}
 		if cmd.ExitCode(err) != cmd.ExitInput || out != "" {
-			t.Errorf("diagnose %s: exit %d, stdout %q", id, cmd.ExitCode(err), out)
+			t.Errorf("diagnose %q: exit %d, stdout %q", run, cmd.ExitCode(err), out)
 		}
-		wantIn(t, firstLine(err.Error()), "Pass the run id from the run's page in Qory Apiary")
+		wantIn(t, firstLine(err.Error()), "Pass the run number from the run's page in Qory Apiary, digits alone such as 18342, or the run id, rn_ and 16 characters such as rn_0123456789abcdef: ")
 	}
-	if s.requests != 0 {
-		t.Errorf("a bad run id reached the server %d times", s.requests)
+	if s.received != 0 {
+		t.Errorf("a bad run reached the server %d times", s.received)
+	}
+}
+
+func TestApiaryDiagnoseTakesOneRun(t *testing.T) {
+	s, _ := diagnoseKeyed(t)
+	for _, args := range [][]string{{}, {diagnosticsRunNumber, diagnosticsRunID}} {
+		_, _, err := runApart(t, append([]string{"apiary", "run", "diagnose"}, args...)...)
+		if want := "Pass one run number or run id, such as 18342 or rn_0123456789abcdef: qory apiary run diagnose takes one run."; err == nil || firstLine(err.Error()) != want {
+			t.Errorf("diagnose %q: %v, want %q", args, err, want)
+		}
+		if cmd.ExitCode(err) != cmd.ExitInput {
+			t.Errorf("diagnose %q: exit %d", args, cmd.ExitCode(err))
+		}
+	}
+	if s.received != 0 {
+		t.Errorf("the server got %d requests", s.received)
 	}
 }
 

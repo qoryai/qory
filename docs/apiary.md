@@ -1,14 +1,15 @@
 # Debug runs on Qory Apiary
 
-`qory apiary run diagnose <run id>` prints what Qory Apiary recorded about one run, as
-one JSON document, so that a person or an agent can find why the run failed. qory signs
-the request with a diagnostics key stored on this computer, which
+`qory apiary run diagnose <run number or id>` prints what Qory Apiary recorded about one
+run, as one JSON document, so that a person or an agent can find why the run failed.
+qory signs the request with a diagnostics key stored on this computer, which
 `qory apiary enrol <server> <code>` makes and enrols once per server.
 
 ```sh
 qory apiary enrol https://apiary.example qecd_F1XT-0RE0-0000-0000-0000-0000-00.uoES-kuj1vk0sq0qoGlmAg
+qory apiary run diagnose 18342
 qory apiary run diagnose rn_0123456789abcdef
-qory apiary run diagnose rn_0123456789abcdef --server https://apiary.example
+qory apiary run diagnose 18342 --server https://apiary.example
 qory apiary run diagnose rn_0123456789abcdef > diagnostics.json
 ```
 
@@ -113,25 +114,32 @@ such as ``Run `chmod 600 <path>` ``.
 
 ## Run it
 
-1. Copy the run id, `rn_` and 16 characters, from the run's page in Qory Apiary.
-2. Run `qory apiary run diagnose <run id>`. With keys for several servers on this
-   computer, add `--server <url>` to select one.
+1. Copy the run's number from the run's page in Qory Apiary: `18342` in "Run 18342",
+   which is also the last part of the page's address. The run id, `rn_` and 16
+   characters, which the Qory Apiary API gives, works too.
+2. Run `qory apiary run diagnose <run number or id>`. With keys for several servers on
+   this computer, add `--server <url>` to select one.
 
-qory sends `GET <server>/v1/runs/<run id>/diagnostics`, signed with the key, and waits
-at most 10 seconds. The document goes to stdout exactly as Qory Apiary sent it, followed
-by a line ending when it has none. Nothing else goes to stdout, so a pipe or a file
-receives JSON alone. Errors go to stderr.
+A run number is digits alone, with no leading zero, at most 9223372036854775807; `#5`
+and `Run 5` are not run numbers. qory stops with an error, before it sends anything,
+for a value that is neither a run number nor a run id. It sends the value as you
+typed it, `GET <server>/v1/runs/<run number or id>/diagnostics`, signed with the key,
+and waits at most 10 seconds. The document goes to stdout exactly as Qory Apiary sent
+it, followed by a line ending when it has none. Nothing else goes to stdout, so a pipe
+or a file receives JSON alone. Errors go to stderr.
 
 The document follows the diagnostics contract, `contracts/diagnostics/v1` in
 [qoryai/integrations](https://github.com/qoryai/integrations). It contains the run, its
 queue entry, each dispatch, the preparation of the machine with the step that stopped it,
-the last events and the end of the run's log.
+the last events and the end of the run's log. The document contains the run's `rn_` id
+and not its number, whichever of the two you passed.
 
 ## Errors
 
 Both commands exit 2 in these cases, and 1 for every other failure:
 
-- a mistake in the command line: the arguments, the server URL, the code or the run id
+- a mistake in the command line: the arguments, the server URL, the code, or the run
+  number or id
 - neither `HOME` nor `XDG_CONFIG_HOME` is set
 - no diagnostics key for the server, or keys for several servers and no `--server`
 - an error when qory reads the stored diagnostics key, such as a secret file that
@@ -160,7 +168,8 @@ Each error's first line starts with the fix.
 | ``Run `qory apiary enrol <server> <code>` first: no diagnostics key in <dir>.`` | No server directory, or no key in it. |
 | ``Pass --server <url>: diagnostics keys for several servers are in <dir>: a, b.`` | Keys for more than one server are on this computer. |
 | ``Remove <dir>, then run `qory apiary enrol <server> <code>` again: <host> did not accept the diagnostics key <id> (401).`` | Qory Apiary has no such key, has revoked it, or this computer's clock is more than five minutes off. |
-| `Check the run id: <host> has no run <id> (not_found).` | Qory Apiary has no run with that id. |
+| `Pass the run number from the run's page in Qory Apiary, digits alone such as 18342, or the run id, rn_ and 16 characters such as rn_0123456789abcdef: <value> is neither.` | The value is neither a run number nor a run id. Nothing was sent. |
+| `Check the run number or id: <host> has no run <run> (not_found).` | Qory Apiary has no run with that number or id. |
 | `Update qory to a release that works with <host>: the request was not accepted: unsupported_contract_version (400).` | Qory Apiary does not serve the contract version that this qory sends. |
 | `Check the run with the instance admin of <host>: the request was not accepted: <code> (<status>).` | Qory Apiary refused the request with another signed code. |
 | `Check that <server> is the server the diagnostics key in <dir> was enrolled with: ...` | The response does not verify under the pinned key, and qory printed nothing. |
