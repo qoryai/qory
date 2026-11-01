@@ -148,6 +148,22 @@ release may change what an existing document does, and states it under Upgrading
 ### Changed
 
 - The `agent` image contains Claude Code 2.1.316, up from 2.1.273.
+- Claude Code runs with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and
+  `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1` in every run,
+  walled or not, and the `env` of its `--settings` copy sets both.
+  Forager fixes the two values, so a value from the server's run
+  configuration, `--env`, `wall.env`, `env` in `qory.yaml`, the `env` of
+  `harness.launch.claude`, a settings fragment, a module's export or the
+  shell `qory run` starts in is not used.
+- In a run from a run code, `events.jsonl` in the run's record has
+  `dev.qory.runtime.text` for each text and thinking block of the main
+  conversation, `dev.qory.runtime.tool_result` for each tool result the
+  model gets, and `dev.qory.runtime.tool_denied` for each tool call
+  denied without a prompt. `dev.qory.runtime.message` is gone. Each
+  event from Claude Code's output has `line`, its line number in the
+  session's output. A text or a tool result over 64 KiB is cut and has
+  `truncated: true`. `dev.qory.runtime.tool_started`, `tool_finished`
+  and `tool_failed` have `summary`, such as a Bash call's command.
 - With `wall.engine_proxy_file` set, a run's wall creates the agent's and the relay's
   containers with `--pull=never`: a missing one of those images fails the run with
   `Pull the image on this machine before you set the engine proxy: …`. Pull them, and
