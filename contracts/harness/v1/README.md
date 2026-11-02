@@ -520,8 +520,11 @@ one before: the `bind` of the stack a checkout extends, then the `provides` of t
 composed modules (§The module manifest), then the `bind` of the checkout's `qory.yaml`,
 or of the stack composed when it extends none. Every module's manifest is read before
 the compose reads any module's entries, so an `only` of one module follows a role that
-a later module provides. A provided entry that an `exclude` or an `only` left out
-provides nothing. Two modules that provide one role with different names fail the
+a later module provides. While the `only` blocks are followed, a provided entry that the
+providing module's `exclude` lists provides nothing, and one that the providing module's
+`only` leaves out still fills its role. To drop a provider, list its entry under
+`exclude`. After the last module, a provided entry that an `exclude` or an `only` left
+out provides nothing. Two modules that provide one role with different names fail the
 compose, unless the checkout's `bind` sets the role: `Bind agents.developer in qory.yaml,
 or compose one of typescript and elixir: both modules provide agents/developer
 (typescript-developer, elixir-developer).` A reference resolves within the stack's

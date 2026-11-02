@@ -56,10 +56,13 @@
 // role, one no entry has, set to the entry filling it in three layers, each replacing
 // the name of the one before: the bind of the base, the provides of the modules, and the
 // bind of the document composed, [Result.Bind] and [Result.Roles]. Every manifest is read
-// before the first module's entries, so an only follows a role a later module provides;
-// the roles are set again after the last module, when a provided entry that a block left
-// out provides nothing and two modules that provide one role with different names fail,
-// unless the document's bind sets it. A reference to a role is checked against the entry
+// before the first module's entries, so an only follows a role a later module provides.
+// While the only blocks are followed, a provided entry that the providing module's
+// exclude lists provides nothing, and one that the providing module's only leaves out
+// still fills its role: to drop a provider, list its entry under exclude. The roles are
+// set again after the last module, when a provided entry that a block left out provides
+// nothing and two modules that provide one role with different names fail, unless the
+// document's bind sets it. A reference to a role is checked against the entry
 // that fills it, and a role is checked to select a composed entry and no entry's name. A
 // reference resolves within the composed entries and the roles alone: it never brings in
 // a module the stack did not list. The text is left as written in the result; a renderer resolves it
