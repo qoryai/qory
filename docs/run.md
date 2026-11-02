@@ -2026,6 +2026,11 @@ agent starts, and closes it `failed` with `no_session`:
 - `take the work item in again in Qory Apiary: the record of what the setup changed in
   <path> failed: <error>; the code is used`
 
+When a push fails, the step's log has each `remote:` line of the forge as `qory run:
+remote: <line>`, and each commit that did not reach the branch as `qory run: not pushed
+from <path>: <commit> <subject>`, at most 50 of each, then `qory run: <n> further lines
+left out`. A URL's login and password and the run's secret values are hidden.
+
 Each of these lines fails the step. `<commit>` is the commit's first 12 characters:
 
 - `take the work item in again in Qory Apiary: after the agent exited, the check of

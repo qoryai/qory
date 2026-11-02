@@ -27,6 +27,9 @@ import (
 const (
 	textNoNewCommits     = "qory run: no new commits to push"
 	textPushed           = "qory run: pushed %s to %s at %s"
+	textForgeLine        = "qory run: remote: %s"
+	textNotPushed        = "qory run: not pushed from %s: %s %s"
+	textFurtherLines     = "qory run: %d further lines left out"
 	textSetupNotSafe     = "qory run: take the work item in again in Qory Apiary: after the setup, the check of repository %s failed, so the agent did not start: %s; the code is used"
 	textNoSetupRecord    = "qory run: take the work item in again in Qory Apiary: the record of what the setup changed in %s failed: %s; the code is used"
 	textNotSafe          = "qory run: take the work item in again in Qory Apiary: after the agent exited, the check of repository %s failed, so qory committed and pushed nothing: %s; the code is used"
@@ -39,6 +42,10 @@ const (
 	textPushNotReached   = "qory run: check that the run's policy allows %[2]s and that %[2]s is reachable, then take the work item in again: the push of %[1]s through the run's gateway failed: %[3]s; the code is used"
 )
 
+// maxFailedPushLines is the most lines of the forge, and the most commits, that a failed
+// push prints for one repository.
+const maxFailedPushLines = 50
+
 // commitName and commitEmail are the author and the committer of a commit that [Push]
 // makes, as qory's squash of a worktree has them: git reads no person's configuration
 // here, and a repository's configuration may not set them.
@@ -47,10 +54,11 @@ const (
 	commitEmail = "qory@localhost"
 )
 
-// pushForbidden, pushMoved and pushRejected match git's lines for a push: a host or a
-// gateway that returned 403, a branch on the remote that is not behind the commit, and a
-// remote that stopped the update.
+// urlLogin matches the user part of a URL. pushForbidden, pushMoved and pushRejected
+// match git's lines for a push: a host or a gateway that returned 403, a branch on the
+// remote that is not behind the commit, and a remote that stopped the update.
 var (
+	urlLogin      = regexp.MustCompile(`://[^/\s@]+@`)
 	pushForbidden = regexp.MustCompile(`(?i)returned error: 403|HTTP 403`)
 	pushMoved     = regexp.MustCompile(`\[rejected\]`)
 	pushRejected  = regexp.MustCompile(`\[remote rejected\]`)
@@ -109,7 +117,7 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 		if heads[i] == "" {
 			continue
 		}
-		if err := pushTo(ctx, hostRunner(&p), folders[i], b, r, heads[i]); err != nil {
+		if err := pushTo(ctx, hostRunner(&p), folders[i], b, r, heads[i], report); err != nil {
 			return nil, err
 		}
 		fmt.Fprintf(report, textPushed+"\n", b.Ref, shownPath(r.Path), shortCommit(heads[i]))
@@ -324,12 +332,56 @@ func headPast(ctx context.Context, git gitRunner, dir string, r WorkRepository) 
 }
 
 // pushTo pushes head of the repository r at dir to the branch of b, as a fast-forward.
-func pushTo(ctx context.Context, git gitRunner, dir string, b *WorkBranch, r WorkRepository, head string) error {
+func pushTo(ctx context.Context, git gitRunner, dir string, b *WorkBranch, r WorkRepository, head string, report io.Writer) error {
 	_, err := git(ctx, dir, "push", "--quiet", "--no-verify", "--no-recurse-submodules", "--", repoURL(b.system, r.Path), head+":refs/heads/"+b.Ref)
-	if err != nil {
-		return pushFailed(b, r.Path, err)
+	if err == nil {
+		return nil
 	}
-	return nil
+	var ge *gitError
+	if errors.As(err, &ge) {
+		printFailedPush(ctx, git, dir, r, head, ge.output, report)
+	}
+	return pushFailed(b, r.Path, err)
+}
+
+// printFailedPush prints on report, the step's log, what the error's one line leaves out:
+// each remote: line that git printed in output, and the commits from r to head, which did
+// not reach the branch. Each shows no URL's login or password. A failed read of the
+// commits prints none, since the error that follows is the one the run ends with.
+func printFailedPush(ctx context.Context, git gitRunner, dir string, r WorkRepository, head, output string, report io.Writer) {
+	var forge []string
+	for line := range strings.Lines(output) {
+		if text, ok := strings.CutPrefix(strings.TrimSpace(line), "remote:"); ok && strings.TrimSpace(text) != "" {
+			forge = append(forge, shownText(strings.TrimSpace(text)))
+		}
+	}
+	printAtMost(forge, report, func(line string) { fmt.Fprintf(report, textForgeLine+"\n", line) })
+	log, err := git(ctx, dir, "log", "--format=%H %s", r.Commit+".."+head)
+	if err != nil {
+		return
+	}
+	printAtMost(strings.Split(strings.TrimSpace(log), "\n"), report, func(line string) {
+		commit, subject, _ := strings.Cut(line, " ")
+		fmt.Fprintf(report, textNotPushed+"\n", shownPath(r.Path), shortCommit(commit), shownText(subject))
+	})
+}
+
+// printAtMost calls print for the first [maxFailedPushLines] lines, and prints how many
+// it left out.
+func printAtMost(lines []string, report io.Writer, print func(string)) {
+	for _, line := range lines[:min(len(lines), maxFailedPushLines)] {
+		print(line)
+	}
+	if left := len(lines) - maxFailedPushLines; left > 0 {
+		fmt.Fprintf(report, textFurtherLines+"\n", left)
+	}
+}
+
+// shownText is text from the forge or a commit as a line shows it: printable, with the
+// login and the password of each URL hidden, since [exports.HideURLs] keeps the login.
+func shownText(text string) string {
+	hidden := urlLogin.ReplaceAllString(exports.HideURLError(errors.New(text)).Error(), "://(hidden)@")
+	return integration.Printable(hidden)
 }
 
 // pushFailed is the line of a push of the repository path that failed with err: by what
@@ -371,7 +423,7 @@ func pushCause(output string) string {
 	if found >= 0 {
 		line = strings.TrimSpace(lines[found])
 	}
-	return integration.Printable(exports.HideURLError(errors.New(line)).Error())
+	return shownText(line)
 }
 
 // withCommit is version with the commit of the repository path on system set to commit,

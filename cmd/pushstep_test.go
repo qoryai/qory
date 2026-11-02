@@ -25,6 +25,7 @@ import (
 	"github.com/qoryai/qory/internal/branchformat"
 	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/proxygit/proxygittest"
+	"github.com/qoryai/qory/internal/secretmask"
 )
 
 // noType is the line of a workspace with no artifact type branch.
@@ -189,6 +190,7 @@ type pushRepo struct {
 	flags        []string
 	waits        []time.Duration
 	setup        func(dir string)
+	mask         string
 }
 
 // newPushRepo serves acme/site at one commit, whose stack declares the workflow hello
@@ -267,6 +269,9 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 		},
 		OnStep: func(e cmd.StepEvent) { got.steps = append(got.steps, e) },
 		OnOpen: func(spec session.OpenSpec) {
+			if p.mask != "" {
+				secretmask.Default().Add(p.mask)
+			}
 			got.runID = spec.RunID
 			p.api.mu.Lock()
 			defer p.api.mu.Unlock()
@@ -682,12 +687,31 @@ func TestARejectedPushFailsTheStep(t *testing.T) {
 // does: the line points at the forge's rule.
 func TestAHookOfTheForgeFailsTheStep(t *testing.T) {
 	p := newPushRepo(t, "write")
-	writeFile(t, filepath.Join(p.bare, "hooks", "pre-receive"), "#!/bin/sh\necho the branch is protected >&2\nexit 1\n")
+	const masked = "value-of-the-run-1234"
+	p.mask = masked
+	hook := "#!/bin/sh\necho the branch is protected >&2\necho see https://bot:token-456@git.test/rules >&2\necho " + masked + " >&2\nexit 1\n"
+	writeFile(t, filepath.Join(p.bare, "hooks", "pre-receive"), hook)
 	if err := os.Chmod(filepath.Join(p.bare, "hooks", "pre-receive"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateFailed, 1)
+	head := gitOut(t, p.h.dir, "rev-parse", "HEAD")
+	wants(t, r.log(), "qory run: remote: the branch is protected\n", "qory run: remote: see https://(hidden)@git.test/rules\n",
+		"qory run: not pushed from acme/site: "+head[:12]+" Changes left by run "+r.runID+"\n",
+		"qory run: not pushed from acme/site: ")
+	for _, secret := range []string{"token-456", "bot:", masked} {
+		if strings.Contains(r.log(), secret) {
+			t.Errorf("the step's log shows %q:\n%s", secret, r.log())
+		}
+	}
+	for line := range strings.Lines(r.out) {
+		if strings.Contains(line, "take the work item") || strings.Contains(line, "change the rule on") {
+			if strings.Contains(line, "remote:") {
+				t.Errorf("the error line has the forge's lines: %q", line)
+			}
+		}
+	}
 	wants(t, r.out, "qory run: change the rule on "+proxygittest.Host+" that stops a push to qory/"+workItem+" of acme/site, then take the work item in again: the push failed: ! [remote rejected]")
 }
 

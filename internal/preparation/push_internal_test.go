@@ -371,3 +371,31 @@ func TestARepositoryInARepositoryIsOneEntry(t *testing.T) {
 		})
 	}
 }
+
+// TestAFailedPushPrintsTheForgeAndTheCommits is a push that failed: each remote: line and
+// each commit, with no login, and a count of what the limit left out.
+func TestAFailedPushPrintsTheForgeAndTheCommits(t *testing.T) {
+	dir, b := onBranch(t, "acme/shop")
+	r := b.Repositories[0]
+	write(t, filepath.Join(dir, "left.txt"), "left\n")
+	run(t, dir, "add", "-A")
+	run(t, dir, "commit", "--quiet", "-m", "see https://bot:token-123@git.example.com/x")
+	head := run(t, dir, "rev-parse", "HEAD")
+	var output, report strings.Builder
+	output.WriteString("To https://git.example.com/acme/shop.git\n")
+	output.WriteString(strings.Repeat("remote: line\n", maxFailedPushLines+3))
+	output.WriteString("remote:\nremote: \n ! [remote rejected] a -> b (hook declined)\n")
+	printFailedPush(context.Background(), hostRunner(&testProxy), dir, r, head, output.String(), &report)
+	got := report.String()
+	if n := strings.Count(got, "qory run: remote: line\n"); n != maxFailedPushLines {
+		t.Errorf("%d lines of the forge, want %d:\n%s", n, maxFailedPushLines, got)
+	}
+	for _, want := range []string{"qory run: 3 further lines left out\n", "qory run: not pushed from acme/shop: " + head[:12] + " see https://"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the lines have no %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "token-123") {
+		t.Errorf("the lines show the password:\n%s", got)
+	}
+}
