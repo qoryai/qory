@@ -1965,15 +1965,17 @@ the modules, as the home of a run started without a run code does.
 ### The push step of a write run
 
 A write run of a work item ends with a push step: qory commits what the agent left, pushes
-it to the branch `qory/<work item id>`, and stores a new version of the artifact `branch`,
-so the next run of the work item starts at that commit. The step runs after the agent
-exits and before the run closes. Its kind is `push` and its name is `push qory/<work item
+it to the branch `qory/<work item id>`, and stores a new version of the artifact `branch`.
+The next run in the same stage starts at that commit. A run of another stage starts at the
+version a gate approved when its stage lists `branch` as an input, and at that commit
+otherwise. The step runs after the agent exits and before the run closes. Its kind is `push` and its name is `push qory/<work item
 id> to <system>/<path>`, followed by ` and 1 further repository` or ` and <n> further
 repositories` for a run with more repositories.
 
 The step runs when the run works on the branch of its work item, its documents set `access`
-to `write`, `workflows` of the stack does not declare the workflow's access as `read`, and
-the session ended `succeeded`. A session that failed, timed out or was cancelled runs no
+to `write`, `workflows` of the stack declares the workflow's access as `write`, and the
+session ended `succeeded`. A workflow that the stack does not declare counts as `read`. A
+session that failed, timed out or was cancelled runs no
 step: qory commits nothing, pushes nothing and stores no version, and what the agent left
 stays in the working folder only. A read run has no step.
 
