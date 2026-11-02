@@ -30,18 +30,12 @@ const textNoImage = "run again: the fetch of the run's image failed: %s"
 // again makes.
 const textNoImageFromCode = "take the work item in again in Qory Apiary: the fetch of the run's image failed: %s" + codeUsed
 
-// imageRefusedError is Forager's refusal of a walled run's image at its fetch,
-// image_missing or image_user_root: qory run closes the run with code as its reason.
-type imageRefusedError struct{ code, text string }
-
-func (e *imageRefusedError) Error() string { return e.text }
-
 // fetchImage fetches the image of a walled run before its first join, as the run's image
 // step: [session.Run.FetchImage], which writes no step for an image the machine
 // defines, checks the image's manifest at its registry through the run's proxy, and
 // pulls the image, also one the engine holds by its digest. With proxy, the pull goes
 // through the run's proxy. A refusal of the image, image_missing or image_user_root, is
-// an [*imageRefusedError] as a [*runLineError]; any other error is a [*runLineError] of
+// a [*reasonError] with Forager's code as a [*runLineError]; any other error is a [*runLineError] of
 // [textNoImage], or [textNoImageFromCode] for a run from a run code, fromCode, whose
 // refusal lines end with [codeUsed] too. Each text has proxy's password, and every
 // secret, hidden, and contains Forager's text alone as its cause, so it unwraps to no
@@ -71,7 +65,7 @@ func fetchImage(ctx context.Context, run openedRun, proxy *session.EngineProxy, 
 		if fromCode {
 			line += codeUsed
 		}
-		return &runLineError{&imageRefusedError{code: ref.Code, text: line}}
+		return &runLineError{&reasonError{code: ref.Code, text: line}}
 	}
 	if fromCode {
 		return &runLineError{fmt.Errorf(textNoImageFromCode, shown(err.Error()))}

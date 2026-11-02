@@ -532,7 +532,7 @@ func TestARunCodeOfAHiddenHarnessThatFailsShowsNoAddress(t *testing.T) {
 			"modules/tools/skills/greet/SKILL.md": "---\nname: greet\ndescription: Greets.\n---\nHello.\n",
 		}}, 3, []string{"skills/greet is provided by 2 modules", "tools  the module tools  ", "world  " + workspaceBase + "  "}},
 		{"the workflow is not in the harness", codeHarness{change: func(d map[string]any) { d["workflow"] = "deploy" }}, 1,
-			[]string{"add a skill or command deploy to " + workspaceHarness + ", or set another workflow in Qory Apiary: the composed harness has no skill or command deploy; the code is used"}},
+			[]string{"add a skill or command deploy to " + workspaceHarness + ", or set another workflow in Qory Apiary: the composed harness has no skill or command deploy (workflow_not_in_harness); the code is used"}},
 		{"the stack proxy does not open", codeHarness{nowhere: func(n *cmd.Nowhere) { n.StackProxyErr = errors.New("the run is closed") }}, 1,
 			[]string{"qory run: take the work item in again in Qory Apiary: the run's stack proxy, through which qory fetches " + workspaceHarness + ", did not open: the run is closed; the code is used\n"}},
 	} {

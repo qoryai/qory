@@ -159,8 +159,8 @@ func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 // codeRun is what a run from a run code came to, opened nowhere: its output and error,
 // the run's spec at the open, the session's spec at the join, the inputs.json and the
 // modes the join found, the folder of the inputs, the URL of the stack's repository,
-// which the output has as <url>, the stack's commit in the documents, and the calls the
-// run got.
+// which the output has as <url>, the stack's commit in the documents, the calls the run
+// got, and the outcomes it closed with.
 type codeRun struct {
 	out      string
 	err      error
@@ -173,6 +173,7 @@ type codeRun struct {
 	url      string
 	commit   string
 	calls    []string
+	closes   []session.Outcome
 }
 
 // codeFetchImage is the FetchImage of each run [runFromCodeGiven] opens; nil is one
@@ -243,7 +244,7 @@ func runFromCodeGiven(t *testing.T, before func(code string) []string, args []st
 	if before != nil {
 		args = append(slices.Clip(args), before(g.code())...)
 	}
-	_, calls, restore := cmd.OpenNowhereWith(cmd.Nowhere{
+	closes, calls, restore := cmd.OpenNowhereWith(cmd.Nowhere{
 		System: proxygittest.Host, Proxy: h.server.Proxy.URL, CABundle: h.server.Proxy.CABundle, Dir: h.runDir,
 		StackProxy: h.server.Proxy.URL, StackCABundle: h.server.Proxy.CABundle,
 		OnOpen:     func(s session.OpenSpec) { r.open = s },
@@ -256,7 +257,7 @@ func runFromCodeGiven(t *testing.T, before func(code string) []string, args []st
 		file, stdin := given(g.code())
 		r.out, r.err = runReading(t, stdin, append([]string{"run", "--run-code-file", file, "--gateway", g.URL}, args...)...)
 	}
-	r.calls = calls()
+	r.calls, r.closes = calls(), closes()
 	r.out, r.url = strings.ReplaceAll(r.out, url, "<url>"), url
 	return r
 }
@@ -322,13 +323,17 @@ func TestARunCodeWithoutAWorkflowTimeLimitRunsThreeHours(t *testing.T) {
 
 // TestARunCodeWhoseHarnessHasNoWorkflowStops is a run from a run code whose workflow is
 // no skill or command of the composed harness: the run stops before the session joins,
-// exit 1, with a line that starts with its fix.
+// exit 1, with a line that starts with its fix, and closes failed with the reason
+// workflow_not_in_harness.
 func TestARunCodeWhoseHarnessHasNoWorkflowStops(t *testing.T) {
 	r := runFromCode(t, nil, func(d map[string]any) { d["workflow"] = "deploy" })
 	if r.joined || cmd.ExitCode(r.err) != 1 {
 		t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
-	wants(t, r.out+r.err.Error(), "add a skill or command deploy to the workspace's harness, or set another workflow in Qory Apiary: the composed harness has no skill or command deploy; the code is used")
+	if want := []session.Outcome{{State: "failed", Reason: "workflow_not_in_harness", ExitCode: -1}}; !slices.Equal(r.closes, want) {
+		t.Errorf("the run closed with %v, want %v", r.closes, want)
+	}
+	wants(t, r.out+r.err.Error(), "add a skill or command deploy to the workspace's harness, or set another workflow in Qory Apiary: the composed harness has no skill or command deploy (workflow_not_in_harness); the code is used")
 }
 
 // TestAWalledRunCodeMountsItsInputsReadOnly is a walled run from a run code: the folder

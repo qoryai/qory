@@ -18,6 +18,7 @@ import (
 
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/integration"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/provisioner"
 	"github.com/qoryai/qory/internal/render"
@@ -437,14 +438,20 @@ func (r *codeRun) writeInputs() (string, func(), error) {
 	return in, remove, f.Close()
 }
 
+// reasonWorkflowNotInHarness is the reason a run from a run code closes with, failed,
+// when the composed harness has no skill or command with the workflow's name.
+const reasonWorkflowNotInHarness = "workflow_not_in_harness"
+
 // workflowArgs are the arguments after -- that start r's workflow on the runtime name,
 // as the harness rep was composed for it, with the inputs in the folder in: the
 // runtime's headless start, see [render.Headless], with the prompt that invokes the
 // skill or command named like the workflow, by the name the runtime registers it
 // under, with the path of inputs.json. A runtime with no headless start, a workflow that
 // is only of a kind the runtime renders or invokes by no name, and a harness with no
-// such skill or command, stop the run.
-func (r *codeRun) workflowArgs(name string, rep report.Report, in string) ([]string, error) {
+// such skill or command, stop the run. The last is a [*reasonError] of
+// [reasonWorkflowNotInHarness], whose line shows the harness as [codeRun.harnessAt]
+// does for system, the system the run's repositories are on.
+func (r *codeRun) workflowArgs(name string, rep report.Report, in, system string) ([]string, error) {
 	rt, err := render.Lookup(name)
 	if err != nil {
 		return nil, input(err)
@@ -476,7 +483,23 @@ func (r *codeRun) workflowArgs(name string, rep report.Report, in string) ([]str
 		}
 		return nil, fmt.Errorf("add a %s %s to %s, or set another runtime in Qory Apiary: %s runs no %s by its name from a headless start%s", add, r.workflow, r.phrase(), accesskey.ShownName(name, false), runsNo, codeUsed)
 	}
-	return nil, fmt.Errorf("add a skill or command %s to %s, or set another workflow in Qory Apiary: the composed harness has no skill or command %s%s", r.workflow, r.phrase(), r.workflow, codeUsed)
+	text := fmt.Sprintf("add a skill or command %s to %s, or set another workflow in Qory Apiary: the composed harness has no skill or command %s (%s)%s", r.workflow, r.harnessAt(system), r.workflow, reasonWorkflowNotInHarness, codeUsed)
+	return nil, &reasonError{code: reasonWorkflowNotInHarness, text: text}
+}
+
+// harnessAt is r's harness as the line of a missing workflow shows it: [codeRun.phrase],
+// and for the checkout's harness the path of the documents' target after it. The target
+// is "the repository" when it is on system, the system the run's repositories are on,
+// which the run's fetch puts in the working folder, and "the target" on any other.
+func (r *codeRun) harnessAt(system string) string {
+	if r.harness != nil || r.target.Path == "" {
+		return r.phrase()
+	}
+	path := integration.Printable(exports.Value(r.target.Path, false))
+	if system != "" && r.target.System == system {
+		return checkoutHarness + " in the repository " + path
+	}
+	return checkoutHarness + " for the target " + path
 }
 
 // noHeadless is the error of a run from a run code on the runtime name, which has no
