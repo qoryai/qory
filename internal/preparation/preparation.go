@@ -96,6 +96,7 @@ const (
 	causeGitLink       = "it has the link %s, and git would read and write through that link"
 	causeHardLink      = "it has the hard link %s, and a write to it would change another file"
 	causeCommonDir     = "its .git has a commondir file, which makes git read the configuration of another repository"
+	causeNoGitPart     = "its .git has no %s, so git would take a folder above it for the repository"
 	textFetched        = "qory run: fetched %s at %s in %s"
 	textFetchedOne     = "qory run: fetched %s at %s and 1 further repository in %s"
 	textFetchedMany    = "qory run: fetched %s at %s and %d further repositories in %s"
@@ -682,9 +683,14 @@ func hostRunner(p *proxygit.Proxy) gitRunner { return hostRunnerWith(p, "") }
 // hostRunnerWith is [hostRunner] with input on git's stdin and env added to its
 // environment.
 func hostRunnerWith(p *proxygit.Proxy, input string, env ...string) gitRunner {
+	return hostRunnerOf(p, nil, input, env)
+}
+
+// hostRunnerOf is [hostRunnerWith] with options added to git's options.
+func hostRunnerOf(p *proxygit.Proxy, options []string, input string, env []string) gitRunner {
 	return func(ctx context.Context, dir string, args ...string) (string, error) {
 		return runGit(ctx, p, func(ctx context.Context) (*exec.Cmd, error) {
-			full := append(append(slices.Clone(hardened), protocols...), args...)
+			full := slices.Concat(hardened, protocols, options, args)
 			cmd, err := hostgit.Unchecked(ctx, dir, hostgit.Base(ctx), full...)
 			if err != nil {
 				return nil, err

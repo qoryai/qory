@@ -70,6 +70,24 @@ var (
 	pushRejected  = regexp.MustCompile(`\[remote rejected\]`)
 )
 
+// noRemote is the proxy of a git of the push step that reaches no remote: it has the
+// environment of a git with a proxy, with no password in it.
+var noRemote = &proxygit.Proxy{}
+
+// noMaintenance are the options of a git of the push step: git commit would otherwise
+// start maintenance in the background on this machine, which outlives the step.
+var noMaintenance = []string{"-c", "gc.auto=0", "-c", "maintenance.auto=false"}
+
+// stepGit runs a git of the push step, as [hostRunnerWith] does, with [noMaintenance] and
+// with GIT_CEILING_DIRECTORIES at the parent of the repository's folder, so git takes no
+// folder above it for the repository.
+func stepGit(p *proxygit.Proxy, input string, env ...string) gitRunner {
+	return func(ctx context.Context, dir string, args ...string) (string, error) {
+		ceiling := "GIT_CEILING_DIRECTORIES=" + filepath.Dir(dir)
+		return hostRunnerOf(p, noMaintenance, input, append(slices.Clone(env), ceiling))(ctx, dir, args...)
+	}
+}
+
 // Push commits what the agent left in each repository of b, in dir, the working folder,
 // and pushes each repository whose HEAD is past its [WorkRepository.Commit] to the branch
 // b.Ref as a fast-forward, by the URL qory builds, through the run's host proxy p. It
@@ -117,10 +135,10 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 	}
 	heads := make([]string, len(b.Repositories))
 	for i, r := range b.Repositories {
-		if err := commitLeft(ctx, &p, folders[i], b.setupChanges[r.Dir], message); err != nil {
+		if err := commitLeft(ctx, folders[i], b.setupChanges[r.Dir], message); err != nil {
 			return nil, fmt.Errorf(textNoCommitLeft, shownPath(r.Path), integration.Printable(exports.HideURLError(err).Error()))
 		}
-		if heads[i], err = headPast(ctx, hostRunner(&p), folders[i], r); err != nil {
+		if heads[i], err = headPast(ctx, stepGit(noRemote, ""), folders[i], r); err != nil {
 			return nil, err
 		}
 	}
@@ -130,7 +148,7 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 		if heads[i] == "" {
 			continue
 		}
-		if err := pushTo(ctx, hostRunner(&p), folders[i], b, r, heads[i], report); err != nil {
+		if err := pushTo(ctx, stepGit(&p, ""), folders[i], b, r, heads[i], report); err != nil {
 			if len(b.pushed) > 0 {
 				return nil, fmt.Errorf(textPushedNoVersion, b.VersionWays(), b.PushedPaths(), strings.TrimPrefix(err.Error(), "qory run: "))
 			}
@@ -207,8 +225,8 @@ func shownPath(path string) string { return integration.Printable(exports.Value(
 // and ignored files, but [leftOut]'s: the index starts from HEAD, so what the agent
 // staged counts only through the file it left. With no such path, or none that differs
 // from HEAD once git added it, nothing is committed.
-func commitLeft(ctx context.Context, p *proxygit.Proxy, dir string, setup map[string]string, message string) error {
-	git := hostRunner(p)
+func commitLeft(ctx context.Context, dir string, setup map[string]string, message string) error {
+	git := stepGit(noRemote, "")
 	changed, err := changedPaths(ctx, git, dir)
 	if err != nil {
 		return err
@@ -229,7 +247,7 @@ func commitLeft(ctx context.Context, p *proxygit.Proxy, dir string, setup map[st
 	if _, err := git(ctx, dir, "reset", "--quiet"); err != nil {
 		return err
 	}
-	add := hostRunnerWith(p, paths.String())
+	add := stepGit(noRemote, paths.String())
 	if _, err := add(ctx, dir, "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
 		return err
 	}
@@ -239,15 +257,17 @@ func commitLeft(ctx context.Context, p *proxygit.Proxy, dir string, setup map[st
 	} else if ge := (*gitError)(nil); !errors.As(err, &ge) || ge.exit != 1 {
 		return err
 	}
-	commit := hostRunnerWith(p, "", "GIT_AUTHOR_NAME="+commitName, "GIT_AUTHOR_EMAIL="+commitEmail, "GIT_COMMITTER_NAME="+commitName, "GIT_COMMITTER_EMAIL="+commitEmail)
+	commit := stepGit(noRemote, "", "GIT_AUTHOR_NAME="+commitName, "GIT_AUTHOR_EMAIL="+commitEmail, "GIT_COMMITTER_NAME="+commitName, "GIT_COMMITTER_EMAIL="+commitEmail)
 	_, err = commit(ctx, dir, "commit", "--quiet", "--no-verify", "--no-gpg-sign", "-m", message)
 	return err
 }
 
 // changedPaths is each path git status lists in dir, with no rename, so a moved file is
-// two paths.
+// two paths. With a gitlink, .gitmodules can make git status run git status in the
+// repository there, and with it what that repository's configuration names, which no
+// check read: --ignore-submodules=all wins over .gitmodules.
 func changedPaths(ctx context.Context, git gitRunner, dir string) ([]string, error) {
-	status, err := git(ctx, dir, "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames")
+	status, err := git(ctx, dir, "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--ignore-submodules=all")
 	if err != nil {
 		return nil, err
 	}
@@ -284,15 +304,15 @@ func leftOut(dir, path string, setup map[string]string) (bool, error) {
 // repository of b, in dir, the working folder, for [Push]. A caller runs it
 // after the setup and before the session joins, under the hold of a walled run's record.
 // [safeFurther] comes first, since the setup could write each .git and git status runs a
-// filter that .git/config has. git runs with the empty proxy's environment, as in [Push],
-// so both read the same list of ignored files.
+// filter that .git/config has. git runs as in [Push], so both read the same list of
+// ignored files.
 func RecordSetup(ctx context.Context, dir string, base []string, b *WorkBranch) error {
 	ctx = hostgit.WithBase(ctx, proxygit.Env(base, nil))
 	dir, err := filepath.Abs(dir)
 	if err != nil {
 		return local(err)
 	}
-	git := hostRunner(&proxygit.Proxy{})
+	git := stepGit(noRemote, "")
 	b.setupChanges = make(map[string]map[string]string, len(b.Repositories))
 	for _, r := range b.Repositories {
 		folder := filepath.Join(dir, filepath.FromSlash(r.Dir))
@@ -394,7 +414,7 @@ func pushTo(ctx context.Context, git gitRunner, dir string, b *WorkBranch, r Wor
 	}
 	var ge *gitError
 	if errors.As(err, &ge) {
-		printFailedPush(ctx, git, dir, r, head, ge.output, report)
+		printFailedPush(ctx, stepGit(noRemote, ""), dir, r, head, ge.output, report)
 	}
 	return pushFailed(b, r.Path, err)
 }

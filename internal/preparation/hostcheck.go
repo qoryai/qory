@@ -66,7 +66,27 @@ func safeAfterRun(ctx context.Context, dir string) (*places.Hold, error) {
 // builds, the keys and the files are checked, and every git qory runs here has replace
 // refs and the commit-graph off. The caller holds the working folder that contains dir.
 func safeFurther(ctx context.Context, dir string) error {
-	return keysOf(ctx, filepath.Join(dir, ".git"), true)
+	gitDir := filepath.Join(dir, ".git")
+	if err := gitParts(gitDir); err != nil {
+		return err
+	}
+	return keysOf(ctx, gitDir, true)
+}
+
+// gitParts stops on a git directory without HEAD, objects or refs: git does not take such
+// a directory for a repository, and goes on to the folders above it.
+func gitParts(gitDir string) error {
+	for _, name := range []string{"HEAD", "objects", "refs"} {
+		_, err := os.Lstat(filepath.Join(gitDir, name))
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			cause := fmt.Sprintf(causeNoGitPart, name)
+			return &unsafeError{cause, cause}
+		case err != nil:
+			return local(err)
+		}
+	}
+	return nil
 }
 
 // unsafeError is a stop of [safeRepository]. Its text is the line for a run that has not
@@ -80,6 +100,11 @@ func checkedRepository(ctx context.Context, dir string, fetched bool) (*places.H
 	gitDir := filepath.Join(dir, ".git")
 	if _, err := gitFiles(gitDir); err != nil {
 		return nil, err
+	}
+	if fetched {
+		if err := gitParts(gitDir); err != nil {
+			return nil, err
+		}
 	}
 	if err := qoryFiles(dir); err != nil {
 		return nil, err

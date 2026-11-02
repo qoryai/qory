@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/qoryai/qory/internal/branchformat"
 )
@@ -570,4 +571,91 @@ func TestNoOtherLockIsRemoved(t *testing.T) {
 			t.Errorf("the other lock is gone: %v", err)
 		}
 	})
+}
+
+// TestAGitlinkOfAnotherRepositoryRunsNoProgram is a repository in the working folder with a
+// clean filter in its configuration, which no check reads, as a staged and as a committed
+// gitlink, with .gitmodules that turn the ignoring of a dirty gitlink off.
+func TestAGitlinkOfAnotherRepositoryRunsNoProgram(t *testing.T) {
+	for name, c := range map[string]struct{ gitmodules, committed bool }{
+		"staged":                 {},
+		"committed":              {committed: true},
+		"staged, .gitmodules":    {gitmodules: true},
+		"committed, .gitmodules": {gitmodules: true, committed: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir, b := onBranch(t, "acme/shop")
+			canary := filepath.Join(t.TempDir(), "canary")
+			sub := filepath.Join(dir, "sub")
+			if err := os.Mkdir(sub, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			run(t, sub, "init", "--quiet", "-b", "main")
+			write(t, filepath.Join(sub, "f"), "f\n")
+			write(t, filepath.Join(sub, ".gitattributes"), "f filter=x\n")
+			run(t, sub, "add", "-A")
+			run(t, sub, "commit", "--quiet", "-m", "sub")
+			program := filepath.Join(sub, ".git", "program.sh")
+			write(t, program, "#!/bin/sh\nenv > "+canary+"\ncat\n")
+			if err := os.Chmod(program, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			run(t, sub, "config", "filter.x.clean", ".git/program.sh")
+			later := time.Now().Add(time.Hour)
+			if err := os.Chtimes(filepath.Join(sub, "f"), later, later); err != nil {
+				t.Fatal(err)
+			}
+			run(t, dir, "update-index", "--add", "--cacheinfo", "160000,"+run(t, sub, "rev-parse", "HEAD")+",sub")
+			if c.gitmodules {
+				write(t, filepath.Join(dir, ".gitmodules"), "[submodule \"sub\"]\n\tpath = sub\n\turl = https://git.example.com/acme/sub.git\n\tignore = none\n")
+				run(t, dir, "add", ".gitmodules")
+			}
+			if c.committed {
+				run(t, dir, "commit", "--quiet", "-m", "sub")
+			}
+			pushOf(dir, b)
+			if _, err := os.Stat(canary); err == nil {
+				t.Error("a program in the repository in the working folder ran")
+			}
+		})
+	}
+}
+
+// TestAGitWithoutPartsStopsBeforeAnyGit is a .git that git does not take for a repository,
+// in a working folder inside another repository: the check stops, and nothing is
+// committed in the repository above it.
+func TestAGitWithoutPartsStopsBeforeAnyGit(t *testing.T) {
+	for _, part := range []string{"HEAD", "objects", "refs"} {
+		inEachRepository(t, func(t *testing.T, dir, folder string, b *WorkBranch, _ string) {
+			parent := filepath.Dir(dir)
+			run(t, parent, "init", "--quiet", "-b", "main")
+			write(t, filepath.Join(parent, "above.txt"), "above\n")
+			run(t, parent, "add", "above.txt")
+			run(t, parent, "commit", "--quiet", "-m", "above")
+			before := run(t, parent, "rev-parse", "HEAD")
+			if err := os.RemoveAll(filepath.Join(folder, ".git", part)); err != nil {
+				t.Fatal(err)
+			}
+			_, _, err := pushOf(dir, b)
+			if err == nil || !strings.Contains(err.Error(), "its .git has no "+part) {
+				t.Fatalf("the error is %v", err)
+			}
+			if got := run(t, parent, "rev-parse", "HEAD"); got != before {
+				t.Errorf("the repository above moved to %s", got)
+			}
+		})
+	}
+}
+
+// TestAStepGitTakesNoFolderAbove is a git of the step in a folder with no repository, in a
+// folder with one: git fails, and reads nothing above the folder.
+func TestAStepGitTakesNoFolderAbove(t *testing.T) {
+	dir, _ := onBranch(t, "acme/shop")
+	inner := filepath.Join(dir, "inner")
+	if err := os.Mkdir(inner, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := stepGit(noRemote, "")(context.Background(), inner, "rev-parse", "--git-dir"); err == nil {
+		t.Errorf("git found a repository at %s", got)
+	}
 }

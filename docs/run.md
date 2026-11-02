@@ -1993,7 +1993,8 @@ The step does this, in order:
 1. qory checks each repository again, because the agent could write to each `.git`. The
    check stops on a key in a configuration file in `.git` that neither `git init` nor the
    fetch writes, on such a file that is not a regular file, on `alternates`, on a
-   `commondir` file, and on a link or a hard link in `.git`. A walled run's target also
+   `commondir` file, on a `.git` with no `HEAD`, `objects` or `refs`, and on a link or a
+   hard link in `.git`. A walled run's target also
    gets the settings check of the place the run used.
 2. qory removes `.git/index.lock` of each repository, a file that an agent killed in a git
    command leaves behind, and prints `qory run: removed .git/index.lock of <path>, which the

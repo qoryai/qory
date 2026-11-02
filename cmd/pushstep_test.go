@@ -1103,8 +1103,9 @@ func TestAPushOverOneMebibyteThroughTheProxy(t *testing.T) {
 }
 
 // recordGit puts a git on the PATH that adds one line for each call to the file it
-// returns, and then runs the git it replaced: GIT_CONFIG_NOSYSTEM, GIT_CONFIG_GLOBAL, and
-// the arguments, separated by |. A call with no system or no global setting off reads
+// returns, and then runs the git it replaced: GIT_CONFIG_NOSYSTEM, GIT_CONFIG_GLOBAL, the
+// first value of git's configuration from the environment, which is the proxy's URL,
+// GIT_CEILING_DIRECTORIES, and the arguments, separated by |. A call with no system or no global setting off reads
 // the file config in place of the file of this machine, so a step that loses those
 // settings fails the test and never reaches a credential helper of this machine, such
 // as one that opens a window on the desktop.
@@ -1117,7 +1118,7 @@ func recordGit(t *testing.T, config string) string {
 	calls := filepath.Join(tempDir(t), "calls")
 	writeFile(t, calls, "")
 	bin := tempDir(t)
-	script := "#!/bin/sh\nprintf '%s|%s|%s\\n' \"$GIT_CONFIG_NOSYSTEM\" \"$GIT_CONFIG_GLOBAL\" \"$*\" >> " + calls + "\n" +
+	script := "#!/bin/sh\nprintf '%s|%s|%s|%s|%s\\n' \"$GIT_CONFIG_NOSYSTEM\" \"$GIT_CONFIG_GLOBAL\" \"$GIT_CONFIG_VALUE_0\" \"$GIT_CEILING_DIRECTORIES\" \"$*\" >> " + calls + "\n" +
 		"if [ \"$GIT_CONFIG_NOSYSTEM\" != 1 ]; then GIT_CONFIG_SYSTEM=" + config + "; export GIT_CONFIG_SYSTEM; fi\n" +
 		"GIT_CONFIG_GLOBAL=${GIT_CONFIG_GLOBAL:-" + config + "}; export GIT_CONFIG_GLOBAL\n" +
 		"exec " + real + " \"$@\"\n"
@@ -1190,22 +1191,35 @@ func TestEveryGitOfThePushStepIsHardened(t *testing.T) {
 			}
 			seen := map[string]bool{}
 			for line := range strings.Lines(step) {
-				parts := strings.SplitN(strings.TrimSuffix(line, "\n"), "|", 3)
-				if len(parts) != 3 {
-					t.Fatalf("the line %q has no three parts", line)
+				parts := strings.SplitN(strings.TrimSuffix(line, "\n"), "|", 5)
+				if len(parts) != 5 {
+					t.Fatalf("the line %q has no five parts", line)
 				}
-				nosystem, global, args := parts[0], parts[1], strings.Fields(parts[2])
+				nosystem, global, proxy, ceiling, all := parts[0], parts[1], parts[2], parts[3], parts[4]
+				args := strings.Fields(all)
 				if nosystem != "1" || global != os.DevNull {
-					t.Errorf("git %s has GIT_CONFIG_NOSYSTEM=%q and GIT_CONFIG_GLOBAL=%q", parts[2], nosystem, global)
+					t.Errorf("git %s has GIT_CONFIG_NOSYSTEM=%q and GIT_CONFIG_GLOBAL=%q", all, nosystem, global)
 				}
 				sub := subcommand(args)
 				seen[sub] = true
-				hostgitCheck := walled && (slices.Contains(args, "--path-format=absolute") || sub == "config" && !strings.Contains(parts[2], "--name-only"))
-				if hostgitCheck {
+				if strings.Contains(proxy, "@") && sub != "push" {
+					t.Errorf("git %s reaches no remote and has the password of the proxy %q", all, proxy)
+				}
+				keyList := sub == "config" && strings.Contains(all, "--name-only")
+				if walled && (slices.Contains(args, "--path-format=absolute") || sub == "config" && !keyList) {
 					continue
 				}
 				if !strings.Contains(strings.Join(args, " "), strings.Join(proxygit.Hardened, " ")) {
-					t.Errorf("git %s has no options %v", parts[2], proxygit.Hardened)
+					t.Errorf("git %s has no options %v", all, proxygit.Hardened)
+				}
+				if keyList {
+					continue
+				}
+				if ceiling == "" {
+					t.Errorf("git %s has no GIT_CEILING_DIRECTORIES", all)
+				}
+				if !strings.Contains(all, "-c gc.auto=0 -c maintenance.auto=false") {
+					t.Errorf("git %s has no maintenance options", all)
 				}
 			}
 			for _, want := range []string{"config", "status", "reset", "add", "diff", "commit", "rev-parse", "merge-base", "push"} {
