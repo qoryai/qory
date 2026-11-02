@@ -2381,8 +2381,8 @@ down stops `qory artifact pull` and a push outside a run with exit 1. In a run, 
 stored the version by that point, so it keeps no local copy, prints a line on standard
 error, and exits 0. A write replaces a link at a file's path, and never follows it.
 
-With a home in the checkout and no `--runtime`, `qory harness remove` deletes the directory
-with the rest of `.qory`.
+With a home in the checkout, `qory harness remove` deletes the directory with the rest of
+`.qory`. `--runtime` does the same when it removes the last composed runtime.
 
 The client sends a POST once. If the response is lost, the version may be stored: read the
 artifact index with `qory artifact pull` before you push again.

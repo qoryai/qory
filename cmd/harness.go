@@ -1988,8 +1988,9 @@ func newRemove(use string, aliases ...string) *cobra.Command {
 		Use:     use,
 		Aliases: aliases,
 		Short:   "Remove the harness and its links from the checkout",
-		Long: `Remove the composed harness and its links from the checkout. Without --runtime, a home in the
-checkout goes with the whole .qory directory, also .qory/artifacts and .qory/work-item.json.
+		Long: `Remove the composed harness and its links from the checkout. A home in the checkout goes with
+the whole .qory directory, also .qory/artifacts and .qory/work-item.json. --runtime does the
+same when it removes the last composed runtime.
 
 A home outside the checkout, under --home or harness.home, is removed with its report.
 The checkout is not touched: nothing was written there.`,
@@ -2042,7 +2043,7 @@ The checkout is not touched: nothing was written there.`,
 			return unlinkErr
 		},
 	}
-	c.Flags().StringVar(&runtime, "runtime", "", "remove this runtime's links and directory only, and keep the rest composed")
+	c.Flags().StringVar(&runtime, "runtime", "", "remove this runtime's links and directory only, and keep the rest composed; the last composed runtime removes the whole home")
 	homeFlags(c, &h)
 	return c
 }
