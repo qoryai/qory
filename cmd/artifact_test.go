@@ -708,18 +708,21 @@ func TestArtifactPushOverTheRunAPILimitReadsNoFile(t *testing.T) {
 }
 
 func TestArtifactPushInARunWithNoWorkItem(t *testing.T) {
-	for name, body := range map[string]string{
-		"the run API's response": `{"error":"not_found"}`,
-		"the gateway's response": `{"error":"not_found","message":"Check the run id."}`,
+	for name, c := range map[string]struct{ body, want string }{
+		"Qory Apiary's response": {
+			`{"error":"not_found"}`,
+			"Start the run from a work item in Qory Apiary: Qory Apiary found no work item for this run.",
+		},
+		"the gateway's response": {`{"error":"not_found","message":"Check the run id."}`, "Check the run id."},
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := inCheckout(t)
 			server := startRunAPI(t)
 			server.status = http.StatusNotFound
-			server.response = body
+			server.response = c.body
 
 			_, err := runIn(t, "text", "artifact", "push", "doc", "-")
-			wantExit(t, err, 1, "Start the run from a work item in Qory Apiary: Qory Apiary found no work item for this run.")
+			wantExit(t, err, 1, c.want)
 
 			if _, err := os.Stat(filepath.Join(root, ".qory", "artifacts", "doc")); !os.IsNotExist(err) {
 				t.Errorf("kept a copy: %v", err)

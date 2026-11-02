@@ -576,7 +576,9 @@ func sendPush(c *cobra.Command, client *runapi.Client, push runapi.Push, sources
 	}
 
 	pushed, err := client.PushArtifact(c.Context(), push)
-	if runapi.HasCode(err, runapi.CodeNotFound) {
+	// A not_found with a message comes from the gateway's route, and never reached Qory Apiary.
+	var apiError *runapi.Error
+	if errors.As(err, &apiError) && apiError.Code == runapi.CodeNotFound && apiError.Message == "" {
 		return errors.New(noWorkItemInRunText)
 	}
 
