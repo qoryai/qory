@@ -465,11 +465,14 @@ A custom type has `base_view`, `size_limit` and `max_files`. qory has no list of
 types: a name alone passes for any name of the right form.
 
 A `json_schema` is an object that compiles as a JSON Schema. It is draft 2020-12 unless its
-`$schema` sets draft-07, the only other draft. A reference to anything outside the schema
-fails, and qory reads no file or URL for one. A `pattern` is a Go regular expression
-(RE2). A `json_schema` has at most 65,536 bytes as compact JSON, 4096 values in all,
+`$schema` sets draft-07, the only other draft. A reference to a file or URL fails when the
+schema reaches it, and qory reads no file or URL for one. The JSON Schema metaschemas are
+built in, so a reference to one passes. A `pattern` is a Go regular expression (RE2). A
+`json_schema` has at most 65,536 bytes as compact JSON, 4096 values in all,
 1024 entries in a list, 1024 members in an object, 16,384 bytes in a string or a member
-name, and 64 lists and objects nested in one another.
+name, and 64 lists and objects nested in one another. The patterns of all custom types in
+one `process.yaml` take at most 16 MiB once compiled, as qory estimates it from each
+pattern's parts: a group repeated 1000 times counts 1000 times.
 
 An entry that breaks a rule stops the command with one line, which starts with the file
 and then the fix:
@@ -496,8 +499,8 @@ is version 1 of the format ([branch.schema.json](branch.schema.json)):
 | `path` | the repository's path on the host: at most 200 characters of segments joined by slashes, with no `.`, `..` or `.git` segment |
 | `commit` | a full commit id, 40 or 64 lower-case hexadecimal digits |
 
-A document has no other member. A software factory uses the format as the JSON Schema of
-a custom artifact type in its `process.yaml`:
+A document has no other member. A software factory can use the format as the JSON Schema
+of a custom artifact type in its `process.yaml`:
 
 ```yaml
 artifact_types:

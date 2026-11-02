@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -415,6 +416,11 @@ func TestVerifyPassesArtifactTypes(t *testing.T) {
 		custom("structured", "size_limit: 1, max_files: 1, json_schema: {$schema: 'https://json-schema.org/draft/2020-12/schema', type: object}"),
 		custom("structured", "size_limit: 1, max_files: 1, json_schema: {$defs: {a: {type: string}}, properties: {a: {$ref: '#/$defs/a'}}}"),
 		custom("structured", "size_limit: 1, max_files: 1, json_schema: {const: 2026-11-02}"),
+		// The metaschemas are built in, and a reference the schema does not reach is not
+		// followed.
+		custom("structured", "size_limit: 1, max_files: 1, json_schema: {$ref: 'https://json-schema.org/draft/2020-12/schema'}"),
+		custom("structured", "size_limit: 1, max_files: 1, json_schema: {$ref: 'http://json-schema.org/draft-07/schema'}"),
+		custom("structured", "size_limit: 1, max_files: 1, json_schema: {$defs: {a: {$ref: 'https://schema.example/a.json'}}}"),
 	} {
 		if err := factory(t, withTypes(body)).Verify(); err != nil {
 			t.Errorf("%q: %v", body, err)
@@ -437,6 +443,8 @@ func TestVerifyChecksArtifactTypes(t *testing.T) {
 		{"\n  - {name: 3}", "set the name of entry 1 of artifact_types to a string of lowercase letters and digits in groups joined by single hyphens: the name is a number"},
 		{"\n  - {name: [a]}", "set the name of entry 1 of artifact_types to a string of lowercase letters and digits in groups joined by single hyphens: the name is a list"},
 		{"\n  - {name: ~}", "set the name of entry 1 of artifact_types to a string of lowercase letters and digits in groups joined by single hyphens: the name is null"},
+		{"\n  - {name: 2026-11-02}", `set the name of entry 1 of artifact_types to a quoted string: YAML reads "2026-11-02" as a type that is not a string`},
+		{"\n  - {name: !!binary aGk=}", `set the name of entry 1 of artifact_types to a quoted string: YAML reads "aGk=" as a type that is not a string`},
 		{"\n  - {name: \"\"}", `set the name of entry 1 of artifact_types to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes: the name is ""`},
 		{"\n  - {name: a--b}", `set the name of entry 1 of artifact_types to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes: the name is "a--b"`},
 		{"\n  - {name: -a}", `set the name of entry 1 of artifact_types to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes: the name is "-a"`},
@@ -462,6 +470,8 @@ func TestVerifyChecksArtifactTypes(t *testing.T) {
 		{custom("file", `size_limit: "1", max_files: 1`), "set size_limit of " + name + " to a whole number from 1 to 1073741824, the most for base_view file: size_limit is a string"},
 		{custom("file", "size_limit: ~, max_files: 1"), "set size_limit of " + name + " to a whole number from 1 to 1073741824, the most for base_view file: size_limit is null"},
 		{custom("file", "size_limit: 99999999999999999999999, max_files: 1"), "set size_limit of " + name + " to a whole number from 1 to 1073741824, the most for base_view file: size_limit is 99999999999999999999999"},
+		{custom("file", `size_limit: !!int "1\n/src/process.yaml: all checks passed", max_files: 1`), "set size_limit of " + name + ` to a whole number from 1 to 1073741824, the most for base_view file: size_limit is "1\n/src/process.yaml: all checks passed"`},
+		{custom("file", `size_limit: 1, max_files: !!float "1\n/src/process.yaml: all checks passed"`), "set max_files of " + name + ` to a whole number from 1 to 20: max_files is "1\n/src/process.yaml: all checks passed"`},
 		{custom("file", "size_limit: 1, max_files: 0"), "set max_files of " + name + " to a whole number from 1 to 20: max_files is 0"},
 		{custom("file", "size_limit: 1, max_files: 21"), "set max_files of " + name + " to a whole number from 1 to 20: max_files is 21"},
 		{custom("structured", "size_limit: 1, max_files: 2, json_schema: {}"), "set max_files of " + name + " to 1: a structured type has one file, and max_files is 2"},
@@ -474,6 +484,7 @@ func TestVerifyChecksArtifactTypes(t *testing.T) {
 		{custom("structured", structured+"{1: a}"), `quote the key "1" in json_schema of ` + name + ": a JSON key is a string"},
 		{custom("structured", structured+"{a: 1, a: 2}"), `remove the second "a" from its object in json_schema of ` + name + ": the object has the key twice"},
 		{custom("structured", structured+"{const: .inf}"), "replace .inf in json_schema of " + name + " with a JSON number: JSON has no such number"},
+		{custom("structured", structured+"{const: !!int a}"), `replace "a" in json_schema of ` + name + " with a JSON value: the value does not decode as !!int"},
 		{custom("structured", structured+"{$schema: 'http://json-schema.org/draft-04/schema#'}"), `set $schema in json_schema of ` + name + ` to https://json-schema.org/draft/2020-12/schema or http://json-schema.org/draft-07/schema, or remove it: $schema is "http://json-schema.org/draft-04/schema#"`},
 		{custom("structured", structured+"{$schema: 3}"), `set $schema in json_schema of ` + name + ` to https://json-schema.org/draft/2020-12/schema or http://json-schema.org/draft-07/schema, or remove it: $schema is "3"`},
 		{custom("structured", structured+"{type: objekt}"), "fix json_schema of " + name + " so that it compiles as a JSON Schema: at '/type': value must be one of 'array', 'boolean', 'integer', 'null', 'number', 'object', 'string'; at '/type': got string, want array"},
@@ -592,11 +603,84 @@ func TestVerifyHidesASecretInArtifactTypes(t *testing.T) {
 		"\n  - {name: a-type, base_view: structured, size_limit: 1, max_files: 1, json_schema: {$ref: '" + secret + "'}}",
 		"\n  - {name: a-type, base_view: structured, size_limit: 1, max_files: 1, json_schema: {type: " + secret + "}}",
 		"\n  - {name: a-type, base_view: structured, size_limit: 1, max_files: 1, json_schema: {pattern: '(" + secret + "'}}",
+		"\n  - {name: !!binary " + secret + "}",
+		"\n  - {name: a-type, base_view: file, size_limit: !!int " + secret + ", max_files: 1}",
+		"\n  - {name: a-type, base_view: file, size_limit: !!float " + secret + ", max_files: 1}",
+		"\n  - {name: a-type, base_view: file, size_limit: 1, max_files: !!int " + secret + "}",
+		"\n  - {name: a-type, base_view: structured, size_limit: 1, max_files: !!int " + secret + ", json_schema: {}}",
+		"\n  - {name: a-type, base_view: structured, size_limit: 1, max_files: 1, json_schema: {const: !!int " + secret + "}}",
+		"\n  - {name: a-type, base_view: structured, size_limit: 1, max_files: 1, json_schema: {const: !!float " + secret + "}}",
+		"\n  - {name: a-type, base_view: structured, size_limit: 1, max_files: 1, json_schema: {const: !!bool " + secret + "}}",
+		"\n  - {name: a-type, base_view: structured, size_limit: 1, max_files: 1, json_schema: {const: !!null " + secret + "}}",
 	} {
 		err := factory(t, withTypes(body)).Verify()
 		if err == nil || strings.Contains(err.Error(), secret) {
 			t.Errorf("%q: %v", body, err)
 		}
+	}
+}
+
+// structuredWith is an entry of artifact_types, a structured type with the name and the
+// JSON Schema in flow style.
+func structuredWith(name, schema string) string {
+	return "\n  - {name: " + name + ", base_view: structured, size_limit: 65536, max_files: 1, json_schema: " + schema + "}"
+}
+
+// repeated is a pattern of n copies of text, in a group repeated 1000 times.
+func repeated(n int, text string) string {
+	return "(?:" + strings.Repeat(text, n) + "){1000}"
+}
+
+// TestVerifyBoundsThePatterns is the limit on compiled patterns: the most that passes,
+// one character more, and the limit shared by the entries of a file, in each place a
+// pattern can be. The message starts with the fix.
+func TestVerifyBoundsThePatterns(t *testing.T) {
+	const fix = "shorten the patterns in json_schema of artifact type "
+	const limit = ": the patterns of all artifact types in the file take at most 16777216 bytes once compiled, and this one brings them to "
+	half := repeated(207, "a")
+	for _, c := range []struct{ body, want string }{
+		{structuredWith("a-type", "{pattern: '"+repeated(417, "a")+"'}"), ""},
+		{structuredWith("a-type", "{pattern: '"+repeated(418, "a")+"'}"), fix + "a-type" + limit + "16801104"},
+		{structuredWith("a-type", "{patternProperties: {'"+repeated(418, "a")+"': {}}}"), fix + "a-type" + limit + "16801104"},
+		{structuredWith("a-type", "{$defs: {x: {pattern: '"+repeated(418, "a")+"'}}}"), fix + "a-type" + limit + "16801104"},
+		{structuredWith("a-type", "{$schema: 'http://json-schema.org/draft-07/schema#', pattern: '"+repeated(418, "a")+"'}"), fix + "a-type" + limit + "16801104"},
+		// The same source twice is compiled once, and two sources count twice.
+		{structuredWith("a-type", "{pattern: '"+repeated(417, "a")+"'}") + structuredWith("b-type", "{pattern: '"+repeated(417, "a")+"'}"), ""},
+		{structuredWith("a-type", "{pattern: '"+half+"'}") + structuredWith("b-type", "{pattern: '"+repeated(208, "b")+"'}"), ""},
+		{structuredWith("a-type", "{pattern: '"+half+"'}") + structuredWith("b-type", "{pattern: '"+repeated(209, "b")+"'}"), fix + "b-type" + limit + "16802208"},
+	} {
+		e := factory(t, withTypes(c.body))
+		err := e.Verify()
+		file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
+		if c.want == "" && err != nil {
+			t.Errorf("%.80s: %v", c.body, err)
+		}
+		if c.want != "" && (err == nil || err.Error() != file+": "+c.want) {
+			t.Errorf("%.80s: %v\nwant %s", c.body, err, c.want)
+		}
+	}
+}
+
+// TestVerifyCompilesNoPatternPastTheLimit is a small process.yaml within every limit of a
+// JSON Schema: 18 patterns of about 3300 characters, each in a group repeated 1000 times,
+// which compile to 128 MiB each. The check stops before it compiles them, so the bytes
+// it allocates stay far under the 2.3 GiB they would take once.
+func TestVerifyCompilesNoPatternPastTheLimit(t *testing.T) {
+	var body strings.Builder
+	for i := range 18 {
+		name := fmt.Sprintf("a-type-%d", i)
+		body.WriteString(structuredWith(name, "{pattern: '"+repeated(3300, string(rune('a'+i)))+"'}"))
+	}
+	e := factory(t, withTypes(body.String()))
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	err := e.Verify()
+	runtime.ReadMemStats(&after)
+	if err == nil || strings.Count(err.Error(), "\n") != 17 || !strings.Contains(err.Error(), "shorten the patterns in json_schema of artifact type a-type-17: ") {
+		t.Errorf("%.300v", err)
+	}
+	if used := after.TotalAlloc - before.TotalAlloc; used > 64<<20 {
+		t.Errorf("the check allocated %d bytes, and the limit is 64 MiB", used)
 	}
 }
 

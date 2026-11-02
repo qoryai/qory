@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"regexp/syntax"
 	"slices"
 	"strings"
 	"unicode"
@@ -49,6 +50,16 @@ const (
 	maxSchemaDepth   = 64
 )
 
+// The limit of the patterns of all custom types in one process.yaml: the most bytes they
+// take once compiled, as [patternBudget] estimates them. A pattern takes a fixed part,
+// and one [syntax.Inst] of 40 bytes for each instruction, a repeat writing its group
+// once for each count. Without the limit, a pattern of a few kilobytes takes 128 MiB.
+const (
+	maxPatternBytes   = 16 << 20
+	patternFixedBytes = 1024
+	patternInstBytes  = 40
+)
+
 // typeSchemaURL is what a custom type's JSON Schema is compiled under: a name no loader
 // resolves, since the schema refers to nothing outside itself.
 const typeSchemaURL = "https://qory.dev/contracts/harness/v1/artifact-type"
@@ -74,8 +85,8 @@ var typeSchemaDrafts = []string{
 
 // checkArtifactTypes checks artifact_types in the process.yaml shown, which may be left
 // out, as [checkArtifactType] checks each entry, and that no two entries have one name.
-// A list with no entries passes. The error has one line for each entry it stops on,
-// each starting with shown.
+// The entries share one [patternBudget]. A list with no entries passes. The error has
+// one line for each entry it stops on, each starting with shown.
 func checkArtifactTypes(shown string, list *yaml.Node) error {
 	if list.Kind == 0 {
 		return nil
@@ -85,8 +96,9 @@ func checkArtifactTypes(shown string, list *yaml.Node) error {
 	}
 	var lines []string
 	first := map[string]int{}
+	patterns := &patternBudget{compiled: map[string]jsonschema.Regexp{}}
 	for i, entry := range list.Content {
-		name, why := checkArtifactType(entry, i)
+		name, why := checkArtifactType(entry, i, patterns)
 		at, twice := first[name]
 		switch {
 		case why != "":
@@ -109,8 +121,8 @@ func checkArtifactTypes(shown string, list *yaml.Node) error {
 // exactly when base_view is structured. It returns the entry's name, "" for none of the
 // right form, and the first thing to fix in the entry, for a message; "" for an entry
 // that passes. qory has no list of standard types, so a name alone passes in any name
-// of the right form.
-func checkArtifactType(entry *yaml.Node, i int) (name, why string) {
+// of the right form. patterns is the budget of the file's patterns.
+func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, why string) {
 	label := fmt.Sprintf("entry %d of artifact_types", i+1)
 	if entry.Kind != yaml.MappingNode {
 		return "", fmt.Sprintf("set %s to an object with a name: the entry is %s", label, nodeKind(entry))
@@ -129,6 +141,10 @@ func checkArtifactType(entry *yaml.Node, i int) (name, why string) {
 	n := value(entry, "name")
 	if n == nil {
 		return "", fmt.Sprintf("add name to %s: the entry has no name", label)
+	}
+	if n.Kind == yaml.ScalarNode && n.Tag != "!!str" && nodeKind(n) == "a string" {
+		// A date or a value with an explicit tag: unquoted, YAML reads it as no string.
+		return "", fmt.Sprintf("set the name of %s to a quoted string: YAML reads %s as a type that is not a string", label, scalarText(n))
 	}
 	if n.Kind != yaml.ScalarNode || n.Tag != "!!str" {
 		return "", fmt.Sprintf("set the name of %s to a string of lowercase letters and digits in groups joined by single hyphens: the name is %s", label, nodeKind(n))
@@ -173,7 +189,7 @@ func checkArtifactType(entry *yaml.Node, i int) (name, why string) {
 	case structured && schema == nil:
 		return name, fmt.Sprintf("add json_schema to %s: a structured type has a JSON Schema", label)
 	case structured:
-		return name, checkTypeSchema(label, schema)
+		return name, checkTypeSchema(label, schema, patterns)
 	}
 	return name, ""
 }
@@ -185,11 +201,16 @@ func wholeNumber(n *yaml.Node, most int64) bool {
 	return n.Kind == yaml.ScalarNode && n.Tag == "!!int" && n.Decode(&v) == nil && v >= 1 && v <= most
 }
 
-// numberText is a limit's value for a message: a number as written, and any other value
-// by its kind.
+// numberText is a limit's value for a message: a number as written, any other value by
+// its kind, and a value tagged as a number that does not decode as one as [scalarText]
+// prints it, since an explicit tag lets any text have that kind.
 func numberText(n *yaml.Node) string {
 	if kind := nodeKind(n); kind != "a number" {
 		return kind
+	}
+	var v any
+	if n.Decode(&v) != nil {
+		return scalarText(n)
 	}
 	return n.Value
 }
@@ -205,9 +226,9 @@ func joinWords(words []string) string {
 
 // checkTypeSchema checks n, the json_schema of the artifact type label, for a message:
 // it is an object, each value has a JSON form, $schema is a draft of [typeSchemaDrafts]
-// or left out, it is within the limits, and it compiles with no file or network read.
-// It returns the fix, "" for a schema that passes.
-func checkTypeSchema(label string, n *yaml.Node) string {
+// or left out, it is within the limits, its patterns are within patterns, and it
+// compiles with no file or network read. It returns the fix, "" for a schema that passes.
+func checkTypeSchema(label string, n *yaml.Node, patterns *patternBudget) string {
 	if n.Kind != yaml.MappingNode {
 		return fmt.Sprintf("set json_schema of %s to an object, a JSON Schema: json_schema is %s", label, nodeKind(n))
 	}
@@ -232,7 +253,10 @@ func checkTypeSchema(label string, n *yaml.Node) string {
 	if size := compact.Len() - 1; size > maxSchemaBytes {
 		return fmt.Sprintf("shorten %s to at most %d bytes of JSON: it has %d", where, maxSchemaBytes, size)
 	}
-	if err := compileTypeSchema(compact.Bytes()); err != nil {
+	if err := compileTypeSchema(compact.Bytes(), patterns); err != nil {
+		if patterns.over > 0 {
+			return fmt.Sprintf("shorten the patterns in %s: the patterns of all artifact types in the file take at most %d bytes once compiled, and this one brings them to %d", where, maxPatternBytes, patterns.over)
+		}
 		return fmt.Sprintf("fix %s so that it compiles as a JSON Schema: %s", where, compileReason(err))
 	}
 	return ""
@@ -277,7 +301,7 @@ func jsonValue(n *yaml.Node, where string) (any, string) {
 	case "!!null", "!!bool", "!!int", "!!float":
 		var v any
 		if err := n.Decode(&v); err != nil {
-			return nil, fmt.Sprintf("replace %s in %s with a JSON value: %s", scalarText(n), where, oneLine(err.Error()))
+			return nil, fmt.Sprintf("replace %s in %s with a JSON value: the value does not decode as %s", scalarText(n), where, n.Tag)
 		}
 		if f, isFloat := v.(float64); isFloat && (math.IsInf(f, 0) || math.IsNaN(f)) {
 			return nil, fmt.Sprintf("replace %s in %s with a JSON number: JSON has no such number", n.Value, where)
@@ -330,10 +354,11 @@ func overSchemaLimit(v any, depth int, values *int) string {
 	return ""
 }
 
-// compileTypeSchema compiles a JSON Schema, draft 2020-12 unless $schema sets another.
-// The compiler has no loader, so a reference outside the schema fails and no file or
-// URL is read.
-func compileTypeSchema(schema []byte) error {
+// compileTypeSchema compiles a JSON Schema, draft 2020-12 unless $schema sets another,
+// with its patterns compiled through patterns. The compiler has no loader, so a reference
+// to a file or a URL fails when the schema reaches it, and no file or URL is read. The
+// JSON Schema metaschemas are built into the compiler, so a reference to one passes.
+func compileTypeSchema(schema []byte, patterns *patternBudget) error {
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(schema))
 	if err != nil {
 		return err
@@ -341,11 +366,77 @@ func compileTypeSchema(schema []byte) error {
 	c := jsonschema.NewCompiler()
 	c.DefaultDraft(jsonschema.Draft2020)
 	c.UseLoader(jsonschema.SchemeURLLoader{})
+	c.UseRegexpEngine(patterns.compile)
+	patterns.over = 0
 	if err := c.AddResource(typeSchemaURL, doc); err != nil {
 		return err
 	}
 	_, err = c.Compile(typeSchemaURL)
 	return err
+}
+
+// patternBudget is the regular expression engine of the JSON Schema compiler for one
+// process.yaml. Every pattern the compiler reads goes through compile, in the check
+// against the metaschema and in the schema's compile, so no pattern is compiled past
+// [maxPatternBytes]. Each source is compiled once.
+type patternBudget struct {
+	// used is the estimated bytes of the patterns in compiled.
+	used int64
+	// over is what used would have become with the pattern that passed the limit, 0
+	// when no pattern of the current schema passed it.
+	over int64
+	// compiled has each compiled pattern by its source.
+	compiled map[string]jsonschema.Regexp
+}
+
+// errPatternBudget is the compiler's error for a pattern past the limit. A message uses
+// [patternBudget.over] in its place.
+var errPatternBudget = errors.New("the pattern passes the limit of the file's patterns")
+
+// compile returns source compiled, or the parser's error, or [errPatternBudget] with
+// nothing compiled. The parser keeps a repeat as one node, so it runs for every pattern,
+// and the size of the program comes from its tree before any program is written.
+func (b *patternBudget) compile(source string) (jsonschema.Regexp, error) {
+	if re, done := b.compiled[source]; done {
+		return re, nil
+	}
+	tree, err := syntax.Parse(source, syntax.Perl)
+	if err != nil {
+		return nil, err
+	}
+	total := b.used + patternFixedBytes + patternInstBytes*patternInsts(tree)
+	if total > maxPatternBytes {
+		b.over = total
+		return nil, errPatternBudget
+	}
+	re, err := regexp.Compile(source)
+	if err != nil {
+		return nil, err
+	}
+	b.used = total
+	b.compiled[source] = re
+	return re, nil
+}
+
+// patternInsts is an upper bound on the instructions of the program compiled from re.
+// Rounds up for each node, as [syntax.Regexp.Simplify] and [syntax.Compile] add at most
+// that many for a capture, a star, a plus, a quest or an alternative. A repeat writes
+// its group once for each count, and a character class counts one instruction for each
+// [patternInstBytes] of its ranges.
+func patternInsts(re *syntax.Regexp) int64 {
+	var inner int64
+	for _, sub := range re.Sub {
+		inner += patternInsts(sub) + 1
+	}
+	switch re.Op {
+	case syntax.OpLiteral:
+		return int64(len(re.Rune)) + 1
+	case syntax.OpCharClass:
+		return int64(len(re.Rune))/10 + 2
+	case syntax.OpRepeat:
+		return int64(max(re.Min, re.Max, 1))*inner + 2
+	}
+	return inner + 2
 }
 
 // compileReason is err, the compiler's error, as one line of a message: each rule of the

@@ -29,7 +29,7 @@ release may change what an existing document does, and states it under Upgrading
   Artifact types in `contracts/harness/v1/README.md`.
 - Version 1 of the branch format, `contracts/harness/v1/branch.schema.json`: a work
   item's branch, `qory/<work item id>`, and the commit in each repository. A software
-  factory uses it as the `json_schema` of a custom artifact type `branch`.
+  factory can use it as the `json_schema` of a custom artifact type `branch`.
 - `-f` on `qory harness compose`, `qory run` and `qory worktree add` takes a stack by
   reference, `<https URL>#<ref>:<folder>`: qory fetches the folder as it fetches a git
   module and composes its `qory-stack.yaml`. `examples/hello` has one, so a run takes it
