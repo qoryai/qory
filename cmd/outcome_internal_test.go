@@ -333,28 +333,45 @@ func endsWithin(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-// TestPushContext is the bound of the push step for each way a session stops: a limit
-// not reached ends the step, a spent limit and a signal each leave [pushAfterStop], and a
-// second signal ends the step at once.
+// TestPushContext is the bound of the push step for each way a session stops, with bounds
+// short enough for a test: a limit not reached ends the step, a spent limit leaves
+// afterLimit, a signal leaves afterSignal and cuts a longer time to it, and a second signal
+// ends the step at once.
 func TestPushContext(t *testing.T) {
-	defer func(d time.Duration) { pushAfterStop = d }(pushAfterStop)
-	pushAfterStop = 200 * time.Millisecond
-	const short, sure = 50 * time.Millisecond, 10 * time.Second
-	ended, cancelEnded := context.WithCancel(context.Background())
-	cancelEnded()
+	const (
+		afterLimit  = time.Hour
+		afterSignal = 200 * time.Millisecond
+		short       = 50 * time.Millisecond
+		sure        = 10 * time.Second
+	)
+	signalled, signal := context.WithCancel(context.Background())
+	signal()
 	var none time.Time
+	alive := context.Background()
+	start := func(t *testing.T, ctx, again context.Context, limit time.Time) context.Context {
+		push, done := pushContext(ctx, again, limit, afterLimit, afterSignal)
+		t.Cleanup(done)
+		return push
+	}
+	endsAfterShort := func(t *testing.T, push context.Context) {
+		t.Helper()
+		if endsWithin(push, short) {
+			t.Error("the step ended at once")
+		}
+		if !endsWithin(push, sure) {
+			t.Error("the step did not end")
+		}
+	}
 
 	t.Run("no limit and no stop", func(t *testing.T) {
-		push, done := pushContext(context.Background(), context.Background(), none)
-		defer done()
-		if endsWithin(push, 2*pushAfterStop) {
+		if endsWithin(start(t, alive, alive, none), 2*afterSignal) {
 			t.Error("the step ended with no stop")
 		}
 	})
 	t.Run("a limit ahead", func(t *testing.T) {
-		push, done := pushContext(context.Background(), context.Background(), time.Now().Add(3*pushAfterStop))
+		push, done := pushContext(alive, alive, time.Now().Add(3*afterSignal), afterSignal, afterSignal)
 		defer done()
-		if endsWithin(push, 2*pushAfterStop) {
+		if endsWithin(push, 2*afterSignal) {
 			t.Error("the step ended before the limit")
 		}
 		if !endsWithin(push, sure) {
@@ -362,42 +379,53 @@ func TestPushContext(t *testing.T) {
 		}
 	})
 	t.Run("a spent limit", func(t *testing.T) {
-		push, done := pushContext(context.Background(), context.Background(), time.Now().Add(-time.Hour))
+		push, done := pushContext(alive, alive, time.Now().Add(-time.Hour), afterSignal, time.Hour)
 		defer done()
-		if endsWithin(push, short) {
-			t.Error("the step ended at once")
-		}
-		if !endsWithin(push, sure) {
-			t.Error("the step did not end")
+		endsAfterShort(t, push)
+	})
+	t.Run("less of the limit left than the time after it", func(t *testing.T) {
+		if endsWithin(start(t, alive, alive, time.Now().Add(short)), 3*short) {
+			t.Error("the step ended at the limit")
 		}
 	})
 	t.Run("a signal before the step", func(t *testing.T) {
-		push, done := pushContext(ended, context.Background(), none)
-		defer done()
-		if endsWithin(push, short) {
-			t.Error("the step ended at once")
-		}
-		if !endsWithin(push, sure) {
-			t.Error("the step did not end")
-		}
+		endsAfterShort(t, start(t, signalled, alive, none))
 	})
 	t.Run("a signal during the step", func(t *testing.T) {
-		ctx, stop := context.WithCancel(context.Background())
+		ctx, stop := context.WithCancel(alive)
 		defer stop()
-		push, done := pushContext(ctx, context.Background(), time.Now().Add(time.Hour))
+		push := start(t, ctx, alive, time.Now().Add(time.Hour))
+		stop()
+		endsAfterShort(t, push)
+	})
+	t.Run("a signal after a spent limit cuts the time", func(t *testing.T) {
+		ctx, stop := context.WithCancel(alive)
+		defer stop()
+		push := start(t, ctx, alive, time.Now().Add(-time.Hour))
+		stop()
+		endsAfterShort(t, push)
+	})
+	t.Run("a signal does not lengthen the time left", func(t *testing.T) {
+		ctx, stop := context.WithCancel(alive)
+		defer stop()
+		push, done := pushContext(ctx, alive, time.Now().Add(-time.Hour), short, time.Hour)
 		defer done()
 		stop()
-		if endsWithin(push, short) {
-			t.Error("the step ended at once")
-		}
 		if !endsWithin(push, sure) {
-			t.Error("the step did not end")
+			t.Error("the signal lengthened the time left")
 		}
 	})
 	t.Run("a second signal", func(t *testing.T) {
-		again, second := context.WithCancel(context.Background())
-		push, done := pushContext(ended, again, none)
-		defer done()
+		again, second := context.WithCancel(alive)
+		push := start(t, signalled, again, none)
+		second()
+		if !endsWithin(push, short) {
+			t.Error("the step did not end at once")
+		}
+	})
+	t.Run("a second signal after a spent limit", func(t *testing.T) {
+		again, second := context.WithCancel(alive)
+		push := start(t, alive, again, time.Now().Add(-time.Hour))
 		second()
 		if !endsWithin(push, short) {
 			t.Error("the step did not end at once")
@@ -432,7 +460,6 @@ func TestPushEndingOutcome(t *testing.T) {
 // TestPushEndingLines is the line of a cut step, with and without a push that landed, and
 // the exit status of each end.
 func TestPushEndingLines(t *testing.T) {
-	limit := pushAfterStop.String()
 	succeeded := session.Outcome{State: event.StateSucceeded}
 	failed := session.Outcome{State: event.StateFailed, ExitCode: 3}
 	timedOut := session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}
@@ -444,10 +471,10 @@ func TestPushEndingLines(t *testing.T) {
 		code   int
 	}{
 		{"second signal", pushEnding{session: succeeded, cut: true, stopped: true, again: true, got: "SIGTERM"}, "qory run got a second signal", 1},
-		{"first signal", pushEnding{session: succeeded, cut: true, stopped: true, got: "SIGTERM"}, "qory run got SIGTERM, and the step reached its limit of " + limit, 1},
+		{"first signal", pushEnding{session: succeeded, cut: true, stopped: true, got: "SIGTERM"}, "qory run got SIGTERM, and the step reached its limit of 15s", 1},
 		{"run's limit", pushEnding{session: succeeded, cut: true, limit: time.Hour}, "the run reached its time limit of 1h0m0s", exitTimeout},
 		{"a failed session at the run's limit", pushEnding{session: failed, cut: true, limit: time.Hour}, "the run reached its time limit of 1h0m0s", 3},
-		{"after a timeout", pushEnding{session: timedOut, cut: true, limit: time.Hour}, "the step reached its limit of " + limit, 3},
+		{"after a timeout", pushEnding{session: timedOut, cut: true, limit: time.Hour}, "the step reached its limit of 2m0s", 3},
 	} {
 		var out strings.Builder
 		err := c.ending.ended(ui.New(&out), func(string) {}, errors.New("cut"), &preparation.WorkBranch{}, sessionEnd)

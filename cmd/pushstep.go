@@ -71,11 +71,14 @@ var branchWait = func(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// pushAfterStop is the time the push step has after a stop: at least this much past a
-// time limit that a session used up, and this much from a signal. It fits inside the 30
-// seconds [child.DefaultGrace] gives a pool's run after SIGTERM, with the 10 seconds of a
-// runtime's default stop and the close. It is a variable for the tests.
-var pushAfterStop = 15 * time.Second
+// The time the push step has after a stop. A signal leaves pushAfterSignal: it fits inside
+// the 30 seconds [child.DefaultGrace] gives a pool's run after SIGTERM, with the 10 seconds
+// of a runtime's default stop and the close. Past a run's time limit no process stops
+// qory run, so the step has pushAfterLimit, and the run can pass its limit by that time.
+const (
+	pushAfterSignal = 15 * time.Second
+	pushAfterLimit  = 120 * time.Second
+)
 
 // keepsWork reports whether the run pushes what its agent left: a run from a run code
 // that may write its target, that no workflow or document limits to reading, with a
@@ -89,16 +92,18 @@ func keepsWork(fromCode *codeRun, readOnly bool, branch *preparation.WorkBranch,
 }
 
 // pushContext is the context of the push step: not ended by ctx, which a stop ended
-// already. It ends at limit, or [pushAfterStop] from now when that is later or limit is
-// zero and ctx has ended; [pushAfterStop] after ctx ends; and at once when again ends.
-func pushContext(ctx, again context.Context, limit time.Time) (context.Context, func()) {
+// already. It ends at limit, or afterLimit from now when that is later; with a zero limit
+// there is no such end. It ends afterSignal after ctx ends, unless it ends sooner, and at
+// once when again ends. Run passes [pushAfterLimit] and [pushAfterSignal].
+func pushContext(ctx, again context.Context, limit time.Time, afterLimit, afterSignal time.Duration) (context.Context, func()) {
 	push, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	wait := time.Duration(math.MaxInt64)
 	if !limit.IsZero() {
-		wait = max(time.Until(limit), pushAfterStop)
+		wait = max(time.Until(limit), afterLimit)
 	}
+	started := time.Now()
 	timer := time.AfterFunc(wait, cancel)
-	stopFirst := context.AfterFunc(ctx, func() { timer.Reset(pushAfterStop) })
+	stopFirst := context.AfterFunc(ctx, func() { timer.Reset(min(wait-time.Since(started), afterSignal)) })
 	stopAgain := context.AfterFunc(again, cancel)
 	return push, func() {
 		stopFirst()
@@ -339,9 +344,9 @@ func (e pushEnding) cutBy() string {
 	case e.again:
 		return textCutSecondSignal
 	case e.stopped:
-		return fmt.Sprintf(textCutSignal, e.got, pushAfterStop)
+		return fmt.Sprintf(textCutSignal, e.got, pushAfterSignal)
 	case e.session.Reason == event.ReasonTimeout:
-		return fmt.Sprintf(textCutPushLimit, pushAfterStop)
+		return fmt.Sprintf(textCutPushLimit, pushAfterLimit)
 	}
 	return fmt.Sprintf(textCutTimeLimit, e.limit)
 }

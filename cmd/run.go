@@ -1032,7 +1032,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if timeout > 0 {
 					limit = opened.Add(timeout)
 				}
-				pushCtx, cancel := pushContext(ctx, again, limit)
+				pushCtx, cancel := pushContext(ctx, again, limit, pushAfterLimit, pushAfterSignal)
 				pushErr = pushWork(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, out)
 				ending.stopped = ctx.Err() != nil
 				ending.again, ending.got = again.Err() != nil, got()
