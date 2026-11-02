@@ -744,6 +744,67 @@ func TestVerifyMatchesNoPattern(t *testing.T) {
 	}
 }
 
+// siblings is n members of a JSON object, each a nested object, as a list of them with a
+// comma at the end: each one writes to the slice in which the library keeps a place.
+func siblings(n int) string {
+	var b strings.Builder
+	for i := range n {
+		fmt.Fprintf(&b, `"x-%d":{"a":{"b":{"c":1}}},`, i)
+	}
+	return b.String()
+}
+
+// TestVerifyPrintsNoPlaceForAMemberName is a member name that a metaschema does not take,
+// among sibling members: the line has the name and no place, and it is the same in each
+// run. Go's maps change the order of the members in each compile.
+func TestVerifyPrintsNoPlaceForAMemberName(t *testing.T) {
+	const regex = "fix json_schema of artifact type a-type so that it compiles as a JSON Schema: invalid propertyName '('; '(' is not valid regex: error parsing regexp: missing closing ): `(`"
+	const uri = "fix json_schema of artifact type a-type so that it compiles as a JSON Schema: invalid propertyName 'not a uri'; 'not a uri' is not valid uri: relative url"
+	many := siblings(30)
+	for _, c := range []struct{ schema, want string }{
+		{`{"title":"t","properties":{"u":{"title":"v","patternProperties":{"(":{}}}}}`, regex},
+		{`{"title":"t",` + many + `"properties":{"u":{"title":"v",` + many + `"patternProperties":{"(":{}}},"w":{` + many + `"title":"z"}}}`, regex},
+		{`{"contentMediaType":"application/json",` + many + `"contentSchema":{` + many + `"patternProperties":{"(":{}}}}`, regex},
+		{`{` + many + `"$vocabulary":{"not a uri":true}}`, uri},
+	} {
+		e := factory(t, withTypes(structuredWith("a-type", c.schema)))
+		file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
+		for range 30 {
+			if err := e.Verify(); err == nil || err.Error() != file+": "+c.want {
+				t.Fatalf("%.80s: %v\nwant %s", c.schema, err, c.want)
+			}
+		}
+	}
+}
+
+// TestSchemaRulesPrintsNoPlaceForContent is a string whose content its schema does not
+// take, among sibling members, with the library's content assertion on: the line has no
+// place, and it is the same in each run. The process.yaml check has that assertion off.
+func TestSchemaRulesPrintsNoPlaceForContent(t *testing.T) {
+	c := jsonschema.NewCompiler()
+	c.AssertContent()
+	const url = "https://schema.example/content"
+	if err := c.AddResource(url, map[string]any{"properties": map[string]any{
+		"a": map[string]any{"contentMediaType": "application/json", "contentSchema": map[string]any{"required": []any{"b"}}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	schema, err := c.Compile(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := map[string]any{"a": "{}"}
+	for i := range 30 {
+		doc[fmt.Sprintf("x-%d", i)] = map[string]any{"b": map[string]any{"c": 1}}
+	}
+	const want = "missing property 'b'"
+	for range 30 {
+		if got := exports.SchemaRules(schema.Validate(doc)); got != want {
+			t.Fatalf("%s\nwant %s", got, want)
+		}
+	}
+}
+
 // TestArtifactTypesSchemaMatchesTheReader keeps artifact_types in process.schema.json and
 // the reader in step: each document is accepted or refused by both.
 func TestArtifactTypesSchemaMatchesTheReader(t *testing.T) {

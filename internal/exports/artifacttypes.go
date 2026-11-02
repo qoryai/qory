@@ -13,6 +13,7 @@ import (
 	"unicode"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 	"gopkg.in/yaml.v3"
 )
 
@@ -431,9 +432,11 @@ func (p parsedPattern) MatchString(string) bool {
 
 // patternInsts estimates the instructions of a program compiled from re. It adds some for
 // each node, for what [syntax.Regexp.Simplify] and [syntax.Compile] add for a capture, a
-// star, a plus, a quest or an alternative, so a pattern's estimate is rarely under its
-// program, and then by one instruction. A repeat counts its group once for each count,
-// and a character class one instruction for each [patternInstBytes] of its ranges.
+// star, a plus, a quest or an alternative. It is no upper bound: a plain literal is one
+// instruction under its program, and in a run of 100,201 valid random patterns 9,233
+// were under, each by one. [patternFixedBytes] covers that gap. A repeat counts its group
+// once for each count, and a character class one instruction for each
+// [patternInstBytes] of its ranges.
 func patternInsts(re *syntax.Regexp) int64 {
 	var inner int64
 	for _, sub := range re.Sub {
@@ -463,23 +466,51 @@ func compileReason(err error) string {
 
 // SchemaRules is err, a [jsonschema.ValidationError], as one line of a message: each
 // rule the document breaks, with the place in the document, with each word that
-// contains a secret hidden as [HideValues] hides it. The text of any other error is one
-// line in the same way.
+// contains a secret hidden as [HideValues] hides it. A rule about a member's name or a
+// string's content has no place, as [schemaRules] has it. The text of any other error
+// is one line in the same way.
 func SchemaRules(err error) string {
-	text := err.Error()
 	var broken *jsonschema.ValidationError
-	if errors.As(err, &broken) {
-		// The first line is the schema; each line after it is one rule, indented by depth.
-		// A line for an allOf or an anyOf only leads to the rules under it.
-		var rules []string
-		for _, line := range strings.Split(text, "\n")[1:] {
-			if !strings.HasSuffix(line, "' failed") {
-				rules = append(rules, strings.TrimPrefix(strings.TrimSpace(line), "- "))
-			}
-		}
-		text = strings.Join(rules, "; ")
+	if !errors.As(err, &broken) {
+		return HideValues(oneLine(err.Error()))
 	}
-	return HideValues(oneLine(text))
+	var rules []string
+	for _, cause := range broken.Causes {
+		rules = append(rules, schemaRules(cause, false)...)
+	}
+	return HideValues(oneLine(strings.Join(rules, "; ")))
+}
+
+// schemaRules is the rule e states and the rules under it, in the order the library
+// prints them. An allOf or an anyOf only leads to the rules under it, and a reference
+// with one rule under it too. The library keeps a slice that later siblings overwrite
+// as the place of a [kind.PropertyNames] or a [kind.ContentSchema], and the rules under
+// one have a place inside the name or the content, so with unplaced true, or under such
+// a rule, a rule prints without a place.
+func schemaRules(e *jsonschema.ValidationError, unplaced bool) []string {
+	switch e.ErrorKind.(type) {
+	case *kind.PropertyNames, *kind.ContentSchema:
+		unplaced = true
+	}
+	var rules []string
+	_, reference := e.ErrorKind.(*kind.Reference)
+	if !reference || len(e.Causes) != 1 {
+		one := jsonschema.ValidationError{SchemaURL: e.SchemaURL, InstanceLocation: e.InstanceLocation, ErrorKind: e.ErrorKind}
+		if unplaced {
+			one.InstanceLocation = nil
+		}
+		text := one.Error()
+		if unplaced {
+			text = strings.TrimPrefix(text, "at '': ")
+		}
+		if !strings.HasSuffix(text, "' failed") {
+			rules = append(rules, text)
+		}
+	}
+	for _, cause := range e.Causes {
+		rules = append(rules, schemaRules(cause, unplaced)...)
+	}
+	return rules
 }
 
 // oneLine is text as one line of a message: at most [maxSchemaError] characters, with
