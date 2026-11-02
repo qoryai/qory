@@ -1,0 +1,28 @@
+apiVersion: qory.dev/v1alpha1
+name: Ad campaigns
+summary: Agents draft ads for a campaign. A person approves each ad before it runs.
+description: >-
+  In Draft, an agent writes an ad and reviews it against the brand rules, for up
+  to two rounds, then measures its reach. In Approve, a person reads the ad and
+  approves it or sends it back.
+type: performance-marketing
+stack: marketing
+process:
+  schema: qory.process/v1
+  stages:
+    - id: st_0000000001
+      name: Draft
+      sequence:
+        - workflow: write-an-ad
+        - loop:
+            rounds: 2
+            body:
+              - workflow: review-the-ad
+              - workflow: write-an-ad
+        - workflow: measure-reach
+      gate: {kind: none}
+    - id: st_0000000002
+      name: Approve
+      sequence:
+        - workflow: measure-reach
+      gate: {kind: person, approvers: members}

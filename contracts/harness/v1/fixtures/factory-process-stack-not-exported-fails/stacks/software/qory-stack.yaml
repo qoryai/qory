@@ -1,0 +1,6 @@
+apiVersion: qory.dev/v1alpha1
+modules:
+  - name: software-factory
+extending: {}
+workflows:
+  explore-a-ticket: {access: read}

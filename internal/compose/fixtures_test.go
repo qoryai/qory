@@ -15,6 +15,7 @@ import (
 
 	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/exports"
 )
 
 const fixtures = "../../contracts/harness/v1/fixtures"
@@ -143,7 +144,23 @@ func TestFixtures(t *testing.T) {
 	}
 }
 
+// load composes the fixture in the working directory. It first checks the fixture's
+// exports, as config.Load checks them at a repository root, so a fixture can expect an
+// exports refusal, such as one of a module's process.yaml.
 func load() (*compose.Result, error) {
+	root, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	e, err := exports.Read(root)
+	if err != nil {
+		return nil, err
+	}
+	if e != nil {
+		if err := e.Verify(); err != nil {
+			return nil, err
+		}
+	}
 	p, err := config.Compose(config.FileName)
 	if err != nil {
 		return nil, err
