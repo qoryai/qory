@@ -587,12 +587,12 @@ func NewCompose(path string, p *Stack) (*Stack, error) {
 	return p, nil
 }
 
-// inPath is err, a refusal of the document at path, with path in front, unless err is an
-// [exports.InFile], whose text contains the file's name already.
+// inPath is err, an error about the document at path, with path in front, or for an
+// [exports.InFile], with path inside its text.
 func inPath(path string, err error) error {
 	var in exports.InFile
 	if errors.As(err, &in) {
-		return err
+		return in.In(exports.HidePath(path))
 	}
 	return fmt.Errorf("%s: %w", path, err)
 }
@@ -699,7 +699,7 @@ func (p *Stack) validate(compose bool) error {
 		p.Workflows[name] = w
 	}
 	if err := CheckRoles(p.Bind, "bind"); err != nil {
-		return err.(*RolesError).In(exports.HidePath(filepath.Base(p.File)))
+		return err
 	}
 	// A document that extends a stack may append nothing and carry only what is the
 	// repository's own beside the base, its extensions say; a stack, and a document

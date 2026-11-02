@@ -42,6 +42,9 @@ func TestReadManifestRefusesRolesItDoesNotRead(t *testing.T) {
 		{"provides:\n  agents/developer: typescript-developer\n", "Write provides as provides.agents.developer: typescript-developer in {path}: provides keys are kinds, and agents/developer is a kind and a role."},
 		{"provides:\n  mcp:\n    a: b\n", `Use agents, commands or skills as a kind under provides in {path}: "mcp" is none of them.`},
 		{"provides:\n  agents:\n    developer: qak_/x\n", "Set provides.agents.developer in {path} to an entry's name"},
+		{"provides:\n  agents:\n    qak_x: [a, b]\n", "Write one name for provides.agents.(a name that contains an access key secret) in {path}:"},
+		{"roles:\n  agents:\n    qak_x: many\n", "Set roles.agents.(a name that contains an access key secret) to one in {path}:"},
+		{"provides:\n  agents:\n    qak_x: a\n    qak_x: b\n", "{path}: provides: "},
 	} {
 		dir := tree(t, map[string]string{ManifestName: head + c.body})
 		_, err := ReadManifest(dir)

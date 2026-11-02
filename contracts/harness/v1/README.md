@@ -428,9 +428,9 @@ passes Forager no list. `egress: []` is a declaration that the module reaches
 nothing.
 `roles`, optional, lists the roles the module's documents reference, by kind, `agents`,
 `skills` or `commands`, and then by role, each set to `one`: one entry fills the role.
-Any other value is refused, `Set roles.agents.developer to one in
+Any other value fails the compose, `module core: Set roles.agents.developer to one in
 modules/core/qory-module.yaml: a role is filled by one entry, and the value is "many".`,
-and so is a list. The compose reads `roles` and checks this value; it checks nothing else
+and so does a list. The compose reads `roles` and checks this value; it checks nothing else
 against it.
 `provides`, optional, fills roles (§References), by kind and then by role, each to the
 name of one entry of that kind, as `bind` does: a technology module `typescript` writes

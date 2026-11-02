@@ -2,7 +2,6 @@ package compose
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -292,10 +291,6 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			o.m, err = module.ReadManifest(src.Dir)
 		}
 		if err != nil {
-			var in exports.InFile
-			if errors.As(err, &in) {
-				return nil, err
-			}
 			return nil, fmt.Errorf("%s: %w", who, err)
 		}
 		if afterManifest != nil {

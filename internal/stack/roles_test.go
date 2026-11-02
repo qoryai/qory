@@ -31,23 +31,25 @@ func TestBindIsReadByKindThenRole(t *testing.T) {
 // TestBindRefusesEachShapeItDoesNotRead is each bind a stack file may write and qory
 // does not read: a flat <kind>/<role> key, a kind that is no kind of role, a kind that is
 // no map, a list as a role's value, and a value that is no name. Each refusal starts with
-// its fix and contains the file's name, with no path in front.
+// its fix and contains the file's path, with no path in front.
 func TestBindRefusesEachShapeItDoesNotRead(t *testing.T) {
 	isolate(t)
 	const head = "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\nbind:\n"
+	// Each text has {path}, the stack file's path as Load was given it.
 	for _, c := range []struct{ body, want string }{
-		{"  agents/coder: rails-coder\n", "Write bind as bind.agents.coder: rails-coder in qory-stack.yaml: bind keys are kinds, and agents/coder is a kind and a role."},
-		{"  agents/coder: [a, b]\n", "Write bind as bind.agents.coder: <name> in qory-stack.yaml: bind keys are kinds, and agents/coder is a kind and a role."},
-		{"  coders:\n    a: b\n", `Use agents, commands or skills as a kind under bind in qory-stack.yaml: "coders" is none of them.`},
-		{"  agents: rails-coder\n", "Write bind.agents in qory-stack.yaml as a map of roles: bind.agents is not a map."},
-		{"  agents:\n    developer: [a, b]\n", "Write one name for bind.agents.developer in qory-stack.yaml: a role is filled by one entry, and the value is a list."},
-		{"  agents:\n    developer: {a: b}\n", "Set bind.agents.developer in qory-stack.yaml to the name of one entry: the value is empty or not a name."},
-		{"  agents:\n    developer:\n", "Set bind.agents.developer in qory-stack.yaml to the name of one entry: the value is empty or not a name."},
-		{"  - agents\n", "Write bind in qory-stack.yaml as a map of kinds, then roles: bind is not a map."},
+		{"  agents/coder: rails-coder\n", "Write bind as bind.agents.coder: rails-coder in {path}: bind keys are kinds, and agents/coder is a kind and a role."},
+		{"  agents/coder: [a, b]\n", "Write bind as bind.agents.coder: <name> in {path}: bind keys are kinds, and agents/coder is a kind and a role."},
+		{"  coders:\n    a: b\n", `Use agents, commands or skills as a kind under bind in {path}: "coders" is none of them.`},
+		{"  agents: rails-coder\n", "Write bind.agents in {path} as a map of roles: bind.agents is not a map."},
+		{"  agents:\n    developer: [a, b]\n", "Write one name for bind.agents.developer in {path}: a role is filled by one entry, and the value is a list."},
+		{"  agents:\n    developer: {a: b}\n", "Set bind.agents.developer in {path} to the name of one entry: the value is empty or not a name."},
+		{"  agents:\n    developer:\n", "Set bind.agents.developer in {path} to the name of one entry: the value is empty or not a name."},
+		{"  - agents\n", "Write bind in {path} as a map of kinds, then roles: bind is not a map."},
 	} {
-		_, err := Load(write(t, head+c.body))
-		if err == nil || err.Error() != c.want {
-			t.Errorf("%q: %v\nwant %q", c.body, err, c.want)
+		path := write(t, head+c.body)
+		_, err := Load(path)
+		if want := strings.ReplaceAll(c.want, "{path}", path); err == nil || err.Error() != want {
+			t.Errorf("%q: %v\nwant %q", c.body, err, want)
 		}
 	}
 }
@@ -72,7 +74,7 @@ func TestReadRolesWithCountsTakesOne(t *testing.T) {
 }
 
 // TestCheckRolesChecksABuiltStack is a stack built in code with a role that is no path
-// segment: validate refuses it with the file's name and no path in front.
+// segment: validate refuses it with the file's path and no path in front.
 func TestCheckRolesChecksABuiltStack(t *testing.T) {
 	err := CheckRoles(Roles{"agents": {"a/b": "c"}}, "bind")
 	if err == nil || !strings.HasPrefix(err.(*RolesError).In("qory.yaml").Error(), "Rename role a/b of bind.agents in qory.yaml") {
@@ -80,6 +82,11 @@ func TestCheckRolesChecksABuiltStack(t *testing.T) {
 	}
 	if err := CheckRoles(Roles{"agents": {"coder": "rails-coder"}}, "bind"); err != nil {
 		t.Fatal(err)
+	}
+	// A role with an access key secret is printed as Forager's phrase.
+	err = CheckRoles(Roles{"agents": {"qak_x": "a/b"}}, "bind")
+	if err == nil || !strings.Contains(err.Error(), "Set bind.agents."+nameWithSecret+" in ") || strings.Contains(err.Error(), "qak_") {
+		t.Fatalf("err = %v", err)
 	}
 }
 

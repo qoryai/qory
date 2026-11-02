@@ -48,9 +48,9 @@ func (r Roles) Len() int {
 	return n
 }
 
-// RolesError is a refusal of the roles under key in a file, whose text contains the
-// file's name. [RolesError.In] sets the name, and the callers that put a path in front of
-// an error return this one without it, see [exports.InFile].
+// RolesError is an error about the roles under key in a file, whose text contains the
+// file's path. [RolesError.In] sets the path, and the callers that put a path in front of
+// an error put it inside this one instead, see [exports.InFile].
 type RolesError struct {
 	text func(file string) string
 	file string
@@ -64,7 +64,7 @@ func (e *RolesError) Error() string {
 	return e.text(file)
 }
 
-// In is the error with file as the name of the file it is about.
+// In is the error with file as the path of the file it is about.
 func (e *RolesError) In(file string) error { return &RolesError{text: e.text, file: file} }
 
 // rolesError is a [RolesError] of format and args, with the file's name at {file} in
@@ -126,7 +126,7 @@ func ReadRoles(n *yaml.Node, key string, counts bool) (Roles, error) {
 			if !segment(role) || strings.Contains(role, " ") {
 				return nil, rolesError("Rename role %s of %s in {file} to one path segment with no space, @ or leading dot.", accesskey.ShownName(role, false), at)
 			}
-			path := at + "." + role
+			path := at + "." + accesskey.ShownName(role, false)
 			var name string
 			switch {
 			case x.Kind == yaml.SequenceNode && counts:
@@ -169,7 +169,7 @@ func CheckRoles(r Roles, key string) error {
 				return rolesError("Rename role %s of %s in {file} to one path segment with no space, @ or leading dot.", accesskey.ShownName(role, false), at)
 			}
 			if name := r[kind][role]; !entryName(name) {
-				return rolesError("Set %s.%s in {file} to an entry's name, one path segment with no space, @ or leading dot: the value is %s.", at, role, accesskey.ShownName(name, true))
+				return rolesError("Set %s.%s in {file} to an entry's name, one path segment with no space, @ or leading dot: the value is %s.", at, accesskey.ShownName(role, false), accesskey.ShownName(name, true))
 			}
 		}
 	}
