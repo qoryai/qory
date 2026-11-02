@@ -13,7 +13,7 @@ import (
 // app with two base modules: core-x, which the base lists by the export core and
 // qory.yaml lists with an exclude already, and tools, which the base lists by a path
 // alone. The fix replaces the entry of core with the whole exclude, under the name
-// qory.yaml lists it by; the collision with tools says to rename the entry.
+// qory.yaml lists it by; the collision with tools prints rename yours.
 func TestPrintCollisionWritesTheEntryOfABaseModule(t *testing.T) {
 	e := &compose.CollisionError{
 		Collisions: []compose.Collision{

@@ -538,7 +538,7 @@ runtime: the resolution happens in the composed tree, per path.
    when an `exclude` or an `only` dropped it, with the module whose block did, and with
    `module core: skill deploy requires command ship, which no module ships` otherwise; a
    reference's message has `references` for `requires`, and `which no module ships and the
-   stack does not bind` when neither an entry nor a binding answers to the name. When the
+   stack does not bind` when neither an entry nor a binding matches the name. When the
    exclude a checkout's `qory.yaml` lists for a base module dropped it, the message is
    `remove commands/ship from the exclude of module core in qory.yaml, or ship it in a
    module of the repository: module core: skill deploy requires command ship, which the
