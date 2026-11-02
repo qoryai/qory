@@ -28,6 +28,10 @@ const (
 	textNoNewCommits     = "qory run: no new commits to push"
 	textPushed           = "qory run: pushed %s to %s at %s"
 	textForgeLine        = "qory run: remote: %s"
+	textLockRemoved      = "qory run: removed .git/index.lock of %s, which the agent left when it stopped"
+	textLockUnproven     = "qory run: take the work item in again in Qory Apiary: repository %s has .git/index.lock and the stop of the agent is not proven, so qory committed and pushed nothing; the code is used"
+	textLockNotFile      = "qory run: take the work item in again in Qory Apiary: .git/index.lock of repository %s is not a regular file, so qory committed and pushed nothing; the code is used"
+	textLockNotRemoved   = "qory run: take the work item in again in Qory Apiary: the removal of .git/index.lock of repository %s failed, so qory committed and pushed nothing: %s; the code is used"
 	textNotPushed        = "qory run: not pushed from %s: %s %s"
 	textFurtherLines     = "qory run: %d further lines left out"
 	textSetupNotSafe     = "qory run: take the work item in again in Qory Apiary: after the setup, the check of repository %s failed, so the agent did not start: %s; the code is used"
@@ -83,7 +87,11 @@ var (
 // and reach no remote. The commits of every repository come before the first push, so
 // a failed commit pushes nothing. A path that [RecordSetup] recorded and that is as the
 // setup left it stays out of the commit.
-func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message string, p proxygit.Proxy, report io.Writer) (*branchformat.Branch, error) {
+//
+// An agent that was killed can leave .git/index.lock, which would stop the commit. After
+// the checks, [clearIndexLocks] removes that one file of each repository when
+// agentStopped is true, and stops the push when a lock is there and it is false.
+func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message string, p proxygit.Proxy, agentStopped bool, report io.Writer) (*branchformat.Branch, error) {
 	ctx = hostgit.WithBase(ctx, proxygit.Env(base, nil))
 	dir, err := filepath.Abs(dir)
 	if err != nil {
@@ -103,6 +111,9 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 			return nil, notSafe(r, err)
 		}
 		defer hold.Release()
+	}
+	if err := clearIndexLocks(b.Repositories, folders, agentStopped, report); err != nil {
+		return nil, err
 	}
 	heads := make([]string, len(b.Repositories))
 	for i, r := range b.Repositories {
@@ -136,6 +147,44 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 	}
 	return &branchformat.Branch{Ref: b.Ref, Repositories: version}, nil
 }
+
+// clearIndexLocks removes .git/index.lock of each repository, in folders by the order of
+// repositories, and prints a line on report for each. It removes nothing until every
+// repository passed: with agentStopped false a lock stops the push, as does one that is
+// not a regular file. A .git that is not a directory has no such file, and the commit
+// reports what git finds. No other lock is touched.
+func clearIndexLocks(repositories []WorkRepository, folders []string, agentStopped bool, report io.Writer) error {
+	var locks []int
+	for i, r := range repositories {
+		info, err := os.Lstat(filepath.Join(folders[i], ".git"))
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		lock, err := os.Lstat(indexLock(folders[i]))
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			continue
+		case err != nil:
+			return fmt.Errorf(textLockNotRemoved, shownPath(r.Path), integration.Printable(err.Error()))
+		case !lock.Mode().IsRegular():
+			return fmt.Errorf(textLockNotFile, shownPath(r.Path))
+		case !agentStopped:
+			return fmt.Errorf(textLockUnproven, shownPath(r.Path))
+		}
+		locks = append(locks, i)
+	}
+	for _, i := range locks {
+		path := shownPath(repositories[i].Path)
+		if err := os.Remove(indexLock(folders[i])); err != nil {
+			return fmt.Errorf(textLockNotRemoved, path, integration.Printable(err.Error()))
+		}
+		fmt.Fprintf(report, textLockRemoved+"\n", path)
+	}
+	return nil
+}
+
+// indexLock is the lock file of the index of the repository at folder.
+func indexLock(folder string) string { return filepath.Join(folder, ".git", "index.lock") }
 
 // notSafe is [textNotSafe] for repository r and err, a stop of [safeAfterRun].
 func notSafe(r WorkRepository, err error) error { return checkFailed(textNotSafe, r, err) }

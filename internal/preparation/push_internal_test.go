@@ -3,6 +3,7 @@ package preparation
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -38,8 +39,13 @@ func onBranch(t *testing.T, list string) (string, *WorkBranch) {
 // pushOf is [Push] of b in dir, with the message "Changes left", which returns the lines
 // it printed too.
 func pushOf(dir string, b *WorkBranch) (*branchformat.Branch, string, error) {
+	return pushWith(dir, b, true)
+}
+
+// pushWith is [pushOf] with agentStopped set.
+func pushWith(dir string, b *WorkBranch, agentStopped bool) (*branchformat.Branch, string, error) {
 	var report strings.Builder
-	doc, err := Push(context.Background(), dir, os.Environ(), b, "Changes left", testProxy, &report)
+	doc, err := Push(context.Background(), dir, os.Environ(), b, "Changes left", testProxy, agentStopped, &report)
 	return doc, report.String(), err
 }
 
@@ -398,4 +404,170 @@ func TestAFailedPushPrintsTheForgeAndTheCommits(t *testing.T) {
 	if strings.Contains(got, "token-123") {
 		t.Errorf("the lines show the password:\n%s", got)
 	}
+}
+
+// inEachRepository runs body for the target and for a further repository of a run of two:
+// folder is the repository the case is about, and left a file there that the agent left.
+func inEachRepository(t *testing.T, body func(t *testing.T, dir, folder string, b *WorkBranch, path string)) {
+	t.Helper()
+	for name, c := range map[string]struct{ repository, path string }{
+		"target":  {"", "acme/shop"},
+		"further": {filepath.Join(filepath.FromSlash(Repositories), "acme", "lib"), "acme/lib"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir, b := onBranch(t, "acme/shop,acme/lib")
+			folder := filepath.Join(dir, c.repository)
+			write(t, filepath.Join(folder, "left.txt"), "left\n")
+			body(t, dir, folder, b, c.path)
+		})
+	}
+}
+
+// committedLeft reports whether the repository at folder has a commit of the run on HEAD.
+func committedLeft(t *testing.T, folder string) bool {
+	t.Helper()
+	return run(t, folder, "log", "-1", "--format=%s") == "Changes left"
+}
+
+// TestAStaleIndexLockDoesNotLoseTheWork is an agent that was killed in a git command, whose
+// stop is proven: qory removes the lock, and the commit and the push go on.
+func TestAStaleIndexLockDoesNotLoseTheWork(t *testing.T) {
+	inEachRepository(t, func(t *testing.T, dir, folder string, b *WorkBranch, path string) {
+		write(t, indexLock(folder), "")
+		_, lines, err := pushWith(dir, b, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Lstat(indexLock(folder)); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("the lock is still there: %v", err)
+		}
+		if !committedLeft(t, folder) {
+			t.Error("the commit is missing")
+		}
+		want := "qory run: removed .git/index.lock of " + path + ", which the agent left when it stopped"
+		if !strings.Contains(lines, want) {
+			t.Errorf("the lines are %q, want %q", lines, want)
+		}
+	})
+}
+
+// TestAnIndexLockFailsTheStepWhileTheStopIsNotProven is a lock with an agent that may run:
+// it stays, and nothing is committed in any repository.
+func TestAnIndexLockFailsTheStepWhileTheStopIsNotProven(t *testing.T) {
+	inEachRepository(t, func(t *testing.T, dir, folder string, b *WorkBranch, path string) {
+		write(t, indexLock(folder), "")
+		_, _, err := pushWith(dir, b, false)
+		want := "repository " + path + " has .git/index.lock and the stop of the agent is not proven"
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("the error is %v, want %q", err, want)
+		}
+		if !strings.HasPrefix(err.Error(), "qory run: take the work item in again in Qory Apiary: ") {
+			t.Errorf("the error starts with %q", err)
+		}
+		if _, err := os.Lstat(indexLock(folder)); err != nil {
+			t.Errorf("the lock is gone: %v", err)
+		}
+		if committedLeft(t, folder) {
+			t.Error("a commit was made")
+		}
+	})
+}
+
+// TestNoLockIsNeededWhileTheStopIsNotProven is a run with no lock: the step goes on.
+func TestNoLockIsNeededWhileTheStopIsNotProven(t *testing.T) {
+	inEachRepository(t, func(t *testing.T, dir, folder string, b *WorkBranch, _ string) {
+		if _, _, err := pushWith(dir, b, false); err != nil {
+			t.Fatal(err)
+		}
+		if !committedLeft(t, folder) {
+			t.Error("the commit is missing")
+		}
+	})
+}
+
+// TestAnIndexLockThatIsNoFileStaysAndFailsTheStep is a directory at the name of the lock.
+func TestAnIndexLockThatIsNoFileStaysAndFailsTheStep(t *testing.T) {
+	inEachRepository(t, func(t *testing.T, dir, folder string, b *WorkBranch, path string) {
+		if err := os.Mkdir(indexLock(folder), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err := pushWith(dir, b, true)
+		want := ".git/index.lock of repository " + path + " is not a regular file"
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("the error is %v, want %q", err, want)
+		}
+		if info, err := os.Lstat(indexLock(folder)); err != nil || !info.IsDir() {
+			t.Errorf("the directory is gone: %v", err)
+		}
+	})
+}
+
+// TestAnIndexLockThatIsALinkStaysAndFailsTheCheck is a link at the name of the lock, which
+// the safety check stops before qory looks at the lock: the link and its target stay.
+func TestAnIndexLockThatIsALinkStaysAndFailsTheCheck(t *testing.T) {
+	inEachRepository(t, func(t *testing.T, dir, folder string, b *WorkBranch, _ string) {
+		target := filepath.Join(t.TempDir(), "kept")
+		write(t, target, "kept\n")
+		if err := os.Symlink(target, indexLock(folder)); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err := pushWith(dir, b, true)
+		if err == nil || !strings.Contains(err.Error(), "the check of repository") {
+			t.Fatalf("the error is %v, want the safety check's", err)
+		}
+		if info, err := os.Lstat(indexLock(folder)); err != nil || info.Mode()&fs.ModeSymlink == 0 {
+			t.Errorf("the link is gone: %v", err)
+		}
+		if _, err := os.Stat(target); err != nil {
+			t.Errorf("the link's target is gone: %v", err)
+		}
+	})
+}
+
+// TestAFailedCheckLeavesTheLock is a lock in one repository and a key in another that the
+// safety check stops: qory removes nothing.
+func TestAFailedCheckLeavesTheLock(t *testing.T) {
+	dir, b := onBranch(t, "acme/shop,acme/lib")
+	write(t, indexLock(dir), "")
+	further := filepath.Join(dir, filepath.FromSlash(Repositories), "acme", "lib")
+	run(t, further, "config", "filter.x.clean", "false")
+	if _, _, err := pushWith(dir, b, true); err == nil || !strings.Contains(err.Error(), "the check of repository") {
+		t.Fatalf("the error is %v, want the safety check's", err)
+	}
+	if _, err := os.Lstat(indexLock(dir)); err != nil {
+		t.Errorf("the lock is gone: %v", err)
+	}
+}
+
+// TestALaterLockThatFailsLeavesTheEarlierLock is a lock in the target and a directory at
+// the name of the lock in a further repository: qory removes neither.
+func TestALaterLockThatFailsLeavesTheEarlierLock(t *testing.T) {
+	dir, b := onBranch(t, "acme/shop,acme/lib")
+	write(t, indexLock(dir), "")
+	further := filepath.Join(dir, filepath.FromSlash(Repositories), "acme", "lib")
+	if err := os.Mkdir(indexLock(further), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := pushWith(dir, b, true); err == nil {
+		t.Fatal("no error")
+	}
+	if _, err := os.Lstat(indexLock(dir)); err != nil {
+		t.Errorf("the target's lock is gone: %v", err)
+	}
+}
+
+// TestNoOtherLockIsRemoved is a lock of another name, in each repository: it stays, and the
+// commit that needs it fails.
+func TestNoOtherLockIsRemoved(t *testing.T) {
+	inEachRepository(t, func(t *testing.T, dir, folder string, b *WorkBranch, _ string) {
+		other := filepath.Join(folder, ".git", "HEAD.lock")
+		write(t, other, "")
+		_, _, err := pushWith(dir, b, true)
+		if err == nil || !strings.Contains(err.Error(), "the commit of what the agent left") {
+			t.Fatalf("the error is %v, want a failed commit", err)
+		}
+		if _, err := os.Lstat(other); err != nil {
+			t.Errorf("the other lock is gone: %v", err)
+		}
+	})
 }

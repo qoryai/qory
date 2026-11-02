@@ -1276,6 +1276,60 @@ func walledPush(t *testing.T) *pushRepo {
 	return p
 }
 
+// TestAWalledRunRemovesAStaleIndexLock is a killed walled agent that left .git/index.lock,
+// in the target and in a further repository: the join proved its stop, so the push goes on.
+func TestAWalledRunRemovesAStaleIndexLock(t *testing.T) {
+	for name, folder := range map[string]string{"target": "", "further": filepath.Join(".qory", "repositories", "acme", "lib")} {
+		t.Run(name, func(t *testing.T) {
+			p := walledPush(t)
+			p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
+			proxygittest.Git(t, filepath.Join(p.h.server.Root, "acme", "lib.git"), "config", "http.receivepack", "true")
+			p.repositories = "acme/site,acme/lib"
+			r := p.run(t, func(dir string) {
+				writeFile(t, filepath.Join(dir, folder, "left.txt"), "left\n")
+				writeFile(t, filepath.Join(dir, folder, ".git", "index.lock"), "")
+			}, func() (*session.Result, error) {
+				return &session.Result{State: event.StateCancelled, TimedOut: true, ExitCode: 124}, nil
+			})
+			r.wantsClose(t, event.StateCancelled, 124)
+			if _, state := r.step(); state != event.StateSucceeded {
+				t.Errorf("the step ended %q, want succeeded\n%s", state, r.out)
+			}
+			wants(t, r.log(), "which the agent left when it stopped")
+			if posts, _, _ := p.api.counts(); posts != 1 {
+				t.Errorf("%d POST, want 1", posts)
+			}
+		})
+	}
+}
+
+// TestAnUnwalledRunWithAnIndexLockFailsTheStep is an agent on the host, whose stop leaves
+// no proof, in the target and in a further repository: the lock stays, nothing is pushed.
+func TestAnUnwalledRunWithAnIndexLockFailsTheStep(t *testing.T) {
+	for name, folder := range map[string]string{"target": "", "further": filepath.Join(".qory", "repositories", "acme", "lib")} {
+		t.Run(name, func(t *testing.T) {
+			p := newPushRepo(t, "write")
+			p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
+			proxygittest.Git(t, filepath.Join(p.h.server.Root, "acme", "lib.git"), "config", "http.receivepack", "true")
+			p.repositories = "acme/site,acme/lib"
+			var lock string
+			r := p.run(t, func(dir string) {
+				lock = filepath.Join(dir, folder, ".git", "index.lock")
+				writeFile(t, filepath.Join(dir, folder, "left.txt"), "left\n")
+				writeFile(t, lock, "")
+			}, nil)
+			r.wantsClose(t, event.StateFailed, 1)
+			wants(t, r.out, "has .git/index.lock and the stop of the agent is not proven")
+			if _, err := os.Lstat(lock); err != nil {
+				t.Errorf("the lock is gone: %v", err)
+			}
+			if posts, _, _ := p.api.counts(); posts != 0 {
+				t.Errorf("%d POST, want 0", posts)
+			}
+		})
+	}
+}
+
 // TestARunThatChangedOnlyWhatTheSetupChangedPushesNothing is a walled run whose agent
 // left the working folder as the setup left it.
 func TestARunThatChangedOnlyWhatTheSetupChangedPushesNothing(t *testing.T) {

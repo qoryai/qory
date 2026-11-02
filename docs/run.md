@@ -1995,7 +1995,13 @@ The step does this, in order:
    fetch writes, on such a file that is not a regular file, on `alternates`, on a
    `commondir` file, and on a link or a hard link in `.git`. A walled run's target also
    gets the settings check of the place the run used.
-2. qory commits what the agent left in each repository, with the message `Changes left by
+2. qory removes `.git/index.lock` of each repository, a file that an agent killed in a git
+   command leaves behind, and prints `qory run: removed .git/index.lock of <path>, which the
+   agent left when it stopped`. qory does this only for a walled run, whose container the
+   session removed. With an agent on the host, the stop of the agent is not proven, and a
+   lock fails the step. qory removes only that file, and only as a regular file in a `.git`
+   directory, so a link stops the check and any other lock stays.
+3. qory commits what the agent left in each repository, with the message `Changes left by
    run <run id>` and the author and committer `qory <qory@localhost>`. A new file is in
    the commit unless git ignores it through `.gitignore` or `.git/info/exclude`. `.qory`
    and the links into it stay out, also when the agent staged them. A path that the setup
@@ -2005,12 +2011,12 @@ The step does this, in order:
    container, so what it changed counts as what the agent left. No hook in `.git` runs.
    The commits of all repositories come before the first push, so a failed commit pushes
    nothing.
-3. qory pushes each repository whose `HEAD` is past the commit the run started at to
+4. qory pushes each repository whose `HEAD` is past the commit the run started at to
    `refs/heads/qory/<work item id>`, through the run's host proxy, with no force. It
    prints `qory run: pushed qory/<work item id> to <path> at <commit>`, where `<commit>`
    is the commit's first 12 characters. With no new commit in any repository, it prints
    `qory run: no new commits to push`, and the step ends with no push and no version.
-4. qory stores a new version of the artifact `main` of the type `branch`, with one file,
+5. qory stores a new version of the artifact `main` of the type `branch`, with one file,
    `branch.json`, in the [branch format](../contracts/harness/v1/README.md#the-branch-format):
    the version the run read, with the commit of each pushed repository replaced, or added
    when the version has no entry for it. After a 429, qory waits for `Retry-After`, at

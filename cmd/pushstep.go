@@ -134,8 +134,9 @@ func canPush(fromCode *codeRun, readOnly bool, branch *preparation.WorkBranch) b
 // pushWork is the run's step of kind push: it pushes what the agent left, through the
 // run's host proxy, and stores the new version of the artifact type branch. The step
 // ends as [inStep] ends it, cancelled when ctx ended. out is how the session ended, which
-// the commit and the version show when it did not succeed, see [failedEnd].
-func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, out session.Outcome) error {
+// the commit and the version show when it did not succeed, see [failedEnd]. agentStopped
+// is whether the agent's stop is proven, see [preparation.Push].
+func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, out session.Outcome, agentStopped bool) error {
 	cut := func() bool { return ctx.Err() != nil }
 	return inStep(run, stderr, event.StepPush, pushStepName(branch, run.System()), cut, func(w io.Writer) error {
 		httpClient, base, err := run.RunAPI()
@@ -157,7 +158,7 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 		if end != "" {
 			message += "\n\n" + end
 		}
-		document, err := preparation.Push(ctx, dir, os.Environ(), branch, message, h.proxy, w)
+		document, err := preparation.Push(ctx, dir, os.Environ(), branch, message, h.proxy, agentStopped, w)
 		if err != nil {
 			return &runLineError{err}
 		}

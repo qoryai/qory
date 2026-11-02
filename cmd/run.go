@@ -1024,7 +1024,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// pushWork is the push step of a run with an agent session that may write, see
 			// [keepsWork], before the close: Qory Apiary takes no version of a run that ended.
 			// The step runs under [pushContext], since a stop has ended ctx or spent the time
-			// limit. A failed step changes the close only of a session that succeeded.
+			// limit. A failed step changes the close only of a session that succeeded. The join
+			// removes the container of a walled agent, and an unwalled agent's process leaves
+			// no proof that it stopped.
 			ending := pushEnding{session: out, limit: timeout}
 			var pushErr error
 			if keepsWork(fromCode, readOnly, branch, res, err) {
@@ -1033,7 +1035,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					limit = opened.Add(timeout)
 				}
 				pushCtx, cancel := pushContext(ctx, again, limit, pushAfterLimit, pushAfterSignal)
-				pushErr = pushWork(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, out)
+				pushErr = pushWork(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, out, walled)
 				ending.stopped = ctx.Err() != nil
 				ending.again, ending.got = again.Err() != nil, got()
 				ending.cut = pushCtx.Err() != nil
