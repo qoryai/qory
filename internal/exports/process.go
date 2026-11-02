@@ -35,8 +35,10 @@ const (
 
 // processFile is a process.yaml as written: the texts a list of templates shows, the
 // workspace type, the stack of the same repository its workflows run on, and the process
-// document. qory checks the document's schema, that its stages are a list, and that each
-// workflow of a stage is one the stack declares, and checks nothing else in it.
+// document. In the document, qory checks the schema, that the stages are a list, that
+// each workflow of a stage is a non-empty string of one line that the stack declares,
+// and that each stage name has no line break or other control character, and checks
+// nothing else in it.
 //
 //	apiVersion: qory.dev/v1alpha1
 //	name: Support desk
@@ -78,7 +80,7 @@ func (e *Exports) readProcess(dir string) ([]byte, string, error) {
 	if err == nil {
 		data, err = root.ReadFile(ProcessFileName)
 	}
-	if escapes(err) {
+	if escapes(root, err) {
 		return nil, path, fmt.Errorf("%s: replace %s with a file inside the module: it is a link to a place outside the module", HidePath(path), ProcessFileName)
 	}
 	if err != nil {
@@ -91,11 +93,21 @@ func (e *Exports) readProcess(dir string) ([]byte, string, error) {
 	return data, path, nil
 }
 
-// escapes reports whether err is an [os.Root]'s refusal of a path that leads outside
-// the root. The os package does not export that error, so escapes compares its text.
-func escapes(err error) bool {
-	var pe *fs.PathError
-	return errors.As(err, &pe) && pe.Err != nil && pe.Err.Error() == "path escapes from parent"
+// escapes reports whether err is the error root returns for a path that leads out of
+// it, such as a link to a place outside the module. Package os does not export that
+// error, so escapes takes it from a lookup of ".." in root, which fails with it before
+// any file is read, as the render's copier does. A closed root fails that lookup with
+// [os.ErrClosed], which is not the error escapes looks for.
+func escapes(root *os.Root, err error) bool {
+	if err == nil {
+		return false
+	}
+	_, probe := root.Lstat("..")
+	if errors.Is(probe, os.ErrClosed) {
+		return false
+	}
+	sentinel := errors.Unwrap(probe)
+	return sentinel != nil && errors.Is(err, sentinel)
 }
 
 // checkProcess checks data, the process.yaml at path in an exported module's folder,
@@ -196,10 +208,10 @@ func (e *Exports) checkWorkflows(shown, stackName string, stages *yaml.Node) err
 			continue
 		}
 		label := strconv.Itoa(i + 1)
-		if n := value(stage, "name"); n != nil && n.Kind == yaml.ScalarNode && strings.TrimSpace(n.Value) != "" {
+		if n := value(stage, "name"); n != nil && n.Kind == yaml.ScalarNode {
 			if why := notOneLine(n.Value); why != "" {
 				lines = append(lines, fmt.Sprintf("%s: set the name of stage %d to one line of text: %s", shown, i+1, why))
-			} else {
+			} else if strings.TrimSpace(n.Value) != "" {
 				label = accesskey.ShownName(n.Value, false)
 			}
 		}
@@ -225,13 +237,16 @@ func (e *Exports) checkWorkflows(shown, stackName string, stages *yaml.Node) err
 }
 
 // badWorkflow is why the workflow value n is no workflow name, for a message: it is
-// null, not a string, empty, or not one line of text; "" for a value that is one.
+// null, not a string, empty, or not one line of text; "" for a value that is one. A
+// number or a boolean is not a string: a quoted "123" is one.
 func badWorkflow(n *yaml.Node) string {
 	switch {
 	case n.Tag == "!!null":
 		return "it is null"
-	case n.Kind != yaml.ScalarNode:
+	case n.Kind != yaml.ScalarNode, n.Tag == "!!int", n.Tag == "!!float", n.Tag == "!!bool":
 		return "it is " + nodeKind(n)
+	case n.Tag != "!!str":
+		return "it is not a string"
 	case strings.TrimSpace(n.Value) == "":
 		return "it is empty"
 	}

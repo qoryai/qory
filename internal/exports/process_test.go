@@ -233,6 +233,19 @@ func TestProcessSchemaMatchesTheReader(t *testing.T) {
 		{strings.Replace(process, "  stages:\n", "  stages: {}\n  other:\n", 1), false},
 		{strings.Replace(process, "  schema: qory.process/v1\n", "  schema: qory.process/v1\n  machine: small\n", 1), true},
 		{process + "owner: acme\n", false},
+		{strings.Replace(process, "workflow: draft-an-answer", `workflow: ""`, 1), false},
+		{strings.Replace(process, "workflow: draft-an-answer", `workflow: " "`, 1), false},
+		{strings.Replace(process, "workflow: draft-an-answer", "workflow: ~", 1), false},
+		{strings.Replace(process, "workflow: draft-an-answer", "workflow: 123", 1), false},
+		{strings.Replace(process, "workflow: draft-an-answer", "workflow: true", 1), false},
+		{strings.Replace(process, "workflow: draft-an-answer", "workflow: [a]", 1), false},
+		{strings.Replace(process, "workflow: draft-an-answer", `workflow: "a\nb"`, 1), false},
+		{strings.Replace(process, "workflow: check-the-tone", `workflow: ""`, 1), false},
+		{strings.Replace(process, "workflow: check-the-tone", `workflow: "a\tb"`, 1), false},
+		{strings.Replace(process, "name: Answer", `name: "Answer\nx"`, 1), false},
+		{strings.Replace(process, "name: Answer", `name: "\t"`, 1), false},
+		{strings.Replace(process, "name: Answer", "name: 3", 1), true},
+		{strings.Replace(process, "name: Answer", `name: ""`, 1), true},
 	} {
 		var doc any
 		if err := yaml.Unmarshal([]byte(c.body), &doc); err != nil {
@@ -348,5 +361,28 @@ func TestVerifyRefusesBadWorkflowNames(t *testing.T) {
 		if !strings.HasPrefix(line, file+": ") {
 			t.Errorf("a line that does not start with the file: %q", line)
 		}
+	}
+}
+
+// TestVerifyRefusesAWorkflowThatIsNoString is a workflow written as a number, a boolean
+// or a date, which YAML reads as no string: each is refused with the entry's place, and
+// the same text quoted is a name the stack must declare.
+func TestVerifyRefusesAWorkflowThatIsNoString(t *testing.T) {
+	for _, c := range []struct{ value, why string }{
+		{"123", "it is a number"},
+		{"1.5", "it is a number"},
+		{"true", "it is a boolean"},
+		{"2026-11-02", "it is not a string"},
+	} {
+		e := factory(t, strings.Replace(process, "workflow: draft-an-answer", "workflow: "+c.value, 1))
+		file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
+		want := file + ": set the workflow of entry 1 in stage Answer to a workflow name: " + c.why
+		if err := e.Verify(); err == nil || err.Error() != want {
+			t.Errorf("%s: %v\nwant %s", c.value, err, want)
+		}
+	}
+	e := factory(t, strings.Replace(process, "workflow: draft-an-answer", `workflow: "123"`, 1))
+	if err := e.Verify(); err == nil || !strings.Contains(err.Error(), ": declare 123 under workflows in ") {
+		t.Errorf("a quoted number: %v", err)
 	}
 }

@@ -378,7 +378,7 @@ process:                         # a qory.process/v1 document
 | `description` | how such a workspace works, at most 1200 characters and at most 80 words |
 | `type` | the workspace type of a workspace made from the template |
 | `stack` | the stack the workspace's workflows run on, one that `exports.stacks` of the same repository lists |
-| `process` | the workspace's process, a `qory.process/v1` document. qory checks that it is an object with `schema: qory.process/v1` and a list of `stages`, and that the stack's `qory-stack.yaml` declares under `workflows` each `workflow` of a stage's `sequence`, a loop's `body` included. qory checks nothing else in it |
+| `process` | the workspace's process, a `qory.process/v1` document. qory checks that it is an object with `schema: qory.process/v1` and a list of `stages`; that each `workflow` of a stage's `sequence`, a loop's `body` included, is a non-empty string of one line that the stack's `qory-stack.yaml` declares under `workflows`; and that each stage `name` has no line break or other control character. qory checks nothing else in it |
 
 Every key is required, and the file has no other key. A key left out, a text over its
 limit, a `stack` that `exports.stacks` does not list, and a `process` that is not such an
@@ -390,8 +390,8 @@ the stack file:
 /src/acme-harness/harness/modules/support-desk/process.yaml: declare check-the-tone under workflows in harness/stacks/support/qory-stack.yaml, or remove it from stage Answer: stack support does not declare it
 ```
 
-A workflow that is empty, null, not a string, or has a line break or another control
-character, is refused the same way, with the entry's place in the stage, such as `entry
+A workflow that is empty, null, not a string, such as `123` or `true`, or has a line
+break or another control character, is refused the same way, with the entry's place in the stage, such as `entry
 2 in the loop of entry 3`. A stage name and a `stack` with a line break or another
 control character are refused too. qory reads the file through the module's folder, as
 the compose reads a module's files: a link to a file inside the folder is followed, and
