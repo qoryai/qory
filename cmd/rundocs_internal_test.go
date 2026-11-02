@@ -454,6 +454,8 @@ func TestARunCodesLinesShowTheHarnessByItsPhrase(t *testing.T) {
 // a fullwidth : and @, which curl built with IDN maps to ASCII; one url.Parse cannot
 // read; and one that is not https. Each is an input error that starts with its fix and
 // shows no part of the URL while the harness is hidden. A host in the xn-- form passes.
+// A module with no source and an exclude, the form a checkout's qory.yaml uses for a
+// module of its base, is stopped with an error that does not call it a folder.
 func TestAHarnessDocumentWithASourceQoryDoesNotFetchStops(t *testing.T) {
 	const settings = " of the harness in the workspace's settings in Qory Apiary"
 	const user = "remove the user name and password from the URL of the module tools" + settings + ": the run's stack proxy sets the harness credentials of the run configuration, so a source's URL needs none; the code is used"
@@ -496,6 +498,11 @@ func TestAHarnessDocumentWithASourceQoryDoesNotFetchStops(t *testing.T) {
 	}
 	if err := harnessChecked(withModule("http://code.example.com/team/tools.git"), false); err == nil || err.Error() != "set the module tools"+settings+" to an https source: http://code.example.com/team/tools.git is not an https URL with a host, and qory fetches a harness only over https; the code is used" {
 		t.Errorf("an http module of a shown harness: %v", err)
+	}
+	excludes := withModule("")
+	excludes.Harness.Modules = []contracts.HarnessModule{{Name: "core", Exclude: &contracts.HarnessSelection{Skills: []string{"explore-a-ticket"}}}}
+	if err := harnessChecked(excludes, true); err == nil || err.Error() != "give the module core"+settings+" an https source: a module of a harness document has a source, so the document cannot exclude entries from a module of the stack it extends; the code is used" || ExitCode(err) != 2 {
+		t.Errorf("an exclude for a module of the base: %v (exit %d)", err, ExitCode(err))
 	}
 }
 

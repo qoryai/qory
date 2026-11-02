@@ -142,6 +142,11 @@ type Module struct {
 	// name. It is set by [Extend], not by the YAML, and the compose applies it after the
 	// base's exclude or only block.
 	CheckoutExclude Selection `yaml:"-"`
+	// BaseName, on a base module, is the name a checkout's qory.yaml lists it by to
+	// exclude from it: the name the base stack sets for it, else the export its source
+	// selects; "" for a module the base lists by a path or a git source alone, which the
+	// checkout cannot list. It is set by [Extend], not by the YAML.
+	BaseName string `yaml:"-"`
 	// Variant forces one of the module's variants instead of the one named like the
 	// runtime.
 	Variant string `yaml:"variant,omitempty"`
@@ -992,6 +997,8 @@ func Extend(base, p *Stack) (*Stack, error) {
 	out.Modules = nil
 	for _, l := range base.Modules {
 		l.Base = true
+		// The name is taken before the source is rewritten for the checkout.
+		l.BaseName = baseName(l)
 		if l.Source.Git == "" {
 			// A base module read by path: inside the base's repository, which is the
 			// extends source's clone for a git base, so the module becomes a git source
@@ -1018,8 +1025,8 @@ func Extend(base, p *Stack) (*Stack, error) {
 	}
 	byName := map[string]int{}
 	for i, l := range out.Modules {
-		if name := baseName(l); name != "" {
-			byName[name] = i
+		if l.BaseName != "" {
+			byName[l.BaseName] = i
 		}
 	}
 	for _, l := range p.Modules {

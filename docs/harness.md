@@ -216,7 +216,7 @@ The rules:
 
 - Use the name the delivered stack lists the module under: its `name`, or the
   `module` its source selects. A module that the stack lists by a `path` or `git`
-  source alone cannot be reached this way.
+  source alone cannot be reached this way: rename your entry instead.
 - The entry contains `name` and `exclude` only. A `source`, `only`, `variant` or `link`
   fails the compose.
 - The exclude lists entries of the kinds the stack's `extending` block lets your modules
@@ -226,7 +226,8 @@ The rules:
   from the exclude of module core in qory.yaml: …`.
 
 Without the exclude, the two skills collide. The compose fails, exit 3, and prints the
-entry to add.
+entry to write. When `qory.yaml` lists the module already, it prints the whole entry to
+replace it with.
 
 ## The composed tree
 

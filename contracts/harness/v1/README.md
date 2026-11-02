@@ -219,12 +219,13 @@ checkout appends:
   exclude lists entries of the kinds in the base's `extending.kinds` and files under its
   `extending.files` prefixes; an instruction section, a settings fragment, a variable, a
   hook or an MCP server of a base module stays. Anything else on that entry fails with
-  status 2, each message starting with its fix: `list module <name> with its name and
-  exclude only: …`, `add an exclude to module <name>, or remove its entry: …`, `remove
-  <part> from the exclude of module <name>: …`, `remove <kind>/<entry> from the exclude
-  of module <name>: …`; and an entry the base module does not compose fails with
-  `remove <kind>/<entry> from the exclude of module <name> in qory.yaml: the base stack
-  <name>@<pin> composes no <kind>/<entry> from module <name>`.
+  status 2, and `qory harness compose` prints the path of the `qory.yaml`, then the
+  message, which starts with its fix: `list module <module> with its name and exclude
+  only: …`, `add an exclude to module <module>, or remove its entry: …`, `remove <part>
+  from the exclude of module <module>: …`, or `remove <kind>/<entry> from the exclude of
+  module <module>: …`. An entry the base module does not compose fails with status 2 and
+  `remove <kind>/<entry> from the exclude of module <module> in qory.yaml: the base stack
+  <stack>@<pin> composes no <kind>/<entry> from module <manifest name>`.
 - The target is the document's. A delivered stack has none, and the checkout defines
   what it composes the base for under `target` beside `extends`; the runner's
   `harness.runtime` and `harness.model` override the document's, and `--runtime` and
@@ -256,9 +257,17 @@ checkout appends:
   path covers that file only. A module shipping anything else fails the compose and the
   message lists it. A base without the block is closed to extension.
 - An entry of an appended module that collides with a base entry fails with status 3.
-  The message contains the exclude for the base module, as for any collision, and
-  `write the exclude for a module of the base stack <name>@<pin> in qory.yaml, under
-  harness.modules`. The message lists that one entry and nothing else of the base.
+  The message lists that one entry and nothing else of the base. For a base module the
+  base lists by `name` or by an export, `qory harness compose` prints `Module <module>
+  belongs to the base stack <name>@<pin>.`, and under `Fix` the entry to write in
+  `qory.yaml`, under `harness.modules`, or `Replace the entry of module <module> with:`
+  when `qory.yaml` lists the module already. The error's text, which the fixtures contain
+  (§Composition rules), has the exclude line for the base module and `write the exclude
+  for a module of the base stack <name>@<pin> in qory.yaml, under harness.modules`. For a
+  base module the base lists by a path or a git source alone, which `qory.yaml` cannot
+  list, `qory harness compose` prints `It belongs to the base stack <name>@<pin>; rename
+  yours.`, and the error's text has `it belongs to the base stack <name>@<pin>; rename
+  yours`.
 - Both stacks' `extensions` go into the report, merged by top-level key: a key the
   checkout sets replaces the base's value whole, and a key it leaves alone stays the
   base's. Nothing under a key is merged.
@@ -275,7 +284,8 @@ checkout appends:
 - A base does not extend another.
 
 The base's hooks and deny rules reach every extending checkout unchanged: `hooks` and
-`permissions` concatenate (§Composition rules) and nothing of the base can be excluded.
+`permissions` concatenate (§Composition rules), and no hook, MCP server, settings
+fragment, instruction section or variable of the base can be excluded.
 What the kinds list removes is the code that runs without the agent's involvement; a
 script inside an appended skill runs when the agent runs it, under the base's hooks and
 rules. A wide `files` prefix, such as `claude/`, is safe for the same reason: the paths a
@@ -528,7 +538,11 @@ runtime: the resolution happens in the composed tree, per path.
    when an `exclude` or an `only` dropped it, with the module whose block did, and with
    `module core: skill deploy requires command ship, which no module ships` otherwise; a
    reference's message has `references` for `requires`, and `which no module ships and the
-   stack does not bind` when neither an entry nor a binding answers to the name. A binding
+   stack does not bind` when neither an entry nor a binding answers to the name. When the
+   exclude a checkout's `qory.yaml` lists for a base module dropped it, the message is
+   `remove commands/ship from the exclude of module core in qory.yaml, or ship it in a
+   module of the repository: module core: skill deploy requires command ship, which the
+   exclude of module core in qory.yaml leaves out`. A binding
    is checked first: one that selects an entry that is not composed fails with `bind agents/coder
    selects agent rails-coder, which no module ships`, or `which module rails leaves out`,
    and a role whose name an entry has fails with `bind agents/reviewer defines a role, and

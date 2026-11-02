@@ -197,8 +197,10 @@ type definedTarget struct {
 // scheme that has a user part, a user name or a password, or an @ between :// and the
 // first / after it; one that url.Parse cannot read; one whose host has a character
 // outside ASCII; one that is not https; and a path that is absolute, the repository's
-// root, or leads out of the repository. The schema of the documents allows no folder;
-// this check does not depend on it. Each error is an input error and starts with the
+// root, or leads out of the repository. A module with no source and an exclude, beside
+// extends, is the form that excludes from a base module in a checkout's qory.yaml, and is
+// stopped with an error that does not call it a folder. The schema of the documents
+// allows no folder; this check does not depend on it. Each error is an input error and starts with the
 // fix in the workspace's settings in Qory Apiary. No error shows a path. Only the error
 // of a URL that is not https shows the URL, and only when the harness is not hidden:
 // then an scp form such as git@host:path shows with its user.
@@ -212,6 +214,11 @@ func harnessChecked(h *contracts.HarnessDocument, hidden bool) error {
 		what := fmt.Sprintf("modules[%d]", i)
 		if m.Name != "" {
 			what = "the module " + accesskey.ShownName(m.Name, false)
+		}
+		if h.Harness.Extends != nil && m.Source == (contracts.HarnessSource{}) && m.Exclude != nil {
+			// The form of a checkout's qory.yaml that excludes from a module of the base;
+			// a module of a harness document has a source.
+			return input(fmt.Errorf("give %s %s an https source: a module of a harness document has a source, so the document cannot exclude entries from a module of the stack it extends%s", what, inSettings, codeUsed))
 		}
 		if err := sourceChecked(what, m.Source.Git, m.Source.Path, hidden); err != nil {
 			return err

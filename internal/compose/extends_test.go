@@ -202,3 +202,129 @@ func TestExtendRefusesAnExcludeOfNoBaseEntry(t *testing.T) {
 		t.Fatalf("a skill the base leaves out: got %v\nwant %s", err, want)
 	}
 }
+
+// baseStackWith is the base stack of [excludeBaseTree] with core listed by the given
+// lines in place of its name and path.
+func baseStackWith(core string) string {
+	return "apiVersion: qory.dev/v1alpha1\nname: web\nextending:\n  kinds: [skills]\nmodules:\n" + core
+}
+
+// TestExtendKeepsRenameForABaseModuleByPath is a base that lists core by a path alone:
+// the checkout's qory.yaml cannot list core, so the collision message is to rename the
+// entry, with no exclude suggested.
+func TestExtendKeepsRenameForABaseModuleByPath(t *testing.T) {
+	dir := excludeBaseTree(t, "")
+	if err := os.WriteFile(filepath.Join(dir, "base", stack.FileName), []byte(baseStackWith("  - source: {path: modules/core}\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := composeExtending(t, dir)
+	var collision *compose.CollisionError
+	if !errors.As(err, &collision) {
+		t.Fatalf("err = %v, want a collision", err)
+	}
+	want := "skills/explore-a-ticket is provided by 2 modules: core@working-tree, app@working-tree\n" +
+		"  it belongs to the base stack web@working-tree; rename yours"
+	if err.Error() != want {
+		t.Fatalf("got\n%s\nwant\n%s", err, want)
+	}
+	if modules, _ := collision.Suggest(collision.Order); len(modules) != 0 || collision.InBase["core"] || !collision.Collisions[0].Rename {
+		t.Fatalf("suggest = %v, in base = %v, rename = %v; want no exclude for core", modules, collision.InBase, collision.Collisions[0].Rename)
+	}
+}
+
+// TestExtendSuggestsTheExportNameOfABaseModule is a base that lists its module by the
+// export core of a git source whose manifest declares core-x: the suggested exclude and
+// the error of an exclude that composes nothing use core, the name qory.yaml lists it by.
+func TestExtendSuggestsTheExportNameOfABaseModule(t *testing.T) {
+	isolateAll(t)
+	url := gitRepo(t, "", map[string]string{
+		"qory.yaml":                     "apiVersion: qory.dev/v1alpha1\nexports:\n  modules: [core]\n",
+		"modules/core/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: core-x\n",
+		"modules/core/skills/explore-a-ticket/SKILL.md": "# the base's\n",
+	})
+	dir := excludeBaseTree(t, "")
+	core := "  - source: {git: \"" + url + "\", ref: main, module: core}\n"
+	if err := os.WriteFile(filepath.Join(dir, "base", stack.FileName), []byte(baseStackWith(core)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	composeIt := func() error {
+		t.Helper()
+		p, err := config.Compose(filepath.Join(dir, "app", config.FileName))
+		if err != nil {
+			t.Fatal(err)
+		}
+		opts := compose.Options{Cache: t.TempDir()}
+		merged, base, err := compose.LoadBase(p, "", opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		opts.Base = base
+		_, err = compose.ComposeWith(merged, opts)
+		return err
+	}
+	err := composeIt()
+	var collision *compose.CollisionError
+	if !errors.As(err, &collision) {
+		t.Fatalf("err = %v, want a collision", err)
+	}
+	if !strings.Contains(err.Error(), "\n    core: exclude: {skills: [explore-a-ticket]}\n") || collision.ExcludeName("core-x") != "core" {
+		t.Fatalf("the exclude for core-x is not written under core:\n%s", err)
+	}
+	app := "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {path: ../base}\n  target: {runtime: claude}\n  modules:\n    - name: app\n    - name: core\n      exclude: {skills: [explore-a-ticket, triage]}\n"
+	if err := os.WriteFile(filepath.Join(dir, "app", config.FileName), []byte(app), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want := "remove skills/triage from the exclude of module core in qory.yaml: the base stack web@working-tree composes no skills/triage from module core-x"
+	if err := composeIt(); err == nil || err.Error() != want {
+		t.Fatalf("got %v\nwant %s", err, want)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "app", config.FileName), []byte(strings.Replace(app, ", triage", "", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := composeIt(); err != nil {
+		t.Fatalf("the exclude under the export's name: %v", err)
+	}
+}
+
+// TestExtendSaysWhichExcludeLeftARequirementOut is the checkout's qory.yaml excluding
+// explore-a-ticket from core with no module of the repository shipping it, while core's
+// command ship references it: the message starts with the fix and states that the
+// exclude in qory.yaml left it out.
+func TestExtendSaysWhichExcludeLeftARequirementOut(t *testing.T) {
+	dir := excludeBaseTree(t, "    - name: core\n      exclude: {skills: [explore-a-ticket]}\n")
+	if err := os.RemoveAll(filepath.Join(dir, "app", "modules", "app", "skills")); err != nil {
+		t.Fatal(err)
+	}
+	_, err := composeExtending(t, dir)
+	want := "remove skills/explore-a-ticket from the exclude of module core in qory.yaml, or ship it in a module of the repository: module core: command ship references skill explore-a-ticket, which the exclude of module core in qory.yaml leaves out"
+	if err == nil || err.Error() != want {
+		t.Fatalf("got %v\nwant %s", err, want)
+	}
+}
+
+// TestExtendSuggestsTheWholeExcludeOfAListedBaseModule is the checkout's qory.yaml
+// listing core with an exclude already when its skill collides with core's: the
+// suggestion is the whole exclude, the listed entry and the colliding one, to write in
+// place of the one qory.yaml lists.
+func TestExtendSuggestsTheWholeExcludeOfAListedBaseModule(t *testing.T) {
+	dir := excludeBaseTree(t, "    - name: core\n      exclude: {skills: [triage]}\n")
+	triage := filepath.Join(dir, "base", "modules", "core", "skills", "triage")
+	if err := os.MkdirAll(triage, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(triage, "SKILL.md"), []byte("# triage\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := composeExtending(t, dir)
+	var collision *compose.CollisionError
+	if !errors.As(err, &collision) {
+		t.Fatalf("err = %v, want a collision", err)
+	}
+	want := "skills/explore-a-ticket is provided by 2 modules: core@working-tree, app@working-tree\n" +
+		"  keep one and exclude the others, for example\n" +
+		"    core: exclude: {skills: [triage, explore-a-ticket]}\n" +
+		"  write the exclude for a module of the base stack web@working-tree in qory.yaml, under harness.modules, in place of the exclude qory.yaml lists for core"
+	if err.Error() != want {
+		t.Fatalf("got\n%s\nwant\n%s", err, want)
+	}
+}

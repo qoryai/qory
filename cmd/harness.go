@@ -1680,7 +1680,8 @@ func flagRefuses(force bool) string {
 }
 
 // printCollision prints what happened, the modules involved, and the stack lines that
-// resolve it by keeping the last module that ships each entry.
+// resolve it by keeping the last module that ships each entry. A base module's lines
+// are the whole entry to write in qory.yaml, with the exclude qory.yaml lists for it.
 func printCollision(u *ui.UI, e *compose.CollisionError, n *source.Named) {
 	for _, c := range e.Collisions {
 		u.Fail(fmt.Errorf("%s is provided by %d modules", accesskey.ShownName(c.Kind+"/"+c.Name, false), len(c.Modules)))
@@ -1693,10 +1694,19 @@ func printCollision(u *ui.UI, e *compose.CollisionError, n *source.Named) {
 			rows = append(rows, []string{accesskey.ShownName(l, false), from, e.Pins[l]})
 		}
 		u.Table(rows)
+		if c.Rename {
+			u.Text("It belongs to the base stack " + accesskey.ShownName(c.Base, false) + "; rename yours.")
+			continue
+		}
 		for _, l := range c.Modules {
-			if e.InBase[l] && c.Base != "" {
-				u.Text("Module " + accesskey.ShownName(l, false) + " belongs to the base stack " + accesskey.ShownName(c.Base, false) + ".")
+			if !e.InBase[l] || c.Base == "" {
+				continue
 			}
+			line := "Module " + accesskey.ShownName(l, false) + " belongs to the base stack " + accesskey.ShownName(c.Base, false)
+			if e.ExcludeName(l) != l {
+				line += "; list it in qory.yaml as " + accesskey.ShownName(e.ExcludeName(l), false)
+			}
+			u.Text(line + ".")
 		}
 	}
 	modules, excludes := e.Suggest(e.Order)
@@ -1714,19 +1724,26 @@ func printCollision(u *ui.UI, e *compose.CollisionError, n *source.Named) {
 	u.Text("Keep one and exclude it from the others. For example, in " + where + ":")
 	for _, l := range modules {
 		u.Blank()
-		if e.InBase[l] {
+		name := accesskey.ShownName(e.ExcludeName(l), false)
+		switch {
+		case e.InBase[l] && len(e.Excluded[l]) > 0:
+			// qory.yaml lists the module already: a second entry would list it twice.
+			u.Text("Replace the entry of module " + name + " with:")
+			u.Code("- name: "+name, "  exclude:")
+		case e.InBase[l]:
 			// A base module is listed by its name with the exclude alone.
-			u.Code("- name: "+accesskey.ShownName(l, false), "  exclude:")
-		} else {
-			u.Code("- name: "+accesskey.ShownName(l, false), "  ...", "  exclude:")
+			u.Code("- name: "+name, "  exclude:")
+		default:
+			u.Code("- name: "+name, "  ...", "  exclude:")
 		}
+		block := e.ExcludeOf(l, excludes)
 		var kinds []string
-		for k := range excludes[l] {
+		for k := range block {
 			kinds = append(kinds, k)
 		}
 		sort.Strings(kinds)
 		for _, k := range kinds {
-			u.Code("    " + k + ": [" + strings.Join(accesskey.ShownNames(excludes[l][k]), ", ") + "]")
+			u.Code("    " + k + ": [" + strings.Join(accesskey.ShownNames(block[k]), ", ") + "]")
 		}
 	}
 }
