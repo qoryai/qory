@@ -64,8 +64,9 @@ func checkoutMounts(spec session.SessionSpec) []wall.Mount {
 
 // TestAReadWorkflowSeesTheCheckoutReadOnly is a walled run from a run code whose
 // workflow the stack declares with access read, with no access, or not at all: the
-// session binds the workspace read-only, the checkout's mount is read-only, and the
-// checkout stays among the places the run may write.
+// session binds the workspace read-only, the checkout's mount is read-only, the
+// checkout stays among the places the run may write, and Claude Code's settings deny
+// the edit tools, allow /qory/qory in Bash and set defaultMode to dontAsk.
 func TestAReadWorkflowSeesTheCheckoutReadOnly(t *testing.T) {
 	for name, stackFile := range map[string]func(string) string{
 		"access read": declares("read"),
@@ -86,6 +87,8 @@ func TestAReadWorkflowSeesTheCheckoutReadOnly(t *testing.T) {
 			if !slices.Contains(r.spec.Written, r.spec.Dir) {
 				t.Errorf("Written %q has no checkout %s", r.spec.Written, r.spec.Dir)
 			}
+			settings := settingsOf(t, r.spec.Args)
+			wants(t, settings, `"Edit"`, `"Write"`, `"NotebookEdit"`, `"Bash(/qory/qory *)"`, `"defaultMode": "dontAsk"`)
 		})
 	}
 }
@@ -104,6 +107,17 @@ func TestAWriteWorkflowSeesTheCheckoutWritable(t *testing.T) {
 	if got := checkoutMounts(r.spec); len(got) != 1 || got[0] != (wall.Mount{Path: r.spec.Dir}) {
 		t.Errorf("the mounts of the checkout are %+v, want %s writable alone", got, r.spec.Dir)
 	}
+	lacks(t, settingsOf(t, r.spec.Args), "/qory/qory", "dontAsk", "NotebookEdit")
+}
+
+// settingsOf is the value of --settings in args, Claude Code's settings as JSON.
+func settingsOf(t *testing.T, args []string) string {
+	t.Helper()
+	i := slices.Index(args, "--settings")
+	if i < 0 || i+1 >= len(args) {
+		t.Fatalf("no --settings in %q", args)
+	}
+	return args[i+1]
 }
 
 // TestARunKeyRunSeesTheCheckoutWritable is a walled run given a run key and no run

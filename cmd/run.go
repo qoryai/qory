@@ -703,7 +703,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// home itself, after the home's check: Forager reads no file of the home.
 				launchArgs := append(append([]string{}, launch.Args...), extra...)
 				if s, ok := renderer.(render.SettingsInliner); ok {
-					if launchArgs, err = inlineSettings(s.SettingsFlag(), launch.Args, extra, at.home); err != nil {
+					if launchArgs, err = inlineSettings(s.SettingsFlag(), launch.Args, extra, at.home, readOnly); err != nil {
 						return false, err
 					}
 				}

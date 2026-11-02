@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 	"strings"
+
+	"github.com/qoryai/forager/wall"
 
 	"github.com/qoryai/qory/internal/exports"
 )
@@ -55,8 +58,10 @@ func setsSettings(flag string, args []string) bool {
 // launch passes the flag once at most, with a value after it, and the agent's
 // arguments not at all, since Forager takes the first and adds its hooks to it alone. A
 // value that is JSON already, from harness.launch, stays as it is. The file is a regular
-// file of at most 64 KiB that holds one JSON object.
-func inlineSettings(flag string, launch, extra []string, home string) ([]string, error) {
+// file of at most 64 KiB that holds one JSON object. With readOnly, for the run of a
+// workflow that only reads the checkout, the settings get [readRules], and a launch
+// with no settings flag gets the flag with those rules alone.
+func inlineSettings(flag string, launch, extra []string, home string, readOnly bool) ([]string, error) {
 	refuse := func(format string, a ...any) error {
 		return input(fmt.Errorf(format+", so the run does not start", a...))
 	}
@@ -69,6 +74,13 @@ func inlineSettings(flag string, launch, extra []string, home string) ([]string,
 		if setsSettings(flag, args) {
 			return nil, refuse("the launch sets %s with no file after it", flag)
 		}
+		if readOnly {
+			data, err := readRules(map[string]any{}, "")
+			if err != nil {
+				return nil, err
+			}
+			args = append(args, flag, string(data))
+		}
 		return append(args, extra...), nil
 	}
 	// A value that is --settings, or --settings=..., is a second --settings: Claude Code
@@ -77,6 +89,18 @@ func inlineSettings(flag string, launch, extra []string, home string) ([]string,
 		return nil, refuse("the launch sets %s more than once", flag)
 	}
 	if strings.HasPrefix(strings.TrimSpace(value), "{") {
+		if !readOnly {
+			return append(args, extra...), nil
+		}
+		object, ok := oneObject([]byte(value))
+		if !ok {
+			return nil, refuse("the Claude Code settings of the launch are not one JSON object")
+		}
+		data, err := readRules(object, "of the launch")
+		if err != nil {
+			return nil, err
+		}
+		args[at] = setValue(args[at], flag, data)
 		return append(args, extra...), nil
 	}
 	path := filepath.Clean(value)
@@ -101,18 +125,94 @@ func inlineSettings(flag string, launch, extra []string, home string) ([]string,
 	if len(data) > maxSettings {
 		return nil, refuse("the Claude Code settings %s are larger than 64 KiB", exports.Value(value, false))
 	}
+	object, ok := oneObject(data)
+	if !ok {
+		return nil, refuse("the Claude Code settings %s are not one JSON object", exports.Value(value, false))
+	}
+	if readOnly {
+		if data, err = readRules(object, exports.Value(value, false)); err != nil {
+			return nil, err
+		}
+	}
+	args[at] = setValue(args[at], flag, data)
+	return append(args, extra...), nil
+}
+
+// setValue is arg, the settings flag's value or flag=value, with the value data.
+func setValue(arg, flag string, data []byte) string {
+	if strings.HasPrefix(arg, flag+"=") {
+		return flag + "=" + string(data)
+	}
+	return string(data)
+}
+
+// oneObject is data read as one JSON object, and whether it is one.
+func oneObject(data []byte) (map[string]any, bool) {
 	var object map[string]any
 	dec := json.NewDecoder(bytes.NewReader(data))
 	if err := dec.Decode(&object); err != nil || object == nil || dec.More() {
-		return nil, refuse("the Claude Code settings %s are not one JSON object", exports.Value(value, false))
+		return nil, false
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return nil, refuse("the Claude Code settings %s are not one JSON object", exports.Value(value, false))
+		return nil, false
 	}
-	if strings.HasPrefix(args[at], flag+"=") {
-		args[at] = flag + "=" + string(data)
-	} else {
-		args[at] = string(data)
+	return object, true
+}
+
+// The rules a run of a workflow that only reads the checkout adds to Claude Code's
+// settings: Claude Code denies its edit tools, allows the qory inside the wall in Bash,
+// which is mounted at [wall.HelperPath] and is not on PATH, and denies every other tool
+// that no rule allows, without a prompt.
+var (
+	readDeny  = []string{"Edit", "Write", "NotebookEdit"}
+	readAllow = []string{"Bash(" + wall.HelperPath + " *)"}
+)
+
+// readDefaultMode is the permissions.defaultMode of a read workflow's run.
+const readDefaultMode = "dontAsk"
+
+// readRules is object, Claude Code's settings, as JSON with [readDeny] added to
+// permissions.deny, [readAllow] to permissions.allow, each rule once, and
+// permissions.defaultMode set to [readDefaultMode]; every other key stays as it is, and
+// < > & stay unescaped. shown is the settings file as a text shows it, or "of the
+// launch" for settings that the launch passes as JSON. A permissions that is no object,
+// and an allow or a deny that is no array, stop the run.
+func readRules(object map[string]any, shown string) ([]byte, error) {
+	at := "the Claude Code settings " + shown
+	if shown == "" {
+		at = "the Claude Code settings"
 	}
-	return append(args, extra...), nil
+	permissions := map[string]any{}
+	if p, ok := object["permissions"]; ok {
+		if permissions, ok = p.(map[string]any); !ok {
+			return nil, input(fmt.Errorf("set permissions in %s to a JSON object: a run of a read workflow adds rules to it, so the run does not start", at))
+		}
+	}
+	for _, add := range []struct {
+		key   string
+		rules []string
+	}{{"deny", readDeny}, {"allow", readAllow}} {
+		var list []any
+		if v, ok := permissions[add.key]; ok {
+			if list, ok = v.([]any); !ok {
+				return nil, input(fmt.Errorf("set permissions.%s in %s to a JSON array: a run of a read workflow adds rules to it, so the run does not start", add.key, at))
+			}
+		}
+		for _, rule := range add.rules {
+			if !slices.Contains(list, any(rule)) {
+				list = append(list, rule)
+			}
+		}
+		permissions[add.key] = list
+	}
+	permissions["defaultMode"] = readDefaultMode
+	object["permissions"] = permissions
+	var out bytes.Buffer
+	enc := json.NewEncoder(&out)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(object); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
 }
