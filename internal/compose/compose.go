@@ -217,6 +217,10 @@ type Options struct {
 	// Hidden is set for the compose of a run whose harness is hidden, whose Copies copies
 	// every module as well, so the home contains no link.
 	Hidden bool
+	// StackAs, when set, is the stack as an error of the compose shows it in place of its
+	// file, for a stack whose file is a copy that the person does not edit, such as the
+	// workspace's harness in Qory Apiary.
+	StackAs string
 }
 
 // beforeManifest and afterManifest, when a test sets them, run with each module's
@@ -417,7 +421,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	if err := checkResolved(res, requires); err != nil {
 		return nil, err
 	}
-	if err := workflowsShipped(p, declared, opts.Base); err != nil {
+	if err := workflowsShipped(p, declared, opts.Base, opts.StackAs); err != nil {
 		return nil, err
 	}
 	if len(instructions) > 0 {
@@ -434,8 +438,9 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 // their exclude or only blocks: base's modules for a stack that extends base, and
 // p's modules for one that extends none. A module that a checkout adds to a base does not
 // count, since the base lists the workflows. Each workflow without one is a line of the
-// error, in sorted order.
-func workflowsShipped(p *stack.Stack, composed map[string]bool, base *Base) error {
+// error, in sorted order, which shows a stack that extends none as as, when set, and
+// otherwise by its file.
+func workflowsShipped(p *stack.Stack, composed map[string]bool, base *Base, as string) error {
 	var lines []string
 	for _, name := range slices.Sorted(maps.Keys(p.Workflows)) {
 		if composed["skills/"+name] || composed["commands/"+name] {
@@ -447,7 +452,10 @@ func workflowsShipped(p *stack.Stack, composed map[string]bool, base *Base) erro
 			continue
 		}
 		in := "the stack"
-		if p.File != "" {
+		switch {
+		case as != "":
+			in = as
+		case p.File != "":
 			in += " in " + filepath.Base(p.File)
 		}
 		lines = append(lines, fmt.Sprintf("add a skill or command %s to a module of %s, or remove %s from its workflows: the stack declares the workflow %s, and none of its modules ships a skill or command %s", w, in, w, w, w))
