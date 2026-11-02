@@ -668,6 +668,7 @@ func TestArtifactPushExitStatuses(t *testing.T) {
 		"payload_too_large": {http.StatusRequestEntityTooLarge, cmd.ExitArtifactRefused},
 		"invalid_artifact":  {http.StatusUnprocessableEntity, 1},
 		"run_ended":         {http.StatusConflict, 1},
+		"answer_unverified": {http.StatusBadGateway, 1},
 	} {
 		t.Run(code, func(t *testing.T) {
 			inCheckout(t)

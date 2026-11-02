@@ -1268,3 +1268,18 @@ func TestAReadRunRecordsNothingAfterTheSetup(t *testing.T) {
 		t.Errorf("a read run ran the record:\n%s", r.out)
 	}
 }
+
+// TestTheMessageOfAnUnverifiedAnswerIsPrintedAsItIs is a 502 answer_unverified to each POST,
+// with the message of the gateway's route: the step's line has that message, word for word.
+func TestTheMessageOfAnUnverifiedAnswerIsPrintedAsItIs(t *testing.T) {
+	const message = "Check the gateway's clock: this line is the route's."
+	p := newPushRepo(t, "write")
+	p.api.post = func(_ int, w http.ResponseWriter) (bool, bool) {
+		w.WriteHeader(http.StatusBadGateway)
+		fmt.Fprintf(w, `{"error":"answer_unverified","message":%q}`, message)
+		return true, false
+	}
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	wants(t, r.out, "the version of the artifact branch was not stored: "+message+"; the code is used")
+}
