@@ -88,6 +88,7 @@ const (
 	textAlternates     = "qory run: start the run in a new empty git working tree, then run again: the working folder's .git has %s, which makes git read objects from outside the working folder"
 	textGitLink        = "qory run: start the run in a new empty git working tree, or remove the link %s, then run again: git would read and write through that link"
 	textHardLink       = "qory run: start the run in a new empty git working tree, or remove the hard link %s, then run again: a write to it would change another file"
+	textGrafts         = "qory run: start the run in a new empty git working tree, then run again: the working folder's .git has info/grafts, which gives commits other parents"
 	textCommonDir      = "qory run: start the run in a new empty git working tree, then run again: the working folder's .git has a commondir file, which makes git read the configuration of another repository"
 	// The cause of each of these lines alone, for the line after the agent exited.
 	causeConfigKey     = "it has %s in %s, a key that neither git init nor the fetch writes, and git on this machine would use that key, such as a filter, a proxy or http.sslVerify"
@@ -96,6 +97,7 @@ const (
 	causeGitLink       = "it has the link %s, and git would read and write through that link"
 	causeHardLink      = "it has the hard link %s, and a write to it would change another file"
 	causeCommonDir     = "its .git has a commondir file, which makes git read the configuration of another repository"
+	causeGrafts        = "its .git has info/grafts, which gives commits other parents, so a push that overwrites a branch would pass as a fast-forward"
 	causeNoGitPart     = "its .git has no %s, so git would take a folder above it for the repository"
 	textFetched        = "qory run: fetched %s at %s in %s"
 	textFetchedOne     = "qory run: fetched %s at %s and 1 further repository in %s"

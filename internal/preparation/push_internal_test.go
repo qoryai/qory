@@ -64,7 +64,7 @@ func TestAfterTheRunTheCheckTakesWhatTheFetchWrote(t *testing.T) {
 		t.Fatal(err)
 	}
 	hold.Release()
-	if err := safeFurther(ctx, filepath.Join(dir, filepath.FromSlash(Repositories), "acme", "lib")); err != nil {
+	if err := safeFurther(ctx, dir, filepath.Join(dir, filepath.FromSlash(Repositories), "acme", "lib")); err != nil {
 		t.Errorf("the check of a further repository: %v", err)
 	}
 }
@@ -658,4 +658,54 @@ func TestAStepGitTakesNoFolderAbove(t *testing.T) {
 	if got, err := stepGit(noRemote, "")(context.Background(), inner, "rev-parse", "--git-dir"); err == nil {
 		t.Errorf("git found a repository at %s", got)
 	}
+}
+
+// TestALinkOnTheWayToAFurtherRepositoryStops is a further repository, or a folder above it,
+// replaced by a link to a repository outside the working folder: nothing there is committed.
+func TestALinkOnTheWayToAFurtherRepositoryStops(t *testing.T) {
+	for name, up := range map[string]int{"the repository": 0, "the folder above it": 1, ".qory/repositories": 2} {
+		t.Run(name, func(t *testing.T) {
+			dir, b := onBranch(t, "acme/shop,acme/lib")
+			lib := filepath.Join(dir, filepath.FromSlash(b.Repositories[1].Dir))
+			at := lib
+			for range up {
+				at = filepath.Dir(at)
+			}
+			outside := filepath.Join(t.TempDir(), "outside")
+			if err := os.Rename(at, outside); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(outside, at); err != nil {
+				t.Fatal(err)
+			}
+			write(t, filepath.Join(lib, "dirty.txt"), "a file outside the working folder\n")
+			head := run(t, lib, "rev-parse", "HEAD")
+			_, _, err := pushOf(dir, b)
+			if err == nil || !strings.Contains(err.Error(), "it has the link ") {
+				t.Fatalf("the error is %v", err)
+			}
+			if got := run(t, lib, "rev-parse", "HEAD"); got != head {
+				t.Errorf("qory committed outside the working folder: %s", got)
+			}
+		})
+	}
+}
+
+// TestAGraftStopsTheStep is a commit with no link to the start that info/grafts gives the
+// start as its parent, so that the check of the fast-forward would pass.
+func TestAGraftStopsTheStep(t *testing.T) {
+	inEachRepository(t, func(t *testing.T, dir, folder string, b *WorkBranch, _ string) {
+		tree := run(t, folder, "write-tree")
+		forged := run(t, folder, "commit-tree", tree, "-m", "unrelated")
+		start := run(t, folder, "rev-parse", "HEAD")
+		run(t, folder, "update-ref", "HEAD", forged)
+		write(t, filepath.Join(folder, ".git", "info", "grafts"), forged+" "+start+"\n")
+		_, _, err := pushOf(dir, b)
+		if err == nil || !strings.Contains(err.Error(), "its .git has info/grafts") {
+			t.Fatalf("the error is %v", err)
+		}
+		if strings.Contains(err.Error(), "start the run in") {
+			t.Errorf("the line has the fix of a run that has not started: %v", err)
+		}
+	})
 }

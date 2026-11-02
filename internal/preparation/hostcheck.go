@@ -32,8 +32,9 @@ import (
 // It stops on the folder, in this order, when:
 //   - its .git has a link anywhere under it ([textGitLink]); it, outside objects, or
 //     .qory has a regular file with another name, a hard link ([textHardLink]); or it
-//     has a commondir file ([textCommonDir]), objects/info/alternates or
-//     objects/info/http-alternates ([textAlternates]), or a config or config.worktree
+//     has a commondir file ([textCommonDir]), info/grafts ([textGrafts]),
+//     objects/info/alternates or objects/info/http-alternates ([textAlternates]), or a
+//     config or config.worktree
 //     that is not a regular file ([textConfigNotFile]);
 //   - hostgit's settings check stops on it ([textPlaceRefused]): the folder is in a place
 //     a walled run used, and its configuration has a key qory and git do not write, or
@@ -60,17 +61,44 @@ func safeAfterRun(ctx context.Context, dir string) (*places.Hold, error) {
 	return checkedRepository(ctx, dir, true)
 }
 
-// safeFurther is [safeAfterRun] for a further repository, without hostgit's settings
-// check: a walled run's record has the fingerprint of the working folder's repository
-// alone, so that check stops on any remote URL here. git reaches the remote by the URL qory
-// builds, the keys and the files are checked, and every git qory runs here has replace
-// refs and the commit-graph off. The caller holds the working folder that contains dir.
-func safeFurther(ctx context.Context, dir string) error {
+// safeFurther is [safeAfterRun] for a further repository at dir in the working folder
+// root, without hostgit's settings check: a walled run's record has the fingerprint of
+// the working folder's repository alone, so that check stops on any remote URL here. git
+// reaches the remote by the URL qory builds, the keys and the files are checked, and every
+// git qory runs here has replace refs and the commit-graph off. The caller holds root.
+// The check also stops on a link anywhere on the way from root to dir, which would take
+// every read and write outside the working folder.
+func safeFurther(ctx context.Context, root, dir string) error {
+	if err := noLinkTo(root, dir); err != nil {
+		return err
+	}
 	gitDir := filepath.Join(dir, ".git")
 	if err := gitParts(gitDir); err != nil {
 		return err
 	}
 	return keysOf(ctx, gitDir, true)
+}
+
+// noLinkTo stops on a link in the folders of the path from root to dir, root excluded.
+func noLinkTo(root, dir string) error {
+	rel, err := filepath.Rel(root, dir)
+	if err != nil {
+		return local(err)
+	}
+	at := root
+	for part := range strings.SplitSeq(rel, string(filepath.Separator)) {
+		at = filepath.Join(at, part)
+		info, err := os.Lstat(at)
+		switch {
+		case err != nil:
+			return local(err)
+		case info.Mode()&fs.ModeSymlink != 0:
+			shown, _ := filepath.Rel(root, at)
+			shown = integration.Printable(filepath.ToSlash(shown))
+			return &unsafeError{fmt.Sprintf(textGitLink, shown), fmt.Sprintf(causeGitLink, shown)}
+		}
+	}
+	return nil
 }
 
 // gitParts stops on a git directory without HEAD, objects or refs: git does not take such
@@ -204,7 +232,7 @@ func qoryFiles(dir string) error {
 
 // gitFiles stops on a git directory with a link anywhere under it, a regular file
 // outside objects that has another name ([hardLinked]), a commondir file, alternates,
-// or a configuration file that is not a regular file, and returns the names of the
+// info/grafts, or a configuration file that is not a regular file, and returns the names of the
 // configuration files it has, config and config.worktree, each a regular file. The
 // walk follows no link.
 func gitFiles(gitDir string) ([]string, error) {
@@ -235,11 +263,13 @@ func gitFiles(gitDir string) ([]string, error) {
 	case err != nil:
 		return nil, local(err)
 	}
-	for _, name := range []string{"commondir", "objects/info/alternates", "objects/info/http-alternates"} {
+	for _, name := range []string{"commondir", "info/grafts", "objects/info/alternates", "objects/info/http-alternates"} {
 		_, err := os.Lstat(filepath.Join(gitDir, filepath.FromSlash(name)))
 		switch {
 		case err == nil && name == "commondir":
 			return nil, &unsafeError{textCommonDir, causeCommonDir}
+		case err == nil && name == "info/grafts":
+			return nil, &unsafeError{textGrafts, causeGrafts}
 		case err == nil:
 			return nil, &unsafeError{fmt.Sprintf(textAlternates, ".git/"+name), fmt.Sprintf(causeAlternates, ".git/"+name)}
 		case !errors.Is(err, fs.ErrNotExist):
