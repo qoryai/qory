@@ -1,0 +1,5 @@
+apiVersion: qory.dev/v1alpha1
+name: elixir
+provides:
+  agents:
+    developer: elixir-developer

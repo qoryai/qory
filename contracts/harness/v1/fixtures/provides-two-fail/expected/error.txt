@@ -1,0 +1,1 @@
+Bind agents.developer in qory.yaml, or compose one of typescript and elixir: both modules provide agents/developer (typescript-developer, elixir-developer).

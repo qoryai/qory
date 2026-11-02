@@ -72,7 +72,8 @@ type Manifest struct {
 	// roles key.
 	Roles stack.Roles
 	// Provides are the roles the module fills, by kind and then by role, each to the name
-	// of the entry that fills it. Nil when the manifest has none.
+	// of the entry that fills it. The compose sets a role from the modules' provides
+	// after the base's bind and before the checkout's. Nil when the manifest has none.
 	Provides stack.Roles
 }
 

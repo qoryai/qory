@@ -400,7 +400,7 @@ type Stack struct {
 	Bind Roles `yaml:"bind,omitempty"`
 	// BaseBind is the bind of the stack a checkout's qory.yaml extends, set by
 	// [Extend]; nil for a stack that extends none. The compose sets each role from
-	// BaseBind first, then from Bind.
+	// BaseBind first, then from the modules' provides, then from Bind.
 	BaseBind Roles `yaml:"-"`
 	// Extending, on a stack, is what a checkout's own modules may ship. A stack that
 	// leaves it out cannot be extended.

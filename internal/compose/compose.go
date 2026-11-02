@@ -159,10 +159,12 @@ type Result struct {
 	MCP map[string]map[string]any
 	// Instructions are the modules' AGENTS.md files joined by a blank line, or "".
 	Instructions string
-	// Bind is the stack's bindings, <kind>/<role> to the name of the entry that fills the
-	// role, every one checked against the composed entries; nil when the stack binds
-	// none.
+	// Bind is the harness's roles, <kind>/<role> to the name of the entry that fills the
+	// role, every one checked against the composed entries; nil when no role is set.
+	// Roles is the same, with where each name comes from.
 	Bind map[string]string
+	// Roles are the roles of Bind, sorted by role, each with the layer that set it.
+	Roles []Role
 	// Env are the variables the harness exports, name to value, with every
 	// $QORY_HARNESS_HOME as written, before substitution: what the module manifests
 	// export, as $QORY_HARNESS_HOME/modules/<name>/<path>, and the configuration's
@@ -246,29 +248,13 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			res.Close()
 		}
 	}()
-	// The base's bind, then the bind of the document composed over it.
-	for _, bind := range []stack.Roles{p.BaseBind, p.Bind} {
-		for role, to := range bind.Flat() {
-			if res.Bind == nil {
-				res.Bind = map[string]string{}
-			}
-			res.Bind[role] = to
-		}
-	}
 	if opts.Memo == nil {
 		opts.Memo = source.NewMemo()
 	}
-	owners := map[string][]string{}
-	paths := map[string]string{}
-	fors := map[string]string{}
-	refs := map[string][]string{}
-	tiers := map[string]string{}
-	servers := map[string]map[string]any{}
-	exporters := map[string]string{}
-	var instructions []string
+	// Every module's manifest is read before the first module's entries, so that the
+	// roles the modules provide are set before an only follows a reference.
+	opened := make([]openedModule, 0, len(p.Modules))
 	dirs := map[string]string{}
-	requires := map[string]map[string][]Need{}
-	checkoutExcludes := map[string]map[string][]string{}
 	for _, pl := range p.Modules {
 		ps := p.SourceOf(pl)
 		who := "module " + accesskey.ShownName(pl.Name, false)
@@ -290,24 +276,20 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			// The directory of a module listed by name is that name.
 			return nil, fmt.Errorf("%s: %w", who, exports.HideError(err))
 		}
-		var root *os.Root
-		var rootInfo fs.FileInfo
-		var realDir string
-		copied := false
+		o := openedModule{pl: pl, ps: ps, src: src}
 		if opts.Copies != nil {
 			if abs, err := filepath.Abs(src.Dir); err == nil && opts.Copies(abs) {
-				copied = true
-				root, rootInfo, realDir = openRoot(res, src.Dir)
+				o.copied = true
+				o.root, o.rootInfo, o.realDir = openRoot(res, src.Dir)
 			}
 		}
 		if beforeManifest != nil {
 			beforeManifest(src.Dir)
 		}
-		var m *module.Manifest
-		if root != nil {
-			m, err = module.ReadManifestIn(root, src.Dir)
+		if o.root != nil {
+			o.m, err = module.ReadManifestIn(o.root, src.Dir)
 		} else {
-			m, err = module.ReadManifest(src.Dir)
+			o.m, err = module.ReadManifest(src.Dir)
 		}
 		if err != nil {
 			var in exports.InFile
@@ -319,14 +301,38 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		if afterManifest != nil {
 			afterManifest(src.Dir)
 		}
-		if pl.Name != "" && m.Name != pl.Name {
-			return nil, fmt.Errorf("module %s: the module at %s has the name %s in its %s", accesskey.ShownName(pl.Name, false), ps.Shown(), accesskey.ShownName(m.Name, false), module.ManifestName)
+		if pl.Name != "" && o.m.Name != pl.Name {
+			return nil, fmt.Errorf("module %s: the module at %s has the name %s in its %s", accesskey.ShownName(pl.Name, false), ps.Shown(), accesskey.ShownName(o.m.Name, false), module.ManifestName)
 		}
+		if other, ok := dirs[o.m.Name]; ok {
+			return nil, fmt.Errorf("module %s is composed twice, from %s and from %s", accesskey.ShownName(o.m.Name, false), other, ps.Shown())
+		}
+		dirs[o.m.Name] = ps.Shown()
+		if !pl.Base && opts.Base != nil {
+			if err := checkProvides(o.m, opts.Base); err != nil {
+				return nil, err
+			}
+		}
+		opened = append(opened, o)
+	}
+	// The roles before the selection: two modules that provide one role leave it unset
+	// here, and the roles are set again once the selection is known.
+	roles, _ := setRoles(p, opened, nil)
+	res.Bind = flatRoles(roles)
+	owners := map[string][]string{}
+	paths := map[string]string{}
+	fors := map[string]string{}
+	refs := map[string][]string{}
+	tiers := map[string]string{}
+	servers := map[string]map[string]any{}
+	exporters := map[string]string{}
+	var instructions []string
+	requires := map[string]map[string][]Need{}
+	read := map[string]*module.Module{}
+	checkoutExcludes := map[string]map[string][]string{}
+	for _, o := range opened {
+		pl, ps, src, root, rootInfo, realDir, copied, m := o.pl, o.ps, o.src, o.root, o.rootInfo, o.realDir, o.copied, o.m
 		name := m.Name
-		if other, ok := dirs[name]; ok {
-			return nil, fmt.Errorf("module %s is composed twice, from %s and from %s", accesskey.ShownName(name, false), other, ps.Shown())
-		}
-		dirs[name] = ps.Shown()
 		variant, err := selectVariant(m, pl, p.Target.Runtimes, name)
 		if err != nil {
 			return nil, fmt.Errorf("module %s: %w", accesskey.ShownName(name, false), err)
@@ -342,6 +348,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		if err != nil {
 			return nil, err
 		}
+		read[name] = l
 		rl := Module{Name: name, Description: m.Description, Dir: l.Dir, Source: ps.String(), Pin: src.Pin, Commit: src.Commit, Ref: ps.Ref, Previous: src.Previous, Warning: src.Warning, Dirty: src.Dirty, Variant: variant, Link: pl.Link, Base: pl.Base, BaseName: pl.BaseName, RetiredAPIVersion: m.RetiredAPIVersion, Egress: m.Egress, Copy: copied, Walled: copied && opts.Walled, Hidden: copied && opts.Hidden, Root: root, RealDir: realDir, DirInfo: rootInfo}
 		requires[name] = needs(l, m.Requires, res.Bind)
 		// The selection comes first, so that what the base allows and what the module
@@ -426,6 +433,22 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		}
 		return res.Entries[i].Name < res.Entries[j].Name
 	})
+	// The roles again, now that the selection is known: a provided entry that an exclude
+	// left out provides nothing.
+	composed := map[string]bool{}
+	for _, e := range res.Entries {
+		composed[e.Kind+"/"+e.Name] = true
+	}
+	res.Roles, err = setRoles(p, opened, func(kind, name string) bool {
+		return !composed[kind+"/"+name] && excludeOf(res, kind, name) != nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	res.Bind = flatRoles(res.Roles)
+	for _, o := range opened {
+		requires[o.m.Name] = needs(read[o.m.Name], o.m.Requires, res.Bind)
+	}
 	if err := checkResolved(res, requires); err != nil {
 		return nil, err
 	}
@@ -655,8 +678,8 @@ func (e *UnresolvedError) Error() string { return strings.Join(e.Lines, "\n") }
 // checkResolved refuses a compose in which a binding, a requirement or a reference does
 // not resolve. requires holds each module's needs by module name, keyed <kind>/<name>. A
 // needed entry may come from any module, since a name is composed once; an entry that
-// was left out has no needs to meet. A bound role is checked once, under bind, and a
-// reference through it says nothing more: the binding is what there is to fix. The
+// was left out has no needs to meet. A role is checked once, with the layer that set it,
+// and a reference through it says nothing more: the role is what there is to fix. The
 // message says why an entry is missing: a module's exclude left it out, or no module
 // ships it, and for a reference that the stack binds no role of that name either.
 func checkResolved(res *Result, requires map[string]map[string][]Need) error {
@@ -672,17 +695,27 @@ func checkResolved(res *Result, requires map[string]map[string][]Need) error {
 		return x.Module
 	}
 	var lines []string
-	for _, role := range sortedKeys(res.Bind) {
+	for _, r := range res.Roles {
+		role, to := r.Role, r.Name
 		kind, name, _ := strings.Cut(role, "/")
-		to := res.Bind[role]
 		if composed[role] {
 			for _, e := range res.Entries {
-				if e.Kind == kind && e.Name == name {
-					lines = append(lines, fmt.Sprintf("bind %s defines a role, and module %s ships %s; a role's name is no entry's", shown(role), shown(e.Module), described(kind, name)))
+				if e.Kind != kind || e.Name != name {
+					continue
 				}
+				if r.Module != "" {
+					lines = append(lines, fmt.Sprintf("Rename role %s in the provides of module %s: module %s ships %s, and a role's name is no entry's.", shown(role), shown(r.Module), shown(e.Module), described(kind, name)))
+					continue
+				}
+				lines = append(lines, fmt.Sprintf("bind %s defines a role, and module %s ships %s; a role's name is no entry's", shown(role), shown(e.Module), described(kind, name)))
 			}
 		}
 		if composed[kind+"/"+to] {
+			continue
+		}
+		if r.Module != "" {
+			// A provided entry that an exclude left out provides nothing, see [setRoles].
+			lines = append(lines, fmt.Sprintf("Ship %s in a module, or remove provides.%s.%s from module %s: no module ships %s.", described(kind, to), shown(kind), shown(name), shown(r.Module), described(kind, to)))
 			continue
 		}
 		if by := leftOut(kind, to); by != "" {
@@ -711,7 +744,7 @@ func checkResolved(res *Result, requires map[string]map[string][]Need) error {
 			}
 			why := "which no module ships"
 			if need.Reference {
-				why += " and the stack does not bind"
+				why += " or provides and the stack does not bind"
 			}
 			lines = append(lines, fmt.Sprintf("module %s: %s %s %s, %s", shown(e.Module), described(e.Kind, e.Name), verb, described(kind, name), why))
 		}
@@ -733,8 +766,8 @@ func excludeOf(res *Result, kind, name string) *Exclude {
 	return nil
 }
 
-// Resolve is the entry a reference to kind and name means: the entry the stack binds the
-// role to, when the name is a bound role of that kind, else the name itself.
+// Resolve is the entry a reference to kind and name means: the entry that fills the role,
+// when the name is a role of that kind in [Result.Bind], else the name itself.
 func (r *Result) Resolve(kind, name string) (string, string) {
 	if to, ok := r.Bind[kind+"/"+name]; ok {
 		return kind, to

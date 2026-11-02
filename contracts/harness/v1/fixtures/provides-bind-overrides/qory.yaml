@@ -1,0 +1,14 @@
+apiVersion: qory.dev/v1alpha1
+harness:
+  target:
+    runtime: claude
+  modules:
+    - name: core
+      source: {path: modules/core}
+    - name: typescript
+      source: {path: modules/typescript}
+    - name: elixir
+      source: {path: modules/elixir}
+  bind:
+    agents:
+      developer: elixir-developer
