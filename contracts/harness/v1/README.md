@@ -255,10 +255,10 @@ checkout appends:
   such as `claude/rules/`, matched by path segment, so `claude/rules` covers
   `claude/rules/a/b.md` and not `claude/rules-private/x.md`, and a prefix that is a file's
   path covers that file only. A module shipping anything else fails the compose and the
-  message lists it. An appended module may `provide` (§The module manifest) roles of the
-  `kinds` alone; a module that provides another kind fails with `Remove provides.agents
-  from module typescript, or use a base that allows agents: the base's extending.kinds is
-  [skills].` A base without the block is closed to extension.
+  message lists it. An appended module's `provides` (§The module manifest) fills roles of
+  the `kinds` alone; a module that provides another kind fails with `Remove
+  provides.agents from module typescript, or use a base that allows agents: the base's
+  extending.kinds is [skills].` A base without the block is closed to extension.
 - An entry of an appended module that collides with a base entry fails with status 3.
   The message lists that one entry and nothing else of the base. For a base module the
   base lists by `name` or by an export, `qory harness compose` prints `Module <module>
