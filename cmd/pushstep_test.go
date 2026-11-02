@@ -1,6 +1,7 @@
 package cmd_test
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -15,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -45,11 +47,15 @@ type pushAPI struct {
 	runID  string
 	files  [][]byte
 	notes  []string
-	bodies []string
-	posts  int
-	reads  int
-	post   func(n int, w http.ResponseWriter) (handled, store bool)
-	index  func(n int, w http.ResponseWriter) bool
+	// writer, when set, is the run id the index shows, and shownFile the file whose sum it
+	// shows, in place of the ones stored.
+	writer    string
+	shownFile []byte
+	bodies    []string
+	posts     int
+	reads     int
+	post      func(n int, w http.ResponseWriter) (handled, store bool)
+	index     func(n int, w http.ResponseWriter) bool
 }
 
 // newPushAPI serves a run API whose work item has the id [workItem] and the stage st_a.
@@ -89,11 +95,15 @@ func (a *pushAPI) serve(w http.ResponseWriter, r *http.Request) {
 // writeIndex writes the index of the versions stored so far.
 func (a *pushAPI) writeIndex(w http.ResponseWriter) {
 	versions := make([]map[string]any, len(a.files))
+	writer := cmp.Or(a.writer, a.runID)
 	for i, file := range a.files {
+		if a.shownFile != nil {
+			file = a.shownFile
+		}
 		sum := sha256.Sum256(file)
 		versions[i] = map[string]any{
 			"id": fmt.Sprintf("av_%d", i+1), "number": i + 1, "stage_id": "st_a", "at": "2026-11-02T09:00:00Z",
-			"writer": map[string]any{"kind": "run", "run_id": a.runID},
+			"writer": map[string]any{"kind": "run", "run_id": writer},
 			"files": []map[string]any{{
 				"filename": "branch.json", "content_type": "application/json", "size": len(file), "sha256": hex.EncodeToString(sum[:]),
 			}},
@@ -196,6 +206,8 @@ type pushRepo struct {
 	waits        []time.Duration
 	setup        func(dir string)
 	mask         string
+	// pushStarted, when set, runs as the push step starts.
+	pushStarted func()
 }
 
 // newPushRepo serves acme/site at one commit, whose stack declares the workflow hello
@@ -224,6 +236,7 @@ type pushed struct {
 	err    error
 	closes []session.Outcome
 	steps  []cmd.StepEvent
+	calls  []string
 	runID  string
 }
 
@@ -263,7 +276,7 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 	}))
 	t.Setenv("QORY_RUN_KEY", "")
 	var got pushed
-	closes, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{
+	closes, calls, restore := cmd.OpenNowhereWith(cmd.Nowhere{
 		System: proxygittest.Host, Repositories: p.repositories, RunAPI: p.api.base(),
 		Proxy: p.h.server.Proxy.URL, CABundle: p.h.server.Proxy.CABundle, Dir: p.h.runDir,
 		Setup: func(session.SetupSpec) error {
@@ -272,7 +285,12 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 			}
 			return nil
 		},
-		OnStep: func(e cmd.StepEvent) { got.steps = append(got.steps, e) },
+		OnStep: func(e cmd.StepEvent) {
+			got.steps = append(got.steps, e)
+			if e.Type == "step_started" && e.Kind == event.StepPush && p.pushStarted != nil {
+				p.pushStarted()
+			}
+		},
 		OnOpen: func(spec session.OpenSpec) {
 			if p.mask != "" {
 				secretmask.Default().Add(p.mask)
@@ -285,7 +303,7 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 	})
 	defer restore()
 	got.out, got.err = run(t, append([]string{"run", "--run-code-file", codeFile(t, g.code()), "--gateway", g.URL}, p.flags...)...)
-	got.closes = closes()
+	got.closes, got.calls = closes(), calls()
 	return got
 }
 
@@ -387,8 +405,8 @@ func TestAWriteRunPushesWhatTheAgentLeft(t *testing.T) {
 	if got := proxygittest.Git(t, p.bare, "log", "--format=%s", p.first+".."+head); got != "Changes left by run "+r.runID+"\nAdd a file" {
 		t.Errorf("the branch's new commits are:\n%s", got)
 	}
-	if got := proxygittest.Git(t, p.bare, "log", "-1", "--format=%an <%ae>", head); got != "qory <qory@localhost>" {
-		t.Errorf("the author of the commit is %s", got)
+	if got := proxygittest.Git(t, p.bare, "log", "-1", "--format=%an <%ae> %cn <%ce>", head); got != "qory <qory@localhost> qory <qory@localhost>" {
+		t.Errorf("the author and the committer of the commit are %s", got)
 	}
 	if got := proxygittest.Git(t, p.bare, "merge-base", p.first, head); got != p.first {
 		t.Errorf("the merge base with the target version is %s", got)
@@ -1505,5 +1523,175 @@ func TestASecondRepositoryThatFailsGivesTheWays(t *testing.T) {
 	}
 	if posts, _, _ := p.api.counts(); posts != 0 {
 		t.Errorf("%d POST went out", posts)
+	}
+}
+
+// hangingPost makes each POST of a version stay open with no response, as a run API that
+// stopped does, and calls then, which sends the signals of the test.
+func hangingPost(t *testing.T, p *pushRepo, then func()) {
+	t.Helper()
+	p.api.post = func(_ int, w http.ResponseWriter) (bool, bool) {
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return true, false
+		}
+		t.Cleanup(func() { conn.Close() })
+		if then != nil {
+			then()
+		}
+		return true, false
+	}
+}
+
+// term sends this process SIGTERM, which qory run under test handles, and waits so the next
+// one counts as a second signal.
+func term(t *testing.T) {
+	t.Helper()
+	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+		t.Error(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+}
+
+// TestAStopAfterThePushShowsBothWaysOut is a step that a limit or a signal stopped during
+// the request that stores the version, after the push: the close, the exit status, and a
+// line that starts with the check of the version and has the cause.
+func TestAStopAfterThePushShowsBothWaysOut(t *testing.T) {
+	timedOut := func() (*session.Result, error) {
+		return &session.Result{State: event.StateCancelled, TimedOut: true, ExitCode: 124}, nil
+	}
+	for name, c := range map[string]struct {
+		result     func() (*session.Result, error)
+		limit      string
+		signals    int
+		state, why string
+		code       int
+		cause      string
+	}{
+		"the run's time limit": {
+			limit: "\n    time_limit: 3s", state: event.StateCancelled, why: event.ReasonTimeout, code: 124,
+			cause: "the run reached its time limit of 3s",
+		},
+		"past a session that timed out": {
+			result: timedOut, limit: "\n    time_limit: 3s", state: event.StateCancelled, why: event.ReasonTimeout, code: 124,
+			cause: "the step reached its limit of 200ms",
+		},
+		"a signal": {
+			signals: 1, state: event.StateCancelled, why: event.ReasonInterrupted, code: 1,
+			cause: "qory run got SIGTERM, and the step reached its limit of 400ms",
+		},
+		"a second signal": {
+			signals: 2, state: event.StateCancelled, why: event.ReasonInterrupted, code: 1,
+			cause: "qory run got a second signal",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newPushRepo(t, "write"+c.limit)
+			defer cmd.SetPushTimes(200*time.Millisecond, 400*time.Millisecond)()
+			hangingPost(t, p, func() {
+				for range c.signals {
+					term(t)
+				}
+			})
+			r := p.run(t, writesAndCommits(t), c.result)
+			r.wantsClose(t, c.state, c.code)
+			if got := r.closes[0].Reason; got != c.why {
+				t.Errorf("the reason of the close is %q, want %q", got, c.why)
+			}
+			if _, state := r.step(); state != event.StateCancelled {
+				t.Errorf("the step ended %q, want cancelled\n%s", state, r.out)
+			}
+			if p.branchHead(t) == "" {
+				t.Errorf("the forge has no branch\n%s", r.out)
+			}
+			wants(t, r.log(), "qory run: pushed qory/"+workItem+" to acme/site at ")
+			wants(t, r.out, "check the artifact branch of the work item in Qory Apiary; with no version of this run, "+versionWays+
+				"; then take the work item in again: qory pushed acme/site, and "+c.cause+", so the version may or may not be stored; the code is used")
+			lacks(t, r.out, "may not have reached the branch")
+		})
+	}
+}
+
+// TestAStopBeforeThePushLands is a second signal during the push, which a hook of the forge
+// holds open: the line has the fix, and no version is stored.
+func TestAStopBeforeThePushLands(t *testing.T) {
+	p := newPushRepo(t, "write")
+	writeFile(t, filepath.Join(p.bare, "hooks", "pre-receive"), "#!/bin/sh\nsleep 2\nexit 1\n")
+	if err := os.Chmod(filepath.Join(p.bare, "hooks", "pre-receive"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p.pushStarted = func() {
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			term(t)
+			term(t)
+		}()
+	}
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateCancelled, 1)
+	wants(t, r.out, "take the work item in again in Qory Apiary: qory run got a second signal during the push step, and the run's commits may not have reached the branch; the code is used")
+	if posts, _, _ := p.api.counts(); posts != 0 {
+		t.Errorf("%d POST, want 0", posts)
+	}
+}
+
+// TestAVersionOfAnotherRunOrContentIsNotStored is a POST with no response and an index with
+// a version that is not this one: the step sends the POST again.
+func TestAVersionOfAnotherRunOrContentIsNotStored(t *testing.T) {
+	for name, change := range map[string]func(a *pushAPI){
+		"another run":   func(a *pushAPI) { a.writer = "run_other" },
+		"other content": func(a *pushAPI) { a.shownFile = []byte("other content") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newPushRepo(t, "write")
+			change(p.api)
+			p.api.post = func(n int, w http.ResponseWriter) (bool, bool) {
+				if n == 1 {
+					failing(w, http.StatusServiceUnavailable, "unavailable", "")
+					return true, true
+				}
+				return false, true
+			}
+			r := p.run(t, writesAndCommits(t), nil)
+			r.wantsClose(t, event.StateSucceeded, 0)
+			if posts, _, _ := p.api.counts(); posts != 2 {
+				t.Errorf("%d POST, want 2", posts)
+			}
+		})
+	}
+}
+
+// TestTheStepClosesItsProxyBeforeTheRunCloses is the host proxy of the step, which ends
+// before the close, and every run API and host proxy call before it, which fail after.
+func TestTheStepClosesItsProxyBeforeTheRunCloses(t *testing.T) {
+	p := newPushRepo(t, "write")
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	opened := 0
+	for _, call := range r.calls {
+		switch call {
+		case "host proxy":
+			opened++
+		case "host proxy closed":
+			opened--
+		}
+	}
+	if opened != 0 {
+		t.Errorf("%d host proxies stayed open: %q", opened, r.calls)
+	}
+}
+
+// TestTheStepMasksThePasswordOfItsProxy swaps the set of secret values as the step starts,
+// so the password in it after the run is one the step added.
+func TestTheStepMasksThePasswordOfItsProxy(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.pushStarted = func() {
+		t.Cleanup(func(before *secretmask.Set) func() { return func() { secretmask.SetDefault(before) } }(secretmask.SetDefault(secretmask.New())))
+	}
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if got := secretmask.Default().Replace(proxygittest.Password); strings.Contains(got, proxygittest.Password) {
+		t.Error("the step did not add the password of its proxy to the secret values")
 	}
 }

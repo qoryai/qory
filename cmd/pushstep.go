@@ -80,6 +80,9 @@ const (
 	pushAfterLimit  = 120 * time.Second
 )
 
+// pushTimes is [pushAfterLimit] and [pushAfterSignal]; a test sets shorter ones.
+var pushTimes = struct{ limit, signal time.Duration }{pushAfterLimit, pushAfterSignal}
+
 // keepsWork reports whether the run pushes what its agent left: a run from a run code
 // that may write its target, that no workflow or document limits to reading, with a
 // branch of its work item and an agent session, however that session ended. A join that
@@ -345,9 +348,9 @@ func (e pushEnding) cutBy() string {
 	case e.again:
 		return textCutSecondSignal
 	case e.stopped:
-		return fmt.Sprintf(textCutSignal, e.got, pushAfterSignal)
+		return fmt.Sprintf(textCutSignal, e.got, pushTimes.signal)
 	case e.session.Reason == event.ReasonTimeout:
-		return fmt.Sprintf(textCutPushLimit, pushAfterLimit)
+		return fmt.Sprintf(textCutPushLimit, pushTimes.limit)
 	}
 	return fmt.Sprintf(textCutTimeLimit, e.limit)
 }

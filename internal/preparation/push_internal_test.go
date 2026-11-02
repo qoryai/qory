@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/qoryai/qory/internal/branchformat"
 	"github.com/qoryai/qory/internal/hostgit"
+	"github.com/qoryai/qory/internal/proxygit"
 )
 
 // onBranch fetches acme/shop, and acme/lib when list has it, and checks out the branch,
@@ -879,5 +881,38 @@ func TestAFailedHistoryCheckIsNotANonFastForward(t *testing.T) {
 	_, err := headPast(context.Background(), stepGit(noRemote, ""), dir, r)
 	if err == nil || !strings.Contains(err.Error(), "the check that HEAD of acme/shop descends from commit 111111111111 failed") {
 		t.Fatalf("the error is %v", err)
+	}
+}
+
+// TestAPasswordInGitsOutputIsHidden is a git whose error has the password of the proxy.
+func TestAPasswordInGitsOutputIsHidden(t *testing.T) {
+	const password = "the-password-of-the-proxy"
+	p := &proxygit.Proxy{URL: "http://qory:" + password + "@127.0.0.1:9"}
+	_, err := runGit(context.Background(), p, func(ctx context.Context) (*exec.Cmd, error) {
+		return exec.CommandContext(ctx, "sh", "-c", "echo 'fatal: "+password+"' >&2; exit 128"), nil
+	}, "push")
+	ge := (*gitError)(nil)
+	if !errors.As(err, &ge) {
+		t.Fatalf("the error is %v", err)
+	}
+	if strings.Contains(err.Error(), password) || strings.Contains(ge.output, password) {
+		t.Errorf("the password is in %q and %q", err, ge.output)
+	}
+}
+
+// TestACommitThatFailsInAFurtherRepositoryPushesNothing is a commit that fails in the
+// further repository, after the target's commit: no repository reaches its branch.
+func TestACommitThatFailsInAFurtherRepositoryPushesNothing(t *testing.T) {
+	dir, b := onBranch(t, "acme/shop,acme/lib")
+	further := filepath.Join(dir, filepath.FromSlash(b.Repositories[1].Dir))
+	write(t, filepath.Join(dir, "left.txt"), "left\n")
+	write(t, filepath.Join(further, "left.txt"), "left\n")
+	write(t, filepath.Join(further, ".git", "HEAD.lock"), "")
+	_, _, err := pushOf(dir, b)
+	if err == nil || !strings.Contains(err.Error(), "the commit of what the agent left in acme/lib failed") {
+		t.Fatalf("the error is %v", err)
+	}
+	if got := b.PushedPaths(); got != "" {
+		t.Errorf("qory pushed %s", got)
 	}
 }

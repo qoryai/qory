@@ -1034,7 +1034,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if timeout > 0 {
 					limit = opened.Add(timeout)
 				}
-				pushCtx, cancel := pushContext(ctx, again, limit, pushAfterLimit, pushAfterSignal)
+				pushCtx, cancel := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
 				pushErr = pushWork(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, out, walled)
 				ending.stopped = ctx.Err() != nil
 				ending.again, ending.got = again.Err() != nil, got()
@@ -1508,7 +1508,7 @@ func runEnded(u *ui.UI, res *session.Result, e runEnd) error {
 func signalContext(parent context.Context) (ctx, again context.Context, got func() string, stop func()) {
 	ctx, cancel := context.WithCancelCause(parent)
 	again, cancelAgain := context.WithCancel(context.Background())
-	signals := make(chan os.Signal, 1)
+	signals := make(chan os.Signal, 2)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	done := make(chan struct{})
 	go func() {

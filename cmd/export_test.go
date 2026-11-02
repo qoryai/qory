@@ -117,6 +117,14 @@ func SetJoinResult(f func(session.SessionSpec) (*session.Result, error)) func() 
 	return func() { joinSession = before }
 }
 
+// SetPushTimes sets the time the push step has past a time limit and after a signal, and
+// returns what restores the defaults.
+func SetPushTimes(limit, signal time.Duration) func() {
+	before := pushTimes
+	pushTimes.limit, pushTimes.signal = limit, signal
+	return func() { pushTimes = before }
+}
+
 // SetBranchWait makes the push step pass each wait to f in place of waiting, and returns
 // what restores the default.
 func SetBranchWait(f func(time.Duration)) func() {
@@ -273,7 +281,11 @@ type nowhere struct {
 	at     *gatewayRun
 	steps  int
 	open   *nowhereStep
+	ended  bool
 }
+
+// errNowhereClosed is what [Run.HostProxy] and [Run.RunAPI] of Forager return after Close.
+var errNowhereClosed = errors.New("the run is closed")
 
 // gatewayRun is a run [Nowhere.AtGateway] opened at a gateway of Forager's in this
 // process, and that gateway.
@@ -327,6 +339,9 @@ func openAtGateway(ctx context.Context, spec session.OpenSpec, image string) (*g
 
 // RunAPI is the client and base URL of [Nowhere.RunAPI].
 func (n *nowhere) RunAPI() (*http.Client, string, error) {
+	if n.ended {
+		return nil, "", errNowhereClosed
+	}
 	if n.values.RunAPI != "" {
 		return http.DefaultClient, n.values.RunAPI, nil
 	}
@@ -416,6 +431,7 @@ func (n *nowhere) Close(ctx context.Context, out session.Outcome) (*session.Clos
 	if n.open != nil {
 		n.open.Exit("cancelled", -1)
 	}
+	n.ended = true
 	n.closed(out)
 	if n.at != nil {
 		closed, err := n.at.run.Close(ctx, out)
@@ -427,6 +443,9 @@ func (n *nowhere) Close(ctx context.Context, out session.Outcome) (*session.Clos
 
 func (n *nowhere) HostProxy() (hostProxy, error) {
 	n.note("host proxy")
+	if n.ended {
+		return hostProxy{}, errNowhereClosed
+	}
 	if n.values.ProxyErr != nil {
 		return hostProxy{}, n.values.ProxyErr
 	}
