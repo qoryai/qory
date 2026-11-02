@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -513,5 +514,33 @@ func TestNoCopyIsTodaysFetch(t *testing.T) {
 	lines, err := prepareFrom(context.Background(), emptyFolder(t), filepath.Join(t.TempDir(), "seed"), env("git.example.com", "acme/shop"))
 	if err != nil || lines != "qory run: fetched acme/shop at C in Xs" {
 		t.Errorf("%q, %v", lines, err)
+	}
+}
+
+// TestSeedFilesCountAsWhatTheSetupLeft is the copy's untracked file, which qory run prepare
+// adds during the setup: it stays out of the commit until the agent changes it.
+func TestSeedFilesCountAsWhatTheSetupLeft(t *testing.T) {
+	for name, changed := range map[string]bool{"as the seed left it": false, "changed": true} {
+		t.Run(name, func(t *testing.T) {
+			dir, b := onBranch(t, "acme/shop")
+			seed := t.TempDir()
+			write(t, filepath.Join(seed, "notes.txt"), "untracked\n")
+			if err := copySeed(dir, seed, nil); err != nil {
+				t.Fatal(err)
+			}
+			recordSetup(t, dir, b)
+			write(t, filepath.Join(dir, "left.txt"), "left\n")
+			want := []string{"left.txt"}
+			if changed {
+				write(t, filepath.Join(dir, "notes.txt"), "the agent\n")
+				want = []string{"left.txt", "notes.txt"}
+			}
+			if _, _, err := pushOf(dir, b); err != nil {
+				t.Fatal(err)
+			}
+			if got := commitPaths(t, dir); !slices.Equal(got, want) {
+				t.Errorf("the commit has %q, want %q", got, want)
+			}
+		})
 	}
 }
