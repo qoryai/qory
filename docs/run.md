@@ -1520,6 +1520,36 @@ repositories are fetched at the head of their default branches.
 When the target is on another system than `QORY_RUN_SYSTEM`, or `QORY_RUN_SYSTEM` is
 not set, qory does not use `target_version`.
 
+A run of a work item at a `target_version` of a target on `QORY_RUN_SYSTEM` works on the
+branch `qory/<work item id>`. qory reads the work item and its artifacts through the run API
+before the fetch, and picks one version of the artifact type `branch`:
+
+1. The newest version of the artifact named `main`, if the work item's stage wrote it.
+2. Else, the version that a gate approved, of any artifact name, if the stage lists
+   `branch` as an input.
+3. Else, the newest version of the artifact named `main`.
+4. With no version, the run creates the branch at `target_version`.
+
+qory composes the harness at `target_version` and with the further repositories at their
+default branches, so a branch does not change the harness of its work item's runs. The
+fetch step also fetches each repository's commit by id, at depth 1. After the compose, and
+after the record of a walled run's places, qory checks out the branch with no request to a
+remote: at the commit in the version, or where the fetch left a repository with no entry
+in the version. The working folder then has the commit's files. qory leaves the ref
+`refs/qory/target-version` at the target version, so a file that the branch removed stays
+out when the run starts from an image's copy.
+
+A run stops before the agent starts when:
+
+- the version does not match the [branch format](../contracts/harness/v1/README.md#the-branch-format),
+  or its `ref` is another work item's;
+- a commit is not on its repository;
+- the target's commit has another `.qory` than `target_version`;
+- git does not check out a commit.
+
+An instance without the feature `workflow_model` returns 404 with no error code to the run
+API. The run then works on `target_version` with no branch.
+
 Each of these stops the run before the compose, exit 1, and the run's record shows the
 run as failed with no session. `<commit>` is the commit's first 12 characters:
 

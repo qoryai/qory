@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"maps"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
@@ -773,13 +774,21 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// control plane opens neither, and composes with the person's git. A run from a
 			// run code whose documents set target_version fetches the target's repository at
 			// that commit, and stops before the compose when the run configuration lists no
-			// repository while the target is on its system.
+			// repository while the target is on its system. A run of a work item at that
+			// version reads the work item's branch first: the fetch takes its commit, the
+			// compose reads the target version, and the branch is checked out last, after
+			// the record of the run's places, so no file of the branch counts as the person's.
 			hostWork := func() error {
 				stopped := func() bool {
 					return ctx.Err() != nil || timeout > 0 && time.Since(opened) >= timeout
 				}
+				var branch *preparation.WorkBranch
 				if run.Repositories() != "" {
-					err := inStep(run, streams.errOut, event.StepFetch, fetchStepName(runValues(run)), stopped, func(w io.Writer) error {
+					var err error
+					if branch, err = fromCode.readBranch(ctx, run, timeout, opened); err != nil {
+						return &runLineError{err}
+					}
+					err = inStep(run, streams.errOut, event.StepFetch, fetchStepNameOn(branch, fromCode, runValues(run)), stopped, func(w io.Writer) error {
 						h, err := run.HostProxy()
 						if err != nil {
 							return &runLineError{noHostProxy(err, code != nil)}
@@ -792,7 +801,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 							fetchCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
 						}
 						defer cancel()
-						if _, err := preparation.RunAt(fetchCtx, cwd, os.Environ(), runValues(run), fromCode.fetchTarget(), h.proxy, w); err != nil {
+						target := fromCode.fetchTarget()
+						target.Branch = branch
+						if _, err := preparation.RunAt(fetchCtx, cwd, os.Environ(), runValues(run), target, h.proxy, w); err != nil {
 							return &runLineError{err}
 						}
 						return nil
@@ -848,7 +859,26 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if err != nil {
 					return err
 				}
-				return prepareSession(freshHome)
+				if err := prepareSession(freshHome); err != nil {
+					return err
+				}
+				if branch == nil {
+					return nil
+				}
+				switchCtx, cancel := ctx, func() {}
+				if timeout > 0 {
+					switchCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+				}
+				defer cancel()
+				// A walled run's record holds the working folder until its session registers.
+				checkOut := preparation.Switch
+				if walled {
+					checkOut = preparation.SwitchHeld
+				}
+				if err := checkOut(switchCtx, cwd, os.Environ(), branch, stderr); err != nil {
+					return &runLineError{err}
+				}
+				return nil
 			}
 			// setupWork runs the setup of a walled run whose run configuration lists
 			// repositories, see [runSetup], within the run's time limit. A setup command that
@@ -1171,6 +1201,8 @@ type openedRun interface {
 	// reads them.
 	System() string
 	Repositories() string
+	// RunAPI is the client and base URL of the run's run API on this machine.
+	RunAPI() (*http.Client, string, error)
 	// Image is the image chosen at the run's open, the zero Image with no wall or when
 	// the gateway's run answer has no image; a walled run with no image fails at the open.
 	Image() session.Image
