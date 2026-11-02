@@ -27,7 +27,8 @@ import (
 
 // codeDocuments are the documents of an answer to a run code: the contract's run/v1
 // documents fixture explore-workflow.json, the workflow hello, harness_hidden true and
-// a target_version among them, with change applied to its members.
+// a target_version among them, with access set to write, so the workflow's access in the
+// stack decides whether the run reads only, and change applied to its members.
 func codeDocuments(t *testing.T, change func(map[string]any)) json.RawMessage {
 	t.Helper()
 	b, err := fs.ReadFile(contracts.RunFS, "fixtures/documents/explore-workflow.json")
@@ -38,6 +39,7 @@ func codeDocuments(t *testing.T, change func(map[string]any)) json.RawMessage {
 	if err := json.Unmarshal(b, &doc); err != nil {
 		t.Fatal(err)
 	}
+	doc["access"] = "write"
 	if change != nil {
 		change(doc)
 	}
@@ -190,6 +192,20 @@ var codeAtGateway bool
 // as [cmd.Nowhere] PolicyImage is; "" selects none. A test sets it.
 var codePolicyImage string
 
+// codeRepositories is the run configuration's repositories of each run
+// [runFromCodeGiven] opens, as [cmd.Nowhere] Repositories is; "" lists none. A test sets
+// it.
+var codeRepositories string
+
+// codeReal, when set, has each run [runFromCodeGiven] opens use a real wall for its
+// setup, the removal of its setup container and its join, as [cmd.Nowhere] Real does. A
+// test sets it.
+var codeReal bool
+
+// codeRemoveSetup is the RemoveSetup of each run [runFromCodeGiven] opens; nil is one
+// that succeeds. A test sets it.
+var codeRemoveSetup func(context.Context) error
+
 // runFromCode runs qory run from a run code whose documents start the workflow of a
 // harness document that extends the stack examples/hello of a repository that the
 // run's stack proxy serves, with the stack file changed by stackFile and the documents
@@ -255,10 +271,13 @@ func runFromCodeGiven(t *testing.T, before func(code string) []string, args []st
 		args = append(slices.Clip(args), before(g.code())...)
 	}
 	closes, calls, restore := cmd.OpenNowhereWith(cmd.Nowhere{
-		System: proxygittest.Host, Proxy: h.server.Proxy.URL, CABundle: h.server.Proxy.CABundle, Dir: h.runDir,
+		System: proxygittest.Host, Repositories: codeRepositories,
+		Proxy: h.server.Proxy.URL, CABundle: h.server.Proxy.CABundle, Dir: h.runDir,
 		StackProxy: h.server.Proxy.URL, StackCABundle: h.server.Proxy.CABundle,
 		OnOpen:      func(s session.OpenSpec) { r.open = s },
 		FetchImage:  codeFetchImage,
+		RemoveSetup: codeRemoveSetup,
+		Real:        codeReal,
 		AtGateway:   codeAtGateway,
 		PolicyImage: codePolicyImage,
 		OnImage:     func(i session.Image) { r.image = i },

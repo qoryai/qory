@@ -30,8 +30,10 @@ record after the error line. Four stops of a run from a run code, right after th
 compose, close with their reason in place of `no_session`: `workflow_not_in_harness` (see
 [What the run takes from the response](#what-the-run-takes-from-the-response)), or
 `read_needs_wall`, `read_needs_setup_outside` or `read_needs_no_nested_docker` (see [Read
-workflows](#read-workflows)). In a folder that is not a git working tree, `qory run` starts
-only with the home outside the folder, as `qory harness compose` composes only then.
+workflows](#read-workflows)). A read run whose setup container was not removed stops after
+the setup and closes with `read_needs_setup_removed`. In a folder that is not a git
+working tree, `qory run` starts only with the home outside the folder, as `qory harness
+compose` composes only then.
 
 A run with a run key writes no harness into the folder it runs in. The harness goes into
 a home under `qory/homes` in your cache directory: `~/.cache/qory/homes/<name>-<hash>` on
@@ -1497,12 +1499,14 @@ repository <path>` when the target's `system` is `QORY_RUN_SYSTEM`, and `the che
 harness for the target <path>` on any other system. A workflow whose skill or command
 the runtime runs by no name from a headless start closes the run with `no_session`.
 
-A run of a workflow whose access is `read`, as `workflows` of the stack declares it, sees
-the checkout read-only. A run with no wall, with `wall.setup: inside` or on an image with
-nested Docker stops after the compose, exit 1, and qory closes it `failed` with
-`read_needs_wall`, `read_needs_setup_outside` or `read_needs_no_nested_docker`. A writable
-mount that contains the checkout, lies inside it or links to it also stops the run, later,
-and the agent does not start. See [Read workflows](#read-workflows).
+A run sees the checkout read-only when `access` in its documents is `read`, or when
+`workflows` of the stack declares its workflow's access as `read`. Such a run with no
+wall, with `wall.setup: inside` or on an image with nested Docker stops after the compose,
+exit 1, and qory closes it `failed` with `read_needs_wall`, `read_needs_setup_outside` or
+`read_needs_no_nested_docker`. A writable mount that contains the checkout, lies inside it
+or links to it also stops the run, later, and the agent does not start. qory removes the
+setup container of such a run before the agent starts, and closes the run `failed` with
+`read_needs_setup_removed` when the removal fails. See [Read workflows](#read-workflows).
 
 The documents of a run with a target may set `target_version`: the version at which Qory
 Apiary checked the target for a harness file. When the target's `system` is
@@ -1694,20 +1698,25 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
   (workflow_not_in_harness); the code is used`, after the compose, which closes the run
   with the reason `workflow_not_in_harness`; [What the run takes from the
   response](#what-the-run-takes-from-the-response) lists the values of `<harness>`
-- `run this workflow with a wall: workflow <workflow> only reads the checkout, and a run
-  with no wall mounts nothing read-only (read_needs_wall); the code is used`, after the
-  compose, for a run of a `read` workflow with no wall, which closes the run with the
-  reason `read_needs_wall`
-- `set wall.setup to outside in forager.yaml, or remove it: workflow <workflow> only reads
-  the checkout, and setup inside runs in the agent's container, which sees the checkout
-  read-only (read_needs_setup_outside); the code is used`, after the compose, for a run of
-  a `read` workflow with `wall.setup: inside`, which closes the run with the reason
-  `read_needs_setup_outside`
-- `use an image without nested Docker for read workflow <workflow>, or declare it write:
-  image <image> has nested Docker, so the checkout cannot be made read-only
-  (read_needs_no_nested_docker); the code is used`, after the compose, for a run of a
-  `read` workflow on an image with `docker: true`, which closes the run with the reason
+- `run this workflow with a wall: this run of workflow <workflow> only reads the checkout,
+  and a run with no wall mounts nothing read-only (read_needs_wall); the code is used`,
+  after the compose, for a read run with no wall, which closes the run with the reason
+  `read_needs_wall`
+- `set wall.setup to outside in forager.yaml, or remove it: this run of workflow
+  <workflow> only reads the checkout, and setup inside runs in the agent's container,
+  which sees the checkout read-only (read_needs_setup_outside); the code is used`, after
+  the compose, for a read run with `wall.setup: inside`, which closes the run with the
+  reason `read_needs_setup_outside`
+- `use an image without nested Docker: this run of workflow <workflow> only reads the
+  checkout, and image <image> has nested Docker, so the checkout cannot be made read-only
+  (read_needs_no_nested_docker); the code is used`, after the compose, for a read run on
+  an image with `docker: true`, which closes the run with the reason
   `read_needs_no_nested_docker`; see [Read workflows](#read-workflows)
+- `start the run again from the work item in Qory Apiary: the setup container of this
+  read run was not removed, so a process in the container can write the checkout: <error>
+  (read_needs_setup_removed); the code is used`, after the setup, for a read run whose
+  setup container was not removed, which closes the run with the reason
+  `read_needs_setup_removed`; see [Read workflows](#read-workflows)
 - `add a command <workflow> to <harness>, or set another runtime in Qory Apiary:
   <runtime> runs no skill by its name from a headless start; the code is used`, after the
   compose, for a workflow that is only a skill on `gemini` or `opencode`
@@ -3191,10 +3200,17 @@ What to know:
 
 ### Read workflows
 
-A stack declares the access of each workflow with `workflows.<name>.access`: `read` or
-`write`. A workflow that sets no access, and one the stack does not declare, is `read`
-(see `workflows` in `contracts/harness/v1/README.md`). A run from a run code whose
-workflow is `read` sees the checkout read-only:
+Two values set what a run of a workflow from a run code may do on the checkout:
+
+- The workflow's access in the stack, `workflows.<name>.access`: `read` or `write`. A
+  workflow that sets no access, and one the stack does not declare, is `read` (see
+  `workflows` in `contracts/harness/v1/README.md`).
+- `access` in the run's documents, from Qory Apiary: `read` or `write`. Documents with no
+  target have no `access`, and the workflow's access applies alone.
+
+A read run is a run where either value is `read`. A workflow declared `write` with
+`access: read` in the documents gives a read run, and so does a workflow declared `read`
+with `access: write`. A read run sees the checkout read-only:
 
 - Forager binds the workspace read-only in the agent's container, and the checkout's
   mount is read-only. A write into the checkout inside fails with `Read-only file
@@ -3203,31 +3219,38 @@ workflow is `read` sees the checkout read-only:
   `Bash(/qory/qory *)` and set `permissions.defaultMode` to `dontAsk`, beside what the
   composed settings contain. Inside the wall, `qory` is at `/qory/qory` and not on
   `PATH`. On the other runtimes, the read-only mount is the only change.
-- The setup container and the host steps still write the checkout, so the checkout stays
-  among the places the run may write, and the record lists it.
+- The setup and the host steps write the checkout, so the checkout stays among the places
+  the run may write, and the record lists it.
+- qory removes the setup container after the setup and before the agent starts, in the
+  wall step `remove the setup container`, so every process in that container has ended
+  when the agent starts. A read run's agent cannot reach a service that the setup started:
+  the name `qory-setup` does not resolve, so a connection to `qory-setup:5432` fails. Any
+  other run keeps the setup container until the run closes. If a workflow's agent needs
+  such a service, declare the workflow `write`, and check that `access` in the run's
+  documents is not `read`.
 
-A run of a `read` workflow with no wall, with `wall.setup: inside` or on an image with
-nested Docker cannot see the checkout read-only. It stops after the compose, before the
-image's fetch, the setup and the agent, exit 1. qory closes the run `failed` with the
+A read run with no wall, with `wall.setup: inside` or on an image with nested Docker
+cannot see the checkout read-only. It stops after the compose, before the image's fetch,
+the setup and the agent, exit 1. qory closes the run `failed` with the
 reason in the line, in place of `no_session`:
 
 - With no wall, as a run with `--run-code-file` and `--gateway` and no `wall` section
   has, `read_needs_wall`:
 
   ```
-  run this workflow with a wall: workflow <workflow> only reads the checkout, and a run with no wall mounts nothing read-only (read_needs_wall); the code is used
+  run this workflow with a wall: this run of workflow <workflow> only reads the checkout, and a run with no wall mounts nothing read-only (read_needs_wall); the code is used
   ```
 
 - With `wall.setup: inside`, `read_needs_setup_outside`:
 
   ```
-  set wall.setup to outside in forager.yaml, or remove it: workflow <workflow> only reads the checkout, and setup inside runs in the agent's container, which sees the checkout read-only (read_needs_setup_outside); the code is used
+  set wall.setup to outside in forager.yaml, or remove it: this run of workflow <workflow> only reads the checkout, and setup inside runs in the agent's container, which sees the checkout read-only (read_needs_setup_outside); the code is used
   ```
 
 - On an image of `wall.images` with `docker: true`, `read_needs_no_nested_docker`:
 
   ```
-  use an image without nested Docker for read workflow <workflow>, or declare it write: image <image> has nested Docker, so the checkout cannot be made read-only (read_needs_no_nested_docker); the code is used
+  use an image without nested Docker: this run of workflow <workflow> only reads the checkout, and image <image> has nested Docker, so the checkout cannot be made read-only (read_needs_no_nested_docker); the code is used
   ```
 
   qory checks the image chosen at the run's open, whichever way it was selected: by the
@@ -3236,10 +3259,21 @@ reason in the line, in place of `no_session`:
   `docker: true` stops the run even when `wall.image` is a pinned reference. An image
   selected by its reference runs no nested Docker.
 
+A read run whose setup container was not removed stops before the agent starts, exit 1,
+because a process in the container can still write the checkout. qory closes the run
+`failed` with the reason `read_needs_setup_removed`:
+
+```
+start the run again from the work item in Qory Apiary: the setup container of this read run was not removed, so a process in the container can write the checkout: <error> (read_needs_setup_removed); the code is used
+```
+
+A time limit or a signal that ends the removal closes the run as it closes a setup that
+it cuts short: `cancelled` with `timeout`, exit 124, or `cancelled` with `interrupted`,
+exit 1.
+
 A writable mount from `--mount` or `wall.mounts` that contains the checkout, lies inside
-it or links to it also stops a run of a `read` workflow, later, and the agent does not
-start. The run stops after the image's fetch, exit 1, with a line that ends
-`(mount_mode_conflict)`:
+it or links to it also stops a read run, later, and the agent does not start. The run
+stops after the image's fetch, exit 1, with a line that ends `(mount_mode_conflict)`:
 
 - When the run configuration lists no repositories, the run has no setup and stops at the
   join. The session closes `failed` with `mount_mode_conflict`, and the run closes
@@ -3256,8 +3290,8 @@ mount in `.git`, and a `wall.mounts` folder that the fetch creates pass the fetc
 as in the last two cases. A writable mount at the checkout's exact path stops nothing:
 qory makes it read-only.
 
-A `write` workflow, a run given a run key with no run code, and a run you start yourself
-see the checkout writable.
+A run of a workflow from a run code where neither value is `read`, a run given a run key
+with no run code, and a run you start yourself see the checkout writable.
 
 ### Qory's images
 

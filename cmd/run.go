@@ -651,6 +651,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// freshHome is true for a dispatched walled run of a runtime that is a
 			// [render.AgentHomer], whose agent starts on a new, empty configuration
 			// directory.
+			// readOnly is set once the compose has the workflows: the run only reads the
+			// checkout, see [readsOnly].
+			var readOnly bool
 			prepareLaunch := func(w io.Writer) (freshHome bool, err error) {
 				harness, workflows, err := composeForRun(w, composing, at, runtime, dispatched, walled)
 				if err != nil && composing.git != nil && composing.git.Named != nil {
@@ -681,9 +684,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					// The time limit counts from the open, so the compose's time is in it.
 					timeout = provisioner.TimeLimit(fromCode.minutes, workflows[fromCode.workflow].TimeLimit)
 				}
-				// A workflow that only reads the checkout sees it read-only, or its run stops
-				// here, before the image's fetch and the setup.
-				readOnly := readsOnly(fromCode, workflows)
+				// A run that only reads the checkout sees it read-only, or stops here, before
+				// the image's fetch and the setup.
+				readOnly = readsOnly(fromCode, workflows)
 				if readOnly {
 					if err := readOnlyCheckout(&spec, at.root, fromCode.workflow, run.Image()); err != nil {
 						return false, err
@@ -904,6 +907,19 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				return err
 			}
+			// removeSetupWork removes the setup container of a read run, see [removeSetup],
+			// within the run's time limit. No host step is open: hostWork exited its steps,
+			// and FetchImage and Setup write theirs. A call cut short by the time limit or a
+			// signal ends as a setup cut short does: the switch after the preparation tests
+			// both before the error.
+			removeSetupWork := func() error {
+				removeCtx, cancel := ctx, func() {}
+				if timeout > 0 {
+					removeCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+				}
+				defer cancel()
+				return removeSetup(removeCtx, run)
+			}
 			// imageWork fetches the image of a walled run, see [fetchImage], within the
 			// run's time limit, once the harness is composed and before the setup, so the
 			// setup and the join start from the image the step fetched. With an engine
@@ -928,6 +944,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				if prepErr == nil && walled && run.Repositories() != "" {
 					prepErr = setupWork()
+				}
+				if prepErr == nil && readOnly {
+					prepErr = removeSetupWork()
 				}
 				if beforeJoin != nil {
 					beforeJoin()
@@ -1181,6 +1200,8 @@ type openedRun interface {
 	Join(ctx context.Context, spec session.SessionSpec) (*session.Result, error)
 	// Setup runs the run's setup commands in the setup container, before the join.
 	Setup(ctx context.Context, spec session.SetupSpec) error
+	// RemoveSetup removes the run's setup container, if it has one, before the first join.
+	RemoveSetup(ctx context.Context) error
 	// FetchImage fetches a walled run's image by reference as the run's image step,
 	// before the first join; see [fetchImage].
 	FetchImage(ctx context.Context) error
@@ -2983,8 +3004,8 @@ func setupCommands() []session.SetupCommand {
 // the setup commands go into the session's spec, and Forager runs them inside the
 // agent's container through qory run setup-command before the agent starts. Outside,
 // the default, run.Setup runs them now in the setup container, a separate container of
-// the run's image on the wall's network, which runs until the run closes. The setup
-// container is checked and limited as the session is: it gets the session's working
+// the run's image on the wall's network, which runs until the run closes, or on a read
+// run until [removeSetup]. The setup container is checked and limited as the session is: it gets the session's working
 // folder, ForagerFiles, Written and Limits, and the agent's variables, see [setupEnv].
 // Inside, the setup commands get the agent's environment.
 func runSetup(ctx context.Context, run openedRun, spec *runSpec) error {

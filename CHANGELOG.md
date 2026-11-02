@@ -66,16 +66,20 @@ release may change what an existing document does, and states it under Upgrading
 - Declare a workflow's access level with `workflows.<name>.access` in its
   `qory-stack.yaml`, `read` or `write`, and `read` when left out. qory stops on any
   other value.
-- A run from a run code of a `read` workflow, which is also a workflow that sets no
-  access or that the stack does not declare, sees the checkout read-only: Forager binds
-  the workspace read-only and the checkout's mount is read-only, so a write into the
-  checkout fails with `Read-only file system`. On Claude Code, its settings also deny
+- A run of a workflow from a run code sees the checkout read-only when `access` in its
+  documents is `read`, or when its workflow's access in the stack is `read`, which is also
+  a workflow that sets no access or that the stack does not declare. Forager binds the
+  workspace read-only and the checkout's mount is read-only, so a write into the checkout
+  fails with `Read-only file system`. On Claude Code, its settings also deny
   `Edit`, `Write` and `NotebookEdit`, allow `Bash(/qory/qory *)` and set
   `permissions.defaultMode` to `dontAsk`. Such a run with no wall, with `wall.setup:
   inside`, or whose image chosen at the run's open has `docker: true`, whichever way it
   was selected, stops after the compose, exit 1, and closes `failed` with
-  `read_needs_wall`, `read_needs_setup_outside` or `read_needs_no_nested_docker`. See
-  §Read workflows in `docs/run.md`.
+  `read_needs_wall`, `read_needs_setup_outside` or `read_needs_no_nested_docker`. qory
+  removes the setup container of such a run before the agent starts, so no process in
+  that container runs while the agent works, and the agent cannot reach a service that
+  the setup started. A removal that fails closes the run `failed` with
+  `read_needs_setup_removed`. See §Read workflows in `docs/run.md`.
 - See the fetch and the compose of `qory run` as steps in the run's record, each with
   its lines and its end: a failed step ends `failed` with the exit status of `qory run`,
   after its error line.
@@ -402,7 +406,8 @@ release may change what an existing document does, and states it under Upgrading
   repositories, which adds a prebuilt image's copy and runs the repository's
   `postCreateCommand` and `postStartCommand`, is one `setup` step of the run's record,
   `prepare`, with its lines and its exit status. It runs in a separate container of the
-  run's image, which runs until the run closes, unless `wall.setup` is `inside`; outside,
+  run's image, which runs until the run closes, or on a read run until qory removes it
+  before the agent starts, unless `wall.setup` is `inside`; outside,
   its lines go to the record alone. Before, it ran in the agent's container before the
   agent, as no step. Outside, the setup container gets the agent's variables, from the
   server's run configuration, `--env`, `wall.env` and the harness's defaults, with the

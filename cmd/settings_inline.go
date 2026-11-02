@@ -58,9 +58,9 @@ func setsSettings(flag string, args []string) bool {
 // launch passes the flag once at most, with a value after it, and the agent's
 // arguments not at all, since Forager takes the first and adds its hooks to it alone. A
 // value that is JSON already, from harness.launch, stays as it is. The file is a regular
-// file of at most 64 KiB that contains one JSON object. With readOnly, for the run of a
-// workflow that only reads the checkout, the settings get [readRules], and a launch
-// with no settings flag gets the flag with those rules alone.
+// file of at most 64 KiB that contains one JSON object. With readOnly, for a run that
+// only reads the checkout, the settings get [readRules], and a launch with no settings
+// flag gets the flag with those rules alone.
 func inlineSettings(flag string, launch, extra []string, home string, readOnly bool) ([]string, error) {
 	refuse := func(format string, a ...any) error {
 		return input(fmt.Errorf(format+", so the run does not start", a...))
@@ -159,10 +159,10 @@ func oneObject(data []byte) (map[string]any, bool) {
 	return object, true
 }
 
-// The rules a run of a workflow that only reads the checkout adds to Claude Code's
-// settings: Claude Code denies its edit tools, allows the qory inside the wall in Bash,
-// which is mounted at [wall.HelperPath] and is not on PATH, and denies every other tool
-// that no rule allows, without a prompt.
+// The rules a run that only reads the checkout adds to Claude Code's settings: Claude
+// Code denies its edit tools, allows the qory inside the wall in Bash, which is mounted
+// at [wall.HelperPath] and is not on PATH, and denies every other tool that no rule
+// allows, without a prompt.
 var (
 	readDeny  = []string{"Edit", "Write", "NotebookEdit"}
 	readAllow = []string{"Bash(" + wall.HelperPath + " *)"}

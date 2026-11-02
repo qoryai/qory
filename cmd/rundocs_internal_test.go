@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -642,5 +643,54 @@ func TestARunCodesWorkflowStartsOnEachRuntimesHeadlessStart(t *testing.T) {
 		if want := noHeadless(runtime); err == nil || err.Error() != want.Error() {
 			t.Errorf("%s: codeRunOf got %v, want %v", runtime, err, want)
 		}
+	}
+}
+
+// TestARunWritesOnlyWithAccessWriteInItsDocuments reads the contract's documents
+// fixtures as a run code's answer is read, schema check included: documents with access
+// write, the fixture with its access changed; documents with access read; and documents
+// with no target, which have no access. Only the first run writes. A run not from a run
+// code does not.
+func TestARunWritesOnlyWithAccessWriteInItsDocuments(t *testing.T) {
+	for _, c := range []struct {
+		name, fixture, set string
+		access             string
+		writes             bool
+	}{
+		{"access write", "explore-workflow.json", "write", "write", true},
+		{"access read", "explore-workflow.json", "", "read", false},
+		{"no target", "explore-harness-without-target.json", "", "", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			raw, err := fs.ReadFile(contracts.RunFS, "fixtures/documents/"+c.fixture)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.set != "" {
+				var doc map[string]any
+				if err := json.Unmarshal(raw, &doc); err != nil {
+					t.Fatal(err)
+				}
+				doc["access"] = c.set
+				if raw, err = json.Marshal(doc); err != nil {
+					t.Fatal(err)
+				}
+			}
+			doc, err := codeDocumentsOf(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r, err := codeRunOf(doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.access != c.access || r.writes() != c.writes {
+				t.Errorf("access %q, writes %v; want %q, %v", r.access, r.writes(), c.access, c.writes)
+			}
+		})
+	}
+	var none *codeRun
+	if none.writes() {
+		t.Error("a run not from a run code writes")
 	}
 }

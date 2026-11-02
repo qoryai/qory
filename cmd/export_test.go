@@ -129,7 +129,8 @@ func OpenNowhere() (outcomes func() []session.Outcome, restore func()) {
 // when not nil, gets each event of the run's host steps, as Forager writes them,
 // Setup, which, when not nil, gets the spec of the run's Setup and returns its error,
 // OnOpen, which, when not nil, gets the spec of each open, FetchImage, which, when not
-// nil, is the run's FetchImage, and AgentEnv, which, when
+// nil, is the run's FetchImage, RemoveSetup, which, when not nil, is the run's
+// RemoveSetup, and AgentEnv, which, when
 // not nil, gets the spec of the run's AgentEnv and returns its result. With AgentEnv
 // nil, AgentEnv returns System and Repositories, each when set, as QORY_RUN_SYSTEM and
 // QORY_RUN_REPOSITORIES, sorted by name. With AtGateway set, each open also opens the
@@ -140,7 +141,9 @@ func OpenNowhere() (outcomes func() []session.Outcome, restore func()) {
 // PolicyImage is the image the run's policy selects, "" for none: the gateway of
 // AtGateway runs under a policy that selects it, and a run with no gateway resolves it
 // against the open's images, as that gateway does. Image returns what the gateway
-// answered, and OnImage, when not nil, gets each value Image returns.
+// answered, and OnImage, when not nil, gets each value Image returns. With Real set,
+// which needs AtGateway, the run's Setup, RemoveSetup and Join are those of the run at
+// that gateway, so they use a real wall, and every other call is the fake's.
 type Nowhere struct {
 	System, Repositories string
 	Proxy, CABundle      string
@@ -154,7 +157,9 @@ type Nowhere struct {
 	AgentEnv             func(session.SessionSpec) ([]string, error)
 	OnOpen               func(session.OpenSpec)
 	FetchImage           func(context.Context) error
+	RemoveSetup          func(context.Context) error
 	AtGateway            bool
+	Real                 bool
 	PolicyImage          string
 	OnImage              func(session.Image)
 	// RunAPI is the base URL of the run's run API, "" for a server that returns 404 with
@@ -176,7 +181,7 @@ type StepEvent struct {
 // is n.Dir, or a new temporary folder, which restore removes. Besides the outcomes, it
 // returns the calls the runs got, in order: "host proxy" for each HostProxy, "host
 // proxy closed" for each close of one, "stack proxy" and "stack proxy closed" for each
-// StackProxy and close of one, "fetch image", "setup" and "join".
+// StackProxy and close of one, "fetch image", "setup", "remove setup" and "join".
 func OpenNowhereWith(n Nowhere) (outcomes func() []session.Outcome, calls func() []string, restore func()) {
 	before := openRun
 	var mu sync.Mutex
@@ -318,21 +323,41 @@ func (noRunAPI) RoundTrip(r *http.Request) (*http.Response, error) {
 	}, nil
 }
 
-func (n *nowhere) Join(context.Context, session.SessionSpec) (*session.Result, error) {
+func (n *nowhere) Join(ctx context.Context, spec session.SessionSpec) (*session.Result, error) {
 	if n.open != nil {
 		return nil, fmt.Errorf("exit step %d before the join", n.open.n)
 	}
 	n.note("join")
+	if n.values.Real {
+		return n.at.run.Join(ctx, spec)
+	}
 	return nil, ErrJoinedNowhere
 }
 
-func (n *nowhere) Setup(_ context.Context, spec session.SetupSpec) error {
+func (n *nowhere) Setup(ctx context.Context, spec session.SetupSpec) error {
 	if n.open != nil {
 		return fmt.Errorf("exit step %d before the setup", n.open.n)
 	}
 	n.note("setup")
+	if n.values.Real {
+		return n.at.run.Setup(ctx, spec)
+	}
 	if n.values.Setup != nil {
 		return n.values.Setup(spec)
+	}
+	return nil
+}
+
+func (n *nowhere) RemoveSetup(ctx context.Context) error {
+	if n.open != nil {
+		return fmt.Errorf("exit step %d before the setup container's removal", n.open.n)
+	}
+	n.note("remove setup")
+	if n.values.Real {
+		return n.at.run.RemoveSetup(ctx)
+	}
+	if n.values.RemoveSetup != nil {
+		return n.values.RemoveSetup(ctx)
 	}
 	return nil
 }

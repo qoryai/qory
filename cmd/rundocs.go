@@ -97,6 +97,10 @@ type codeRun struct {
 	minutes  int
 	hidden   bool
 	target   preparation.Target
+	// access is what the run may do on its target: [stack.AccessRead] or
+	// [stack.AccessWrite], from the documents' access. It is empty when the documents have
+	// no target.
+	access   string
 	workItem string
 }
 
@@ -168,7 +172,7 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if doc.Target != nil {
 		target = preparation.Target{System: doc.Target.System, Path: doc.Target.Path, Version: doc.TargetVersion}
 	}
-	r := &codeRun{runtime: runtime, settings: settings, harness: harness, defines: defines, workflow: doc.Workflow, inputs: doc.Inputs, minutes: minutes, hidden: hidden, target: target}
+	r := &codeRun{runtime: runtime, settings: settings, harness: harness, defines: defines, workflow: doc.Workflow, inputs: doc.Inputs, minutes: minutes, hidden: hidden, target: target, access: doc.Access}
 	if doc.WorkItem != nil {
 		r.workItem = doc.WorkItem.ID
 	}
@@ -176,6 +180,13 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 		r.named = source.NewNamed(r.phrase())
 	}
 	return r, nil
+}
+
+// writes reports whether the run r may write to its target: its access is
+// [stack.AccessWrite]. A run not from a run code has no access, and neither does a run
+// whose documents have no target.
+func (r *codeRun) writes() bool {
+	return r != nil && r.access == stack.AccessWrite
 }
 
 // definedHarness is a harness document whose section defines a stack, as qory writes it
