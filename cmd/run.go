@@ -680,6 +680,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					// The time limit counts from the open, so the compose's time is in it.
 					timeout = provisioner.TimeLimit(fromCode.minutes, workflows[fromCode.workflow].TimeLimit)
 				}
+				// A workflow that only reads the checkout sees it read-only, or its run stops
+				// here, before the image's fetch and the setup.
+				readOnly := readsOnly(fromCode, workflows)
+				if readOnly {
+					if err := readOnlyCheckout(&spec, at.root, fromCode.workflow, run.Image()); err != nil {
+						return false, err
+					}
+				}
 				if dispatched {
 					launch.Args = dispatchedArgs(renderer, launch.Args)
 				}
@@ -687,7 +695,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// home itself, after the home's check: Forager reads no file of the home.
 				launchArgs := append(append([]string{}, launch.Args...), extra...)
 				if s, ok := renderer.(render.SettingsInliner); ok {
-					if launchArgs, err = inlineSettings(s.SettingsFlag(), launch.Args, extra, at.home); err != nil {
+					if launchArgs, err = inlineSettings(s.SettingsFlag(), launch.Args, extra, at.home, readOnly); err != nil {
 						return false, err
 					}
 				}
@@ -1163,6 +1171,9 @@ type openedRun interface {
 	// reads them.
 	System() string
 	Repositories() string
+	// Image is the image chosen at the run's open, the zero Image with no wall or when
+	// the gateway's run answer has no image; a walled run with no image fails at the open.
+	Image() session.Image
 	// Dir is the run directory.
 	Dir() string
 }

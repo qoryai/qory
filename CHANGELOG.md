@@ -54,7 +54,17 @@ release may change what an existing document does, and states it under Upgrading
   from its workflow's `time_limit`, else 3 hours.
 - Declare a workflow's access level with `workflows.<name>.access` in its
   `qory-stack.yaml`, `read` or `write`, and `read` when left out. qory stops on any
-  other value and grants no permission from it.
+  other value.
+- A run from a run code of a `read` workflow, which is also a workflow that sets no
+  access or that the stack does not declare, sees the checkout read-only: Forager binds
+  the workspace read-only and the checkout's mount is read-only, so a write into the
+  checkout fails with `Read-only file system`. On Claude Code, its settings also deny
+  `Edit`, `Write` and `NotebookEdit`, allow `Bash(/qory/qory *)` and set
+  `permissions.defaultMode` to `dontAsk`. Such a run with no wall, with `wall.setup:
+  inside`, or whose image chosen at the run's open has `docker: true`, whichever way it
+  was selected, stops after the compose, exit 1, and closes `failed` with
+  `read_needs_wall`, `read_needs_setup_outside` or `read_needs_no_nested_docker`. See
+  §Read workflows in `docs/run.md`.
 - See the fetch and the compose of `qory run` as steps in the run's record, each with
   its lines and its end: a failed step ends `failed` with the exit status of `qory run`,
   after its error line.

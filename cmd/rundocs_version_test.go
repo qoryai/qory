@@ -15,14 +15,16 @@ import (
 
 // versionRepository is a run from a control plane, as [newHostFetch] makes it, whose
 // server serves acme/site as well, on its default branch main: a first commit whose
-// qory.yaml lists the module hello, with the command hello, then a head commit that
-// removes the command. It returns the run, both commits and the files of the first.
+// qory.yaml lists the module hello, with the command hello, and declares the workflow
+// hello write, so a run with no wall joins, then a head commit that removes the command
+// and the workflow. It returns the run, both commits and the files of the first.
 func versionRepository(t *testing.T) (h *hostFetch, first, head string, files map[string]string) {
 	t.Helper()
 	hello := helloFiles(t)
 	h = newHostFetch(t, "", "main")
+	stack := "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: hello\n    source: {path: modules/hello}\n"
 	files = map[string]string{
-		"qory.yaml":                       ownStack("apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: hello\n    source: {path: modules/hello}\n"),
+		"qory.yaml":                       ownStack(stack + "workflows:\n  hello:\n    access: write\n"),
 		"modules/hello/qory-module.yaml":  hello["examples/hello/modules/hello/qory-module.yaml"],
 		"modules/hello/commands/hello.md": hello["examples/hello/modules/hello/commands/hello.md"],
 	}
@@ -30,6 +32,8 @@ func versionRepository(t *testing.T) (h *hostFetch, first, head string, files ma
 	work := tempDir(t)
 	proxygittest.Git(t, work, "clone", "--quiet", filepath.Join(h.server.Root, "acme", "site.git"), ".")
 	proxygittest.Git(t, work, "rm", "--quiet", "modules/hello/commands/hello.md")
+	writeFile(t, filepath.Join(work, "qory.yaml"), ownStack(stack))
+	proxygittest.Git(t, work, "add", "qory.yaml")
 	proxygittest.Git(t, work, "-c", "user.name=Example", "-c", "user.email=example@example.com", "commit", "--quiet", "-m", "head")
 	proxygittest.Git(t, work, "push", "--quiet", "origin", "main")
 	return h, first, proxygittest.Git(t, work, "rev-parse", "HEAD"), files

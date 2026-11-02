@@ -174,6 +174,8 @@ type codeRun struct {
 	commit   string
 	calls    []string
 	closes   []session.Outcome
+	// image is the last value the run's Image returned, the zero Image when nothing read it.
+	image session.Image
 }
 
 // codeFetchImage is the FetchImage of each run [runFromCodeGiven] opens; nil is one
@@ -183,6 +185,10 @@ var codeFetchImage func(context.Context) error
 // codeAtGateway, when set, has [runFromCodeGiven] open each run at a gateway of
 // Forager's in this process as well, as [cmd.Nowhere] AtGateway does. A test sets it.
 var codeAtGateway bool
+
+// codePolicyImage is the image the policy of each run [runFromCodeGiven] opens selects,
+// as [cmd.Nowhere] PolicyImage is; "" selects none. A test sets it.
+var codePolicyImage string
 
 // runFromCode runs qory run from a run code whose documents start the workflow of a
 // harness document that extends the stack examples/hello of a repository that the
@@ -251,9 +257,11 @@ func runFromCodeGiven(t *testing.T, before func(code string) []string, args []st
 	closes, calls, restore := cmd.OpenNowhereWith(cmd.Nowhere{
 		System: proxygittest.Host, Proxy: h.server.Proxy.URL, CABundle: h.server.Proxy.CABundle, Dir: h.runDir,
 		StackProxy: h.server.Proxy.URL, StackCABundle: h.server.Proxy.CABundle,
-		OnOpen:     func(s session.OpenSpec) { r.open = s },
-		FetchImage: codeFetchImage,
-		AtGateway:  codeAtGateway,
+		OnOpen:      func(s session.OpenSpec) { r.open = s },
+		FetchImage:  codeFetchImage,
+		AtGateway:   codeAtGateway,
+		PolicyImage: codePolicyImage,
+		OnImage:     func(i session.Image) { r.image = i },
 	})
 	defer restore()
 	if given == nil {
@@ -283,7 +291,7 @@ func TestARunCodeStartsItsWorkflow(t *testing.T) {
 	if err := json.Unmarshal(want, &doc); err != nil {
 		t.Fatal(err)
 	}
-	r := runFromCode(t, func(s string) string { return s + "workflows:\n  hello:\n    time_limit: 7h\n" }, func(d map[string]any) {
+	r := runFromCode(t, func(s string) string { return s + "workflows:\n  hello:\n    time_limit: 7h\n    access: write\n" }, func(d map[string]any) {
 		d["run_settings"] = map[string]any{"runtime": "claude", "model": "example-large", "provider_models": []any{map[string]any{"id": "example-large"}}}
 	})
 	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
@@ -317,7 +325,7 @@ func TestARunCodeStartsItsWorkflow(t *testing.T) {
 // TestARunCodeWithoutAWorkflowTimeLimitRunsThreeHours is a run from a run code whose
 // base sets no time_limit for its workflow: the session's time limit is 3 hours.
 func TestARunCodeWithoutAWorkflowTimeLimitRunsThreeHours(t *testing.T) {
-	r := runFromCode(t, nil, nil)
+	r := runFromCode(t, writesHello, nil)
 	if !r.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
@@ -421,7 +429,7 @@ func TestARunCodeDescriptorIsClosedBeforeTheRunStartsAProgram(t *testing.T) {
 		}
 		t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 		return []string{"--run-code-file", "/dev/fd/" + strconv.Itoa(n)}
-	}, nil, nil, nil)
+	}, nil, writesHello, nil)
 	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}

@@ -34,20 +34,20 @@ func settingsHome(t *testing.T, content string) (string, string) {
 func TestInlineSettingsPassesTheFileAsItIs(t *testing.T) {
 	content := "{\n  \"model\": \"a-model\",\n  \"hooks\": {}\n}\n"
 	home, file := settingsHome(t, content)
-	got, err := inlineSettings("--settings", []string{"--plugin-dir", "/p", "--settings", file, "--setting-sources", "user"}, []string{"-p", "hi"}, home)
+	got, err := inlineSettings("--settings", []string{"--plugin-dir", "/p", "--settings", file, "--setting-sources", "user"}, []string{"-p", "hi"}, home, false)
 	want := []string{"--plugin-dir", "/p", "--settings", content, "--setting-sources", "user", "-p", "hi"}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Errorf("got %q, %v\nwant %q", got, err, want)
 	}
-	got, err = inlineSettings("--settings", []string{"--settings=" + file}, nil, home)
+	got, err = inlineSettings("--settings", []string{"--settings=" + file}, nil, home, false)
 	if err != nil || !reflect.DeepEqual(got, []string{"--settings=" + content}) {
 		t.Errorf("--settings=: got %q, %v", got, err)
 	}
-	got, err = inlineSettings("--settings", []string{"--settings", `{"model":"x"}`}, nil, home)
+	got, err = inlineSettings("--settings", []string{"--settings", `{"model":"x"}`}, nil, home, false)
 	if err != nil || !reflect.DeepEqual(got, []string{"--settings", `{"model":"x"}`}) {
 		t.Errorf("JSON already: got %q, %v", got, err)
 	}
-	got, err = inlineSettings("--settings", []string{"--verbose"}, []string{"-p", "hi"}, home)
+	got, err = inlineSettings("--settings", []string{"--verbose"}, []string{"-p", "hi"}, home, false)
 	if err != nil || !reflect.DeepEqual(got, []string{"--verbose", "-p", "hi"}) {
 		t.Errorf("no settings: got %q, %v", got, err)
 	}
@@ -58,7 +58,7 @@ func TestInlineSettingsPassesTheFileAsItIs(t *testing.T) {
 func TestInlineSettingsRefuses(t *testing.T) {
 	refused := func(name string, launch, extra []string, home, want string) {
 		t.Helper()
-		_, err := inlineSettings("--settings", launch, extra, home)
+		_, err := inlineSettings("--settings", launch, extra, home, false)
 		if err == nil || err.Error() != want || ExitCode(err) != ExitInput {
 			t.Errorf("%s: %v, want %q", name, err, want)
 		}
@@ -112,7 +112,7 @@ func TestInlineSettingsRefuses(t *testing.T) {
 
 	home, file = settingsHome(t, `{"model":"`+strings.Repeat("x", maxSettings)+`"}`)
 	refused("too large", []string{"--settings", file}, nil, home, "the Claude Code settings "+file+" are larger than 64 KiB"+tail)
-	if _, err := inlineSettings("--settings", []string{"--settings", file}, nil, home); err == nil {
+	if _, err := inlineSettings("--settings", []string{"--settings", file}, nil, home, false); err == nil {
 		t.Error("too large passed")
 	}
 	_, file2 := settingsHome(t, "")
@@ -120,7 +120,7 @@ func TestInlineSettingsRefuses(t *testing.T) {
 		if err := os.WriteFile(file2, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		refused("not one object: "+content, []string{"--settings", file2}, nil, filepath.Dir(filepath.Dir(file2)), "the Claude Code settings "+file2+" are not one JSON object"+tail)
+		refused("not one object: "+content, []string{"--settings", file2}, nil, filepath.Dir(filepath.Dir(file2)), "write one JSON object in the Claude Code settings "+file2+": the file is not one JSON object"+tail)
 	}
 
 	home, file = settingsHome(t, "{}")
@@ -157,13 +157,13 @@ func TestInlineSettingsRefusesABareSettingsInTheAgentsArguments(t *testing.T) {
 			{"--", "--settings"},
 			{"--append-system-prompt", "--settings"},
 		} {
-			got, err := inlineSettings("--settings", launch, extra, home)
+			got, err := inlineSettings("--settings", launch, extra, home, false)
 			if err == nil || err.Error() != want || ExitCode(err) != ExitInput {
 				t.Errorf("launch %q, agent's arguments %q: got %q, %v, want %q", launch, extra, got, err, want)
 			}
 		}
 	}
-	got, err := inlineSettings("--settings", nil, []string{"-p", "--settingsx", "--setting-sources", "user"}, home)
+	got, err := inlineSettings("--settings", nil, []string{"-p", "--settingsx", "--setting-sources", "user"}, home, false)
 	if err != nil || !reflect.DeepEqual(got, []string{"-p", "--settingsx", "--setting-sources", "user"}) {
 		t.Errorf("no --settings: got %q, %v", got, err)
 	}

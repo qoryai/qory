@@ -55,6 +55,7 @@ const deadProxy = "http://qory:nowhere@127.0.0.1:9"
 // repository that the run's stack proxy serves and its host proxy does not. With
 // checkout set, the documents contain no harness document, and the checkout's qory.yaml
 // extends that folder, which the run's host proxy serves and its stack proxy does not.
+// The base's stack declares the workflow hello write, see [writesHello].
 type codeHarness struct {
 	// stack changes the base's stack file, nil for none; files are further files of the
 	// base's repository, and tools, when not nil, the files of the repository of the
@@ -160,7 +161,7 @@ func (c codeHarness) run(t *testing.T) harnessRun {
 	if c.stack != nil {
 		files[folder+"/qory-stack.yaml"] = c.stack(files[folder+"/qory-stack.yaml"])
 	}
-	files[folder+"/qory-stack.yaml"] = withExtendable(files[folder+"/qory-stack.yaml"])
+	files[folder+"/qory-stack.yaml"] = withExtendable(writesHello(files[folder+"/qory-stack.yaml"]))
 	for name := range c.links {
 		delete(files, name)
 	}
@@ -298,7 +299,7 @@ func (r harnessRun) noHarnessFile(t *testing.T) {
 func TestARunCodeComposesTheWorkspacesHarnessThroughTheStackProxy(t *testing.T) {
 	r := codeHarness{
 		stack: func(s string) string {
-			return withTools(toolsURL, toolsRef)(s) + "workflows:\n  hello:\n    time_limit: 5h\n"
+			return withTools(toolsURL, toolsRef)(s) + "workflows:\n  hello:\n    time_limit: 5h\n    access: write\n"
 		},
 		tools: toolsModule(),
 		before: func() []string {
@@ -577,7 +578,7 @@ func TestARunCodeOfAHiddenHarnessThatFailsShowsNoAddress(t *testing.T) {
 func TestARunCodeWithoutAHarnessDocumentComposesTheCheckoutsFile(t *testing.T) {
 	for _, shown := range []bool{false, true} {
 		t.Run(fmt.Sprintf("shown %v", shown), func(t *testing.T) {
-			r := codeHarness{checkout: true, shown: shown, stack: func(s string) string { return s + "workflows:\n  hello:\n    time_limit: 5h\n" }}.run(t)
+			r := codeHarness{checkout: true, shown: shown, stack: func(s string) string { return s + "workflows:\n  hello:\n    time_limit: 5h\n    access: write\n" }}.run(t)
 			if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
 				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 			}
