@@ -2542,8 +2542,8 @@ any other artifact it fetches the approved version, or the newest when none is a
 32 MiB encoded through the run API, about 24 MiB of files, whatever the type's size limit.
 
 `qory artifact push` exits 4, with the type and the limit, for a type that the workspace
-does not have or the workflow may not write, for too many files, and for files over a
-limit. One version has at most 100 files through the run API, whatever the type's maximum.
+does not have, for too many files, and for files over a limit. One version has at most 100
+files through the run API, whatever the type's maximum.
 `qory run verdict` exits 4 for a request over its limit too. `qory work-item show` exits 3
 with no work item. These numbers mean a collision and a foreign path on `qory harness`.
 

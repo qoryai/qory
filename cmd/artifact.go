@@ -78,8 +78,8 @@ func (noWorkItemError) Error() string { return noWorkItemText }
 // [ExitCode] gives it [ExitArtifactRefused].
 func artifactRefused(err error) bool {
 	for _, code := range []string{
-		runapi.CodeTypeNotWritable, runapi.CodeUnknownType, runapi.CodeTooManyFiles,
-		runapi.CodeTooLarge, runapi.CodePayloadTooLarge,
+		runapi.CodeUnknownType, runapi.CodeTooManyFiles, runapi.CodeTooLarge,
+		runapi.CodePayloadTooLarge,
 	} {
 		if runapi.HasCode(err, code) {
 			return true
@@ -393,9 +393,9 @@ under <type>/<name>/v<N>/, and print the version. - reads one file from standard
 --name separates several artifacts of one type, such as mockups of two screens. The store
 is .qory/artifacts, or /tmp/qory-artifacts when the run's checkout is read-only.
 
-qory exits ` + strconv.Itoa(ExitArtifactRefused) + ` with the type and the limit for a type that the workspace does not have or the
-workflow may not write, for too many files, and for files over the type's size limit. One
-version is at most about 24 MiB and 100 files through the run API, whatever the type's limit.
+qory exits ` + strconv.Itoa(ExitArtifactRefused) + ` with the type and the limit for a type that the workspace does not have,
+for too many files, and for files over the type's size limit. One version is at most about
+24 MiB and 100 files through the run API, whatever the type's limit.
 
 Outside a run, qory keeps the files in .qory/artifacts and sends nothing.
 

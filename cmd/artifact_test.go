@@ -661,7 +661,6 @@ func TestArtifactPushExitStatuses(t *testing.T) {
 		status int
 		exit   int
 	}{
-		"type_not_writable": {http.StatusForbidden, cmd.ExitArtifactRefused},
 		"unknown_type":      {http.StatusUnprocessableEntity, cmd.ExitArtifactRefused},
 		"too_many_files":    {http.StatusUnprocessableEntity, cmd.ExitArtifactRefused},
 		"too_large":         {http.StatusUnprocessableEntity, cmd.ExitArtifactRefused},
