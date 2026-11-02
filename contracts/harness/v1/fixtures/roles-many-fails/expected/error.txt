@@ -1,0 +1,1 @@
+Set roles.agents.developer to one in modules/core/qory-module.yaml: a role is filled by one entry, and the value is "many".

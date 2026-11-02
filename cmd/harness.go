@@ -1217,7 +1217,7 @@ func ownFileRows(own string, doc *stack.Stack, conf config.Config) [][2]string {
 		if n := len(doc.Modules); n > 0 {
 			read = append(read, count(n, "module", "modules"))
 		}
-		if n := len(doc.Bind); n > 0 {
+		if n := doc.Bind.Len(); n > 0 {
 			read = append(read, count(n, "binding", "bindings"))
 		}
 		if n := len(doc.Extensions); n > 0 {

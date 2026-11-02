@@ -396,7 +396,7 @@ type harnessSection struct {
 	Extends     stack.Source             `yaml:"extends,omitempty"`
 	Target      stack.Target             `yaml:"target,omitempty"`
 	Modules     []stack.Module           `yaml:"modules,omitempty"`
-	Bind        map[string]string        `yaml:"bind,omitempty"`
+	Bind        stack.Roles              `yaml:"bind,omitempty"`
 	Extensions  map[string]any           `yaml:"extensions,omitempty"`
 	// Workflows are the workflows of the stack the section defines, as a stack file
 	// sets them; a section that extends a stack takes the base's and sets none.
@@ -406,7 +406,7 @@ type harnessSection struct {
 // composes reports whether the section carries a compose document: modules, extends,
 // bindings, extensions or workflows. A section of machine keys alone is not a document.
 func (h *harnessSection) composes() bool {
-	return h != nil && (len(h.Modules) > 0 || h.extends() || len(h.Bind) > 0 || len(h.Extensions) > 0 || len(h.Workflows) > 0)
+	return h != nil && (len(h.Modules) > 0 || h.extends() || h.Bind.Len() > 0 || len(h.Extensions) > 0 || len(h.Workflows) > 0)
 }
 
 // extends reports whether the section names a stack to extend, by directory or by export.

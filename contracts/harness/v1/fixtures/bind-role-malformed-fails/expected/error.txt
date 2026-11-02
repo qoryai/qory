@@ -1,1 +1,1 @@
-qory.yaml: bind coder: a role is <kind>/<name>, the kind one of agents, commands, skills
+Rename role .coder of bind.agents in qory.yaml to one path segment with no space, @ or leading dot.

@@ -392,11 +392,16 @@ type Stack struct {
 	Tiers map[string]any `yaml:"tiers,omitempty"`
 	// Modules are the modules to compose, in the order they merge.
 	Modules []Module `yaml:"modules"`
-	// Bind selects the entry that fills each role a document references, <kind>/<role> to
-	// the entry's name in that kind, so a module writes ${qory:agents/coder} and the
-	// stack selects which agent that is. A document that extends a stack adds to the
-	// base's bindings and may rebind a role of the base's.
-	Bind map[string]string `yaml:"bind,omitempty"`
+	// Bind selects the entry that fills each role a document references, by kind and
+	// then by role, to the entry's name in that kind: a module writes
+	// ${qory:agents/coder}, and bind: {agents: {coder: rails-coder}} selects which agent
+	// that is. After [Extend], it is the bind of the checkout's qory.yaml, and BaseBind
+	// is the base's.
+	Bind Roles `yaml:"bind,omitempty"`
+	// BaseBind is the bind of the stack a checkout's qory.yaml extends, set by
+	// [Extend]; nil for a stack that extends none. The compose sets each role from
+	// BaseBind first, then from Bind.
+	BaseBind Roles `yaml:"-"`
 	// Extending, on a stack, is what a checkout's own modules may ship. A stack that
 	// leaves it out cannot be extended.
 	Extending *Extending `yaml:"extending,omitempty"`
@@ -535,7 +540,7 @@ func loadFile(path string) (*Stack, error) {
 		return nil, err
 	}
 	if err := p.validate(false); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, inPath(path, err)
 	}
 	// The repository delivering the stack states the qory it needs once, in its
 	// qory.yaml; every stack it holds is held to that range beside its own.
@@ -577,9 +582,19 @@ func NewCompose(path string, p *Stack) (*Stack, error) {
 		return nil, err
 	}
 	if err := p.validate(true); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, inPath(path, err)
 	}
 	return p, nil
+}
+
+// inPath is err, a refusal of the document at path, with path in front, unless err is an
+// [exports.InFile], whose text contains the file's name already.
+func inPath(path string, err error) error {
+	var in exports.InFile
+	if errors.As(err, &in) {
+		return err
+	}
+	return fmt.Errorf("%s: %w", path, err)
 }
 
 // extends reports whether the document names a stack to extend.
@@ -683,17 +698,8 @@ func (p *Stack) validate(compose bool) error {
 		w.TimeLimit = d
 		p.Workflows[name] = w
 	}
-	for _, role := range sortedKeys(p.Bind) {
-		kind, name, ok := strings.Cut(role, "/")
-		if !ok || !isReferable(kind) {
-			return fmt.Errorf("bind %s: a role is <kind>/<name>, the kind one of %s", accesskey.ShownName(role, false), strings.Join(Referable, ", "))
-		}
-		if !segment(name) || strings.Contains(name, " ") {
-			return fmt.Errorf("bind %s: %s is not an entry name; a name is one path segment", accesskey.ShownName(role, false), accesskey.ShownName(name, true))
-		}
-		if to := p.Bind[role]; !segment(to) || strings.Contains(to, " ") || strings.Contains(to, "/") {
-			return fmt.Errorf("bind %s: %s is not an entry name; a role is bound to the name of an entry of its kind", accesskey.ShownName(role, false), accesskey.ShownName(to, true))
-		}
+	if err := CheckRoles(p.Bind, "bind"); err != nil {
+		return err.(*RolesError).In(exports.HidePath(filepath.Base(p.File)))
 	}
 	// A document that extends a stack may append nothing and carry only what is the
 	// repository's own beside the base, its extensions say; a stack, and a document
@@ -979,7 +985,8 @@ func FileAllowed(name string, prefixes []string) bool {
 
 // Extend returns the stack the checkout's qory.yaml p composes on base: the base's
 // modules first, marked [Module.Base], each with its source rewritten to resolve from p,
-// then p's modules; p's target, since a base has none; both files' extensions. The
+// then p's modules; p's target, since a base has none; both files' extensions; the
+// base's bind in [Stack.BaseBind] and p's in [Stack.Bind], kept apart. The
 // result's Qory is p's; the base's range is the caller's to keep and check, as
 // [Base.Qory] does. It refuses a base that extends another and a base without an
 // extending block. An entry of p that lists a base module by its name is no module of
@@ -1041,15 +1048,7 @@ func Extend(base, p *Stack) (*Stack, error) {
 		// compose fails on a checkout module of the same name, as composed twice.
 		out.Modules = append(out.Modules, l)
 	}
-	if len(base.Bind) > 0 || len(p.Bind) > 0 {
-		out.Bind = map[string]string{}
-		for role, to := range base.Bind {
-			out.Bind[role] = to
-		}
-		for role, to := range p.Bind {
-			out.Bind[role] = to
-		}
-	}
+	out.BaseBind = base.Bind
 	out.Workflows = base.Workflows
 	out.Extensions = map[string]any{}
 	for key, v := range base.Extensions {

@@ -38,3 +38,5 @@ require (
 )
 
 replace github.com/qoryai/forager => ../../forager/wt-next-1101
+
+replace github.com/qoryai/integrations => ../../integrations/wt-next

@@ -67,6 +67,13 @@ type Manifest struct {
 	// manifest has no egress key; empty, and not nil, when it declares an empty list,
 	// which states that the module reaches nothing. Forager distinguishes the two.
 	Egress []string
+	// Roles are the roles the module's documents reference, by kind and then by role, each
+	// set to one, the number of entries that fill the role. Nil when the manifest has no
+	// roles key.
+	Roles stack.Roles
+	// Provides are the roles the module fills, by kind and then by role, each to the name
+	// of the entry that fills it. Nil when the manifest has none.
+	Provides stack.Roles
 }
 
 // EgressHost is the grammar of a declared host, copied from the Forager contract's
@@ -84,6 +91,8 @@ type rawManifest struct {
 	Env         map[string]string      `yaml:"env,omitempty"`
 	Requires    []map[string]yaml.Node `yaml:"requires,omitempty"`
 	Egress      *[]string              `yaml:"egress,omitempty"`
+	Roles       yaml.Node              `yaml:"roles,omitempty"`
+	Provides    yaml.Node              `yaml:"provides,omitempty"`
 }
 
 // singular maps the key a requires item names its entry by to the entry's kind. mcp is
@@ -227,8 +236,10 @@ var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // These are errors: an unknown field, an apiVersion other than [stack.APIVersion] or a
 // retired spelling of it, a missing name, a default that selects something other than
 // a declared variant or "fail", an env key that is not an environment variable name or
-// is QORY_HARNESS_HOME, and an env value that is not a relative path inside the module.
-// Every error contains the manifest path. A name the file writes that contains an access
+// is QORY_HARNESS_HOME, an env value that is not a relative path inside the module, and
+// roles or provides that [stack.ReadRoles] refuses, roles with every value one. Every
+// error contains the manifest path; a refusal of roles or provides contains it inside
+// the text, after the fix. A name the file writes that contains an access
 // key secret or a run key, a key of env, of variants or of a requires item, an entry a
 // requires item lists, and the variant default selects, is printed as
 // [accesskey.ShownName] prints it, and a value it writes as [exports.Value] prints it.
@@ -330,6 +341,25 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 			}
 		}
 		sort.Strings(m.Egress)
+	}
+	for _, part := range []struct {
+		key    string
+		node   *yaml.Node
+		counts bool
+		to     *stack.Roles
+	}{{"roles", &raw.Roles, true, &m.Roles}, {"provides", &raw.Provides, false, &m.Provides}} {
+		if part.node.Kind == 0 {
+			continue
+		}
+		r, err := stack.ReadRoles(part.node, part.key, part.counts)
+		var re *stack.RolesError
+		if errors.As(err, &re) {
+			return nil, re.In(path)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%s: %s: %w", path, part.key, exports.HideValueError(err, ""))
+		}
+		*part.to = r
 	}
 	for name, node := range raw.Variants {
 		if name == "default" {

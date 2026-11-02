@@ -2,6 +2,7 @@ package compose
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -245,9 +246,12 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			res.Close()
 		}
 	}()
-	if len(p.Bind) > 0 {
-		res.Bind = map[string]string{}
-		for role, to := range p.Bind {
+	// The base's bind, then the bind of the document composed over it.
+	for _, bind := range []stack.Roles{p.BaseBind, p.Bind} {
+		for role, to := range bind.Flat() {
+			if res.Bind == nil {
+				res.Bind = map[string]string{}
+			}
 			res.Bind[role] = to
 		}
 	}
@@ -306,6 +310,10 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			m, err = module.ReadManifest(src.Dir)
 		}
 		if err != nil {
+			var in exports.InFile
+			if errors.As(err, &in) {
+				return nil, err
+			}
 			return nil, fmt.Errorf("%s: %w", who, err)
 		}
 		if afterManifest != nil {

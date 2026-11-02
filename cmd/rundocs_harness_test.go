@@ -1017,3 +1017,32 @@ func TestAHarnessDocumentWhosePathLeadsOutStops(t *testing.T) {
 		})
 	}
 }
+
+// TestARunCodeWhoseHarnessBindsByKindComposes is a run from a run code whose harness
+// document binds a role of each of two kinds, by kind and then by role: the documents
+// pass qory's checks and the harness composes, so the session joins.
+func TestARunCodeWhoseHarnessBindsByKindComposes(t *testing.T) {
+	r := runFromCode(t, nil, harnessBind(map[string]any{"commands": map[string]any{"greeting": "hello"}, "skills": map[string]any{"welcome": "greet"}}))
+	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
+		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	wants(t, r.out, "qory run: composed ")
+}
+
+// TestARunCodeWhoseHarnessBindsFlatStops is a run from a run code whose harness
+// document writes a bind key as <kind>/<role>: the documents fail qory's checks, and the
+// run stops before the session joins, exit 1.
+func TestARunCodeWhoseHarnessBindsFlatStops(t *testing.T) {
+	r := runFromCode(t, nil, harnessBind(map[string]any{"commands/greeting": "hello"}))
+	if r.joined || cmd.ExitCode(r.err) != 1 {
+		t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	wants(t, r.err.Error(), "the response to the run code does not pass qory's checks")
+}
+
+// harnessBind sets the bind of the harness document of a run code's documents to b.
+func harnessBind(b map[string]any) func(map[string]any) {
+	return func(d map[string]any) {
+		d["harness"].(map[string]any)["harness"].(map[string]any)["bind"] = b
+	}
+}

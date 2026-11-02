@@ -8,4 +8,5 @@ harness:
       exclude:
         agents: [reviewer]
   bind:
-    agents/coder: rails-coder
+    agents:
+      coder: rails-coder
