@@ -69,21 +69,16 @@ func New(baseURL string, client *http.Client) (*Client, error) {
 
 	u, err := url.Parse(baseURL)
 	if err != nil {
-		// The inner error alone: url.Error contains the whole value, password included.
-		var parse *url.Error
-		if errors.As(err, &parse) {
-			err = parse.Err
-		}
-
-		return nil, fmt.Errorf("%s The value does not parse: %w", fix, err)
+		// No part of the error: it can contain the value, or a part of a password.
+		return nil, errors.New(fix + " The value does not parse as a URL.")
 	}
 
 	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil ||
 		strings.ContainsAny(baseURL, "?#") {
 		shown := url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path}
 
-		return nil, fmt.Errorf("%s It needs http or https and no user, query or fragment. The value starts with %s.",
-			fix, shown.String())
+		return nil, fmt.Errorf("%s It needs http or https and no user, query or fragment. "+
+			"The value without those is %q.", fix, shown.String())
 	}
 
 	return &Client{base: strings.TrimRight(baseURL, "/"), http: client}, nil

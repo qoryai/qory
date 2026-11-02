@@ -127,6 +127,7 @@ func TestNewChecksTheBaseURL(t *testing.T) {
 		"http://gateway/v1/runs/1#",
 		"http://gateway\x7f/v1",
 		"http://user:secret@gateway:notaport/v1",
+		"http://user:s3/cret@gateway/v1/runs/1",
 		"ftp://gateway/v1?token=secret",
 	} {
 		_, err := runapi.New(base, http.DefaultClient)
@@ -139,7 +140,7 @@ func TestNewChecksTheBaseURL(t *testing.T) {
 			t.Errorf("New(%q): %q does not start with the fix", base, err)
 		}
 
-		if strings.Contains(err.Error(), "secret") {
+		if strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "s3") {
 			t.Errorf("New(%q): %q contains the password", base, err)
 		}
 	}
