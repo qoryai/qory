@@ -1,0 +1,3 @@
+agents/core-developer core
+commands/serve web
+skills/deploy core

@@ -1,0 +1,1 @@
+Write one name for bind.agents.developer in qory.yaml: a role is filled by one entry, and the value is a list.

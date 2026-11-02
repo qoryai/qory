@@ -1,0 +1,2 @@
+agents/typescript-developer typescript
+skills/deploy core

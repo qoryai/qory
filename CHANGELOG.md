@@ -157,6 +157,21 @@ release may change what an existing document does, and states it under Upgrading
   lets your modules ship. A collision with an entry of such a module prints that exclude
   in place of `rename yours`. See Leave out an entry of a delivered module in
   `docs/harness.md`.
+- A module fills a role with `provides` in its `qory-module.yaml`, by kind and then by
+  role: `provides: {agents: {developer: typescript-developer}}` makes a workflow skill's
+  `${qory:agents/developer}` the agent `typescript-developer`, with no `bind` in the
+  checkout. A role's name comes from the base's `bind`, then the modules' `provides`,
+  then the checkout's `bind`, each replacing the one before. Two modules that provide one
+  role with different names stop the compose unless the checkout's `bind` sets it. A
+  provided entry that an `exclude` leaves out provides nothing, and a module appended to
+  a base provides only the kinds the base's `extending.kinds` lists.
+- `roles` in a module's `qory-module.yaml` lists the roles its documents reference, by
+  kind and then by role, each set to `one`.
+- The report has `roles`, each role with the entry that fills it and `from`: `base`,
+  `provides <module>` or `bind`. `bind` in the report contains provided roles too, so
+  `qory harness launch --json` and `--address` print them. The Bind table that
+  `qory harness inspect` and `qory harness compose --dry-run` print has a third column,
+  `from`.
 
 ### Changed
 
@@ -165,6 +180,14 @@ release may change what an existing document does, and states it under Upgrading
 - A run from a run code whose composed harness has no skill or command of the
   workflow's name closes `failed` with the reason `workflow_not_in_harness`, not
   `no_session`, and its line shows the target's path after the checkout's harness.
+- `bind` nests roles by kind: `bind: {agents: {coder: rails-coder}}`. A flat key stops
+  the compose with `Write bind as bind.agents.coder: rails-coder in qory.yaml: bind keys
+  are kinds, and agents/coder is a kind and a role.`, and a list as a role's value stops
+  it too. The harness section of a run code's documents writes `bind` the same way.
+- A reference to a role that nothing fills ends with `which no module ships or provides
+  and the stack does not bind`. When a module provides the role with an entry that an
+  `exclude` or an `only` left out, it ends with `which module web provides as agent
+  core-developer, which module core leaves out`, one line per such module.
 - The `agent` image contains Claude Code 2.1.316, up from 2.1.273.
 - Claude Code runs with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and
   `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1` in every run,

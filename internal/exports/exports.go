@@ -374,7 +374,15 @@ var (
 	syntaxLine   = regexp.MustCompile(`^yaml: line (\d+):`)
 )
 
-// DecodeError prefixes a decode error with path. An unknown key is reported by
+// InFile is an error whose text contains the path of the file it is about. In returns
+// the error with that path set; [DecodeError] returns it so, without the path in front.
+type InFile interface {
+	error
+	In(file string) error
+}
+
+// DecodeError prefixes a decode error with path, except an [InFile], which it returns
+// with path inside its text. An unknown key is reported by
 // [KeyNotRead] as one the file at path does not read, with the decoder's line number
 // when it gives one. A key written twice whose name contains an access key secret or a
 // run key is reported in the decoder's words without the name. Any other error is
@@ -382,6 +390,10 @@ var (
 // or a run key, as a key whose name has a newline in it does: then [withoutSecrets]
 // says it.
 func DecodeError(path string, err error) error {
+	var in InFile
+	if errors.As(err, &in) {
+		return in.In(HidePath(path))
+	}
 	text := err.Error()
 	rest := " " + filepath.Base(path) + " reads"
 	if m := UnknownKey.FindStringSubmatch(text); m != nil {

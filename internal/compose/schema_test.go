@@ -15,8 +15,9 @@ import (
 
 // TestSchemas validates every fixture document against the contract's schemas: a
 // qory.yaml that composes passes config.schema.json, one refused for its apiVersion, a
-// kind, its qory key or its workflows fails it,
-// every module manifest passes module.schema.json, every MCP server file passes
+// kind, its qory key, its workflows or its bind fails it,
+// every module manifest passes module.schema.json unless the fixture expects it refused,
+// every MCP server file passes
 // mcp.schema.json unless the fixture expects it refused, the stack a fixture extends,
 // stack/qory-stack.yaml, passes stack.schema.json unless the fixture expects it refused,
 // and every process template, modules/<name>/process.yaml, passes process.schema.json
@@ -47,7 +48,8 @@ func TestSchemas(t *testing.T) {
 	for _, dir := range dirs {
 		errText, _ := os.ReadFile(filepath.Join(dir, "expected", "error.txt"))
 		wantInvalid := strings.Contains(string(errText), "apiVersion") || strings.Contains(string(errText), "kind ") || strings.Contains(string(errText), "qory \"") ||
-			strings.HasPrefix(string(errText), "qory.yaml: ") && strings.Contains(string(errText), "workflows")
+			strings.HasPrefix(string(errText), "qory.yaml: ") && strings.Contains(string(errText), "workflows") ||
+			strings.Contains(string(errText), "bind.") && strings.Contains(string(errText), " in qory.yaml")
 		err := composeSchema.Validate(document(t, filepath.Join(dir, "qory.yaml")))
 		if wantInvalid && err == nil {
 			t.Errorf("%s: the document passed the schema; want a failure", dir)
@@ -69,7 +71,15 @@ func TestSchemas(t *testing.T) {
 		more, _ := filepath.Glob(filepath.Join(dir, "stack", "modules", "*", "qory-module.yaml"))
 		manifests = append(manifests, more...)
 		for _, m := range manifests {
-			if err := moduleSchema.Validate(document(t, m)); err != nil {
+			// A manifest the compose refuses for its roles or provides is in the error
+			// by its path in the fixture.
+			rel, _ := filepath.Rel(dir, m)
+			wantBad := strings.Contains(string(errText), " in "+rel+":")
+			err := moduleSchema.Validate(document(t, m))
+			if wantBad && err == nil {
+				t.Errorf("%s passed the schema; want a failure", m)
+			}
+			if !wantBad && err != nil {
 				t.Errorf("%s: %v", m, err)
 			}
 		}

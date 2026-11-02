@@ -8,4 +8,5 @@ harness:
       only:
         skills: [deploy]
   bind:
-    agents/coder: core-coder
+    agents:
+      coder: core-coder

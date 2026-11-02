@@ -1224,7 +1224,7 @@ func ownFileRows(own string, doc *stack.Stack, conf config.Config) [][2]string {
 		if n := len(doc.Modules); n > 0 {
 			read = append(read, count(n, "module", "modules"))
 		}
-		if n := len(doc.Bind); n > 0 {
+		if n := doc.Bind.Len(); n > 0 {
 			read = append(read, count(n, "binding", "bindings"))
 		}
 		if n := len(doc.Extensions); n > 0 {
@@ -1879,7 +1879,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/harness.md#a-home-outside-th
 				kind, entry, _ := strings.Cut(address, "/")
 				registered, ok := addresses[kind][entry]
 				if !ok {
-					return input(fmt.Errorf("%s is not an agent, skill, command or bound role the harness is composed with for %s; --json lists them under addresses", exports.Value(address, false), name))
+					return input(fmt.Errorf("%s is not an agent, skill, command or role the harness is composed with for %s; --json lists them under addresses", exports.Value(address, false), name))
 				}
 				_, err = fmt.Fprintln(cmd.OutOrStdout(), registered)
 				return err
@@ -1898,7 +1898,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/harness.md#a-home-outside-th
 	}
 	c.Flags().StringVar(&runtime, "runtime", "", "the runtime to start, one the harness is composed for; the only one when left out")
 	c.Flags().BoolVar(&asJSON, "json", false, "print the command, arguments, variables and registered names as one JSON object")
-	c.Flags().StringVar(&address, "address", "", "print only the name the session gives this <kind>/<name> or bound role, such as skills/deploy")
+	c.Flags().StringVar(&address, "address", "", "print only the name the session gives this <kind>/<name> or role, such as skills/deploy")
 	homeFlags(c, &h)
 	return c
 }

@@ -1,0 +1,5 @@
+apiVersion: qory.dev/v1alpha1
+name: ts
+provides:
+  agents:
+    developer: ts-developer

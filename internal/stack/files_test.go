@@ -1,6 +1,7 @@
 package stack
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -132,26 +133,24 @@ func TestExtendRefusesWhatABaseModuleCannotExclude(t *testing.T) {
 	}
 }
 
-// TestExtendMergesTheBindings is a checkout's qory.yaml binding a role over its base: the
-// base's bindings carry, the checkout's add to them and rebind a role of the base's.
-func TestExtendMergesTheBindings(t *testing.T) {
-	base := &Stack{Modules: []Module{{Name: "core", Source: Source{Path: "modules/core"}}}, Bind: map[string]string{"agents/coder": "base-coder", "agents/reviewer-role": "reviewer"}, Extending: &Extending{}, Root: "/repo", File: "/repo/qory-stack.yaml"}
-	p := &Stack{Extends: Source{Path: "../base"}, Bind: map[string]string{"agents/coder": "rails-coder", "skills/entry": "implement"}, File: "/app/qory-stack.yaml"}
+// TestExtendKeepsTheBindsApart is a checkout's qory.yaml binding a role over its base:
+// the base's bind goes to BaseBind and the checkout's stays in Bind, so the compose can
+// put the modules' provides between the two.
+func TestExtendKeepsTheBindsApart(t *testing.T) {
+	base := &Stack{Modules: []Module{{Name: "core", Source: Source{Path: "modules/core"}}}, Bind: Roles{"agents": {"coder": "base-coder", "reviewer-role": "reviewer"}}, Extending: &Extending{}, Root: "/repo", File: "/repo/qory-stack.yaml"}
+	p := &Stack{Extends: Source{Path: "../base"}, Bind: Roles{"agents": {"coder": "rails-coder"}, "skills": {"entry": "implement"}}, File: "/app/qory-stack.yaml"}
 	out, err := Extend(base, p)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"agents/coder": "rails-coder", "agents/reviewer-role": "reviewer", "skills/entry": "implement"}
-	if len(out.Bind) != len(want) {
-		t.Fatalf("bind %v, want %v", out.Bind, want)
+	if !reflect.DeepEqual(out.BaseBind, base.Bind) {
+		t.Errorf("BaseBind = %v, want the base's %v", out.BaseBind, base.Bind)
 	}
-	for role, to := range want {
-		if out.Bind[role] != to {
-			t.Errorf("bind %s = %q, want %q", role, out.Bind[role], to)
-		}
+	if !reflect.DeepEqual(out.Bind, p.Bind) {
+		t.Errorf("Bind = %v, want the checkout's %v", out.Bind, p.Bind)
 	}
-	if base.Bind["agents/coder"] != "base-coder" {
-		t.Error("Extend wrote into the base's bindings")
+	if base.Bind["agents"]["coder"] != "base-coder" {
+		t.Error("Extend wrote into the base's bind")
 	}
 }
 

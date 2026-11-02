@@ -6,4 +6,5 @@ harness:
     - name: core
       source: {path: modules/core}
   bind:
-    agents/coder: rails-coder
+    agents:
+      coder: rails-coder

@@ -390,8 +390,8 @@ cd <checkout> && eval "$(qory harness launch --runtime claude)"
 
 `--json` prints the command, the arguments and all those variables as one JSON object. It is
 for a launcher that starts the program without a shell. Under `addresses`, it lists the
-name the session gives each composed agent, skill and command, per kind. A bound role is
-listed beside them, as the entry it is bound to.
+name the session gives each composed agent, skill and command, per kind. A role is
+listed beside them, as the entry that fills it, from a `bind` or a module's `provides`.
 
 - For Claude Code, the plugin prefixes every name: `harness:<name>`.
 - For the other tools, the name is the one the module wrote.

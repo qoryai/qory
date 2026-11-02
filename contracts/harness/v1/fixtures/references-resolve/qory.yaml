@@ -8,4 +8,5 @@ harness:
     - name: rails
       source: {path: modules/rails}
   bind:
-    agents/coder: rails-coder
+    agents:
+      coder: rails-coder

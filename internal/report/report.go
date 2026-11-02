@@ -94,6 +94,18 @@ type Entry struct {
 	Tier string `json:"tier,omitempty"`
 }
 
+// Role is one role of the harness and the entry that fills it.
+type Role struct {
+	// Role is the role as a reference writes it, <kind>/<role>.
+	Role string `json:"role"`
+	// Agent is the name of the entry of the role's kind that fills the role.
+	Agent string `json:"agent"`
+	// From is the layer that set the name: "base" for the bind of the stack the
+	// checkout's qory.yaml extends, "provides <module>" for a module's provides, and
+	// "bind" for the bind of the document composed.
+	From string `json:"from"`
+}
+
 // Tier is the entry a tier the agents use maps to.
 type Tier struct {
 	// Model is the model id the agents of the tier get.
@@ -213,9 +225,13 @@ type Report struct {
 	// QORY_HARNESS_HOME, sorted by name; a runtime the harness sets none for is left out,
 	// and so is the field when it sets none for any.
 	LaunchEnv map[string][]Var `json:"launch_env,omitempty"`
-	// Bind is the stack's bindings, <kind>/<role> to the name of the entry that fills the
-	// role, absent when the stack binds none.
+	// Bind is the harness's roles, <kind>/<role> to the name of the entry that fills the
+	// role, from the base's bind, the modules' provides and the checkout's bind; absent
+	// when no role is set.
 	Bind map[string]string `json:"bind,omitempty"`
+	// Roles are the roles of Bind, sorted by role, each with the layer that set its
+	// name; absent when no role is set.
+	Roles []Role `json:"roles,omitempty"`
 	// Tiers is, for each tier an agent sets that has a map, the entry it maps to; a tier
 	// an agent sets that is absent here has no map. Absent when no such tier has one.
 	Tiers map[string]Tier `json:"tiers,omitempty"`
@@ -335,6 +351,9 @@ func New(res *compose.Result, name, checkout, home string) Report {
 	}
 	if len(res.Bind) > 0 {
 		r.Bind = res.Bind
+	}
+	for _, role := range res.Roles {
+		r.Roles = append(r.Roles, Role{Role: role.Role, Agent: role.Name, From: role.From})
 	}
 	if res.Base != nil {
 		r.Base = &Base{Name: res.Base.Name, Source: res.Base.Source, Pin: res.Base.Pin}
@@ -490,8 +509,20 @@ func (r Report) PrintBody(w io.Writer) error {
 		u.Blank()
 		u.Heading("Bind")
 		rows = nil
+		from := map[string]string{}
+		for _, role := range r.Roles {
+			from[role.Role] = role.From
+		}
 		for _, role := range sorted(r.Bind) {
-			rows = append(rows, []string{accesskey.ShownName(role, false), accesskey.ShownName(r.Bind[role], false)})
+			row := []string{accesskey.ShownName(role, false), accesskey.ShownName(r.Bind[role], false)}
+			if f := from[role]; f != "" {
+				layer, module, _ := strings.Cut(f, " ")
+				if module != "" {
+					layer += " " + accesskey.ShownName(module, false)
+				}
+				row = append(row, layer)
+			}
+			rows = append(rows, row)
 		}
 		u.Table(rows)
 	}

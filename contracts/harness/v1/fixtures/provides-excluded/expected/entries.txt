@@ -1,0 +1,3 @@
+agents/elixir-developer elixir
+agents/typescript-reviewer typescript
+skills/deploy core

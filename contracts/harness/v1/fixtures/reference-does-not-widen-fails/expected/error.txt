@@ -1,1 +1,1 @@
-module core: skill deploy references agent profiler, which no module ships and the stack does not bind
+module core: skill deploy references agent profiler, which no module ships or provides and the stack does not bind
