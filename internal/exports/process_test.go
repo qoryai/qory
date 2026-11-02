@@ -421,6 +421,8 @@ func TestVerifyPassesArtifactTypes(t *testing.T) {
 		custom("structured", "size_limit: 1, max_files: 1, json_schema: {$ref: 'https://json-schema.org/draft/2020-12/schema'}"),
 		custom("structured", "size_limit: 1, max_files: 1, json_schema: {$ref: 'http://json-schema.org/draft-07/schema'}"),
 		custom("structured", "size_limit: 1, max_files: 1, json_schema: {$defs: {a: {$ref: 'https://schema.example/a.json'}}}"),
+		// A URL that is the schema's $id is inside the schema.
+		custom("structured", "size_limit: 1, max_files: 1, json_schema: {$id: 'https://a.example/x', $defs: {b: {}}, properties: {a: {$ref: 'https://a.example/x#/$defs/b'}}}"),
 	} {
 		if err := factory(t, withTypes(body)).Verify(); err != nil {
 			t.Errorf("%q: %v", body, err)
@@ -636,7 +638,7 @@ func repeated(n int, text string) string {
 // pattern can be. The message starts with the fix.
 func TestVerifyBoundsThePatterns(t *testing.T) {
 	const fix = "shorten the patterns in json_schema of artifact type "
-	const limit = ": the patterns of all artifact types in the file take at most 16777216 bytes once compiled, and this one brings them to "
+	const limit = ": the estimate for the patterns of all artifact types in the file is at most 16777216 bytes, and this one brings it to "
 	half := repeated(207, "a")
 	for _, c := range []struct{ body, want string }{
 		{structuredWith("a-type", "{pattern: '"+repeated(417, "a")+"'}"), ""},
@@ -644,7 +646,7 @@ func TestVerifyBoundsThePatterns(t *testing.T) {
 		{structuredWith("a-type", "{patternProperties: {'"+repeated(418, "a")+"': {}}}"), fix + "a-type" + limit + "16801104"},
 		{structuredWith("a-type", "{$defs: {x: {pattern: '"+repeated(418, "a")+"'}}}"), fix + "a-type" + limit + "16801104"},
 		{structuredWith("a-type", "{$schema: 'http://json-schema.org/draft-07/schema#', pattern: '"+repeated(418, "a")+"'}"), fix + "a-type" + limit + "16801104"},
-		// The same source twice is compiled once, and two sources count twice.
+		// The same source twice counts once, and two sources count twice.
 		{structuredWith("a-type", "{pattern: '"+repeated(417, "a")+"'}") + structuredWith("b-type", "{pattern: '"+repeated(417, "a")+"'}"), ""},
 		{structuredWith("a-type", "{pattern: '"+half+"'}") + structuredWith("b-type", "{pattern: '"+repeated(208, "b")+"'}"), ""},
 		{structuredWith("a-type", "{pattern: '"+half+"'}") + structuredWith("b-type", "{pattern: '"+repeated(209, "b")+"'}"), fix + "b-type" + limit + "16802208"},
@@ -661,26 +663,184 @@ func TestVerifyBoundsThePatterns(t *testing.T) {
 	}
 }
 
-// TestVerifyCompilesNoPatternPastTheLimit is a small process.yaml within every limit of a
-// JSON Schema: 18 patterns of about 3300 characters, each in a group repeated 1000 times,
-// which compile to 128 MiB each. The check stops before it compiles them, so the bytes
-// it allocates stay far under the 2.3 GiB they would take once.
+// onePass is a pattern of 300 alternatives of a class and a character, anchored at both
+// ends. The character is different for each i, so that each source counts. Go's compiler
+// builds a one-pass program for such a pattern, and its memory grows with the square of
+// the alternatives.
+func onePass(i int) string {
+	alternatives := make([]string, 300)
+	for a := range alternatives {
+		var class strings.Builder
+		for c := range 16 {
+			class.WriteRune(rune(0x4e00 + 2*(16*a+c)))
+		}
+		alternatives[a] = "[" + class.String() + "]" + string(rune(0x3400+i))
+	}
+	return "^(?:" + strings.Join(alternatives, "|") + ")$"
+}
+
+// TestVerifyCompilesNoPatternPastTheLimit is two process.yaml files whose patterns a
+// compiler would write out: 18 patterns of about 3300 characters, each in a group
+// repeated 1000 times, past the limit, and 104 anchored alternations within it. The
+// bytes the check allocates stay far under the gigabytes that compiling them takes.
 func TestVerifyCompilesNoPatternPastTheLimit(t *testing.T) {
+	allocated := func(e *exports.Exports) (uint64, error) {
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		err := e.Verify()
+		runtime.ReadMemStats(&after)
+		return after.TotalAlloc - before.TotalAlloc, err
+	}
 	var body strings.Builder
 	for i := range 18 {
 		name := fmt.Sprintf("a-type-%d", i)
 		body.WriteString(structuredWith(name, "{pattern: '"+repeated(3300, string(rune('a'+i)))+"'}"))
 	}
-	e := factory(t, withTypes(body.String()))
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
-	err := e.Verify()
-	runtime.ReadMemStats(&after)
+	used, err := allocated(factory(t, withTypes(body.String())))
 	if err == nil || strings.Count(err.Error(), "\n") != 17 || !strings.Contains(err.Error(), "shorten the patterns in json_schema of artifact type a-type-17: ") {
 		t.Errorf("%.300v", err)
 	}
-	if used := after.TotalAlloc - before.TotalAlloc; used > 64<<20 {
-		t.Errorf("the check allocated %d bytes, and the limit is 64 MiB", used)
+	if used > 64<<20 {
+		t.Errorf("the repeats: the check allocated %d bytes, and the limit is 64 MiB", used)
+	}
+	body.Reset()
+	for i := range 104 {
+		name := fmt.Sprintf("a-type-%d", i)
+		body.WriteString(structuredWith(name, "{pattern: '"+onePass(i)+"'}"))
+	}
+	used, err = allocated(factory(t, withTypes(body.String())))
+	if err != nil {
+		t.Errorf("%.300v", err)
+	}
+	if used > 512<<20 {
+		t.Errorf("the alternations: the check allocated %d bytes, and the limit is 512 MiB", used)
+	}
+}
+
+// TestVerifyMatchesNoPattern is each place in a JSON Schema where the compiler reads a
+// pattern, and each way to bring a metaschema into a schema. No check matches a pattern:
+// [exports] panics if one does, which fails this test.
+func TestVerifyMatchesNoPattern(t *testing.T) {
+	for _, schema := range []string{
+		"{pattern: a, patternProperties: {b: {pattern: c}}, propertyNames: {pattern: d}}",
+		"{default: a, examples: [b], const: c, properties: {a: {pattern: '^a$'}}, required: [a]}",
+		"{$ref: 'https://json-schema.org/draft/2020-12/schema', pattern: a}",
+		"{$schema: 'http://json-schema.org/draft-07/schema#', pattern: a, patternProperties: {b: {}}}",
+		"{$id: 'https://a.example/x', $defs: {b: {pattern: a}}, $ref: '#/$defs/b'}",
+		"{$dynamicAnchor: m, $defs: {b: {$dynamicRef: '#m', pattern: a}}, $ref: '#/$defs/b'}",
+		"{if: {pattern: a}, then: {pattern: b}, else: {pattern: c}, not: {pattern: d}}",
+		"{contentMediaType: application/json, contentEncoding: base64, contentSchema: {pattern: a}}",
+	} {
+		if err := factory(t, withTypes(structuredWith("a-type", schema))).Verify(); err != nil {
+			t.Errorf("%s: %v", schema, err)
+		}
+	}
+	// A metaschema inside the schema: the compile fails or passes, and matches nothing.
+	for _, schema := range []string{
+		"{$defs: {m: {$id: 'https://a.example/m', pattern: a}, n: {$id: 'https://a.example/n', $schema: 'https://a.example/m', pattern: b}}}",
+		"{$id: 'https://a.example/m', $vocabulary: {'https://json-schema.org/draft/2020-12/vocab/core': true}, $defs: {n: {$id: 'n', $schema: 'https://a.example/m', pattern: b}}}",
+	} {
+		_ = factory(t, withTypes(structuredWith("a-type", schema))).Verify()
+	}
+}
+
+// siblings is n members of a JSON object, each a nested object, as a list of them with a
+// comma at the end: each one writes to the slice in which the library keeps a place.
+func siblings(n int) string {
+	var b strings.Builder
+	for i := range n {
+		fmt.Fprintf(&b, `"x-%d":{"a":{"b":{"c":1}}},`, i)
+	}
+	return b.String()
+}
+
+// TestVerifyPrintsNoPlaceForAMemberName is a member name that a metaschema does not take,
+// among sibling members: the line has the name and no place, and it is the same in each
+// run. Go's maps change the order of the members in each compile.
+func TestVerifyPrintsNoPlaceForAMemberName(t *testing.T) {
+	const regex = "fix json_schema of artifact type a-type so that it compiles as a JSON Schema: invalid propertyName '('; '(' is not valid regex: error parsing regexp: missing closing ): `(`"
+	const uri = "fix json_schema of artifact type a-type so that it compiles as a JSON Schema: invalid propertyName 'not a uri'; 'not a uri' is not valid uri: relative url"
+	many := siblings(30)
+	for _, c := range []struct{ schema, want string }{
+		{`{"title":"t","properties":{"u":{"title":"v","patternProperties":{"(":{}}}}}`, regex},
+		{`{"title":"t",` + many + `"properties":{"u":{"title":"v",` + many + `"patternProperties":{"(":{}}},"w":{` + many + `"title":"z"}}}`, regex},
+		{`{"contentMediaType":"application/json",` + many + `"contentSchema":{` + many + `"patternProperties":{"(":{}}}}`, regex},
+		{`{` + many + `"$vocabulary":{"not a uri":true}}`, uri},
+	} {
+		e := factory(t, withTypes(structuredWith("a-type", c.schema)))
+		file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
+		for range 30 {
+			if err := e.Verify(); err == nil || err.Error() != file+": "+c.want {
+				t.Fatalf("%.80s: %v\nwant %s", c.schema, err, c.want)
+			}
+		}
+	}
+}
+
+// TestSchemaRulesPrintsNoPlaceForContent is a string whose content its schema does not
+// take, among sibling members, with the library's content assertion on: the line has no
+// place, and it is the same in each run. The process.yaml check has that assertion off.
+func TestSchemaRulesPrintsNoPlaceForContent(t *testing.T) {
+	c := jsonschema.NewCompiler()
+	c.AssertContent()
+	const url = "https://schema.example/content"
+	if err := c.AddResource(url, map[string]any{"properties": map[string]any{
+		"a": map[string]any{"contentMediaType": "application/json", "contentSchema": map[string]any{"required": []any{"b"}}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	schema, err := c.Compile(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := map[string]any{"a": "{}"}
+	for i := range 30 {
+		doc[fmt.Sprintf("x-%d", i)] = map[string]any{"b": map[string]any{"c": 1}}
+	}
+	const want = "missing property 'b'"
+	for range 30 {
+		if got := exports.SchemaRules(schema.Validate(doc)); got != want {
+			t.Fatalf("%s\nwant %s", got, want)
+		}
+	}
+}
+
+// TestSchemaRulesPrintsARuleWithNothingUnderIt is a 'not', an 'enum' and a 'const' whose
+// library text ends as the text of an 'allOf' does, with no rule under them: each prints
+// as a rule, and the text of an 'allOf' with a rule under it does not print.
+func TestSchemaRulesPrintsARuleWithNothingUnderIt(t *testing.T) {
+	member := func(rule map[string]any) map[string]any {
+		return map[string]any{"properties": map[string]any{"a": rule}}
+	}
+	object := map[string]any{"b": "c"}
+	for _, tc := range []struct {
+		name   string
+		schema map[string]any
+		want   string
+	}{
+		{"not", member(map[string]any{"not": map[string]any{"type": "string"}}), "at '/a': 'not' failed"},
+		{"enum of an object", member(map[string]any{"enum": []any{object, "c"}}), "at '/a': 'enum' failed"},
+		{"enum of an array", member(map[string]any{"enum": []any{[]any{"b"}}}), "at '/a': 'enum' failed"},
+		{"const of an object", member(map[string]any{"const": object}), "at '/a': 'const' failed"},
+		{"const of an array", member(map[string]any{"const": []any{"b"}}), "at '/a': 'const' failed"},
+		{"not under a member name", map[string]any{"propertyNames": map[string]any{"not": map[string]any{"const": "a"}}}, "invalid propertyName 'a'; 'not' failed"},
+		{"not under allOf", map[string]any{"allOf": []any{member(map[string]any{"not": map[string]any{}})}}, "at '/a': 'not' failed"},
+		{"allOf with a rule under it", map[string]any{"allOf": []any{map[string]any{"required": []any{"b"}}}}, "at '': missing property 'b'"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := jsonschema.NewCompiler()
+			const url = "https://schema.example/rule"
+			if err := c.AddResource(url, tc.schema); err != nil {
+				t.Fatal(err)
+			}
+			schema, err := c.Compile(url)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := exports.SchemaRules(schema.Validate(map[string]any{"a": "x"})); got != tc.want {
+				t.Errorf("%s\nwant %s", got, tc.want)
+			}
+		})
 	}
 }
 

@@ -137,6 +137,10 @@ func OpenNowhere() (outcomes func() []session.Outcome, restore func()) {
 // gateway's local link, and Close closes the run there with qory's outcome and then
 // ends that gateway: the gateway writes its record, events.jsonl, and the session
 // writes session.jsonl, in the folder of the run's id under the open's RunsDir.
+// PolicyImage is the image the run's policy selects, "" for none: the gateway of
+// AtGateway runs under a policy that selects it, and a run with no gateway resolves it
+// against the open's images, as that gateway does. Image returns what the gateway
+// answered, and OnImage, when not nil, gets each value Image returns.
 type Nowhere struct {
 	System, Repositories string
 	Proxy, CABundle      string
@@ -151,6 +155,8 @@ type Nowhere struct {
 	OnOpen               func(session.OpenSpec)
 	FetchImage           func(context.Context) error
 	AtGateway            bool
+	PolicyImage          string
+	OnImage              func(session.Image)
 	// RunAPI is the base URL of the run's run API, "" for a server that returns 404 with
 	// no error code to every request, as Qory Apiary does with its feature workflow_model
 	// off.
@@ -189,7 +195,7 @@ func OpenNowhereWith(n Nowhere) (outcomes func() []session.Outcome, calls func()
 		var at *gatewayRun
 		if n.AtGateway {
 			var err error
-			if at, err = openAtGateway(ctx, spec); err != nil {
+			if at, err = openAtGateway(ctx, spec, n.PolicyImage); err != nil {
 				return nil, err
 			}
 		}
@@ -203,7 +209,7 @@ func OpenNowhereWith(n Nowhere) (outcomes func() []session.Outcome, calls func()
 			made = append(made, dir)
 			mu.Unlock()
 		}
-		return &nowhere{id: spec.RunID, dir: dir, values: n, note: note, at: at, closed: func(o session.Outcome) {
+		return &nowhere{id: spec.RunID, dir: dir, values: n, image: answeredImage(spec, n.PolicyImage), note: note, at: at, closed: func(o session.Outcome) {
 			mu.Lock()
 			defer mu.Unlock()
 			got = append(got, o)
@@ -235,6 +241,7 @@ type nowhere struct {
 	id     string
 	dir    string
 	values Nowhere
+	image  session.Image
 	note   func(string)
 	closed func(session.Outcome)
 	at     *gatewayRun
@@ -249,14 +256,36 @@ type gatewayRun struct {
 	g   *gateway.Gateway
 }
 
+// answeredImage is the image a gateway's run answer sets for the run of spec under a
+// policy that selects selected, "" for none: the entry of spec.Images of that name, or
+// of the default's, or the name as a reference; the zero Image with no wall.
+func answeredImage(spec session.OpenSpec, selected string) session.Image {
+	if spec.Wall == nil {
+		return session.Image{}
+	}
+	if selected == "" {
+		selected = spec.Image
+	}
+	if i := slices.IndexFunc(spec.Images, func(d session.Image) bool { return d.Name == selected }); i >= 0 {
+		return spec.Images[i]
+	}
+	return session.Image{Ref: selected}
+}
+
 // openAtGateway starts a gateway in this process with no server, which keeps the
-// record of each run in the folder of its id under spec.RunsDir, and opens the run of
-// spec there, over the gateway's local link.
-func openAtGateway(ctx context.Context, spec session.OpenSpec) (*gatewayRun, error) {
+// record of each run in the folder of its id under spec.RunsDir and runs each under a
+// policy that selects image, "" for no policy, and opens the run of spec there, over
+// the gateway's local link.
+func openAtGateway(ctx context.Context, spec session.OpenSpec, image string) (*gatewayRun, error) {
+	var pol *gateway.Policy
+	if image != "" {
+		pol = &gateway.Policy{Version: 1, Image: image, Egress: gateway.PolicyEgress{Mode: "observe"}}
+	}
 	g, err := gateway.Start(ctx, gateway.Config{
 		RunDir:       func(id string) string { return filepath.Join(spec.RunsDir, id) },
 		NoLinkSocket: true,
 		Report:       func(string) {},
+		Policy:       pol,
 	})
 	if err != nil {
 		return nil, err
@@ -418,6 +447,19 @@ func (s *nowhereStep) Exit(state string, exitCode int) error {
 	s.r.open = nil
 	s.r.event(StepEvent{Type: "step_exited", Step: s.n, State: state, ExitCode: exitCode})
 	return nil
+}
+
+// Image is the image of the gateway's run answer: with AtGateway, the answer of the
+// gateway in this process; otherwise [answeredImage].
+func (n *nowhere) Image() session.Image {
+	img := n.image
+	if n.at != nil {
+		img = n.at.run.Image()
+	}
+	if n.values.OnImage != nil {
+		n.values.OnImage(img)
+	}
+	return img
 }
 
 func (n *nowhere) System() string       { return n.values.System }

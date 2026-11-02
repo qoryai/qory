@@ -134,7 +134,7 @@
                 "not": {"pattern": "^([0.]+(ns|us|ms|s|m|h))+$"}
               },
               "access": {
-                "description": "The access level the workflow declares for what a dispatched run of it works on: read or write. Left out, it is read. qory checks the value and grants no permission from it.",
+                "description": "The access level the workflow declares for what a dispatched run of it works on: read or write. Left out, it is read. A dispatched run from a run code of a read workflow sees the checkout read-only, and on Claude Code its settings deny Edit, Write and NotebookEdit; such a run with no wall, with wall.setup: inside, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). A write workflow's run sees the checkout writable.",
                 "enum": ["read", "write"]
               }
             }

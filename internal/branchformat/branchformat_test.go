@@ -153,14 +153,33 @@ func TestCheck(t *testing.T) {
 // one that is not JSON: the fix first, and then each rule with its place.
 func TestCheckStartsWithTheFix(t *testing.T) {
 	err := branchformat.Check([]byte(`{"ref": "main", "repositories": []}`))
-	const want = "fix the branch document to match contracts/harness/v1/branch.schema.json: at '/ref': "
-	if err == nil || !strings.HasPrefix(err.Error(), want) || !strings.Contains(err.Error(), "at '/repositories': ") || strings.Contains(err.Error(), "\n") {
-		t.Errorf("%v\nwant %s…", err, want)
+	const want = "fix the branch document to match contracts/harness/v1/branch.schema.json: at '/"
+	if err == nil || !strings.HasPrefix(err.Error(), want) || strings.Contains(err.Error(), "\n") {
+		t.Fatalf("%v\nwant %s…", err, want)
+	}
+	// The library returns the rules in no fixed order.
+	for _, rule := range []string{"at '/ref': ", "at '/repositories': "} {
+		if !strings.Contains(err.Error(), rule) {
+			t.Errorf("%v\nwant %s", err, rule)
+		}
 	}
 	for _, doc := range []string{"", "{", `{} {}`} {
 		err := branchformat.Check([]byte(doc))
 		if err == nil || !strings.HasPrefix(err.Error(), "write the branch document as one JSON object, the format of contracts/harness/v1/branch.schema.json: ") {
 			t.Errorf("%q: %v", doc, err)
+		}
+	}
+}
+
+// TestCheckPrintsTheSegmentRule is a path with a segment the format does not take. The
+// schema has that rule under a not, which has no rule under it in the library's error,
+// and the error has the place and the not.
+func TestCheckPrintsTheSegmentRule(t *testing.T) {
+	const want = "fix the branch document to match contracts/harness/v1/branch.schema.json: at '/repositories/0/path': 'not' failed"
+	for _, path := range []string{"acme/.git", "../web", "acme/../web", "acme/.GIT/x", "./web"} {
+		err := branchformat.Check([]byte(strings.Replace(valid(), "acme/web", path, 1)))
+		if err == nil || err.Error() != want {
+			t.Errorf("%s: %v\nwant %s", path, err, want)
 		}
 	}
 }

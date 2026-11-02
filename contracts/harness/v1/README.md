@@ -194,7 +194,7 @@ schema is [config.schema.json](config.schema.json).
 | `extensions` | no | a map of keys the author chooses, each a value of any shape, a scalar, a list or a map of any depth; written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it |
 | `workflows` | no | the settings of each workflow of the stack, by its name: a lower-case letter, then up to 63 lower-case letters, digits and hyphens. A run that Qory Apiary dispatches from a run code starts the skill or command named like its workflow (docs/run.md, §The run key from a run code). The compose fails with status 2 for each workflow that no module of the stack composes as a skill or command, after the modules' `exclude` and `only`: `add a skill or command <name> to a module of the base stack <stack>, or remove <name> from the workflows of its qory-stack.yaml: the stack declares the workflow <name>, and none of its modules ships a skill or command <name>`, or, for a stack that extends none, `add a skill or command <name> to a module of the stack in <file>, or remove <name> from its workflows: …`, where `<file>` is the `qory-stack.yaml` or the `qory.yaml` that defines the stack. For a stack that the harness document of a run from a run code defines, the line has `the workspace's harness in Qory Apiary` in place of `the stack in <file>`. A module that a checkout adds to the stack it extends does not count. The harness section of a `qory.yaml` that defines a stack lists them with the same keys and checks; a section that extends a stack takes the base's and lists none |
 | `workflows.<name>.time_limit` | no | how long a dispatched run of the workflow may run, counted from the run's open, as a Go duration above zero, such as `7h`, `45m` or `1h30m`; qory stops with an error on any other value: `set workflows.<name>.time_limit to a duration above zero, such as 7h or 45m: <value> is not one`. The run's `run_settings.time_limit_minutes`, when Qory Apiary sets it, applies instead, and a workflow without it runs for at most 3 hours |
-| `workflows.<name>.access` | no | the access level the workflow declares for what a dispatched run of it works on, `read` or `write`, and `read` when left out; qory stops with an error on any other value: `set workflows.<name>.access to read or write: <value> is neither`. qory checks the value, does not change it and grants no permission from it |
+| `workflows.<name>.access` | no | the access level the workflow declares for what a dispatched run of it works on, `read` or `write`, and `read` when left out; qory stops with an error on any other value: `set workflows.<name>.access to read or write: <value> is neither`. A dispatched run from a run code of a `read` workflow sees the checkout read-only, and on Claude Code its settings deny `Edit`, `Write` and `NotebookEdit`; such a run with no wall, with `wall.setup: inside`, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). A `write` workflow's run sees the checkout writable |
 | `extending` | no | what a module of a checkout extending this stack may ship: `kinds`, `instructions`, `settings`, `files` (§Extending a stack). A base without the block cannot be extended |
 | `extending.target` | no | the runtimes and the models the stack is written for, `runtime` and `model`, each one name or a list, one of the two at least. A checkout's resolved target outside either list fails the compose; listed models make the model required, since a target without one runs whatever the runtime defaults to, which is a model the stack did not list. Left out, every target is accepted, a model left out included (§Extending a stack) |
 
@@ -465,14 +465,15 @@ A custom type has `base_view`, `size_limit` and `max_files`. qory has no list of
 types: a name alone passes for any name of the right form.
 
 A `json_schema` is an object that compiles as a JSON Schema. It is draft 2020-12 unless its
-`$schema` sets draft-07, the only other draft. A reference to a file or URL fails when the
-schema reaches it, and qory reads no file or URL for one. The JSON Schema metaschemas are
-built in, so a reference to one passes. A `pattern` is a Go regular expression (RE2). A
+`$schema` sets draft-07, the only other draft. A reference to a file or URL outside the
+schema fails when the schema reaches it, and qory reads no file or URL for one. The JSON
+Schema metaschemas are built in, so a reference to one passes. A `pattern` is a Go
+regular expression (RE2). A
 `json_schema` has at most 65,536 bytes as compact JSON, 4096 values in all,
 1024 entries in a list, 1024 members in an object, 16,384 bytes in a string or a member
 name, and 64 lists and objects nested in one another. The patterns of all custom types in
-one `process.yaml` take at most 16 MiB once compiled, as qory estimates it from each
-pattern's parts: a group repeated 1000 times counts 1000 times.
+one `process.yaml` are at most 16 MiB by qory's estimate from each pattern's parts: a
+group repeated 1000 times counts 1000 times. qory parses each pattern and compiles none.
 
 An entry that breaks a rule stops the command with one line, which starts with the file
 and then the fix:
