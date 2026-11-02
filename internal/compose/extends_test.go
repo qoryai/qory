@@ -1,6 +1,7 @@
 package compose_test
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -95,5 +96,109 @@ func TestLoadBaseStopsABaseLinkedOutOfItsClone(t *testing.T) {
 				t.Fatalf("got %v\nwant %s", err, want)
 			}
 		})
+	}
+}
+
+// excludeBaseTree is a base whose module core ships the skill explore-a-ticket and a
+// command that references it, and a checkout whose module app ships its version of the
+// skill, with lines of the checkout's modules list after app.
+func excludeBaseTree(t *testing.T, modules string) string {
+	t.Helper()
+	return writeTree(t, map[string]string{
+		"base/" + stack.FileName:                             "apiVersion: qory.dev/v1alpha1\nname: web\nextending:\n  kinds: [skills]\nmodules:\n  - name: core\n    source:\n      path: modules/core\n",
+		"base/modules/core/qory-module.yaml":                 "apiVersion: qory.dev/v1alpha1\nname: core\n",
+		"base/modules/core/skills/explore-a-ticket/SKILL.md": "# the base's\n",
+		"base/modules/core/commands/ship.md":                 "Run ${qory:skills/explore-a-ticket}.\n",
+		"app/" + config.FileName:                             "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {path: ../base}\n  target: {runtime: claude}\n  modules:\n    - name: app\n" + modules,
+		"app/modules/app/qory-module.yaml":                   "apiVersion: qory.dev/v1alpha1\nname: app\n",
+		"app/modules/app/skills/explore-a-ticket/SKILL.md":   "# the repository's\n",
+	})
+}
+
+// composeExtending composes the checkout's qory.yaml in dir on its base.
+func composeExtending(t *testing.T, dir string) (*compose.Result, error) {
+	t.Helper()
+	p, err := config.Compose(filepath.Join(dir, "app", config.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged, base, err := compose.LoadBase(p, "", compose.Options{})
+	if err != nil {
+		return nil, err
+	}
+	return compose.ComposeWith(merged, compose.Options{Base: base})
+}
+
+// TestExtendExcludesABaseEntry is the checkout's qory.yaml listing the base's module
+// core by its name with an exclude of explore-a-ticket: the repository's skill is
+// composed, the base's command references it, and the report lists the base's skill as
+// left out of core.
+func TestExtendExcludesABaseEntry(t *testing.T) {
+	dir := excludeBaseTree(t, "    - name: core\n      exclude: {skills: [explore-a-ticket]}\n")
+	res, err := composeExtending(t, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := map[string]string{}
+	for _, e := range res.Entries {
+		from[e.Kind+"/"+e.Name] = e.Module
+	}
+	if from["skills/explore-a-ticket"] != "app" || from["commands/ship"] != "core" || len(from) != 2 {
+		t.Fatalf("entries by module = %v, want the skill from app and the command from core", from)
+	}
+	if len(res.Excludes) != 1 || res.Excludes[0].Module != "core" || res.Excludes[0].Kind != "skills" || res.Excludes[0].Name != "explore-a-ticket" || !strings.HasSuffix(res.Excludes[0].Path, filepath.Join("modules", "core", "skills", "explore-a-ticket")) {
+		t.Fatalf("excludes = %+v, want core's skills/explore-a-ticket", res.Excludes)
+	}
+	if len(res.Modules) != 2 || res.Modules[0].Name != "core" || !res.Modules[0].Base || res.Modules[1].Name != "app" {
+		t.Fatalf("modules = %+v, want the base's core, then app", res.Modules)
+	}
+}
+
+// TestExtendSuggestsTheExcludeOfABaseEntry is the checkout's skill colliding with the
+// base's: the message and Suggest give the exclude for core, the base's module, and say
+// it goes in qory.yaml.
+func TestExtendSuggestsTheExcludeOfABaseEntry(t *testing.T) {
+	_, err := composeExtending(t, excludeBaseTree(t, ""))
+	var collision *compose.CollisionError
+	if !errors.As(err, &collision) {
+		t.Fatalf("err = %v, want a collision", err)
+	}
+	want := "skills/explore-a-ticket is provided by 2 modules: core@working-tree, app@working-tree\n" +
+		"  keep one and exclude the others, for example\n" +
+		"    core: exclude: {skills: [explore-a-ticket]}\n" +
+		"  write the exclude for a module of the base stack web@working-tree in qory.yaml, under harness.modules"
+	if err.Error() != want {
+		t.Fatalf("got\n%s\nwant\n%s", err, want)
+	}
+	modules, excludes := collision.Suggest(collision.Order)
+	if len(modules) != 1 || modules[0] != "core" || len(excludes["core"]["skills"]) != 1 || excludes["core"]["skills"][0] != "explore-a-ticket" {
+		t.Fatalf("suggest = %v, %v; want core excluding skills/explore-a-ticket", modules, excludes)
+	}
+	if !collision.InBase["core"] || collision.InBase["app"] {
+		t.Fatalf("in base = %v, want core alone", collision.InBase)
+	}
+}
+
+// TestExtendRefusesAnExcludeOfNoBaseEntry is the checkout's qory.yaml excluding from core
+// a skill core does not compose: one it does not ship, and one the base's exclude
+// already leaves out. Each message starts with the fix.
+func TestExtendRefusesAnExcludeOfNoBaseEntry(t *testing.T) {
+	dir := excludeBaseTree(t, "    - name: core\n      exclude: {skills: [explore-a-ticket, triage]}\n")
+	_, err := composeExtending(t, dir)
+	want := "remove skills/triage from the exclude of module core in qory.yaml: the base stack web@working-tree composes no skills/triage from module core"
+	if err == nil || err.Error() != want {
+		t.Fatalf("a skill core does not ship: got %v\nwant %s", err, want)
+	}
+	stackFile := filepath.Join(dir, "base", stack.FileName)
+	if err := os.WriteFile(stackFile, []byte("apiVersion: qory.dev/v1alpha1\nname: web\nextending:\n  kinds: [skills]\nmodules:\n  - name: core\n    source:\n      path: modules/core\n    exclude: {skills: [explore-a-ticket]}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "app", config.FileName), []byte("apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {path: ../base}\n  target: {runtime: claude}\n  modules:\n    - name: core\n      exclude: {skills: [explore-a-ticket]}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = composeExtending(t, dir)
+	want = "remove skills/explore-a-ticket from the exclude of module core in qory.yaml: the base stack web@working-tree composes no skills/explore-a-ticket from module core"
+	if err == nil || err.Error() != want {
+		t.Fatalf("a skill the base leaves out: got %v\nwant %s", err, want)
 	}
 }

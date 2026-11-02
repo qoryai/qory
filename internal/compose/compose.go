@@ -334,6 +334,9 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		if err != nil {
 			return nil, err
 		}
+		if err := applyCheckoutExclude(l, pl.CheckoutExclude, res, opts.Base); err != nil {
+			return nil, err
+		}
 		if !pl.Base && opts.Base != nil {
 			if err := checkExtending(l, opts.Base); err != nil {
 				return nil, err
@@ -860,6 +863,55 @@ func applySelection(l *module.Module, pl stack.Module, env map[string]string, re
 	return remaining, pulled, nil
 }
 
+// applyCheckoutExclude leaves out of base module l the entries the checkout's qory.yaml
+// excludes from it, sel, after the base's exclude or only block, and records each one in
+// res. An entry the base module does not compose is an error, so a base that stops
+// shipping an entry is noticed. Kinds and names are walked in sorted order.
+func applyCheckoutExclude(l *module.Module, sel stack.Selection, res *Result, base *Base) error {
+	if sel.Empty() {
+		return nil
+	}
+	named := map[string]bool{}
+	for _, kind := range sel.KindNames() {
+		for _, name := range sel.Kinds[kind] {
+			named[kind+"/"+name] = true
+		}
+	}
+	composed := map[string]bool{}
+	for _, e := range l.Entries {
+		composed[e.Kind+"/"+e.Name] = true
+	}
+	for _, key := range sortedKeys(named) {
+		if !composed[key] {
+			stackText := "the base stack"
+			if base != nil {
+				stackText += " " + base.String()
+			}
+			return fmt.Errorf("remove %s from the exclude of module %s in qory.yaml: %s composes no %s from module %s", shownKey(key), shown(l.Name), stackText, shownKey(key), shown(l.Name))
+		}
+	}
+	var kept []module.Entry
+	for _, e := range l.Entries {
+		if named[e.Kind+"/"+e.Name] {
+			res.Excludes = append(res.Excludes, Exclude{Module: l.Name, Kind: e.Kind, Name: e.Name, Path: e.Path})
+			continue
+		}
+		kept = append(kept, e)
+	}
+	l.Entries = kept
+	return nil
+}
+
+// shownKey is a <kind>/<name> key for a message: a file's path as [exports.HidePath]
+// shows it, any other name as [shown] does.
+func shownKey(key string) string {
+	kind, name, _ := strings.Cut(key, "/")
+	if kind == "files" {
+		return "files/" + exports.HidePath(name)
+	}
+	return shown(kind) + "/" + shown(name)
+}
+
 // Collision is one entry name that more than one module provides.
 type Collision struct {
 	// Kind is the entry kind the collision is in.
@@ -868,8 +920,9 @@ type Collision struct {
 	Name string
 	// Modules provide the entry, in stack order.
 	Modules []string
-	// Base is the base stack, as <name>@<pin>, when one of the modules is the base's:
-	// no exclude resolves that collision, the extending module renames its entry.
+	// Base is the base stack, as <name>@<pin>, when one of the modules is the base's: the
+	// exclude that resolves the collision for a base module goes in the checkout's
+	// qory.yaml, on an entry that lists the base module by its name.
 	Base string
 }
 
@@ -885,6 +938,9 @@ type CollisionError struct {
 	Sources map[string]string
 	// Order lists the module names in stack order, for [CollisionError.Suggest].
 	Order []string
+	// InBase marks the names of the base's modules, for the command's lines that
+	// resolve a collision.
+	InBase map[string]bool
 }
 
 // Suggest returns, per module, the excludes that resolve every collision by keeping the
@@ -895,9 +951,6 @@ type CollisionError struct {
 func (e *CollisionError) Suggest(order []string) (modules []string, excludes map[string]map[string][]string) {
 	excludes = map[string]map[string][]string{}
 	for _, c := range e.Collisions {
-		if c.Base != "" {
-			continue
-		}
 		for _, l := range c.Modules[:len(c.Modules)-1] {
 			if excludes[l] == nil {
 				excludes[l] = map[string][]string{}
@@ -932,13 +985,12 @@ func (e *CollisionError) Error() string {
 			}
 		}
 		fmt.Fprintf(&b, "%s/%s is provided by %d modules: %s\n", shown(c.Kind), shown(c.Name), len(c.Modules), strings.Join(named, ", "))
-		if c.Base != "" {
-			fmt.Fprintf(&b, "  it belongs to the base stack %s; rename yours\n", shown(c.Base))
-			continue
-		}
 		b.WriteString("  keep one and exclude the others, for example\n")
 		for _, l := range c.Modules[:len(c.Modules)-1] {
 			fmt.Fprintf(&b, "    %-*s exclude: {%s: [%s]}\n", width, shown(l)+":", shown(c.Kind), shown(c.Name))
+		}
+		if c.Base != "" {
+			fmt.Fprintf(&b, "  write the exclude for a module of the base stack %s in qory.yaml, under harness.modules\n", shown(c.Base))
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
@@ -968,7 +1020,7 @@ func collisions(owners map[string][]string, modules []Module, base *Base) error 
 		return nil
 	}
 	sort.Strings(keys)
-	e := &CollisionError{Pins: pin, Sources: sources, Order: order}
+	e := &CollisionError{Pins: pin, Sources: sources, Order: order, InBase: inBase}
 	for _, key := range keys {
 		kind, name, _ := strings.Cut(key, "/")
 		c := Collision{Kind: kind, Name: name, Modules: owners[key]}

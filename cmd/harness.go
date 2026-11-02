@@ -1693,8 +1693,10 @@ func printCollision(u *ui.UI, e *compose.CollisionError, n *source.Named) {
 			rows = append(rows, []string{accesskey.ShownName(l, false), from, e.Pins[l]})
 		}
 		u.Table(rows)
-		if c.Base != "" {
-			u.Text("It belongs to the base stack " + accesskey.ShownName(c.Base, false) + "; rename yours.")
+		for _, l := range c.Modules {
+			if e.InBase[l] && c.Base != "" {
+				u.Text("Module " + accesskey.ShownName(l, false) + " belongs to the base stack " + accesskey.ShownName(c.Base, false) + ".")
+			}
 		}
 	}
 	modules, excludes := e.Suggest(e.Order)
@@ -1703,10 +1705,21 @@ func printCollision(u *ui.UI, e *compose.CollisionError, n *source.Named) {
 	}
 	u.Blank()
 	u.Heading("Fix")
-	u.Text("Keep one and exclude it from the others. For example, in qory-stack.yaml:")
+	where := "qory-stack.yaml"
+	for _, l := range modules {
+		if e.InBase[l] {
+			where = "qory.yaml, under harness.modules"
+		}
+	}
+	u.Text("Keep one and exclude it from the others. For example, in " + where + ":")
 	for _, l := range modules {
 		u.Blank()
-		u.Code("- name: "+accesskey.ShownName(l, false), "  ...", "  exclude:")
+		if e.InBase[l] {
+			// A base module is listed by its name with the exclude alone.
+			u.Code("- name: "+accesskey.ShownName(l, false), "  exclude:")
+		} else {
+			u.Code("- name: "+accesskey.ShownName(l, false), "  ...", "  exclude:")
+		}
 		var kinds []string
 		for k := range excludes[l] {
 			kinds = append(kinds, k)

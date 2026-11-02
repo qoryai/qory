@@ -137,6 +137,11 @@ type Module struct {
 	// It is set by [Extend], not by the YAML, which also rewrites the module's source so
 	// it resolves from the checkout's qory.yaml.
 	Base bool `yaml:"-"`
+	// CheckoutExclude, on a base module, lists the entries the checkout's qory.yaml
+	// leaves out of it: the exclude of the entry there that lists the base module by its
+	// name. It is set by [Extend], not by the YAML, and the compose applies it after the
+	// base's exclude or only block.
+	CheckoutExclude Selection `yaml:"-"`
 	// Variant forces one of the module's variants instead of the one named like the
 	// runtime.
 	Variant string `yaml:"variant,omitempty"`
@@ -369,7 +374,8 @@ type Stack struct {
 	Description string `yaml:"description,omitempty"`
 	// Extends, in a checkout's qory.yaml, selects the base stack it appends to: a
 	// directory that contains a qory-stack.yaml, as a path or inside a git repository at
-	// a ref. The base's modules come first and cannot be changed.
+	// a ref. The base's modules come first and cannot be changed; the checkout may only
+	// leave entries out of them, see [Extend].
 	Extends Source `yaml:"extends,omitempty"`
 	// Target is the runtime and model the harness is rendered for, in a checkout's
 	// qory.yaml: required for its own stack, and beside Extends the target the checkout
@@ -888,6 +894,70 @@ func filePrefix(s string) bool {
 	return true
 }
 
+// baseName is the name a checkout's qory.yaml lists base module l by: the name the base
+// stack sets for it, else the export its source selects; "" for a module the base lists by
+// a path or a git source alone, whose name only its manifest defines.
+func baseName(l Module) string {
+	if l.Name != "" {
+		return l.Name
+	}
+	return l.Source.Module
+}
+
+// checkoutExclude checks entry l of a checkout's qory.yaml, which lists a module of the
+// base by its name: the entry has an exclude and nothing beside it, and the exclude lists
+// entries of the kinds and under the file prefixes extending lets an appended module
+// ship, since a checkout leaves out only what its modules may replace. The base's
+// hooks, MCP servers, instructions, settings and variables stay as the base composes
+// them. Whether the base module composes each entry is the compose's check.
+func checkoutExclude(l Module, extending *Extending) error {
+	name := accesskey.ShownName(l.Name, false)
+	if l.Source.Path != "" || l.Source.Git != "" || l.Source.exported() || !l.Only.Empty() || l.Variant != "" || l.Link != "" {
+		return fmt.Errorf("list module %s with its name and exclude only: it belongs to the base stack, and a checkout's qory.yaml cannot change its source, only, variant or link", name)
+	}
+	if l.Exclude.Empty() {
+		return fmt.Errorf("add an exclude to module %s, or remove its entry: it belongs to the base stack, and a checkout's qory.yaml lists a base module only to exclude entries from it", name)
+	}
+	for _, part := range []struct {
+		key string
+		set bool
+	}{{"instructions", l.Exclude.Instructions}, {"settings", l.Exclude.Settings.Set()}, {"env", l.Exclude.Env.Set()}} {
+		if part.set {
+			return fmt.Errorf("remove %s from the exclude of module %s: it belongs to the base stack, and a checkout's qory.yaml excludes entries from a base module, not its instructions, settings or env", part.key, name)
+		}
+	}
+	for _, kind := range l.Exclude.KindNames() {
+		for _, entry := range l.Exclude.Kinds[kind] {
+			if kind == "files" {
+				if !FileAllowed(entry, extending.Files) {
+					return fmt.Errorf("remove files/%s from the exclude of module %s: a checkout excludes from a base module only files where an extending module may ship them, and the base stack lets an extending module ship files under %s", exports.HidePath(entry), name, prefixesText(extending.Files))
+				}
+				continue
+			}
+			if !slices.Contains(extending.Kinds, kind) {
+				return fmt.Errorf("remove %s/%s from the exclude of module %s: a checkout excludes from a base module only entries of the kinds an extending module may ship, and the base stack lets an extending module ship %s", accesskey.ShownName(kind, false), accesskey.ShownName(entry, false), name, kindsListText(extending.Kinds))
+			}
+		}
+	}
+	return nil
+}
+
+// kindsListText lists kinds for a message, "no entries" for none.
+func kindsListText(kinds []string) string {
+	if len(kinds) == 0 {
+		return "no entries"
+	}
+	return strings.Join(accesskey.ShownNames(kinds), ", ")
+}
+
+// prefixesText lists file prefixes for a message, "no path" for none.
+func prefixesText(prefixes []string) string {
+	if len(prefixes) == 0 {
+		return "no path"
+	}
+	return strings.Join(exports.Values(prefixes), ", ")
+}
+
 // FileAllowed reports whether a files entry name, <runtime>/<path>, is one of the
 // prefixes or under one, by path segment: claude/rules and claude/rules/ both cover
 // claude/rules/a/b.md and neither covers claude/rules-private/x.md, and a prefix that is
@@ -907,8 +977,10 @@ func FileAllowed(name string, prefixes []string) bool {
 // then p's modules; p's target, since a base has none; both files' extensions. The
 // result's Qory is p's; the base's range is the caller's to keep and check, as
 // [Base.Qory] does. It refuses a base that extends another and a base without an
-// extending block. An extension key both files set is p's. The result's File and Root are
-// p's.
+// extending block. An entry of p that lists a base module by its name is no module of
+// the result: its exclude becomes that base module's [Module.CheckoutExclude], under the
+// rules of [checkoutExclude]. An extension key both files set is p's. The result's File
+// and Root are p's.
 func Extend(base, p *Stack) (*Stack, error) {
 	if base.Extends.Path != "" || base.Extends.Git != "" {
 		return nil, &BaseExtendsError{File: base.File, Extends: base.Extends}
@@ -944,16 +1016,24 @@ func Extend(base, p *Stack) (*Stack, error) {
 		}
 		out.Modules = append(out.Modules, l)
 	}
-	inBase := map[string]bool{}
-	for _, l := range out.Modules {
-		inBase[l.Name] = true
-	}
-	for _, l := range p.Modules {
-		if inBase[l.Name] {
-			return nil, fmt.Errorf("module %s belongs to the base stack; a checkout's qory.yaml cannot list a base module, exclude from it or replace it", accesskey.ShownName(l.Name, false))
+	byName := map[string]int{}
+	for i, l := range out.Modules {
+		if name := baseName(l); name != "" {
+			byName[name] = i
 		}
 	}
-	out.Modules = append(out.Modules, p.Modules...)
+	for _, l := range p.Modules {
+		if i, ok := byName[l.Name]; ok {
+			if err := checkoutExclude(l, base.Extending); err != nil {
+				return nil, err
+			}
+			out.Modules[i].CheckoutExclude = l.Exclude
+			continue
+		}
+		// A module the base lists by a path alone is named by its manifest, and the
+		// compose fails on a checkout module of the same name, as composed twice.
+		out.Modules = append(out.Modules, l)
+	}
 	if len(base.Bind) > 0 || len(p.Bind) > 0 {
 		out.Bind = map[string]string{}
 		for role, to := range base.Bind {

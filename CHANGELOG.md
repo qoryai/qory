@@ -145,6 +145,13 @@ release may change what an existing document does, and states it under Upgrading
   Qory Apiary. qory writes the key to `~/.config/qory/apiary/<host>/` and never to
   `forager.yaml`. If the command stops after Qory Apiary enrolled the key, the same
   command finishes the enrolment without sending the code again.
+- Leave an entry out of a module of the stack you extend: in the harness section of
+  `qory.yaml`, list the module by its name with `exclude` alone, such as `{name: core,
+  exclude: {skills: [explore-a-ticket]}}`, and a module of your repository can ship that
+  entry instead. The exclude lists entries of the kinds the stack's `extending` block lets
+  your modules ship. A collision with an entry of the base stack prints that exclude in
+  place of `rename yours`. See Leave out an entry of a delivered module in
+  `docs/harness.md`.
 
 ### Changed
 

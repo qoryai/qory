@@ -209,7 +209,22 @@ checkout appends:
 
 - The base's modules come first, in the base's order, with the base's excludes, variants
   and links; a relative source of the base resolves inside the base's repository. The
-  checkout cannot list, exclude, reorder or re-source a base module.
+  checkout cannot reorder, re-source or replace a base module, or change its files.
+- The checkout may leave entries out of a base module: its `modules` lists the base
+  module by the name the base lists it under, its `name` or the `module` its source
+  selects, with `exclude` and no other key, `{name: core, exclude: {skills:
+  [explore-a-ticket]}}`. The entry is no module of the composed stack: its exclude
+  applies to the base module after the base's exclude or only block, and the report
+  lists each entry it leaves out under `excludes`, by the base module's name. The
+  exclude lists entries of the kinds in the base's `extending.kinds` and files under its
+  `extending.files` prefixes; an instruction section, a settings fragment, a variable, a
+  hook or an MCP server of a base module stays. Anything else on that entry fails with
+  status 2, each message starting with its fix: `list module <name> with its name and
+  exclude only: …`, `add an exclude to module <name>, or remove its entry: …`, `remove
+  <part> from the exclude of module <name>: …`, `remove <kind>/<entry> from the exclude
+  of module <name>: …`; and an entry the base module does not compose fails with
+  `remove <kind>/<entry> from the exclude of module <name> in qory.yaml: the base stack
+  <name>@<pin> composes no <kind>/<entry> from module <name>`.
 - The target is the document's. A delivered stack has none, and the checkout defines
   what it composes the base for under `target` beside `extends`; the runner's
   `harness.runtime` and `harness.model` override the document's, and `--runtime` and
@@ -240,10 +255,10 @@ checkout appends:
   `claude/rules/a/b.md` and not `claude/rules-private/x.md`, and a prefix that is a file's
   path covers that file only. A module shipping anything else fails the compose and the
   message lists it. A base without the block is closed to extension.
-- An entry of an appended module that collides with a base entry fails with status 3, and
-  the message states that the entry belongs to the base, `<name>@<pin>`, and that it needs
-  a new name;
-  no exclude resolves it. The message lists that one entry and nothing else of the base.
+- An entry of an appended module that collides with a base entry fails with status 3.
+  The message contains the exclude for the base module, as for any collision, and
+  `write the exclude for a module of the base stack <name>@<pin> in qory.yaml, under
+  harness.modules`. The message lists that one entry and nothing else of the base.
 - Both stacks' `extensions` go into the report, merged by top-level key: a key the
   checkout sets replaces the base's value whole, and a key it leaves alone stays the
   base's. Nothing under a key is merged.

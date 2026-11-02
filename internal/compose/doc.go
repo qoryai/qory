@@ -3,7 +3,9 @@
 // A stack, [stack.Stack], defines an ordered list of modules and a target runtime. A
 // compose file selects a base stack to take both from: [LoadBase] fetches the base and
 // puts its modules first, closed, and [ComposeWith] refuses what an appended module ships
-// beyond the base's extending block and any entry colliding with the base's. A module is
+// beyond the base's extending block and any entry colliding with the base's. The compose
+// file may leave entries out of a base module, [stack.Module.CheckoutExclude], which
+// [ComposeWith] applies after the base's exclude or only block. A module is
 // one directory of harness material. An entry is one atomic thing a module ships,
 // identified by kind and name; the kinds are skills, agents, commands, output-styles,
 // hooks, mcp and files. A module may also ship an AGENTS.md instruction file and settings
@@ -27,8 +29,9 @@
 //  4. Reads the entries, the settings fragments, the MCP servers and AGENTS.md with
 //     [module.Read]. A variant redirects entry kinds only; settings and AGENTS.md come
 //     from the module root.
-//  5. Applies the module's excludes. An exclude that selects nothing the module ships
-//     fails the compose, so a module that stops shipping an entry is noticed.
+//  5. Applies the module's excludes, then, for a base module, the excludes of the
+//     compose file. An exclude that selects nothing the module ships fails the compose,
+//     so a module that stops shipping an entry is noticed.
 //  6. Merges the module's settings fragments into the result, appends its AGENTS.md, and
 //     adds the variables its manifest exports, each as
 //     $QORY_HARNESS_HOME/modules/<name>/<path>. Two modules exporting one name with
