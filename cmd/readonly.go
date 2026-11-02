@@ -12,10 +12,6 @@ import (
 	"github.com/qoryai/qory/internal/stack"
 )
 
-// reasonReadNeedsSetupRemoved is the reason of a read run closed before the join because
-// its setup container was not removed.
-const reasonReadNeedsSetupRemoved = "read_needs_setup_removed"
-
 // The lines of a run from a run code that only reads the checkout, [readsOnly], and that
 // cannot see the checkout read-only, each with the workflow's name: one with no wall,
 // one whose setup runs inside the agent's container, and one whose image runs nested
@@ -84,11 +80,11 @@ func readRefused(code, text string) error {
 // removeSetup removes the setup container of a read run, after the setup and before the
 // join, so no process in that container writes the checkout while the agent reads it.
 // With no setup container, RemoveSetup returns nil, so the call has no condition. An
-// error stops the run before the join with [reasonReadNeedsSetupRemoved]: the container
-// may still run, and no session can join the run.
+// error stops the run before the join with [event.ReasonReadNeedsSetupRemoved]: the
+// container may still run, and no session can join the run.
 func removeSetup(ctx context.Context, run openedRun) error {
 	if err := run.RemoveSetup(ctx); err != nil {
-		return readRefused(reasonReadNeedsSetupRemoved, fmt.Sprintf(textReadNeedsSetupRemoved, accesskey.ShownError(err)))
+		return readRefused(event.ReasonReadNeedsSetupRemoved, fmt.Sprintf(textReadNeedsSetupRemoved, accesskey.ShownError(err)))
 	}
 	return nil
 }
