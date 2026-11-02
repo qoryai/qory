@@ -1,10 +1,14 @@
 package cmd_test
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/qoryai/forager/session"
@@ -401,4 +405,161 @@ func TestAReadWorkflowOnAnImageWithoutNestedDockerRuns(t *testing.T) {
 			})
 		}
 	}
+}
+
+// listsRepositories has the run configuration of the runs of test t list
+// example-org/hello, so each run has a setup, for the rest of the test.
+func listsRepositories(t *testing.T) {
+	t.Helper()
+	codeRepositories = "example-org/hello"
+	t.Cleanup(func() { codeRepositories = "" })
+}
+
+// removesSetupWith has each run of test t use remove as its RemoveSetup, for the rest of
+// the test.
+func removesSetupWith(t *testing.T, remove func(context.Context) error) {
+	t.Helper()
+	codeRemoveSetup = remove
+	t.Cleanup(func() { codeRemoveSetup = nil })
+}
+
+// onlyCalls is calls with every call that is not in want left out.
+func onlyCalls(calls, want []string) []string {
+	var out []string
+	for _, c := range calls {
+		if slices.Contains(want, c) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// TestAReadRunRemovesTheSetupContainerBeforeTheJoin is a walled read run, one with a
+// setup, and one whose run configuration lists no repositories, which has none: the run
+// removes the setup container after the setup and before the join, with no step open,
+// which the fake's RemoveSetup checks, and with no condition on the setup.
+func TestAReadRunRemovesTheSetupContainerBeforeTheJoin(t *testing.T) {
+	order := []string{"setup", "remove setup", "join"}
+	for name, c := range map[string]struct {
+		lists bool
+		want  []string
+	}{
+		"with a setup": {true, order},
+		"with none":    {false, []string{"remove setup", "join"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if c.lists {
+				listsRepositories(t)
+			}
+			r, _ := readRun(t, nil, readImage, "")
+			if !r.joined {
+				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+			}
+			if got := onlyCalls(r.calls, order); !slices.Equal(got, c.want) {
+				t.Errorf("the calls %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// TestAWriteRunKeepsTheSetupContainer is a walled write run with a setup: it never calls
+// RemoveSetup, so the setup container stays up.
+func TestAWriteRunKeepsTheSetupContainer(t *testing.T) {
+	listsRepositories(t)
+	r, _ := readRun(t, declares("write"), readImage, "")
+	if !r.joined {
+		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	if got, want := onlyCalls(r.calls, []string{"setup", "remove setup", "join"}), []string{"setup", "join"}; !slices.Equal(got, want) {
+		t.Errorf("the calls %v, want %v", got, want)
+	}
+}
+
+// TestAReadRunWhoseSetupContainerStaysStops is a read run whose RemoveSetup fails: it
+// stops before the join, exit 1, closes failed with read_needs_setup_removed and -1, and
+// its line has the error, with a phrase in place of an error that contains a secret.
+func TestAReadRunWhoseSetupContainerStaysStops(t *testing.T) {
+	const head = "start the run again: the setup container of this read run was not removed, so a process in the container can write the checkout: "
+	const tail = " (read_needs_setup_removed); the code is used"
+	secret := "qak_" + strings.Repeat("a", 43)
+	for name, c := range map[string]struct {
+		err  error
+		want string
+	}{
+		"an error":                   {errors.New("the removal failed"), "the removal failed"},
+		"an error that has a secret": {errors.New("the removal failed with " + secret), "(a value that contains an access key secret)"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			listsRepositories(t)
+			removesSetupWith(t, func(context.Context) error { return c.err })
+			r, _ := readRun(t, nil, readImage, "")
+			checkRemovalStopped(t, r, session.Outcome{State: "failed", Reason: "read_needs_setup_removed", ExitCode: -1}, 1)
+			wants(t, r.out+r.err.Error(), head+c.want+tail)
+			lacks(t, r.out+r.err.Error(), secret)
+		})
+	}
+}
+
+// TestAGatewayTakesTheCloseOfAReadRunWhoseSetupContainerStays is the run of
+// [TestAReadRunWhoseSetupContainerStaysStops] at a gateway of Forager's in this process:
+// the gateway accepts the close, so the records end with the reason and contain no
+// batch_refused.
+func TestAGatewayTakesTheCloseOfAReadRunWhoseSetupContainerStays(t *testing.T) {
+	atGateway(t)
+	listsRepositories(t)
+	removesSetupWith(t, func(context.Context) error { return errors.New("the removal failed") })
+	r, _ := readRun(t, nil, readImage, "")
+	const reason = "read_needs_setup_removed"
+	checkRemovalStopped(t, r, session.Outcome{State: "failed", Reason: reason, ExitCode: -1}, 1)
+	checkGatewayRecord(t, r, reason)
+}
+
+// checkRemovalStopped checks that r, a run that reached RemoveSetup, stopped before the
+// join with the exit status code and closed with out alone.
+func checkRemovalStopped(t *testing.T, r codeRun, out session.Outcome, code int) {
+	t.Helper()
+	if r.joined || cmd.ExitCode(r.err) != code {
+		t.Fatalf("%v (exit %d), want exit %d before the join\n%s", r.err, cmd.ExitCode(r.err), code, r.out)
+	}
+	if !slices.Equal(r.closes, []session.Outcome{out}) {
+		t.Errorf("the run closed with %v, want %v", r.closes, out)
+	}
+	if slices.Contains(r.calls, "join") || !slices.Contains(r.calls, "remove setup") {
+		t.Errorf("the calls: %v", r.calls)
+	}
+}
+
+// TestATimeLimitDuringTheSetupContainersRemovalEndsAsInASetup is a read run whose time
+// limit ends while RemoveSetup runs: RemoveSetup's context ends at the limit, and the run
+// takes the path of a setup that the limit cut short: cancelled with timeout, exit 124,
+// and the line of the time limit, with no read_needs_setup_removed.
+func TestATimeLimitDuringTheSetupContainersRemovalEndsAsInASetup(t *testing.T) {
+	listsRepositories(t)
+	removesSetupWith(t, func(ctx context.Context) error {
+		<-ctx.Done()
+		return fmt.Errorf("the removal stopped: %w", ctx.Err())
+	})
+	r, _ := readRun(t, func(s string) string { return s + "workflows:\n  hello:\n    time_limit: 15s\n" }, readImage, "")
+	checkRemovalStopped(t, r, session.Outcome{State: "cancelled", Reason: "timeout", ExitCode: 124}, 124)
+	wants(t, r.out+r.err.Error(), "the run was cancelled at its time limit of 15s, before ")
+	lacks(t, r.out+r.err.Error(), "read_needs_setup_removed")
+}
+
+// TestASignalDuringTheSetupContainersRemovalEndsAsInASetup is a read run that gets
+// SIGINT while RemoveSetup runs: the run takes the path of a setup that a signal cut
+// short: cancelled with interrupted, exit 1, and the line of the signal, with no
+// read_needs_setup_removed.
+func TestASignalDuringTheSetupContainersRemovalEndsAsInASetup(t *testing.T) {
+	listsRepositories(t)
+	removesSetupWith(t, func(ctx context.Context) error {
+		if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
+			return err
+		}
+		<-ctx.Done()
+		return fmt.Errorf("the removal stopped: %w", ctx.Err())
+	})
+	r, _ := readRun(t, nil, readImage, "")
+	checkRemovalStopped(t, r, session.Outcome{State: "cancelled", Reason: "interrupted", ExitCode: -1}, 1)
+	wants(t, r.out+r.err.Error(), "the run was cancelled: qory run got SIGINT before ")
+	lacks(t, r.out+r.err.Error(), "read_needs_setup_removed")
 }

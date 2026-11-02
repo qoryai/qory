@@ -30,8 +30,10 @@ record after the error line. Four stops of a run from a run code, right after th
 compose, close with their reason in place of `no_session`: `workflow_not_in_harness` (see
 [What the run takes from the response](#what-the-run-takes-from-the-response)), or
 `read_needs_wall`, `read_needs_setup_outside` or `read_needs_no_nested_docker` (see [Read
-workflows](#read-workflows)). In a folder that is not a git working tree, `qory run` starts
-only with the home outside the folder, as `qory harness compose` composes only then.
+workflows](#read-workflows)). A read run whose setup container was not removed stops after
+the setup and closes with `read_needs_setup_removed`. In a folder that is not a git
+working tree, `qory run` starts only with the home outside the folder, as `qory harness
+compose` composes only then.
 
 A run with a run key writes no harness into the folder it runs in. The harness goes into
 a home under `qory/homes` in your cache directory: `~/.cache/qory/homes/<name>-<hash>` on
@@ -1502,8 +1504,9 @@ A run sees the checkout read-only when `access` in its documents is `read`, or w
 wall, with `wall.setup: inside` or on an image with nested Docker stops after the compose,
 exit 1, and qory closes it `failed` with `read_needs_wall`, `read_needs_setup_outside` or
 `read_needs_no_nested_docker`. A writable mount that contains the checkout, lies inside it
-or links to it also stops the run, later, and the agent does not start. See [Read
-workflows](#read-workflows).
+or links to it also stops the run, later, and the agent does not start. qory removes the
+setup container of such a run before the agent starts, and closes the run `failed` with
+`read_needs_setup_removed` when the removal fails. See [Read workflows](#read-workflows).
 
 The documents of a run with a target may set `target_version`: the version at which Qory
 Apiary checked the target for a harness file. When the target's `system` is
@@ -1679,6 +1682,11 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
   (read_needs_no_nested_docker); the code is used`, after the compose, for a read run on
   an image with `docker: true`, which closes the run with the reason
   `read_needs_no_nested_docker`; see [Read workflows](#read-workflows)
+- `start the run again: the setup container of this read run was not removed, so a
+  process in the container can write the checkout: <error>
+  (read_needs_setup_removed); the code is used`, after the setup, for a read run whose
+  setup container was not removed, which closes the run with the reason
+  `read_needs_setup_removed`; see [Read workflows](#read-workflows)
 - `add a command <workflow> to <harness>, or set another runtime in Qory Apiary:
   <runtime> runs no skill by its name from a headless start; the code is used`, after the
   compose, for a workflow that is only a skill on `gemini` or `opencode`
@@ -3181,8 +3189,14 @@ with `access: write`. A read run sees the checkout read-only:
   `Bash(/qory/qory *)` and set `permissions.defaultMode` to `dontAsk`, beside what the
   composed settings contain. Inside the wall, `qory` is at `/qory/qory` and not on
   `PATH`. On the other runtimes, the read-only mount is the only change.
-- The setup container and the host steps still write the checkout, so the checkout stays
-  among the places the run may write, and the record lists it.
+- The setup and the host steps write the checkout, so the checkout stays among the places
+  the run may write, and the record lists it.
+- qory removes the setup container after the setup and before the agent starts, in the
+  wall step `remove the setup container`, so every process in that container has ended
+  when the agent starts. A read run's agent cannot reach a service that the setup started:
+  the name `qory-setup` does not resolve, so a connection to `qory-setup:5432` fails. Any
+  other run keeps the setup container until the run closes, so declare a workflow `write`
+  if its agent needs such a service.
 
 A read run with no wall, with `wall.setup: inside` or on an image with nested Docker
 cannot see the checkout read-only. It stops after the compose, before the image's fetch,
@@ -3213,6 +3227,18 @@ reason in the line, in place of `no_session`:
   `wall.image` when the policy selects none. A policy that selects an entry with
   `docker: true` stops the run even when `wall.image` is a pinned reference. An image
   selected by its reference runs no nested Docker.
+
+A read run whose setup container was not removed stops before the agent starts, exit 1,
+because a process in the container can still write the checkout. qory closes the run
+`failed` with the reason `read_needs_setup_removed`:
+
+```
+start the run again: the setup container of this read run was not removed, so a process in the container can write the checkout: <error> (read_needs_setup_removed); the code is used
+```
+
+A time limit or a signal that ends the removal closes the run as it closes a setup that
+it cuts short: `cancelled` with `timeout`, exit 124, or `cancelled` with `interrupted`,
+exit 1.
 
 A writable mount from `--mount` or `wall.mounts` that contains the checkout, lies inside
 it or links to it also stops a read run, later, and the agent does not start. The run

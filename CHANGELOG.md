@@ -64,8 +64,11 @@ release may change what an existing document does, and states it under Upgrading
   `permissions.defaultMode` to `dontAsk`. Such a run with no wall, with `wall.setup:
   inside`, or whose image chosen at the run's open has `docker: true`, whichever way it
   was selected, stops after the compose, exit 1, and closes `failed` with
-  `read_needs_wall`, `read_needs_setup_outside` or `read_needs_no_nested_docker`. See
-  §Read workflows in `docs/run.md`.
+  `read_needs_wall`, `read_needs_setup_outside` or `read_needs_no_nested_docker`. qory
+  removes the setup container of such a run before the agent starts, so no process in
+  that container runs while the agent works, and the agent cannot reach a service that
+  the setup started. A removal that fails closes the run `failed` with
+  `read_needs_setup_removed`. See §Read workflows in `docs/run.md`.
 - See the fetch and the compose of `qory run` as steps in the run's record, each with
   its lines and its end: a failed step ends `failed` with the exit status of `qory run`,
   after its error line.
@@ -392,7 +395,8 @@ release may change what an existing document does, and states it under Upgrading
   repositories, which adds a prebuilt image's copy and runs the repository's
   `postCreateCommand` and `postStartCommand`, is one `setup` step of the run's record,
   `prepare`, with its lines and its exit status. It runs in a separate container of the
-  run's image, which runs until the run closes, unless `wall.setup` is `inside`; outside,
+  run's image, which runs until the run closes, or on a read run until qory removes it
+  before the agent starts, unless `wall.setup` is `inside`; outside,
   its lines go to the record alone. Before, it ran in the agent's container before the
   agent, as no step. Outside, the setup container gets the agent's variables, from the
   server's run configuration, `--env`, `wall.env` and the harness's defaults, with the
