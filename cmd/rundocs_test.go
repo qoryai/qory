@@ -180,6 +180,10 @@ type codeRun struct {
 // that succeeds. A test sets it.
 var codeFetchImage func(context.Context) error
 
+// codeAtGateway, when set, has [runFromCodeGiven] open each run at a gateway of
+// Forager's in this process as well, as [cmd.Nowhere] AtGateway does. A test sets it.
+var codeAtGateway bool
+
 // runFromCode runs qory run from a run code whose documents start the workflow of a
 // harness document that extends the stack examples/hello of a repository that the
 // run's stack proxy serves, with the stack file changed by stackFile and the documents
@@ -249,6 +253,7 @@ func runFromCodeGiven(t *testing.T, before func(code string) []string, args []st
 		StackProxy: h.server.Proxy.URL, StackCABundle: h.server.Proxy.CABundle,
 		OnOpen:     func(s session.OpenSpec) { r.open = s },
 		FetchImage: codeFetchImage,
+		AtGateway:  codeAtGateway,
 	})
 	defer restore()
 	if given == nil {
@@ -334,6 +339,34 @@ func TestARunCodeWhoseHarnessHasNoWorkflowStops(t *testing.T) {
 		t.Errorf("the run closed with %v, want %v", r.closes, want)
 	}
 	wants(t, r.out+r.err.Error(), "add a skill or command deploy to the workspace's harness, or set another workflow in Qory Apiary: the composed harness has no skill or command deploy (workflow_not_in_harness); the code is used")
+}
+
+// TestAGatewayTakesTheCloseOfARunCodeWhoseHarnessHasNoWorkflow is the run of
+// [TestARunCodeWhoseHarnessHasNoWorkflowStops] opened and closed at a gateway of
+// Forager's in this process: exit 1 before the join, and the gateway accepts the close,
+// so the last run.exited of the gateway's record, events.jsonl, and of the session's,
+// session.jsonl, is failed with workflow_not_in_harness and -1, and neither record
+// contains batch_refused.
+func TestAGatewayTakesTheCloseOfARunCodeWhoseHarnessHasNoWorkflow(t *testing.T) {
+	codeAtGateway = true
+	t.Cleanup(func() { codeAtGateway = false })
+	r := runFromCode(t, nil, func(d map[string]any) { d["workflow"] = "deploy" })
+	if r.joined || cmd.ExitCode(r.err) != 1 {
+		t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	wants(t, r.out+r.err.Error(), "(workflow_not_in_harness); the code is used")
+	dir := filepath.Join(r.open.RunsDir, r.open.RunID)
+	for _, file := range []string{"events.jsonl", "session.jsonl"} {
+		b, err := os.ReadFile(filepath.Join(dir, file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := lastExited(t, b); got != "failed/workflow_not_in_harness/-1" {
+			t.Errorf("%s ends the run %s, want failed/workflow_not_in_harness/-1\n%s", file, got, b)
+		}
+		lacks(t, string(b), "batch_refused")
+	}
+	lacks(t, r.out, "batch_refused")
 }
 
 // TestAWalledRunCodeMountsItsInputsReadOnly is a walled run from a run code: the folder

@@ -230,10 +230,10 @@ const pinnedImage = "registry.example/agents/go@sha256:0123456789abcdef012345678
 // engineDocker is a program that stands in for docker, as [fakeDocker] does, and writes
 // every command line into the log it returns. It answers the image inspect of the
 // repository digests with image when held or once pulled, and with no such image
-// otherwise; the image's config with the user 1000; and a pull by sending a request for
+// otherwise; the image's config with user; and a pull by sending a request for
 // http://registry.example/v2/ through proxyURL, which [enginePull] writes the results of
 // into the file it returns.
-func engineDocker(t *testing.T, image string, held bool, proxyURL string) (docker, log, pulled string) {
+func engineDocker(t *testing.T, image, user string, held bool, proxyURL string) (docker, log, pulled string) {
 	t.Helper()
 	bin, err := os.Executable()
 	if err != nil {
@@ -253,7 +253,7 @@ func engineDocker(t *testing.T, image string, held bool, proxyURL string) (docke
 echo "$*" >> `+log+`
 case "$*" in
 "image inspect --format {{json .RepoDigests}} "*) `+inspect+` ;;
-"image inspect --format {{json .Config}} "*) echo '{"User":"1000"}'; exit 0 ;;
+"image inspect --format {{json .Config}} "*) echo '{"User":"`+user+`"}'; exit 0 ;;
 "pull "*) : > `+holds+`; QORY_TEST_ENGINE_PULL=1 exec '`+bin+`' -test.run='^$' -- '`+proxyURL+`' http://registry.example/v2/ `+pulled+` ;;
 esac
 case "$1 $2" in
@@ -372,7 +372,7 @@ func TestAWalledRunPullsItsImageThroughTheEngineProxy(t *testing.T) {
 	composedForFake(t, root, "claude")
 	image, policy, lines, requests := localImage(t)
 	addr := freeAddress(t)
-	docker, log, pulled := engineDocker(t, image, false, "http://qory:"+fetchPassword+"@"+addr)
+	docker, log, pulled := engineDocker(t, image, "1000", false, "http://qory:"+fetchPassword+"@"+addr)
 	file := writeEngineProxy(t, addr)
 	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), imagesSection(docker, staticELF(t))+lines+"  engine_proxy_file: "+file+"\nmachine: aws-ec2\n"+localGateway)
 	out, err := run(t, "run", "claude", "--policy", policy)
@@ -435,7 +435,7 @@ func TestAWalledRunStartsTheImageItsEngineHolds(t *testing.T) {
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, "claude")
 	image, policy, lines, requests := localImage(t)
-	docker, log, _ := engineDocker(t, image, true, "http://qory:"+fetchPassword+"@127.0.0.1:9")
+	docker, log, _ := engineDocker(t, image, "1000", true, "http://qory:"+fetchPassword+"@127.0.0.1:9")
 	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), imagesSection(docker, staticELF(t))+lines+localGateway)
 	out, err := run(t, "run", "claude", "--policy", policy)
 	if cmd.ExitCode(err) != 4 {
@@ -459,6 +459,47 @@ func TestAWalledRunStartsTheImageItsEngineHolds(t *testing.T) {
 	if started := evs["dev.qory.run.started"]; len(started) != 1 || started[0]["machine"] != nil {
 		t.Errorf("run.started is %v, want no machine", started)
 	}
+}
+
+// TestAGatewayTakesTheCloseOfARunWhoseImageRunsAsRoot is a walled run whose policy
+// selects its image by a reference that the engine has, on a registry on this
+// machine, under Forager's session and the gateway qory run starts, with root as the
+// image's user: the image's fetch fails with image_user_root, qory run prints the line
+// with the fix first and exits 1, no container starts, and the gateway accepts the
+// close, so the last run.exited of the gateway's record, events.jsonl, and of the
+// session's, session.jsonl, is failed with image_user_root and -1, and neither record
+// contains batch_refused.
+func TestAGatewayTakesTheCloseOfARunWhoseImageRunsAsRoot(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, "claude")
+	image, policy, lines, _ := localImage(t)
+	docker, log, _ := engineDocker(t, image, "root", true, "http://qory:"+fetchPassword+"@127.0.0.1:9")
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), imagesSection(docker, staticELF(t))+lines+localGateway)
+	out, err := run(t, "run", "claude", "--policy", policy)
+	if cmd.ExitCode(err) != 1 {
+		t.Fatalf("%v (exit %d), want exit 1\n%s", err, cmd.ExitCode(err), out)
+	}
+	wants(t, out, "\nqory run: set USER in the image to a user other than root that its /etc/passwd lists, or select another image in the run's policy: the image "+image+" runs as root; a run's image runs as the wall's user (image_user_root)\n")
+	data, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containerRun.Match(data) {
+		t.Errorf("a container started:\n%s", data)
+	}
+	dir, _ := events(t, root)
+	for _, file := range []string{"events.jsonl", "session.jsonl"} {
+		b, err := os.ReadFile(filepath.Join(dir, file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := lastExited(t, b); got != "failed/image_user_root/-1" {
+			t.Errorf("%s ends the run %s, want failed/image_user_root/-1\n%s", file, got, b)
+		}
+		lacks(t, string(b), "batch_refused")
+	}
+	lacks(t, out, "batch_refused")
 }
 
 // noFileContains fails t when a file under dir contains secret.

@@ -183,6 +183,30 @@ func recorded(t *testing.T, root string) []string {
 	return ids
 }
 
+// lastExited is the last dev.qory.run.exited of rec, a record's lines, as
+// "state/reason/exit code", or "none" when rec has none.
+func lastExited(t *testing.T, rec []byte) string {
+	t.Helper()
+	end := "none"
+	for _, line := range strings.Split(strings.TrimSpace(string(rec)), "\n") {
+		var ev struct {
+			Type string `json:"type"`
+			Data struct {
+				State    string  `json:"state"`
+				Reason   string  `json:"reason"`
+				ExitCode float64 `json:"exit_code"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("%s: %v", line, err)
+		}
+		if ev.Type == "dev.qory.run.exited" {
+			end = fmt.Sprintf("%s/%s/%v", ev.Data.State, ev.Data.Reason, ev.Data.ExitCode)
+		}
+	}
+	return end
+}
+
 // endsOf is how each run recorded for the checkout at root ended, in the order of its
 // id: "state/reason/exit code" of its dev.qory.run.exited, such as "failed/no_session/-1"
 // for a run whose session never started, or "none" for a record with no end.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"time"
@@ -129,7 +130,11 @@ func OpenNowhere() (outcomes func() []session.Outcome, restore func()) {
 // nil, is the run's FetchImage, and AgentEnv, which, when
 // not nil, gets the spec of the run's AgentEnv and returns its result. With AgentEnv
 // nil, AgentEnv returns System and Repositories, each when set, as QORY_RUN_SYSTEM and
-// QORY_RUN_REPOSITORIES, sorted by name.
+// QORY_RUN_REPOSITORIES, sorted by name. With AtGateway set, each open also opens the
+// run at a gateway of Forager's that starts in this process for it, over the
+// gateway's local link, and Close closes the run there with qory's outcome and then
+// ends that gateway: the gateway writes its record, events.jsonl, and the session
+// writes session.jsonl, in the folder of the run's id under the open's RunsDir.
 type Nowhere struct {
 	System, Repositories string
 	Proxy, CABundle      string
@@ -143,6 +148,7 @@ type Nowhere struct {
 	AgentEnv             func(session.SessionSpec) ([]string, error)
 	OnOpen               func(session.OpenSpec)
 	FetchImage           func(context.Context) error
+	AtGateway            bool
 }
 
 // StepEvent is one event of a host step of a run [OpenNowhereWith] opened: Type is
@@ -170,9 +176,16 @@ func OpenNowhereWith(n Nowhere) (outcomes func() []session.Outcome, calls func()
 		defer mu.Unlock()
 		did = append(did, call)
 	}
-	openRun = func(_ context.Context, spec session.OpenSpec) (openedRun, error) {
+	openRun = func(ctx context.Context, spec session.OpenSpec) (openedRun, error) {
 		if n.OnOpen != nil {
 			n.OnOpen(spec)
+		}
+		var at *gatewayRun
+		if n.AtGateway {
+			var err error
+			if at, err = openAtGateway(ctx, spec); err != nil {
+				return nil, err
+			}
 		}
 		dir := n.Dir
 		if dir == "" {
@@ -184,7 +197,7 @@ func OpenNowhereWith(n Nowhere) (outcomes func() []session.Outcome, calls func()
 			made = append(made, dir)
 			mu.Unlock()
 		}
-		return &nowhere{id: spec.RunID, dir: dir, values: n, note: note, closed: func(o session.Outcome) {
+		return &nowhere{id: spec.RunID, dir: dir, values: n, note: note, at: at, closed: func(o session.Outcome) {
 			mu.Lock()
 			defer mu.Unlock()
 			got = append(got, o)
@@ -218,8 +231,37 @@ type nowhere struct {
 	values Nowhere
 	note   func(string)
 	closed func(session.Outcome)
+	at     *gatewayRun
 	steps  int
 	open   *nowhereStep
+}
+
+// gatewayRun is a run [Nowhere.AtGateway] opened at a gateway of Forager's in this
+// process, and that gateway.
+type gatewayRun struct {
+	run *session.Run
+	g   *gateway.Gateway
+}
+
+// openAtGateway starts a gateway in this process with no server, which keeps the
+// record of each run in the folder of its id under spec.RunsDir, and opens the run of
+// spec there, over the gateway's local link.
+func openAtGateway(ctx context.Context, spec session.OpenSpec) (*gatewayRun, error) {
+	g, err := gateway.Start(ctx, gateway.Config{
+		RunDir:       func(id string) string { return filepath.Join(spec.RunsDir, id) },
+		NoLinkSocket: true,
+		Report:       func(string) {},
+	})
+	if err != nil {
+		return nil, err
+	}
+	spec.Gateway = session.LocalGateway(g.LocalLink())
+	r, err := session.Open(ctx, spec)
+	if err != nil {
+		g.Close(ctx)
+		return nil, err
+	}
+	return &gatewayRun{run: r, g: g}, nil
 }
 
 func (n *nowhere) Join(context.Context, session.SessionSpec) (*session.Result, error) {
@@ -270,11 +312,16 @@ func (n *nowhere) AgentEnv(spec session.SessionSpec) ([]string, error) {
 	return env, nil
 }
 
-func (n *nowhere) Close(_ context.Context, out session.Outcome) (*session.Closed, error) {
+func (n *nowhere) Close(ctx context.Context, out session.Outcome) (*session.Closed, error) {
 	if n.open != nil {
 		n.open.Exit("cancelled", -1)
 	}
 	n.closed(out)
+	if n.at != nil {
+		closed, err := n.at.run.Close(ctx, out)
+		_, endErr := n.at.g.Close(ctx)
+		return closed, errors.Join(err, endErr)
+	}
 	return &session.Closed{RunID: n.id, State: out.State, Reason: out.Reason, ExitCode: out.ExitCode}, nil
 }
 
