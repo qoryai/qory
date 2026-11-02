@@ -42,6 +42,6 @@
 // a collision with its suggested fix being the one case, is returned wrapped so that it
 // matches [ErrReported]: main recognises it and prints nothing further. Either way main
 // exits with [ExitCode]: 2 for a mistake in the input, 3 for a collision or no work item,
-// 4 for a path qory refuses to replace or a push the run API refuses, the runtime's own
-// status after a qory run, 1 for anything else.
+// 4 for a path qory refuses to replace or a push that fails the run API's check of a type
+// or a limit, the runtime's own status after a qory run, 1 for anything else.
 package cmd

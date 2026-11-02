@@ -1539,11 +1539,12 @@ const (
 	// ExitStale is a --check that found the home behind the stack and modules, or
 	// nothing composed.
 	ExitStale = 6
-	// ExitNoWorkItem is qory work-item show with no work item. No other command that has
-	// a collision exits with it: the number is ExitCollision's on the harness verbs.
+	// ExitNoWorkItem is qory work-item show with no work item, on a command that has no
+	// collision: the harness verbs use the same number for ExitCollision.
 	ExitNoWorkItem = 3
-	// ExitArtifactRefused is a push of a type or of files over a limit that the run API
-	// refused. The number is ExitForeign's on the harness verbs.
+	// ExitArtifactRefused is a push that failed the run API's check of its type or a
+	// limit, on a command that has no foreign path: the harness verbs use the same number
+	// for ExitForeign.
 	ExitArtifactRefused = 4
 )
 

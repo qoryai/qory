@@ -18,6 +18,11 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- A skill reads its work item and stores what it made with `qory work-item show`, `qory
+  artifact pull`, `qory artifact push` and `qory run verdict`. In a run they use Qory
+  Apiary through the gateway, at `QORY_RUN_API`. Outside a run they use the checkout's
+  `.qory` directory. `qory work-item show` exits 3 with no work item, and `qory artifact
+  push` exits 4 for a type or a limit. See Commands of a work item in `docs/run.md`.
 - Every command that reads the configuration checks the `process.yaml` at the folder
   root of each module that `exports.modules` lists: its fields and their limits, that
   `stack` is one of `exports.stacks`, and that the stack declares each workflow the

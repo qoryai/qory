@@ -60,7 +60,7 @@ type noWorkItemError struct{}
 // Error returns the line for the person.
 func (noWorkItemError) Error() string { return noWorkItemText }
 
-// artifactRefused reports whether err is the run API's refusal of a type or a limit.
+// artifactRefused reports whether err is a run API error for a type or a limit.
 // [ExitCode] gives it [ExitArtifactRefused].
 func artifactRefused(err error) bool {
 	for _, code := range []string{
