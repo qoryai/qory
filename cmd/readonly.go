@@ -42,8 +42,8 @@ func readsOnly(r *codeRun, workflows map[string]stack.Workflow) bool {
 // nested Docker. A walled run with no image fails at the open and never gets here. A
 // run with a writable mount that contains root, lies inside it or links to it passes
 // here and stops later, so the agent does not start: Forager returns
-// mount_mode_conflict from the join, or from AgentEnv, before the setup, for an image
-// the policy selects by its reference.
+// mount_mode_conflict from the join, or, in a run with repositories whose image the
+// policy selects by its reference, from AgentEnv, before the setup.
 func readOnlyCheckout(spec *runSpec, root, workflow string, img session.Image) error {
 	refused := func(code, text string) error {
 		return &reasonError{code: code, text: text + " (" + code + ")" + codeUsed}

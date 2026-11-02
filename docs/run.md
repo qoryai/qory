@@ -26,10 +26,10 @@ such as `qory run: composed 42 entries from 3 modules for claude`. `-f`/`--file`
 `qory.yaml` and `harness.yaml`. A compose that fails stops the run before the agent
 starts, with the exit status of `qory harness compose`. The run's record shows that the
 run failed with no session started (`no_session`), and qory prints the path of the run's
-record after the error line. A run from a run code that stops after the compose closes
-with its reason in place of `no_session`: `workflow_not_in_harness` (see [What the run
-takes from the response](#what-the-run-takes-from-the-response)), or `read_needs_wall`,
-`read_needs_setup_outside` or `read_needs_no_nested_docker` (see [Read
+record after the error line. Four stops of a run from a run code, right after the
+compose, close with their reason in place of `no_session`: `workflow_not_in_harness` (see
+[What the run takes from the response](#what-the-run-takes-from-the-response)), or
+`read_needs_wall`, `read_needs_setup_outside` or `read_needs_no_nested_docker` (see [Read
 workflows](#read-workflows)). In a folder that is not a git working tree, `qory run` starts
 only with the home outside the folder, as `qory harness compose` composes only then.
 
@@ -3174,10 +3174,12 @@ start. The run stops after the image's fetch, exit 1, with a line that ends
 - When it lists repositories and the run's policy selects the image by its reference,
   the run stops before the setup and closes `failed` with `no_session`.
 
-A mount folder inside the checkout of a run whose run configuration lists repositories
-stops the run at the fetch instead, with `no_session`: the fetch needs an empty working
-folder. A writable mount at the checkout's exact path stops nothing: qory makes it
-read-only.
+A mount folder that exists in the checkout before the fetch, outside `.git` and `.qory`,
+stops a run whose run configuration lists repositories at the fetch instead, with
+`no_session`: the fetch needs an empty working folder. `--mount <checkout>/.qory/sub`, a
+mount in `.git`, and a `wall.mounts` folder that the fetch creates pass the fetch and stop
+as in the last two cases. A writable mount at the checkout's exact path stops nothing:
+qory makes it read-only.
 
 A `write` workflow, a run given a run key with no run code, and a run you start yourself
 see the checkout writable.
