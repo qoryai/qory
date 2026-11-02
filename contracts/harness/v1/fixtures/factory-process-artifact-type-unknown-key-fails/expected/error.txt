@@ -1,0 +1,1 @@
+modules/support-desk/process.yaml: remove the key "owner" from entry 1 of artifact_types: an artifact type has only name, base_view, size_limit, max_files and json_schema

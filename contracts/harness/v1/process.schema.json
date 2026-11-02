@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://qory.dev/contracts/harness/v1/process.schema.json",
   "title": "process.yaml",
-  "description": "process.yaml at the folder root of an exported module, a factory: a process template, with the texts a list of templates shows, the workspace type, the stack its workflows run on and the process document.",
+  "description": "process.yaml at the folder root of an exported module, a factory: a process template, with the texts a list of templates shows, the workspace type, the stack its workflows run on, the process document and the artifact types its workspaces use.",
   "type": "object",
   "required": ["apiVersion", "name", "summary", "description", "type", "stack", "process"],
   "additionalProperties": false,
@@ -40,9 +40,56 @@
           }
         }
       }
+    },
+    "artifact_types": {
+      "description": "The artifact types the template's workspaces use. Optional, and a list with no entries is valid. Each name is listed once, which qory checks and this schema cannot state. qory also checks that each json_schema compiles as a JSON Schema within the limits of the contract's README. qory has no list of standard types.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/artifact_type"}
     }
   },
   "$defs": {
+    "artifact_type": {
+      "description": "An artifact type: a standard type by its name alone, or a custom type with its full definition.",
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"description": "Lowercase letters and digits in groups joined by single hyphens, 1 to 64 bytes.", "type": "string", "maxLength": 64, "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
+        "base_view": {"description": "How a version's files are shown, and what they must be.", "enum": ["document", "image", "video", "file", "structured"]},
+        "size_limit": {"description": "The most bytes of all files of one version.", "type": "integer", "minimum": 1},
+        "max_files": {"description": "The most files of one version.", "type": "integer", "minimum": 1, "maximum": 20},
+        "json_schema": {"description": "The JSON Schema of a structured type's file.", "type": "object"}
+      },
+      "oneOf": [
+        {"description": "A standard type: the name alone.", "maxProperties": 1},
+        {"$ref": "#/$defs/custom_document"},
+        {"$ref": "#/$defs/custom_image"},
+        {"$ref": "#/$defs/custom_video"},
+        {"$ref": "#/$defs/custom_file"},
+        {"$ref": "#/$defs/custom_structured"}
+      ]
+    },
+    "custom_document": {
+      "required": ["base_view", "size_limit", "max_files"],
+      "properties": {"base_view": {"const": "document"}, "size_limit": {"maximum": 10485760}, "json_schema": false}
+    },
+    "custom_image": {
+      "required": ["base_view", "size_limit", "max_files"],
+      "properties": {"base_view": {"const": "image"}, "size_limit": {"maximum": 52428800}, "json_schema": false}
+    },
+    "custom_video": {
+      "required": ["base_view", "size_limit", "max_files"],
+      "properties": {"base_view": {"const": "video"}, "size_limit": {"maximum": 2147483648}, "json_schema": false}
+    },
+    "custom_file": {
+      "required": ["base_view", "size_limit", "max_files"],
+      "properties": {"base_view": {"const": "file"}, "size_limit": {"maximum": 1073741824}, "json_schema": false}
+    },
+    "custom_structured": {
+      "description": "A structured type has one file, and the one base view with a json_schema.",
+      "required": ["base_view", "size_limit", "max_files", "json_schema"],
+      "properties": {"base_view": {"const": "structured"}, "size_limit": {"maximum": 1048576}, "max_files": {"maximum": 1}}
+    },
     "workflow": {
       "description": "A workflow of a stage: a string of one line, not empty or white space alone, that the stack declares under workflows.",
       "type": "string",

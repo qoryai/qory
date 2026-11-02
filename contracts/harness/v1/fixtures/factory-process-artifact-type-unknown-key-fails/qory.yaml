@@ -1,0 +1,10 @@
+apiVersion: qory.dev/v1alpha1
+exports:
+  stacks: [support]
+  modules: [support-desk]
+harness:
+  target:
+    runtime: claude
+  modules:
+    - name: support-desk
+      source: {path: ., module: support-desk}
