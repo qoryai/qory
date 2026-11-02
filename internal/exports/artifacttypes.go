@@ -482,11 +482,12 @@ func SchemaRules(err error) string {
 }
 
 // schemaRules is the rule e states and the rules under it, in the order the library
-// prints them. An allOf or an anyOf only leads to the rules under it, and a reference
-// with one rule under it too. The library keeps a slice that later siblings overwrite
-// as the place of a [kind.PropertyNames] or a [kind.ContentSchema], and the rules under
-// one have a place inside the name or the content, so with unplaced true, or under such
-// a rule, a rule prints without a place.
+// prints them. A text such as 'allOf' failed only leads to the rules under it, and a
+// reference with one rule under it too, so neither prints. With no rule under it, as
+// for a 'not', that text is the rule, and it prints. The library keeps a slice that
+// later siblings overwrite as the place of a [kind.PropertyNames] or a
+// [kind.ContentSchema], and the rules under one have a place inside the name or the
+// content, so with unplaced true, or under such a rule, a rule prints without a place.
 func schemaRules(e *jsonschema.ValidationError, unplaced bool) []string {
 	switch e.ErrorKind.(type) {
 	case *kind.PropertyNames, *kind.ContentSchema:
@@ -503,7 +504,7 @@ func schemaRules(e *jsonschema.ValidationError, unplaced bool) []string {
 		if unplaced {
 			text = strings.TrimPrefix(text, "at '': ")
 		}
-		if !strings.HasSuffix(text, "' failed") {
+		if len(e.Causes) == 0 || !strings.HasSuffix(text, "' failed") {
 			rules = append(rules, text)
 		}
 	}

@@ -805,6 +805,45 @@ func TestSchemaRulesPrintsNoPlaceForContent(t *testing.T) {
 	}
 }
 
+// TestSchemaRulesPrintsARuleWithNothingUnderIt is a 'not', an 'enum' and a 'const' whose
+// library text ends as the text of an 'allOf' does, with no rule under them: each prints
+// as a rule, and the text of an 'allOf' with a rule under it does not print.
+func TestSchemaRulesPrintsARuleWithNothingUnderIt(t *testing.T) {
+	member := func(rule map[string]any) map[string]any {
+		return map[string]any{"properties": map[string]any{"a": rule}}
+	}
+	object := map[string]any{"b": "c"}
+	for _, tc := range []struct {
+		name   string
+		schema map[string]any
+		want   string
+	}{
+		{"not", member(map[string]any{"not": map[string]any{"type": "string"}}), "at '/a': 'not' failed"},
+		{"enum of an object", member(map[string]any{"enum": []any{object, "c"}}), "at '/a': 'enum' failed"},
+		{"enum of an array", member(map[string]any{"enum": []any{[]any{"b"}}}), "at '/a': 'enum' failed"},
+		{"const of an object", member(map[string]any{"const": object}), "at '/a': 'const' failed"},
+		{"const of an array", member(map[string]any{"const": []any{"b"}}), "at '/a': 'const' failed"},
+		{"not under a member name", map[string]any{"propertyNames": map[string]any{"not": map[string]any{"const": "a"}}}, "invalid propertyName 'a'; 'not' failed"},
+		{"not under allOf", map[string]any{"allOf": []any{member(map[string]any{"not": map[string]any{}})}}, "at '/a': 'not' failed"},
+		{"allOf with a rule under it", map[string]any{"allOf": []any{map[string]any{"required": []any{"b"}}}}, "at '': missing property 'b'"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := jsonschema.NewCompiler()
+			const url = "https://schema.example/rule"
+			if err := c.AddResource(url, tc.schema); err != nil {
+				t.Fatal(err)
+			}
+			schema, err := c.Compile(url)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := exports.SchemaRules(schema.Validate(map[string]any{"a": "x"})); got != tc.want {
+				t.Errorf("%s\nwant %s", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestArtifactTypesSchemaMatchesTheReader keeps artifact_types in process.schema.json and
 // the reader in step: each document is accepted or refused by both.
 func TestArtifactTypesSchemaMatchesTheReader(t *testing.T) {

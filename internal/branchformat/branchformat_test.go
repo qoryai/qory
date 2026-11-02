@@ -171,6 +171,19 @@ func TestCheckStartsWithTheFix(t *testing.T) {
 	}
 }
 
+// TestCheckPrintsTheSegmentRule is a path with a segment the format does not take. The
+// schema has that rule under a not, so the library gives its text with no rule under it,
+// and the error has the place and that rule.
+func TestCheckPrintsTheSegmentRule(t *testing.T) {
+	const want = "fix the branch document to match contracts/harness/v1/branch.schema.json: at '/repositories/0/path': 'not' failed"
+	for _, path := range []string{"acme/.git", "../web", "acme/../web", "acme/.GIT/x", "./web"} {
+		err := branchformat.Check([]byte(strings.Replace(valid(), "acme/web", path, 1)))
+		if err == nil || err.Error() != want {
+			t.Errorf("%s: %v\nwant %s", path, err, want)
+		}
+	}
+}
+
 // TestCheckHidesASecret is an access key secret in a value: the error does not print it.
 func TestCheckHidesASecret(t *testing.T) {
 	const secret = "qak_" + "0123456789abcdef"
