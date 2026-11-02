@@ -151,6 +151,21 @@ process.yaml](../contracts/harness/v1/README.md#a-factorys-processyaml).
 The harness repository states the qory it needs once, in its `qory.yaml`:
 `qory: ">=0.5.0"`. That requirement applies to every stack it delivers.
 
+### Declare a workflow
+
+A stack lists under `workflows` the workflows that a run from a run code may start. A
+workflow's name is its skill's name: the run starts the skill or command of that name.
+So the stack ships a skill or command for each workflow it lists. When none of the
+stack's modules composes one, after their `exclude` and `only`, the compose fails with
+exit 2:
+
+```
+add a skill or command deploy to a module of the base stack core@4b8e2f1a9c7d, or remove deploy from the workflows of its qory-stack.yaml: the stack declares the workflow deploy, and none of its modules ships a skill or command deploy
+```
+
+A module that a checkout adds to the stack does not count, because the stack lists the
+workflows.
+
 ## See a collision
 
 `qory setup example` writes a stack and two modules. Both modules ship a greet skill. The

@@ -160,6 +160,11 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- The compose fails, exit 2, for each entry of a stack's `workflows` that no module of
+  the stack composes as a skill or command.
+- A run from a run code whose composed harness has no skill or command of the
+  workflow's name closes `failed` with the reason `workflow_not_in_harness`, not
+  `no_session`, and its line shows the target's path after the checkout's harness.
 - The `agent` image contains Claude Code 2.1.316, up from 2.1.273.
 - Claude Code runs with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and
   `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1` in every run,

@@ -1,0 +1,1 @@
+add a skill or command deploy to a module of the base stack core@working-tree, or remove deploy from the workflows of its qory-stack.yaml: the stack declares the workflow deploy, and none of its modules ships a skill or command deploy

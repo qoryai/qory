@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -434,15 +435,53 @@ func TestARunCodesLinesShowTheHarnessByItsPhrase(t *testing.T) {
 			if (r.named != nil) != hidden || (r.harness != nil) != (harness != nil) {
 				t.Errorf("hidden %v: named %+v, harness %q", hidden, r.named, r.harness)
 			}
-			_, missing := r.workflowArgs("claude", report.Report{}, "")
+			_, missing := r.workflowArgs("claude", report.Report{}, "", "")
 			for _, c := range []struct{ got, want string }{
 				{r.startLine("run_1"), "qory run: the run run_1 starts the workflow example of " + phrase + " on claude"},
-				{fmt.Sprint(missing), "add a skill or command example to " + phrase + ", or set another workflow in Qory Apiary: the composed harness has no skill or command example; the code is used"},
+				{fmt.Sprint(missing), "add a skill or command example to " + phrase + ", or set another workflow in Qory Apiary: the composed harness has no skill or command example (workflow_not_in_harness); the code is used"},
 			} {
 				if c.got != c.want {
 					t.Errorf("hidden %v: got  %q\nwant %q", hidden, c.got, c.want)
 				}
 			}
+		}
+	}
+}
+
+// TestAMissingWorkflowEndsTheRunWithItsReason is workflowArgs for a harness with no skill
+// or command example: a [*reasonError] of workflow_not_in_harness, whose line shows the
+// checkout's harness with the target's path, as the repository when the target is on
+// the system of the run's repositories and as the target on any other, and the
+// workspace's harness without it.
+func TestAMissingWorkflowEndsTheRunWithItsReason(t *testing.T) {
+	const fix = "add a skill or command example to "
+	const cause = ", or set another workflow in Qory Apiary: the composed harness has no skill or command example (workflow_not_in_harness); the code is used"
+	doc := &contracts.HarnessDocument{Harness: contracts.HarnessSection{Extends: &contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7"}}}
+	target := &contracts.Target{System: "code.example.com", Path: "acme/site"}
+	for _, c := range []struct {
+		harness *contracts.HarnessDocument
+		target  *contracts.Target
+		system  string
+		want    string
+	}{
+		{nil, target, "code.example.com", "the checkout's harness in the repository acme/site"},
+		{nil, target, "forge.example.org", "the checkout's harness for the target acme/site"},
+		{nil, target, "", "the checkout's harness for the target acme/site"},
+		{nil, &contracts.Target{System: "tickets.example.com", Path: "queue-7"}, "code.example.com", "the checkout's harness for the target queue-7"},
+		{nil, nil, "code.example.com", "the checkout's harness"},
+		{doc, target, "code.example.com", "the workspace's harness"},
+	} {
+		r, err := codeRunOf(contracts.Documents{Harness: c.harness, Target: c.target, Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = r.workflowArgs("claude", report.Report{}, "", c.system)
+		var ended *reasonError
+		if !errors.As(err, &ended) || ended.code != "workflow_not_in_harness" || err.Error() != fix+c.want+cause {
+			t.Errorf("%+v on %q: %v\nwant %s", c.target, c.system, err, fix+c.want+cause)
+		}
+		if ExitCode(err) != 1 {
+			t.Errorf("%+v: exit %d, want 1", c.target, ExitCode(err))
 		}
 	}
 }
@@ -577,7 +616,7 @@ func TestARunCodesWorkflowStartsOnEachRuntimesHeadlessStart(t *testing.T) {
 		{"opencode", command, []string{"run", "--format", "json", "--command", "example", file}},
 		{"cursor", skill, []string{"--print", "--output-format", "stream-json", "--add-dir", in, "/example " + file}},
 	} {
-		got, err := r.workflowArgs(c.runtime, c.rep, in)
+		got, err := r.workflowArgs(c.runtime, c.rep, in, "")
 		if err != nil || !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%s: got %q, %v\nwant %q", c.runtime, got, err, c.want)
 		}
@@ -594,7 +633,7 @@ func TestARunCodesWorkflowStartsOnEachRuntimesHeadlessStart(t *testing.T) {
 		{"amp", skill, "set another runtime for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow with a runtime's headless start, and has none for amp; the code is used"},
 		{"copilot", skill, "set another runtime for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow with a runtime's headless start, and has none for copilot; the code is used"},
 	} {
-		if _, err := r.workflowArgs(c.runtime, c.rep, in); err == nil || err.Error() != c.want {
+		if _, err := r.workflowArgs(c.runtime, c.rep, in, ""); err == nil || err.Error() != c.want {
 			t.Errorf("%s: got %v\nwant %s", c.runtime, err, c.want)
 		}
 	}

@@ -674,7 +674,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return false, input(err)
 				}
 				if fromCode != nil {
-					if extra, err = fromCode.workflowArgs(name, rep, in); err != nil {
+					if extra, err = fromCode.workflowArgs(name, rep, in, run.System()); err != nil {
 						return false, err
 					}
 					// The time limit counts from the open, so the compose's time is in it.
@@ -917,12 +917,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				said("the record is in " + record)
 				return reported(&exitError{code: exitTimeout})
 			case prepErr != nil:
-				// A run no session joined is failed with no_session, or with the refusal of
-				// its image as the reason.
+				// A run no session joined is failed with no_session, or with the reason a
+				// [*reasonError] sets.
 				out := session.Outcome{State: event.StateFailed, ExitCode: -1}
-				var image *imageRefusedError
-				if errors.As(prepErr, &image) {
-					out.Reason = image.code
+				var ended *reasonError
+				if errors.As(prepErr, &ended) {
+					out.Reason = ended.code
 				}
 				closeRun(out)
 				lines.done(nil)

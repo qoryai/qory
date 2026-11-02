@@ -2,8 +2,10 @@ package compose
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -265,6 +267,9 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	dirs := map[string]string{}
 	requires := map[string]map[string][]Need{}
 	checkoutExcludes := map[string]map[string][]string{}
+	// declared is every entry, as <kind>/<name>, that the modules of the stack whose
+	// workflows the compose checks compose, see [workflowsShipped].
+	declared := map[string]bool{}
 	for _, pl := range p.Modules {
 		ps := p.SourceOf(pl)
 		who := "module " + accesskey.ShownName(pl.Name, false)
@@ -341,6 +346,13 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		env, pulled, err := applySelection(l, pl, m.Env, requires[name], res)
 		if err != nil {
 			return nil, err
+		}
+		// The base's workflows are checked on what its modules ship, before a checkout's
+		// exclude drops an entry that a module of the repository may ship instead.
+		if pl.Base || opts.Base == nil {
+			for _, e := range l.Entries {
+				declared[e.Kind+"/"+e.Name] = true
+			}
 		}
 		if err := applyCheckoutExclude(l, pl, res, opts.Base); err != nil {
 			return nil, err
@@ -421,6 +433,9 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	if err := checkResolved(res, requires); err != nil {
 		return nil, err
 	}
+	if err := workflowsShipped(p, declared, opts.Base); err != nil {
+		return nil, err
+	}
 	if len(instructions) > 0 {
 		res.Instructions = strings.Join(instructions, "\n\n") + "\n"
 	}
@@ -428,6 +443,35 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		res.Env[name] = value
 	}
 	return res, nil
+}
+
+// workflowsShipped checks that each workflow of p is a skill or command that composed
+// contains, the entries of the modules of the stack that lists the workflows, after
+// their exclude or only blocks: base's modules for a stack that extends base, and
+// p's modules for one that extends none. A module that a checkout adds to a base does not
+// count, since the base lists the workflows. Each workflow without one is a line of the
+// error, in sorted order.
+func workflowsShipped(p *stack.Stack, composed map[string]bool, base *Base) error {
+	var lines []string
+	for _, name := range slices.Sorted(maps.Keys(p.Workflows)) {
+		if composed["skills/"+name] || composed["commands/"+name] {
+			continue
+		}
+		w := shown(name)
+		if base != nil {
+			lines = append(lines, fmt.Sprintf("add a skill or command %s to a module of the base stack %s, or remove %s from the workflows of its %s: the stack declares the workflow %s, and none of its modules ships a skill or command %s", w, base.String(), w, stack.FileName, w, w))
+			continue
+		}
+		in := "the stack"
+		if p.File != "" {
+			in += " in " + filepath.Base(p.File)
+		}
+		lines = append(lines, fmt.Sprintf("add a skill or command %s to a module of %s, or remove %s from its workflows: the stack declares the workflow %s, and none of its modules ships a skill or command %s", w, in, w, w, w))
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	return errors.New(strings.Join(lines, "\n"))
 }
 
 // exportEnv adds a module's exported variables to the result, each as

@@ -1478,6 +1478,21 @@ run <run id> starts the workflow <workflow> of the workspace's harness on claude
 run whose documents contain a harness, or `… of the checkout's harness on claude` for one
 whose documents contain none.
 
+When the composed harness has no skill or command of the workflow's name, the run stops
+before the agent starts, exit 1, and qory closes the run `failed` with the reason
+`workflow_not_in_harness`, in place of `no_session`:
+
+```
+add a skill or command <workflow> to <harness>, or set another workflow in Qory Apiary: the composed harness has no skill or command <workflow> (workflow_not_in_harness); the code is used
+```
+
+`<harness>` is `the workspace's harness` for a run whose documents contain a harness. For
+one whose documents contain none, it is `the checkout's harness`, with the target's
+`path` after it when the documents have a target: `the checkout's harness in the
+repository <path>` when the target's `system` is `QORY_RUN_SYSTEM`, and `the checkout's
+harness for the target <path>` on any other system. A workflow whose skill or command
+the runtime runs by no name from a headless start closes the run with `no_session`.
+
 The documents of a run with a target may set `target_version`: the version at which Qory
 Apiary checked the target for a harness file. When the target's `system` is
 `QORY_RUN_SYSTEM`, the target is the run's repository: Qory Apiary lists the target's
@@ -1634,9 +1649,10 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
   again: qory starts a run code's workflow with a runtime's headless start, and has none
   for <runtime>; the code is used`, before anything is fetched
 - `add a skill or command <workflow> to <harness>, or set another workflow in Qory
-  Apiary: the composed harness has no skill or command <workflow>; the code is used`,
-  after the compose, where `<harness>` is `the workspace's harness` or `the checkout's
-  harness`
+  Apiary: the composed harness has no skill or command <workflow>
+  (workflow_not_in_harness); the code is used`, after the compose, which closes the run
+  with the reason `workflow_not_in_harness`; [What the run takes from the
+  response](#what-the-run-takes-from-the-response) lists the values of `<harness>`
 - `add a command <workflow> to <harness>, or set another runtime in Qory Apiary:
   <runtime> runs no skill by its name from a headless start; the code is used`, after the
   compose, for a workflow that is only a skill on `gemini` or `opencode`

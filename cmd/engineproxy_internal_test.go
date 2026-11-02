@@ -292,7 +292,7 @@ func TestFetchImageSaysHowTheFetchEnded(t *testing.T) {
 				t.Errorf("%v, from a run code %v: %v, want the line %q", c.err, fromCode, err, want)
 				continue
 			}
-			var refused *imageRefusedError
+			var refused *reasonError
 			if got := errors.As(err, &refused); got != (c.code != "") || got && refused.code != c.code {
 				t.Errorf("%v: the image refusal %+v, want %q", c.err, refused, c.code)
 			}
