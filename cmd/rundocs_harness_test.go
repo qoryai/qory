@@ -1036,7 +1036,8 @@ func TestAHarnessDocumentWhosePathLeadsOutStops(t *testing.T) {
 // document binds a role of each of two kinds, by kind and then by role: the documents
 // pass qory's checks and the harness composes, so the session joins.
 func TestARunCodeWhoseHarnessBindsByKindComposes(t *testing.T) {
-	r := runFromCode(t, nil, harnessBind(map[string]any{"commands": map[string]any{"greeting": "hello"}, "skills": map[string]any{"welcome": "greet"}}))
+	writes := func(s string) string { return s + "workflows:\n  hello:\n    access: write\n" }
+	r := runFromCode(t, writes, harnessBind(map[string]any{"commands": map[string]any{"greeting": "hello"}, "skills": map[string]any{"welcome": "greet"}}))
 	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
