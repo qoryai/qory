@@ -1,1 +1,3 @@
+commands/review core
 skills/a core
+skills/fix core

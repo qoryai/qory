@@ -1,0 +1,8 @@
+apiVersion: qory.dev/v1alpha1
+name: core
+modules:
+  - name: core
+    source: {path: modules/core}
+extending: {kinds: [skills]}
+workflows:
+  deploy: {}
