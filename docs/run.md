@@ -1682,8 +1682,8 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
   (read_needs_no_nested_docker); the code is used`, after the compose, for a read run on
   an image with `docker: true`, which closes the run with the reason
   `read_needs_no_nested_docker`; see [Read workflows](#read-workflows)
-- `start the run again: the setup container of this read run was not removed, so a
-  process in the container can write the checkout: <error>
+- `take the work item in again in Qory Apiary: the setup container of this read run was
+  not removed, so a process in the container can write the checkout: <error>
   (read_needs_setup_removed); the code is used`, after the setup, for a read run whose
   setup container was not removed, which closes the run with the reason
   `read_needs_setup_removed`; see [Read workflows](#read-workflows)
@@ -3233,7 +3233,7 @@ because a process in the container can still write the checkout. qory closes the
 `failed` with the reason `read_needs_setup_removed`:
 
 ```
-start the run again: the setup container of this read run was not removed, so a process in the container can write the checkout: <error> (read_needs_setup_removed); the code is used
+take the work item in again in Qory Apiary: the setup container of this read run was not removed, so a process in the container can write the checkout: <error> (read_needs_setup_removed); the code is used
 ```
 
 A time limit or a signal that ends the removal closes the run as it closes a setup that

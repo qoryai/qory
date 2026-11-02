@@ -26,7 +26,7 @@ const (
 	textReadNeedsWall           = "run this workflow with a wall: this run of workflow %s only reads the checkout, and a run with no wall mounts nothing read-only"
 	textReadNeedsSetupOutside   = "set wall.setup to outside in " + config.ForagerFileName + ", or remove it: this run of workflow %s only reads the checkout, and setup inside runs in the agent's container, which sees the checkout read-only"
 	textReadNeedsNoNestedDocker = "use an image without nested Docker: this run of workflow %s only reads the checkout, and image %s has nested Docker, so the checkout cannot be made read-only"
-	textReadNeedsSetupRemoved   = "start the run again: the setup container of this read run was not removed, so a process in the container can write the checkout: %s"
+	textReadNeedsSetupRemoved   = "take the work item in again in Qory Apiary: the setup container of this read run was not removed, so a process in the container can write the checkout: %s"
 )
 
 // readsOnly reports whether the run from the run code r only reads the checkout: the
