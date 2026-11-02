@@ -392,10 +392,10 @@ the stack file:
 
 A workflow that is empty, null, not a string, or has a line break or another control
 character, is refused the same way, with the entry's place in the stage, such as `entry
-2 in the loop of entry 3`. So is a stage name with a line break or another control
-character. qory reads the file through the module's folder, as the compose reads a
-module's files: a link to a file inside the folder is followed, and a link to a place
-outside it is refused without reading the place it leads to.
+2 in the loop of entry 3`. A stage name and a `stack` with a line break or another
+control character are refused too. qory reads the file through the module's folder, as
+the compose reads a module's files: a link to a file inside the folder is followed, and
+a link to a place outside it is refused without reading the place it leads to.
 
 A character is a Unicode code point, and a word is a run of characters without white
 space. The compose does not read the file: in the composed tree it is one of the

@@ -142,6 +142,11 @@ func (e *Exports) checkProcess(path string, data []byte) error {
 	if t.Stack == "" {
 		return fmt.Errorf("%s: add stack, a name that exports.stacks lists: the file has no stack", shown)
 	}
+	if why := notOneLine(t.Stack); why != "" {
+		// The refusal of a stack exports.stacks does not list prints the value, so a
+		// value with a line break could start a line that looks like qory's.
+		return fmt.Errorf("%s: set stack to one line of text: %s", shown, why)
+	}
 	if !contains(e.Stacks, t.Stack) {
 		listed := "no stacks"
 		if len(e.Stacks) > 0 {
