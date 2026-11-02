@@ -46,6 +46,8 @@ func Root() *cobra.Command {
   run         run the agent behind a proxy: recorded; behind a wall, fenced, no tokens inside
   access-key  make the key this machine signs its runs to the server with
   apiary      debug runs on a Qory Apiary server
+  work-item   read the work item of this run
+  artifact    pull and push the artifacts of a work item
 
 It serves Claude Code, Codex, Gemini CLI, OpenCode, Cursor, Copilot CLI, Amp, Goose, and
 any tool that reads AGENTS.md.
@@ -79,7 +81,7 @@ More: https://github.com/qoryai/qory`,
 	}
 	// The completion script is qory setup completion, and setup shell loads it.
 	root.CompletionOptions.DisableDefaultCmd = true
-	root.AddCommand(newVersion(), newUpdate(), newSetup(), newHarness(), newWorktree(), newConfig(), newRun(), newGateway(), newImage(), newAccessKeyCommand(), newApiary())
+	root.AddCommand(newVersion(), newUpdate(), newSetup(), newHarness(), newWorktree(), newConfig(), newRun(), newGateway(), newImage(), newAccessKeyCommand(), newApiary(), newWorkItem(), newArtifact())
 	root.AddCommand(shortcuts()...)
 	root.AddCommand(worktreeShortcuts()...)
 	root.PersistentFlags().BoolP("verbose", "v", false, "print more of what the command does; each command's help lists what")

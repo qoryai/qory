@@ -105,4 +105,5 @@ qory run [runtime] [-- argument...] [flags]
 * [qory run end](qory_run_end.md)	 - End a run a starter registered, and say how it went
 * [qory run register](qory_run_register.md)	 - Register a run with the server, and write its run key for the job to a descriptor
 * [qory run resend](qory_run_resend.md)	 - Send a finished run's record to the server again
+* [qory run verdict](qory_run_verdict.md)	 - Store the run's verdict
 

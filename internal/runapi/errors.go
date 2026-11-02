@@ -55,8 +55,15 @@ type Error struct {
 }
 
 // Error returns one line for a person or a log: Message when the response has one, else
-// a line made from the code, with the fix first.
+// a line made from the code, with the fix first. A POST with the code [CodeUnavailable]
+// always gets the line below, in place of the gateway's retry line: the POST may have
+// stored the version.
 func (e *Error) Error() string {
+	if e.Code == CodeUnavailable && strings.HasPrefix(e.Request, http.MethodPost) {
+		return fmt.Sprintf("Read the artifact index, and try again if the version is not there. "+
+			"%s may have stored it (%d %s).", e.Request, e.Status, e.Code)
+	}
+
 	if e.Message != "" {
 		return e.Message
 	}
@@ -152,7 +159,7 @@ func readError(response *http.Response, request string) *Error {
 
 // versionTooLarge returns the error of a version of artifactType that is size bytes
 // encoded, over [MaxBody], which the client does not send.
-func versionTooLarge(artifactType string, size int) *Error {
+func versionTooLarge(artifactType string, size int64) *Error {
 	return &Error{
 		Code:  CodePayloadTooLarge,
 		Type:  artifactType,

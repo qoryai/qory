@@ -2342,6 +2342,51 @@ the requests, so with `gateway.egress.paths` set, every run on the machine needs
 The access key's secret stays Forager's: see [The access key and the
 instance](#the-access-key-and-the-instance).
 
+## Commands of a work item
+
+A skill reads its work item and stores what it made with four commands. Each command
+works in a run and on a laptop, so a skill needs no branch for where it runs.
+
+| Command | In a run | Outside a run |
+| ------- | -------- | ------------- |
+| `qory work-item show` | Prints the work item as JSON. | Prints `.qory/work-item.json`. With no file, exits 3. |
+| `qory artifact pull [<type>] [--version <N>]` | Fetches artifacts into `.qory/artifacts/<type>/<name>/v<N>/`, writes `.qory/artifacts/index.json`, and prints the directory. | Fetches nothing, and says so. |
+| `qory artifact push <type> <file>... [--name <name>] [--note <text>]` | Stores the files as one new version, keeps a copy in `.qory/artifacts`, and prints the version. | Keeps the files in `.qory/artifacts`, and sends nothing. |
+| `qory run verdict passed\|changes-requested\|escalate [--gaps <file>]` | Stores the verdict. Qory Apiary acts on it when the run ends. | Prints the verdict and keeps it in `.qory/artifacts/verdict/`. Nothing acts on it. |
+
+A run with a control plane sets `QORY_RUN_API` to
+`http://run-api.qory.invalid/v1/runs/<run id>`. The commands send their requests there
+through `HTTP_PROXY`. The gateway signs them, so the run has no key. With the variable
+absent, the commands work on the checkout's `.qory` directory.
+
+`qory artifact pull` fetches the newest version of each output of the stage, and the
+version of each input that its gate approved. A type that is both counts as an output. For
+any other artifact it fetches the approved version, or the newest when none is approved.
+`<type>` limits the fetch to one type. `--version` needs `<type>`.
+
+`-` as a file of `qory artifact push` reads one file from standard input. Its name is
+`stdin` with the extension of its content, such as `stdin.md`. One version is at most
+32 MiB encoded through the run API, about 24 MiB of files, whatever the type's size limit.
+
+`qory artifact push` exits 4, with the type and the limit, for a type that the workspace
+does not have or the workflow may not write, for too many files, and for files over a
+limit. One version has at most 100 files through the run API, whatever the type's maximum.
+`qory run verdict` exits 4 for a request over its limit too. `qory work-item show` exits 3
+with no work item. These numbers mean a collision and a foreign path on `qory harness`.
+
+`.qory/artifacts/.gitignore` keeps the artifacts out of git, also in a run's checkout,
+which has no exclude line for `.qory`. A directory link at `.qory` or `.qory/artifacts`
+stops `qory artifact push` with exit 1 before it sends anything. A directory link further
+down stops `qory artifact pull` and a push outside a run with exit 1. In a run, a push has
+stored the version by that point, so it keeps no local copy, prints a line on standard
+error, and exits 0. A write replaces a link at a file's path, and never follows it.
+
+With a home in the checkout, `qory harness remove` deletes the directory with the rest of
+`.qory`. `--runtime` does the same when it removes the last composed runtime.
+
+The client sends a POST once. If the response is lost, the version may be stored: read the
+artifact index with `qory artifact pull` before you push again.
+
 ## Credentials the agent never has
 
 Behind a wall, a run needs no credential inside the container. `forager.yaml` defines the

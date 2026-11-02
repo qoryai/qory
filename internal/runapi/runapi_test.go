@@ -480,6 +480,42 @@ func TestPushArtifactSendsNothingOverTheLimit(t *testing.T) {
 	}
 }
 
+func TestPushArtifactSendsNoMoreFilesThanTheRunAPITakes(t *testing.T) {
+	client := serve(t, func(_ http.ResponseWriter, r *http.Request) {
+		t.Errorf("request sent: %s", r.RequestURI)
+	})
+
+	_, err := client.PushArtifact(context.Background(), runapi.Push{
+		Type: "screenshot", Files: make([]runapi.PushFile, runapi.MaxFiles+1),
+	})
+	if !runapi.HasCode(err, runapi.CodeTooManyFiles) {
+		t.Fatalf("err = %v", err)
+	}
+
+	if want := "Push at most 100 files in one version of screenshot. This version has 101."; err.Error() != want {
+		t.Errorf("err = %q", err)
+	}
+}
+
+func TestAnUnavailablePushSaysToReadTheIndexFirst(t *testing.T) {
+	for name, body := range map[string]string{
+		"no message": `{"error":"unavailable"}`,
+		"a message":  `{"error":"unavailable","message":"Retry the request."}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			client := serve(t, respond(http.StatusServiceUnavailable, body))
+
+			_, err := client.PushVerdict(context.Background(), runapi.VerdictPassed, "")
+
+			want := "Read the artifact index, and try again if the version is not there. " +
+				"POST /verdict may have stored it (503 unavailable)."
+			if err == nil || err.Error() != want {
+				t.Errorf("err = %v", err)
+			}
+		})
+	}
+}
+
 func TestPushVerdictSendsTheBodyTheRunAPIReads(t *testing.T) {
 	for _, c := range []struct{ gaps, want string }{
 		{"Add the empty cart.", `{"verdict":"changes-requested","gaps":"Add the empty cart."}`},
