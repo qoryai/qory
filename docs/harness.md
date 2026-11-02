@@ -215,8 +215,8 @@ records the same.
 The rules:
 
 - Use the name the delivered stack lists the module under: its `name`, or the
-  `module` its source selects. A module that the stack lists by a path alone cannot be
-  reached this way.
+  `module` its source selects. A module that the stack lists by a `path` or `git`
+  source alone cannot be reached this way.
 - The entry contains `name` and `exclude` only. A `source`, `only`, `variant` or `link`
   fails the compose.
 - The exclude lists entries of the kinds the stack's `extending` block lets your modules
