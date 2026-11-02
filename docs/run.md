@@ -3170,7 +3170,7 @@ What to know:
 
 ### Read workflows
 
-Two values set what a run from a run code may do on the checkout:
+Two values set what a run of a workflow from a run code may do on the checkout:
 
 - The workflow's access in the stack, `workflows.<name>.access`: `read` or `write`. A
   workflow that sets no access, and one the stack does not declare, is `read` (see
@@ -3195,8 +3195,9 @@ with `access: write`. A read run sees the checkout read-only:
   wall step `remove the setup container`, so every process in that container has ended
   when the agent starts. A read run's agent cannot reach a service that the setup started:
   the name `qory-setup` does not resolve, so a connection to `qory-setup:5432` fails. Any
-  other run keeps the setup container until the run closes, so declare a workflow `write`
-  if its agent needs such a service.
+  other run keeps the setup container until the run closes. If a workflow's agent needs
+  such a service, declare the workflow `write`, and check that `access` in the run's
+  documents is not `read`.
 
 A read run with no wall, with `wall.setup: inside` or on an image with nested Docker
 cannot see the checkout read-only. It stops after the compose, before the image's fetch,
@@ -3259,8 +3260,8 @@ mount in `.git`, and a `wall.mounts` folder that the fetch creates pass the fetc
 as in the last two cases. A writable mount at the checkout's exact path stops nothing:
 qory makes it read-only.
 
-A run from a run code where neither value is `read`, a run given a run key with no run
-code, and a run you start yourself see the checkout writable.
+A run of a workflow from a run code where neither value is `read`, a run given a run key
+with no run code, and a run you start yourself see the checkout writable.
 
 ### Qory's images
 
