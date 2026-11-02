@@ -1,6 +1,7 @@
 package exports_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -671,5 +672,49 @@ func TestArtifactTypesSchemaMatchesTheReader(t *testing.T) {
 		if err := factory(t, body).Verify(); (err == nil) != c.valid {
 			t.Errorf("reader: %q valid=%v err=%v", c.body, c.valid, err)
 		}
+	}
+}
+
+// TestBranchSchemaPassesAsACustomType is the contract's branch.schema.json as the
+// json_schema of a custom type: it passes the check and process.schema.json, with the
+// limits that a factory sets for the type. The same type with a schema that does not
+// compile fails, so the check reads the entry.
+func TestBranchSchemaPassesAsACustomType(t *testing.T) {
+	raw, err := os.ReadFile("../../contracts/harness/v1/branch.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var one bytes.Buffer
+	if err := json.Compact(&one, raw); err != nil {
+		t.Fatal(err)
+	}
+	entry := func(schema string) string {
+		return withTypes("\n  - name: branch\n    base_view: structured\n    size_limit: 65536\n    max_files: 1\n    json_schema: " + schema)
+	}
+	body := entry(one.String())
+	if err := factory(t, body).Verify(); err != nil {
+		t.Errorf("branch.schema.json: %v", err)
+	}
+	schema, err := jsonschema.NewCompiler().Compile("../../contracts/harness/v1/process.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc any
+	if err := yaml.Unmarshal([]byte(body), &doc); err != nil {
+		t.Fatal(err)
+	}
+	j, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(j, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if err := schema.Validate(doc); err != nil {
+		t.Errorf("process.schema.json: %v", err)
+	}
+	broken := entry(strings.Replace(one.String(), `"type":"object"`, `"type":"objekt"`, 1))
+	if err := factory(t, broken).Verify(); err == nil || !strings.Contains(err.Error(), "so that it compiles as a JSON Schema: ") {
+		t.Errorf("a schema that does not compile: %v", err)
 	}
 }

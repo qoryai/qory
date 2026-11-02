@@ -53,8 +53,9 @@ const (
 // resolves, since the schema refers to nothing outside itself.
 const typeSchemaURL = "https://qory.dev/contracts/harness/v1/artifact-type"
 
-// maxCompileError is the most characters of the compiler's text that a message prints.
-const maxCompileError = 300
+// maxSchemaError is the most characters of the JSON Schema library's text that a message
+// prints.
+const maxSchemaError = 300
 
 // typeKeys is every key an entry of artifact_types may have.
 var typeKeys = []string{"name", "base_view", "size_limit", "max_files", "json_schema"}
@@ -353,12 +354,20 @@ func compileTypeSchema(schema []byte) error {
 func compileReason(err error) string {
 	var invalid *jsonschema.SchemaValidationError
 	if errors.As(err, &invalid) {
-		err = invalid.Err
+		return SchemaRules(invalid.Err)
 	}
-	text := strings.ReplaceAll(err.Error(), typeSchemaURL, "")
+	return HideValues(oneLine(strings.ReplaceAll(err.Error(), typeSchemaURL, "")))
+}
+
+// SchemaRules is err, a [jsonschema.ValidationError], as one line of a message: each
+// rule the document breaks, with the place in the document, with each word that
+// contains a secret hidden as [HideValues] hides it. The text of any other error is one
+// line in the same way.
+func SchemaRules(err error) string {
+	text := err.Error()
 	var broken *jsonschema.ValidationError
 	if errors.As(err, &broken) {
-		// The first line is the draft; each line after it is one rule, indented by depth.
+		// The first line is the schema; each line after it is one rule, indented by depth.
 		// A line for an allOf or an anyOf only leads to the rules under it.
 		var rules []string
 		for _, line := range strings.Split(text, "\n")[1:] {
@@ -371,13 +380,13 @@ func compileReason(err error) string {
 	return HideValues(oneLine(text))
 }
 
-// oneLine is text as one line of a message: at most [maxCompileError] characters, with
+// oneLine is text as one line of a message: at most [maxSchemaError] characters, with
 // ... after what is cut, and each character that does not print as ?.
 func oneLine(text string) string {
 	var b strings.Builder
 	n := 0
 	for _, r := range text {
-		if n == maxCompileError {
+		if n == maxSchemaError {
 			b.WriteString("...")
 			break
 		}

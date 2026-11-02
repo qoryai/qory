@@ -2,7 +2,7 @@
 
 What `qory harness compose` reads and what it writes.
 
-## Four files
+## Five files
 
 | File | Lives in | Defines |
 |---|---|---|
@@ -10,6 +10,7 @@ What `qory harness compose` reads and what it writes.
 | `qory-module.yaml` | the root of a module | the module: its name, its variants per runtime, the variables it exports |
 | `process.yaml` | optional; the folder root of a module that `exports.modules` lists, which makes the module a factory | a process template: its name, summary and description, the workspace type, the exported stack its workflows run on, its `qory.process/v1` process, and optionally the artifact types its workspaces use. Every command that reads the configuration checks it; the compose does not read it (§Exports) |
 | `qory.yaml`, or `harness.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's stack, its target and modules, or the stack it extends, the target it composes it for and the modules it appends, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; under `exports`, the stacks and modules this repository publishes for others, by name (§Exports); `git` and `env` (§The configuration) |
+| a branch document | the file of a version of a structured artifact type `branch` | a work item's branch and the commit in each repository (§The branch format). No compose reads it |
 
 Every module has a `qory-module.yaml`; it defines the module's name, and a directory
 without one is not a module. `qory.yaml` is optional: every setting has a default. It has
@@ -475,6 +476,36 @@ and then the fix:
 
 ```text
 /src/acme-harness/harness/modules/support-desk/process.yaml: add size_limit and max_files to artifact type reply-draft, or leave only its name: a custom type has base_view, size_limit and max_files
+```
+
+## The branch format
+
+A branch document records a work item's branch and the commit in each repository. This
+is version 1 of the format ([branch.schema.json](branch.schema.json)):
+
+```json
+{"ref": "qory/wi_7k2m9pq4xt3a8b1c",
+ "repositories": [{"system": "github.com", "path": "acme/web", "commit": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e"}]}
+```
+
+| Member | Meaning |
+|---|---|
+| `ref` | the branch's name, the same in each repository: `qory/` followed by the work item's id |
+| `repositories` | each repository with the commit of the branch in it, at least one |
+| `system` | the host the repository is on, a lower-case host name of at most 253 characters |
+| `path` | the repository's path on the host: at most 200 characters of segments joined by slashes, with no `.`, `..` or `.git` segment |
+| `commit` | a full commit id, 40 or 64 lower-case hexadecimal digits |
+
+A document has no other member. A software factory uses the format as the JSON Schema of
+a custom artifact type in its `process.yaml`:
+
+```yaml
+artifact_types:
+  - name: branch
+    base_view: structured
+    size_limit: 65536
+    max_files: 1
+    json_schema: {…}             # the content of branch.schema.json
 ```
 
 ## The module manifest
