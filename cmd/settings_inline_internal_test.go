@@ -120,7 +120,7 @@ func TestInlineSettingsRefuses(t *testing.T) {
 		if err := os.WriteFile(file2, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		refused("not one object: "+content, []string{"--settings", file2}, nil, filepath.Dir(filepath.Dir(file2)), "the Claude Code settings "+file2+" are not one JSON object"+tail)
+		refused("not one object: "+content, []string{"--settings", file2}, nil, filepath.Dir(filepath.Dir(file2)), "write one JSON object in the Claude Code settings "+file2+": the file is not one JSON object"+tail)
 	}
 
 	home, file = settingsHome(t, "{}")

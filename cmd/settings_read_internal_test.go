@@ -78,10 +78,10 @@ func TestInlineSettingsLeavesAWriteRunsSettings(t *testing.T) {
 	}
 }
 
-// TestInlineSettingsRefusesReadRulesItCannotAdd refuses a read workflow's run whose
+// TestInlineSettingsRefusesReadRulesItCannotAdd stops a read workflow's run whose
 // settings have permissions that is no object, or an allow or a deny that is no array,
-// and settings of the launch that are no JSON object, each with its line, an input
-// error.
+// and one whose settings of the launch are no JSON object: each returns an input error
+// with its line.
 func TestInlineSettingsRefusesReadRulesItCannotAdd(t *testing.T) {
 	for content, want := range map[string]string{
 		`{"permissions": []}`:               "set permissions in the Claude Code settings %s to a JSON object: a run of a read workflow adds rules to it, so the run does not start",
@@ -96,7 +96,7 @@ func TestInlineSettingsRefusesReadRulesItCannotAdd(t *testing.T) {
 	}
 	home, _ := settingsHome(t, "{}")
 	_, err := inlineSettings("--settings", []string{"--settings", `{"a": 1} {}`}, nil, home, true)
-	if want := "the Claude Code settings of the launch are not one JSON object, so the run does not start"; err == nil || err.Error() != want {
+	if want := "pass one JSON object to --settings in harness.launch: a run of a read workflow adds rules to it, and the value is not one JSON object, so the run does not start"; err == nil || err.Error() != want {
 		t.Errorf("JSON of the launch: %v, want %q", err, want)
 	}
 }
