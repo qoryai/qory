@@ -16,7 +16,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -327,7 +326,7 @@ func (c *Client) Download(ctx context.Context, versionID string, file File, w io
 func (c *Client) PushArtifact(ctx context.Context, push Push) (*Pushed, error) {
 	// nil would encode as null, and the run API reads a string and a list.
 	files := make([]PushFile, len(push.Files))
-	encoded := 0
+	sizes := make([]int64, len(push.Files))
 
 	for i, file := range push.Files {
 		if file.Content == nil {
@@ -335,11 +334,11 @@ func (c *Client) PushArtifact(ctx context.Context, push Push) (*Pushed, error) {
 		}
 
 		files[i] = file
-		encoded += base64.StdEncoding.EncodedLen(len(file.Content))
+		sizes[i] = int64(len(file.Content))
 	}
 
-	if encoded > MaxBody {
-		return nil, versionTooLarge(push.Type, encoded)
+	if err := CheckVersionSize(push.Type, sizes); err != nil {
+		return nil, err
 	}
 
 	push.Files = files
@@ -350,10 +349,25 @@ func (c *Client) PushArtifact(ctx context.Context, push Push) (*Pushed, error) {
 	}
 
 	if len(body) > MaxBody {
-		return nil, versionTooLarge(push.Type, len(body))
+		return nil, versionTooLarge(push.Type, int64(len(body)))
 	}
 
 	return c.post(ctx, "/artifacts", body)
+}
+
+// CheckVersionSize returns the [Error] of [Client.PushArtifact] when files of sizes bytes
+// are over [MaxBody] once encoded, so a caller need not read them first; else nil.
+func CheckVersionSize(artifactType string, sizes []int64) error {
+	var encoded int64
+	for _, size := range sizes {
+		encoded += (size + 2) / 3 * 4
+	}
+
+	if encoded > MaxBody {
+		return versionTooLarge(artifactType, encoded)
+	}
+
+	return nil
 }
 
 // PushVerdict stores the run's verdict, one of the Verdict constants. Empty gaps are left

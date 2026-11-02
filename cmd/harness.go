@@ -1539,11 +1539,18 @@ const (
 	// ExitStale is a --check that found the home behind the stack and modules, or
 	// nothing composed.
 	ExitStale = 6
+	// ExitNoWorkItem is qory work-item show with no work item. No other command that has
+	// a collision exits with it: the number is ExitCollision's on the harness verbs.
+	ExitNoWorkItem = 3
+	// ExitArtifactRefused is a push of a type or of files over a limit that the run API
+	// refused. The number is ExitForeign's on the harness verbs.
+	ExitArtifactRefused = 4
 )
 
 // ExitCode is the status a process exits with for err: 0 for nil, the runtime's own
 // status for a qory run whose runtime exited with one, [ExitInput], [ExitCollision],
-// [ExitForeign], [ExitVersion] or [ExitStale] for the errors each stands for, and 1 for
+// [ExitForeign], [ExitVersion], [ExitStale], [ExitNoWorkItem] or [ExitArtifactRefused] for
+// the errors each stands for, and 1 for
 // every other failure, such as a git source that could not be fetched or a file that could not be
 // written. A command unknown to the tree is an input error too; cobra reports it as a
 // plain error whose text starts with "unknown command", which is the one place this
@@ -1555,12 +1562,17 @@ func ExitCode(err error) int {
 	var version *versionError
 	var stale *staleError
 	var git *hostgit.GitVersionError
+	var noWorkItem noWorkItemError
 	switch {
 	case err == nil:
 		return 0
 	case exitStatusOf(err):
 		code, _ := exitStatus(err)
 		return code
+	case errors.As(err, &noWorkItem):
+		return ExitNoWorkItem
+	case artifactRefused(err):
+		return ExitArtifactRefused
 	case errors.As(err, &collision):
 		return ExitCollision
 	case errors.As(err, &foreign):

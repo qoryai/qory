@@ -1012,7 +1012,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	c.Flags().StringVar(&o.limits.ShmSize, "shm-size", "", "the size of /dev/shm in the container, such as 2g ("+config.ForagerFileName+": wall.shm_size)")
 	homeFlags(c, &h)
 	composeFlags(c, &composing)
-	c.AddCommand(newResend(), newRegister(), newEnd(), newForward(), newRelay(), newNest(), newPrepare(), newAgentEnv(), newExec(), newHold(), newSetupCommand(), newSeed(), newPrebuildStep(), newPool())
+	c.AddCommand(newResend(), newRegister(), newEnd(), newForward(), newRelay(), newNest(), newPrepare(), newAgentEnv(), newExec(), newHold(), newSetupCommand(), newSeed(), newPrebuildStep(), newPool(), newRunVerdict())
 	return c
 }
 

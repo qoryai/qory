@@ -152,7 +152,7 @@ func readError(response *http.Response, request string) *Error {
 
 // versionTooLarge returns the error of a version of artifactType that is size bytes
 // encoded, over [MaxBody], which the client does not send.
-func versionTooLarge(artifactType string, size int) *Error {
+func versionTooLarge(artifactType string, size int64) *Error {
 	return &Error{
 		Code:  CodePayloadTooLarge,
 		Type:  artifactType,
