@@ -26,8 +26,8 @@ import (
 )
 
 // The words of the push step of a write run. textChangesLeft is the message of the commit
-// of what the agent left, with the run's id. textNoBranchType is the fix of the workflow
-// model, word for word.
+// of what the agent left, with the run's id. textNoBranchType has the fix of the workflow
+// model, with the two ways of [preparation.WorkBranch.VersionWays].
 const (
 	textChangesLeft     = "Changes left by run %s"
 	textPushStep        = "push %s to %s"
@@ -35,9 +35,9 @@ const (
 	textPushStepMany    = "push %s to %s and %d further repositories"
 	textPushNoHostProxy = "take the work item in again in Qory Apiary: the run's host proxy, through which qory pushes the run's commits, did not open: %s" + codeUsed
 	textPushNoRunAPI    = "take the work item in again in Qory Apiary: the run API, which stores the version of the artifact " + branchType + ", is not reachable from this run: %s" + codeUsed
-	textNoBranchType    = "Define the artifact type " + branchType + " in the workspace's Artifact types, then run the round again"
-	textNotStored       = "take the work item in again in Qory Apiary: qory pushed %s, and the version of the artifact " + branchType + " was not stored: %s" + codeUsed
-	textStoreUnknown    = "check the artifact " + branchType + " of the work item in Qory Apiary, then take the work item in again: qory pushed %s, and the request that stores its version got no answer, so the version may or may not be stored: %s" + codeUsed
+	textNoBranchType    = "Define the artifact type " + branchType + " in the workspace's Artifact types, then %s, then run the round again"
+	textNotStored       = "%s, then take the work item in again: qory pushed %s, and the version of the artifact " + branchType + " was not stored: %s" + codeUsed
+	textStoreUnknown    = "check the artifact " + branchType + " of the work item in Qory Apiary; with no version of this run, %s; then take the work item in again: qory pushed %s, and the request that stores its version got no answer, so the version may or may not be stored: %s" + codeUsed
 	textPushInterrupted = "the run was cancelled: qory run got %s during the push step, and the run's commits may not have reached the branch"
 	textPushStopped     = "the run was cancelled during the push step, and the run's commits may not have reached the branch"
 	textPushTimedOut    = "take the work item in again in Qory Apiary: the run reached its time limit of %s during the push step, and the run's commits may not have reached the branch" + codeUsed
@@ -108,7 +108,7 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 		if document == nil {
 			return nil
 		}
-		if err := storeBranch(ctx, client, runID, document); err != nil {
+		if err := storeBranch(ctx, client, runID, branch, document); err != nil {
 			return &runLineError{err}
 		}
 		return nil
@@ -140,14 +140,15 @@ func pushStepName(branch *preparation.WorkBranch, system string) string {
 // a 429, which neither forwarded nor stored the POST, sends it again after Retry-After;
 // a POST whose answer was lost sends it again only when [branchStored] reads that no
 // version of this run has the document. At most [maxBranchTries] POST go out, and
-// unknown_type is [textNoBranchType].
-func storeBranch(ctx context.Context, client *runapi.Client, runID string, document *branchformat.Branch) error {
+// unknown_type is [textNoBranchType]. Every failure has the fix of
+// [preparation.WorkBranch.VersionWays], as the push landed.
+func storeBranch(ctx context.Context, client *runapi.Client, runID string, branch *preparation.WorkBranch, document *branchformat.Branch) error {
 	content, err := json.Marshal(document)
 	if err != nil {
-		return fmt.Errorf(textNotStored, document.Ref, shownError(err))
+		return fmt.Errorf(textNotStored, branch.VersionWays(), document.Ref, shownError(err))
 	}
 	if err := branchformat.Check(content); err != nil {
-		return fmt.Errorf(textNotStored, document.Ref, shownError(err))
+		return fmt.Errorf(textNotStored, branch.VersionWays(), document.Ref, shownError(err))
 	}
 	sum := sha256.Sum256(content)
 	push := runapi.Push{Type: branchType, Name: defaultName, Files: []runapi.PushFile{
@@ -167,7 +168,7 @@ func storeBranch(ctx context.Context, client *runapi.Client, runID string, docum
 		case ctx.Err() != nil:
 			return last
 		case runapi.HasCode(last, runapi.CodeUnknownType):
-			return errors.New(textNoBranchType)
+			return fmt.Errorf(textNoBranchType, branch.VersionWays())
 		case runapi.HasCode(last, runapi.CodeRateLimited):
 		case answerLost(last):
 			stored, err := branchStored(ctx, client, runID, hex.EncodeToString(sum[:]))
@@ -175,15 +176,15 @@ func storeBranch(ctx context.Context, client *runapi.Client, runID string, docum
 			case err != nil && ctx.Err() != nil:
 				return err
 			case err != nil:
-				return fmt.Errorf(textStoreUnknown, document.Ref, shownError(err))
+				return fmt.Errorf(textStoreUnknown, branch.VersionWays(), document.Ref, shownError(err))
 			case stored:
 				return nil
 			}
 		default:
-			return fmt.Errorf(textNotStored, document.Ref, shownError(last))
+			return fmt.Errorf(textNotStored, branch.VersionWays(), document.Ref, shownError(last))
 		}
 	}
-	return fmt.Errorf(textNotStored, document.Ref, shownError(last))
+	return fmt.Errorf(textNotStored, branch.VersionWays(), document.Ref, shownError(last))
 }
 
 // postBranch sends push once, within the limit of one request.

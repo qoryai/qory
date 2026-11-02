@@ -48,7 +48,18 @@ type WorkBranch struct {
 	// git status lists it, with the digest of its entry. [RecordSetup] sets it, and it is
 	// nil with no setup outside the agent's container.
 	setupChanges map[string]map[string]string
+	// pushed is each repository [Push] pushed, as a line shows it.
+	pushed []string
 }
+
+// VersionWays is the fix for a branch that [Push] pushed with no version stored: the next
+// run starts at the last version, so its push fails as a branch that moved.
+func (b *WorkBranch) VersionWays() string {
+	return fmt.Sprintf(textVersionWays, b.Ref, b.PushedPaths(), shownPath(b.system))
+}
+
+// PushedPaths is each repository [Push] pushed, as one phrase of a line.
+func (b *WorkBranch) PushedPaths() string { return strings.Join(b.pushed, " and ") }
 
 // WorkRepository is one repository of a run on its [WorkBranch].
 type WorkRepository struct {

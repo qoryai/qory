@@ -28,8 +28,12 @@ import (
 	"github.com/qoryai/qory/internal/secretmask"
 )
 
-// noType is the line of a workspace with no artifact type branch.
-const noType = "Define the artifact type branch in the workspace's Artifact types, then run the round again"
+// versionWays is the fix of a branch pushed with no version stored, and noType the line of
+// a workspace with no artifact type branch.
+const (
+	versionWays = "add a new version of the artifact branch in Qory Apiary with the head of qory/" + workItem + " on acme/site, or delete that branch on " + proxygittest.Host
+	noType      = "Define the artifact type branch in the workspace's Artifact types, then " + versionWays + ", then run the round again"
+)
 
 // pushAPI is a run API that stores the versions of the artifact branch that a run posts.
 // post, when set, gets the number of each POST, from 1, and writes its response when it
@@ -766,7 +770,7 @@ func TestARateLimitIsBounded(t *testing.T) {
 	if len(p.waits) != 4 || p.waits[0] != time.Minute {
 		t.Errorf("the waits are %v, want 4 of a minute", p.waits)
 	}
-	wants(t, r.out, "qory run: take the work item in again in Qory Apiary: qory pushed qory/"+workItem+", and the version of the artifact branch was not stored: ")
+	wants(t, r.out, "qory run: "+versionWays+", then take the work item in again: qory pushed qory/"+workItem+", and the version of the artifact branch was not stored: ")
 }
 
 // TestALostAnswerOfAStoredVersionSendsNothingAgain is a POST that stored its version and
@@ -835,12 +839,12 @@ func TestALostAnswerThatTheIndexDoesNotSettleFails(t *testing.T) {
 	if posts, reads, _ := p.api.counts(); posts != 1 || reads != 6 {
 		t.Errorf("%d POST, %d reads, want 1, and the read of the fetch and 5", posts, reads)
 	}
-	wants(t, r.out, "qory run: check the artifact branch of the work item in Qory Apiary, then take the work item in again: qory pushed qory/"+workItem+
+	wants(t, r.out, "qory run: check the artifact branch of the work item in Qory Apiary; with no version of this run, "+versionWays+"; then take the work item in again: qory pushed qory/"+workItem+
 		", and the request that stores its version got no answer, so the version may or may not be stored: ")
 }
 
-// TestAWorkspaceWithoutTheTypeFailsTheStep is unknown_type: the step fails with the line
-// of the workflow model, word for word, after the push.
+// TestAWorkspaceWithoutTheTypeFailsTheStep is unknown_type: the step fails after the push,
+// with the line of the workflow model and the two ways of a pushed branch.
 func TestAWorkspaceWithoutTheTypeFailsTheStep(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.api.post = func(_ int, w http.ResponseWriter) (bool, bool) {
@@ -1282,4 +1286,31 @@ func TestTheMessageOfAnUnverifiedAnswerIsPrintedAsItIs(t *testing.T) {
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateFailed, 1)
 	wants(t, r.out, "the version of the artifact branch was not stored: "+message+"; the code is used")
+}
+
+// TestASecondRepositoryThatFailsGivesTheWays is a run of two repositories whose first push
+// landed and whose second failed: no version is stored, and the line has the two ways for
+// the first and the fix of the second.
+func TestASecondRepositoryThatFailsGivesTheWays(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
+	bare := filepath.Join(p.h.server.Root, "acme", "lib.git")
+	proxygittest.Git(t, bare, "config", "http.receivepack", "true")
+	writeFile(t, filepath.Join(bare, "hooks", "pre-receive"), "#!/bin/sh\nexit 1\n")
+	if err := os.Chmod(filepath.Join(bare, "hooks", "pre-receive"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p.repositories = "acme/site,acme/lib"
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+		writeFile(t, filepath.Join(dir, ".qory", "repositories", "acme", "lib", "left.txt"), "left\n")
+	}, nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	wants(t, r.out, "qory run: "+versionWays+": qory pushed acme/site and stored no version, because the push of the next repository failed: change the rule on "+proxygittest.Host)
+	if p.branchHead(t) == "" {
+		t.Error("the first repository has no branch")
+	}
+	if posts, _, _ := p.api.counts(); posts != 0 {
+		t.Errorf("%d POST went out", posts)
+	}
 }

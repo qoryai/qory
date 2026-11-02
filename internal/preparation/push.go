@@ -35,7 +35,9 @@ const (
 	textNotSafe          = "qory run: take the work item in again in Qory Apiary: after the agent exited, the check of repository %s failed, so qory committed and pushed nothing: %s; the code is used"
 	textNoCommitLeft     = "qory run: take the work item in again in Qory Apiary: the commit of what the agent left in %s failed: %s; the code is used"
 	textNotFastForward   = "qory run: take the work item in again in Qory Apiary, and keep the run's commits on top of commit %[3]s: HEAD of %[1]s is at %[2]s, which does not descend from it, so a push would not be a fast-forward; the code is used"
-	textBranchMoved      = "qory run: add a new version of the artifact branch in Qory Apiary with the head of %[1]s on %[2]s, or delete that branch on %[3]s, then take the work item in again: the branch moved since the run fetched it, and the push failed: %[4]s; the code is used"
+	textVersionWays      = "add a new version of the artifact branch in Qory Apiary with the head of %[1]s on %[2]s, or delete that branch on %[3]s"
+	textBranchMoved      = "qory run: " + textVersionWays + ", then take the work item in again: the branch moved since the run fetched it, and the push failed: %[4]s; the code is used"
+	textPushedNoVersion  = "qory run: %s: qory pushed %s and stored no version, because the push of the next repository failed: %s"
 	textPushRefused      = "qory run: change the rule on %[3]s that stops a push to %[1]s of %[2]s, then take the work item in again: the push failed: %[4]s; the code is used"
 	textPushForbidden    = "qory run: add /%[1]s.git/git-receive-pack to the path rules of the run's policy for %[2]s, and give the run's credential for %[2]s write access to %[1]s, then take the work item in again: the push through the run's gateway returned 403: %[3]s; the code is used"
 	textPushNoCredential = "qory run: give the run's credential for %[2]s write access to %[1]s, then take the work item in again: the push through the run's gateway failed: %[3]s; the code is used"
@@ -118,8 +120,12 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 			continue
 		}
 		if err := pushTo(ctx, hostRunner(&p), folders[i], b, r, heads[i], report); err != nil {
+			if len(b.pushed) > 0 {
+				return nil, fmt.Errorf(textPushedNoVersion, b.VersionWays(), b.PushedPaths(), strings.TrimPrefix(err.Error(), "qory run: "))
+			}
 			return nil, err
 		}
+		b.pushed = append(b.pushed, shownPath(r.Path))
 		fmt.Fprintf(report, textPushed+"\n", b.Ref, shownPath(r.Path), shortCommit(heads[i]))
 		version = withCommit(version, b.system, r.Path, heads[i])
 		pushed = true

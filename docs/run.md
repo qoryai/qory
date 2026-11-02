@@ -2018,7 +2018,8 @@ with the reason `interrupted`, exit 1.
 A failed step closes the run `failed`, exit 1, also after a session that succeeded. One
 repository can be pushed before another fails, and a push can succeed before its version
 is stored. The branch is then past every version of the artifact, and the next run's push
-fails with the line for a branch that moved.
+fails as a branch that moved. Each line for that state gives both ways out: add a version
+with the head of the branch, or delete the branch.
 
 On a run that can push, each of these lines stops the run after the setup, before the
 agent starts, and closes it `failed` with `no_session`:
@@ -2062,13 +2063,22 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   pushes the run's commits, did not open: <error>; the code is used`
 - `take the work item in again in Qory Apiary: the run API, which stores the version of the
   artifact branch, is not reachable from this run: <error>; the code is used`
-- `Define the artifact type branch in the workspace's Artifact types, then run the round
-  again`, when the workspace has no artifact type `branch`
-- `take the work item in again in Qory Apiary: qory pushed <branch>, and the version of the
-  artifact branch was not stored: <error>; the code is used`
-- `check the artifact branch of the work item in Qory Apiary, then take the work item in
-  again: qory pushed <branch>, and the request that stores its version got no answer, so
-  the version may or may not be stored: <error>; the code is used`
+- `Define the artifact type branch in the workspace's Artifact types, then add a new version
+  of the artifact branch in Qory Apiary with the head of qory/<work item id> on <path>, or
+  delete that branch on <system>, then run the round again`, when the workspace has no
+  artifact type `branch`
+- `add a new version of the artifact branch in Qory Apiary with the head of qory/<work item
+  id> on <path>, or delete that branch on <system>, then take the work item in again: qory
+  pushed <branch>, and the version of the artifact branch was not stored: <error>; the code
+  is used`
+- `check the artifact branch of the work item in Qory Apiary; with no version of this run,
+  add a new version of the artifact branch in Qory Apiary with the head of qory/<work item
+  id> on <path>, or delete that branch on <system>; then take the work item in again: qory
+  pushed <branch>, and the request that stores its version got no answer, so the version may
+  or may not be stored: <error>; the code is used`
+- `add a new version of the artifact branch in Qory Apiary with the head of qory/<work item
+  id> on <path>, or delete that branch on <system>: qory pushed <path> and stored no version,
+  because the push of the next repository failed: <line of that failure>`
 
 A step that the time limit or a signal stopped prints one of these:
 
