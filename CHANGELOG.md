@@ -176,7 +176,9 @@ release may change what an existing document does, and states it under Upgrading
   are kinds, and agents/coder is a kind and a role.`, and a list as a role's value stops
   it too. The harness section of a run code's documents writes `bind` the same way.
 - A reference to a role that nothing fills ends with `which no module ships or provides
-  and the stack does not bind`.
+  and the stack does not bind`. When a module provides the role with an entry that an
+  `exclude` or an `only` left out, it ends with `which module web provides as agent
+  core-developer, which module core leaves out`, one line per such module.
 - The `agent` image contains Claude Code 2.1.316, up from 2.1.273.
 - Claude Code runs with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and
   `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1` in every run,

@@ -1,0 +1,2 @@
+module core: skill deploy references agent developer, which module web provides as agent core-developer, which module core leaves out
+module core: skill deploy references agent developer, which module ts provides as agent ts-developer, which module ts leaves out

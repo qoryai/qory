@@ -429,15 +429,16 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		}
 		return res.Entries[i].Name < res.Entries[j].Name
 	})
-	// The roles again, now that the selection is known: a provided entry that an exclude
+	// The roles again, now that the selection is known: a provided entry that a block
 	// left out provides nothing.
 	composed := map[string]bool{}
 	for _, e := range res.Entries {
 		composed[e.Kind+"/"+e.Name] = true
 	}
-	res.Roles, err = setRoles(p, opened, func(_ openedModule, kind, name string) bool {
+	leftOut := func(_ openedModule, kind, name string) bool {
 		return !composed[kind+"/"+name] && excludeOf(res, kind, name) != nil
-	}, false)
+	}
+	res.Roles, err = setRoles(p, opened, leftOut, false)
 	if err != nil {
 		return nil, err
 	}
@@ -445,7 +446,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	for _, o := range opened {
 		requires[o.m.Name] = needs(read[o.m.Name], o.m.Requires, res.Bind)
 	}
-	if err := checkResolved(res, requires); err != nil {
+	if err := checkResolved(res, requires, droppedProviders(opened, leftOut)); err != nil {
 		return nil, err
 	}
 	if len(instructions) > 0 {
@@ -676,9 +677,10 @@ func (e *UnresolvedError) Error() string { return strings.Join(e.Lines, "\n") }
 // <kind>/<name>. A needed entry may come from any module, since a name is composed once;
 // an entry that was left out has no needs to meet. A role is checked once, with the layer
 // that set it, and a reference through it adds no line: the role is what there is to fix.
-// The message says why an entry is missing: a module's exclude left it out, or no module
-// ships it, and for a reference that no role of that name is set either.
-func checkResolved(res *Result, requires map[string]map[string][]Need) error {
+// The message says why an entry is missing: a module's exclude left it out, a module
+// provides the role with an entry a block left out (dropped, keyed by role), or no
+// module ships it, and for a reference that no role of that name is set either.
+func checkResolved(res *Result, requires map[string]map[string][]Need, dropped map[string][]Role) error {
 	composed := map[string]bool{}
 	for _, e := range res.Entries {
 		composed[e.Kind+"/"+e.Name] = true
@@ -736,6 +738,17 @@ func checkResolved(res *Result, requires map[string]map[string][]Need) error {
 			}
 			if by := leftOut(kind, name); by != "" {
 				lines = append(lines, fmt.Sprintf("module %s: %s %s %s, which module %s leaves out", shown(e.Module), described(e.Kind, e.Name), verb, described(kind, name), shown(by)))
+				continue
+			}
+			if ps := dropped[need.Key]; len(ps) > 0 {
+				for _, r := range ps {
+					provided := fmt.Sprintf("module %s: %s %s %s, which module %s provides as %s", shown(e.Module), described(e.Kind, e.Name), verb, described(kind, name), shown(r.Module), described(kind, r.Name))
+					if x := excludeOf(res, kind, r.Name); x != nil && x.Listed != "" {
+						lines = append(lines, fmt.Sprintf("remove %s from the exclude of module %s in qory.yaml, or ship it in a module of the repository: %s, which the exclude of module %s in qory.yaml leaves out", shownKey(kind+"/"+r.Name), shown(x.Listed), provided, shown(x.Listed)))
+						continue
+					}
+					lines = append(lines, fmt.Sprintf("%s, which module %s leaves out", provided, shown(leftOut(kind, r.Name))))
+				}
 				continue
 			}
 			why := "which no module ships"

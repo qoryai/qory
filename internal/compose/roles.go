@@ -129,6 +129,24 @@ func andList(names []string) string {
 	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
+// droppedProviders is, per role keyed <kind>/<role>, the provided entries of the opened
+// modules for which dropped reports true, in the order of the modules.
+func droppedProviders(opened []openedModule, dropped func(o openedModule, kind, name string) bool) map[string][]Role {
+	out := map[string][]Role{}
+	for _, o := range opened {
+		for _, kind := range sortedKeys(o.m.Provides) {
+			roles := o.m.Provides[kind]
+			for _, role := range sortedKeys(roles) {
+				if name := roles[role]; dropped(o, kind, name) {
+					key := kind + "/" + role
+					out[key] = append(out[key], Role{Role: key, Name: name, From: "provides " + o.m.Name, Module: o.m.Name})
+				}
+			}
+		}
+	}
+	return out
+}
+
 // excludedBy reports whether the exclude of o, or the exclude a checkout's qory.yaml
 // lists for o, lists the entry of kind and name. Both are known before the compose reads
 // the entries, so the roles before the selection drop what they leave out.

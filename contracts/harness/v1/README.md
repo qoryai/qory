@@ -577,11 +577,16 @@ runtime: the resolution happens in the composed tree, per path.
    `module core: skill deploy requires command ship, which no module ships` otherwise; a
    reference's message has `references` for `requires`, and `which no module ships or
    provides and the stack does not bind` when neither an entry nor a role matches the
-   name. When the
+   name. When a module provides the role with an entry that an `exclude` or an `only`
+   left out, the message has one line per such module: `module core: skill deploy
+   references agent developer, which module web provides as agent core-developer, which
+   module core leaves out`. When the
    exclude a checkout's `qory.yaml` lists for a base module dropped it, the message is
    `remove commands/ship from the exclude of module core in qory.yaml, or ship it in a
    module of the repository: module core: skill deploy requires command ship, which the
-   exclude of module core in qory.yaml leaves out`. A binding
+   exclude of module core in qory.yaml leaves out`, and for a provided entry it ends
+   `which module ts provides as agent ts-developer, which the exclude of module ts in
+   qory.yaml leaves out`. A binding
    is checked first: one that selects an entry that is not composed fails with `bind agents/coder
    selects agent rails-coder, which no module ships`, or `which module rails leaves out`,
    and a role whose name an entry has fails with `bind agents/reviewer defines a role, and
