@@ -123,7 +123,11 @@ func TestNewChecksTheBaseURL(t *testing.T) {
 		"http://user:secret@gateway/v1/runs/1",
 		"http://gateway/v1/runs/1?x=1",
 		"http://gateway/v1/runs/1#x",
+		"http://gateway/v1/runs/1?",
+		"http://gateway/v1/runs/1#",
 		"http://gateway\x7f/v1",
+		"http://user:secret@gateway:notaport/v1",
+		"ftp://gateway/v1?token=secret",
 	} {
 		_, err := runapi.New(base, http.DefaultClient)
 		if err == nil {
@@ -296,6 +300,7 @@ func TestDownloadSendsNothingButOnePathSegment(t *testing.T) {
 	for _, c := range []struct{ version, name string }{
 		{"", "a.png"}, {".", "a.png"}, {"..", "a.png"}, {"a/b", "a.png"},
 		{"av_1", ""}, {"av_1", "."}, {"av_1", ".."}, {"av_1", "../a.png"}, {"av_1", `a\b.png`}, {"av_1", "a\x00.png"},
+		{"av_1", "a\n.png"}, {"av_1", "a\x7f.png"},
 	} {
 		err := client.Download(context.Background(), c.version, runapi.File{Filename: c.name}, io.Discard)
 		if err == nil || !strings.HasPrefix(err.Error(), "Pull the file by a version id") {
@@ -320,6 +325,38 @@ func TestDownloadFailsOnBytesThatDoNotMatchTheIndex(t *testing.T) {
 				t.Errorf("err = %v", err)
 			}
 		})
+	}
+}
+
+// failingWriter is a destination that is full.
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("no space left on device") }
+
+func TestDownloadReportsAFailedWriteApartFromTheResponse(t *testing.T) {
+	content := []byte("the bytes")
+	client := serve(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(content) })
+
+	err := client.Download(context.Background(), "av_1", file("a", content), failingWriter{})
+	if err == nil || !strings.HasPrefix(err.Error(), "Check where a is written, then pull it again.") ||
+		!strings.Contains(err.Error(), "no space left on device") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// The gateway ends the connection when a file fails its check against Core's digest.
+func TestDownloadFailsOnAConnectionThatEndsEarly(t *testing.T) {
+	content := []byte("the bytes")
+
+	client := serve(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(content[:4])
+		w.(http.Flusher).Flush()
+		panic(http.ErrAbortHandler)
+	})
+
+	err := client.Download(context.Background(), "av_1", file("a", content), io.Discard)
+	if err == nil || !strings.HasPrefix(err.Error(), "Pull a again.") || !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Errorf("err = %v", err)
 	}
 }
 
@@ -396,15 +433,12 @@ func TestPushArtifactSendsTheBodyTheRunAPIReads(t *testing.T) {
 
 func TestPushArtifactLeavesOutAnEmptyNameAndNote(t *testing.T) {
 	client := serve(t, func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatal(err)
-		}
+		raw, _ := io.ReadAll(r.Body)
 
-		for _, member := range []string{"name", "note"} {
-			if _, sent := body[member]; sent {
-				t.Errorf("the body has %s", member)
-			}
+		// A nil Content is an empty file: the run API returns 400 for null.
+		want := `{"type":"screenshot","files":[{"filename":"a.png","content_type":"image/png","content_base64":""}]}`
+		if string(raw) != want {
+			t.Errorf("body = %s", raw)
 		}
 
 		respond(http.StatusCreated, pushedExample)(w, r)
@@ -449,6 +483,8 @@ func TestPushVerdictSendsTheBodyTheRunAPIReads(t *testing.T) {
 	for _, c := range []struct{ gaps, want string }{
 		{"Add the empty cart.", `{"verdict":"changes-requested","gaps":"Add the empty cart."}`},
 		{"", `{"verdict":"changes-requested"}`},
+		// Escaped, 20000 of these would pass the limit of the body.
+		{"a < b & c", `{"verdict":"changes-requested","gaps":"a < b & c"}`},
 	} {
 		client := serve(t, func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodPost || r.URL.Path != "/v1/runs/run-1/verdict" {
@@ -497,7 +533,8 @@ func TestErrorsStartWithTheFix(t *testing.T) {
 		},
 		{
 			"unauthorized", http.StatusUnauthorized, "", `{"error":"unauthorized"}`, runapi.CodeUnauthorized,
-			"Check the access key of the run's gateway in Qory Apiary. The signature of GET /work-item did not verify (401 unauthorized).",
+			"Check the access key of the run's gateway in Qory Apiary, and the clock of the gateway's host. " +
+				"GET /work-item did not verify (401 unauthorized).",
 		},
 		{
 			"an unknown run", http.StatusNotFound, "", `{"error":"not_found"}`, runapi.CodeNotFound,
@@ -511,7 +548,7 @@ func TestErrorsStartWithTheFix(t *testing.T) {
 		},
 		{
 			"inputs", http.StatusConflict, "", `{"error":"inputs_invalid"}`, runapi.CodeInputsInvalid,
-			"Fix the ticket of this work item at its source. A value of the ticket breaks the rules for a run's inputs " +
+			"Fix the ticket or the work item. One of its values breaks the rules for a run's inputs " +
 				"(GET /work-item returned 409 inputs_invalid).",
 		},
 		{
@@ -528,8 +565,17 @@ func TestErrorsStartWithTheFix(t *testing.T) {
 			"Try again in 12 seconds. The gateway's access key is over its rate limit (GET /work-item returned 429 rate_limited).",
 		},
 		{
+			"rate limit of one second", http.StatusTooManyRequests, "1", `{"error":"rate_limited"}`, runapi.CodeRateLimited,
+			"Try again in 1 second. The gateway's access key is over its rate limit (GET /work-item returned 429 rate_limited).",
+		},
+		{
 			"rate limit with no wait", http.StatusTooManyRequests, "", `{"error":"rate_limited"}`, runapi.CodeRateLimited,
 			"Try again in a minute. The gateway's access key is over its rate limit (GET /work-item returned 429 rate_limited).",
+		},
+		{
+			"an answer of the gateway's route", http.StatusBadGateway, "",
+			`{"error":"answer_unverified","message":"Check the access key of the run's gateway."}`,
+			runapi.CodeAnswerUnverified, "Check the access key of the run's gateway.",
 		},
 		{
 			"unavailable", http.StatusServiceUnavailable, "", `{"error":"unavailable"}`, runapi.CodeUnavailable,
@@ -575,6 +621,17 @@ func TestErrorsStartWithTheFix(t *testing.T) {
 	}
 }
 
+func TestATooLargeVerdictHasTheVerdictLimit(t *testing.T) {
+	client := serve(t, respond(http.StatusRequestEntityTooLarge, `{"error":"payload_too_large"}`))
+
+	_, err := client.PushVerdict(context.Background(), runapi.VerdictPassed, "")
+
+	want := "Shrink the request to at most 65536 bytes encoded. POST /verdict returned 413 payload_too_large."
+	if err == nil || err.Error() != want {
+		t.Errorf("err = %v", err)
+	}
+}
+
 func TestAPushErrorHasItsMembers(t *testing.T) {
 	client := serve(t, respond(http.StatusUnprocessableEntity,
 		`{"error":"too_large","type":"demo-video","limit":209715200,"message":"Shrink the files of one version of demo-video to at most 209715200 bytes together."}`))
@@ -599,7 +656,7 @@ func TestResponsesTheClientCannotRead(t *testing.T) {
 		"no JSON":         {`<html>`, "Check the run's gateway. The response to GET /work-item is not the run API's JSON"},
 		"another shape":   {`{"version":1,"inputs":"none"}`, "Check the run's gateway. The response to GET /work-item is not the run API's JSON"},
 		"newer version":   {`{"version":2}`, "Update qory. This qory reads version 1 of the run API, and GET /work-item returned version 2."},
-		"no version":      {`{}`, "Update qory. This qory reads version 1 of the run API, and GET /work-item returned version 0."},
+		"no version":      {`{}`, "Check the run's gateway. The response to GET /work-item has no version."},
 		"a long response": {`{"version":1,"x":"` + strings.Repeat("a", 16<<20) + `"}`, "Check the run's gateway. The response to GET /work-item is over"},
 	} {
 		t.Run(name, func(t *testing.T) {

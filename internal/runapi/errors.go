@@ -26,23 +26,27 @@ const (
 	CodeTooLarge        = "too_large"
 	CodeInvalidArtifact = "invalid_artifact"
 	CodeUnavailable     = "unavailable"
+	// CodeAnswerUnverified is the gateway's error for a response of Qory Apiary whose
+	// signature failed its check.
+	CodeAnswerUnverified = "answer_unverified"
 )
 
-// Error is an error status of the run API, or, with Status 0, a version too large to
-// send. Error returns one line that starts with the fix: Message when the response has
-// one, or a line made from the code.
+// Error is an error status of the run API or of the gateway's route to it, or, with
+// Status 0, a version too large to send.
 type Error struct {
 	// Status is the HTTP status, 0 for a request that was not sent.
 	Status int
 	// Code is the response's `error`, empty for a response that has none, such as the
-	// error page of an instance without the run API.
+	// error page of a server without the run API.
 	Code string
-	// Type is the artifact type, and Limit the type's limit, where the error has them.
-	Type  string
+	// Type is the artifact type, where the error has one.
+	Type string
+	// Limit is the limit that the push is over, in files or bytes.
 	Limit int64
 	// Names has the members or files that failed, such as `files[0].filename`.
 	Names []string
-	// Message is the response's `message`, which starts with the fix.
+	// Message is the response's `message`, written for a person. Where a fix exists, the
+	// message starts with it; `run_ended` has none.
 	Message string
 	// RetryAfter is the `Retry-After` header in seconds, 0 for none.
 	RetryAfter int
@@ -50,7 +54,8 @@ type Error struct {
 	Request string
 }
 
-// Error returns the line for a person or a log, with the fix first.
+// Error returns one line for a person or a log: Message when the response has one, else
+// a line made from the code, with the fix first.
 func (e *Error) Error() string {
 	if e.Message != "" {
 		return e.Message
@@ -62,8 +67,8 @@ func (e *Error) Error() string {
 	case CodeInvalidRequest:
 		return fmt.Sprintf("Fix %s in the request. %s returned %s.", strings.Join(e.Names, ", "), e.Request, status)
 	case CodeUnauthorized:
-		return fmt.Sprintf("Check the access key of the run's gateway in Qory Apiary. The signature of %s did not verify (%s).",
-			e.Request, status)
+		return fmt.Sprintf("Check the access key of the run's gateway in Qory Apiary, and the clock of the gateway's host. "+
+			"%s did not verify (%s).", e.Request, status)
 	case CodeNotFound:
 		if strings.Contains(e.Request, "/files/") {
 			return fmt.Sprintf("Pull the artifact index again, and use a version id and a filename from it. %s returned %s.",
@@ -73,16 +78,25 @@ func (e *Error) Error() string {
 		return fmt.Sprintf("Check the run id in the run API's base URL. %s returned %s: the run is unknown, "+
 			"goes through another gateway, or has no work item.", e.Request, status)
 	case CodeInputsInvalid:
-		return fmt.Sprintf("Fix the ticket of this work item at its source. A value of the ticket breaks the rules "+
-			"for a run's inputs (%s returned %s).", e.Request, status)
+		return fmt.Sprintf("Fix the ticket or the work item. One of its values breaks the rules for a run's inputs "+
+			"(%s returned %s).", e.Request, status)
 	case CodeTicketGone:
 		return fmt.Sprintf("Take the ticket in again. The ticket of this work item is no longer in Qory Apiary "+
 			"(%s returned %s).", e.Request, status)
 	case CodePayloadTooLarge:
-		return fmt.Sprintf("Shrink the request to at most %d bytes encoded. %s returned %s.", MaxBody, e.Request, status)
+		limit := MaxBody
+		if strings.HasSuffix(e.Request, "/verdict") {
+			limit = maxVerdictBody
+		}
+
+		return fmt.Sprintf("Shrink the request to at most %d bytes encoded. %s returned %s.", limit, e.Request, status)
 	case CodeRateLimited:
 		wait := "a minute"
-		if e.RetryAfter > 0 {
+
+		switch {
+		case e.RetryAfter == 1:
+			wait = "1 second"
+		case e.RetryAfter > 1:
 			wait = fmt.Sprintf("%d seconds", e.RetryAfter)
 		}
 
