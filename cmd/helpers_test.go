@@ -184,11 +184,15 @@ func recorded(t *testing.T, root string) []string {
 }
 
 // lastExited is the last dev.qory.run.exited of rec, a record's lines, as
-// "state/reason/exit code", or "none" when rec has none.
+// "state/reason/exit code", or "none" when rec has none, an empty rec included. A line
+// that is not JSON fails the test.
 func lastExited(t *testing.T, rec []byte) string {
 	t.Helper()
 	end := "none"
 	for _, line := range strings.Split(strings.TrimSpace(string(rec)), "\n") {
+		if line == "" {
+			continue
+		}
 		var ev struct {
 			Type string `json:"type"`
 			Data struct {

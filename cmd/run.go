@@ -818,7 +818,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 							if err != nil {
 								return err
 							}
-							composing.file = file
+							composing.file, composing.fromDocuments = file, true
 						}
 						s, err := run.StackProxy()
 						if err != nil {

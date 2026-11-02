@@ -511,6 +511,10 @@ type composeOptions struct {
 	// and [compose.CheckAddresses] the modules' URLs once the base is read, before any
 	// module is fetched.
 	checkedAs string
+	// fromDocuments is set for the compose of the harness document of a run from a run
+	// code, whose file is the copy in the run directory: the compose's errors show a
+	// stack that the document defines as checkedAs in Qory Apiary.
+	fromDocuments bool
 }
 
 // named is the harness o composes with no address shown, see [source.Named]; nil for any
@@ -945,6 +949,9 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 		}
 	}
 	opts := compose.Options{Update: update, Pins: pins, Cache: conf.Git.Cache, Timeout: conf.Git.Timeout, Env: conf.Env, Memo: memo, Tiers: resolveTiers(flagTiers, conf), Copies: copies(at, o.walled || o.hidden), Walled: o.walled, Hidden: o.hidden}
+	if o.fromDocuments && o.checkedAs != "" {
+		opts.StackAs = o.checkedAs + " in Qory Apiary"
+	}
 	if o.git != nil {
 		opts.Git, opts.Cache = o.git, o.cache
 	}

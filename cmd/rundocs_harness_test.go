@@ -384,6 +384,19 @@ func TestARunCodeComposesAHarnessDocumentThatDefinesAStack(t *testing.T) {
 	}
 }
 
+// TestARunCodesHarnessDocumentWithAWorkflowItsModulesLackStops is a run from a run code
+// whose harness document defines a stack whose workflow deploy no module composes: the
+// compose fails, exit 2, before the join, with a line that shows the stack as the
+// workspace's harness in Qory Apiary, not by the file in the run directory.
+func TestARunCodesHarnessDocumentWithAWorkflowItsModulesLackStops(t *testing.T) {
+	r := codeHarness{defines: map[string]any{"deploy": map[string]any{}}}.run(t)
+	if r.joined || cmd.ExitCode(r.err) != cmd.ExitInput {
+		t.Fatalf("%v (exit %d), want exit 2 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	wants(t, r.out+r.err.Error(), "add a skill or command deploy to a module of "+workspaceHarness+" in Qory Apiary, or remove deploy from its workflows: the stack declares the workflow deploy, and none of its modules ships a skill or command deploy")
+	lacks(t, r.out+r.err.Error(), "harness.yaml")
+}
+
 // TestARunCodesShownHarnessDocumentShowsAddresses is a run from a run code whose
 // documents contain a harness document with a module of another repository and set
 // harness_hidden to false: qory fetches both through the run's stack proxy, and its
