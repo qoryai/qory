@@ -1554,6 +1554,9 @@ A run stops before the agent starts when:
 An instance without the feature `workflow_model` returns 404 with no error code to the run
 API. The run then works on `target_version` with no branch.
 
+A write run on the branch pushes what the agent left to it: see [The push step of a write
+run](#the-push-step-of-a-write-run).
+
 Each of these stops the run before the compose, exit 1, and the run's record shows the
 run as failed with no session. `<commit>` is the commit's first 12 characters:
 
@@ -1958,6 +1961,105 @@ limits. Each error starts with its fix:
 
 When `harness_hidden` is `false`, the home of a run without a wall keeps its links to
 the modules, as the home of a run started without a run code does.
+
+### The push step of a write run
+
+A write run of a work item ends with a push step: qory commits what the agent left, pushes
+it to the branch `qory/<work item id>`, and stores a new version of the artifact `branch`,
+so the next run of the work item starts at that commit. The step runs after the agent
+exits and before the run closes. Its kind is `push` and its name is `push qory/<work item
+id> to <system>/<path>`, followed by ` and 1 further repository` or ` and <n> further
+repositories` for a run with more repositories.
+
+The step runs when the run works on the branch of its work item, its documents set `access`
+to `write`, `workflows` of the stack does not declare the workflow's access as `read`, and
+the session ended `succeeded`. A session that failed, timed out or was cancelled runs no
+step: qory commits nothing, pushes nothing and stores no version, and what the agent left
+stays in the working folder only. A read run has no step.
+
+The step does this, in order:
+
+1. qory checks each repository again, because the agent could write to each `.git`. The
+   check stops on a key in a configuration file in `.git` that neither `git init` nor the
+   fetch writes, on such a file that is not a regular file, on `alternates`, on a
+   `commondir` file, and on a link or a hard link in `.git`. A walled run's target also
+   gets the settings check of the place the run used.
+2. qory commits what the agent left in each repository, with the message `Changes left by
+   run <run id>` and the author and committer `qory <qory@localhost>`. A new file is in
+   the commit unless git ignores it through `.gitignore` or `.git/info/exclude`. `.qory`
+   and the links into it stay out, also when the agent staged them. No hook in `.git`
+   runs. The commits of all repositories come before the first push, so a failed commit
+   pushes nothing.
+3. qory pushes each repository whose `HEAD` is past the commit the run started at to
+   `refs/heads/qory/<work item id>`, through the run's host proxy, with no force. It
+   prints `qory run: pushed qory/<work item id> to <path> at <commit>`, where `<commit>`
+   is the commit's first 12 characters. With no new commit in any repository, it prints
+   `qory run: no new commits to push`, and the step ends with no push and no version.
+4. qory stores a new version of the artifact `main` of the type `branch`, with one file,
+   `branch.json`, in the [branch format](../contracts/harness/v1/README.md#the-branch-format):
+   the version the run read, with the commit of each pushed repository replaced, or added
+   when the version has no entry for it. After a 429, qory waits for `Retry-After`, at
+   most 60 seconds, and sends the request again, at most 5 requests in all. After a request
+   with no answer, or with a status of 500 or above, qory reads the work item's artifacts
+   first, and sends the request again only when no version of this run has the file.
+
+A run's policy with path rules must allow `/<path>.git/git-receive-pack` for the push.
+
+The step counts toward the run's time limit. At the limit, qory closes the run `cancelled`
+with the reason `timeout`, exit 124. A signal during the step closes the run `cancelled`
+with the reason `interrupted`, exit 1.
+
+A failed step closes the run `failed`, exit 1, also after a session that succeeded. One
+repository can be pushed before another fails, and a push can succeed before its version
+is stored. The branch is then past every version of the artifact, and the next run's push
+fails with the line for a branch that moved.
+
+Each of these lines fails the step. `<commit>` is the commit's first 12 characters:
+
+- `take the work item in again in Qory Apiary: after the agent exited, the check of
+  repository <path> failed, so qory committed and pushed nothing: <cause>; the code is
+  used`, before any commit
+- `take the work item in again in Qory Apiary: the commit of what the agent left in <path>
+  failed: <error>; the code is used`
+- `take the work item in again in Qory Apiary, and keep the run's commits on top of commit
+  <commit>: HEAD of <path> is at <commit>, which does not descend from it, so a push would
+  not be a fast-forward; the code is used`, when the agent replaced the commit the run
+  started at
+- `add a new version of the artifact branch in Qory Apiary with the head of qory/<work item
+  id> on <path>, or delete that branch on <system>, then take the work item in again: the
+  branch moved since the run fetched it, and the push failed: <error>; the code is used`
+- `change the rule on <system> that stops a push to qory/<work item id> of <path>, then take
+  the work item in again: the push failed: <error>; the code is used`, when a rule or a
+  hook on the system stops the update
+- `add /<path>.git/git-receive-pack to the path rules of the run's policy for <system>, and
+  give the run's credential for <system> write access to <path>, then take the work item in
+  again: the push through the run's gateway returned 403: <error>; the code is used`
+- `give the run's credential for <system> write access to <path>, then take the work item in
+  again: the push through the run's gateway failed: <error>; the code is used`
+- `check that the run's policy allows <system> and that <system> is reachable, then take
+  the work item in again: the push of <path> through the run's gateway failed: <error>;
+  the code is used`
+- `take the work item in again in Qory Apiary: the run's host proxy, through which qory
+  pushes the run's commits, did not open: <error>; the code is used`
+- `take the work item in again in Qory Apiary: the run API, which stores the version of the
+  artifact branch, is not reachable from this run: <error>; the code is used`
+- `Define the artifact type branch in the workspace's Artifact types, then run the round
+  again`, when the workspace has no artifact type `branch`
+- `take the work item in again in Qory Apiary: qory pushed <branch>, and the version of the
+  artifact branch was not stored: <error>; the code is used`
+- `check the artifact branch of the work item in Qory Apiary, then take the work item in
+  again: qory pushed <branch>, and the request that stores its version got no answer, so
+  the version may or may not be stored: <error>; the code is used`
+
+A step that the time limit or a signal stopped prints one of these:
+
+- `take the work item in again in Qory Apiary: the run reached its time limit of <limit>
+  during the push step, and the run's commits may not have reached the branch; the code is
+  used`
+- `the run was cancelled: qory run got <signal> during the push step, and the run's commits
+  may not have reached the branch`
+- `the run was cancelled during the push step, and the run's commits may not have reached
+  the branch`
 
 ### Runs of a node pool
 
