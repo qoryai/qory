@@ -1651,8 +1651,8 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
 - `add a skill or command <workflow> to <harness>, or set another workflow in Qory
   Apiary: the composed harness has no skill or command <workflow>
   (workflow_not_in_harness); the code is used`, after the compose, which closes the run
-  with the reason `workflow_not_in_harness`; `<harness>` is as [What the run takes from
-  the response](#what-the-run-takes-from-the-response) says
+  with the reason `workflow_not_in_harness`; [What the run takes from the
+  response](#what-the-run-takes-from-the-response) lists the values of `<harness>`
 - `add a command <workflow> to <harness>, or set another runtime in Qory Apiary:
   <runtime> runs no skill by its name from a headless start; the code is used`, after the
   compose, for a workflow that is only a skill on `gemini` or `opencode`
