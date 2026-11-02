@@ -384,7 +384,7 @@ summary: Agents draft answers to support tickets. A person checks each answer.  
 description: >-                  # at most 1200 characters and 80 words
   Each ticket goes through two stages. In Answer, an agent drafts an answer and
   then checks its tone. In Check, a person reads the draft and sends it or sends it back.
-type: customer-care              # the workspace type
+type: qory.software              # the workspace type key
 stack: support                   # a stack that exports.stacks of this repository lists
 process:                         # a qory.process/v1 document
   schema: qory.process/v1
@@ -422,7 +422,7 @@ artifact_types:                  # optional; the artifact types the workspaces u
 | `name` | the template's name, at most 60 characters |
 | `summary` | what a workspace made from the template does, at most 200 characters |
 | `description` | how such a workspace works, at most 1200 characters and at most 80 words |
-| `type` | the workspace type of a workspace made from the template |
+| `type` | the workspace type of a workspace made from the template: a workspace type key, such as `qory.software` |
 | `stack` | the stack the workspace's workflows run on, one that `exports.stacks` of the same repository lists |
 | `process` | the workspace's process, a `qory.process/v1` document. qory checks that it is an object with `schema: qory.process/v1` and a list of `stages`; that each `workflow` of a stage's `sequence`, a loop's `body` included, is a non-empty string of one line that the stack's `qory-stack.yaml` declares under `workflows`; and that each stage `name` has no line break or other control character. qory checks nothing else in it |
 | `artifact_types` | optional; the list of the artifact types the workspaces use, as [Artifact types](#artifact-types) has it. A list with no entries is valid |
