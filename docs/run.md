@@ -1511,11 +1511,12 @@ not set, qory does not use `target_version`.
 
 A run of a work item at a `target_version` of a target on `QORY_RUN_SYSTEM` works on the
 branch `qory/<work item id>`. qory reads the work item and its artifacts through the run API
-before the fetch, and picks one version of the artifact `branch`, name `main`:
+before the fetch, and picks one version of the artifact type `branch`:
 
-1. The artifact's newest version, if the work item's stage wrote it.
-2. Else, the version that a gate approved, if the stage lists `branch` as an input.
-3. Else, the newest version.
+1. The newest version of the artifact named `main`, if the work item's stage wrote it.
+2. Else, the version that a gate approved, of any artifact name, if the stage lists
+   `branch` as an input.
+3. Else, the newest version of the artifact named `main`.
 4. With no version, the run creates the branch at `target_version`.
 
 qory composes the harness at `target_version` and with the further repositories at their
@@ -1523,8 +1524,9 @@ default branches, so a branch does not change the harness of its work item's run
 fetch step also fetches each repository's commit by id, at depth 1. After the compose, and
 after the record of a walled run's places, qory checks out the branch with no request to a
 remote: at the commit in the version, or where the fetch left a repository with no entry
-in the version. The working folder then has the commit's files, and a file that the
-branch removed stays out when the run starts from an image's copy.
+in the version. The working folder then has the commit's files. qory leaves the ref
+`refs/qory/target-version` at the target version, so a file that the branch removed stays
+out when the run starts from an image's copy.
 
 A run stops before the agent starts when:
 

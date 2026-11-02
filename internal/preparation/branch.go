@@ -17,11 +17,12 @@ import (
 
 // The words of the checkout of a work item's branch. Each is one format string.
 const (
-	textOnBranch       = "qory run: on branch %s at %s"
-	textBranchNoCommit = "qory run: add a new version of the artifact branch in Qory Apiary with a commit of %[2]s, then take the work item in again: the version has %[1]s, which is not a commit on %[2]s on %[3]s. The fetch through the run's gateway failed: %[4]s; the code is used"
-	textQoryInBranch   = "qory run: add a new version of the artifact branch in Qory Apiary whose commit has .qory as the target version %[3]s has it, then take the work item in again: commit %[2]s of %[1]s has another .qory, where qory keeps the files of the run; the code is used"
-	textNoCheckout     = "qory run: add a new version of the artifact branch in Qory Apiary with a commit that git can check out, then take the work item in again. The checkout of %[1]s at %[2]s in %[3]s failed: %[4]s; the code is used"
-	textNoHoldOnBranch = "qory run: take the work item in again in Qory Apiary: the check of the working folder before the checkout of the branch failed: %s; the code is used"
+	textOnBranch        = "qory run: on branch %s at %s"
+	textBranchNoCommit  = "qory run: add a new version of the artifact branch in Qory Apiary with a commit of %[2]s, then take the work item in again: the version has %[1]s, which is not a commit on %[2]s on %[3]s. The fetch through the run's gateway failed: %[4]s; the code is used"
+	textBranchNotCommit = "qory run: add a new version of the artifact branch in Qory Apiary with a commit of %[2]s, then take the work item in again: the version has %[1]s, which is not a commit; the code is used"
+	textQoryInBranch    = "qory run: add a new version of the artifact branch in Qory Apiary whose commit has .qory as the target version %[3]s has it, then take the work item in again: commit %[2]s of %[1]s has another .qory, where qory keeps the files of the run; the code is used"
+	textNoCheckout      = "qory run: add a new version of the artifact branch in Qory Apiary with a commit that git can check out, then take the work item in again. The checkout of %[1]s at %[2]s in %[3]s failed: %[4]s; the code is used"
+	textNoHoldOnBranch  = "qory run: take the work item in again in Qory Apiary: the check of the working folder before the checkout of the branch failed: %s; the code is used"
 )
 
 // targetRef is the ref that [Switch] leaves at the target version: [fromSeed] reads which
@@ -83,7 +84,7 @@ func fetchBranchCommit(ctx context.Context, git gitRunner, dest, system, path st
 		return notAtCommit(path, system, commit, err)
 	}
 	if _, err := git(ctx, dest, "rev-parse", "--verify", "--quiet", commit+"^{commit}"); err != nil {
-		return branchNoCommit(path, system, commit, "the id is not a commit's")
+		return fmt.Errorf(textBranchNotCommit, shortCommit(commit), integration.Printable(exports.Value(path, false)))
 	}
 	return nil
 }
@@ -153,7 +154,11 @@ func SwitchHeld(ctx context.Context, dir string, base []string, b *WorkBranch, r
 // noCheckout is [textNoCheckout] for repository r, with git's line in err.
 func noCheckout(b *WorkBranch, r WorkRepository, err error) error {
 	shown := integration.Printable(exports.Value(r.Path, false))
-	return fmt.Errorf(textNoCheckout, b.Ref, shortCommit(b.CommitOf(b.system, r.Path)), shown, integration.Printable(exports.HideURLError(err).Error()))
+	commit := b.CommitOf(b.system, r.Path)
+	if commit == "" {
+		commit = r.Commit
+	}
+	return fmt.Errorf(textNoCheckout, b.Ref, shortCommit(commit), shown, integration.Printable(exports.HideURLError(err).Error()))
 }
 
 // sameQory stops on a commit whose .qory entry is not the one of the target version.
@@ -181,11 +186,11 @@ func removedByBranch(ctx context.Context, dir string) (map[string]bool, error) {
 		if errors.As(err, &ge) && ge.exit == 1 {
 			return nil, nil
 		}
-		return nil, gitFailed(err)
+		return nil, gitFailedIn(err)
 	}
 	out, err := git(ctx, dir, "diff", "--name-only", "-z", "--no-renames", "--diff-filter=D", targetRef, "HEAD", "--")
 	if err != nil {
-		return nil, gitFailed(err)
+		return nil, gitFailedIn(err)
 	}
 	removed := map[string]bool{}
 	for _, path := range strings.Split(out, "\x00") {

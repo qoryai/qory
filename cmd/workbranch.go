@@ -99,9 +99,10 @@ func featureOff(err error) bool {
 	return errors.As(err, &apiError) && apiError.Status == http.StatusNotFound && apiError.Code == ""
 }
 
-// chosenBranch is the version of the artifact branch, name main, that a run starts at:
-// the artifact's newest version when the work item's stage wrote it; else the version
-// that a gate approved of a stage's input; else the newest version; nil with no version.
+// chosenBranch is the version of the artifact type branch that a run starts at: the
+// newest version of the artifact main when the work item's stage wrote it; else the
+// version of any artifact name that a gate approved of a stage's input; else the newest
+// version of the artifact main; nil with no version of main.
 func chosenBranch(snapshot *runapi.Snapshot, index *runapi.Index) (*runapi.Version, error) {
 	at := slices.IndexFunc(index.Artifacts, func(a runapi.Artifact) bool {
 		return a.Type == branchType && a.Name == defaultName

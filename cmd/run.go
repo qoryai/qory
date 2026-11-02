@@ -867,7 +867,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if walled {
 					checkOut = preparation.SwitchHeld
 				}
-				if err := checkOut(switchCtx, cwd, os.Environ(), branch, streams.errOut); err != nil {
+				if err := checkOut(switchCtx, cwd, os.Environ(), branch, stderr); err != nil {
 					return &runLineError{err}
 				}
 				return nil

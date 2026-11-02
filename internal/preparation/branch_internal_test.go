@@ -257,8 +257,9 @@ func TestStopsOnABranchIDThatIsNoCommit(t *testing.T) {
 
 	b := &WorkBranch{Ref: testRef, Version: versionOf("acme/shop", tree)}
 	_, err := fetchListAt(dir, "acme/shop", Target{System: "git.example.com", Path: "acme/shop", Version: first, Branch: b})
-	if err == nil || !strings.HasPrefix(err.Error(), "qory run: add a new version of the artifact branch") {
-		t.Fatalf("err = %v", err)
+	want := "qory run: add a new version of the artifact branch in Qory Apiary with a commit of acme/shop, then take the work item in again: the version has " + tree[:12] + ", which is not a commit; the code is used"
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %s", err, want)
 	}
 }
 
