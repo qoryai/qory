@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"strings"
@@ -38,9 +39,13 @@ const (
 	textNoBranchType    = "Define the artifact type " + branchType + " in the workspace's Artifact types, then %s, then run the round again"
 	textNotStored       = "%s, then take the work item in again: qory pushed %s, and the version of the artifact " + branchType + " was not stored: %s" + codeUsed
 	textStoreUnknown    = "check the artifact " + branchType + " of the work item in Qory Apiary; with no version of this run, %s; then take the work item in again: qory pushed %s, and the request that stores its version got no answer, so the version may or may not be stored: %s" + codeUsed
-	textPushInterrupted = "the run was cancelled: qory run got %s during the push step, and the run's commits may not have reached the branch"
-	textPushStopped     = "the run was cancelled during the push step, and the run's commits may not have reached the branch"
-	textPushTimedOut    = "take the work item in again in Qory Apiary: the run reached its time limit of %s during the push step, and the run's commits may not have reached the branch" + codeUsed
+	textPushCut         = "take the work item in again in Qory Apiary: %s during the push step, and the run's commits may not have reached the branch" + codeUsed
+	textPushCutPushed   = "check the artifact " + branchType + " of the work item in Qory Apiary; with no version of this run, %s; then take the work item in again: qory pushed %s, and %s, so the version may or may not be stored" + codeUsed
+	textCutSecondSignal = "qory run got a second signal"
+	textCutTimeLimit    = "the run reached its time limit of %s"
+	textCutPushLimit    = "the step reached its limit of %s"
+	textCutSignal       = "qory run got %s, and " + textCutPushLimit
+	textRunEnded        = "The run ended %s: %s."
 )
 
 // branchFile is the name of the one file of a version of the artifact type branch.
@@ -66,15 +71,54 @@ var branchWait = func(ctx context.Context, d time.Duration) error {
 	}
 }
 
+// pushAfterStop is the time the push step has after a stop: at least this much past a
+// time limit that a session used up, and this much from a signal. It fits inside the 30
+// seconds [child.DefaultGrace] gives a pool's run after SIGTERM, with the 10 seconds of a
+// runtime's default stop and the close. It is a variable for the tests.
+var pushAfterStop = 15 * time.Second
+
 // keepsWork reports whether the run pushes what its agent left: a run from a run code
 // that may write its target, that no workflow or document limits to reading, with a
-// branch of its work item, whose session closes the run succeeded by out. A session that
-// failed, timed out or was cancelled pushes nothing and stores no version, so no half
-// done work reaches a gate or a later run. [readsOnly] sets readOnly, and
-// [codeRun.writes] alone is true for a workflow that declares read in documents with
+// branch of its work item and an agent session, however that session ended. A join that
+// returned an error has no [session.Result], so nothing shows that an agent ran. A run
+// that Qory Apiary closed during the session takes no version. [readsOnly] sets readOnly,
+// and [codeRun.writes] alone is true for a workflow that declares read in documents with
 // access write.
-func keepsWork(fromCode *codeRun, readOnly bool, branch *preparation.WorkBranch, out session.Outcome) bool {
-	return canPush(fromCode, readOnly, branch) && out.State == event.StateSucceeded
+func keepsWork(fromCode *codeRun, readOnly bool, branch *preparation.WorkBranch, res *session.Result, joinErr error) bool {
+	return canPush(fromCode, readOnly, branch) && joinErr == nil && res != nil && !res.RunClosed
+}
+
+// pushContext is the context of the push step: not ended by ctx, which a stop ended
+// already. It ends at limit, or [pushAfterStop] from now when that is later or limit is
+// zero and ctx has ended; [pushAfterStop] after ctx ends; and at once when again ends.
+func pushContext(ctx, again context.Context, limit time.Time) (context.Context, func()) {
+	push, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	wait := time.Duration(math.MaxInt64)
+	if !limit.IsZero() {
+		wait = max(time.Until(limit), pushAfterStop)
+	}
+	timer := time.AfterFunc(wait, cancel)
+	stopFirst := context.AfterFunc(ctx, func() { timer.Reset(pushAfterStop) })
+	stopAgain := context.AfterFunc(again, cancel)
+	return push, func() {
+		stopFirst()
+		stopAgain()
+		timer.Stop()
+		cancel()
+	}
+}
+
+// failedEnd is the line that shows how a run that did not succeed ended, in the commit of
+// what its agent left and in the note of its version; "" for out succeeded.
+func failedEnd(out session.Outcome) string {
+	if out.State == event.StateSucceeded {
+		return ""
+	}
+	reason := out.Reason
+	if reason == "" {
+		reason = fmt.Sprintf("exit %d", out.ExitCode)
+	}
+	return fmt.Sprintf(textRunEnded, out.State, reason)
 }
 
 // canPush reports whether the run has a push step if its session succeeds.
@@ -84,9 +128,11 @@ func canPush(fromCode *codeRun, readOnly bool, branch *preparation.WorkBranch) b
 
 // pushWork is the run's step of kind push: it pushes what the agent left, through the
 // run's host proxy, and stores the new version of the artifact type branch. The step
-// ends as [inStep] ends it.
-func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, stopped func() bool) error {
-	return inStep(run, stderr, event.StepPush, pushStepName(branch, run.System()), stopped, func(w io.Writer) error {
+// ends as [inStep] ends it, cancelled when ctx ended. out is how the session ended, which
+// the commit and the version show when it did not succeed, see [failedEnd].
+func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, out session.Outcome) error {
+	cut := func() bool { return ctx.Err() != nil }
+	return inStep(run, stderr, event.StepPush, pushStepName(branch, run.System()), cut, func(w io.Writer) error {
 		httpClient, base, err := run.RunAPI()
 		if err != nil {
 			return &runLineError{fmt.Errorf(textPushNoRunAPI, shownError(err))}
@@ -101,14 +147,19 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 		}
 		secretmask.Default().AddURLPassword(h.proxy.URL)
 		defer h.close()
-		document, err := preparation.Push(ctx, dir, os.Environ(), branch, fmt.Sprintf(textChangesLeft, runID), h.proxy, w)
+		end := failedEnd(out)
+		message := fmt.Sprintf(textChangesLeft, runID)
+		if end != "" {
+			message += "\n\n" + end
+		}
+		document, err := preparation.Push(ctx, dir, os.Environ(), branch, message, h.proxy, w)
 		if err != nil {
 			return &runLineError{err}
 		}
 		if document == nil {
 			return nil
 		}
-		if err := storeBranch(ctx, client, runID, branch, document); err != nil {
+		if err := storeBranch(ctx, client, runID, end, branch, document); err != nil {
 			return &runLineError{err}
 		}
 		return nil
@@ -142,7 +193,7 @@ func pushStepName(branch *preparation.WorkBranch, system string) string {
 // version of this run has the document. At most [maxBranchTries] POST go out, and
 // unknown_type is [textNoBranchType]. Every failure has the fix of
 // [preparation.WorkBranch.VersionWays], as the push landed.
-func storeBranch(ctx context.Context, client *runapi.Client, runID string, branch *preparation.WorkBranch, document *branchformat.Branch) error {
+func storeBranch(ctx context.Context, client *runapi.Client, runID, note string, branch *preparation.WorkBranch, document *branchformat.Branch) error {
 	content, err := json.Marshal(document)
 	if err != nil {
 		return fmt.Errorf(textNotStored, branch.VersionWays(), document.Ref, shownError(err))
@@ -151,7 +202,7 @@ func storeBranch(ctx context.Context, client *runapi.Client, runID string, branc
 		return fmt.Errorf(textNotStored, branch.VersionWays(), document.Ref, shownError(err))
 	}
 	sum := sha256.Sum256(content)
-	push := runapi.Push{Type: branchType, Name: defaultName, Files: []runapi.PushFile{
+	push := runapi.Push{Type: branchType, Name: defaultName, Note: note, Files: []runapi.PushFile{
 		{Filename: branchFile, ContentType: "application/json", Content: content},
 	}}
 	var last error
@@ -255,33 +306,68 @@ func hasBranchVersion(index *runapi.Index, runID, sum string) bool {
 	return false
 }
 
-// pushOutcome is the outcome a run closes with after its push step failed with err: the
-// outcome of a session that ctx or the run's time limit stopped, or failed with the
-// status of err. Forager closes a run failed after a succeeded session.
-func pushOutcome(ctx context.Context, stopped func() bool, err error) session.Outcome {
+// pushEnding is what the end of a run needs to know of its push step.
+type pushEnding struct {
+	// session is the outcome of the session, and limit the run's time limit.
+	session session.Outcome
+	limit   time.Duration
+	// stopped is whether qory run got a signal, again whether it got a second, and cut
+	// whether the step's context ended, each as the step exited. got is the first signal.
+	stopped, again, cut bool
+	got                 string
+}
+
+// outcome is the outcome a run closes with after its push step failed with err. A session
+// that did not succeed keeps its end, whatever the step did. After a session that
+// succeeded, a cut step closes the run as a stop does, and a failed one closes it failed
+// with the status of err.
+func (e pushEnding) outcome(err error) session.Outcome {
 	switch {
-	case ctx.Err() != nil:
+	case e.session.State != event.StateSucceeded:
+		return e.session
+	case e.cut && e.stopped:
 		return session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1}
-	case stopped():
+	case e.cut:
 		return session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}
 	}
 	return session.Outcome{State: event.StateFailed, ExitCode: ExitCode(err)}
 }
 
-// pushEnded prints how a push step that failed with err ended the run, which closed with
-// out, and returns qory run's exit status: 1, or [exitTimeout] at the run's time limit.
-func pushEnded(u *ui.UI, said func(string), out session.Outcome, err error, got string, limit time.Duration) error {
+// cutBy is what ended a step whose context ended, as a line has it.
+func (e pushEnding) cutBy() string {
 	switch {
+	case e.again:
+		return textCutSecondSignal
+	case e.stopped:
+		return fmt.Sprintf(textCutSignal, e.got, pushAfterStop)
+	case e.session.Reason == event.ReasonTimeout:
+		return fmt.Sprintf(textCutPushLimit, pushAfterStop)
+	}
+	return fmt.Sprintf(textCutTimeLimit, e.limit)
+}
+
+// ended prints how a push step that failed with err ended, for a run on branch, and
+// returns qory run's exit status: ended, the session's, when the session did not succeed,
+// [exitTimeout] for a step cut at the run's time limit, and 1 otherwise. Each cut line
+// has the two ways out when a push landed with no version stored.
+func (e pushEnding) ended(u *ui.UI, said func(string), err error, branch *preparation.WorkBranch, ended error) error {
+	if e.cut {
+		if pushed := branch.PushedPaths(); pushed != "" {
+			u.Fail(fmt.Errorf(textPushCutPushed, branch.VersionWays(), pushed, e.cutBy()))
+		} else {
+			u.Fail(fmt.Errorf(textPushCut, e.cutBy()))
+		}
+	} else {
+		said(strings.TrimPrefix(err.Error(), "qory run: "))
+	}
+	out := e.outcome(err)
+	switch {
+	case e.session.State != event.StateSucceeded:
+		return ended
 	case out.Reason == event.ReasonTimeout:
-		u.Fail(fmt.Errorf(textPushTimedOut, limit))
 		return reported(&exitError{code: exitTimeout})
-	case out.State == event.StateCancelled && got != "":
-		u.Fail(fmt.Errorf(textPushInterrupted, got))
-		return reported(&exitError{code: 1})
-	case out.State == event.StateCancelled:
-		u.Fail(errors.New(textPushStopped))
+	case e.cut:
 		return reported(&exitError{code: 1})
 	}
-	said(strings.TrimPrefix(err.Error(), "qory run: "))
 	return reported(err)
 }

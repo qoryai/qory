@@ -1973,11 +1973,20 @@ id> to <system>/<path>`, followed by ` and 1 further repository` or ` and <n> fu
 repositories` for a run with more repositories.
 
 The step runs when the run works on the branch of its work item, its documents set `access`
-to `write`, `workflows` of the stack declares the workflow's access as `write`, and the
-session ended `succeeded`. A workflow that the stack does not declare counts as `read`. A
-session that failed, timed out or was cancelled runs no
-step: qory commits nothing, pushes nothing and stores no version, and what the agent left
-stays in the working folder only. A read run has no step.
+to `write`, `workflows` of the stack declares the workflow's access as `write`, and an agent
+session ran, however it ended. A workflow that the stack does not declare counts as `read`.
+A session that failed, timed out or was cancelled gets the same step and the same checks as
+one that succeeded. The commit keeps its subject and gets the body line `The run ended
+<state>: <reason>.`, and the version's note is the same line. `<reason>` is `exit <code>`
+for a session with no reason. A session that succeeded has neither.
+
+A run has no step in these cases, and what the agent left stays in the working folder only:
+
+- A read run.
+- A run whose session did not start, or stopped with an error of the session itself.
+- A run that Qory Apiary ended during its session. What the agent left stays on the machine
+  and is deleted with it, so nothing reaches the branch.
+- A run on a machine that is lost: nothing is left to run the step.
 
 The step does this, in order:
 
@@ -2011,12 +2020,27 @@ The step does this, in order:
 
 A run's policy with path rules must allow `/<path>.git/git-receive-pack` for the push.
 
-The step counts toward the run's time limit. At the limit, qory closes the run `cancelled`
-with the reason `timeout`, exit 124. A signal during the step closes the run `cancelled`
-with the reason `interrupted`, exit 1.
+The step counts toward the run's time limit, and has 15 seconds when the run has less left,
+also after the session used up the limit. A first signal, before or during the step, leaves
+the step 15 seconds. A second signal ends the step at once. A step that one of these ended
+has the state `cancelled`, and the commits it made stay in the working folder.
 
-A failed step closes the run `failed`, exit 1, also after a session that succeeded. One
-repository can be pushed before another fails, and a push can succeed before its version
+The run closes as its session ended, whatever the step did: a session that timed out closes
+`cancelled` with the reason `timeout`, exit 124, and a session that failed closes `failed`.
+The line of a failed step is printed after the run's end. After a session that succeeded,
+the step sets the close:
+
+- A failed step closes the run `failed`, exit 1.
+- A step stopped at the time limit closes the run `cancelled` with the reason `timeout`,
+  exit 124.
+- A step stopped after a signal closes the run `cancelled` with the reason `interrupted`,
+  exit 1.
+
+`qory run pool` stops a run with SIGTERM, and with SIGKILL 30 seconds later. The step gets
+its 15 seconds when the agent's runtime stops within the 10 seconds of the default
+`--stop-grace`. A longer `--stop-grace` takes time from the step, and SIGKILL ends it.
+
+One repository can be pushed before another fails, and a push can succeed before its version
 is stored. The branch is then past every version of the artifact, and the next run's push
 fails as a branch that moved. Each line for that state gives both ways out: add a version
 with the head of the branch, or delete the branch.
@@ -2080,15 +2104,16 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   id> on <path>, or delete that branch on <system>: qory pushed <path> and stored no version,
   because the push of the next repository failed: <line of that failure>`
 
-A step that the time limit or a signal stopped prints one of these:
+A step that the time limit or a signal stopped prints one of these, where `<cause>` is `qory
+run got a second signal`, `qory run got <signal>, and the step reached its limit of 15s`,
+`the step reached its limit of 15s`, or `the run reached its time limit of <limit>`:
 
-- `take the work item in again in Qory Apiary: the run reached its time limit of <limit>
-  during the push step, and the run's commits may not have reached the branch; the code is
-  used`
-- `the run was cancelled: qory run got <signal> during the push step, and the run's commits
-  may not have reached the branch`
-- `the run was cancelled during the push step, and the run's commits may not have reached
-  the branch`
+- `take the work item in again in Qory Apiary: <cause> during the push step, and the run's
+  commits may not have reached the branch; the code is used`
+- `check the artifact branch of the work item in Qory Apiary; with no version of this run,
+  add a new version of the artifact branch in Qory Apiary with the head of qory/<work item
+  id> on <path>, or delete that branch on <system>; then take the work item in again: qory
+  pushed <branch>, and <cause>, so the version may or may not be stored; the code is used`
 
 ### Runs of a node pool
 

@@ -325,7 +325,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return err
 				}
 			}
-			ctx, got, stop := signalContext(cmd.Context())
+			ctx, again, got, stop := signalContext(cmd.Context())
 			defer stop()
 			spec := runSpec{
 				OpenSpec: session.OpenSpec{
@@ -1021,19 +1021,25 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			spec.Stdout, spec.Stderr = streams.session()
 			res, err := joinSession(run, ctx, spec.SessionSpec)
 			out := sessionOutcome(res, err)
-			// pushWork is the push step of a write run whose session succeeded, see
-			// [keepsWork], within the run's time limit, before the close: Qory Apiary takes
-			// no version of a run that ended.
+			// pushWork is the push step of a run with an agent session that may write, see
+			// [keepsWork], before the close: Qory Apiary takes no version of a run that ended.
+			// The step runs under [pushContext], since a stop has ended ctx or spent the time
+			// limit. A failed step changes the close only of a session that succeeded.
+			ending := pushEnding{session: out, limit: timeout}
 			var pushErr error
-			if keepsWork(fromCode, readOnly, branch, out) {
-				pushCtx, cancel := ctx, func() {}
+			if keepsWork(fromCode, readOnly, branch, res, err) {
+				var limit time.Time
 				if timeout > 0 {
-					pushCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+					limit = opened.Add(timeout)
 				}
-				pushErr = pushWork(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, stopped)
+				pushCtx, cancel := pushContext(ctx, again, limit)
+				pushErr = pushWork(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, out)
+				ending.stopped = ctx.Err() != nil
+				ending.again, ending.got = again.Err() != nil, got()
+				ending.cut = pushCtx.Err() != nil
 				cancel()
 				if pushErr != nil {
-					out = pushOutcome(ctx, stopped, pushErr)
+					out = ending.outcome(pushErr)
 				}
 			}
 			closed := closeRun(out)
@@ -1075,7 +1081,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			ended := runEnded(u, res, end)
 			if pushErr != nil {
-				return pushEnded(u, said, out, pushErr, got(), timeout)
+				return ending.ended(u, said, pushErr, branch, ended)
 			}
 			return ended
 		},
@@ -1494,10 +1500,12 @@ func runEnded(u *ui.UI, res *session.Result, e runEnd) error {
 	return reported(&exitError{code: code})
 }
 
-// signalContext is parent until qory gets SIGINT or SIGTERM; got names the signal it got,
-// "" before one. stop ends the watch, and a signal after it acts as it would without.
-func signalContext(parent context.Context) (ctx context.Context, got func() string, stop func()) {
+// signalContext is parent until qory gets SIGINT or SIGTERM; again ends at a second such
+// signal; got names the first signal it got, "" before one. stop ends the watch, and a
+// signal after it acts as it would without.
+func signalContext(parent context.Context) (ctx, again context.Context, got func() string, stop func()) {
 	ctx, cancel := context.WithCancelCause(parent)
+	again, cancelAgain := context.WithCancel(context.Background())
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	done := make(chan struct{})
@@ -1505,6 +1513,12 @@ func signalContext(parent context.Context) (ctx context.Context, got func() stri
 		select {
 		case s := <-signals:
 			cancel(gotSignal{name: signalName(s)})
+		case <-done:
+			return
+		}
+		select {
+		case <-signals:
+			cancelAgain()
 		case <-done:
 		}
 	}()
@@ -1514,6 +1528,7 @@ func signalContext(parent context.Context) (ctx context.Context, got func() stri
 			signal.Stop(signals)
 			close(done)
 			cancel(context.Canceled)
+			cancelAgain()
 		})
 	}
 	got = func() string {
@@ -1523,7 +1538,7 @@ func signalContext(parent context.Context) (ctx context.Context, got func() stri
 		}
 		return ""
 	}
-	return ctx, got, stop
+	return ctx, again, got, stop
 }
 
 // gotSignal is the cause of qory run's context ending at a signal it got.

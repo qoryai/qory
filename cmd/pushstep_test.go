@@ -130,6 +130,7 @@ func (a *pushAPI) posted(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.bodies = append(a.bodies, body.Type+" "+body.Name+" "+body.Files[0].Filename+" "+body.Files[0].ContentType)
+	a.notes = append(a.notes, body.Note)
 	store := true
 	if a.post != nil {
 		var handled bool
@@ -458,33 +459,95 @@ func TestAReadRunPushesNothing(t *testing.T) {
 	}
 }
 
-// TestASessionThatDidNotSucceedPushesNothing is a write run whose agent left a change and
-// whose session failed, timed out or was cancelled: no push step, and the run closes as
-// the session ended.
-func TestASessionThatDidNotSucceedPushesNothing(t *testing.T) {
+// TestASessionThatDidNotSucceedPushes is a write run whose agent left a change and whose
+// session ended another way: the step pushes it, and the commit and the version show that
+// end. The run closes as the session ended.
+func TestASessionThatDidNotSucceedPushes(t *testing.T) {
 	for name, c := range map[string]struct {
 		result *session.Result
 		state  string
 		code   int
+		end    string
 	}{
-		"failed":    {&session.Result{State: event.StateFailed, ExitCode: 3}, event.StateFailed, 3},
-		"timed out": {&session.Result{State: event.StateCancelled, TimedOut: true, ExitCode: 124}, event.StateCancelled, 124},
-		"cancelled": {&session.Result{State: event.StateCancelled, Cancelled: true, ExitCode: 130}, event.StateCancelled, 1},
+		"failed":    {&session.Result{State: event.StateFailed, ExitCode: 3}, event.StateFailed, 3, "The run ended failed: exit 3."},
+		"timed out": {&session.Result{State: event.StateCancelled, TimedOut: true, ExitCode: 124}, event.StateCancelled, 124, "The run ended cancelled: timeout."},
+		"cancelled": {&session.Result{State: event.StateCancelled, Cancelled: true, ExitCode: 130}, event.StateCancelled, 1, "The run ended cancelled: interrupted."},
 	} {
 		t.Run(name, func(t *testing.T) {
 			p := newPushRepo(t, "write")
 			r := p.run(t, writesAndCommits(t), func() (*session.Result, error) { return c.result, nil })
 			r.wantsClose(t, c.state, c.code)
-			if name, _ := r.step(); name != "" {
-				t.Errorf("a push step %q", name)
+			if got := r.closes[0]; got.ExitCode != c.result.ExitCode {
+				t.Errorf("the run closed with exit %d, want %d", got.ExitCode, c.result.ExitCode)
 			}
-			if head := p.branchHead(t); head != "" {
-				t.Errorf("the forge has the branch at %s", head)
+			if _, state := r.step(); state != event.StateSucceeded {
+				t.Errorf("the step ended %q, want succeeded\n%s", state, r.out)
 			}
-			if posts, _, _ := p.api.counts(); posts != 0 {
-				t.Errorf("%d POST, want 0", posts)
+			head := p.branchHead(t)
+			if head == "" {
+				t.Fatalf("the forge has no branch\n%s", r.out)
+			}
+			got := proxygittest.Git(t, p.bare, "log", "-1", "--format=%B", head)
+			if want := "Changes left by run " + r.runID + "\n\n" + c.end; got != want {
+				t.Errorf("the commit's message is %q, want %q", got, want)
+			}
+			if len(p.api.notes) != 1 || p.api.notes[0] != c.end {
+				t.Errorf("the notes are %q, want %q", p.api.notes, c.end)
 			}
 		})
+	}
+}
+
+// TestASucceededRunShowsNoEnd is the commit and the version of a session that succeeded.
+func TestASucceededRunShowsNoEnd(t *testing.T) {
+	p := newPushRepo(t, "write")
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	got := proxygittest.Git(t, p.bare, "log", "-1", "--format=%B", p.branchHead(t))
+	if want := "Changes left by run " + r.runID; got != want {
+		t.Errorf("the commit's message is %q, want %q", got, want)
+	}
+	if len(p.api.notes) != 1 || p.api.notes[0] != "" {
+		t.Errorf("the notes are %q, want one empty note", p.api.notes)
+	}
+}
+
+// TestAFailedPushKeepsTheEndOfTheSession is a push that fails after a session that did not
+// succeed: the step fails and prints its line, and the run closes as the session ended.
+func TestAFailedPushKeepsTheEndOfTheSession(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.api.post = func(_ int, w http.ResponseWriter) (bool, bool) {
+		failing(w, http.StatusConflict, "run_ended", "")
+		return true, false
+	}
+	r := p.run(t, writesAndCommits(t), func() (*session.Result, error) {
+		return &session.Result{State: event.StateCancelled, TimedOut: true, ExitCode: 124}, nil
+	})
+	r.wantsClose(t, event.StateCancelled, 124)
+	if got := r.closes[0]; got.Reason != event.ReasonTimeout {
+		t.Errorf("the run closed with %+v, want the reason timeout", got)
+	}
+	if _, state := r.step(); state != event.StateFailed {
+		t.Errorf("the step ended %q, want failed", state)
+	}
+	wants(t, r.out, "the version of the artifact branch was not stored")
+}
+
+// TestARunTheGatewayClosedPushesNothing is a session that ended because Qory Apiary closed
+// the run, which takes no version.
+func TestARunTheGatewayClosedPushesNothing(t *testing.T) {
+	p := newPushRepo(t, "write")
+	r := p.run(t, writesAndCommits(t), func() (*session.Result, error) {
+		return &session.Result{State: event.StateCancelled, Reason: "stopped", RunClosed: true}, nil
+	})
+	if name, _ := r.step(); name != "" {
+		t.Errorf("a push step %q", name)
+	}
+	if head := p.branchHead(t); head != "" {
+		t.Errorf("the forge has the branch at %s", head)
+	}
+	if posts, _, _ := p.api.counts(); posts != 0 {
+		t.Errorf("%d POST, want 0", posts)
 	}
 }
 

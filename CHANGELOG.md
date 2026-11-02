@@ -24,8 +24,8 @@ release may change what an existing document does, and states it under Upgrading
 - A write run of a work item ends with a push step: qory commits what the agent left,
   pushes each repository with new commits to `qory/<work item id>`, and stores a new
   version of the artifact `branch`. The next run in the same stage starts at that commit. A
-  session that did not succeed pushes nothing. See The push step of a write run in
-  `docs/run.md`.
+  session that failed, timed out or was cancelled gets the same step, and its commit and
+  version show how it ended. See The push step of a write run in `docs/run.md`.
 - A skill reads its work item and stores what it made with `qory work-item show`, `qory
   artifact pull`, `qory artifact push` and `qory run verdict`. In a run they use Qory
   Apiary through the gateway, at `QORY_RUN_API`. Outside a run they use the checkout's
