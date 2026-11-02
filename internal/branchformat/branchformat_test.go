@@ -153,9 +153,15 @@ func TestCheck(t *testing.T) {
 // one that is not JSON: the fix first, and then each rule with its place.
 func TestCheckStartsWithTheFix(t *testing.T) {
 	err := branchformat.Check([]byte(`{"ref": "main", "repositories": []}`))
-	const want = "fix the branch document to match contracts/harness/v1/branch.schema.json: at '/ref': "
-	if err == nil || !strings.HasPrefix(err.Error(), want) || !strings.Contains(err.Error(), "at '/repositories': ") || strings.Contains(err.Error(), "\n") {
-		t.Errorf("%v\nwant %s…", err, want)
+	const want = "fix the branch document to match contracts/harness/v1/branch.schema.json: at '/"
+	if err == nil || !strings.HasPrefix(err.Error(), want) || strings.Contains(err.Error(), "\n") {
+		t.Fatalf("%v\nwant %s…", err, want)
+	}
+	// The library returns the rules in no fixed order.
+	for _, rule := range []string{"at '/ref': ", "at '/repositories': "} {
+		if !strings.Contains(err.Error(), rule) {
+			t.Errorf("%v\nwant %s", err, rule)
+		}
 	}
 	for _, doc := range []string{"", "{", `{} {}`} {
 		err := branchformat.Check([]byte(doc))

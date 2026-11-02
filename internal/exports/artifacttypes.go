@@ -50,10 +50,10 @@ const (
 	maxSchemaDepth   = 64
 )
 
-// The limit of the patterns of all custom types in one process.yaml: the most bytes they
-// take once compiled, as [patternBudget] estimates them. A pattern takes a fixed part,
-// and one [syntax.Inst] of 40 bytes for each instruction, a repeat writing its group
-// once for each count. Without the limit, a pattern of a few kilobytes takes 128 MiB.
+// The limit of the patterns of all custom types in one process.yaml, in bytes of
+// [patternBudget]'s estimate. A pattern counts a fixed part and one [syntax.Inst] of 40
+// bytes for each instruction of a program, a repeat counting its group once for each
+// count. qory compiles no pattern, so the estimate is not memory that qory uses.
 const (
 	maxPatternBytes   = 16 << 20
 	patternFixedBytes = 1024
@@ -96,7 +96,7 @@ func checkArtifactTypes(shown string, list *yaml.Node) error {
 	}
 	var lines []string
 	first := map[string]int{}
-	patterns := &patternBudget{compiled: map[string]jsonschema.Regexp{}}
+	patterns := &patternBudget{counted: map[string]bool{}}
 	for i, entry := range list.Content {
 		name, why := checkArtifactType(entry, i, patterns)
 		at, twice := first[name]
@@ -255,7 +255,7 @@ func checkTypeSchema(label string, n *yaml.Node, patterns *patternBudget) string
 	}
 	if err := compileTypeSchema(compact.Bytes(), patterns); err != nil {
 		if patterns.over > 0 {
-			return fmt.Sprintf("shorten the patterns in %s: the patterns of all artifact types in the file take at most %d bytes once compiled, and this one brings them to %d", where, maxPatternBytes, patterns.over)
+			return fmt.Sprintf("shorten the patterns in %s: the estimate for the patterns of all artifact types in the file is at most %d bytes, and this one brings it to %d", where, maxPatternBytes, patterns.over)
 		}
 		return fmt.Sprintf("fix %s so that it compiles as a JSON Schema: %s", where, compileReason(err))
 	}
@@ -355,9 +355,10 @@ func overSchemaLimit(v any, depth int, values *int) string {
 }
 
 // compileTypeSchema compiles a JSON Schema, draft 2020-12 unless $schema sets another,
-// with its patterns compiled through patterns. The compiler has no loader, so a reference
-// to a file or a URL fails when the schema reaches it, and no file or URL is read. The
-// JSON Schema metaschemas are built into the compiler, so a reference to one passes.
+// with its patterns parsed through patterns, and drops the result: nothing is validated
+// against it. The compiler has no loader, so a reference to a file or a URL outside the
+// schema fails when the schema reaches it, and no file or URL is read. The JSON Schema
+// metaschemas are built into the compiler, so a reference to one passes.
 func compileTypeSchema(schema []byte, patterns *patternBudget) error {
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(schema))
 	if err != nil {
@@ -366,7 +367,7 @@ func compileTypeSchema(schema []byte, patterns *patternBudget) error {
 	c := jsonschema.NewCompiler()
 	c.DefaultDraft(jsonschema.Draft2020)
 	c.UseLoader(jsonschema.SchemeURLLoader{})
-	c.UseRegexpEngine(patterns.compile)
+	c.UseRegexpEngine(patterns.parse)
 	patterns.over = 0
 	if err := c.AddResource(typeSchemaURL, doc); err != nil {
 		return err
@@ -376,29 +377,29 @@ func compileTypeSchema(schema []byte, patterns *patternBudget) error {
 }
 
 // patternBudget is the regular expression engine of the JSON Schema compiler for one
-// process.yaml. Every pattern the compiler reads goes through compile, in the check
-// against the metaschema and in the schema's compile, so no pattern is compiled past
-// [maxPatternBytes]. Each source is compiled once.
+// process.yaml. Every pattern the compiler reads goes through parse, in the check against
+// the metaschema and in the schema's compile. parse compiles no pattern: this check never
+// matches one, and a compiled program can take far more memory than its source.
 type patternBudget struct {
-	// used is the estimated bytes of the patterns in compiled.
+	// used is the estimated bytes of the patterns in counted.
 	used int64
 	// over is what used would have become with the pattern that passed the limit, 0
 	// when no pattern of the current schema passed it.
 	over int64
-	// compiled has each compiled pattern by its source.
-	compiled map[string]jsonschema.Regexp
+	// counted has the source of each pattern that used includes.
+	counted map[string]bool
 }
 
 // errPatternBudget is the compiler's error for a pattern past the limit. A message uses
 // [patternBudget.over] in its place.
 var errPatternBudget = errors.New("the pattern passes the limit of the file's patterns")
 
-// compile returns source compiled, or the parser's error, or [errPatternBudget] with
-// nothing compiled. The parser keeps a repeat as one node, so it runs for every pattern,
-// and the size of the program comes from its tree before any program is written.
-func (b *patternBudget) compile(source string) (jsonschema.Regexp, error) {
-	if re, done := b.compiled[source]; done {
-		return re, nil
+// parse returns source as a [parsedPattern], or the parser's error, or [errPatternBudget].
+// The parser keeps a repeat as one node, so the estimate comes from its tree at the cost
+// of reading the source. A source counts once.
+func (b *patternBudget) parse(source string) (jsonschema.Regexp, error) {
+	if b.counted[source] {
+		return parsedPattern(source), nil
 	}
 	tree, err := syntax.Parse(source, syntax.Perl)
 	if err != nil {
@@ -409,20 +410,30 @@ func (b *patternBudget) compile(source string) (jsonschema.Regexp, error) {
 		b.over = total
 		return nil, errPatternBudget
 	}
-	re, err := regexp.Compile(source)
-	if err != nil {
-		return nil, err
-	}
 	b.used = total
-	b.compiled[source] = re
-	return re, nil
+	b.counted[source] = true
+	return parsedPattern(source), nil
 }
 
-// patternInsts is an upper bound on the instructions of the program compiled from re.
-// Rounds up for each node, as [syntax.Regexp.Simplify] and [syntax.Compile] add at most
-// that many for a capture, a star, a plus, a quest or an alternative. A repeat writes
-// its group once for each count, and a character class counts one instruction for each
-// [patternInstBytes] of its ranges.
+// parsedPattern is the source of a pattern the parser read, with no program. The
+// compiler keeps it in a schema that [compileTypeSchema] drops, so nothing calls
+// MatchString.
+type parsedPattern string
+
+// String is the pattern's source.
+func (p parsedPattern) String() string { return string(p) }
+
+// MatchString panics: a parsedPattern has no program, and a schema with one is never
+// validated against. A test that reaches it fails.
+func (p parsedPattern) MatchString(string) bool {
+	panic("exports: a process.yaml's json_schema was validated against, and its patterns have no program")
+}
+
+// patternInsts estimates the instructions of a program compiled from re. It adds some for
+// each node, for what [syntax.Regexp.Simplify] and [syntax.Compile] add for a capture, a
+// star, a plus, a quest or an alternative, so a pattern's estimate is rarely under its
+// program, and then by one instruction. A repeat counts its group once for each count,
+// and a character class one instruction for each [patternInstBytes] of its ranges.
 func patternInsts(re *syntax.Regexp) int64 {
 	var inner int64
 	for _, sub := range re.Sub {
