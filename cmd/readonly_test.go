@@ -34,6 +34,9 @@ func writesHello(f string) string {
 	return f + "workflows:\n  hello:\n    access: write\n"
 }
 
+// lowered sets access in a run's documents to read.
+func lowered(d map[string]any) { d["access"] = "read" }
+
 // readRun is a walled run from a run code whose workflow hello the stack file, changed
 // by stackFile, declares, with the fake docker and the wall section of forager.yaml
 // whose wall.image is image, with more after it; it returns the run and the fake
@@ -46,6 +49,12 @@ func readRun(t *testing.T, stackFile func(string) string, image, more string) (c
 // readRunArgs is [readRun] with the flags args.
 func readRunArgs(t *testing.T, args []string, stackFile func(string) string, image, more string) (codeRun, string) {
 	t.Helper()
+	return readRunDocuments(t, args, stackFile, nil, image, more)
+}
+
+// readRunDocuments is [readRunArgs] with the documents changed by change.
+func readRunDocuments(t *testing.T, args []string, stackFile func(string) string, change func(map[string]any), image, more string) (codeRun, string) {
+	t.Helper()
 	var log string
 	r := runFromCodeWith(t, func(string) []string {
 		var docker string
@@ -53,7 +62,7 @@ func readRunArgs(t *testing.T, args []string, stackFile func(string) string, ima
 		writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
 			"wall:\n  adapter: docker\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n  image: "+image+"\n"+more)
 		return nil
-	}, append([]string{"--home", filepath.Join(tempDir(t), "home")}, args...), stackFile, nil)
+	}, append([]string{"--home", filepath.Join(tempDir(t), "home")}, args...), stackFile, change)
 	return r, log
 }
 
@@ -68,19 +77,26 @@ func checkoutMounts(spec session.SessionSpec) []wall.Mount {
 	return out
 }
 
-// TestAReadWorkflowSeesTheCheckoutReadOnly is a walled run from a run code whose
-// workflow the stack declares with access read, with no access, or not at all: the
-// session binds the workspace read-only, the checkout's mount is read-only, the
-// checkout stays among the places the run may write, and Claude Code's settings deny
-// the edit tools, allow /qory/qory in Bash and set defaultMode to dontAsk.
-func TestAReadWorkflowSeesTheCheckoutReadOnly(t *testing.T) {
-	for name, stackFile := range map[string]func(string) string{
-		"access read": declares("read"),
-		"no access":   declares(""),
-		"undeclared":  nil,
+// TestAReadRunSeesTheCheckoutReadOnly is a walled run from a run code that only reads:
+// its documents have access write and the stack declares its workflow with access read,
+// with no access, or not at all, or its documents have access read and the stack
+// declares its workflow write. The session binds the workspace read-only, the
+// checkout's mount is read-only, the checkout stays among the places the run may write,
+// and Claude Code's settings deny the edit tools, allow /qory/qory in Bash and set
+// defaultMode to dontAsk.
+func TestAReadRunSeesTheCheckoutReadOnly(t *testing.T) {
+	for _, c := range []struct {
+		name      string
+		stackFile func(string) string
+		change    func(map[string]any)
+	}{
+		{"access read", declares("read"), nil},
+		{"no access", declares(""), nil},
+		{"undeclared", nil, nil},
+		{"lowered by the documents", declares("write"), lowered},
 	} {
-		t.Run(name, func(t *testing.T) {
-			r, _ := readRun(t, stackFile, readImage, "")
+		t.Run(c.name, func(t *testing.T) {
+			r, _ := readRunDocuments(t, nil, c.stackFile, c.change, readImage, "")
 			if !r.joined {
 				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 			}
@@ -100,8 +116,9 @@ func TestAReadWorkflowSeesTheCheckoutReadOnly(t *testing.T) {
 }
 
 // TestAWriteWorkflowSeesTheCheckoutWritable is a walled run from a run code whose
-// workflow the stack declares with access write: the workspace and the checkout's mount
-// stay writable, and Claude Code's settings get no rules from qory.
+// workflow the stack declares with access write and whose documents have access write:
+// the workspace and the checkout's mount stay writable, and Claude Code's settings get
+// no rules from qory.
 func TestAWriteWorkflowSeesTheCheckoutWritable(t *testing.T) {
 	r, _ := readRun(t, declares("write"), readImage, "")
 	if !r.joined {
@@ -183,20 +200,27 @@ var readRefusals = []struct {
 	name, image, wall, policy, reason, line string
 }{
 	{"no wall", "", "", "", "read_needs_wall",
-		"run this workflow with a wall: workflow hello only reads the checkout, and a run with no wall mounts nothing read-only (read_needs_wall); the code is used"},
+		"run this workflow with a wall: this run of workflow hello only reads the checkout, and a run with no wall mounts nothing read-only (read_needs_wall); the code is used"},
 	{"setup inside", readImage, "  setup: inside\n", "", "read_needs_setup_outside",
-		"set wall.setup to outside in forager.yaml, or remove it: workflow hello only reads the checkout, and setup inside runs in the agent's container, which sees the checkout read-only (read_needs_setup_outside); the code is used"},
+		"set wall.setup to outside in forager.yaml, or remove it: this run of workflow hello only reads the checkout, and setup inside runs in the agent's container, which sees the checkout read-only (read_needs_setup_outside); the code is used"},
 	{"nested Docker", pinnedImage, readImages, "nested", "read_needs_no_nested_docker",
-		"use an image without nested Docker for read workflow hello, or declare it write: image nested has nested Docker, so the checkout cannot be made read-only (read_needs_no_nested_docker); the code is used"},
+		"use an image without nested Docker: this run of workflow hello only reads the checkout, and image nested has nested Docker, so the checkout cannot be made read-only (read_needs_no_nested_docker); the code is used"},
 }
 
 // refusedRead runs the run of a refusal of [readRefusals] with image and wall.
 func refusedRead(t *testing.T, image, wall string) (codeRun, string) {
 	t.Helper()
+	return refusedDocuments(t, nil, nil, image, wall)
+}
+
+// refusedDocuments is [refusedRead] with the stack file changed by stackFile and the
+// documents by change.
+func refusedDocuments(t *testing.T, stackFile func(string) string, change func(map[string]any), image, wall string) (codeRun, string) {
+	t.Helper()
 	if image == "" {
-		return runFromCode(t, nil, nil), ""
+		return runFromCode(t, stackFile, change), ""
 	}
-	return readRun(t, nil, image, wall)
+	return readRunDocuments(t, nil, stackFile, change, image, wall)
 }
 
 // checkStopped checks that r stopped before the join, exit 1, closed failed with reason
@@ -255,6 +279,22 @@ func TestAReadWorkflowThatCannotBeReadOnlyStops(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			selectsImage(t, c.policy)
 			r, log := refusedRead(t, c.image, c.wall)
+			checkStopped(t, r, log, c.reason)
+			wants(t, r.out+r.err.Error(), c.line)
+		})
+	}
+}
+
+// TestALoweredRunThatCannotBeReadOnlyStops is each run of
+// [TestAReadWorkflowThatCannotBeReadOnlyStops] with its workflow declared write and
+// access read in its documents: no wall, wall.setup inside and an image with nested
+// Docker each stop it in the same way, with the same line and reason, and no agent or
+// container starts.
+func TestALoweredRunThatCannotBeReadOnlyStops(t *testing.T) {
+	for _, c := range readRefusals {
+		t.Run(c.name, func(t *testing.T) {
+			selectsImage(t, c.policy)
+			r, log := refusedDocuments(t, declares("write"), lowered, c.image, c.wall)
 			checkStopped(t, r, log, c.reason)
 			wants(t, r.out+r.err.Error(), c.line)
 		})

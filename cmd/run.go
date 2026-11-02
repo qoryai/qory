@@ -680,8 +680,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					// The time limit counts from the open, so the compose's time is in it.
 					timeout = provisioner.TimeLimit(fromCode.minutes, workflows[fromCode.workflow].TimeLimit)
 				}
-				// A workflow that only reads the checkout sees it read-only, or its run stops
-				// here, before the image's fetch and the setup.
+				// A run that only reads the checkout sees it read-only, or stops here, before
+				// the image's fetch and the setup.
 				readOnly := readsOnly(fromCode, workflows)
 				if readOnly {
 					if err := readOnlyCheckout(&spec, at.root, fromCode.workflow, run.Image()); err != nil {

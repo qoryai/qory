@@ -27,7 +27,8 @@ import (
 
 // codeDocuments are the documents of an answer to a run code: the contract's run/v1
 // documents fixture explore-workflow.json, the workflow hello, harness_hidden true and
-// a target_version among them, with change applied to its members.
+// a target_version among them, with access set to write, so the workflow's access in the
+// stack decides whether the run reads only, and change applied to its members.
 func codeDocuments(t *testing.T, change func(map[string]any)) json.RawMessage {
 	t.Helper()
 	b, err := fs.ReadFile(contracts.RunFS, "fixtures/documents/explore-workflow.json")
@@ -38,6 +39,7 @@ func codeDocuments(t *testing.T, change func(map[string]any)) json.RawMessage {
 	if err := json.Unmarshal(b, &doc); err != nil {
 		t.Fatal(err)
 	}
+	doc["access"] = "write"
 	if change != nil {
 		change(doc)
 	}

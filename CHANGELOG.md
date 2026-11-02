@@ -55,10 +55,11 @@ release may change what an existing document does, and states it under Upgrading
 - Declare a workflow's access level with `workflows.<name>.access` in its
   `qory-stack.yaml`, `read` or `write`, and `read` when left out. qory stops on any
   other value.
-- A run from a run code of a `read` workflow, which is also a workflow that sets no
-  access or that the stack does not declare, sees the checkout read-only: Forager binds
-  the workspace read-only and the checkout's mount is read-only, so a write into the
-  checkout fails with `Read-only file system`. On Claude Code, its settings also deny
+- A run from a run code sees the checkout read-only when `access` in its documents is
+  `read`, or when its workflow's access in the stack is `read`, which is also a workflow
+  that sets no access or that the stack does not declare. Forager binds the workspace
+  read-only and the checkout's mount is read-only, so a write into the checkout fails
+  with `Read-only file system`. On Claude Code, its settings also deny
   `Edit`, `Write` and `NotebookEdit`, allow `Bash(/qory/qory *)` and set
   `permissions.defaultMode` to `dontAsk`. Such a run with no wall, with `wall.setup:
   inside`, or whose image chosen at the run's open has `docker: true`, whichever way it
