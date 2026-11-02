@@ -172,8 +172,8 @@ func TestCheckStartsWithTheFix(t *testing.T) {
 }
 
 // TestCheckPrintsTheSegmentRule is a path with a segment the format does not take. The
-// schema has that rule under a not, so the library gives its text with no rule under it,
-// and the error has the place and that rule.
+// schema has that rule under a not, which has no rule under it in the library's error,
+// and the error has the place and the not.
 func TestCheckPrintsTheSegmentRule(t *testing.T) {
 	const want = "fix the branch document to match contracts/harness/v1/branch.schema.json: at '/repositories/0/path': 'not' failed"
 	for _, path := range []string{"acme/.git", "../web", "acme/../web", "acme/.GIT/x", "./web"} {
