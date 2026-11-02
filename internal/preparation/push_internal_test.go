@@ -103,7 +103,7 @@ func TestAStopHasACauseFitForAfterTheRun(t *testing.T) {
 
 // TestACommitHasEveryPathByItsName is an agent's paths that a pathspec would read as
 // magic or as a wildcard, a path with a space and a line break, a removed file, and a
-// repository cloned inside the working folder, which git adds as a link to a commit.
+// repository cloned inside the working folder, which stays out.
 func TestACommitHasEveryPathByItsName(t *testing.T) {
 	dir, b := onBranch(t, "acme/shop")
 	for _, name := range []string{":(magic).txt", "a*.txt", "with space\nand a break.txt"} {
@@ -128,7 +128,7 @@ func TestACommitHasEveryPathByItsName(t *testing.T) {
 	}
 	got := strings.Split(run(t, dir, "-c", "core.quotePath=false", "diff-tree", "-r", "-z", "--name-only", "--no-commit-id", "HEAD"), "\x00")
 	got = slices.DeleteFunc(got, func(s string) bool { return s == "" })
-	want := []string{":(magic).txt", "README.md", "a*.txt", "another.txt", "inner", "with space\nand a break.txt"}
+	want := []string{":(magic).txt", "README.md", "a*.txt", "another.txt", "with space\nand a break.txt"}
 	if !slices.Equal(got, want) {
 		t.Errorf("the commit has %q, want %q", got, want)
 	}
@@ -349,33 +349,131 @@ func TestASetupThatAddsAFilterStopsBeforeGitStatus(t *testing.T) {
 	}
 }
 
-// TestARepositoryInARepositoryIsOneEntry is a repository the setup cloned in the working
-// folder, which git status lists as one path: it stays out until a file in it changes.
-func TestARepositoryInARepositoryIsOneEntry(t *testing.T) {
-	for name, changed := range map[string]bool{"as the setup left it": false, "changed": true} {
+// TestARepositoryInARepositoryStaysOut is a repository the setup or the agent left in the
+// working folder, with and without a commit: it stays out of the commit. A line shows it
+// unless it is as the setup left it, and a change beside it is pushed.
+func TestARepositoryInARepositoryStaysOut(t *testing.T) {
+	for name, c := range map[string]struct{ commits, setup, changed, line bool }{
+		"the agent's, with a commit":  {commits: true, line: true},
+		"the agent's, with no commit": {line: true},
+		"the setup's, as it left it":  {commits: true, setup: true},
+		"the setup's, changed":        {commits: true, setup: true, changed: true, line: true},
+	} {
 		t.Run(name, func(t *testing.T) {
 			dir, b := onBranch(t, "acme/shop")
-			inner := filepath.Join(dir, "inner")
+			inner := filepath.Join(dir, "a", "inner")
 			if err := os.MkdirAll(inner, 0o755); err != nil {
 				t.Fatal(err)
 			}
 			run(t, inner, "init", "--quiet", "-b", "main")
 			write(t, filepath.Join(inner, "file.txt"), "inner\n")
-			run(t, inner, "add", "-A")
-			run(t, inner, "commit", "--quiet", "-m", "inner")
-			recordSetup(t, dir, b)
-			if changed {
+			if c.commits {
+				run(t, inner, "add", "-A")
+				run(t, inner, "commit", "--quiet", "-m", "inner")
+			}
+			if c.setup {
+				recordSetup(t, dir, b)
+			}
+			if c.changed {
 				write(t, filepath.Join(inner, "file.txt"), "the agent\n")
 				run(t, inner, "commit", "--quiet", "-a", "-m", "the agent")
 			}
-			doc, _, err := pushOf(dir, b)
+			write(t, filepath.Join(dir, "left.txt"), "left\n")
+			doc, lines, err := pushOf(dir, b)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if (doc != nil) != changed {
-				t.Errorf("the document is %+v", doc)
+			if doc == nil {
+				t.Fatal("the change beside the repository was not pushed")
+			}
+			if got := commitPaths(t, dir); !slices.Equal(got, []string{"left.txt"}) {
+				t.Errorf("the commit has %q", got)
+			}
+			want := "a/inner of acme/shop to push them: that folder is a repository"
+			if got := strings.Contains(lines, want); got != c.line {
+				t.Errorf("the line is there: %v, want %v\n%s", got, c.line, lines)
 			}
 		})
+	}
+}
+
+// TestAGitlinkWithARepositoryPrintsTheLine is a gitlink in the commit, with a repository in
+// its folder: git status does not list it, and the line shows it.
+func TestAGitlinkWithARepositoryPrintsTheLine(t *testing.T) {
+	dir, b := onBranch(t, "acme/shop")
+	sub := filepath.Join(dir, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run(t, sub, "init", "--quiet", "-b", "main")
+	write(t, filepath.Join(sub, "f"), "f\n")
+	run(t, sub, "add", "-A")
+	run(t, sub, "commit", "--quiet", "-m", "sub")
+	run(t, dir, "update-index", "--add", "--cacheinfo", "160000,"+run(t, sub, "rev-parse", "HEAD")+",sub")
+	run(t, dir, "commit", "--quiet", "-m", "a gitlink")
+	_, lines, err := pushOf(dir, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "in sub of acme/shop"; !strings.Contains(lines, "sub of acme/shop to push them") {
+		t.Errorf("the lines are %q, want %q", lines, want)
+	}
+}
+
+// TestAStagedFileTheAgentRemovedStaysOut is a path staged and then removed, and an ignored
+// file force-added: neither is a path to add once the index is back at HEAD.
+func TestAStagedFileTheAgentRemovedStaysOut(t *testing.T) {
+	for name, agent := range map[string]func(t *testing.T, dir string){
+		"staged then removed": func(t *testing.T, dir string) {
+			write(t, filepath.Join(dir, "tmp.txt"), "tmp\n")
+			run(t, dir, "add", "tmp.txt")
+			if err := os.Remove(filepath.Join(dir, "tmp.txt")); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"an ignored file force-added": func(t *testing.T, dir string) {
+			write(t, filepath.Join(dir, ".git", "info", "exclude"), "*.log\n")
+			write(t, filepath.Join(dir, "a.log"), "log\n")
+			run(t, dir, "add", "-f", "a.log")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir, b := onBranch(t, "acme/shop")
+			agent(t, dir)
+			write(t, filepath.Join(dir, "work.txt"), "work\n")
+			if _, _, err := pushOf(dir, b); err != nil {
+				t.Fatal(err)
+			}
+			if got := commitPaths(t, dir); !slices.Equal(got, []string{"work.txt"}) {
+				t.Errorf("the commit has %q", got)
+			}
+		})
+	}
+}
+
+// TestACommitOfTheAgentWithQoryIsUndone is an agent that committed a file in .qory: the
+// run's commit puts .qory back, and the agent's other file stays in the branch.
+func TestACommitOfTheAgentWithQoryIsUndone(t *testing.T) {
+	dir, b := onBranch(t, "acme/shop")
+	before := run(t, dir, "ls-tree", "HEAD", "--", ".qory")
+	write(t, filepath.Join(dir, ".qory", "mine.txt"), "mine\n")
+	write(t, filepath.Join(dir, "kept.txt"), "kept\n")
+	run(t, dir, "add", "-f", ".qory/mine.txt", "kept.txt")
+	run(t, dir, "commit", "--quiet", "-m", "the agent")
+	if _, _, err := pushOf(dir, b); err != nil {
+		t.Fatal(err)
+	}
+	if got := run(t, dir, "ls-tree", "HEAD", "--", ".qory"); got != before {
+		t.Errorf(".qory on the branch is %q, want %q", got, before)
+	}
+	if got := run(t, dir, "show", "HEAD:kept.txt"); got != "kept" {
+		t.Errorf("kept.txt is %q", got)
+	}
+	if got := run(t, dir, "log", "-1", "--format=%s"); got != "Changes left" {
+		t.Errorf("the last commit is %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".qory", "mine.txt")); err != nil {
+		t.Errorf("the file on disk is gone: %v", err)
 	}
 }
 

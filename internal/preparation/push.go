@@ -28,6 +28,7 @@ const (
 	textNoNewCommits     = "qory run: no new commits to push"
 	textPushed           = "qory run: pushed %s to %s at %s"
 	textForgeLine        = "qory run: remote: %s"
+	textNestedRepository = "qory run: have the agent leave plain files in %s of %s to push them: that folder is a repository, so qory left it out of the commit, and what it has stays in the working folder"
 	textLockRemoved      = "qory run: removed .git/index.lock of %s, which the agent left when it stopped"
 	textLockUnproven     = "qory run: take the work item in again in Qory Apiary: repository %s has .git/index.lock and the stop of the agent is not proven, so qory committed and pushed nothing; the code is used"
 	textLockNotFile      = "qory run: take the work item in again in Qory Apiary: .git/index.lock of repository %s is not a regular file, so qory committed and pushed nothing; the code is used"
@@ -56,6 +57,7 @@ const maxFailedPushLines = 50
 // makes, as qory's squash of a worktree has them: git reads no person's configuration
 // here, and a repository's configuration may not set them.
 const (
+	gitlinkMode = "160000"
 	commitName  = "qory"
 	commitEmail = "qory@localhost"
 )
@@ -135,7 +137,7 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 	}
 	heads := make([]string, len(b.Repositories))
 	for i, r := range b.Repositories {
-		if err := commitLeft(ctx, folders[i], b.setupChanges[r.Dir], message); err != nil {
+		if err := commitLeft(ctx, folders[i], r, b.setupChanges[r.Dir], message, report); err != nil {
 			return nil, fmt.Errorf(textNoCommitLeft, shownPath(r.Path), integration.Printable(exports.HideURLError(err).Error()))
 		}
 		if heads[i], err = headPast(ctx, stepGit(noRemote, ""), folders[i], r); err != nil {
@@ -220,35 +222,45 @@ func checkFailed(text string, r WorkRepository, err error) error {
 // shownPath is path as a line shows a repository.
 func shownPath(path string) string { return integration.Printable(exports.Value(path, false)) }
 
-// commitLeft commits what the agent left in the repository at dir, with message, as
-// [commitName]. The commit has each path git status lists, by git's rules for untracked
-// and ignored files, but [leftOut]'s: the index starts from HEAD, so what the agent
-// staged counts only through the file it left. With no such path, or none that differs
-// from HEAD once git added it, nothing is committed.
-func commitLeft(ctx context.Context, dir string, setup map[string]string, message string) error {
+// commitLeft commits what the agent left in r, the repository at dir, with message, as
+// [commitName]. The index starts from HEAD, so what the agent staged counts only through
+// the file it left. The commit has each path git status lists, by git's rules for
+// untracked and ignored files, but [leftOut]'s and a repository in the repository, for
+// which a line goes to report. A path of [leftOut] that a commit of the agent changed
+// goes back to what r.Commit has, because a branch with another .qory stops the later runs
+// of its work item. With no change from HEAD, nothing is committed.
+func commitLeft(ctx context.Context, dir string, r WorkRepository, setup map[string]string, message string, report io.Writer) error {
 	git := stepGit(noRemote, "")
+	if _, err := git(ctx, dir, "reset", "--quiet"); err != nil {
+		return err
+	}
 	changed, err := changedPaths(ctx, git, dir)
 	if err != nil {
 		return err
 	}
-	var paths strings.Builder
+	var paths []string
 	for _, path := range changed {
 		out, err := leftOut(dir, path, setup)
-		if err != nil {
+		switch {
+		case err != nil:
 			return err
-		}
-		if !out {
-			paths.WriteString(":(top,literal)" + path + "\x00")
+		case out:
+		case isRepository(dir, strings.TrimSuffix(path, "/")):
+			fmt.Fprintf(report, textNestedRepository+"\n", shownText(strings.TrimSuffix(path, "/")), shownPath(r.Path))
+		default:
+			paths = append(paths, path)
 		}
 	}
-	if paths.Len() == 0 {
-		return nil
-	}
-	if _, err := git(ctx, dir, "reset", "--quiet"); err != nil {
+	if err := reportGitlinks(ctx, git, dir, r, report); err != nil {
 		return err
 	}
-	add := stepGit(noRemote, paths.String())
-	if _, err := add(ctx, dir, "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
+	if len(paths) > 0 {
+		add := stepGit(noRemote, pathspecs(paths))
+		if _, err := add(ctx, dir, "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
+			return err
+		}
+	}
+	if err := restoreLeftOut(ctx, git, dir, r.Commit); err != nil {
 		return err
 	}
 	// hostgit sets diff.ignoreSubmodules=all, which would hide a repository in the repository.
@@ -259,6 +271,67 @@ func commitLeft(ctx context.Context, dir string, setup map[string]string, messag
 	}
 	commit := stepGit(noRemote, "", "GIT_AUTHOR_NAME="+commitName, "GIT_AUTHOR_EMAIL="+commitEmail, "GIT_COMMITTER_NAME="+commitName, "GIT_COMMITTER_EMAIL="+commitEmail)
 	_, err = commit(ctx, dir, "commit", "--quiet", "--no-verify", "--no-gpg-sign", "-m", message)
+	return err
+}
+
+// pathspecs is paths as git reads them with --pathspec-file-nul: each from the top of the
+// repository, with no pattern in it.
+func pathspecs(paths []string) string {
+	var list strings.Builder
+	for _, path := range paths {
+		list.WriteString(":(top,literal)" + path + "\x00")
+	}
+	return list.String()
+}
+
+// isRepository reports whether path, relative to the repository at dir, has a .git entry.
+func isRepository(dir, path string) bool {
+	_, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(path), ".git"))
+	return err == nil
+}
+
+// reportGitlinks prints [textNestedRepository] for each gitlink in the index of the
+// repository at dir that has a repository in its folder: git status with
+// --ignore-submodules=all does not list it, and no git runs in that repository.
+func reportGitlinks(ctx context.Context, git gitRunner, dir string, r WorkRepository, report io.Writer) error {
+	entries, err := git(ctx, dir, "ls-files", "--stage", "-z")
+	if err != nil {
+		return err
+	}
+	for entry := range strings.SplitSeq(entries, "\x00") {
+		about, path, ok := strings.Cut(entry, "\t")
+		if ok && strings.HasPrefix(about, gitlinkMode+" ") && isRepository(dir, path) {
+			fmt.Fprintf(report, textNestedRepository+"\n", shownText(path), shownPath(r.Path))
+		}
+	}
+	return nil
+}
+
+// restoreLeftOut sets each path of [leftOut] in the index of the repository at dir to what
+// the commit start has, when it differs there, so the next commit undoes a commit of the
+// agent. The file on disk stays.
+func restoreLeftOut(ctx context.Context, git gitRunner, dir, start string) error {
+	differs, err := git(ctx, dir, "diff", "--cached", "--name-only", "-z", "--no-renames", start)
+	if err != nil {
+		return err
+	}
+	var paths []string
+	for path := range strings.SplitSeq(differs, "\x00") {
+		if path == "" {
+			continue
+		}
+		out, err := leftOut(dir, path, nil)
+		if err != nil {
+			return err
+		}
+		if out {
+			paths = append(paths, path)
+		}
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	_, err = stepGit(noRemote, pathspecs(paths))(ctx, dir, "reset", "--quiet", start, "--pathspec-from-file=-", "--pathspec-file-nul")
 	return err
 }
 

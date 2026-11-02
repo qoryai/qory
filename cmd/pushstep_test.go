@@ -1315,6 +1315,43 @@ func TestTheIdentityOfTheAgentDoesNotLoseTheWork(t *testing.T) {
 	}
 }
 
+// TestAnAgentsCommitOfQoryAndALinkKeepsTheNextRun is an agent that committed a file in .qory
+// or a link of the compose: the run's commit puts each back, so the next run of the work
+// item starts on the branch, and the agent's other work is on the branch.
+func TestAnAgentsCommitOfQoryAndALinkKeepsTheNextRun(t *testing.T) {
+	for name, what := range map[string]string{"a file in .qory": ".qory", "a link": "link"} {
+		t.Run(name, func(t *testing.T) {
+			p := newPushRepo(t, "write")
+			first := p.run(t, func(dir string) {
+				path := filepath.Join(".qory", "mine.txt")
+				writeFile(t, filepath.Join(dir, path), "mine\n")
+				if what == "link" {
+					path = "CLAUDE.md"
+					if err := os.Symlink(".qory/mine.txt", filepath.Join(dir, path)); err != nil {
+						t.Fatal(err)
+					}
+				}
+				writeFile(t, filepath.Join(dir, "kept.txt"), "kept\n")
+				proxygittest.Git(t, dir, "add", "-f", path, "kept.txt")
+				proxygittest.Git(t, dir, "-c", "user.name=Agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-m", "the agent")
+			}, nil)
+			first.wantsClose(t, event.StateSucceeded, 0)
+			head := p.branchHead(t)
+			if got := proxygittest.Git(t, p.bare, "diff", "--name-only", p.first, head); got != "kept.txt" {
+				t.Errorf("the branch differs from the start in %q", got)
+			}
+			p.again(t)
+			second := p.run(t, func(dir string) {
+				if got := gitOut(t, dir, "show", "HEAD:kept.txt"); got != "kept" {
+					t.Errorf("kept.txt is %q", got)
+				}
+				writeFile(t, filepath.Join(dir, "second.txt"), "second\n")
+			}, nil)
+			second.wantsClose(t, event.StateSucceeded, 0)
+		})
+	}
+}
+
 // TestAWalledRunRemovesAStaleIndexLock is a killed walled agent that left .git/index.lock,
 // in the target and in a further repository: the join proved its stop, so the push goes on.
 func TestAWalledRunRemovesAStaleIndexLock(t *testing.T) {
