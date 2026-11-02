@@ -162,6 +162,9 @@ func Run(ctx context.Context, dir string, base []string, getenv func(string) str
 // target_version.
 type Target struct {
 	System, Path, Version string
+	// Branch is the branch of the run's work item, nil for none. It is used only when
+	// the fetch uses Version.
+	Branch *WorkBranch
 }
 
 // RunAt is [Run] with the target's repository fetched at at.Version, when at sets a
@@ -177,7 +180,9 @@ type Target struct {
 // the commit, or serves no fetch of a commit by its id, stops the fetch with
 // [textNoCommit] or [textNoFetchByID]. The further repositories are fetched at the head
 // of their default branches. A version of a target on another system, which is not one
-// of the run's repositories, is not used.
+// of the run's repositories, is not used. With at.Branch set, the target's commit of the
+// branch is fetched too, and each further repository is on the branch at the end:
+// [Switch] moves the target to it after the compose.
 func RunAt(ctx context.Context, dir string, base []string, getenv func(string) string, at Target, p proxygit.Proxy, report io.Writer) (bool, error) {
 	ctx = hostgit.WithBase(ctx, base)
 	list := getenv(EnvRepositories)
@@ -223,6 +228,15 @@ func RunAt(ctx context.Context, dir string, base []string, getenv func(string) s
 	if err != nil {
 		return false, notFetched(paths[0], system, err)
 	}
+	branch := at.Branch
+	if commit == "" {
+		branch = nil
+	}
+	if branch != nil {
+		if err := fetchBranch(ctx, g, dir, system, paths[0], strings.TrimSpace(head), branch); err != nil {
+			return false, err
+		}
+	}
 	// The line shows the commit HEAD is at, which is commit when it is set.
 	shown := strings.TrimSpace(head)
 	if len(shown) > 12 {
@@ -240,6 +254,11 @@ func RunAt(ctx context.Context, dir string, base []string, getenv func(string) s
 			dest := filepath.Join(dir, filepath.FromSlash(Repositories), filepath.FromSlash(path))
 			if _, err := g(ctx, dir, "clone", "--quiet", "--depth", "1", "--", repoURL(system, path), dest); err != nil {
 				return false, notFetched(path, system, err)
+			}
+			if branch != nil {
+				if err := branchFurther(ctx, g, dest, system, path, branch); err != nil {
+					return false, err
+				}
 			}
 		}
 	}

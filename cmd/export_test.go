@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -149,6 +151,10 @@ type Nowhere struct {
 	OnOpen               func(session.OpenSpec)
 	FetchImage           func(context.Context) error
 	AtGateway            bool
+	// RunAPI is the base URL of the run's run API, "" for a server that returns 404 with
+	// no error code to every request, as Qory Apiary does with its feature workflow_model
+	// off.
+	RunAPI string
 }
 
 // StepEvent is one event of a host step of a run [OpenNowhereWith] opened: Type is
@@ -262,6 +268,25 @@ func openAtGateway(ctx context.Context, spec session.OpenSpec) (*gatewayRun, err
 		return nil, err
 	}
 	return &gatewayRun{run: r, g: g}, nil
+}
+
+// RunAPI is the client and base URL of [Nowhere.RunAPI].
+func (n *nowhere) RunAPI() (*http.Client, string, error) {
+	if n.values.RunAPI != "" {
+		return http.DefaultClient, n.values.RunAPI, nil
+	}
+	return &http.Client{Transport: noRunAPI{}}, "http://run-api.qory.invalid/v1/runs/" + n.id, nil
+}
+
+// noRunAPI is a transport that returns 404 with an error page to every request.
+type noRunAPI struct{}
+
+// RoundTrip returns the response.
+func (noRunAPI) RoundTrip(r *http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: http.StatusNotFound, Header: http.Header{}, Request: r,
+		Body: io.NopCloser(strings.NewReader("<html>Not found</html>")),
+	}, nil
 }
 
 func (n *nowhere) Join(context.Context, session.SessionSpec) (*session.Result, error) {

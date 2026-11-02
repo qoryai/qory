@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"maps"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
@@ -765,13 +766,21 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// control plane opens neither, and composes with the person's git. A run from a
 			// run code whose documents set target_version fetches the target's repository at
 			// that commit, and stops before the compose when the run configuration lists no
-			// repository while the target is on its system.
+			// repository while the target is on its system. A run of a work item at that
+			// version reads the work item's branch first: the fetch takes its commit, the
+			// compose reads the target version, and the end of the compose step checks out
+			// the branch.
 			hostWork := func() error {
 				stopped := func() bool {
 					return ctx.Err() != nil || timeout > 0 && time.Since(opened) >= timeout
 				}
+				var branch *preparation.WorkBranch
 				if run.Repositories() != "" {
-					err := inStep(run, streams.errOut, event.StepFetch, fetchStepName(runValues(run)), stopped, func(w io.Writer) error {
+					var err error
+					if branch, err = fromCode.readBranch(ctx, run, timeout, opened); err != nil {
+						return &runLineError{err}
+					}
+					err = inStep(run, streams.errOut, event.StepFetch, fetchStepNameOn(branch, fromCode, runValues(run)), stopped, func(w io.Writer) error {
 						h, err := run.HostProxy()
 						if err != nil {
 							return &runLineError{noHostProxy(err, code != nil)}
@@ -784,7 +793,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 							fetchCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
 						}
 						defer cancel()
-						if _, err := preparation.RunAt(fetchCtx, cwd, os.Environ(), runValues(run), fromCode.fetchTarget(), h.proxy, w); err != nil {
+						target := fromCode.fetchTarget()
+						target.Branch = branch
+						if _, err := preparation.RunAt(fetchCtx, cwd, os.Environ(), runValues(run), target, h.proxy, w); err != nil {
 							return &runLineError{err}
 						}
 						return nil
@@ -834,8 +845,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						composing.cache = filepath.Join(run.Dir(), runSources)
 					}
 					var err error
-					freshHome, err = prepareLaunch(w)
-					return err
+					if freshHome, err = prepareLaunch(w); err != nil {
+						return err
+					}
+					if branch != nil {
+						if err := preparation.Switch(ctx, cwd, os.Environ(), branch, w); err != nil {
+							return &runLineError{err}
+						}
+					}
+					return nil
 				})
 				if err != nil {
 					return err
@@ -1163,6 +1181,8 @@ type openedRun interface {
 	// reads them.
 	System() string
 	Repositories() string
+	// RunAPI is the client and base URL of the run's run API on this machine.
+	RunAPI() (*http.Client, string, error)
 	// Dir is the run directory.
 	Dir() string
 }

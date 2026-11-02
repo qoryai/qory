@@ -18,6 +18,9 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- A run of a work item works on the branch `qory/<work item id>`. A later stage starts at
+  the commit that its gate approved, and a second round continues the work of the first.
+  The harness still comes from `target_version`.
 - A skill reads its work item and stores what it made with `qory work-item show`, `qory
   artifact pull`, `qory artifact push` and `qory run verdict`. In a run they use Qory
   Apiary through the gateway, at `QORY_RUN_API`. Outside a run they use the checkout's

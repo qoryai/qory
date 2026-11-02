@@ -1509,6 +1509,31 @@ repositories are fetched at the head of their default branches.
 When the target is on another system than `QORY_RUN_SYSTEM`, or `QORY_RUN_SYSTEM` is
 not set, qory does not use `target_version`.
 
+A run of a work item at a `target_version` of a target on `QORY_RUN_SYSTEM` works on the
+branch `qory/<work item id>`. qory reads the work item and its artifacts through the run API
+before the fetch, and picks one version of the artifact `branch`, name `main`:
+
+1. The artifact's newest version, if the work item's stage wrote it.
+2. Else, the version that a gate approved, if the stage lists `branch` as an input.
+3. Else, the newest version.
+4. With no version, the run creates the branch at `target_version`.
+
+qory composes the harness at `target_version`, so a branch does not change the harness of
+its work item's runs. The fetch step also fetches the version's commit by id, at depth 1.
+The end of the compose step checks out the branch at that commit, with no request to the
+remote. Each further repository gets the branch too: at its commit in the version, or at
+the head of its default branch.
+
+A run stops before the agent starts when:
+
+- the version does not match the [branch format](../contracts/harness/v1/README.md#the-branch-format),
+  or its `ref` is another work item's;
+- the commit has another `.qory` than `target_version`;
+- the commit has a file where the compose wrote a link of the harness.
+
+An instance without the feature `workflow_model` returns 404 with no error code to the run
+API. The run then works on `target_version` with no branch.
+
 Each of these stops the run before the compose, exit 1, and the run's record shows the
 run as failed with no session. `<commit>` is the commit's first 12 characters:
 
