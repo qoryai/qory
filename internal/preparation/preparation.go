@@ -180,9 +180,8 @@ type Target struct {
 // the commit, or serves no fetch of a commit by its id, stops the fetch with
 // [textNoCommit] or [textNoFetchByID]. The further repositories are fetched at the head
 // of their default branches. A version of a target on another system, which is not one
-// of the run's repositories, is not used. With at.Branch set, the target's commit of the
-// branch is fetched too, and each further repository is on the branch at the end:
-// [Switch] moves the target to it after the compose.
+// of the run's repositories, is not used. With at.Branch set, the commit of the branch in
+// each repository is fetched too, and [Switch] checks it out after the compose.
 func RunAt(ctx context.Context, dir string, base []string, getenv func(string) string, at Target, p proxygit.Proxy, report io.Writer) (bool, error) {
 	ctx = hostgit.WithBase(ctx, base)
 	list := getenv(EnvRepositories)
@@ -233,7 +232,9 @@ func RunAt(ctx context.Context, dir string, base []string, getenv func(string) s
 		branch = nil
 	}
 	if branch != nil {
-		if err := fetchBranch(ctx, g, dir, system, paths[0], strings.TrimSpace(head), branch); err != nil {
+		branch.system = system
+		branch.Repositories = []WorkRepository{{Path: paths[0], Dir: ".", Commit: strings.TrimSpace(head)}}
+		if err := fetchBranchCommit(ctx, g, dir, system, paths[0], branch); err != nil {
 			return false, err
 		}
 	}
@@ -256,9 +257,11 @@ func RunAt(ctx context.Context, dir string, base []string, getenv func(string) s
 				return false, notFetched(path, system, err)
 			}
 			if branch != nil {
-				if err := branchFurther(ctx, g, dest, system, path, branch); err != nil {
+				if err := fetchBranchCommit(ctx, g, dest, system, path, branch); err != nil {
 					return false, err
 				}
+				at := filepath.ToSlash(filepath.Join(filepath.FromSlash(Repositories), filepath.FromSlash(path)))
+				branch.Repositories = append(branch.Repositories, WorkRepository{Path: path, Dir: at})
 			}
 		}
 	}

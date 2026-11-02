@@ -51,7 +51,7 @@ func branchAPI(t *testing.T, file string) string {
 }
 
 // runOnBranch is [runAtVersion] with the run API at api, and the steps of the run.
-func runOnBranch(t *testing.T, h *hostFetch, version, api string) (string, error, keyRun, []cmd.StepEvent) {
+func runOnBranch(t *testing.T, h *hostFetch, version, api string, flags ...string) (string, error, keyRun, []cmd.StepEvent) {
 	t.Helper()
 	g := newCodeRelay(t)
 	g.documents = codeDocuments(t, func(d map[string]any) {
@@ -70,7 +70,7 @@ func runOnBranch(t *testing.T, h *hostFetch, version, api string) (string, error
 		OnStep: func(e cmd.StepEvent) { steps = append(steps, e) },
 	})
 	defer restore()
-	out, err := run(t, "run", "--run-code-file", codeFile(t, g.code()), "--gateway", g.URL)
+	out, err := run(t, append([]string{"run", "--run-code-file", codeFile(t, g.code()), "--gateway", g.URL}, flags...)...)
 	return out, err, keyRun{closes: closes(), joined: errors.Is(err, cmd.ErrJoinedNowhere)}, steps
 }
 
@@ -116,6 +116,34 @@ func TestARunWorksOnTheBranchAndComposesTheTargetVersion(t *testing.T) {
 	}
 }
 
+// TestAWalledRunRecordsTheCheckoutBeforeTheBranch is a walled run whose branch adds a key
+// that qory acts on to qory.yaml: the record of the run's places has the target version's
+// file, so qory does not act on the key after the run.
+func TestAWalledRunRecordsTheCheckoutBeforeTheBranch(t *testing.T) {
+	h, first, _, files := versionRepository(t)
+	docker, _ := fakeDocker(t)
+	walledBy(t, docker)
+	work := tempDir(t)
+	proxygittest.Git(t, work, "clone", "--quiet", filepath.Join(h.server.Root, "acme", "site.git"), ".")
+	proxygittest.Git(t, work, "checkout", "--quiet", "-b", "work", first)
+	writeFile(t, filepath.Join(work, "qory.yaml"), files["qory.yaml"]+"worktree:\n  run:\n    add: [make setup]\n")
+	proxygittest.Git(t, work, "-c", "user.name=Example", "-c", "user.email=example@example.com", "commit", "--quiet", "-am", "branch")
+	proxygittest.Git(t, work, "push", "--quiet", "origin", "work")
+	commit := proxygittest.Git(t, work, "rev-parse", "HEAD")
+
+	out, err, n, _ := runOnBranch(t, h, first, branchAPI(t, branchDocument(t, commit)), "--home", filepath.Join(tempDir(t), "home"))
+	if !n.joined {
+		t.Fatalf("%v (exit %d), want the join\n%s", err, cmd.ExitCode(err), out)
+	}
+	if got := gitOut(t, h.dir, "rev-parse", "HEAD"); got != commit {
+		t.Errorf("the working folder is at %s, want %s", got, commit)
+	}
+	_, err = run(t, "config")
+	if err == nil || !strings.Contains(err.Error(), "changes worktree.run.add since a walled run began here") {
+		t.Errorf("config: %v", err)
+	}
+}
+
 // TestARunWithNoBranchVersionCreatesTheBranch is the first run of a work item: the branch
 // is new, at the target version.
 func TestARunWithNoBranchVersionCreatesTheBranch(t *testing.T) {
@@ -157,10 +185,10 @@ func TestARunStopsOnABrokenBranchVersion(t *testing.T) {
 	for name, c := range map[string]struct{ file, want string }{
 		"another work item": {
 			`{"ref":"qory/wi_other","repositories":[{"system":"git.test","path":"acme/site","commit":"` + commit + `"}]}`,
-			"Fix version 1 of the artifact branch in Qory Apiary: its ref is not qory/" + workItem + ".",
+			"Add a new version of the artifact branch in Qory Apiary with the ref qory/" + workItem + ": version 1 has another ref.",
 		},
-		"not the format": {`{"ref":"main"}`, "Fix version 1 of the artifact branch in Qory Apiary: fix the branch document"},
-		"not JSON":       {"text", "Fix version 1 of the artifact branch in Qory Apiary: write the branch document"},
+		"not the format": {`{"ref":"main"}`, "Add a new version of the artifact branch in Qory Apiary in place of version 1: fix the branch document"},
+		"not JSON":       {"text", "Add a new version of the artifact branch in Qory Apiary in place of version 1: write the branch document"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h, first, _, _ := versionRepository(t)

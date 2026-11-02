@@ -82,8 +82,8 @@ func (r *codeRun) readBranch(ctx context.Context, run openedRun, timeout time.Du
 	}
 
 	if document.Ref != branch.Ref {
-		return nil, fmt.Errorf("Fix version %d of the artifact %s in Qory Apiary: its ref is not %s.%s",
-			version.Number, branchType, branch.Ref, codeUsed)
+		return nil, fmt.Errorf("Add a new version of the artifact %s in Qory Apiary with the ref %s: version %d has another ref.%s",
+			branchType, branch.Ref, version.Number, codeUsed)
 	}
 
 	branch.Version = document.Repositories
@@ -123,9 +123,15 @@ func chosenBranch(snapshot *runapi.Snapshot, index *runapi.Index) (*runapi.Versi
 			continue
 		}
 
-		for i := range versions {
-			if versions[i].ID == input.Version.ID {
-				return &versions[i], nil
+		for _, artifact := range index.Artifacts {
+			if artifact.Type != branchType {
+				continue
+			}
+
+			for i := range artifact.Versions {
+				if artifact.Versions[i].ID == input.Version.ID {
+					return &artifact.Versions[i], nil
+				}
 			}
 		}
 
@@ -140,8 +146,8 @@ func chosenBranch(snapshot *runapi.Snapshot, index *runapi.Index) (*runapi.Versi
 // branch format.
 func readBranchVersion(ctx context.Context, client *runapi.Client, version *runapi.Version) (*branchformat.Branch, error) {
 	if len(version.Files) != 1 || version.Files[0].Size > maxBranchFile {
-		return nil, fmt.Errorf("Fix version %d of the artifact %s in Qory Apiary: a version has one file of at most %d bytes.",
-			version.Number, branchType, maxBranchFile)
+		return nil, fmt.Errorf("Add a new version of the artifact %s in Qory Apiary with one file of at most %d bytes: version %d has another size.",
+			branchType, maxBranchFile, version.Number)
 	}
 
 	var content bytes.Buffer
@@ -150,12 +156,12 @@ func readBranchVersion(ctx context.Context, client *runapi.Client, version *runa
 	}
 
 	if err := branchformat.Check(content.Bytes()); err != nil {
-		return nil, fmt.Errorf("Fix version %d of the artifact %s in Qory Apiary: %w", version.Number, branchType, err)
+		return nil, fmt.Errorf("Add a new version of the artifact %s in Qory Apiary in place of version %d: %w", branchType, version.Number, err)
 	}
 
 	var document branchformat.Branch
 	if err := json.Unmarshal(content.Bytes(), &document); err != nil {
-		return nil, fmt.Errorf("Fix version %d of the artifact %s in Qory Apiary: %w", version.Number, branchType, err)
+		return nil, fmt.Errorf("Add a new version of the artifact %s in Qory Apiary in place of version %d: %w", branchType, version.Number, err)
 	}
 
 	return &document, nil

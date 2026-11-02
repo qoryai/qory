@@ -1518,18 +1518,21 @@ before the fetch, and picks one version of the artifact `branch`, name `main`:
 3. Else, the newest version.
 4. With no version, the run creates the branch at `target_version`.
 
-qory composes the harness at `target_version`, so a branch does not change the harness of
-its work item's runs. The fetch step also fetches the version's commit by id, at depth 1.
-The end of the compose step checks out the branch at that commit, with no request to the
-remote. Each further repository gets the branch too: at its commit in the version, or at
-the head of its default branch.
+qory composes the harness at `target_version` and with the further repositories at their
+default branches, so a branch does not change the harness of its work item's runs. The
+fetch step also fetches each repository's commit by id, at depth 1. After the compose, and
+after the record of a walled run's places, qory checks out the branch with no request to a
+remote: at the commit in the version, or where the fetch left a repository with no entry
+in the version. The working folder then has the commit's files, and a file that the
+branch removed stays out when the run starts from an image's copy.
 
 A run stops before the agent starts when:
 
 - the version does not match the [branch format](../contracts/harness/v1/README.md#the-branch-format),
   or its `ref` is another work item's;
-- the commit has another `.qory` than `target_version`;
-- the commit has a file where the compose wrote a link of the harness.
+- a commit is not on its repository;
+- the target's commit has another `.qory` than `target_version`;
+- git does not check out a commit.
 
 An instance without the feature `workflow_model` returns 404 with no error code to the run
 API. The run then works on `target_version` with no branch.

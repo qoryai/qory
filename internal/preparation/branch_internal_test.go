@@ -141,8 +141,16 @@ func TestFurtherRepositoriesGetTheBranch(t *testing.T) {
 	b := fetchBranchAt(t, dir, "acme/shop,acme/api,acme/docs", first, entries)
 
 	api := filepath.Join(dir, ".qory", "repositories", "acme", "api")
+	if got := run(t, api, "rev-parse", "HEAD"); got != apiHead {
+		t.Errorf("before the switch api HEAD = %s, want %s: a compose reads the default branch", got, apiHead)
+	}
+
+	if _, err := switchTo(dir, b); err != nil {
+		t.Fatal(err)
+	}
+
 	if got := run(t, api, "rev-parse", "HEAD"); got != apiCommit {
-		t.Errorf("api HEAD = %s, want %s, the head was %s", got, apiCommit, apiHead)
+		t.Errorf("api HEAD = %s, want %s", got, apiCommit)
 	}
 	docs := filepath.Join(dir, ".qory", "repositories", "acme", "docs")
 	if got := run(t, docs, "rev-parse", "HEAD"); got != docsHead {
@@ -152,10 +160,6 @@ func TestFurtherRepositoriesGetTheBranch(t *testing.T) {
 		if got := run(t, repository, "symbolic-ref", "--short", "HEAD"); got != testRef {
 			t.Errorf("%s branch = %s", repository, got)
 		}
-	}
-
-	if _, err := switchTo(dir, b); err != nil {
-		t.Fatal(err)
 	}
 	want := []WorkRepository{
 		{Path: "acme/shop", Dir: ".", Commit: first},
@@ -188,7 +192,7 @@ func TestABranchCannotChangeTheComposedHarness(t *testing.T) {
 	b := fetchBranchAt(t, dir, "acme/shop", first, versionOf("acme/shop", commit))
 
 	_, err := switchTo(dir, b)
-	if err == nil || !strings.HasPrefix(err.Error(), "qory run: make .qory in commit "+commit[:12]) {
+	if err == nil || !strings.Contains(err.Error(), "commit "+commit[:12]+" of "+testRef+" has another .qory") {
 		t.Fatalf("err = %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".qory", "harness")); !os.IsNotExist(err) {
@@ -199,32 +203,31 @@ func TestABranchCannotChangeTheComposedHarness(t *testing.T) {
 	}
 }
 
-// TestABranchCannotReplaceALinkOfTheHarness has the compose's link at a path that the
-// branch tracks, excluded or not: the switch stops, and the link stays.
-func TestABranchCannotReplaceALinkOfTheHarness(t *testing.T) {
+// TestAFileInTheWayStopsTheCheckout has a file at a path that the commit tracks, ignored or
+// not: the switch stops, and the file stays.
+func TestAFileInTheWayStopsTheCheckout(t *testing.T) {
 	for name, excluded := range map[string]bool{"untracked": false, "excluded": true} {
 		t.Run(name, func(t *testing.T) {
 			needGit(t)
 			base, dir := t.TempDir(), emptyFolder(t)
 			first, _ := movedRemote(t, base, "acme/shop")
 			commit := branchCommit(t, base, "acme/shop", first, func(work string) {
-				write(t, filepath.Join(work, "CLAUDE.md"), "from the branch\n")
+				write(t, filepath.Join(work, "notes.md"), "from the branch\n")
 			})
 
 			b := fetchBranchAt(t, dir, "acme/shop", first, versionOf("acme/shop", commit))
-			if err := os.Symlink(".qory/harness/CLAUDE.md", filepath.Join(dir, "CLAUDE.md")); err != nil {
-				t.Fatal(err)
-			}
+			write(t, filepath.Join(dir, "notes.md"), "in the way\n")
 			if excluded {
-				write(t, filepath.Join(dir, ".git", "info", "exclude"), "/CLAUDE.md\n")
+				write(t, filepath.Join(dir, ".git", "info", "exclude"), "/notes.md\n")
 			}
 
 			_, err := switchTo(dir, b)
-			if err == nil || !strings.HasPrefix(err.Error(), "qory run: remove the harness's links from commit "+commit[:12]) {
+			want := "qory run: add a new version of the artifact branch in Qory Apiary with a commit that git can check out"
+			if err == nil || !strings.HasPrefix(err.Error(), want) || !strings.HasSuffix(err.Error(), "; the code is used") {
 				t.Fatalf("err = %v", err)
 			}
-			if target, err := os.Readlink(filepath.Join(dir, "CLAUDE.md")); err != nil || target != ".qory/harness/CLAUDE.md" {
-				t.Errorf("link = %q, %v", target, err)
+			if got := contentOf(t, filepath.Join(dir, "notes.md")); got != "in the way\n" {
+				t.Errorf("notes.md = %q", got)
 			}
 		})
 	}
@@ -239,8 +242,67 @@ func TestStopsOnABranchCommitTheRemoteLacks(t *testing.T) {
 
 	b := &WorkBranch{Ref: testRef, Version: versionOf("acme/shop", strings.Repeat("a", 40))}
 	_, err := fetchListAt(dir, "acme/shop", Target{System: "git.example.com", Path: "acme/shop", Version: first, Branch: b})
-	if err == nil || !strings.Contains(err.Error(), strings.Repeat("a", 12)) {
+	want := "qory run: add a new version of the artifact branch in Qory Apiary with a commit of acme/shop, then take the work item in again: the version has aaaaaaaaaaaa"
+	if err == nil || !strings.HasPrefix(err.Error(), want) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// TestStopsOnABranchIDThatIsNoCommit is a version with the id of a tree: the fetch stops.
+func TestStopsOnABranchIDThatIsNoCommit(t *testing.T) {
+	needGit(t)
+	base, dir := t.TempDir(), emptyFolder(t)
+	first, _ := movedRemote(t, base, "acme/shop")
+	tree := run(t, filepath.Join(base, "acme", "shop.git"), "rev-parse", first+"^{tree}")
+
+	b := &WorkBranch{Ref: testRef, Version: versionOf("acme/shop", tree)}
+	_, err := fetchListAt(dir, "acme/shop", Target{System: "git.example.com", Path: "acme/shop", Version: first, Branch: b})
+	if err == nil || !strings.HasPrefix(err.Error(), "qory run: add a new version of the artifact branch") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// TestTheSeedLeavesOutWhatTheBranchRemoved is a branch that removes a file and a folder's
+// only tracked file: the image's copy brings back neither, and adds the rest.
+func TestTheSeedLeavesOutWhatTheBranchRemoved(t *testing.T) {
+	needGit(t)
+	base, dir := t.TempDir(), emptyFolder(t)
+	work := t.TempDir()
+	run(t, work, "init", "--quiet", "-b", "main")
+	write(t, filepath.Join(work, "gone.md"), "tracked\n")
+	write(t, filepath.Join(work, "lib", "gone.go"), "tracked\n")
+	write(t, filepath.Join(work, "kept.md"), "tracked\n")
+	run(t, work, "add", "-A")
+	run(t, work, "commit", "--quiet", "-m", "first")
+	first := run(t, work, "rev-parse", "HEAD")
+	bareFrom(t, base, "acme/shop", work)
+	commit := branchCommit(t, base, "acme/shop", first, func(clone string) {
+		run(t, clone, "rm", "--quiet", "gone.md", "lib/gone.go")
+	})
+
+	seed := t.TempDir()
+	run(t, seed, "clone", "--quiet", "--", baseURL+"/acme/shop.git", ".")
+	write(t, filepath.Join(seed, "lib", "dependency.go"), "installed\n")
+
+	b := fetchBranchAt(t, dir, "acme/shop", first, versionOf("acme/shop", commit))
+	if _, err := switchTo(dir, b); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := removedByBranch(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := copySeed(dir, seed, removed); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{"gone.md", filepath.Join("lib", "gone.go")} {
+		if _, err := os.Lstat(filepath.Join(dir, path)); !os.IsNotExist(err) {
+			t.Errorf("%s: %v", path, err)
+		}
+	}
+	if got := contentOf(t, filepath.Join(dir, "lib", "dependency.go")); got != "installed\n" {
+		t.Errorf("lib/dependency.go = %q", got)
 	}
 }
 

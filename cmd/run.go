@@ -768,8 +768,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// that commit, and stops before the compose when the run configuration lists no
 			// repository while the target is on its system. A run of a work item at that
 			// version reads the work item's branch first: the fetch takes its commit, the
-			// compose reads the target version, and the end of the compose step checks out
-			// the branch.
+			// compose reads the target version, and the branch is checked out last, after
+			// the record of the run's places, so no file of the branch counts as the person's.
 			hostWork := func() error {
 				stopped := func() bool {
 					return ctx.Err() != nil || timeout > 0 && time.Since(opened) >= timeout
@@ -845,20 +845,32 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						composing.cache = filepath.Join(run.Dir(), runSources)
 					}
 					var err error
-					if freshHome, err = prepareLaunch(w); err != nil {
-						return err
-					}
-					if branch != nil {
-						if err := preparation.Switch(ctx, cwd, os.Environ(), branch, w); err != nil {
-							return &runLineError{err}
-						}
-					}
-					return nil
+					freshHome, err = prepareLaunch(w)
+					return err
 				})
 				if err != nil {
 					return err
 				}
-				return prepareSession(freshHome)
+				if err := prepareSession(freshHome); err != nil {
+					return err
+				}
+				if branch == nil {
+					return nil
+				}
+				switchCtx, cancel := ctx, func() {}
+				if timeout > 0 {
+					switchCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+				}
+				defer cancel()
+				// A walled run's record holds the working folder until its session registers.
+				checkOut := preparation.Switch
+				if walled {
+					checkOut = preparation.SwitchHeld
+				}
+				if err := checkOut(switchCtx, cwd, os.Environ(), branch, streams.errOut); err != nil {
+					return &runLineError{err}
+				}
+				return nil
 			}
 			// setupWork runs the setup of a walled run whose run configuration lists
 			// repositories, see [runSetup], within the run's time limit. A setup command that
