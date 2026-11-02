@@ -479,7 +479,7 @@ func TestAWriteRunKeepsTheSetupContainer(t *testing.T) {
 // stops before the join, exit 1, closes failed with read_needs_setup_removed and -1, and
 // its line has the error, with a phrase in place of an error that contains a secret.
 func TestAReadRunWhoseSetupContainerStaysStops(t *testing.T) {
-	const head = "take the work item in again in Qory Apiary: the setup container of this read run was not removed, so a process in the container can write the checkout: "
+	const head = "start the run again from the work item in Qory Apiary: the setup container of this read run was not removed, so a process in the container can write the checkout: "
 	const tail = " (read_needs_setup_removed); the code is used"
 	secret := "qak_" + strings.Repeat("a", 43)
 	for name, c := range map[string]struct {
