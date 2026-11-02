@@ -34,7 +34,7 @@ qory harness launch [flags]
 ### Options
 
 ```
-      --address string   print only the name the session gives this <kind>/<name> or bound role, such as skills/deploy
+      --address string   print only the name the session gives this <kind>/<name> or role, such as skills/deploy
   -h, --help             help for launch
       --home string      where the harness is composed: a directory outside the checkout, one home per checkout under it, or .qory/harness (qory.yaml: harness.home)
       --json             print the command, arguments, variables and registered names as one JSON object
