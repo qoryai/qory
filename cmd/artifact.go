@@ -53,6 +53,10 @@ const maxGapsFile = 64 << 10
 // noWorkItemText is what qory work-item show prints outside a run with no work item file.
 const noWorkItemText = "No work item. Write .qory/work-item.json, or pass the task to the skill."
 
+// noWorkItemInRunText is the error of qory artifact push when the run API has no work item
+// for the run.
+const noWorkItemInRunText = "Start the run from a work item in Qory Apiary: Qory Apiary found no work item for this run."
+
 // noWorkItemError is the error of qory work-item show with no work item. [ExitCode] gives
 // it [ExitNoWorkItem].
 type noWorkItemError struct{}
@@ -572,6 +576,10 @@ func sendPush(c *cobra.Command, client *runapi.Client, push runapi.Push, sources
 	}
 
 	pushed, err := client.PushArtifact(c.Context(), push)
+	if runapi.HasCode(err, runapi.CodeNotFound) {
+		return errors.New(noWorkItemInRunText)
+	}
+
 	if err != nil {
 		return err
 	}
