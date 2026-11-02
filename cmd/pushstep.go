@@ -74,7 +74,12 @@ var branchWait = func(ctx context.Context, d time.Duration) error {
 // [codeRun.writes] alone is true for a workflow that declares read in documents with
 // access write.
 func keepsWork(fromCode *codeRun, readOnly bool, branch *preparation.WorkBranch, out session.Outcome) bool {
-	return fromCode.writes() && !readOnly && branch != nil && out.State == event.StateSucceeded
+	return canPush(fromCode, readOnly, branch) && out.State == event.StateSucceeded
+}
+
+// canPush reports whether the run has a push step if its session succeeds.
+func canPush(fromCode *codeRun, readOnly bool, branch *preparation.WorkBranch) bool {
+	return fromCode.writes() && !readOnly && branch != nil
 }
 
 // pushWork is the run's step of kind push: it pushes what the agent left, through the

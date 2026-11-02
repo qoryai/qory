@@ -937,6 +937,19 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return fetchImage(imageCtx, run, spec.EngineProxy, code != nil)
 				})
 			}
+			// recordSetupWork records what the setup left changed, within the run's time limit,
+			// so the push step leaves it out, see [preparation.RecordSetup].
+			recordSetupWork := func() error {
+				recordCtx, cancel := ctx, func() {}
+				if timeout > 0 {
+					recordCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+				}
+				defer cancel()
+				if err := preparation.RecordSetup(recordCtx, cwd, os.Environ(), branch); err != nil {
+					return &runLineError{err}
+				}
+				return nil
+			}
 			// A run stopped or out of time before its session joins prepares nothing more.
 			var prepErr error
 			if ctx.Err() == nil && (timeout == 0 || time.Since(opened) < timeout) {
@@ -949,6 +962,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				if prepErr == nil && readOnly {
 					prepErr = removeSetupWork()
+				}
+				if prepErr == nil && walled && spec.setupWhere != config.SetupInside && canPush(fromCode, readOnly, branch) {
+					prepErr = recordSetupWork()
 				}
 				if beforeJoin != nil {
 					beforeJoin()

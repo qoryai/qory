@@ -206,3 +206,168 @@ func TestPushFailed(t *testing.T) {
 		t.Errorf("pushFailed: %q", got)
 	}
 }
+
+// recordSetup is [RecordSetup] of b in dir.
+func recordSetup(t *testing.T, dir string, b *WorkBranch) {
+	t.Helper()
+	if err := RecordSetup(context.Background(), dir, os.Environ(), b); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// commitPaths is each path of the commit at HEAD.
+func commitPaths(t *testing.T, dir string) []string {
+	t.Helper()
+	got := strings.Fields(run(t, dir, "diff-tree", "-r", "--name-only", "--no-commit-id", "HEAD"))
+	slices.Sort(got)
+	return got
+}
+
+// setupLeaves is a setup that changes README.md, adds lock.txt, removes first.txt and
+// adds the link latest.
+func setupLeaves(t *testing.T, dir string) {
+	t.Helper()
+	write(t, filepath.Join(dir, "README.md"), "the setup\n")
+	write(t, filepath.Join(dir, "lock.txt"), "the setup\n")
+	if err := os.Remove(filepath.Join(dir, "first.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("README.md", filepath.Join(dir, "latest")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestWhatTheSetupLeftIsNotCommitted is a setup that changed a file, added one, removed
+// one and added a link, and an agent that changed nothing: no commit, no push, no version.
+func TestWhatTheSetupLeftIsNotCommitted(t *testing.T) {
+	dir, b := onBranch(t, "acme/shop")
+	head := run(t, dir, "rev-parse", "HEAD")
+	setupLeaves(t, dir)
+	recordSetup(t, dir, b)
+	doc, lines, err := pushOf(dir, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc != nil || run(t, dir, "rev-parse", "HEAD") != head {
+		t.Errorf("the document is %+v, and HEAD is %s", doc, run(t, dir, "rev-parse", "HEAD"))
+	}
+	if strings.TrimSpace(lines) != textNoNewCommits {
+		t.Errorf("the lines are %q", lines)
+	}
+}
+
+// TestAPathTheAgentChangedAgainIsCommitted is each kind of path the setup left, which the
+// agent changed again, beside the ones it did not touch.
+func TestAPathTheAgentChangedAgainIsCommitted(t *testing.T) {
+	cases := map[string]struct {
+		agent func(t *testing.T, dir string)
+		want  []string
+	}{
+		"a file": {func(t *testing.T, dir string) {
+			write(t, filepath.Join(dir, "README.md"), "the agent\n")
+		}, []string{"README.md"}},
+		"a file with the bit that lets it run": {func(t *testing.T, dir string) {
+			if err := os.Chmod(filepath.Join(dir, "README.md"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}, []string{"README.md"}},
+		"a removed file": {func(t *testing.T, dir string) {
+			write(t, filepath.Join(dir, "first.txt"), "the agent\n")
+		}, []string{"first.txt"}},
+		"a file the setup added, removed": {func(t *testing.T, dir string) {
+			if err := os.Remove(filepath.Join(dir, "README.md")); err != nil {
+				t.Fatal(err)
+			}
+		}, []string{"README.md"}},
+		"a link": {func(t *testing.T, dir string) {
+			if err := os.Remove(filepath.Join(dir, "latest")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink("lock.txt", filepath.Join(dir, "latest")); err != nil {
+				t.Fatal(err)
+			}
+		}, []string{"latest"}},
+		"a new file": {func(t *testing.T, dir string) {
+			write(t, filepath.Join(dir, "new.txt"), "the agent\n")
+		}, []string{"new.txt"}},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir, b := onBranch(t, "acme/shop")
+			setupLeaves(t, dir)
+			recordSetup(t, dir, b)
+			c.agent(t, dir)
+			doc, _, err := pushOf(dir, b)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if doc == nil {
+				t.Fatal("the run pushed nothing")
+			}
+			if got := commitPaths(t, dir); !slices.Equal(got, c.want) {
+				t.Errorf("the commit has %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// TestAFileTheSetupRestoredIsNoChange is a path the setup left changed that the agent
+// put back as HEAD has it: git status no longer lists it, so no commit.
+func TestAFileTheSetupRestoredIsNoChange(t *testing.T) {
+	dir, b := onBranch(t, "acme/shop")
+	content := contentOf(t, filepath.Join(dir, "README.md"))
+	write(t, filepath.Join(dir, "README.md"), "the setup\n")
+	recordSetup(t, dir, b)
+	write(t, filepath.Join(dir, "README.md"), content)
+	if doc, _, err := pushOf(dir, b); err != nil || doc != nil {
+		t.Errorf("the document is %+v, the error %v", doc, err)
+	}
+}
+
+// TestASetupThatAddsAFilterStopsBeforeGitStatus is a setup that added a clean filter,
+// which git status would run on this machine: the check comes first and the filter does
+// not run.
+func TestASetupThatAddsAFilterStopsBeforeGitStatus(t *testing.T) {
+	dir, b := onBranch(t, "acme/shop")
+	marker := filepath.Join(t.TempDir(), "filter-ran")
+	run(t, dir, "config", "filter.probe.clean", "touch "+marker+"; cat")
+	write(t, filepath.Join(dir, ".git", "info", "attributes"), "* filter=probe\n")
+	write(t, filepath.Join(dir, "README.md"), "the setup\n")
+	err := RecordSetup(context.Background(), dir, os.Environ(), b)
+	if err == nil || !strings.Contains(err.Error(), "after the setup, the check of repository acme/shop failed, so the agent did not start: ") {
+		t.Fatalf("the error is %v", err)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the filter ran")
+	}
+}
+
+// TestARepositoryInARepositoryIsOneEntry is a repository the setup cloned in the working
+// folder, which git status lists as one path: it stays out until a file in it changes.
+func TestARepositoryInARepositoryIsOneEntry(t *testing.T) {
+	for name, changed := range map[string]bool{"as the setup left it": false, "changed": true} {
+		t.Run(name, func(t *testing.T) {
+			dir, b := onBranch(t, "acme/shop")
+			inner := filepath.Join(dir, "inner")
+			if err := os.MkdirAll(inner, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			run(t, inner, "init", "--quiet", "-b", "main")
+			write(t, filepath.Join(inner, "file.txt"), "inner\n")
+			run(t, inner, "add", "-A")
+			run(t, inner, "commit", "--quiet", "-m", "inner")
+			recordSetup(t, dir, b)
+			if changed {
+				write(t, filepath.Join(inner, "file.txt"), "the agent\n")
+				run(t, inner, "commit", "--quiet", "-a", "-m", "the agent")
+			}
+			doc, _, err := pushOf(dir, b)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (doc != nil) != changed {
+				t.Errorf("the document is %+v", doc)
+			}
+		})
+	}
+}

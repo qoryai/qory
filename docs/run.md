@@ -1987,9 +1987,13 @@ The step does this, in order:
 2. qory commits what the agent left in each repository, with the message `Changes left by
    run <run id>` and the author and committer `qory <qory@localhost>`. A new file is in
    the commit unless git ignores it through `.gitignore` or `.git/info/exclude`. `.qory`
-   and the links into it stay out, also when the agent staged them. No hook in `.git`
-   runs. The commits of all repositories come before the first push, so a failed commit
-   pushes nothing.
+   and the links into it stay out, also when the agent staged them. A path that the setup
+   changed stays out while it is as the setup left it: after a setup outside the agent's
+   container, qory records each changed path and its content, and commits a path only if
+   the agent changed it again. With `wall.setup: inside`, the setup runs in the agent's
+   container, so what it changed counts as what the agent left. No hook in `.git` runs.
+   The commits of all repositories come before the first push, so a failed commit pushes
+   nothing.
 3. qory pushes each repository whose `HEAD` is past the commit the run started at to
    `refs/heads/qory/<work item id>`, through the run's host proxy, with no force. It
    prints `qory run: pushed qory/<work item id> to <path> at <commit>`, where `<commit>`
@@ -2013,6 +2017,14 @@ A failed step closes the run `failed`, exit 1, also after a session that succeed
 repository can be pushed before another fails, and a push can succeed before its version
 is stored. The branch is then past every version of the artifact, and the next run's push
 fails with the line for a branch that moved.
+
+On a run that can push, each of these lines stops the run after the setup, before the
+agent starts, and closes it `failed` with `no_session`:
+
+- `take the work item in again in Qory Apiary: after the setup, the check of repository
+  <path> failed, so the agent did not start: <cause>; the code is used`
+- `take the work item in again in Qory Apiary: the record of what the setup changed in
+  <path> failed: <error>; the code is used`
 
 Each of these lines fails the step. `<commit>` is the commit's first 12 characters:
 

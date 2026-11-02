@@ -2,9 +2,13 @@ package preparation
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -23,6 +27,8 @@ import (
 const (
 	textNoNewCommits     = "qory run: no new commits to push"
 	textPushed           = "qory run: pushed %s to %s at %s"
+	textSetupNotSafe     = "qory run: take the work item in again in Qory Apiary: after the setup, the check of repository %s failed, so the agent did not start: %s; the code is used"
+	textNoSetupRecord    = "qory run: take the work item in again in Qory Apiary: the record of what the setup changed in %s failed: %s; the code is used"
 	textNotSafe          = "qory run: take the work item in again in Qory Apiary: after the agent exited, the check of repository %s failed, so qory committed and pushed nothing: %s; the code is used"
 	textNoCommitLeft     = "qory run: take the work item in again in Qory Apiary: the commit of what the agent left in %s failed: %s; the code is used"
 	textNotFastForward   = "qory run: take the work item in again in Qory Apiary, and keep the run's commits on top of commit %[3]s: HEAD of %[1]s is at %[2]s, which does not descend from it, so a push would not be a fast-forward; the code is used"
@@ -65,7 +71,8 @@ var (
 // does not run. The two exceptions are the checks of a recorded place in
 // [hostgit.Hold], git config --file and git rev-parse, which use the flags of hostgit
 // and reach no remote. The commits of every repository come before the first push, so
-// a failed commit pushes nothing.
+// a failed commit pushes nothing. A path that [RecordSetup] recorded and that is as the
+// setup left it stays out of the commit.
 func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message string, p proxygit.Proxy, report io.Writer) (*branchformat.Branch, error) {
 	ctx = hostgit.WithBase(ctx, proxygit.Env(base, nil))
 	dir, err := filepath.Abs(dir)
@@ -89,7 +96,7 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 	}
 	heads := make([]string, len(b.Repositories))
 	for i, r := range b.Repositories {
-		if err := commitLeft(ctx, &p, folders[i], message); err != nil {
+		if err := commitLeft(ctx, &p, folders[i], b.setupChanges[r.Dir], message); err != nil {
 			return nil, fmt.Errorf(textNoCommitLeft, shownPath(r.Path), integration.Printable(exports.HideURLError(err).Error()))
 		}
 		if heads[i], err = headPast(ctx, hostRunner(&p), folders[i], r); err != nil {
@@ -117,13 +124,16 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 }
 
 // notSafe is [textNotSafe] for repository r and err, a stop of [safeAfterRun].
-func notSafe(r WorkRepository, err error) error {
+func notSafe(r WorkRepository, err error) error { return checkFailed(textNotSafe, r, err) }
+
+// checkFailed is the line text for the failed check of r, with what the folder has.
+func checkFailed(text string, r WorkRepository, err error) error {
 	cause := strings.TrimPrefix(err.Error(), "qory run: ")
 	var unsafe *unsafeError
 	if errors.As(err, &unsafe) {
 		cause = unsafe.cause
 	}
-	return fmt.Errorf(textNotSafe, shownPath(r.Path), cause)
+	return fmt.Errorf(text, shownPath(r.Path), cause)
 }
 
 // shownPath is path as a line shows a repository.
@@ -134,19 +144,15 @@ func shownPath(path string) string { return integration.Printable(exports.Value(
 // and ignored files, but [leftOut]'s: the index starts from HEAD, so what the agent
 // staged counts only through the file it left. With no such path, or none that differs
 // from HEAD once git added it, nothing is committed.
-func commitLeft(ctx context.Context, p *proxygit.Proxy, dir, message string) error {
+func commitLeft(ctx context.Context, p *proxygit.Proxy, dir string, setup map[string]string, message string) error {
 	git := hostRunner(p)
-	status, err := git(ctx, dir, "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames")
+	changed, err := changedPaths(ctx, git, dir)
 	if err != nil {
 		return err
 	}
 	var paths strings.Builder
-	for _, entry := range strings.Split(status, "\x00") {
-		if len(entry) < 4 {
-			continue
-		}
-		path := entry[3:]
-		out, err := leftOut(dir, path)
+	for _, path := range changed {
+		out, err := leftOut(dir, path, setup)
 		if err != nil {
 			return err
 		}
@@ -164,7 +170,8 @@ func commitLeft(ctx context.Context, p *proxygit.Proxy, dir, message string) err
 	if _, err := add(ctx, dir, "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
 		return err
 	}
-	if _, err := git(ctx, dir, "diff", "--cached", "--quiet", "--no-ext-diff"); err == nil {
+	// hostgit sets diff.ignoreSubmodules=all, which would hide a repository in the repository.
+	if _, err := git(ctx, dir, "diff", "--cached", "--quiet", "--no-ext-diff", "--ignore-submodules=none"); err == nil {
 		return nil
 	} else if ge := (*gitError)(nil); !errors.As(err, &ge) || ge.exit != 1 {
 		return err
@@ -174,15 +181,128 @@ func commitLeft(ctx context.Context, p *proxygit.Proxy, dir, message string) err
 	return err
 }
 
+// changedPaths is each path git status lists in dir, with no rename, so a moved file is
+// two paths.
+func changedPaths(ctx context.Context, git gitRunner, dir string) ([]string, error) {
+	status, err := git(ctx, dir, "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, entry := range strings.Split(status, "\x00") {
+		if len(entry) >= 4 {
+			paths = append(paths, entry[3:])
+		}
+	}
+	return paths, nil
+}
+
 // leftOut reports whether path, relative to the repository at dir, stays out of a commit:
-// it is [checkout.Dir] or under it, or a link that qory wrote. A run's branch stops every
-// later run of its work item when its commit has another .qory than the target version,
-// or a path where the compose writes a link.
-func leftOut(dir, path string) (bool, error) {
-	if path = strings.TrimSuffix(path, "/"); path == checkout.Dir || strings.HasPrefix(path, checkout.Dir+"/") {
+// it is [checkout.Dir] or under it, a link that qory wrote, or an entry of setup as the
+// setup left it. A run's branch stops every later run of its work item when its commit
+// has another .qory than the target version, or a path where the compose writes a link.
+func leftOut(dir, path string, setup map[string]string) (bool, error) {
+	trimmed := strings.TrimSuffix(path, "/")
+	if trimmed == checkout.Dir || strings.HasPrefix(trimmed, checkout.Dir+"/") {
 		return true, nil
 	}
-	return render.OwnLink(dir, filepath.Join(dir, filepath.FromSlash(path)))
+	if link, err := render.OwnLink(dir, filepath.Join(dir, filepath.FromSlash(trimmed))); link || err != nil {
+		return link, err
+	}
+	recorded, ok := setup[path]
+	if !ok {
+		return false, nil
+	}
+	now, err := entryDigest(dir, path)
+	return now == recorded, err
+}
+
+// RecordSetup records what the setup of a run that can push left changed in each
+// repository of b, in dir, the working folder, for [Push]. A caller runs it
+// after the setup and before the session joins, under the hold of a walled run's record.
+// [safeFurther] comes first, since the setup could write each .git and git status runs a
+// filter that .git/config has. git runs with the empty proxy's environment, as in [Push],
+// so both read the same list of ignored files.
+func RecordSetup(ctx context.Context, dir string, base []string, b *WorkBranch) error {
+	ctx = hostgit.WithBase(ctx, proxygit.Env(base, nil))
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return local(err)
+	}
+	git := hostRunner(&proxygit.Proxy{})
+	b.setupChanges = make(map[string]map[string]string, len(b.Repositories))
+	for _, r := range b.Repositories {
+		folder := filepath.Join(dir, filepath.FromSlash(r.Dir))
+		if err := safeFurther(ctx, folder); err != nil {
+			return checkFailed(textSetupNotSafe, r, err)
+		}
+		paths, err := changedPaths(ctx, git, folder)
+		if err != nil {
+			return fmt.Errorf(textNoSetupRecord, shownPath(r.Path), integration.Printable(exports.HideURLError(err).Error()))
+		}
+		digests := make(map[string]string, len(paths))
+		for _, path := range paths {
+			if digests[path], err = entryDigest(folder, path); err != nil {
+				return fmt.Errorf(textNoSetupRecord, shownPath(r.Path), integration.Printable(exports.HideError(err).Error()))
+			}
+		}
+		b.setupChanges[r.Dir] = digests
+	}
+	return nil
+}
+
+// entryDigest is the SHA-256 sum of the entry path in dir as it is on disk, read with no
+// git, so no filter runs: a missing entry, a link's target, a file's content and whether
+// it may be run, or each entry of a folder, as git status lists a repository in a
+// repository. Any other kind of file has its type alone.
+func entryDigest(dir, path string) (string, error) {
+	sum := sha256.New()
+	if err := addEntry(sum, filepath.Join(dir, filepath.FromSlash(strings.TrimSuffix(path, "/")))); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(sum.Sum(nil)), nil
+}
+
+// addEntry adds the entry at path to sum, for [entryDigest].
+func addEntry(sum io.Writer, path string) error {
+	info, err := os.Lstat(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		_, err = io.WriteString(sum, "missing\x00")
+		return err
+	case err != nil:
+		return err
+	case info.Mode()&fs.ModeSymlink != 0:
+		target, err := os.Readlink(path)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(sum, "link %q\x00", target)
+	case info.IsDir():
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			fmt.Fprintf(sum, "entry %q\x00", entry.Name())
+			if err := addEntry(sum, filepath.Join(path, entry.Name())); err != nil {
+				return err
+			}
+		}
+		fmt.Fprint(sum, "end\x00")
+	case info.Mode().IsRegular():
+		f, err := os.OpenFile(path, os.O_RDONLY|render.OpenFlags, 0)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		fmt.Fprintf(sum, "file %o\x00", info.Mode().Perm()&0o111)
+		_, err = io.Copy(sum, f)
+		return err
+	default:
+		fmt.Fprintf(sum, "other %s\x00", info.Mode().Type())
+	}
+	return nil
 }
 
 // headPast is HEAD of the repository r at dir when it is past [WorkRepository.Commit], ""

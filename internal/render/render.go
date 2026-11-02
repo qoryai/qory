@@ -1578,6 +1578,10 @@ func excludePattern(rel string) string {
 	return b.String()
 }
 
+// OpenFlags are the flags that keep a read of a checkout's file from following a link at
+// its path, waiting on a pipe there, or making it the terminal of the process.
+const OpenFlags = openFlags
+
 // OwnLink is [ownLink], for a caller that leaves qory's links out of a commit.
 func OwnLink(root, path string) (bool, error) { return ownLink(root, path) }
 

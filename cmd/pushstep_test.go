@@ -188,6 +188,7 @@ type pushRepo struct {
 	change       func(map[string]any)
 	flags        []string
 	waits        []time.Duration
+	setup        func(dir string)
 }
 
 // newPushRepo serves acme/site at one commit, whose stack declares the workflow hello
@@ -258,6 +259,12 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 	closes, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{
 		System: proxygittest.Host, Repositories: p.repositories, RunAPI: p.api.base(),
 		Proxy: p.h.server.Proxy.URL, CABundle: p.h.server.Proxy.CABundle, Dir: p.h.runDir,
+		Setup: func(session.SetupSpec) error {
+			if p.setup != nil {
+				p.setup(p.h.dir)
+			}
+			return nil
+		},
 		OnStep: func(e cmd.StepEvent) { got.steps = append(got.steps, e) },
 		OnOpen: func(spec session.OpenSpec) {
 			got.runID = spec.RunID
@@ -1043,9 +1050,10 @@ func subcommand(args []string) string {
 	return ""
 }
 
-// TestEveryGitOfThePushStepIsHardened records each git after the agent exits: each reads
-// no system or global configuration file, and each has [proxygit.Hardened] apart from
-// the two checks of a recorded place in a walled run, which hostgit runs.
+// TestEveryGitOfThePushStepIsHardened records each git of the record after the setup and
+// of the push step: each reads no system or global configuration file, and each has
+// [proxygit.Hardened] apart from the two checks of a recorded place in a walled run,
+// which hostgit runs.
 func TestEveryGitOfThePushStepIsHardened(t *testing.T) {
 	for name, walled := range map[string]bool{"unwalled": false, "walled": true} {
 		t.Run(name, func(t *testing.T) {
@@ -1062,23 +1070,32 @@ func TestEveryGitOfThePushStepIsHardened(t *testing.T) {
 			t.Setenv("GIT_CONFIG_SYSTEM", empty)
 			t.Setenv("GIT_CONFIG_GLOBAL", empty)
 			calls := recordGit(t, empty)
-			const agentExited = "agent exited"
-			r := p.run(t, func(dir string) {
-				writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+			// A walled run records what its setup left, so the calls start there.
+			const mark = "the calls start here"
+			startCalls := func() {
 				before, err := os.ReadFile(calls)
 				if err != nil {
 					t.Fatal(err)
 				}
-				writeFile(t, calls, string(before)+agentExited+"\n")
+				writeFile(t, calls, string(before)+mark+"\n")
+			}
+			if walled {
+				p.setup = func(string) { startCalls() }
+			}
+			r := p.run(t, func(dir string) {
+				writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+				if !walled {
+					startCalls()
+				}
 			}, nil)
 			r.wantsClose(t, event.StateSucceeded, 0)
 			log, err := os.ReadFile(calls)
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, step, ok := strings.Cut(string(log), agentExited+"\n")
+			_, step, ok := strings.Cut(string(log), mark+"\n")
 			if !ok {
-				t.Fatalf("the file of calls has no line %q:\n%s", agentExited, log)
+				t.Fatalf("the file of calls has no line %q:\n%s", mark, log)
 			}
 			seen := map[string]bool{}
 			for line := range strings.Lines(step) {
@@ -1151,5 +1168,79 @@ func TestACredentialHelperOfAConfigFileIsNotRead(t *testing.T) {
 				t.Errorf("the plain git did not run the helper, so the test shows nothing: %v", err)
 			}
 		})
+	}
+}
+
+// walledPush is a walled write run, whose setup writes lock.txt and changes README.md.
+func walledPush(t *testing.T) *pushRepo {
+	t.Helper()
+	p := newPushRepo(t, "write")
+	docker, _ := fakeDocker(t)
+	walledBy(t, docker)
+	p.flags = []string{"--home", filepath.Join(tempDir(t), "home")}
+	p.setup = func(dir string) {
+		writeFile(t, filepath.Join(dir, "lock.txt"), "the setup\n")
+		writeFile(t, filepath.Join(dir, "README.md"), "the setup\n")
+	}
+	return p
+}
+
+// TestARunThatChangedOnlyWhatTheSetupChangedPushesNothing is a walled run whose agent
+// left the working folder as the setup left it.
+func TestARunThatChangedOnlyWhatTheSetupChangedPushesNothing(t *testing.T) {
+	p := walledPush(t)
+	r := p.run(t, nil, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	wants(t, r.log(), "qory run: no new commits to push")
+	if got := p.branchHead(t); got != "" {
+		t.Errorf("the forge has the branch at %s", got)
+	}
+	if posts, _, _ := p.api.counts(); posts != 0 {
+		t.Errorf("%d POST went out", posts)
+	}
+}
+
+// TestTheAgentsChangeBesideTheSetupsIsPushed is a walled run whose agent changed one path
+// the setup changed: the commit has that path and not the other.
+func TestTheAgentsChangeBesideTheSetupsIsPushed(t *testing.T) {
+	p := walledPush(t)
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "README.md"), "the agent\n")
+	}, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if p.branchHead(t) == "" {
+		t.Fatalf("the run pushed nothing:\n%s", r.out)
+	}
+	got := proxygittest.Git(t, p.h.dir, "diff-tree", "-r", "--name-only", "--no-commit-id", "HEAD")
+	if got != "README.md" {
+		t.Errorf("the commit has %q, want README.md", got)
+	}
+}
+
+// TestASetupThatAddsAKeyStopsTheRunBeforeTheAgent is a setup that wrote a key git would
+// use to run a program: the run fails before the agent starts, with the line after the setup.
+func TestASetupThatAddsAKeyStopsTheRunBeforeTheAgent(t *testing.T) {
+	p := walledPush(t)
+	p.setup = func(dir string) { proxygittest.Git(t, dir, "config", "core.fsmonitor", "/bin/false") }
+	started := false
+	r := p.run(t, func(string) { started = true }, nil)
+	if started {
+		t.Error("the agent started")
+	}
+	wants(t, r.out, "after the setup, the check of repository acme/site failed, so the agent did not start: ", "core.fsmonitor")
+	if strings.Contains(r.out, "qory run: qory run:") {
+		t.Errorf("the line has qory run: twice:\n%s", r.out)
+	}
+}
+
+// TestAReadRunRecordsNothingAfterTheSetup is a read run whose setup wrote a key: the
+// record belongs to a run that can push, so the line of the record does not appear.
+func TestAReadRunRecordsNothingAfterTheSetup(t *testing.T) {
+	p := walledPush(t)
+	p.change = lowered
+	p.setup = func(dir string) { proxygittest.Git(t, dir, "config", "core.fsmonitor", "/bin/false") }
+	r := p.run(t, nil, nil)
+	if strings.Contains(r.out, "after the setup, the check of repository") {
+		t.Errorf("a read run ran the record:\n%s", r.out)
 	}
 }
