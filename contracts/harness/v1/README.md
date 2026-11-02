@@ -188,7 +188,7 @@ schema is [config.schema.json](config.schema.json).
 | `modules[].only` | no | the only things of this module that are composed, with the same keys as `exclude`, plus what the listed entries require from this module (`requires` in its manifest, followed transitively). Everything else is left out: a kind not listed contributes no entry beyond those, a part not listed is left out. `only: {skills: [deploy]}` is the deploy skill, what it needs, and nothing else. An `exclude` beside it lists entries the `only` brought in, to leave them out after all; a requirement left out that way has to come from another module (rule 4). It lists no part, and nothing the `only` lists |
 | `modules[].variant` | no | forces one of the module's variants instead of the one with the targeted runtime's name |
 | `modules[].link` | no | a name at the checkout root, one path segment, linked to the module's directory in the composed tree, so a permission rule or a script refers to the module's files by a checkout-relative path: `harness/scripts/check.sh`. A hard link (§Rendering), each name used once across the modules |
-| `bind` | no | the entry that fills each role a document references (§References): `<kind>/<role>` to the name of an entry of that kind, `agents/coder: rails-coder`. The kind is `agents`, `skills` or `commands`. A checkout extending a stack adds to the base's bindings and may rebind a role of the base's |
+| `bind` | no | the entry that fills each role a document references (§References), by kind and then by role, to the name of one entry of that kind: `bind: {agents: {coder: rails-coder}}`. The kind is `agents`, `skills` or `commands`. A role's value is one name; a list is refused. A flat key, `agents/coder: rails-coder`, is refused with `Write bind as bind.agents.coder: rails-coder in qory.yaml: bind keys are kinds, and agents/coder is a kind and a role.` A checkout's `bind` sets a role over the base's `bind` and over the modules' `provides` |
 | `extensions` | no | a map of keys the author chooses, each a value of any shape, a scalar, a list or a map of any depth; written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it |
 | `workflows` | no | the settings of each workflow of the stack, by its name: a lower-case letter, then up to 63 lower-case letters, digits and hyphens. A run that Qory Apiary dispatches from a run code starts the skill or command named like its workflow (docs/run.md, §The run key from a run code). The harness section of a `qory.yaml` that defines a stack lists them with the same keys and checks; a section that extends a stack takes the base's and lists none |
 | `workflows.<name>.time_limit` | no | how long a dispatched run of the workflow may run, counted from the run's open, as a Go duration above zero, such as `7h`, `45m` or `1h30m`; qory stops with an error on any other value: `set workflows.<name>.time_limit to a duration above zero, such as 7h or 45m: <value> is not one`. The run's `run_settings.time_limit_minutes`, when Qory Apiary sets it, applies instead, and a workflow without it runs for at most 3 hours |
@@ -255,7 +255,10 @@ checkout appends:
   such as `claude/rules/`, matched by path segment, so `claude/rules` covers
   `claude/rules/a/b.md` and not `claude/rules-private/x.md`, and a prefix that is a file's
   path covers that file only. A module shipping anything else fails the compose and the
-  message lists it. A base without the block is closed to extension.
+  message lists it. An appended module may `provide` (§The module manifest) roles of the
+  `kinds` alone; a module that provides another kind fails with `Remove provides.agents
+  from module typescript, or use a base that allows agents: the base's extending.kinds is
+  [skills].` A base without the block is closed to extension.
 - An entry of an appended module that collides with a base entry fails with status 3.
   The message lists that one entry and nothing else of the base. For a base module the
   base lists by `name` or by an export, `qory harness compose` prints `Module <module>
@@ -271,8 +274,9 @@ checkout appends:
 - Both stacks' `extensions` go into the report, merged by top-level key: a key the
   checkout sets replaces the base's value whole, and a key it leaves alone stays the
   base's. Nothing under a key is merged.
-- The base's `bind` applies, and the checkout's `bind` adds to it and may rebind a role of
-  the base's: which entry fills a role is a target's choice, like the model.
+- The base's `bind` applies, then the `provides` of the modules, then the checkout's
+  `bind`, each layer replacing the name a role has from the one before (§References):
+  which entry fills a role is a target's choice, like the model.
 - The report records the base with its source and pin, and marks the base's modules.
 - The base may come from `-f` in place of `extends` (§Discovery): `qory harness compose
   -f <stack>` in a checkout whose document extends a stack composes the document on that
@@ -381,6 +385,12 @@ requires:
 egress:                          # the hosts the module's skills, hooks and servers reach
   - api.example.com
   - "*.github.com"               # every host below github.com, not github.com itself
+roles:                           # the roles the module's documents reference
+  agents:
+    reviewer: one                # one entry fills the role
+provides:                        # the roles the module fills
+  agents:
+    developer: nextjs-developer  # ${qory:agents/developer} is the agent nextjs-developer
 ```
 
 `description`, optional, describes what the module is for; the report contains it and `qory harness
@@ -416,6 +426,19 @@ two: the declaration decides nothing, the policy alone defines what the run reac
 A module with no `egress` key declares nothing, and a harness in which no module declares
 passes Forager no list. `egress: []` is a declaration that the module reaches
 nothing.
+`roles`, optional, lists the roles the module's documents reference, by kind, `agents`,
+`skills` or `commands`, and then by role, each set to `one`: one entry fills the role.
+Any other value is refused, `Set roles.agents.developer to one in
+modules/core/qory-module.yaml: a role is filled by one entry, and the value is "many".`,
+and so is a list. The compose reads `roles` and checks this value; it checks nothing else
+against it.
+`provides`, optional, fills roles (§References), by kind and then by role, each to the
+name of one entry of that kind, as `bind` does: a technology module `typescript` writes
+`provides: {agents: {developer: typescript-developer}}`, and a workflow skill's
+`${qory:agents/developer}` resolves to `typescript-developer` with no `bind` in the
+checkout. The name is a composed entry of any module. A list as a value, a flat
+`agents/developer` key and a kind other than the three are refused, each with the
+manifest's path.
 
 A module's tree contains these entry kinds:
 
@@ -489,12 +512,21 @@ program puts before a skill writes `/${qory:skills/review}`.
 
 `${qory:<tier>}`, with no slash, is a tier, not a reference. It is allowed only as the whole value of an agent's frontmatter `model`. Anywhere else, and with a name that is not a tier, it fails the compose.
 
-A reference selects an entry of that name, or a role. A role is a name no entry has, bound
-per stack under `bind` to the entry that fills it: core writes `${qory:agents/coder}`,
-one stack binds `agents/coder: rails-coder` and another binds a different agent, and the
-same core module serves both. A reference resolves within the stack's composed entries
-and its bindings, and nowhere else: it never brings in a module the stack did not list,
-and never an entry a module's `only` or `exclude` left out. A reference is a requirement
+A reference selects an entry of that name, or a role. A role is a name no entry has, set
+to the entry that fills it: core writes `${qory:agents/coder}`, one stack binds `bind:
+{agents: {coder: rails-coder}}` and another binds a different agent, and the same core
+module serves both. A role's name is set in three layers, each replacing the name of the
+one before: the `bind` of the stack a checkout extends, then the `provides` of the
+composed modules (§The module manifest), then the `bind` of the checkout's `qory.yaml`,
+or of the stack composed when it extends none. Every module's manifest is read before
+the compose reads any module's entries, so an `only` of one module follows a role that
+a later module provides. A provided entry that an `exclude` or an `only` left out
+provides nothing. Two modules that provide one role with different names fail the
+compose, unless the checkout's `bind` sets the role: `Bind agents.developer in qory.yaml,
+or compose one of typescript and elixir: both modules provide agents/developer
+(typescript-developer, elixir-developer).` A reference resolves within the stack's
+composed entries and its roles, and nowhere else: it never brings in a module the stack
+did not list, and never an entry a module's `only` or `exclude` left out. A reference is a requirement
 (rule 4), so an entry needs no `requires` line for what its documents reference, and an
 `only` follows references the way it follows `requires`.
 
@@ -533,12 +565,13 @@ runtime: the resolution happens in the composed tree, per path.
 4. **A requirement that is not composed fails.** After the excludes and the collision
    check, every composed entry's `requires` items from its manifest and the references in
    its documents (§References) are checked against the composed entries, a reference to
-   a bound role against the entry it is bound to. One that is missing fails the compose
+   a role against the entry that fills it. One that is missing fails the compose
    with `module core: skill deploy requires command ship, which module core leaves out`
    when an `exclude` or an `only` dropped it, with the module whose block did, and with
    `module core: skill deploy requires command ship, which no module ships` otherwise; a
-   reference's message has `references` for `requires`, and `which no module ships and the
-   stack does not bind` when neither an entry nor a binding matches the name. When the
+   reference's message has `references` for `requires`, and `which no module ships or
+   provides and the stack does not bind` when neither an entry nor a role matches the
+   name. When the
    exclude a checkout's `qory.yaml` lists for a base module dropped it, the message is
    `remove commands/ship from the exclude of module core in qory.yaml, or ship it in a
    module of the repository: module core: skill deploy requires command ship, which the
@@ -547,8 +580,12 @@ runtime: the resolution happens in the composed tree, per path.
    selects agent rails-coder, which no module ships`, or `which module rails leaves out`,
    and a role whose name an entry has fails with `bind agents/reviewer defines a role, and
    module core ships agent reviewer; a role's name is no entry's`, since such a role
-   cannot be rebound. Every failure of this rule comes at once, one per line, the
-   bindings first and then the entries in their sorted order, so one compose lists every
+   cannot be rebound. A role a module provides is checked the same way, with `Ship agent
+   typescript-developer in a module, or remove provides.agents.developer from module
+   typescript: no module ships agent typescript-developer.` and `Rename role
+   agents/reviewer in the provides of module typescript: module core ships agent reviewer,
+   and a role's name is no entry's.` Every failure of this rule comes at once, one per
+   line, the roles first and then the entries in their sorted order, so one compose lists every
    site there is to fix. An entry that was left out has no requirements to meet. A
    manifest whose `requires` lists an entry the module does not ship fails as the module
    is read: `module core: requires lists skill release, which the module does not ship`.
@@ -571,7 +608,7 @@ runtime: the resolution happens in the composed tree, per path.
    `default: fail`, fails the compose.
 7. **Everything is reported.** The report lists every module with its pin, every entry with
    its module and, for one an `only` brought in, the entry that required it, the
-   references each entry's documents contain, the bindings, every entry
+   references each entry's documents contain, the roles with the layer that set each, every entry
    and part a block left out, as `<kind>/<name>`, `instructions/AGENTS.md`,
    `settings/<runtime>/<file>` or `env/<NAME>`, and every variant chosen. `qory harness
    inspect` prints it.
@@ -785,8 +822,8 @@ cd <checkout> && eval "$(qory harness launch --runtime claude)"
 ```
 
 `addresses` is, per kind, the name the session started by that line registers each
-composed agent, skill and command under, and each bound role as the entry it is bound to
-(§References): `{"agents": {"coder": "harness:rails-coder", "reviewer":
+composed agent, skill and command under, and each role as the entry that fills it, from
+a `bind` or a module's `provides` (§References): `{"agents": {"coder": "harness:rails-coder", "reviewer":
 "harness:reviewer"}, "skills": {"implement": "harness:implement"}}` for claude, whose
 plugin prefixes every kind, the names as the modules wrote them for every other runtime,
 and a kind the runtime skips left out. `--address <kind>/<name>` prints that one
@@ -840,7 +877,7 @@ reports it with status 2: `goose` and `any`.
 
 | `target.runtime` | Template | Rendered for it under the runtime's directory | Reaches the session from outside | Read from the checkout alone |
 |---|---|---|---|---|
-| `claude` | `claude --plugin-dir ${dir}/plugin --settings ${dir}/settings.json --mcp-config ${dir}/mcp.json --append-system-prompt-file ${dir}/launch/CLAUDE.md --setting-sources user` | `plugin/`, a plugin in Claude Code's layout: the skills and commands linked, or written where a document contains a reference, the agents copied, since Claude Code passes over a link in a plugin's `agents/` where it follows one everywhere else, the output styles under `output-styles/` with the manifest's `outputStyles` pointing there, `.claude-plugin/plugin.json` setting its name to `harness`, so a skill is `/harness:<name>` and an agent `harness:<name>`, and every reference in the plugin resolves to that name; `launch/CLAUDE.md`, the instructions with their references resolved the same way and, after them, the names the session registers, per kind, with each bound role | everything: the plugin, the permissions, hooks and model in `settings.json`, the environment the line sets, the servers, the instructions appended to the system prompt; `--setting-sources user` keeps every `.claude` of the checkout and of the directories above it out | nothing |
+| `claude` | `claude --plugin-dir ${dir}/plugin --settings ${dir}/settings.json --mcp-config ${dir}/mcp.json --append-system-prompt-file ${dir}/launch/CLAUDE.md --setting-sources user` | `plugin/`, a plugin in Claude Code's layout: the skills and commands linked, or written where a document contains a reference, the agents copied, since Claude Code passes over a link in a plugin's `agents/` where it follows one everywhere else, the output styles under `output-styles/` with the manifest's `outputStyles` pointing there, `.claude-plugin/plugin.json` setting its name to `harness`, so a skill is `/harness:<name>` and an agent `harness:<name>`, and every reference in the plugin resolves to that name; `launch/CLAUDE.md`, the instructions with their references resolved the same way and, after them, the names the session registers, per kind, with each role | everything: the plugin, the permissions, hooks and model in `settings.json`, the environment the line sets, the servers, the instructions appended to the system prompt; `--setting-sources user` keeps every `.claude` of the checkout and of the directories above it out | nothing |
 | `cursor` | `cursor-agent --plugin-dir ${dir}/plugin` | `plugin/`, the same layout under `.cursor-plugin/plugin.json`, with the agents in Cursor's shape, a copy of `hooks.json` as `hooks/hooks.json` and of `mcp.json` as `.mcp.json`, since the CLI takes no settings file | the skills, agents, hooks and servers | the instructions, `AGENTS.md` |
 | `copilot` | `copilot --add-dir ${dir}/workspace --additional-mcp-config @${dir}/mcp.json` | `workspace/.github/skills` linked and `workspace/.github/agents` written, which `--add-dir` loads as trusted configuration, and `mcp.json` with the servers under `mcpServers`, so the MCP kind has a place in copilot | the skills, agents and servers | the hooks and the instructions |
 | `codex` | `env CODEX_HOME=${dir} codex` | `skills/` linked and the instructions as `AGENTS.md`, ending with the names the session registers, which a Codex home registers as the modules wrote them, beside `config.toml` and the agents, so the directory is a Codex home | everything | nothing; Codex keeps its login in the same home, `auth.json`, so a launcher authenticates through `OPENAI_API_KEY` or puts `auth.json` there |
@@ -873,8 +910,13 @@ entries, and `base` when it is the base stack's. A
 source that selects an export is written as the stack wrote it, `<url>#<ref> module
 <name>`. An entry an `only` brought in has `for`, the `<kind>/<name>` that required it,
 and an entry whose documents reference others has `references`, the `<kind>/<name>` keys
-as written, a role's included; the stack's bindings are `bind`, `<kind>/<role>` to the
-entry's name, absent when there are none. An agent with a tier has `tier`. `tiers` lists each tier the agents use that has a map, with `model`, `effort` when set, and `from`: `--tier`, for an entry of `--tier` and `--tier-effort`, or the file that set it. `egress` is the union of the hosts the modules
+as written, a role's included; the roles are `bind`, `<kind>/<role>` to the name of the
+entry that fills it, from the base's `bind`, the modules' `provides` and the checkout's
+`bind`, absent when there are none; and `roles`, the same roles sorted, each `{role,
+agent, from}`, `from` being `base`, `provides <module>` or `bind`:
+`[{"role": "agents/developer", "agent": "typescript-developer", "from": "provides
+typescript"}]`. `qory harness inspect` and `qory harness compose --dry-run` print them in
+the Bind table, with `from` as the third column. An agent with a tier has `tier`. `tiers` lists each tier the agents use that has a map, with `model`, `effort` when set, and `from`: `--tier`, for an entry of `--tier` and `--tier-effort`, or the file that set it. `egress` is the union of the hosts the modules
 declared (§The module manifest), sorted by host, each with the `modules` that declared it
 in stack order, and absent when no module declares; when one does, the target runtime's
 hosts, the model endpoint for `claude`, join under the runtime's name, so a stack
