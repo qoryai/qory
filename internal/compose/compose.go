@@ -740,7 +740,7 @@ func checkResolved(res *Result, requires map[string]map[string][]Need, dropped m
 				lines = append(lines, fmt.Sprintf("module %s: %s %s %s, which module %s leaves out", shown(e.Module), described(e.Kind, e.Name), verb, described(kind, name), shown(by)))
 				continue
 			}
-			if ps := dropped[need.Key]; len(ps) > 0 {
+			if ps := dropped[need.Key]; need.Reference && len(ps) > 0 {
 				for _, r := range ps {
 					provided := fmt.Sprintf("module %s: %s %s %s, which module %s provides as %s", shown(e.Module), described(e.Kind, e.Name), verb, described(kind, name), shown(r.Module), described(kind, r.Name))
 					if x := excludeOf(res, kind, r.Name); x != nil && x.Listed != "" {
