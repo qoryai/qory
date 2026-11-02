@@ -58,10 +58,10 @@ func setsSettings(flag string, args []string) bool {
 // launch passes the flag once at most, with a value after it, and the agent's
 // arguments not at all, since Forager takes the first and adds its hooks to it alone. A
 // value that is JSON already, from harness.launch, stays as it is. The file is a regular
-// file of at most 64 KiB that contains one JSON object. With readOnly, for a run that
-// only reads the checkout, the settings get [readRules], and a launch with no settings
+// file of at most 64 KiB that contains one JSON object. With readRoot, the checkout of a
+// run that only reads it, the settings get [readRules], and a launch with no settings
 // flag gets the flag with those rules alone.
-func inlineSettings(flag string, launch, extra []string, home string, readOnly bool) ([]string, error) {
+func inlineSettings(flag string, launch, extra []string, home, readRoot string) ([]string, error) {
 	refuse := func(format string, a ...any) error {
 		return input(fmt.Errorf(format+", so the run does not start", a...))
 	}
@@ -74,8 +74,8 @@ func inlineSettings(flag string, launch, extra []string, home string, readOnly b
 		if setsSettings(flag, args) {
 			return nil, refuse("the launch sets %s with no file after it", flag)
 		}
-		if readOnly {
-			data, err := readRules(map[string]any{}, "")
+		if readRoot != "" {
+			data, err := readRules(map[string]any{}, "", readRoot)
 			if err != nil {
 				return nil, err
 			}
@@ -89,14 +89,14 @@ func inlineSettings(flag string, launch, extra []string, home string, readOnly b
 		return nil, refuse("the launch sets %s more than once", flag)
 	}
 	if strings.HasPrefix(strings.TrimSpace(value), "{") {
-		if !readOnly {
+		if readRoot == "" {
 			return append(args, extra...), nil
 		}
 		object, ok := oneObject([]byte(value))
 		if !ok {
 			return nil, refuse("pass one JSON object to %s in harness.launch: a run of a read workflow adds rules to it, and the value is not one JSON object", flag)
 		}
-		data, err := readRules(object, "of the launch")
+		data, err := readRules(object, "of the launch", readRoot)
 		if err != nil {
 			return nil, err
 		}
@@ -129,8 +129,8 @@ func inlineSettings(flag string, launch, extra []string, home string, readOnly b
 	if !ok {
 		return nil, refuse("write one JSON object in the Claude Code settings %s: the file is not one JSON object", exports.Value(value, false))
 	}
-	if readOnly {
-		if data, err = readRules(object, exports.Value(value, false)); err != nil {
+	if readRoot != "" {
+		if data, err = readRules(object, exports.Value(value, false), readRoot); err != nil {
 			return nil, err
 		}
 	}
@@ -159,25 +159,51 @@ func oneObject(data []byte) (map[string]any, bool) {
 	return object, true
 }
 
-// The rules a run that only reads the checkout adds to Claude Code's settings: Claude
-// Code denies its edit tools, allows the qory inside the wall in Bash, which is mounted
-// at [wall.HelperPath] and is not on PATH, and denies every other tool that no rule
-// allows, without a prompt.
-var (
-	readDeny  = []string{"Edit", "Write", "NotebookEdit"}
-	readAllow = []string{"Bash(" + wall.HelperPath + " *)"}
-)
+// workspaceInWall is where a run whose policy names its image by its reference sees the
+// checkout, in place of the checkout's path on the machine.
+const workspaceInWall = "/workspace"
+
+// readDeny and readAllow are the rules a run that only reads the checkout at root adds to
+// Claude Code's settings. Claude Code denies every edit under the checkout and
+// NotebookEdit, allows the qory inside the wall in Bash, which is mounted at
+// [wall.HelperPath] and is not on PATH, allows reads and edits in [tempStoreDir], where
+// the agent reads what it pulled and makes the files it pushes, and denies every other
+// tool that no rule allows, without a prompt. Edit rules cover the Write tool too, and a
+// bare Edit or Write would remove the tool from the agent, also in that folder. A deny
+// wins over any allow that the composed settings contain. The read-only mount stays the
+// boundary.
+func readDeny(root string) []string {
+	rules := []string{"NotebookEdit"}
+	for _, path := range []string{root, workspaceInWall} {
+		if rule := "Edit(/" + ruleGlob.Replace(path) + "/**)"; !slices.Contains(rules, rule) {
+			rules = append(rules, rule)
+		}
+	}
+	return rules
+}
+
+// readAllow is described at [readDeny].
+func readAllow() []string {
+	return []string{
+		"Bash(" + wall.HelperPath + " *)",
+		"Read(/" + ruleGlob.Replace(tempStoreDir) + "/**)",
+		"Edit(/" + ruleGlob.Replace(tempStoreDir) + "/**)",
+	}
+}
+
+// ruleGlob escapes the characters of a path that a rule reads as a gitignore pattern.
+var ruleGlob = strings.NewReplacer(`\`, `\\`, `*`, `\*`, `?`, `\?`, `[`, `\[`, `]`, `\]`)
 
 // readDefaultMode is the permissions.defaultMode of a read workflow's run.
 const readDefaultMode = "dontAsk"
 
-// readRules is object, Claude Code's settings, as JSON with [readDeny] added to
+// readRules is object, Claude Code's settings, as JSON with [readDeny] of root added to
 // permissions.deny, [readAllow] to permissions.allow, each rule once, and
 // permissions.defaultMode set to [readDefaultMode]; every other key stays as it is, and
 // < > & stay unescaped. shown is the settings file as a text shows it, or "of the
 // launch" for settings that the launch passes as JSON. A permissions that is no object,
 // and an allow or a deny that is no array, stop the run.
-func readRules(object map[string]any, shown string) ([]byte, error) {
+func readRules(object map[string]any, shown, root string) ([]byte, error) {
 	at := "the Claude Code settings " + shown
 	if shown == "" {
 		at = "the Claude Code settings"
@@ -191,7 +217,7 @@ func readRules(object map[string]any, shown string) ([]byte, error) {
 	for _, add := range []struct {
 		key   string
 		rules []string
-	}{{"deny", readDeny}, {"allow", readAllow}} {
+	}{{"deny", readDeny(root)}, {"allow", readAllow()}} {
 		var list []any
 		if v, ok := permissions[add.key]; ok {
 			if list, ok = v.([]any); !ok {

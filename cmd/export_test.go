@@ -586,3 +586,18 @@ func SetLaunchPrebuild(f func(ctx context.Context, s prebuild.Settings, r prebui
 // mounts against the home folder and the state directory, which qory run makes before
 // the run starts anything.
 func WalledPlaces(root string, mounts []wall.Mount) error { return walledPlaces(root, mounts) }
+
+// SetTempStoreDir sets the store of a run whose checkout is read-only to dir, and returns
+// a function that restores it.
+func SetTempStoreDir(dir string) func() {
+	before := tempStoreDir
+	tempStoreDir = dir
+	return func() { tempStoreDir = before }
+}
+
+// SetCheckoutUnwritable makes a run read every checkout as one it cannot write, as a
+// read-only mount does for root too, and returns a function that restores the check.
+func SetCheckoutUnwritable() func() {
+	checkoutWritable = func(string) bool { return false }
+	return func() { checkoutWritable = canWrite }
+}

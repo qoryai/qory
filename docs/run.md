@@ -2516,14 +2516,21 @@ works in a run and on a laptop, so a skill needs no branch for where it runs.
 | Command | In a run | Outside a run |
 | ------- | -------- | ------------- |
 | `qory work-item show` | Prints the work item as JSON. | Prints `.qory/work-item.json`. With no file, exits 3. |
-| `qory artifact pull [<type>] [--version <N>]` | Fetches artifacts into `.qory/artifacts/<type>/<name>/v<N>/`, writes `.qory/artifacts/index.json`, and prints the directory. | Fetches nothing, and says so. |
-| `qory artifact push <type> <file>... [--name <name>] [--note <text>]` | Stores the files as one new version, keeps a copy in `.qory/artifacts`, and prints the version. | Keeps the files in `.qory/artifacts`, and sends nothing. |
+| `qory artifact pull [<type>] [--version <N>]` | Fetches artifacts into the store, under `<type>/<name>/v<N>/`, writes `index.json` there, and prints the store's directory. | Fetches nothing, and says so. |
+| `qory artifact push <type> <file>... [--name <name>] [--note <text>]` | Stores the files as one new version, keeps a copy in the store, and prints the version. | Keeps the files in `.qory/artifacts`, and sends nothing. |
 | `qory run verdict passed\|changes-requested\|escalate [--gaps <file>]` | Stores the verdict. Qory Apiary acts on it when the run ends. | Prints the verdict and keeps it in `.qory/artifacts/verdict/`. Nothing acts on it. |
 
 A run with a control plane sets `QORY_RUN_API` to
 `http://run-api.qory.invalid/v1/runs/<run id>`. The commands send their requests there
 through `HTTP_PROXY`. The gateway signs them, so the run has no key. With the variable
 absent, the commands work on the checkout's `.qory` directory.
+
+The store is the folder of a run's artifact files. It is `.qory/artifacts` in the checkout.
+In a run that cannot write its checkout, such as a [read run](#read-workflows), it is
+`/tmp/qory-artifacts` in the agent's container, and it ends with the container. Each command
+checks whether it can write the checkout, so no setting is needed. Read the files from the
+directory that `qory artifact pull` prints, and a skill works on both. Outside a run the
+store is `.qory/artifacts`.
 
 `qory artifact pull` fetches the newest version of each output of the stage, and the
 version of each input that its gate approved. A type that is both counts as an output. For
@@ -2541,8 +2548,10 @@ limit. One version has at most 100 files through the run API, whatever the type'
 with no work item. These numbers mean a collision and a foreign path on `qory harness`.
 
 `.qory/artifacts/.gitignore` keeps the artifacts out of git, also in a run's checkout,
-which has no exclude line for `.qory`. A directory link at `.qory` or `.qory/artifacts`
-stops `qory artifact push` with exit 1 before it sends anything. A directory link further
+which has no exclude line for `.qory`. `/tmp/qory-artifacts` has mode 700 and no
+`.gitignore`, because it lies outside the checkout. A directory link at `.qory`,
+`.qory/artifacts` or `/tmp/qory-artifacts` stops `qory artifact push` with exit 1 before it
+sends anything. A directory link further
 down stops `qory artifact pull` and a push outside a run with exit 1. In a run, a push has
 stored the version by that point, so it keeps no local copy, prints a line on standard
 error, and exits 0. A write replaces a link at a file's path, and never follows it.
@@ -3317,10 +3326,27 @@ with `access: write`. A read run sees the checkout read-only:
 - Forager binds the workspace read-only in the agent's container, and the checkout's
   mount is read-only. A write into the checkout inside fails with `Read-only file
   system`.
-- On Claude Code, the run's settings deny `Edit`, `Write` and `NotebookEdit`, allow
-  `Bash(/qory/qory *)` and set `permissions.defaultMode` to `dontAsk`, beside what the
-  composed settings contain. Inside the wall, `qory` is at `/qory/qory` and not on
+- The commands of a work item keep their files in `/tmp/qory-artifacts`, the store of a
+  run that cannot write its checkout. `qory artifact pull` prints that directory. See
+  [Commands of a work item](#commands-of-a-work-item).
+- On Claude Code, the run's settings deny `NotebookEdit` and every edit under the
+  checkout, with `Edit(//<checkout>/**)` and `Edit(//workspace/**)`. They allow
+  `Bash(/qory/qory *)`, `Read(//tmp/qory-artifacts/**)` and
+  `Edit(//tmp/qory-artifacts/**)`, and set `permissions.defaultMode` to `dontAsk`, beside
+  what the composed settings contain. Inside the wall, `qory` is at `/qory/qory` and not on
   `PATH`. On the other runtimes, the read-only mount is the only change.
+
+  So the agent reads what it pulled and makes what it pushes in `/tmp/qory-artifacts`, with
+  Claude Code's `Read` and `Write` tools:
+
+  ```
+  /qory/qory artifact push review /tmp/qory-artifacts/review.md
+  /qory/qory run verdict changes-requested --gaps /tmp/qory-artifacts/gaps.md
+  ```
+
+  Every other write stops at `dontAsk`. An `Edit` or `Write` allow in the composed
+  settings opens the rest of the container, and the deny rules and the read-only mount
+  still stop a write to the checkout.
 - The setup and the host steps write the checkout, so the checkout stays among the places
   the run may write, and the record lists it.
 - qory removes the setup container after the setup and before the agent starts, in the
