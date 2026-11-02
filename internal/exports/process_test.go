@@ -105,6 +105,9 @@ func TestVerifyChecksTheProcessFields(t *testing.T) {
 		{with("type", `" "`), "add type, the workspace type the template sets up: the file has no type"},
 		{without("stack"), "add stack, a name that exports.stacks lists: the file has no stack"},
 		{with("stack", "web"), "set stack to a name that exports.stacks lists: stack is web, and exports.stacks lists support"},
+		{with("stack", `"web\nqory: all checks passed"`), "set stack to one line of text: it has a line break"},
+		{with("stack", `"web\rx"`), "set stack to one line of text: it has a line break"},
+		{with("stack", `"web\tx"`), "set stack to one line of text: it has a control character"},
 		{without("process"), "add process, the template's process document as an object: the file has no process"},
 		{with("process", "~"), "add process, the template's process document as an object: the file has no process"},
 		{with("process", "[a]"), "set process to an object, the template's process document: process is a list"},
@@ -222,6 +225,7 @@ func TestProcessSchemaMatchesTheReader(t *testing.T) {
 		{strings.Replace(process, "name: Support desk", "name: "+strings.Repeat("n", 61), 1), false},
 		{strings.Replace(process, "type: customer-care\n", "", 1), false},
 		{strings.Replace(process, "stack: support", `stack: ""`, 1), false},
+		{strings.Replace(process, "stack: support", `stack: "support\nx"`, 1), false},
 		{strings.Replace(process, "description: An agent", "description: "+strings.Repeat("w ", 80)+"An agent", 1), false},
 		{strings.Replace(process, "description: An agent", "description: "+strings.Repeat("w ", 70)+"An agent", 1), true},
 		{strings.Replace(process, "  schema: qory.process/v1\n", "", 1), false},
@@ -229,6 +233,19 @@ func TestProcessSchemaMatchesTheReader(t *testing.T) {
 		{strings.Replace(process, "  stages:\n", "  stages: {}\n  other:\n", 1), false},
 		{strings.Replace(process, "  schema: qory.process/v1\n", "  schema: qory.process/v1\n  machine: small\n", 1), true},
 		{process + "owner: acme\n", false},
+		{strings.Replace(process, "workflow: draft-an-answer", `workflow: ""`, 1), false},
+		{strings.Replace(process, "workflow: draft-an-answer", `workflow: " "`, 1), false},
+		{strings.Replace(process, "workflow: draft-an-answer", "workflow: ~", 1), false},
+		{strings.Replace(process, "workflow: draft-an-answer", "workflow: 123", 1), false},
+		{strings.Replace(process, "workflow: draft-an-answer", "workflow: true", 1), false},
+		{strings.Replace(process, "workflow: draft-an-answer", "workflow: [a]", 1), false},
+		{strings.Replace(process, "workflow: draft-an-answer", `workflow: "a\nb"`, 1), false},
+		{strings.Replace(process, "workflow: check-the-tone", `workflow: ""`, 1), false},
+		{strings.Replace(process, "workflow: check-the-tone", `workflow: "a\tb"`, 1), false},
+		{strings.Replace(process, "name: Answer", `name: "Answer\nx"`, 1), false},
+		{strings.Replace(process, "name: Answer", `name: "\t"`, 1), false},
+		{strings.Replace(process, "name: Answer", "name: 3", 1), true},
+		{strings.Replace(process, "name: Answer", `name: ""`, 1), true},
 	} {
 		var doc any
 		if err := yaml.Unmarshal([]byte(c.body), &doc); err != nil {
@@ -247,5 +264,125 @@ func TestProcessSchemaMatchesTheReader(t *testing.T) {
 		if err := factory(t, c.body).Verify(); (err == nil) != c.valid {
 			t.Errorf("reader: %q valid=%v err=%v", c.body, c.valid, err)
 		}
+	}
+}
+
+// TestVerifyRefusesAProcessLinkOutside is a process.yaml that is a link to a file outside
+// the module's folder, by an absolute path, by a relative one, and to a file that is not
+// there: each is refused with the fix first, and no line contains the target's content
+// or its path. A link to a file inside the folder is read as the file.
+func TestVerifyRefusesAProcessLinkOutside(t *testing.T) {
+	e := factory(t, process)
+	folder := filepath.Join(e.Root, "modules", "desk")
+	file := filepath.Join(folder, exports.ProcessFileName)
+	outside := filepath.Join(t.TempDir(), "elsewhere.yaml")
+	if err := os.WriteFile(outside, []byte("owner: TARGET-CONTENT\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want := file + ": replace process.yaml with a file inside the module: it is a link to a place outside the module"
+	for _, target := range []string{outside, filepath.Join("..", "..", "elsewhere.yaml"), "../gone.yaml", "/gone.yaml"} {
+		if target == filepath.Join("..", "..", "elsewhere.yaml") {
+			if err := os.WriteFile(filepath.Join(e.Root, "elsewhere.yaml"), []byte("owner: TARGET-CONTENT\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.Remove(file); err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, file); err != nil {
+			t.Fatal(err)
+		}
+		err := e.Verify()
+		if err == nil || err.Error() != want {
+			t.Errorf("a link to %s: %v\nwant %s", target, err, want)
+		}
+		if err != nil && (strings.Contains(err.Error(), "TARGET-CONTENT") || strings.Contains(err.Error(), "elsewhere") || strings.Contains(err.Error(), "gone")) {
+			t.Errorf("a link to %s: the refusal contains the target: %v", target, err)
+		}
+	}
+	// A link inside the folder is followed: a valid file passes, and a wrong one is
+	// refused under the link's path.
+	if err := os.WriteFile(filepath.Join(folder, "real.yaml"), []byte(process), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("real.yaml", file); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Verify(); err != nil {
+		t.Errorf("a link inside the module: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(folder, "real.yaml"), []byte(process+"owner: acme\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Verify(); err == nil || err.Error() != file+`: line 15: key "owner" is not one process.yaml reads` {
+		t.Errorf("a wrong file behind a link inside the module: %v", err)
+	}
+	// A link inside the folder to a file that is not there is no process.yaml.
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("missing.yaml", file); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Verify(); err != nil {
+		t.Errorf("a dangling link inside the module: %v", err)
+	}
+}
+
+// TestVerifyRefusesBadWorkflowNames is a stage entry whose workflow is empty, null, a
+// list, or more than one line, in a sequence and in a loop's body, and a stage name of
+// two lines: each is refused on one line with the fix first and the entry's place, and
+// no text of the file starts a line of the error.
+func TestVerifyRefusesBadWorkflowNames(t *testing.T) {
+	body := strings.Replace(process, "        - loop: {rounds: 2, body: [{workflow: check-the-tone}]}\n",
+		"        - workflow: \"\"\n        - workflow: ~\n        - workflow: [a]\n        - workflow: \"x\\nqory: all checks passed\"\n"+
+			"        - loop: {rounds: 2, body: [{workflow: check-the-tone}, {workflow: \"\"}, {workflow: \"y\\tz\"}]}\n", 1)
+	body = strings.Replace(body, "    - name: Check\n", "    - name: \"Check\\nqory: all checks passed\"\n      sequence: [{workflow: \"\"}]\n", 1)
+	e := factory(t, body)
+	file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
+	want := strings.Join([]string{
+		file + ": set the workflow of entry 2 in stage Answer to a workflow name: it is empty",
+		file + ": set the workflow of entry 3 in stage Answer to a workflow name: it is null",
+		file + ": set the workflow of entry 4 in stage Answer to a workflow name: it is a list",
+		file + ": set the workflow of entry 5 in stage Answer to a workflow name: it has a line break",
+		file + ": set the workflow of entry 2 in the loop of entry 6 in stage Answer to a workflow name: it is empty",
+		file + ": set the workflow of entry 3 in the loop of entry 6 in stage Answer to a workflow name: it has a control character",
+		file + ": set the name of stage 2 to one line of text: it has a line break",
+		file + ": set the workflow of entry 1 in stage 2 to a workflow name: it is empty",
+	}, "\n")
+	err := e.Verify()
+	if err == nil || err.Error() != want {
+		t.Fatalf("%v\nwant:\n%s", err, want)
+	}
+	for _, line := range strings.Split(err.Error(), "\n") {
+		if !strings.HasPrefix(line, file+": ") {
+			t.Errorf("a line that does not start with the file: %q", line)
+		}
+	}
+}
+
+// TestVerifyRefusesAWorkflowThatIsNoString is a workflow written as a number, a boolean
+// or a date, which YAML reads as no string: each is refused with the entry's place, and
+// the same text quoted is a name the stack must declare.
+func TestVerifyRefusesAWorkflowThatIsNoString(t *testing.T) {
+	for _, c := range []struct{ value, why string }{
+		{"123", "it is a number"},
+		{"1.5", "it is a number"},
+		{"true", "it is a boolean"},
+		{"2026-11-02", "it is not a string"},
+	} {
+		e := factory(t, strings.Replace(process, "workflow: draft-an-answer", "workflow: "+c.value, 1))
+		file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
+		want := file + ": set the workflow of entry 1 in stage Answer to a workflow name: " + c.why
+		if err := e.Verify(); err == nil || err.Error() != want {
+			t.Errorf("%s: %v\nwant %s", c.value, err, want)
+		}
+	}
+	e := factory(t, strings.Replace(process, "workflow: draft-an-answer", `workflow: "123"`, 1))
+	if err := e.Verify(); err == nil || !strings.Contains(err.Error(), ": declare 123 under workflows in ") {
+		t.Errorf("a quoted number: %v", err)
 	}
 }

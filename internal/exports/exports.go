@@ -259,8 +259,12 @@ func (e *Exports) Verify() error {
 		if !isFile(filepath.Join(e.Root, dir, ModuleFileName)) {
 			return fmt.Errorf("%s: exports.modules lists %s, and %s contains no %s", e.File, accesskey.ShownName(name, false), HidePath(dir), ModuleFileName)
 		}
-		if file := filepath.Join(e.Root, dir, ProcessFileName); isFile(file) {
-			if err := e.checkProcess(file); err != nil {
+		data, file, err := e.readProcess(dir)
+		if err != nil {
+			return err
+		}
+		if data != nil {
+			if err := e.checkProcess(file, data); err != nil {
 				return err
 			}
 		}
