@@ -56,10 +56,13 @@
 // role, one no entry has, set to the entry filling it in three layers, each replacing
 // the name of the one before: the bind of the base, the provides of the modules, and the
 // bind of the document composed, [Result.Bind] and [Result.Roles]. Every manifest is read
-// before the first module's entries, so an only follows a role a later module provides.
-// While the only blocks are followed, a provided entry that the providing module's
-// exclude lists provides nothing, and one that the providing module's only leaves out
-// still fills its role: to drop a provider, list its entry under exclude. The roles are
+// before the first module's entries, so an only follows a role a later module provides,
+// when the role has one name while the only blocks are followed. While they are, a
+// provided entry that the providing module's exclude lists, or the exclude that a
+// checkout's qory.yaml lists for it, provides nothing. One that the providing module's
+// only leaves out still counts: it fills its role, or, when another module provides a
+// different name, the role keeps the name of the layer below, and the only blocks follow
+// neither provider. To drop a provider, list its entry under exclude. The roles are
 // set again after the last module, when a provided entry that a block left out provides
 // nothing and two modules that provide one role with different names fail, unless the
 // document's bind sets it. A reference to a role is checked against the entry
