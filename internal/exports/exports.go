@@ -245,7 +245,8 @@ func (e *Exports) Module(name string) (string, error) {
 
 // Verify checks that every export is there: a qory-stack.yaml in each stack's directory,
 // a qory-module.yaml in each module's. The error contains the file that is missing and
-// the export that wants it.
+// the export that wants it. A module whose folder has a process.yaml at its root, a
+// factory, has that file checked too, as [Exports.checkProcess] describes.
 func (e *Exports) Verify() error {
 	for _, name := range e.Stacks {
 		dir, _ := e.Stack(name)
@@ -257,6 +258,11 @@ func (e *Exports) Verify() error {
 		dir, _ := e.Module(name)
 		if !isFile(filepath.Join(e.Root, dir, ModuleFileName)) {
 			return fmt.Errorf("%s: exports.modules lists %s, and %s contains no %s", e.File, accesskey.ShownName(name, false), HidePath(dir), ModuleFileName)
+		}
+		if file := filepath.Join(e.Root, dir, ProcessFileName); isFile(file) {
+			if err := e.checkProcess(file); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

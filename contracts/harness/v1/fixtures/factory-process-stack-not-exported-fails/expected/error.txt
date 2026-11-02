@@ -1,0 +1,1 @@
+modules/software-factory/process.yaml: set stack to a name that exports.stacks lists: stack is softwre, and exports.stacks lists core, software

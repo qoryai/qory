@@ -360,6 +360,64 @@ selects an export the repository does not list is refused with the list of what 
 repository exports; one that selects an export of a repository without the section is
 refused with a message to select its directories with `path`.
 
+### A factory's process.yaml
+
+A module that `exports.modules` lists and that has a `process.yaml` at its folder root is
+a factory. The file is a process template: the texts, the workspace type, the stack and
+the process that a workspace made from it starts with
+([process.schema.json](process.schema.json)). Every command that reads the
+configuration checks the file, once it finds each export. A module without the file is
+not checked for it.
+
+```yaml
+# harness/modules/support-desk/process.yaml
+apiVersion: qory.dev/v1alpha1
+name: Support desk               # at most 60 characters
+summary: Agents draft answers to support tickets. A person checks each answer.   # at most 200
+description: >-                  # at most 1200 characters and 80 words
+  Each ticket goes through two stages. In Answer, an agent drafts an answer and
+  then checks its tone. In Check, a person reads the draft and sends it or sends it back.
+type: customer-care              # the workspace type
+stack: support                   # a stack that exports.stacks of this repository lists
+process:                         # a qory.process/v1 document
+  schema: qory.process/v1
+  stages:
+    - id: st_0000000001
+      name: Answer
+      sequence:
+        - workflow: draft-an-answer          # declared under workflows in harness/stacks/support/qory-stack.yaml
+        - loop: {rounds: 3, body: [{workflow: check-the-tone}]}
+      gate: {kind: none}
+    - id: st_0000000002
+      name: Check
+      sequence: []
+      gate: {kind: person, approvers: members}
+```
+
+| Key | Meaning |
+|---|---|
+| `apiVersion` | `qory.dev/v1alpha1`, required as in every delivered file |
+| `name` | the template's name, at most 60 characters |
+| `summary` | what a workspace made from the template does, at most 200 characters |
+| `description` | how such a workspace works, at most 1200 characters and at most 80 words |
+| `type` | the workspace type of a workspace made from the template |
+| `stack` | the stack the workspace's workflows run on, one that `exports.stacks` of the same repository lists |
+| `process` | the workspace's process, a `qory.process/v1` document. qory checks that it is an object with `schema: qory.process/v1` and a list of `stages`, and that the stack's `qory-stack.yaml` declares under `workflows` each `workflow` of a stage's `sequence`, a loop's `body` included. qory checks nothing else in it |
+
+Every key is required, and the file has no other key. A key left out, a text over its
+limit, a `stack` that `exports.stacks` does not list, and a `process` that is not such an
+object are refused with the file and the fix in the message. Each workflow that the
+stack does not declare is refused with one line, which has the stage, the workflow and
+the stack file:
+
+```text
+/src/acme-harness/harness/modules/support-desk/process.yaml: declare check-the-tone under workflows in harness/stacks/support/qory-stack.yaml, or remove it from stage Answer: stack support does not declare it
+```
+
+A character is a Unicode code point, and a word is a run of characters without white
+space. The compose does not read the file: in the composed tree it is one of the
+module's other files (§The module manifest).
+
 ## The module manifest
 
 ```yaml
@@ -429,6 +487,7 @@ hooks/<file>                     atomic; scripts that a settings fragment refers
 mcp/<name>.json                  atomic; one MCP server: the object a runtime's MCP configuration contains under the server's name
 files/<runtime>/<path>           atomic; one file the runtime reads at <path> under its directory, any depth
 settings/<runtime>/<file>       merged; one fragment per target file of one runtime, in that runtime's format
+process.yaml                     a factory's process template, checked when exports.modules lists the module (§Exports); composed as one of the other files
 <anything else>                  the module's other files, reached as $QORY_HARNESS_HOME/modules/<name>/<path>
 ```
 

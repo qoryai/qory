@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qory.dev/contracts/harness/v1/process.schema.json",
+  "title": "process.yaml",
+  "description": "process.yaml at the folder root of an exported module, a factory: a process template, with the texts a list of templates shows, the workspace type, the stack its workflows run on and the process document.",
+  "type": "object",
+  "required": ["apiVersion", "name", "summary", "description", "type", "stack", "process"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {"const": "qory.dev/v1alpha1"},
+    "name": {"description": "The template's name, at most 60 characters.", "type": "string", "maxLength": 60, "pattern": "\\S"},
+    "summary": {"description": "One or two sentences on what a workspace made from the template does, at most 200 characters.", "type": "string", "maxLength": 200, "pattern": "\\S"},
+    "description": {"description": "How a workspace made from the template works, at most 1200 characters and 80 words.", "type": "string", "maxLength": 1200, "pattern": "^\\s*\\S+(\\s+\\S+){0,79}\\s*$"},
+    "type": {"description": "The workspace type a workspace made from the template has, such as customer-care.", "type": "string", "pattern": "\\S"},
+    "stack": {"description": "The stack the template's workflows run on: a name that exports.stacks of the same repository lists. Each workflow of a stage is declared under workflows in that stack's qory-stack.yaml.", "type": "string", "pattern": "^[^./\\\\@][^/\\\\@]*$"},
+    "process": {
+      "description": "The process document of a workspace made from the template, a qory.process/v1 document. qory checks its schema, that its stages are a list, and that the stack declares each workflow of a stage, and checks nothing else in it.",
+      "type": "object",
+      "required": ["schema", "stages"],
+      "properties": {
+        "schema": {"const": "qory.process/v1"},
+        "stages": {"type": "array"}
+      }
+    }
+  }
+}

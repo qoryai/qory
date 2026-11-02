@@ -1,0 +1,10 @@
+apiVersion: qory.dev/v1alpha1
+exports:
+  stacks: [marketing]
+  modules: [ad-campaigns]
+harness:
+  target:
+    runtime: claude
+  modules:
+    - name: ad-campaigns
+      source: {path: ., module: ad-campaigns}

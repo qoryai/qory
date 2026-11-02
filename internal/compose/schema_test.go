@@ -17,8 +17,10 @@ import (
 // qory.yaml that composes passes config.schema.json, one refused for its apiVersion, a
 // kind, its qory key or its workflows fails it,
 // every module manifest passes module.schema.json, every MCP server file passes
-// mcp.schema.json unless the fixture expects it refused, and the stack a fixture extends,
-// stack/qory-stack.yaml, passes stack.schema.json unless the fixture expects it refused.
+// mcp.schema.json unless the fixture expects it refused, the stack a fixture extends,
+// stack/qory-stack.yaml, passes stack.schema.json unless the fixture expects it refused,
+// and every process template, modules/<name>/process.yaml, passes process.schema.json
+// unless the fixture expects it refused for what the schema checks.
 func TestSchemas(t *testing.T) {
 	c := jsonschema.NewCompiler()
 	composeSchema, err := c.Compile("../../contracts/harness/v1/config.schema.json")
@@ -34,6 +36,10 @@ func TestSchemas(t *testing.T) {
 		t.Fatal(err)
 	}
 	mcpSchema, err := c.Compile("../../contracts/harness/v1/mcp.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	processSchema, err := c.Compile("../../contracts/harness/v1/process.schema.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,6 +71,21 @@ func TestSchemas(t *testing.T) {
 		for _, m := range manifests {
 			if err := moduleSchema.Validate(document(t, m)); err != nil {
 				t.Errorf("%s: %v", m, err)
+			}
+		}
+		// A process template refused for a stack that exports.stacks does not list, or for
+		// a workflow its stack does not declare, passes the schema: the schema checks one
+		// file, and those refusals compare two.
+		processes, _ := filepath.Glob(filepath.Join(dir, "modules", "*", "process.yaml"))
+		wantBadProcess := strings.Contains(string(errText), "process.yaml: ") &&
+			!strings.Contains(string(errText), "exports.stacks lists") && !strings.Contains(string(errText), " under workflows in ")
+		for _, f := range processes {
+			err := processSchema.Validate(document(t, f))
+			if wantBadProcess && err == nil {
+				t.Errorf("%s passed the schema; want a failure", f)
+			}
+			if !wantBadProcess && err != nil {
+				t.Errorf("%s: %v", f, err)
 			}
 		}
 		servers, _ := filepath.Glob(filepath.Join(dir, "modules", "*", "mcp", "*.json"))
