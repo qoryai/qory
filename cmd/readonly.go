@@ -35,12 +35,15 @@ func readsOnly(r *codeRun, workflows map[string]stack.Workflow) bool {
 // contains the workspace stops the join. The checkout stays among the places the run
 // may write, which the setup container and the host steps still write. img is the
 // image chosen at the run's open, [session.Run.Image], whichever way it was selected:
-// the policy, --image or wall.image. A run that cannot see the checkout read-only stops
-// before the join with a [*reasonError], each line ending with [codeUsed]: one with no
-// wall, read_needs_wall; one with wall.setup inside, read_needs_setup_outside; and one
-// whose image sets docker: true, read_needs_no_nested_docker. An image selected by its
-// reference runs no nested Docker. A walled run with no image passes, and fails at the
-// join.
+// the policy, --image or wall.image. Three kinds of run stop here, before the join, with
+// a [*reasonError], each line ending with [codeUsed]: one with no wall, read_needs_wall;
+// one with wall.setup inside, read_needs_setup_outside; and one whose image sets
+// docker: true, read_needs_no_nested_docker. An image selected by its reference runs no
+// nested Docker. A walled run with no image fails at the open and never gets here. A
+// run with a writable mount that contains root, lies inside it or links to it passes
+// here and stops later, so the agent does not start: Forager returns
+// mount_mode_conflict from the join, or from AgentEnv, before the setup, for an image
+// the policy selects by its reference.
 func readOnlyCheckout(spec *runSpec, root, workflow string, img session.Image) error {
 	refused := func(code, text string) error {
 		return &reasonError{code: code, text: text + " (" + code + ")" + codeUsed}

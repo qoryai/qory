@@ -1498,9 +1498,11 @@ harness for the target <path>` on any other system. A workflow whose skill or co
 the runtime runs by no name from a headless start closes the run with `no_session`.
 
 A run of a workflow whose access is `read`, as `workflows` of the stack declares it, sees
-the checkout read-only. When the run cannot, it stops after the compose, exit 1, and qory
-closes it `failed` with `read_needs_wall`, `read_needs_setup_outside` or
-`read_needs_no_nested_docker`: see [Read workflows](#read-workflows).
+the checkout read-only. A run with no wall, with `wall.setup: inside` or on an image with
+nested Docker stops after the compose, exit 1, and qory closes it `failed` with
+`read_needs_wall`, `read_needs_setup_outside` or `read_needs_no_nested_docker`. A writable
+mount that contains the checkout, lies inside it or links to it also stops the run, later,
+and the agent does not start. See [Read workflows](#read-workflows).
 
 The documents of a run with a target may set `target_version`: the version at which Qory
 Apiary checked the target for a harness file. When the target's `system` is
@@ -3129,9 +3131,10 @@ workflow is `read` sees the checkout read-only:
 - The setup container and the host steps still write the checkout, so the checkout stays
   among the places the run may write, and the record lists it.
 
-A run of a `read` workflow that cannot see the checkout read-only stops after the
-compose, before the image's fetch, the setup and the agent, exit 1. qory closes the run
-`failed` with the reason in the line, in place of `no_session`:
+A run of a `read` workflow with no wall, with `wall.setup: inside` or on an image with
+nested Docker cannot see the checkout read-only. It stops after the compose, before the
+image's fetch, the setup and the agent, exit 1. qory closes the run `failed` with the
+reason in the line, in place of `no_session`:
 
 - With no wall, as a run with `--run-code-file` and `--gateway` and no `wall` section
   has, `read_needs_wall`:
@@ -3157,6 +3160,24 @@ compose, before the image's fetch, the setup and the agent, exit 1. qory closes 
   `wall.image` when the policy selects none. A policy that selects an entry with
   `docker: true` stops the run even when `wall.image` is a pinned reference. An image
   selected by its reference runs no nested Docker.
+
+A writable mount from `--mount` or `wall.mounts` that contains the checkout, lies inside
+it or links to it also stops a run of a `read` workflow, later, and the agent does not
+start. The run stops after the image's fetch, exit 1, with a line that ends
+`(mount_mode_conflict)`:
+
+- When the run configuration lists no repositories, the run has no setup and stops at the
+  join. The session closes `failed` with `mount_mode_conflict`, and the run closes
+  `failed` with no reason.
+- When it lists repositories, the setup runs first, with the checkout writable and
+  without the mount, and the run stops at the join in the same way.
+- When it lists repositories and the run's policy selects the image by its reference,
+  the run stops before the setup and closes `failed` with `no_session`.
+
+A mount folder inside the checkout of a run whose run configuration lists repositories
+stops the run at the fetch instead, with `no_session`: the fetch needs an empty working
+folder. A writable mount at the checkout's exact path stops nothing: qory makes it
+read-only.
 
 A `write` workflow, a run given a run key with no run code, and a run you start yourself
 see the checkout writable.

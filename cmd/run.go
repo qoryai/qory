@@ -1172,7 +1172,7 @@ type openedRun interface {
 	System() string
 	Repositories() string
 	// Image is the image chosen at the run's open, the zero Image with no wall or when
-	// the gateway's run answer has no image; a walled run with no image fails at the join.
+	// the gateway's run answer has no image; a walled run with no image fails at the open.
 	Image() session.Image
 	// Dir is the run directory.
 	Dir() string
