@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"time"
 
 	"github.com/qoryai/qory/internal/branchformat"
@@ -102,21 +101,25 @@ func featureOff(err error) bool {
 // chosenBranch is the version of the artifact type branch that a run starts at: the
 // newest version of the artifact main when the work item's stage wrote it; else the
 // version of any artifact name that a gate approved of a stage's input; else the newest
-// version of the artifact main; nil with no version of main.
+// version of the artifact main; nil with none of these.
 func chosenBranch(snapshot *runapi.Snapshot, index *runapi.Index) (*runapi.Version, error) {
-	at := slices.IndexFunc(index.Artifacts, func(a runapi.Artifact) bool {
-		return a.Type == branchType && a.Name == defaultName
-	})
-	if at < 0 || len(index.Artifacts[at].Versions) == 0 {
-		return nil, nil
+	var newest *runapi.Version
+
+	for _, artifact := range index.Artifacts {
+		if artifact.Type != branchType || artifact.Name != defaultName {
+			continue
+		}
+
+		for i := range artifact.Versions {
+			if newest == nil || artifact.Versions[i].Number > newest.Number {
+				newest = &artifact.Versions[i]
+			}
+		}
 	}
 
-	versions := index.Artifacts[at].Versions
-	newest := slices.MaxFunc(versions, func(a, b runapi.Version) int { return a.Number - b.Number })
-
 	stage := snapshot.Stage.ID
-	if stage != nil && newest.StageID != nil && *stage == *newest.StageID {
-		return &newest, nil
+	if newest != nil && stage != nil && newest.StageID != nil && *stage == *newest.StageID {
+		return newest, nil
 	}
 
 	for _, input := range snapshot.Inputs {
@@ -140,7 +143,7 @@ func chosenBranch(snapshot *runapi.Snapshot, index *runapi.Index) (*runapi.Versi
 			"not in the artifact's index.%s", input.Version.Number, branchType, codeUsed)
 	}
 
-	return &newest, nil
+	return newest, nil
 }
 
 // readBranchVersion downloads the one file of version and returns it, checked against the

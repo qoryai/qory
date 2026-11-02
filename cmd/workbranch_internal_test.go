@@ -70,6 +70,13 @@ func TestChosenBranch(t *testing.T) {
 			branchIndex([2]string{"av_1", "st_a"}),
 			"av_1",
 		},
+		"an approved version with no artifact main": {
+			stageSnapshot(approved("av_9")),
+			&runapi.Index{Artifacts: []runapi.Artifact{
+				{Type: branchType, Name: "other", Versions: []runapi.Version{{ID: "av_9", Number: 1}}},
+			}},
+			"av_9",
+		},
 		"an approved version of another artifact name": {
 			stageSnapshot(approved("av_9")),
 			&runapi.Index{Artifacts: []runapi.Artifact{

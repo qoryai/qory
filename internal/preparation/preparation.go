@@ -260,8 +260,12 @@ func RunAt(ctx context.Context, dir string, base []string, getenv func(string) s
 				if err := fetchBranchCommit(ctx, g, dest, system, path, branch); err != nil {
 					return false, err
 				}
+				head, err := g(ctx, dest, "rev-parse", "HEAD")
+				if err != nil {
+					return false, notFetched(path, system, err)
+				}
 				at := filepath.ToSlash(filepath.Join(filepath.FromSlash(Repositories), filepath.FromSlash(path)))
-				branch.Repositories = append(branch.Repositories, WorkRepository{Path: path, Dir: at})
+				branch.Repositories = append(branch.Repositories, WorkRepository{Path: path, Dir: at, Commit: strings.TrimSpace(head)})
 			}
 		}
 	}
