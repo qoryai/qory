@@ -55,8 +55,15 @@ type Error struct {
 }
 
 // Error returns one line for a person or a log: Message when the response has one, else
-// a line made from the code, with the fix first.
+// a line made from the code, with the fix first. A POST with the code [CodeUnavailable]
+// always gets the line below, in place of the gateway's retry line: the POST may have
+// stored the version.
 func (e *Error) Error() string {
+	if e.Code == CodeUnavailable && strings.HasPrefix(e.Request, http.MethodPost) {
+		return fmt.Sprintf("Read the artifact index, and try again if the version is not there. "+
+			"%s may have stored it (%d %s).", e.Request, e.Status, e.Code)
+	}
+
 	if e.Message != "" {
 		return e.Message
 	}
@@ -103,11 +110,6 @@ func (e *Error) Error() string {
 		return fmt.Sprintf("Try again in %s. The gateway's access key is over its rate limit (%s returned %s).",
 			wait, e.Request, status)
 	case CodeUnavailable:
-		if strings.HasPrefix(e.Request, http.MethodPost) {
-			return fmt.Sprintf("Read the artifact index, and try again if the version is not there. "+
-				"%s may have stored it (%s).", e.Request, status)
-		}
-
 		return fmt.Sprintf("Try again. Qory Apiary could not complete %s (%s).", e.Request, status)
 	case "":
 		if e.Status == http.StatusNotFound {

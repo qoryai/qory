@@ -1988,8 +1988,8 @@ func newRemove(use string, aliases ...string) *cobra.Command {
 		Use:     use,
 		Aliases: aliases,
 		Short:   "Remove the harness and its links from the checkout",
-		Long: `Remove the composed harness and its links from the checkout. A home in the checkout goes with
-the whole .qory directory, also .qory/artifacts and .qory/work-item.json.
+		Long: `Remove the composed harness and its links from the checkout. Without --runtime, a home in the
+checkout goes with the whole .qory directory, also .qory/artifacts and .qory/work-item.json.
 
 A home outside the checkout, under --home or harness.home, is removed with its report.
 The checkout is not touched: nothing was written there.`,

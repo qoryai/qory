@@ -498,14 +498,21 @@ func TestPushArtifactSendsNoMoreFilesThanTheRunAPITakes(t *testing.T) {
 }
 
 func TestAnUnavailablePushSaysToReadTheIndexFirst(t *testing.T) {
-	client := serve(t, respond(http.StatusServiceUnavailable, `{"error":"unavailable"}`))
+	for name, body := range map[string]string{
+		"no message": `{"error":"unavailable"}`,
+		"a message":  `{"error":"unavailable","message":"Retry the request."}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			client := serve(t, respond(http.StatusServiceUnavailable, body))
 
-	_, err := client.PushVerdict(context.Background(), runapi.VerdictPassed, "")
+			_, err := client.PushVerdict(context.Background(), runapi.VerdictPassed, "")
 
-	want := "Read the artifact index, and try again if the version is not there. " +
-		"POST /verdict may have stored it (503 unavailable)."
-	if err == nil || err.Error() != want {
-		t.Errorf("err = %v", err)
+			want := "Read the artifact index, and try again if the version is not there. " +
+				"POST /verdict may have stored it (503 unavailable)."
+			if err == nil || err.Error() != want {
+				t.Errorf("err = %v", err)
+			}
+		})
 	}
 }
 

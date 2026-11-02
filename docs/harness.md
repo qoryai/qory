@@ -448,9 +448,9 @@ A tier's entry may also set an effort value: `{model: claude-opus-5-5, effort: m
 
 ## Removing the harness
 
-`qory harness remove` removes the composed tree and its links from the checkout. A home
-in the checkout goes with the whole `.qory` directory, also `.qory/artifacts` and
-`.qory/work-item.json`.
+`qory harness remove` removes the composed tree and its links from the checkout. Without
+`--runtime`, a home in the checkout goes with the whole `.qory` directory, also
+`.qory/artifacts` and `.qory/work-item.json`.
 
 - A home outside the checkout is removed with its report. The checkout is not touched:
   nothing was written there.

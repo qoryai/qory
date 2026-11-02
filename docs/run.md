@@ -2375,10 +2375,14 @@ limit. One version has at most 100 files through the run API, whatever the type'
 with no work item. These numbers mean a collision and a foreign path on `qory harness`.
 
 `.qory/artifacts/.gitignore` keeps the artifacts out of git, also in a run's checkout,
-which has no exclude line for `.qory`. A directory link at `.qory`, or anywhere under
-`.qory/artifacts`, stops the command with exit 1 before it sends anything. A write replaces
-a link at a file's path, and never follows it. `qory harness remove` deletes the
-directory with the rest of `.qory`.
+which has no exclude line for `.qory`. A directory link at `.qory` or `.qory/artifacts`
+stops `qory artifact push` with exit 1 before it sends anything. A directory link further
+down stops `qory artifact pull` and a push outside a run with exit 1. In a run, a push has
+stored the version by that point, so it keeps no local copy, prints a line on standard
+error, and exits 0. A write replaces a link at a file's path, and never follows it.
+
+With a home in the checkout and no `--runtime`, `qory harness remove` deletes the directory
+with the rest of `.qory`.
 
 The client sends a POST once. If the response is lost, the version may be stored: read the
 artifact index with `qory artifact pull` before you push again.
