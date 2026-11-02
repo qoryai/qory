@@ -10,7 +10,7 @@ input. --name separates several artifacts of one type, such as mockups of two sc
 
 qory exits 4 with the type and the limit for a type that the workspace does not have or the
 workflow may not write, for too many files, and for files over the type's size limit. One
-version is at most about 24 MiB through the run API, whatever the type's limit.
+version is at most about 24 MiB and 100 files through the run API, whatever the type's limit.
 
 Outside a run, qory keeps the files in .qory/artifacts and sends nothing.
 

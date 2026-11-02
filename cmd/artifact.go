@@ -209,12 +209,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 		},
 		Annotations: map[string]string{inWall: "true"},
 		RunE: func(c *cobra.Command, args []string) error {
-			if version != 0 && len(args) == 0 {
-				return input(errors.New("Name the artifact type: qory artifact pull <type> --version <N>."))
+			if c.Flags().Changed("version") && version < 1 {
+				return input(fmt.Errorf("Set --version to a version number from 1. The value is %d.", version))
 			}
 
-			if version < 0 {
-				return input(fmt.Errorf("Set --version to a version number from 1. The value is %d.", version))
+			if version != 0 && len(args) == 0 {
+				return input(errors.New("Name the artifact type: qory artifact pull <type> --version <N>."))
 			}
 
 			client, err := runAPIClient()
@@ -378,7 +378,7 @@ input. --name separates several artifacts of one type, such as mockups of two sc
 
 qory exits ` + strconv.Itoa(ExitArtifactRefused) + ` with the type and the limit for a type that the workspace does not have or the
 workflow may not write, for too many files, and for files over the type's size limit. One
-version is at most about 24 MiB through the run API, whatever the type's limit.
+version is at most about 24 MiB and 100 files through the run API, whatever the type's limit.
 
 Outside a run, qory keeps the files in .qory/artifacts and sends nothing.
 
@@ -509,6 +509,25 @@ func contentType(content []byte) string {
 	return strings.TrimSpace(kind)
 }
 
+// copyTo writes the content of source to w.
+func (s pushSource) copyTo(w io.Writer) error {
+	if s.path == "" {
+		_, err := w.Write(s.content)
+
+		return err
+	}
+
+	file, err := os.Open(s.path)
+	if err != nil {
+		return fmt.Errorf("Check %s. Reading it failed: %w", s.path, err)
+	}
+	defer file.Close()
+
+	_, err = io.Copy(w, file)
+
+	return err
+}
+
 // bytesOf returns the content of source.
 func (s pushSource) bytesOf() ([]byte, error) {
 	if s.path == "" {
@@ -523,15 +542,21 @@ func (s pushSource) bytesOf() ([]byte, error) {
 	return content, nil
 }
 
-// sendPush sends the version, keeps a copy of its files, and prints the version. A copy
-// that fails prints a line on standard error: the version is stored, so the push worked.
+// sendPush sends the version, keeps a copy of its files, and prints the version. A store
+// that cannot be opened sends nothing. A copy that fails after the send prints a line on
+// standard error: the version is stored, so the push worked.
 func sendPush(c *cobra.Command, client *runapi.Client, push runapi.Push, sources []pushSource) error {
 	sizes := make([]int64, len(sources))
 	for i, source := range sources {
 		sizes[i] = source.size
 	}
 
-	if err := runapi.CheckVersionSize(push.Type, sizes); err != nil {
+	if err := runapi.CheckVersion(push.Type, sizes); err != nil {
+		return err
+	}
+
+	store, err := openArtifactStore()
+	if err != nil {
 		return err
 	}
 
@@ -551,24 +576,27 @@ func sendPush(c *cobra.Command, client *runapi.Client, push runapi.Push, sources
 		return err
 	}
 
-	if _, err := fmt.Fprintf(c.OutOrStdout(), "Pushed %s/%s version %d.\n", pushed.Type, pushed.Name, pushed.Version.Number); err != nil {
+	if _, err := fmt.Fprintf(c.OutOrStdout(), "Pushed %s/%s version %d.\n", push.Type, push.Name, pushed.Version.Number); err != nil {
 		return err
 	}
 
-	store, err := openArtifactStore()
-	if err == nil {
-		_, err = store.keep(pushed.Type, pushed.Name, pushed.Version.Number, sources)
-	}
-
-	if err != nil {
+	// The type and name are the checked ones of the command line, never the response's.
+	if _, err := store.keep(push.Type, push.Name, pushed.Version.Number, sources); err != nil {
 		fmt.Fprintf(c.ErrOrStderr(), "Check .qory/artifacts: the version is stored in Qory Apiary, and the local copy failed: %v\n", err)
 	}
 
 	return nil
 }
 
-// keepPush keeps the version in the store, outside a run.
+// keepPush keeps the version in the store, outside a run. Standard input has no limit
+// there, but qory reads it only up to [runapi.MaxBody], so longer input stops the push.
 func keepPush(c *cobra.Command, artifactType, name string, sources []pushSource) error {
+	for _, source := range sources {
+		if source.path == "" && source.size > runapi.MaxBody {
+			return input(fmt.Errorf("Pass a file in place of -. Standard input is read up to %d bytes, and this input is longer.", runapi.MaxBody))
+		}
+	}
+
 	store, err := openArtifactStore()
 	if err != nil {
 		return err
@@ -748,12 +776,45 @@ func openArtifactStore() (*artifactStore, error) {
 		return nil, err
 	}
 
-	ignore := filepath.Join(store.dir, ".gitignore")
-	if err := os.WriteFile(ignore, []byte("*\n"), 0o644); err != nil {
-		return nil, fmt.Errorf("Check %s. Writing it failed: %w", ignore, err)
+	if err := store.write(store.dir, ".gitignore", func(w io.Writer) error {
+		_, err := io.WriteString(w, "*\n")
+
+		return err
+	}); err != nil {
+		return nil, err
 	}
 
 	return store, nil
+}
+
+// write writes the file name in dir, a directory of [artifactStore.realDir], through a
+// temporary file. So a failed write leaves no file under name, and a link at name is
+// replaced, never followed. An error of fill comes back as it is.
+func (s *artifactStore) write(dir, name string, fill func(io.Writer) error) error {
+	temp, err := os.CreateTemp(dir, ".write-*")
+	if err != nil {
+		return fmt.Errorf("Check %s. Making a temporary file failed: %w", dir, err)
+	}
+	defer os.Remove(temp.Name())
+
+	err = fill(temp)
+	if closed := temp.Close(); err == nil && closed != nil {
+		err = fmt.Errorf("Check %s. Writing it failed: %w", filepath.Join(dir, name), closed)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	if err := os.Chmod(temp.Name(), 0o644); err != nil {
+		return fmt.Errorf("Check %s. Setting its mode failed: %w", filepath.Join(dir, name), err)
+	}
+
+	if err := os.Rename(temp.Name(), filepath.Join(dir, name)); err != nil {
+		return fmt.Errorf("Check %s. Writing it failed: %w", filepath.Join(dir, name), err)
+	}
+
+	return nil
 }
 
 // realDir makes the directory parts under the store, and returns it. It stops at a link
@@ -827,6 +888,10 @@ func (s *artifactStore) nextVersion(artifactType, name string) (int, error) {
 
 // versionDir makes the directory of one version and returns it.
 func (s *artifactStore) versionDir(artifactType, name string, number int) (string, error) {
+	if number < 1 {
+		return "", fmt.Errorf("Check the version of %s/%s. %d is no version number.", artifactType, name, number)
+	}
+
 	return s.realDir(artifactType, name, "v"+strconv.Itoa(number))
 }
 
@@ -838,14 +903,8 @@ func (s *artifactStore) keep(artifactType, name string, number int, sources []pu
 	}
 
 	for _, source := range sources {
-		content, err := source.bytesOf()
-		if err != nil {
+		if err := s.write(dir, source.filename, source.copyTo); err != nil {
 			return "", err
-		}
-
-		path := filepath.Join(dir, source.filename)
-		if err := os.WriteFile(path, content, 0o644); err != nil {
-			return "", fmt.Errorf("Check %s. Writing it failed: %w", path, err)
 		}
 	}
 
@@ -853,8 +912,7 @@ func (s *artifactStore) keep(artifactType, name string, number int, sources []pu
 }
 
 // fetch downloads the files of version into its directory. A file that is there with the
-// index's digest stays; a download goes to a temporary file first, so a failed one leaves
-// no file under the file's name.
+// index's digest stays.
 func (s *artifactStore) fetch(c *cobra.Command, client *runapi.Client, artifact runapi.Artifact, version runapi.Version) error {
 	for what, value := range map[string]string{"type": artifact.Type, "name": artifact.Name} {
 		if err := artifactNameError(what, value); err != nil {
@@ -877,23 +935,9 @@ func (s *artifactStore) fetch(c *cobra.Command, client *runapi.Client, artifact 
 			continue
 		}
 
-		temp, err := os.CreateTemp(dir, ".pull-*")
-		if err != nil {
-			return fmt.Errorf("Check %s. Making a temporary file failed: %w", dir, err)
-		}
-
-		err = client.Download(c.Context(), version.ID, file, temp)
-		if closed := temp.Close(); err == nil {
-			err = closed
-		}
-
-		if err == nil {
-			err = os.Rename(temp.Name(), path)
-		}
-
-		if err != nil {
-			os.Remove(temp.Name())
-
+		if err := s.write(dir, file.Filename, func(w io.Writer) error {
+			return client.Download(c.Context(), version.ID, file, w)
+		}); err != nil {
 			return err
 		}
 	}
@@ -918,16 +962,15 @@ func sameFile(path string, file runapi.File) bool {
 
 // localFilename reports whether name is safe as one file name in a directory.
 func localFilename(name string) bool {
-	return name != "" && name != "." && name != ".." && name != ".gitignore" &&
-		!strings.ContainsAny(name, `/\`) && strings.IndexFunc(name, unicode.IsControl) < 0
+	return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, `/\`) &&
+		strings.IndexFunc(name, unicode.IsControl) < 0
 }
 
 // writeIndex writes the run API's index, as it returned it.
 func (s *artifactStore) writeIndex(raw []byte) error {
-	path := filepath.Join(s.dir, indexFile)
-	if err := os.WriteFile(path, raw, 0o644); err != nil {
-		return fmt.Errorf("Check %s. Writing it failed: %w", path, err)
-	}
+	return s.write(s.dir, indexFile, func(w io.Writer) error {
+		_, err := w.Write(raw)
 
-	return nil
+		return err
+	})
 }

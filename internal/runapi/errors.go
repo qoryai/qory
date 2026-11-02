@@ -103,6 +103,11 @@ func (e *Error) Error() string {
 		return fmt.Sprintf("Try again in %s. The gateway's access key is over its rate limit (%s returned %s).",
 			wait, e.Request, status)
 	case CodeUnavailable:
+		if strings.HasPrefix(e.Request, http.MethodPost) {
+			return fmt.Sprintf("Read the artifact index, and try again if the version is not there. "+
+				"%s may have stored it (%s).", e.Request, status)
+		}
+
 		return fmt.Sprintf("Try again. Qory Apiary could not complete %s (%s).", e.Request, status)
 	case "":
 		if e.Status == http.StatusNotFound {

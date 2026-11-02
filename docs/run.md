@@ -2370,12 +2370,15 @@ any other artifact it fetches the approved version, or the newest when none is a
 
 `qory artifact push` exits 4, with the type and the limit, for a type that the workspace
 does not have or the workflow may not write, for too many files, and for files over a
-limit. `qory work-item show` exits 3 with no work item. These numbers mean a collision
-and a foreign path on `qory harness`.
+limit. One version has at most 100 files through the run API, whatever the type's maximum.
+`qory run verdict` exits 4 for a request over its limit too. `qory work-item show` exits 3
+with no work item. These numbers mean a collision and a foreign path on `qory harness`.
 
 `.qory/artifacts/.gitignore` keeps the artifacts out of git, also in a run's checkout,
-which has no exclude line for `.qory`. A link at `.qory`, or anywhere under
-`.qory/artifacts`, stops the command with exit 1.
+which has no exclude line for `.qory`. A directory link at `.qory`, or anywhere under
+`.qory/artifacts`, stops the command with exit 1 before it sends anything. A write replaces
+a link at a file's path, and never follows it. `qory harness remove` deletes the
+directory with the rest of `.qory`.
 
 The client sends a POST once. If the response is lost, the version may be stored: read the
 artifact index with `qory artifact pull` before you push again.

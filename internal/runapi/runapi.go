@@ -34,6 +34,10 @@ const MaxBody = 32 << 20
 // maxVerdictBody is the largest body of POST verdict in bytes.
 const maxVerdictBody = 64 << 10
 
+// MaxFiles is the most files of one version in POST artifacts, whatever the maximum of the
+// artifact type. The run API returns 400 past it, with no type or limit in the error.
+const MaxFiles = 100
+
 // The limits of what the client reads of a response other than a file. maxResponse is
 // above the 768 KiB of a work item snapshot and leaves room for a long artifact index.
 const (
@@ -315,9 +319,8 @@ func (c *Client) Download(ctx context.Context, versionID string, file File, w io
 	return nil
 }
 
-// PushArtifact stores a new version of an artifact of the run's work item. A version over
-// [MaxBody] encoded returns an [Error] with the code [CodePayloadTooLarge] and sends
-// nothing.
+// PushArtifact stores a new version of an artifact of the run's work item. A version that
+// [CheckVersion] stops returns its [Error] and sends nothing.
 func (c *Client) PushArtifact(ctx context.Context, push Push) (*Pushed, error) {
 	// nil would encode as null, and the run API reads a string and a list.
 	files := make([]PushFile, len(push.Files))
@@ -332,7 +335,7 @@ func (c *Client) PushArtifact(ctx context.Context, push Push) (*Pushed, error) {
 		sizes[i] = int64(len(file.Content))
 	}
 
-	if err := CheckVersionSize(push.Type, sizes); err != nil {
+	if err := CheckVersion(push.Type, sizes); err != nil {
 		return nil, err
 	}
 
@@ -350,9 +353,20 @@ func (c *Client) PushArtifact(ctx context.Context, push Push) (*Pushed, error) {
 	return c.post(ctx, "/artifacts", body)
 }
 
-// CheckVersionSize returns the [Error] of [Client.PushArtifact] when files of sizes bytes
-// are over [MaxBody] once encoded, so a caller need not read them first; else nil.
-func CheckVersionSize(artifactType string, sizes []int64) error {
+// CheckVersion returns an [Error] for a version with files of sizes bytes that the run API
+// cannot take, with the code [CodeTooManyFiles] past [MaxFiles], and
+// [CodePayloadTooLarge] past [MaxBody] once encoded; else nil. A caller checks with it
+// before it reads the files.
+func CheckVersion(artifactType string, sizes []int64) error {
+	if len(sizes) > MaxFiles {
+		return &Error{
+			Code:    CodeTooManyFiles,
+			Type:    artifactType,
+			Limit:   MaxFiles,
+			Message: fmt.Sprintf("Push at most %d files in one version of %s. This version has %d.", MaxFiles, artifactType, len(sizes)),
+		}
+	}
+
 	var encoded int64
 	for _, size := range sizes {
 		encoded += (size + 2) / 3 * 4

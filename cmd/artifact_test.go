@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -339,16 +340,17 @@ func TestArtifactPullOfAVersion(t *testing.T) {
 	_, err = run(t, "artifact", "pull", "--version", "1")
 	wantExit(t, err, cmd.ExitInput, "Name the artifact type")
 
-	_, err = run(t, "artifact", "pull", "demo", "--version=-1")
-	wantExit(t, err, cmd.ExitInput, "Set --version")
+	for _, value := range []string{"-1", "0"} {
+		_, err = run(t, "artifact", "pull", "demo", "--version="+value)
+		wantExit(t, err, cmd.ExitInput, "Set --version")
+	}
 }
 
 func TestArtifactPullWritesNothingOutsideItsDirectory(t *testing.T) {
 	for name, entry := range map[string]string{
-		"a filename":    artifactEntry("demo", "main", "av_1", 1, versionEntry("av_1", 1, fileEntry("../../../../x", "bytes"))),
-		"a type":        artifactEntry("../demo", "main", "av_1", 1, versionEntry("av_1", 1, fileEntry("a", "bytes"))),
-		"a name":        artifactEntry("demo", "../../x", "av_1", 1, versionEntry("av_1", 1, fileEntry("a", "bytes"))),
-		"the gitignore": artifactEntry("demo", "main", "av_1", 1, versionEntry("av_1", 1, fileEntry(".gitignore", "bytes"))),
+		"a filename": artifactEntry("demo", "main", "av_1", 1, versionEntry("av_1", 1, fileEntry("../../../../x", "bytes"))),
+		"a type":     artifactEntry("../demo", "main", "av_1", 1, versionEntry("av_1", 1, fileEntry("a", "bytes"))),
+		"a name":     artifactEntry("demo", "../../x", "av_1", 1, versionEntry("av_1", 1, fileEntry("a", "bytes"))),
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := inCheckout(t)
@@ -358,8 +360,91 @@ func TestArtifactPullWritesNothingOutsideItsDirectory(t *testing.T) {
 			_, err := run(t, "artifact", "pull")
 			wantExit(t, err, 1, "Check the artifact index of this run.")
 
-			if _, err := os.Stat(filepath.Join(root, "x")); !os.IsNotExist(err) {
-				t.Errorf("x: %v", err)
+			_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, _ error) error {
+				if entry.Name() == "x" || entry.Name() == "a" {
+					t.Errorf("wrote %s", path)
+				}
+
+				return nil
+			})
+		})
+	}
+}
+
+func TestArtifactPullKeepsAFileNamedGitignore(t *testing.T) {
+	root := inCheckout(t)
+	server := startRunAPI(t)
+	server.index = indexOf(artifactEntry("demo", "main", "av_1", 1, versionEntry("av_1", 1, fileEntry(".gitignore", "bytes"))))
+	server.files["/artifacts/av_1/files/.gitignore"] = "bytes"
+
+	if _, err := run(t, "artifact", "pull"); err != nil {
+		t.Fatal(err)
+	}
+
+	wantFile(t, filepath.Join(root, ".qory", "artifacts", "demo", "main", "v1", ".gitignore"), "bytes")
+}
+
+func TestArtifactPullChoosesAVersionPerArtifact(t *testing.T) {
+	for name, c := range map[string]struct {
+		snapshot string
+		artifact string
+		version  string
+	}{
+		"an input with a version newer than the approved one": {
+			`{"version":1,"inputs":[{"type":"demo","required":true,"version":{"id":"av_2","number":2}}],"outputs":[]}`,
+			artifactEntry("demo", "main", "av_1", 3, versionEntry("av_1", 1, fileEntry("v", "one")),
+				versionEntry("av_2", 2, fileEntry("v", "two")), versionEntry("av_3", 3, fileEntry("v", "three"))),
+			"v2",
+		},
+		"another artifact of an input's type takes its approved version": {
+			`{"version":1,"inputs":[{"type":"demo","required":true,"version":{"id":"av_9","number":9}}],"outputs":[]}`,
+			artifactEntry("demo", "main", "av_1", 2, versionEntry("av_1", 1, fileEntry("v", "one")),
+				versionEntry("av_2", 2, fileEntry("v", "two"))),
+			"v1",
+		},
+		"an input with no approved version is not fetched": {
+			`{"version":1,"inputs":[{"type":"demo","required":true,"version":null}],"outputs":[]}`,
+			artifactEntry("demo", "main", "", 1, versionEntry("av_1", 1, fileEntry("v", "one"))),
+			"",
+		},
+		"a type that is an input and an output is an output": {
+			`{"version":1,"inputs":[{"type":"demo","required":true,"version":{"id":"av_1","number":1}}],` +
+				`"outputs":[{"type":"demo","required":true,"version":null,"check":"missing"}]}`,
+			artifactEntry("demo", "main", "av_1", 2, versionEntry("av_1", 1, fileEntry("v", "one")),
+				versionEntry("av_2", 2, fileEntry("v", "two"))),
+			"v2",
+		},
+		"another artifact with no approved version takes its newest": {
+			`{"version":1,"inputs":[],"outputs":[]}`,
+			artifactEntry("demo", "main", "", 2, versionEntry("av_1", 1, fileEntry("v", "one")),
+				versionEntry("av_2", 2, fileEntry("v", "two"))),
+			"v2",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := inCheckout(t)
+			server := startRunAPI(t)
+			server.snapshot = c.snapshot
+			server.index = indexOf(c.artifact)
+			server.files = map[string]string{
+				"/artifacts/av_1/files/v": "one", "/artifacts/av_2/files/v": "two", "/artifacts/av_3/files/v": "three",
+			}
+
+			if _, err := run(t, "artifact", "pull"); err != nil {
+				t.Fatal(err)
+			}
+
+			entries, err := os.ReadDir(filepath.Join(root, ".qory", "artifacts", "demo", "main"))
+			if c.version == "" {
+				if err == nil {
+					t.Errorf("entries = %v", entries)
+				}
+
+				return
+			}
+
+			if err != nil || len(entries) != 1 || entries[0].Name() != c.version {
+				t.Errorf("entries = %v, %v, want %s", entries, err, c.version)
 			}
 		})
 	}
@@ -384,25 +469,131 @@ func TestArtifactPullLeavesNoFileOfAFailedDownload(t *testing.T) {
 	}
 }
 
-func TestALinkInTheStoreStopsAWrite(t *testing.T) {
+func TestADirectoryLinkInTheStoreStopsAWrite(t *testing.T) {
+	for name, link := range map[string]string{
+		"at .qory":     ".qory",
+		"at artifacts": ".qory/artifacts",
+		"at a type":    ".qory/artifacts/demo",
+		"at a name":    ".qory/artifacts/demo/main",
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := inCheckout(t)
+			t.Setenv("QORY_RUN_API", "")
+
+			outside := t.TempDir()
+			at := filepath.Join(root, filepath.FromSlash(link))
+
+			if err := os.MkdirAll(filepath.Dir(at), 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := os.Symlink(outside, at); err != nil {
+				t.Fatal(err)
+			}
+
+			file := filepath.Join(root, "a.md")
+			if err := os.WriteFile(file, []byte("bytes"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := run(t, "artifact", "push", "demo", file)
+			wantExit(t, err, 1, "Remove ")
+
+			if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+				t.Errorf("wrote %v outside the checkout", entries)
+			}
+		})
+	}
+}
+
+func TestALinkAtAVersionStopsAPull(t *testing.T) {
 	root := inCheckout(t)
-	t.Setenv("QORY_RUN_API", "")
+	server := startRunAPI(t)
+	server.index = indexOf(artifactEntry("demo", "main", "av_1", 1, versionEntry("av_1", 1, fileEntry("a.md", "bytes"))))
+	server.files["/artifacts/av_1/files/a.md"] = "bytes"
 
 	outside := t.TempDir()
-	if err := os.Symlink(outside, filepath.Join(root, ".qory")); err != nil {
+	version := filepath.Join(root, ".qory", "artifacts", "demo", "main", "v1")
+
+	if err := os.MkdirAll(filepath.Dir(version), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	file := filepath.Join(root, "a.md")
-	if err := os.WriteFile(file, []byte("bytes"), 0o644); err != nil {
+	if err := os.Symlink(outside, version); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err := run(t, "artifact", "push", "demo", file)
+	_, err := run(t, "artifact", "pull")
 	wantExit(t, err, 1, "Remove ")
 
 	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
 		t.Errorf("wrote %v outside the checkout", entries)
+	}
+}
+
+func TestALinkInTheStoreStopsAPushBeforeItSends(t *testing.T) {
+	root := inCheckout(t)
+	server := startRunAPI(t)
+
+	if err := os.Symlink(t.TempDir(), filepath.Join(root, ".qory")); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := runIn(t, "text", "artifact", "push", "doc", "-")
+	wantExit(t, err, 1, "Remove ")
+
+	if len(server.pushes) != 0 {
+		t.Errorf("pushes = %d", len(server.pushes))
+	}
+}
+
+func TestAWriteReplacesALinkAtAFilesPath(t *testing.T) {
+	root := inCheckout(t)
+	server := startRunAPI(t)
+	server.index = indexOf()
+	store := filepath.Join(root, ".qory", "artifacts")
+	outside := filepath.Join(t.TempDir(), "target")
+
+	if err := os.WriteFile(outside, []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	version := filepath.Join(store, "doc", "main", "v3")
+	if err := os.MkdirAll(version, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{filepath.Join(store, ".gitignore"), filepath.Join(store, "index.json"), filepath.Join(version, "stdin.md")} {
+		if err := os.Symlink(outside, path); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := runIn(t, "# Text\n", "artifact", "push", "doc", "-"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := run(t, "artifact", "pull"); err != nil {
+		t.Fatal(err)
+	}
+
+	wantFile(t, outside, "mine")
+	wantFile(t, filepath.Join(version, "stdin.md"), "# Text\n")
+}
+
+func TestAResponseOfAnotherTypeWritesNoOtherPath(t *testing.T) {
+	root := inCheckout(t)
+	server := startRunAPI(t)
+	server.response = `{"version":1,"artifact":{"type":"../../evil","name":"main","version":{"id":"av_3","number":3}}}`
+
+	if _, err := runIn(t, "# Text\n", "artifact", "push", "doc", "-"); err != nil {
+		t.Fatal(err)
+	}
+
+	wantFile(t, filepath.Join(root, ".qory", "artifacts", "doc", "main", "v3", "stdin.md"), "# Text\n")
+
+	if _, err := os.Stat(filepath.Join(root, ".qory", "evil")); !os.IsNotExist(err) {
+		t.Errorf("evil: %v", err)
 	}
 }
 
@@ -503,11 +694,51 @@ func TestArtifactPushOverTheRunAPILimitReadsNoFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// A read of the file would fail with another error.
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatal(err)
+	}
+
 	_, err := run(t, "artifact", "push", "demo-video", path)
 	wantExit(t, err, cmd.ExitArtifactRefused, "Shrink the files of this version of demo-video")
 
 	if len(server.pushes) != 0 {
 		t.Errorf("pushes = %d", len(server.pushes))
+	}
+}
+
+func TestArtifactPushOverTheFilesOfTheRunAPI(t *testing.T) {
+	root := inCheckout(t)
+	server := startRunAPI(t)
+
+	args := []string{"artifact", "push", "screenshot"}
+
+	for number := range 101 {
+		path := filepath.Join(root, fmt.Sprintf("%d.md", number))
+		if err := os.WriteFile(path, []byte("bytes"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		args = append(args, path)
+	}
+
+	_, err := run(t, args...)
+	wantExit(t, err, cmd.ExitArtifactRefused, "Push at most 100 files in one version of screenshot.")
+
+	if len(server.pushes) != 0 {
+		t.Errorf("pushes = %d", len(server.pushes))
+	}
+}
+
+func TestArtifactPushCutsNoInputOutsideARun(t *testing.T) {
+	root := inCheckout(t)
+	t.Setenv("QORY_RUN_API", "")
+
+	_, err := runIn(t, strings.Repeat("a", 32<<20+1), "artifact", "push", "doc", "-")
+	wantExit(t, err, cmd.ExitInput, "Pass a file in place of -.")
+
+	if _, err := os.Stat(filepath.Join(root, ".qory")); !os.IsNotExist(err) {
+		t.Errorf(".qory: %v", err)
 	}
 }
 

@@ -2756,7 +2756,7 @@ var (
 	setupCommandArgs = []string{"run", "setup-command"}
 )
 
-// inWall is the annotation of a verb the wall runs inside a container.
+// inWall is the annotation of a verb that runs inside a container.
 const inWall = "qory.dev/in-wall"
 
 // newRelay builds the hidden relay verb, what the wall starts in the relay's container
