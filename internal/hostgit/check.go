@@ -880,6 +880,21 @@ func records() ([]places.Record, error) {
 	return recs, nil
 }
 
+// identityKey is the key of the mark [WithIdentity] adds to a context.
+type identityKey struct{}
+
+// WithIdentity returns ctx with the settings check taking the keys of [Identity] in a
+// repository's config, for a caller whose git sets the identity in its environment, so
+// git uses no value of those keys. Other callers stay refused: such a check is kept out of
+// what the check keeps between commands, and qory reads user.name for its display.
+func WithIdentity(ctx context.Context) context.Context {
+	return context.WithValue(ctx, identityKey{}, true)
+}
+
+// Identity reports whether key is one of the two keys of a commit's identity, which an
+// agent sets to commit, and which make git run no program.
+func Identity(key string) bool { return key == "user.name" || key == "user.email" }
+
 // Forget drops what the check keeps between commands, so the next one reads every
 // record and every file again.
 func Forget() {
@@ -910,7 +925,8 @@ func check(ctx context.Context, dir string) (*places.Hold, error) {
 	if err != nil {
 		return nil, err
 	}
-	u := &using{ctx: ctx, h: &places.Hold{}, recs: recs, dir: abs, held: map[string]bool{}}
+	_, identity := ctx.Value(identityKey{}).(bool)
+	u := &using{ctx: ctx, h: &places.Hold{}, recs: recs, dir: abs, held: map[string]bool{}, identity: identity}
 	// The places of the files the sums were taken of are held before the files are read
 	// again: the git directory and the common directory may lie in another place than
 	// dir.
@@ -932,7 +948,9 @@ func check(ctx context.Context, dir string) (*places.Hold, error) {
 		u.h.Release()
 		return nil, err
 	}
-	state.verified[abs], state.gitDirs[abs] = sums, held
+	if !u.identity {
+		state.verified[abs], state.gitDirs[abs] = sums, held
+	}
 	return u.h, nil
 }
 
@@ -945,6 +963,8 @@ type using struct {
 	dir  string
 	// held is the paths of the places held, by their record.
 	held map[string]bool
+	// identity is whether the check takes the keys of [Identity], see [WithIdentity].
+	identity bool
 }
 
 // hold refuses dir when any of paths lies in a recorded place that a walled run uses,
@@ -1074,6 +1094,9 @@ func fullCheck(u *using) (map[string]string, []string, error) {
 		for _, s := range f.settings {
 			if noURL(s.Key, urls) {
 				return nil, nil, &RefusedError{Dir: dir, Key: s.Key, Reason: RefusedRemoteNoURL}
+			}
+			if u.identity && Identity(s.Key) && filepath.Base(f.path) == "config" {
+				continue
 			}
 			if !accepted(recs, s, f.held) {
 				reason := RefusedSetting

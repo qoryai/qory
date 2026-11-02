@@ -53,7 +53,9 @@ func safeRepository(ctx context.Context, dir string) (*places.Hold, error) {
 }
 
 // safeAfterRun is [safeRepository] for a repository that qory fetched and an agent had
-// open for writing: it also accepts the keys that the fetch writes, see [fetchKey]. git
+// open for writing: it also accepts the keys that the fetch writes, see [fetchKey], and
+// the two keys of a commit's identity, see [hostgit.Identity], since an agent sets those to
+// commit and the commit of the push step sets all four of git's identity variables. git
 // reaches the repository's remote by the URL qory builds, so remote.origin.url can have
 // any value. Every other stop of safeRepository applies, and the error is an
 // [*unsafeError].
@@ -67,8 +69,9 @@ func safeAfterRun(ctx context.Context, dir string) (*places.Hold, error) {
 // reaches the remote by the URL qory builds, the keys and the files are checked, and every
 // git qory runs here has replace refs and the commit-graph off. The caller holds root.
 // The check also stops on a link anywhere on the way from root to dir, which would take
-// every read and write outside the working folder.
-func safeFurther(ctx context.Context, root, dir string) error {
+// every read and write outside the working folder. afterRun is for the check after the
+// agent exited, which takes the keys of a commit's identity as [safeAfterRun] does.
+func safeFurther(ctx context.Context, root, dir string, afterRun bool) error {
 	if err := noLinkTo(root, dir); err != nil {
 		return err
 	}
@@ -76,7 +79,7 @@ func safeFurther(ctx context.Context, root, dir string) error {
 	if err := gitParts(gitDir); err != nil {
 		return err
 	}
-	return keysOf(ctx, gitDir, true)
+	return keysOf(ctx, gitDir, true, afterRun)
 }
 
 // noLinkTo stops on a link in the folders of the path from root to dir, root excluded.
@@ -137,7 +140,11 @@ func checkedRepository(ctx context.Context, dir string, fetched bool) (*places.H
 	if err := qoryFiles(dir); err != nil {
 		return nil, err
 	}
-	hold, err := hostgit.Hold(ctx, dir)
+	holdCtx := ctx
+	if fetched {
+		holdCtx = hostgit.WithIdentity(ctx)
+	}
+	hold, err := hostgit.Hold(holdCtx, dir)
 	if err != nil {
 		if hostgit.Refused(err) {
 			cause := integration.Printable(exports.HideError(err).Error())
@@ -145,7 +152,7 @@ func checkedRepository(ctx context.Context, dir string, fetched bool) (*places.H
 		}
 		return nil, gitFailed(err)
 	}
-	if err := keysOf(ctx, gitDir, fetched); err != nil {
+	if err := keysOf(ctx, gitDir, fetched, fetched); err != nil {
 		hold.Release()
 		return nil, err
 	}
@@ -158,8 +165,8 @@ func checkedRepository(ctx context.Context, dir string, fetched bool) (*places.H
 
 // keysOf checks the files of the git directory gitDir, as [gitFiles] does, and the keys
 // of each configuration file it has. With fetched set, its config may also have each key
-// of [fetchKey].
-func keysOf(ctx context.Context, gitDir string, fetched bool) error {
+// of [fetchKey], and with afterRun each key of [hostgit.Identity].
+func keysOf(ctx context.Context, gitDir string, fetched, afterRun bool) error {
 	files, err := gitFiles(gitDir)
 	if err != nil {
 		return err
@@ -170,7 +177,7 @@ func keysOf(ctx context.Context, gitDir string, fetched bool) error {
 			return gitFailed(err)
 		}
 		for _, key := range keys {
-			if name == "config" && fetched && fetchKey(key) {
+			if name == "config" && (fetched && fetchKey(key) || afterRun && hostgit.Identity(key)) {
 				continue
 			}
 			if name == "config" && !fetched && strings.HasPrefix(key, "remote.") {

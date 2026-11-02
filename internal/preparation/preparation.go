@@ -91,7 +91,7 @@ const (
 	textGrafts         = "qory run: start the run in a new empty git working tree, then run again: the working folder's .git has info/grafts, which gives commits other parents"
 	textCommonDir      = "qory run: start the run in a new empty git working tree, then run again: the working folder's .git has a commondir file, which makes git read the configuration of another repository"
 	// The cause of each of these lines alone, for the line after the agent exited.
-	causeConfigKey     = "it has %s in %s, a key that neither git init nor the fetch writes, and git on this machine would use that key, such as a filter, a proxy or http.sslVerify"
+	causeConfigKey     = "it has %s in %s, and the check stops on each key that neither git init nor the fetch writes, because a key such as a filter, a proxy or http.sslVerify changes what git on this machine does"
 	causeConfigNotFile = "its %s is not a regular file"
 	causeAlternates    = "its .git has %s, which makes git read objects from outside the working folder"
 	causeGitLink       = "it has the link %s, and git would read and write through that link"

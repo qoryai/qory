@@ -64,7 +64,7 @@ func TestAfterTheRunTheCheckTakesWhatTheFetchWrote(t *testing.T) {
 		t.Fatal(err)
 	}
 	hold.Release()
-	if err := safeFurther(ctx, dir, filepath.Join(dir, filepath.FromSlash(Repositories), "acme", "lib")); err != nil {
+	if err := safeFurther(ctx, dir, filepath.Join(dir, filepath.FromSlash(Repositories), "acme", "lib"), true); err != nil {
 		t.Errorf("the check of a further repository: %v", err)
 	}
 }
@@ -708,4 +708,42 @@ func TestAGraftStopsTheStep(t *testing.T) {
 			t.Errorf("the line has the fix of a run that has not started: %v", err)
 		}
 	})
+}
+
+// TestTheIdentityOfTheAgentDoesNotStopThePush is an agent that set user.name and user.email
+// to commit, and the commit of qory, which does not use them.
+func TestTheIdentityOfTheAgentDoesNotStopThePush(t *testing.T) {
+	inEachRepository(t, func(t *testing.T, dir, folder string, b *WorkBranch, _ string) {
+		run(t, folder, "config", "user.name", "Agent")
+		run(t, folder, "config", "user.email", "agent@example.com")
+		if _, _, err := pushOf(dir, b); err != nil {
+			t.Fatal(err)
+		}
+		if got := run(t, folder, "log", "-1", "--format=%an %ae %cn %ce"); got != "qory qory@localhost qory qory@localhost" {
+			t.Errorf("the commit's identity is %q", got)
+		}
+	})
+}
+
+// TestOtherKeysOfTheUserSectionStop is a key that looks like the identity's and is not one.
+func TestOtherKeysOfTheUserSectionStop(t *testing.T) {
+	for _, key := range []string{"user.signingkey", "user.x.name", "author.name"} {
+		inEachRepository(t, func(t *testing.T, dir, folder string, b *WorkBranch, _ string) {
+			run(t, folder, "config", key, "a value")
+			if _, _, err := pushOf(dir, b); err == nil || !strings.Contains(err.Error(), "the check stops on each key") {
+				t.Fatalf("%s: the error is %v", key, err)
+			}
+		})
+	}
+}
+
+// TestASetupThatSetsTheIdentityStops is the record after the setup, which is not a check
+// after the run: a key of the identity stops it.
+func TestASetupThatSetsTheIdentityStops(t *testing.T) {
+	dir, b := onBranch(t, "acme/shop")
+	run(t, dir, "config", "user.name", "The setup")
+	err := RecordSetup(context.Background(), dir, os.Environ(), b)
+	if err == nil || !strings.Contains(err.Error(), "the check stops on each key") {
+		t.Fatalf("the error is %v", err)
+	}
 }

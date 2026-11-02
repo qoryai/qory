@@ -119,7 +119,7 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 	for i, r := range b.Repositories {
 		folders[i] = filepath.Join(dir, filepath.FromSlash(r.Dir))
 		if i > 0 {
-			if err := safeFurther(ctx, dir, folders[i]); err != nil {
+			if err := safeFurther(ctx, dir, folders[i], true); err != nil {
 				return nil, notSafe(r, err)
 			}
 			continue
@@ -316,7 +316,7 @@ func RecordSetup(ctx context.Context, dir string, base []string, b *WorkBranch) 
 	b.setupChanges = make(map[string]map[string]string, len(b.Repositories))
 	for _, r := range b.Repositories {
 		folder := filepath.Join(dir, filepath.FromSlash(r.Dir))
-		if err := safeFurther(ctx, dir, folder); err != nil {
+		if err := safeFurther(ctx, dir, folder, false); err != nil {
 			return checkFailed(textSetupNotSafe, r, err)
 		}
 		paths, err := changedPaths(ctx, git, folder)

@@ -658,7 +658,7 @@ func TestAFailedSafetyCheckFailsTheStep(t *testing.T) {
 			func(t *testing.T, dir string) {
 				proxygittest.Git(t, dir, "config", "core.sshCommand", "/bin/false")
 			},
-			"it has core.sshcommand in .git/config, a key that neither git init nor the fetch writes",
+			"it has core.sshcommand in .git/config, and the check stops on each key that neither git init nor the fetch writes",
 		},
 		"a hook in the configuration": {
 			func(t *testing.T, dir string) {
@@ -1288,6 +1288,31 @@ func walledPush(t *testing.T) *pushRepo {
 		writeFile(t, filepath.Join(dir, "README.md"), "the setup\n")
 	}
 	return p
+}
+
+// TestTheIdentityOfTheAgentDoesNotLoseTheWork is an agent that set user.name and user.email
+// to commit, with and without a wall, whose two gates each take those keys. Another key
+// stays stopped.
+func TestTheIdentityOfTheAgentDoesNotLoseTheWork(t *testing.T) {
+	for name, walled := range map[string]bool{"unwalled": false, "walled": true} {
+		t.Run(name, func(t *testing.T) {
+			var p *pushRepo
+			if walled {
+				p = walledPush(t)
+			} else {
+				p = newPushRepo(t, "write")
+			}
+			r := p.run(t, func(dir string) {
+				proxygittest.Git(t, dir, "config", "user.name", "Agent")
+				proxygittest.Git(t, dir, "config", "user.email", "agent@example.com")
+				writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+			}, nil)
+			r.wantsClose(t, event.StateSucceeded, 0)
+			if p.branchHead(t) == "" {
+				t.Errorf("the forge has no branch\n%s", r.out)
+			}
+		})
+	}
 }
 
 // TestAWalledRunRemovesAStaleIndexLock is a killed walled agent that left .git/index.lock,

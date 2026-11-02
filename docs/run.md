@@ -1992,7 +1992,8 @@ The step does this, in order:
 
 1. qory checks each repository again, because the agent could write to each `.git`. The
    check stops on a key in a configuration file in `.git` that neither `git init` nor the
-   fetch writes, on such a file that is not a regular file, on `alternates`, on
+   fetch writes, apart from `user.name` and `user.email` in `.git/config`, which the commit
+   of this step does not use, on such a file that is not a regular file, on `alternates`, on
    `info/grafts`, on a `commondir` file, on a `.git` with no `HEAD`, `objects` or `refs`,
    on a link in `.git` or on the way to a further repository, and on a hard link in `.git`
    outside `objects`. A walled run's target also gets the settings check of the place the
