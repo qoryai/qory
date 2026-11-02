@@ -1,0 +1,1 @@
+modules/support-desk/process.yaml: rename or remove entry 3 of artifact_types: entry 1 has the name screenshot too

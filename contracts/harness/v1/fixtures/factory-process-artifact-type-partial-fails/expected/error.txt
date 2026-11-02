@@ -1,0 +1,1 @@
+modules/support-desk/process.yaml: add size_limit and max_files to artifact type reply-draft, or leave only its name: a custom type has base_view, size_limit and max_files

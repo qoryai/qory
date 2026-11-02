@@ -8,7 +8,7 @@ What `qory harness compose` reads and what it writes.
 |---|---|---|
 | `qory-stack.yaml` | a directory that `extends` or `-f` selects; an ancestor directory covering several repositories; the root of the harness repository that delivers it | a stack delivered to be extended: the ordered modules, the excludes, what a checkout extending it may add and the runtimes and models it is written for |
 | `qory-module.yaml` | the root of a module | the module: its name, its variants per runtime, the variables it exports |
-| `process.yaml` | optional; the folder root of a module that `exports.modules` lists, which makes the module a factory | a process template: its name, summary and description, the workspace type, the exported stack its workflows run on, and its `qory.process/v1` process. Every command that reads the configuration checks it; the compose does not read it (§Exports) |
+| `process.yaml` | optional; the folder root of a module that `exports.modules` lists, which makes the module a factory | a process template: its name, summary and description, the workspace type, the exported stack its workflows run on, its `qory.process/v1` process, and optionally the artifact types its workspaces use. Every command that reads the configuration checks it; the compose does not read it (§Exports) |
 | `qory.yaml`, or `harness.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's stack, its target and modules, or the stack it extends, the target it composes it for and the modules it appends, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; under `exports`, the stacks and modules this repository publishes for others, by name (§Exports); `git` and `env` (§The configuration) |
 
 Every module has a `qory-module.yaml`; it defines the module's name, and a directory
@@ -370,7 +370,8 @@ refused with a message to select its directories with `path`.
 A module that `exports.modules` lists and that has a `process.yaml` at its folder root is
 a factory. The file is a process template: the texts, the workspace type, the stack and
 the process that a workspace made from it starts with
-([process.schema.json](process.schema.json)). Every command that reads the
+([process.schema.json](process.schema.json)). It may also list the artifact types its
+workspaces use. Every command that reads the
 configuration checks the file, once it finds each export. A module without the file is
 not checked for it.
 
@@ -397,6 +398,21 @@ process:                         # a qory.process/v1 document
       name: Check
       sequence: []
       gate: {kind: person, approvers: members}
+artifact_types:                  # optional; the artifact types the workspaces use
+  - name: screenshot             # a standard type: the name alone
+  - name: reply-draft            # a custom type: the full definition
+    base_view: document
+    size_limit: 65536
+    max_files: 1
+  - name: customer-facts         # a structured custom type also has a JSON Schema
+    base_view: structured
+    size_limit: 65536
+    max_files: 1
+    json_schema:
+      type: object
+      required: [customer]
+      properties:
+        customer: {type: string}
 ```
 
 | Key | Meaning |
@@ -408,8 +424,9 @@ process:                         # a qory.process/v1 document
 | `type` | the workspace type of a workspace made from the template |
 | `stack` | the stack the workspace's workflows run on, one that `exports.stacks` of the same repository lists |
 | `process` | the workspace's process, a `qory.process/v1` document. qory checks that it is an object with `schema: qory.process/v1` and a list of `stages`; that each `workflow` of a stage's `sequence`, a loop's `body` included, is a non-empty string of one line that the stack's `qory-stack.yaml` declares under `workflows`; and that each stage `name` has no line break or other control character. qory checks nothing else in it |
+| `artifact_types` | optional; the list of the artifact types the workspaces use, as [Artifact types](#artifact-types) has it. A list with no entries is valid |
 
-Every key is required, and the file has no other key. A key left out, a text over its
+Every key but `artifact_types` is required, and the file has no other key. A key left out, a text over its
 limit, a `stack` that `exports.stacks` does not list, and a `process` that is not such an
 object are refused with the file and the fix in the message. Each workflow that the
 stack does not declare is refused with one line, which has the stage, the workflow and
@@ -429,6 +446,36 @@ a link to a place outside it is refused without reading the place it leads to.
 A character is a Unicode code point, and a word is a run of characters without white
 space. The compose does not read the file: in the composed tree it is one of the
 module's other files (§The module manifest).
+
+#### Artifact types
+
+An artifact is a typed, versioned result of a work item. Each entry of `artifact_types`
+is a standard type, `name` alone, or a custom type, with these keys and no others:
+
+| Key | Meaning |
+|---|---|
+| `name` | required: lowercase letters and digits in groups joined by single hyphens, 1 to 64 bytes, such as `reply-draft`. Each name is listed once |
+| `base_view` | `document`, `image`, `video`, `file` or `structured`, how a version's files are shown |
+| `size_limit` | the most bytes of all files of one version, a whole number from 1 to the base view's most: 10 MiB for `document`, 50 MiB for `image`, 2 GiB for `video`, 1 GiB for `file` and 1 MiB for `structured` |
+| `max_files` | the most files of one version, a whole number from 1 to 20; exactly 1 for `structured` |
+| `json_schema` | the JSON Schema of the file, exactly when `base_view` is `structured` |
+
+A custom type has `base_view`, `size_limit` and `max_files`. qory has no list of standard
+types: a name alone passes for any name of the right form.
+
+A `json_schema` is an object that compiles as a JSON Schema. It is draft 2020-12 unless its
+`$schema` sets draft-07, the only other draft. A reference to anything outside the schema
+fails, and qory reads no file or URL for one. A `pattern` is a Go regular expression
+(RE2). A `json_schema` has at most 65,536 bytes as compact JSON, 4096 values in all,
+1024 entries in a list, 1024 members in an object, 16,384 bytes in a string or a member
+name, and 64 lists and objects nested in one another.
+
+An entry that breaks a rule stops the command with one line, which starts with the file
+and then the fix:
+
+```text
+/src/acme-harness/harness/modules/support-desk/process.yaml: add size_limit and max_files to artifact type reply-draft, or leave only its name: a custom type has base_view, size_limit and max_files
+```
 
 ## The module manifest
 

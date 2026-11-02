@@ -2,6 +2,7 @@ package exports_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -384,5 +385,291 @@ func TestVerifyRefusesAWorkflowThatIsNoString(t *testing.T) {
 	e := factory(t, strings.Replace(process, "workflow: draft-an-answer", `workflow: "123"`, 1))
 	if err := e.Verify(); err == nil || !strings.Contains(err.Error(), ": declare 123 under workflows in ") {
 		t.Errorf("a quoted number: %v", err)
+	}
+}
+
+// withTypes is process with artifact_types set to the YAML list body.
+func withTypes(body string) string { return process + "artifact_types:" + body + "\n" }
+
+// custom is an entry of artifact_types: a type of the base view with the keys given.
+func custom(view, rest string) string {
+	return "\n  - {name: a-type, base_view: " + view + ", " + rest + "}"
+}
+
+// TestVerifyPassesArtifactTypes is each shape of artifact_types that passes: a name
+// alone, a custom type of each base view at its limits, a list with no entries, and a
+// JSON Schema in each draft that a custom type may use.
+func TestVerifyPassesArtifactTypes(t *testing.T) {
+	for _, body := range []string{
+		" []",
+		"\n  - name: mockup",
+		"\n  - name: \"123\"\n  - name: a-1-b",
+		"\n  - name: " + strings.Repeat("a", 64),
+		custom("document", "size_limit: 10485760, max_files: 20"),
+		custom("image", "size_limit: 52428800, max_files: 1"),
+		custom("video", "size_limit: 2147483648, max_files: 5"),
+		custom("file", "size_limit: 1073741824, max_files: 2"),
+		custom("structured", "size_limit: 1048576, max_files: 1, json_schema: {}"),
+		custom("structured", "size_limit: 1, max_files: 1, json_schema: {$schema: 'http://json-schema.org/draft-07/schema#', type: object}"),
+		custom("structured", "size_limit: 1, max_files: 1, json_schema: {$schema: 'https://json-schema.org/draft/2020-12/schema', type: object}"),
+		custom("structured", "size_limit: 1, max_files: 1, json_schema: {$defs: {a: {type: string}}, properties: {a: {$ref: '#/$defs/a'}}}"),
+		custom("structured", "size_limit: 1, max_files: 1, json_schema: {const: 2026-11-02}"),
+	} {
+		if err := factory(t, withTypes(body)).Verify(); err != nil {
+			t.Errorf("%q: %v", body, err)
+		}
+	}
+}
+
+// TestVerifyChecksArtifactTypes is each mistake in artifact_types. Each refusal starts
+// with the file and then the fix.
+func TestVerifyChecksArtifactTypes(t *testing.T) {
+	const structured = "size_limit: 65536, max_files: 1, json_schema: "
+	const name = "artifact type a-type"
+	for _, c := range []struct{ body, want string }{
+		{" ~", "set artifact_types to a list of artifact types, or remove it: artifact_types is null"},
+		{" {name: mockup}", "set artifact_types to a list of artifact types, or remove it: artifact_types is an object"},
+		{" mockup", "set artifact_types to a list of artifact types, or remove it: artifact_types is a string"},
+		{"\n  - mockup", "set entry 1 of artifact_types to an object with a name: the entry is a string"},
+		{"\n  - ~", "set entry 1 of artifact_types to an object with a name: the entry is null"},
+		{"\n  - {base_view: file}", "add name to entry 1 of artifact_types: the entry has no name"},
+		{"\n  - {name: 3}", "set the name of entry 1 of artifact_types to a string of lowercase letters and digits in groups joined by single hyphens: the name is a number"},
+		{"\n  - {name: [a]}", "set the name of entry 1 of artifact_types to a string of lowercase letters and digits in groups joined by single hyphens: the name is a list"},
+		{"\n  - {name: ~}", "set the name of entry 1 of artifact_types to a string of lowercase letters and digits in groups joined by single hyphens: the name is null"},
+		{"\n  - {name: \"\"}", `set the name of entry 1 of artifact_types to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes: the name is ""`},
+		{"\n  - {name: a--b}", `set the name of entry 1 of artifact_types to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes: the name is "a--b"`},
+		{"\n  - {name: -a}", `set the name of entry 1 of artifact_types to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes: the name is "-a"`},
+		{"\n  - {name: \"a\\n\"}", `set the name of entry 1 of artifact_types to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes: the name is "a\n"`},
+		{"\n  - {name: " + strings.Repeat("a", 65) + "}", `set the name of entry 1 of artifact_types to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes: the name is "` + strings.Repeat("a", 65) + `"`},
+		{"\n  - {name: mockup, owner: acme}", `remove the key "owner" from entry 1 of artifact_types: an artifact type has only name, base_view, size_limit, max_files and json_schema`},
+		{"\n  - {name: mockup, [a]: b}", `remove the key a list from entry 1 of artifact_types: an artifact type has only name, base_view, size_limit, max_files and json_schema`},
+		{"\n  - {name: mockup, name: screenshot}", "remove the second name from entry 1 of artifact_types: the entry has the key twice"},
+		{"\n  - {name: a-type, size_limit: 1}", "add base_view and max_files to " + name + ", or leave only its name: a custom type has base_view, size_limit and max_files"},
+		{"\n  - {name: a-type, base_view: file}", "add size_limit and max_files to " + name + ", or leave only its name: a custom type has base_view, size_limit and max_files"},
+		{"\n  - {name: a-type, base_view: file, size_limit: 1}", "add max_files to " + name + ", or leave only its name: a custom type has base_view, size_limit and max_files"},
+		{"\n  - {name: a-type, json_schema: {}}", "add base_view, size_limit and max_files to " + name + ", or leave only its name: a custom type has base_view, size_limit and max_files"},
+		{custom("text", "size_limit: 1, max_files: 1"), `set base_view of ` + name + ` to document, image, video, file or structured: base_view is "text"`},
+		{custom("[a]", "size_limit: 1, max_files: 1"), "set base_view of " + name + " to document, image, video, file or structured: base_view is a list"},
+		{custom("document", "size_limit: 0, max_files: 1"), "set size_limit of " + name + " to a whole number from 1 to 10485760, the most for base_view document: size_limit is 0"},
+		{custom("document", "size_limit: 10485761, max_files: 1"), "set size_limit of " + name + " to a whole number from 1 to 10485760, the most for base_view document: size_limit is 10485761"},
+		{custom("image", "size_limit: 52428801, max_files: 1"), "set size_limit of " + name + " to a whole number from 1 to 52428800, the most for base_view image: size_limit is 52428801"},
+		{custom("video", "size_limit: 2147483649, max_files: 1"), "set size_limit of " + name + " to a whole number from 1 to 2147483648, the most for base_view video: size_limit is 2147483649"},
+		{custom("file", "size_limit: 1073741825, max_files: 1"), "set size_limit of " + name + " to a whole number from 1 to 1073741824, the most for base_view file: size_limit is 1073741825"},
+		{custom("structured", "size_limit: 1048577, max_files: 1, json_schema: {}"), "set size_limit of " + name + " to a whole number from 1 to 1048576, the most for base_view structured: size_limit is 1048577"},
+		{custom("file", "size_limit: 1.5, max_files: 1"), "set size_limit of " + name + " to a whole number from 1 to 1073741824, the most for base_view file: size_limit is 1.5"},
+		{custom("file", "size_limit: 1.0, max_files: 1"), "set size_limit of " + name + " to a whole number from 1 to 1073741824, the most for base_view file: size_limit is 1.0"},
+		{custom("file", `size_limit: "1", max_files: 1`), "set size_limit of " + name + " to a whole number from 1 to 1073741824, the most for base_view file: size_limit is a string"},
+		{custom("file", "size_limit: ~, max_files: 1"), "set size_limit of " + name + " to a whole number from 1 to 1073741824, the most for base_view file: size_limit is null"},
+		{custom("file", "size_limit: 99999999999999999999999, max_files: 1"), "set size_limit of " + name + " to a whole number from 1 to 1073741824, the most for base_view file: size_limit is 99999999999999999999999"},
+		{custom("file", "size_limit: 1, max_files: 0"), "set max_files of " + name + " to a whole number from 1 to 20: max_files is 0"},
+		{custom("file", "size_limit: 1, max_files: 21"), "set max_files of " + name + " to a whole number from 1 to 20: max_files is 21"},
+		{custom("structured", "size_limit: 1, max_files: 2, json_schema: {}"), "set max_files of " + name + " to 1: a structured type has one file, and max_files is 2"},
+		{custom("structured", "size_limit: 1, max_files: 1"), "add json_schema to " + name + ": a structured type has a JSON Schema"},
+		{custom("document", "size_limit: 1, max_files: 1, json_schema: {}"), "remove json_schema from " + name + ", or set base_view to structured: only a structured type has a JSON Schema, and base_view is document"},
+		{custom("image", "size_limit: 1, max_files: 1, json_schema: ~"), "remove json_schema from " + name + ", or set base_view to structured: only a structured type has a JSON Schema, and base_view is image"},
+		{custom("structured", structured+"[a]"), "set json_schema of " + name + " to an object, a JSON Schema: json_schema is a list"},
+		{custom("structured", structured+"true"), "set json_schema of " + name + " to an object, a JSON Schema: json_schema is a boolean"},
+		{custom("structured", structured+"~"), "set json_schema of " + name + " to an object, a JSON Schema: json_schema is null"},
+		{custom("structured", structured+"{1: a}"), `quote the key "1" in json_schema of ` + name + ": a JSON key is a string"},
+		{custom("structured", structured+"{a: 1, a: 2}"), `remove the second "a" from its object in json_schema of ` + name + ": the object has the key twice"},
+		{custom("structured", structured+"{const: .inf}"), "replace .inf in json_schema of " + name + " with a JSON number: JSON has no such number"},
+		{custom("structured", structured+"{$schema: 'http://json-schema.org/draft-04/schema#'}"), `set $schema in json_schema of ` + name + ` to https://json-schema.org/draft/2020-12/schema or http://json-schema.org/draft-07/schema, or remove it: $schema is "http://json-schema.org/draft-04/schema#"`},
+		{custom("structured", structured+"{$schema: 3}"), `set $schema in json_schema of ` + name + ` to https://json-schema.org/draft/2020-12/schema or http://json-schema.org/draft-07/schema, or remove it: $schema is "3"`},
+		{custom("structured", structured+"{type: objekt}"), "fix json_schema of " + name + " so that it compiles as a JSON Schema: at '/type': value must be one of 'array', 'boolean', 'integer', 'null', 'number', 'object', 'string'; at '/type': got string, want array"},
+		{custom("structured", structured+"{$ref: '#/$defs/gone'}"), "fix json_schema of " + name + ` so that it compiles as a JSON Schema: json-pointer in "#/$defs/gone" not found`},
+	} {
+		e := factory(t, withTypes(c.body))
+		file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
+		if err := e.Verify(); err == nil || err.Error() != file+": "+c.want {
+			t.Errorf("%q: %v\nwant %s: %s", c.body, err, file, c.want)
+		}
+	}
+}
+
+// TestVerifyPrintsOneLineForEachArtifactType is two entries that fail and a name listed
+// twice: one line for each, and the workflows of the stages first.
+func TestVerifyPrintsOneLineForEachArtifactType(t *testing.T) {
+	e := factory(t, withTypes("\n  - name: mockup\n  - name: Mockup\n  - {name: a-type, size_limit: 1}\n  - name: mockup\n  - name: mockup"))
+	file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
+	want := strings.Join([]string{
+		file + `: set the name of entry 2 of artifact_types to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes: the name is "Mockup"`,
+		file + ": add base_view and max_files to artifact type a-type, or leave only its name: a custom type has base_view, size_limit and max_files",
+		file + ": rename or remove entry 4 of artifact_types: entry 1 has the name mockup too",
+		file + ": rename or remove entry 5 of artifact_types: entry 1 has the name mockup too",
+	}, "\n")
+	if err := e.Verify(); err == nil || err.Error() != want {
+		t.Errorf("%v\nwant:\n%s", err, want)
+	}
+	bad := strings.Replace(withTypes("\n  - name: Mockup"), "workflow: draft-an-answer", "workflow: send-a-reply", 1)
+	if err := factory(t, bad).Verify(); err == nil || !strings.Contains(err.Error(), "declare send-a-reply under workflows") || strings.Contains(err.Error(), "Mockup") {
+		t.Errorf("a workflow and a type: %v", err)
+	}
+}
+
+// TestVerifyBoundsAJSONSchema is a custom type's JSON Schema at each limit, which passes,
+// and one past it, which fails with the fix first.
+func TestVerifyBoundsAJSONSchema(t *testing.T) {
+	entry := func(schema string) string {
+		return withTypes("\n  - {name: a-type, base_view: structured, size_limit: 65536, max_files: 1, json_schema: " + schema + "}")
+	}
+	items := func(n int, item string) string {
+		return strings.TrimSuffix(strings.Repeat(item+", ", n), ", ")
+	}
+	list := func(n int) string { return "{x-a: [" + items(n, "1") + "]}" }
+	members := func(n int) string {
+		var b strings.Builder
+		for i := range n {
+			fmt.Fprintf(&b, "a%d: 1, ", i)
+		}
+		return "{x-a: {" + b.String() + "}}"
+	}
+	nested := func(n int) string { return strings.Repeat("{x-a: ", n-1) + "{}" + strings.Repeat("}", n-1) }
+	// values is a schema of n values: itself, the list, 4 lists in it and the numbers.
+	values := func(n int) string {
+		full := "[" + items(1024, "1") + "]"
+		return "{x-a: [" + items(3, full) + ", [" + items(n-6-3*1024, "1") + "]]}"
+	}
+	// sized is a schema of n bytes of compact JSON: 4 long strings and a shorter one.
+	sized := func(n int) string {
+		long := `"` + strings.Repeat("s", 16000) + `"`
+		return `{x-a: [` + items(4, long) + `, "` + strings.Repeat("s", n-64024) + `"]}`
+	}
+	const where = "shorten json_schema of artifact type a-type"
+	for _, c := range []struct{ schema, want string }{
+		{list(1024), ""},
+		{list(1025), where + ": it has a list of more than 1024 entries"},
+		{members(1024), ""},
+		{members(1025), where + ": it has an object of more than 1024 members"},
+		{`{title: "` + strings.Repeat("s", 16384) + `"}`, ""},
+		{`{title: "` + strings.Repeat("s", 16385) + `"}`, where + ": it has a string of more than 16384 bytes"},
+		{`{? "` + strings.Repeat("s", 16384) + `" : 1}`, ""},
+		{`{? "` + strings.Repeat("s", 16385) + `" : 1}`, where + ": it has a member name of more than 16384 bytes"},
+		{nested(64), ""},
+		{nested(65), where + ": it nests lists and objects more than 64 deep"},
+		{values(4096), ""},
+		{values(4097), where + ": it has more than 4096 values"},
+		{sized(65536), ""},
+		{sized(65537), where + " to at most 65536 bytes of JSON: it has 65537"},
+	} {
+		e := factory(t, entry(c.schema))
+		err := e.Verify()
+		file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
+		if c.want == "" && err != nil {
+			t.Errorf("%.60s: %v", c.schema, err)
+		}
+		if c.want != "" && (err == nil || err.Error() != file+": "+c.want) {
+			t.Errorf("%.60s: %v\nwant %s", c.schema, err, c.want)
+		}
+	}
+}
+
+// TestVerifyReadsNothingForAJSONSchema is a custom type's JSON Schema that refers to a
+// file, to a URL and to a schema beside it: each fails, and no file is read.
+func TestVerifyReadsNothingForAJSONSchema(t *testing.T) {
+	place := filepath.Join(t.TempDir(), "elsewhere.json")
+	if err := os.WriteFile(place, []byte(`{"title": "TARGET-CONTENT"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []string{"file://" + place, "https://schema.example/a.json", "branch.schema.json"} {
+		body := withTypes("\n  - {name: a-type, base_view: structured, size_limit: 1, max_files: 1, json_schema: {$ref: '" + ref + "'}}")
+		err := factory(t, body).Verify()
+		if err == nil || !strings.Contains(err.Error(), "so that it compiles as a JSON Schema: ") || strings.Contains(err.Error(), "TARGET-CONTENT") {
+			t.Errorf("%s: %v", ref, err)
+		}
+	}
+}
+
+// TestVerifyHidesASecretInArtifactTypes is an access key secret where a name, a key or a
+// schema's value belongs: no line prints it.
+func TestVerifyHidesASecretInArtifactTypes(t *testing.T) {
+	const secret = "qak_" + "0123456789abcdef"
+	for _, body := range []string{
+		"\n  - name: " + secret,
+		"\n  - {name: mockup, " + secret + ": 1}",
+		"\n  - {name: a-type, base_view: " + secret + ", size_limit: 1, max_files: 1}",
+		"\n  - {name: a-type, base_view: structured, size_limit: 1, max_files: 1, json_schema: {$schema: " + secret + "}}",
+		"\n  - {name: a-type, base_view: structured, size_limit: 1, max_files: 1, json_schema: {$ref: '" + secret + "'}}",
+		"\n  - {name: a-type, base_view: structured, size_limit: 1, max_files: 1, json_schema: {type: " + secret + "}}",
+		"\n  - {name: a-type, base_view: structured, size_limit: 1, max_files: 1, json_schema: {pattern: '(" + secret + "'}}",
+	} {
+		err := factory(t, withTypes(body)).Verify()
+		if err == nil || strings.Contains(err.Error(), secret) {
+			t.Errorf("%q: %v", body, err)
+		}
+	}
+}
+
+// TestArtifactTypesSchemaMatchesTheReader keeps artifact_types in process.schema.json and
+// the reader in step: each document is accepted or refused by both.
+func TestArtifactTypesSchemaMatchesTheReader(t *testing.T) {
+	schema, err := jsonschema.NewCompiler().Compile("../../contracts/harness/v1/process.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const limits = "size_limit: 65536, max_files: 1"
+	for _, c := range []struct {
+		body  string
+		valid bool
+	}{
+		{" []", true},
+		{" ~", false},
+		{" {}", false},
+		{"\n  - mockup", false},
+		{"\n  - name: mockup", true},
+		{"\n  - {}", false},
+		{"\n  - {name: 3}", false},
+		{"\n  - {name: Mockup}", false},
+		{"\n  - {name: a--b}", false},
+		{"\n  - name: " + strings.Repeat("a", 64), true},
+		{"\n  - name: " + strings.Repeat("a", 65), false},
+		{"\n  - {name: mockup, owner: acme}", false},
+		{"\n  - {name: a-type, base_view: file}", false},
+		{"\n  - {name: a-type, size_limit: 1}", false},
+		{"\n  - {name: a-type, json_schema: {}}", false},
+		{custom("text", limits), false},
+		{custom("document", limits), true},
+		{custom("document", "size_limit: 10485760, max_files: 20"), true},
+		{custom("document", "size_limit: 10485761, max_files: 1"), false},
+		{custom("image", "size_limit: 52428800, max_files: 1"), true},
+		{custom("image", "size_limit: 52428801, max_files: 1"), false},
+		{custom("video", "size_limit: 2147483648, max_files: 1"), true},
+		{custom("video", "size_limit: 2147483649, max_files: 1"), false},
+		{custom("file", "size_limit: 1073741824, max_files: 1"), true},
+		{custom("file", "size_limit: 1073741825, max_files: 1"), false},
+		{custom("structured", "size_limit: 1048576, max_files: 1, json_schema: {}"), true},
+		{custom("structured", "size_limit: 1048577, max_files: 1, json_schema: {}"), false},
+		{custom("file", "size_limit: 0, max_files: 1"), false},
+		{custom("file", "size_limit: 1.5, max_files: 1"), false},
+		{custom("file", `size_limit: "1", max_files: 1`), false},
+		{custom("file", "size_limit: 1, max_files: 0"), false},
+		{custom("file", "size_limit: 1, max_files: 20"), true},
+		{custom("file", "size_limit: 1, max_files: 21"), false},
+		{custom("structured", limits), false},
+		{custom("structured", "size_limit: 1, max_files: 2, json_schema: {}"), false},
+		{custom("structured", limits+", json_schema: [a]"), false},
+		{custom("structured", limits+", json_schema: {type: object}"), true},
+		{custom("document", limits+", json_schema: {}"), false},
+		{custom("image", limits+", json_schema: {}"), false},
+		{custom("video", limits+", json_schema: {}"), false},
+		{custom("file", limits+", json_schema: {}"), false},
+	} {
+		body := withTypes(c.body)
+		var doc any
+		if err := yaml.Unmarshal([]byte(body), &doc); err != nil {
+			t.Fatal(err)
+		}
+		j, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(j, &doc); err != nil {
+			t.Fatal(err)
+		}
+		if err := schema.Validate(doc); (err == nil) != c.valid {
+			t.Errorf("schema: %q valid=%v err=%v", c.body, c.valid, err)
+		}
+		if err := factory(t, body).Verify(); (err == nil) != c.valid {
+			t.Errorf("reader: %q valid=%v err=%v", c.body, c.valid, err)
+		}
 	}
 }

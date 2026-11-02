@@ -22,6 +22,11 @@ release may change what an existing document does, and states it under Upgrading
   root of each module that `exports.modules` lists: its fields and their limits, that
   `stack` is one of `exports.stacks`, and that the stack declares each workflow the
   process runs. See §Exports in `contracts/harness/v1/README.md`.
+- List the artifact types a factory's workspaces use with `artifact_types` in its
+  `process.yaml`: a standard type by its name alone, a custom type with `base_view`,
+  `size_limit`, `max_files` and, for `base_view: structured`, `json_schema`. Every command
+  that reads the configuration checks each entry and compiles each `json_schema`. See
+  Artifact types in `contracts/harness/v1/README.md`.
 - `-f` on `qory harness compose`, `qory run` and `qory worktree add` takes a stack by
   reference, `<https URL>#<ref>:<folder>`: qory fetches the folder as it fetches a git
   module and composes its `qory-stack.yaml`. `examples/hello` has one, so a run takes it

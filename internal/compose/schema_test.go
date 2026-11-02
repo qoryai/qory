@@ -85,10 +85,13 @@ func TestSchemas(t *testing.T) {
 		}
 		// A process template refused for a stack that exports.stacks does not list, or for
 		// a workflow its stack does not declare, passes the schema: the schema checks one
-		// file, and those refusals compare two.
+		// file, and those refusals compare two. One refused for an artifact type name
+		// listed twice, or a json_schema that does not compile, passes it too: a JSON
+		// Schema cannot state either rule.
 		processes, _ := filepath.Glob(filepath.Join(dir, "modules", "*", "process.yaml"))
 		wantBadProcess := strings.Contains(string(errText), "process.yaml: ") &&
-			!strings.Contains(string(errText), "exports.stacks lists") && !strings.Contains(string(errText), " under workflows in ")
+			!strings.Contains(string(errText), "exports.stacks lists") && !strings.Contains(string(errText), " under workflows in ") &&
+			!strings.Contains(string(errText), " of artifact_types: entry ") && !strings.Contains(string(errText), " compiles as a JSON Schema: ")
 		for _, f := range processes {
 			err := processSchema.Validate(document(t, f))
 			if wantBadProcess && err == nil {

@@ -34,11 +34,12 @@ const (
 )
 
 // processFile is a process.yaml as written: the texts a list of templates shows, the
-// workspace type, the stack of the same repository its workflows run on, and the process
-// document. In the document, qory checks the schema, that the stages are a list, that
-// each workflow of a stage is a non-empty string of one line that the stack declares,
-// and that each stage name has no line break or other control character, and checks
-// nothing else in it.
+// workspace type, the stack of the same repository its workflows run on, the process
+// document, and optionally the artifact types the workspaces use. In the document, qory
+// checks the schema, that the stages are a list, that each workflow of a stage is a
+// non-empty string of one line that the stack declares, and that each stage name has no
+// line break or other control character, and checks nothing else in it. In
+// artifact_types, qory checks each entry as [checkArtifactType] has it.
 //
 //	apiVersion: qory.dev/v1alpha1
 //	name: Support desk
@@ -49,14 +50,20 @@ const (
 //	process:
 //	  schema: qory.process/v1
 //	  stages: [{name: Answer, sequence: [{workflow: draft-an-answer}]}]
+//	artifact_types:
+//	  - name: reply-draft
+//	    base_view: document
+//	    size_limit: 65536
+//	    max_files: 1
 type processFile struct {
-	APIVersion  string    `yaml:"apiVersion"`
-	Name        string    `yaml:"name"`
-	Summary     string    `yaml:"summary"`
-	Description string    `yaml:"description"`
-	Type        string    `yaml:"type"`
-	Stack       string    `yaml:"stack"`
-	Process     yaml.Node `yaml:"process"`
+	APIVersion    string    `yaml:"apiVersion"`
+	Name          string    `yaml:"name"`
+	Summary       string    `yaml:"summary"`
+	Description   string    `yaml:"description"`
+	Type          string    `yaml:"type"`
+	Stack         string    `yaml:"stack"`
+	Process       yaml.Node `yaml:"process"`
+	ArtifactTypes yaml.Node `yaml:"artifact_types"`
 }
 
 // readProcess returns the process.yaml at the root of the module folder dir, relative to
@@ -113,10 +120,11 @@ func escapes(root *os.Root, err error) bool {
 // checkProcess checks data, the process.yaml at path in an exported module's folder,
 // field by field: each one is set, the texts are within their limits, stack is one of
 // [Exports.Stacks], process is an object with schema qory.process/v1 and a list of
-// stages, and every workflow of a stage's sequence, a loop's body included, is declared
-// under workflows in the stack's qory-stack.yaml, as [Exports.checkWorkflows] checks.
-// The error starts with the file and then the fix; for the workflows it has one line for
-// each refusal.
+// stages, every workflow of a stage's sequence, a loop's body included, is declared
+// under workflows in the stack's qory-stack.yaml, as [Exports.checkWorkflows] checks,
+// and artifact_types, when it is set, is as [checkArtifactTypes] checks. The error
+// starts with the file and then the fix; for the workflows and the artifact types it has
+// one line for each refusal.
 func (e *Exports) checkProcess(path string, data []byte) error {
 	shown := HidePath(path)
 	if err := RefuseAliases(shown, data); err != nil {
@@ -185,7 +193,10 @@ func (e *Exports) checkProcess(path string, data []byte) error {
 	if stages.Kind != yaml.SequenceNode {
 		return fmt.Errorf("%s: set process.stages to a list of stages: process.stages is %s", shown, nodeKind(stages))
 	}
-	return e.checkWorkflows(shown, t.Stack, stages)
+	if err := e.checkWorkflows(shown, t.Stack, stages); err != nil {
+		return err
+	}
+	return checkArtifactTypes(shown, &t.ArtifactTypes)
 }
 
 // checkWorkflows checks that every workflow the stages run is declared under workflows in
@@ -355,10 +366,12 @@ func scalarText(n *yaml.Node) string {
 	return nodeKind(n)
 }
 
-// nodeKind is what a YAML value is, for a message: an object, a list, a string, a number
-// or a boolean.
+// nodeKind is what a YAML value is, for a message: an object, a list, null, a string, a
+// number or a boolean.
 func nodeKind(n *yaml.Node) string {
 	switch {
+	case n.Tag == "!!null":
+		return "null"
 	case n.Kind == yaml.MappingNode:
 		return "an object"
 	case n.Kind == yaml.SequenceNode:
