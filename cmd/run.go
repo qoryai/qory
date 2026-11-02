@@ -684,15 +684,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// here, before the image's fetch and the setup.
 				readOnly := readsOnly(fromCode, workflows)
 				if readOnly {
-					image := selected
-					if image == "" {
-						image = spec.Image
-					}
-					var w *config.ForagerWall
-					if conf.Forager != nil {
-						w = conf.Forager.Wall
-					}
-					if err := readOnlyCheckout(&spec, at.root, fromCode.workflow, image, w); err != nil {
+					if err := readOnlyCheckout(&spec, at.root, fromCode.workflow, run.Image()); err != nil {
 						return false, err
 					}
 				}
@@ -1179,6 +1171,9 @@ type openedRun interface {
 	// reads them.
 	System() string
 	Repositories() string
+	// Image is the image chosen at the run's open, the zero Image with no wall or when
+	// the gateway's run answer has no image; a walled run with no image fails at the join.
+	Image() session.Image
 	// Dir is the run directory.
 	Dir() string
 }

@@ -3152,10 +3152,11 @@ compose, before the image's fetch, the setup and the agent, exit 1. qory closes 
   use an image without nested Docker for read workflow <workflow>, or declare it write: image <image> has nested Docker, so the checkout cannot be made read-only (read_needs_no_nested_docker); the code is used
   ```
 
-  The image qory checks is the one the run's policy selects, or `wall.image` or
-  `--image` when the policy selects none. With a server, qory checks `wall.image` or
-  `--image`: the run configuration's image arrives once the run starts, and is a
-  reference, which runs no nested Docker.
+  qory checks the image chosen at the run's open, whichever way it was selected: by the
+  run's policy, which with a server is the run configuration's, or by `--image` or
+  `wall.image` when the policy selects none. A policy that selects an entry with
+  `docker: true` stops the run even when `wall.image` is a pinned reference. An image
+  selected by its reference runs no nested Docker.
 
 A `write` workflow, a run given a run key with no run code, and a run you start yourself
 see the checkout writable.

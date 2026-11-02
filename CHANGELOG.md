@@ -56,9 +56,10 @@ release may change what an existing document does, and states it under Upgrading
   checkout fails with `Read-only file system`. On Claude Code, its settings also deny
   `Edit`, `Write` and `NotebookEdit`, allow `Bash(/qory/qory *)` and set
   `permissions.defaultMode` to `dontAsk`. Such a run with no wall, with `wall.setup:
-  inside`, or on an image with `docker: true` stops after the compose, exit 1, and
-  closes `failed` with `read_needs_wall`, `read_needs_setup_outside` or
-  `read_needs_no_nested_docker`. See §Read workflows in `docs/run.md`.
+  inside`, or whose image chosen at the run's open has `docker: true`, whichever way it
+  was selected, stops after the compose, exit 1, and closes `failed` with
+  `read_needs_wall`, `read_needs_setup_outside` or `read_needs_no_nested_docker`. See
+  §Read workflows in `docs/run.md`.
 - See the fetch and the compose of `qory run` as steps in the run's record, each with
   its lines and its end: a failed step ends `failed` with the exit status of `qory run`,
   after its error line.
