@@ -1,0 +1,15 @@
+apiVersion: qory.dev/v1alpha1
+harness:
+  target:
+    runtime: claude
+  modules:
+    - name: core
+      source: {path: modules/core}
+      only:
+        skills: [deploy]
+    - name: web
+      source: {path: modules/web}
+    - name: ts
+      source: {path: modules/ts}
+      exclude:
+        agents: [ts-developer]

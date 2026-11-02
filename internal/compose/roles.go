@@ -44,12 +44,13 @@ type openedModule struct {
 
 // setRoles sets each role of p from three layers, a later layer replacing the name: the
 // base's bind, then the provides of the opened modules, then the bind of p. A provided
-// entry for which dropped reports true provides nothing; a nil dropped drops none.
+// entry for which dropped reports true provides nothing.
 //
 // Two modules that provide one role with different names fail the compose, unless the
-// bind of p sets the role. With a nil dropped, such a role is left unset and no error is
-// returned, since the selection may still leave one of the entries out.
-func setRoles(p *stack.Stack, opened []openedModule, dropped func(kind, name string) bool) ([]Role, error) {
+// bind of p sets the role. With first set, for the roles before the selection, such a
+// role keeps the name of the layer below and no error is returned, since the selection
+// may still leave one of the entries out.
+func setRoles(p *stack.Stack, opened []openedModule, dropped func(o openedModule, kind, name string) bool, first bool) ([]Role, error) {
 	set := map[string]Role{}
 	for kind, roles := range p.BaseBind {
 		for role, name := range roles {
@@ -60,7 +61,7 @@ func setRoles(p *stack.Stack, opened []openedModule, dropped func(kind, name str
 	for _, o := range opened {
 		for kind, roles := range o.m.Provides {
 			for role, name := range roles {
-				if dropped != nil && dropped(kind, name) {
+				if dropped(o, kind, name) {
 					continue
 				}
 				key := kind + "/" + role
@@ -80,8 +81,7 @@ func setRoles(p *stack.Stack, opened []openedModule, dropped func(kind, name str
 			}
 		}
 		if len(names) > 1 {
-			if dropped == nil {
-				delete(set, key)
+			if first {
 				continue
 			}
 			return nil, twoProviders(p, key, list)
@@ -127,6 +127,13 @@ func andList(names []string) string {
 		return strings.Join(names, "")
 	}
 	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+}
+
+// excludedBy reports whether the exclude of o, or the exclude a checkout's qory.yaml
+// lists for o, lists the entry of kind and name. Both are known before the compose reads
+// the entries, so the roles before the selection drop what they leave out.
+func excludedBy(o openedModule, kind, name string) bool {
+	return slices.Contains(o.pl.Exclude.Kinds[kind], name) || slices.Contains(o.pl.CheckoutExclude.Kinds[kind], name)
 }
 
 // flatRoles is roles keyed <kind>/<role>, nil for none.

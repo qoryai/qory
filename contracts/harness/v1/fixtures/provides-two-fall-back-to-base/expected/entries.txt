@@ -1,0 +1,4 @@
+agents/core-developer core
+agents/ex-reviewer ex
+agents/ts-reviewer ts
+skills/deploy core

@@ -315,9 +315,10 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		}
 		opened = append(opened, o)
 	}
-	// The roles before the selection: two modules that provide one role leave it unset
-	// here, and the roles are set again once the selection is known.
-	roles, _ := setRoles(p, opened, nil)
+	// The roles before the selection: a provided entry that the providing module's exclude
+	// lists provides nothing, and a role that two modules provide keeps the name of the
+	// layer below. The roles are set again once the selection is known.
+	roles, _ := setRoles(p, opened, excludedBy, true)
 	res.Bind = flatRoles(roles)
 	owners := map[string][]string{}
 	paths := map[string]string{}
@@ -439,9 +440,9 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	for _, e := range res.Entries {
 		composed[e.Kind+"/"+e.Name] = true
 	}
-	res.Roles, err = setRoles(p, opened, func(kind, name string) bool {
+	res.Roles, err = setRoles(p, opened, func(_ openedModule, kind, name string) bool {
 		return !composed[kind+"/"+name] && excludeOf(res, kind, name) != nil
-	})
+	}, false)
 	if err != nil {
 		return nil, err
 	}
