@@ -162,6 +162,21 @@ func (e *RefusedError) Error() string {
 	return fmt.Sprintf("the git configuration of %s sets %s, which qory does not write; qory runs no git there, since a run could have set it to make git on this machine run a program", Shown(e.Dir), ShownKey(accesskey.ShownName(e.Key, false)))
 }
 
+// fixStarts are the starts of the sentences of a refusal's text with a fix for a person.
+var fixStarts = []string{". qory setup repo", ". Remove ", ". If docker ps"}
+
+// Cause is the text of the refusal without its fix, for a caller whose fix is another: a
+// step after a run, whose code is used, cannot run again in the same place.
+func (e *RefusedError) Cause() string {
+	text := e.Error()
+	for _, start := range fixStarts {
+		if i := strings.Index(text, start); i >= 0 {
+			return text[:i]
+		}
+	}
+	return text
+}
+
 // unreadable is the refusal of a configuration of the repository at dir that git could
 // not read, err being why: [RefusedNoGit] when there is no git to read it with,
 // [RefusedUnreadable] otherwise.

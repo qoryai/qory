@@ -98,6 +98,8 @@ const (
 	causeHardLink      = "it has the hard link %s, and a write to it would change another file"
 	causeCommonDir     = "its .git has a commondir file, which makes git read the configuration of another repository"
 	causeGrafts        = "its .git has info/grafts, which gives commits other parents, so a push that overwrites a branch would pass as a fast-forward"
+	causeGitFailed     = "git failed: %s"
+	causeLocal         = "the read of its files failed: %s"
 	causeNoGitPart     = "its .git has no %s, so git would take a folder above it for the repository"
 	textFetched        = "qory run: fetched %s at %s in %s"
 	textFetchedOne     = "qory run: fetched %s at %s and 1 further repository in %s"
@@ -835,12 +837,14 @@ var answered = regexp.MustCompile(`(?i)authentication failed|could not read (use
 // gitFailed is [textGitFailed] with git's line, or what kept git from running, made
 // printable.
 func gitFailed(err error) error {
-	return fmt.Errorf(textGitFailed, integration.Printable(exports.HideURLError(err).Error()))
+	shown := integration.Printable(exports.HideURLError(err).Error())
+	return &unsafeError{fmt.Sprintf(textGitFailed, shown), fmt.Sprintf(causeGitFailed, shown)}
 }
 
 // local is [textLocal]: a failure on the machine, not of a fetch.
 func local(err error) error {
-	return fmt.Errorf(textLocal, integration.Printable(exports.HideError(err).Error()))
+	shown := integration.Printable(exports.HideError(err).Error())
+	return &unsafeError{fmt.Sprintf(textLocal, shown), fmt.Sprintf(causeLocal, shown)}
 }
 
 // The words of a failure of qory run prepare inside the wall that is not of a fetch:

@@ -39,6 +39,7 @@ const (
 	textNoSetupRecord    = "qory run: take the work item in again in Qory Apiary: the record of what the setup changed in %s failed: %s; the code is used"
 	textNotSafe          = "qory run: take the work item in again in Qory Apiary: after the agent exited, the check of repository %s failed, so qory committed and pushed nothing: %s; the code is used"
 	textNoCommitLeft     = "qory run: take the work item in again in Qory Apiary: the commit of what the agent left in %s failed: %s; the code is used"
+	textNoHistory        = "qory run: take the work item in again in Qory Apiary: the check that HEAD of %s descends from commit %s failed: %s; the code is used"
 	textNotFastForward   = "qory run: take the work item in again in Qory Apiary, and keep the run's commits on top of commit %[3]s: HEAD of %[1]s is at %[2]s, which does not descend from it, so a push would not be a fast-forward; the code is used"
 	textVersionWays      = "add a new version of the artifact branch in Qory Apiary with the head of %[1]s on %[2]s, or delete that branch on %[3]s"
 	textBranchMoved      = "qory run: " + textVersionWays + ", then take the work item in again: the branch moved since the run fetched it, and the push failed: %[4]s; the code is used"
@@ -100,11 +101,13 @@ func stepGit(p *proxygit.Proxy, input string, env ...string) gitRunner {
 // Before any git writes, [safeAfterRun] checks the target and [safeFurther] each further
 // repository, since the agent could write each .git, and the hold on the working folder
 // lasts until Push returns. Every git runs with the environment [proxygit.Env] makes, so
-// it reads no system or global configuration file and no credential helper of one runs,
-// and with [proxygit.Hardened], so a hook, a filter or another program that .git names
-// does not run. The two exceptions are the checks of a recorded place in
-// [hostgit.Hold], git config --file and git rev-parse, which use the flags of hostgit
-// and reach no remote. The commits of every repository come before the first push, so
+// it reads no system or global configuration file, and with [proxygit.Hardened], which
+// turns off the hooks in .git, fsmonitor and credential helpers. The two exceptions are
+// the checks of a recorded place in [hostgit.Hold], git config --file and git rev-parse,
+// which use the flags of hostgit and reach no remote. No option turns a filter off: the
+// check stops on each key that git init and the fetch do not write, filter keys among
+// them, so a filter stays out only while no process writes .git/config after the check.
+// The commits of every repository come before the first push, so
 // a failed commit pushes nothing. A path that [RecordSetup] recorded and that is as the
 // setup left it stays out of the commit.
 //
@@ -337,8 +340,8 @@ func restoreLeftOut(ctx context.Context, git gitRunner, dir, start string) error
 
 // changedPaths is each path git status lists in dir, with no rename, so a moved file is
 // two paths. With a gitlink, .gitmodules can make git status run git status in the
-// repository there, and with it what that repository's configuration names, which no
-// check read: --ignore-submodules=all wins over .gitmodules.
+// repository there, and with it a program set in that repository's configuration, which
+// no check read: --ignore-submodules=all wins over .gitmodules.
 func changedPaths(ctx context.Context, git gitRunner, dir string) ([]string, error) {
 	status, err := git(ctx, dir, "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--ignore-submodules=all")
 	if err != nil {
@@ -473,8 +476,12 @@ func headPast(ctx context.Context, git gitRunner, dir string, r WorkRepository) 
 	if head == r.Commit {
 		return "", nil
 	}
-	if _, err := git(ctx, dir, "merge-base", "--is-ancestor", r.Commit, head); err != nil {
+	_, err = git(ctx, dir, "merge-base", "--is-ancestor", r.Commit, head)
+	if ge := (*gitError)(nil); errors.As(err, &ge) && ge.exit == 1 {
 		return "", fmt.Errorf(textNotFastForward, shownPath(r.Path), shortCommit(head), shortCommit(r.Commit))
+	}
+	if err != nil {
+		return "", fmt.Errorf(textNoHistory, shownPath(r.Path), shortCommit(r.Commit), integration.Printable(exports.HideURLError(err).Error()))
 	}
 	return head, nil
 }
@@ -556,7 +563,7 @@ func pushFailed(b *WorkBranch, path string, err error) error {
 	return fmt.Errorf(textPushNotReached, shown, host, cause)
 }
 
-// pushCause is the line of git's output that says why a push failed, made printable: the
+// pushCause is the line of git's output with the reason a push failed, made printable: the
 // line of the ref, else the first error, else the first line. The first line of a
 // rejected push is the remote's address.
 func pushCause(output string) string {

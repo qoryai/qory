@@ -836,10 +836,10 @@ func TestARateLimitIsBounded(t *testing.T) {
 	wants(t, r.out, "qory run: "+versionWays+", then take the work item in again: qory pushed qory/"+workItem+", and the version of the artifact branch was not stored: ")
 }
 
-// TestALostAnswerOfAStoredVersionSendsNothingAgain is a POST that stored its version and
-// whose answer came back 502: the step reads the index, finds the version and sends no
+// TestNoResponseToAStoredVersionSendsNothingAgain is a POST that stored its version and
+// whose response is a 502: the step reads the index, finds the version and sends no
 // second POST. A second case loses the connection.
-func TestALostAnswerOfAStoredVersionSendsNothingAgain(t *testing.T) {
+func TestNoResponseToAStoredVersionSendsNothingAgain(t *testing.T) {
 	for name, lose := range map[string]func(http.ResponseWriter){
 		"answer_unverified": func(w http.ResponseWriter) { failing(w, http.StatusBadGateway, "answer_unverified", "") },
 		"no response": func(w http.ResponseWriter) {
@@ -864,9 +864,9 @@ func TestALostAnswerOfAStoredVersionSendsNothingAgain(t *testing.T) {
 	}
 }
 
-// TestALostAnswerOfNoVersionSendsAgain is a POST that stored nothing and came back 503:
+// TestNoResponseWithNoVersionSendsAgain is a POST that stored nothing and came back 503:
 // the index has no version, so a second POST stores one.
-func TestALostAnswerOfNoVersionSendsAgain(t *testing.T) {
+func TestNoResponseWithNoVersionSendsAgain(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.api.post = func(n int, w http.ResponseWriter) (bool, bool) {
 		if n == 1 {
@@ -882,9 +882,9 @@ func TestALostAnswerOfNoVersionSendsAgain(t *testing.T) {
 	}
 }
 
-// TestALostAnswerThatTheIndexDoesNotSettleFails is a lost answer and an index that stays
+// TestNoResponseThatTheIndexDoesNotSettleFails is a request with no response and an index that stays
 // unreadable: no second POST goes out, and the step fails with what is unknown.
-func TestALostAnswerThatTheIndexDoesNotSettleFails(t *testing.T) {
+func TestNoResponseThatTheIndexDoesNotSettleFails(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.api.post = func(_ int, w http.ResponseWriter) (bool, bool) {
 		failing(w, http.StatusServiceUnavailable, "unavailable", "")
@@ -903,7 +903,7 @@ func TestALostAnswerThatTheIndexDoesNotSettleFails(t *testing.T) {
 		t.Errorf("%d POST, %d reads, want 1, and the read of the fetch and 5", posts, reads)
 	}
 	wants(t, r.out, "qory run: check the artifact branch of the work item in Qory Apiary; with no version of this run, "+versionWays+"; then take the work item in again: qory pushed qory/"+workItem+
-		", and the request that stores its version got no answer, so the version may or may not be stored: ")
+		", and the request that stores its version ended with no response, so the version may or may not be stored: ")
 }
 
 // TestAWorkspaceWithoutTheTypeFailsTheStep is unknown_type: the step fails after the push,

@@ -1997,7 +1997,7 @@ The step does this, in order:
    `info/grafts`, on a `commondir` file, on a `.git` with no `HEAD`, `objects` or `refs`,
    on a link in `.git` or on the way to a further repository, and on a hard link in `.git`
    outside `objects`. A walled run's target also gets the settings check of the place the
-   run used.
+   run used, which stops on a `remote.origin.url` other than the one it recorded.
 2. qory removes `.git/index.lock` of each repository, a file that an agent killed in a git
    command leaves behind, and prints `qory run: removed .git/index.lock of <path>, which the
    agent left when it stopped`. qory does this only for a walled run, whose container the
@@ -2080,6 +2080,8 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   used`, before any commit
 - `take the work item in again in Qory Apiary: the commit of what the agent left in <path>
   failed: <error>; the code is used`
+- `take the work item in again in Qory Apiary: the check that HEAD of <path> descends from
+  commit <commit> failed: <error>; the code is used`
 - `take the work item in again in Qory Apiary, and keep the run's commits on top of commit
   <commit>: HEAD of <path> is at <commit>, which does not descend from it, so a push would
   not be a fast-forward; the code is used`, when the agent replaced the commit the run
@@ -2113,8 +2115,8 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
 - `check the artifact branch of the work item in Qory Apiary; with no version of this run,
   add a new version of the artifact branch in Qory Apiary with the head of qory/<work item
   id> on <path>, or delete that branch on <system>; then take the work item in again: qory
-  pushed <branch>, and the request that stores its version got no answer, so the version may
-  or may not be stored: <error>; the code is used`
+  pushed <branch>, and the request that stores its version ended with no response, so the
+  version may or may not be stored: <error>; the code is used`
 - `add a new version of the artifact branch in Qory Apiary with the head of qory/<work item
   id> on <path>, or delete that branch on <system>: qory pushed <path> and stored no version,
   because the push of the next repository failed: <line of that failure>`

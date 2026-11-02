@@ -38,7 +38,7 @@ const (
 	textPushNoRunAPI    = "take the work item in again in Qory Apiary: the run API, which stores the version of the artifact " + branchType + ", is not reachable from this run: %s" + codeUsed
 	textNoBranchType    = "Define the artifact type " + branchType + " in the workspace's Artifact types, then %s, then run the round again"
 	textNotStored       = "%s, then take the work item in again: qory pushed %s, and the version of the artifact " + branchType + " was not stored: %s" + codeUsed
-	textStoreUnknown    = "check the artifact " + branchType + " of the work item in Qory Apiary; with no version of this run, %s; then take the work item in again: qory pushed %s, and the request that stores its version got no answer, so the version may or may not be stored: %s" + codeUsed
+	textStoreUnknown    = "check the artifact " + branchType + " of the work item in Qory Apiary; with no version of this run, %s; then take the work item in again: qory pushed %s, and the request that stores its version ended with no response, so the version may or may not be stored: %s" + codeUsed
 	textPushCut         = "take the work item in again in Qory Apiary: %s during the push step, and the run's commits may not have reached the branch" + codeUsed
 	textPushCutPushed   = "check the artifact " + branchType + " of the work item in Qory Apiary; with no version of this run, %s; then take the work item in again: qory pushed %s, and %s, so the version may or may not be stored" + codeUsed
 	textCutSecondSignal = "qory run got a second signal"
@@ -195,7 +195,7 @@ func pushStepName(branch *preparation.WorkBranch, system string) string {
 // storeBranch stores document as a new version of the artifact main of the type branch.
 // The gateway never retries a POST and Qory Apiary does not detect one sent twice, so:
 // a 429, which neither forwarded nor stored the POST, sends it again after Retry-After;
-// a POST whose answer was lost sends it again only when [branchStored] reads that no
+// a POST with no response sends it again only when [branchStored] reads that no
 // version of this run has the document. At most [maxBranchTries] POST go out, and
 // unknown_type is [textNoBranchType]. Every failure has the fix of
 // [preparation.WorkBranch.VersionWays], as the push landed.
@@ -227,7 +227,7 @@ func storeBranch(ctx context.Context, client *runapi.Client, runID, note string,
 		case runapi.HasCode(last, runapi.CodeUnknownType):
 			return fmt.Errorf(textNoBranchType, branch.VersionWays())
 		case runapi.HasCode(last, runapi.CodeRateLimited):
-		case answerLost(last):
+		case noResponse(last):
 			stored, err := branchStored(ctx, client, runID, hex.EncodeToString(sum[:]))
 			switch {
 			case err != nil && ctx.Err() != nil:
@@ -252,10 +252,10 @@ func postBranch(ctx context.Context, client *runapi.Client, push runapi.Push) er
 	return err
 }
 
-// answerLost reports whether err leaves unknown whether the POST stored its version: no
+// noResponse reports whether err leaves unknown whether the POST stored its version: no
 // status of the run API came back, or a status of 500 or above did, as 502
 // answer_unverified and 503 unavailable are.
-func answerLost(err error) bool {
+func noResponse(err error) bool {
 	var apiError *runapi.Error
 	return !errors.As(err, &apiError) || apiError.Status >= http.StatusInternalServerError
 }
@@ -273,7 +273,7 @@ func retryAfter(err error) time.Duration {
 
 // branchStored reports whether the index of the work item has a version of the artifact
 // main of the type branch that the run runID wrote, with one file of the SHA-256 sum. A
-// 429 or a lost answer reads the index again, at most [maxBranchTries] times.
+// 429 or a request with no response reads the index again, at most [maxBranchTries] times.
 func branchStored(ctx context.Context, client *runapi.Client, runID, sum string) (bool, error) {
 	var last error
 	for try := 1; try <= maxBranchTries; try++ {
@@ -289,7 +289,7 @@ func branchStored(ctx context.Context, client *runapi.Client, runID, sum string)
 			return hasBranchVersion(index, runID, sum), nil
 		}
 		last = err
-		if ctx.Err() != nil || !runapi.HasCode(err, runapi.CodeRateLimited) && !answerLost(err) {
+		if ctx.Err() != nil || !runapi.HasCode(err, runapi.CodeRateLimited) && !noResponse(err) {
 			return false, err
 		}
 	}

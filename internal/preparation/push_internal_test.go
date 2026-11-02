@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/qoryai/qory/internal/branchformat"
+	"github.com/qoryai/qory/internal/hostgit"
 )
 
 // onBranch fetches acme/shop, and acme/lib when list has it, and checks out the branch,
@@ -842,6 +843,41 @@ func TestASetupThatSetsTheIdentityStops(t *testing.T) {
 	run(t, dir, "config", "user.name", "The setup")
 	err := RecordSetup(context.Background(), dir, os.Environ(), b)
 	if err == nil || !strings.Contains(err.Error(), "the check stops on each key") {
+		t.Fatalf("the error is %v", err)
+	}
+}
+
+// TestACheckThatFailedHasAFixAPersonCanCarryOut is a failed check after the run whose cause
+// comes from a text for a run that has not started: the line has only the fix of a used code.
+func TestACheckThatFailedHasAFixAPersonCanCarryOut(t *testing.T) {
+	r := WorkRepository{Path: "acme/shop"}
+	for name, err := range map[string]error{
+		"git":     gitFailed(errors.New("fatal: a line of git")),
+		"machine": local(errors.New("a read failed")),
+		"a remote file": &unsafeError{"the line", (&hostgit.RefusedError{
+			Dir: "/w", Key: "remotes/x", Reason: hostgit.RefusedRemoteFile}).Cause()},
+		"a pointer": &unsafeError{"the line", (&hostgit.RefusedError{Reason: hostgit.RefusedPointer}).Cause()},
+	} {
+		got := notSafe(r, err).Error()
+		for _, fix := range []string{"run again", "Remove it", "--accept-checkout", "docker ps"} {
+			if strings.Contains(got, fix) {
+				t.Errorf("%s: %q has %q", name, got, fix)
+			}
+		}
+		if !strings.HasPrefix(got, "qory run: take the work item in again in Qory Apiary: ") || !strings.HasSuffix(got, "; the code is used") {
+			t.Errorf("%s: %q", name, got)
+		}
+	}
+}
+
+// TestAFailedHistoryCheckIsNotANonFastForward is a start commit that the repository does
+// not have, so git merge-base exits 128: only its exit 1 is a history that left the start.
+func TestAFailedHistoryCheckIsNotANonFastForward(t *testing.T) {
+	dir, b := onBranch(t, "acme/shop")
+	r := b.Repositories[0]
+	r.Commit = strings.Repeat("1", 40)
+	_, err := headPast(context.Background(), stepGit(noRemote, ""), dir, r)
+	if err == nil || !strings.Contains(err.Error(), "the check that HEAD of acme/shop descends from commit 111111111111 failed") {
 		t.Fatalf("the error is %v", err)
 	}
 }

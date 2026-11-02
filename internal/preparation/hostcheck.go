@@ -56,8 +56,9 @@ func safeRepository(ctx context.Context, dir string) (*places.Hold, error) {
 // open for writing: it also accepts the keys that the fetch writes, see [fetchKey], and
 // the two keys of a commit's identity, see [hostgit.Identity], since an agent sets those to
 // commit and the commit of the push step sets all four of git's identity variables. git
-// reaches the repository's remote by the URL qory builds, so remote.origin.url can have
-// any value. Every other stop of safeRepository applies, and the error is an
+// reaches the repository's remote by the URL qory builds, so this check takes any value of
+// remote.origin.url, and hostgit's settings check of a walled run's place takes only the
+// URL it recorded. Every other stop of safeRepository applies, and the error is an
 // [*unsafeError].
 func safeAfterRun(ctx context.Context, dir string) (*places.Hold, error) {
 	return checkedRepository(ctx, dir, true)
@@ -147,8 +148,12 @@ func checkedRepository(ctx context.Context, dir string, fetched bool) (*places.H
 	hold, err := hostgit.Hold(holdCtx, dir)
 	if err != nil {
 		if hostgit.Refused(err) {
-			cause := integration.Printable(exports.HideError(err).Error())
-			return nil, &unsafeError{fmt.Sprintf(textPlaceRefused, cause), cause}
+			line := integration.Printable(exports.HideError(err).Error())
+			cause := line
+			if refused := (*hostgit.RefusedError)(nil); errors.As(err, &refused) {
+				cause = integration.Printable(exports.HideError(errors.New(refused.Cause())).Error())
+			}
+			return nil, &unsafeError{fmt.Sprintf(textPlaceRefused, line), cause}
 		}
 		return nil, gitFailed(err)
 	}
