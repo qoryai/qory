@@ -1,0 +1,1155 @@
+package cmd_test
+
+import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/qoryai/forager/event"
+	"github.com/qoryai/forager/session"
+
+	"github.com/qoryai/qory/cmd"
+	"github.com/qoryai/qory/internal/branchformat"
+	"github.com/qoryai/qory/internal/proxygit"
+	"github.com/qoryai/qory/internal/proxygit/proxygittest"
+)
+
+// noType is the line of a workspace with no artifact type branch.
+const noType = "Define the artifact type branch in the workspace's Artifact types, then run the round again"
+
+// pushAPI is a run API that stores the versions of the artifact branch that a run posts.
+// post, when set, gets the number of each POST, from 1, and writes its response when it
+// returns true; store then says whether the POST stored its version. index does the same
+// for each GET of the artifacts. The counts are of the requests that arrived.
+type pushAPI struct {
+	server *httptest.Server
+	mu     sync.Mutex
+	runID  string
+	files  [][]byte
+	notes  []string
+	bodies []string
+	posts  int
+	reads  int
+	post   func(n int, w http.ResponseWriter) (handled, store bool)
+	index  func(n int, w http.ResponseWriter) bool
+}
+
+// newPushAPI serves a run API whose work item has the id [workItem] and the stage st_a.
+func newPushAPI(t *testing.T) *pushAPI {
+	t.Helper()
+	a := &pushAPI{}
+	a.server = httptest.NewServer(http.HandlerFunc(a.serve))
+	t.Cleanup(a.server.Close)
+	return a
+}
+
+// base is the run API's base URL.
+func (a *pushAPI) base() string { return a.server.URL + "/v1/runs/r" }
+
+func (a *pushAPI) serve(w http.ResponseWriter, r *http.Request) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/r/work-item":
+		fmt.Fprintf(w, `{"version":1,"work_item":{"id":%q,"number":1},"stage":{"id":"st_a"},"inputs":[],"outputs":[]}`, workItem)
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/r/artifacts":
+		a.reads++
+		if a.index == nil || !a.index(a.reads, w) {
+			a.writeIndex(w)
+		}
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/runs/r/artifacts/av_"):
+		var n int
+		fmt.Sscanf(r.URL.Path, "/v1/runs/r/artifacts/av_%d/files/branch.json", &n)
+		w.Write(a.files[n-1])
+	case r.Method == http.MethodPost && r.URL.Path == "/v1/runs/r/artifacts":
+		a.posted(w, r)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+// writeIndex writes the index of the versions stored so far.
+func (a *pushAPI) writeIndex(w http.ResponseWriter) {
+	versions := make([]map[string]any, len(a.files))
+	for i, file := range a.files {
+		sum := sha256.Sum256(file)
+		versions[i] = map[string]any{
+			"id": fmt.Sprintf("av_%d", i+1), "number": i + 1, "stage_id": "st_a", "at": "2026-11-02T09:00:00Z",
+			"writer": map[string]any{"kind": "run", "run_id": a.runID},
+			"files": []map[string]any{{
+				"filename": "branch.json", "content_type": "application/json", "size": len(file), "sha256": hex.EncodeToString(sum[:]),
+			}},
+			"approvals": []any{},
+		}
+	}
+	artifacts := []map[string]any{}
+	if len(versions) > 0 {
+		artifacts = append(artifacts, map[string]any{"type": "branch", "name": "main", "newest_version": len(versions), "versions": versions})
+	}
+	json.NewEncoder(w).Encode(map[string]any{"version": 1, "artifacts": artifacts})
+}
+
+// posted stores the file of a POST of the artifact branch, as the run API does.
+func (a *pushAPI) posted(w http.ResponseWriter, r *http.Request) {
+	a.posts++
+	var body struct {
+		Type  string `json:"type"`
+		Name  string `json:"name"`
+		Note  string `json:"note"`
+		Files []struct {
+			Filename    string `json:"filename"`
+			ContentType string `json:"content_type"`
+			Content     string `json:"content_base64"`
+		} `json:"files"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Files) != 1 {
+		http.Error(w, "{}", http.StatusBadRequest)
+		return
+	}
+	content, err := base64.StdEncoding.DecodeString(body.Files[0].Content)
+	if err != nil {
+		http.Error(w, "{}", http.StatusBadRequest)
+		return
+	}
+	a.bodies = append(a.bodies, body.Type+" "+body.Name+" "+body.Files[0].Filename+" "+body.Files[0].ContentType)
+	store := true
+	if a.post != nil {
+		var handled bool
+		if handled, store = a.post(a.posts, w); handled && !store {
+			return
+		}
+		if handled {
+			a.files = append(a.files, content)
+			return
+		}
+	}
+	a.files = append(a.files, content)
+	w.WriteHeader(http.StatusCreated)
+	fmt.Fprintf(w, `{"version":1,"artifact":{"type":"branch","name":"main","version":{"id":"av_%d","number":%d}}}`, len(a.files), len(a.files))
+}
+
+// counts is how many POST and GET artifacts arrived, and how many versions are stored.
+func (a *pushAPI) counts() (posts, reads, stored int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.posts, a.reads, len(a.files)
+}
+
+// document is the stored version number n, from 1, checked against the branch format.
+func (a *pushAPI) document(t *testing.T, n int) branchformat.Branch {
+	t.Helper()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.files) < n {
+		t.Fatalf("%d versions are stored, want %d", len(a.files), n)
+	}
+	if err := branchformat.Check(a.files[n-1]); err != nil {
+		t.Fatalf("version %d: %v", n, err)
+	}
+	var doc branchformat.Branch
+	if err := json.Unmarshal(a.files[n-1], &doc); err != nil {
+		t.Fatal(err)
+	}
+	return doc
+}
+
+// failing is a response of the run API with status and the error code, Retry-After set
+// when it is not empty.
+func failing(w http.ResponseWriter, status int, code, retry string) {
+	if retry != "" {
+		w.Header().Set("Retry-After", retry)
+	}
+	w.WriteHeader(status)
+	fmt.Fprintf(w, `{"error":%q}`, code)
+}
+
+// pushRepo is a run's repository on a stand-in forge that takes a push, with the fixture
+// of a write run. h is the run's working folder and run directory, and repositories is
+// the list of the run configuration.
+type pushRepo struct {
+	h            *hostFetch
+	api          *pushAPI
+	first        string
+	bare         string
+	repositories string
+	change       func(map[string]any)
+	flags        []string
+	waits        []time.Duration
+}
+
+// newPushRepo serves acme/site at one commit, whose stack declares the workflow hello
+// with access, and takes a push.
+func newPushRepo(t *testing.T, access string) *pushRepo {
+	t.Helper()
+	hello := helloFiles(t)
+	h := newHostFetch(t, "", "main")
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	stack := "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: hello\n    source: {path: modules/hello}\n"
+	first := h.server.Repository(t, "acme/site", "main", map[string]string{
+		"qory.yaml":                       ownStack(stack + "workflows:\n  hello:\n    access: " + access + "\n"),
+		"README.md":                       "acme/site\n",
+		"modules/hello/qory-module.yaml":  hello["examples/hello/modules/hello/qory-module.yaml"],
+		"modules/hello/commands/hello.md": hello["examples/hello/modules/hello/commands/hello.md"],
+	})
+	p := &pushRepo{h: h, api: newPushAPI(t), first: first, bare: filepath.Join(h.server.Root, "acme", "site.git"), repositories: "acme/site"}
+	proxygittest.Git(t, p.bare, "config", "http.receivepack", "true")
+	t.Cleanup(cmd.SetBranchWait(func(d time.Duration) { p.waits = append(p.waits, d) }))
+	return p
+}
+
+// pushed is what a run of a [pushRepo] came to.
+type pushed struct {
+	out    string
+	err    error
+	closes []session.Outcome
+	steps  []cmd.StepEvent
+	runID  string
+}
+
+// succeeded is the result of a session that ended with exit 0.
+func succeeded() (*session.Result, error) {
+	return &session.Result{State: event.StateSucceeded}, nil
+}
+
+// run runs qory run from a run code of the work item [workItem] at the commit p.first,
+// with the session that agent stands in for: it writes to the working folder, and its
+// result is what session returns, [succeeded] for nil.
+func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*session.Result, error)) pushed {
+	t.Helper()
+	g := newCodeRelay(t)
+	g.documents = codeDocuments(t, func(d map[string]any) {
+		target := map[string]any{"system": proxygittest.Host, "path": "acme/site"}
+		d["target"], d["inputs"].(map[string]any)["target"] = target, target
+		d["target_version"] = p.first
+		d["harness_hidden"] = false
+		d["run_settings"] = map[string]any{"runtime": "claude"}
+		if p.change != nil {
+			p.change(d)
+		}
+	})
+	if result == nil {
+		result = succeeded
+	}
+	t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
+		// The session has registered the run, as a join does before the runtime starts.
+		if spec.OnVariables != nil {
+			spec.OnVariables(session.Applied{})
+		}
+		if agent != nil {
+			agent(p.h.dir)
+		}
+		return result()
+	}))
+	t.Setenv("QORY_RUN_KEY", "")
+	var got pushed
+	closes, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{
+		System: proxygittest.Host, Repositories: p.repositories, RunAPI: p.api.base(),
+		Proxy: p.h.server.Proxy.URL, CABundle: p.h.server.Proxy.CABundle, Dir: p.h.runDir,
+		OnStep: func(e cmd.StepEvent) { got.steps = append(got.steps, e) },
+		OnOpen: func(spec session.OpenSpec) {
+			got.runID = spec.RunID
+			p.api.mu.Lock()
+			defer p.api.mu.Unlock()
+			p.api.runID = spec.RunID
+		},
+	})
+	defer restore()
+	got.out, got.err = run(t, append([]string{"run", "--run-code-file", codeFile(t, g.code()), "--gateway", g.URL}, p.flags...)...)
+	got.closes = closes()
+	return got
+}
+
+// again gives the next run a new, empty working folder and run directory.
+func (p *pushRepo) again(t *testing.T) {
+	t.Helper()
+	dir := tempDir(t)
+	t.Chdir(dir)
+	runGit(t, dir, "init", "--quiet", "-b", "main")
+	p.h.dir, p.h.runDir = dir, tempDir(t)
+}
+
+// branchHead is the commit of the work item's branch on the forge, "" with no branch.
+func (p *pushRepo) branchHead(t *testing.T) string {
+	t.Helper()
+	return proxygittest.Git(t, p.bare, "for-each-ref", "--format=%(objectname)", "refs/heads/qory/"+workItem)
+}
+
+// step is the push step's name, and the state it exited with, "" with no push step.
+func (r pushed) step() (name, state string) {
+	number := 0
+	for _, e := range r.steps {
+		switch {
+		case e.Type == "step_started" && e.Kind == event.StepPush:
+			name, number = e.Name, e.Step
+		case e.Type == "step_exited" && e.Step == number:
+			state = e.State
+		}
+	}
+	return name, state
+}
+
+// log is the push step's lines.
+func (r pushed) log() string {
+	number := 0
+	var lines strings.Builder
+	for _, e := range r.steps {
+		switch {
+		case e.Type == "step_started" && e.Kind == event.StepPush:
+			number = e.Step
+		case e.Type == "log" && e.Step == number:
+			lines.WriteString(e.Line)
+		}
+	}
+	return lines.String()
+}
+
+// wantsClose fails the test unless the run closed once with state and exited code.
+func (r pushed) wantsClose(t *testing.T, state string, code int) {
+	t.Helper()
+	if len(r.closes) != 1 || r.closes[0].State != state {
+		t.Errorf("the run closed with %+v, want %s", r.closes, state)
+	}
+	if got := cmd.ExitCode(r.err); got != code {
+		t.Errorf("exit %d (%v), want %d\n%s", got, r.err, code, r.out)
+	}
+}
+
+// commitAll commits every file in dir, as an agent does.
+func commitAll(t *testing.T, dir, message string) {
+	t.Helper()
+	proxygittest.Git(t, dir, "add", "-A")
+	proxygittest.Git(t, dir, "-c", "user.name=Agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-m", message)
+}
+
+// writesAndCommits is an agent that commits one file and leaves a second uncommitted.
+func writesAndCommits(t *testing.T) func(string) {
+	return func(dir string) {
+		writeFile(t, filepath.Join(dir, "committed.txt"), "committed\n")
+		commitAll(t, dir, "Add a file")
+		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+		writeFile(t, filepath.Join(dir, "README.md"), "changed\n")
+	}
+}
+
+// TestAWriteRunPushesWhatTheAgentLeft is a write run whose agent made a commit and left a
+// new file and a change uncommitted, from a depth-1 fetch: the branch on the forge has
+// both, one more commit than the agent made with the run's id in its message, on the
+// target version, and the run posts one version in the branch format at that commit.
+func TestAWriteRunPushesWhatTheAgentLeft(t *testing.T) {
+	p := newPushRepo(t, "write")
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if got := gitOut(t, p.h.dir, "rev-parse", "--is-shallow-repository"); got != "true" {
+		t.Errorf("the working folder is shallow: %s, want true", got)
+	}
+	head := p.branchHead(t)
+	if head == "" {
+		t.Fatalf("the forge has no branch\n%s", r.out)
+	}
+	if got := gitOut(t, p.h.dir, "rev-parse", "HEAD"); got != head {
+		t.Errorf("the forge's branch is at %s, the working folder at %s", head, got)
+	}
+	for file, want := range map[string]string{"committed.txt": "committed\n", "left.txt": "left\n", "README.md": "changed\n"} {
+		if got := proxygittest.Git(t, p.bare, "show", head+":"+file); got != strings.TrimSpace(want) {
+			t.Errorf("%s on the branch is %q, want %q", file, got, want)
+		}
+	}
+	if got := proxygittest.Git(t, p.bare, "log", "--format=%s", p.first+".."+head); got != "Changes left by run "+r.runID+"\nAdd a file" {
+		t.Errorf("the branch's new commits are:\n%s", got)
+	}
+	if got := proxygittest.Git(t, p.bare, "log", "-1", "--format=%an <%ae>", head); got != "qory <qory@localhost>" {
+		t.Errorf("the author of the commit is %s", got)
+	}
+	if got := proxygittest.Git(t, p.bare, "merge-base", p.first, head); got != p.first {
+		t.Errorf("the merge base with the target version is %s", got)
+	}
+	doc := p.api.document(t, 1)
+	want := branchformat.Branch{Ref: "qory/" + workItem, Repositories: []branchformat.Repository{{System: proxygittest.Host, Path: "acme/site", Commit: head}}}
+	if doc.Ref != want.Ref || !slices.Equal(doc.Repositories, want.Repositories) {
+		t.Errorf("the version is %+v, want %+v", doc, want)
+	}
+	if posts, _, _ := p.api.counts(); posts != 1 {
+		t.Errorf("%d POST, want 1", posts)
+	}
+	if got := p.api.bodies[0]; got != "branch main branch.json application/json" {
+		t.Errorf("the POST is %q", got)
+	}
+	name, state := r.step()
+	if want := "push qory/" + workItem + " to " + proxygittest.Host + "/acme/site"; name != want || state != event.StateSucceeded {
+		t.Errorf("the push step is %q %s, want %q succeeded\n%+v", name, state, want, r.steps)
+	}
+	wants(t, r.log(), "qory run: pushed qory/"+workItem+" to acme/site at "+head[:12])
+	p.h.noPassword(t, r.out)
+}
+
+// TestARunWithNoNewCommitsPushesNothing is a write run whose agent changed nothing: the
+// step runs, and writes no branch and no version.
+func TestARunWithNoNewCommitsPushesNothing(t *testing.T) {
+	p := newPushRepo(t, "write")
+	r := p.run(t, nil, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if head := p.branchHead(t); head != "" {
+		t.Errorf("the forge has the branch at %s", head)
+	}
+	if posts, reads, _ := p.api.counts(); posts != 0 || reads != 1 {
+		t.Errorf("%d POST and %d reads of the index, want 0 and the read of the fetch", posts, reads)
+	}
+	wants(t, r.log(), "qory run: no new commits to push")
+}
+
+// TestAReadRunPushesNothing is a walled run that only reads, with a change in the working
+// folder: by the documents' access read, and by a workflow declared read in documents
+// with access write. Neither has a push step, a branch on the forge or a version.
+func TestAReadRunPushesNothing(t *testing.T) {
+	for name, c := range map[string]struct {
+		declared string
+		change   func(map[string]any)
+	}{
+		"access read in the documents":   {"write", lowered},
+		"a workflow declared read":       {"read", nil},
+		"a workflow declared read twice": {"read", lowered},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newPushRepo(t, c.declared)
+			docker, _ := fakeDocker(t)
+			walledBy(t, docker)
+			p.change, p.flags = c.change, []string{"--home", filepath.Join(tempDir(t), "home")}
+			r := p.run(t, func(dir string) { writeFile(t, filepath.Join(dir, "left.txt"), "left\n") }, nil)
+			r.wantsClose(t, event.StateSucceeded, 0)
+			if name, _ := r.step(); name != "" {
+				t.Errorf("a push step %q", name)
+			}
+			if head := p.branchHead(t); head != "" {
+				t.Errorf("the forge has the branch at %s", head)
+			}
+			if posts, _, _ := p.api.counts(); posts != 0 {
+				t.Errorf("%d POST, want 0", posts)
+			}
+		})
+	}
+}
+
+// TestASessionThatDidNotSucceedPushesNothing is a write run whose agent left a change and
+// whose session failed, timed out or was cancelled: no push step, and the run closes as
+// the session ended.
+func TestASessionThatDidNotSucceedPushesNothing(t *testing.T) {
+	for name, c := range map[string]struct {
+		result *session.Result
+		state  string
+		code   int
+	}{
+		"failed":    {&session.Result{State: event.StateFailed, ExitCode: 3}, event.StateFailed, 3},
+		"timed out": {&session.Result{State: event.StateCancelled, TimedOut: true, ExitCode: 124}, event.StateCancelled, 124},
+		"cancelled": {&session.Result{State: event.StateCancelled, Cancelled: true, ExitCode: 130}, event.StateCancelled, 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newPushRepo(t, "write")
+			r := p.run(t, writesAndCommits(t), func() (*session.Result, error) { return c.result, nil })
+			r.wantsClose(t, c.state, c.code)
+			if name, _ := r.step(); name != "" {
+				t.Errorf("a push step %q", name)
+			}
+			if head := p.branchHead(t); head != "" {
+				t.Errorf("the forge has the branch at %s", head)
+			}
+			if posts, _, _ := p.api.counts(); posts != 0 {
+				t.Errorf("%d POST, want 0", posts)
+			}
+		})
+	}
+}
+
+// TestASessionThatDidNotStartPushesNothing is a join that returned an error.
+func TestASessionThatDidNotStartPushesNothing(t *testing.T) {
+	p := newPushRepo(t, "write")
+	r := p.run(t, writesAndCommits(t), func() (*session.Result, error) { return nil, errors.New("the join failed") })
+	if len(r.closes) != 1 || r.closes[0].State != event.StateFailed {
+		t.Errorf("the run closed with %+v, want failed", r.closes)
+	}
+	if name, _ := r.step(); name != "" {
+		t.Errorf("a push step %q", name)
+	}
+}
+
+// TestQoryAndHarnessLinksStayOutOfTheCommit is an agent that left a file, a harness link
+// at the root and one in a folder, files under .qory, and an exclude file with none of
+// their lines, and staged a link and a .qory file: the commit has the file alone.
+func TestQoryAndHarnessLinksStayOutOfTheCommit(t *testing.T) {
+	p := newPushRepo(t, "write")
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+		writeFile(t, filepath.Join(dir, ".qory", "harness", "CLAUDE.md"), "the harness\n")
+		writeFile(t, filepath.Join(dir, ".qory", "harness", ".claude", "settings.json"), "{}\n")
+		writeFile(t, filepath.Join(dir, ".claude", "local.txt"), "the checkout's\n")
+		if err := os.Symlink(".qory/harness/CLAUDE.md", filepath.Join(dir, "CLAUDE.md")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("../.qory/harness/.claude/settings.json", filepath.Join(dir, ".claude", "settings.json")); err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, filepath.Join(dir, ".git", "info", "exclude"), "")
+		proxygittest.Git(t, dir, "add", "-f", "CLAUDE.md", ".qory/harness/CLAUDE.md")
+	}, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	head := p.branchHead(t)
+	if head == "" {
+		t.Fatalf("the forge has no branch\n%s", r.out)
+	}
+	got := strings.Fields(proxygittest.Git(t, p.bare, "diff", "--name-only", p.first, head))
+	if want := []string{".claude/local.txt", "left.txt"}; !slices.Equal(got, want) {
+		t.Errorf("the commit has %q, want %q", got, want)
+	}
+}
+
+// TestALinkOfTheAgentIsCommitted is a link that does not lead into .qory: it is the
+// agent's work.
+func TestALinkOfTheAgentIsCommitted(t *testing.T) {
+	p := newPushRepo(t, "write")
+	r := p.run(t, func(dir string) {
+		if err := os.Symlink("README.md", filepath.Join(dir, "LINK.md")); err != nil {
+			t.Fatal(err)
+		}
+	}, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if got := proxygittest.Git(t, p.bare, "diff", "--name-only", p.first, p.branchHead(t)); got != "LINK.md" {
+		t.Errorf("the commit has %q", got)
+	}
+}
+
+// TestIgnoredFilesFollowGit is a file that the repository's .gitignore ignores: it stays
+// out of the commit, and the .gitignore goes in.
+func TestIgnoredFilesFollowGit(t *testing.T) {
+	p := newPushRepo(t, "write")
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, ".gitignore"), "*.log\n")
+		writeFile(t, filepath.Join(dir, "build.log"), "ignored\n")
+	}, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if got := proxygittest.Git(t, p.bare, "diff", "--name-only", p.first, p.branchHead(t)); got != ".gitignore" {
+		t.Errorf("the commit has %q", got)
+	}
+}
+
+// TestAHookInGitDoesNotRun is an agent that wrote each hook a commit and a push run: none
+// runs, and the push goes through.
+func TestAHookInGitDoesNotRun(t *testing.T) {
+	p := newPushRepo(t, "write")
+	mark := filepath.Join(tempDir(t), "ran")
+	r := p.run(t, func(dir string) {
+		for _, hook := range []string{"pre-commit", "commit-msg", "prepare-commit-msg", "post-commit", "pre-push"} {
+			file := filepath.Join(dir, ".git", "hooks", hook)
+			writeFile(t, file, "#!/bin/sh\necho "+hook+" >> "+mark+"\nexit 1\n")
+			if err := os.Chmod(file, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+	}, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if got, err := os.ReadFile(mark); err == nil {
+		t.Errorf("hooks ran: %s", got)
+	}
+	if p.branchHead(t) == "" {
+		t.Errorf("the forge has no branch\n%s", r.out)
+	}
+}
+
+// TestAFailedSafetyCheckFailsTheStep is each thing an agent can write in .git that the
+// check stops on: the step fails, the run closes failed, and no git writes anything: no
+// commit in the working folder, no branch, no version.
+func TestAFailedSafetyCheckFailsTheStep(t *testing.T) {
+	for name, c := range map[string]struct {
+		write func(t *testing.T, dir string)
+		want  string
+	}{
+		"a key that runs a program": {
+			func(t *testing.T, dir string) {
+				proxygittest.Git(t, dir, "config", "core.sshCommand", "/bin/false")
+			},
+			"it has core.sshcommand in .git/config, a key that neither git init nor the fetch writes",
+		},
+		"a hook in the configuration": {
+			func(t *testing.T, dir string) {
+				proxygittest.Git(t, dir, "config", "hook.mark.command", "/bin/false")
+			},
+			"it has hook.mark.command in .git/config",
+		},
+		"a proxy for origin": {
+			func(t *testing.T, dir string) {
+				proxygittest.Git(t, dir, "config", "remote.origin.proxy", "http://127.0.0.1:9")
+			},
+			"it has remote.origin.proxy in .git/config",
+		},
+		"another push URL": {
+			func(t *testing.T, dir string) {
+				proxygittest.Git(t, dir, "config", "remote.origin.pushurl", "https://elsewhere.example/acme/site.git")
+			},
+			"it has remote.origin.pushurl in .git/config",
+		},
+		"a link under .git": {
+			func(t *testing.T, dir string) {
+				if err := os.Symlink(t.TempDir(), filepath.Join(dir, ".git", "refs", "elsewhere")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			"it has the link .git/refs/elsewhere",
+		},
+		"alternates": {
+			func(t *testing.T, dir string) {
+				writeFile(t, filepath.Join(dir, ".git", "objects", "info", "alternates"), "/elsewhere\n")
+			},
+			"its .git has .git/objects/info/alternates",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newPushRepo(t, "write")
+			var head string
+			r := p.run(t, func(dir string) {
+				writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+				commitAll(t, dir, "Add a file")
+				head = gitOut(t, dir, "rev-parse", "HEAD")
+				writeFile(t, filepath.Join(dir, "more.txt"), "more\n")
+				c.write(t, dir)
+			}, nil)
+			r.wantsClose(t, event.StateFailed, 1)
+			if _, state := r.step(); state != event.StateFailed {
+				t.Errorf("the step ended %q, want failed", state)
+			}
+			wants(t, r.out, "qory run: take the work item in again in Qory Apiary: after the agent exited, the check of repository acme/site failed, so qory committed and pushed nothing: "+c.want, "the code is used")
+			wants(t, r.log(), c.want)
+			if got := gitOut(t, p.h.dir, "rev-parse", "HEAD"); got != head {
+				t.Errorf("HEAD moved to %s", got)
+			}
+			if got := p.branchHead(t); got != "" {
+				t.Errorf("the forge has the branch at %s", got)
+			}
+			if posts, _, _ := p.api.counts(); posts != 0 {
+				t.Errorf("%d POST, want 0", posts)
+			}
+		})
+	}
+}
+
+// TestARejectedPushFailsTheStep is a branch on the forge that moved since the run fetched
+// it: git rejects the push, which is a fast-forward with no force, the branch stays
+// where it is, no version is stored, and the run closes failed with the fix first.
+func TestARejectedPushFailsTheStep(t *testing.T) {
+	p := newPushRepo(t, "write")
+	other := tempDir(t)
+	proxygittest.Git(t, other, "clone", "--quiet", p.bare, ".")
+	writeFile(t, filepath.Join(other, "moved.txt"), "moved\n")
+	commitAll(t, other, "Move the branch")
+	proxygittest.Git(t, other, "push", "--quiet", "origin", "HEAD:refs/heads/qory/"+workItem)
+	moved := p.branchHead(t)
+
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	if _, state := r.step(); state != event.StateFailed {
+		t.Errorf("the step ended %q, want failed", state)
+	}
+	wants(t, r.out, "qory run: add a new version of the artifact branch in Qory Apiary with the head of qory/"+workItem+" on acme/site, or delete that branch on "+proxygittest.Host+
+		", then take the work item in again: the branch moved since the run fetched it, and the push failed: ! [rejected]")
+	lacks(t, r.out, proxygittest.Password)
+	if got := p.branchHead(t); got != moved {
+		t.Errorf("the branch moved to %s", got)
+	}
+	if posts, _, _ := p.api.counts(); posts != 0 {
+		t.Errorf("%d POST, want 0", posts)
+	}
+}
+
+// TestAHookOfTheForgeFailsTheStep is a forge that stops the update, as a protected branch
+// does: the line points at the forge's rule.
+func TestAHookOfTheForgeFailsTheStep(t *testing.T) {
+	p := newPushRepo(t, "write")
+	writeFile(t, filepath.Join(p.bare, "hooks", "pre-receive"), "#!/bin/sh\necho the branch is protected >&2\nexit 1\n")
+	if err := os.Chmod(filepath.Join(p.bare, "hooks", "pre-receive"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	wants(t, r.out, "qory run: change the rule on "+proxygittest.Host+" that stops a push to qory/"+workItem+" of acme/site, then take the work item in again: the push failed: ! [remote rejected]")
+}
+
+// TestAPushThatARuleRefusesSaysWhatToAllow is a run's proxy that returns 403 to the POST
+// of the push, as a policy with path rules does when no rule covers git-receive-pack.
+func TestAPushThatARuleRefusesSaysWhatToAllow(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.h.server.Refuse("/acme/site.git/git-receive-pack")
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	wants(t, r.out, "qory run: add /acme/site.git/git-receive-pack to the path rules of the run's policy for "+proxygittest.Host+
+		", and give the run's credential for "+proxygittest.Host+" write access to acme/site, then take the work item in again: the push through the run's gateway returned 403: ")
+	if got := p.branchHead(t); got != "" {
+		t.Errorf("the forge has the branch at %s", got)
+	}
+}
+
+// TestARateLimitedPostWaitsAndSendsAgain is a 429 with Retry-After: 2 twice: the step
+// waits that long each time and the third POST stores one version.
+func TestARateLimitedPostWaitsAndSendsAgain(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.api.post = func(n int, w http.ResponseWriter) (bool, bool) {
+		if n <= 2 {
+			failing(w, http.StatusTooManyRequests, "rate_limited", "2")
+			return true, false
+		}
+		return false, true
+	}
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if posts, reads, stored := p.api.counts(); posts != 3 || stored != 1 || reads != 1 {
+		t.Errorf("%d POST, %d reads, %d stored, want 3, the read of the fetch, 1", posts, reads, stored)
+	}
+	if want := []time.Duration{2 * time.Second, 2 * time.Second}; !slices.Equal(p.waits, want) {
+		t.Errorf("the waits are %v, want %v", p.waits, want)
+	}
+}
+
+// TestARateLimitIsBounded is a 429 to every POST: five go out, the step fails, and the
+// run closes failed. A Retry-After past a minute waits a minute.
+func TestARateLimitIsBounded(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.api.post = func(_ int, w http.ResponseWriter) (bool, bool) {
+		failing(w, http.StatusTooManyRequests, "rate_limited", "3600")
+		return true, false
+	}
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	if posts, _, stored := p.api.counts(); posts != 5 || stored != 0 {
+		t.Errorf("%d POST, %d stored, want 5 and 0", posts, stored)
+	}
+	if len(p.waits) != 4 || p.waits[0] != time.Minute {
+		t.Errorf("the waits are %v, want 4 of a minute", p.waits)
+	}
+	wants(t, r.out, "qory run: take the work item in again in Qory Apiary: qory pushed qory/"+workItem+", and the version of the artifact branch was not stored: ")
+}
+
+// TestALostAnswerOfAStoredVersionSendsNothingAgain is a POST that stored its version and
+// whose answer came back 502: the step reads the index, finds the version and sends no
+// second POST. A second case loses the connection.
+func TestALostAnswerOfAStoredVersionSendsNothingAgain(t *testing.T) {
+	for name, lose := range map[string]func(http.ResponseWriter){
+		"answer_unverified": func(w http.ResponseWriter) { failing(w, http.StatusBadGateway, "answer_unverified", "") },
+		"no response": func(w http.ResponseWriter) {
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				conn.Close()
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newPushRepo(t, "write")
+			p.api.post = func(_ int, w http.ResponseWriter) (bool, bool) {
+				lose(w)
+				return true, true
+			}
+			r := p.run(t, writesAndCommits(t), nil)
+			r.wantsClose(t, event.StateSucceeded, 0)
+			if posts, reads, stored := p.api.counts(); posts != 1 || stored != 1 || reads != 2 {
+				t.Errorf("%d POST, %d reads, %d stored, want 1, 2 and 1", posts, reads, stored)
+			}
+		})
+	}
+}
+
+// TestALostAnswerOfNoVersionSendsAgain is a POST that stored nothing and came back 503:
+// the index has no version, so a second POST stores one.
+func TestALostAnswerOfNoVersionSendsAgain(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.api.post = func(n int, w http.ResponseWriter) (bool, bool) {
+		if n == 1 {
+			failing(w, http.StatusServiceUnavailable, "unavailable", "")
+			return true, false
+		}
+		return false, true
+	}
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if posts, reads, stored := p.api.counts(); posts != 2 || stored != 1 || reads != 2 {
+		t.Errorf("%d POST, %d reads, %d stored, want 2, 2 and 1", posts, reads, stored)
+	}
+}
+
+// TestALostAnswerThatTheIndexDoesNotSettleFails is a lost answer and an index that stays
+// unreadable: no second POST goes out, and the step fails with what is unknown.
+func TestALostAnswerThatTheIndexDoesNotSettleFails(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.api.post = func(_ int, w http.ResponseWriter) (bool, bool) {
+		failing(w, http.StatusServiceUnavailable, "unavailable", "")
+		return true, false
+	}
+	p.api.index = func(n int, w http.ResponseWriter) bool {
+		if n == 1 {
+			return false
+		}
+		failing(w, http.StatusServiceUnavailable, "unavailable", "")
+		return true
+	}
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	if posts, reads, _ := p.api.counts(); posts != 1 || reads != 6 {
+		t.Errorf("%d POST, %d reads, want 1, and the read of the fetch and 5", posts, reads)
+	}
+	wants(t, r.out, "qory run: check the artifact branch of the work item in Qory Apiary, then take the work item in again: qory pushed qory/"+workItem+
+		", and the request that stores its version got no answer, so the version may or may not be stored: ")
+}
+
+// TestAWorkspaceWithoutTheTypeFailsTheStep is unknown_type: the step fails with the line
+// of the workflow model, word for word, after the push.
+func TestAWorkspaceWithoutTheTypeFailsTheStep(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.api.post = func(_ int, w http.ResponseWriter) (bool, bool) {
+		failing(w, http.StatusUnprocessableEntity, "unknown_type", "")
+		return true, false
+	}
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	if _, state := r.step(); state != event.StateFailed {
+		t.Errorf("the step ended %q, want failed", state)
+	}
+	wants(t, r.out, "qory run: "+noType+"\n")
+	wants(t, r.log(), "qory run: "+noType+"\n")
+	if posts, reads, _ := p.api.counts(); posts != 1 || reads != 1 {
+		t.Errorf("%d POST, %d reads, want 1 and the read of the fetch", posts, reads)
+	}
+	if p.branchHead(t) == "" {
+		t.Error("the forge has no branch: the push comes before the POST")
+	}
+}
+
+// TestARunEndedPostFailsTheStep is 409 run_ended: no second POST.
+func TestARunEndedPostFailsTheStep(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.api.post = func(_ int, w http.ResponseWriter) (bool, bool) {
+		failing(w, http.StatusConflict, "run_ended", "")
+		return true, false
+	}
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	if posts, _, _ := p.api.counts(); posts != 1 {
+		t.Errorf("%d POST, want 1", posts)
+	}
+}
+
+// TestASecondRunStartsAtThePushedCommit is two runs of one work item: the second fetches
+// the commit of the version the first posted, starts on the branch there, adds a commit,
+// and its push is a fast-forward of the first. Its version replaces the commit.
+func TestASecondRunStartsAtThePushedCommit(t *testing.T) {
+	p := newPushRepo(t, "write")
+	first := p.run(t, writesAndCommits(t), nil)
+	first.wantsClose(t, event.StateSucceeded, 0)
+	pushedHead := p.branchHead(t)
+
+	p.again(t)
+	var startedAt, onBranch string
+	second := p.run(t, func(dir string) {
+		startedAt = gitOut(t, dir, "rev-parse", "HEAD")
+		onBranch = gitOut(t, dir, "symbolic-ref", "--short", "HEAD")
+		writeFile(t, filepath.Join(dir, "second.txt"), "second\n")
+	}, nil)
+	second.wantsClose(t, event.StateSucceeded, 0)
+	if startedAt != pushedHead || onBranch != "qory/"+workItem {
+		t.Errorf("the second run started at %s on %s, want %s on the branch", startedAt, onBranch, pushedHead)
+	}
+	wants(t, second.out, "qory run: on branch qory/"+workItem+" at "+pushedHead[:12])
+	head := p.branchHead(t)
+	if got := proxygittest.Git(t, p.bare, "merge-base", pushedHead, head); got != pushedHead || head == pushedHead {
+		t.Errorf("the branch went from %s to %s, not as a fast-forward", pushedHead, head)
+	}
+	if got := proxygittest.Git(t, p.bare, "log", "-1", "--format=%s", head); got != "Changes left by run "+second.runID {
+		t.Errorf("the new commit's message is %q", got)
+	}
+	doc := p.api.document(t, 2)
+	if len(doc.Repositories) != 1 || doc.Repositories[0].Commit != head {
+		t.Errorf("the second version is %+v, want %s", doc, head)
+	}
+}
+
+// TestAVersionKeepsAnUnchangedRepository is a run of two repositories that reads a
+// version with both, whose agent changed the further one alone: the new version has the
+// target's commit as it was and the further one's new commit, and the target has no push.
+func TestAVersionKeepsAnUnchangedRepository(t *testing.T) {
+	p := newPushRepo(t, "write")
+	lib := p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
+	libBare := filepath.Join(p.h.server.Root, "acme", "lib.git")
+	proxygittest.Git(t, libBare, "config", "http.receivepack", "true")
+	p.repositories = "acme/site,acme/lib"
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "site.txt"), "site\n")
+		writeFile(t, filepath.Join(dir, ".qory", "repositories", "acme", "lib", "lib.txt"), "changed\n")
+	}, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	doc := p.api.document(t, 1)
+	if len(doc.Repositories) != 2 {
+		t.Fatalf("the first version is %+v, want both repositories\n%s", doc, r.out)
+	}
+	if name, _ := r.step(); name != "push qory/"+workItem+" to "+proxygittest.Host+"/acme/site and 1 further repository" {
+		t.Errorf("the push step is %q", name)
+	}
+	libHead := proxygittest.Git(t, libBare, "rev-parse", "refs/heads/qory/"+workItem)
+	if got := proxygittest.Git(t, libBare, "merge-base", lib, libHead); got != lib {
+		t.Errorf("the further repository's branch does not descend from %s", lib)
+	}
+	siteHead := p.branchHead(t)
+
+	p.again(t)
+	second := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, ".qory", "repositories", "acme", "lib", "second.txt"), "second\n")
+	}, nil)
+	second.wantsClose(t, event.StateSucceeded, 0)
+	next := p.api.document(t, 2)
+	want := []branchformat.Repository{
+		{System: proxygittest.Host, Path: "acme/site", Commit: siteHead},
+		{System: proxygittest.Host, Path: "acme/lib", Commit: proxygittest.Git(t, libBare, "rev-parse", "refs/heads/qory/"+workItem)},
+	}
+	if !slices.Equal(next.Repositories, want) {
+		t.Errorf("the second version has %+v, want %+v", next.Repositories, want)
+	}
+	if want[1].Commit == libHead {
+		t.Error("the further repository did not move")
+	}
+	if got := p.branchHead(t); got != siteHead {
+		t.Errorf("the target moved to %s", got)
+	}
+}
+
+// TestAWalledRunPushes is a walled run: the check of the settings of a place the run used
+// passes after the session, and a further repository too.
+func TestAWalledRunPushes(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
+	proxygittest.Git(t, filepath.Join(p.h.server.Root, "acme", "lib.git"), "config", "http.receivepack", "true")
+	p.repositories = "acme/site,acme/lib"
+	docker, _ := fakeDocker(t)
+	walledBy(t, docker)
+	p.flags = []string{"--home", filepath.Join(tempDir(t), "home")}
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+		writeFile(t, filepath.Join(dir, ".qory", "repositories", "acme", "lib", "left.txt"), "left\n")
+	}, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if doc := p.api.document(t, 1); len(doc.Repositories) != 2 {
+		t.Errorf("the version is %+v, want both repositories\n%s", doc, r.out)
+	}
+}
+
+// TestAWalledRunWithAnAddedKeyFailsTheStep is the settings check of a place a walled run
+// used, which comes first: the line has its words.
+func TestAWalledRunWithAnAddedKeyFailsTheStep(t *testing.T) {
+	p := newPushRepo(t, "write")
+	docker, _ := fakeDocker(t)
+	walledBy(t, docker)
+	p.flags = []string{"--home", filepath.Join(tempDir(t), "home")}
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+		proxygittest.Git(t, dir, "config", "core.fsmonitor", "/bin/false")
+	}, nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	wants(t, r.out, "after the agent exited, the check of repository acme/site failed, so qory committed and pushed nothing: ", "core.fsmonitor")
+	if got := p.branchHead(t); got != "" {
+		t.Errorf("the forge has the branch at %s", got)
+	}
+}
+
+// TestAHistoryThatLeavesTheStartFailsTheStep is an agent that replaced the commit the run
+// started at: on a branch the forge does not have yet any push would pass, so the step
+// stops before the push.
+func TestAHistoryThatLeavesTheStartFailsTheStep(t *testing.T) {
+	p := newPushRepo(t, "write")
+	r := p.run(t, func(dir string) {
+		proxygittest.Git(t, dir, "-c", "user.name=Agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "--amend", "-m", "Replace the first commit")
+	}, nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	wants(t, r.out, "qory run: take the work item in again in Qory Apiary, and keep the run's commits on top of commit "+p.first[:12])
+	if got := p.branchHead(t); got != "" {
+		t.Errorf("the forge has the branch at %s", got)
+	}
+}
+
+// TestAPushOverOneMebibyteThroughTheProxy is a commit larger than http.postBuffer, which
+// git sends chunked. The stand-in proxy is a tunnel, so this covers the git side alone.
+func TestAPushOverOneMebibyteThroughTheProxy(t *testing.T) {
+	p := newPushRepo(t, "write")
+	r := p.run(t, func(dir string) {
+		large := make([]byte, 2<<20)
+		for i := range large {
+			large[i] = byte(i * 2654435761 >> 13)
+		}
+		sum := sha256.Sum256(large)
+		for i := 0; i < len(large)-32; i += 32 {
+			copy(large[i:], sum[:])
+			sum = sha256.Sum256(sum[:])
+		}
+		if err := os.WriteFile(filepath.Join(dir, "large.bin"), large, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if p.branchHead(t) == "" {
+		t.Errorf("the forge has no branch\n%s", r.out)
+	}
+}
+
+// recordGit puts a git on the PATH that adds one line for each call to the file it
+// returns, and then runs the git it replaced: GIT_CONFIG_NOSYSTEM, GIT_CONFIG_GLOBAL, and
+// the arguments, separated by |. A call with no system or no global setting off reads
+// the file config in place of the file of this machine, so a step that loses those
+// settings fails the test and never reaches a credential helper of this machine, such
+// as one that opens a window on the desktop.
+func recordGit(t *testing.T, config string) string {
+	t.Helper()
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git is not installed")
+	}
+	calls := filepath.Join(tempDir(t), "calls")
+	writeFile(t, calls, "")
+	bin := tempDir(t)
+	script := "#!/bin/sh\nprintf '%s|%s|%s\\n' \"$GIT_CONFIG_NOSYSTEM\" \"$GIT_CONFIG_GLOBAL\" \"$*\" >> " + calls + "\n" +
+		"if [ \"$GIT_CONFIG_NOSYSTEM\" != 1 ]; then GIT_CONFIG_SYSTEM=" + config + "; export GIT_CONFIG_SYSTEM; fi\n" +
+		"GIT_CONFIG_GLOBAL=${GIT_CONFIG_GLOBAL:-" + config + "}; export GIT_CONFIG_GLOBAL\n" +
+		"exec " + real + " \"$@\"\n"
+	writeFile(t, filepath.Join(bin, "git"), script)
+	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return calls
+}
+
+// subcommand is the first word of args that no -c option comes with.
+func subcommand(args []string) string {
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-c" {
+			i++
+			continue
+		}
+		return args[i]
+	}
+	return ""
+}
+
+// TestEveryGitOfThePushStepIsHardened records each git after the agent exits: each reads
+// no system or global configuration file, and each has [proxygit.Hardened] apart from
+// the two checks of a recorded place in a walled run, which hostgit runs.
+func TestEveryGitOfThePushStepIsHardened(t *testing.T) {
+	for name, walled := range map[string]bool{"unwalled": false, "walled": true} {
+		t.Run(name, func(t *testing.T) {
+			p := newPushRepo(t, "write")
+			if walled {
+				docker, _ := fakeDocker(t)
+				walledBy(t, docker)
+				p.flags = []string{"--home", filepath.Join(tempDir(t), "home")}
+			}
+			// The values of the test differ from the ones the step must set.
+			empty := filepath.Join(tempDir(t), "gitconfig")
+			writeFile(t, empty, "")
+			t.Setenv("GIT_CONFIG_NOSYSTEM", "0")
+			t.Setenv("GIT_CONFIG_SYSTEM", empty)
+			t.Setenv("GIT_CONFIG_GLOBAL", empty)
+			calls := recordGit(t, empty)
+			const agentExited = "agent exited"
+			r := p.run(t, func(dir string) {
+				writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+				before, err := os.ReadFile(calls)
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeFile(t, calls, string(before)+agentExited+"\n")
+			}, nil)
+			r.wantsClose(t, event.StateSucceeded, 0)
+			log, err := os.ReadFile(calls)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, step, ok := strings.Cut(string(log), agentExited+"\n")
+			if !ok {
+				t.Fatalf("the file of calls has no line %q:\n%s", agentExited, log)
+			}
+			seen := map[string]bool{}
+			for line := range strings.Lines(step) {
+				parts := strings.SplitN(strings.TrimSuffix(line, "\n"), "|", 3)
+				if len(parts) != 3 {
+					t.Fatalf("the line %q has no three parts", line)
+				}
+				nosystem, global, args := parts[0], parts[1], strings.Fields(parts[2])
+				if nosystem != "1" || global != os.DevNull {
+					t.Errorf("git %s has GIT_CONFIG_NOSYSTEM=%q and GIT_CONFIG_GLOBAL=%q", parts[2], nosystem, global)
+				}
+				sub := subcommand(args)
+				seen[sub] = true
+				hostgitCheck := walled && (slices.Contains(args, "--path-format=absolute") || sub == "config" && !strings.Contains(parts[2], "--name-only"))
+				if hostgitCheck {
+					continue
+				}
+				if !strings.Contains(strings.Join(args, " "), strings.Join(proxygit.Hardened, " ")) {
+					t.Errorf("git %s has no options %v", parts[2], proxygit.Hardened)
+				}
+			}
+			for _, want := range []string{"config", "status", "reset", "add", "diff", "commit", "rev-parse", "merge-base", "push"} {
+				if !seen[want] {
+					t.Errorf("the step ran no git %s:\n%s", want, step)
+				}
+			}
+		})
+	}
+}
+
+// TestACredentialHelperOfAConfigFileIsNotRead has a system or global configuration file
+// with a helper that writes a file. The helper does not run in a run that fetches and
+// pushes through a proxy with a password. A plain git with the same file and the same
+// proxy runs it, so the test fails if the helper stops being reachable.
+func TestACredentialHelperOfAConfigFileIsNotRead(t *testing.T) {
+	for name, variable := range map[string]string{"system": "GIT_CONFIG_SYSTEM", "global": "GIT_CONFIG_GLOBAL"} {
+		t.Run(name, func(t *testing.T) {
+			p := newPushRepo(t, "write")
+			marker := filepath.Join(tempDir(t), "helper-ran")
+			helper := filepath.Join(tempDir(t), "helper")
+			writeFile(t, helper, "#!/bin/sh\nprintf '%s\\n' \"$1\" >> "+marker+"\n")
+			if err := os.Chmod(helper, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			config := filepath.Join(tempDir(t), "gitconfig")
+			writeFile(t, config, "[credential]\n\thelper = "+helper+"\n")
+			t.Setenv(variable, config)
+			if variable == "GIT_CONFIG_SYSTEM" {
+				t.Setenv("GIT_CONFIG_NOSYSTEM", "0")
+			}
+			recordGit(t, config)
+			r := p.run(t, func(dir string) {
+				writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+			}, nil)
+			r.wantsClose(t, event.StateSucceeded, 0)
+			if p.branchHead(t) == "" {
+				t.Fatalf("the run pushed nothing:\n%s", r.out)
+			}
+			if got, err := os.ReadFile(marker); err == nil {
+				t.Errorf("the run ran the helper of the %s configuration: %q", name, got)
+			}
+			proxy := p.h.server.Proxy
+			plain := exec.Command("git", "-c", "http.proxy="+proxy.URL, "-c", "http.proxyAuthMethod=basic",
+				"-c", "http.sslCAInfo="+proxy.CABundle, "ls-remote", "--", p.h.server.URL("acme/site"))
+			plain.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "NO_PROXY=", "no_proxy=")
+			if out, err := plain.CombinedOutput(); err != nil {
+				t.Fatalf("the plain git failed: %v\n%s", err, out)
+			}
+			if _, err := os.Stat(marker); err != nil {
+				t.Errorf("the plain git did not run the helper, so the test shows nothing: %v", err)
+			}
+		})
+	}
+}

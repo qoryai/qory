@@ -1578,6 +1578,9 @@ func excludePattern(rel string) string {
 	return b.String()
 }
 
+// OwnLink is [ownLink], for a caller that leaves qory's links out of a commit.
+func OwnLink(root, path string) (bool, error) { return ownLink(root, path) }
+
 // ownLink reports whether path is a link qory wrote into this checkout: a relative symlink
 // that resolves, from the directory it really stands in, into the checkout's own qory
 // directory. A link into another checkout's qory directory, reached through a symlinked

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/qoryai/forager/accesskey"
@@ -47,6 +48,35 @@ import (
 // safeRepository returns that hold, which its caller releases once the fetch and the
 // checkout end; on a stop, it releases the hold first.
 func safeRepository(ctx context.Context, dir string) (*places.Hold, error) {
+	return checkedRepository(ctx, dir, false)
+}
+
+// safeAfterRun is [safeRepository] for a repository that qory fetched and an agent had
+// open for writing: it also accepts the keys that the fetch writes, see [fetchKey]. git
+// reaches the repository's remote by the URL qory builds, so remote.origin.url can have
+// any value. Every other stop of safeRepository applies, and the error is an
+// [*unsafeError].
+func safeAfterRun(ctx context.Context, dir string) (*places.Hold, error) {
+	return checkedRepository(ctx, dir, true)
+}
+
+// safeFurther is [safeAfterRun] for a further repository, without hostgit's settings
+// check: a walled run's record has the fingerprint of the working folder's repository
+// alone, so that check stops on any remote URL here. git reaches the remote by the URL qory
+// builds, the keys and the files are checked, and every git qory runs here has replace
+// refs and the commit-graph off. The caller holds the working folder that contains dir.
+func safeFurther(ctx context.Context, dir string) error {
+	return keysOf(ctx, filepath.Join(dir, ".git"), true)
+}
+
+// unsafeError is a stop of [safeRepository]. Its text is the line for a run that has not
+// started, and cause is what the folder has, for a line after the agent exited.
+type unsafeError struct{ line, cause string }
+
+func (e *unsafeError) Error() string { return e.line }
+
+// checkedRepository is [safeRepository], and [safeAfterRun] with fetched set.
+func checkedRepository(ctx context.Context, dir string, fetched bool) (*places.Hold, error) {
 	gitDir := filepath.Join(dir, ".git")
 	if _, err := gitFiles(gitDir); err != nil {
 		return nil, err
@@ -57,11 +87,12 @@ func safeRepository(ctx context.Context, dir string) (*places.Hold, error) {
 	hold, err := hostgit.Hold(ctx, dir)
 	if err != nil {
 		if hostgit.Refused(err) {
-			return nil, fmt.Errorf(textPlaceRefused, integration.Printable(exports.HideError(err).Error()))
+			cause := integration.Printable(exports.HideError(err).Error())
+			return nil, &unsafeError{fmt.Sprintf(textPlaceRefused, cause), cause}
 		}
 		return nil, gitFailed(err)
 	}
-	if err := keysOf(ctx, gitDir); err != nil {
+	if err := keysOf(ctx, gitDir, fetched); err != nil {
 		hold.Release()
 		return nil, err
 	}
@@ -73,8 +104,9 @@ func safeRepository(ctx context.Context, dir string) (*places.Hold, error) {
 }
 
 // keysOf checks the files of the git directory gitDir, as [gitFiles] does, and the keys
-// of each configuration file it has.
-func keysOf(ctx context.Context, gitDir string) error {
+// of each configuration file it has. With fetched set, its config may also have each key
+// of [fetchKey].
+func keysOf(ctx context.Context, gitDir string, fetched bool) error {
 	files, err := gitFiles(gitDir)
 	if err != nil {
 		return err
@@ -85,13 +117,17 @@ func keysOf(ctx context.Context, gitDir string) error {
 			return gitFailed(err)
 		}
 		for _, key := range keys {
-			if name == "config" && strings.HasPrefix(key, "remote.") {
+			if name == "config" && fetched && fetchKey(key) {
+				continue
+			}
+			if name == "config" && !fetched && strings.HasPrefix(key, "remote.") {
 				return errors.New(textHasRemote)
 			}
 			if name == "config.worktree" || !initKey(key) {
 				// A key's subsection can be a URL with a password, as in
 				// http.<url>.sslVerify: it is shown without its userinfo, as hostgit shows it.
-				return fmt.Errorf(textConfigKey, hostgit.ShownKey(accesskey.ShownName(key, false)), ".git/"+name)
+				shown := hostgit.ShownKey(accesskey.ShownName(key, false))
+				return &unsafeError{fmt.Sprintf(textConfigKey, shown, ".git/"+name), fmt.Sprintf(causeConfigKey, shown, ".git/"+name)}
 			}
 		}
 	}
@@ -112,7 +148,8 @@ func hardLinked(rel string, d fs.DirEntry) error {
 		return local(err)
 	}
 	if linkCount(info) > 1 {
-		return fmt.Errorf(textHardLink, integration.Printable(filepath.ToSlash(rel)))
+		shown := integration.Printable(filepath.ToSlash(rel))
+		return &unsafeError{fmt.Sprintf(textHardLink, shown), fmt.Sprintf(causeHardLink, shown)}
 	}
 	return nil
 }
@@ -153,7 +190,8 @@ func gitFiles(gitDir string) ([]string, error) {
 		}
 		rel, _ := filepath.Rel(filepath.Dir(gitDir), path)
 		if d.Type()&fs.ModeSymlink != 0 {
-			link = fmt.Errorf(textGitLink, integration.Printable(filepath.ToSlash(rel)))
+			shown := integration.Printable(filepath.ToSlash(rel))
+			link = &unsafeError{fmt.Sprintf(textGitLink, shown), fmt.Sprintf(causeGitLink, shown)}
 			return filepath.SkipAll
 		}
 		// Git writes each object to a temporary file and renames it, so a hard link under
@@ -176,9 +214,9 @@ func gitFiles(gitDir string) ([]string, error) {
 		_, err := os.Lstat(filepath.Join(gitDir, filepath.FromSlash(name)))
 		switch {
 		case err == nil && name == "commondir":
-			return nil, errors.New(textCommonDir)
+			return nil, &unsafeError{textCommonDir, causeCommonDir}
 		case err == nil:
-			return nil, fmt.Errorf(textAlternates, ".git/"+name)
+			return nil, &unsafeError{fmt.Sprintf(textAlternates, ".git/"+name), fmt.Sprintf(causeAlternates, ".git/"+name)}
 		case !errors.Is(err, fs.ErrNotExist):
 			return nil, local(err)
 		}
@@ -192,7 +230,7 @@ func gitFiles(gitDir string) ([]string, error) {
 		case err != nil:
 			return nil, local(err)
 		case !info.Mode().IsRegular():
-			return nil, fmt.Errorf(textConfigNotFile, ".git/"+name)
+			return nil, &unsafeError{fmt.Sprintf(textConfigNotFile, ".git/"+name), fmt.Sprintf(causeConfigNotFile, ".git/"+name)}
 		}
 		files = append(files, name)
 	}
@@ -206,13 +244,20 @@ func initKey(key string) bool {
 	return hostgit.Written(key) && strings.Count(key, ".") == 1
 }
 
+// fetchKey reports whether the fetch of a run's repository writes key: origin's url and
+// refspec, and a local branch's upstream, which a clone of a further repository has.
+func fetchKey(key string) bool {
+	return key == "remote.origin.url" || key == "remote.origin.fetch" || strings.HasPrefix(key, "branch.") && hostgit.Written(key)
+}
+
 // configKeys lists the keys of the configuration file at path, as git reads it, without
 // following an include and without acting on any key: git config --file from the root
 // folder, with no global or system configuration, run as a git on this machine is, from
 // the environment [hostgit.Base] of ctx.
 func configKeys(ctx context.Context, path string) ([]string, error) {
 	out, err := runGit(ctx, nil, func(ctx context.Context) (*exec.Cmd, error) {
-		cmd, err := hostgit.Unchecked(ctx, "/", hostgit.Base(ctx), "config", "--file", path, "--list", "--null", "--name-only")
+		args := append(slices.Clone(hardened), "config", "--file", path, "--list", "--null", "--name-only")
+		cmd, err := hostgit.Unchecked(ctx, "/", hostgit.Base(ctx), args...)
 		if err != nil {
 			return nil, err
 		}

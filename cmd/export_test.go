@@ -107,6 +107,27 @@ func SetJoinSession(f func(session.SessionSpec)) func() {
 	return func() { joinSession = before }
 }
 
+// SetJoinResult makes the join of each run return what f returns, with no session, as a
+// session that ended that way does, and returns what restores the default.
+func SetJoinResult(f func(session.SessionSpec) (*session.Result, error)) func() {
+	before := joinSession
+	joinSession = func(_ openedRun, _ context.Context, spec session.SessionSpec) (*session.Result, error) {
+		return f(spec)
+	}
+	return func() { joinSession = before }
+}
+
+// SetBranchWait makes the push step pass each wait to f in place of waiting, and returns
+// what restores the default.
+func SetBranchWait(f func(time.Duration)) func() {
+	before := branchWait
+	branchWait = func(_ context.Context, d time.Duration) error {
+		f(d)
+		return nil
+	}
+	return func() { branchWait = before }
+}
+
 // ErrJoinedNowhere is the error of the join of a run [OpenNowhere] opened.
 var ErrJoinedNowhere = errors.New("the run was opened nowhere, so no session joins it")
 

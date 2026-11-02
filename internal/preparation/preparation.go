@@ -89,6 +89,13 @@ const (
 	textGitLink        = "qory run: start the run in a new empty git working tree, or remove the link %s, then run again: git would read and write through that link"
 	textHardLink       = "qory run: start the run in a new empty git working tree, or remove the hard link %s, then run again: a write to it would change another file"
 	textCommonDir      = "qory run: start the run in a new empty git working tree, then run again: the working folder's .git has a commondir file, which makes git read the configuration of another repository"
+	// The cause of each of these lines alone, for the line after the agent exited.
+	causeConfigKey     = "it has %s in %s, a key that neither git init nor the fetch writes, and git on this machine would use that key, such as a filter, a proxy or http.sslVerify"
+	causeConfigNotFile = "its %s is not a regular file"
+	causeAlternates    = "its .git has %s, which makes git read objects from outside the working folder"
+	causeGitLink       = "it has the link %s, and git would read and write through that link"
+	causeHardLink      = "it has the hard link %s, and a write to it would change another file"
+	causeCommonDir     = "its .git has a commondir file, which makes git read the configuration of another repository"
 	textFetched        = "qory run: fetched %s at %s in %s"
 	textFetchedOne     = "qory run: fetched %s at %s and 1 further repository in %s"
 	textFetchedMany    = "qory run: fetched %s at %s and %d further repositories in %s"
@@ -621,11 +628,13 @@ func exclude(ctx context.Context, git gitRunner, dir string) error {
 	return nil
 }
 
-// gitError is a git that failed: its first line on stderr, or what stopped it, and
-// the status git exited with, or -1 when git did not exit by itself.
+// gitError is a git that failed: its first line on stderr, or what stopped it, the status
+// git exited with, or -1 when git did not exit by itself, and every line it wrote on
+// stderr, which a push needs: its first line is the remote's address.
 type gitError struct {
-	line string
-	exit int
+	line   string
+	exit   int
+	output string
 }
 
 func (e *gitError) Error() string { return e.line }
@@ -668,7 +677,11 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 // makes for p, which sets the proxy and the CA bundle and reads no configuration but
 // the repository's. No error's text
 // contains the password of p's URL.
-func hostRunner(p *proxygit.Proxy) gitRunner {
+func hostRunner(p *proxygit.Proxy) gitRunner { return hostRunnerWith(p, "") }
+
+// hostRunnerWith is [hostRunner] with input on git's stdin and env added to its
+// environment.
+func hostRunnerWith(p *proxygit.Proxy, input string, env ...string) gitRunner {
 	return func(ctx context.Context, dir string, args ...string) (string, error) {
 		return runGit(ctx, p, func(ctx context.Context) (*exec.Cmd, error) {
 			full := append(append(slices.Clone(hardened), protocols...), args...)
@@ -676,7 +689,8 @@ func hostRunner(p *proxygit.Proxy) gitRunner {
 			if err != nil {
 				return nil, err
 			}
-			cmd.Env = proxygit.Env(cmd.Env, p)
+			cmd.Env = append(proxygit.Env(cmd.Env, p), env...)
+			cmd.Stdin = strings.NewReader(input)
 			return cmd, nil
 		}, args[0])
 	}
@@ -693,7 +707,7 @@ func runGit(ctx context.Context, p *proxygit.Proxy, make func(context.Context) (
 	defer cancel()
 	cmd, err := make(call)
 	if err != nil {
-		return "", &gitError{proxygit.Hide(err.Error(), p), -1}
+		return "", &gitError{line: proxygit.Hide(err.Error(), p), exit: -1}
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -705,19 +719,20 @@ func runGit(ctx context.Context, p *proxygit.Proxy, make func(context.Context) (
 	if err != nil {
 		switch {
 		case errors.Is(context.Cause(call), errLimit):
-			return "", &gitError{fmt.Sprintf(textStopped, subcommand, limit), -1}
+			return "", &gitError{line: fmt.Sprintf(textStopped, subcommand, limit), exit: -1}
 		case ctx.Err() != nil:
-			return "", &gitError{fmt.Sprintf(textCut, subcommand), -1}
+			return "", &gitError{line: fmt.Sprintf(textCut, subcommand), exit: -1}
 		}
 		exit := -1
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
 			exit = ee.ExitCode()
 		}
-		if line := firstLine(stderr.String()); line != "" {
-			return "", &gitError{proxygit.Hide(line, p), exit}
+		output := proxygit.Hide(stderr.String(), p)
+		if line := firstLine(output); line != "" {
+			return "", &gitError{line, exit, output}
 		}
-		return "", &gitError{proxygit.Hide(err.Error(), p), exit}
+		return "", &gitError{line: proxygit.Hide(err.Error(), p), exit: exit}
 	}
 	return stdout.String(), nil
 }

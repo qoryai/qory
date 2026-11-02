@@ -763,6 +763,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				return nil
 			}
+			// stopped reports whether qory run was stopped or ran out of time.
+			stopped := func() bool {
+				return ctx.Err() != nil || timeout > 0 && time.Since(opened) >= timeout
+			}
+			// branch is the branch of the run's work item, set by hostWork, nil for none.
+			var branch *preparation.WorkBranch
 			// hostWork is the run's work on this machine before its session joins, in two
 			// steps of the run's record: the fetch, when the run configuration lists
 			// repositories, and the compose. When the run configuration lists repositories,
@@ -782,10 +788,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// compose reads the target version, and the branch is checked out last, after
 			// the record of the run's places, so no file of the branch counts as the person's.
 			hostWork := func() error {
-				stopped := func() bool {
-					return ctx.Err() != nil || timeout > 0 && time.Since(opened) >= timeout
-				}
-				var branch *preparation.WorkBranch
 				if run.Repositories() != "" {
 					var err error
 					if branch, err = fromCode.readBranch(ctx, run, timeout, opened); err != nil {
@@ -1002,7 +1004,23 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// terminal and on pipes.
 			spec.Stdout, spec.Stderr = streams.session()
 			res, err := joinSession(run, ctx, spec.SessionSpec)
-			closed := closeRun(sessionOutcome(res, err))
+			out := sessionOutcome(res, err)
+			// pushWork is the push step of a write run whose session succeeded, see
+			// [keepsWork], within the run's time limit, before the close: Qory Apiary takes
+			// no version of a run that ended.
+			var pushErr error
+			if keepsWork(fromCode, readOnly, branch, out) {
+				pushCtx, cancel := ctx, func() {}
+				if timeout > 0 {
+					pushCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+				}
+				pushErr = pushWork(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, stopped)
+				cancel()
+				if pushErr != nil {
+					out = pushOutcome(ctx, stopped, pushErr)
+				}
+			}
+			closed := closeRun(out)
 			if err != nil {
 				return failed(err)
 			}
@@ -1039,7 +1057,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if delivery.Undelivered > 0 {
 				u.Fail(fmt.Errorf("%d events did not reach the server; %s/undelivered contains them", delivery.Undelivered, ui.Short(res.Dir, at.root)))
 			}
-			return runEnded(u, res, end)
+			ended := runEnded(u, res, end)
+			if pushErr != nil {
+				return pushEnded(u, said, out, pushErr, got(), timeout)
+			}
+			return ended
 		},
 	}
 	c.Flags().BoolVar(&local, "local", false, "run without the server: record to files, under the machine's policy")
@@ -1206,10 +1228,10 @@ type openedRun interface {
 	// before the first join; see [fetchImage].
 	FetchImage(ctx context.Context) error
 	Close(ctx context.Context, out session.Outcome) (*session.Closed, error)
-	// StartStep starts a step of the run's host work, of kind fetch or compose.
+	// StartStep starts a step of the run's host work, of kind fetch, compose or push.
 	StartStep(kind, name string) (hostStep, error)
-	// HostProxy starts the run's host proxy, for the fetch of the run's repositories on
-	// this machine.
+	// HostProxy starts the run's host proxy, for the fetch and the push of the run's
+	// repositories on this machine.
 	HostProxy() (hostProxy, error)
 	// StackProxy starts the run's stack proxy, for the fetch of the run's harness on this
 	// machine, before the run's first Join.
@@ -1222,7 +1244,8 @@ type openedRun interface {
 	// reads them.
 	System() string
 	Repositories() string
-	// RunAPI is the client and base URL of the run's run API on this machine.
+	// RunAPI is the client and base URL of the run's run API on this machine, until the
+	// close.
 	RunAPI() (*http.Client, string, error)
 	// Image is the image chosen at the run's open, the zero Image with no wall or when
 	// the gateway's run answer has no image; a walled run with no image fails at the open.

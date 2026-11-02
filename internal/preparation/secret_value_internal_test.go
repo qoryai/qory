@@ -26,12 +26,12 @@ func TestARepositoryWithASecretIsNotPrinted(t *testing.T) {
 	if err == nil || strings.Contains(err.Error(), secret) || !strings.Contains(err.Error(), "only repositories of owner o: entry 2 is of owner "+valuePhrase+",") {
 		t.Errorf("other owner: %v", err)
 	}
-	err = notFetched("o/"+secret, "git.example", &gitError{"fatal: repository 'https://u:token-123@git.example/o/" + secret + "/' not found", 128})
+	err = notFetched("o/"+secret, "git.example", &gitError{line: "fatal: repository 'https://u:token-123@git.example/o/" + secret + "/' not found", exit: 128})
 	want := "qory run: add a credential for git.example that reads " + valuePhrase + " to the run configuration, then run again. The fetch of " + valuePhrase + " through the run's gateway failed: fatal: repository " + valuePhrase + " not found"
 	if err == nil || err.Error() != want {
 		t.Errorf("not fetched: %v\nwant %q", err, want)
 	}
-	err = notFetched("o/a", "git.example", &gitError{"fatal: repository 'https://u:token-123@git.example/o/a/' not found", 128})
+	err = notFetched("o/a", "git.example", &gitError{line: "fatal: repository 'https://u:token-123@git.example/o/a/' not found", exit: 128})
 	if want := "qory run: add a credential for git.example that reads o/a to the run configuration, then run again. The fetch of o/a through the run's gateway failed: fatal: repository 'https://u:(hidden)@git.example/o/a/' not found"; err == nil || err.Error() != want {
 		t.Errorf("not fetched: %v\nwant %q", err, want)
 	}
