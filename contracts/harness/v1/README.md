@@ -2,12 +2,13 @@
 
 What `qory harness compose` reads and what it writes.
 
-## Three files
+## Four files
 
 | File | Lives in | Defines |
 |---|---|---|
 | `qory-stack.yaml` | a directory that `extends` or `-f` selects; an ancestor directory covering several repositories; the root of the harness repository that delivers it | a stack delivered to be extended: the ordered modules, the excludes, what a checkout extending it may add and the runtimes and models it is written for |
 | `qory-module.yaml` | the root of a module | the module: its name, its variants per runtime, the variables it exports |
+| `process.yaml` | optional; the folder root of a module that `exports.modules` lists, which makes the module a factory | a process template: its name, summary and description, the workspace type, the exported stack its workflows run on, and its `qory.process/v1` process. Every command that reads the configuration checks it; the compose does not read it (§Exports) |
 | `qory.yaml`, or `harness.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's stack, its target and modules, or the stack it extends, the target it composes it for and the modules it appends, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; under `exports`, the stacks and modules this repository publishes for others, by name (§Exports); `git` and `env` (§The configuration) |
 
 Every module has a `qory-module.yaml`; it defines the module's name, and a directory
@@ -20,8 +21,8 @@ with its `qory-stack.yaml`. A directory contains `qory-stack.yaml` or a `qory.ya
 and one of the two names, never both; the file name defines which document a file
 contains, and no document has a kind.
 
-A `qory-stack.yaml` and a `qory-module.yaml` contain `apiVersion`; they are delivered
-files. A `qory.yaml` or `harness.yaml` may leave it out, and is then read as the newest
+A `qory-stack.yaml`, a `qory-module.yaml` and a `process.yaml` contain `apiVersion`;
+they are delivered files. A `qory.yaml` or `harness.yaml` may leave it out, and is then read as the newest
 format this qory reads, `qory.dev/v1alpha1`. A reader refuses a version it does not read
 and lists the versions it does. `v1alpha1` marks the format as subject to change.
 
@@ -388,6 +389,13 @@ the stack file:
 ```text
 /src/acme-harness/harness/modules/support-desk/process.yaml: declare check-the-tone under workflows in harness/stacks/support/qory-stack.yaml, or remove it from stage Answer: stack support does not declare it
 ```
+
+A workflow that is empty, null, not a string, or has a line break or another control
+character, is refused the same way, with the entry's place in the stage, such as `entry
+2 in the loop of entry 3`. So is a stage name with a line break or another control
+character. qory reads the file through the module's folder, as the compose reads a
+module's files: a link to a file inside the folder is followed, and a link to a place
+outside it is refused without reading the place it leads to.
 
 A character is a Unicode code point, and a word is a run of characters without white
 space. The compose does not read the file: in the composed tree it is one of the

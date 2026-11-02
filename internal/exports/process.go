@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/qoryai/forager/accesskey"
@@ -55,17 +57,55 @@ type processFile struct {
 	Process     yaml.Node `yaml:"process"`
 }
 
-// checkProcess reads the process.yaml at path, in an exported module's folder, and
-// checks its fields: each one is set, the texts are within their limits, stack is one of
+// readProcess returns the process.yaml at the root of the module folder dir, relative to
+// [Exports.Root], with its path: nil data when the folder has no such file. The file is
+// read through the folder opened as an [os.Root], as the compose reads a module's files,
+// so a link inside the folder is followed and a link that leads outside it is refused
+// without reading its target.
+func (e *Exports) readProcess(dir string) ([]byte, string, error) {
+	folder := filepath.Join(e.Root, dir)
+	path := filepath.Join(folder, ProcessFileName)
+	root, err := os.OpenRoot(folder)
+	if err != nil {
+		return nil, path, HideError(err)
+	}
+	defer root.Close()
+	info, err := root.Stat(ProcessFileName)
+	if errors.Is(err, fs.ErrNotExist) || err == nil && info.IsDir() {
+		return nil, path, nil
+	}
+	var data []byte
+	if err == nil {
+		data, err = root.ReadFile(ProcessFileName)
+	}
+	if escapes(err) {
+		return nil, path, fmt.Errorf("%s: replace %s with a file inside the module: it is a link to a place outside the module", HidePath(path), ProcessFileName)
+	}
+	if err != nil {
+		return nil, path, HideError(err)
+	}
+	if data == nil {
+		// An empty file is a file, which checkProcess refuses for its first field.
+		data = []byte{}
+	}
+	return data, path, nil
+}
+
+// escapes reports whether err is an [os.Root]'s refusal of a path that leads outside
+// the root. The os package does not export that error, so escapes compares its text.
+func escapes(err error) bool {
+	var pe *fs.PathError
+	return errors.As(err, &pe) && pe.Err != nil && pe.Err.Error() == "path escapes from parent"
+}
+
+// checkProcess checks data, the process.yaml at path in an exported module's folder,
+// field by field: each one is set, the texts are within their limits, stack is one of
 // [Exports.Stacks], process is an object with schema qory.process/v1 and a list of
 // stages, and every workflow of a stage's sequence, a loop's body included, is declared
-// under workflows in the stack's qory-stack.yaml. The error starts with the file and
-// then the fix; for undeclared workflows it has one line for each.
-func (e *Exports) checkProcess(path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return HideError(err)
-	}
+// under workflows in the stack's qory-stack.yaml, as [Exports.checkWorkflows] checks.
+// The error starts with the file and then the fix; for the workflows it has one line for
+// each refusal.
+func (e *Exports) checkProcess(path string, data []byte) error {
 	shown := HidePath(path)
 	if err := RefuseAliases(shown, data); err != nil {
 		return err
@@ -133,9 +173,11 @@ func (e *Exports) checkProcess(path string) error {
 
 // checkWorkflows checks that every workflow the stages run is declared under workflows in
 // the qory-stack.yaml of the exported stack: each workflow entry of a stage's sequence,
-// and each of a loop's body. Any other shape, such as a sequence that is not a list, is
-// left unchecked. The error has one line per stage and undeclared workflow, each starting
-// with shown, the process.yaml.
+// and each of a loop's body. A workflow that is empty, null or not one line of text, and
+// a stage name that is not one line of text, are refused too, so no line of the error
+// is text from the file that a reader could take for a line of qory's. Any other shape,
+// such as a sequence that is not a list, is left unchecked. The error has one line per
+// refusal, each starting with shown, the process.yaml.
 func (e *Exports) checkWorkflows(shown, stackName string, stages *yaml.Node) error {
 	dir, _ := e.Stack(stackName)
 	stackFile := filepath.Join(dir, StackFileName)
@@ -150,10 +192,19 @@ func (e *Exports) checkWorkflows(shown, stackName string, stages *yaml.Node) err
 		}
 		label := strconv.Itoa(i + 1)
 		if n := value(stage, "name"); n != nil && n.Kind == yaml.ScalarNode && strings.TrimSpace(n.Value) != "" {
-			label = accesskey.ShownName(n.Value, false)
+			if why := notOneLine(n.Value); why != "" {
+				lines = append(lines, fmt.Sprintf("%s: set the name of stage %d to one line of text: %s", shown, i+1, why))
+			} else {
+				label = accesskey.ShownName(n.Value, false)
+			}
 		}
 		seen := map[string]bool{}
-		for _, name := range stageWorkflows(stage) {
+		for _, ref := range stageWorkflows(stage) {
+			if why := badWorkflow(ref.name); why != "" {
+				lines = append(lines, fmt.Sprintf("%s: set the workflow of %s in stage %s to a workflow name: %s", shown, ref.where, label, why))
+				continue
+			}
+			name := ref.name.Value
 			if declared[name] || seen[name] {
 				continue
 			}
@@ -166,6 +217,32 @@ func (e *Exports) checkWorkflows(shown, stackName string, stages *yaml.Node) err
 		return errors.New(strings.Join(lines, "\n"))
 	}
 	return nil
+}
+
+// badWorkflow is why the workflow value n is no workflow name, for a message: it is
+// null, not a string, empty, or not one line of text; "" for a value that is one.
+func badWorkflow(n *yaml.Node) string {
+	switch {
+	case n.Tag == "!!null":
+		return "it is null"
+	case n.Kind != yaml.ScalarNode:
+		return "it is " + nodeKind(n)
+	case strings.TrimSpace(n.Value) == "":
+		return "it is empty"
+	}
+	return notOneLine(n.Value)
+}
+
+// notOneLine is why v is not one line of text, for a message: it has a line break or
+// another control character; "" for one line.
+func notOneLine(v string) string {
+	if strings.ContainsAny(v, "\n\r") {
+		return "it has a line break"
+	}
+	if strings.IndexFunc(v, unicode.IsControl) >= 0 {
+		return "it has a control character"
+	}
+	return ""
 }
 
 // stackWorkflows returns the names under workflows in the stack file at file, relative to
@@ -192,37 +269,47 @@ func (e *Exports) stackWorkflows(file string) (map[string]bool, error) {
 	return names, nil
 }
 
-// stageWorkflows returns the workflow names a stage runs, in order: the workflow of each
-// entry of its sequence, and of each entry of a loop's body.
-func stageWorkflows(stage *yaml.Node) []string {
-	var names []string
-	add := func(entry *yaml.Node) {
-		if w := value(entry, "workflow"); w != nil && w.Kind == yaml.ScalarNode {
-			names = append(names, w.Value)
-		}
-	}
+// workflowRef is one workflow entry of a stage: where it is in the stage, as a message
+// writes it, and the value of its workflow key.
+type workflowRef struct {
+	where string
+	name  *yaml.Node
+}
+
+// stageWorkflows returns the workflow entries a stage runs, in order: each entry of its
+// sequence that has a workflow key, and each such entry of a loop's body. Entries are
+// counted from 1.
+func stageWorkflows(stage *yaml.Node) []workflowRef {
+	var refs []workflowRef
 	seq := value(stage, "sequence")
 	if seq == nil || seq.Kind != yaml.SequenceNode {
 		return nil
 	}
-	for _, entry := range seq.Content {
+	for i, entry := range seq.Content {
 		if entry.Kind != yaml.MappingNode {
 			continue
 		}
-		add(entry)
+		if w := value(entry, "workflow"); w != nil {
+			refs = append(refs, workflowRef{"entry " + strconv.Itoa(i+1), w})
+		}
 		loop := value(entry, "loop")
 		if loop == nil || loop.Kind != yaml.MappingNode {
 			continue
 		}
-		if body := value(loop, "body"); body != nil && body.Kind == yaml.SequenceNode {
-			for _, b := range body.Content {
-				if b.Kind == yaml.MappingNode {
-					add(b)
-				}
+		body := value(loop, "body")
+		if body == nil || body.Kind != yaml.SequenceNode {
+			continue
+		}
+		for j, b := range body.Content {
+			if b.Kind != yaml.MappingNode {
+				continue
+			}
+			if w := value(b, "workflow"); w != nil {
+				refs = append(refs, workflowRef{fmt.Sprintf("entry %d in the loop of entry %d", j+1, i+1), w})
 			}
 		}
 	}
-	return names
+	return refs
 }
 
 // value returns the value of key in the mapping m, nil when m has no such key or is not a

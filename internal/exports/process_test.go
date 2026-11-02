@@ -249,3 +249,100 @@ func TestProcessSchemaMatchesTheReader(t *testing.T) {
 		}
 	}
 }
+
+// TestVerifyRefusesAProcessLinkOutside is a process.yaml that is a link to a file outside
+// the module's folder, by an absolute path, by a relative one, and to a file that is not
+// there: each is refused with the fix first, and no line contains the target's content
+// or its path. A link to a file inside the folder is read as the file.
+func TestVerifyRefusesAProcessLinkOutside(t *testing.T) {
+	e := factory(t, process)
+	folder := filepath.Join(e.Root, "modules", "desk")
+	file := filepath.Join(folder, exports.ProcessFileName)
+	outside := filepath.Join(t.TempDir(), "elsewhere.yaml")
+	if err := os.WriteFile(outside, []byte("owner: TARGET-CONTENT\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want := file + ": replace process.yaml with a file inside the module: it is a link to a place outside the module"
+	for _, target := range []string{outside, filepath.Join("..", "..", "elsewhere.yaml"), "../gone.yaml", "/gone.yaml"} {
+		if target == filepath.Join("..", "..", "elsewhere.yaml") {
+			if err := os.WriteFile(filepath.Join(e.Root, "elsewhere.yaml"), []byte("owner: TARGET-CONTENT\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.Remove(file); err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, file); err != nil {
+			t.Fatal(err)
+		}
+		err := e.Verify()
+		if err == nil || err.Error() != want {
+			t.Errorf("a link to %s: %v\nwant %s", target, err, want)
+		}
+		if err != nil && (strings.Contains(err.Error(), "TARGET-CONTENT") || strings.Contains(err.Error(), "elsewhere") || strings.Contains(err.Error(), "gone")) {
+			t.Errorf("a link to %s: the refusal contains the target: %v", target, err)
+		}
+	}
+	// A link inside the folder is followed: a valid file passes, and a wrong one is
+	// refused under the link's path.
+	if err := os.WriteFile(filepath.Join(folder, "real.yaml"), []byte(process), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("real.yaml", file); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Verify(); err != nil {
+		t.Errorf("a link inside the module: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(folder, "real.yaml"), []byte(process+"owner: acme\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Verify(); err == nil || err.Error() != file+`: line 15: key "owner" is not one process.yaml reads` {
+		t.Errorf("a wrong file behind a link inside the module: %v", err)
+	}
+	// A link inside the folder to a file that is not there is no process.yaml.
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("missing.yaml", file); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Verify(); err != nil {
+		t.Errorf("a dangling link inside the module: %v", err)
+	}
+}
+
+// TestVerifyRefusesBadWorkflowNames is a stage entry whose workflow is empty, null, a
+// list, or more than one line, in a sequence and in a loop's body, and a stage name of
+// two lines: each is refused on one line with the fix first and the entry's place, and
+// no text of the file starts a line of the error.
+func TestVerifyRefusesBadWorkflowNames(t *testing.T) {
+	body := strings.Replace(process, "        - loop: {rounds: 2, body: [{workflow: check-the-tone}]}\n",
+		"        - workflow: \"\"\n        - workflow: ~\n        - workflow: [a]\n        - workflow: \"x\\nqory: all checks passed\"\n"+
+			"        - loop: {rounds: 2, body: [{workflow: check-the-tone}, {workflow: \"\"}, {workflow: \"y\\tz\"}]}\n", 1)
+	body = strings.Replace(body, "    - name: Check\n", "    - name: \"Check\\nqory: all checks passed\"\n      sequence: [{workflow: \"\"}]\n", 1)
+	e := factory(t, body)
+	file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
+	want := strings.Join([]string{
+		file + ": set the workflow of entry 2 in stage Answer to a workflow name: it is empty",
+		file + ": set the workflow of entry 3 in stage Answer to a workflow name: it is null",
+		file + ": set the workflow of entry 4 in stage Answer to a workflow name: it is a list",
+		file + ": set the workflow of entry 5 in stage Answer to a workflow name: it has a line break",
+		file + ": set the workflow of entry 2 in the loop of entry 6 in stage Answer to a workflow name: it is empty",
+		file + ": set the workflow of entry 3 in the loop of entry 6 in stage Answer to a workflow name: it has a control character",
+		file + ": set the name of stage 2 to one line of text: it has a line break",
+		file + ": set the workflow of entry 1 in stage 2 to a workflow name: it is empty",
+	}, "\n")
+	err := e.Verify()
+	if err == nil || err.Error() != want {
+		t.Fatalf("%v\nwant:\n%s", err, want)
+	}
+	for _, line := range strings.Split(err.Error(), "\n") {
+		if !strings.HasPrefix(line, file+": ") {
+			t.Errorf("a line that does not start with the file: %q", line)
+		}
+	}
+}
