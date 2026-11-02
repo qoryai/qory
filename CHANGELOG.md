@@ -18,6 +18,9 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- A run of a work item works on the branch `qory/<work item id>`, at the commit of the
+  artifact `branch` that its stage starts from. The harness still comes from
+  `target_version`.
 - A skill reads its work item and stores what it made with `qory work-item show`, `qory
   artifact pull`, `qory artifact push` and `qory run verdict`. In a run they use Qory
   Apiary through the gateway, at `QORY_RUN_API`. Outside a run they use the checkout's
@@ -27,6 +30,14 @@ release may change what an existing document does, and states it under Upgrading
   root of each module that `exports.modules` lists: its fields and their limits, that
   `stack` is one of `exports.stacks`, and that the stack declares each workflow the
   process runs. See §Exports in `contracts/harness/v1/README.md`.
+- List the artifact types a factory's workspaces use with `artifact_types` in its
+  `process.yaml`: a standard type by its name alone, a custom type with `base_view`,
+  `size_limit`, `max_files` and, for `base_view: structured`, `json_schema`. Every command
+  that reads the configuration checks each entry and compiles each `json_schema`. See
+  Artifact types in `contracts/harness/v1/README.md`.
+- Version 1 of the branch format, `contracts/harness/v1/branch.schema.json`: a work
+  item's branch, `qory/<work item id>`, and the commit in each repository. A software
+  factory can use it as the `json_schema` of a custom artifact type `branch`.
 - `-f` on `qory harness compose`, `qory run` and `qory worktree add` takes a stack by
   reference, `<https URL>#<ref>:<folder>`: qory fetches the folder as it fetches a git
   module and composes its `qory-stack.yaml`. `examples/hello` has one, so a run takes it

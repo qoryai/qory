@@ -81,7 +81,7 @@ func fromAnswerOnly(cmd *cobra.Command, runtime string, extra []string) error {
 // settings' time_limit_minutes, 0 for none, and harness_hidden. named is set when
 // harness_hidden is true: no text of the run shows the address of a harness source.
 // target is the documents' target and target_version, which the fetch uses for the
-// target's repository.
+// target's repository. workItem is the id of the documents' work item, "" for none.
 type codeRun struct {
 	runtime  string
 	settings []provisioner.Setting
@@ -100,7 +100,8 @@ type codeRun struct {
 	// access is what the run may do on its target: [stack.AccessRead] or
 	// [stack.AccessWrite], from the documents' access. It is empty when the documents have
 	// no target.
-	access string
+	access   string
+	workItem string
 }
 
 // The harness of a run from a run code as a text shows it: the documents' harness
@@ -172,6 +173,9 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 		target = preparation.Target{System: doc.Target.System, Path: doc.Target.Path, Version: doc.TargetVersion}
 	}
 	r := &codeRun{runtime: runtime, settings: settings, harness: harness, defines: defines, workflow: doc.Workflow, inputs: doc.Inputs, minutes: minutes, hidden: hidden, target: target, access: doc.Access}
+	if doc.WorkItem != nil {
+		r.workItem = doc.WorkItem.ID
+	}
 	if hidden {
 		r.named = source.NewNamed(r.phrase())
 	}

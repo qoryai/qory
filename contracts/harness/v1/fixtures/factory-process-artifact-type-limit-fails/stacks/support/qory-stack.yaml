@@ -1,0 +1,7 @@
+apiVersion: qory.dev/v1alpha1
+modules:
+  - name: support-desk
+extending: {}
+workflows:
+  draft-an-answer: {access: read}
+  check-the-tone: {access: read}

@@ -79,7 +79,8 @@ func Prepare(ctx context.Context, dir, seed string, getenv func(string) string, 
 // copy's .git is used past it. It copies each entry of the copy's working tree but
 // [notCopied] that dir does not have, as [addTree] adds it: the files the fetched commit
 // tracks are in dir already and stay as they are, and the untracked and ignored ones of
-// the copy, the installed dependencies, are added.
+// the copy, the installed dependencies, are added. A file that a work item's branch
+// removed, as [removedByBranch] finds it, stays out.
 func fromSeed(ctx context.Context, dir, seed, system, path string) (bool, error) {
 	if seed == "" {
 		return false, nil
@@ -106,7 +107,11 @@ func fromSeed(ctx context.Context, dir, seed, system, path string) (bool, error)
 	if err := checkOrigin(ctx, dir, seed, system, path); err != nil {
 		return false, err
 	}
-	if err := copySeed(dir, seed); err != nil {
+	removed, err := removedByBranch(ctx, dir)
+	if err != nil {
+		return false, err
+	}
+	if err := copySeed(dir, seed, removed); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -153,7 +158,8 @@ func sameOrigin(github bool, url, system, path string) bool {
 // copySeed adds the entries at the top of seed but [notCopied] to dir, as [addTree]
 // adds them. Every path is opened through an [os.Root] of dir and one of seed, and every
 // entry is made new, so no link in dir is followed and nothing there is written over.
-func copySeed(dir, seed string) error {
+// A path in removed is not copied.
+func copySeed(dir, seed string, removed map[string]bool) error {
 	dst, err := os.OpenRoot(dir)
 	if err != nil {
 		return localIn(err)
@@ -164,14 +170,26 @@ func copySeed(dir, seed string) error {
 		return localIn(err)
 	}
 	defer src.Close()
-	return addTree(src, dst, seed, ".", notCopied)
+	return addTree(src, dst, seed, ".", notCopied, removed)
+}
+
+// holdsRemoved reports whether a path in removed is below the folder p.
+func holdsRemoved(removed map[string]bool, p string) bool {
+	prefix := filepath.ToSlash(p) + "/"
+	for path := range removed {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // addTree adds the entries of the folder name of src, but the ones skip names, to the
 // folder of that name in dst: an entry dst does not have is copied as [copyTree] copies
 // it; a folder dst has as a folder, not a link, gets what it lacks the same way; and any
-// other entry dst has stays as it is, so no file of dst is written over.
-func addTree(src, dst *os.Root, seed, name string, skip []string) error {
+// other entry dst has stays as it is, so no file of dst is written over. A path in
+// removed is not copied, and a folder above one is copied without it.
+func addTree(src, dst *os.Root, seed, name string, skip []string, removed map[string]bool) error {
 	f, err := src.Open(name)
 	if err != nil {
 		return localIn(err)
@@ -186,9 +204,28 @@ func addTree(src, dst *os.Root, seed, name string, skip []string) error {
 			continue
 		}
 		p := filepath.Join(name, e.Name())
+		if removed[filepath.ToSlash(p)] {
+			continue
+		}
+		fi, err := src.Lstat(p)
+		if err != nil {
+			return localIn(err)
+		}
 		have, err := dst.Lstat(p)
 		if errors.Is(err, fs.ErrNotExist) {
-			if err := copyEntry(src, dst, seed, p); err != nil {
+			if !fi.IsDir() || !holdsRemoved(removed, p) {
+				if err := copyEntry(src, dst, seed, p); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := dst.Mkdir(p, 0o700); err != nil {
+				return localIn(err)
+			}
+			if err := addTree(src, dst, seed, p, nil, removed); err != nil {
+				return err
+			}
+			if err := keepMode(dst, p, fi); err != nil {
 				return err
 			}
 			continue
@@ -196,12 +233,8 @@ func addTree(src, dst *os.Root, seed, name string, skip []string) error {
 		if err != nil {
 			return localIn(err)
 		}
-		fi, err := src.Lstat(p)
-		if err != nil {
-			return localIn(err)
-		}
 		if have.IsDir() && fi.IsDir() {
-			if err := addTree(src, dst, seed, p, nil); err != nil {
+			if err := addTree(src, dst, seed, p, nil, removed); err != nil {
 				return err
 			}
 		}

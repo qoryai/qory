@@ -1,0 +1,31 @@
+apiVersion: qory.dev/v1alpha1
+name: Support desk
+summary: Agents draft answers to support tickets. A person checks each answer.
+description: >-
+  Each ticket goes through two stages. In Answer, an agent drafts an answer and
+  then checks its tone, for up to three rounds. In Check, a person reads the
+  draft and sends it or sends it back.
+type: customer-care
+stack: support
+process:
+  schema: qory.process/v1
+  stages:
+    - id: st_0000000001
+      name: Answer
+      sequence:
+        - workflow: draft-an-answer
+        - loop:
+            rounds: 3
+            body:
+              - workflow: check-the-tone
+      gate: {kind: none}
+    - id: st_0000000002
+      name: Check
+      sequence: []
+      gate: {kind: person, approvers: members}
+artifact_types:
+  - name: customer-facts
+    base_view: structured
+    size_limit: 65536
+    max_files: 1
+    json_schema: {type: objekt}

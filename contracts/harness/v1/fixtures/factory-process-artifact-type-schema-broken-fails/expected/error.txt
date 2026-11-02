@@ -1,0 +1,1 @@
+modules/support-desk/process.yaml: fix json_schema of artifact type customer-facts so that it compiles as a JSON Schema: at '/type': value must be one of 'array', 'boolean', 'integer', 'null', 'number', 'object', 'string'; at '/type': got string, want array

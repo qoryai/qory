@@ -32,6 +32,7 @@ const (
 	textFetchStepOne     = "fetch %s and 1 further repository"
 	textFetchStepMany    = "fetch %s and %d further repositories"
 	textFetchStepUnnamed = "fetch the run's repositories"
+	textFetchStepBranch  = "%s at %s %s"
 	textComposeStep      = "compose the harness for %s"
 	textComposeStepAny   = "compose the harness"
 )

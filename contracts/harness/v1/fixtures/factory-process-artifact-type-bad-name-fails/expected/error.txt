@@ -1,0 +1,1 @@
+modules/support-desk/process.yaml: set the name of entry 1 of artifact_types to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes: the name is "Reply_Draft"
