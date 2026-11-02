@@ -94,7 +94,8 @@ harness:
       source: {path: ./harness}
 ```
 
-The delivered modules cannot be changed.
+The delivered modules cannot be changed. You can only leave out an entry of one: see
+[Leave out an entry of a delivered module](#leave-out-an-entry-of-a-delivered-module).
 
 A runner may already have the stack tree. It selects the base with
 `qory harness compose -f <stack>` instead. The repository's file then contains no
@@ -189,6 +190,44 @@ the agent it calls. The rest of the module stays out.
 
 Sometimes `only` pulls in a required entry that you take from another module instead.
 Leave it out with one `exclude` line beside the `only`.
+
+### Leave out an entry of a delivered module
+
+To use your version of an entry that a delivered module also ships, list the delivered
+module by its name with `exclude` alone:
+
+```yaml
+harness:
+  extends: {git: https://github.com/acme/harness, ref: v2.4.0, stack: nextjs}
+  target: {runtime: claude}
+  modules:
+    - name: core               # a module of the stack you extend
+      exclude: {skills: [explore-a-ticket]}
+    - name: app                # ships skills/explore-a-ticket too
+      source: {path: ./harness}
+```
+
+The compose leaves the delivered `explore-a-ticket` out of `core` and takes the one in
+`app`. `qory harness inspect` lists `core  skills/explore-a-ticket` under **Excludes**,
+and the skill from `app` under **Entries**. The report, `.qory/harness-report.json`,
+records the same.
+
+The rules:
+
+- Use the name the delivered stack lists the module under: its `name`, or the
+  `module` its source selects. A module that the stack lists by a `path` or `git`
+  source alone cannot be reached this way: rename your entry instead.
+- The entry contains `name` and `exclude` only. A `source`, `only`, `variant` or `link`
+  fails the compose.
+- The exclude lists entries of the kinds the stack's `extending` block lets your modules
+  ship, and files under its `extending.files` prefixes. The delivered hooks, MCP
+  servers, instructions, settings and variables stay as they are.
+- An entry the delivered module does not compose fails the compose, `remove skills/x
+  from the exclude of module core in qory.yaml: …`.
+
+Without the exclude, the two skills collide. The compose fails, exit 3, and prints the
+entry to write. When `qory.yaml` lists the module already, it prints the whole entry to
+replace it with.
 
 ## The composed tree
 
