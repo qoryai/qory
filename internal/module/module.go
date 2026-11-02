@@ -238,9 +238,9 @@ var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // retired spelling of it, a missing name, a default that selects something other than
 // a declared variant or "fail", an env key that is not an environment variable name or
 // is QORY_HARNESS_HOME, an env value that is not a relative path inside the module, and
-// roles or provides that [stack.ReadRoles] refuses, roles with every value one. Every
-// error contains the manifest path; an error about roles or provides contains it inside
-// the text, after the fix. A name the file writes that contains an access
+// roles or provides for which [stack.ReadRoles] returns an error, roles with every
+// value one. Every error contains the manifest path; an error about roles or provides
+// contains it inside the text, after the fix. A name the file writes that contains an access
 // key secret or a run key, a key of env, of variants or of a requires item, an entry a
 // requires item lists, and the variant default selects, is printed as
 // [accesskey.ShownName] prints it, and a value it writes as [exports.Value] prints it.

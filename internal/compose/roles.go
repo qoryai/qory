@@ -148,8 +148,8 @@ func flatRoles(roles []Role) map[string]string {
 	return out
 }
 
-// checkProvides refuses a module of a checkout that extends base and provides a kind of
-// role that the base's extending.kinds does not list.
+// checkProvides returns an error for a module of a checkout that extends base and
+// provides a kind of role that the base's extending.kinds does not list.
 func checkProvides(m *module.Manifest, base *Base) error {
 	kinds := make([]string, 0, len(m.Provides))
 	for kind := range m.Provides {

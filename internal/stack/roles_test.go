@@ -55,7 +55,7 @@ func TestBindRefusesEachShapeItDoesNotRead(t *testing.T) {
 }
 
 // TestReadRolesWithCountsTakesOne is the roles key of a module's manifest: one is read,
-// and many and a list are refused, each with the fix first.
+// and many and a list return an error, each with the fix first.
 func TestReadRolesWithCountsTakesOne(t *testing.T) {
 	r, err := ReadRoles(node(t, "agents:\n  developer: one\n"), "roles", true)
 	if err != nil || r["agents"]["developer"] != "one" {
@@ -74,7 +74,7 @@ func TestReadRolesWithCountsTakesOne(t *testing.T) {
 }
 
 // TestCheckRolesChecksABuiltStack is a stack built in code with a role that is no path
-// segment: validate refuses it with the file's path and no path in front.
+// segment: validate returns an error with the file's path and no path in front.
 func TestCheckRolesChecksABuiltStack(t *testing.T) {
 	err := CheckRoles(Roles{"agents": {"a/b": "c"}}, "bind")
 	if err == nil || !strings.HasPrefix(err.(*RolesError).In("qory.yaml").Error(), "Rename role a/b of bind.agents in qory.yaml") {

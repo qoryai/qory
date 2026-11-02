@@ -671,13 +671,13 @@ type UnresolvedError struct {
 
 func (e *UnresolvedError) Error() string { return strings.Join(e.Lines, "\n") }
 
-// checkResolved refuses a compose in which a binding, a requirement or a reference does
-// not resolve. requires holds each module's needs by module name, keyed <kind>/<name>. A
-// needed entry may come from any module, since a name is composed once; an entry that
-// was left out has no needs to meet. A role is checked once, with the layer that set it,
-// and a reference through it says nothing more: the role is what there is to fix. The
-// message says why an entry is missing: a module's exclude left it out, or no module
-// ships it, and for a reference that the stack binds no role of that name either.
+// checkResolved returns an error for a compose in which a role, a requirement or a
+// reference does not resolve. requires holds each module's needs by module name, keyed
+// <kind>/<name>. A needed entry may come from any module, since a name is composed once;
+// an entry that was left out has no needs to meet. A role is checked once, with the layer
+// that set it, and a reference through it adds no line: the role is what there is to fix.
+// The message says why an entry is missing: a module's exclude left it out, or no module
+// ships it, and for a reference that no role of that name is set either.
 func checkResolved(res *Result, requires map[string]map[string][]Need) error {
 	composed := map[string]bool{}
 	for _, e := range res.Entries {

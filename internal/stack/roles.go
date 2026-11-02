@@ -95,7 +95,7 @@ func ReadRoles(n *yaml.Node, key string, counts bool) (Roles, error) {
 	if n.Kind != yaml.MappingNode {
 		return nil, rolesError("Write %s in {file} as a map of kinds, then roles: %s is not a map.", key, key)
 	}
-	// Decoding into a map refuses a key written twice, which a node keeps.
+	// Decoding into a map returns an error for a key written twice, which a node keeps.
 	var kinds map[string]yaml.Node
 	if err := n.Decode(&kinds); err != nil {
 		return nil, err

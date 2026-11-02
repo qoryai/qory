@@ -177,7 +177,6 @@ release may change what an existing document does, and states it under Upgrading
   it too. The harness section of a run code's documents writes `bind` the same way.
 - A reference to a role that nothing fills ends with `which no module ships or provides
   and the stack does not bind`.
-
 - The `agent` image contains Claude Code 2.1.316, up from 2.1.273.
 - Claude Code runs with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and
   `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1` in every run,
