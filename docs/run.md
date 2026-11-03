@@ -2612,9 +2612,9 @@ In a run that cannot write its checkout, such as a [read run](#read-workflows), 
 `/tmp/qory-artifacts` in the agent's container, and it ends with the container. `qory
 artifact pull` and `qory artifact push` check whether they can write the checkout, so no
 setting is needed. In a wall they find the checkout from the folder the run started in, so
-a `cd` does not change the store. With no wall they find it from the working folder. In a
-run, read the files from the directory that `qory artifact pull` prints, which is a whole
-path. Outside a run the store is `.qory/artifacts`.
+a `cd` does not change the store. On an image with nested Docker, and with no wall, they
+find it from the working folder. In a run, read the files from the directory that `qory
+artifact pull` prints, which is a whole path. Outside a run the store is `.qory/artifacts`.
 
 `qory artifact pull` fetches the newest version of each output of the stage, and the
 version of each input that its gate approved. A type that is both counts as an output. For
