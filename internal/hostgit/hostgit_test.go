@@ -353,7 +353,7 @@ func TestAKeyAddedOrChangedSinceTheRecordIsRefused(t *testing.T) {
 		t.Fatalf("the key taken out again: %v", err)
 	}
 	git(t, dir, "config", "user.email", "someone@example.com")
-	refusedKey(t, run(t, dir), dir, "user.name")
+	refusedKey(t, run(t, dir), dir, "user.email")
 }
 
 // TestASettingWithoutAValueHashesApart refuses a key written with no value where the
