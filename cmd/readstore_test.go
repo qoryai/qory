@@ -148,7 +148,7 @@ type signedRunAPI struct {
 
 // The run API's fixture: the artifact brief, version 1, with one file.
 const (
-	gatewaySnapshot = `{"version":1,"work_item":{"id":"wi_1","number":12},"inputs":[],` +
+	gatewaySnapshot = `{"version":1,"work_item":{"id":"wi_1","number":12},"run":{"id":"r","number":57},"inputs":[],` +
 		`"outputs":[{"type":"brief","required":true,"version":null,"check":"missing"}]}`
 	gatewayArtifactFile = "brief.md"
 	gatewayArtifactText = "the brief"

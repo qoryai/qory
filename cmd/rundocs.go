@@ -102,6 +102,9 @@ type codeRun struct {
 	// no target.
 	access   string
 	workItem string
+
+	// runNumber is the run's number on the server, set by [codeRun.readBranch].
+	runNumber int
 }
 
 // The harness of a run from a run code as a text shows it: the documents' harness

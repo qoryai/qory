@@ -2008,7 +2008,7 @@ The step does this, in order:
    fails the step. qory removes only that file, and only as a regular file in a `.git`
    directory, so a link stops the check and any other lock stays.
 3. qory commits what the agent left in each repository, with the message `Changes left by
-   run <run id>` and the author and committer `qory <qory@localhost>`. A new file is in
+   run <run number>` and the author and committer `qory <qory@localhost>`. A new file is in
    the commit unless git ignores it through `.gitignore` or `.git/info/exclude`. `.qory`
    and the links into it stay out, also when the agent staged them. When a commit of the
    agent has them, qory's commit puts them back as they were at the start of the run, and

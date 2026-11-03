@@ -24,7 +24,8 @@ const (
 // readBranch reads the branch of the work item that r's run is for, on this machine and
 // before the fetch: nil with no branch step, for a run that is not from a run code, has
 // no work item, or has no target version on the system of its repositories, and for a
-// server with the feature workflow_model off. Each error ends with [codeUsed].
+// server with the feature workflow_model off. Each error ends with [codeUsed]. It sets
+// r.runNumber from the work item snapshot.
 func (r *codeRun) readBranch(ctx context.Context, run openedRun, timeout time.Duration, opened time.Time) (*preparation.WorkBranch, error) {
 	if r == nil || r.workItem == "" || r.target.Version == "" || r.target.System != run.System() {
 		return nil, nil
@@ -58,6 +59,8 @@ func (r *codeRun) readBranch(ctx context.Context, run openedRun, timeout time.Du
 	if err != nil {
 		return nil, fmt.Errorf("%w%s", err, codeUsed)
 	}
+
+	r.runNumber = snapshot.Run.Number
 
 	index, err := client.Artifacts(ctx)
 	if err != nil {

@@ -23,7 +23,7 @@ const (
 	snapshotExample = `{
   "version": 1,
   "work_item": {"id": "wi_1", "number": 12, "url": "https://example.test/wi_1"},
-  "run": {"id": "run-1", "workflow": "capture-demo", "round": 2},
+  "run": {"id": "run-1", "number": 57, "workflow": "capture-demo", "round": 2},
   "stage": {"id": "st_1", "name": "Build", "round": 2, "rounds": 3, "state": "running"},
   "inputs": [
     {"type": "acceptance-criteria", "required": true, "version": {"id": "av_1", "number": 2}}
@@ -48,7 +48,7 @@ const (
 	noStageExample = `{
   "version": 1,
   "work_item": {"id": "wi_1", "number": 12, "url": "https://example.test/wi_1"},
-  "run": {"id": "run-1", "workflow": null, "round": null},
+  "run": {"id": "run-1", "number": 57, "workflow": null, "round": null},
   "stage": {"id": null, "name": null, "round": null, "rounds": null, "state": null},
   "inputs": [],
   "outputs": [],
@@ -202,7 +202,7 @@ func TestWorkItemReadsTheSnapshot(t *testing.T) {
 		t.Errorf("work item = %+v", snapshot.WorkItem)
 	}
 
-	if *snapshot.Run.Workflow != "capture-demo" || *snapshot.Run.Round != 2 || *snapshot.Stage.Name != "Build" {
+	if snapshot.Run.Number != 57 || *snapshot.Run.Workflow != "capture-demo" || *snapshot.Run.Round != 2 || *snapshot.Stage.Name != "Build" {
 		t.Errorf("run = %+v, stage = %+v", snapshot.Run, snapshot.Stage)
 	}
 
@@ -686,6 +686,8 @@ func TestAPushErrorHasItsMembers(t *testing.T) {
 }
 
 func TestResponsesTheClientCannotRead(t *testing.T) {
+	const noRunNumber = "Check the run's gateway. The response to GET /work-item has no run number."
+
 	for name, c := range map[string]struct {
 		body string
 		want string
@@ -694,6 +696,10 @@ func TestResponsesTheClientCannotRead(t *testing.T) {
 		"another shape":   {`{"version":1,"inputs":"none"}`, "Check the run's gateway. The response to GET /work-item is not the run API's JSON"},
 		"newer version":   {`{"version":2}`, "Update qory. This qory reads version 1 of the run API, and GET /work-item returned version 2."},
 		"no version":      {`{}`, "Check the run's gateway. The response to GET /work-item has no version."},
+		"no run":          {`{"version":1}`, noRunNumber},
+		"no run number":   {`{"version":1,"run":{"id":"run-1"}}`, noRunNumber},
+		"a null number":   {`{"version":1,"run":{"id":"run-1","number":null}}`, noRunNumber},
+		"a number of 0":   {`{"version":1,"run":{"id":"run-1","number":0}}`, noRunNumber},
 		"a long response": {`{"version":1,"x":"` + strings.Repeat("a", 16<<20) + `"}`, "Check the run's gateway. The response to GET /work-item is over"},
 	} {
 		t.Run(name, func(t *testing.T) {

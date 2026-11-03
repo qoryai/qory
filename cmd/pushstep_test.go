@@ -39,14 +39,23 @@ const (
 	noType      = "Define the artifact type branch in the workspace's Artifact types, then " + versionWays + ", then run the round again"
 )
 
+// pushRunNumber is the run's number in the work item of [pushAPI], and changesLeft the
+// message of the commit of what the agent of that run left.
+const (
+	pushRunNumber = 57
+	changesLeft   = "Changes left by run 57"
+)
+
 // pushAPI is a run API that stores the versions of the artifact branch that a run posts.
 // post, when set, gets the number of each POST, from 1, and writes its response when it
 // returns true; store then says whether the POST stored its version. index does the same
-// for each GET of the artifacts. The counts are of the requests that arrived.
+// for each GET of the artifacts. The counts are of the requests that arrived. number is
+// the run's number in the work item, left out of the response when it is 0.
 type pushAPI struct {
 	server *httptest.Server
 	mu     sync.Mutex
 	runID  string
+	number int
 	files  [][]byte
 	notes  []string
 	// writer, when set, is the run id the index shows, and shownFile the file whose sum it
@@ -63,7 +72,7 @@ type pushAPI struct {
 // newPushAPI serves a run API whose work item has the id [workItem] and the stage st_a.
 func newPushAPI(t *testing.T) *pushAPI {
 	t.Helper()
-	a := &pushAPI{}
+	a := &pushAPI{number: pushRunNumber}
 	a.server = httptest.NewServer(http.HandlerFunc(a.serve))
 	t.Cleanup(a.server.Close)
 	return a
@@ -77,7 +86,11 @@ func (a *pushAPI) serve(w http.ResponseWriter, r *http.Request) {
 	defer a.mu.Unlock()
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/r/work-item":
-		fmt.Fprintf(w, `{"version":1,"work_item":{"id":%q,"number":1},"stage":{"id":"st_a"},"inputs":[],"outputs":[]}`, workItem)
+		run := fmt.Sprintf(`{"id":%q}`, a.runID)
+		if a.number != 0 {
+			run = fmt.Sprintf(`{"id":%q,"number":%d}`, a.runID, a.number)
+		}
+		fmt.Fprintf(w, `{"version":1,"work_item":{"id":%q,"number":1},"run":%s,"stage":{"id":"st_a"},"inputs":[],"outputs":[]}`, workItem, run)
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/r/artifacts":
 		a.reads++
 		if a.index == nil || !a.index(a.reads, w) {
@@ -425,7 +438,7 @@ func TestAWriteRunPushesWhatTheAgentLeft(t *testing.T) {
 			t.Errorf("%s on the branch is %q, want %q", file, got, want)
 		}
 	}
-	if got := proxygittest.Git(t, p.bare, "log", "--format=%s", p.first+".."+head); got != "Changes left by run "+r.runID+"\nAdd a file" {
+	if got := proxygittest.Git(t, p.bare, "log", "--format=%s", p.first+".."+head); got != changesLeft+"\nAdd a file" {
 		t.Errorf("the branch's new commits are:\n%s", got)
 	}
 	if got := proxygittest.Git(t, p.bare, "log", "-1", "--format=%an <%ae> %cn <%ce>", head); got != "qory <qory@localhost> qory <qory@localhost>" {
@@ -529,7 +542,7 @@ func TestASessionThatDidNotSucceedPushes(t *testing.T) {
 				t.Fatalf("the forge has no branch\n%s", r.out)
 			}
 			got := proxygittest.Git(t, p.bare, "log", "-1", "--format=%B", head)
-			if want := "Changes left by run " + r.runID + "\n\n" + c.end; got != want {
+			if want := changesLeft + "\n\n" + c.end; got != want {
 				t.Errorf("the commit's message is %q, want %q", got, want)
 			}
 			if len(p.api.notes) != 1 || p.api.notes[0] != c.end {
@@ -539,13 +552,48 @@ func TestASessionThatDidNotSucceedPushes(t *testing.T) {
 	}
 }
 
+// TestTheCommitHasTheRunNumberAndNotTheRunID is the subject of the commit of what the agent
+// left: the number from the work item, in place of the run's id.
+func TestTheCommitHasTheRunNumberAndNotTheRunID(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.api.number = 41
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	got := proxygittest.Git(t, p.bare, "log", "-1", "--format=%s", p.branchHead(t))
+	if got != "Changes left by run 41" {
+		t.Errorf("the commit's subject is %q", got)
+	}
+	if r.runID == "" || strings.Contains(got, r.runID) {
+		t.Errorf("the commit's subject %q has the run id %q", got, r.runID)
+	}
+}
+
+// TestAResponseWithNoRunNumberStopsTheRunBeforeTheJoin is a work item with no run number:
+// the run ends before the agent, so no commit reads "run 0".
+func TestAResponseWithNoRunNumberStopsTheRunBeforeTheJoin(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.api.number = 0
+	joined := false
+	r := p.run(t, func(string) { joined = true }, nil)
+	if cmd.ExitCode(r.err) != 1 || joined {
+		t.Fatalf("%v (exit %d, joined %v), want exit 1 before the join\n%s", r.err, cmd.ExitCode(r.err), joined, r.out)
+	}
+	wants(t, r.out+r.err.Error(), "Check the run's gateway. The response to GET /work-item has no run number.", "the code is used")
+	if name, _ := r.step(); name != "" {
+		t.Errorf("the run has the push step %q", name)
+	}
+	if head := p.branchHead(t); head != "" {
+		t.Errorf("the forge has the branch at %s", head)
+	}
+}
+
 // TestASucceededRunShowsNoEnd is the commit and the version of a session that succeeded.
 func TestASucceededRunShowsNoEnd(t *testing.T) {
 	p := newPushRepo(t, "write")
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateSucceeded, 0)
 	got := proxygittest.Git(t, p.bare, "log", "-1", "--format=%B", p.branchHead(t))
-	if want := "Changes left by run " + r.runID; got != want {
+	if want := changesLeft; got != want {
 		t.Errorf("the commit's message is %q, want %q", got, want)
 	}
 	if len(p.api.notes) != 1 || p.api.notes[0] != "" {
@@ -806,7 +854,7 @@ func TestAHookOfTheForgeFailsTheStep(t *testing.T) {
 	r.wantsClose(t, event.StateFailed, 1)
 	head := gitOut(t, p.h.dir, "rev-parse", "HEAD")
 	wants(t, r.log(), "qory run: remote: the branch is protected\n", "qory run: remote: see https://(hidden)@git.test/rules\n",
-		"qory run: not pushed from acme/site: "+head[:12]+" Changes left by run "+r.runID+"\n",
+		"qory run: not pushed from acme/site: "+head[:12]+" "+changesLeft+"\n",
 		"qory run: not pushed from acme/site: ")
 	for _, secret := range []string{"token-456", "bot:", masked} {
 		if strings.Contains(r.log(), secret) {
@@ -994,6 +1042,7 @@ func TestASecondRunStartsAtThePushedCommit(t *testing.T) {
 	pushedHead := p.branchHead(t)
 
 	p.again(t)
+	p.api.number = 58
 	var startedAt, onBranch string
 	second := p.run(t, func(dir string) {
 		startedAt = gitOut(t, dir, "rev-parse", "HEAD")
@@ -1009,7 +1058,7 @@ func TestASecondRunStartsAtThePushedCommit(t *testing.T) {
 	if got := proxygittest.Git(t, p.bare, "merge-base", pushedHead, head); got != pushedHead || head == pushedHead {
 		t.Errorf("the branch went from %s to %s, not as a fast-forward", pushedHead, head)
 	}
-	if got := proxygittest.Git(t, p.bare, "log", "-1", "--format=%s", head); got != "Changes left by run "+second.runID {
+	if got := proxygittest.Git(t, p.bare, "log", "-1", "--format=%s", head); got != "Changes left by run 58" {
 		t.Errorf("the new commit's message is %q", got)
 	}
 	doc := p.api.document(t, 2)

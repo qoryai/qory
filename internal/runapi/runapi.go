@@ -102,9 +102,11 @@ type Snapshot struct {
 		Number int    `json:"number"`
 		URL    string `json:"url"`
 	} `json:"work_item"`
-	// Workflow and Round are nil for a run that has neither.
+	// Number is the run's number on the server, from 1. Workflow and Round are nil for a
+	// run that has neither.
 	Run struct {
 		ID       string  `json:"id"`
+		Number   int     `json:"number"`
 		Workflow *string `json:"workflow"`
 		Round    *int    `json:"round"`
 	} `json:"run"`
@@ -233,13 +235,17 @@ type Pushed struct {
 	Version VersionRef `json:"version"`
 }
 
-// WorkItem returns the work item snapshot.
+// WorkItem returns the work item snapshot. A response with no run number is an error.
 func (c *Client) WorkItem(ctx context.Context) (*Snapshot, error) {
 	var snapshot Snapshot
 
 	raw, err := c.exchange(ctx, http.MethodGet, "/work-item", nil, http.StatusOK, &snapshot)
 	if err != nil {
 		return nil, err
+	}
+
+	if snapshot.Run.Number < 1 {
+		return nil, errors.New("Check the run's gateway. The response to GET /work-item has no run number.")
 	}
 
 	snapshot.Raw = raw

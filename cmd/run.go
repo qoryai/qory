@@ -1040,7 +1040,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					limit = opened.Add(timeout)
 				}
 				pushCtx, cancel := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
-				ending.noStep, pushErr = removeThenPush(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, out, walled)
+				ending.noStep, pushErr = removeThenPush(pushCtx, run, streams.errOut, branch, cwd, spec.RunID, fromCode.runNumber, out, walled)
 				ending.stopped = ctx.Err() != nil
 				ending.again, ending.got = again.Err() != nil, got()
 				ending.cut = pushCtx.Err() != nil

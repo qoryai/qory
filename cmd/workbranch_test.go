@@ -37,7 +37,7 @@ func branchAPI(t *testing.T, file string) string {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/runs/r/work-item":
-			fmt.Fprintf(w, `{"version":1,"work_item":{"id":%q,"number":1},"stage":{"id":"st_a"},"inputs":[],"outputs":[]}`, workItem)
+			fmt.Fprintf(w, `{"version":1,"work_item":{"id":%q,"number":1},"run":{"id":"r","number":57},"stage":{"id":"st_a"},"inputs":[],"outputs":[]}`, workItem)
 		case "/v1/runs/r/artifacts":
 			fmt.Fprintf(w, `{"version":1,"artifacts":[{"type":"branch","name":"main","newest_version":1,"versions":%s}]}`, versions)
 		case "/v1/runs/r/artifacts/av_1/files/branch.json":
