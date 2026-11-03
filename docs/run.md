@@ -2511,7 +2511,8 @@ instance](#the-access-key-and-the-instance).
 ## Commands of a work item
 
 A skill reads its work item and stores what it made with four commands. Each command
-works in a run and on a laptop, so a skill needs no branch for where it runs.
+works in a run and on a laptop. A wall mounts `qory` at `/qory/qory` and does not add it to
+`PATH`, so a skill calls `/qory/qory` in a run with a wall and `qory` on a laptop.
 
 | Command | In a run | Outside a run |
 | ------- | -------- | ------------- |
@@ -2527,10 +2528,12 @@ absent, the commands work on the checkout's `.qory` directory.
 
 The store is the folder of a run's artifact files. It is `.qory/artifacts` in the checkout.
 In a run that cannot write its checkout, such as a [read run](#read-workflows), it is
-`/tmp/qory-artifacts` in the agent's container, and it ends with the container. Each command
-checks whether it can write the checkout, so no setting is needed. Read the files from the
-directory that `qory artifact pull` prints, and a skill works on both. Outside a run the
-store is `.qory/artifacts`.
+`/tmp/qory-artifacts` in the agent's container, and it ends with the container. `qory
+artifact pull` and `qory artifact push` check whether they can write the checkout, so no
+setting is needed. In a wall they find the checkout from the folder the run started in, so
+a `cd` does not change the store. With no wall they find it from the working folder. In a
+run, read the files from the directory that `qory artifact pull` prints, which is a whole
+path. Outside a run the store is `.qory/artifacts`.
 
 `qory artifact pull` fetches the newest version of each output of the stage, and the
 version of each input that its gate approved. A type that is both counts as an output. For
@@ -2548,8 +2551,11 @@ files through the run API, whatever the type's maximum.
 with no work item. These numbers mean a collision and a foreign path on `qory harness`.
 
 `.qory/artifacts/.gitignore` keeps the artifacts out of git, also in a run's checkout,
-which has no exclude line for `.qory`. `/tmp/qory-artifacts` has mode 700 and no
-`.gitignore`, because it lies outside the checkout. A directory link at `.qory`,
+which has no exclude line for `.qory`. `/tmp/qory-artifacts` has no `.gitignore`, because
+it lies outside the checkout. qory makes that folder with mode 700 as the run's user. If
+another user owns a folder at that path, or its mode has a group or other bit,
+`qory artifact pull` and `qory artifact push` stop with exit 1, and the push sends nothing.
+Remove the folder to run the command again. A directory link at `.qory`,
 `.qory/artifacts` or `/tmp/qory-artifacts` stops `qory artifact push` with exit 1 before it
 sends anything. A directory link further
 down stops `qory artifact pull` and a push outside a run with exit 1. In a run, a push has
@@ -3326,15 +3332,23 @@ with `access: write`. A read run sees the checkout read-only:
 - Forager binds the workspace read-only in the agent's container, and the checkout's
   mount is read-only. A write into the checkout inside fails with `Read-only file
   system`.
-- The commands of a work item keep their files in `/tmp/qory-artifacts`, the store of a
-  run that cannot write its checkout. `qory artifact pull` prints that directory. See
+- `qory artifact pull` and `qory artifact push` keep their files in `/tmp/qory-artifacts`,
+  the store of a run that cannot write its checkout. `qory artifact pull` prints that
+  directory. See
   [Commands of a work item](#commands-of-a-work-item).
 - On Claude Code, the run's settings deny `NotebookEdit` and every edit under the
   checkout, with `Edit(//<checkout>/**)` and `Edit(//workspace/**)`. They allow
   `Bash(/qory/qory *)`, `Read(//tmp/qory-artifacts/**)` and
-  `Edit(//tmp/qory-artifacts/**)`, and set `permissions.defaultMode` to `dontAsk`, beside
-  what the composed settings contain. Inside the wall, `qory` is at `/qory/qory` and not on
-  `PATH`. On the other runtimes, the read-only mount is the only change.
+  `Edit(//tmp/qory-artifacts/**)`, add `/tmp/qory-artifacts` to
+  `permissions.additionalDirectories`, and set `permissions.defaultMode` to `dontAsk`,
+  beside what the composed settings contain. Inside the wall, `qory` is at `/qory/qory` and
+  not on `PATH`. On the other runtimes, the read-only mount is the only change.
+
+  `permissions.additionalDirectories` keeps the store readable when the composed settings
+  set `permissions.blockReadsOutsideWorkingDirectories`. A folder on that list must exist
+  when Claude Code starts, so qory makes `/tmp/qory-artifacts` in the container before the
+  agent starts. If the image has something at that path, the run stops before the agent
+  starts, and the error line starts with the fix.
 
   So the agent reads what it pulled and makes what it pushes in `/tmp/qory-artifacts`, with
   Claude Code's `Read` and `Write` tools:
@@ -3344,9 +3358,11 @@ with `access: write`. A read run sees the checkout read-only:
   /qory/qory run verdict changes-requested --gaps /tmp/qory-artifacts/gaps.md
   ```
 
-  Every other write stops at `dontAsk`. An `Edit` or `Write` allow in the composed
-  settings opens the rest of the container, and the deny rules and the read-only mount
-  still stop a write to the checkout.
+  Every other write stops at `dontAsk`, apart from Claude Code's memory folder,
+  `/tmp/qory-agent-home/projects/<project>/memory/`, which Claude Code lets the agent write
+  with no rule. That folder stays in the container and does not reach the checkout. An
+  `Edit` or `Write` allow in the composed settings opens the rest of the container, and the
+  deny rules and the read-only mount still stop a write to the checkout.
 - The setup and the host steps write the checkout, so the checkout stays among the places
   the run may write, and the record lists it.
 - qory removes the setup container after the setup and before the agent starts, in the
