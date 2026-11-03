@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/qoryai/forager/accesskey"
 
@@ -132,7 +133,9 @@ func privateGitDir(ctx context.Context, root, dir, private, commit string) error
 }
 
 // copyRegular reads the file at path once, following no link, and writes it to the new
-// file target. It stops on anything but a regular file.
+// file target. It stops on anything but a regular file. The copy has the time of path:
+// for a file whose size and times match its index entry, git status reads the content
+// only if the index file is not newer than the entry, so a newer copy shows no change.
 func copyRegular(path, target string) error {
 	from, err := os.OpenFile(path, os.O_RDONLY|render.OpenFlags, 0)
 	if err != nil {
@@ -154,7 +157,10 @@ func copyRegular(path, target string) error {
 		to.Close()
 		return err
 	}
-	return to.Close()
+	if err := to.Close(); err != nil {
+		return err
+	}
+	return os.Chtimes(target, time.Time{}, info.ModTime())
 }
 
 // noLinkTo stops on a link in the folders of the path from root to dir, root excluded.

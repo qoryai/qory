@@ -450,6 +450,29 @@ func TestThePrivateGitDirHasNoKeyOfALaterWrite(t *testing.T) {
 	}
 }
 
+// TestThePrivateIndexHasTheTimeOfTheIndex is an index with a known past time: the copy has
+// that time, so git status of the copy reads a file of the same size as the index entry as
+// git status of the repository does.
+func TestThePrivateIndexHasTheTimeOfTheIndex(t *testing.T) {
+	dir, b := onBranch(t, "acme/shop")
+	past := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	if err := os.Chtimes(filepath.Join(dir, ".git", "index"), past, past); err != nil {
+		t.Fatal(err)
+	}
+	private := t.TempDir()
+	ctx := hostgit.WithBase(context.Background(), proxygit.Env(os.Environ(), nil))
+	if err := privateGitDir(ctx, dir, dir, private, b.Repositories[0].Commit); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Join(private, "index"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.ModTime().Equal(past) {
+		t.Errorf("the copy of the index has the time %s, want %s", info.ModTime(), past)
+	}
+}
+
 // TestTheCheckReadsThePrivateCopy is the git the check runs, seen through a program first on
 // the PATH that writes its arguments to a file and runs git: git config --file reads the
 // copy that git status reads, and never the live .git/config, which a process can change
