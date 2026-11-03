@@ -30,8 +30,9 @@ import (
 )
 
 // The tests of this file pin the commands of a work item in a read run, whose checkout
-// is read-only: the store is a temporary folder, every command in the run finds it, and
-// nothing under the checkout changes.
+// is read-only: the store is a temporary folder, and nothing under the checkout changes.
+// In a wall each command of the run finds that folder from any working folder, because it
+// reads the checkout from the folder the run's container started in.
 
 // tempStore sets the store of a read run to a folder of the test, not yet made.
 func tempStore(t *testing.T) string {
@@ -477,7 +478,8 @@ func TestAPushAfterAPullInAReadRun(t *testing.T) {
 }
 
 // TestAWriteRunKeepsTheStoreInTheCheckout is a run whose checkout it can write: the store
-// stays .qory/artifacts, with its .gitignore, and no temporary folder appears.
+// stays .qory/artifacts, with its .gitignore, its lines have the whole path, and no
+// temporary folder appears.
 func TestAWriteRunKeepsTheStoreInTheCheckout(t *testing.T) {
 	root := inCheckout(t)
 	server := startRunAPI(t)
@@ -490,7 +492,8 @@ func TestAWriteRunKeepsTheStoreInTheCheckout(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if want := ".qory/artifacts/\n"; out != want {
+	store := filepath.Join(root, ".qory", "artifacts")
+	if want := store + "/\n"; out != want {
 		t.Errorf("pull printed %q, want %q", out, want)
 	}
 
@@ -498,10 +501,150 @@ func TestAWriteRunKeepsTheStoreInTheCheckout(t *testing.T) {
 	wantFile(t, filepath.Join(root, ".qory", "artifacts", ".gitignore"), "*\n")
 
 	_, err = run(t, "artifact", "pull", "demo", "--version", "9")
-	wantExit(t, err, cmd.ExitInput, "Choose a version that .qory/artifacts/index.json lists. demo has no version 9.")
+	wantExit(t, err, cmd.ExitInput, "Choose a version that "+filepath.Join(store, "index.json")+" lists. demo has no version 9.")
 
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Errorf("the temporary store: %v", err)
+	}
+}
+
+// TestACommandInAWallFindsTheStoreFromAnyFolder is a cd in the agent's shell, to a folder
+// outside git that this user can write. In a wall the store stays the one of the run's
+// checkout, the temporary store on a read run and .qory/artifacts on a write run, and
+// nothing appears under the working folder.
+func TestACommandInAWallFindsTheStoreFromAnyFolder(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		readOnly bool
+	}{{"a read run", true}, {"a write run", false}} {
+		t.Run(c.name, func(t *testing.T) {
+			root := inCheckout(t)
+			server := startRunAPI(t)
+			pullFixture(server)
+
+			dir := tempStore(t)
+			t.Cleanup(cmd.SetRunStartFolder(root))
+
+			want := filepath.Join(root, ".qory", "artifacts")
+			if c.readOnly {
+				want = dir
+				readOnlyTree(t, root)
+			}
+
+			elsewhere, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			t.Chdir(elsewhere)
+
+			out, err := run(t, "artifact", "pull")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if out != want+"/\n" {
+				t.Errorf("pull printed %q, want %q", out, want+"/\n")
+			}
+
+			wantFile(t, filepath.Join(want, "demo", "main", "v2", "demo.md"), "new demo")
+
+			if entries, _ := os.ReadDir(elsewhere); len(entries) != 0 {
+				t.Errorf("the working folder has %v", entries)
+			}
+		})
+	}
+}
+
+// TestAFolderOtherUsersCanOpenStopsAPush is a folder at the store's path that another
+// user can open, which a host with a shared /tmp can have: the push stops before it
+// sends, and leaves the folder's mode and files as they are.
+func TestAFolderOtherUsersCanOpenStopsAPush(t *testing.T) {
+	root := inCheckout(t)
+	server := startRunAPI(t)
+	pullFixture(server)
+
+	dir := tempStore(t)
+
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Chmod(dir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+
+	readOnlyTree(t, root)
+
+	_, err := run(t, "artifact", "pull")
+	wantExit(t, err, 1, "Remove "+dir+", then run the command again.")
+
+	_, err = runIn(t, "the text", "artifact", "push", "doc", "-")
+	wantExit(t, err, 1, "Remove "+dir+", then run the command again.")
+
+	if len(server.pushes) != 0 {
+		t.Errorf("the push reached the run API: %v", server.pushes)
+	}
+
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if info.Mode().Perm() != 0o777 {
+		t.Errorf("the mode changed to %o", info.Mode().Perm())
+	}
+
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("the folder has %v", entries)
+	}
+}
+
+// TestAFolderOfAnotherUserStopsAPush is a folder at the store's path of mode 700 that
+// another user owns. Only root can make one.
+func TestAFolderOfAnotherUserStopsAPush(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("only root can give a folder to another user")
+	}
+
+	root := inCheckout(t)
+	server := startRunAPI(t)
+	dir := tempStore(t)
+
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Chown(dir, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	readOnlyTree(t, root)
+
+	_, err := runIn(t, "the text", "artifact", "push", "doc", "-")
+	wantExit(t, err, 1, "Remove "+dir+", then run the command again.")
+
+	if len(server.pushes) != 0 {
+		t.Errorf("the push reached the run API: %v", server.pushes)
+	}
+}
+
+// TestAFolderOfThisUserWithMode700IsTheStore is the folder as qory run agent-env leaves
+// it: empty, of mode 700, there before the first command.
+func TestAFolderOfThisUserWithMode700IsTheStore(t *testing.T) {
+	root := inCheckout(t)
+	server := startRunAPI(t)
+	pullFixture(server)
+
+	dir := tempStore(t)
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	readOnlyTree(t, root)
+
+	if out, err := run(t, "artifact", "pull"); err != nil || out != dir+"/\n" {
+		t.Fatalf("pull: %q, %v", out, err)
 	}
 }
 

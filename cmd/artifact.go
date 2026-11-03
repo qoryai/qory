@@ -19,9 +19,11 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/qoryai/forager/wall"
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/checkout"
+	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/runapi"
 )
 
@@ -48,14 +50,31 @@ const (
 	stdinArgument = "-"
 )
 
-// tempStoreDir is the store of a run whose checkout qory cannot write. The agent's
-// container has a writable root, and each command of the run finds the store at this one
-// path, as do the rules of [readRules].
-var tempStoreDir = "/tmp/qory-artifacts"
+// tempStoreDir is the store of a run whose checkout qory cannot write, in the writable
+// root of the agent's container. A variable for the tests.
+var tempStoreDir = preparation.TempStore
 
 // checkoutWritable reports whether a run may write the checkout at a path. A variable
 // for the tests, which root runs and a mode does not stop.
 var checkoutWritable = canWrite
+
+// runStartFolder returns the folder that the run's container started in, empty outside a
+// wall. Forager starts the container with --workdir at the checkout or a folder in it,
+// and the container's first process stays there, so no cd in the agent's shell changes
+// the value. A process is in a wall when it is the qory at [wall.HelperPath]; elsewhere
+// process 1 is the machine's. A variable for the tests.
+var runStartFolder = func() string {
+	if exe, err := os.Executable(); err != nil || exe != wall.HelperPath {
+		return ""
+	}
+
+	start, err := os.Readlink("/proc/1/cwd")
+	if err != nil {
+		return ""
+	}
+
+	return start
+}
 
 // maxGapsFile is the most read of the file of --gaps: the 64 KiB of the request's body.
 const maxGapsFile = 64 << 10
@@ -771,11 +790,10 @@ func artifactNameError(what, value string) error {
 // artifactStore is the checkout's .qory/artifacts directory. Its .gitignore keeps it out of
 // git: a run's checkout has no exclude line for .qory, and a later commit of the run must
 // not take the artifacts in. In a run whose checkout qory cannot write, it is
-// [tempStoreDir], with no .gitignore, and temporary is set.
+// [tempStoreDir], with no .gitignore.
 type artifactStore struct {
-	root      string
-	dir       string
-	temporary bool
+	root string
+	dir  string
 }
 
 // checkoutRoot returns the root of the checkout that the working directory is in.
@@ -788,11 +806,24 @@ func checkoutRoot() (string, error) {
 	return checkout.Root(workingDir)
 }
 
-// openArtifactStore returns the store of the checkout that the working directory is in,
-// or in a run whose checkout qory cannot write, as a read-only mount stops every write,
-// the store at [tempStoreDir]. Outside a run a checkout that qory cannot write fails here.
+// storeRoot returns the checkout of the store. In a wall it is the checkout of
+// [runStartFolder], so each command of the run finds one store from any folder. Elsewhere
+// it is the checkout that the working directory is in.
+func storeRoot() (string, error) {
+	if os.Getenv(envRunAPI) != "" {
+		if start := runStartFolder(); start != "" {
+			return checkout.Root(start)
+		}
+	}
+
+	return checkoutRoot()
+}
+
+// openArtifactStore returns the store of the checkout of [storeRoot], or in a run whose
+// checkout qory cannot write, as a read-only mount stops every write, the store at
+// [tempStoreDir]. Outside a run a checkout that qory cannot write fails here.
 func openArtifactStore() (*artifactStore, error) {
-	root, err := checkoutRoot()
+	root, err := storeRoot()
 	if err != nil {
 		return nil, err
 	}
@@ -818,10 +849,11 @@ func openArtifactStore() (*artifactStore, error) {
 	return store, nil
 }
 
-// openTempStore returns the store at [tempStoreDir]. Only this user reads the folder,
-// which matters on a host where other users share /tmp.
+// openTempStore returns the store at [tempStoreDir], made by [preparation.FreshHome] or
+// here. A folder that another user owns or can open stops the command, because a run's
+// artifact files must reach no other user on a host that shares /tmp.
 func openTempStore() (*artifactStore, error) {
-	store := &artifactStore{root: filepath.Dir(tempStoreDir), dir: tempStoreDir, temporary: true}
+	store := &artifactStore{root: filepath.Dir(tempStoreDir), dir: tempStoreDir}
 
 	if err := os.Mkdir(store.dir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
 		return nil, fmt.Errorf("Check %s. Making the directory failed: %w", store.dir, err)
@@ -829,6 +861,17 @@ func openTempStore() (*artifactStore, error) {
 
 	if _, err := store.realDir(); err != nil {
 		return nil, err
+	}
+
+	info, err := os.Lstat(store.dir)
+	if err != nil {
+		return nil, fmt.Errorf("Check %s. Reading it failed: %w", store.dir, err)
+	}
+
+	if owner, user := folderOwner(info); owner != user || info.Mode().Perm()&0o077 != 0 {
+		return nil, fmt.Errorf("Remove %s, then run the command again. qory keeps a run's artifact files only in a folder "+
+			"that this user owns and no other user can open. The folder's owner is uid %d, this user is uid %d, and its mode is %o.",
+			store.dir, owner, user, info.Mode().Perm())
 	}
 
 	return store, nil
@@ -894,10 +937,11 @@ func (s *artifactStore) realDir(parts ...string) (string, error) {
 	return at, nil
 }
 
-// shown returns path for a line of output: relative to the working directory, and in a
-// temporary store the whole path, which a skill follows from any directory.
+// shown returns path for a line of output: in a run the whole path, because Claude Code
+// can reset the shell to another folder between two commands, and elsewhere relative to
+// the working directory.
 func (s *artifactStore) shown(path string) string {
-	if s.temporary {
+	if os.Getenv(envRunAPI) != "" {
 		return path
 	}
 

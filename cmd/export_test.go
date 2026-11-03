@@ -595,6 +595,14 @@ func SetTempStoreDir(dir string) func() {
 	return func() { tempStoreDir = before }
 }
 
+// SetRunStartFolder sets the folder that a run in a wall started in, and returns a
+// function that restores the check.
+func SetRunStartFolder(dir string) func() {
+	before := runStartFolder
+	runStartFolder = func() string { return dir }
+	return func() { runStartFolder = before }
+}
+
 // SetCheckoutUnwritable makes a run read every checkout as one it cannot write, as a
 // read-only mount does for root too, and returns a function that restores the check.
 func SetCheckoutUnwritable() func() {

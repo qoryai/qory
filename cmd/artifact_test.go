@@ -276,11 +276,11 @@ func TestArtifactPullFetchesTheChosenVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if out != ".qory/artifacts/\n" {
+	store := filepath.Join(root, ".qory", "artifacts")
+	if out != store+"/\n" {
 		t.Errorf("out = %q", out)
 	}
 
-	store := filepath.Join(root, ".qory", "artifacts")
 	wantFile(t, filepath.Join(store, "brief", "main", "v1", "brief.md"), "approved brief")
 	wantFile(t, filepath.Join(store, "demo", "main", "v2", "demo.md"), "new demo")
 	wantFile(t, filepath.Join(store, "notes", "main", "v1", "notes.md"), "the notes")

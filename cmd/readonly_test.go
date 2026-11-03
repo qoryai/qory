@@ -121,6 +121,25 @@ func TestAReadRunSeesTheCheckoutReadOnly(t *testing.T) {
 	}
 }
 
+// TestAReadRunOpensTheStoreToAComposedBlock is a read run whose module sets
+// blockReadsOutsideWorkingDirectories in its settings, as the software factory's does: the
+// compose keeps the setting, and the settings of the launch list the store in
+// additionalDirectories, without which Read in the store fails on Claude Code.
+func TestAReadRunOpensTheStoreToAComposedBlock(t *testing.T) {
+	r := runFromCodeLinks(t, func(string) []string {
+		docker, _ := fakeDocker(t)
+		writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
+			"wall:\n  adapter: docker\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n  image: "+readImage+"\n")
+		return nil
+	}, []string{"--home", filepath.Join(tempDir(t), "home")}, declares("read"), nil, map[string]string{
+		"examples/hello/modules/hello/settings/claude/settings.json": `{"permissions": {"blockReadsOutsideWorkingDirectories": true}}`,
+	}, nil)
+	if !r.joined {
+		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	wants(t, settingsOf(t, r.spec.Args), `"blockReadsOutsideWorkingDirectories": true`, `"additionalDirectories": [`, `"/tmp/qory-artifacts"`)
+}
+
 // TestAWriteWorkflowSeesTheCheckoutWritable is a walled run from a run code whose
 // workflow the stack declares with access write and whose documents have access write:
 // the workspace and the checkout's mount stay writable, and Claude Code's settings get
@@ -136,7 +155,7 @@ func TestAWriteWorkflowSeesTheCheckoutWritable(t *testing.T) {
 	if got := checkoutMounts(r.spec); len(got) != 1 || got[0] != (wall.Mount{Path: r.spec.Dir}) {
 		t.Errorf("the mounts of the checkout are %+v, want %s writable alone", got, r.spec.Dir)
 	}
-	lacks(t, settingsOf(t, r.spec.Args), "/qory/qory", "dontAsk", "NotebookEdit")
+	lacks(t, settingsOf(t, r.spec.Args), "/qory/qory", "dontAsk", "NotebookEdit", "additionalDirectories")
 }
 
 // settingsOf is the value of --settings in args, Claude Code's settings as JSON.
