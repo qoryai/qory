@@ -517,6 +517,23 @@ func TestNoCopyIsTodaysFetch(t *testing.T) {
 	}
 }
 
+// TestAPrivateCopyStopsOnAnythingButARegularFile is a path that has a pipe, or a link to
+// it: the copy follows no link and waits on no pipe.
+func TestAPrivateCopyStopsOnAnythingButARegularFile(t *testing.T) {
+	folder := t.TempDir()
+	if err := syscall.Mkfifo(filepath.Join(folder, "pipe"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("pipe", filepath.Join(folder, "link")); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"pipe", "link"} {
+		if err := copyRegular(filepath.Join(folder, name), filepath.Join(folder, name+".copy")); err == nil {
+			t.Errorf("%s was copied", name)
+		}
+	}
+}
+
 // TestSeedFilesCountAsWhatTheSetupLeft is the copy's untracked file, which qory run prepare
 // adds during the setup: it stays out of the commit until the agent changes it.
 func TestSeedFilesCountAsWhatTheSetupLeft(t *testing.T) {

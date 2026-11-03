@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -18,6 +19,7 @@ import (
 	"github.com/qoryai/qory/internal/integration"
 	"github.com/qoryai/qory/internal/places"
 	"github.com/qoryai/qory/internal/proxygit"
+	"github.com/qoryai/qory/internal/render"
 )
 
 // safeRepository stops on a working folder whose repository git on this machine must not
@@ -81,6 +83,78 @@ func safeFurther(ctx context.Context, root, dir string, afterRun bool) error {
 		return err
 	}
 	return keysOf(ctx, gitDir, true, afterRun)
+}
+
+// privateGitDir fills the folder private as a git directory for git status of the
+// repository at dir, for a repository that a process may still write: [safeFurther] with
+// afterRun false stops on what git would act on, but in a folder that stays open for
+// writing, a check of the live files holds only at the moment of the check. So each
+// configuration file is read once, into private, and the keys of those copies are
+// checked, and git reads only those copies, so a key that dir gets after this read has
+// no effect. private also has HEAD at commit, and copies of the index and of
+// info/exclude, as far as dir has them. It has no hooks and no attributes. git reads the
+// objects from dir, which runs no program.
+func privateGitDir(ctx context.Context, root, dir, private, commit string) error {
+	if err := noLinkTo(root, dir); err != nil {
+		return err
+	}
+	gitDir := filepath.Join(dir, ".git")
+	if err := gitParts(gitDir); err != nil {
+		return err
+	}
+	files, err := gitFiles(gitDir)
+	if err != nil {
+		return err
+	}
+	for _, name := range files {
+		if err := copyRegular(filepath.Join(gitDir, name), filepath.Join(private, name)); err != nil {
+			return local(err)
+		}
+	}
+	if err := keysIn(ctx, private, files, true, false); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(private, "HEAD"), []byte(commit+"\n"), 0o600); err != nil {
+		return local(err)
+	}
+	for _, name := range []string{"refs", "info"} {
+		if err := os.Mkdir(filepath.Join(private, name), 0o700); err != nil {
+			return local(err)
+		}
+	}
+	for _, name := range []string{"index", filepath.Join("info", "exclude")} {
+		err := copyRegular(filepath.Join(gitDir, name), filepath.Join(private, name))
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return local(err)
+		}
+	}
+	return nil
+}
+
+// copyRegular reads the file at path once, following no link, and writes it to the new
+// file target. It stops on anything but a regular file.
+func copyRegular(path, target string) error {
+	from, err := os.OpenFile(path, os.O_RDONLY|render.OpenFlags, 0)
+	if err != nil {
+		return err
+	}
+	defer from.Close()
+	info, err := from.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file", integration.Printable(filepath.Base(path)))
+	}
+	to, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(to, from); err != nil {
+		to.Close()
+		return err
+	}
+	return to.Close()
 }
 
 // noLinkTo stops on a link in the folders of the path from root to dir, root excluded.
@@ -176,8 +250,14 @@ func keysOf(ctx context.Context, gitDir string, fetched, afterRun bool) error {
 	if err != nil {
 		return err
 	}
+	return keysIn(ctx, gitDir, files, fetched, afterRun)
+}
+
+// keysIn is the check of [keysOf] of the configuration files files, read from the folder
+// dir, a git directory or copies of its files.
+func keysIn(ctx context.Context, dir string, files []string, fetched, afterRun bool) error {
 	for _, name := range files {
-		keys, err := configKeys(ctx, filepath.Join(gitDir, name))
+		keys, err := configKeys(ctx, filepath.Join(dir, name))
 		if err != nil {
 			return gitFailed(err)
 		}

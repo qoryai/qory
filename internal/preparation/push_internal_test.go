@@ -3,7 +3,9 @@ package preparation
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -349,6 +351,157 @@ func TestASetupThatAddsAFilterStopsBeforeGitStatus(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); err == nil {
 		t.Error("the filter ran")
+	}
+}
+
+// laterFilter writes into the repository at dir what a process in the setup container can
+// write after the check: a clean filter, a fake program in a temporary folder that creates
+// the file marker, and attributes that apply it. It also moves the time of a tracked file
+// with its size unchanged, so git status reads that file.
+func laterFilter(t *testing.T, dir, marker string) {
+	t.Helper()
+	program := filepath.Join(t.TempDir(), "filter")
+	write(t, program, "#!/bin/sh\n: > '"+marker+"'\ncat\n")
+	if err := os.Chmod(program, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config, err := os.OpenFile(filepath.Join(dir, ".git", "config"), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer config.Close()
+	if _, err := fmt.Fprintf(config, "[filter \"probe\"]\n\tclean = %s\n", program); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, ".git", "info", "attributes"), "* filter=probe\n")
+	later := time.Now().Add(time.Hour)
+	if err := os.Chtimes(filepath.Join(dir, "README.md"), later, later); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestAFilterWrittenAfterTheCheckRunsNoProgram is a process that adds a filter between the
+// check and git status, so each run of the test has the order that a concurrent write
+// reaches only at times. git status reads the copy, so the filter does not run, and the
+// record is as it is with no filter.
+func TestAFilterWrittenAfterTheCheckRunsNoProgram(t *testing.T) {
+	dir, b := onBranch(t, "acme/shop")
+	marker := filepath.Join(t.TempDir(), "filter-ran")
+	write(t, filepath.Join(dir, "lock.txt"), "the setup\n")
+	ran := false
+	status := func(env ...string) gitRunner {
+		return func(ctx context.Context, at string, args ...string) (string, error) {
+			laterFilter(t, dir, marker)
+			ran = true
+			return stepGit(noRemote, "", env...)(ctx, at, args...)
+		}
+	}
+	if err := recordWith(context.Background(), dir, os.Environ(), b, status); err != nil {
+		t.Fatal(err)
+	}
+	if !ran {
+		t.Fatal("git status did not run")
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the filter ran")
+	}
+	if got := slices.Sorted(maps.Keys(b.setupChanges["."])); !slices.Equal(got, []string{"lock.txt"}) {
+		t.Errorf("the record has %q, want lock.txt", got)
+	}
+}
+
+// TestThePrivateGitDirHasNoKeyOfALaterWrite is the folder git status reads: a later write
+// to .git changes nothing in it, and git status with it has no filter to run.
+func TestThePrivateGitDirHasNoKeyOfALaterWrite(t *testing.T) {
+	dir, b := onBranch(t, "acme/shop")
+	r := b.Repositories[0]
+	write(t, filepath.Join(dir, ".git", "info", "exclude"), "ignored.txt\n")
+	index, err := os.ReadFile(filepath.Join(dir, ".git", "index"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	private := t.TempDir()
+	if err := privateGitDir(hostgit.WithBase(context.Background(), proxygit.Env(os.Environ(), nil)), dir, dir, private, r.Commit); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "filter-ran")
+	laterFilter(t, dir, marker)
+	config, err := os.ReadFile(filepath.Join(private, "config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(config), "filter") {
+		t.Errorf("the private config has a key of the later write:\n%s", config)
+	}
+	if _, err := os.Lstat(filepath.Join(private, "info", "attributes")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the private folder has attributes: %v", err)
+	}
+	for name, want := range map[string]string{"HEAD": r.Commit + "\n", "index": string(index), "info/exclude": "ignored.txt\n"} {
+		if got, err := os.ReadFile(filepath.Join(private, filepath.FromSlash(name))); err != nil || string(got) != want {
+			t.Errorf("%s of the private folder differs from what was read: %v", name, err)
+		}
+	}
+	env := []string{"GIT_DIR=" + private, "GIT_WORK_TREE=" + dir, "GIT_OBJECT_DIRECTORY=" + filepath.Join(dir, ".git", "objects")}
+	if _, err := changedPaths(hostgit.WithBase(context.Background(), proxygit.Env(os.Environ(), nil)), stepGit(noRemote, "", env...), dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the filter ran")
+	}
+}
+
+// TestTheCheckReadsThePrivateCopy is the git the check runs, seen through a program first on
+// the PATH that writes its arguments to a file and runs git: git config --file reads the
+// copy that git status reads, and never the live .git/config, which a process can change
+// between the two reads.
+func TestTheCheckReadsThePrivateCopy(t *testing.T) {
+	dir, b := onBranch(t, "acme/shop")
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin, private := t.TempDir(), t.TempDir()
+	calls := filepath.Join(bin, "calls")
+	write(t, filepath.Join(bin, "git"), "#!/bin/sh\necho \"$*\" >> '"+calls+"'\nexec '"+git+"' \"$@\"\n")
+	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(filepath.ListSeparator)+os.Getenv("PATH"))
+	ctx := hostgit.WithBase(context.Background(), proxygit.Env(os.Environ(), nil))
+	if err := privateGitDir(ctx, dir, dir, private, b.Repositories[0].Commit); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "--file "+filepath.Join(private, "config")) {
+		t.Errorf("no check of the private copy in:\n%s", got)
+	}
+	if strings.Contains(string(got), filepath.Join(dir, ".git", "config")) {
+		t.Errorf("a check of the live file in:\n%s", got)
+	}
+}
+
+// TestTheRecordListsWhatGitStatusListsInTheRepository is a plain setup that changes, adds,
+// removes, stages and ignores: the private folder gives the same paths as git status in
+// the repository itself.
+func TestTheRecordListsWhatGitStatusListsInTheRepository(t *testing.T) {
+	dir, b := onBranch(t, "acme/shop")
+	setupLeaves(t, dir)
+	write(t, filepath.Join(dir, ".git", "info", "exclude"), "ignored.txt\n")
+	write(t, filepath.Join(dir, "ignored.txt"), "the setup\n")
+	write(t, filepath.Join(dir, "staged.txt"), "the setup\n")
+	run(t, dir, "add", "staged.txt")
+	want, err := changedPaths(hostgit.WithBase(context.Background(), proxygit.Env(os.Environ(), nil)), stepGit(noRemote, ""), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(want)
+	recordSetup(t, dir, b)
+	got := slices.Sorted(maps.Keys(b.setupChanges["."]))
+	if len(got) == 0 || !slices.Equal(got, want) {
+		t.Errorf("the record has %q, git status lists %q", got, want)
 	}
 }
 

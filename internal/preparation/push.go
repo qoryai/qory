@@ -379,25 +379,27 @@ func leftOut(dir, path string, setup map[string]string) (bool, error) {
 // RecordSetup records what the setup of a run that can push left changed in each
 // repository of b, in dir, the working folder, for [Push]. A caller runs it
 // after the setup and before the session joins, under the hold of a walled run's record.
-// [safeFurther] comes first, since the setup could write each .git and git status runs a
-// filter that .git/config has. git runs as in [Push], so both read the same list of
-// ignored files.
+// The setup container is still up, and git status runs a filter that .git/config has, so
+// a process in that container could add one after any check of the live file. git status
+// therefore reads a copy that no process in the container can write, see [privateGitDir].
+// git runs as in [Push], so both read the same list of ignored files.
 func RecordSetup(ctx context.Context, dir string, base []string, b *WorkBranch) error {
+	return recordWith(ctx, dir, base, b, func(env ...string) gitRunner { return stepGit(noRemote, "", env...) })
+}
+
+// recordWith is [RecordSetup], with status as the [stepGit] of its git status.
+func recordWith(ctx context.Context, dir string, base []string, b *WorkBranch, status func(env ...string) gitRunner) error {
 	ctx = hostgit.WithBase(ctx, proxygit.Env(base, nil))
 	dir, err := filepath.Abs(dir)
 	if err != nil {
 		return local(err)
 	}
-	git := stepGit(noRemote, "")
 	b.setupChanges = make(map[string]map[string]string, len(b.Repositories))
 	for _, r := range b.Repositories {
 		folder := filepath.Join(dir, filepath.FromSlash(r.Dir))
-		if err := safeFurther(ctx, dir, folder, false); err != nil {
-			return checkFailed(textSetupNotSafe, r, err)
-		}
-		paths, err := changedPaths(ctx, git, folder)
+		paths, err := setupPaths(ctx, dir, folder, r, status)
 		if err != nil {
-			return fmt.Errorf(textNoSetupRecord, shownPath(r.Path), integration.Printable(exports.HideURLError(err).Error()))
+			return err
 		}
 		digests := make(map[string]string, len(paths))
 		for _, path := range paths {
@@ -408,6 +410,27 @@ func RecordSetup(ctx context.Context, dir string, base []string, b *WorkBranch) 
 		b.setupChanges[r.Dir] = digests
 	}
 	return nil
+}
+
+// setupPaths is each path [changedPaths] lists for the repository r at folder in the
+// working folder root, read through a [privateGitDir] that exists for this call alone.
+// That folder is in this machine's temporary folder, which a run's container does not
+// mount unless a mount of the run lists it.
+func setupPaths(ctx context.Context, root, folder string, r WorkRepository, status func(env ...string) gitRunner) ([]string, error) {
+	private, err := os.MkdirTemp("", "qory-record-")
+	if err != nil {
+		return nil, checkFailed(textSetupNotSafe, r, local(err))
+	}
+	defer os.RemoveAll(private)
+	if err := privateGitDir(ctx, root, folder, private, r.Commit); err != nil {
+		return nil, checkFailed(textSetupNotSafe, r, err)
+	}
+	git := status("GIT_DIR="+private, "GIT_WORK_TREE="+folder, "GIT_OBJECT_DIRECTORY="+filepath.Join(folder, ".git", "objects"))
+	paths, err := changedPaths(ctx, git, folder)
+	if err != nil {
+		return nil, fmt.Errorf(textNoSetupRecord, shownPath(r.Path), integration.Printable(exports.HideURLError(err).Error()))
+	}
+	return paths, nil
 }
 
 // entryDigest is the SHA-256 sum of the entry path in dir as it is on disk, read with no
