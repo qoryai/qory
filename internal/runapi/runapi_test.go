@@ -685,9 +685,20 @@ func TestAPushErrorHasItsMembers(t *testing.T) {
 	}
 }
 
-func TestResponsesTheClientCannotRead(t *testing.T) {
-	const noRunNumber = "Check the run's gateway. The response to GET /work-item has no run number."
+// TestAWorkItemWithNoRunNumberIsRead is a response with no run number: only the push step
+// uses the number, so the client returns the snapshot with 0.
+func TestAWorkItemWithNoRunNumberIsRead(t *testing.T) {
+	snapshot, err := serve(t, respond(http.StatusOK, `{"version":1,"run":{"id":"run-1"}}`)).WorkItem(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 
+	if snapshot.Run.Number != 0 {
+		t.Errorf("run = %+v", snapshot.Run)
+	}
+}
+
+func TestResponsesTheClientCannotRead(t *testing.T) {
 	for name, c := range map[string]struct {
 		body string
 		want string
@@ -696,10 +707,6 @@ func TestResponsesTheClientCannotRead(t *testing.T) {
 		"another shape":   {`{"version":1,"inputs":"none"}`, "Check the run's gateway. The response to GET /work-item is not the run API's JSON"},
 		"newer version":   {`{"version":2}`, "Update qory. This qory reads version 1 of the run API, and GET /work-item returned version 2."},
 		"no version":      {`{}`, "Check the run's gateway. The response to GET /work-item has no version."},
-		"no run":          {`{"version":1}`, noRunNumber},
-		"no run number":   {`{"version":1,"run":{"id":"run-1"}}`, noRunNumber},
-		"a null number":   {`{"version":1,"run":{"id":"run-1","number":null}}`, noRunNumber},
-		"a number of 0":   {`{"version":1,"run":{"id":"run-1","number":0}}`, noRunNumber},
 		"a long response": {`{"version":1,"x":"` + strings.Repeat("a", 16<<20) + `"}`, "Check the run's gateway. The response to GET /work-item is over"},
 	} {
 		t.Run(name, func(t *testing.T) {

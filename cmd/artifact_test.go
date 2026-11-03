@@ -41,7 +41,7 @@ func startRunAPI(t *testing.T) *runAPIServer {
 	t.Helper()
 
 	s := &runAPIServer{
-		snapshot: `{"version":1,"work_item":{"id":"wi_1","number":12},"run":{"id":"r","number":57},"inputs":[],"outputs":[]}`,
+		snapshot: `{"version":1,"work_item":{"id":"wi_1","number":12},"inputs":[],"outputs":[]}`,
 		index:    `{"version":1,"artifacts":[]}`,
 		files:    map[string]string{},
 		status:   http.StatusCreated,
@@ -166,7 +166,7 @@ func wantExit(t *testing.T, err error, status int, text string) {
 func TestWorkItemShowPrintsTheSnapshotInARun(t *testing.T) {
 	inCheckout(t)
 	server := startRunAPI(t)
-	server.snapshot = `{"version":1,"run":{"id":"r","number":57},"ticket":{"title":"A title"},"notes":[]}`
+	server.snapshot = `{"version":1,"ticket":{"title":"A title"},"notes":[]}`
 
 	out, err := run(t, "work-item", "show")
 	if err != nil {
@@ -246,7 +246,7 @@ func TestArtifactPullOutsideARunFetchesNothing(t *testing.T) {
 // pullFixture sets the server to a stage with the input brief and the output demo, and
 // an artifact of neither.
 func pullFixture(server *runAPIServer) {
-	server.snapshot = `{"version":1,"run":{"id":"r","number":57},"inputs":[{"type":"brief","required":true,"version":{"id":"av_b1","number":1}}],` +
+	server.snapshot = `{"version":1,"inputs":[{"type":"brief","required":true,"version":{"id":"av_b1","number":1}}],` +
 		`"outputs":[{"type":"demo","required":true,"version":null,"check":"missing"}]}`
 	server.index = indexOf(
 		artifactEntry("brief", "main", "av_b1", 2,
@@ -391,31 +391,31 @@ func TestArtifactPullChoosesAVersionPerArtifact(t *testing.T) {
 		version  string
 	}{
 		"an input with a version newer than the approved one": {
-			`{"version":1,"run":{"id":"r","number":57},"inputs":[{"type":"demo","required":true,"version":{"id":"av_2","number":2}}],"outputs":[]}`,
+			`{"version":1,"inputs":[{"type":"demo","required":true,"version":{"id":"av_2","number":2}}],"outputs":[]}`,
 			artifactEntry("demo", "main", "av_1", 3, versionEntry("av_1", 1, fileEntry("v", "one")),
 				versionEntry("av_2", 2, fileEntry("v", "two")), versionEntry("av_3", 3, fileEntry("v", "three"))),
 			"v2",
 		},
 		"another artifact of an input's type takes its approved version": {
-			`{"version":1,"run":{"id":"r","number":57},"inputs":[{"type":"demo","required":true,"version":{"id":"av_9","number":9}}],"outputs":[]}`,
+			`{"version":1,"inputs":[{"type":"demo","required":true,"version":{"id":"av_9","number":9}}],"outputs":[]}`,
 			artifactEntry("demo", "main", "av_1", 2, versionEntry("av_1", 1, fileEntry("v", "one")),
 				versionEntry("av_2", 2, fileEntry("v", "two"))),
 			"v1",
 		},
 		"an input with no approved version is not fetched": {
-			`{"version":1,"run":{"id":"r","number":57},"inputs":[{"type":"demo","required":true,"version":null}],"outputs":[]}`,
+			`{"version":1,"inputs":[{"type":"demo","required":true,"version":null}],"outputs":[]}`,
 			artifactEntry("demo", "main", "", 1, versionEntry("av_1", 1, fileEntry("v", "one"))),
 			"",
 		},
 		"a type that is an input and an output is an output": {
-			`{"version":1,"run":{"id":"r","number":57},"inputs":[{"type":"demo","required":true,"version":{"id":"av_1","number":1}}],` +
+			`{"version":1,"inputs":[{"type":"demo","required":true,"version":{"id":"av_1","number":1}}],` +
 				`"outputs":[{"type":"demo","required":true,"version":null,"check":"missing"}]}`,
 			artifactEntry("demo", "main", "av_1", 2, versionEntry("av_1", 1, fileEntry("v", "one")),
 				versionEntry("av_2", 2, fileEntry("v", "two"))),
 			"v2",
 		},
 		"another artifact with no approved version takes its newest": {
-			`{"version":1,"run":{"id":"r","number":57},"inputs":[],"outputs":[]}`,
+			`{"version":1,"inputs":[],"outputs":[]}`,
 			artifactEntry("demo", "main", "", 2, versionEntry("av_1", 1, fileEntry("v", "one")),
 				versionEntry("av_2", 2, fileEntry("v", "two"))),
 			"v2",

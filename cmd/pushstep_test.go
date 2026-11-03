@@ -568,8 +568,8 @@ func TestTheCommitHasTheRunNumberAndNotTheRunID(t *testing.T) {
 	}
 }
 
-// TestAResponseWithNoRunNumberStopsTheRunBeforeTheJoin is a work item with no run number:
-// the run ends before the agent, so no commit reads "run 0".
+// TestAResponseWithNoRunNumberStopsTheRunBeforeTheJoin is a write run of a work item with
+// no run number: the run ends before the agent, so no commit reads "run 0".
 func TestAResponseWithNoRunNumberStopsTheRunBeforeTheJoin(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.api.number = 0
@@ -578,12 +578,42 @@ func TestAResponseWithNoRunNumberStopsTheRunBeforeTheJoin(t *testing.T) {
 	if cmd.ExitCode(r.err) != 1 || joined {
 		t.Fatalf("%v (exit %d, joined %v), want exit 1 before the join\n%s", r.err, cmd.ExitCode(r.err), joined, r.out)
 	}
-	wants(t, r.out+r.err.Error(), "Check the run's gateway. The response to GET /work-item has no run number.", "the code is used")
+	wants(t, r.out+r.err.Error(), "Check the run's gateway. The response to GET /work-item has no run number; the code is used")
 	if name, _ := r.step(); name != "" {
 		t.Errorf("the run has the push step %q", name)
 	}
 	if head := p.branchHead(t); head != "" {
 		t.Errorf("the forge has the branch at %s", head)
+	}
+}
+
+// TestAReadRunNeedsNoRunNumber is a read run of a work item with no run number, by the
+// documents' access and by a workflow declared read: it commits nothing, so it runs and
+// closes as usual.
+func TestAReadRunNeedsNoRunNumber(t *testing.T) {
+	for name, c := range map[string]struct {
+		declared string
+		change   func(map[string]any)
+	}{
+		"access read in the documents": {"write", lowered},
+		"a workflow declared read":     {"read", nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newPushRepo(t, c.declared)
+			docker, _ := fakeDocker(t)
+			walledBy(t, docker)
+			p.change, p.flags = c.change, []string{"--home", filepath.Join(tempDir(t), "home")}
+			p.api.number = 0
+			joined := false
+			r := p.run(t, func(string) { joined = true }, nil)
+			r.wantsClose(t, event.StateSucceeded, 0)
+			if !joined {
+				t.Errorf("the agent did not run\n%s", r.out)
+			}
+			if name, _ := r.step(); name != "" {
+				t.Errorf("a push step %q", name)
+			}
+		})
 	}
 }
 

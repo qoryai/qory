@@ -31,6 +31,7 @@ import (
 // model, with the two ways of [preparation.WorkBranch.VersionWays].
 const (
 	textChangesLeft     = "Changes left by run %d"
+	textNoRunNumber     = "Check the run's gateway. The response to GET /work-item has no run number" + codeUsed
 	textPushStep        = "push %s to %s"
 	textPushStepOne     = "push %s to %s and 1 further repository"
 	textPushStepMany    = "push %s to %s and %d further repositories"

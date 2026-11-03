@@ -868,6 +868,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if err != nil {
 					return err
 				}
+				// Only the push step's commit uses the run number. readOnly is set by the
+				// compose, so the check comes here, before the session.
+				if canPush(fromCode, readOnly, branch) && fromCode.runNumber < 1 {
+					return &runLineError{errors.New(textNoRunNumber)}
+				}
 				if err := prepareSession(freshHome); err != nil {
 					return err
 				}
