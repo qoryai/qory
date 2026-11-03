@@ -165,8 +165,9 @@ const workspaceInWall = "/workspace"
 
 // readDeny and readAllow are the rules a run that only reads the checkout at root adds to
 // Claude Code's settings. Claude Code denies every edit under the checkout and
-// NotebookEdit, allows the qory inside the wall in Bash, which is mounted at
-// [wall.HelperPath] and is not on PATH, allows reads and edits in [tempStoreDir], where
+// NotebookEdit, allows in Bash only the commands of a work item on the qory inside the
+// wall, which is mounted at [wall.HelperPath] and is not on PATH, because the hidden verbs
+// of that binary start any program, allows reads and edits in [tempStoreDir], where
 // the agent reads what it pulled and makes the files it pushes, and denies every other
 // tool that no rule allows, without a prompt. Edit rules cover the Write tool too, and a
 // bare Edit or Write would remove the tool from the agent, also in that folder. A deny
@@ -185,7 +186,9 @@ func readDeny(root string) []string {
 // readAllow is described at [readDeny].
 func readAllow() []string {
 	return []string{
-		"Bash(" + wall.HelperPath + " *)",
+		"Bash(" + wall.HelperPath + " artifact *)",
+		"Bash(" + wall.HelperPath + " run verdict *)",
+		"Bash(" + wall.HelperPath + " work-item *)",
 		"Read(/" + ruleGlob.Replace(tempStoreDir) + "/**)",
 		"Edit(/" + ruleGlob.Replace(tempStoreDir) + "/**)",
 	}

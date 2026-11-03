@@ -86,8 +86,8 @@ func checkoutMounts(spec session.SessionSpec) []wall.Mount {
 // with no access, or not at all, or its documents have access read and the stack
 // declares its workflow write. The session binds the workspace read-only, the
 // checkout's mount is read-only, the checkout stays among the places the run may write,
-// and Claude Code's settings deny the edit tools, allow /qory/qory in Bash and set
-// defaultMode to dontAsk.
+// and Claude Code's settings deny the edit tools, allow the commands of a work item on
+// /qory/qory in Bash and set defaultMode to dontAsk.
 func TestAReadRunSeesTheCheckoutReadOnly(t *testing.T) {
 	for _, c := range []struct {
 		name      string
@@ -114,9 +114,10 @@ func TestAReadRunSeesTheCheckoutReadOnly(t *testing.T) {
 				t.Errorf("Written %q has no checkout %s", r.spec.Written, r.spec.Dir)
 			}
 			settings := settingsOf(t, r.spec.Args)
-			wants(t, settings, `"Edit(/`+r.spec.Dir+`/**)"`, `"Edit(//workspace/**)"`, `"NotebookEdit"`, `"Bash(/qory/qory *)"`,
+			wants(t, settings, `"Edit(/`+r.spec.Dir+`/**)"`, `"Edit(//workspace/**)"`, `"NotebookEdit"`,
+				`"Bash(/qory/qory artifact *)"`, `"Bash(/qory/qory run verdict *)"`, `"Bash(/qory/qory work-item *)"`,
 				`"Read(//tmp/qory-artifacts/**)"`, `"Edit(//tmp/qory-artifacts/**)"`, `"defaultMode": "dontAsk"`)
-			lacks(t, settings, `"Edit"`, `"Write"`)
+			lacks(t, settings, `"Edit"`, `"Write"`, `"Bash(/qory/qory *)"`)
 		})
 	}
 }

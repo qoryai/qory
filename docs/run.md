@@ -3338,7 +3338,8 @@ with `access: write`. A read run sees the checkout read-only:
   [Commands of a work item](#commands-of-a-work-item).
 - On Claude Code, the run's settings deny `NotebookEdit` and every edit under the
   checkout, with `Edit(//<checkout>/**)` and `Edit(//workspace/**)`. They allow
-  `Bash(/qory/qory *)`, `Read(//tmp/qory-artifacts/**)` and
+  `Bash(/qory/qory artifact *)`, `Bash(/qory/qory run verdict *)`,
+  `Bash(/qory/qory work-item *)`, `Read(//tmp/qory-artifacts/**)` and
   `Edit(//tmp/qory-artifacts/**)`, add `/tmp/qory-artifacts` to
   `permissions.additionalDirectories`, and set `permissions.defaultMode` to `dontAsk`,
   beside what the composed settings contain. Inside the wall, `qory` is at `/qory/qory` and

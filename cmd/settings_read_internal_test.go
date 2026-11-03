@@ -47,7 +47,7 @@ func TestReadRulesLeaveNoWriteUnderTheCheckout(t *testing.T) {
 		t.Errorf("deny %v removes a file tool", deny)
 	}
 	allow, _ := p["allow"].([]any)
-	if want := []any{"Edit", "Write", "Bash(/qory/qory *)", readStoreRule, editStoreRule}; !reflect.DeepEqual(allow, want) {
+	if want := []any{"Edit", "Write", "Bash(/qory/qory artifact *)", "Bash(/qory/qory run verdict *)", "Bash(/qory/qory work-item *)", readStoreRule, editStoreRule}; !reflect.DeepEqual(allow, want) {
 		t.Errorf("allow %v, want %v", allow, want)
 	}
 	for _, under := range []string{"/home/a/co", workspaceInWall} {
@@ -95,14 +95,43 @@ func TestReadRulesEscapeTheCheckoutsPath(t *testing.T) {
 	}
 }
 
+// TestReadAllowOpensOnlyTheCommandsOfAWorkItem is the Bash rules of a read run: one for
+// each group of work item commands. No rule opens the helper as a whole, because its
+// hidden verbs, such as run exec, start any program past dontAsk. Each rule leads to a
+// command that exists and is not hidden.
+func TestReadAllowOpensOnlyTheCommandsOfAWorkItem(t *testing.T) {
+	var got []string
+	for _, rule := range readAllow() {
+		if strings.HasPrefix(rule, "Bash") {
+			got = append(got, rule)
+		}
+	}
+	want := []string{"Bash(/qory/qory artifact *)", "Bash(/qory/qory run verdict *)", "Bash(/qory/qory work-item *)"}
+	if !slices.Equal(got, want) {
+		t.Errorf("Bash rules %q, want %q", got, want)
+	}
+	for _, bare := range []string{"Bash", "Bash(*)", "Bash(/qory/qory *)", "Bash(/qory/qory:*)", "Bash(/qory/qory)"} {
+		if slices.Contains(readAllow(), bare) {
+			t.Errorf("readAllow has %s", bare)
+		}
+	}
+	root := Root()
+	for _, verbs := range [][]string{{"artifact"}, {"run", "verdict"}, {"work-item"}} {
+		c, rest, err := root.Find(verbs)
+		if err != nil || len(rest) != 0 || c.Hidden || c.Name() != verbs[len(verbs)-1] {
+			t.Errorf("%v finds %s, rest %q, hidden %v, %v", verbs, c.Name(), rest, c.Hidden, err)
+		}
+	}
+}
+
 // TestInlineSettingsAddsTheReadRules is the settings of a read workflow's run: the
 // file's permissions get NotebookEdit and an Edit rule for the checkout and for
-// /workspace in deny, and Bash(/qory/qory *) and a Read and an Edit rule for the store in
-// allow, each once, after the rules the file has, the store in additionalDirectories,
+// /workspace in deny, and a Bash rule for each command of a work item and a Read and an
+// Edit rule for the store in allow, each once, after the rules the file has, the store in additionalDirectories,
 // and defaultMode dontAsk in place of the file's; every other key stays, < > & as they are. Settings the launch passes as
 // JSON get the same, and a launch with no settings gets --settings with the rules alone.
 func TestInlineSettingsAddsTheReadRules(t *testing.T) {
-	content := `{"model": "a-model", "hooks": {"Stop": "a && b <c>"}, "permissions": {"allow": ["WebSearch", "Bash(/qory/qory *)"], "deny": ["Bash", "Write"], "defaultMode": "acceptEdits"}}`
+	content := `{"model": "a-model", "hooks": {"Stop": "a && b <c>"}, "permissions": {"allow": ["WebSearch", "Bash(/qory/qory artifact *)"], "deny": ["Bash", "Write"], "defaultMode": "acceptEdits"}}`
 	home, file := settingsHome(t, content)
 	got, err := inlineSettings("--settings", []string{"--settings", file}, []string{"-p", "hi"}, home, "/co")
 	if err != nil || len(got) != 4 || got[0] != "--settings" || !slices.Equal(got[2:], []string{"-p", "hi"}) {
@@ -110,7 +139,7 @@ func TestInlineSettingsAddsTheReadRules(t *testing.T) {
 	}
 	p := permissionsOf(t, got[1])
 	want := map[string]any{
-		"allow":       []any{"WebSearch", "Bash(/qory/qory *)", readStoreRule, editStoreRule},
+		"allow":       []any{"WebSearch", "Bash(/qory/qory artifact *)", "Bash(/qory/qory run verdict *)", "Bash(/qory/qory work-item *)", readStoreRule, editStoreRule},
 		"deny":        []any{"Bash", "Write", "NotebookEdit", "Edit(//co/**)", "Edit(//workspace/**)"},
 		"defaultMode": "dontAsk",
 
@@ -128,7 +157,7 @@ func TestInlineSettingsAddsTheReadRules(t *testing.T) {
 		t.Fatalf("JSON already: got %q, %v", got, err)
 	}
 	want = map[string]any{
-		"allow":       []any{"Bash(/qory/qory *)", readStoreRule, editStoreRule},
+		"allow":       []any{"Bash(/qory/qory artifact *)", "Bash(/qory/qory run verdict *)", "Bash(/qory/qory work-item *)", readStoreRule, editStoreRule},
 		"deny":        []any{"NotebookEdit", "Edit(//co/**)", "Edit(//workspace/**)"},
 		"defaultMode": "dontAsk",
 

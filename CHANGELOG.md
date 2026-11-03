@@ -80,9 +80,11 @@ release may change what an existing document does, and states it under Upgrading
   a workflow that sets no access or that the stack does not declare. Forager binds the
   workspace read-only and the checkout's mount is read-only, so a write into the checkout
   fails with `Read-only file system`. On Claude Code, its settings also deny
-  `NotebookEdit` and every edit under the checkout, allow `Bash(/qory/qory *)` and reads
-  and edits in `/tmp/qory-artifacts`, add that folder to
-  `permissions.additionalDirectories`, and set `permissions.defaultMode` to `dontAsk`. Such
+  `NotebookEdit` and every edit under the checkout, allow the commands of a work item in
+  Bash, with `Bash(/qory/qory artifact *)`, `Bash(/qory/qory run verdict *)` and
+  `Bash(/qory/qory work-item *)`, allow reads and edits in `/tmp/qory-artifacts`, add that
+  folder to `permissions.additionalDirectories`, and set `permissions.defaultMode` to
+  `dontAsk`. Such
   a run with no wall, with `wall.setup:
   inside`, or whose image chosen at the run's open has `docker: true`, whichever way it
   was selected, stops after the compose, exit 1, and closes `failed` with
