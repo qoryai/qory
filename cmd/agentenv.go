@@ -161,7 +161,8 @@ func writeKept(file string, always, ca []string) error {
 // newAgentEnv builds the hidden agent-env verb, what a dispatched walled run of Claude
 // Code starts the agent through, after the setup commands when they run inside the wall:
 // it first makes the agent's home fresh, [preparation.FreshHome], and fails on anything
-// the image or the setup commands put there; it then reads the kept names from the file
+// the image or the setup commands put there, and makes the store's folder for a run that
+// cannot write its checkout, which is the verb's working folder; it then reads the kept names from the file
 // its first argument names, removes from its environment every [preparation.Dropped] name the file
 // does not keep, but a prefixed name holding the gateway's placeholder, and executes the
 // launch after -- with its arguments unchanged. It parses no flag. It prints nothing; on
@@ -175,7 +176,7 @@ func newAgentEnv() *cobra.Command {
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Last before the agent: its home, made fresh.
-			err := preparation.FreshHome(os.Getenv)
+			err := preparation.FreshHome(os.Getenv, !checkoutWritable("."))
 			var path string
 			var argv, env []string
 			if err == nil {

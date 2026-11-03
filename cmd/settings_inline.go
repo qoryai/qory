@@ -165,8 +165,9 @@ const workspaceInWall = "/workspace"
 
 // readDeny and readAllow are the rules a run that only reads the checkout at root adds to
 // Claude Code's settings. Claude Code denies every edit under the checkout and
-// NotebookEdit, allows the qory inside the wall in Bash, which is mounted at
-// [wall.HelperPath] and is not on PATH, allows reads and edits in [tempStoreDir], where
+// NotebookEdit, allows in Bash only the commands of a work item on the qory inside the
+// wall, which is mounted at [wall.HelperPath] and is not on PATH, because the hidden verbs
+// of that binary start any program, allows reads and edits in [tempStoreDir], where
 // the agent reads what it pulled and makes the files it pushes, and denies every other
 // tool that no rule allows, without a prompt. Edit rules cover the Write tool too, and a
 // bare Edit or Write would remove the tool from the agent, also in that folder. A deny
@@ -185,24 +186,32 @@ func readDeny(root string) []string {
 // readAllow is described at [readDeny].
 func readAllow() []string {
 	return []string{
-		"Bash(" + wall.HelperPath + " *)",
+		"Bash(" + wall.HelperPath + " artifact *)",
+		"Bash(" + wall.HelperPath + " run verdict *)",
+		"Bash(" + wall.HelperPath + " work-item *)",
 		"Read(/" + ruleGlob.Replace(tempStoreDir) + "/**)",
 		"Edit(/" + ruleGlob.Replace(tempStoreDir) + "/**)",
 	}
 }
 
-// ruleGlob escapes the characters of a path that a rule reads as a gitignore pattern.
-var ruleGlob = strings.NewReplacer(`\`, `\\`, `*`, `\*`, `?`, `\?`, `[`, `\[`, `]`, `\]`)
+// ruleGlob escapes the characters of a path that a rule reads as a gitignore pattern. On
+// Claude Code 2.1.316 a rule matches a backslash only when it is written as four, and an
+// escaped ? matches nothing, so ? stays a pattern: a deny then also covers a path with
+// any other character there.
+var ruleGlob = strings.NewReplacer(`\`, `\\\\`, `*`, `\*`, `[`, `\[`, `]`, `\]`)
 
 // readDefaultMode is the permissions.defaultMode of a read workflow's run.
 const readDefaultMode = "dontAsk"
 
 // readRules is object, Claude Code's settings, as JSON with [readDeny] of root added to
-// permissions.deny, [readAllow] to permissions.allow, each rule once, and
-// permissions.defaultMode set to [readDefaultMode]; every other key stays as it is, and
-// < > & stay unescaped. shown is the settings file as a text shows it, or "of the
-// launch" for settings that the launch passes as JSON. A permissions that is no object,
-// and an allow or a deny that is no array, stop the run.
+// permissions.deny, [readAllow] to permissions.allow, [tempStoreDir] to
+// permissions.additionalDirectories, each once, and permissions.defaultMode set to
+// [readDefaultMode]; every other key stays as it is, and < > & stay unescaped. The
+// directory opens the folder under permissions.blockReadsOutsideWorkingDirectories, which
+// a composed module can set and which stops a Read rule there. shown is the settings file
+// as a text shows it, or "of the launch" for settings that the launch passes as JSON. A
+// permissions that is no object, and an allow, a deny or an additionalDirectories that is
+// no array, stop the run.
 func readRules(object map[string]any, shown, root string) ([]byte, error) {
 	at := "the Claude Code settings " + shown
 	if shown == "" {
@@ -217,7 +226,7 @@ func readRules(object map[string]any, shown, root string) ([]byte, error) {
 	for _, add := range []struct {
 		key   string
 		rules []string
-	}{{"deny", readDeny(root)}, {"allow", readAllow()}} {
+	}{{"deny", readDeny(root)}, {"allow", readAllow()}, {"additionalDirectories", []string{tempStoreDir}}} {
 		var list []any
 		if v, ok := permissions[add.key]; ok {
 			if list, ok = v.([]any); !ok {

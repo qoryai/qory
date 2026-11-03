@@ -21,6 +21,12 @@ const EnvAgentHome = "CLAUDE_CONFIG_DIR"
 // checkout, and it goes with the container.
 const AgentHome = "/tmp/qory-agent-home"
 
+// TempStore is the folder of the artifact files of a run that cannot write its checkout,
+// in the agent's container, at one fixed path: qory artifact pull and push find it from
+// any folder, and the Claude Code rules of a read run are written before the container
+// starts.
+const TempStore = "/tmp/qory-artifacts"
+
 // managedSettings is where Claude Code on Linux reads managed settings, above every
 // other source and whatever CLAUDE_CONFIG_DIR is: managed-settings.json,
 // managed-settings.d/, CLAUDE.md and managed-mcp.json, see
@@ -38,6 +44,24 @@ const (
 	textHomeNotMade    = "let the agent's user make %s, then run again: the agent's home could not be made: %s"
 )
 
+// The words of [TempStore], which qory run agent-env prints after its name. Each is one
+// format string, with the fix first.
+const (
+	textStoreExists     = "remove %s from the image: qory makes the folder of a run's artifact files only where nothing is, so a read run does not start"
+	textStoreNotEmpty   = "leave no program of the image running that writes into %s: the folder of a run's artifact files contained something once qory made it, so a read run does not start"
+	textStoreParentLink = "replace the symbolic link %s with a folder in the image: the folder of a run's artifact files, %s, is made only where no link leads"
+	textStoreNotMade    = "let the agent's user make %s, then run again: the folder of a run's artifact files could not be made: %s"
+)
+
+// freshWords are the lines of [freshFolder] for one folder.
+type freshWords struct{ exists, notEmpty, parentLink, notMade string }
+
+// The lines of the agent's home and of [TempStore].
+var (
+	homeWords  = freshWords{textHomeExists, textHomeNotEmpty, textHomeParentLink, textHomeNotMade}
+	storeWords = freshWords{textStoreExists, textStoreNotEmpty, textStoreParentLink, textStoreNotMade}
+)
+
 // FreshHome makes the agent's home, [AgentHome], new and empty when getenv sets
 // [EnvAgentHome] to it, as qory run does for a dispatched walled run of Claude Code, and
 // does nothing otherwise. qory run agent-env calls it last before the agent starts, after
@@ -48,12 +72,21 @@ const (
 // the image's programs and the repository's commands run as the agent's user in the
 // agent's container, so a program they leave running can write in the home after
 // FreshHome returns; against that, the boundary is the wall. Every error's text is one
-// line, ready for stderr.
-func FreshHome(getenv func(string) string) error {
+// line, ready for stderr. With store, for a run that cannot write its checkout, it also
+// makes [TempStore] new and empty with mode 0700, under the same rules: Claude Code reads
+// permissions.additionalDirectories when it starts, and leaves out a folder that does not
+// exist then.
+func FreshHome(getenv func(string) string, store bool) error {
 	if getenv(EnvAgentHome) != AgentHome {
 		return nil
 	}
-	return agentHome(AgentHome)
+	if err := agentHome(AgentHome); err != nil {
+		return err
+	}
+	if store {
+		return freshFolder(TempStore, storeWords)
+	}
+	return nil
 }
 
 // agentHome refuses anything at [managedSettings], a link or a file too, and then makes
@@ -67,48 +100,54 @@ func agentHome(path string) error {
 	return freshHome(path)
 }
 
-// freshHome makes path an empty directory of mode 0700. It refuses anything at path when
-// it runs, a file, a folder or a link, which the image or the repository's commands put
-// there, and a symbolic link in a folder above it. The directory is opened after
-// Mkdir without following a link, refused unless it is empty, and given its mode through
-// that open file, so a folder put at path in between is used as the home only when it
-// is empty, and then with mode 0700.
-func freshHome(path string) error {
+// freshHome makes path the agent's home, see [freshFolder].
+func freshHome(path string) error { return freshFolder(path, homeWords) }
+
+// freshFolder makes path an empty directory of mode 0700, with the lines of words. It
+// refuses anything at path when it runs, a file, a folder or a link, which the image or
+// the repository's commands put there, and a symbolic link in a folder above it. The
+// directory is opened after Mkdir without following a link, refused unless it is empty,
+// and given its mode through that open file, so a folder put at path in between is used
+// only when it is empty, and then with mode 0700.
+func freshFolder(path string, words freshWords) error {
+	notMade := func(err error) error {
+		return fmt.Errorf(words.notMade, integration.Printable(path), integration.Printable(err.Error()))
+	}
 	if _, err := os.Lstat(path); err == nil {
-		return fmt.Errorf(textHomeExists, integration.Printable(path))
+		return fmt.Errorf(words.exists, integration.Printable(path))
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return homeNotMade(path, err)
+		return notMade(err)
 	}
 	for dir := filepath.Dir(path); ; dir = filepath.Dir(dir) {
 		fi, err := os.Lstat(dir)
 		if err != nil {
-			return homeNotMade(path, err)
+			return notMade(err)
 		}
 		if fi.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf(textHomeParentLink, integration.Printable(dir), integration.Printable(path))
+			return fmt.Errorf(words.parentLink, integration.Printable(dir), integration.Printable(path))
 		}
 		if dir == filepath.Dir(dir) {
 			break
 		}
 	}
 	if err := os.Mkdir(path, 0o700); errors.Is(err, os.ErrExist) {
-		return fmt.Errorf(textHomeExists, integration.Printable(path))
+		return fmt.Errorf(words.exists, integration.Printable(path))
 	} else if err != nil {
-		return homeNotMade(path, err)
+		return notMade(err)
 	}
 	madeHome(path)
 	f, err := openDir(path)
 	if err != nil {
-		return homeNotMade(path, err)
+		return notMade(err)
 	}
 	defer f.Close()
 	if _, err := f.Readdirnames(1); err == nil {
-		return fmt.Errorf(textHomeNotEmpty, integration.Printable(path))
+		return fmt.Errorf(words.notEmpty, integration.Printable(path))
 	} else if !errors.Is(err, io.EOF) {
-		return homeNotMade(path, err)
+		return notMade(err)
 	}
 	if err := f.Chmod(0o700); err != nil {
-		return homeNotMade(path, err)
+		return notMade(err)
 	}
 	return nil
 }
@@ -116,8 +155,3 @@ func freshHome(path string) error {
 // madeHome runs between the Mkdir of the agent's home and its open; a test puts
 // something at the path there.
 var madeHome = func(string) {}
-
-// homeNotMade is [textHomeNotMade] for path, with the error made printable.
-func homeNotMade(path string, err error) error {
-	return fmt.Errorf(textHomeNotMade, integration.Printable(path), integration.Printable(err.Error()))
-}

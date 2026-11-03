@@ -86,8 +86,8 @@ func checkoutMounts(spec session.SessionSpec) []wall.Mount {
 // with no access, or not at all, or its documents have access read and the stack
 // declares its workflow write. The session binds the workspace read-only, the
 // checkout's mount is read-only, the checkout stays among the places the run may write,
-// and Claude Code's settings deny the edit tools, allow /qory/qory in Bash and set
-// defaultMode to dontAsk.
+// and Claude Code's settings deny the edit tools, allow the commands of a work item on
+// /qory/qory in Bash and set defaultMode to dontAsk.
 func TestAReadRunSeesTheCheckoutReadOnly(t *testing.T) {
 	for _, c := range []struct {
 		name      string
@@ -114,11 +114,31 @@ func TestAReadRunSeesTheCheckoutReadOnly(t *testing.T) {
 				t.Errorf("Written %q has no checkout %s", r.spec.Written, r.spec.Dir)
 			}
 			settings := settingsOf(t, r.spec.Args)
-			wants(t, settings, `"Edit(/`+r.spec.Dir+`/**)"`, `"Edit(//workspace/**)"`, `"NotebookEdit"`, `"Bash(/qory/qory *)"`,
+			wants(t, settings, `"Edit(/`+r.spec.Dir+`/**)"`, `"Edit(//workspace/**)"`, `"NotebookEdit"`,
+				`"Bash(/qory/qory artifact *)"`, `"Bash(/qory/qory run verdict *)"`, `"Bash(/qory/qory work-item *)"`,
 				`"Read(//tmp/qory-artifacts/**)"`, `"Edit(//tmp/qory-artifacts/**)"`, `"defaultMode": "dontAsk"`)
-			lacks(t, settings, `"Edit"`, `"Write"`)
+			lacks(t, settings, `"Edit"`, `"Write"`, `"Bash(/qory/qory *)"`)
 		})
 	}
+}
+
+// TestAReadRunOpensTheStoreToAComposedBlock is a read run whose module sets
+// blockReadsOutsideWorkingDirectories in its settings, as the software factory's does: the
+// compose keeps the setting, and the settings of the launch list the store in
+// additionalDirectories, without which Read in the store fails on Claude Code.
+func TestAReadRunOpensTheStoreToAComposedBlock(t *testing.T) {
+	r := runFromCodeLinks(t, func(string) []string {
+		docker, _ := fakeDocker(t)
+		writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
+			"wall:\n  adapter: docker\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n  image: "+readImage+"\n")
+		return nil
+	}, []string{"--home", filepath.Join(tempDir(t), "home")}, declares("read"), nil, map[string]string{
+		"examples/hello/modules/hello/settings/claude/settings.json": `{"permissions": {"blockReadsOutsideWorkingDirectories": true}}`,
+	}, nil)
+	if !r.joined {
+		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	wants(t, settingsOf(t, r.spec.Args), `"blockReadsOutsideWorkingDirectories": true`, `"additionalDirectories": [`, `"/tmp/qory-artifacts"`)
 }
 
 // TestAWriteWorkflowSeesTheCheckoutWritable is a walled run from a run code whose
@@ -136,7 +156,7 @@ func TestAWriteWorkflowSeesTheCheckoutWritable(t *testing.T) {
 	if got := checkoutMounts(r.spec); len(got) != 1 || got[0] != (wall.Mount{Path: r.spec.Dir}) {
 		t.Errorf("the mounts of the checkout are %+v, want %s writable alone", got, r.spec.Dir)
 	}
-	lacks(t, settingsOf(t, r.spec.Args), "/qory/qory", "dontAsk", "NotebookEdit")
+	lacks(t, settingsOf(t, r.spec.Args), "/qory/qory", "dontAsk", "NotebookEdit", "additionalDirectories")
 }
 
 // settingsOf is the value of --settings in args, Claude Code's settings as JSON.

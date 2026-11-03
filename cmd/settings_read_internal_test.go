@@ -47,7 +47,7 @@ func TestReadRulesLeaveNoWriteUnderTheCheckout(t *testing.T) {
 		t.Errorf("deny %v removes a file tool", deny)
 	}
 	allow, _ := p["allow"].([]any)
-	if want := []any{"Edit", "Write", "Bash(/qory/qory *)", readStoreRule, editStoreRule}; !reflect.DeepEqual(allow, want) {
+	if want := []any{"Edit", "Write", "Bash(/qory/qory artifact *)", "Bash(/qory/qory run verdict *)", "Bash(/qory/qory work-item *)", readStoreRule, editStoreRule}; !reflect.DeepEqual(allow, want) {
 		t.Errorf("allow %v, want %v", allow, want)
 	}
 	for _, under := range []string{"/home/a/co", workspaceInWall} {
@@ -57,11 +57,37 @@ func TestReadRulesLeaveNoWriteUnderTheCheckout(t *testing.T) {
 	}
 }
 
+// TestReadRulesOpenTheStoreToAComposedBlock is settings with
+// blockReadsOutsideWorkingDirectories, as a composed module sets it: the key stays, the
+// store joins the directories the file lists, once, and a value that is no array stops
+// the run.
+func TestReadRulesOpenTheStoreToAComposedBlock(t *testing.T) {
+	data, err := readRules(map[string]any{"permissions": map[string]any{
+		"blockReadsOutsideWorkingDirectories": true,
+		"additionalDirectories":               []any{"/data", "/tmp/qory-artifacts"},
+	}}, "", "/co")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := permissionsOf(t, string(data))
+	if p["blockReadsOutsideWorkingDirectories"] != true {
+		t.Errorf("the block is gone: %v", p)
+	}
+	if got, want := p["additionalDirectories"], []any{"/data", "/tmp/qory-artifacts"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("additionalDirectories %v, want %v", got, want)
+	}
+	_, err = readRules(map[string]any{"permissions": map[string]any{"additionalDirectories": "/data"}}, "", "/co")
+	if want := "set permissions.additionalDirectories in the Claude Code settings to a JSON array: a run of a read workflow adds rules to it, so the run does not start"; err == nil || err.Error() != want {
+		t.Errorf("got %v, want %q", err, want)
+	}
+}
+
 // TestReadRulesEscapeTheCheckoutsPath is a checkout whose path contains the characters
-// of a gitignore pattern: the rule matches that literal path, and the checkout at
-// /workspace has one rule.
+// of a gitignore pattern. The rule matches that path, as Claude Code 2.1.316 reads it: a
+// [, ] and * escaped, a backslash written as four, and a ? left as a pattern, which also
+// matches any other character there. The checkout at /workspace has one rule.
 func TestReadRulesEscapeTheCheckoutsPath(t *testing.T) {
-	if got, want := readDeny(`/a[1]/b*c?d`), []string{"NotebookEdit", `Edit(//a\[1\]/b\*c\?d/**)`, "Edit(//workspace/**)"}; !slices.Equal(got, want) {
+	if got, want := readDeny(`/a[1]/b*c?d\e`), []string{"NotebookEdit", `Edit(//a\[1\]/b\*c?d\\\\e/**)`, "Edit(//workspace/**)"}; !slices.Equal(got, want) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 	if got, want := readDeny("/workspace"), []string{"NotebookEdit", "Edit(//workspace/**)"}; !slices.Equal(got, want) {
@@ -69,14 +95,43 @@ func TestReadRulesEscapeTheCheckoutsPath(t *testing.T) {
 	}
 }
 
+// TestReadAllowOpensOnlyTheCommandsOfAWorkItem is the Bash rules of a read run: one for
+// each group of work item commands. No rule opens the helper as a whole, because its
+// hidden verbs, such as run exec, start any program past dontAsk. Each rule leads to a
+// command that exists and is not hidden.
+func TestReadAllowOpensOnlyTheCommandsOfAWorkItem(t *testing.T) {
+	var got []string
+	for _, rule := range readAllow() {
+		if strings.HasPrefix(rule, "Bash") {
+			got = append(got, rule)
+		}
+	}
+	want := []string{"Bash(/qory/qory artifact *)", "Bash(/qory/qory run verdict *)", "Bash(/qory/qory work-item *)"}
+	if !slices.Equal(got, want) {
+		t.Errorf("Bash rules %q, want %q", got, want)
+	}
+	for _, bare := range []string{"Bash", "Bash(*)", "Bash(/qory/qory *)", "Bash(/qory/qory:*)", "Bash(/qory/qory)"} {
+		if slices.Contains(readAllow(), bare) {
+			t.Errorf("readAllow has %s", bare)
+		}
+	}
+	root := Root()
+	for _, verbs := range [][]string{{"artifact"}, {"run", "verdict"}, {"work-item"}} {
+		c, rest, err := root.Find(verbs)
+		if err != nil || len(rest) != 0 || c.Hidden || c.Name() != verbs[len(verbs)-1] {
+			t.Errorf("%v finds %s, rest %q, hidden %v, %v", verbs, c.Name(), rest, c.Hidden, err)
+		}
+	}
+}
+
 // TestInlineSettingsAddsTheReadRules is the settings of a read workflow's run: the
 // file's permissions get NotebookEdit and an Edit rule for the checkout and for
-// /workspace in deny, and Bash(/qory/qory *) and a Read and an Edit rule for the store in
-// allow, each once, after the rules the file has, and defaultMode dontAsk in place of
-// the file's; every other key stays, < > & as they are. Settings the launch passes as
+// /workspace in deny, and a Bash rule for each command of a work item and a Read and an
+// Edit rule for the store in allow, each once, after the rules the file has, the store in additionalDirectories,
+// and defaultMode dontAsk in place of the file's; every other key stays, < > & as they are. Settings the launch passes as
 // JSON get the same, and a launch with no settings gets --settings with the rules alone.
 func TestInlineSettingsAddsTheReadRules(t *testing.T) {
-	content := `{"model": "a-model", "hooks": {"Stop": "a && b <c>"}, "permissions": {"allow": ["WebSearch", "Bash(/qory/qory *)"], "deny": ["Bash", "Write"], "defaultMode": "acceptEdits"}}`
+	content := `{"model": "a-model", "hooks": {"Stop": "a && b <c>"}, "permissions": {"allow": ["WebSearch", "Bash(/qory/qory artifact *)"], "deny": ["Bash", "Write"], "defaultMode": "acceptEdits"}}`
 	home, file := settingsHome(t, content)
 	got, err := inlineSettings("--settings", []string{"--settings", file}, []string{"-p", "hi"}, home, "/co")
 	if err != nil || len(got) != 4 || got[0] != "--settings" || !slices.Equal(got[2:], []string{"-p", "hi"}) {
@@ -84,9 +139,11 @@ func TestInlineSettingsAddsTheReadRules(t *testing.T) {
 	}
 	p := permissionsOf(t, got[1])
 	want := map[string]any{
-		"allow":       []any{"WebSearch", "Bash(/qory/qory *)", readStoreRule, editStoreRule},
+		"allow":       []any{"WebSearch", "Bash(/qory/qory artifact *)", "Bash(/qory/qory run verdict *)", "Bash(/qory/qory work-item *)", readStoreRule, editStoreRule},
 		"deny":        []any{"Bash", "Write", "NotebookEdit", "Edit(//co/**)", "Edit(//workspace/**)"},
 		"defaultMode": "dontAsk",
+
+		"additionalDirectories": []any{"/tmp/qory-artifacts"},
 	}
 	if !reflect.DeepEqual(p, want) {
 		t.Errorf("permissions %v, want %v", p, want)
@@ -100,9 +157,11 @@ func TestInlineSettingsAddsTheReadRules(t *testing.T) {
 		t.Fatalf("JSON already: got %q, %v", got, err)
 	}
 	want = map[string]any{
-		"allow":       []any{"Bash(/qory/qory *)", readStoreRule, editStoreRule},
+		"allow":       []any{"Bash(/qory/qory artifact *)", "Bash(/qory/qory run verdict *)", "Bash(/qory/qory work-item *)", readStoreRule, editStoreRule},
 		"deny":        []any{"NotebookEdit", "Edit(//co/**)", "Edit(//workspace/**)"},
 		"defaultMode": "dontAsk",
+
+		"additionalDirectories": []any{"/tmp/qory-artifacts"},
 	}
 	if p := permissionsOf(t, strings.TrimPrefix(got[0], "--settings=")); !reflect.DeepEqual(p, want) {
 		t.Errorf("JSON already: permissions %v, want %v", p, want)
