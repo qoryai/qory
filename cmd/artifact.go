@@ -27,7 +27,8 @@ import (
 
 // The commands of a work item: qory work-item show, qory artifact pull and push, and qory
 // run verdict. In a run they use the run API through the gateway. Outside a run they use
-// the checkout's .qory directory, so a skill runs the same commands on a laptop.
+// the checkout's .qory directory, so a skill runs the same commands on a laptop. Their
+// files are in the store, [artifactStore].
 
 // envRunAPI is the variable that a run with a control plane sets to the run's address on
 // its gateway. Its absence means that the command runs outside such a run.
@@ -46,6 +47,15 @@ const (
 	defaultName   = "main"
 	stdinArgument = "-"
 )
+
+// tempStoreDir is the store of a run whose checkout qory cannot write. The agent's
+// container has a writable root, and each command of the run finds the store at this one
+// path, as do the rules of [readRules].
+var tempStoreDir = "/tmp/qory-artifacts"
+
+// checkoutWritable reports whether a run may write the checkout at a path. A variable
+// for the tests, which root runs and a mode does not stop.
+var checkoutWritable = canWrite
 
 // maxGapsFile is the most read of the file of --gaps: the 64 KiB of the request's body.
 const maxGapsFile = 64 << 10
@@ -68,8 +78,8 @@ func (noWorkItemError) Error() string { return noWorkItemText }
 // [ExitCode] gives it [ExitArtifactRefused].
 func artifactRefused(err error) bool {
 	for _, code := range []string{
-		runapi.CodeTypeNotWritable, runapi.CodeUnknownType, runapi.CodeTooManyFiles,
-		runapi.CodeTooLarge, runapi.CodePayloadTooLarge,
+		runapi.CodeUnknownType, runapi.CodeTooManyFiles, runapi.CodeTooLarge,
+		runapi.CodePayloadTooLarge,
 	} {
 		if runapi.HasCode(err, code) {
 			return true
@@ -175,7 +185,8 @@ func newArtifact() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "artifact",
 		Short: "Pull and push the artifacts of a work item",
-		Long: `Pull the artifacts of this run's work item into .qory/artifacts, and push new versions.
+		Long: `Pull the artifacts of this run's work item into the store, and push new versions. The store
+is .qory/artifacts, or /tmp/qory-artifacts when the run's checkout is read-only.
 
 --verbose adds nothing here.
 
@@ -191,10 +202,11 @@ func newArtifactPull() *cobra.Command {
 
 	c := &cobra.Command{
 		Use:   "pull [<type>]",
-		Short: "Fetch a work item's artifacts into .qory/artifacts",
-		Long: `Fetch the work item's artifacts into .qory/artifacts/<type>/<name>/v<N>/, one directory per
-version with its files, and write .qory/artifacts/index.json: the types, names, versions,
-who wrote each, and approvals. Then print the directory.
+		Short: "Fetch a work item's artifacts and print their directory",
+		Long: `Fetch the work item's artifacts into the store, under <type>/<name>/v<N>/, one directory per
+version with its files, and write index.json there: the types, names, versions, who wrote
+each, and approvals. Then print the store's directory. Read the files from that directory:
+it is .qory/artifacts, or /tmp/qory-artifacts when the run's checkout is read-only.
 
 With no --version, qory fetches the newest version of each output of the stage, and the
 version of each input that its gate approved. For any other artifact, it fetches the
@@ -287,13 +299,13 @@ func pullArtifacts(c *cobra.Command, client *runapi.Client, artifactType string,
 		}
 	}
 
-	if version != 0 && !found {
-		return input(fmt.Errorf("Choose a version that .qory/artifacts/index.json lists. %s has no version %d.",
-			artifactType, version))
-	}
-
 	if err := store.writeIndex(index.Raw); err != nil {
 		return err
+	}
+
+	if version != 0 && !found {
+		return input(fmt.Errorf("Choose a version that %s lists. %s has no version %d.",
+			store.shown(filepath.Join(store.dir, indexFile)), artifactType, version))
 	}
 
 	_, err = fmt.Fprintln(c.OutOrStdout(), store.shown(store.dir)+string(filepath.Separator))
@@ -376,13 +388,14 @@ func newArtifactPush() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "push <type> <file>...",
 		Short: "Upload files as one new version of an artifact",
-		Long: `Upload the files as one new version of the artifact <type>/<name>, keep a copy in
-.qory/artifacts/<type>/<name>/v<N>/, and print the version. - reads one file from standard
-input. --name separates several artifacts of one type, such as mockups of two screens.
+		Long: `Upload the files as one new version of the artifact <type>/<name>, keep a copy in the store
+under <type>/<name>/v<N>/, and print the version. - reads one file from standard input.
+--name separates several artifacts of one type, such as mockups of two screens. The store
+is .qory/artifacts, or /tmp/qory-artifacts when the run's checkout is read-only.
 
-qory exits ` + strconv.Itoa(ExitArtifactRefused) + ` with the type and the limit for a type that the workspace does not have or the
-workflow may not write, for too many files, and for files over the type's size limit. One
-version is at most about 24 MiB and 100 files through the run API, whatever the type's limit.
+qory exits ` + strconv.Itoa(ExitArtifactRefused) + ` with the type and the limit for a type that the workspace does not have,
+for too many files, and for files over the type's size limit. One version is at most about
+24 MiB and 100 files through the run API, whatever the type's limit.
 
 Outside a run, qory keeps the files in .qory/artifacts and sends nothing.
 
@@ -592,7 +605,7 @@ func sendPush(c *cobra.Command, client *runapi.Client, push runapi.Push, sources
 
 	// The type and name are the checked ones of the command line, never the response's.
 	if _, err := store.keep(push.Type, push.Name, pushed.Version.Number, sources); err != nil {
-		fmt.Fprintf(c.ErrOrStderr(), "Check .qory/artifacts: the version is stored in Qory Apiary, and the local copy failed: %v\n", err)
+		fmt.Fprintf(c.ErrOrStderr(), "Check %s: the version is stored in Qory Apiary, and the local copy failed: %v\n", store.shown(store.dir), err)
 	}
 
 	return nil
@@ -757,10 +770,12 @@ func artifactNameError(what, value string) error {
 
 // artifactStore is the checkout's .qory/artifacts directory. Its .gitignore keeps it out of
 // git: a run's checkout has no exclude line for .qory, and a later commit of the run must
-// not take the artifacts in.
+// not take the artifacts in. In a run whose checkout qory cannot write, it is
+// [tempStoreDir], with no .gitignore, and temporary is set.
 type artifactStore struct {
-	root string
-	dir  string
+	root      string
+	dir       string
+	temporary bool
 }
 
 // checkoutRoot returns the root of the checkout that the working directory is in.
@@ -773,11 +788,17 @@ func checkoutRoot() (string, error) {
 	return checkout.Root(workingDir)
 }
 
-// openArtifactStore returns the store of the checkout that the working directory is in.
+// openArtifactStore returns the store of the checkout that the working directory is in,
+// or in a run whose checkout qory cannot write, as a read-only mount stops every write,
+// the store at [tempStoreDir]. Outside a run a checkout that qory cannot write fails here.
 func openArtifactStore() (*artifactStore, error) {
 	root, err := checkoutRoot()
 	if err != nil {
 		return nil, err
+	}
+
+	if os.Getenv(envRunAPI) != "" && !checkoutWritable(root) {
+		return openTempStore()
 	}
 
 	store := &artifactStore{root: root, dir: filepath.Join(checkout.QoryDir(root), artifactsDir)}
@@ -791,6 +812,22 @@ func openArtifactStore() (*artifactStore, error) {
 
 		return err
 	}); err != nil {
+		return nil, err
+	}
+
+	return store, nil
+}
+
+// openTempStore returns the store at [tempStoreDir]. Only this user reads the folder,
+// which matters on a host where other users share /tmp.
+func openTempStore() (*artifactStore, error) {
+	store := &artifactStore{root: filepath.Dir(tempStoreDir), dir: tempStoreDir, temporary: true}
+
+	if err := os.Mkdir(store.dir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+		return nil, fmt.Errorf("Check %s. Making the directory failed: %w", store.dir, err)
+	}
+
+	if _, err := store.realDir(); err != nil {
 		return nil, err
 	}
 
@@ -857,8 +894,13 @@ func (s *artifactStore) realDir(parts ...string) (string, error) {
 	return at, nil
 }
 
-// shown returns path for a line of output: relative to the working directory.
+// shown returns path for a line of output: relative to the working directory, and in a
+// temporary store the whole path, which a skill follows from any directory.
 func (s *artifactStore) shown(path string) string {
+	if s.temporary {
+		return path
+	}
+
 	workingDir, err := os.Getwd()
 	if err != nil {
 		return path

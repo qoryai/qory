@@ -114,7 +114,9 @@ func TestAReadRunSeesTheCheckoutReadOnly(t *testing.T) {
 				t.Errorf("Written %q has no checkout %s", r.spec.Written, r.spec.Dir)
 			}
 			settings := settingsOf(t, r.spec.Args)
-			wants(t, settings, `"Edit"`, `"Write"`, `"NotebookEdit"`, `"Bash(/qory/qory *)"`, `"defaultMode": "dontAsk"`)
+			wants(t, settings, `"Edit(/`+r.spec.Dir+`/**)"`, `"Edit(//workspace/**)"`, `"NotebookEdit"`, `"Bash(/qory/qory *)"`,
+				`"Read(//tmp/qory-artifacts/**)"`, `"Edit(//tmp/qory-artifacts/**)"`, `"defaultMode": "dontAsk"`)
+			lacks(t, settings, `"Edit"`, `"Write"`)
 		})
 	}
 }

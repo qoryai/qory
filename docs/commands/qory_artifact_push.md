@@ -4,13 +4,14 @@ Upload files as one new version of an artifact
 
 ### Synopsis
 
-Upload the files as one new version of the artifact <type>/<name>, keep a copy in
-.qory/artifacts/<type>/<name>/v<N>/, and print the version. - reads one file from standard
-input. --name separates several artifacts of one type, such as mockups of two screens.
+Upload the files as one new version of the artifact <type>/<name>, keep a copy in the store
+under <type>/<name>/v<N>/, and print the version. - reads one file from standard input.
+--name separates several artifacts of one type, such as mockups of two screens. The store
+is .qory/artifacts, or /tmp/qory-artifacts when the run's checkout is read-only.
 
-qory exits 4 with the type and the limit for a type that the workspace does not have or the
-workflow may not write, for too many files, and for files over the type's size limit. One
-version is at most about 24 MiB and 100 files through the run API, whatever the type's limit.
+qory exits 4 with the type and the limit for a type that the workspace does not have,
+for too many files, and for files over the type's size limit. One version is at most about
+24 MiB and 100 files through the run API, whatever the type's limit.
 
 Outside a run, qory keeps the files in .qory/artifacts and sends nothing.
 

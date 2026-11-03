@@ -14,7 +14,6 @@ import (
 const (
 	CodeInvalidRequest  = "invalid_request"
 	CodeUnauthorized    = "unauthorized"
-	CodeTypeNotWritable = "type_not_writable"
 	CodeNotFound        = "not_found"
 	CodeRunEnded        = "run_ended"
 	CodeInputsInvalid   = "inputs_invalid"

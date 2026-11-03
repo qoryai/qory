@@ -30,7 +30,10 @@ release may change what an existing document does, and states it under Upgrading
   artifact pull`, `qory artifact push` and `qory run verdict`. In a run they use Qory
   Apiary through the gateway, at `QORY_RUN_API`. Outside a run they use the checkout's
   `.qory` directory. `qory work-item show` exits 3 with no work item, and `qory artifact
-  push` exits 4 for a type or a limit. See Commands of a work item in `docs/run.md`.
+  push` exits 4 for a type or a limit. In a run that cannot write its checkout, such as a
+  read run, `qory artifact pull` and `qory artifact push` keep their files in
+  `/tmp/qory-artifacts`, and `pull` prints that directory. See Commands of a work item in
+  `docs/run.md`.
 - Every command that reads the configuration checks the `process.yaml` at the folder
   root of each module that `exports.modules` lists: its fields and their limits, that
   `stack` is one of `exports.stacks`, and that the stack declares each workflow the
@@ -76,8 +79,9 @@ release may change what an existing document does, and states it under Upgrading
   a workflow that sets no access or that the stack does not declare. Forager binds the
   workspace read-only and the checkout's mount is read-only, so a write into the checkout
   fails with `Read-only file system`. On Claude Code, its settings also deny
-  `Edit`, `Write` and `NotebookEdit`, allow `Bash(/qory/qory *)` and set
-  `permissions.defaultMode` to `dontAsk`. Such a run with no wall, with `wall.setup:
+  `NotebookEdit` and every edit under the checkout, allow `Bash(/qory/qory *)` and reads
+  and edits in `/tmp/qory-artifacts`, and set `permissions.defaultMode` to `dontAsk`. Such
+  a run with no wall, with `wall.setup:
   inside`, or whose image chosen at the run's open has `docker: true`, whichever way it
   was selected, stops after the compose, exit 1, and closes `failed` with
   `read_needs_wall`, `read_needs_setup_outside` or `read_needs_no_nested_docker`. qory

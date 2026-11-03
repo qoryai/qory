@@ -1,12 +1,13 @@
 ## qory artifact pull
 
-Fetch a work item's artifacts into .qory/artifacts
+Fetch a work item's artifacts and print their directory
 
 ### Synopsis
 
-Fetch the work item's artifacts into .qory/artifacts/<type>/<name>/v<N>/, one directory per
-version with its files, and write .qory/artifacts/index.json: the types, names, versions,
-who wrote each, and approvals. Then print the directory.
+Fetch the work item's artifacts into the store, under <type>/<name>/v<N>/, one directory per
+version with its files, and write index.json there: the types, names, versions, who wrote
+each, and approvals. Then print the store's directory. Read the files from that directory:
+it is .qory/artifacts, or /tmp/qory-artifacts when the run's checkout is read-only.
 
 With no --version, qory fetches the newest version of each output of the stage, and the
 version of each input that its gate approved. For any other artifact, it fetches the
