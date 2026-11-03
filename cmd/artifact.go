@@ -58,11 +58,13 @@ var tempStoreDir = preparation.TempStore
 // for the tests, which root runs and a mode does not stop.
 var checkoutWritable = canWrite
 
-// runStartFolder returns the folder that the run's container started in, empty outside a
-// wall. Forager starts the container with --workdir at the checkout or a folder in it,
-// and the container's first process stays there, so no cd in the agent's shell changes
-// the value. A process is in a wall when it is the qory at [wall.HelperPath]; elsewhere
-// process 1 is the machine's. A variable for the tests.
+// runStartFolder returns the folder that the run's container started in. Forager starts
+// the container with --workdir at the checkout or a folder in it, and the container's
+// first process stays there, so no cd in the agent's shell changes the value. The value
+// is empty outside a wall, and on an image with nested Docker, where process 1 runs as
+// root and the agent's user cannot read its link; a read run has no nested Docker. A
+// process is in a wall when it is the qory at [wall.HelperPath]; elsewhere process 1 is
+// the machine's. A variable for the tests.
 var runStartFolder = func() string {
 	if exe, err := os.Executable(); err != nil || exe != wall.HelperPath {
 		return ""
@@ -807,8 +809,9 @@ func checkoutRoot() (string, error) {
 }
 
 // storeRoot returns the checkout of the store. In a wall it is the checkout of
-// [runStartFolder], so each command of the run finds one store from any folder. Elsewhere
-// it is the checkout that the working directory is in.
+// [runStartFolder], so each command of the run finds one store from any folder. On an
+// image with nested Docker, and with no wall, it is the checkout that the working
+// directory is in.
 func storeRoot() (string, error) {
 	if os.Getenv(envRunAPI) != "" {
 		if start := runStartFolder(); start != "" {
